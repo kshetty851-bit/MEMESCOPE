@@ -12,6 +12,12 @@ from app.models.market import (
     TradingStatus,
 )
 from app.models.refresh_token import RefreshToken
+from app.models.score import (
+    ScoreGrade,
+    ScoreTrigger,
+    TokenScore,
+    TokenScoreHistory,
+)
 from app.models.token import DiscoveredToken, MetadataStatus
 from app.models.user import User, UserRole
 
@@ -21,8 +27,12 @@ __all__ = [
     "EnrichmentStatus",
     "MetadataStatus",
     "RefreshToken",
+    "ScoreGrade",
+    "ScoreTrigger",
     "TokenEnrichmentState",
     "TokenMarketSnapshot",
+    "TokenScore",
+    "TokenScoreHistory",
     "TradingStatus",
     "User",
     "UserRole",
