@@ -5,8 +5,8 @@ from __future__ import annotations
 import httpx
 import pytest
 
+from app.core.backoff import BackoffPolicy
 from app.services.helius.client import HeliusClient, HeliusError
-from app.services.scanner.backoff import BackoffPolicy
 
 pytestmark = pytest.mark.unit
 

@@ -65,6 +65,21 @@ async def db_session(engine) -> AsyncGenerator[AsyncSession]:
 
 
 @pytest.fixture
+async def test_session_factory(engine, monkeypatch: pytest.MonkeyPatch):
+    """Point modules that open their own sessions at the *test* database.
+
+    Workers deliberately create sessions via `SessionFactory` rather than
+    receiving one, so without this they would read and write the development
+    database — where a live worker is also running and competing for the same
+    rows. Patching the factory keeps those tests isolated and deterministic.
+    """
+    factory = async_sessionmaker(bind=engine, expire_on_commit=False, autoflush=False)
+    monkeypatch.setattr("app.services.market.worker.SessionFactory", factory)
+    monkeypatch.setattr("app.db.session.SessionFactory", factory)
+    return factory
+
+
+@pytest.fixture
 async def app(db_session: AsyncSession):
     """App instance with the DB dependency pointed at the test transaction."""
     application = create_app()

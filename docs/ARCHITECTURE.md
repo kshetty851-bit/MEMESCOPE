@@ -152,7 +152,137 @@ Each subscriber has a bounded queue. A client too slow to keep up has messages
 dropped rather than being allowed to grow a backlog: a live feed is only useful
 while it is live.
 
+## Token enrichment engine
+
+Added Day 3. A second independent worker (`enrichment`), separate from both the
+API and the scanner. Discovery must never wait on market data, and a provider
+outage must never stop tokens being found.
+
+```
+scanner ──publish──▶ Redis channel ──▶ enrichment listener ──▶ enrol in schedule
+                                                                     │
+                     ┌───────────────────────────────────────────────┘
+                     ▼
+        token_enrichment_state (work queue)
+                     │  claim_due: FOR UPDATE SKIP LOCKED + lease
+                     ▼
+            MarketEnrichmentService
+                     │  batches of 30 mints
+                     ▼
+            MarketDataProvider (ABC) ──▶ DexScreenerProvider
+                     │                      retry · breaker · timeout
+                     ▼
+        token_market_snapshots (append-only)
+                     │
+                     ▼
+              REST API ──▶ frontend
+```
+
+**Two inputs, one queue.** The Redis listener enrols a token the instant the
+scanner publishes it, so enrichment begins within milliseconds. The database
+queue drives every subsequent refresh. A backfill sweep enrols any token that
+has no scheduling row, at startup **and every 5 minutes after**. The listener is
+the fast path, not a guarantee: it only sees events published while it is
+connected, so a startup-only sweep leaves orphans behind after a Redis blip or a
+worker restart. Live verification found 1,411 tokens stranded that way; the
+periodic sweep took it to zero.
+
+**Why a database queue rather than a Redis queue.** The work is recurring, not
+one-shot: each token needs re-enqueueing forever on a schedule that depends on
+its age. A durable row with `next_refresh_at` expresses that directly, survives
+restarts, and makes "what is due?" a single indexed query. `FOR UPDATE SKIP
+LOCKED` with a lease lets multiple worker replicas claim disjoint sets, and a
+worker that dies mid-batch releases its tokens when the lease expires rather
+than stranding them.
+
+**Batching is load-bearing.** DexScreener accepts 30 mints per request. Fetching
+one at a time would be 30× the requests for identical data and would not fit
+inside the rate limit at this token volume. `fetch_many` is therefore the
+primitive in the provider interface, not an optimisation bolted on later.
+
+### Provider abstraction
+
+Nothing above `app/services/market/providers/` sees vendor JSON. See
+[ADR 0001](adr/0001-market-provider-abstraction.md) for the full reasoning.
+
+### Adaptive refresh
+
+A token's information value decays sharply with age, so refresh cadence follows
+it. Every boundary is configurable.
+
+| Tier   | Age            | Interval | Rationale                                  |
+| ------ | -------------- | -------- | ------------------------------------------ |
+| fresh  | < 30 min       | 30s      | The window that decides whether it is anything |
+| young  | 30 min – 6 h   | 5 min    | Still moving, no longer second-by-second    |
+| mature | 6 – 24 h       | 30 min   | Trend, not tick                             |
+| old    | > 24 h         | 6 h      | Kept current, cheaply                       |
+
+Without tiering, old tokens would consume the entire provider budget within days
+purely by outnumbering new ones.
+
+Two distinct backoff paths sit on top:
+
+- **Failure** (provider error) backs off exponentially, floored at the tier's own
+  interval so a broken token is never polled *more* than a healthy one.
+- **Empty** (no pool indexed yet) eases off linearly and is capped at the mature
+  interval. This is the normal state for a token seconds old — roughly half of
+  brand-new mints are not yet indexed — and treating it as an error would
+  dead-letter perfectly healthy tokens.
+
+### Snapshots, not overwrites
+
+`token_market_snapshots` is append-only. Every successful refresh inserts a row;
+nothing is ever updated. That is what makes price history, volume trends, and
+later backtesting possible at all — an overwriting `current_market` table would
+throw away the only data that answers "what happened".
+
+A snapshot is written only when the provider actually returned market data. A
+token with no pool records the *attempt* on its state row (`consecutive_empty`,
+`last_attempt_at`) rather than inserting a row of NULLs, which would bloat the
+history table with no information.
+
+Money is `NUMERIC`, never float. Meme coin prices run to 1e-12 and market caps
+to 1e10; binary floating point cannot represent decimal fractions exactly and the
+error compounds across millions of rows. The API serialises them as JSON strings
+and the frontend keeps them as strings until the moment of display.
+
 ## Data model
+
+```
+token_market_snapshots  (append-only history)
+──────────────────────
+id                        uuid pk
+token_id                  fk → discovered_tokens (cascade)
+mint_address              denormalised, so history needs no join
+captured_at               indexed DESC
+price_usd / price_native  NUMERIC(38,18)
+liquidity_usd, fully_diluted_valuation, market_cap   NUMERIC(24,4)
+volume_24h / volume_1h / volume_5m                   NUMERIC(24,4)
+buy_count_24h, sell_count_24h
+dex_name, trading_pair, pool_address
+trading_status            enum(unknown|trading|inactive)
+is_verified
+provider                  provenance across vendor migrations
+provider_latency_ms
+
+token_enrichment_state  (scheduler work queue, one row per token)
+──────────────────────
+id                    uuid pk
+token_id              fk → discovered_tokens, unique
+mint_address          unique
+status                enum(active|dead_letter|paused)
+next_refresh_at       the hot column; drives every claim
+last_attempt_at / last_success_at
+consecutive_failures  → exponential backoff, then dead-letter
+consecutive_empty     → linear backoff (not an error)
+total_refreshes / total_snapshots
+last_error, tier
+```
+
+Indexes are shaped around the three real queries:
+`(mint_address, captured_at DESC)` for history and the `DISTINCT ON` that
+resolves each token's latest snapshot; `captured_at DESC` for trending; and
+`(status, next_refresh_at)` for the claim query.
 
 ```
 discovered_tokens
@@ -240,6 +370,26 @@ the load balancer stops sending traffic without the process dying.
 Full jitter rather than plain doubling: when Helius recovers from an outage,
 every reconnecting client would otherwise retry in lockstep and knock it over
 again.
+
+## Enrichment failure modes
+
+| Failure                       | Handling                                          |
+| ----------------------------- | ------------------------------------------------- |
+| Provider timeout / 5xx        | Retried with exponential backoff + full jitter.    |
+| Provider 429                  | Retried; counts towards the circuit breaker.       |
+| Provider 4xx (our bug)        | Not retried — it would fail identically.           |
+| Provider persistently down    | Circuit opens after 5 consecutive failures, fails fast for 60s, then admits a single probe (half-open) and closes only after 2 successes. |
+| Token with no indexed pool    | Empty result, not an error. Linear backoff, capped. |
+| Partial payload               | Every `MarketData` field is optional; a missing symbol never discards a mint. |
+| Junk values (NaN, strings)    | Coerced to `None` at the adapter boundary.        |
+| Repeated failure on one token | Dead-lettered after 10 consecutive failures; retained and requeueable, not deleted. |
+| Worker crash mid-batch        | Claim lease expires; tokens return to the queue.   |
+| Redis down                    | Listener reconnects with backoff. The database queue keeps working, so enrichment continues — only the "enrol immediately on discovery" latency is lost. |
+| Whole provider outage         | `refresh_degraded` logged, every token rescheduled with backoff, worker stays up. Discovery is entirely unaffected. |
+
+The circuit breaker exists because retrying a dead provider is worse than
+useless: it burns the worker's time and adds load to something already
+struggling. Failing fast for a cooldown and probing once is strictly better.
 
 ## Deliberate omissions
 

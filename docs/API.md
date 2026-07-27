@@ -180,6 +180,123 @@ than buffering without limit.
 websocat ws://localhost:8000/api/v1/tokens/stream
 ```
 
+### Market (enrichment engine)
+
+Public, like the rest of the token API.
+
+| Method | Path                          | Description                          |
+| ------ | ----------------------------- | ------------------------------------ |
+| GET    | `/api/v1/tokens/{mint}/market`  | Current market state for a token   |
+| GET    | `/api/v1/tokens/{mint}/history` | Historical snapshots, newest first |
+| GET    | `/api/v1/market/trending`       | Tokens ranked by latest snapshot   |
+
+#### Money is a string, not a number
+
+Every monetary field is serialised as a JSON **string** (`"0.017840000000000000"`).
+The database stores `NUMERIC`, and rendering it as a JSON number would push it
+through a float and silently destroy precision on prices around 1e-12. Parse it
+with a decimal library; convert to a float only for display.
+
+#### Snapshot object
+
+```json
+{
+  "id": "6bcac987-b5d4-4b16-af9d-05abf08f73f6",
+  "mint_address": "cRyAiogmFhGKkZafqNKaoTqZCdTP8432VtRWEAEpump",
+  "captured_at": "2026-07-27T13:59:12.441Z",
+  "price_usd": "0.017840000000000000",
+  "price_native": "0.000196400000000000",
+  "liquidity_usd": "308900.5300",
+  "fully_diluted_valuation": "17850000.0000",
+  "market_cap": "17850000.0000",
+  "volume_24h": "175100.4900",
+  "volume_1h": "175100.4900",
+  "volume_5m": "19200.1700",
+  "buy_count_24h": 1317,
+  "sell_count_24h": 138,
+  "dex_name": "pumpswap",
+  "trading_pair": "USWR/SOL",
+  "pool_address": "HxQ2...4Lps",
+  "trading_status": "trading",
+  "is_verified": true,
+  "provider": "dexscreener",
+  "provider_latency_ms": 341
+}
+```
+
+`captured_at` is the "last updated" timestamp. `trading_status` is one of
+`unknown` (no pool indexed yet), `trading`, or `inactive` (indexed but with
+negligible liquidity). Any field may be `null` — providers return partial data
+routinely, and a missing value never discards the observation.
+
+#### `GET /api/v1/tokens/{mint}/market`
+
+```json
+{
+  "mint_address": "cRyAiog…pump",
+  "market": { /* snapshot, or null */ },
+  "snapshot_count": 18,
+  "last_refreshed_at": "2026-07-27T13:59:12.441Z",
+  "next_refresh_at": "2026-07-27T13:59:42.441Z",
+  "enrichment_status": "active",
+  "tier": "fresh"
+}
+```
+
+`market` is `null` when the provider has not indexed a pool yet. That is a
+**200, not a 404** — the token exists, its market does not yet. A 404 means the
+token was never discovered.
+
+`enrichment_status` is `active`, `dead_letter`, or `paused`. `tier` is the
+adaptive refresh band: `fresh`, `young`, `mature`, or `old`.
+
+#### `GET /api/v1/tokens/{mint}/history`
+
+| Query param | Type     | Default | Notes                       |
+| ----------- | -------- | ------- | --------------------------- |
+| `page`      | int ≥ 1  | `1`     |                             |
+| `page_size` | 1–500    | `50`    |                             |
+| `since`     | datetime | —       | Lower bound on `captured_at` |
+| `until`     | datetime | —       | Upper bound on `captured_at` |
+
+```json
+{ "mint_address": "…", "items": [ /* snapshots */ ],
+  "total": 18, "page": 1, "page_size": 50, "pages": 1 }
+```
+
+Newest first. An inverted window (`since` after `until`) returns 422.
+
+#### `GET /api/v1/market/trending`
+
+One entry per token, using its most recent snapshot.
+
+| Query param     | Type    | Default      | Notes                                    |
+| --------------- | ------- | ------------ | ---------------------------------------- |
+| `page`          | int ≥ 1 | `1`          |                                          |
+| `page_size`     | 1–100   | `20`         |                                          |
+| `sort_by`       | enum    | `volume_24h` | also `volume_1h`, `volume_5m`, `liquidity_usd`, `market_cap`, `price_usd`, `captured_at` |
+| `min_liquidity` | float   | —            | Drop pools below this USD liquidity      |
+| `since`         | datetime| —            | Only consider snapshots after this time  |
+
+```json
+{
+  "items": [{ "token": { /* token */ }, "market": { /* snapshot */ } }],
+  "total": 30, "page": 1, "page_size": 20, "pages": 2,
+  "sort_by": "volume_24h"
+}
+```
+
+Tokens with a `null` value for the sort field rank last, so a token with no
+recorded volume never outranks one that has volume.
+
+`sort_by=captured_at` ranks by observation recency rather than size — the live
+feed uses it to pick up market data for tokens that are new and low-volume,
+which a volume ranking would bury.
+
+```bash
+curl -s "http://localhost:8000/api/v1/market/trending?sort_by=liquidity_usd&min_liquidity=1000&page_size=5"
+```
+
 ## Examples
 
 Register:

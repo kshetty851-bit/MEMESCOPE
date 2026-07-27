@@ -5,6 +5,12 @@ model that is never imported is invisible to it.
 """
 
 from app.db.base import Base
+from app.models.market import (
+    EnrichmentStatus,
+    TokenEnrichmentState,
+    TokenMarketSnapshot,
+    TradingStatus,
+)
 from app.models.refresh_token import RefreshToken
 from app.models.token import DiscoveredToken, MetadataStatus
 from app.models.user import User, UserRole
@@ -12,8 +18,12 @@ from app.models.user import User, UserRole
 __all__ = [
     "Base",
     "DiscoveredToken",
+    "EnrichmentStatus",
     "MetadataStatus",
     "RefreshToken",
+    "TokenEnrichmentState",
+    "TokenMarketSnapshot",
+    "TradingStatus",
     "User",
     "UserRole",
 ]

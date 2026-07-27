@@ -1,10 +1,14 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import Link from "next/link";
 
 import { Card } from "@/components/ui/card";
+import { TradingStatusBadge } from "@/components/ui/trading-status-badge";
+import { useMarketByMint } from "@/hooks/use-market-data";
 import { useTokenStream, type StreamStatus } from "@/hooks/use-token-stream";
 import { api } from "@/lib/api-client";
+import { formatAge, formatUsd, shortenAddress } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { DiscoveredToken } from "@/types/api";
 
@@ -22,23 +26,8 @@ const STATUS_DOT: Record<StreamStatus, string> = {
   offline: "bg-danger",
 };
 
-function shorten(address: string | null, lead = 4, tail = 4): string {
-  if (!address) return "—";
-  if (address.length <= lead + tail + 1) return address;
-  return `${address.slice(0, lead)}…${address.slice(-tail)}`;
-}
-
-function timeAgo(iso: string): string {
-  const seconds = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
-  if (seconds < 60) return `${Math.floor(seconds)}s ago`;
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-  if (seconds < 86_400) return `${Math.floor(seconds / 3600)}h ago`;
-  return `${Math.floor(seconds / 86_400)}d ago`;
-}
-
 export default function LiveFeedPage() {
-  // Seed from REST so the page is populated on load, then let the socket
-  // append. Without the seed the feed is blank until the next launch.
+  // Seed from REST so the page is populated on load, then let the socket append.
   const { data: seed } = useQuery({
     queryKey: ["tokens", "latest"],
     queryFn: () => api.get<DiscoveredToken[]>("/tokens/latest?limit=50"),
@@ -46,6 +35,7 @@ export default function LiveFeedPage() {
   });
 
   const { tokens, status } = useTokenStream(seed ?? []);
+  const { byMint } = useMarketByMint();
 
   return (
     <div className="flex flex-col gap-6">
@@ -53,7 +43,7 @@ export default function LiveFeedPage() {
         <div>
           <h1 className="text-2xl font-semibold">Live Token Feed</h1>
           <p className="text-sm text-muted">
-            Newly launched Solana tokens, newest first.
+            Newly launched Solana tokens with market enrichment, newest first.
           </p>
         </div>
 
@@ -74,66 +64,80 @@ export default function LiveFeedPage() {
 
       <Card className="p-0">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[720px] text-left text-sm">
+          <table className="w-full min-w-[1080px] text-left text-sm">
             <thead className="border-b border-border text-xs uppercase tracking-wide text-muted">
               <tr>
+                <th scope="col" className="px-4 py-3 font-medium">Token</th>
                 <th scope="col" className="px-4 py-3 font-medium">Mint</th>
-                <th scope="col" className="px-4 py-3 font-medium">Name</th>
-                <th scope="col" className="px-4 py-3 font-medium">Symbol</th>
-                <th scope="col" className="px-4 py-3 font-medium">Discovered</th>
-                <th scope="col" className="px-4 py-3 font-medium">Creator</th>
+                <th scope="col" className="px-4 py-3 text-right font-medium">Market Cap</th>
+                <th scope="col" className="px-4 py-3 text-right font-medium">Liquidity</th>
+                <th scope="col" className="px-4 py-3 text-right font-medium">Vol 24h</th>
+                <th scope="col" className="px-4 py-3 font-medium">DEX</th>
+                <th scope="col" className="px-4 py-3 font-medium">Status</th>
+                <th scope="col" className="px-4 py-3 text-right font-medium">Age</th>
               </tr>
             </thead>
             <tbody>
               {tokens.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-4 py-10 text-center text-muted">
+                  <td colSpan={8} className="px-4 py-10 text-center text-muted">
                     {status === "live"
                       ? "Waiting for the next launch…"
                       : "No tokens discovered yet."}
                   </td>
                 </tr>
               ) : (
-                tokens.map((token) => (
-                  <tr
-                    key={token.mint_address}
-                    className="border-b border-border/50 last:border-0 hover:bg-surface-raised/50"
-                  >
-                    <td className="px-4 py-3">
-                      <span
-                        className="font-mono text-xs text-content"
-                        title={token.mint_address}
-                      >
-                        {shorten(token.mint_address, 6, 6)}
-                      </span>
-                    </td>
-                    <td className="max-w-[220px] truncate px-4 py-3">
-                      {token.name ?? <span className="text-muted">Pending…</span>}
-                    </td>
-                    <td className="px-4 py-3">
-                      {token.symbol ? (
-                        <span className="rounded bg-surface-raised px-2 py-0.5 text-xs font-medium">
-                          {token.symbol}
+                tokens.map((token) => {
+                  const market = byMint.get(token.mint_address);
+                  return (
+                    <tr
+                      key={token.mint_address}
+                      className="border-b border-border/50 last:border-0 hover:bg-surface-raised/50"
+                    >
+                      <td className="max-w-[220px] px-4 py-3">
+                        <Link
+                          href={`/tokens/${token.mint_address}`}
+                          className="flex flex-col hover:text-brand"
+                        >
+                          <span className="truncate">
+                            {token.name ?? <span className="text-muted">Pending…</span>}
+                          </span>
+                          {token.symbol && (
+                            <span className="text-xs text-muted">{token.symbol}</span>
+                          )}
+                        </Link>
+                      </td>
+
+                      <td className="px-4 py-3">
+                        <span className="font-mono text-xs" title={token.mint_address}>
+                          {shortenAddress(token.mint_address, 5, 5)}
                         </span>
-                      ) : (
-                        <span className="text-muted">—</span>
-                      )}
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-muted">
-                      <time dateTime={token.discovered_at}>
-                        {timeAgo(token.discovered_at)}
-                      </time>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className="font-mono text-xs text-muted"
-                        title={token.creator_address ?? undefined}
-                      >
-                        {shorten(token.creator_address)}
-                      </span>
-                    </td>
-                  </tr>
-                ))
+                      </td>
+
+                      <td className="px-4 py-3 text-right tabular-nums">
+                        {formatUsd(market?.market_cap)}
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums">
+                        {formatUsd(market?.liquidity_usd)}
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums">
+                        {formatUsd(market?.volume_24h)}
+                      </td>
+
+                      <td className="px-4 py-3">
+                        {market?.dex_name ?? <span className="text-muted">—</span>}
+                      </td>
+                      <td className="px-4 py-3">
+                        <TradingStatusBadge status={market?.trading_status} />
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums text-muted">
+                        <time dateTime={token.discovered_at}>
+                          {formatAge(token.discovered_at)}
+                        </time>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>

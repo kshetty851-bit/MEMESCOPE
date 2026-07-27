@@ -126,8 +126,50 @@ class Settings(BaseSettings):
     # Redis channel the scanner publishes to and the API fans out from.
     TOKEN_EVENT_CHANNEL: str = "memescope:tokens:discovered"
 
+    # --- Market data provider ------------------------------------------------
+    # Which implementation of MarketDataProvider to construct. Swapping this is
+    # the only change needed to move to a different vendor.
+    MARKET_PROVIDER: str = "dexscreener"
+    MARKET_PROVIDER_BASE_URL: str = "https://api.dexscreener.com"
+    MARKET_PROVIDER_API_KEY: SecretStr = SecretStr("")
+    MARKET_PROVIDER_TIMEOUT_SECONDS: float = 10.0
+    # DexScreener accepts up to 30 addresses per request; batching is what makes
+    # enriching thousands of tokens affordable inside the rate limit.
+    MARKET_PROVIDER_BATCH_SIZE: int = 30
+    MARKET_PROVIDER_MAX_ATTEMPTS: int = 3
+
+    # --- Circuit breaker -----------------------------------------------------
+    MARKET_BREAKER_FAILURE_THRESHOLD: int = 5
+    MARKET_BREAKER_RESET_SECONDS: float = 60.0
+    MARKET_BREAKER_HALF_OPEN_SUCCESSES: int = 2
+
+    # --- Enrichment worker ---------------------------------------------------
+    ENRICHMENT_POLL_INTERVAL_SECONDS: float = 5.0
+    ENRICHMENT_BATCH_LIMIT: int = 60
+    ENRICHMENT_CONCURRENCY: int = 4
+    # Consecutive failures before a token is parked in the dead-letter state.
+    ENRICHMENT_DEAD_LETTER_THRESHOLD: int = 10
+    # How often to sweep for discovered tokens that have no scheduling row.
+    # Runs at startup and then periodically: the Redis listener can miss events
+    # (Redis restart, worker lag, state loss), and a startup-only sweep would
+    # leave those tokens orphaned until someone restarted the worker.
+    ENRICHMENT_BACKFILL_INTERVAL_SECONDS: float = 300.0
+
+    # --- Adaptive refresh tiers ---------------------------------------------
+    # "token age (minutes) -> refresh interval (seconds)". Young tokens move
+    # fastest and matter most; old ones are polled rarely so their volume does
+    # not crowd out fresh launches.
+    ENRICHMENT_TIER_FRESH_MAX_MINUTES: int = 30
+    ENRICHMENT_TIER_FRESH_INTERVAL_SECONDS: int = 30
+    ENRICHMENT_TIER_YOUNG_MAX_MINUTES: int = 360  # 6 hours
+    ENRICHMENT_TIER_YOUNG_INTERVAL_SECONDS: int = 300  # 5 minutes
+    ENRICHMENT_TIER_MATURE_MAX_MINUTES: int = 1440  # 24 hours
+    ENRICHMENT_TIER_MATURE_INTERVAL_SECONDS: int = 1800  # 30 minutes
+    ENRICHMENT_TIER_OLD_INTERVAL_SECONDS: int = 21600  # 6 hours
+
     # --- Feature flags -------------------------------------------------------
     FEATURE_SCANNER_ENABLED: bool = False
+    FEATURE_ENRICHMENT_ENABLED: bool = False
     FEATURE_AI_SCORING_ENABLED: bool = False
 
     @computed_field  # type: ignore[prop-decorator]

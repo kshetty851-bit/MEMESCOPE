@@ -28,6 +28,7 @@ from typing import Any
 import websockets
 from websockets.asyncio.client import ClientConnection
 
+from app.core.backoff import BackoffPolicy
 from app.core.config import settings
 from app.core.events import publish_token_discovered
 from app.core.logging import get_logger
@@ -36,7 +37,6 @@ from app.db.session import SessionFactory
 from app.models.token import MetadataStatus
 from app.repositories.token import TokenRepository
 from app.services.helius.client import HeliusClient
-from app.services.scanner.backoff import BackoffPolicy
 from app.services.scanner.parser import (
     LogEvent,
     is_token_creation_log,

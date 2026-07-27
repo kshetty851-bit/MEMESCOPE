@@ -23,6 +23,12 @@ x-backend-env: &backend-env
   SCANNER_WATCH_PROGRAMS: ${SCANNER_WATCH_PROGRAMS:-6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P}
   SCANNER_COMMITMENT: ${SCANNER_COMMITMENT:-confirmed}
   SCANNER_WORKER_CONCURRENCY: ${SCANNER_WORKER_CONCURRENCY:-4}
+  FEATURE_ENRICHMENT_ENABLED: ${FEATURE_ENRICHMENT_ENABLED:-false}
+  MARKET_PROVIDER: ${MARKET_PROVIDER:-dexscreener}
+  MARKET_PROVIDER_BASE_URL: ${MARKET_PROVIDER_BASE_URL:-https://api.dexscreener.com}
+  MARKET_PROVIDER_BATCH_SIZE: ${MARKET_PROVIDER_BATCH_SIZE:-30}
+  ENRICHMENT_BATCH_LIMIT: ${ENRICHMENT_BATCH_LIMIT:-60}
+  ENRICHMENT_POLL_INTERVAL_SECONDS: ${ENRICHMENT_POLL_INTERVAL_SECONDS:-5}
 
 services:
   postgres:
@@ -134,6 +140,23 @@ services:
       target: development
     restart: unless-stopped
     command: python -m app.scanner_main
+    environment:
+      <<: *backend-env
+      RUN_MIGRATIONS: "false"
+    volumes:
+      - ./backend:/app
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  # Market Enrichment Worker. Independent of the scanner: stopping this service
+  # must never affect token discovery.
+  enrichment:
+    build:
+      context: ./backend
+      target: development
+    restart: unless-stopped
+    command: python -m app.enrichment_main
     environment:
       <<: *backend-env
       RUN_MIGRATIONS: "false"

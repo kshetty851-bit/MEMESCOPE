@@ -3,6 +3,9 @@
 Full jitter (a uniform draw over `[0, capped_delay]`) rather than plain doubling:
 when a dependency comes back after an outage, every reconnecting client would
 otherwise retry in lockstep and knock it straight back over.
+
+Shared by the scanner (Helius reconnects) and the enrichment worker (market
+provider retries), so it lives in `core` rather than in either package.
 """
 
 from __future__ import annotations

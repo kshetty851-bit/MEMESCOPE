@@ -14,9 +14,9 @@ from typing import Any, Self
 
 import httpx
 
+from app.core.backoff import BackoffPolicy
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.services.scanner.backoff import BackoffPolicy
 
 logger = get_logger(__name__)
 

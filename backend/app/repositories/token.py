@@ -32,6 +32,22 @@ class TokenRepository(BaseRepository[DiscoveredToken]):
         stmt = select(DiscoveredToken).where(DiscoveredToken.mint_address == mint_address)
         return (await self.session.execute(stmt)).scalars().first()
 
+    async def get_many_by_mints(
+        self, mint_addresses: Sequence[str]
+    ) -> dict[str, DiscoveredToken]:
+        """Fetch several tokens at once, keyed by mint.
+
+        Used by the enrichment worker, which processes tokens in batches and
+        would otherwise issue one query per token.
+        """
+        if not mint_addresses:
+            return {}
+        stmt = select(DiscoveredToken).where(
+            DiscoveredToken.mint_address.in_(list(mint_addresses))
+        )
+        rows = (await self.session.execute(stmt)).scalars().all()
+        return {row.mint_address: row for row in rows}
+
     async def insert_if_absent(self, values: dict[str, Any]) -> DiscoveredToken | None:
         """Insert a token, ignoring it if the mint is already known.
 

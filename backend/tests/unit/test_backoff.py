@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.services.scanner.backoff import BackoffPolicy
+from app.core.backoff import BackoffPolicy
 
 pytestmark = pytest.mark.unit
 

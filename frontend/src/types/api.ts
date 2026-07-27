@@ -84,3 +84,80 @@ export type TokenStreamEvent =
   | { type: "connection.ready"; message?: string }
   | { type: "ping" }
   | { type: "token.discovered"; data: DiscoveredToken };
+
+/* --- Market enrichment ---------------------------------------------------- */
+
+export type TradingStatus = "unknown" | "trading" | "inactive";
+
+/**
+ * Money arrives as a JSON string, not a number.
+ *
+ * The backend stores NUMERIC and Pydantic serialises Decimal as a string;
+ * parsing to a JS number would silently lose precision on prices like
+ * 1e-12. Keep it a string and only convert at the point of formatting.
+ */
+export type DecimalString = string;
+
+export interface MarketSnapshot {
+  id: string;
+  mint_address: string;
+  /** Last updated timestamp for this observation. */
+  captured_at: string;
+
+  price_usd: DecimalString | null;
+  price_native: DecimalString | null;
+  liquidity_usd: DecimalString | null;
+  fully_diluted_valuation: DecimalString | null;
+  market_cap: DecimalString | null;
+
+  volume_24h: DecimalString | null;
+  volume_1h: DecimalString | null;
+  volume_5m: DecimalString | null;
+
+  buy_count_24h: number | null;
+  sell_count_24h: number | null;
+
+  dex_name: string | null;
+  trading_pair: string | null;
+  pool_address: string | null;
+
+  trading_status: TradingStatus;
+  is_verified: boolean;
+
+  provider: string;
+  provider_latency_ms: number | null;
+}
+
+export interface TokenMarket {
+  mint_address: string;
+  /** Null until the provider has indexed a pool for this token. */
+  market: MarketSnapshot | null;
+  snapshot_count: number;
+  last_refreshed_at: string | null;
+  next_refresh_at: string | null;
+  enrichment_status: string | null;
+  tier: string | null;
+}
+
+export interface MarketHistoryPage {
+  mint_address: string;
+  items: MarketSnapshot[];
+  total: number;
+  page: number;
+  page_size: number;
+  pages: number;
+}
+
+export interface TrendingEntry {
+  token: DiscoveredToken;
+  market: MarketSnapshot;
+}
+
+export interface TrendingPage {
+  items: TrendingEntry[];
+  total: number;
+  page: number;
+  page_size: number;
+  pages: number;
+  sort_by: string;
+}
