@@ -1,0 +1,38 @@
+@import "tailwindcss";
+
+/* Design tokens. Tailwind v4 reads these directly as utility values, so
+   `bg-surface` or `text-muted` resolve without a tailwind.config file. */
+@theme {
+  --color-canvas: oklch(0.16 0.02 265);
+  --color-surface: oklch(0.21 0.025 265);
+  --color-surface-raised: oklch(0.26 0.028 265);
+  --color-border: oklch(0.34 0.03 265);
+
+  --color-content: oklch(0.97 0.005 265);
+  --color-muted: oklch(0.72 0.02 265);
+
+  --color-brand: oklch(0.74 0.19 152);
+  --color-brand-strong: oklch(0.66 0.2 152);
+  --color-danger: oklch(0.68 0.2 22);
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    background-color: var(--color-canvas);
+    color: var(--color-content);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-brand);
+    outline-offset: 2px;
+  }
+}

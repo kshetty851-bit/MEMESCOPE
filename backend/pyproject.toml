@@ -1,0 +1,156 @@
+[project]
+name = "memescope-backend"
+version = "0.1.0"
+description = "MemeScope AI — API for AI-powered Solana meme coin discovery"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Proprietary" }
+
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "gunicorn>=23.0.0",
+    "pydantic>=2.9.0",
+    "pydantic-settings>=2.6.0",
+    "email-validator>=2.2.0",
+    "sqlalchemy[asyncio]>=2.0.36",
+    "alembic>=1.14.0",
+    "asyncpg>=0.30.0",
+    "psycopg[binary]>=3.2.0",
+    "redis[hiredis]>=5.2.0",
+    "pyjwt>=2.10.0",
+    "bcrypt>=4.2.0",
+    "structlog>=24.4.0",
+    "httpx>=0.27.2",
+    "celery[redis]>=5.4.0",
+    "tenacity>=9.0.0",
+    "sentry-sdk[fastapi]>=2.18.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-cov>=6.0.0",
+    "pytest-env>=1.1.5",
+    "anyio>=4.6.0",
+    "ruff>=0.8.0",
+    "mypy>=1.13.0",
+    "types-passlib",
+    "pre-commit>=4.0.0",
+    "faker>=33.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+# --- Ruff --------------------------------------------------------------------
+[tool.ruff]
+target-version = "py312"
+line-length = 95
+src = ["app", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",    # pycodestyle
+    "F",         # pyflakes
+    "I",         # isort
+    "N",         # pep8-naming
+    "UP",        # pyupgrade
+    "B",         # bugbear
+    "C4",        # comprehensions
+    "SIM",       # simplify
+    "ASYNC",     # async pitfalls
+    "S",         # bandit
+    "T20",       # no print()
+    "RUF",
+]
+ignore = [
+    "S101",   # assert — required by pytest
+    "B008",   # function calls in defaults — the FastAPI Depends() idiom
+    "N805",   # pydantic validators take cls
+    "N811",   # aliasing dialect types (UUID as PgUUID) is the SQLAlchemy idiom
+    "UP046",  # pydantic generics are declared with Generic[T], not PEP 695
+    "UP047",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S105", "S106", "S311"]
+"alembic/*" = ["E501", "N999"]
+# S105/S106: the literal "bearer" and the `token_type` argument name trip the
+# hardcoded-password heuristic; neither is a secret.
+"app/core/security.py" = ["S106"]
+"app/schemas/auth.py" = ["S105"]
+# N802: computed_field properties mirror env var casing.
+# S105: POSTGRES_PASSWORD's local-development default is not a real secret.
+"app/core/config.py" = ["N802", "S105"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+[tool.ruff.format]
+docstring-code-format = true
+
+# --- mypy --------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.12"
+plugins = ["pydantic.mypy"]
+strict = true
+warn_unreachable = true
+disallow_untyped_decorators = false
+exclude = ["alembic/versions/"]
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false
+
+# Celery ships no py.typed marker.
+[[tool.mypy.overrides]]
+module = ["celery.*"]
+ignore_missing_imports = true
+
+# --- pytest ------------------------------------------------------------------
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+# Fixtures and tests must share one event loop: the session-scoped engine and
+# the Redis pool are bound to the loop they were created on.
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+    "-ra",
+    "--cov=app",
+    "--cov-report=term-missing",
+    "--cov-report=xml",
+]
+markers = [
+    "unit: fast, no external services",
+    "integration: requires Postgres and Redis",
+]
+env = [
+    "ENVIRONMENT=test",
+    "SECRET_KEY=test-secret-key-not-for-production-use-only-0000",
+    "REFRESH_COOKIE_SECURE=false",
+    "RATE_LIMIT_ENABLED=false",
+    "LOG_FORMAT=console",
+    "LOG_LEVEL=WARNING",
+]
+
+[tool.coverage.run]
+source = ["app"]
+omit = ["app/workers/*", "alembic/*", "*/__init__.py"]
+
+[tool.coverage.report]
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "@abstractmethod",
+    "pragma: no cover",
+]
