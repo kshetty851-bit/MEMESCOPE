@@ -1,0 +1,140 @@
+"""Cross-process event fan-out for token discoveries.
+
+The scanner runs as its own process and the API runs as N gunicorn workers, so
+an in-memory callback list would only ever reach clients that happened to be
+connected to the publishing process. Redis pub/sub carries the event to every
+API process, and each process fans it out to its own WebSocket clients.
+
+    scanner ──publish──▶ Redis channel ──▶ every API process ──▶ its WS clients
+
+Each subscriber gets its own bounded queue. A client too slow to keep up has
+messages dropped rather than being allowed to grow a queue without limit — a
+live feed is only useful when it is live, and stale backlog helps nobody.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import json
+from collections.abc import AsyncIterator
+from typing import Any
+
+from redis.asyncio import Redis
+
+from app.core.config import settings
+from app.core.logging import get_logger
+from app.core.redis import get_redis
+
+logger = get_logger(__name__)
+
+SUBSCRIBER_QUEUE_SIZE = 100
+
+
+async def publish_token_discovered(
+    payload: dict[str, Any], *, redis: Redis | None = None
+) -> int:
+    """Publish a discovery. Returns the number of Redis subscribers reached."""
+    client = redis or get_redis()
+    receivers = await client.publish(
+        settings.TOKEN_EVENT_CHANNEL, json.dumps(payload, default=str)
+    )
+    return int(receivers)
+
+
+class TokenEventBroadcaster:
+    """Per-process fan-out hub bridging Redis pub/sub to local WebSockets.
+
+    One Redis subscription per process regardless of client count; connecting a
+    thousand WebSockets does not open a thousand Redis connections.
+    """
+
+    def __init__(self, channel: str | None = None) -> None:
+        self._channel = channel or settings.TOKEN_EVENT_CHANNEL
+        self._subscribers: set[asyncio.Queue[dict[str, Any]]] = set()
+        self._task: asyncio.Task[None] | None = None
+        self._lock = asyncio.Lock()
+
+    @property
+    def subscriber_count(self) -> int:
+        return len(self._subscribers)
+
+    async def start(self) -> None:
+        async with self._lock:
+            if self._task is None or self._task.done():
+                self._task = asyncio.create_task(self._listen(), name="token-event-listener")
+                logger.info("token_broadcaster_started", channel=self._channel)
+
+    async def stop(self) -> None:
+        async with self._lock:
+            if self._task is not None:
+                self._task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await self._task
+                self._task = None
+        self._subscribers.clear()
+        logger.info("token_broadcaster_stopped")
+
+    async def _listen(self) -> None:
+        """Consume the Redis channel forever, reconnecting on failure."""
+        attempt = 0
+        while True:
+            pubsub = None
+            try:
+                pubsub = get_redis().pubsub()
+                await pubsub.subscribe(self._channel)
+                attempt = 0
+                logger.info("token_broadcaster_subscribed", channel=self._channel)
+
+                async for message in pubsub.listen():
+                    if message.get("type") != "message":
+                        continue
+                    try:
+                        payload = json.loads(message["data"])
+                    except (ValueError, TypeError):
+                        logger.warning(
+                            "token_event_malformed", raw=str(message.get("data"))[:200]
+                        )
+                        continue
+                    self._fan_out(payload)
+
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                attempt += 1
+                delay = min(2.0**attempt, 30.0)
+                logger.warning(
+                    "token_broadcaster_reconnect",
+                    error=str(exc),
+                    attempt=attempt,
+                    delay_seconds=delay,
+                )
+                await asyncio.sleep(delay)
+            finally:
+                if pubsub is not None:
+                    with contextlib.suppress(Exception):
+                        await pubsub.aclose()  # type: ignore[no-untyped-call]
+
+    def _fan_out(self, payload: dict[str, Any]) -> None:
+        dropped = 0
+        for queue in list(self._subscribers):
+            try:
+                queue.put_nowait(payload)
+            except asyncio.QueueFull:
+                dropped += 1
+        if dropped:
+            logger.warning("token_event_dropped_slow_consumer", dropped=dropped)
+
+    @contextlib.asynccontextmanager
+    async def subscribe(self) -> AsyncIterator[asyncio.Queue[dict[str, Any]]]:
+        """Register a queue for the lifetime of one WebSocket connection."""
+        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=SUBSCRIBER_QUEUE_SIZE)
+        self._subscribers.add(queue)
+        await self.start()
+        try:
+            yield queue
+        finally:
+            self._subscribers.discard(queue)
+
+
+broadcaster = TokenEventBroadcaster()

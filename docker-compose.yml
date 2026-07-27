@@ -18,6 +18,11 @@ x-backend-env: &backend-env
   LOG_FORMAT: ${LOG_FORMAT:-console}
   CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
   REFRESH_COOKIE_SECURE: ${REFRESH_COOKIE_SECURE:-false}
+  HELIUS_API_KEY: ${HELIUS_API_KEY:-}
+  FEATURE_SCANNER_ENABLED: ${FEATURE_SCANNER_ENABLED:-false}
+  SCANNER_WATCH_PROGRAMS: ${SCANNER_WATCH_PROGRAMS:-6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P}
+  SCANNER_COMMITMENT: ${SCANNER_COMMITMENT:-confirmed}
+  SCANNER_WORKER_CONCURRENCY: ${SCANNER_WORKER_CONCURRENCY:-4}
 
 services:
   postgres:
@@ -111,6 +116,24 @@ services:
       target: development
     restart: unless-stopped
     command: celery -A app.workers.celery_app beat --loglevel=info
+    environment:
+      <<: *backend-env
+      RUN_MIGRATIONS: "false"
+    volumes:
+      - ./backend:/app
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  # Long-lived Helius WebSocket consumer. Deliberately a single replica: each
+  # instance opens its own subscription, so scaling out would duplicate every
+  # event rather than share the load.
+  scanner:
+    build:
+      context: ./backend
+      target: development
+    restart: unless-stopped
+    command: python -m app.scanner_main
     environment:
       <<: *backend-env
       RUN_MIGRATIONS: "false"

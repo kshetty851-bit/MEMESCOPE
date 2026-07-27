@@ -6,6 +6,14 @@ model that is never imported is invisible to it.
 
 from app.db.base import Base
 from app.models.refresh_token import RefreshToken
+from app.models.token import DiscoveredToken, MetadataStatus
 from app.models.user import User, UserRole
 
-__all__ = ["Base", "RefreshToken", "User", "UserRole"]
+__all__ = [
+    "Base",
+    "DiscoveredToken",
+    "MetadataStatus",
+    "RefreshToken",
+    "User",
+    "UserRole",
+]

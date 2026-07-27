@@ -14,6 +14,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from app.api.v1.endpoints import health
 from app.api.v1.router import api_router
 from app.core.config import settings
+from app.core.events import broadcaster
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import configure_logging, get_logger
 from app.core.redis import close_redis, init_redis
@@ -34,9 +35,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         environment=settings.ENVIRONMENT,
     )
     await init_redis()
+    # Bridges the scanner's Redis pub/sub events to this process's WebSocket
+    # clients. Started per API process, not per connection.
+    await broadcaster.start()
     try:
         yield
     finally:
+        await broadcaster.stop()
         await close_redis()
         await dispose_engine()
         logger.info("application_stopped")

@@ -92,7 +92,87 @@ page load — which `Providers` performs during bootstrap.
 Revocation before expiry uses a Redis denylist keyed by `jti`, with a TTL equal
 to the token's remaining life, so it cleans itself up.
 
+## Token discovery engine
+
+Added Day 2. Runs as its own container (`scanner`), not inside the API: it is a
+long-lived stateful stream consumer, and hosting it in the API would mean every
+gunicorn worker opening a duplicate subscription.
+
+```
+Helius logsSubscribe (WebSocket)
+  │  ~170k transactions per 10 min
+  ▼
+log pre-filter  ── requires an InitializeMint marker; drops 99.9%
+  │
+  ▼
+bounded queue (2000)  ── drops newest on overflow, never blocks the socket
+  │
+  ▼
+N workers ──▶ getTransaction  (retry: a confirmed tx is not instantly queryable)
+          ──▶ getAsset (DAS)  (retry: the indexer lags confirmation)
+          │
+          ▼
+    INSERT ... ON CONFLICT DO NOTHING
+          │  returns a row only on genuine first insert
+          ▼
+    Redis publish ──▶ every API process ──▶ its WebSocket clients
+```
+
+**Why a bounded queue.** The stream delivers hundreds of transactions per second
+while resolving one token costs two RPC round trips. Without decoupling, a burst
+of launches would either block the socket read (getting us disconnected) or grow
+memory without limit. On overflow the newest event is dropped and logged: a
+scanner that dies under load is worse than one that misses a token.
+
+**Why detection keys off `InitializeMint`.** A mint account cannot exist without
+it, and it is emitted by both the SPL Token and Token-2022 programs. Keying off
+a launchpad's own instruction name would break the moment that launchpad renamed
+it — pump.fun already emits `CreateV2`, not `Create`.
+
+**Idempotency** is enforced by the database, not by application code. The unique
+index on `mint_address` plus `ON CONFLICT DO NOTHING` means two workers racing on
+the same mint cannot both win, and no exception is raised for the loser. The
+insert returns a row only on a genuine first insert, which is exactly the signal
+for "should this be broadcast?". A Redis `SET NX` check runs first purely to
+avoid a wasted database round trip; it is an optimisation, not the guarantee.
+
+**Metadata is never a blocker.** A token whose metadata has not been indexed yet
+is stored with `metadata_status=pending`. Losing a discovery would be far worse
+than storing a row whose name arrives a few seconds later.
+
+### Event fan-out
+
+The scanner and the API are separate processes, so an in-memory callback list
+would only reach clients connected to the publishing process. Redis pub/sub
+carries each discovery to every API process, and each process fans out to its
+own WebSocket clients — one Redis subscription per process regardless of client
+count.
+
+Each subscriber has a bounded queue. A client too slow to keep up has messages
+dropped rather than being allowed to grow a backlog: a live feed is only useful
+while it is live.
+
 ## Data model
+
+```
+discovered_tokens
+─────────────────
+id               uuid pk
+mint_address     unique, indexed   ← natural key; makes ingestion idempotent
+name / symbol / decimals / metadata_uri
+creator_address  indexed           ← transaction fee payer
+signature        indexed
+slot             bigint            ← exceeds 32-bit range
+block_time       indexed           ← on-chain creation time
+discovered_at    indexed, desc     ← when this system first saw it
+source_program   indexed
+metadata_status  enum(pending|resolved|failed)
+metadata_attempts
+created_at / updated_at
+```
+
+Both timestamps are kept deliberately: the gap between `block_time` and
+`discovered_at` is ingestion latency, worth measuring rather than inferring.
 
 ```
 users                          refresh_tokens
@@ -141,6 +221,25 @@ a trace survives the proxy hop.
 `/live` never touches a dependency — a failing database must not cause a restart
 loop. `/ready` checks Postgres and Redis and returns 503 when either is down, so
 the load balancer stops sending traffic without the process dying.
+
+## Scanner failure modes
+
+| Failure                  | Handling                                                |
+| ------------------------ | ------------------------------------------------------- |
+| Helius WebSocket drops   | Reconnect with exponential backoff + full jitter; a clean connection resets the ladder. |
+| Transaction not yet queryable | Polled up to `SCANNER_TX_FETCH_ATTEMPTS` times with backoff. |
+| DAS metadata not indexed | Polled up to `SCANNER_METADATA_ATTEMPTS`; then stored `pending`. |
+| Partial DAS response     | Every metadata field is optional; a missing symbol never discards a mint. |
+| Rate limited (429) / 5xx | Retried with backoff. A JSON-RPC application error is not retried — it would fail identically. |
+| Duplicate events         | Redis `SET NX`, then the unique index as the real guarantee. |
+| Redis unavailable        | Dedupe fails open; discovery continues, the database still rejects duplicates. |
+| Burst of launches        | Bounded queue sheds the newest events and logs `scanner_queue_full`. |
+| Malformed metadata       | NUL-stripped, trimmed, truncated before storage. |
+| Failed on-chain tx       | Skipped — a reverted mint never existed. |
+
+Full jitter rather than plain doubling: when Helius recovers from an outage,
+every reconnecting client would otherwise retry in lockstep and knock it over
+again.
 
 ## Deliberate omissions
 

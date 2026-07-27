@@ -16,6 +16,7 @@ from pydantic import (
     Field,
     PostgresDsn,
     RedisDsn,
+    SecretStr,
     computed_field,
     field_validator,
     model_validator,
@@ -93,11 +94,58 @@ class Settings(BaseSettings):
     # --- Frontend ------------------------------------------------------------
     FRONTEND_URL: str = "http://localhost:3000"
 
-    # --- Feature flags (Day 1 placeholders; no logic behind them yet) --------
+    # --- Solana / Helius -----------------------------------------------------
+    # Never hardcoded: SecretStr keeps the key out of logs and repr output.
+    HELIUS_API_KEY: SecretStr = SecretStr("")
+    HELIUS_RPC_BASE: str = "https://mainnet.helius-rpc.com"
+    HELIUS_WS_BASE: str = "wss://mainnet.helius-rpc.com"
+    HELIUS_HTTP_TIMEOUT_SECONDS: float = 20.0
+
+    # --- Token discovery scanner --------------------------------------------
+    # Programs whose logs are watched for token-creation instructions. pump.fun
+    # is where the overwhelming majority of Solana meme coins launch; adding a
+    # launchpad is a config change, not a code change.
+    SCANNER_WATCH_PROGRAMS: CsvList = Field(
+        default_factory=lambda: ["6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"]
+    )
+    SCANNER_COMMITMENT: Literal["processed", "confirmed", "finalized"] = "confirmed"
+    # Bounded queue: under a launch burst we shed load rather than exhaust memory.
+    SCANNER_QUEUE_SIZE: int = 2000
+    SCANNER_WORKER_CONCURRENCY: int = 4
+    # Reconnect/retry backoff (seconds), exponential with full jitter.
+    SCANNER_BACKOFF_INITIAL_SECONDS: float = 1.0
+    SCANNER_BACKOFF_MAX_SECONDS: float = 60.0
+    SCANNER_BACKOFF_MULTIPLIER: float = 2.0
+    # A confirmed transaction is not instantly queryable, nor instantly indexed
+    # by DAS; both are retried rather than dropped.
+    SCANNER_TX_FETCH_ATTEMPTS: int = 6
+    SCANNER_METADATA_ATTEMPTS: int = 5
+    SCANNER_WS_PING_INTERVAL_SECONDS: float = 20.0
+    # TTL of the Redis dedupe key that suppresses repeated events for a mint.
+    SCANNER_DEDUPE_TTL_SECONDS: int = 3600
+    # Redis channel the scanner publishes to and the API fans out from.
+    TOKEN_EVENT_CHANNEL: str = "memescope:tokens:discovered"
+
+    # --- Feature flags -------------------------------------------------------
     FEATURE_SCANNER_ENABLED: bool = False
     FEATURE_AI_SCORING_ENABLED: bool = False
 
-    @field_validator("CORS_ORIGINS", "ALLOWED_HOSTS", mode="before")
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def HELIUS_RPC_URL(self) -> str:
+        return f"{self.HELIUS_RPC_BASE}/?api-key={self.HELIUS_API_KEY.get_secret_value()}"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def HELIUS_WS_URL(self) -> str:
+        return f"{self.HELIUS_WS_BASE}/?api-key={self.HELIUS_API_KEY.get_secret_value()}"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def helius_configured(self) -> bool:
+        return bool(self.HELIUS_API_KEY.get_secret_value())
+
+    @field_validator("CORS_ORIGINS", "ALLOWED_HOSTS", "SCANNER_WATCH_PROGRAMS", mode="before")
     @classmethod
     def _split_csv(cls, value: Any) -> Any:
         """Accept a comma-separated string or a JSON array."""
@@ -157,6 +205,8 @@ class Settings(BaseSettings):
                 raise ValueError("ALLOWED_HOSTS must be explicit in production")
             if not self.REFRESH_COOKIE_SECURE:
                 raise ValueError("REFRESH_COOKIE_SECURE must be true in production")
+        if self.FEATURE_SCANNER_ENABLED and not self.HELIUS_API_KEY.get_secret_value():
+            raise ValueError("HELIUS_API_KEY is required when FEATURE_SCANNER_ENABLED is true")
         return self
 
 

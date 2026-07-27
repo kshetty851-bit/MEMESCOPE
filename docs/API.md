@@ -88,6 +88,98 @@ Both are also mounted under `/api/v1`.
 | PATCH  | `/api/v1/users/me`         | bearer | Update display name              |
 | POST   | `/api/v1/users/me/password`| bearer | Change password; revokes sessions|
 
+### Tokens (discovery engine)
+
+Public — discovered tokens are public chain data, so no bearer token is needed.
+
+| Method | Path                        | Description                              |
+| ------ | --------------------------- | ---------------------------------------- |
+| GET    | `/api/v1/tokens`            | List with pagination, sorting, filtering |
+| GET    | `/api/v1/tokens/latest`     | Most recent discoveries, newest first    |
+| GET    | `/api/v1/tokens/{mint}`     | One token by mint address                |
+| WS     | `/api/v1/tokens/stream`     | Live discovery feed                      |
+
+#### Token object
+
+```json
+{
+  "id": "8bca69c5-f07d-4f8e-8f48-fc133dc2016e",
+  "mint_address": "DfBEf7sTQTS3kXfuR4J47E9zwzoTfzbzCo1YEypPpump",
+  "name": "at",
+  "symbol": "at",
+  "decimals": 6,
+  "metadata_uri": "https://ipfs.io/ipfs/QmZhYsShK8FA78fVwtzw6FMkUFCA5vCMueFUx6PquZowP9",
+  "creator_address": "4UKLdTBiz6pGRccq9CGw9n53UwmAdd4UX1sJKeUohSiP",
+  "signature": "5WoivgEPg25m2AA2p1Hgqo1XH1co8rmew19833woUUL9TKpnn4kuzCfvXEuuhZx4m3RzCGpzrAtwc7DwVFumevYB",
+  "slot": 435487181,
+  "block_time": "2026-07-27T06:31:43Z",
+  "discovered_at": "2026-07-27T06:31:45.220325Z",
+  "source_program": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+  "metadata_status": "resolved"
+}
+```
+
+`block_time` is when the token was created on-chain. `discovered_at` is when
+MemeScope first saw it. `metadata_status` is `pending` when off-chain metadata
+has not been indexed yet — the token is still recorded, and `name`/`symbol` may
+be `null`.
+
+#### `GET /api/v1/tokens`
+
+| Query param         | Type     | Default         | Notes                              |
+| ------------------- | -------- | --------------- | ---------------------------------- |
+| `page`              | int ≥ 1  | `1`             |                                    |
+| `page_size`         | 1–100    | `20`            |                                    |
+| `sort_by`           | enum     | `discovered_at` | `discovered_at`, `block_time`, `slot`, `name`, `symbol` |
+| `order`             | enum     | `desc`          | `asc`, `desc`                      |
+| `created_after`     | datetime | —               | On-chain creation lower bound      |
+| `created_before`    | datetime | —               | On-chain creation upper bound      |
+| `discovered_after`  | datetime | —               | Discovery lower bound              |
+| `discovered_before` | datetime | —               | Discovery upper bound              |
+| `symbol`            | string   | —               | Case-insensitive exact match       |
+| `creator_address`   | string   | —               | Exact match                        |
+| `metadata_status`   | enum     | —               | `pending`, `resolved`, `failed`    |
+
+Response:
+
+```json
+{ "items": [ /* tokens */ ], "total": 130, "page": 1, "page_size": 20, "pages": 7 }
+```
+
+An inverted range (`created_after` later than `created_before`) returns 422.
+
+> **Encoding note.** A `+00:00` offset must be percent-encoded (`%2B00:00`) or
+> the `+` is decoded as a space and the request fails validation. Using the `Z`
+> suffix (`2026-07-27T06:30:00Z`) avoids the issue entirely.
+
+#### `GET /api/v1/tokens/latest`
+
+`limit` (1–100, default 20). Returns a bare array, newest first.
+
+#### `GET /api/v1/tokens/{mint}`
+
+`mint` must be base58, 32–44 characters; anything else returns 422 before the
+database is touched. Unknown mints return 404 with the standard envelope.
+
+#### `WS /api/v1/tokens/stream`
+
+Frames are JSON objects with a `type`:
+
+```json
+{"type": "connection.ready", "message": "Streaming discoveries."}
+{"type": "token.discovered", "data": { /* token object */ }}
+{"type": "ping"}
+```
+
+`ping` is a keepalive sent after ~25s of silence so idle proxies do not close the
+connection. Anything the client sends is ignored. Clients should reconnect with
+backoff; the server drops messages for consumers that fall too far behind rather
+than buffering without limit.
+
+```bash
+websocat ws://localhost:8000/api/v1/tokens/stream
+```
+
 ## Examples
 
 Register:
@@ -129,6 +221,5 @@ immediate feedback.
 
 ## Not yet implemented
 
-Token discovery, scanning, watchlists, and AI scoring endpoints do not exist on
-Day 1. They will live under `/api/v1/tokens`, `/api/v1/watchlists`, and
-`/api/v1/signals`.
+Watchlists and AI scoring endpoints do not exist yet. They will live under
+`/api/v1/watchlists` and `/api/v1/signals`.
