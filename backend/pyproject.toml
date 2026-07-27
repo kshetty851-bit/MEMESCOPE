@@ -89,6 +89,9 @@ ignore = [
 # N802: computed_field properties mirror env var casing.
 # S105: POSTGRES_PASSWORD's local-development default is not a real secret.
 "app/core/config.py" = ["N802", "S105"]
+# S105: reason codes about SPL tokens (TOKEN_TOO_NEW, TOKEN_STALE) trip the
+# hardcoded-password heuristic on the word "token". None is a credential.
+"app/services/scoring/explain.py" = ["S105"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["app"]

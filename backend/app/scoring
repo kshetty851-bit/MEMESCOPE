@@ -1,0 +1,11 @@
+scoring/
+├── __init__.py
+├── engine.py          # evaluate()
+├── models.py          # FeatureSet, Result, Config
+├── weights.py         # Weight registry
+├── normalisers.py     # Feature scaling
+├── risk.py            # Multiplicative risk logic
+├── evidence.py        # Evidence calculation
+├── explain.py         # Human-readable explanation
+├── grades.py          # Grade mapping
+└── tests/

@@ -167,6 +167,26 @@ class Settings(BaseSettings):
     ENRICHMENT_TIER_MATURE_INTERVAL_SECONDS: int = 1800  # 30 minutes
     ENRICHMENT_TIER_OLD_INTERVAL_SECONDS: int = 21600  # 6 hours
 
+    # --- AI scoring engine ---------------------------------------------------
+    # Which weight vector to score with. Resolved through the model registry,
+    # which raises on an unknown name rather than falling back to a default —
+    # a typo must not silently ship scores from a model nobody chose.
+    SCORING_MODEL_VERSION: str = "v1"
+    # Snapshots per feature window. The window itself is tier-relative
+    # (K x tier interval, clamped), because a fixed window starves the slow
+    # tiers: at a 6-hour refresh interval a one-hour window holds one
+    # observation, permanently capping evidence for every healthy old token.
+    SCORING_FEATURE_WINDOW: int = 12
+    SCORING_WINDOW_MIN_SECONDS: int = 3600  # 1 hour
+    SCORING_WINDOW_MAX_SECONDS: int = 604800  # 7 days
+    # Liquidity drawdown inside this window is a rug in progress and vetoes the
+    # score; the same decline spread over days is decay and only penalises.
+    SCORING_RUG_WINDOW_SECONDS: int = 3600
+    # Observations needed before window-based signals count as fully evidenced.
+    SCORING_MIN_OBSERVATIONS: int = 3
+    # Consecutive qualifying evaluations before Elite is granted.
+    SCORING_ELITE_SUSTAIN_EVALUATIONS: int = 3
+
     # --- Feature flags -------------------------------------------------------
     FEATURE_SCANNER_ENABLED: bool = False
     FEATURE_ENRICHMENT_ENABLED: bool = False
