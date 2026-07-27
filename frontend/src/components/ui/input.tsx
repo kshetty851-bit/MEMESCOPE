@@ -17,8 +17,11 @@ export function Input({ label, error, hint, className, id, ...props }: InputProp
   const describedBy = error ? `${inputId}-error` : hint ? `${inputId}-hint` : undefined;
 
   return (
-    <div className="flex flex-col gap-1.5">
-      <label htmlFor={inputId} className="text-sm font-medium text-content">
+    <div className="flex flex-col gap-2">
+      <label
+        htmlFor={inputId}
+        className="text-label font-medium uppercase text-ink-faint"
+      >
         {label}
       </label>
       <input
@@ -26,9 +29,12 @@ export function Input({ label, error, hint, className, id, ...props }: InputProp
         aria-invalid={error ? true : undefined}
         aria-describedby={describedBy}
         className={cn(
-          "h-10 rounded-md border bg-surface px-3 text-sm text-content",
-          "placeholder:text-muted/70 focus:outline-none focus-visible:ring-2",
-          error ? "border-danger" : "border-border focus:border-brand",
+          "h-11 rounded-card border bg-abyss/70 px-3.5 text-sm text-ink",
+          "transition-colors duration-150 ease-[var(--ease-precise)]",
+          "placeholder:text-ink-faint/60 focus:outline-none",
+          error
+            ? "border-danger focus:border-danger"
+            : "border-line hover:border-line-bright focus:border-plasma",
           className,
         )}
         {...props}
@@ -38,7 +44,7 @@ export function Input({ label, error, hint, className, id, ...props }: InputProp
           {error}
         </p>
       ) : hint ? (
-        <p id={`${inputId}-hint`} className="text-xs text-muted">
+        <p id={`${inputId}-hint`} className="text-xs text-ink-faint">
           {hint}
         </p>
       ) : null}

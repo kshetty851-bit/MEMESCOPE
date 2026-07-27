@@ -5,8 +5,8 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/panel";
 import { useAuth } from "@/hooks/use-auth";
 
 const MIN_PASSWORD_LENGTH = 12;
@@ -41,7 +41,7 @@ export default function RegisterPage() {
         password: form.password,
         display_name: form.displayName || undefined,
       });
-      router.replace("/dashboard");
+      router.replace("/command");
     } catch {
       // Rendered from the store below.
     } finally {
@@ -50,13 +50,14 @@ export default function RegisterPage() {
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Create an account</CardTitle>
-        <CardDescription>Start tracking Solana meme coins.</CardDescription>
-      </CardHeader>
+    <div>
+      <Label>Request access</Label>
+      <h1 className="mt-2 text-title font-semibold text-ink">Deploy your division</h1>
+      <p className="mt-2 text-sm text-ink-faint">
+        Seven AI specialists start working the moment you sign in.
+      </p>
 
-      <form onSubmit={handleSubmit} className="flex flex-col gap-4" noValidate>
+      <form onSubmit={handleSubmit} className="mt-8 flex flex-col gap-5" noValidate>
         <Input
           label="Email"
           type="email"
@@ -66,7 +67,7 @@ export default function RegisterPage() {
           onChange={update("email")}
         />
         <Input
-          label="Display name"
+          label="Call sign"
           type="text"
           autoComplete="nickname"
           value={form.displayName}
@@ -85,22 +86,25 @@ export default function RegisterPage() {
         />
 
         {error && (
-          <p role="alert" className="rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">
+          <p
+            role="alert"
+            className="rounded-card border border-danger/30 bg-danger/10 px-3 py-2.5 text-sm text-danger"
+          >
             {error}
           </p>
         )}
 
-        <Button type="submit" loading={submitting}>
-          Create account
+        <Button type="submit" variant="primary" size="lg" loading={submitting}>
+          Create clearance
         </Button>
       </form>
 
-      <p className="mt-4 text-center text-sm text-muted">
-        Already registered?{" "}
-        <Link href="/login" className="text-brand hover:underline">
+      <p className="mt-6 text-center text-sm text-ink-faint">
+        Already cleared?{" "}
+        <Link href="/login" className="text-plasma transition-colors hover:text-ink">
           Sign in
         </Link>
       </p>
-    </Card>
+    </div>
   );
 }

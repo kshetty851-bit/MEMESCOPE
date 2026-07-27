@@ -5,8 +5,8 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/panel";
 import { useAuth } from "@/hooks/use-auth";
 
 export default function LoginPage() {
@@ -17,7 +17,7 @@ export default function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    if (isAuthenticated) router.replace("/dashboard");
+    if (isAuthenticated) router.replace("/command");
   }, [isAuthenticated, router]);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -26,7 +26,7 @@ export default function LoginPage() {
     setSubmitting(true);
     try {
       await login({ email, password });
-      router.replace("/dashboard");
+      router.replace("/command");
     } catch {
       // The store holds the message; the banner below renders it.
     } finally {
@@ -35,13 +35,14 @@ export default function LoginPage() {
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Sign in</CardTitle>
-        <CardDescription>Access your MemeScope dashboard.</CardDescription>
-      </CardHeader>
+    <div>
+      <Label>Secure access</Label>
+      <h1 className="mt-2 text-title font-semibold text-ink">Enter the Command Center</h1>
+      <p className="mt-2 text-sm text-ink-faint">
+        Authenticate to reach live intelligence.
+      </p>
 
-      <form onSubmit={handleSubmit} className="flex flex-col gap-4" noValidate>
+      <form onSubmit={handleSubmit} className="mt-8 flex flex-col gap-5" noValidate>
         <Input
           label="Email"
           type="email"
@@ -62,22 +63,25 @@ export default function LoginPage() {
         />
 
         {error && (
-          <p role="alert" className="rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">
+          <p
+            role="alert"
+            className="rounded-card border border-danger/30 bg-danger/10 px-3 py-2.5 text-sm text-danger"
+          >
             {error}
           </p>
         )}
 
-        <Button type="submit" loading={submitting}>
-          Sign in
+        <Button type="submit" variant="primary" size="lg" loading={submitting}>
+          Authenticate
         </Button>
       </form>
 
-      <p className="mt-4 text-center text-sm text-muted">
-        No account?{" "}
-        <Link href="/register" className="text-brand hover:underline">
-          Create one
+      <p className="mt-6 text-center text-sm text-ink-faint">
+        No clearance?{" "}
+        <Link href="/register" className="text-plasma transition-colors hover:text-ink">
+          Request access
         </Link>
       </p>
-    </Card>
+    </div>
   );
 }

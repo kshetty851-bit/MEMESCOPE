@@ -1,38 +1,623 @@
 @import "tailwindcss";
 
-/* Design tokens. Tailwind v4 reads these directly as utility values, so
-   `bg-surface` or `text-muted` resolve without a tailwind.config file. */
+/* ============================================================================
+   MEMESCOPE DESIGN SYSTEM
+   ----------------------------------------------------------------------------
+   Concept: "Signal in the void."
+
+   MEMESCOPE is an observatory, not a trading terminal. The canvas is deep,
+   dimensional dark — never flat black. Intelligence arrives as light. Data has
+   mass, temperature and glow. Everything is seen through an instrument.
+
+   Three rules give the brand its fingerprint:
+     1. Every numeral is monospace. Every sentence is sans. No exceptions.
+        Precision reads as precision.
+     2. Gold is reserved exclusively for APEX / Elite Gem. Scarcity in the
+        palette mirrors scarcity in the product. Using gold anywhere else
+        devalues the one thing that should feel rare.
+     3. Nothing bounces. Motion is instrument response — fast, damped, exact.
+   ========================================================================== */
+
 @theme {
-  --color-canvas: oklch(0.16 0.02 265);
-  --color-surface: oklch(0.21 0.025 265);
-  --color-surface-raised: oklch(0.26 0.028 265);
-  --color-border: oklch(0.34 0.03 265);
+  /* --- Substrate ---------------------------------------------------------
+     Five luminance steps on a single desaturated blue-violet. Depth comes
+     from stacking these, never from drop shadows on a flat background. */
+  --color-void: oklch(0.11 0.014 265);
+  --color-abyss: oklch(0.14 0.017 265);
+  --color-surface: oklch(0.17 0.019 265);
+  --color-elevated: oklch(0.21 0.021 265);
+  --color-raised: oklch(0.25 0.023 265);
 
-  --color-content: oklch(0.97 0.005 265);
-  --color-muted: oklch(0.72 0.02 265);
+  --color-line: oklch(0.28 0.024 265);
+  --color-line-bright: oklch(0.4 0.03 265);
 
-  --color-brand: oklch(0.74 0.19 152);
-  --color-brand-strong: oklch(0.66 0.2 152);
+  /* --- Ink ---------------------------------------------------------------
+     Three weights only. A fourth tier is always a hierarchy problem. */
+  --color-ink: oklch(0.97 0.004 265);
+  --color-ink-dim: oklch(0.76 0.015 265);
+  --color-ink-faint: oklch(0.56 0.02 265);
+
+  /* --- Brand -------------------------------------------------------------
+     Plasma is the house colour: the light the instrument itself emits. */
+  --color-plasma: oklch(0.82 0.15 196);
+  --color-plasma-deep: oklch(0.64 0.16 210);
+
+  /* --- The AI Squad ------------------------------------------------------
+     Each specialist owns one hue. These are identity, not decoration: a
+     glow, a border or a single dot is enough to say which agent is speaking. */
+  --color-scout: oklch(0.8 0.19 155);
+  --color-oracle: oklch(0.72 0.18 295);
+  --color-titan: oklch(0.7 0.16 245);
+  --color-pulse: oklch(0.72 0.21 355);
+  --color-sentinel: oklch(0.73 0.19 35);
+  --color-echo: oklch(0.78 0.16 65);
+  --color-apex: oklch(0.85 0.14 88);
+
+  /* --- Semantic ----------------------------------------------------------
+     Deliberately quieter than the agent hues so status never shouts over
+     identity. */
+  --color-safe: oklch(0.76 0.16 155);
+  --color-warn: oklch(0.8 0.15 75);
   --color-danger: oklch(0.68 0.2 22);
 
+  /* --- Type --------------------------------------------------------------
+     Geist Sans for language, Geist Mono for every figure on screen. */
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SF Mono", monospace;
+
+  --text-display: 4.5rem;
+  --text-display--line-height: 0.95;
+  --text-display--letter-spacing: -0.04em;
+  --text-title: 2rem;
+  --text-title--line-height: 1.1;
+  --text-title--letter-spacing: -0.025em;
+  --text-heading: 1.125rem;
+  --text-heading--line-height: 1.3;
+  --text-heading--letter-spacing: -0.015em;
+  /* Small caps label — the instrument's voice for field names. */
+  --text-label: 0.6875rem;
+  --text-label--line-height: 1.2;
+  --text-label--letter-spacing: 0.14em;
+
+  /* --- Form --------------------------------------------------------------
+     Panels are architecture; chips are components. Different radii keep the
+     hierarchy legible at a glance. */
+  --radius-chip: 6px;
+  --radius-card: 12px;
+  --radius-panel: 16px;
+
+  /* --- Motion ------------------------------------------------------------
+     One expressive curve, one utility curve. `instrument` is a damped
+     exponential — it arrives fast then settles without ever overshooting,
+     which is what separates "precision hardware" from "toy". */
+  --ease-instrument: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-precise: cubic-bezier(0.4, 0, 0.2, 1);
+
+  --duration-instant: 120ms;
+  --duration-quick: 200ms;
+  --duration-considered: 340ms;
+  --duration-cinematic: 900ms;
+
+  --animate-drift: drift 24s var(--ease-precise) infinite;
+  --animate-breathe: breathe 6s ease-in-out infinite;
+  --animate-orbit: orbit 40s linear infinite;
+  --animate-scan: scan 3.6s var(--ease-precise) infinite;
+  --animate-core: core 8s ease-in-out infinite;
+  --animate-rise: rise var(--duration-considered) var(--ease-instrument) both;
 }
+
+/* ============================================================================
+   KEYFRAMES — the ambient layer
+   Long, low-amplitude loops. If a motion is noticeable while you read, it is
+   wrong; the interface should feel alive only in peripheral vision.
+   ========================================================================== */
+
+@keyframes drift {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+  33% {
+    transform: translate3d(2%, -3%, 0);
+  }
+  66% {
+    transform: translate3d(-2%, 2%, 0);
+  }
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.04);
+  }
+}
+
+@keyframes orbit {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* The signature motion: a luminous line sweeping a surface as data lands. */
+@keyframes scan {
+  0% {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  88% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(1000%);
+    opacity: 0;
+  }
+}
+
+@keyframes core {
+  0%,
+  100% {
+    opacity: 0.7;
+    transform: scale(1) rotate(0deg);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.06) rotate(180deg);
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes pulse-ring {
+  0% {
+    transform: scale(0.8);
+    opacity: 0.8;
+  }
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+
+/* Special events. Every one of these is single-shot by design: a celebration
+   that repeats stops being a celebration and becomes a distraction. */
+@keyframes emit-gold {
+  0% {
+    transform: scale(0.7);
+    opacity: 0;
+  }
+  15% {
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+}
+
+@keyframes ripple-once {
+  0% {
+    transform: scale(0.85);
+    opacity: 0.7;
+  }
+  100% {
+    transform: scale(1.9);
+    opacity: 0;
+  }
+}
+
+@keyframes flare {
+  0%,
+  100% {
+    opacity: 0;
+  }
+  20%,
+  60% {
+    opacity: 1;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   THE UNIVERSE
+   Long, low-amplitude loops on transform/opacity only, so every one of these
+   is composited on the GPU and costs no layout or paint.
+   ------------------------------------------------------------------------- */
+
+@keyframes station-drift {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) rotate(-1deg);
+  }
+  50% {
+    transform: translate3d(6vw, -2vh, 0) rotate(1deg);
+  }
+}
+
+@keyframes float-glyph {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) rotate(0deg);
+    opacity: 0.5;
+  }
+  50% {
+    transform: translate3d(-2vw, -3vh, 0) rotate(8deg);
+    opacity: 1;
+  }
+}
+
+@keyframes asteroid {
+  from {
+    transform: translate3d(4vw, 0, 0);
+  }
+  to {
+    transform: translate3d(-14vw, 6vh, 0);
+  }
+}
+
+@keyframes stream {
+  from {
+    transform: translate3d(0, 0, 0);
+    opacity: 0;
+  }
+  10%,
+  85% {
+    opacity: 0.55;
+  }
+  to {
+    transform: translate3d(110vw, 0, 0);
+    opacity: 0;
+  }
+}
+
+@keyframes mote {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(-6vw, -10vh, 0);
+  }
+}
+
+/* Universe reactions — each fires once and unmounts. */
+@keyframes rocket {
+  0% {
+    transform: scaleY(0);
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  70% {
+    transform: scaleY(1);
+    opacity: 0.85;
+  }
+  100% {
+    transform: scaleY(1) translateY(-30vh);
+    opacity: 0;
+  }
+}
+
+@keyframes wave {
+  0% {
+    transform: translate(-50%, -50%) scale(0.15);
+    opacity: 0.55;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(3.4);
+    opacity: 0;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   SPECIALIST IDLE BEHAVIOUR
+   Each emblem is alive without being animated *at* you. Amplitudes are tiny
+   and periods are long and mutually prime, so no two specialists ever fall
+   into visible lockstep.
+   ------------------------------------------------------------------------- */
+
+@keyframes blink {
+  0%,
+  92%,
+  100% {
+    transform: scaleY(1);
+  }
+  95% {
+    transform: scaleY(0.08);
+  }
+}
+
+@keyframes visor {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
+
+/* Energy travelling through the armour: a dash offset, which animates on the
+   compositor and never triggers layout. */
+@keyframes energy {
+  from {
+    stroke-dashoffset: 42;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes sweep {
+  0%,
+  100% {
+    transform: translateY(-9px);
+    opacity: 0;
+  }
+  35%,
+  65% {
+    opacity: 0.75;
+  }
+  50% {
+    transform: translateY(9px);
+  }
+}
+
+@keyframes ticker {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@keyframes shimmer {
+  from {
+    background-position: -200% 0;
+  }
+  to {
+    background-position: 200% 0;
+  }
+}
+
+/* ============================================================================
+   BASE
+   ========================================================================== */
 
 @layer base {
   html {
     color-scheme: dark;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
   }
 
   body {
-    background-color: var(--color-canvas);
-    color: var(--color-content);
+    background-color: var(--color-void);
+    color: var(--color-ink);
     font-family: var(--font-sans);
-    -webkit-font-smoothing: antialiased;
+    /* The void is never flat: two vast, barely-there light sources give the
+       page depth before a single element is drawn. */
+    background-image:
+      radial-gradient(
+        ellipse 80% 50% at 50% -10%,
+        color-mix(in oklch, var(--color-plasma) 9%, transparent),
+        transparent 70%
+      ),
+      radial-gradient(
+        ellipse 60% 50% at 90% 10%,
+        color-mix(in oklch, var(--color-oracle) 7%, transparent),
+        transparent 65%
+      );
+    background-attachment: fixed;
+  }
+
+  /* Every numeral on screen is mono and tabular. This single rule is the
+     most recognisable thing about the interface. */
+  [data-numeric],
+  .numeric {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
   }
 
   :focus-visible {
-    outline: 2px solid var(--color-brand);
+    outline: 2px solid var(--color-plasma);
     outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  ::selection {
+    background: color-mix(in oklch, var(--color-plasma) 30%, transparent);
+    color: var(--color-ink);
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-line);
+    border-radius: 99px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-line-bright);
+    background-clip: content-box;
+  }
+}
+
+/* ============================================================================
+   COMPONENT PRIMITIVES
+   Expressed in CSS rather than utility soup because they encode brand rules,
+   not layout decisions.
+   ========================================================================== */
+
+@layer components {
+  /* The instrument reticle: corner brackets that mark a surface as being
+     actively observed. Used sparingly — on focus, and on Elite Gems. */
+  .reticle::before,
+  .reticle::after {
+    content: "";
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    border-color: currentColor;
+    opacity: 0.55;
+    transition: opacity var(--duration-quick) var(--ease-precise);
+  }
+  .reticle::before {
+    top: 8px;
+    left: 8px;
+    border-top: 1px solid;
+    border-left: 1px solid;
+  }
+  .reticle::after {
+    bottom: 8px;
+    right: 8px;
+    border-bottom: 1px solid;
+    border-right: 1px solid;
+  }
+
+  /* Hairline top edge — reads as a lit rim on a machined panel. */
+  .rimlight {
+    position: relative;
+  }
+  .rimlight::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto;
+    height: 1px;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in oklch, var(--color-ink) 22%, transparent) 30%,
+      color-mix(in oklch, var(--color-ink) 22%, transparent) 70%,
+      transparent
+    );
+  }
+
+  .grid-field {
+    background-image:
+      linear-gradient(
+        color-mix(in oklch, var(--color-line) 45%, transparent) 1px,
+        transparent 1px
+      ),
+      linear-gradient(
+        90deg,
+        color-mix(in oklch, var(--color-line) 45%, transparent) 1px,
+        transparent 1px
+      );
+    background-size: 44px 44px;
+    mask-image: radial-gradient(ellipse 70% 60% at 50% 40%, black, transparent 75%);
+  }
+
+  .skeleton {
+    background: linear-gradient(
+      90deg,
+      var(--color-surface) 25%,
+      var(--color-elevated) 50%,
+      var(--color-surface) 75%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.6s linear infinite;
+  }
+}
+
+/* ============================================================================
+   OBSERVATORY / COMMAND MODES
+
+   Two ways to look at the same instrument, sharing identical functionality.
+
+   OBSERVATORY (default) is the full atmosphere: ambient fields, blur, glow.
+   COMMAND strips every non-informational effect for professionals who keep
+   this open for eight hours. It is not a "lite" mode — nothing is removed
+   except decoration, and the density increases because the ornament is gone.
+
+   Implemented as one attribute on <html> so the switch is instant and costs a
+   single style recalculation rather than a React re-render of the tree.
+   ========================================================================== */
+
+/* Two distinct classes, because "animated" and "decorative" are not the same
+   thing. `.ambient` is pure atmosphere and disappears. `.motion-loop` marks
+   elements that animate continuously but carry meaning — the Core body, the
+   specialist nodes — so Command mode stills them rather than removing them. */
+[data-mode="command"] .ambient {
+  display: none !important;
+}
+
+[data-mode="command"] .motion-loop {
+  animation: none !important;
+}
+
+[data-mode="command"] .observatory-only {
+  display: none !important;
+}
+
+[data-mode="command"] body {
+  /* The void goes flat: no light sources, no depth. */
+  background-image: none;
+}
+
+[data-mode="command"] {
+  /* Backdrop blur is the single most expensive effect on screen and buys
+     nothing when information density is the goal. */
+  --blur-panel: 0px;
+}
+
+[data-mode="command"] .grid-field {
+  display: none;
+}
+
+/* Panels tighten and lose their translucency so rows read as a dense table. */
+[data-mode="command"] [data-panel] {
+  backdrop-filter: none;
+  background-color: var(--color-abyss);
+}
+
+/* ============================================================================
+   REDUCED MOTION
+   Ambient loops stop entirely. Transitions collapse to near-zero rather than
+   to zero, so state changes stay perceptible instead of teleporting.
+   ========================================================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .ambient {
+    display: none !important;
+  }
+
+  .motion-loop {
+    animation: none !important;
   }
 }

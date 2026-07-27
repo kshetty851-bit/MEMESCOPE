@@ -231,4 +231,7 @@ Ready for next milestone.
 ---
 
 # Next
-```
+
+Day 4 — AI Scoring Engine.
+
+See ROADMAP.md for scope.
