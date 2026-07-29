@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     # branding used everywhere else — invalidates every issued token and signs
     # every user out. Change it only with a deliberate session-invalidation plan.
     PROJECT_NAME: str = "MemeScope AI"
-    VERSION: str = "0.1.0"
+    VERSION: str = "0.8.0-rc1"
     ENVIRONMENT: Environment = "local"
     DEBUG: bool = False
     API_V1_PREFIX: str = "/api/v1"
