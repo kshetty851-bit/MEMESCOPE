@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable, Coroutine
+from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.exceptions import AuthenticationError, PermissionDeniedError
 from app.core.redis import is_token_denied
 from app.core.security import decode_access_token
@@ -22,13 +24,54 @@ from app.services.user_service import UserService
 # auto_error=False so a missing header raises our own envelope, not FastAPI's.
 bearer_scheme = HTTPBearer(auto_error=False, description="JWT access token")
 
+#: Stable identity for the development bypass principal. A fixed, obviously
+#: synthetic UUID so it is recognisable in logs and cannot collide with a real
+#: account, which are generated randomly.
+DEVELOPMENT_USER_ID = uuid.UUID("00000000-0000-4000-8000-00000000d0e5")
+
 DbSession = Annotated[AsyncSession, Depends(get_db)]
 Credentials = Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)]
+
+
+def _developer_principal() -> User:
+    """The identity every request carries while the bypass is active.
+
+    Deliberately **not** persisted and never written to the database: it exists
+    for the lifetime of one request. A real row would outlive the flag, leaving
+    a privileged account behind in whatever database the developer happened to
+    be pointed at.
+
+    The id is fixed so logs and any per-user state stay coherent across requests
+    within a session.
+    """
+    # `created_at` and `updated_at` are set explicitly: they are server defaults,
+    # and this object is never flushed, so nothing would populate them and the
+    # response schema would fail to serialise a null.
+    now = datetime.now(UTC)
+    return User(
+        id=DEVELOPMENT_USER_ID,
+        email=settings.DEVELOPMENT_USER_EMAIL,
+        hashed_password="",
+        display_name="Developer",
+        role=UserRole.ADMIN,
+        is_active=True,
+        is_verified=True,
+        created_at=now,
+        updated_at=now,
+    )
 
 
 async def get_current_user(
     request: Request, session: DbSession, credentials: Credentials
 ) -> User:
+    # Development bypass. `auth_bypass_active` is already anded with the
+    # environment, so this branch is unreachable outside local development, and
+    # the production config refuses to boot if the flag is set at all.
+    if settings.auth_bypass_active:
+        developer = _developer_principal()
+        request.state.user_id = str(developer.id)
+        return developer
+
     if credentials is None or not credentials.credentials:
         raise AuthenticationError("Missing bearer token.")
 

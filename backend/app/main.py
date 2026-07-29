@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from app.api.v1.endpoints import health
 from app.api.v1.router import api_router
@@ -17,6 +18,7 @@ from app.core.config import settings
 from app.core.events import broadcaster
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import configure_logging, get_logger
+from app.core.observability import init_sentry
 from app.core.redis import close_redis, init_redis
 from app.db.session import dispose_engine
 from app.middleware.rate_limit import RateLimitMiddleware
@@ -29,11 +31,27 @@ logger = get_logger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     configure_logging()
+    # Before anything else that can fail: an exception raised during startup is
+    # exactly the kind worth reporting, and it is unreachable if the reporter
+    # is initialised afterwards.
+    init_sentry()
     logger.info(
         "application_starting",
         version=settings.VERSION,
         environment=settings.ENVIRONMENT,
     )
+    if settings.auth_bypass_active:
+        # Loud and every boot. An auth bypass that nobody notices is running is
+        # the failure mode worth designing against; production refuses to start
+        # with the flag set at all, so this can only ever appear locally.
+        logger.warning(
+            "authentication_bypass_active",
+            environment=settings.ENVIRONMENT,
+            detail=(
+                "DEVELOPMENT_BYPASS_AUTH is on: every request is treated as an "
+                "authenticated developer. Never enable this outside local development."
+            ),
+        )
     await init_redis()
     # Bridges the scanner's Redis pub/sub events to this process's WebSocket
     # clients. Started per API process, not per connection.
@@ -85,6 +103,15 @@ def create_app() -> FastAPI:
     if settings.ALLOWED_HOSTS != ["*"]:
         app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.ALLOWED_HOSTS)
     app.add_middleware(RequestContextMiddleware)
+
+    # Added last, so it is the outermost layer and runs *first* on the way in.
+    # `request.client` has to be corrected before anything reads it - the rate
+    # limiter keys on it and every log line records it, and both would otherwise
+    # see the proxy rather than the user. Only enabled when proxies are declared:
+    # honouring `X-Forwarded-For` from an untrusted peer would let any client
+    # choose its own rate-limit bucket.
+    if settings.TRUSTED_PROXY_IPS:
+        app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=settings.TRUSTED_PROXY_IPS)
 
     register_exception_handlers(app)
 

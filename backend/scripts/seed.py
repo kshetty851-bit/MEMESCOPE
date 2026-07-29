@@ -26,8 +26,8 @@ async def seed(email: str, password: str, display_name: str) -> int:
 
     async with SessionFactory() as session:
         existing = (
-            await session.execute(select(User).where(User.email == email))
-        ).scalars().first()
+            (await session.execute(select(User).where(User.email == email))).scalars().first()
+        )
 
         if existing is not None:
             print(f"User {email} already exists (id={existing.id}).")

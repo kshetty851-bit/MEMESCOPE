@@ -20,6 +20,10 @@ def _settings(**overrides: object) -> Settings:
     base: dict[str, object] = {
         "ENVIRONMENT": "local",
         "DEBUG": False,
+        # Pinned off: the local container exports this, and leaving it ambient
+        # would make the production-hardening tests trip on the bypass guard
+        # instead of the rule each one is actually named for.
+        "DEVELOPMENT_BYPASS_AUTH": False,
         "SECRET_KEY": "x" * 48,
         "ALLOWED_HOSTS": "*",
         "REFRESH_COOKIE_SECURE": True,

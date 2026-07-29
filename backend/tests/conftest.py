@@ -74,7 +74,11 @@ async def test_session_factory(engine, monkeypatch: pytest.MonkeyPatch):
     rows. Patching the factory keeps those tests isolated and deterministic.
     """
     factory = async_sessionmaker(bind=engine, expire_on_commit=False, autoflush=False)
+    # Each module that imports `SessionFactory` by name binds it at import time,
+    # so patching `app.db.session` alone leaves those bindings pointing at the
+    # development database. Every such module has to be patched explicitly.
     monkeypatch.setattr("app.services.market.worker.SessionFactory", factory)
+    monkeypatch.setattr("app.workers.scoring_tasks.SessionFactory", factory)
     monkeypatch.setattr("app.db.session.SessionFactory", factory)
     return factory
 
