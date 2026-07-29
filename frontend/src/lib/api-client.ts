@@ -99,6 +99,30 @@ async function refreshAccessToken(): Promise<string | null> {
   return refreshPromise;
 }
 
+/**
+ * Round-trip duration of the most recent API call, in milliseconds.
+ *
+ * Recorded here so the telemetry bar can report real latency without issuing a
+ * request purely to time one. Subscribers are notified rather than polled, so a
+ * displayed figure always corresponds to a call the app actually made.
+ */
+let lastLatencyMs: number | null = null;
+const latencyListeners = new Set<(ms: number | null) => void>();
+
+export function onLatencySample(listener: (ms: number | null) => void): () => void {
+  latencyListeners.add(listener);
+  return () => latencyListeners.delete(listener);
+}
+
+export function getLastLatency(): number | null {
+  return lastLatencyMs;
+}
+
+function recordLatency(ms: number | null) {
+  lastLatencyMs = ms;
+  for (const listener of latencyListeners) listener(ms);
+}
+
 export async function apiFetch<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { body, skipAuthRetry = false, headers, ...rest } = options;
 
@@ -114,7 +138,15 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
 
-  let response = await send(accessToken);
+  const startedAt = performance.now();
+  let response: Response;
+  try {
+    response = await send(accessToken);
+  } catch (error) {
+    recordLatency(null);
+    throw error;
+  }
+  recordLatency(Math.round(performance.now() - startedAt));
 
   if (response.status === 401 && !skipAuthRetry) {
     const renewed = await refreshAccessToken();
