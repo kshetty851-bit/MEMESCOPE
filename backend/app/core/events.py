@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from typing import Any
 
 from redis.asyncio import Redis
@@ -40,6 +40,49 @@ async def publish_token_discovered(
         settings.TOKEN_EVENT_CHANNEL, json.dumps(payload, default=str)
     )
     return int(receivers)
+
+
+async def publish_score_changed(payload: dict[str, Any], *, redis: Redis | None = None) -> int:
+    """Publish a materially changed score.
+
+    Its own channel rather than the discovery one: a score change is not a
+    discovery, and multiplexing them would force every consumer to discriminate
+    on payload shape before it could tell what it had received.
+
+    Callers must publish **after** the transaction commits. Publishing first
+    would let an event describe a score that never landed, and the Observatory
+    Log would narrate an event with no row behind it - the same ordering the
+    scanner already follows.
+    """
+    client = redis or get_redis()
+    receivers = await client.publish(
+        settings.SCORE_EVENT_CHANNEL, json.dumps(payload, default=str)
+    )
+    return int(receivers)
+
+
+async def publish_score_events(
+    payloads: Sequence[dict[str, Any]], *, redis: Redis | None = None
+) -> int:
+    """Publish a batch of score events, best-effort.
+
+    Delivery failures are logged and swallowed: the database is the source of
+    truth and the sweep will re-evaluate regardless, so a dropped event costs a
+    live update, not correctness. Alerts (Day 8) must therefore read state
+    rather than rely on having seen every event.
+    """
+    delivered = 0
+    for payload in payloads:
+        try:
+            await publish_score_changed(payload, redis=redis)
+            delivered += 1
+        except Exception as exc:
+            logger.warning(
+                "score_event_publish_failed",
+                mint=payload.get("mint_address"),
+                error=str(exc),
+            )
+    return delivered
 
 
 class TokenEventBroadcaster:

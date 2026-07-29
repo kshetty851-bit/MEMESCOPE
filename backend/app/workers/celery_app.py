@@ -15,7 +15,7 @@ celery_app = Celery(
     "memescope",
     broker=settings.REDIS_URI,
     backend=settings.REDIS_URI,
-    include=["app.workers.tasks"],
+    include=["app.workers.tasks", "app.workers.scoring_tasks", "app.radar.scheduler"],
 )
 
 celery_app.conf.update(
@@ -38,5 +38,24 @@ celery_app.conf.beat_schedule = {
     "purge-expired-refresh-tokens": {
         "task": "app.workers.tasks.purge_expired_refresh_tokens",
         "schedule": crontab(hour="3", minute="0"),
+    },
+    # The reconciliation pass behind the enrichment worker's fast path. Not
+    # optional: the fast path cannot cover the crash window between the
+    # enrichment commit and the scoring commit, nor deploys and restarts.
+    "score-sweep": {
+        "task": "app.workers.scoring_tasks.score_sweep",
+        "schedule": crontab(minute="*/15"),
+    },
+    # Runs beside the refresh-token purge, in the same quiet hour.
+    "prune-score-history": {
+        "task": "app.workers.scoring_tasks.prune_score_history",
+        "schedule": crontab(hour="3", minute="30"),
+    },
+    # The Radar re-evaluates existing projects on its own cadence, independent
+    # of discovery. Every 15 minutes: often enough that a breakout is caught the
+    # same hour, rare enough that the sweep never overruns itself.
+    "radar-sweep": {
+        "task": "app.radar.scheduler.radar_sweep",
+        "schedule": crontab(minute="*/15"),
     },
 }
