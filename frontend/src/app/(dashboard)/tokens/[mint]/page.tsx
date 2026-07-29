@@ -14,6 +14,14 @@ import { Skeleton, SkeletonText } from "@/components/ui/skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/states";
 import { Sparkline } from "@/components/ui/sparkline";
 import { MissionReport } from "@/components/token/mission-report";
+import { CloneRiskBadge } from "@/components/decision/clone-risk-badge";
+import { InvestmentThesis } from "@/components/decision/investment-thesis";
+import { OpportunityTimeline } from "@/components/decision/opportunity-timeline";
+import { ProjectHealth } from "@/components/decision/project-health";
+import { useIdentity } from "@/hooks/use-identity";
+import { useRadarEntry } from "@/hooks/use-radar";
+import { buildHealth } from "@/lib/health";
+import { buildThesis } from "@/lib/thesis";
 import { SentinelRead } from "@/components/sentinel/sentinel-read";
 import { useTokenScore } from "@/hooks/use-scores";
 import { ApiError, api } from "@/lib/api-client";
@@ -48,6 +56,11 @@ export default function TokenDetailPage() {
   // The scoring engine's verdict for this token, with the component breakdown
   // the ranking endpoint omits.
   const scoreQuery = useTokenScore(mint);
+
+  // Phase 12 decision surfaces. The Radar entry is optional — most tokens are
+  // not on it — and clone risk is available for every discovered mint.
+  const radarEntry = useRadarEntry(mint);
+  const identity = useIdentity(mint);
 
   const history = useQuery({
     queryKey: ["tokens", mint, "history", page],
@@ -122,6 +135,12 @@ export default function TokenDetailPage() {
             <p data-numeric className="mt-1.5 truncate text-xs text-ink-faint" title={mint}>
               {mint}
             </p>
+            {/* Directly under the name, because that is what it is about: a
+                contested name is the one risk here a user can act on with
+                certainty. */}
+            {identity.data ? (
+              <CloneRiskBadge identity={identity.data} className="mt-2" />
+            ) : null}
           </div>
         </div>
 
@@ -348,6 +367,29 @@ export default function TokenDetailPage() {
             Prose first, arithmetic second — the report explains itself, and
             anyone who wants the numbers is one panel away. */}
         <aside className="flex min-w-0 flex-col gap-6">
+          {/* Explanation first: the thesis says why this token is worth a
+              second of attention, the health readouts say what state it is in,
+              and the waterfall further down carries the arithmetic for anyone
+              who wants to check the claim. */}
+          {scoreQuery.isPending ? (
+            // A pending query must not render as "not scored": that is a claim
+            // about the token, and it would be false for the second or two the
+            // request is in flight.
+            <Panel>
+              <SkeletonText lines={6} />
+            </Panel>
+          ) : (
+            <>
+              <InvestmentThesis
+                thesis={buildThesis(
+                  score ?? null,
+                  radarEntry.data?.reasons?.map((reason) => reason.message),
+                )}
+              />
+              <ProjectHealth dimensions={buildHealth(score ?? null)} />
+            </>
+          )}
+          {radarEntry.data ? <OpportunityTimeline entry={radarEntry.data} /> : null}
           <SentinelRead
             score={score}
             status={scoreQuery.data?.status}
