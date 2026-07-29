@@ -76,11 +76,15 @@ def upgrade() -> None:
     op.create_index("ix_discovered_tokens_signature", "discovered_tokens", ["signature"])
     op.create_index("ix_discovered_tokens_slot", "discovered_tokens", ["slot"])
     op.create_index("ix_discovered_tokens_block_time", "discovered_tokens", ["block_time"])
-    op.create_index("ix_discovered_tokens_discovered_at", "discovered_tokens", ["discovered_at"])
+    op.create_index(
+        "ix_discovered_tokens_discovered_at", "discovered_tokens", ["discovered_at"]
+    )
     op.create_index(
         "ix_discovered_tokens_creator_address", "discovered_tokens", ["creator_address"]
     )
-    op.create_index("ix_discovered_tokens_source_program", "discovered_tokens", ["source_program"])
+    op.create_index(
+        "ix_discovered_tokens_source_program", "discovered_tokens", ["source_program"]
+    )
     op.create_index("ix_discovered_tokens_created_at", "discovered_tokens", ["created_at"])
 
     # Serves the live feed, which is always "newest first".

@@ -34,7 +34,13 @@ class RefreshToken(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     token_hash: Mapped[str] = mapped_column(
         String(64), unique=True, index=True, nullable=False
     )
-    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # Indexed for the nightly purge of expired tokens. The index has existed in
+    # the database since migration 0001; it was missing from the model, so
+    # `alembic check` reported permanent drift and could not be used as a CI
+    # gate. Declaring it here reconciles the two without a schema change.
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     replaced_by_id: Mapped[uuid.UUID | None] = mapped_column(
         PgUUID(as_uuid=True),

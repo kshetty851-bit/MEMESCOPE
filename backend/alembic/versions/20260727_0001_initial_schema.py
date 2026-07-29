@@ -101,7 +101,9 @@ def upgrade() -> None:
             ondelete="SET NULL",
         ),
     )
-    op.create_index("ix_refresh_tokens_token_hash", "refresh_tokens", ["token_hash"], unique=True)
+    op.create_index(
+        "ix_refresh_tokens_token_hash", "refresh_tokens", ["token_hash"], unique=True
+    )
     op.create_index("ix_refresh_tokens_user_id", "refresh_tokens", ["user_id"])
     op.create_index("ix_refresh_tokens_created_at", "refresh_tokens", ["created_at"])
     # Supports the nightly purge of expired tokens.

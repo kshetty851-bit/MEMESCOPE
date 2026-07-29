@@ -68,6 +68,10 @@ migration: ## Autogenerate a migration (make migration M="add tokens")
 downgrade: ## Roll back one migration
 	$(BACKEND) alembic downgrade -1
 
+.PHONY: migration-check
+migration-check: ## Fail if a model has drifted from the migrations
+	$(BACKEND) alembic check
+
 .PHONY: seed
 seed: ## Create a local admin user
 	$(BACKEND) python -m scripts.seed
@@ -99,14 +103,14 @@ test-frontend: ## Run frontend tests
 
 .PHONY: lint
 lint: ## Lint both services
-	$(BACKEND) ruff check app tests
-	$(BACKEND) ruff format --check app tests
+	$(BACKEND) ruff check .
+	$(BACKEND) ruff format --check .
 	$(FRONTEND) npm run lint
 
 .PHONY: format
 format: ## Auto-format both services
-	$(BACKEND) ruff check --fix app tests
-	$(BACKEND) ruff format app tests
+	$(BACKEND) ruff check --fix .
+	$(BACKEND) ruff format .
 	$(FRONTEND) npm run format
 
 .PHONY: typecheck
@@ -115,7 +119,7 @@ typecheck: ## Type-check both services
 	$(FRONTEND) npm run typecheck
 
 .PHONY: check
-check: lint typecheck test ## Everything CI runs
+check: lint typecheck migration-check test ## Everything CI runs
 
 # --- Shells ------------------------------------------------------------------
 
