@@ -1,36 +1,48 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { DashboardPrimer } from "@/components/alpha/dashboard-primer";
-import { OpportunityCard } from "@/components/decision/opportunity-card";
+import { Mascot } from "@/components/brand/mascot";
+import { MissionBrief } from "@/components/decision/mission-brief";
+import { OpportunityQueue, type QueueItem } from "@/components/decision/opportunity-queue";
 import { RadarScoreboard } from "@/components/decision/radar-scoreboard";
 import { SinceLastVisit } from "@/components/decision/since-last-visit";
-import { Why } from "@/components/decision/why";
-import { Mascot } from "@/components/brand/mascot";
 import { Panel } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useIdentities } from "@/hooks/use-identity";
 import { useExitWatch } from "@/hooks/use-intelligence";
 import { useRadar } from "@/hooks/use-radar";
 import { useScoresByMint, useTopScores } from "@/hooks/use-scores";
-import { type TokenSnapshotMemory, rememberVisit } from "@/lib/changes";
-import { buildSections } from "@/lib/sections";
+import {
+  type TokenSnapshotMemory,
+  diffToken,
+  rememberVisit,
+  rememberedTokens,
+} from "@/lib/changes";
+import { convictionOf } from "@/lib/conviction";
+import { assessMarket } from "@/lib/market-quality";
+import { type MissionState, missionStatus } from "@/lib/mission";
+import { priorityRank, researchPriority } from "@/lib/research-priority";
 
 /**
- * Today's Opportunities — the home page.
+ * Mission Control — the daily briefing.
  *
- * Phase 12 replaced the operator dashboard that used to live here. Discovery
- * totals, stream state, latency and division diagnostics all moved to
- * `/system`: they told a user the platform was working, which is not the same
- * as telling them anything worth acting on, and they occupied the top of the
- * page where the answer should be.
+ * Phase 13 turned this page from a set of category shelves into a briefing
+ * with a work list. The order is deliberate and it is the whole argument:
  *
- * What replaces them is a set of sections that each say what they measure
- * before showing a single number. The ordering is deliberate — conviction and
- * momentum first, deterioration and risk last — but every section renders on
- * every visit, including the unflattering ones. A page that shows only what is
- * going well is a pitch, not an instrument.
+ *   1. **Mission Brief** — is today worth your time at all?
+ *   2. **Opportunity Queue** — if it is, what do you look at first?
+ *   3. **Since your last visit** — what moved while you were away?
+ *   4. **Radar Scoreboard** — how has the platform actually done?
+ *
+ * The scoreboard sits last on purpose. It is the record LETZMOON is judged by,
+ * and putting the judgement *after* the recommendations means a user reaches
+ * the claims already knowing what the platform's calls have been worth.
+ *
+ * Everything derives from data already on the wire — the same queries the
+ * previous version issued plus the batched clone lookup. No endpoint was added
+ * or changed for Phase 13.
  */
 export default function CommandPage() {
   const scores = useScoresByMint();
@@ -41,18 +53,17 @@ export default function CommandPage() {
   const scored = useMemo(() => top.data?.items ?? [], [top.data]);
   const radarEntries = useMemo(() => radar.data?.items ?? [], [radar.data]);
 
+  // Read the visit baseline once per mount. Re-reading would diff against
+  // memory this very render wrote, and report nothing forever.
+  const [baseline] = useState(() => rememberedTokens());
+
   const exitSeverity = useMemo(() => {
-    const map = new Map<string, string>();
+    const map = new Map<string, "clear" | "watch" | "elevated">();
     for (const item of exit.data?.items ?? []) {
-      map.set(item.mint_address, item.severity);
+      map.set(item.mint_address, item.severity as "clear" | "watch" | "elevated");
     }
     return map;
   }, [exit.data]);
-
-  const sections = useMemo(
-    () => buildSections({ scored, radar: radarEntries, exitSeverity }),
-    [scored, radarEntries, exitSeverity],
-  );
 
   const radarByMint = useMemo(
     () => new Map(radarEntries.map((entry) => [entry.mint_address, entry])),
@@ -63,70 +74,205 @@ export default function CommandPage() {
     [scored],
   );
 
-  // One batched clone-risk request for every mint on the page rather than one
-  // per card — the same deduplication discipline the scoring hooks follow.
-  const visibleMints = useMemo(
-    () => [...new Set(sections.flatMap((section) => section.mints))],
-    [sections],
+  // Everything the platform currently has an opinion about, from either source.
+  const candidateMints = useMemo(
+    () => [
+      ...new Set([
+        ...radarEntries.map((entry) => entry.mint_address),
+        ...scored.map((item) => item.token.mint_address),
+      ]),
+    ],
+    [radarEntries, scored],
   );
-  const identities = useIdentities(visibleMints);
 
-  // Record what the user was shown, so the next visit has a baseline to diff
-  // against. After render, and only once there is real data to remember.
-  useEffect(() => {
-    if (visibleMints.length === 0) return;
+  const identities = useIdentities(candidateMints.slice(0, 100));
 
-    const memory: Record<string, TokenSnapshotMemory> = {};
-    for (const mint of visibleMints) {
+  /** Classify every candidate. Pure inputs, so this recomputes only on change. */
+  const classified = useMemo(() => {
+    return candidateMints.map((mint) => {
       const score = scores.byMint.get(mint);
       const entry = radarByMint.get(mint);
-      memory[mint] = {
+      const identity = identities.data?.get(mint);
+      const severity = exitSeverity.get(mint) ?? null;
+
+      const current: TokenSnapshotMemory = {
         score: score ? Number(score.score) : null,
         grade: score?.grade ?? null,
         liquidity: entry?.current_liquidity ? Number(entry.current_liquidity) : null,
         volume24h: null,
         currentMultiple: entry?.current_multiple ? Number(entry.current_multiple) : null,
-        exitSeverity: exitSeverity.get(mint) ?? null,
+        exitSeverity: severity,
+      };
+      const changes = diffToken(baseline[mint], current);
+
+      const mission = missionStatus({
+        currentMultiple: current.currentMultiple,
+        peakMultiple: entry?.peak_multiple ? Number(entry.peak_multiple) : null,
+        daysSinceDetection: entry?.days_since_detection
+          ? Number(entry.days_since_detection)
+          : 999,
+        exitSeverity: severity,
+        hasVeto: Boolean(score?.risk?.has_veto),
+        // A Radar entry has by construction cleared the engine's minimum
+        // observation count; a bare score row may not have.
+        observations: score?.evidence?.observations ?? (entry ? 48 : 0),
+      });
+
+      const conviction = score ? convictionOf(score.grade, score.is_elite) : null;
+      const confidence = score?.evidence?.confidence
+        ? Number(score.evidence.confidence)
+        : null;
+
+      const priority = researchPriority({
+        conviction,
+        mission,
+        confidence,
+        changeCount: changes.length,
+        hasVeto: Boolean(score?.risk?.has_veto),
+        exitSeverity: severity,
+        cloneRisk: identity?.clone_risk ?? null,
+      });
+
+      const token = tokenByMint.get(mint);
+      return {
+        mint,
+        name: token?.name ?? entry?.name,
+        symbol: token?.symbol ?? entry?.symbol,
+        grade: score?.grade ?? null,
+        isElite: score?.is_elite,
+        score: score?.score ?? null,
+        conviction,
+        mission,
+        priority,
+        confidence,
+        changes,
+        identity,
+      } satisfies QueueItem;
+    });
+  }, [
+    candidateMints,
+    scores.byMint,
+    radarByMint,
+    tokenByMint,
+    identities.data,
+    exitSeverity,
+    baseline,
+  ]);
+
+  /**
+   * The queue. Only Critical and High reach it.
+   *
+   * The attention economy made literal: Medium and Low stay searchable on the
+   * Radar and the feed, but they do not get a slot in a briefing whose entire
+   * value is that it is short.
+   */
+  const queue = useMemo(
+    () =>
+      [...classified]
+        .filter(
+          (item) =>
+            item.priority.priority === "critical" || item.priority.priority === "high",
+        )
+        .sort(
+          (a, b) =>
+            priorityRank(a.priority.priority) - priorityRank(b.priority.priority) ||
+            b.priority.score - a.priority.score,
+        )
+        .slice(0, 8),
+    [classified],
+  );
+
+  const stateCounts = useMemo(() => {
+    const counts: Partial<Record<MissionState, number>> = {};
+    for (const item of classified) {
+      counts[item.mission] = (counts[item.mission] ?? 0) + 1;
+    }
+    return counts;
+  }, [classified]);
+
+  const cloneWarnings = useMemo(
+    () =>
+      classified.filter(
+        (item) =>
+          item.identity?.clone_risk === "high" || item.identity?.clone_risk === "moderate",
+      ).length,
+    [classified],
+  );
+
+  const market = useMemo(() => {
+    const confidences = classified
+      .map((item) => item.confidence)
+      .filter((value): value is number => value !== null)
+      .sort((a, b) => a - b);
+
+    return assessMarket({
+      scored: scored.length,
+      strongOrBetter: scored.filter(
+        (item) => item.score?.grade === "high_conviction" || item.score?.grade === "strong",
+      ).length,
+      aboveEntry: radarEntries.filter(
+        (entry) => Number(entry.current_multiple ?? 0) >= 1,
+      ).length,
+      tracked: radarEntries.length,
+      deteriorating: [...exitSeverity.values()].filter((s) => s !== "clear").length,
+      medianConfidence: confidences.length
+        ? (confidences[Math.floor(confidences.length / 2)] ?? 0)
+        : 0,
+      cloneWarnings,
+    });
+  }, [classified, scored, radarEntries, exitSeverity, cloneWarnings]);
+
+  const movers = useMemo(() => {
+    const label = (item: (typeof classified)[number]) =>
+      item.symbol ?? item.name ?? `${item.mint.slice(0, 4)}…${item.mint.slice(-4)}`;
+
+    const gain = classified.find((item) =>
+      item.changes.some((c) => c.code === "RETURN_MOVED" && c.direction === "up"),
+    );
+    const drop = classified.find((item) =>
+      item.changes.some((c) => c.code === "RETURN_MOVED" && c.direction === "down"),
+    );
+
+    return {
+      gain: gain ? { label: label(gain), detail: gain.priority.whyToday } : null,
+      drop: drop ? { label: label(drop), detail: drop.priority.whyToday } : null,
+    };
+  }, [classified]);
+
+  // Record what was shown, so the next visit has a baseline to diff against.
+  useEffect(() => {
+    if (classified.length === 0) return;
+    const memory: Record<string, TokenSnapshotMemory> = {};
+    for (const item of classified) {
+      const entry = radarByMint.get(item.mint);
+      memory[item.mint] = {
+        score: item.score ? Number(item.score) : null,
+        grade: item.grade ?? null,
+        liquidity: entry?.current_liquidity ? Number(entry.current_liquidity) : null,
+        volume24h: null,
+        currentMultiple: entry?.current_multiple ? Number(entry.current_multiple) : null,
+        exitSeverity: exitSeverity.get(item.mint) ?? null,
       };
     }
     rememberVisit(memory, new Date());
-  }, [visibleMints, scores.byMint, radarByMint, exitSeverity]);
+  }, [classified, radarByMint, exitSeverity]);
 
   const loading = top.isPending || radar.isPending;
   const unreachable = top.isError && radar.isError;
 
+  if (loading) {
+    return (
+      <div className="flex flex-col gap-6">
+        <Skeleton className="h-64 rounded-panel" />
+        <Skeleton className="h-40 rounded-panel" />
+        <Skeleton className="h-40 rounded-panel" />
+      </div>
+    );
+  }
+
   return (
-    <div className="flex flex-col gap-8">
+    <div className="lm-enter flex flex-col gap-8">
       <DashboardPrimer />
-
-      {/* --- Mission Control hero ---------------------------------------- */}
-      <header className="relative flex items-center justify-between gap-6 overflow-hidden rounded-panel border border-line/60 bg-surface/40 px-6 py-7 backdrop-blur-xl">
-        <div className="flex flex-col gap-2">
-          <p className="text-xs uppercase tracking-[0.14em] text-brand-accent">
-            Mission Control
-          </p>
-          <h1 className="text-balance text-3xl font-medium tracking-tight text-ink">
-            What deserves your attention today
-          </h1>
-          <p className="max-w-2xl text-sm leading-relaxed text-ink-dim">
-            Every section says what it measures and why these projects are in it.
-            LETZMOON reports what it can observe. It does not predict returns,
-            and nothing here is a recommendation.
-          </p>
-        </div>
-        {/* Hidden below `sm`: on a phone this is 340px of decoration above the
-            answer the user opened the app for. */}
-        <Mascot size={132} className="hidden shrink-0 sm:block" />
-      </header>
-
-      {/* --- The record, before the pitch -------------------------------- */}
-      <RadarScoreboard entries={radarEntries} isPending={radar.isPending} />
-
-      <SinceLastVisit
-        scores={scores.byMint}
-        radar={radarByMint}
-        exitSeverity={exitSeverity}
-      />
 
       {unreachable ? (
         <Panel density="comfortable">
@@ -137,55 +283,32 @@ export default function CommandPage() {
         </Panel>
       ) : null}
 
-      {sections.map((section) => (
-        <section key={section.definition.id} className="flex flex-col gap-3">
-          <header className="flex flex-col gap-1">
-            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-              <h2 className="text-lg font-medium tracking-tight text-ink">
-                {section.definition.title}
-              </h2>
-              <Why>{section.definition.basis}</Why>
-            </div>
-            <p className="max-w-2xl text-sm leading-relaxed text-ink-dim">
-              {section.definition.description}
-            </p>
-          </header>
+      <div className="relative">
+        <MissionBrief
+          analysed={top.data?.candidate_total ?? scored.length}
+          market={market}
+          worthInvestigating={queue.length}
+          stateCounts={stateCounts}
+          cloneWarnings={cloneWarnings}
+          biggestGain={movers.gain}
+          biggestDrop={movers.drop}
+        />
+        {/* Hidden below `lg`: on a phone this is decoration above the answer. */}
+        <div className="pointer-events-none absolute right-6 top-4 hidden lg:block">
+          <Mascot size={104} />
+        </div>
+      </div>
 
-          {loading ? (
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {[0, 1, 2].map((index) => (
-                <Skeleton key={index} className="h-32 rounded-panel" />
-              ))}
-            </div>
-          ) : section.mints.length === 0 ? (
-            <Panel density="compact">
-              <p className="max-w-2xl text-sm leading-relaxed text-ink-dim">
-                Nothing qualified for this section right now. That is a reading,
-                not a gap — the conditions it describes are simply not present in
-                what LETZMOON can currently observe.
-              </p>
-            </Panel>
-          ) : (
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {section.mints.map((mint) => {
-                const entry = radarByMint.get(mint);
-                const token = tokenByMint.get(mint);
-                return (
-                  <OpportunityCard
-                    key={mint}
-                    mint={mint}
-                    name={token?.name ?? entry?.name}
-                    symbol={token?.symbol ?? entry?.symbol}
-                    score={scores.byMint.get(mint)}
-                    radar={entry}
-                    identity={identities.data?.get(mint)}
-                  />
-                );
-              })}
-            </div>
-          )}
-        </section>
-      ))}
+      <OpportunityQueue items={queue} />
+
+      <SinceLastVisit
+        scores={scores.byMint}
+        radar={radarByMint}
+        exitSeverity={exitSeverity}
+      />
+
+      {/* The record comes after the claims, so the claims are read in its light. */}
+      <RadarScoreboard entries={radarEntries} isPending={radar.isPending} />
     </div>
   );
 }
