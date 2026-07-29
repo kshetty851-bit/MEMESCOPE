@@ -19,6 +19,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
+from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -311,3 +312,153 @@ class TestSweepIsAdditive:
         after = await db_session.scalar(select(TokenMarketSnapshot.id).limit(1))
 
         assert before == after
+
+
+class TestTheSweepRefreshesWhatItHasAlreadyDetected:
+    """Regression cover for a Radar whose returns silently froze at detection.
+
+    `candidate_mints` ranks by most recent observation, so it surfaces whatever
+    enrichment last touched. A detected token leaves that window within minutes,
+    and nothing else fed the sweep — so `current_multiple` and `peak_multiple`
+    kept their detection-time values indefinitely while the price moved.
+
+    Measured on the live database before the fix: 0 of 28 tracked entries were
+    still in the candidate window, with staleness up to seven hours.
+    """
+
+    async def test_tracked_mints_returns_detected_entries_stalest_first(
+        self, db_session: AsyncSession
+    ) -> None:
+        repository = RadarRepository(db_session)
+
+        for index, mint in enumerate(("mint-stale", "mint-fresh")):
+            token = await _seed_token(db_session, mint)
+            await _seed_series(db_session, token)
+            await RadarService(db_session).evaluate_mint(
+                mint, now=NOW + timedelta(hours=index)
+            )
+
+        tracked = await repository.tracked_mints(limit=10)
+
+        assert set(tracked) == {"mint-stale", "mint-fresh"}
+        # Stalest first, so a truncated run degrades evenly rather than
+        # stranding whichever entries happen to sort last.
+        assert tracked[0] == "mint-stale"
+
+    async def test_a_sweep_refreshes_an_entry_outside_the_candidate_window(
+        self, db_session: AsyncSession
+    ) -> None:
+        """The exact production shape: detected, then never observed again.
+
+        The tracked token's own series stops, while other tokens keep being
+        snapshotted — so it cannot appear in `candidate_mints` and only the
+        tracked population can reach it.
+        """
+        token = await _seed_token(db_session, "mint-tracked")
+        await _seed_series(db_session, token)
+
+        service = RadarService(db_session)
+        assert await service.evaluate_mint("mint-tracked", now=NOW) is True
+
+        repository = RadarRepository(db_session)
+        entry = await repository.get("mint-tracked")
+        assert entry is not None
+        detected_multiple = entry.current_multiple
+        detected_at = entry.last_evaluated_at
+
+        # The price moves after detection.
+        db_session.add(
+            TokenMarketSnapshot(
+                token_id=token.id,
+                mint_address=token.mint_address,
+                captured_at=NOW + timedelta(minutes=5),
+                price_usd=Decimal("0.010"),
+                market_cap=Decimal(900_000),
+                liquidity_usd=Decimal(60_000),
+                volume_24h=Decimal(90_000),
+                volume_1h=Decimal(9_000),
+                buy_count_24h=400,
+                sell_count_24h=90,
+                provider="test",
+            )
+        )
+        # Newer, busier tokens crowd the most-recently-observed window.
+        for filler in range(3):
+            other = await _seed_token(db_session, f"mint-filler-{filler}")
+            await _seed_series(db_session, other)
+            for step in range(14):
+                db_session.add(
+                    TokenMarketSnapshot(
+                        token_id=other.id,
+                        mint_address=other.mint_address,
+                        captured_at=NOW + timedelta(minutes=30 + step),
+                        price_usd=Decimal("0.002"),
+                        market_cap=Decimal(200_000),
+                        liquidity_usd=Decimal(30_000),
+                        volume_24h=Decimal(40_000),
+                        volume_1h=Decimal(2_000),
+                        buy_count_24h=200,
+                        sell_count_24h=80,
+                        provider="test",
+                    )
+                )
+        await db_session.flush()
+
+        later = NOW + timedelta(hours=1)
+        candidates = await repository.candidate_mints(limit=3)
+        assert "mint-tracked" not in candidates, (
+            "fixture no longer reproduces the bug: the tracked mint must fall "
+            "outside the candidate window for this test to mean anything"
+        )
+
+        await RadarService(db_session).sweep(limit=3, now=later)
+
+        refreshed = await repository.get("mint-tracked")
+        assert refreshed is not None
+        assert refreshed.last_evaluated_at > detected_at
+        assert refreshed.current_multiple != detected_multiple
+        assert refreshed.current_price == Decimal("0.010")
+
+
+class TestRadarSurfacesCarryTokenIdentity:
+    """Regression cover for nameless Radar entries.
+
+    `RadarEntryOut` declares `name` and `symbol`, and the Radar card renders
+    `symbol ?? name ?? <truncated mint>`. But `radar_tokens` stores neither and
+    `_to_entry` never populated them, so every Radar surface fell through to the
+    mint address for every token — while `/scores/top`, which joins
+    `discovered_tokens`, showed names correctly on the same tokens.
+
+    Identity deliberately still lives only in `discovered_tokens`; duplicating
+    it onto `radar_tokens` would let the two disagree.
+    """
+
+    async def test_names_for_resolves_identity_from_discovered_tokens(
+        self, db_session: AsyncSession
+    ) -> None:
+        await _seed_token(db_session, "mint-named")
+        names = await RadarRepository(db_session).names_for(["mint-named", "mint-unknown"])
+
+        assert names["mint-named"] == ("Radar Probe", "RDR")
+        # An undiscovered mint is absent rather than an empty string, so the
+        # caller can fall back rather than render a blank.
+        assert "mint-unknown" not in names
+
+    async def test_names_for_is_empty_without_mints(self, db_session: AsyncSession) -> None:
+        assert await RadarRepository(db_session).names_for([]) == {}
+
+    async def test_the_radar_listing_returns_a_name(
+        self, db_session: AsyncSession, client: AsyncClient
+    ) -> None:
+        token = await _seed_token(db_session, "mint-listed")
+        await _seed_series(db_session, token)
+        await RadarService(db_session).evaluate_mint("mint-listed", now=NOW)
+        await db_session.commit()
+
+        response = await client.get("/api/v1/radar", params={"page_size": 25})
+        assert response.status_code == 200
+
+        entries = {item["mint_address"]: item for item in response.json()["items"]}
+        assert "mint-listed" in entries
+        assert entries["mint-listed"]["name"] == "Radar Probe"
+        assert entries["mint-listed"]["symbol"] == "RDR"

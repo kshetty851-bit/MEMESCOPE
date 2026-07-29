@@ -71,9 +71,23 @@ def _days_since(moment: datetime, now: datetime) -> Decimal:
     return Decimal(max((now - moment).total_seconds(), 0)) / _SECONDS_PER_DAY
 
 
-def _to_entry(entry: RadarToken, now: datetime) -> RadarEntryOut:
+def _to_entry(
+    entry: RadarToken,
+    now: datetime,
+    names: dict[str, tuple[str | None, str | None]] | None = None,
+) -> RadarEntryOut:
+    """Assemble one Radar entry.
+
+    `names` maps mint -> (name, symbol). It is optional so the signature stays
+    usable without a lookup, but omitting it renders every entry nameless: the
+    schema declares both fields and `RadarToken` stores neither, so they were
+    previously always null on every Radar surface.
+    """
+    name, symbol = (names or {}).get(entry.mint_address, (None, None))
     return RadarEntryOut(
         mint_address=entry.mint_address,
+        name=name,
+        symbol=symbol,
         category=entry.current_category,
         original_category=entry.category,
         opportunity_score=entry.current_opportunity_score,
@@ -182,8 +196,10 @@ async def get_leaderboard(
     limit: Annotated[int, Query(ge=1, le=100)] = 25,
 ) -> list[RadarEntryOut]:
     now = datetime.now(UTC)
-    entries = await RadarRepository(session).leaderboard(limit=limit)
-    return [_to_entry(entry, now) for entry in entries]
+    repository = RadarRepository(session)
+    entries = await repository.leaderboard(limit=limit)
+    names = await repository.names_for([entry.mint_address for entry in entries])
+    return [_to_entry(entry, now, names) for entry in entries]
 
 
 @router.get("/achievements", response_model=list[AchievementOut], summary="Recent milestones")
@@ -233,8 +249,10 @@ async def list_radar(
     )
     total = await repository.count_entries(category=category, active_only=active_only)
 
+    names = await repository.names_for([entry.mint_address for entry in entries])
+
     return RadarPage(
-        items=[_to_entry(entry, now) for entry in entries],
+        items=[_to_entry(entry, now, names) for entry in entries],
         total=total,
         page=page,
         page_size=page_size,
@@ -291,7 +309,7 @@ async def get_entry(session: DbSession, mint: str) -> RadarDetailOut:
         raise NotFoundError(f"{mint} is not on the Radar.")
 
     now = datetime.now(UTC)
-    base = _to_entry(entry, now)
+    base = _to_entry(entry, now, await repository.names_for([entry.mint_address]))
 
     dimensions: list[DimensionOut] = []
     reasons: list[ReasonOut] = []

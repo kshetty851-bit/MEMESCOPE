@@ -116,6 +116,52 @@ class RadarRepository:
         )
         return found
 
+    async def names_for(
+        self, mint_addresses: Sequence[str]
+    ) -> dict[str, tuple[str | None, str | None]]:
+        """Display name and symbol per mint, for the mints on one page.
+
+        `radar_tokens` deliberately stores no name or symbol: identity belongs
+        to `discovered_tokens` and duplicating it would let the two disagree.
+        The API still has to render a name, so it is resolved here — one query
+        per request keyed by the page's mints, rather than a per-entry lookup.
+
+        A mint with no discovery row, or with a null name, is simply absent;
+        callers fall back to the mint address.
+        """
+        if not mint_addresses:
+            return {}
+
+        statement = select(
+            DiscoveredToken.mint_address, DiscoveredToken.name, DiscoveredToken.symbol
+        ).where(DiscoveredToken.mint_address.in_(list(dict.fromkeys(mint_addresses))))
+
+        return {
+            row.mint_address: (row.name, row.symbol)
+            for row in (await self._session.execute(statement)).all()
+        }
+
+    async def tracked_mints(self, *, limit: int) -> list[str]:
+        """Mints already on the Radar, stalest first.
+
+        `candidate_mints` ranks by most recent observation, so it surfaces
+        whatever enrichment touched last — overwhelmingly brand-new tokens. A
+        token that has *already* been detected drops out of that window within
+        minutes and would then never be re-evaluated again, freezing its
+        `current_*` and `peak_*` values at their detection-time readings.
+
+        Ordering by `last_evaluated_at` ascending gives every tracked entry a
+        turn, so the refresh interval degrades predictably as the Radar grows
+        instead of leaving an arbitrary subset permanently stale.
+        """
+        statement = (
+            select(RadarToken.mint_address)
+            .where(RadarToken.is_active.is_(True))
+            .order_by(RadarToken.last_evaluated_at.asc())
+            .limit(limit)
+        )
+        return list((await self._session.scalars(statement)).all())
+
     # --- Writing ------------------------------------------------------------
 
     async def record_detection(self, **values: object) -> RadarToken | None:

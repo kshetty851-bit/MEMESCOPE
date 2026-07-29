@@ -251,14 +251,38 @@ class RadarService:
     # --- Sweep ---------------------------------------------------------------
 
     async def sweep(self, *, limit: int = 200, now: datetime | None = None) -> dict[str, int]:
-        """Evaluate a batch of candidates.
+        """Refresh everything already on the Radar, then look for new entries.
+
+        Two populations, and they do not overlap in practice:
+
+        * **Tracked** — already detected, with `current_*` and `peak_*` values
+          that only move when something re-evaluates them.
+        * **Candidates** — ranked by most recent observation, which is
+          overwhelmingly whatever enrichment just touched.
+
+        Sweeping candidates alone looks sufficient and is not. A token drops out
+        of the most-recently-observed window within minutes of being detected
+        and is then never re-evaluated again, so its return freezes at the
+        multiple it had on the day it was found — measured live, 0 of 28 tracked
+        entries were still in the candidate window, and staleness ran to seven
+        hours. The record stops describing the market and starts describing the
+        moment of detection.
+
+        Tracked entries go first and stalest-first, so a truncated run degrades
+        the refresh interval evenly instead of stranding an arbitrary subset.
+        Each population gets its own budget: a growing Radar cannot crowd out
+        discovery, and a busy chain cannot starve the record.
 
         Commits once at the end rather than per token: the whole batch is one
         logical observation of the market, and a partial commit would leave the
         record describing a moment that never existed.
         """
         moment = now or datetime.now(UTC)
-        mints = await self._repository.candidate_mints(limit=limit)
+
+        tracked_mints = await self._repository.tracked_mints(limit=limit)
+        candidates = await self._repository.candidate_mints(limit=limit)
+        # Tracked first, then candidates, de-duplicated with order preserved.
+        mints = list(dict.fromkeys([*tracked_mints, *candidates]))
 
         evaluated = 0
         tracked = 0
@@ -268,5 +292,10 @@ class RadarService:
                 tracked += 1
 
         await self._session.commit()
-        logger.info("radar_sweep_completed", evaluated=evaluated, tracked=tracked)
+        logger.info(
+            "radar_sweep_completed",
+            evaluated=evaluated,
+            tracked=tracked,
+            refreshed_existing=len(tracked_mints),
+        )
         return {"evaluated": evaluated, "tracked": tracked}
