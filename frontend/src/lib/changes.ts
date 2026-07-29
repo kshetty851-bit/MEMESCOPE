@@ -141,7 +141,7 @@ export function diffToken(
         direction: change > 0 ? "up" : "down",
         display: `${after.currentMultiple.toFixed(2)}×`,
         detail:
-          "Measured from MEMESCOPE's first detection, never from the token's launch.",
+          "Measured from LETZMOON's first detection, never from the token's launch.",
       });
     }
   }

@@ -70,7 +70,7 @@ export function SinceLastVisit({
       <Panel density="compact" className="flex flex-col gap-2">
         <h2 className="text-sm font-medium tracking-tight text-ink">First visit</h2>
         <p className="max-w-2xl text-sm leading-relaxed text-ink-dim">
-          MEMESCOPE will remember what you saw today and show you what moved
+          LETZMOON will remember what you saw today and show you what moved
           when you come back. That memory is stored in this browser only — there
           is no account behind it yet, so clearing your browser data resets it.
         </p>

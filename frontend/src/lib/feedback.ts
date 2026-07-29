@@ -108,7 +108,7 @@ export async function submitFeedback(report: FeedbackReport): Promise<FeedbackOu
 /** The report as text, for copying into an email or an issue. */
 export function formatReport(report: FeedbackReport): string {
   return [
-    `[${FEEDBACK_LABEL[report.kind]}] MEMESCOPE alpha`,
+    `[${FEEDBACK_LABEL[report.kind]}] LETZMOON alpha`,
     "",
     report.message,
     "",

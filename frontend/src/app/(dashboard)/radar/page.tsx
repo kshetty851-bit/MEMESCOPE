@@ -51,7 +51,7 @@ export default function RadarPage() {
           </h1>
           <p className="mt-2 max-w-2xl text-sm text-ink-dim">
             Continuously re-evaluated regardless of age. Market cap is never a qualification
-            — every return below is measured from the moment MEMESCOPE first detected the
+            — every return below is measured from the moment LETZMOON first detected the
             project, not from its launch.
           </p>
         </div>

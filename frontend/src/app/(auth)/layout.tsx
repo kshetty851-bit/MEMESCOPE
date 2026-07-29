@@ -24,7 +24,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
         <div className="flex flex-col items-center gap-10">
           <AiCore size={340} />
           <div className="max-w-sm text-center">
-            <Label>AI Crypto Intelligence</Label>
+            <Label>AI Opportunity Intelligence</Label>
             <p className="mt-3 text-balance text-heading text-ink">
               Seven AI specialists scanning Solana, continuously.
             </p>

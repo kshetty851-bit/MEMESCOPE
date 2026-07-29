@@ -72,7 +72,7 @@ export default function DesignSystemPage() {
       <header>
         <Label>Brand guidelines</Label>
         <h1 className="mt-2 text-title font-semibold text-ink">
-          The MEMESCOPE design system
+          The LETZMOON design system
         </h1>
         <p className="mt-3 max-w-2xl text-ink-dim">
           Signal in the void. A dark, dimensional canvas where intelligence arrives as

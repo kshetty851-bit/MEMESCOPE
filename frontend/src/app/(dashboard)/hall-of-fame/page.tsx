@@ -120,7 +120,7 @@ export default function HallPage() {
         <p className="mt-2 text-sm leading-relaxed text-ink-dim">
           Every project the Radar has ever detected stays on this record permanently.
           Returns are measured from{" "}
-          <span className="text-ink">MEMESCOPE&rsquo;s first detection</span>, never from
+          <span className="text-ink">LETZMOON&rsquo;s first detection</span>, never from
           launch — measuring from launch would credit the platform with moves it never
           called.
         </p>

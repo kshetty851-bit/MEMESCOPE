@@ -189,7 +189,7 @@ export function CommandNav() {
         aria-label="Command navigation"
         className="fixed inset-y-0 left-0 z-40 hidden w-[68px] flex-col items-center border-r border-line bg-abyss/80 py-5 backdrop-blur-xl lg:flex"
       >
-        <Link href="/command" aria-label="MEMESCOPE Command Center" className="mb-8">
+        <Link href="/command" aria-label="LETZMOON Command Center" className="mb-8">
           <LogoMark size={26} className="text-plasma" />
         </Link>
 

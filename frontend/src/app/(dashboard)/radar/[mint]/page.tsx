@@ -99,7 +99,7 @@ export default function RadarTimelinePage() {
 
       {/* --- Performance since detection ---------------------------------- */}
       <Panel>
-        <Label>Since MEMESCOPE first detected it</Label>
+        <Label>Since LETZMOON first detected it</Label>
         <div className="mt-3 grid gap-4 sm:grid-cols-4">
           <Figure
             label="Current"

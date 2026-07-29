@@ -26,7 +26,7 @@ export function InvestmentThesis({ thesis }: { thesis: Thesis }) {
         <Why label="What is this?">
           The observable case for and against this token, assembled from what the
           scoring engine, the Radar and Exit Watch each reported. It is not a
-          recommendation, and MEMESCOPE has no view on whether you should act.
+          recommendation, and LETZMOON has no view on whether you should act.
         </Why>
       </header>
 
@@ -50,7 +50,7 @@ export function InvestmentThesis({ thesis }: { thesis: Thesis }) {
       {thesis.unavailable.length > 0 ? (
         <Section title="Not collected">
           <p className="text-sm leading-relaxed text-ink-dim">
-            MEMESCOPE cannot see {joinNaturally(thesis.unavailable)} for any token
+            LETZMOON cannot see {joinNaturally(thesis.unavailable)} for any token
             yet. These are declared in the model and counted against confidence
             rather than assumed to be fine, so a low confidence figure here
             describes the platform&rsquo;s coverage — not this project.

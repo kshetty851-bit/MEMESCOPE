@@ -5,16 +5,17 @@ import { Providers } from "@/components/providers";
 import { MODE_BOOT_SCRIPT } from "@/hooks/use-observatory-mode";
 import { env } from "@/lib/env";
 import "@/styles/globals.css";
+import "@/styles/letzmoon.css";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  // The wordmark is MEMESCOPE, always. The env var carries a legacy display
+  // The wordmark is LETZMOON, always. The env var carries a legacy display
   // name and must not be allowed to leak into brand surfaces.
   title: {
-    default: "MEMESCOPE — AI Crypto Intelligence",
-    template: "%s · MEMESCOPE",
+    default: "LETZMOON — AI Opportunity Intelligence",
+    template: "%s · LETZMOON",
   },
   description:
     "The Intelligence Division continuously scans Solana, analyses every launch and discovers opportunities before the market reacts.",

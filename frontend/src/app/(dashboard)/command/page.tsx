@@ -4,8 +4,10 @@ import { useEffect, useMemo } from "react";
 
 import { DashboardPrimer } from "@/components/alpha/dashboard-primer";
 import { OpportunityCard } from "@/components/decision/opportunity-card";
+import { RadarScoreboard } from "@/components/decision/radar-scoreboard";
 import { SinceLastVisit } from "@/components/decision/since-last-visit";
 import { Why } from "@/components/decision/why";
+import { Mascot } from "@/components/brand/mascot";
 import { Panel } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useIdentities } from "@/hooks/use-identity";
@@ -97,19 +99,28 @@ export default function CommandPage() {
     <div className="flex flex-col gap-8">
       <DashboardPrimer />
 
-      <header className="flex flex-col gap-2">
-        <p className="text-xs uppercase tracking-[0.14em] text-ink-faint">
-          Today&rsquo;s opportunities
-        </p>
-        <h1 className="text-balance text-3xl font-medium tracking-tight text-ink">
-          What deserves your attention today
-        </h1>
-        <p className="max-w-2xl text-sm leading-relaxed text-ink-dim">
-          Every section says what it measures and why these projects are in it.
-          MEMESCOPE reports what it can observe. It does not predict returns,
-          and nothing here is a recommendation.
-        </p>
+      {/* --- Mission Control hero ---------------------------------------- */}
+      <header className="relative flex items-center justify-between gap-6 overflow-hidden rounded-panel border border-line/60 bg-surface/40 px-6 py-7 backdrop-blur-xl">
+        <div className="flex flex-col gap-2">
+          <p className="text-xs uppercase tracking-[0.14em] text-brand-accent">
+            Mission Control
+          </p>
+          <h1 className="text-balance text-3xl font-medium tracking-tight text-ink">
+            What deserves your attention today
+          </h1>
+          <p className="max-w-2xl text-sm leading-relaxed text-ink-dim">
+            Every section says what it measures and why these projects are in it.
+            LETZMOON reports what it can observe. It does not predict returns,
+            and nothing here is a recommendation.
+          </p>
+        </div>
+        {/* Hidden below `sm`: on a phone this is 340px of decoration above the
+            answer the user opened the app for. */}
+        <Mascot size={132} className="hidden shrink-0 sm:block" />
       </header>
+
+      {/* --- The record, before the pitch -------------------------------- */}
+      <RadarScoreboard entries={radarEntries} isPending={radar.isPending} />
 
       <SinceLastVisit
         scores={scores.byMint}
@@ -151,7 +162,7 @@ export default function CommandPage() {
               <p className="max-w-2xl text-sm leading-relaxed text-ink-dim">
                 Nothing qualified for this section right now. That is a reading,
                 not a gap — the conditions it describes are simply not present in
-                what MEMESCOPE can currently observe.
+                what LETZMOON can currently observe.
               </p>
             </Panel>
           ) : (

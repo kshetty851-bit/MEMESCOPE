@@ -65,7 +65,7 @@ export interface DiscoveredToken {
   slot: number;
   /** On-chain creation time. */
   block_time: string | null;
-  /** When MemeScope first saw the token. */
+  /** When LetzMooN first saw the token. */
   discovered_at: string;
   source_program: string | null;
   metadata_status: MetadataStatus;

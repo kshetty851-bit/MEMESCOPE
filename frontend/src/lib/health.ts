@@ -128,7 +128,7 @@ export function buildHealth(score: TokenScore | null): HealthDimension[] {
         label,
         status: "not_collected" as const,
         detail:
-          "MEMESCOPE does not collect this signal yet. It is declared in the " +
+          "LETZMOON does not collect this signal yet. It is declared in the " +
           "model and counted against confidence rather than assumed to be fine.",
         evidence: [],
       };

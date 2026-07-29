@@ -205,7 +205,7 @@ export function evaluateWatch(
           reason,
           status: "unknown",
           detail:
-            "Accumulation needs holder and wallet data, which MEMESCOPE does not " +
+            "Accumulation needs holder and wallet data, which LETZMOON does not " +
             "collect. This watch cannot be answered yet.",
         };
     }

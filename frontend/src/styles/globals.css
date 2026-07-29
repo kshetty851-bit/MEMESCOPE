@@ -1,11 +1,11 @@
 @import "tailwindcss";
 
 /* ============================================================================
-   MEMESCOPE DESIGN SYSTEM
+   LETZMOON DESIGN SYSTEM
    ----------------------------------------------------------------------------
    Concept: "Signal in the void."
 
-   MEMESCOPE is an observatory, not a trading terminal. The canvas is deep,
+   LETZMOON is an observatory, not a trading terminal. The canvas is deep,
    dimensional dark — never flat black. Intelligence arrives as light. Data has
    mass, temperature and glow. Everything is seen through an instrument.
 
@@ -21,12 +21,17 @@
 @theme {
   /* --- Substrate ---------------------------------------------------------
      Five luminance steps on a single desaturated blue-violet. Depth comes
-     from stacking these, never from drop shadows on a flat background. */
-  --color-void: oklch(0.11 0.014 265);
-  --color-abyss: oklch(0.14 0.017 265);
-  --color-surface: oklch(0.17 0.019 265);
-  --color-elevated: oklch(0.21 0.021 265);
-  --color-raised: oklch(0.25 0.023 265);
+     from stacking these, never from drop shadows on a flat background.
+
+     Retuned for LETZMOON: the floor drops to deep space (#070B18) and cards
+     sit at #0E1528. The ramp stays five steps and keeps its spacing, so every
+     surface that stacked correctly before still does — this is a re-grade of
+     the same system, not a new one. */
+  --color-void: oklch(0.088 0.022 268);      /* ≈ #070B18 */
+  --color-abyss: oklch(0.122 0.026 268);
+  --color-surface: oklch(0.155 0.03 268);    /* ≈ #0E1528 */
+  --color-elevated: oklch(0.2 0.032 268);
+  --color-raised: oklch(0.245 0.034 268);
 
   --color-line: oklch(0.28 0.024 265);
   --color-line-bright: oklch(0.4 0.03 265);
@@ -41,6 +46,27 @@
      Plasma is the house colour: the light the instrument itself emits. */
   --color-plasma: oklch(0.82 0.15 196);
   --color-plasma-deep: oklch(0.64 0.16 210);
+
+  /* --- LETZMOON accents ---------------------------------------------------
+     Three, and only three, in a fixed hierarchy:
+
+       primary   purple   — the brand's own voice: wordmark, primary action
+       secondary emerald  — confirmation and gain
+       accent    cyan     — instrumentation, edges, live state
+
+     They are aliases over hues the system already carries (Oracle, Scout,
+     plasma) rather than new pigments. That matters: every agent colour, grade
+     tone and status hue was tuned against this substrate, and introducing a
+     fourth family would put two greens and two blues on the same screen with
+     no rule for choosing between them.
+
+     Gold is still absent here on purpose. It belongs to APEX / Elite alone,
+     and a brand accent that borrowed it would spend the one scarce colour the
+     product has. */
+  --color-brand: oklch(0.72 0.18 295);        /* purple  — primary */
+  --color-brand-bright: oklch(0.8 0.17 295);
+  --color-brand-secondary: oklch(0.78 0.17 158); /* emerald — secondary */
+  --color-brand-accent: oklch(0.83 0.14 196);    /* cyan    — accent */
 
   /* --- The AI Squad ------------------------------------------------------
      Each specialist owns one hue. These are identity, not decoration: a

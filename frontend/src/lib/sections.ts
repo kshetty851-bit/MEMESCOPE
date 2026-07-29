@@ -17,7 +17,7 @@
  * ## Where the brief and the data disagree
  *
  * "Early Accumulation" normally means wallets quietly building a position, and
- * MEMESCOPE cannot see wallets at all. Rather than approximate it from price —
+ * LETZMOON cannot see wallets at all. Rather than approximate it from price —
  * which would be exactly the invented intelligence this codebase deletes on
  * sight — the section maps to the Radar's own `undervalued` category and its
  * description says plainly what it is measuring instead.
@@ -74,7 +74,7 @@ export const SECTIONS: SectionDefinition[] = [
       "on-chain structure, not from wallet behaviour.",
     basis:
       "The Radar's undervalued category. True accumulation would need holder " +
-      "and wallet history, which MEMESCOPE does not collect — so this is a " +
+      "and wallet history, which LETZMOON does not collect — so this is a " +
       "structural reading, and the section is named for what it can actually see.",
   },
   {
@@ -84,7 +84,7 @@ export const SECTIONS: SectionDefinition[] = [
       "Detected earlier and now trading below their observed peak. Listed " +
       "because a baseline already exists for them, not because a recovery is expected.",
     basis:
-      "Current multiple is below peak multiple, both measured from MEMESCOPE's " +
+      "Current multiple is below peak multiple, both measured from LETZMOON's " +
       "first detection. The platform has no view on whether any of them recover.",
   },
   {

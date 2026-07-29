@@ -85,7 +85,7 @@ export default function TokenDetailPage() {
       <EmptyState
         agent="scout"
         title="Not in the archive"
-        body={`${shortenAddress(mint, 8, 8)} has not been discovered by MEMESCOPE. If it launched moments ago, SCOUT may still be resolving it.`}
+        body={`${shortenAddress(mint, 8, 8)} has not been discovered by LETZMOON. If it launched moments ago, SCOUT may still be resolving it.`}
         action={
           <Link href="/feed">
             <Button variant="outline" size="sm">

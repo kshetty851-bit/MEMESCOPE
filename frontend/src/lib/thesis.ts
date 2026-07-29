@@ -43,7 +43,7 @@ export interface ThesisPoint {
 }
 
 export interface Thesis {
-  /** Why MEMESCOPE surfaced this token at all. */
+  /** Why LETZMOON surfaced this token at all. */
   appeared: string[];
   strengths: ThesisPoint[];
   weaknesses: ThesisPoint[];

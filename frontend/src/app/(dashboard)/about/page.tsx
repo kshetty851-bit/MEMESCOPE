@@ -75,10 +75,10 @@ export default function AboutPage() {
       <header>
         <Label>About</Label>
         <h1 className="mt-2 text-title font-semibold text-ink">
-          What MEMESCOPE is, and what it is not
+          What LETZMOON is, and what it is not
         </h1>
         <p className="mt-3 text-ink-dim">
-          MEMESCOPE watches Solana for newly launched tokens, gathers market data on each
+          LETZMOON watches Solana for newly launched tokens, gathers market data on each
           one, and scores it with a deterministic engine. The point is to see something
           worth seeing earlier — and to be told plainly how much the platform actually
           knows.
@@ -96,7 +96,7 @@ export default function AboutPage() {
           tools, for every candidate, all day.
         </p>
         <p className="mt-3 text-sm leading-relaxed text-ink-dim">
-          MEMESCOPE does that continuously and shows its work.
+          LETZMOON does that continuously and shows its work.
         </p>
       </Panel>
 
@@ -301,7 +301,7 @@ export default function AboutPage() {
         </p>
         <p className="mt-3 text-sm leading-relaxed text-ink-dim">
           <span className="text-ink">
-            MEMESCOPE is an intelligence tool, not financial advice.
+            LETZMOON is an intelligence tool, not financial advice.
           </span>{" "}
           Nothing here is a recommendation to buy or sell anything. Meme coins routinely go
           to zero. Do your own research, and never risk money you cannot afford to lose.

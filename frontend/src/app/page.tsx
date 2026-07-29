@@ -3,6 +3,8 @@ import Link from "next/link";
 import { AiCore } from "@/components/brand/ai-core";
 import { AgentSigil } from "@/components/brand/agent-sigil";
 import { Universe } from "@/components/brand/universe/universe";
+import { Mascot } from "@/components/brand/mascot";
+import { SpaceField } from "@/components/brand/space-field";
 import { Logo } from "@/components/brand/logo";
 import { Badge, StatusDot } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,7 +13,7 @@ import { AGENTS, ALL_AGENTS, PIPELINE } from "@/lib/design/agents";
 import { AUTH_BYPASS } from "@/lib/env";
 
 export const metadata = {
-  title: "MEMESCOPE — AI Crypto Intelligence",
+  title: "LETZMOON — AI Opportunity Intelligence",
   description:
     "The Intelligence Division continuously scans Solana, analyses every launch and discovers opportunities before the market reacts.",
 };
@@ -27,6 +29,7 @@ export const metadata = {
 export default function LandingPage() {
   return (
     <div className="relative overflow-x-hidden">
+      <SpaceField />
       <Universe />
 
       {/* --- Chrome ------------------------------------------------------- */}
@@ -41,7 +44,7 @@ export default function LandingPage() {
           {AUTH_BYPASS ? (
             <Link href="/command">
               <Button variant="surface" size="sm">
-                Enter Observatory
+                Enter Mission Control
               </Button>
             </Link>
           ) : (
@@ -74,8 +77,17 @@ export default function LandingPage() {
             confidence={0.78}
             showAgents={false}
             className="max-w-[95vw] opacity-60"
-            label="The MEMESCOPE AI Core"
+            label="The LETZMOON AI Core"
           />
+        </div>
+
+        {/* The mascot is the first thing to arrive and the only thing moving
+            at rest. It sits behind the headline on wide screens so the words
+            stay the subject; below `lg` it is hidden rather than shrunk,
+            because at phone width it would either crowd the copy or be too
+            small to read as a character at all. */}
+        <div className="pointer-events-none absolute inset-0 hidden items-center justify-end pr-[6vw] lg:flex">
+          <Mascot size={340} priority className="opacity-95" />
         </div>
 
         <div className="relative z-10 flex max-w-3xl flex-col items-center text-center">
@@ -88,21 +100,21 @@ export default function LandingPage() {
           </Badge>
 
           <h1 className="text-balance text-[clamp(2.5rem,7vw,4.5rem)] font-semibold leading-[0.98] tracking-[-0.04em] text-ink animate-[rise_0.7s_var(--ease-instrument)_0.1s_both]">
-            Discover tomorrow&rsquo;s meme coin gems{" "}
-            <span className="bg-gradient-to-r from-plasma via-ink to-oracle bg-clip-text text-transparent">
-              before everyone else.
+            LETZMOON{" "}
+            <span className="block bg-gradient-to-r from-brand via-brand-accent to-brand-secondary bg-clip-text text-transparent">
+              AI Opportunity Intelligence
             </span>
           </h1>
 
           <p className="mt-7 max-w-xl text-pretty text-[1.0625rem] leading-relaxed text-ink-dim animate-[rise_0.7s_var(--ease-instrument)_0.2s_both]">
-            The Intelligence Division continuously scans Solana, analyses every launch and
-            discovers opportunities before the market reacts.
+            Helping you discover high-quality crypto opportunities through
+            explainable market intelligence.
           </p>
 
           <div className="mt-10 flex flex-col gap-3 sm:flex-row animate-[rise_0.7s_var(--ease-instrument)_0.3s_both]">
             <Link href="/command">
               <Button variant="primary" size="lg" className="w-full sm:w-auto">
-                Launch Command Center
+                Enter Mission Control
                 <svg
                   viewBox="0 0 24 24"
                   fill="none"
@@ -118,9 +130,9 @@ export default function LandingPage() {
                 </svg>
               </Button>
             </Link>
-            <Link href="/feed">
+            <Link href="/radar">
               <Button variant="outline" size="lg" className="w-full sm:w-auto">
-                Watch Live Scanner
+                Explore Radar
               </Button>
             </Link>
           </div>
@@ -154,7 +166,7 @@ export default function LandingPage() {
             Seven specialists. One verdict.
           </h2>
           <p className="mt-4 text-ink-dim">
-            MEMESCOPE is not a dashboard with alerts bolted on. It is an organisation of AI
+            LETZMOON is not a dashboard with alerts bolted on. It is an organisation of AI
             specialists, each with a single job, feeding one shared intelligence core.
           </p>
         </div>

@@ -34,10 +34,10 @@ export function OpportunityTimeline({ entry }: { entry: RadarEntry }) {
   const events: { key: string; title: string; detail: string; tone: string }[] = [
     {
       key: "detected",
-      title: "Detected by MEMESCOPE",
+      title: "Detected by LETZMOON",
       detail:
         `First observed at ${formatUsd(first)}. Every return below is measured ` +
-        `from this moment — never from the token's launch, which MEMESCOPE did ` +
+        `from this moment — never from the token's launch, which LETZMOON did ` +
         `not call.`,
       tone: "var(--color-oracle)",
     },
