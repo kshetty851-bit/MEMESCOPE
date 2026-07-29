@@ -14,9 +14,16 @@ import { Skeleton, SkeletonText } from "@/components/ui/skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/states";
 import { Sparkline } from "@/components/ui/sparkline";
 import { MissionReport } from "@/components/token/mission-report";
+import { SentinelRead } from "@/components/sentinel/sentinel-read";
+import { useTokenScore } from "@/hooks/use-scores";
 import { ApiError, api } from "@/lib/api-client";
-import { formatAge, formatCount, formatPrice, formatUsd, shortenAddress } from "@/lib/format";
-import { deriveIntelligence } from "@/lib/intelligence";
+import {
+  formatAge,
+  formatCount,
+  formatPrice,
+  formatUsd,
+  shortenAddress,
+} from "@/lib/format";
 import { formatDate } from "@/lib/utils";
 import type { DiscoveredToken, MarketHistoryPage, TokenMarket } from "@/types/api";
 
@@ -37,6 +44,10 @@ export default function TokenDetailPage() {
     queryFn: () => api.get<TokenMarket>(`/tokens/${mint}/market`),
     refetchInterval: 30_000,
   });
+
+  // The scoring engine's verdict for this token, with the component breakdown
+  // the ranking endpoint omits.
+  const scoreQuery = useTokenScore(mint);
 
   const history = useQuery({
     queryKey: ["tokens", mint, "history", page],
@@ -83,7 +94,8 @@ export default function TokenDetailPage() {
   }
 
   const snapshot = market.data?.market ?? null;
-  const intel = token.data ? deriveIntelligence(token.data, snapshot) : null;
+  // The full score, including the component waterfall the ranking rows omit.
+  const score = scoreQuery.data?.status === "scored" ? scoreQuery.data.score : null;
 
   return (
     <div className="flex flex-col gap-6">
@@ -105,9 +117,7 @@ export default function TokenDetailPage() {
                   {token.data.symbol}
                 </span>
               )}
-              {intel?.elite && (
-                <Badge tone="apex">Elite Gem</Badge>
-              )}
+              {score?.is_elite && <Badge tone="apex">Elite Gem</Badge>}
             </div>
             <p data-numeric className="mt-1.5 truncate text-xs text-ink-faint" title={mint}>
               {mint}
@@ -139,9 +149,7 @@ export default function TokenDetailPage() {
                     : "No pool indexed yet"}
                 </PanelTitle>
               </div>
-              {snapshot?.dex_name && (
-                <Badge tone="plasma">{snapshot.dex_name}</Badge>
-              )}
+              {snapshot?.dex_name && <Badge tone="plasma">{snapshot.dex_name}</Badge>}
             </PanelHeader>
 
             {market.isPending ? (
@@ -166,7 +174,10 @@ export default function TokenDetailPage() {
                   <div className="mb-6 flex items-end justify-between gap-6 rounded-card bg-abyss/50 p-4">
                     <div>
                       <Label>Price</Label>
-                      <p data-numeric className="mt-1 text-3xl font-medium tracking-tight text-ink">
+                      <p
+                        data-numeric
+                        className="mt-1 text-3xl font-medium tracking-tight text-ink"
+                      >
                         {formatPrice(snapshot.price_usd)}
                       </p>
                     </div>
@@ -198,7 +209,10 @@ export default function TokenDetailPage() {
                   {[
                     { label: "Trading pair", value: snapshot.trading_pair ?? "—" },
                     { label: "Pool", value: shortenAddress(snapshot.pool_address, 6, 6) },
-                    { label: "Creator", value: shortenAddress(token.data?.creator_address, 6, 6) },
+                    {
+                      label: "Creator",
+                      value: shortenAddress(token.data?.creator_address, 6, 6),
+                    },
                     {
                       label: "Discovered",
                       value: token.data ? formatDate(token.data.discovered_at) : "—",
@@ -260,17 +274,22 @@ export default function TokenDetailPage() {
               <table className="w-full min-w-[720px] text-left text-sm">
                 <thead>
                   <tr className="border-b border-line/60">
-                    {["Captured", "Price", "Market Cap", "Liquidity", "Vol 24h", "Buys / Sells"].map(
-                      (head, index) => (
-                        <th
-                          key={head}
-                          scope="col"
-                          className={`px-6 py-3 text-label font-medium uppercase text-ink-faint ${index > 0 ? "text-right" : ""}`}
-                        >
-                          {head}
-                        </th>
-                      ),
-                    )}
+                    {[
+                      "Captured",
+                      "Price",
+                      "Market Cap",
+                      "Liquidity",
+                      "Vol 24h",
+                      "Buys / Sells",
+                    ].map((head, index) => (
+                      <th
+                        key={head}
+                        scope="col"
+                        className={`px-6 py-3 text-label font-medium uppercase text-ink-faint ${index > 0 ? "text-right" : ""}`}
+                      >
+                        {head}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
@@ -313,7 +332,8 @@ export default function TokenDetailPage() {
                           {formatUsd(row.volume_24h)}
                         </td>
                         <td data-numeric className="px-6 py-3 text-right text-ink-faint">
-                          {formatCount(row.buy_count_24h)} / {formatCount(row.sell_count_24h)}
+                          {formatCount(row.buy_count_24h)} /{" "}
+                          {formatCount(row.sell_count_24h)}
                         </td>
                       </tr>
                     ))
@@ -324,10 +344,17 @@ export default function TokenDetailPage() {
           </Panel>
         </div>
 
-        {/* Right: mission report */}
+        {/* Right: Sentinel's read, then the waterfall it is reading from.
+            Prose first, arithmetic second — the report explains itself, and
+            anyone who wants the numbers is one panel away. */}
         <aside className="flex min-w-0 flex-col gap-6">
-          {token.data && intel ? (
-            <MissionReport token={token.data} intel={intel} />
+          <SentinelRead
+            score={score}
+            status={scoreQuery.data?.status}
+            isPending={scoreQuery.isPending}
+          />
+          {token.data ? (
+            <MissionReport token={token.data} score={score} />
           ) : (
             <Panel>
               <SkeletonText lines={8} />

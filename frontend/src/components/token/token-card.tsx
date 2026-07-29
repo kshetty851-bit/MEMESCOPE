@@ -8,12 +8,13 @@ import { Badge } from "@/components/ui/badge";
 import { Meter } from "@/components/ui/metric";
 import { StageRail } from "@/components/token/stage-rail";
 import { Label } from "@/components/ui/panel";
-import { AGENTS } from "@/lib/design/agents";
+import { AGENTS, type AgentId } from "@/lib/design/agents";
 import { formatAge, formatUsd, shortenAddress } from "@/lib/format";
-import { deriveIntelligence, type Signal } from "@/lib/intelligence";
 import { lifecycleStage } from "@/lib/lifecycle";
+import { GRADE_LABEL, GRADE_TONE, freshnessLabel, num, ratio } from "@/lib/scores";
 import { cn } from "@/lib/utils";
 import type { DiscoveredToken, MarketSnapshot } from "@/types/api";
+import type { TokenScore } from "@/types/score";
 
 /**
  * The token card.
@@ -28,36 +29,36 @@ import type { DiscoveredToken, MarketSnapshot } from "@/types/api";
  * nothing.
  */
 
-function SignalPip({
-  signal,
-  invert = false,
-  pending = false,
+/**
+ * One backend-reported figure as a labelled meter.
+ *
+ * Every value here is served by the scoring API. Nothing is derived on the
+ * client, so what the card shows and what `/scores/{mint}` would return cannot
+ * drift apart.
+ */
+function ScorePip({
+  label,
+  agent,
+  value,
+  tone,
+  title,
 }: {
-  signal: Signal;
-  invert?: boolean;
-  pending?: boolean;
+  label: string;
+  agent: AgentId;
+  /** 0–1. */
+  value: number;
+  tone?: string;
+  title: string;
 }) {
-  const spec = AGENTS[signal.agent];
-  // Risk is the one signal where a high score is bad — it fills toward danger.
-  const tone = invert && signal.score > 0.5 ? "var(--color-danger)" : spec.hue;
+  const spec = AGENTS[agent];
 
   return (
-    <div
-      className="flex min-w-0 flex-col gap-1.5"
-      title={pending ? "Awaiting first market observation" : signal.readout}
-    >
+    <div className="flex min-w-0 flex-col gap-1.5" title={title}>
       <span className="flex items-center gap-1 text-label uppercase text-ink-faint">
-        <AgentSigil agent={signal.agent} size={11} style={{ color: spec.hue }} />
-        <span className="truncate">{signal.agent}</span>
+        <AgentSigil agent={agent} size={11} style={{ color: spec.hue }} />
+        <span className="truncate">{label}</span>
       </span>
-      {/* An unobserved token gets no verdict at all. Showing a half-full risk
-          bar would tell the user "moderately dangerous" when the truth is
-          "not yet measured" — the two must never look alike. */}
-      {pending ? (
-        <span className="h-3 rounded-[2px] border border-dashed border-line" />
-      ) : (
-        <Meter value={signal.score} segments={5} tone={tone} label={`${signal.agent} signal`} />
-      )}
+      <Meter value={value} segments={5} tone={tone ?? spec.hue} label={`${label} signal`} />
     </div>
   );
 }
@@ -127,23 +128,30 @@ function ArrivalCard({
 export function TokenCard({
   token,
   market,
+  score,
   className,
   style,
 }: {
   token: DiscoveredToken;
   market: MarketSnapshot | null;
+  /** From the scoring API. Null until the engine has evaluated this token. */
+  score: TokenScore | null;
   className?: string;
   style?: React.CSSProperties;
 }) {
-  const intel = deriveIntelligence(token, market);
-  const stage = lifecycleStage(token, market, intel);
+  const stage = lifecycleStage(token, market, score);
 
-  if (intel.provisional) {
+  // No score means the division has not reported yet. An arrival card says so
+  // rather than rendering meters at zero, which would read as "measured and
+  // bad" when the truth is "not yet measured".
+  if (!score) {
     return <ArrivalCard token={token} className={className} style={style} />;
   }
 
-  const confidencePct = Math.round(intel.confidence * 100);
-  const gemPct = Math.round(intel.gemProbability * 100);
+  const elite = score.is_elite;
+  const scorePct = Math.round(num(score.score));
+  const confidencePct = Math.round(num(score.evidence.confidence));
+  const freshness = num(score.evidence.freshness);
 
   return (
     <Link
@@ -153,9 +161,11 @@ export function TokenCard({
         "group relative block overflow-hidden rounded-panel border bg-surface/70 backdrop-blur-xl",
         "transition-[transform,border-color,box-shadow] duration-250 ease-[var(--ease-instrument)]",
         "hover:-translate-y-1 focus-visible:-translate-y-1",
-        intel.elite
+        elite
           ? "reticle border-apex/45 text-apex shadow-[0_0_0_1px_color-mix(in_oklch,var(--color-apex)_20%,transparent),0_20px_60px_-24px_color-mix(in_oklch,var(--color-apex)_60%,transparent)]"
-          : "border-line hover:border-line-bright",
+          : score.risk.has_veto
+            ? "border-danger/40 hover:border-danger/60"
+            : "border-line hover:border-line-bright",
         className,
       )}
     >
@@ -190,10 +200,17 @@ export function TokenCard({
             <span data-numeric className="text-xs text-ink-faint">
               {formatAge(token.discovered_at)}
             </span>
-            {intel.elite ? (
+            {elite ? (
               <Badge tone="apex">
                 <AgentSigil agent="apex" size={11} />
                 Elite Gem
+              </Badge>
+            ) : score.risk.has_veto ? (
+              // The risk gate capped this score outright. It outranks the
+              // trading state: a tradeable rug is still a rug.
+              <Badge tone="danger">
+                <AgentSigil agent="sentinel" size={11} />
+                Vetoed
               </Badge>
             ) : market?.trading_status === "trading" ? (
               <Badge tone="safe">Trading</Badge>
@@ -221,19 +238,55 @@ export function TokenCard({
           ))}
         </div>
 
-        {/* Squad signals */}
-        <div className="mt-5 grid grid-cols-4 gap-3 border-t border-line pt-4">
-          <SignalPip signal={intel.momentum} pending={intel.provisional} />
-          <SignalPip signal={intel.whale} pending={intel.provisional} />
-          <SignalPip signal={intel.community} pending={intel.provisional} />
-          <SignalPip signal={intel.risk} invert pending={intel.provisional} />
+        {/* Division readouts — every value served by the scoring API.
+            Three columns, not four: the overall score is the headline in the
+            verdict bar directly below, and repeating it here only squeezed the
+            labels until they truncated. */}
+        <div className="mt-5 grid grid-cols-3 gap-3 border-t border-line pt-4">
+          <ScorePip
+            label="Confidence"
+            agent="oracle"
+            value={ratio(score.evidence.confidence)}
+            title={`Evidence ${Math.round(num(score.evidence.evidence))}% discounted by freshness`}
+          />
+          <ScorePip
+            label="Evidence"
+            agent="scout"
+            value={ratio(score.evidence.evidence)}
+            title={`${score.evidence.observations} observations, ${Math.round(
+              num(score.evidence.coverage),
+            )}% model coverage`}
+          />
+          <ScorePip
+            label="Risk"
+            agent="sentinel"
+            value={ratio(score.risk.market_risk)}
+            tone={
+              num(score.risk.market_risk) > 50 ? "var(--color-danger)" : AGENTS.sentinel.hue
+            }
+            title={
+              score.risk.has_veto
+                ? "Risk gate vetoed this token — score capped"
+                : `Market risk ${Math.round(num(score.risk.market_risk))} of 100`
+            }
+          />
         </div>
 
         {/* Verdict */}
         <div className="mt-4 flex items-center justify-between gap-4 rounded-card bg-abyss/60 px-3 py-2.5">
           <div className="flex items-center gap-2">
             <AgentSigil agent="oracle" size={14} className="text-oracle" />
-            <Label>Confidence</Label>
+            <Label>Grade</Label>
+            <span
+              className="text-sm font-medium"
+              style={{ color: GRADE_TONE[score.grade] }}
+            >
+              {GRADE_LABEL[score.grade]}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Label>Score</Label>
             <span
               data-numeric
               className={cn(
@@ -245,29 +298,19 @@ export function TokenCard({
                     : "text-ink-faint",
               )}
             >
-              {intel.provisional ? "—" : `${confidencePct}%`}
-            </span>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Label>Gem</Label>
-            <span
-              data-numeric
-              className={cn(
-                "text-sm font-medium",
-                intel.elite ? "text-apex" : "text-ink-dim",
-              )}
-            >
-              {intel.provisional ? "—" : `${gemPct}%`}
+              {scorePct}
             </span>
           </div>
         </div>
 
-        {intel.provisional && (
-          <p className="mt-3 text-[0.6875rem] text-ink-faint">
-            Awaiting first market observation.
-          </p>
-        )}
+        {/* Provenance: which model, how fresh, and when it last ran. */}
+        <p className="mt-3 flex items-center gap-2 text-[0.6875rem] text-ink-faint">
+          <span>{freshnessLabel(freshness)}</span>
+          <span aria-hidden>·</span>
+          <span data-numeric>{formatAge(score.evaluated_at)} ago</span>
+          <span aria-hidden>·</span>
+          <span>{score.model_version}</span>
+        </p>
       </div>
     </Link>
   );

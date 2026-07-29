@@ -12,9 +12,10 @@ import { SkeletonTokenCard } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/states";
 import { TokenCard } from "@/components/token/token-card";
 import { useMarketByMint } from "@/hooks/use-market-data";
+import { useScoresByMint } from "@/hooks/use-scores";
 import { useTokenStream, type StreamStatus } from "@/hooks/use-token-stream";
 import { api } from "@/lib/api-client";
-import { deriveIntelligence } from "@/lib/intelligence";
+import { num } from "@/lib/scores";
 import { cn } from "@/lib/utils";
 import type { DiscoveredToken } from "@/types/api";
 
@@ -54,37 +55,41 @@ export default function LiveScannerPage() {
 
   const { tokens, status } = useTokenStream(seed ?? []);
   const { byMint } = useMarketByMint();
+  const { byMint: scoresByMint } = useScoresByMint();
 
   const decorated = useMemo(
     () =>
       tokens.map((token) => ({
         token,
         market: byMint.get(token.mint_address) ?? null,
-        intel: deriveIntelligence(token, byMint.get(token.mint_address) ?? null),
+        score: scoresByMint.get(token.mint_address) ?? null,
       })),
-    [tokens, byMint],
+    [tokens, byMint, scoresByMint],
   );
 
   const visible = useMemo(() => {
     switch (filter) {
       case "elite":
-        return decorated.filter((row) => row.intel.elite);
+        return decorated.filter((row) => row.score?.is_elite);
       case "trading":
         return decorated.filter((row) => row.market?.trading_status === "trading");
       case "risk":
-        return decorated.filter((row) => row.intel.risk.score >= 0.6);
+        // The engine's own verdict: a veto, or risk it scored past halfway.
+        return decorated.filter(
+          (row) => row.score?.risk.has_veto || num(row.score?.risk.market_risk) >= 50,
+        );
       default:
         return decorated;
     }
   }, [decorated, filter]);
 
-  const eliteCount = decorated.filter((row) => row.intel.elite).length;
+  const eliteCount = decorated.filter((row) => row.score?.is_elite).length;
 
   // Split the feed by observation state. Arrivals are slim rows in their own
   // strip; analysed tokens get full cards. Interleaving them in one grid would
   // leave short cards stretched to tall row heights and read as broken.
-  const arrivals = visible.filter((row) => row.intel.provisional).slice(0, 8);
-  const analysed = visible.filter((row) => !row.intel.provisional);
+  const arrivals = visible.filter((row) => !row.score).slice(0, 8);
+  const analysed = visible.filter((row) => row.score);
 
   return (
     <div className="flex flex-col gap-6">
@@ -123,11 +128,7 @@ export default function LiveScannerPage() {
       </div>
 
       {/* Filters */}
-      <div
-        role="tablist"
-        aria-label="Filter discoveries"
-        className="flex flex-wrap gap-2"
-      >
+      <div role="tablist" aria-label="Filter discoveries" className="flex flex-wrap gap-2">
         {FILTERS.map((item) => {
           const active = filter === item.id;
           return (
@@ -161,9 +162,7 @@ export default function LiveScannerPage() {
         <EmptyState
           agent={filter === "elite" ? "apex" : "scout"}
           title={
-            filter === "elite"
-              ? "No Elite Gems right now"
-              : "Nothing matches this filter"
+            filter === "elite" ? "No Elite Gems right now" : "Nothing matches this filter"
           }
           body={
             filter === "elite"
@@ -192,6 +191,7 @@ export default function LiveScannerPage() {
                     key={row.token.mint_address}
                     token={row.token}
                     market={row.market}
+                    score={row.score}
                     className="animate-[rise_0.4s_var(--ease-instrument)_both]"
                     style={{ animationDelay: `${index * 30}ms` }}
                   />
@@ -214,10 +214,13 @@ export default function LiveScannerPage() {
                     key={row.token.mint_address}
                     token={row.token}
                     market={row.market}
+                    score={row.score}
                     // Stagger only the first screenful; beyond that the delay
                     // would make late cards feel broken, not choreographed.
                     className={
-                      index < 9 ? "animate-[rise_0.5s_var(--ease-instrument)_both]" : undefined
+                      index < 9
+                        ? "animate-[rise_0.5s_var(--ease-instrument)_both]"
+                        : undefined
                     }
                     style={index < 9 ? { animationDelay: `${index * 40}ms` } : undefined}
                   />

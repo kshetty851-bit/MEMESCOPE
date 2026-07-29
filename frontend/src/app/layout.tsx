@@ -18,7 +18,8 @@ export const metadata: Metadata = {
   },
   description:
     "The Intelligence Division continuously scans Solana, analyses every launch and discovers opportunities before the market reacts.",
-  robots: env.NEXT_PUBLIC_ENVIRONMENT === "production" ? "index,follow" : "noindex,nofollow",
+  robots:
+    env.NEXT_PUBLIC_ENVIRONMENT === "production" ? "index,follow" : "noindex,nofollow",
 };
 
 export const viewport: Viewport = {

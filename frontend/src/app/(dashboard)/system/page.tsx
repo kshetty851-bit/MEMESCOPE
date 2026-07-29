@@ -75,9 +75,8 @@ export default function DesignSystemPage() {
           The MEMESCOPE design system
         </h1>
         <p className="mt-3 max-w-2xl text-ink-dim">
-          Signal in the void. A dark, dimensional canvas where intelligence
-          arrives as light, data has mass, and everything is observed through an
-          instrument.
+          Signal in the void. A dark, dimensional canvas where intelligence arrives as
+          light, data has mass, and everything is observed through an instrument.
         </p>
       </header>
 
@@ -160,10 +159,7 @@ export default function DesignSystemPage() {
               <span style={{ color: AGENTS[id].hue }}>
                 <AgentSigil agent={id} size={44} alive />
               </span>
-              <span
-                className="text-label uppercase"
-                style={{ color: AGENTS[id].hue }}
-              >
+              <span className="text-label uppercase" style={{ color: AGENTS[id].hue }}>
                 {AGENTS[id].name}
               </span>
             </div>
@@ -205,13 +201,16 @@ export default function DesignSystemPage() {
         <Panel className="flex flex-wrap items-center gap-6">
           <ModeToggle compact />
           <p className="text-sm text-ink-faint">
-            Try it — the ambient field, panel blur and every ambient loop stop
-            instantly. The Core stills but never disappears.
+            Try it — the ambient field, panel blur and every ambient loop stop instantly.
+            The Core stills but never disappears.
           </p>
         </Panel>
       </Section>
 
-      <Section title="Buttons" caption="At most one plasma-glow primary per view. Scarcity makes the primary action read as inevitable.">
+      <Section
+        title="Buttons"
+        caption="At most one plasma-glow primary per view. Scarcity makes the primary action read as inevitable."
+      >
         <Panel className="flex flex-wrap items-center gap-3">
           <Button variant="primary">Launch Command Center</Button>
           <Button variant="outline">Watch Live Scanner</Button>
@@ -304,7 +303,9 @@ export default function DesignSystemPage() {
           </div>
           <div className="flex flex-col items-center gap-3">
             <AiCore size={140} confidence={0.95} showAgents={false} elite />
-            <span className="text-label uppercase text-ink-faint">Elite · one gold pulse</span>
+            <span className="text-label uppercase text-ink-faint">
+              Elite · one gold pulse
+            </span>
           </div>
           <div className="flex flex-col gap-2">
             <code data-numeric className="text-xs text-ink-dim">

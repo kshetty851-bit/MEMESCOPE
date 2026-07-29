@@ -25,12 +25,10 @@ export default function GlobalError({
 
       <div className="max-w-md space-y-3">
         <Label>Containment</Label>
-        <h1 className="text-title font-semibold text-ink">
-          SENTINEL halted this view
-        </h1>
+        <h1 className="text-title font-semibold text-ink">SENTINEL halted this view</h1>
         <p className="text-sm text-ink-faint">
-          Something failed while rendering. The scanner and enrichment engine are
-          unaffected and still running.
+          Something failed while rendering. The scanner and enrichment engine are unaffected
+          and still running.
         </p>
         {error.digest && (
           <p data-numeric className="text-xs text-ink-faint/70">

@@ -8,15 +8,11 @@ import { AgentPanel } from "@/components/squad/agent-panel";
 import { Badge } from "@/components/ui/badge";
 import { Label, Panel } from "@/components/ui/panel";
 import { useMarketByMint } from "@/hooks/use-market-data";
+import { useScoresByMint } from "@/hooks/use-scores";
 import { useTokenStream } from "@/hooks/use-token-stream";
 import { api } from "@/lib/api-client";
-import {
-  AGENTS,
-  ALL_AGENTS,
-  type AgentId,
-  type AgentStatus,
-} from "@/lib/design/agents";
-import { deriveIntelligence } from "@/lib/intelligence";
+import { AGENTS, ALL_AGENTS, type AgentId, type AgentStatus } from "@/lib/design/agents";
+import { num } from "@/lib/scores";
 import type { TokenPage } from "@/types/api";
 
 /**
@@ -29,6 +25,7 @@ import type { TokenPage } from "@/types/api";
 export default function SquadPage() {
   const { tokens, status } = useTokenStream();
   const { byMint } = useMarketByMint();
+  const { byMint: scoresByMint } = useScoresByMint();
 
   const totals = useQuery({
     queryKey: ["tokens", "totals"],
@@ -38,13 +35,16 @@ export default function SquadPage() {
 
   const discovered = totals.data?.total ?? 0;
   const enriched = byMint.size;
+  // Every figure below is a count or a mean over scores the API served.
   const scored = tokens
-    .map((token) => deriveIntelligence(token, byMint.get(token.mint_address) ?? null))
-    .filter((intel) => !intel.provisional);
-  const elites = scored.filter((intel) => intel.elite).length;
+    .map((token) => scoresByMint.get(token.mint_address))
+    .filter((score): score is NonNullable<typeof score> => Boolean(score));
+  const elites = scored.filter((score) => score.is_elite).length;
   const confidence =
     scored.length > 0
-      ? scored.reduce((sum, intel) => sum + intel.confidence, 0) / scored.length
+      ? scored.reduce((sum, score) => sum + num(score.evidence.confidence), 0) /
+        scored.length /
+        100
       : 0;
 
   const live: {
@@ -72,7 +72,8 @@ export default function SquadPage() {
       metricValue: enriched,
       systemLabel: "Wallet index",
       systemValue: "PARTIAL",
-      recommendation: "Average position size proxies capital flow until wallet clustering is deployed.",
+      recommendation:
+        "Average position size proxies capital flow until wallet clustering is deployed.",
     },
     {
       agent: "pulse",
@@ -90,7 +91,8 @@ export default function SquadPage() {
       metricValue: enriched,
       systemLabel: "Social feeds",
       systemValue: "PARTIAL",
-      recommendation: "Participation count stands in for social reach pending narrative ingestion.",
+      recommendation:
+        "Participation count stands in for social reach pending narrative ingestion.",
     },
     {
       agent: "sentinel",
@@ -99,7 +101,8 @@ export default function SquadPage() {
       metricValue: enriched,
       systemLabel: "Threat level",
       systemValue: "NOMINAL",
-      recommendation: "Liquidity depth, sell pressure and metadata integrity under continuous review.",
+      recommendation:
+        "Liquidity depth, sell pressure and metadata integrity under continuous review.",
     },
     {
       agent: "oracle",
@@ -136,10 +139,10 @@ export default function SquadPage() {
             Six analysts feed one brain
           </h2>
           <p className="mt-3 text-sm text-ink-dim">
-            Each specialist streams findings into the Core, which integrates
-            them into a single confidence score. The Core warms as conviction
-            rises and cools as it falls. When every check clears, APEX grants
-            Elite classification and the Core emits one golden pulse.
+            Each specialist streams findings into the Core, which integrates them into a
+            single confidence score. The Core warms as conviction rises and cools as it
+            falls. When every check clears, APEX grants Elite classification and the Core
+            emits one golden pulse.
           </p>
         </div>
       </Panel>

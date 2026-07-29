@@ -1,5 +1,7 @@
 "use client";
 
+import { AlphaBar } from "@/components/alpha/alpha-bar";
+import { FeedbackWidget } from "@/components/alpha/feedback-widget";
 import { Universe } from "@/components/brand/universe/universe";
 import { CommandNav } from "@/components/layout/command-nav";
 import { AiCore } from "@/components/brand/ai-core";
@@ -24,9 +26,15 @@ export default function CommandLayout({ children }: { children: React.ReactNode 
     <div className="relative min-h-screen lg:pl-[68px]">
       <Universe />
       <CommandNav />
+      {/* Above the content rather than pinned: an alpha notice that floats over
+          the instrument would cover data on every page for the whole session. */}
+      <AlphaBar />
       <main className="mx-auto max-w-[1600px] px-5 pb-24 pt-6 lg:px-8 lg:pb-12">
         {children}
       </main>
+      {/* Every page, because the moment a tester notices something is the only
+          moment they will report it. */}
+      <FeedbackWidget />
     </div>
   );
 }

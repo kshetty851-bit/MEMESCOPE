@@ -6,89 +6,166 @@ import { Meter } from "@/components/ui/metric";
 import { Label, Panel } from "@/components/ui/panel";
 import { AGENTS, PIPELINE, type AgentId } from "@/lib/design/agents";
 import { formatAge } from "@/lib/format";
-import { LEVEL_LABEL, type TokenIntelligence } from "@/lib/intelligence";
+import { GRADE_LABEL, num, ratio } from "@/lib/scores";
 import { cn } from "@/lib/utils";
 import type { DiscoveredToken } from "@/types/api";
+import type { TokenScore } from "@/types/score";
 
 /**
  * MISSION REPORT
  *
  * The division's findings as a narrative, in pipeline order, each specialist
- * speaking once in their own voice. A table of the same numbers would be
- * denser and forgettable; the sequence is what makes a verdict feel earned —
- * you watch six independent checks resolve before Oracle scores it.
+ * speaking once in their own voice. A table of the same numbers would be denser
+ * and forgettable; the sequence is what makes a verdict feel earned.
+ *
+ * Every line is now the backend's. Component scores, their weights and the
+ * sentences beneath them come from `/scores/{mint}`, attributed to the agent the
+ * API named. A component the model declares but cannot yet evaluate says so
+ * explicitly rather than being omitted — that visible gap is the honest reading
+ * of a model that is only 65% complete, and hiding it would overstate what the
+ * platform knows.
  */
 
 interface Line {
   agent: AgentId;
   headline: string;
   detail: string;
+  /** 0–1, when the component reported one. */
   score?: number;
   tone?: string;
 }
 
-export function MissionReport({
-  token,
-  intel,
-  className,
-}: {
-  token: DiscoveredToken;
-  intel: TokenIntelligence;
-  className?: string;
-}) {
-  const lines: Record<AgentId, Line> = {
-    scout: {
+/** Which agent owns each declared component, per the API's own attribution. */
+function linesFor(token: DiscoveredToken, score: TokenScore): Record<AgentId, Line> {
+  const byAgent = new Map<string, Line>();
+
+  for (const component of score.components) {
+    const agent = component.agent as AgentId;
+    if (!(agent in AGENTS)) continue;
+
+    // The engine emits reason codes; the API renders them into sentences. The
+    // first is the most significant for that component.
+    const detail = component.reasons.length
+      ? (score.reasons.find((reason) => component.reasons.includes(reason.code))?.message ??
+        component.reasons[0])
+      : undefined;
+
+    if (!component.available) {
+      // Declared with real weight but no data source yet. Saying so is what
+      // makes the missing signal visible in the product rather than silently
+      // absent from a weight table.
+      //
+      // An agent can own several components — Sentinel holds both liquidity
+      // depth and contract safety — so an unavailable one must never overwrite
+      // a reading that exists. Without this guard Sentinel reported "not yet
+      // available" on a token whose liquidity it had actually measured.
+      if (byAgent.has(agent)) continue;
+      byAgent.set(agent, {
+        agent,
+        headline: "Signal not yet available",
+        detail: `Declared at ${Math.round(num(component.declared_weight) * 100)}% of the model. No data source for this signal yet.`,
+      });
+      continue;
+    }
+
+    const value = num(component.score);
+    byAgent.set(agent, {
+      agent,
+      headline: `${labelOf(component.id)} ${Math.round(value)}`,
+      detail: detail ?? `Contributing ${num(component.contribution).toFixed(2)} points.`,
+      score: value / 100,
+      tone:
+        component.id === "market_risk" || value < 35 ? "var(--color-danger)" : undefined,
+    });
+  }
+
+  const confidence = num(score.evidence.confidence);
+
+  return {
+    scout: byAgent.get("scout") ?? {
       agent: "scout",
       headline: `New signal detected ${formatAge(token.discovered_at)} ago`,
-      detail: token.source_program
-        ? "Unknown launch discovered at mint initialisation on a watched launchpad."
-        : "Unknown launch discovered at mint initialisation.",
+      detail: "Discovered at mint initialisation on a watched launchpad.",
     },
-    titan: {
+    titan: byAgent.get("titan") ?? {
       agent: "titan",
-      headline: `Capital flow ${LEVEL_LABEL[intel.whale.level].toLowerCase()}`,
-      detail: intel.whale.readout,
-      score: intel.whale.score,
+      headline: "Signal not yet available",
+      detail: "Wallet intelligence is not yet collected.",
     },
-    pulse: {
+    pulse: byAgent.get("pulse") ?? {
       agent: "pulse",
-      headline: `Momentum ${LEVEL_LABEL[intel.momentum.level].toLowerCase()}`,
-      detail: intel.momentum.readout,
-      score: intel.momentum.score,
+      headline: "No flow to measure",
+      detail: "No trade activity recorded in the current window.",
     },
-    echo: {
+    echo: byAgent.get("echo") ?? {
       agent: "echo",
-      headline: `Narrative ${LEVEL_LABEL[intel.community.level].toLowerCase()}`,
-      detail: intel.community.readout,
-      score: intel.community.score,
+      headline: "Signal not yet available",
+      detail: "Narrative tracking is not yet collected.",
     },
+    // Sentinel always speaks for the risk gate, never for a weighted component.
+    // The gate is not part of the sum at all — it multiplies the composite and
+    // can veto it outright — so it is the one thing Sentinel must report.
     sentinel: {
       agent: "sentinel",
-      headline:
-        intel.risk.score < 0.25
-          ? "Security review cleared"
-          : `Risk ${LEVEL_LABEL[intel.risk.level].toLowerCase()}`,
-      detail: intel.risk.readout,
-      score: intel.risk.score,
-      tone: intel.risk.score > 0.5 ? "var(--color-danger)" : undefined,
+      headline: score.risk.has_veto ? "Risk gate engaged" : "No anomalies recorded",
+      detail: score.risk.has_veto
+        ? "The score was capped regardless of every other signal."
+        : `Market risk ${Math.round(num(score.risk.market_risk))} of 100.`,
+      score: ratio(score.risk.market_risk),
+      tone: num(score.risk.market_risk) > 50 ? "var(--color-danger)" : undefined,
     },
     oracle: {
       agent: "oracle",
-      headline: `Confidence ${Math.round(intel.confidence * 100)}%`,
-      detail:
-        intel.confidence >= 0.7
-          ? "Confidence exceeds historical baseline. Pattern correlation increased across all inputs."
-          : intel.confidence >= 0.4
-            ? "Inputs are divergent. Correlation below threshold for classification."
-            : "Evidence insufficient. No conclusion supported.",
-      score: intel.confidence,
+      headline: `${GRADE_LABEL[score.grade]} — score ${Math.round(num(score.score))}`,
+      detail: `Confidence ${Math.round(confidence)}% from ${score.evidence.observations} observations at ${Math.round(num(score.evidence.coverage))}% model coverage. Model ${score.model_version}.`,
+      score: ratio(score.score),
     },
     apex: {
       agent: "apex",
       headline: "Elite classification granted",
-      detail: "Opportunity verified. All six divisions cleared with conviction and verified depth.",
+      detail: "Sustained conviction, cleared risk gate and verified liquidity depth.",
     },
   };
+}
+
+/** Component ids as short headlines. Presentation only. */
+function labelOf(id: string): string {
+  return id
+    .split("_")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+export function MissionReport({
+  token,
+  score,
+  className,
+}: {
+  token: DiscoveredToken;
+  /** Null until the engine has scored this token. */
+  score: TokenScore | null;
+  className?: string;
+}) {
+  if (!score) {
+    return (
+      <Panel className={cn("overflow-visible", className)}>
+        <div className="mb-5 flex items-center justify-between gap-4">
+          <div>
+            <Label>Mission report</Label>
+            <p className="mt-1 text-heading font-medium text-ink">Division findings</p>
+          </div>
+          <Badge tone="neutral">Awaiting score</Badge>
+        </div>
+        <p className="text-sm text-ink-faint">
+          The division has not reported on this token yet. Findings appear once the scoring
+          engine has evaluated its first market observation.
+        </p>
+      </Panel>
+    );
+  }
+
+  const lines = linesFor(token, score);
+  const elite = score.is_elite;
 
   return (
     <Panel className={cn("overflow-visible", className)}>
@@ -97,7 +174,7 @@ export function MissionReport({
           <Label>Mission report</Label>
           <p className="mt-1 text-heading font-medium text-ink">Division findings</p>
         </div>
-        {intel.provisional && <Badge tone="neutral">Awaiting market data</Badge>}
+        {score.risk.has_veto && <Badge tone="danger">Vetoed</Badge>}
       </div>
 
       <ol className="relative flex flex-col">
@@ -153,7 +230,7 @@ export function MissionReport({
       <div
         className={cn(
           "relative mt-5 flex items-center gap-4 rounded-card border p-4",
-          intel.elite
+          elite
             ? "reticle border-apex/45 bg-apex/[0.07] text-apex"
             : "border-line bg-abyss/50",
         )}
@@ -161,7 +238,7 @@ export function MissionReport({
         <div
           className={cn(
             "flex size-11 shrink-0 items-center justify-center rounded-full border",
-            intel.elite
+            elite
               ? "border-apex/50 bg-apex/10 text-apex"
               : "border-line bg-elevated text-ink-faint",
           )}
@@ -169,20 +246,17 @@ export function MissionReport({
           <AgentSigil agent="apex" size={22} alive />
         </div>
         <div className="min-w-0">
-          <p
-            className={cn(
-              "text-sm font-semibold",
-              intel.elite ? "text-apex" : "text-ink-dim",
-            )}
-          >
-            {intel.elite
+          <p className={cn("text-sm font-semibold", elite ? "text-apex" : "text-ink-dim")}>
+            {elite
               ? "APEX — Elite classification granted"
               : "APEX — classification withheld"}
           </p>
           <p className="mt-0.5 text-sm text-ink-faint">
-            {intel.elite
+            {elite
               ? lines.apex.detail
-              : `Elite probability ${Math.round(intel.gemProbability * 100)}%. Classification requires sustained conviction, cleared security review and verified liquidity depth.`}
+              : `Score ${Math.round(num(score.score))}, evidence ${Math.round(
+                  num(score.evidence.evidence),
+                )}%. Classification requires sustained conviction, a cleared risk gate and verified liquidity depth.`}
           </p>
         </div>
       </div>

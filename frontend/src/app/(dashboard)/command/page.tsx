@@ -2,28 +2,32 @@
 
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 
 import { AiCore } from "@/components/brand/ai-core";
 import { AgentSigil } from "@/components/brand/agent-sigil";
 import { TokenAvatar } from "@/components/brand/token-avatar";
 import { AgentPanel } from "@/components/squad/agent-panel";
 import { ObservatoryLog } from "@/components/observatory/observatory-log";
+import { DashboardPrimer } from "@/components/alpha/dashboard-primer";
+import { SentinelPanel } from "@/components/sentinel/sentinel-panel";
 import { TelemetryBar } from "@/components/layout/telemetry-bar";
 import { useObservatoryLog } from "@/hooks/use-observatory-log";
 import { Badge, StatusDot } from "@/components/ui/badge";
 import { AnimatedNumber, Meter } from "@/components/ui/metric";
 import { Label, Panel, PanelHeader, PanelTitle } from "@/components/ui/panel";
 import { Skeleton, SkeletonTokenCard } from "@/components/ui/skeleton";
-import { EmptyState } from "@/components/ui/states";
+import { EmptyState, ErrorState } from "@/components/ui/states";
 import { TokenCard } from "@/components/token/token-card";
+import { useApiLatency } from "@/hooks/use-api-latency";
 import { useMarketByMint } from "@/hooks/use-market-data";
+import { useScoresByMint, useTopScores } from "@/hooks/use-scores";
 import { useTokenStream } from "@/hooks/use-token-stream";
 import { api } from "@/lib/api-client";
 import { AGENTS } from "@/lib/design/agents";
-import { formatAge, formatUsd } from "@/lib/format";
-import { deriveIntelligence } from "@/lib/intelligence";
-import type { DiscoveredToken, TokenPage, TrendingPage } from "@/types/api";
+import { formatAge } from "@/lib/format";
+import { GRADE_LABEL, GRADE_TONE, num } from "@/lib/scores";
+import type { DiscoveredToken, TokenPage } from "@/types/api";
 
 /**
  * COMMAND CENTER
@@ -37,7 +41,7 @@ export default function CommandCenterPage() {
   // Seed from REST so landing here shows a populated command view immediately.
   // Without it the page starts empty and fills only as launches happen, which
   // makes a working system look broken for the first minute.
-  const { data: seed } = useQuery({
+  const { data: seed, isPending: seedPending } = useQuery({
     queryKey: ["tokens", "latest"],
     queryFn: () => api.get<DiscoveredToken[]>("/tokens/latest?limit=40"),
     staleTime: 10_000,
@@ -45,6 +49,17 @@ export default function CommandCenterPage() {
 
   const { tokens, status } = useTokenStream(seed ?? []);
   const { byMint } = useMarketByMint();
+  // One request for the whole page: the Core, the cards, the log and the rail
+  // all read from this shared query rather than fetching per token.
+  // `total` is the backend's own count of scored tokens, carried on the same
+  // response as the window — Sentinel reports it without a second request.
+  const {
+    byMint: scoresByMint,
+    labelsByMint: scoreLabels,
+    total: scoreTotal,
+    isPending: scoresPending,
+    isError: scoresError,
+  } = useScoresByMint();
 
   const totals = useQuery({
     queryKey: ["tokens", "totals"],
@@ -52,89 +67,74 @@ export default function CommandCenterPage() {
     refetchInterval: 30_000,
   });
 
-  const trending = useQuery({
-    queryKey: ["market", "trending", "command"],
-    queryFn: () =>
-      api.get<TrendingPage>("/market/trending?sort_by=volume_24h&page_size=6&min_liquidity=500"),
-    refetchInterval: 30_000,
-  });
+  // Top opportunities now come from the scoring engine's own ranking rather
+  // than from raw volume, which is the whole point of having a score.
+  const topScores = useTopScores(6);
 
   const discovered = totals.data?.total ?? 0;
   const enriched = byMint.size;
 
-  // Elite Gems across whatever the feed currently holds. Recomputed on every
-  // tick, which is cheap and keeps the Core honest.
+  // Elite is a backend certification, not a client calculation: the engine
+  // grants it after sustained qualification and the UI only counts what it
+  // granted.
   const elites = useMemo(
-    () =>
-      tokens.filter(
-        (token) => deriveIntelligence(token, byMint.get(token.mint_address) ?? null).elite,
-      ),
-    [tokens, byMint],
+    () => tokens.filter((token) => scoresByMint.get(token.mint_address)?.is_elite),
+    [tokens, scoresByMint],
   );
 
-  // Everything the division reports on, computed once per tick.
+  // Aggregates over the scores the API served. Every figure below is a count or
+  // a mean of backend values — no thresholds are re-derived here.
   const analysis = useMemo(() => {
     const scored = tokens
-      .map((token) => ({
-        token,
-        intel: deriveIntelligence(token, byMint.get(token.mint_address) ?? null),
-      }))
-      .filter((row) => !row.intel.provisional);
+      .map((token) => scoresByMint.get(token.mint_address))
+      .filter((score): score is NonNullable<typeof score> => Boolean(score));
 
+    // `sampled` exists to keep "nothing to measure" distinguishable from
+    // "measured zero". The scoring window is the most recently evaluated
+    // hundred tokens and the feed is the most recent arrivals; when those two
+    // sets do not overlap there is no sample, and rendering that as 0% claimed
+    // the division had no confidence rather than no reading.
     if (scored.length === 0) {
-      return { confidence: 0, whales: 0, threats: 0, topWhale: null as string | null };
+      return { confidence: 0, sampled: 0, vetoed: 0, highConviction: 0 };
     }
 
-    // The Core reflects the division's aggregate conviction across the live
-    // window — one number that genuinely moves as the market does.
     const confidence =
-      scored.reduce((sum, row) => sum + row.intel.confidence, 0) / scored.length;
-
-    const whaleRows = scored.filter((row) => row.intel.whale.score >= 0.7);
-    const threats = scored.filter((row) => row.intel.risk.score >= 0.7).length;
+      scored.reduce((sum, score) => sum + num(score.evidence.confidence), 0) /
+      scored.length /
+      100;
 
     return {
       confidence,
-      whales: whaleRows.length,
-      threats,
-      topWhale: whaleRows[0]?.token.mint_address ?? null,
+      sampled: scored.length,
+      vetoed: scored.filter((score) => score.risk.has_veto).length,
+      highConviction: scored.filter(
+        (score) => score.grade === "strong" || score.grade === "high_conviction",
+      ).length,
     };
-  }, [tokens, byMint]);
+  }, [tokens, scoresByMint]);
 
   // The log is generated from real state transitions and is also what drives
   // the universe reactions — one traversal, two outputs.
-  const logEntries = useObservatoryLog(tokens, byMint);
+  const logEntries = useObservatoryLog(tokens, scoresByMint, scoreLabels);
 
-  // Real round-trip latency to the API, sampled rather than continuous.
-  const [latency, setLatency] = useState<number | null>(null);
-  useEffect(() => {
-    let cancelled = false;
+  // Round-trip latency, sampled from a query the page already runs rather than
+  // from a request of its own. The previous implementation fired an extra
+  // `/tokens?page_size=1` every 20s purely to time it, which showed up as a
+  // duplicate of the totals query on every dashboard load.
+  const latency = useApiLatency();
 
-    const sample = async () => {
-      const started = performance.now();
-      try {
-        await api.get<TokenPage>("/tokens?page_size=1");
-        if (!cancelled) setLatency(Math.round(performance.now() - started));
-      } catch {
-        if (!cancelled) setLatency(null);
-      }
-    };
-
-    void sample();
-    const timer = window.setInterval(() => void sample(), 20_000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, []);
+  // "Loading" means a request is genuinely outstanding — not merely that the
+  // list is empty. Once both queries have answered, an empty feed is a fact
+  // about the chain and should be stated as one.
+  const feedLoading = (seedPending || scoresPending) && tokens.length === 0;
 
   // Lead with tokens the division has actually reported on; arrivals still
   // appear, but a screen of empty cards is a poor first impression.
   const liveTokens = useMemo(() => {
-    const analysed = tokens.filter((token) => byMint.has(token.mint_address));
-    const arrivals = tokens.filter((token) => !byMint.has(token.mint_address));
+    const analysed = tokens.filter((token) => scoresByMint.has(token.mint_address));
+    const arrivals = tokens.filter((token) => !scoresByMint.has(token.mint_address));
     return [...arrivals.slice(0, 2), ...analysed].slice(0, 6);
-  }, [tokens, byMint]);
+  }, [tokens, scoresByMint]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -158,7 +158,7 @@ export default function CommandCenterPage() {
                 : "Synthesising",
           signalsToday: discovered,
           eliteGems: elites.length,
-          whaleActivity: analysis.whales,
+          whaleActivity: analysis.vetoed,
           healthy: status === "live",
           latencyMs: latency,
         }}
@@ -167,6 +167,20 @@ export default function CommandCenterPage() {
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
         {/* ---------------- Centre: live intelligence ------------------- */}
         <div className="flex min-w-0 flex-col gap-6">
+          {/* Shown once, above Sentinel: understanding what a score means has to
+              come before reading one. */}
+          <DashboardPrimer />
+
+          {/* Sentinel leads: the brief is what you read before the numbers.
+              It narrates the same `scoresByMint` window the rest of the page
+              already has, so it costs no request. */}
+          <SentinelPanel
+            tokens={tokens}
+            scoresByMint={scoresByMint}
+            labelsByMint={scoreLabels}
+            totalScored={scoresByMint.size > 0 ? scoreTotal : 0}
+          />
+
           {/* Core + vitals */}
           <Panel className="overflow-visible">
             <div className="flex flex-col items-center gap-8 md:flex-row">
@@ -175,8 +189,8 @@ export default function CommandCenterPage() {
                 confidence={analysis.confidence}
                 elite={elites.length > 0}
                 activeAgents={[
-                  ...(analysis.whales > 0 ? (["titan"] as const) : []),
-                  ...(analysis.threats > 0 ? (["sentinel"] as const) : []),
+                  ...(analysis.highConviction > 0 ? (["oracle"] as const) : []),
+                  ...(analysis.vetoed > 0 ? (["sentinel"] as const) : []),
                 ]}
                 className="shrink-0"
               />
@@ -203,10 +217,19 @@ export default function CommandCenterPage() {
                 <div>
                   <Label>Division confidence</Label>
                   <p className="mt-1 text-3xl font-medium tracking-tight text-plasma">
-                    <AnimatedNumber
-                      value={Math.round(analysis.confidence * 100)}
-                      format={(n) => `${Math.round(n)}%`}
-                    />
+                    {analysis.sampled === 0 ? (
+                      <span
+                        className="text-ink-faint"
+                        title="No scored token in the live feed yet"
+                      >
+                        —
+                      </span>
+                    ) : (
+                      <AnimatedNumber
+                        value={Math.round(analysis.confidence * 100)}
+                        format={(n) => `${Math.round(n)}%`}
+                      />
+                    )}
                   </p>
                 </div>
 
@@ -245,12 +268,28 @@ export default function CommandCenterPage() {
               </Link>
             </div>
 
-            {tokens.length === 0 ? (
+            {/* Three distinct states, deliberately.
+                Skeletons used to render whenever the list was empty, which
+                meant a failed request and a genuinely quiet chain both looked
+                like "still loading" — forever. A first-time user reads that as
+                a slow product rather than a broken one, and never reloads. */}
+            {scoresError && tokens.length === 0 ? (
+              <ErrorState
+                body="The intelligence feed is not responding. The division is still scanning — this view will recover on its own once the connection returns."
+                onRetry={() => window.location.reload()}
+              />
+            ) : feedLoading ? (
               <div className="grid gap-4 md:grid-cols-2">
                 {Array.from({ length: 4 }, (_, index) => (
                   <SkeletonTokenCard key={index} />
                 ))}
               </div>
+            ) : tokens.length === 0 ? (
+              <EmptyState
+                agent="scout"
+                title="No launches in this window"
+                body="Scout is watching the chain. New tokens appear here the moment they are minted."
+              />
             ) : (
               <div className="grid items-start gap-4 md:grid-cols-2">
                 {liveTokens.map((token) => (
@@ -258,6 +297,7 @@ export default function CommandCenterPage() {
                     key={token.mint_address}
                     token={token}
                     market={byMint.get(token.mint_address) ?? null}
+                    score={scoresByMint.get(token.mint_address) ?? null}
                   />
                 ))}
               </div>
@@ -285,39 +325,36 @@ export default function CommandCenterPage() {
               />
               <AgentPanel
                 agent="titan"
-                status={analysis.whales > 0 ? "investigating" : "monitoring"}
+                status="idle"
                 metricLabel="Markets watched"
                 metricValue={enriched}
-                systemLabel="Capital flow"
-                systemValue={analysis.whales > 0 ? "ELEVATED" : "NOMINAL"}
-                eventKey={analysis.topWhale ?? undefined}
-                recommendation={
-                  analysis.whales > 0
-                    ? `Whale accumulation confirmed on ${analysis.whales} token${analysis.whales > 1 ? "s" : ""}.`
-                    : "No large capital movement in the current window."
-                }
+                systemLabel="Wallet intel"
+                systemValue="PENDING"
+                recommendation="Awaiting wallet intelligence — smart-money signals are not yet collected."
               />
               <AgentPanel
                 agent="sentinel"
-                status={analysis.threats > 0 ? "alert" : "monitoring"}
+                status={analysis.vetoed > 0 ? "alert" : "monitoring"}
                 metricLabel="Tokens screened"
-                metricValue={enriched}
+                metricValue={scoresByMint.size}
                 systemLabel="Threat level"
-                systemValue={analysis.threats > 0 ? "ELEVATED" : "NOMINAL"}
-                eventKey={analysis.threats > 0 ? `threat-${analysis.threats}` : undefined}
+                systemValue={analysis.vetoed > 0 ? "ELEVATED" : "NOMINAL"}
+                eventKey={analysis.vetoed > 0 ? `veto-${analysis.vetoed}` : undefined}
                 recommendation={
-                  analysis.threats > 0
-                    ? `Security concerns detected on ${analysis.threats} token${analysis.threats > 1 ? "s" : ""}.`
-                    : "No contract anomalies across screened tokens."
+                  analysis.vetoed > 0
+                    ? `Risk gate vetoed ${analysis.vetoed} token${analysis.vetoed > 1 ? "s" : ""} in the current window.`
+                    : "No vetoes across scored tokens."
                 }
               />
               <AgentPanel
                 agent="oracle"
-                status={enriched > 0 ? "analysing" : "idle"}
+                status={scoresByMint.size > 0 ? "analysing" : "idle"}
                 metricLabel="Tokens scored"
-                metricValue={enriched}
+                metricValue={scoresByMint.size}
                 systemLabel="Confidence"
-                systemValue={`${Math.round(analysis.confidence * 100)}%`}
+                systemValue={
+                  analysis.sampled === 0 ? "—" : `${Math.round(analysis.confidence * 100)}%`
+                }
                 recommendation={
                   elites.length > 0
                     ? `Elite classification granted to ${elites.length} token${elites.length > 1 ? "s" : ""}. Awaiting review.`
@@ -339,59 +376,59 @@ export default function CommandCenterPage() {
               <PanelHeader className="mb-0">
                 <div>
                   <Label>Top opportunities</Label>
-                  <PanelTitle className="mt-1 text-sm">Ranked by 24h volume</PanelTitle>
+                  <PanelTitle className="mt-1 text-sm">Ranked by AI score</PanelTitle>
                 </div>
               </PanelHeader>
             </div>
 
             <div className="border-t border-line">
-              {trending.isPending ? (
+              {topScores.isPending ? (
                 <div className="space-y-3 p-4">
                   {Array.from({ length: 4 }, (_, index) => (
                     <Skeleton key={index} className="h-11" />
                   ))}
                 </div>
-              ) : (trending.data?.items.length ?? 0) === 0 ? (
+              ) : (topScores.data?.items.length ?? 0) === 0 ? (
                 <EmptyState
-                  agent="pulse"
+                  agent="oracle"
                   title="No ranked tokens yet"
-                  body="PULSE needs at least one enriched market observation before it can rank anything."
+                  body="ORACLE needs at least one scored token before it can rank anything."
                   className="py-10"
                 />
               ) : (
                 <ul>
-                  {trending.data?.items.map((entry) => {
-                    const intel = deriveIntelligence(entry.token, entry.market);
-                    return (
-                      <li key={entry.token.mint_address}>
-                        <Link
-                          href={`/tokens/${entry.token.mint_address}`}
-                          className="flex items-center gap-3 border-b border-line/60 px-4 py-3 transition-colors last:border-0 hover:bg-elevated/50"
-                        >
-                          <TokenAvatar mint={entry.token.mint_address} size={28} />
-                          <div className="min-w-0 flex-1">
-                            <p className="truncate text-sm text-ink">
-                              {entry.token.symbol ?? entry.token.name ?? "Unnamed"}
-                            </p>
-                            <p data-numeric className="text-xs text-ink-faint">
-                              {formatUsd(entry.market.volume_24h)} vol
-                            </p>
-                          </div>
-                          {intel.elite ? (
-                            <AgentSigil agent="apex" size={15} className="text-apex" />
-                          ) : (
-                            <span
-                              data-numeric
-                              className="text-xs text-ink-dim"
-                              style={{ color: AGENTS.oracle.hue }}
-                            >
-                              {Math.round(intel.confidence * 100)}%
-                            </span>
-                          )}
-                        </Link>
-                      </li>
-                    );
-                  })}
+                  {topScores.data?.items.map((entry) => (
+                    <li key={entry.token.mint_address}>
+                      <Link
+                        href={`/tokens/${entry.token.mint_address}`}
+                        className="flex items-center gap-3 border-b border-line/60 px-4 py-3 transition-colors last:border-0 hover:bg-elevated/50"
+                      >
+                        <TokenAvatar mint={entry.token.mint_address} size={28} />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm text-ink">
+                            {entry.token.symbol ?? entry.token.name ?? "Unnamed"}
+                          </p>
+                          <p
+                            className="text-xs"
+                            style={{ color: GRADE_TONE[entry.score.grade] }}
+                          >
+                            {GRADE_LABEL[entry.score.grade]}
+                          </p>
+                        </div>
+                        {entry.score.is_elite ? (
+                          <AgentSigil agent="apex" size={15} className="text-apex" />
+                        ) : (
+                          <span
+                            data-numeric
+                            className="text-xs"
+                            style={{ color: AGENTS.oracle.hue }}
+                          >
+                            {Math.round(num(entry.score.score))}
+                          </span>
+                        )}
+                      </Link>
+                    </li>
+                  ))}
                 </ul>
               )}
             </div>
@@ -404,12 +441,27 @@ export default function CommandCenterPage() {
             <Label>System health</Label>
             <ul className="mt-3 flex flex-col gap-2.5">
               {[
-                { name: "Discovery scanner", value: status === "live" ? "Operational" : "Degraded", ok: status === "live" },
-                { name: "Enrichment worker", value: enriched > 0 ? "Operational" : "Idle", ok: enriched > 0 },
+                {
+                  name: "Discovery scanner",
+                  value: status === "live" ? "Operational" : "Degraded",
+                  ok: status === "live",
+                },
+                {
+                  name: "Enrichment worker",
+                  value: enriched > 0 ? "Operational" : "Idle",
+                  ok: enriched > 0,
+                },
                 { name: "Market provider", value: "DexScreener", ok: true },
-                { name: "Event stream", value: status === "live" ? "Connected" : "Retrying", ok: status === "live" },
+                {
+                  name: "Event stream",
+                  value: status === "live" ? "Connected" : "Retrying",
+                  ok: status === "live",
+                },
               ].map((row) => (
-                <li key={row.name} className="flex items-center justify-between gap-3 text-sm">
+                <li
+                  key={row.name}
+                  className="flex items-center justify-between gap-3 text-sm"
+                >
                   <span className="flex items-center gap-2 text-ink-dim">
                     <StatusDot
                       live={row.ok}

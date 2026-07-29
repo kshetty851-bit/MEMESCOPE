@@ -23,8 +23,8 @@ export default function NotFound() {
           SCOUT swept this sector. Nothing here.
         </h1>
         <p className="text-sm text-ink-faint">
-          The page you asked for does not exist. The division is still watching
-          everything that does.
+          The page you asked for does not exist. The division is still watching everything
+          that does.
         </p>
       </div>
 

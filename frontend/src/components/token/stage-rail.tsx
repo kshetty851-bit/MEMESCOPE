@@ -1,9 +1,4 @@
-import {
-  STAGE_LABEL,
-  STAGE_ORDER,
-  STAGE_TONE,
-  type LifecycleStage,
-} from "@/lib/lifecycle";
+import { STAGE_LABEL, STAGE_ORDER, STAGE_TONE, type LifecycleStage } from "@/lib/lifecycle";
 import { cn } from "@/lib/utils";
 
 /**
