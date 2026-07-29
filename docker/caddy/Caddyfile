@@ -1,0 +1,73 @@
+# MEMESCOPE production edge.
+#
+# Caddy rather than nginx because the objective is a *permanent* HTTPS URL:
+# Caddy provisions and renews certificates from Let's Encrypt on its own, while
+# the nginx config this supersedes (docker/nginx/nginx.conf) expects certificate
+# files to already exist at docker/nginx/certs and has no renewal story. A
+# certificate that silently expires ninety days after an alpha launch is the
+# most predictable outage this deployment could have.
+#
+# DOMAIN and ACME_EMAIL are supplied by the environment; Caddy fails to start if
+# DOMAIN is unset, which is the correct behaviour - a reverse proxy that comes up
+# on the wrong hostname would serve the alpha to nobody and get a certificate for
+# nothing.
+{
+	email {$ACME_EMAIL}
+	# Cuts the noisy per-request lines while keeping errors.
+	log {
+		level WARN
+	}
+}
+
+{$DOMAIN} {
+	encode zstd gzip
+
+	# --- Security headers --------------------------------------------------
+	#
+	# These are the *edge* copy. The API sets its own (see
+	# app/middleware/security_headers.py) and those win for API responses
+	# because `header` here only adds what is missing. The duplication is
+	# deliberate: the frontend is a Next.js server that sets none of these, so
+	# without them here the HTML responses would ship bare.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "geolocation=(), microphone=(), camera=()"
+		# Caddy advertises itself by default; there is no reason to tell a
+		# scanner which server and version it is talking to.
+		-Server
+	}
+
+	# --- API ---------------------------------------------------------------
+	#
+	# Matched before the frontend catch-all. `/api/*`, the probes and the
+	# WebSocket all belong to the backend.
+	#
+	# WebSockets need no special directive in Caddy v2 - reverse_proxy upgrades
+	# the connection automatically - but the long-lived stream needs its read
+	# timeout lifted, or the token feed is severed every 30 seconds.
+	@api {
+		path /api/* /live /ready /docs /redoc /openapi.json
+	}
+	reverse_proxy @api backend:8000 {
+		header_up X-Real-IP {remote_host}
+		transport http {
+			read_timeout 3600s
+		}
+	}
+
+	# --- Static assets -----------------------------------------------------
+	#
+	# Next.js fingerprints everything under /_next/static, so those URLs are
+	# immutable by construction and can be cached hard. Anything else must not
+	# be, or a deploy leaves users on stale HTML pointing at deleted chunks.
+	@immutable {
+		path /_next/static/* /fonts/*
+	}
+	header @immutable Cache-Control "public, max-age=31536000, immutable"
+
+	# --- Frontend ----------------------------------------------------------
+	reverse_proxy frontend:3000
+}
