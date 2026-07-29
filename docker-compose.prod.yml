@@ -2,13 +2,23 @@
 #   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 #
 # Differences from local: production build targets, no source bind mounts, no
-# published database/cache ports, resource limits, and nginx in front.
+# published database/cache ports, resource limits, and Caddy in front.
 
 name: memescope
 
 services:
   postgres:
-    ports: []
+    restart: unless-stopped
+    # `!reset []` — NOT `ports: []`.
+    #
+    # Compose merges list-valued fields by concatenation, so an empty list
+    # removes nothing: the base file's mapping survived into the production
+    # config and published Postgres and Redis on the host. On a public server
+    # with a permissive firewall that is the database exposed to the internet.
+    # Caught by the Phase 6C production rehearsal, which is the only reason it
+    # was not found by someone else first. `!reset` is the documented way to
+    # clear an inherited value (Compose spec 2.24+).
+    ports: !reset []
     volumes:
       - postgres-data:/var/lib/postgresql/data
     deploy:
@@ -16,7 +26,8 @@ services:
         limits: { cpus: "2", memory: 2G }
 
   redis:
-    ports: []
+    restart: unless-stopped
+    ports: !reset []
     command: >
       redis-server
       --appendonly yes
@@ -46,11 +57,28 @@ services:
       DEBUG: "false"
       LOG_FORMAT: json
       REFRESH_COOKIE_SECURE: "true"
-      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      # Migrations are owned by deploy.sh, which runs them once as an ordered
+      # step before any container starts. Left on, every replica races to apply
+      # them at boot and they collide creating `alembic_version` — harmless the
+      # first time, but a real migration racing itself is how a schema ends up
+      # half-applied with one replica dead.
+      RUN_MIGRATIONS: "false"
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:?ALLOWED_HOSTS must be explicit in production}
       CORS_ORIGINS: ${CORS_ORIGINS:?CORS_ORIGINS must be explicit in production}
-    volumes: []
-    ports: []
+      # Without this the rate limiter keys every user onto Caddy's address and
+      # they share one allowance. Compose gives services a private network, so
+      # the whole bridge subnet is the trust boundary.
+      TRUSTED_PROXY_IPS: ${TRUSTED_PROXY_IPS:-172.16.0.0/12}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0.1}
+      BUILD_SHA: ${BUILD_SHA:-unknown}
+    volumes: !reset []
+    # Unpublished on purpose: Caddy reaches the backend over the compose
+    # network. Publishing a fixed host port is also incompatible with more than
+    # one replica — the second container cannot bind an address the first holds,
+    # which is exactly how this was discovered.
+    ports: !reset []
+    restart: unless-stopped
     deploy:
       replicas: 2
       resources:
@@ -65,20 +93,38 @@ services:
       ENVIRONMENT: production
       LOG_FORMAT: json
       RUN_MIGRATIONS: "false"
-      REDIS_PASSWORD: ${REDIS_PASSWORD}
-    volumes: []
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      BUILD_SHA: ${BUILD_SHA:-unknown}
+    volumes: !reset []
+    restart: unless-stopped
 
   scheduler:
     build:
       context: ./backend
       target: production
-    command: celery -A app.workers.celery_app beat --loglevel=info
+    # `--schedule` must point somewhere the unprivileged user can write.
+    command: >
+      celery -A app.workers.celery_app beat --loglevel=info
+      --schedule=/var/lib/celery/celerybeat-schedule
     environment:
       ENVIRONMENT: production
       LOG_FORMAT: json
       RUN_MIGRATIONS: "false"
-      REDIS_PASSWORD: ${REDIS_PASSWORD}
-    volumes: []
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      BUILD_SHA: ${BUILD_SHA:-unknown}
+    volumes: !reset
+      - celery-beat:/var/lib/celery
+    restart: unless-stopped
+
+  # A disabled feature exits 0 and must then stay stopped. Under
+  # `unless-stopped` a clean exit is restarted forever, which burns CPU and
+  # fills the logs with a loop that looks like a crash. `on-failure` restarts a
+  # genuine crash and respects a deliberate no-op.
+  scanner:
+    restart: on-failure
+
+  enrichment:
+    restart: on-failure
 
   frontend:
     build:
@@ -87,25 +133,74 @@ services:
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?required}
         NEXT_PUBLIC_ENVIRONMENT: production
-    volumes: []
-    ports: []
+        NEXT_PUBLIC_BUILD_SHA: ${BUILD_SHA:-unknown}
+        NEXT_PUBLIC_ALPHA: "true"
+        NEXT_PUBLIC_POSTHOG_KEY: ${POSTHOG_KEY:-}
+        NEXT_PUBLIC_POSTHOG_HOST: ${POSTHOG_HOST:-https://eu.i.posthog.com}
+        NEXT_PUBLIC_FEEDBACK_URL: ${FEEDBACK_URL:-}
+    volumes: !reset []
+    ports: !reset []
+    restart: unless-stopped
     deploy:
       resources:
         limits: { cpus: "1", memory: 512M }
 
-  nginx:
-    image: nginx:1.27-alpine
+  # Supersedes the nginx service. See docker/caddy/Caddyfile for why: nginx
+  # needed certificates to already exist and had no renewal path, which is not
+  # a permanent HTTPS URL. docker/nginx/nginx.conf is retained but unused.
+  caddy:
+    image: caddy:2.8-alpine
     restart: unless-stopped
     ports:
       - "80:80"
       - "443:443"
+      - "443:443/udp" # HTTP/3
+    environment:
+      DOMAIN: ${DOMAIN:?DOMAIN is required — Caddy needs it to request a certificate}
+      ACME_EMAIL: ${ACME_EMAIL:?ACME_EMAIL is required for Let's Encrypt expiry notices}
     volumes:
-      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./docker/nginx/certs:/etc/nginx/certs:ro
+      - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates and ACME account keys. Losing this volume means
+      # re-requesting every certificate, which Let's Encrypt rate-limits to
+      # five per week per domain — enough to lock out a bad afternoon.
+      - caddy-data:/data
+      - caddy-config:/config
     depends_on:
-      - backend
-      - frontend
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "caddy", "version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Uses the Postgres image rather than the backend one: `pg_dump` must match
+  # the server's major version, and pinning both to the same image makes that
+  # true by construction instead of by remembering. It also keeps the backend
+  # image free of a client it never uses.
+  backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "/scripts/backup-loop.sh"]
+    volumes:
+      - ./scripts:/scripts:ro
+      - backup-data:/backups
+    environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER:-memescope}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?required}
+      PGDATABASE: ${POSTGRES_DB:-memescope}
+      BACKUP_DIR: /backups
+    depends_on:
+      postgres:
+        condition: service_healthy
 
 volumes:
+  celery-beat:
   postgres-data:
   redis-data:
+  caddy-data:
+  caddy-config:
+  backup-data:
