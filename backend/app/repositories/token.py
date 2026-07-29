@@ -32,6 +32,57 @@ class TokenRepository(BaseRepository[DiscoveredToken]):
         stmt = select(DiscoveredToken).where(DiscoveredToken.mint_address == mint_address)
         return (await self.session.execute(stmt)).scalars().first()
 
+    async def name_collisions(
+        self, mint_addresses: Sequence[str]
+    ) -> dict[str, tuple[int, int]]:
+        """Per mint: how many tokens share its name, and how many predate it.
+
+        Returns `{mint: (sharing_name, discovered_before)}`, counting the token
+        itself in `sharing_name`. A mint whose name is null or blank is absent —
+        an unnamed token cannot impersonate anything by name.
+
+        Both halves matter and neither is sufficient alone. The cluster size
+        says how contested a name is; the "discovered before" count says where
+        in that queue this particular mint sits. The 1st token called *Puffins*
+        and the 149th are very different propositions, and only the second
+        number separates them.
+
+        Two window functions over one scan rather than a correlated subquery
+        per mint, which at 24k tokens and 333 clusters of ten-or-more would be
+        the difference between one query and thousands.
+        """
+        if not mint_addresses:
+            return {}
+
+        named = (
+            select(
+                DiscoveredToken.mint_address,
+                DiscoveredToken.name,
+                sa_func.count().over(partition_by=DiscoveredToken.name).label("sharing_name"),
+                sa_func.rank()
+                .over(
+                    partition_by=DiscoveredToken.name,
+                    order_by=(
+                        DiscoveredToken.discovered_at.asc(),
+                        DiscoveredToken.mint_address.asc(),
+                    ),
+                )
+                .label("arrival_rank"),
+            )
+            .where(DiscoveredToken.name.is_not(None))
+            .where(DiscoveredToken.name != "")
+            .subquery()
+        )
+
+        stmt = select(named.c.mint_address, named.c.sharing_name, named.c.arrival_rank).where(
+            named.c.mint_address.in_(list(dict.fromkeys(mint_addresses)))
+        )
+
+        return {
+            row.mint_address: (int(row.sharing_name), int(row.arrival_rank) - 1)
+            for row in (await self.session.execute(stmt)).all()
+        }
+
     async def get_many_by_mints(
         self, mint_addresses: Sequence[str]
     ) -> dict[str, DiscoveredToken]:

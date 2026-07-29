@@ -6,7 +6,7 @@ New feature areas (scanner, tokens, alerts, watchlists) get their own module in
 
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import auth, health, market, scores, tokens, users
+from app.api.v1.endpoints import auth, health, identity, market, scores, tokens, users
 from app.exit_signals import api as intelligence
 from app.radar import api as radar
 
@@ -28,3 +28,7 @@ api_router.include_router(radar.router)
 # Exit Watch, the permanent record and the leaderboards. Additive; the Radar's
 # own routes and every pre-existing endpoint are unchanged.
 api_router.include_router(intelligence.router)
+# Clone risk. Additive, and the only API added in Phase 12: deciding whether a
+# name is contested needs a scan across every discovered token, so it cannot be
+# computed client-side.
+api_router.include_router(identity.router)
