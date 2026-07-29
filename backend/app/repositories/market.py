@@ -81,6 +81,57 @@ class MarketSnapshotRepository(BaseRepository[TokenMarketSnapshot]):
         total = int((await self.session.execute(count_stmt)).scalar_one())
         return rows, total
 
+    async def window_for_mints(
+        self,
+        mint_addresses: Sequence[str],
+        *,
+        since: datetime,
+        limit_per_mint: int,
+    ) -> dict[str, list[TokenMarketSnapshot]]:
+        """Up to N recent snapshots for each of several mints, newest first.
+
+        One round trip for a whole scoring batch. `ROW_NUMBER() OVER (PARTITION
+        BY mint_address ORDER BY captured_at DESC)` takes the head of each
+        token's history in a single pass over
+        `ix_snapshots_mint_captured_desc`, where the obvious alternative - a
+        query per mint - would be one round trip per token per cycle.
+
+        `since` is the widest window in the batch. Tokens whose own tier implies
+        a narrower window are trimmed in memory by the caller, because the
+        window is a per-token property and this is a single statement.
+        """
+        if not mint_addresses:
+            return {}
+
+        ranked = (
+            select(
+                TokenMarketSnapshot,
+                func.row_number()
+                .over(
+                    partition_by=TokenMarketSnapshot.mint_address,
+                    order_by=TokenMarketSnapshot.captured_at.desc(),
+                )
+                .label("rn"),
+            )
+            .where(
+                TokenMarketSnapshot.mint_address.in_(mint_addresses),
+                TokenMarketSnapshot.captured_at >= since,
+            )
+            .subquery("ranked")
+        )
+        Ranked = aliased(TokenMarketSnapshot, ranked)  # noqa: N806 - an ORM alias is a class
+
+        stmt = (
+            select(Ranked)
+            .where(ranked.c.rn <= limit_per_mint)
+            .order_by(Ranked.mint_address, Ranked.captured_at.desc())
+        )
+
+        window: dict[str, list[TokenMarketSnapshot]] = {}
+        for snapshot in (await self.session.execute(stmt)).scalars().all():
+            window.setdefault(snapshot.mint_address, []).append(snapshot)
+        return window
+
     async def latest_per_token(
         self,
         *,

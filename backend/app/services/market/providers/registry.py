@@ -12,14 +12,27 @@ from collections.abc import Callable
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.services.market.providers.base import MarketDataProvider
+from app.services.market.providers.composite import CompositeProvider
 from app.services.market.providers.dexscreener import DexScreenerProvider
 
 logger = get_logger(__name__)
 
 ProviderFactory = Callable[[], MarketDataProvider]
 
+
+def _composite() -> MarketDataProvider:
+    """DexScreener with the GeckoTerminal liquidity fill behind it.
+
+    The primary is constructed here rather than injected because the registry
+    is the layer that knows concrete classes; the composite itself stays
+    agnostic about which provider it is wrapping.
+    """
+    return CompositeProvider(DexScreenerProvider())
+
+
 _PROVIDERS: dict[str, ProviderFactory] = {
     DexScreenerProvider.name: DexScreenerProvider,
+    CompositeProvider.name: _composite,
 }
 
 

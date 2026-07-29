@@ -18,11 +18,13 @@ import asyncio
 import contextlib
 import json
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
 from app.core.config import settings
+from app.core.events import publish_score_events
 from app.core.logging import get_logger
 from app.core.redis import get_redis
 from app.db.session import SessionFactory
@@ -30,6 +32,7 @@ from app.services.market.providers.base import MarketDataProvider
 from app.services.market.providers.registry import get_provider
 from app.services.market.scheduler import RefreshScheduler
 from app.services.market.service import MarketEnrichmentService
+from app.services.scoring.service import TokenScoringService
 
 logger = get_logger(__name__)
 
@@ -44,6 +47,13 @@ class WorkerStats:
     failures: int = 0
     dead_lettered: int = 0
     degraded_cycles: int = 0
+    # Scoring runs in its own transaction after enrichment commits, so its
+    # counters are tracked separately - a scoring failure says nothing about
+    # whether the snapshots landed.
+    tokens_scored: int = 0
+    score_history_written: int = 0
+    score_events_published: int = 0
+    scoring_failures: int = 0
     started_at: datetime | None = field(default=None)
 
     def as_dict(self) -> dict[str, Any]:
@@ -56,6 +66,10 @@ class WorkerStats:
             "failures": self.failures,
             "dead_lettered": self.dead_lettered,
             "degraded_cycles": self.degraded_cycles,
+            "tokens_scored": self.tokens_scored,
+            "score_history_written": self.score_history_written,
+            "score_events_published": self.score_events_published,
+            "scoring_failures": self.scoring_failures,
             "started_at": self.started_at.isoformat() if self.started_at else None,
         }
 
@@ -234,9 +248,51 @@ class MarketEnrichmentWorker:
                     self.stats.degraded_cycles += 1
                 total += outcome.requested
 
+            mints = [state.mint_address for state in states]
+            # TX-1 ends here. Snapshots are durable from this point, whatever
+            # scoring does next.
             await session.commit()
             self.stats.cycles += 1
-            return total
+
+        await self._score_batch(mints)
+        return total
+
+    # --- Scoring (TX-2) -----------------------------------------------------
+
+    async def _score_batch(self, mints: Sequence[str]) -> None:
+        """Score the batch that was just enriched, in its own transaction.
+
+        Deliberately outside the enrichment transaction. `claim_due` holds row
+        locks on `token_enrichment_state` until TX-1 commits, so scoring inside
+        it would extend that lock across every worker replica for the sake of a
+        computation that is derived and recomputable. Running afterwards costs a
+        crash window in which a snapshot exists without a score, which the sweep
+        closes anyway - it has to, for deploys and restarts.
+
+        Failure here is contained: it is logged and the cycle continues. The
+        snapshots are already committed, and the sweep will pick the token up.
+        """
+        if not settings.FEATURE_AI_SCORING_ENABLED or not mints:
+            return
+
+        try:
+            async with SessionFactory() as session:
+                service = TokenScoringService(session)
+                outcome = await service.score_mints(mints, now=datetime.now(UTC))
+                await session.commit()
+        except Exception:
+            self.stats.scoring_failures += 1
+            logger.exception("scoring_cycle_failed", tokens=len(mints))
+            return
+
+        self.stats.tokens_scored += outcome.scored
+        self.stats.score_history_written += outcome.history_written
+
+        # After the commit, never before: an event published from inside the
+        # transaction can describe a score that never landed.
+        if outcome.events:
+            await publish_score_events(outcome.events)
+            self.stats.score_events_published += len(outcome.events)
 
 
 async def run_worker() -> None:

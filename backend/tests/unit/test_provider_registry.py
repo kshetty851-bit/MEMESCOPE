@@ -11,6 +11,7 @@ from app.services.market.providers.base import (
     MarketDataProvider,
     ProviderHealth,
 )
+from app.services.market.providers.composite import CompositeProvider
 from app.services.market.providers.dexscreener import DexScreenerProvider
 from app.services.market.providers.registry import (
     available_providers,
@@ -38,6 +39,18 @@ class StubProvider(MarketDataProvider):
 
 def test_default_provider_is_dexscreener() -> None:
     assert isinstance(get_provider(), DexScreenerProvider)
+
+
+def test_composite_is_selectable_and_wraps_dexscreener() -> None:
+    """The liquidity fill is opt-in: selecting it must not change the default."""
+    provider = get_provider("composite")
+    assert isinstance(provider, CompositeProvider)
+    assert isinstance(provider.primary, DexScreenerProvider)
+    assert provider.secondary.name == "geckoterminal"
+
+
+def test_composite_inherits_the_primary_batch_size() -> None:
+    assert get_provider("composite").batch_size == DexScreenerProvider().batch_size
 
 
 def test_unknown_provider_fails_loudly() -> None:
