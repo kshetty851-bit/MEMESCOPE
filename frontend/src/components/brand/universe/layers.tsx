@@ -66,16 +66,14 @@ export function Nebula() {
       <div
         className="motion-loop absolute -left-[15%] top-[-10%] size-[70vw] rounded-full opacity-[0.16] blur-[90px]"
         style={{
-          background:
-            "radial-gradient(circle, var(--color-oracle), transparent 65%)",
+          background: "radial-gradient(circle, var(--color-oracle), transparent 65%)",
           animation: "drift 90s var(--ease-precise) infinite",
         }}
       />
       <div
         className="motion-loop absolute right-[-20%] top-[15%] size-[60vw] rounded-full opacity-[0.13] blur-[100px]"
         style={{
-          background:
-            "radial-gradient(circle, var(--color-plasma-deep), transparent 65%)",
+          background: "radial-gradient(circle, var(--color-plasma-deep), transparent 65%)",
           animation: "drift 120s var(--ease-precise) infinite reverse",
         }}
       />
@@ -94,7 +92,12 @@ export function Nebula() {
 
 export function DistantGalaxies() {
   return (
-    <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 size-full" aria-hidden>
+    <svg
+      viewBox="0 0 100 100"
+      preserveAspectRatio="none"
+      className="absolute inset-0 size-full"
+      aria-hidden
+    >
       <defs>
         <radialGradient id="galaxy-a">
           <stop offset="0%" stopColor="var(--color-oracle)" stopOpacity="0.5" />
@@ -105,8 +108,22 @@ export function DistantGalaxies() {
           <stop offset="100%" stopColor="transparent" />
         </radialGradient>
       </defs>
-      <ellipse cx="18" cy="72" rx="7" ry="1.6" fill="url(#galaxy-a)" transform="rotate(-24 18 72)" />
-      <ellipse cx="82" cy="26" rx="5" ry="1.1" fill="url(#galaxy-b)" transform="rotate(18 82 26)" />
+      <ellipse
+        cx="18"
+        cy="72"
+        rx="7"
+        ry="1.6"
+        fill="url(#galaxy-a)"
+        transform="rotate(-24 18 72)"
+      />
+      <ellipse
+        cx="82"
+        cy="26"
+        rx="5"
+        ry="1.1"
+        fill="url(#galaxy-b)"
+        transform="rotate(18 82 26)"
+      />
     </svg>
   );
 }
@@ -195,17 +212,56 @@ export function OrbitalStation() {
     >
       <svg viewBox="0 0 120 60" className="w-full">
         {/* Solar arrays */}
-        <rect x="2" y="20" width="30" height="18" fill="var(--color-titan)" opacity="0.22" />
-        <rect x="88" y="20" width="30" height="18" fill="var(--color-titan)" opacity="0.22" />
-        <path d="M2 20v18M12 20v18M22 20v18M32 20v18M88 20v18M98 20v18M108 20v18M118 20v18"
-              stroke="var(--color-line-bright)" strokeWidth="0.5" opacity="0.5" />
+        <rect
+          x="2"
+          y="20"
+          width="30"
+          height="18"
+          fill="var(--color-titan)"
+          opacity="0.22"
+        />
+        <rect
+          x="88"
+          y="20"
+          width="30"
+          height="18"
+          fill="var(--color-titan)"
+          opacity="0.22"
+        />
+        <path
+          d="M2 20v18M12 20v18M22 20v18M32 20v18M88 20v18M98 20v18M108 20v18M118 20v18"
+          stroke="var(--color-line-bright)"
+          strokeWidth="0.5"
+          opacity="0.5"
+        />
         {/* Truss + hull */}
-        <rect x="32" y="28" width="56" height="3" fill="var(--color-line-bright)" opacity="0.6" />
-        <rect x="48" y="21" width="24" height="17" rx="4" fill="oklch(0.24 0.02 265)" stroke="var(--color-line-bright)" strokeWidth="0.6" />
+        <rect
+          x="32"
+          y="28"
+          width="56"
+          height="3"
+          fill="var(--color-line-bright)"
+          opacity="0.6"
+        />
+        <rect
+          x="48"
+          y="21"
+          width="24"
+          height="17"
+          rx="4"
+          fill="oklch(0.24 0.02 265)"
+          stroke="var(--color-line-bright)"
+          strokeWidth="0.6"
+        />
         <circle cx="60" cy="29.5" r="2.6" fill="var(--color-plasma)" opacity="0.7" />
         {/* Beacon */}
         <circle cx="72" cy="24" r="1.2" fill="var(--color-danger)">
-          <animate attributeName="opacity" values="1;0.1;1" dur="3.4s" repeatCount="indefinite" />
+          <animate
+            attributeName="opacity"
+            values="1;0.1;1"
+            dur="3.4s"
+            repeatCount="indefinite"
+          />
         </circle>
       </svg>
     </div>
@@ -214,7 +270,12 @@ export function OrbitalStation() {
 
 export function Satellites() {
   return (
-    <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 size-full" aria-hidden>
+    <svg
+      viewBox="0 0 100 100"
+      preserveAspectRatio="none"
+      className="absolute inset-0 size-full"
+      aria-hidden
+    >
       {[
         { r: 34, dur: 180, size: 0.5, tone: "var(--color-plasma)" },
         { r: 44, dur: 260, size: 0.35, tone: "var(--color-scout)" },
@@ -268,8 +329,16 @@ export function CryptoGlyphs() {
           <svg viewBox="0 0 20 20" className="size-full">
             {/* Holographic containment ring + mark. Deliberately faint: these
                 are set dressing, not branding. */}
-            <circle cx="10" cy="10" r="9.4" fill="none" stroke="var(--color-plasma)"
-                    strokeWidth="0.25" strokeDasharray="1 2.4" opacity="0.5" />
+            <circle
+              cx="10"
+              cy="10"
+              r="9.4"
+              fill="none"
+              stroke="var(--color-plasma)"
+              strokeWidth="0.25"
+              strokeDasharray="1 2.4"
+              opacity="0.5"
+            />
             <path d={GLYPHS[item.id]} fill="var(--color-plasma)" opacity="0.24" />
           </svg>
         </div>
@@ -292,7 +361,12 @@ export function Asteroids({ seed = 91 }: { seed?: number }) {
   }));
 
   return (
-    <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 size-full" aria-hidden>
+    <svg
+      viewBox="0 0 100 100"
+      preserveAspectRatio="none"
+      className="absolute inset-0 size-full"
+      aria-hidden
+    >
       {rocks.map((rock, index) => (
         <g
           key={index}
@@ -327,7 +401,12 @@ export function DataStreams({ density = 0.4 }: { density?: number }) {
   }));
 
   return (
-    <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 size-full" aria-hidden>
+    <svg
+      viewBox="0 0 100 100"
+      preserveAspectRatio="none"
+      className="absolute inset-0 size-full"
+      aria-hidden
+    >
       {streams.map((stream, index) => (
         <line
           key={index}
@@ -351,7 +430,13 @@ export function DataStreams({ density = 0.4 }: { density?: number }) {
 
 /* ------------------------------------------------------------- Particles -- */
 
-export function ParticleField({ density = 0.4, seed = 17 }: { density?: number; seed?: number }) {
+export function ParticleField({
+  density = 0.4,
+  seed = 17,
+}: {
+  density?: number;
+  seed?: number;
+}) {
   const random = seeded(seed);
   // Scales with market activity: a quiet chain gets a calm sky.
   const count = 18 + Math.round(density * 46);
@@ -364,7 +449,12 @@ export function ParticleField({ density = 0.4, seed = 17 }: { density?: number; 
   }));
 
   return (
-    <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 size-full" aria-hidden>
+    <svg
+      viewBox="0 0 100 100"
+      preserveAspectRatio="none"
+      className="absolute inset-0 size-full"
+      aria-hidden
+    >
       {motes.map((mote, index) => (
         <circle
           key={index}

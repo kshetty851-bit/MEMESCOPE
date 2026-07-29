@@ -3,7 +3,26 @@
 import { create } from "zustand";
 
 import { api, setAccessToken } from "@/lib/api-client";
+import { AUTH_BYPASS } from "@/lib/env";
 import type { AuthResponse, LoginPayload, RegisterPayload, User } from "@/types/api";
+
+/**
+ * Stand-in identity used while `AUTH_BYPASS` is on.
+ *
+ * Mirrors the principal the backend hands out under the same flag, so the UI
+ * and the API agree on who is signed in without a token ever existing. Never
+ * reached in a production build.
+ */
+const DEVELOPER_USER: User = {
+  id: "00000000-0000-4000-8000-00000000d0e5",
+  email: "developer@memescope.local",
+  display_name: "Developer",
+  role: "admin",
+  is_active: true,
+  is_verified: true,
+  last_login_at: null,
+  created_at: new Date(0).toISOString(),
+};
 
 /**
  * Session state.
@@ -42,6 +61,14 @@ export const useAuthStore = create<AuthState>((set) => {
     error: null,
 
     bootstrap: async () => {
+      // Development bypass: resolve to a developer session synchronously and
+      // make no request at all. Returning before the fetch is what keeps the
+      // network free of auth traffic, rather than merely ignoring its result.
+      if (AUTH_BYPASS) {
+        set({ user: DEVELOPER_USER, status: "authenticated", error: null });
+        return;
+      }
+
       set({ status: "loading" });
       try {
         applySession(

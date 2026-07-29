@@ -1,5 +1,6 @@
 "use client";
 
+import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
@@ -15,6 +16,7 @@ import {
   StarField,
 } from "@/components/brand/universe/layers";
 import { useReducedMotion } from "@/hooks/use-reduced-motion";
+import { cameraFor, cameraTransform, HOME } from "@/lib/camera";
 import {
   getUniverseActivity,
   onUniverseActivity,
@@ -39,6 +41,15 @@ import { cn } from "@/lib/utils";
  * Parallax follows the pointer through two CSS variables written at most once
  * per frame by a single passive listener. That is the only JS that runs, and
  * it is disabled on touch, in Command mode and under reduced motion.
+ *
+ * Two independent movements, composed:
+ *   * The CAMERA is where the observatory is pointed, one per view. It changes
+ *     only on navigation and animates over `--duration-camera`.
+ *   * PARALLAX is how the head moves within that framing, driven by the
+ *     pointer, continuous.
+ * The camera wraps the planes so a route change animates exactly one element
+ * however many planes the scene grows to. The vignette sits outside it - that
+ * is chrome holding the sky off the UI, not part of the sky.
  */
 
 const MAX_EVENTS = 6;
@@ -55,6 +66,12 @@ export function Universe({
 }) {
   const reduced = useReducedMotion();
   const root = useRef<HTMLDivElement>(null);
+  const pathname = usePathname();
+
+  // Auth and error screens borrow the sky without belonging to a view, so the
+  // minimal variant stays at the home framing rather than inheriting whichever
+  // route happened to render it.
+  const camera = minimal ? HOME : cameraFor(pathname);
 
   const [activity, setActivity] = useState(getUniverseActivity);
   const [events, setEvents] = useState<UniverseEvent[]>([]);
@@ -133,65 +150,84 @@ export function Universe({
       )}
       style={{ ["--px" as string]: 0, ["--py" as string]: 0 }}
     >
-      {/* Plane 1 — deep stars. Barely parallax; they are effectively at infinity. */}
       <div
-        className="absolute inset-[-2%] will-change-transform"
-        style={{ transform: "translate3d(calc(var(--px) * -6px), calc(var(--py) * -6px), 0)" }}
+        className="universe-camera absolute inset-0"
+        style={{ transform: cameraTransform(camera) }}
       >
-        {deep}
-      </div>
-
-      {/* Plane 2 — nebula. */}
-      <div
-        className="absolute inset-[-6%] will-change-transform"
-        style={{ transform: "translate3d(calc(var(--px) * -14px), calc(var(--py) * -14px), 0)" }}
-      >
-        <Nebula />
-      </div>
-
-      {/* Plane 3 — galaxies, satellites, debris. */}
-      <div
-        className="absolute inset-[-4%] will-change-transform"
-        style={{ transform: "translate3d(calc(var(--px) * -24px), calc(var(--py) * -24px), 0)" }}
-      >
-        {mid}
-      </div>
-
-      {/* Plane 4 — the planet. Large mass, small movement. */}
-      {!minimal && (
+        {/* Plane 1 — deep stars. Barely parallax; they are effectively at infinity. */}
         <div
-          className="absolute inset-0 will-change-transform"
-          style={{ transform: "translate3d(calc(var(--px) * -18px), calc(var(--py) * -12px), 0)" }}
+          className="absolute inset-[-2%] will-change-transform"
+          style={{
+            transform: "translate3d(calc(var(--px) * -6px), calc(var(--py) * -6px), 0)",
+          }}
         >
-          <CelestialBody goldWash={goldWash} />
+          {deep}
         </div>
-      )}
 
-      {/* Plane 5 — station, glyphs, data streams. */}
-      {!minimal && (
+        {/* Plane 2 — nebula. */}
         <div
-          className="absolute inset-0 will-change-transform"
-          style={{ transform: "translate3d(calc(var(--px) * -40px), calc(var(--py) * -30px), 0)" }}
+          className="absolute inset-[-6%] will-change-transform"
+          style={{
+            transform: "translate3d(calc(var(--px) * -14px), calc(var(--py) * -14px), 0)",
+          }}
         >
-          <OrbitalStation />
-          <CryptoGlyphs />
-          <DataStreams density={activity} />
+          <Nebula />
         </div>
-      )}
 
-      {/* Plane 6 — foreground motes. Most movement, least contrast. */}
-      <div
-        className="absolute inset-[-3%] will-change-transform"
-        style={{ transform: "translate3d(calc(var(--px) * -60px), calc(var(--py) * -46px), 0)" }}
-      >
-        <ParticleField density={activity} />
+        {/* Plane 3 — galaxies, satellites, debris. */}
+        <div
+          className="absolute inset-[-4%] will-change-transform"
+          style={{
+            transform: "translate3d(calc(var(--px) * -24px), calc(var(--py) * -24px), 0)",
+          }}
+        >
+          {mid}
+        </div>
+
+        {/* Plane 4 — the planet. Large mass, small movement. */}
+        {!minimal && (
+          <div
+            className="absolute inset-0 will-change-transform"
+            style={{
+              transform: "translate3d(calc(var(--px) * -18px), calc(var(--py) * -12px), 0)",
+            }}
+          >
+            <CelestialBody goldWash={goldWash} />
+          </div>
+        )}
+
+        {/* Plane 5 — station, glyphs, data streams. */}
+        {!minimal && (
+          <div
+            className="absolute inset-0 will-change-transform"
+            style={{
+              transform: "translate3d(calc(var(--px) * -40px), calc(var(--py) * -30px), 0)",
+            }}
+          >
+            <OrbitalStation />
+            <CryptoGlyphs />
+            <DataStreams density={activity} />
+          </div>
+        )}
+
+        {/* Plane 6 — foreground motes. Most movement, least contrast. */}
+        <div
+          className="absolute inset-[-3%] will-change-transform"
+          style={{
+            transform: "translate3d(calc(var(--px) * -60px), calc(var(--py) * -46px), 0)",
+          }}
+        >
+          <ParticleField density={activity} />
+        </div>
+
+        {/* --- Event layer -------------------------------------------------
+            Every reaction is single-shot and unmounts itself. Inside the
+            camera because a launch happens at the planet's limb, and the limb
+            is wherever the camera currently has it. */}
+        {events.map((event) => (
+          <UniverseReaction key={event.id} event={event} />
+        ))}
       </div>
-
-      {/* --- Event layer ---------------------------------------------------
-          Every reaction is single-shot and unmounts itself. */}
-      {events.map((event) => (
-        <UniverseReaction key={event.id} event={event} />
-      ))}
 
       {/* Vignette: keeps the sky off the edges of the UI, where it would
           fight the chrome. Always last, always on top of the scene. */}

@@ -8,6 +8,7 @@ import { Badge, StatusDot } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Panel, Label } from "@/components/ui/panel";
 import { AGENTS, ALL_AGENTS, PIPELINE } from "@/lib/design/agents";
+import { AUTH_BYPASS } from "@/lib/env";
 
 export const metadata = {
   title: "MEMESCOPE — AI Crypto Intelligence",
@@ -32,18 +33,31 @@ export default function LandingPage() {
       <header className="fixed inset-x-0 top-0 z-50 border-b border-line/60 bg-void/60 backdrop-blur-xl">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
           <Logo />
-          <div className="flex items-center gap-2">
-            <Link href="/login">
-              <Button variant="ghost" size="sm">
-                Sign in
-              </Button>
-            </Link>
-            <Link href="/register">
+          {/* With the auth bypass active there is no session to establish, so
+              offering "Sign in" would be a control that silently bounces the
+              visitor to /command - the product claiming a step it does not
+              take. Show the destination instead. Both branches are real; the
+              flag decides which one is true. */}
+          {AUTH_BYPASS ? (
+            <Link href="/command">
               <Button variant="surface" size="sm">
-                Request access
+                Enter Observatory
               </Button>
             </Link>
-          </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <Link href="/login">
+                <Button variant="ghost" size="sm">
+                  Sign in
+                </Button>
+              </Link>
+              <Link href="/register">
+                <Button variant="surface" size="sm">
+                  Request access
+                </Button>
+              </Link>
+            </div>
+          )}
         </div>
       </header>
 
@@ -65,14 +79,15 @@ export default function LandingPage() {
         </div>
 
         <div className="relative z-10 flex max-w-3xl flex-col items-center text-center">
-          <Badge tone="plasma" className="mb-8 animate-[rise_0.6s_var(--ease-instrument)_both]">
+          <Badge
+            tone="plasma"
+            className="mb-8 animate-[rise_0.6s_var(--ease-instrument)_both]"
+          >
             <StatusDot tone="var(--color-plasma)" />
             Live on Solana mainnet
           </Badge>
 
-          <h1
-            className="text-balance text-[clamp(2.5rem,7vw,4.5rem)] font-semibold leading-[0.98] tracking-[-0.04em] text-ink animate-[rise_0.7s_var(--ease-instrument)_0.1s_both]"
-          >
+          <h1 className="text-balance text-[clamp(2.5rem,7vw,4.5rem)] font-semibold leading-[0.98] tracking-[-0.04em] text-ink animate-[rise_0.7s_var(--ease-instrument)_0.1s_both]">
             Discover tomorrow&rsquo;s meme coin gems{" "}
             <span className="bg-gradient-to-r from-plasma via-ink to-oracle bg-clip-text text-transparent">
               before everyone else.
@@ -88,8 +103,18 @@ export default function LandingPage() {
             <Link href="/command">
               <Button variant="primary" size="lg" className="w-full sm:w-auto">
                 Launch Command Center
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="size-4">
-                  <path d="M5 12h14M13 6l6 6-6 6" strokeLinecap="round" strokeLinejoin="round" />
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  className="size-4"
+                >
+                  <path
+                    d="M5 12h14M13 6l6 6-6 6"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
                 </svg>
               </Button>
             </Link>
@@ -104,14 +129,17 @@ export default function LandingPage() {
               found rather than announced — a line you notice on the second
               read, which is what makes it stick. */}
           <p className="mt-12 text-label uppercase text-ink-faint animate-[rise_0.7s_var(--ease-instrument)_0.45s_both]">
-            The blockchain never sleeps.{" "}
-            <span className="text-plasma">Neither do we.</span>
+            The blockchain never sleeps. <span className="text-plasma">Neither do we.</span>
           </p>
 
           <div className="mt-10 flex items-center gap-6 text-ink-faint animate-[rise_0.7s_var(--ease-instrument)_0.55s_both]">
             {ALL_AGENTS.map((id) => (
               <span key={id} style={{ color: AGENTS[id].hue }} title={AGENTS[id].name}>
-                <AgentSigil agent={id} size={22} className="opacity-70 transition-opacity hover:opacity-100" />
+                <AgentSigil
+                  agent={id}
+                  size={22}
+                  className="opacity-70 transition-opacity hover:opacity-100"
+                />
               </span>
             ))}
           </div>
@@ -126,9 +154,8 @@ export default function LandingPage() {
             Seven specialists. One verdict.
           </h2>
           <p className="mt-4 text-ink-dim">
-            MEMESCOPE is not a dashboard with alerts bolted on. It is an
-            organisation of AI specialists, each with a single job, feeding one
-            shared intelligence core.
+            MEMESCOPE is not a dashboard with alerts bolted on. It is an organisation of AI
+            specialists, each with a single job, feeding one shared intelligence core.
           </p>
         </div>
 
@@ -162,9 +189,7 @@ export default function LandingPage() {
                       {spec.name}
                     </p>
                     <p className="mt-1 text-sm text-ink-dim">{spec.mission}</p>
-                    <p className="mt-3 text-xs text-ink-faint">
-                      {spec.traits.join(" · ")}
-                    </p>
+                    <p className="mt-3 text-xs text-ink-faint">{spec.traits.join(" · ")}</p>
                   </div>
                 </div>
               </Panel>
@@ -187,7 +212,10 @@ export default function LandingPage() {
             {PIPELINE.map((id, index) => {
               const spec = AGENTS[id];
               return (
-                <li key={id} className="relative flex flex-1 items-center gap-3 py-3 sm:flex-col sm:gap-3 sm:py-0 sm:text-center">
+                <li
+                  key={id}
+                  className="relative flex flex-1 items-center gap-3 py-3 sm:flex-col sm:gap-3 sm:py-0 sm:text-center"
+                >
                   <div
                     className="ambient flex size-10 shrink-0 items-center justify-center rounded-full border animate-[breathe_6s_ease-in-out_infinite]"
                     style={{
@@ -200,7 +228,10 @@ export default function LandingPage() {
                     <AgentSigil agent={id} size={20} />
                   </div>
                   <div className="min-w-0 sm:mt-1">
-                    <p className="text-label font-semibold uppercase" style={{ color: spec.hue }}>
+                    <p
+                      className="text-label font-semibold uppercase"
+                      style={{ color: spec.hue }}
+                    >
                       {spec.name}
                     </p>
                     <p className="mt-1 text-xs text-ink-faint">{spec.voice}</p>
@@ -220,9 +251,8 @@ export default function LandingPage() {
           <div className="mt-8 flex items-center justify-center gap-3 border-t border-line pt-6">
             <AgentSigil agent="apex" size={20} className="text-apex" />
             <p className="text-sm text-ink-dim">
-              Clear all six and{" "}
-              <span className="font-medium text-apex">APEX</span> certifies an
-              Elite Gem. Roughly one in a hundred.
+              Clear all six and <span className="font-medium text-apex">APEX</span>{" "}
+              certifies an Elite Gem. Roughly one in a hundred.
             </p>
           </div>
         </Panel>
@@ -230,7 +260,13 @@ export default function LandingPage() {
 
       {/* --- Entry -------------------------------------------------------- */}
       <section className="relative mx-auto max-w-4xl px-6 pb-32 pt-12 text-center">
-        <AiCore size={180} confidence={0.9} showAgents={false} className="mx-auto mb-8 opacity-80" elite />
+        <AiCore
+          size={180}
+          confidence={0.9}
+          showAgents={false}
+          className="mx-auto mb-8 opacity-80"
+          elite
+        />
         <h2 className="text-balance text-title font-semibold text-ink">
           The market reacts in minutes. You will know in seconds.
         </h2>
