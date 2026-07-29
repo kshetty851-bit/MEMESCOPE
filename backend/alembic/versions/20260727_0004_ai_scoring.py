@@ -49,9 +49,7 @@ def _bounds() -> list[sa.CheckConstraint]:
         sa.CheckConstraint(f"{column} >= 0 AND {column} <= 100", name=f"{column}_range")
         for column in _SCORE_COLUMNS
     ]
-    checks.append(
-        sa.CheckConstraint("observations >= 0", name="observations_non_negative")
-    )
+    checks.append(sa.CheckConstraint("observations >= 0", name="observations_non_negative"))
     return checks
 
 
@@ -76,9 +74,7 @@ def _shared_columns() -> list[sa.Column]:
             server_default=sa.text("now()"),
             nullable=False,
         ),
-        sa.Column(
-            "source_snapshot_captured_at", sa.DateTime(timezone=True), nullable=True
-        ),
+        sa.Column("source_snapshot_captured_at", sa.DateTime(timezone=True), nullable=True),
     ]
 
 

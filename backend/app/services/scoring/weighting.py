@@ -87,7 +87,12 @@ def solve_weights(declared: Mapping[ComponentId, Decimal], cap: Decimal) -> Weig
             break
 
         headroom = sum((cap - weights[key] for key in uncapped), start=ZERO)
-        if headroom <= ZERO:
+        if headroom <= ZERO:  # pragma: no cover - unreachable, see below
+            # Zero headroom needs every uncapped weight sitting exactly at the
+            # cap while another exceeds it, which would put the total above
+            # `n * cap >= 1` - impossible once the weights have been
+            # renormalised to sum to 1. Kept so that a future change to the
+            # guard above fails safe instead of dividing by zero.
             break
 
         # Proportional to remaining headroom, so no component is pushed over the

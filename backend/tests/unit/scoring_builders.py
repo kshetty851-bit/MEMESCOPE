@@ -82,7 +82,9 @@ def declining_window(
     decay, so it is the parameter tests vary.
     """
     return (
-        Observation(captured_at=now, price_usd=Decimal("0.001"), liquidity_usd=Decimal(current)),
+        Observation(
+            captured_at=now, price_usd=Decimal("0.001"), liquidity_usd=Decimal(current)
+        ),
         Observation(
             captured_at=now - timedelta(seconds=seconds_ago),
             price_usd=Decimal("0.002"),

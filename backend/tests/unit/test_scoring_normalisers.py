@@ -190,7 +190,7 @@ def test_ratio_of_divides() -> None:
 def test_ratio_of_returns_none_rather_than_zero(
     numerator: Decimal | None, denominator: Decimal | None
 ) -> None:
-    """"Not recorded" and "is zero" are different facts; only None says the first."""
+    """ "Not recorded" and "is zero" are different facts; only None says the first."""
     assert ratio_of(numerator, denominator) is None
 
 

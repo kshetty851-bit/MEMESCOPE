@@ -359,16 +359,19 @@ def _insufficient(
     explanation = build_explanation((*codes, ReasonCode.INSUFFICIENT_DATA))
 
     breakdowns = _build_breakdowns(results, declared, {}, {}, ZERO)
+    # Quantised like every other path: a caller comparing `score` across results
+    # should never have to care which branch produced it.
+    nil = quantize(ZERO)
 
     return ScoreResult(
         mint_address=features.mint_address,
         model_version=config.version,
         scorable=False,
-        score=ZERO,
-        opportunity_raw=ZERO,
+        score=nil,
+        opportunity_raw=nil,
         market_risk=quantize(clamp(risk.as_score)),
-        risk_deduction=ZERO,
-        evidence=ZERO,
+        risk_deduction=nil,
+        evidence=nil,
         coverage=quantize(clamp(evidence.coverage_score, ZERO, HUNDRED)),
         observations=features.observations,
         grade=ScoreGrade.CRITICAL,

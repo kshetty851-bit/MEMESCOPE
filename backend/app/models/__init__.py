@@ -11,6 +11,7 @@ from app.models.market import (
     TokenMarketSnapshot,
     TradingStatus,
 )
+from app.models.radar import RadarAchievement, RadarSnapshot, RadarToken
 from app.models.refresh_token import RefreshToken
 from app.models.score import (
     ScoreGrade,
@@ -26,6 +27,9 @@ __all__ = [
     "DiscoveredToken",
     "EnrichmentStatus",
     "MetadataStatus",
+    "RadarAchievement",
+    "RadarSnapshot",
+    "RadarToken",
     "RefreshToken",
     "ScoreGrade",
     "ScoreTrigger",

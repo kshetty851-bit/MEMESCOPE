@@ -85,9 +85,7 @@ def test_tier_comes_from_age_not_from_stored_state(
     ],
 )
 def test_window_is_tier_relative(age_minutes: int, expected_window: int) -> None:
-    _, _, window = window_seconds_for(
-        Decimal(age_minutes), policy=POLICY, feature_window=12
-    )
+    _, _, window = window_seconds_for(Decimal(age_minutes), policy=POLICY, feature_window=12)
     assert window == expected_window
 
 
@@ -283,9 +281,9 @@ def test_priced_observations_filters_and_preserves_order() -> None:
 def test_mean_spacing_needs_two_observations() -> None:
     assert features(window=observations(count=1)).mean_spacing_seconds() is None
     assert features(window=()).mean_spacing_seconds() is None
-    assert features(window=observations(count=5, spacing_seconds=300)).mean_spacing_seconds() == (
-        Decimal(300)
-    )
+    assert features(
+        window=observations(count=5, spacing_seconds=300)
+    ).mean_spacing_seconds() == (Decimal(300))
 
 
 def test_has_market_reflects_provider_coverage() -> None:

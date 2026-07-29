@@ -14,12 +14,12 @@ from decimal import Decimal
 
 import pytest
 
+from app.services.scoring import evaluate
 from app.services.scoring.components.market_risk import MarketRisk
 from app.services.scoring.explain import ReasonCode
 from app.services.scoring.features import Observation
 from app.services.scoring.models.v1 import MODEL_V1
 from app.services.scoring.normalisers import ONE, ZERO
-from app.services.scoring import evaluate
 from tests.unit.scoring_builders import NOW, declining_window, features, observations
 
 pytestmark = pytest.mark.unit
@@ -42,8 +42,7 @@ def test_an_acute_drawdown_vetoes() -> None:
     assert ReasonCode.LIQUIDITY_DRAWDOWN_ACUTE in assessment.reasons
 
 
-def test_an_acute_drawdown_cannot_be_outvoted(
-) -> None:
+def test_an_acute_drawdown_cannot_be_outvoted() -> None:
     """The whole reason risk multiplies instead of adding.
 
     Every opportunity signal is set to its strongest: deep-looking liquidity
@@ -150,9 +149,7 @@ def test_balanced_flow_is_not_penalised_for_selling() -> None:
 
 
 def test_sell_share_needs_trades() -> None:
-    assessment = GATE.evaluate(
-        features(buy_count_24h=None, sell_count_24h=None, window=())
-    )
+    assessment = GATE.evaluate(features(buy_count_24h=None, sell_count_24h=None, window=()))
     assert assessment.raw["sell_share"] is None
 
     empty = GATE.evaluate(features(buy_count_24h=0, sell_count_24h=0, window=()))
