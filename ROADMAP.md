@@ -69,91 +69,115 @@ Status: Complete
 
 ---
 
+## ✅ Day 4 – AI Scoring Engine
+
+Deterministic weighted model, no ML or LLM in the scoring path. Score,
+confidence, evidence, explanation and history. Weights published at
+`/api/v1/scores/model`.
+
+Status: Complete
+
+---
+
+## ✅ Phases 5–7 – Observatory, alpha surfaces, production rehearsal
+
+Camera, Sentinel narration, About page, feedback, onboarding, Caddy edge,
+backups, deploy/rollback. Six deployment defects found and fixed in rehearsal.
+
+Status: Complete
+
+---
+
+## ✅ Phase 8 – Opportunity Radar
+
+Tracks projects of any age. Returns measured from MEMESCOPE's first detection,
+never from token launch. First detection immutable, records append-only, failed
+opportunities never hidden.
+
+Status: Complete
+
+---
+
+## ✅ Phase 9 – Exit Watch and the permanent record
+
+Seven checkable signals, two declared and permanently unavailable. Never a sell
+signal. Hall of Fame ranks by peak, Hall of Lessons by current, one page and one
+toggle.
+
+Status: Complete
+
+---
+
+## ✅ Phase 10 – Composite market provider
+
+Fills the pump.fun bonding-curve liquidity gap, keyed by pool address. Opt-in
+via `MARKET_PROVIDER=composite`.
+
+Status: Complete
+
+---
+
 # Next Milestones
 
-## 🚧 Day 4 – AI Scoring Engine
+## 🚧 v0.8.0-rc1 → private alpha
 
-Goal:
+Stabilisation, versioning and release preparation. See `RELEASE_NOTES.md`.
 
-Generate a transparent AI score for each token using multiple weighted signals.
-
-Possible inputs:
-
-- Liquidity
-- Holder distribution
-- Volume
-- Momentum
-- Smart money
-- Market age
-- Contract risk
-- Narrative strength
-
-Deliverables:
-
-- AI score
-- Confidence score
-- Score explanation
-- Historical score changes
+The remaining blocker for a public deployment is operational, not
+engineering: no server, domain or credentials.
 
 ---
 
-## Planned
+## Planned, and genuinely buildable now
 
-### Day 5
+### Rotation engine
 
-Smart Wallet Intelligence
+Lead/lag over the stored series — volume leading price, liquidity leading
+volume. Computable from data the platform already holds.
 
----
+### `/market/trending` performance
 
-### Day 6
+A latest-snapshot pointer to replace the `DISTINCT ON` over the full
+append-only snapshot table. Currently ~5–7s and degrading linearly.
 
-Security & Rug Detection
+### Second scoring signal source
 
----
-
-### Day 7
-
-Narrative Intelligence
-
----
-
-### Day 8
-
-Alerts
-
-Telegram
-
-Discord
-
-Email
-
-Push Notifications
+On-chain bonding-curve reserves via Helius would close the liquidity gap
+completely rather than partially.
 
 ---
 
-### Day 9
+## Blocked until the data pipeline exists
 
-Portfolio Tracking
+These are **not** scheduled work. Each needs a data source the platform does not
+have, and none will be estimated in the meantime.
 
-Watchlists
+### Day 5 — Smart Wallet Intelligence
 
-Favourites
+Needs wallet addresses, transactions and holder history. Historical
+profitability additionally needs price-at-timestamp for arbitrary tokens across
+arbitrary history — a dataset that cannot be reconstructed from our own records.
 
-PnL
+### Day 6 — Security & Rug Detection
 
----
+Needs mint/freeze authority, LP burn and renouncement data. **Unlocks Elite.**
 
-### Day 10
+### Day 7 — Narrative Intelligence
 
-Deployment
+Needs token metadata or a social provider. A keyword classifier over a ticker is
+not narrative intelligence.
 
-Production
+### Day 8 — Alerts
 
-Monitoring
+Needs a delivery channel. Must read state, not rely on event delivery.
 
-Documentation
+### Day 9 — Portfolio
 
-Public Launch
+Watchlists, favourites, PnL.
+
+### Day 10 — Public launch
+
+Production deployment, monitoring, public launch.
 
 ---
 

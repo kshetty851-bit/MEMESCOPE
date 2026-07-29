@@ -2,13 +2,20 @@
 
 AI-powered Solana meme coin discovery platform.
 
-**Status: Days 1–3 complete, plus the frontend Observatory.** The platform
-foundation (auth, API, database, cache, workers, CI), the Solana discovery
-engine (Helius scanner, live WebSocket stream, token storage, REST feed), and
-market enrichment (DexScreener provider, adaptive refresh scheduling, historical
-snapshots, trending) are all in place. AI scoring is the next milestone and is
-deliberately *not* implemented yet; the architecture leaves a clearly marked
-seam for it.
+**Status: `v0.8.0-rc1` — release candidate for private alpha.**
+
+The platform foundation (auth, API, database, cache, workers, CI), the Solana
+discovery engine, market enrichment, the deterministic AI scoring engine, the
+Opportunity Radar with its permanent track record, Exit Watch, and the
+production deployment overlay are all in place and verified.
+
+Four of nine scoring signals have no data source and are declared unavailable
+rather than estimated, so **no token can be certified Elite in v1**. That is the
+intended outcome, not a defect — see [Known limitations](#known-limitations).
+
+The single source of truth is
+[`MEMESCOPE_MASTER_CONTEXT.md`](MEMESCOPE_MASTER_CONTEXT.md); release specifics
+are in [`RELEASE_NOTES.md`](RELEASE_NOTES.md).
 
 ---
 
@@ -20,11 +27,11 @@ seam for it.
 | Database   | PostgreSQL 16 · Alembic migrations             |
 | Cache      | Redis 7 (sessions, rate limits, denylist, bus) |
 | Workers    | Celery + Beat                                  |
-| Chain data | Helius (Solana) · DexScreener (market)         |
+| Chain data | Helius (Solana) · DexScreener + GeckoTerminal   |
 | Frontend   | Next.js 15 (App Router) · React 19 · TS 5      |
 | Styling    | Tailwind CSS v4                                |
 | State      | Zustand (session) · TanStack Query (server)    |
-| Runtime    | Docker Compose · nginx in production           |
+| Runtime    | Docker Compose · Caddy in production            |
 | CI         | GitHub Actions — lint, types, tests, images    |
 
 ## Quick start
@@ -42,8 +49,12 @@ make up
 | Service      | URL                          |
 | ------------ | ---------------------------- |
 | Frontend     | http://localhost:3000        |
-| API docs     | http://localhost:8000/docs   |
-| Readiness    | http://localhost:8000/ready  |
+| API docs     | http://localhost:8001/docs   |
+| Readiness    | http://localhost:8001/ready  |
+
+> **Host ports are deliberately shifted** to avoid colliding with another local
+> project, and this is the most common source of confusion: the API is on
+> **8001** (not 8000), Postgres on **5433**, Redis on **6380**.
 
 The stack also runs four background processes alongside `backend` and
 `frontend`: `worker` and `scheduler` (Celery), `scanner` (Helius discovery), and
@@ -70,7 +81,7 @@ MEMESCOPE/
 │   └── tests/          unit (fast) + integration (real Postgres/Redis)
 ├── frontend/           Next.js app
 │   └── src/            app · components · hooks · lib · stores · styles · types
-├── docker/             Postgres init SQL, nginx config
+├── docker/             Postgres init SQL, Caddy config
 ├── docs/               Architecture, API, development, deployment
 ├── .github/workflows/  CI pipeline
 ├── docker-compose.yml       Local stack
@@ -106,24 +117,46 @@ Full detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## What lives where
 
-| Feature              | Implemented in                                      |
-| -------------------- | --------------------------------------------------- |
-| Solana scanning      | `backend/app/services/scanner/` · `services/helius/` |
-| Token models         | `backend/app/models/token.py` · `models/market.py`   |
-| Market enrichment    | `backend/app/services/market/`                       |
-| Discovery API + feed | `backend/app/api/v1/endpoints/tokens.py`             |
-| Market API           | `backend/app/api/v1/endpoints/market.py`             |
-| Observatory UI       | `frontend/src/app/(dashboard)/`                      |
+| Feature                  | Implemented in                                       |
+| ------------------------ | ---------------------------------------------------- |
+| Solana scanning          | `backend/app/services/scanner/` · `services/helius/`  |
+| Token models             | `backend/app/models/token.py` · `models/market.py`    |
+| Market enrichment        | `backend/app/services/market/`                        |
+| Market providers         | `backend/app/services/market/providers/`              |
+| AI scoring engine        | `backend/app/services/scoring/`                       |
+| Opportunity Radar        | `backend/app/radar/`                                  |
+| Exit Watch / smart money | `backend/app/exit_signals/`                           |
+| Discovery API + feed     | `backend/app/api/v1/endpoints/tokens.py`              |
+| Observatory UI           | `frontend/src/app/(dashboard)/`                       |
 
-## Where the next features go
-
-| Feature              | Lands in                                            |
-| -------------------- | --------------------------------------------------- |
-| AI scoring           | `backend/app/services/scoring/`                      |
-| Score API            | `backend/app/api/v1/endpoints/` + a router line      |
-| Score models         | `backend/app/models/` + a migration                  |
-
-Three feature flags live in `app/core/config.py`, all defaulting to off:
+Feature flags live in `app/core/config.py`, all defaulting to off:
 `FEATURE_SCANNER_ENABLED` (requires `HELIUS_API_KEY`),
-`FEATURE_ENRICHMENT_ENABLED`, and `FEATURE_AI_SCORING_ENABLED` — the seam for
-the next milestone.
+`FEATURE_ENRICHMENT_ENABLED`, `FEATURE_AI_SCORING_ENABLED` (requires
+enrichment) and `FEATURE_RADAR_ENABLED`.
+
+> ⚠️ **Any new setting must also be added to the `x-backend-env` anchor in
+> `docker-compose.yml`.** A setting absent from that anchor never reaches the
+> containers and silently falls back to its code default regardless of `.env`.
+> This has happened three times; `backend/tests/unit/test_compose_env_contract.py`
+> now asserts it for runtime-critical settings.
+
+## Known limitations
+
+Stated up front because the product states them too — see
+[`ALPHA_CHECKLIST.md`](ALPHA_CHECKLIST.md) for the full operator list.
+
+- **Four of nine scoring signals have no data source.** Contract safety, holder
+  distribution, smart money and narrative are declared, weighted and charged to
+  coverage. Available weight totals 0.65 and the Elite gate needs 70, so **no
+  token can be certified Elite**.
+- **Confidence reads low across the whole feed** (typically 30–45%). That is the
+  coverage mechanism working, not a fault.
+- **Liquidity is missing for pump.fun bonding-curve pools** from DexScreener.
+  `MARKET_PROVIDER=composite` fills part of this gap; the fill is budget-limited
+  and covers a fraction of peak demand.
+- **`/market/trending` is slow** (~5–7s) and degrades as snapshots accumulate.
+  See `RELEASE_NOTES.md` for the measurement and the planned fix.
+- **Smart money is unavailable by construction**, not by absence of activity.
+- Read-only: no watchlist, alerts or portfolio. No wallet connection; nothing is
+  ever signed.
+- Scores are **not predictions**. The model reads current state.

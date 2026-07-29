@@ -72,17 +72,26 @@ Completed
 - Authentication
 - Discovery
 - Market Enrichment
+- Composite market provider (bonding-curve liquidity fill)
 - Live Feed
 - Observatory UI
+- AI Scoring Engine
+- Opportunity Radar and the permanent track record
+- Exit Watch, Hall of Fame / Hall of Lessons
+- Production deployment overlay (Caddy, backups, deploy/rollback)
+
+Blocked on data that does not exist yet
+
+- Smart Wallet Intelligence — no wallet addresses, transactions or holder lists
+  in the schema. Reported unavailable rather than estimated.
+- Rug Detection — needs mint/freeze authority and LP burn data.
+- Narrative AI — token name and symbol are the only text the platform holds.
 
 Upcoming
 
-- AI Scoring
-- Smart Wallet Intelligence
-- Rug Detection
-- Narrative AI
-- Alerts
-- Portfolio
+- Alerts (needs a delivery channel)
+- Portfolio / watchlists
+- Rotation engine (computable from the stored series today)
 
 ---
 
