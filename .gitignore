@@ -3,7 +3,13 @@
 # =============================================================================
 .env
 .env.*
+# Templates carry no values, only the shape of the configuration, and are the
+# only record of what a deployment needs. The negations must list every one:
+# `.env.*` above would otherwise swallow them and the next operator would find
+# no documentation of the required variables.
 !.env.example
+!.env.production.example
+!.env.staging.example
 *.pem
 *.key
 *.p12

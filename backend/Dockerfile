@@ -62,6 +62,15 @@ COPY --chown=memescope:memescope scripts ./scripts
 
 RUN chmod +x ./scripts/*.sh || true
 
+# Celery beat persists its schedule to a file in the working directory, which
+# this image deliberately does not make writable — the container runs
+# unprivileged and /app is owned by root. Without somewhere to write, beat dies
+# on startup with EACCES and every periodic job silently stops running: no
+# score sweep, no history pruning, and nothing obviously broken on the surface.
+# A dedicated directory owned by the runtime user fixes it, and a named volume
+# mounted here inherits this ownership when Docker initialises it.
+RUN mkdir -p /var/lib/celery && chown memescope:memescope /var/lib/celery
+
 USER memescope
 
 EXPOSE 8000

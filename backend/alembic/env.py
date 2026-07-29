@@ -15,7 +15,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from app.core.config import settings
-from app.models import Base  # noqa: F401 — imports every model into the metadata
+from app.models import Base  # imports every model into the metadata, for autogenerate
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.DATABASE_URI)
@@ -26,7 +26,7 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 
-def include_object(obj, name, type_, reflected, compare_to) -> bool:  # noqa: ANN001
+def include_object(obj, name, type_, reflected, compare_to) -> bool:
     # Never let autogenerate try to drop the alembic bookkeeping table.
     return not (type_ == "table" and name == "alembic_version")
 

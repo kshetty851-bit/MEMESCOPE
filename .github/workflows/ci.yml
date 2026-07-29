@@ -71,8 +71,8 @@ jobs:
       - name: Lint
         run: |
           source .venv/bin/activate
-          ruff check app tests
-          ruff format --check app tests
+          ruff check .
+          ruff format --check .
 
       - name: Type check
         run: |
@@ -88,6 +88,14 @@ jobs:
           alembic upgrade head
           alembic downgrade base
           alembic upgrade head
+
+      # Catches a model changed without a migration. Previously unusable as a
+      # gate: `ix_refresh_tokens_expires_at` existed in the database but not in
+      # the model, so this reported drift permanently. Reconciled in v0.8.0-rc1.
+      - name: Verify no migration drift
+        run: |
+          source .venv/bin/activate
+          alembic check
 
       - name: Test
         run: |

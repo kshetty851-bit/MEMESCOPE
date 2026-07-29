@@ -1,6 +1,6 @@
 [project]
 name = "memescope-backend"
-version = "0.1.0"
+version = "0.8.0rc1"
 description = "MemeScope AI — API for AI-powered Solana meme coin discovery"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -82,6 +82,9 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S105", "S106", "S311"]
 "alembic/*" = ["E501", "N999"]
+# T201: these are command-line tools whose print() calls are their output, not
+# debug leftovers. Routing them through structlog would emit JSON at an operator.
+"scripts/*" = ["T201"]
 # S105/S106: the literal "bearer" and the `token_type` argument name trip the
 # hardcoded-password heuristic; neither is a secret.
 "app/core/security.py" = ["S106"]
@@ -150,6 +153,11 @@ env = [
 [tool.coverage.run]
 source = ["app"]
 omit = ["app/workers/*", "alembic/*", "*/__init__.py"]
+# SQLAlchemy's asyncio layer resumes coroutines inside greenlets. Without this,
+# every service line that runs after an `await` on a query is reported as
+# unreached even when a passing test provably executed it, which understates
+# async service coverage across the whole project.
+concurrency = ["greenlet", "thread"]
 
 [tool.coverage.report]
 exclude_also = [
