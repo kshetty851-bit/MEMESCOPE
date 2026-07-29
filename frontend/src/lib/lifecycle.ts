@@ -1,5 +1,5 @@
-import type { TokenIntelligence } from "@/lib/intelligence";
 import type { DiscoveredToken, MarketSnapshot } from "@/types/api";
+import type { TokenScore } from "@/types/score";
 
 /**
  * TOKEN LIFECYCLE
@@ -20,12 +20,7 @@ import type { DiscoveredToken, MarketSnapshot } from "@/types/api";
 
 export type LifecycleStage = "detected" | "analysing" | "scored" | "elite";
 
-export const STAGE_ORDER: LifecycleStage[] = [
-  "detected",
-  "analysing",
-  "scored",
-  "elite",
-];
+export const STAGE_ORDER: LifecycleStage[] = ["detected", "analysing", "scored", "elite"];
 
 export const STAGE_LABEL: Record<LifecycleStage, string> = {
   detected: "Detected",
@@ -47,14 +42,16 @@ export function lifecycleStage(
   // parameter now.
   _token: DiscoveredToken,
   market: MarketSnapshot | null,
-  intel: TokenIntelligence,
+  score: TokenScore | null,
 ): LifecycleStage {
-  if (intel.elite) return "elite";
+  // Every stage below is backend state. `Elite` in particular is a
+  // certification the scoring engine grants after sustained qualification — the
+  // client only reports it.
+  if (score?.is_elite) return "elite";
+  if (score) return "scored";
   if (!market) return "detected";
-  // A pool exists but the provider has not resolved whether it is tradeable —
-  // the observation is genuinely incomplete.
-  if (market.trading_status === "unknown") return "analysing";
-  return "scored";
+  // A pool exists but nothing has scored it yet — the division is mid-work.
+  return "analysing";
 }
 
 /** 0–1 progress through the pipeline, for the stage rail. */

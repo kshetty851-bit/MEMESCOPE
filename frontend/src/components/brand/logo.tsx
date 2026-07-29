@@ -36,10 +36,7 @@ export function LogoMark({ size = 24, className }: { size?: number; className?: 
 export function Wordmark({ className }: { className?: string }) {
   return (
     <span
-      className={cn(
-        "text-[0.9375rem] font-semibold tracking-[0.16em] text-ink",
-        className,
-      )}
+      className={cn("text-[0.9375rem] font-semibold tracking-[0.16em] text-ink", className)}
     >
       MEMESCOPE
     </span>

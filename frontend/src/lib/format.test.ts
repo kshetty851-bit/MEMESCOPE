@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { formatAge, formatCount, formatPrice, formatUsd, shortenAddress } from "@/lib/format";
+import {
+  formatAge,
+  formatCount,
+  formatPrice,
+  formatUsd,
+  shortenAddress,
+} from "@/lib/format";
 
 afterEach(() => {
   vi.useRealTimers();

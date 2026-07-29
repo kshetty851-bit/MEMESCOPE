@@ -140,7 +140,9 @@ export function Meter({
             style={{
               background: index < filled ? tone : "var(--color-elevated)",
               boxShadow:
-                index < filled ? `0 0 8px color-mix(in oklch, ${tone} 45%, transparent)` : undefined,
+                index < filled
+                  ? `0 0 8px color-mix(in oklch, ${tone} 45%, transparent)`
+                  : undefined,
             }}
           />
         ))}

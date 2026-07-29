@@ -11,14 +11,7 @@
  * clears it, Oracle reasons over it, Apex certifies it.
  */
 
-export type AgentId =
-  | "scout"
-  | "titan"
-  | "pulse"
-  | "echo"
-  | "sentinel"
-  | "oracle"
-  | "apex";
+export type AgentId = "scout" | "titan" | "pulse" | "echo" | "sentinel" | "oracle" | "apex";
 
 /**
  * Each specialist's register. This is a contract, not flavour text: every

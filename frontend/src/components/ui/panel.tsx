@@ -47,9 +47,7 @@ export function Panel({
         className,
       )}
       style={
-        accent
-          ? ({ ...style, "--panel-accent": accent } as React.CSSProperties)
-          : style
+        accent ? ({ ...style, "--panel-accent": accent } as React.CSSProperties) : style
       }
       {...props}
     >
@@ -89,10 +87,7 @@ export function PanelTitle({ className, ...props }: HTMLAttributes<HTMLHeadingEl
 export function Label({ className, ...props }: HTMLAttributes<HTMLSpanElement>) {
   return (
     <span
-      className={cn(
-        "text-label font-medium uppercase text-ink-faint",
-        className,
-      )}
+      className={cn("text-label font-medium uppercase text-ink-faint", className)}
       {...props}
     />
   );

@@ -5,17 +5,8 @@ import { cn } from "@/lib/utils";
  * spinner says "wait"; a skeleton says "here is what you are about to read",
  * which makes the same latency feel shorter.
  */
-export function Skeleton({
-  className,
-  ...props
-}: React.HTMLAttributes<HTMLDivElement>) {
-  return (
-    <div
-      className={cn("skeleton rounded-chip", className)}
-      aria-hidden
-      {...props}
-    />
-  );
+export function Skeleton({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
+  return <div className={cn("skeleton rounded-chip", className)} aria-hidden {...props} />;
 }
 
 export function SkeletonText({

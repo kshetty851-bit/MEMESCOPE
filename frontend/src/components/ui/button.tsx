@@ -19,8 +19,7 @@ const VARIANTS: Record<Variant, string> = {
   surface:
     "bg-elevated/80 text-ink border border-line hover:border-line-bright hover:bg-raised/80",
   ghost: "text-ink-dim hover:text-ink hover:bg-elevated/60",
-  outline:
-    "border border-plasma/40 text-plasma hover:bg-plasma/10 hover:border-plasma/70",
+  outline: "border border-plasma/40 text-plasma hover:bg-plasma/10 hover:border-plasma/70",
   danger: "bg-danger/15 text-danger border border-danger/35 hover:bg-danger/25",
 };
 

@@ -26,10 +26,7 @@ type Listener = (event: UniverseEvent) => void;
 const listeners = new Set<Listener>();
 let counter = 0;
 
-export function emitUniverseEvent(
-  type: UniverseEventType,
-  detail?: string,
-): UniverseEvent {
+export function emitUniverseEvent(type: UniverseEventType, detail?: string): UniverseEvent {
   counter += 1;
   const event: UniverseEvent = { type, id: counter, detail };
   listeners.forEach((listener) => listener(event));

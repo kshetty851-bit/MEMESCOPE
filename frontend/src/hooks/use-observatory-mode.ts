@@ -23,9 +23,7 @@ const listeners = new Set<() => void>();
 
 function currentMode(): ObservatoryMode {
   if (typeof document === "undefined") return "observatory";
-  return document.documentElement.dataset.mode === "command"
-    ? "command"
-    : "observatory";
+  return document.documentElement.dataset.mode === "command" ? "command" : "observatory";
 }
 
 function subscribe(listener: () => void): () => void {

@@ -97,6 +97,9 @@
   --duration-quick: 200ms;
   --duration-considered: 340ms;
   --duration-cinematic: 900ms;
+  /* Longer than cinematic on purpose: the camera carries the whole sky, and at
+     900ms a full-field move reads as a jolt rather than a turn. */
+  --duration-camera: 1400ms;
 
   --animate-drift: drift 24s var(--ease-precise) infinite;
   --animate-breathe: breathe 6s ease-in-out infinite;
@@ -392,10 +395,10 @@
 
 @keyframes shimmer {
   from {
-    background-position: -200% 0;
+    transform: translateX(-100%);
   }
   to {
-    background-position: 200% 0;
+    transform: translateX(100%);
   }
 }
 
@@ -519,6 +522,22 @@
     );
   }
 
+  /* THE CAMERA
+     One composited transform wrapping every parallax plane, so moving between
+     views reads as the observatory turning to look rather than the page
+     swapping underneath you. Nested inside the pointer parallax rather than
+     replacing it: the camera says where we are pointed, the pointer says how
+     the head moves within that. Transitioning the wrapper keeps this to a
+     single animated element regardless of how many planes the scene has.
+
+     No transition is declared for reduced motion because none is needed - the
+     global `prefers-reduced-motion` block already collapses every transition to
+     0.01ms, and `.ambient` removes the sky outright. */
+  .universe-camera {
+    transition: transform var(--duration-camera) var(--ease-instrument);
+    will-change: transform;
+  }
+
   .grid-field {
     background-image:
       linear-gradient(
@@ -534,14 +553,22 @@
     mask-image: radial-gradient(ellipse 70% 60% at 50% 40%, black, transparent 75%);
   }
 
+  /* The sweep is a transform-driven pseudo-element rather than an animated
+     `background-position`. The two look identical; only this one stays on the
+     compositor. It matters here more than anywhere else in the system: a
+     loading feed renders sixty skeletons at once, each covering real area, and
+     `background-position` repainted every one of them on every frame. */
   .skeleton {
-    background: linear-gradient(
-      90deg,
-      var(--color-surface) 25%,
-      var(--color-elevated) 50%,
-      var(--color-surface) 75%
-    );
-    background-size: 200% 100%;
+    position: relative;
+    overflow: hidden;
+    background: var(--color-surface);
+  }
+
+  .skeleton::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, var(--color-elevated), transparent);
     animation: shimmer 1.6s linear infinite;
   }
 }

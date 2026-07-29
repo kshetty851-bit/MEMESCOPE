@@ -15,10 +15,16 @@ import { cn } from "@/lib/utils";
  *
  * IDLE BEHAVIOUR (`alive`)
  * At display sizes the sigils gain the idle layer: eyes blink, visors glow,
- * energy travels the armour, sensors sweep. Every behaviour is CSS on
- * `transform`, `opacity` or `stroke-dashoffset` — all compositor-only — and
- * every one is tagged `.motion-loop`, so Command mode and reduced motion still
- * them without removing the emblem.
+ * energy travels the armour, sensors sweep. Every behaviour is CSS, and every
+ * one is tagged `.motion-loop`, so Command mode and reduced motion still them
+ * without removing the emblem.
+ *
+ * Blinks and sweeps are `transform`/`opacity` and composite. The conduit flow
+ * is `stroke-dashoffset`, which does **not** — it repaints the path every
+ * frame. That is a deliberate trade: dashoffset is the only honest way to make
+ * a dashed line flow along its own path, and the repaint is bounded by a sigil
+ * that is at most 44px square. It is also why `alive` is opt-in. Do not add it
+ * to anything that renders in bulk.
  *
  * The idle layer is off by default: a 12px sigil inside a badge should not be
  * blinking, and a feed of sixty cards must not run sixty animations.
@@ -199,7 +205,10 @@ function PARTS(agent: AgentId, alive: boolean): SigilParts {
         ),
         // Signal arcs pulsing outward — attention being received.
         alive: () => (
-          <g className="motion-loop" style={{ animation: "visor 3.8s ease-in-out infinite" }}>
+          <g
+            className="motion-loop"
+            style={{ animation: "visor 3.8s ease-in-out infinite" }}
+          >
             <path d="M38 26.5c1.8 2.6 1.8 6.4 0 9M42 24c3 4.2 3 10.8 0 15" opacity="0.55" />
           </g>
         ),

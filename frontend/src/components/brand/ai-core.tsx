@@ -182,12 +182,7 @@ export function AiCore({
                   style={{ transition: "opacity 0.8s var(--ease-precise)" }}
                 />
                 {Array.from({ length: packetsPerFeed }, (_, packet) => (
-                  <circle
-                    key={packet}
-                    r={2.5}
-                    fill={AGENTS[id].hue}
-                    className="ambient"
-                  >
+                  <circle key={packet} r={2.5} fill={AGENTS[id].hue} className="ambient">
                     <animate
                       attributeName="cx"
                       values={`${x};${CENTRE}`}
@@ -253,7 +248,9 @@ export function AiCore({
           fill={accent}
           opacity={0.75 + level * 0.25}
           filter={`url(#${uid}-bloom)`}
-          style={{ transition: "r 1.2s var(--ease-instrument), opacity 1.2s var(--ease-precise)" }}
+          style={{
+            transition: "r 1.2s var(--ease-instrument), opacity 1.2s var(--ease-precise)",
+          }}
         />
 
         {/* Elite emission — one golden pulse, then silence. */}

@@ -32,7 +32,13 @@ const NAV: NavItem[] = [
     href: "/command",
     label: "Command",
     icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className={ICON}>
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        className={ICON}
+      >
         <circle cx="12" cy="12" r="3" />
         <circle cx="12" cy="12" r="8.5" strokeDasharray="3 3" />
         <path d="M12 1v3M12 20v3M1 12h3M20 12h3" strokeLinecap="round" />
@@ -43,9 +49,69 @@ const NAV: NavItem[] = [
     href: "/feed",
     label: "Scanner",
     icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className={ICON}>
-        <path d="M3 8V5a2 2 0 0 1 2-2h3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3" strokeLinecap="round" />
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        className={ICON}
+      >
+        <path
+          d="M3 8V5a2 2 0 0 1 2-2h3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3"
+          strokeLinecap="round"
+        />
         <path d="M3 12h18" strokeLinecap="round" />
+      </svg>
+    ),
+  },
+  {
+    href: "/radar",
+    label: "Radar",
+    icon: (
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        className={ICON}
+      >
+        <circle cx="12" cy="12" r="9" />
+        <circle cx="12" cy="12" r="4.5" />
+        <path d="M12 3v4M12 17v4M3 12h4M17 12h4" strokeLinecap="round" />
+      </svg>
+    ),
+  },
+  {
+    href: "/track-record",
+    label: "Record",
+    icon: (
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        className={ICON}
+      >
+        <path d="M3 19h18" strokeLinecap="round" />
+        <rect x="5" y="12" width="3.5" height="7" rx="1" />
+        <rect x="10.25" y="7" width="3.5" height="12" rx="1" />
+        <rect x="15.5" y="10" width="3.5" height="9" rx="1" />
+      </svg>
+    ),
+  },
+  {
+    href: "/exit-watch",
+    label: "Exit",
+    icon: (
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        className={ICON}
+      >
+        <path d="M12 3v10" strokeLinecap="round" />
+        <path d="M7.5 6.5a8 8 0 1 0 9 0" strokeLinecap="round" />
       </svg>
     ),
   },
@@ -53,7 +119,13 @@ const NAV: NavItem[] = [
     href: "/division",
     label: "Division",
     icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className={ICON}>
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        className={ICON}
+      >
         <circle cx="12" cy="12" r="2.5" />
         <circle cx="12" cy="4" r="2" />
         <circle cx="19" cy="16" r="2" />
@@ -63,10 +135,32 @@ const NAV: NavItem[] = [
     ),
   },
   {
+    href: "/about",
+    label: "About",
+    icon: (
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        className={ICON}
+      >
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 16v-5M12 8h.01" strokeLinecap="round" />
+      </svg>
+    ),
+  },
+  {
     href: "/system",
     label: "System",
     icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className={ICON}>
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        className={ICON}
+      >
         <rect x="3" y="3" width="7.5" height="7.5" rx="1.5" />
         <rect x="13.5" y="3" width="7.5" height="7.5" rx="3.75" />
         <rect x="3" y="13.5" width="7.5" height="7.5" rx="3.75" />
@@ -81,8 +175,7 @@ export function CommandNav() {
   const router = useRouter();
   const { user, logout } = useAuth();
 
-  const isActive = (href: string) =>
-    pathname === href || pathname.startsWith(`${href}/`);
+  const isActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
 
   async function handleSignOut() {
     await logout();
@@ -134,8 +227,18 @@ export function CommandNav() {
           aria-label="Sign out"
           className="flex size-11 items-center justify-center rounded-card text-ink-faint transition-colors hover:bg-elevated/70 hover:text-danger"
         >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className={ICON}>
-            <path d="M15 17l5-5-5-5M20 12H9M11 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h5" strokeLinecap="round" strokeLinejoin="round" />
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            className={ICON}
+          >
+            <path
+              d="M15 17l5-5-5-5M20 12H9M11 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
           </svg>
         </button>
       </nav>

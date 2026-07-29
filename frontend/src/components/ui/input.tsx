@@ -18,10 +18,7 @@ export function Input({ label, error, hint, className, id, ...props }: InputProp
 
   return (
     <div className="flex flex-col gap-2">
-      <label
-        htmlFor={inputId}
-        className="text-label font-medium uppercase text-ink-faint"
-      >
+      <label htmlFor={inputId} className="text-label font-medium uppercase text-ink-faint">
         {label}
       </label>
       <input

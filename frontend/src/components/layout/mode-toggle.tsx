@@ -18,7 +18,13 @@ export function ModeToggle({ compact = false }: { compact?: boolean }) {
       label: "Observatory",
       short: "OBS",
       icon: (
-        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" className="size-3.5">
+        <svg
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.4"
+          className="size-3.5"
+        >
           <circle cx="8" cy="8" r="2.4" />
           <circle cx="8" cy="8" r="6" strokeDasharray="2 2.5" />
         </svg>
@@ -29,7 +35,13 @@ export function ModeToggle({ compact = false }: { compact?: boolean }) {
       label: "Command",
       short: "CMD",
       icon: (
-        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" className="size-3.5">
+        <svg
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.4"
+          className="size-3.5"
+        >
           <path d="M2 4h12M2 8h12M2 12h8" strokeLinecap="round" />
         </svg>
       ),
@@ -54,9 +66,7 @@ export function ModeToggle({ compact = false }: { compact?: boolean }) {
             className={cn(
               "inline-flex items-center gap-1.5 rounded-[4px] px-2 py-1 text-label uppercase",
               "transition-colors duration-150 ease-[var(--ease-precise)]",
-              active
-                ? "bg-elevated text-ink"
-                : "text-ink-faint hover:text-ink-dim",
+              active ? "bg-elevated text-ink" : "text-ink-faint hover:text-ink-dim",
             )}
           >
             {option.icon}
