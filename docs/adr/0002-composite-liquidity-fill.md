@@ -136,6 +136,34 @@ from a market adapter and deserves its own verification pass. See
 complete snapshot for a late one, and a snapshot timestamped two minutes after
 the observation it describes is silently wrong data.
 
+## Field result — not production-viable as built (2026-07-30)
+
+Enabled on the live stack and **reverted the same day**. It stalled enrichment
+completely: DexScreener began timing out at 10s from inside the worker, five
+consecutive failures tripped the circuit breaker, and snapshot writes went to
+zero for roughly an hour.
+
+The failure is not in DexScreener and not in the network. Measured during the
+incident, DexScreener answered in 0.3-0.4s both from the host *and from inside
+the enrichment container*, while the worker's own requests to it timed out.
+Causally confirmed by the revert: with `MARKET_PROVIDER=composite` the pipeline
+wrote 0 snapshots, and with `dexscreener` it wrote 21 within a minute.
+
+The likely mechanism is the secondary's cost under the worker's real
+concurrency, which the original verification never exercised: it was tested in
+isolation on batches of 6 and 30 mints, not under `ENRICHMENT_CONCURRENCY=4`
+with a 5s poll and GeckoTerminal's 25-calls-per-minute budget forcing retries
+and sleeps inside every batch. httpx timeouts are wall-clock, so a saturated
+event loop expires a request whose response already arrived.
+
+**Before enabling this again** it needs: the secondary moved off the enrichment
+request path (a separate backfill worker, so a slow fill can never delay a
+snapshot), or a hard per-batch time budget on the fill. The three rules in this
+ADR are unaffected — the design is sound, the placement is not.
+
+`MARKET_PROVIDER` remains `dexscreener` by default, which is what it always was
+in code; only the local `.env` was changed and it has been reverted.
+
 ## Verification
 
 - `tests/unit/test_composite_provider.py` — 30 tests locking the three rules,
