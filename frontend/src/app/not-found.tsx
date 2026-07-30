@@ -33,7 +33,7 @@ export default function NotFound() {
           <Button variant="primary">Return to Command Center</Button>
         </Link>
         <Link href="/feed">
-          <Button variant="outline">Open Scanner</Button>
+          <Button variant="outline">Open Market Observatory</Button>
         </Link>
       </div>
     </main>

@@ -29,7 +29,7 @@ export function SkeletonText({
   );
 }
 
-/** Placeholder shaped like a token card in the Live Scanner. */
+/** Placeholder shaped like a token card in the Market Observatory. */
 export function SkeletonTokenCard() {
   return (
     <div className="rounded-panel border border-line bg-surface/60 p-5">

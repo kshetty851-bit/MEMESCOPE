@@ -89,7 +89,7 @@ export default function TokenDetailPage() {
         action={
           <Link href="/feed">
             <Button variant="outline" size="sm">
-              Back to Scanner
+              Back to Market Observatory
             </Button>
           </Link>
         }
@@ -147,7 +147,7 @@ export default function TokenDetailPage() {
         <div className="flex items-center gap-2">
           <Link href="/feed">
             <Button variant="ghost" size="sm">
-              ← Scanner
+              ← Observatory
             </Button>
           </Link>
         </div>

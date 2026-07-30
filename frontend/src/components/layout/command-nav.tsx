@@ -47,7 +47,7 @@ const NAV: NavItem[] = [
   },
   {
     href: "/feed",
-    label: "Scanner",
+    label: "Observatory",
     icon: (
       <svg
         viewBox="0 0 24 24"

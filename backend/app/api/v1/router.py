@@ -6,7 +6,16 @@ New feature areas (scanner, tokens, alerts, watchlists) get their own module in
 
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import auth, health, identity, market, scores, tokens, users
+from app.api.v1.endpoints import (
+    analysts,
+    auth,
+    health,
+    identity,
+    market,
+    scores,
+    tokens,
+    users,
+)
 from app.exit_signals import api as intelligence
 from app.radar import api as radar
 
@@ -32,3 +41,6 @@ api_router.include_router(intelligence.router)
 # name is contested needs a scan across every discovered token, so it cannot be
 # computed client-side.
 api_router.include_router(identity.router)
+# The Phase 15 analyst ensemble. Additive and read-only: it runs the six pure
+# analysts over stored observations and publishes its own weights.
+api_router.include_router(analysts.router)

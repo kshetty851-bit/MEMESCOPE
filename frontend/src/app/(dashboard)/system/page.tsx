@@ -213,7 +213,7 @@ export default function DesignSystemPage() {
       >
         <Panel className="flex flex-wrap items-center gap-3">
           <Button variant="primary">Launch Command Center</Button>
-          <Button variant="outline">Watch Live Scanner</Button>
+          <Button variant="outline">Open Market Observatory</Button>
           <Button variant="surface">Surface</Button>
           <Button variant="ghost">Ghost</Button>
           <Button variant="danger">Revoke</Button>

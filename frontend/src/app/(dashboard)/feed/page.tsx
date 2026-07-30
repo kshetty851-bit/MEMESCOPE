@@ -44,7 +44,7 @@ const STATUS_COPY: Record<StreamStatus, string> = {
   offline: "Offline",
 };
 
-export default function LiveScannerPage() {
+export default function MarketObservatoryPage() {
   const [filter, setFilter] = useState<Filter>("all");
 
   const { data: seed } = useQuery({
@@ -96,7 +96,7 @@ export default function LiveScannerPage() {
       {/* Header */}
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <Label>Live Scanner</Label>
+          <Label>Market Observatory</Label>
           <h1 className="mt-2 text-title font-semibold text-ink">
             Every launch, the moment it happens
           </h1>
