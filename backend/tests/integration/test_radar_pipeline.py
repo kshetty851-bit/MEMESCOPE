@@ -558,3 +558,89 @@ class TestPeakCapturesHighsBetweenSweeps:
         after = await repository.get("mint-monotonic")
         assert after is not None
         assert after.peak_price == high_water
+
+
+class TestRotationReachesTheWholeUniverse:
+    """Regression cover for a candidate window that could not see past 1.8 minutes.
+
+    `candidate_mints` orders by most recent observation, so on live data the
+    top 500 spanned about 1.8 minutes and 22,400 of 23,355 eligible projects
+    sat permanently below the cut. They were not evaluated slowly — they could
+    never be evaluated at all, however good they were.
+    """
+
+    async def test_every_eligible_mint_belongs_to_exactly_one_bucket(
+        self, db_session: AsyncSession
+    ) -> None:
+        for index in range(12):
+            token = await _seed_token(db_session, f"mint-rot-{index}")
+            await _seed_series(db_session, token, count=14)
+
+        repository = RadarRepository(db_session)
+        buckets = 4
+        seen: list[str] = []
+        for bucket in range(buckets):
+            seen.extend(
+                await repository.rotating_mints(limit=100, bucket=bucket, buckets=buckets)
+            )
+
+        ours = [m for m in seen if m.startswith("mint-rot-")]
+        # Partition: every mint appears once across a full rotation, never twice.
+        assert sorted(ours) == sorted({f"mint-rot-{i}" for i in range(12)})
+        assert len(ours) == len(set(ours))
+
+    async def test_a_stale_mint_is_reachable_though_it_never_enters_the_hot_window(
+        self, db_session: AsyncSession
+    ) -> None:
+        # One old token, then enough newer ones to bury it in the hot ordering.
+        stale = await _seed_token(db_session, "mint-stale-tail")
+        await _seed_series(db_session, stale, count=14)
+
+        for index in range(6):
+            fresh = await _seed_token(db_session, f"mint-fresh-{index}")
+            await _seed_series(db_session, fresh, count=14)
+            for step in range(14):
+                db_session.add(
+                    TokenMarketSnapshot(
+                        token_id=fresh.id,
+                        mint_address=fresh.mint_address,
+                        captured_at=NOW + timedelta(minutes=step),
+                        price_usd=Decimal("0.002"),
+                        market_cap=Decimal(200_000),
+                        liquidity_usd=Decimal(30_000),
+                        volume_24h=Decimal(40_000),
+                        volume_1h=Decimal(2_000),
+                        buy_count_24h=200,
+                        sell_count_24h=80,
+                        provider="test",
+                    )
+                )
+        await db_session.flush()
+
+        repository = RadarRepository(db_session)
+
+        hot = await repository.candidate_mints(limit=3)
+        assert "mint-stale-tail" not in hot, (
+            "fixture no longer reproduces the bug: the stale mint must be "
+            "outside the hot window for this test to mean anything"
+        )
+
+        # But a full rotation must reach it.
+        buckets = 4
+        reachable = [
+            mint
+            for bucket in range(buckets)
+            for mint in await repository.rotating_mints(
+                limit=100, bucket=bucket, buckets=buckets
+            )
+        ]
+        assert "mint-stale-tail" in reachable
+
+    async def test_an_invalid_bucket_fails_loudly(self, db_session: AsyncSession) -> None:
+        # A silently-skipped slice would leave part of the universe unevaluated
+        # for a full rotation with no signal at all.
+        repository = RadarRepository(db_session)
+        with pytest.raises(ValueError):
+            await repository.rotating_mints(limit=10, bucket=4, buckets=4)
+        with pytest.raises(ValueError):
+            await repository.rotating_mints(limit=10, bucket=0, buckets=0)

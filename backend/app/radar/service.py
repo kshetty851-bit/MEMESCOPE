@@ -23,6 +23,7 @@ from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.radar import RadarToken
 from app.radar import achievements, detector, scorer
@@ -278,6 +279,8 @@ class RadarService:
           that only move when something re-evaluates them.
         * **Candidates** — ranked by most recent observation, which is
           overwhelmingly whatever enrichment just touched.
+        * **Rotation** — a deterministic slice of the *entire* eligible
+          universe, so every project is reached on a fixed cycle.
 
         Sweeping candidates alone looks sufficient and is not. A token drops out
         of the most-recently-observed window within minutes of being detected
@@ -292,6 +295,15 @@ class RadarService:
         Each population gets its own budget: a growing Radar cannot crowd out
         discovery, and a busy chain cannot starve the record.
 
+        The rotation exists because the hot window is far narrower than it
+        looks. Measured live, 978 mints were snapshotted inside one sweep
+        interval, so a 500-token candidate list spans about **1.8 minutes** —
+        and 22,400 of 23,355 eligible projects sat permanently below the cut.
+        They were not evaluated slowly; they could not be evaluated at all.
+        `rotating_mints` gives each of them a guaranteed turn, so the Radar
+        finally assesses the universe it collects rather than the last two
+        minutes of it.
+
         Commits once at the end rather than per token: the whole batch is one
         logical observation of the market, and a partial commit would leave the
         record describing a moment that never existed.
@@ -300,8 +312,23 @@ class RadarService:
 
         tracked_mints = await self._repository.tracked_mints(limit=limit)
         candidates = await self._repository.candidate_mints(limit=limit)
-        # Tracked first, then candidates, de-duplicated with order preserved.
-        mints = list(dict.fromkeys([*tracked_mints, *candidates]))
+
+        # Which slice of the universe this sweep owns. Derived from the clock
+        # rather than stored, so replicas agree without coordinating and a
+        # restart cannot rewind the cycle.
+        bucket = (
+            int(moment.timestamp()) // settings.RADAR_SWEEP_INTERVAL_SECONDS
+        ) % settings.RADAR_ROTATION_BUCKETS
+        rotating = await self._repository.rotating_mints(
+            limit=limit,
+            bucket=bucket,
+            buckets=settings.RADAR_ROTATION_BUCKETS,
+        )
+
+        # Tracked first, then the hot window, then the rotation slice.
+        # De-duplicated with order preserved, so a token appearing in two
+        # populations is evaluated once and keeps its highest priority.
+        mints = list(dict.fromkeys([*tracked_mints, *candidates, *rotating]))
 
         evaluated = 0
         tracked = 0
@@ -316,5 +343,7 @@ class RadarService:
             evaluated=evaluated,
             tracked=tracked,
             refreshed_existing=len(tracked_mints),
+            rotation_bucket=bucket,
+            rotation_size=len(rotating),
         )
         return {"evaluated": evaluated, "tracked": tracked}

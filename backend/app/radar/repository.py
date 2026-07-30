@@ -19,8 +19,8 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import Select, func, select
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import BigInteger, Select, String, func, literal_column, select
+from sqlalchemy.dialects.postgresql import BIT, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -91,11 +91,22 @@ class RadarRepository:
         )
 
     async def candidate_mints(self, *, limit: int, min_observations: int = 12) -> list[str]:
-        """Tokens with enough history for the Radar to have an opinion.
+        """The hot window: tokens observed most recently.
 
-        Deliberately *not* filtered by age: the Radar's premise is that a
-        ninety-day-old project can be the opportunity. Ordered by most recently
-        observed so an evaluation cycle spends its budget on live tokens.
+        Deliberately *not* filtered by age — the Radar's premise is that a
+        ninety-day-old project can be the opportunity — but ordered by most
+        recent observation so a new launch is assessed while it is still new.
+
+        **This ordering alone cannot cover the universe, and must not be used
+        alone.** Measured on live data, 978 mints were snapshotted inside one
+        15-minute sweep interval, so the top 500 spans about 1.8 minutes.
+        Everything observed earlier sits below the limit forever: position 5,000
+        was last seen 32 minutes ago and position 23,355 sixty-two hours ago.
+        Those tokens were not evaluated slowly, they were never evaluated at
+        all — 22,400 eligible projects could not enter the Radar however good
+        they were.
+
+        `rotating_mints` is the other half. Use both.
         """
         statement = (
             select(
@@ -109,6 +120,71 @@ class RadarRepository:
             .limit(limit)
         )
         return [row.mint_address for row in (await self._session.execute(statement)).all()]
+
+    async def rotating_mints(
+        self,
+        *,
+        limit: int,
+        bucket: int,
+        buckets: int,
+        min_observations: int = 12,
+    ) -> list[str]:
+        """One deterministic slice of the whole eligible universe.
+
+        Every eligible mint belongs to exactly one bucket, chosen by a stable
+        hash of its address. Each sweep processes the next bucket, so the entire
+        population is covered in `buckets` sweeps and every project gets a turn
+        regardless of when it was last observed.
+
+        **Why a hash rather than a timestamp.** Rotating by "least recently
+        evaluated" is the obvious approach and it cannot work here: a candidate
+        that is evaluated and *not* detected leaves no record — the Radar
+        deliberately stores only what it detected — so there is no per-token
+        evaluation timestamp to sort by. Recording every attempt would mean a
+        new table written 500 times a sweep purely for scheduling.
+
+        Hashing needs no state at all. It is stable across restarts, identical
+        on every replica, and spreads evenly because the input is a base58
+        address rather than anything correlated with quality.
+
+        MD5 rather than `hashtext`: the latter is an undocumented internal whose
+        value has changed between major versions, which would silently reshuffle
+        every bucket during an upgrade and skip a slice of the universe for one
+        full rotation.
+        """
+        if buckets < 1:
+            raise ValueError("buckets must be at least 1")
+        if not 0 <= bucket < buckets:
+            raise ValueError(f"bucket {bucket} outside range 0..{buckets - 1}")
+
+        # ('x' || first 8 hex chars)::bit(32)::bigint gives a stable signed
+        # 32-bit integer; abs() before the modulo so negatives cannot fold two
+        # buckets onto one.
+        bucket_of = func.mod(
+            func.abs(
+                func.cast(
+                    func.cast(
+                        literal_column("'x'", String)
+                        + func.substr(func.md5(TokenMarketSnapshot.mint_address), 1, 8),
+                        BIT(32),
+                    ),
+                    BigInteger,
+                )
+            ),
+            buckets,
+        )
+
+        statement = (
+            select(TokenMarketSnapshot.mint_address)
+            .group_by(TokenMarketSnapshot.mint_address)
+            .having(func.count() >= min_observations)
+            .having(bucket_of == bucket)
+            # Least recently observed first *within* the bucket, so a slice that
+            # overflows the limit still favours the tokens most overdue a look.
+            .order_by(func.max(TokenMarketSnapshot.captured_at).asc())
+            .limit(limit)
+        )
+        return list((await self._session.scalars(statement)).all())
 
     async def token_id_for(self, mint_address: str) -> uuid.UUID | None:
         found: uuid.UUID | None = await self._session.scalar(

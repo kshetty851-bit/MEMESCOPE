@@ -62,6 +62,10 @@ x-backend-env: &backend-env
   # twice before.
   FEATURE_RADAR_ENABLED: ${FEATURE_RADAR_ENABLED:-false}
   RADAR_SWEEP_BATCH_LIMIT: ${RADAR_SWEEP_BATCH_LIMIT:-500}
+  # How many slices the eligible universe is divided into for the rotation.
+  # In the anchor, not on the enrichment service: the beat worker schedules the
+  # sweep and the API reports the cycle, so both must agree on the value.
+  RADAR_ROTATION_BUCKETS: ${RADAR_ROTATION_BUCKETS:-48}
   SCORING_MODEL_VERSION: ${SCORING_MODEL_VERSION:-v1}
   # Local development only. The app refuses to boot if this is set while
   # ENVIRONMENT=production.

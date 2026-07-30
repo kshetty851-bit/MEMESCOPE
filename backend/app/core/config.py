@@ -223,6 +223,10 @@ class Settings(BaseSettings):
     FEATURE_RADAR_ENABLED: bool = False
     RADAR_SWEEP_BATCH_LIMIT: int = 500
     RADAR_SWEEP_INTERVAL_SECONDS: int = 900
+    #: How many slices the eligible universe is divided into. Every project is
+    #: evaluated once per full rotation, so at a 900s sweep this is 12 hours.
+    #: Raise it to spread load, lower it to shorten the guaranteed interval.
+    RADAR_ROTATION_BUCKETS: int = 48
 
     SCORING_MODEL_VERSION: str = "v1"
     # Snapshots per feature window. The window itself is tier-relative
