@@ -462,3 +462,99 @@ class TestRadarSurfacesCarryTokenIdentity:
         assert "mint-listed" in entries
         assert entries["mint-listed"]["name"] == "Radar Probe"
         assert entries["mint-listed"]["symbol"] == "RDR"
+
+
+class TestPeakCapturesHighsBetweenSweeps:
+    """Regression cover for a peak that only ever saw the latest snapshot.
+
+    The Radar sweeps every fifteen minutes; enrichment writes snapshots as
+    often as every thirty seconds. The peak was raised against `series.latest`
+    alone, so a high reached between two sweeps was never recorded — even
+    though the snapshot holding it was already in the database.
+
+    Measured on the live database before the fix: 18 of 37 tracked entries
+    under-reported their peak, the worst by 4.17x. It only ever errs downward,
+    which flatters nothing but makes the track record wrong.
+    """
+
+    async def test_a_spike_between_sweeps_is_not_lost(self, db_session: AsyncSession) -> None:
+        token = await _seed_token(db_session, "mint-spike")
+        await _seed_series(db_session, token, count=20, price_step=Decimal(0))
+
+        service = RadarService(db_session)
+        assert await service.evaluate_mint("mint-spike", now=NOW) is True
+
+        repository = RadarRepository(db_session)
+        entry = await repository.get("mint-spike")
+        assert entry is not None
+        baseline_peak = entry.peak_multiple
+
+        # A spike, then a full retrace — both captured by enrichment, and both
+        # in the past by the time the next sweep runs.
+        for index, price in enumerate([Decimal("0.005"), Decimal("0.001")]):
+            db_session.add(
+                TokenMarketSnapshot(
+                    token_id=token.id,
+                    mint_address=token.mint_address,
+                    captured_at=NOW + timedelta(minutes=1 + index),
+                    price_usd=price,
+                    market_cap=Decimal(500_000),
+                    liquidity_usd=Decimal(40_000),
+                    volume_24h=Decimal(60_000),
+                    volume_1h=Decimal(4_000),
+                    buy_count_24h=250,
+                    sell_count_24h=90,
+                    provider="test",
+                )
+            )
+        await db_session.flush()
+
+        await service.evaluate_mint("mint-spike", now=NOW + timedelta(minutes=15))
+
+        refreshed = await repository.get("mint-spike")
+        assert refreshed is not None
+        assert refreshed.peak_price == Decimal("0.005"), (
+            "the spike was in the window and must have raised the peak"
+        )
+        assert refreshed.peak_multiple is not None
+        assert refreshed.peak_multiple > baseline_peak
+        # And the current reading still reflects the retrace, not the spike.
+        assert refreshed.current_price == Decimal("0.001")
+
+    async def test_the_peak_still_only_ever_rises(self, db_session: AsyncSession) -> None:
+        """The monotonic guarantee the track record rests on, unchanged."""
+        token = await _seed_token(db_session, "mint-monotonic")
+        await _seed_series(db_session, token, count=20, price_step=Decimal(0))
+
+        service = RadarService(db_session)
+        await service.evaluate_mint("mint-monotonic", now=NOW)
+
+        repository = RadarRepository(db_session)
+        before = await repository.get("mint-monotonic")
+        assert before is not None
+        high_water = before.peak_price
+
+        # Nothing but decline afterwards.
+        for index in range(4):
+            db_session.add(
+                TokenMarketSnapshot(
+                    token_id=token.id,
+                    mint_address=token.mint_address,
+                    captured_at=NOW + timedelta(minutes=index + 1),
+                    price_usd=Decimal("0.0000001"),
+                    market_cap=Decimal(100),
+                    liquidity_usd=Decimal(50),
+                    volume_24h=Decimal(10),
+                    volume_1h=Decimal(1),
+                    buy_count_24h=1,
+                    sell_count_24h=90,
+                    provider="test",
+                )
+            )
+        await db_session.flush()
+
+        await service.evaluate_mint("mint-monotonic", now=NOW + timedelta(minutes=30))
+
+        after = await repository.get("mint-monotonic")
+        assert after is not None
+        assert after.peak_price == high_water

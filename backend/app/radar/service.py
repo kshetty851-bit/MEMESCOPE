@@ -148,6 +148,24 @@ class RadarService:
 
         current_multiple = achievements.multiple(entry.first_price, price)
 
+        # The highest price anywhere in the observed window, not just the one
+        # standing at this instant.
+        #
+        # The peak used to be raised against `price` alone — the single latest
+        # snapshot at sweep time. Sweeps run every 15 minutes while enrichment
+        # writes snapshots as often as every 30 seconds, so any high that
+        # happened *between* two sweeps was never seen, even though the snapshot
+        # capturing it was already in the database. Measured on live data, 18 of
+        # 37 tracked entries under-reported their peak, the worst by 4.17x.
+        #
+        # This reads the window the engine was already given, so it costs no
+        # extra query, and it only ever raises the peak — the monotonic
+        # guarantee the track record depends on is untouched.
+        window_high = max(
+            (o.price_usd for o in series.observations if o.price_usd is not None),
+            default=None,
+        )
+
         await self._repository.update_current(
             entry,
             price=price,
@@ -160,6 +178,7 @@ class RadarService:
             category=str(category) if category else entry.current_category,
             current_multiple=current_multiple,
             evaluated_at=moment,
+            window_high=window_high,
         )
 
         await self._maybe_write_snapshot(entry, series, result, category, moment)

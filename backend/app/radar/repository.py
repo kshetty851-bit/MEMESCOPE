@@ -199,6 +199,7 @@ class RadarRepository:
         category: str,
         current_multiple: Decimal | None,
         evaluated_at: datetime,
+        window_high: Decimal | None = None,
     ) -> None:
         """Move the current-state columns, and raise the peak if it has risen.
 
@@ -206,6 +207,14 @@ class RadarRepository:
         provider outage or a bad snapshot cannot erase a high the token
         genuinely reached, which is what lets the track record report peak
         return honestly rather than optimistically.
+
+        `window_high` is the highest price anywhere in the observed window, and
+        it is what the peak is actually measured against. Using the latest price
+        alone meant a high reached between two sweeps was invisible — the sweep
+        cadence is fifteen minutes, enrichment writes every thirty seconds, and
+        the snapshot holding the high was already stored. It defaults to `None`
+        so existing callers keep their previous behaviour rather than silently
+        changing meaning.
         """
         entry.current_price = price
         entry.current_market_cap = market_cap
@@ -216,12 +225,26 @@ class RadarRepository:
         entry.current_multiple = current_multiple
         entry.last_evaluated_at = evaluated_at
 
-        if price is not None and (entry.peak_price is None or price > entry.peak_price):
-            entry.peak_price = price
-            entry.peak_market_cap = market_cap
+        # Take the higher of the window's high and the current price. The
+        # current price is still considered because a window that somehow
+        # excludes it must not lower the peak.
+        candidate = max(
+            (value for value in (price, window_high) if value is not None),
+            default=None,
+        )
+
+        if candidate is not None and (
+            entry.peak_price is None or candidate > entry.peak_price
+        ):
+            entry.peak_price = candidate
+            # Market cap is only carried across when the peak is the *current*
+            # observation. A historical high has no market cap stored beside it
+            # here, and inventing one by reusing today's would be wrong.
+            if price is not None and candidate == price:
+                entry.peak_market_cap = market_cap
             entry.peak_at = evaluated_at
             if entry.first_price is not None and entry.first_price > 0:
-                entry.peak_multiple = price / entry.first_price
+                entry.peak_multiple = candidate / entry.first_price
 
     async def add_snapshot(self, **values: object) -> None:
         self._session.add(RadarSnapshot(**values))
