@@ -15,7 +15,12 @@ celery_app = Celery(
     "memescope",
     broker=settings.REDIS_URI,
     backend=settings.REDIS_URI,
-    include=["app.workers.tasks", "app.workers.scoring_tasks", "app.radar.scheduler"],
+    include=[
+        "app.workers.tasks",
+        "app.workers.scoring_tasks",
+        "app.radar.scheduler",
+        "app.events.scheduler",
+    ],
 )
 
 celery_app.conf.update(
@@ -57,5 +62,13 @@ celery_app.conf.beat_schedule = {
     "radar-sweep": {
         "task": "app.radar.scheduler.radar_sweep",
         "schedule": crontab(minute="*/15"),
+    },
+    # Event detection runs a few minutes *after* the Radar sweep, deliberately.
+    # It compares fresh analyst readings against the cached previous ones, so
+    # running it before the sweep would diff a stale reading against itself and
+    # report nothing — losing the change until the next cycle.
+    "event-cycle": {
+        "task": "app.events.scheduler.event_cycle",
+        "schedule": crontab(minute="3,18,33,48"),
     },
 }

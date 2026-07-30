@@ -9,12 +9,14 @@ from fastapi import APIRouter
 from app.api.v1.endpoints import (
     analysts,
     auth,
+    events,
     health,
     identity,
     market,
     scores,
     tokens,
     users,
+    watchlists,
 )
 from app.exit_signals import api as intelligence
 from app.radar import api as radar
@@ -44,3 +46,8 @@ api_router.include_router(identity.router)
 # The Phase 15 analyst ensemble. Additive and read-only: it runs the six pure
 # analysts over stored observations and publishes its own weights.
 api_router.include_router(analysts.router)
+# Phase 17: watchlists and the event log. Watchlist routes are scoped to the
+# authenticated user in SQL; event routes are read-only. Additive throughout —
+# no existing route changed shape.
+api_router.include_router(watchlists.router)
+api_router.include_router(events.router)

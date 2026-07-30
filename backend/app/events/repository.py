@@ -169,6 +169,111 @@ class EventRepository:
         )
         return (await self._session.scalars(statement)).all()
 
+    async def events_for_mints(
+        self, mints: Sequence[str], *, limit: int = 50
+    ) -> Sequence[IntelligenceEvent]:
+        """Recent events across a set of tokens, newest first.
+
+        One query for a whole watchlist rather than one per row — the
+        difference between a watchlist page costing one round trip and costing
+        one per token on it.
+        """
+        if not mints:
+            return []
+        statement = (
+            select(IntelligenceEvent)
+            .where(IntelligenceEvent.mint_address.in_(list(dict.fromkeys(mints))))
+            .order_by(IntelligenceEvent.occurred_at.desc())
+            .limit(limit)
+        )
+        return (await self._session.scalars(statement)).all()
+
+    async def latest_event_per_mint(
+        self, mints: Sequence[str]
+    ) -> dict[str, IntelligenceEvent]:
+        """The most recent event per token, for the "last change" column.
+
+        `DISTINCT ON` rather than a window function or a correlated subquery: it
+        rides the `(mint_address, occurred_at DESC)` index and reads one row per
+        token instead of scanning each token's whole history.
+        """
+        if not mints:
+            return {}
+        statement = (
+            select(IntelligenceEvent)
+            .where(IntelligenceEvent.mint_address.in_(list(dict.fromkeys(mints))))
+            .distinct(IntelligenceEvent.mint_address)
+            .order_by(
+                IntelligenceEvent.mint_address,
+                IntelligenceEvent.occurred_at.desc(),
+            )
+        )
+        rows = (await self._session.scalars(statement)).all()
+        return {row.mint_address: row for row in rows}
+
+    async def event_by_id(self, event_id: uuid.UUID) -> IntelligenceEvent | None:
+        found: IntelligenceEvent | None = await self._session.scalar(
+            select(IntelligenceEvent).where(IntelligenceEvent.id == event_id)
+        )
+        return found
+
+    async def count_events(
+        self,
+        *,
+        since: datetime | None = None,
+        kinds: Sequence[str] | None = None,
+        mints: Sequence[str] | None = None,
+    ) -> int:
+        statement = select(func.count()).select_from(IntelligenceEvent)
+        if since is not None:
+            statement = statement.where(IntelligenceEvent.occurred_at >= since)
+        if kinds:
+            statement = statement.where(IntelligenceEvent.kind.in_(list(kinds)))
+        if mints:
+            statement = statement.where(
+                IntelligenceEvent.mint_address.in_(list(dict.fromkeys(mints)))
+            )
+        return int((await self._session.execute(statement)).scalar_one())
+
+    async def search_events(
+        self,
+        *,
+        offset: int = 0,
+        limit: int = 50,
+        since: datetime | None = None,
+        kinds: Sequence[str] | None = None,
+        mints: Sequence[str] | None = None,
+        severity: str | None = None,
+        newest_first: bool = True,
+    ) -> Sequence[IntelligenceEvent]:
+        """Filtered, ordered, paginated events.
+
+        Every filter is applied in SQL. Filtering client-side would mean
+        shipping the whole log to decide what to show, which stops working the
+        moment the log is interesting.
+        """
+        statement = select(IntelligenceEvent)
+        if since is not None:
+            statement = statement.where(IntelligenceEvent.occurred_at >= since)
+        if kinds:
+            statement = statement.where(IntelligenceEvent.kind.in_(list(kinds)))
+        if mints:
+            statement = statement.where(
+                IntelligenceEvent.mint_address.in_(list(dict.fromkeys(mints)))
+            )
+        if severity:
+            statement = statement.where(IntelligenceEvent.severity == severity)
+
+        order = (
+            IntelligenceEvent.occurred_at.desc()
+            if newest_first
+            else IntelligenceEvent.occurred_at.asc()
+        )
+        # `id` breaks ties so the ordering is total: without it two events in the
+        # same second could swap between pages while a client walks them.
+        statement = statement.order_by(order, IntelligenceEvent.id).offset(offset).limit(limit)
+        return (await self._session.scalars(statement)).all()
+
     async def counts_by_kind(self, since: datetime) -> dict[str, int]:
         """Event tallies for the personal brief."""
         statement = (
