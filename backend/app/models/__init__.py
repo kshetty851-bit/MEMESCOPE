@@ -41,3 +41,11 @@ __all__ = [
     "User",
     "UserRole",
 ]
+from app.models.intelligence import (  # noqa: F401
+    AnalystReadingCache,
+    EventKind,
+    EventSeverity,
+    IntelligenceEvent,
+    Watchlist,
+    WatchlistItem,
+)
