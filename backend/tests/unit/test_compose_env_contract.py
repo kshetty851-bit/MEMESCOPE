@@ -81,6 +81,13 @@ REQUIRED_IN_ANCHOR = {
     "FEATURE_ENRICHMENT_ENABLED": "read by enrichment and reported by the API",
     "FEATURE_AI_SCORING_ENABLED": "read by enrichment and the beat worker",
     "FEATURE_RADAR_ENABLED": "read by the API and the beat worker",
+    "FEATURE_PUMPFUN_RADAR_ENABLED": "read by the Pump.fun Radar beat task",
+    # The scanner writes its state and the API reads it; the scanner's own
+    # container healthcheck and the API's endpoint must agree on what "down"
+    # means, or Docker restarts a service the dashboard calls healthy.
+    "SCANNER_RECONNECT_ERROR_ATTEMPTS": "scanner escalates, API reports it degraded",
+    "SCANNER_STATE_TTL_SECONDS": "scanner writes the key, API expects it to still exist",
+    "HEALTH_SCANNER_DOWN_MINUTES": "read by the API endpoint and the scanner healthcheck",
 }
 
 
@@ -112,6 +119,30 @@ def test_redis_password_is_not_also_set_per_service() -> None:
         "docker-compose.prod.yml. It belongs in the x-backend-env anchor only — "
         "per-service copies are how the scanner and enrichment workers were "
         "missed."
+    )
+
+
+def test_the_scanner_declares_a_healthcheck() -> None:
+    """Its absence is why four days of dead discovery went unnoticed.
+
+    `restart: unless-stopped` only sees a live process, and the scanner process
+    stayed perfectly alive throughout — reconnecting to a Helius that had run
+    out of quota. Without a healthcheck nothing ever asked whether it was still
+    finding tokens.
+    """
+    assert REPO_ROOT is not None
+    text = (REPO_ROOT / "docker-compose.yml").read_text()
+
+    scanner = re.search(r"^  scanner:\n(.*?)(?=^  \S)", text, re.M | re.S)
+    assert scanner is not None, "scanner service not found in docker-compose.yml"
+
+    assert "healthcheck:" in scanner.group(1), (
+        "The scanner service has no healthcheck. A dead scanner reports `Up` "
+        "forever without one — see MEMESCOPE_AUDIT.md R1."
+    )
+    assert "app.health.probe" in scanner.group(1), (
+        "The scanner healthcheck must run the discovery probe, not a generic "
+        "liveness command: the process being alive is exactly what lied."
     )
 
 

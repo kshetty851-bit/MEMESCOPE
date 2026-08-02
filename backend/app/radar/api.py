@@ -30,6 +30,8 @@ from app.radar.schemas import (
     ModelOut,
     PerformanceOut,
     RadarDetailOut,
+    RadarDiscoveredCandidateOut,
+    RadarDiscoveredPage,
     RadarEntryOut,
     RadarHistoryOut,
     RadarPage,
@@ -37,6 +39,7 @@ from app.radar.schemas import (
     ReasonOut,
     TierCount,
 )
+from app.services.pumpfun_radar import PumpfunRadarScanner
 
 router = APIRouter(prefix="/radar", tags=["radar"])
 
@@ -261,6 +264,52 @@ async def list_radar(
             "include_inactive": include_inactive,
             "sort": sort,
         },
+    )
+
+
+@router.get(
+    "/discovered",
+    response_model=RadarDiscoveredPage,
+    summary="Eligible Pump.fun discovery candidates",
+)
+async def list_discovered(
+    session: DbSession,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 25,
+) -> RadarDiscoveredPage:
+    """List the configured Pump.fun age and market window.
+
+    This route is intentionally separate from ``GET /radar``: an admission
+    candidate has not passed the Opportunity Radar's technical, community or
+    AI scoring stages and must not be represented as if it has.
+    """
+    now = datetime.now(UTC)
+    scanner = PumpfunRadarScanner(session)
+    candidates = await scanner.candidates(
+        limit=page_size,
+        offset=(page - 1) * page_size,
+        now=now,
+    )
+    total = await scanner.count(now=now)
+    return RadarDiscoveredPage(
+        items=[
+            RadarDiscoveredCandidateOut(
+                token=candidate.token_address,
+                name=candidate.name,
+                symbol=candidate.symbol,
+                creation_time=candidate.creation_time,
+                age_days=candidate.age_days,
+                market_cap=candidate.market_cap,
+                liquidity=candidate.liquidity,
+                volume=candidate.volume_24h,
+                holder_count=candidate.holder_count,
+                last_scan_time=candidate.last_scan_time,
+            )
+            for candidate in candidates
+        ],
+        total=total,
+        page=page,
+        page_size=page_size,
     )
 
 

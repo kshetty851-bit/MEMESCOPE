@@ -151,7 +151,23 @@ class Settings(BaseSettings):
     SCANNER_WS_PING_INTERVAL_SECONDS: float = 20.0
     # TTL of the Redis dedupe key that suppresses repeated events for a mint.
     SCANNER_DEDUPE_TTL_SECONDS: int = 3600
-    # Redis channel the scanner publishes to and the API fans out from.
+    # Reconnect escalation. The backoff ladder above is correct and must not
+    # change — full jitter is what stops every client retrying in lockstep when
+    # Helius recovers. What was missing is escalation: the scanner spent four
+    # days on attempt 959 against an exhausted Helius quota, logging `warning`
+    # every time, while the container reported healthy. Past this many
+    # consecutive failures the condition is no longer transient and is logged at
+    # ERROR.
+    SCANNER_RECONNECT_ERROR_ATTEMPTS: int = Field(default=5, ge=1)
+    # ...but not on every attempt after that, or a week-long outage writes a
+    # million identical ERROR lines. One in N once escalated.
+    SCANNER_RECONNECT_ERROR_EVERY: int = Field(default=20, ge=1)
+    # How long the scanner's published state stays valid in Redis. Longer than
+    # the maximum backoff delay, so a scanner that is merely between retries
+    # does not read as absent; short enough that a killed process disappears.
+    SCANNER_STATE_TTL_SECONDS: int = Field(default=300, ge=30)
+    # Redis channel the scanner publishes to and the API fans out from. This is
+    # the *base* name; `token_channel` below is what is actually used.
     TOKEN_EVENT_CHANNEL: str = "memescope:tokens:discovered"
 
     # --- Market data provider ------------------------------------------------
@@ -227,6 +243,43 @@ class Settings(BaseSettings):
     #: evaluated once per full rotation, so at a 900s sweep this is 12 hours.
     #: Raise it to spread load, lower it to shorten the guaranteed interval.
     RADAR_ROTATION_BUCKETS: int = 48
+
+    # --- Pump.fun Radar discovery ------------------------------------------
+    # This is an admission stage, deliberately separate from the Opportunity
+    # Radar. It identifies a bounded-age Pump.fun universe from data already
+    # discovered and enriched; it neither scores nor re-fetches a token.
+    FEATURE_PUMPFUN_RADAR_ENABLED: bool = False
+    PUMPFUN_PROGRAM_ID: str = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
+    PUMPFUN_RADAR_MIN_AGE_DAYS: int = Field(default=6, ge=0)
+    PUMPFUN_RADAR_MAX_AGE_DAYS: int = Field(default=8, ge=0)
+    # Zero is an intentional safe default: it requires the market fields to
+    # exist without silently imposing a product threshold that has not been
+    # chosen yet. Operators can tighten both values through configuration.
+    PUMPFUN_RADAR_MIN_MARKET_CAP: float = Field(default=0, ge=0)
+    PUMPFUN_RADAR_MIN_LIQUIDITY: float = Field(default=0, ge=0)
+    PUMPFUN_RADAR_BATCH_LIMIT: int = Field(default=500, ge=1, le=5000)
+
+    # --- Pipeline health -----------------------------------------------------
+    # Staleness thresholds, per stage, in minutes. A stage is `healthy` below
+    # the degraded bound, `degraded` between the two, and `down` at or past the
+    # down bound. Every stage gets its own pair because their cadences differ by
+    # two orders of magnitude — discovery is continuous, the Radar sweeps every
+    # 15 minutes — so one shared threshold would either cry wolf on the Radar or
+    # stay silent for an hour of dead discovery.
+    #
+    # Health is *derived from persisted state*: the last row each stage wrote.
+    # Nothing here reports a stage as healthy because its process is running;
+    # the scanner was running throughout the four days it discovered nothing.
+    HEALTH_SCANNER_DEGRADED_MINUTES: int = Field(default=15, ge=1)
+    HEALTH_SCANNER_DOWN_MINUTES: int = Field(default=60, ge=1)
+    HEALTH_ENRICHMENT_DEGRADED_MINUTES: int = Field(default=10, ge=1)
+    HEALTH_ENRICHMENT_DOWN_MINUTES: int = Field(default=30, ge=1)
+    # Scoring and the Radar both run on a 15-minute beat, so one missed cycle is
+    # degraded and several in a row is down.
+    HEALTH_SCORING_DEGRADED_MINUTES: int = Field(default=30, ge=1)
+    HEALTH_SCORING_DOWN_MINUTES: int = Field(default=120, ge=1)
+    HEALTH_RADAR_DEGRADED_MINUTES: int = Field(default=30, ge=1)
+    HEALTH_RADAR_DOWN_MINUTES: int = Field(default=120, ge=1)
 
     SCORING_MODEL_VERSION: str = "v1"
     # Snapshots per feature window. The window itself is tier-relative
@@ -364,6 +417,48 @@ class Settings(BaseSettings):
 
     @computed_field  # type: ignore[prop-decorator]
     @property
+    def redis_namespace(self) -> str:
+        """Prefix isolating every Redis channel by environment.
+
+        The test suite already isolates Postgres — it creates and drops its own
+        `*_test` database — but it shared Redis with whatever stack happened to
+        be running. So `pytest` published discoveries onto the same channel the
+        development enrichment worker was subscribed to, naming tokens that
+        exist only in the test database. The worker read them, failed the
+        foreign key, and tore down its subscription. A green test run left the
+        development pipeline in a crash loop.
+
+        Derived from `ENVIRONMENT` rather than configured separately: a
+        namespace an operator can set independently is a namespace an operator
+        can set to the same value twice, which is the bug this prevents.
+        """
+        return self.ENVIRONMENT
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def token_channel(self) -> str:
+        """The discovery channel actually published to and subscribed from."""
+        return f"{self.redis_namespace}:{self.TOKEN_EVENT_CHANNEL}"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def score_channel(self) -> str:
+        """The score-change channel actually published to and subscribed from."""
+        return f"{self.redis_namespace}:{self.SCORE_EVENT_CHANNEL}"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def scanner_state_key(self) -> str:
+        """Where the scanner process publishes its own connection state.
+
+        The scanner runs in its own container, so the API cannot read its
+        in-memory counters. It writes them here instead, with a TTL, and the
+        pipeline health endpoint reads them.
+        """
+        return f"{self.redis_namespace}:memescope:scanner:state"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
     def DATABASE_URI(self) -> str:
         return str(
             PostgresDsn.build(
@@ -414,6 +509,23 @@ class Settings(BaseSettings):
                 raise ValueError("REFRESH_COOKIE_SECURE must be true in production")
         if self.FEATURE_SCANNER_ENABLED and not self.HELIUS_API_KEY.get_secret_value():
             raise ValueError("HELIUS_API_KEY is required when FEATURE_SCANNER_ENABLED is true")
+        if self.PUMPFUN_RADAR_MIN_AGE_DAYS > self.PUMPFUN_RADAR_MAX_AGE_DAYS:
+            raise ValueError(
+                "PUMPFUN_RADAR_MIN_AGE_DAYS must not exceed PUMPFUN_RADAR_MAX_AGE_DAYS"
+            )
+        # An inverted pair would report a stage as `down` before it was ever
+        # `degraded`, so the middle state could never be observed and the
+        # warning that precedes an outage would never fire.
+        for stage in ("SCANNER", "ENRICHMENT", "SCORING", "RADAR"):
+            degraded = getattr(self, f"HEALTH_{stage}_DEGRADED_MINUTES")
+            down = getattr(self, f"HEALTH_{stage}_DOWN_MINUTES")
+            if degraded > down:
+                raise ValueError(
+                    f"HEALTH_{stage}_DEGRADED_MINUTES must not exceed "
+                    f"HEALTH_{stage}_DOWN_MINUTES"
+                )
+        if self.SCANNER_RECONNECT_ERROR_ATTEMPTS < 1:
+            raise ValueError("SCANNER_RECONNECT_ERROR_ATTEMPTS must be at least 1")
         return self
 
 

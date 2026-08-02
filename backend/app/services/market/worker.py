@@ -41,6 +41,15 @@ logger = get_logger(__name__)
 class WorkerStats:
     cycles: int = 0
     tokens_registered: int = 0
+    #: Discovery messages consumed, and those that failed on their own. A
+    #: failed message is now a counter rather than a dropped subscription, so
+    #: it needs somewhere to be counted.
+    discovery_messages: int = 0
+    discovery_messages_failed: int = 0
+    #: Times the subscription itself had to be re-established. Should stay near
+    #: zero; a rising value means a genuine Redis or connection problem rather
+    #: than a bad payload.
+    listener_reconnects: int = 0
     tokens_refreshed: int = 0
     snapshots_written: int = 0
     without_market: int = 0
@@ -60,6 +69,9 @@ class WorkerStats:
         return {
             "cycles": self.cycles,
             "tokens_registered": self.tokens_registered,
+            "discovery_messages": self.discovery_messages,
+            "discovery_messages_failed": self.discovery_messages_failed,
+            "listener_reconnects": self.listener_reconnects,
             "tokens_refreshed": self.tokens_refreshed,
             "snapshots_written": self.snapshots_written,
             "without_market": self.without_market,
@@ -133,10 +145,10 @@ class MarketEnrichmentWorker:
             pubsub = None
             try:
                 pubsub = get_redis().pubsub()
-                await pubsub.subscribe(settings.TOKEN_EVENT_CHANNEL)
+                await pubsub.subscribe(settings.token_channel)
                 attempt = 0
                 logger.info(
-                    "enrichment_listener_subscribed", channel=settings.TOKEN_EVENT_CHANNEL
+                    "enrichment_listener_subscribed", channel=settings.token_channel
                 )
 
                 async for message in pubsub.listen():
@@ -144,30 +156,18 @@ class MarketEnrichmentWorker:
                         break
                     if message.get("type") != "message":
                         continue
-                    try:
-                        payload = json.loads(message["data"])
-                        mint = payload.get("mint_address")
-                    except (ValueError, TypeError, AttributeError):
-                        continue
-                    if not mint:
-                        continue
-
-                    async with SessionFactory() as session:
-                        service = MarketEnrichmentService(
-                            session, self._provider, scheduler=self._scheduler
-                        )
-                        if await service.register_token(mint):
-                            self.stats.tokens_registered += 1
-                        await session.commit()
+                    await self._handle_discovery_message(message)
 
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
                 attempt += 1
+                self.stats.listener_reconnects += 1
                 delay = min(2.0**attempt, 30.0)
                 logger.warning(
                     "enrichment_listener_reconnect",
                     error=str(exc),
+                    error_type=type(exc).__name__,
                     attempt=attempt,
                     delay_seconds=delay,
                 )
@@ -176,6 +176,62 @@ class MarketEnrichmentWorker:
                 if pubsub is not None:
                     with contextlib.suppress(Exception):
                         await pubsub.aclose()  # type: ignore[no-untyped-call]
+
+    async def _handle_discovery_message(self, message: dict[str, Any]) -> None:
+        """Process exactly one discovery, and never let it kill the listener.
+
+        Previously only JSON errors were caught here; anything the database
+        raised escaped to the reconnect handler, which tore down the whole
+        subscription. A single message naming a token that did not exist —
+        which is what a test run publishing onto a shared channel produces —
+        cost every subsequent discovery until the resubscribe completed, then
+        repeated.
+
+        The blast radius of a bad message is now that message. The database
+        queue is the durable path regardless: a discovery missed here is picked
+        up by the backfill sweep within five minutes, so swallowing the failure
+        loses latency, not tokens.
+        """
+        self.stats.discovery_messages += 1
+        try:
+            payload = json.loads(message["data"])
+            mint = payload.get("mint_address")
+        except (ValueError, TypeError, AttributeError, KeyError):
+            self.stats.discovery_messages_failed += 1
+            logger.warning(
+                "enrichment_discovery_malformed",
+                reason="payload is not JSON with a mint_address",
+                raw=str(message.get("data"))[:200],
+            )
+            return
+        if not mint:
+            self.stats.discovery_messages_failed += 1
+            logger.warning("enrichment_discovery_malformed", reason="no mint_address")
+            return
+
+        try:
+            async with SessionFactory() as session:
+                service = MarketEnrichmentService(
+                    session, self._provider, scheduler=self._scheduler
+                )
+                if await service.register_token(mint):
+                    self.stats.tokens_registered += 1
+                await session.commit()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            self.stats.discovery_messages_failed += 1
+            logger.warning(
+                "enrichment_discovery_failed",
+                mint=mint,
+                error=str(exc),
+                error_type=type(exc).__name__,
+                failed_total=self.stats.discovery_messages_failed,
+                detail=(
+                    "This discovery was skipped. The backfill sweep will enrol "
+                    "the token if it genuinely exists."
+                ),
+            )
 
     async def _backfill_missing_state(self) -> None:
         """Enrol any discovered token that has no scheduling row yet."""

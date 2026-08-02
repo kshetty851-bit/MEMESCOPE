@@ -500,7 +500,11 @@ async def test_mints_without_scores_finds_only_tokens_with_market_data(
     await _snapshots(db_session, with_market, count=1)
     await _token(db_session, "MintNothing")
 
-    pending = set(await ScoreRepository(db_session).mints_without_scores(limit=50))
+    pending = set(
+        await ScoreRepository(db_session).mints_without_scores(
+            since=NOW - timedelta(days=3), limit=50
+        )
+    )
 
     assert "MintPending" in pending
     assert "MintNothing" not in pending

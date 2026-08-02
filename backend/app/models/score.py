@@ -57,11 +57,6 @@ from app.models.token import PUBKEY_MAX_LENGTH, DiscoveredToken
 # 71.40000000000001.
 SCORE_PRECISION = Numeric(5, 2)
 
-# Evidence floor baked into the `ranking_hot` partial index. It mirrors the
-# `min_evidence` default on the ranking endpoint; the two must move together,
-# which is why the value lives here as a named constant rather than inline.
-RANKING_HOT_MIN_EVIDENCE = 25
-
 MODEL_VERSION_MAX_LENGTH = 32
 TRIGGER_MAX_LENGTH = 32
 
@@ -202,17 +197,33 @@ class TokenScore(Base, UUIDPrimaryKeyMixin, TimestampMixin):
             text("score DESC"),
             "mint_address",
         ),
-        # The default filter combination gets its own partial index: excluding
-        # vetoed and low-evidence rows removes the bulk of the table, so the
-        # common ranking query touches a fraction of the entries.
+        # What `/scores/top` actually issues. The index above cannot serve it:
+        # `model_version` leads, and the endpoint sends no equality on that
+        # column unless a caller passes `?model_version=`, so Postgres has to
+        # seq-scan `token_scores`, hash-join `discovered_tokens` and top-N sort
+        # 20,225 rows to return 20.
+        #
+        # This one leads with the sort key and is partial on the one filter the
+        # default request always carries, so the ranking becomes an index scan
+        # that stops after `limit` rows.
+        #
+        # It replaces `ix_token_scores_ranking_hot`, which additionally required
+        # `evidence >= 25`. No query the application issues implies that
+        # predicate — `min_confidence` is optional and unset by default — so
+        # that index was unusable by construction rather than merely unused.
+        # `IS false`, not `= false`. SQLAlchemy compiles `has_veto.is_(False)`
+        # to `has_veto IS false`, and Postgres's predicate-implication prover
+        # does not recognise that as implying `has_veto = false` — it treats
+        # `IS` and `=` as unrelated operators regardless of the column being
+        # NOT NULL. A partial index whose predicate the planner cannot prove is
+        # implied is simply never used, which is how the index this replaces
+        # went unnoticed. Verified against `EXPLAIN` on the ORM's own SQL, not
+        # on a hand-written equivalent.
         Index(
-            "ix_token_scores_ranking_hot",
-            "model_version",
+            "ix_token_scores_ranking_default",
             text("score DESC"),
             "mint_address",
-            postgresql_where=text(
-                f"has_veto = false AND evidence >= {RANKING_HOT_MIN_EVIDENCE}"
-            ),
+            postgresql_where=text("has_veto IS false"),
         ),
         # Elite is rare by construction, so this partial index stays tiny.
         Index(

@@ -41,6 +41,24 @@ x-backend-env: &backend-env
   SCANNER_WATCH_PROGRAMS: ${SCANNER_WATCH_PROGRAMS:-6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P}
   SCANNER_COMMITMENT: ${SCANNER_COMMITMENT:-confirmed}
   SCANNER_WORKER_CONCURRENCY: ${SCANNER_WORKER_CONCURRENCY:-4}
+  # Reconnect escalation and the state the scanner publishes for the health
+  # endpoint. In the anchor, not on the scanner service: the scanner writes the
+  # state and the API reads it, so both containers must agree on the TTL and on
+  # what counts as "failing".
+  SCANNER_RECONNECT_ERROR_ATTEMPTS: ${SCANNER_RECONNECT_ERROR_ATTEMPTS:-5}
+  SCANNER_RECONNECT_ERROR_EVERY: ${SCANNER_RECONNECT_ERROR_EVERY:-20}
+  SCANNER_STATE_TTL_SECONDS: ${SCANNER_STATE_TTL_SECONDS:-300}
+  # Pipeline health thresholds. Read by the API (the endpoint) and by the
+  # scanner (its container healthcheck), so a value set on one service only
+  # would let the two disagree about whether discovery is down.
+  HEALTH_SCANNER_DEGRADED_MINUTES: ${HEALTH_SCANNER_DEGRADED_MINUTES:-15}
+  HEALTH_SCANNER_DOWN_MINUTES: ${HEALTH_SCANNER_DOWN_MINUTES:-60}
+  HEALTH_ENRICHMENT_DEGRADED_MINUTES: ${HEALTH_ENRICHMENT_DEGRADED_MINUTES:-10}
+  HEALTH_ENRICHMENT_DOWN_MINUTES: ${HEALTH_ENRICHMENT_DOWN_MINUTES:-30}
+  HEALTH_SCORING_DEGRADED_MINUTES: ${HEALTH_SCORING_DEGRADED_MINUTES:-30}
+  HEALTH_SCORING_DOWN_MINUTES: ${HEALTH_SCORING_DOWN_MINUTES:-120}
+  HEALTH_RADAR_DEGRADED_MINUTES: ${HEALTH_RADAR_DEGRADED_MINUTES:-30}
+  HEALTH_RADAR_DOWN_MINUTES: ${HEALTH_RADAR_DOWN_MINUTES:-120}
   FEATURE_ENRICHMENT_ENABLED: ${FEATURE_ENRICHMENT_ENABLED:-false}
   MARKET_PROVIDER: ${MARKET_PROVIDER:-dexscreener}
   MARKET_PROVIDER_BASE_URL: ${MARKET_PROVIDER_BASE_URL:-https://api.dexscreener.com}
@@ -62,6 +80,13 @@ x-backend-env: &backend-env
   # twice before.
   FEATURE_RADAR_ENABLED: ${FEATURE_RADAR_ENABLED:-false}
   RADAR_SWEEP_BATCH_LIMIT: ${RADAR_SWEEP_BATCH_LIMIT:-500}
+  FEATURE_PUMPFUN_RADAR_ENABLED: ${FEATURE_PUMPFUN_RADAR_ENABLED:-false}
+  PUMPFUN_PROGRAM_ID: ${PUMPFUN_PROGRAM_ID:-6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P}
+  PUMPFUN_RADAR_MIN_AGE_DAYS: ${PUMPFUN_RADAR_MIN_AGE_DAYS:-6}
+  PUMPFUN_RADAR_MAX_AGE_DAYS: ${PUMPFUN_RADAR_MAX_AGE_DAYS:-8}
+  PUMPFUN_RADAR_MIN_MARKET_CAP: ${PUMPFUN_RADAR_MIN_MARKET_CAP:-0}
+  PUMPFUN_RADAR_MIN_LIQUIDITY: ${PUMPFUN_RADAR_MIN_LIQUIDITY:-0}
+  PUMPFUN_RADAR_BATCH_LIMIT: ${PUMPFUN_RADAR_BATCH_LIMIT:-500}
   # How many slices the eligible universe is divided into for the rotation.
   # In the anchor, not on the enrichment service: the beat worker schedules the
   # sweep and the API reports the cycle, so both must agree on the value.
@@ -191,6 +216,20 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    # The scanner spent four days connected to nothing while this service
+    # reported `Up`, because a live process was the only thing anyone checked.
+    # This probe checks the *outcome* instead: has a token been discovered
+    # recently, and does the scanner itself believe it can reach Helius.
+    #
+    # `start_period` is generous on purpose — a cold start has to connect,
+    # subscribe and wait for an actual launch before it can pass, and failing
+    # during that window would restart-loop a scanner that is working fine.
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.health.probe"]
+      interval: 120s
+      timeout: 20s
+      retries: 3
+      start_period: 300s
 
   # Market Enrichment Worker. Independent of the scanner: stopping this service
   # must never affect token discovery.

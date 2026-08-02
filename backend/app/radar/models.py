@@ -135,6 +135,43 @@ class RadarSeries:
 
 
 @dataclass(frozen=True, slots=True)
+class RadarCandidateSignals:
+    """Reserved extension point for later intelligence stages.
+
+    Discovery owns only the deterministic token and market facts. Community,
+    technical, AI, on-chain-holder and builder inputs land here in later
+    milestones, without changing the admission contract or duplicating those
+    facts into a second table.
+    """
+
+    community_score: Decimal | None = None
+    technical_score: Decimal | None = None
+    ai_score: Decimal | None = None
+    breakout_pattern: str | None = None
+    resistance: Decimal | None = None
+    support: Decimal | None = None
+    holder_growth: Decimal | None = None
+    builder_activity: Decimal | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RadarCandidate:
+    """Reusable discovery-stage candidate, before any intelligence scoring."""
+
+    token_address: str
+    name: str | None
+    symbol: str | None
+    creation_time: datetime
+    age_days: Decimal
+    market_cap: Decimal | None
+    liquidity: Decimal | None
+    volume_24h: Decimal | None
+    holder_count: int | None
+    last_scan_time: datetime
+    signals: RadarCandidateSignals = field(default_factory=RadarCandidateSignals)
+
+
+@dataclass(frozen=True, slots=True)
 class DimensionResult:
     """One axis's verdict.
 

@@ -55,8 +55,12 @@ class DiscoveredToken(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         String(PUBKEY_MAX_LENGTH), index=True, nullable=True
     )
 
+    # Not indexed: provenance only. No query in the application filters, joins
+    # or sorts on it — the natural key is `mint_address`, which is what
+    # ingestion deduplicates on. The index cost 3.7 MB of write amplification on
+    # the hottest insert path in the system to serve nothing (Sprint 2, §3).
     signature: Mapped[str] = mapped_column(
-        String(SIGNATURE_MAX_LENGTH), index=True, nullable=False
+        String(SIGNATURE_MAX_LENGTH), nullable=False
     )
     # Slots exceed the 32-bit integer range, so BigInteger is not optional here.
     slot: Mapped[int] = mapped_column(BigInteger, index=True, nullable=False)
@@ -90,11 +94,16 @@ class DiscoveredToken(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
 
     __table_args__ = (
-        # The live feed is "newest first", and the retry sweep looks up pending
-        # rows by age; both are covered here.
-        Index("ix_discovered_tokens_discovered_at_desc", discovered_at.desc()),
+        # The retry sweep looks up pending rows by age
+        # (`list_pending_metadata`), and `?metadata_status=` filters the token
+        # list. Kept: it reads as unused only because the scanner — the sole
+        # writer of `pending` rows — has not been running.
         Index("ix_discovered_tokens_status_discovered", "metadata_status", "discovered_at"),
     )
+    # `ix_discovered_tokens_discovered_at_desc` was dropped in Sprint 2. A btree
+    # scans backward as cheaply as forward, so a DESC index on the same single
+    # column as the plain `discovered_at` index can serve no query the ascending
+    # one cannot. It was pure duplicate write cost.
 
     @property
     def is_metadata_resolved(self) -> bool:

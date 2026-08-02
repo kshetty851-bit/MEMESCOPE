@@ -138,25 +138,60 @@ class ScoreRepository(BaseRepository[TokenScore]):
                 newest[token_id] = row
         return list(newest.values())
 
-    async def mints_without_scores(self, *, limit: int = 500) -> Sequence[str]:
-        """Tokens that have market snapshots but no score row yet.
+    async def mints_without_scores(
+        self, *, since: datetime, limit: int = 500
+    ) -> Sequence[str]:
+        """Tokens with a *scorable* snapshot window but no score row yet.
 
         The sweep's first arm: it closes the window between the enrichment
         commit and the scoring commit, plus anything missed across a restart.
 
-        Tokens with no snapshot are excluded - there is nothing to score yet,
-        and returning them would make the sweep re-examine every unindexed mint
-        on every pass.
+        `since` is the oldest snapshot the engine could still build a window
+        from. The caller supplies it because the window is tier-relative and
+        tiers are a scheduling concern, not a persistence one - the same
+        division of labour as `stale_before`.
+
+        **Why the cutoff exists.** This asked only for *any* snapshot, which is
+        not the condition the engine actually scores on: it needs an
+        observation inside the token's history window. A token last enriched a
+        week ago satisfied the old predicate, was selected, produced an empty
+        window, and was skipped as unscorable - then selected again on the next
+        pass, forever. With `LIMIT` and no `ORDER BY`, Postgres returned the
+        same rows from the same heap positions every time, so 2,880 permanently
+        unscorable tokens held the head of the queue and consumed the entire
+        200-row budget on every cycle. The sweep ran every 15 minutes for days
+        and scored nothing (MEMESCOPE_AUDIT.md §3.5).
+
+        **Why the ordering is by latest snapshot.** Any total order would make
+        the query deterministic, but a *static* one would re-select the same
+        head whenever that head is unscorable for some reason this predicate
+        does not capture - the same starvation with a different cause. Ordering
+        by the freshest observation makes the head rotate on its own: every
+        enrichment write reorders the queue, so a token that cannot be scored
+        drifts down it as others are refreshed. `mint_address` breaks ties, so
+        the order is total and two identical calls return identical pages.
+
+        Newest-first is also the right priority on its own terms - the token
+        whose data just landed is the one a score is most useful for.
         """
-        has_snapshot = (
-            select(TokenMarketSnapshot.id)
-            .where(TokenMarketSnapshot.token_id == DiscoveredToken.id)
-            .exists()
+        latest = (
+            select(func.max(TokenMarketSnapshot.captured_at).label("latest"))
+            .where(
+                TokenMarketSnapshot.token_id == DiscoveredToken.id,
+                TokenMarketSnapshot.captured_at >= since,
+            )
+            .lateral("latest_snapshot")
         )
         stmt = (
             select(DiscoveredToken.mint_address)
             .outerjoin(TokenScore, TokenScore.token_id == DiscoveredToken.id)
-            .where(TokenScore.id.is_(None), has_snapshot)
+            # An inner lateral join: a token with no snapshot inside the window
+            # produces a NULL aggregate and is dropped, which is exactly the
+            # `EXISTS` this replaces - but it also yields the sort key, so the
+            # ordering costs no second pass over the snapshot table.
+            .join(latest, latest.c.latest.is_not(None))
+            .where(TokenScore.id.is_(None))
+            .order_by(latest.c.latest.desc(), DiscoveredToken.mint_address.asc())
             .limit(limit)
         )
         return (await self.session.execute(stmt)).scalars().all()

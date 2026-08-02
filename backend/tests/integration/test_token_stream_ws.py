@@ -53,7 +53,7 @@ def test_discovery_is_broadcast_to_connected_client(app: Any) -> None:
         # Retry briefly: the broadcaster subscribes asynchronously, and a
         # publish that lands before SUBSCRIBE completes reaches nobody.
         for _ in range(40):
-            publisher.publish(settings.TOKEN_EVENT_CHANNEL, json.dumps(PAYLOAD))
+            publisher.publish(settings.token_channel, json.dumps(PAYLOAD))
             message = websocket.receive_json()
             if message["type"] == "token.discovered":
                 assert message["data"]["mint_address"] == PAYLOAD["mint_address"]
@@ -73,10 +73,10 @@ def test_malformed_event_does_not_kill_the_stream(app: Any) -> None:
         publisher = sync_redis.Redis(
             host=settings.REDIS_HOST, port=settings.REDIS_PORT, db=settings.REDIS_DB
         )
-        publisher.publish(settings.TOKEN_EVENT_CHANNEL, "this is not json")
+        publisher.publish(settings.token_channel, "this is not json")
 
         for _ in range(40):
-            publisher.publish(settings.TOKEN_EVENT_CHANNEL, json.dumps(PAYLOAD))
+            publisher.publish(settings.token_channel, json.dumps(PAYLOAD))
             message = websocket.receive_json()
             if message["type"] == "token.discovered":
                 publisher.close()

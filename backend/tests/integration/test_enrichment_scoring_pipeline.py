@@ -180,8 +180,8 @@ async def test_the_event_is_published_on_the_score_channel(
     await worker._run_cycle()
 
     channels = {channel for channel, _ in captured_redis.published}
-    assert channels == {settings.SCORE_EVENT_CHANNEL}
-    assert settings.TOKEN_EVENT_CHANNEL not in channels
+    assert channels == {settings.score_channel}
+    assert settings.token_channel not in channels
 
     payload = json.loads(captured_redis.published[0][1])
     assert payload["type"] == "score_changed"

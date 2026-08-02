@@ -259,6 +259,34 @@ class TokenScoringService:
                 stale.append(row.mint_address)
         return stale
 
+    def scorable_since(self, *, now: datetime) -> datetime:
+        """The oldest snapshot the engine could still build any window from.
+
+        A token whose newest observation predates this cannot be scored under
+        any tier: `window_seconds_for` clamps the history window to
+        `K x tier_interval`, so the widest window in the system is the slowest
+        tier's. Selecting such a token can only ever produce a skip.
+
+        Derived from the policy rather than hardcoded, so raising
+        `SCORING_FEATURE_WINDOW` or the old tier's interval widens this with it
+        and the sweep does not silently start ignoring tokens it could score.
+        """
+        widest = max(
+            window_seconds_for(
+                Decimal(0), policy=self.policy, feature_window=settings.SCORING_FEATURE_WINDOW
+            )[2],
+            # The tier is chosen by age, so ask the policy directly for the
+            # slowest interval rather than inventing an age that maps to it.
+            min(
+                max(
+                    settings.SCORING_FEATURE_WINDOW * self.policy.old_interval_seconds,
+                    settings.SCORING_WINDOW_MIN_SECONDS,
+                ),
+                settings.SCORING_WINDOW_MAX_SECONDS,
+            ),
+        )
+        return now - timedelta(seconds=widest)
+
     # --- Internals -----------------------------------------------------------
 
     def _materiality_policy(self) -> MaterialityPolicy:

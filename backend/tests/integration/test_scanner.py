@@ -133,7 +133,7 @@ async def test_discovers_persists_and_broadcasts(db_session: Any, client: Any) -
     from app.core.redis import get_redis
 
     pubsub = get_redis().pubsub()
-    await pubsub.subscribe(settings.TOKEN_EVENT_CHANNEL)
+    await pubsub.subscribe(settings.token_channel)
 
     await _run_one_event(scanner, _notification())
 

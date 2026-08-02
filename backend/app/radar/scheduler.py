@@ -18,6 +18,7 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.db.session import SessionFactory
 from app.radar.service import RadarService
+from app.services.pumpfun_radar import PumpfunRadarScanner
 from app.workers.celery_app import celery_app
 from app.workers.runtime import run_async
 
@@ -43,3 +44,17 @@ async def _radar_sweep(limit: int | None = None) -> dict[str, Any]:
     batch = limit or settings.RADAR_SWEEP_BATCH_LIMIT
     async with SessionFactory() as session:
         return await RadarService(session).sweep(limit=batch)
+
+
+@celery_app.task(name="app.radar.scheduler.pumpfun_radar_scan")
+def pumpfun_radar_scan(limit: int | None = None) -> dict[str, Any]:
+    """Refresh the discovery-only Pump.fun Radar admission view."""
+    return run_async(_pumpfun_radar_scan(limit))
+
+
+async def _pumpfun_radar_scan(limit: int | None = None) -> dict[str, Any]:
+    if not settings.FEATURE_PUMPFUN_RADAR_ENABLED:
+        return {"skipped": "pumpfun_radar_disabled"}
+
+    async with SessionFactory() as session:
+        return await PumpfunRadarScanner(session).scan(limit=limit)

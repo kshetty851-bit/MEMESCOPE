@@ -15,7 +15,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -27,7 +27,7 @@ from sqlalchemy.sql.elements import ColumnElement
 from app.models.market import TokenMarketSnapshot
 from app.models.radar import RadarAchievement, RadarSnapshot, RadarToken
 from app.models.token import DiscoveredToken
-from app.radar.models import Observation, RadarSeries
+from app.radar.models import Observation, RadarCandidate, RadarSeries
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +54,121 @@ class RadarRepository:
         self._session = session
 
     # --- Reading market history ---------------------------------------------
+
+    def _pumpfun_candidate_statement(
+        self,
+        *,
+        program_id: str,
+        min_age_days: int,
+        max_age_days: int,
+        min_market_cap: Decimal,
+        min_liquidity: Decimal,
+        now: datetime,
+    ) -> Select[tuple[DiscoveredToken, TokenMarketSnapshot]]:
+        """Latest enriched snapshot for each eligible Pump.fun discovery.
+
+        The scanner owns creation facts and the enrichment worker owns market
+        facts. Selecting them together at read time preserves that ownership
+        and avoids a second mutable copy solely for the Radar admission stage.
+        """
+        latest = select(
+            TokenMarketSnapshot.id.label("snapshot_id"),
+            func.row_number()
+            .over(
+                partition_by=TokenMarketSnapshot.mint_address,
+                order_by=TokenMarketSnapshot.captured_at.desc(),
+            )
+            .label("rank"),
+        ).subquery()
+        oldest_creation = now - timedelta(days=max_age_days)
+        newest_creation = now - timedelta(days=min_age_days)
+
+        return (
+            select(DiscoveredToken, TokenMarketSnapshot)
+            .join(latest, latest.c.snapshot_id == TokenMarketSnapshot.id)
+            .join(
+                DiscoveredToken,
+                DiscoveredToken.mint_address == TokenMarketSnapshot.mint_address,
+            )
+            .where(
+                latest.c.rank == 1,
+                DiscoveredToken.source_program == program_id,
+                DiscoveredToken.block_time.is_not(None),
+                DiscoveredToken.block_time >= oldest_creation,
+                DiscoveredToken.block_time <= newest_creation,
+                TokenMarketSnapshot.market_cap >= min_market_cap,
+                TokenMarketSnapshot.liquidity_usd >= min_liquidity,
+            )
+            .order_by(TokenMarketSnapshot.captured_at.desc())
+        )
+
+    async def pumpfun_candidates(
+        self,
+        *,
+        program_id: str,
+        min_age_days: int,
+        max_age_days: int,
+        min_market_cap: Decimal,
+        min_liquidity: Decimal,
+        now: datetime,
+        limit: int,
+        offset: int = 0,
+    ) -> list[RadarCandidate]:
+        statement = (
+            self._pumpfun_candidate_statement(
+                program_id=program_id,
+                min_age_days=min_age_days,
+                max_age_days=max_age_days,
+                min_market_cap=min_market_cap,
+                min_liquidity=min_liquidity,
+                now=now,
+            )
+            .limit(limit)
+            .offset(offset)
+        )
+        rows = (await self._session.execute(statement)).all()
+        return [
+            RadarCandidate(
+                token_address=token.mint_address,
+                name=token.name,
+                symbol=token.symbol,
+                creation_time=token.block_time,
+                age_days=Decimal(max((now - token.block_time).total_seconds(), 0))
+                / Decimal(86_400),
+                market_cap=snapshot.market_cap,
+                liquidity=snapshot.liquidity_usd,
+                volume_24h=snapshot.volume_24h,
+                # No provider supplies holders yet. The candidate contract is
+                # ready for it, but discovery must not invent an estimate.
+                holder_count=None,
+                last_scan_time=snapshot.captured_at,
+            )
+            for token, snapshot in rows
+            if token.block_time is not None
+        ]
+
+    async def count_pumpfun_candidates(
+        self,
+        *,
+        program_id: str,
+        min_age_days: int,
+        max_age_days: int,
+        min_market_cap: Decimal,
+        min_liquidity: Decimal,
+        now: datetime,
+    ) -> int:
+        statement = self._pumpfun_candidate_statement(
+            program_id=program_id,
+            min_age_days=min_age_days,
+            max_age_days=max_age_days,
+            min_market_cap=min_market_cap,
+            min_liquidity=min_liquidity,
+            now=now,
+        ).order_by(None)
+        total = await self._session.scalar(
+            select(func.count()).select_from(statement.subquery())
+        )
+        return int(total or 0)
 
     async def load_series(self, mint_address: str, *, limit: int = 96) -> RadarSeries | None:
         """The observation window the engine scores.

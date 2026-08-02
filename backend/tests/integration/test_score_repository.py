@@ -368,7 +368,9 @@ async def test_mints_without_scores_requires_a_snapshot(
         )
     await ScoreRepository(db_session).upsert_many([_score_row(scored)])
 
-    pending = set(await ScoreRepository(db_session).mints_without_scores())
+    pending = set(
+        await ScoreRepository(db_session).mints_without_scores(since=NOW - timedelta(days=3))
+    )
 
     assert "MintUnswept" in pending
     assert "MintSwept" not in pending

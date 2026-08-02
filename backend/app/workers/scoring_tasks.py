@@ -53,7 +53,15 @@ async def _score_sweep(limit: int | None = None) -> dict[str, Any]:
         service = TokenScoringService(session, model=model)
         scores = ScoreRepository(session)
 
-        missing = list(await scores.mints_without_scores(limit=batch_limit))
+        # Only tokens whose newest observation still falls inside a scoring
+        # window. Without the cutoff this arm re-selected the same permanently
+        # unscorable tokens every cycle and consumed the whole batch budget, so
+        # the two arms below never got a turn (MEMESCOPE_AUDIT.md §3.5).
+        missing = list(
+            await scores.mints_without_scores(
+                since=service.scorable_since(now=now), limit=batch_limit
+            )
+        )
         stale = await service.find_stale(now=now, limit=batch_limit)
         outdated = list(
             await scores.outdated_model_mints(model_version=model.version, limit=batch_limit)

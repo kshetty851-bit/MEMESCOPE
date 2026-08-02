@@ -101,6 +101,54 @@ restored is not a backup — test the restore path on a schedule.
 Redis holds only regenerable state (rate counters, denylist, task queue). Losing
 it logs nobody out; it just clears the denylist early.
 
+## Database maintenance
+
+Autovacuum handles this in normal operation, and migration `0007_maintenance`
+tunes it per-table so it keeps up with the two append-only tables that grow
+continuously. Nothing below runs automatically — deliberately. `VACUUM` on
+`token_score_history` rewrites ~1.8 GB, and a scheduled job that decides to do
+that on its own during a launch burst is a worse outage than the drift it fixes.
+
+**Check before you act.** This is read-only and answers whether maintenance is
+worth its cost:
+
+```bash
+make db-stats
+```
+
+It reports `pg_class.reltuples` — the number the planner actually reads —
+against the true row count. A `drift_factor` near 1.0 means the planner's
+estimates are sound and there is nothing to fix. Do not use
+`pg_stat_user_tables.n_live_tup` for this: it is a separate activity counter
+that is discarded on an unclean shutdown, and reading it reports enormous drift
+the planner never saw.
+
+**Refresh statistics.** Seconds, no table rewrite, no lock that blocks reads or
+writes. Safe to run on a live system at any time:
+
+```bash
+make db-analyze
+```
+
+**Reclaim space.** Minutes, rewrites the table. Run it deliberately, during a
+quiet period, and only when dead tuples have actually accumulated — on
+append-only tables like `token_market_snapshots` that is rare:
+
+```bash
+make db-vacuum
+```
+
+Both wrap `python -m app.db.maintenance`, which takes `--table` (repeatable) to
+scope the work and runs each statement separately so a failure names the table
+it failed on.
+
+When to run `db-analyze` by hand:
+
+- after a restore, a bulk import, or a large `DELETE`
+- after `make migrate` adds an index to a large table
+- when a query's plan changes for no apparent reason and `make db-stats` shows
+  a drift factor materially away from 1.0
+
 ## TLS
 
 Place certificates at `docker/nginx/certs/fullchain.pem` and `privkey.pem`

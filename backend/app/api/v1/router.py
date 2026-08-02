@@ -19,10 +19,15 @@ from app.api.v1.endpoints import (
     watchlists,
 )
 from app.exit_signals import api as intelligence
+from app.health import api as pipeline_health
 from app.radar import api as radar
 
 api_router = APIRouter()
 api_router.include_router(health.router)
+# Pipeline health, on its own `/health` prefix so it cannot be confused with the
+# liveness and readiness probes above. Those report this process; this reports
+# whether the platform is still producing anything.
+api_router.include_router(pipeline_health.router)
 api_router.include_router(auth.router)
 api_router.include_router(users.router)
 api_router.include_router(tokens.router)

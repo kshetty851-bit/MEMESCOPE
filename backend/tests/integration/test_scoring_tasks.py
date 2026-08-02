@@ -296,6 +296,83 @@ async def test_the_sweep_reports_an_empty_pass(
     assert result["scored"] == 0
 
 
+async def test_a_token_whose_data_aged_out_does_not_consume_the_batch(
+    sessions: Any, scoring_enabled: CapturingRedis, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The livelock, at the level of the job that suffered it.
+
+    A token last enriched well outside any scoring window can only ever be
+    skipped. Before the fix the sweep selected exactly those tokens, filled its
+    whole batch with them, and reported `scored: 0, skipped: 200` every cycle
+    for days while a scorable token sat behind them.
+
+    Asserted through the batch budget: with a batch of one, the scorable token
+    is only reached if the aged-out one is no longer selected at all.
+    """
+    monkeypatch.setattr(
+        "app.workers.scoring_tasks.settings.SCORING_SWEEP_BATCH_LIMIT", 1
+    )
+    now = datetime.now(UTC)
+    async with sessions() as session:
+        # Enriched ten days ago: outside the widest window the engine can build.
+        await _token_with_market(
+            session, f"{PREFIX}AgedOut", now=now - timedelta(days=10), age_hours=240
+        )
+        await _token_with_market(session, f"{PREFIX}Current", now=now)
+
+    result = await _score_sweep()
+
+    assert result["missing"] == 1
+    assert result["scored"] == 1
+    assert result["skipped"] == 0
+    async with sessions() as session:
+        scores = ScoreRepository(session)
+        assert await scores.get_by_mint(f"{PREFIX}Current") is not None
+        assert await scores.get_by_mint(f"{PREFIX}AgedOut") is None
+
+
+async def test_a_skipped_token_does_not_abort_the_batch(
+    sessions: Any, scoring_enabled: CapturingRedis
+) -> None:
+    """Selection is a filter, not a guarantee.
+
+    A token can pass the freshness predicate and still come back unscorable —
+    the engine declines when too little component weight is available. That is
+    a normal outcome and must cost only that token, leaving the rest of the
+    batch scored.
+    """
+    now = datetime.now(UTC)
+    async with sessions() as session:
+        await _token_with_market(session, f"{PREFIX}Rich", now=now)
+        # One observation, price only: not enough available weight to score.
+        thin = await TokenRepository(session).insert_if_absent(
+            {
+                "mint_address": f"{PREFIX}Thin",
+                "signature": f"sig-{PREFIX}Thin",
+                "slot": 1,
+                "discovered_at": now - timedelta(hours=3),
+                "block_time": now - timedelta(hours=3),
+            }
+        )
+        assert thin is not None
+        await MarketSnapshotRepository(session).add_snapshot(
+            {
+                "token_id": thin.id,
+                "mint_address": f"{PREFIX}Thin",
+                "captured_at": now,
+                "trading_status": TradingStatus.UNKNOWN,
+                "provider": "dexscreener",
+            }
+        )
+        await session.commit()
+
+    result = await _score_sweep()
+
+    assert result["scored"] >= 1
+    async with sessions() as session:
+        assert await ScoreRepository(session).get_by_mint(f"{PREFIX}Rich") is not None
+
+
 # --- rescore_tokens -----------------------------------------------------------
 
 

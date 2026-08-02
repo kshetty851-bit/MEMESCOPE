@@ -72,6 +72,18 @@ downgrade: ## Roll back one migration
 migration-check: ## Fail if a model has drifted from the migrations
 	$(BACKEND) alembic check
 
+.PHONY: db-analyze
+db-analyze: ## Refresh planner statistics (ANALYZE, seconds, safe on a live system)
+	$(BACKEND) python -m app.db.maintenance
+
+.PHONY: db-vacuum
+db-vacuum: ## VACUUM ANALYZE. Rewrites ~2.5GB; minutes, not seconds. Run deliberately.
+	$(BACKEND) python -m app.db.maintenance --vacuum
+
+.PHONY: db-stats
+db-stats: ## Show planner row estimates against actual counts
+	$(BACKEND) python -m app.db.maintenance --report
+
 .PHONY: seed
 seed: ## Create a local admin user
 	$(BACKEND) python -m scripts.seed

@@ -37,7 +37,7 @@ async def publish_token_discovered(
     """Publish a discovery. Returns the number of Redis subscribers reached."""
     client = redis or get_redis()
     receivers = await client.publish(
-        settings.TOKEN_EVENT_CHANNEL, json.dumps(payload, default=str)
+        settings.token_channel, json.dumps(payload, default=str)
     )
     return int(receivers)
 
@@ -56,7 +56,7 @@ async def publish_score_changed(payload: dict[str, Any], *, redis: Redis | None 
     """
     client = redis or get_redis()
     receivers = await client.publish(
-        settings.SCORE_EVENT_CHANNEL, json.dumps(payload, default=str)
+        settings.score_channel, json.dumps(payload, default=str)
     )
     return int(receivers)
 
@@ -93,7 +93,7 @@ class TokenEventBroadcaster:
     """
 
     def __init__(self, channel: str | None = None) -> None:
-        self._channel = channel or settings.TOKEN_EVENT_CHANNEL
+        self._channel = channel or settings.token_channel
         self._subscribers: set[asyncio.Queue[dict[str, Any]]] = set()
         self._task: asyncio.Task[None] | None = None
         self._lock = asyncio.Lock()

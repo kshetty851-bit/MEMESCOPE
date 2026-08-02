@@ -96,6 +96,28 @@ class RadarPage(BaseSchema):
     applied_filters: dict[str, object]
 
 
+class RadarDiscoveredCandidateOut(BaseSchema):
+    """A Pump.fun admission candidate, before any intelligence scoring."""
+
+    token: str
+    name: str | None = None
+    symbol: str | None = None
+    creation_time: datetime
+    age_days: Decimal
+    market_cap: Decimal | None
+    liquidity: Decimal | None
+    volume: Decimal | None
+    holder_count: int | None = None
+    last_scan_time: datetime
+
+
+class RadarDiscoveredPage(BaseSchema):
+    items: list[RadarDiscoveredCandidateOut]
+    total: int
+    page: int
+    page_size: int
+
+
 class RadarSnapshotOut(BaseSchema):
     captured_at: datetime
     price: Decimal | None

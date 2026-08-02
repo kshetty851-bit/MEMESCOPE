@@ -66,3 +66,8 @@ def test_production_config_passes_when_hardened() -> None:
         REFRESH_COOKIE_SECURE=True,
     )
     assert settings.is_production
+
+
+def test_pumpfun_radar_rejects_an_inverted_age_window() -> None:
+    with pytest.raises(ValidationError, match="PUMPFUN_RADAR_MIN_AGE_DAYS"):
+        _settings(PUMPFUN_RADAR_MIN_AGE_DAYS=9, PUMPFUN_RADAR_MAX_AGE_DAYS=8)

@@ -63,6 +63,12 @@ celery_app.conf.beat_schedule = {
         "task": "app.radar.scheduler.radar_sweep",
         "schedule": crontab(minute="*/15"),
     },
+    # Admission only: reuses persisted discovery and market data without
+    # invoking the existing opportunity-scoring sweep above.
+    "pumpfun-radar-scan": {
+        "task": "app.radar.scheduler.pumpfun_radar_scan",
+        "schedule": crontab(minute="*/15"),
+    },
     # Event detection runs a few minutes *after* the Radar sweep, deliberately.
     # It compares fresh analyst readings against the cached previous ones, so
     # running it before the sweep would diff a stale reading against itself and

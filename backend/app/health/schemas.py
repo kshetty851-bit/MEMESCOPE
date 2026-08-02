@@ -1,0 +1,63 @@
+"""Response models for `GET /api/v1/health/pipeline`."""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Literal
+
+from app.schemas.common import BaseSchema
+
+#: The three states every stage and the overall roll-up can be in.
+StageStatus = Literal["healthy", "degraded", "down"]
+
+
+class ScannerHealth(BaseSchema):
+    status: StageStatus
+    last_discovery: datetime | None
+    minutes_since_last_token: float | None
+    #: Consecutive failed reconnects, as published by the scanner process.
+    #: `None` when the scanner has published no state — it is not running, or
+    #: its state key has expired.
+    reconnect_attempts: int | None = None
+    #: Why the scanner considers itself unhealthy, verbatim from its last
+    #: connection error. `None` while connected.
+    failure_reason: str | None = None
+
+
+class EnrichmentHealth(BaseSchema):
+    status: StageStatus
+    last_snapshot: datetime | None
+    minutes_since_last_snapshot: float | None
+    #: Tokens whose next refresh is already due — the enrichment backlog.
+    queue_depth: int
+    #: Tokens that failed often enough to be parked. Not counted in the queue.
+    dead_lettered: int
+
+
+class ScoringHealth(BaseSchema):
+    status: StageStatus
+    last_score: datetime | None
+    minutes_since_last_score: float | None
+    #: Tokens that have market observations but no score row yet.
+    pending: int
+
+
+class RadarHealth(BaseSchema):
+    status: StageStatus
+    last_cycle: datetime | None
+    minutes_since_last_cycle: float | None
+    tracked_tokens: int
+
+
+class PipelineHealth(BaseSchema):
+    scanner: ScannerHealth
+    market_enrichment: EnrichmentHealth
+    scoring: ScoringHealth
+    radar: RadarHealth
+    #: The worst status of any *enabled* stage. A stage whose feature flag is
+    #: off is reported on its own but excluded here, so a deployment that
+    #: deliberately runs without the scanner is not permanently degraded.
+    overall: StageStatus
+    environment: str
+    version: str
+    observed_at: datetime

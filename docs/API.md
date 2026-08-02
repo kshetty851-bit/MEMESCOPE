@@ -63,12 +63,74 @@ replaying an old one revokes every session for that user.
 
 ### Health
 
-| Method | Path     | Auth | Description                                |
-| ------ | -------- | ---- | ------------------------------------------ |
-| GET    | `/live`  | —    | Process is up. Never touches dependencies. |
-| GET    | `/ready` | —    | Postgres + Redis reachable. 503 if not.    |
+| Method | Path                       | Auth | Description                                |
+| ------ | -------------------------- | ---- | ------------------------------------------ |
+| GET    | `/live`                    | —    | Process is up. Never touches dependencies. |
+| GET    | `/ready`                   | —    | Postgres + Redis reachable. 503 if not.    |
+| GET    | `/api/v1/health/pipeline`  | —    | Per-stage pipeline health. 503 when down.  |
 
-Both are also mounted under `/api/v1`.
+`/live` and `/ready` are also mounted under `/api/v1`.
+
+`/health/pipeline` answers a different question from both: not "is this process
+serving" but "is the platform still producing anything". Every figure is derived
+from persisted state — the last row each stage wrote — because a stage's process
+being alive is precisely the signal that failed. Discovery once stopped for four
+days while `/live`, `/ready` and the container status all stayed green.
+
+Each of `scanner`, `market_enrichment`, `scoring` and `radar` reports a
+`status` of `healthy`, `degraded` or `down`, the timestamp it was last known to
+produce output, and the minutes since. Stage-specific depth is included:
+enrichment reports `queue_depth` and `dead_lettered`, scoring reports `pending`
+(tokens with observations but no score), the Radar reports `tracked_tokens`.
+The scanner additionally reports `reconnect_attempts` and `failure_reason`,
+published by the scanner process itself — a scanner that cannot reach Helius is
+degraded even when its last discovery is recent.
+
+`overall` is the worst status among **enabled** stages, so a deployment that
+deliberately runs no scanner is not permanently degraded. The endpoint returns
+`503` when `overall` is `down` and `200` when it is `degraded`, so an external
+monitor can page without parsing the body — and is not trained to ignore a
+warning.
+
+Thresholds are configurable per stage via `HEALTH_<STAGE>_DEGRADED_MINUTES` and
+`HEALTH_<STAGE>_DOWN_MINUTES`. The scanner's container healthcheck
+(`python -m app.health.probe`) reads the same values, so Docker and the
+dashboard cannot disagree about whether discovery is down.
+
+```json
+{
+  "scanner": {
+    "status": "down",
+    "last_discovery": "2026-07-29T13:19:08.739931Z",
+    "minutes_since_last_token": 6029.2,
+    "reconnect_attempts": 7,
+    "failure_reason": "InvalidStatus: server rejected WebSocket connection: HTTP 429"
+  },
+  "market_enrichment": {
+    "status": "healthy",
+    "last_snapshot": "2026-08-02T17:35:14.014146Z",
+    "minutes_since_last_snapshot": 1.2,
+    "queue_depth": 0,
+    "dead_lettered": 5
+  },
+  "scoring": {
+    "status": "healthy",
+    "last_score": "2026-08-02T17:38:02.996678Z",
+    "minutes_since_last_score": 10.3,
+    "pending": 2880
+  },
+  "radar": {
+    "status": "healthy",
+    "last_cycle": "2026-08-02T17:45:00.028538Z",
+    "minutes_since_last_cycle": 3.4,
+    "tracked_tokens": 41
+  },
+  "overall": "down",
+  "environment": "local",
+  "version": "0.8.0-rc1",
+  "observed_at": "2026-08-02T17:48:23.467883Z"
+}
+```
 
 ### Auth
 

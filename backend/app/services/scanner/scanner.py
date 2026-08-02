@@ -34,6 +34,7 @@ from app.core.events import publish_token_discovered
 from app.core.logging import get_logger
 from app.core.redis import get_redis
 from app.db.session import SessionFactory
+from app.health.service import publish_scanner_state
 from app.models.token import MetadataStatus
 from app.repositories.token import TokenRepository
 from app.services.helius.client import HeliusClient
@@ -60,6 +61,11 @@ class ScannerStats:
     tokens_duplicate: int = 0
     resolve_failures: int = 0
     reconnects: int = 0
+    #: Failures since the last clean connection. `reconnects` is the lifetime
+    #: total and never falls, so it cannot answer "is it failing *now*" — which
+    #: is the only question escalation and health care about.
+    consecutive_failures: int = 0
+    last_failure_reason: str | None = None
     started_at: datetime | None = field(default=None)
 
     def as_dict(self) -> dict[str, Any]:
@@ -72,6 +78,8 @@ class ScannerStats:
             "tokens_duplicate": self.tokens_duplicate,
             "resolve_failures": self.resolve_failures,
             "reconnects": self.reconnects,
+            "consecutive_failures": self.consecutive_failures,
+            "last_failure_reason": self.last_failure_reason,
             "started_at": self.started_at.isoformat() if self.started_at else None,
         }
 
@@ -133,7 +141,6 @@ class TokenScanner:
     # --- Stream -------------------------------------------------------------
 
     async def _stream_forever(self) -> None:
-        attempt = 0
         while not self._stop.is_set():
             try:
                 async with websockets.connect(
@@ -144,7 +151,12 @@ class TokenScanner:
                     close_timeout=5,
                 ) as ws:
                     await self._subscribe(ws)
-                    attempt = 0  # a clean connection resets the backoff ladder
+                    # A clean connection resets the ladder and clears the
+                    # published failure, so recovery is visible immediately
+                    # rather than at the next health poll.
+                    self.stats.consecutive_failures = 0
+                    self.stats.last_failure_reason = None
+                    await self._publish_state(connected=True)
                     await self._consume(ws)
 
             except asyncio.CancelledError:
@@ -152,17 +164,60 @@ class TokenScanner:
             except Exception as exc:
                 if self._stop.is_set():
                     break
-                attempt += 1
                 self.stats.reconnects += 1
-                delay = self._backoff.delay_for(attempt)
-                logger.warning(
-                    "scanner_reconnect",
-                    error=str(exc),
-                    error_type=type(exc).__name__,
-                    attempt=attempt,
-                    delay_seconds=round(delay, 2),
-                )
+                self.stats.consecutive_failures += 1
+                self.stats.last_failure_reason = f"{type(exc).__name__}: {exc}"
+                delay = self._backoff.delay_for(self.stats.consecutive_failures)
+                self._log_reconnect(exc, delay)
+                await self._publish_state(connected=False)
                 await asyncio.sleep(delay)
+
+    def _log_reconnect(self, exc: Exception, delay: float) -> None:
+        """Escalate a persistent outage instead of warning about it forever.
+
+        A single failed reconnect is routine and belongs at `warning`. Nine
+        hundred of them is an outage, and logging the nine-hundredth the same
+        way as the first is how four days of dead discovery went unnoticed —
+        every line looked exactly like the transient case it was not.
+
+        Past the threshold the level becomes ERROR, but only every Nth attempt:
+        an unattended weekend outage should page once and leave a readable log,
+        not a million identical lines.
+        """
+        attempt = self.stats.consecutive_failures
+        fields: dict[str, Any] = {
+            "error": str(exc),
+            "error_type": type(exc).__name__,
+            "attempt": attempt,
+            "delay_seconds": round(delay, 2),
+        }
+
+        if attempt < settings.SCANNER_RECONNECT_ERROR_ATTEMPTS:
+            logger.warning("scanner_reconnect", **fields)
+            return
+
+        first_escalation = attempt == settings.SCANNER_RECONNECT_ERROR_ATTEMPTS
+        due = (attempt - settings.SCANNER_RECONNECT_ERROR_ATTEMPTS) % (
+            settings.SCANNER_RECONNECT_ERROR_EVERY
+        ) == 0
+        if first_escalation or due:
+            logger.error(
+                "scanner_reconnect_failing",
+                **fields,
+                threshold=settings.SCANNER_RECONNECT_ERROR_ATTEMPTS,
+                detail=(
+                    "Discovery has stopped. The scanner cannot reach Helius and "
+                    "is no longer finding tokens; this is not a transient blip."
+                ),
+            )
+
+    async def _publish_state(self, *, connected: bool) -> None:
+        """Make the connection state readable from the API container."""
+        await publish_scanner_state(
+            connected=connected,
+            reconnect_attempts=self.stats.consecutive_failures,
+            failure_reason=self.stats.last_failure_reason,
+        )
 
     async def _subscribe(self, ws: ClientConnection) -> None:
         for index, program in enumerate(self._programs):
