@@ -68,6 +68,25 @@ class EventKind(enum.StrEnum):
     CONFIDENCE_DECREASED = "confidence_decreased"
     FIRST_ANALYSED = "first_analysed"
 
+    # --- Opportunity Engine lifecycle (Sprint 4) ----------------------------
+    # Added, never redefined: every kind above keeps the meaning it has always
+    # had, and no existing detector emits any of the kinds below. The engine
+    # writes through the same append-only repository, so the timeline, the
+    # brief and the watchlist deltas pick these up with no changes.
+    OPPORTUNITY_OPENED = "opportunity_opened"
+    OPPORTUNITY_CONFIRMED = "opportunity_confirmed"
+    OPPORTUNITY_EXPIRING = "opportunity_expiring"
+    OPPORTUNITY_CLOSED = "opportunity_closed"
+    OPPORTUNITY_ARCHIVED = "opportunity_archived"
+    SIGNAL_ADDED = "signal_added"
+    SIGNAL_CONFIRMED = "signal_confirmed"
+    SIGNAL_EXPIRED = "signal_expired"
+    #: The signal's claim came true — the predicted transition happened.
+    SIGNAL_REALISED = "signal_realised"
+    #: The transition the signal reported reversed. For a factual signal this
+    #: is a correction, not a failed prediction (see `opportunities/outcomes`).
+    SIGNAL_INVALIDATED = "signal_invalidated"
+
 
 class EventSeverity(enum.StrEnum):
     INFO = "info"

@@ -132,6 +132,45 @@ dashboard cannot disagree about whether discovery is down.
 }
 ```
 
+### Opportunities
+
+| Method | Path                            | Auth | Description                        |
+| ------ | ------------------------------- | ---- | ---------------------------------- |
+| GET    | `/opportunities`                | —    | The live board, ranked             |
+| GET    | `/opportunities/{mint}`         | —    | One opportunity, optionally by generation |
+
+The board answers *what should I look at now*, which is a different question
+from `/radar`'s *which projects are getting stronger*. An opportunity exists
+because something **changed**; the token itself may be days or weeks old, but
+the signal must be new.
+
+One card per token — one `mint_address`, one `generation`, and zero-to-many live
+`signals`. Stage and signal are orthogonal, so "Near Graduation" and
+"Pre-Breakout" appear as two badges on one card rather than two entries.
+
+**Freshness is enforced on read, not by a background job.** A signal is included
+only while its `expires_at` is in the future, so the board is correct even if the
+expiry sweep has never run — and an opportunity whose token stopped being
+enriched leaves the board on its own as its signals age out.
+
+Each signal carries `strength` (the provider's claim about the transition) and
+`confidence` (what the engine derived from confirmation, corroboration, evidence
+and freshness). Confidence never exceeds strength. `explanation` is rendered
+server-side from stored reason codes in five parts — trigger, boundary, delta,
+corroboration, and **limits**, which names what could not be checked.
+
+There is deliberately no `total`: an unconditional count alongside the page is
+measurable cost for a question nobody asks of a live board. `has_more` answers
+the one that matters.
+
+Filters (`signal_type`, `stage`) are echoed in `applied_filters`, and an
+unrecognised value returns an empty page rather than a 422. While
+`FEATURE_OPPORTUNITY_ENGINE_ENABLED` is off the board is **empty rather than
+absent**, with `applied_filters.engine_enabled` set to `false`.
+
+An empty board means nothing changed — that is information, not a fault.
+`/health/pipeline` is where a reader distinguishes it from a stalled pipeline.
+
 ### Auth
 
 | Method | Path                    | Auth   | Description                        |

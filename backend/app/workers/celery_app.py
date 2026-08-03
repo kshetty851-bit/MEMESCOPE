@@ -20,6 +20,7 @@ celery_app = Celery(
         "app.workers.scoring_tasks",
         "app.radar.scheduler",
         "app.events.scheduler",
+        "app.opportunities.scheduler",
     ],
 )
 
@@ -76,5 +77,14 @@ celery_app.conf.beat_schedule = {
     "event-cycle": {
         "task": "app.events.scheduler.event_cycle",
         "schedule": crontab(minute="3,18,33,48"),
+    },
+    # Closing an opportunity needs no new data, only elapsed time, and the
+    # enrichment fast path cannot do it: a token whose signal has gone quiet is
+    # exactly the one detection stops visiting. Every five minutes, not fifteen,
+    # because the grace window is an hour — a board that shows a lapsed
+    # opportunity as ACTIVE is making a claim about now from data about then.
+    "opportunity-review": {
+        "task": "app.opportunities.scheduler.opportunity_review",
+        "schedule": crontab(minute="*/5"),
     },
 }

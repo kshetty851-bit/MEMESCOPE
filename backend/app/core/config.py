@@ -259,6 +259,106 @@ class Settings(BaseSettings):
     PUMPFUN_RADAR_MIN_LIQUIDITY: float = Field(default=0, ge=0)
     PUMPFUN_RADAR_BATCH_LIMIT: int = Field(default=500, ge=1, le=5000)
 
+    # --- Opportunity Engine ---------------------------------------------------
+    # Off by default like every other pipeline flag, so enabling it is a
+    # deliberate act. While off, detection never runs and no existing behaviour
+    # changes — the Radar, scoring and enrichment are untouched either way.
+    FEATURE_OPPORTUNITY_ENGINE_ENABLED: bool = False
+    #: Which venues count as a bonding curve, and which as a graduated pool.
+    #: Configurable because a launchpad renaming its venue must be a config
+    #: change, not a code change — pump.fun has already renamed an instruction
+    #: once (see the scanner's `InitializeMint` reasoning).
+    OPPORTUNITY_BONDING_CURVE_VENUES: CsvList = Field(
+        default_factory=lambda: ["pumpfun"]
+    )
+    OPPORTUNITY_GRADUATED_VENUES: CsvList = Field(default_factory=lambda: ["pumpswap"])
+    #: Observations a signal needs before it may become ACTIVE. Below this the
+    #: opportunity sits in PENDING_CONFIRMATION and reaches no board: one
+    #: snapshot is noise.
+    OPPORTUNITY_REQUIRED_CONFIRMATIONS: int = Field(default=2, ge=1)
+    #: How many observations to load per token for provider evaluation.
+    OPPORTUNITY_WINDOW_SIZE: int = Field(default=12, ge=2, le=200)
+    #: Per-signal-type TTL. Fresh graduation is a bounded factual window; a
+    #: token that graduated three days ago did not graduate *now*.
+    OPPORTUNITY_TTL_FRESH_GRADUATION_SECONDS: int = Field(default=172_800, ge=60)
+    #: Fallback for any signal type without its own TTL, so a provider added in
+    #: a future sprint cannot produce an immortal signal by omission.
+    OPPORTUNITY_TTL_DEFAULT_SECONDS: int = Field(default=21_600, ge=60)
+    #: How long an opportunity stays EXPIRING before closing. A re-detection
+    #: inside this window revives it in place rather than minting a generation.
+    OPPORTUNITY_GRACE_SECONDS: int = Field(default=3_600, ge=0)
+    #: How long a CLOSED opportunity settles before archival frees its token to
+    #: open a new generation.
+    OPPORTUNITY_ARCHIVE_AFTER_SECONDS: int = Field(default=86_400, ge=0)
+    #: Per-signal TTL for the breakout family. Hours, not days: ADR §11 puts
+    #: breakout at "confirmed or invalidated fast", and a stale breakout is the
+    #: most misleading card the board can show — it claims a move is happening.
+    OPPORTUNITY_TTL_BREAKOUT_SECONDS: int = Field(default=21_600, ge=60)
+    #: Pre-breakout resolves more slowly by nature: it is a claim about pressure
+    #: building, which either realises into a breakout or quietly does not.
+    OPPORTUNITY_TTL_PRE_BREAKOUT_SECONDS: int = Field(default=86_400, ge=60)
+
+    # --- Breakout provider ----------------------------------------------------
+    # Every threshold measured against the stored history on 2026-08-03 (1.37 M
+    # evaluable observations). At these values the provider fires on 0.03 % of
+    # observations for breakout and 0.31 % for pre-breakout; a board is not a
+    # feed, and a signal that fires on everything ranks nothing.
+    #: Observations required before a range exists at all. Below this the
+    #: provider reports unavailable rather than reading two points as a trend.
+    OPPORTUNITY_BREAKOUT_MIN_OBSERVATIONS: int = Field(default=8, ge=3, le=200)
+    #: How far above its own trailing high the price must be. 0.15 keeps 0.12 %
+    #: of observations; 0 would keep 0.71 %, most of which is noise inside the
+    #: normal spread of a thin pair.
+    OPPORTUNITY_BREAKOUT_PRICE_MARGIN: float = Field(default=0.15, ge=0, le=10)
+    #: Hourly volume against the window's median. Required by both claims — a
+    #: price drifting up on no extra trading is the range being re-read, not
+    #: broken.
+    OPPORTUNITY_BREAKOUT_VOLUME_MULTIPLE: float = Field(default=2.0, ge=1, le=100)
+    #: How close to the trailing high still counts as approaching it. 0.90 is
+    #: the pre-breakout band's lower edge.
+    OPPORTUNITY_BREAKOUT_PROXIMITY: float = Field(default=0.90, ge=0, le=1)
+
+    #: Upper bound on opportunities examined by one expiry pass. Bounded so the
+    #: sweep cannot grow unbounded with the table.
+    OPPORTUNITY_EXPIRY_BATCH_LIMIT: int = Field(default=500, ge=1, le=5000)
+
+    # --- Bonding curve collection ---------------------------------------------
+    # Reads pump.fun curve accounts directly from the chain, which is the input
+    # §14a names as the unblock for Near Graduation. Off by default like every
+    # other pipeline stage, and additionally blocked today by the Helius plan
+    # quota — every RPC method returns `429 max usage reached`.
+    FEATURE_CURVE_COLLECTION_ENABLED: bool = False
+    #: Tokens per collection pass. `getMultipleAccounts` accepts 100 addresses,
+    #: so this is a multiple of that or a fraction of one call.
+    CURVE_COLLECTION_BATCH_LIMIT: int = Field(default=100, ge=1, le=1000)
+    #: How many curve observations the near-graduation window reads.
+    CURVE_WINDOW_SIZE: int = Field(default=12, ge=2, le=200)
+
+    # --- Near Graduation provider --------------------------------------------
+    # Off by default because the data does not support it, not because the
+    # feature is unfinished. Measured against the live database on 2026-08-03:
+    # of 386 tokens observed graduating, only 5 ever showed a pump.fun market
+    # cap at or above 50k, and of 48 that did reach 50k only those same 5
+    # graduated. `market_cap` on a bonding-curve pair is not bonding-curve
+    # progress — the same class of gap that leaves `liquidity_usd` 100% null
+    # for these pairs (ADR 0002).
+    #
+    # The provider and its model are complete and tested. Enable this once a
+    # source of genuine curve progress exists — on-chain reserves via Helius is
+    # the route ADR 0002 names — and the signal reaches the board with no code
+    # change.
+    OPPORTUNITY_NEAR_GRADUATION_ENABLED: bool = False
+    #: Market cap at which a pump.fun token graduates, in USD. Configurable
+    #: because it is a protocol constant that has changed before; deriving it
+    #: from observed transitions is the better long-term answer.
+    OPPORTUNITY_GRADUATION_MARKET_CAP: float = Field(default=69_000, gt=0)
+    #: Progress at or above which a token counts as approaching graduation.
+    #: Below it there is nothing to report — most of the universe sits there.
+    OPPORTUNITY_NEAR_GRADUATION_MIN_PROGRESS: float = Field(default=0.55, gt=0, le=1)
+    #: Observations needed before the trend components may contribute. Below
+    #: this they report unavailable rather than reading a trend from two points.
+    OPPORTUNITY_NEAR_GRADUATION_MIN_OBSERVATIONS: int = Field(default=4, ge=2)
+
     # --- Pipeline health -----------------------------------------------------
     # Staleness thresholds, per stage, in minutes. A stage is `healthy` below
     # the degraded bound, `degraded` between the two, and `down` at or past the
@@ -380,6 +480,8 @@ class Settings(BaseSettings):
         "ALLOWED_HOSTS",
         "TRUSTED_PROXY_IPS",
         "SCANNER_WATCH_PROGRAMS",
+        "OPPORTUNITY_BONDING_CURVE_VENUES",
+        "OPPORTUNITY_GRADUATED_VENUES",
         mode="before",
     )
     @classmethod

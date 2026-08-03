@@ -5,6 +5,7 @@ model that is never imported is invisible to it.
 """
 
 from app.db.base import Base
+from app.models.curve import TokenCurveSnapshot  # noqa: F401
 from app.models.market import (
     EnrichmentStatus,
     TokenEnrichmentState,
@@ -48,4 +49,8 @@ from app.models.intelligence import (  # noqa: F401
     IntelligenceEvent,
     Watchlist,
     WatchlistItem,
+)
+from app.models.opportunity import (  # noqa: F401
+    Opportunity,
+    OpportunitySignal,
 )

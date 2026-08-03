@@ -28,6 +28,8 @@ from app.core.events import publish_score_events
 from app.core.logging import get_logger
 from app.core.redis import get_redis
 from app.db.session import SessionFactory
+from app.opportunities.engine import OpportunityEngine
+from app.services.curve.collector import BondingCurveCollector
 from app.services.market.providers.base import MarketDataProvider
 from app.services.market.providers.registry import get_provider
 from app.services.market.scheduler import RefreshScheduler
@@ -63,6 +65,20 @@ class WorkerStats:
     score_history_written: int = 0
     score_events_published: int = 0
     scoring_failures: int = 0
+    # Opportunity detection runs in its own transaction after scoring, so its
+    # counters are separate too: a detection failure says nothing about whether
+    # the snapshots or the scores landed.
+    opportunities_opened: int = 0
+    opportunity_signals: int = 0
+    opportunity_events: int = 0
+    opportunity_failures: int = 0
+    # Curve collection reads a different source in its own transaction, so its
+    # counters are separate too: a Helius outage says nothing about whether the
+    # market snapshots landed.
+    curve_reads: int = 0
+    curve_snapshots: int = 0
+    curve_unparsable: int = 0
+    curve_failures: int = 0
     started_at: datetime | None = field(default=None)
 
     def as_dict(self) -> dict[str, Any]:
@@ -82,6 +98,14 @@ class WorkerStats:
             "score_history_written": self.score_history_written,
             "score_events_published": self.score_events_published,
             "scoring_failures": self.scoring_failures,
+            "opportunities_opened": self.opportunities_opened,
+            "opportunity_signals": self.opportunity_signals,
+            "opportunity_events": self.opportunity_events,
+            "opportunity_failures": self.opportunity_failures,
+            "curve_reads": self.curve_reads,
+            "curve_snapshots": self.curve_snapshots,
+            "curve_unparsable": self.curve_unparsable,
+            "curve_failures": self.curve_failures,
             "started_at": self.started_at.isoformat() if self.started_at else None,
         }
 
@@ -311,6 +335,8 @@ class MarketEnrichmentWorker:
             self.stats.cycles += 1
 
         await self._score_batch(mints)
+        await self._collect_curves(mints)
+        await self._detect_opportunities(mints)
         return total
 
     # --- Scoring (TX-2) -----------------------------------------------------
@@ -349,6 +375,75 @@ class MarketEnrichmentWorker:
         if outcome.events:
             await publish_score_events(outcome.events)
             self.stats.score_events_published += len(outcome.events)
+
+
+    # --- Bonding curve collection (TX-3) ------------------------------------
+
+    async def _collect_curves(self, mints: Sequence[str]) -> None:
+        """Read the bonding curve for the batch that was just enriched.
+
+        Runs **before** detection so a curve observation written now is visible
+        to the providers evaluated moments later — that ordering is what lets
+        near graduation read a curve position from the same cycle rather than
+        always trailing it by one.
+
+        Its own transaction, and contained: the chain and DexScreener are
+        independent sources, so a Helius outage must cost the curve series and
+        nothing else. The snapshots are already durable by this point.
+        """
+        if not settings.FEATURE_CURVE_COLLECTION_ENABLED or not mints:
+            return
+
+        try:
+            async with SessionFactory() as session:
+                collector = BondingCurveCollector(session)
+                outcome = await collector.collect(
+                    list(mints)[: settings.CURVE_COLLECTION_BATCH_LIMIT],
+                    now=datetime.now(UTC),
+                )
+                await session.commit()
+        except Exception:
+            self.stats.curve_failures += 1
+            logger.exception("curve_collection_failed", tokens=len(mints))
+            return
+
+        self.stats.curve_reads += outcome.fetched
+        self.stats.curve_snapshots += outcome.written
+        self.stats.curve_unparsable += outcome.unparsable
+
+    # --- Opportunity detection (TX-4) ---------------------------------------
+
+    async def _detect_opportunities(self, mints: Sequence[str]) -> None:
+        """Run signal detection over the batch that was just enriched.
+
+        This is what makes detection event-driven rather than a scan: the
+        engine evaluates exactly the tokens whose observations just changed, on
+        the tiered cadence the scheduler already paces. There is no recurring
+        sweep over the token universe, and work is proportional to change
+        rather than to table size (ARCHITECTURE_DECISIONS.md AD-12).
+
+        Its own transaction, after scoring, for the same reason scoring is
+        separate from enrichment: `claim_due` holds row locks until TX-1
+        commits, and detection is derived and recomputable. A failure is
+        contained and logged — the snapshots are already durable, and the next
+        refresh of the same token re-evaluates it.
+        """
+        if not settings.FEATURE_OPPORTUNITY_ENGINE_ENABLED or not mints:
+            return
+
+        try:
+            async with SessionFactory() as session:
+                engine = OpportunityEngine(session)
+                outcome = await engine.detect(mints, now=datetime.now(UTC))
+                await session.commit()
+        except Exception:
+            self.stats.opportunity_failures += 1
+            logger.exception("opportunity_cycle_failed", tokens=len(mints))
+            return
+
+        self.stats.opportunities_opened += outcome.opportunities_opened
+        self.stats.opportunity_signals += outcome.signals_added
+        self.stats.opportunity_events += outcome.events_recorded
 
 
 async def run_worker() -> None:

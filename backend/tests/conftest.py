@@ -79,6 +79,7 @@ async def test_session_factory(engine, monkeypatch: pytest.MonkeyPatch):
     # development database. Every such module has to be patched explicitly.
     monkeypatch.setattr("app.services.market.worker.SessionFactory", factory)
     monkeypatch.setattr("app.workers.scoring_tasks.SessionFactory", factory)
+    monkeypatch.setattr("app.opportunities.scheduler.SessionFactory", factory)
     monkeypatch.setattr("app.db.session.SessionFactory", factory)
     return factory
 

@@ -353,7 +353,7 @@ types in the vision, four are computable today:
 | Signal | Status | Basis |
 | --- | --- | --- |
 | **Fresh graduation** | ✅ Available | `dex_name` transitions `pumpfun` → `pumpswap`. Unambiguous, already stored |
-| **Near graduation** | ✅ Available | `market_cap` against the published threshold |
+| **Near graduation** | ❌ **Blocked** — *amended 2026-08-03, see §14a* | ~~`market_cap` against the published threshold~~. Disproven by replay: `market_cap` on a bonding-curve pair does not track curve progress |
 | **Pre-breakout / breakout** | ✅ Available | Price and volume series |
 | **Volume expansion** | ✅ Available | `volume_5m` / `volume_1h` / `volume_24h` |
 | **Liquidity expansion** | ⚠️ Post-graduation only | `liquidity_usd` is null for **100 %** of bonding-curve rows (ADR 0002) |
@@ -373,14 +373,92 @@ records why the built solution was reverted and what it needs before re-enabling
 
 ---
 
+## 14a. Amendment — Near Graduation is not computable from market data
+
+> **Status:** Accepted · **Date:** 2026-08-03 · **Type:** Empirical finding
+> **Supersedes:** the §14 row asserting Near graduation was available from
+> `market_cap`, and the assumption behind §15 step 2.
+> **Raised by:** Sprint 7, from replay over the live database.
+
+**Near Graduation is not currently computable from DexScreener-derived market
+data.** The provider is built, tested and registered, and remains deliberately
+**non-operational** until direct bonding-curve progress arrives from an
+on-chain source.
+
+### What was measured
+
+Replay over the production snapshot history, **386 observed graduation events**:
+
+| Measurement | Result |
+| --- | --- |
+| Graduated tokens that ever showed a pump.fun market cap ≥ $50k | **5 of 386** (1.3 % recall) |
+| Tokens reaching ≥ $50k on the curve that then graduated | **5 of 48** (10 % precision) |
+| Median peak pump.fun market cap among graduated tokens | **$4,159**, against a ~$69k threshold |
+| Volume at the last pre-graduation observation, vs the token's own baseline | median **1.11×** |
+| Transaction count over the same comparison | median **1.26×** |
+
+Tokens were also observed sitting on the curve reporting **$197k, $147k and
+$141k** market caps *without having graduated* — a direct contradiction of the
+field being curve progress.
+
+### Why
+
+`market_cap` on a bonding-curve pair is not a read of the curve. This is the
+same class of gap already recorded in ADR 0002, which found `liquidity_usd`
+null for **100 %** of these pairs: DexScreener does not model pump.fun's
+bonding curve, and the market-cap figure it derives for such a pair carries no
+reliable relationship to how full that curve is.
+
+A threshold built on it would produce a confident-looking signal that is wrong
+roughly nine times in ten. That is an estimate presented as an observation,
+which §14's own rule and the platform's central honesty claim both forbid.
+
+### Consequences
+
+- The six-component model in `app/opportunities/providers/near_graduation.py`
+  is complete, deterministic and covered by 32 tests. Nothing about it is
+  provisional; only its input is missing.
+- The provider registers as non-operational, carrying the measurement as its
+  `unavailable_reason`, so the gap stays visible in the provider list rather
+  than the signal silently never appearing.
+- `OPPORTUNITY_NEAR_GRADUATION_ENABLED` switches it on. No code change and no
+  engine change is needed once the data exists.
+- **The unblock is a data source, not engineering.** On-chain bonding-curve
+  reserves via Helius — ADR 0002's route (b) — is the named path, and it is
+  currently gated behind the same Helius quota wall that has discovery down.
+
+### For future sessions
+
+**Do not re-run this investigation.** The question "can we predict graduation
+from the market data we already collect?" has been asked and answered against
+the full production history, and the answer is no. Re-deriving it costs a
+session and reaches the same conclusion.
+
+Two things — and only these — would make it worth revisiting:
+
+1. A **new input** lands that reads the curve directly (on-chain reserves, or a
+   provider that models the bonding curve). Then enable the flag and validate
+   the existing model against it.
+2. The measurement is shown to be **wrong**, by a replay that contradicts the
+   table above rather than by an argument that it ought to work.
+
+Anything else — a different threshold, a smarter weighting, a longer window —
+changes how the same unusable input is read, not whether it carries the signal.
+
+---
+
 ## 15. Sequencing
 
 1. **Fresh graduation.** A clean transition on data already stored, needing no
    new source. Validates the entire pipeline end to end — provider contract,
    confirmation, event log, projection, expiry — on the smallest honest signal.
-2. **Near graduation.** Same substrate, adds a published threshold.
+2. ~~**Near graduation.** Same substrate, adds a published threshold.~~
+   **Built and blocked on data — see §14a.** The provider ships
+   non-operational; the step is complete as engineering and is waiting on an
+   input, so it no longer gates what follows.
 3. **Breakout / pre-breakout.** Introduces multi-observation windows and the
-   realisation exit path.
+   realisation exit path. **Now the next buildable provider**, since step 2
+   cannot proceed without a new data source.
 4. **Liquidity signals.** Gated on ADR 0002's re-placement work.
 5. **Blocked providers.** Registered as unavailable until a data source exists.
 

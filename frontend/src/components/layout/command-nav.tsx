@@ -65,6 +65,22 @@ const NAV: NavItem[] = [
     ),
   },
   {
+    href: "/opportunities",
+    label: "Signals",
+    icon: (
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        className={ICON}
+      >
+        <path d="M3 14l4-6 4 4 3-7 4 9" strokeLinecap="round" strokeLinejoin="round" />
+        <circle cx="18" cy="14" r="2.5" />
+      </svg>
+    ),
+  },
+  {
     href: "/radar",
     label: "Radar",
     icon: (

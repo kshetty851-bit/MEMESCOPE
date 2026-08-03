@@ -20,6 +20,7 @@ from app.api.v1.endpoints import (
 )
 from app.exit_signals import api as intelligence
 from app.health import api as pipeline_health
+from app.opportunities import api as opportunities
 from app.radar import api as radar
 
 api_router = APIRouter()
@@ -56,3 +57,8 @@ api_router.include_router(analysts.router)
 # no existing route changed shape.
 api_router.include_router(watchlists.router)
 api_router.include_router(events.router)
+# Sprint 4/5: the Opportunity board. Its own namespace rather than reshaping
+# `/radar` — opportunities live in their own tables and `/radar` has an
+# established shape driven by a different model. Additive: no existing route
+# changes, and the board is empty while the engine's feature flag is off.
+api_router.include_router(opportunities.router)
