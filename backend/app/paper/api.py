@@ -19,22 +19,33 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import Annotated
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 
 from app.api.deps import DbSession
 from app.core.config import settings
 from app.models.paper import PaperPosition
+from app.paper import exits, lab
+from app.paper.lab_service import load_dataset, replay_all
 from app.paper.metrics import WalletMetrics
 from app.paper.models import PositionStatus
 from app.paper.schemas import (
     BenchmarkOut,
+    EquityPointOut,
+    LabFindingOut,
+    LabOut,
+    LabRuleOut,
+    LabStrategyOut,
+    LabTokensOut,
     MetricsOut,
     PositionOut,
     PositionsOut,
     RuleOut,
     StrategiesOut,
     StrategyOut,
+    TokenComparisonOut,
+    UnavailableStrategyOut,
     WalletOut,
 )
 from app.paper.service import PaperWalletService, WalletRead
@@ -275,3 +286,281 @@ def _benchmarks(read: WalletRead) -> list[BenchmarkOut]:
             ),
         ),
     ]
+
+
+# --- Strategy Lab -------------------------------------------------------------
+
+METHODOLOGY = (
+    "Every rule is replayed over the same detections and the same stored prices; "
+    "only the exit logic differs. Capital is unconstrained here — each detection "
+    "gets one $100 position regardless of what else is open — so entries stay "
+    "identical across rules and a difference in result is a difference in the "
+    "exit. That makes these returns equal-weight per-trade figures, directly "
+    "comparable to 'buy every Radar token'. They are NOT the live wallet's "
+    "balance, where $1,000 of cash constrains which tokens can be entered at all."
+)
+
+
+@router.get("/lab", response_model=LabOut, summary="Strategy Lab")
+async def get_lab(session: DbSession) -> LabOut:
+    """Every published exit rule, replayed over one shared dataset.
+
+    Declared before `/{...}`-shaped routes, matching the ordering rule the rest
+    of the API follows.
+
+    The dataset is loaded once and handed to every strategy unchanged. Two
+    strategies given separately-loaded datasets could differ because a snapshot
+    landed between the loads, and the comparison would be measuring a race.
+    """
+    now = datetime.now(UTC)
+    dataset = await load_dataset(session, now=now)
+    results = replay_all(dataset)
+    order = lab.rank(results)
+    baseline_id = exits.baseline().id
+    baseline_return = results[baseline_id].total_return_pct
+
+    strategies = [
+        _to_lab_strategy(
+            strategy,
+            results[strategy.id],
+            rank=order.index(strategy.id) + 1,
+            baseline_return=baseline_return,
+        )
+        for strategy in exits.LAB_STRATEGIES
+    ]
+    strategies.sort(key=lambda item: item.rank)
+
+    span = lab.observed_span(results[baseline_id].trades)
+    return LabOut(
+        strategies=strategies,
+        unavailable=[
+            UnavailableStrategyOut(id=sid, name=name, reason=reason)
+            for sid, name, reason in exits.UNAVAILABLE_STRATEGIES
+        ],
+        findings=_findings(results, order, baseline_id),
+        baseline_id=baseline_id,
+        detections=len(dataset.detections),
+        unpriced_detections=dataset.unpriced,
+        observed_days=(
+            None
+            if span is None
+            else (Decimal(span.total_seconds()) / Decimal(86_400)).quantize(Decimal("0.1"))
+        ),
+        methodology=METHODOLOGY,
+        observed_at=now,
+    )
+
+
+@router.get("/lab/tokens", response_model=LabTokensOut, summary="Per-token rule comparison")
+async def get_lab_tokens(
+    session: DbSession,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+) -> LabTokensOut:
+    """How every rule handled each token, and which captured most of its peak."""
+    now = datetime.now(UTC)
+    dataset = await load_dataset(session, now=now)
+    results = replay_all(dataset)
+
+    return LabTokensOut(
+        items=[
+            TokenComparisonOut(
+                mint_address=item.mint_address,
+                symbol=item.symbol,
+                peak_pct=item.peak_pct,
+                returns=item.returns,
+                best_strategy_id=item.best_strategy_id,
+                best_capture_pct=item.best_capture_pct,
+            )
+            for item in lab.compare_by_token(results, limit=limit)
+        ],
+        strategy_ids=[strategy.id for strategy in exits.LAB_STRATEGIES],
+        observed_at=now,
+    )
+
+
+def _to_lab_strategy(
+    strategy: exits.LabStrategy,
+    result: lab.LabResult,
+    *,
+    rank: int,
+    baseline_return: Decimal | None,
+) -> LabStrategyOut:
+    difference: Decimal | None = None
+    if (
+        not strategy.is_baseline
+        and baseline_return is not None
+        and result.total_return_pct is not None
+    ):
+        difference = (result.total_return_pct - baseline_return).quantize(Decimal("0.01"))
+
+    return LabStrategyOut(
+        id=strategy.id,
+        name=strategy.name,
+        description=strategy.description,
+        rules=[
+            LabRuleOut(label=label, value=value) for label, value in strategy.published_rules()
+        ],
+        is_baseline=strategy.is_baseline,
+        invested=result.invested,
+        total_return_pct=result.total_return_pct,
+        realised_return_pct=result.realised_return_pct,
+        open_share_pct=result.open_share_pct,
+        baseline_difference_pct=difference,
+        annualised_return_pct=result.annualised_return_pct,
+        annualised_unavailable_reason=result.annualised_unavailable_reason,
+        closed_count=result.closed_count,
+        open_count=result.open_count,
+        win_rate_pct=result.win_rate_pct,
+        profit_factor=result.profit_factor,
+        average_win=result.average_win,
+        average_loss=result.average_loss,
+        largest_winner=result.largest_winner,
+        largest_loser=result.largest_loser,
+        max_drawdown_pct=result.max_drawdown_pct,
+        average_hold_hours=result.average_hold_hours,
+        average_peak_pct=result.average_peak_pct,
+        average_giveback_pct=result.average_giveback_pct,
+        exits_by_reason=result.exits_by_reason,
+        rank=rank,
+        equity_curve=[
+            EquityPointOut(at=point.at, equity=point.equity, drawdown_pct=point.drawdown_pct)
+            for point in result.equity_curve
+        ],
+        return_distribution=list(result.return_distribution),
+        hold_distribution=list(result.hold_distribution),
+    )
+
+
+def _findings(
+    results: dict[str, lab.LabResult], order: tuple[str, ...], baseline_id: str
+) -> list[LabFindingOut]:
+    """Conclusions drawn only from the figures, each naming its own metric.
+
+    Deliberately mechanical. Every sentence below is a statement about what the
+    replay measured, and none tells a reader what to do — the moment this
+    function starts recommending, the lab stops being evidence.
+
+    The baseline's standing is stated whether it won or lost. A lab that only
+    narrated the winner would be the hindsight this sprint forbids.
+    """
+    names = {strategy.id: strategy.name for strategy in exits.LAB_STRATEGIES}
+    findings: list[LabFindingOut] = []
+    if not order:
+        return findings
+
+    best_id, worst_id = order[0], order[-1]
+    best, worst = results[best_id], results[worst_id]
+    baseline = results[baseline_id]
+
+    if best.total_return_pct is not None:
+        findings.append(
+            LabFindingOut(
+                headline=f"Best measured return: {names[best_id]}",
+                detail=(
+                    f"{best.total_return_pct}% over {best.closed_count} closed trades, "
+                    f"with a {best.max_drawdown_pct}% realised drawdown. Ranked on "
+                    "total return alone — the one figure every rule reports."
+                ),
+                strategy_id=best_id,
+            )
+        )
+
+    if worst_id != best_id and worst.total_return_pct is not None:
+        findings.append(
+            LabFindingOut(
+                headline=f"Worst measured return: {names[worst_id]}",
+                detail=(
+                    f"{worst.total_return_pct}% over {worst.closed_count} closed trades, "
+                    f"with a {worst.max_drawdown_pct}% realised drawdown."
+                ),
+                strategy_id=worst_id,
+            )
+        )
+
+    if baseline.total_return_pct is not None:
+        place = order.index(baseline_id) + 1
+        findings.append(
+            LabFindingOut(
+                headline=(f"The benchmark placed {place} of {len(order)}"),
+                detail=(
+                    f"Equal Weight v1 returned {baseline.total_return_pct}%. It is "
+                    "frozen and is not tuned in response to this table — every "
+                    "comparison here is drawn against it, so moving it would "
+                    "restate all of them."
+                ),
+                strategy_id=baseline_id,
+            )
+        )
+
+    # The diagnostic pairing: peak reached against peak handed back. This is what
+    # distinguishes "the entries were bad" from "the exits gave it away".
+    giveback = [
+        (sid, result)
+        for sid, result in results.items()
+        if result.average_giveback_pct is not None and result.average_peak_pct is not None
+    ]
+    if giveback:
+        worst_giveback = max(
+            giveback, key=lambda item: (item[1].average_giveback_pct, item[0])
+        )
+        sid, result = worst_giveback
+        findings.append(
+            LabFindingOut(
+                headline=f"Largest giveback: {names[sid]}",
+                detail=(
+                    f"Positions reached {result.average_peak_pct}% above entry on "
+                    f"average and handed back {result.average_giveback_pct}% of that "
+                    "peak by the exit. A high peak with a high giveback means the "
+                    "entries found the move and the exit rule did not collect it."
+                ),
+                strategy_id=sid,
+            )
+        )
+
+    # The most important caveat in the table. A rule can lead on marked return
+    # while its *closed* trades lost badly — the open positions are carrying it.
+    # Ranking uses the marked total, so this divergence has to be stated rather
+    # than left to be noticed in a column.
+    divergences = [
+        (sid, result.total_return_pct - result.realised_return_pct, result)
+        for sid, result in results.items()
+        if result.total_return_pct is not None and result.realised_return_pct is not None
+    ]
+    if divergences:
+        sid, gap, result = max(divergences, key=lambda item: (item[1], item[0]))
+        if gap >= Decimal(20):
+            findings.append(
+                LabFindingOut(
+                    headline=f"{names[sid]}'s return is carried by open positions",
+                    detail=(
+                        f"Marked total {result.total_return_pct}%, but its "
+                        f"{result.closed_count} closed trades returned "
+                        f"{result.realised_return_pct}% — a gap of "
+                        f"{gap.quantize(Decimal('0.01'))} points, with "
+                        f"{result.open_share_pct}% of positions still open. The "
+                        "marked figure is a position, not a result."
+                    ),
+                    strategy_id=sid,
+                )
+            )
+
+    stopped = [
+        (sid, result.exits_by_reason.get("stop", 0), result.closed_count)
+        for sid, result in results.items()
+        if result.closed_count > 0
+    ]
+    if stopped:
+        sid, stops, total = max(stopped, key=lambda item: (item[1] / item[2], item[0]))
+        findings.append(
+            LabFindingOut(
+                headline=f"Most stop-driven: {names[sid]}",
+                detail=(
+                    f"{stops} of {total} closed trades exited on a stop. Exit-reason "
+                    "counts are the mechanism behind the return figure, not a "
+                    "separate claim about it."
+                ),
+                strategy_id=sid,
+            )
+        )
+
+    return findings

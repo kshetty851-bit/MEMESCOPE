@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 /**
  * Top navigation.
  *
- * Four destinations, named in plain language. Replaces the nine-item
+ * Five destinations, named in plain language. Replaces the nine-item
  * iconographic rail, which required hovering to learn what any of it meant and
  * truncated to "Com…", "Obse…", "Divisi…" on a phone.
  *
@@ -28,6 +28,10 @@ const NAV: NavItem[] = [
   { href: "/", label: "Radar" },
   { href: "/record", label: "Track record" },
   { href: "/wallet", label: "Paper wallet" },
+  // Sprint 26. Sits beside the wallet because it answers the question the
+  // wallet raises: the wallet runs one rule, the lab shows how every published
+  // rule handled the same detections.
+  { href: "/lab", label: "Strategy lab" },
   { href: "/settings", label: "Settings" },
 ];
 
@@ -96,7 +100,7 @@ export function SiteNav() {
         </div>
       </header>
 
-      {/* Mobile: the same four, at the bottom, with labels that fit. */}
+      {/* Mobile: the same five, at the bottom, with labels that fit. */}
       <nav
         aria-label="Main"
         className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-abyss/95 backdrop-blur-xl md:hidden"

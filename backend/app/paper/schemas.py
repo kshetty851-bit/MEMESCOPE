@@ -175,3 +175,122 @@ class PositionsOut(BaseSchema):
 class StrategiesOut(BaseSchema):
     items: list[StrategyOut]
     active_id: str
+
+
+# --- Strategy Lab -------------------------------------------------------------
+
+
+class LabRuleOut(BaseSchema):
+    label: str
+    value: str
+
+
+class EquityPointOut(BaseSchema):
+    at: datetime
+    equity: Decimal
+    drawdown_pct: Decimal
+
+
+class LabStrategyOut(BaseSchema):
+    """One published rule set, replayed over the shared dataset.
+
+    Every figure is measured. `None` means no trade supports it — never zero.
+    """
+
+    id: str
+    name: str
+    description: str
+    rules: list[LabRuleOut]
+    #: True for Equal Weight v1, the permanent benchmark. Never more than one.
+    is_baseline: bool
+
+    invested: Decimal
+    #: Every trade, with open positions marked at the latest observed price.
+    total_return_pct: Decimal | None = None
+    #: **Closed trades only.** Served beside the total because win rate and
+    #: profit factor are also closed-only: a rule whose headline return comes
+    #: mostly from open marks would otherwise read as though it had earned it.
+    realised_return_pct: Decimal | None = None
+    #: Share of trades still open — how much of the total is a mark, not a result.
+    open_share_pct: Decimal | None = None
+    #: Difference against the baseline, in percentage points. Null for the
+    #: baseline itself — a benchmark does not differ from itself.
+    baseline_difference_pct: Decimal | None = None
+    #: Refused unless the observed history is long enough to annualise without
+    #: extrapolating. The reason is served beside it.
+    annualised_return_pct: Decimal | None = None
+    annualised_unavailable_reason: str | None = None
+
+    closed_count: int
+    open_count: int
+    win_rate_pct: Decimal | None = None
+    profit_factor: Decimal | None = None
+    average_win: Decimal | None = None
+    average_loss: Decimal | None = None
+    largest_winner: Decimal | None = None
+    largest_loser: Decimal | None = None
+    max_drawdown_pct: Decimal | None = None
+    average_hold_hours: Decimal | None = None
+    #: How high positions got before exiting, and how much of that was handed
+    #: back. Together these explain *why* a rule wins or loses.
+    average_peak_pct: Decimal | None = None
+    average_giveback_pct: Decimal | None = None
+    exits_by_reason: dict[str, int] = Field(default_factory=dict)
+
+    rank: int
+    equity_curve: list[EquityPointOut] = Field(default_factory=list)
+    return_distribution: list[Decimal] = Field(default_factory=list)
+    hold_distribution: list[Decimal] = Field(default_factory=list)
+
+
+class UnavailableStrategyOut(BaseSchema):
+    """A rule that was asked for and cannot be measured honestly."""
+
+    id: str
+    name: str
+    reason: str
+
+
+class LabFindingOut(BaseSchema):
+    """A conclusion drawn only from the figures above.
+
+    Every finding names the metric it rests on. Nothing here is an opinion about
+    what a reader should do; it is a statement about what the replay measured.
+    """
+
+    headline: str
+    detail: str
+    strategy_id: str | None = None
+
+
+class LabOut(BaseSchema):
+    strategies: list[LabStrategyOut]
+    unavailable: list[UnavailableStrategyOut]
+    findings: list[LabFindingOut]
+    baseline_id: str
+    #: Detections replayed, and how many were never priced so never entered.
+    detections: int
+    unpriced_detections: int
+    observed_days: Decimal | None = None
+    #: Why a lab return is not a wallet balance. Served on every response.
+    methodology: str
+    observed_at: datetime
+
+
+class TokenComparisonOut(BaseSchema):
+    mint_address: str
+    symbol: str | None = None
+    #: The highest the token reached while held, as a percent of entry.
+    peak_pct: Decimal | None = None
+    #: strategy id -> return percent.
+    returns: dict[str, Decimal | None] = Field(default_factory=dict)
+    #: Which rule captured the largest share of the peak. Null when the token
+    #: never rose — there was no move to capture.
+    best_strategy_id: str | None = None
+    best_capture_pct: Decimal | None = None
+
+
+class LabTokensOut(BaseSchema):
+    items: list[TokenComparisonOut]
+    strategy_ids: list[str]
+    observed_at: datetime
