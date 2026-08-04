@@ -3,12 +3,15 @@
 import { useMemo } from "react";
 import Link from "next/link";
 
+import { PaperWalletWidget } from "@/components/paper/wallet-widget";
 import { RadarRow } from "@/components/radar/radar-row";
 import { StatusDot } from "@/components/ui/badge";
 import { Label, Panel } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/states";
+import { usePaperPositions } from "@/hooks/use-paper";
 import { useRadar } from "@/hooks/use-radar";
+import { byMint, paperStateFor } from "@/lib/paper";
 
 /**
  * THE RADAR — the homepage.
@@ -40,6 +43,11 @@ export default function RadarPage() {
     sort: "score",
   });
 
+  // Whether the wallet holds each row. One request for the page, cached on the
+  // simulation's own cadence — the Radar's ranking query is untouched.
+  const paper = usePaperPositions();
+  const traded = useMemo(() => byMint(paper.data?.items ?? []), [paper.data]);
+
   const visible = useMemo(() => data?.items ?? [], [data]);
   const total = data?.total ?? 0;
 
@@ -62,6 +70,11 @@ export default function RadarPage() {
           <span>{isFetching ? "Refreshing" : "Every 2 min"}</span>
         </div>
       </header>
+
+      {/* The ranking and the result of mechanically trading it, adjacent. That
+          adjacency is deliberate: a Radar shown beside a losing wallet is a
+          more honest product than a Radar shown alone. */}
+      <PaperWalletWidget />
 
       {isError ? (
         <ErrorState
@@ -91,7 +104,12 @@ export default function RadarPage() {
       ) : (
         <div className="flex flex-col gap-3">
           {visible.map((entry, index) => (
-            <RadarRow key={entry.mint_address} entry={entry} rank={index + 1} />
+            <RadarRow
+              key={entry.mint_address}
+              entry={entry}
+              rank={index + 1}
+              paperState={paperStateFor(traded.get(entry.mint_address))}
+            />
           ))}
         </div>
       )}

@@ -278,12 +278,29 @@ describe("RadarRow", () => {
     expect(hrefs.some((h) => h?.includes("solscan"))).toBe(true);
   });
 
-  it("marks paper trading unavailable rather than offering a button that does nothing", () => {
-    render(<RadarRow entry={entry()} rank={1} />);
+  it("reports whether the wallet holds the token, and offers no button", () => {
+    // The strategy enters on its own published rule with no manual step, so
+    // there is nothing to click. A control implying otherwise would be the
+    // discretion the whole design excludes.
+    render(<RadarRow entry={entry()} rank={1} paperState="open" />);
 
-    const action = screen.getByText("Paper trade");
-    expect(action).toHaveAttribute("aria-disabled");
+    const action = screen.getByText("In wallet");
     expect(action.tagName).not.toBe("BUTTON");
+    expect(action).toHaveAttribute("href", "/wallet");
+  });
+
+  it("says nothing about the wallet for a token it never took", () => {
+    // "Not held" must never read as "available to buy".
+    const { container } = render(<RadarRow entry={entry()} rank={1} />);
+
+    expect(screen.queryByText("In wallet")).not.toBeInTheDocument();
+    expect(screen.queryByText("Traded")).not.toBeInTheDocument();
+    expect((container.textContent ?? "").toLowerCase()).not.toContain("paper trade");
+  });
+
+  it("distinguishes a closed trade from an open position", () => {
+    render(<RadarRow entry={entry()} rank={1} paperState="closed" />);
+    expect(screen.getByText("Traded")).toBeInTheDocument();
   });
 
   it("is a complete row when nothing is live", () => {

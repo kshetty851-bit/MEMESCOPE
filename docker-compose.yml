@@ -104,6 +104,14 @@ x-backend-env: &backend-env
   # config, so a value set on one service only would let the two disagree about
   # what counts as a graduation.
   FEATURE_OPPORTUNITY_ENGINE_ENABLED: ${FEATURE_OPPORTUNITY_ENGINE_ENABLED:-false}
+  # Paper wallet. In the anchor because two services read it: the scheduler
+  # runs the review beat and the API serves the wallet, and a starting balance
+  # set on one service only would let them disagree about what every return is
+  # measured against. Nothing here connects a wallet or touches a chain.
+  FEATURE_PAPER_WALLET_ENABLED: ${FEATURE_PAPER_WALLET_ENABLED:-false}
+  PAPER_WALLET_STARTING_BALANCE: ${PAPER_WALLET_STARTING_BALANCE:-1000}
+  PAPER_WALLET_STRATEGY_ID: ${PAPER_WALLET_STRATEGY_ID:-equal_weight_v1}
+  PAPER_WALLET_REVIEW_BATCH_LIMIT: ${PAPER_WALLET_REVIEW_BATCH_LIMIT:-200}
   OPPORTUNITY_BONDING_CURVE_VENUES: ${OPPORTUNITY_BONDING_CURVE_VENUES:-pumpfun}
   OPPORTUNITY_GRADUATED_VENUES: ${OPPORTUNITY_GRADUATED_VENUES:-pumpswap}
   OPPORTUNITY_REQUIRED_CONFIRMATIONS: ${OPPORTUNITY_REQUIRED_CONFIRMATIONS:-2}

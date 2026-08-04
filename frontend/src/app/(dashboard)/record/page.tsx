@@ -9,9 +9,12 @@ import { EmptyState, ErrorState } from "@/components/ui/states";
 import { HistoryFeed } from "@/components/record/history-feed";
 import { Journey } from "@/components/record/journey";
 import { TokenActions } from "@/components/token/token-actions";
+import { usePaperPositions } from "@/hooks/use-paper";
+import { byMint, exitLabel, usd } from "@/lib/paper";
 import { useRadar, useRadarBenchmark, useRadarPerformance } from "@/hooks/use-radar";
 import { formatMultiple } from "@/lib/radar";
 import { cn } from "@/lib/utils";
+import type { PaperPosition } from "@/types/paper";
 import type { RadarEntry, RadarPerformance } from "@/types/radar";
 
 /**
@@ -145,6 +148,47 @@ function Badges({ tiers }: { tiers: string[] }) {
   );
 }
 
+/**
+ * Was this token traded, and how did it go?
+ *
+ * Deliberately never offers an action. The strategy enters on its own published
+ * rule with no manual step, so a token the wallet has not taken reads "—",
+ * never "buy" — implying a button here would be the discretion the whole design
+ * excludes.
+ */
+function PaperCell({ position }: { position: PaperPosition | undefined }) {
+  if (!position) return <span className="text-ink-faint">—</span>;
+
+  const pnl = usd(position.pnl_usd);
+  const closed = position.status === "closed";
+  const value = n(position.pnl_usd);
+
+  return (
+    <span
+      className="whitespace-nowrap tabular-nums"
+      title={
+        closed
+          ? `${exitLabel(position.exit_reason) ?? "Closed"} · entered at rank #${position.entry_rank}`
+          : `Open · entered at rank #${position.entry_rank}`
+      }
+    >
+      <span
+        className={cn(
+          value === null && "text-ink-faint",
+          value !== null && value > 0 && "text-safe",
+          value !== null && value < 0 && "text-danger",
+          value === 0 && "text-ink-dim",
+        )}
+      >
+        {pnl ?? "—"}
+      </span>
+      <span className="ml-1.5 text-xs text-ink-faint">
+        {closed ? (exitLabel(position.exit_reason) ?? "closed") : "open"}
+      </span>
+    </span>
+  );
+}
+
 function Reached({ ok }: { ok: boolean }) {
   return (
     <span className={ok ? "text-safe" : "text-ink-faint"} aria-label={ok ? "yes" : "no"}>
@@ -159,9 +203,15 @@ export default function TrackRecordPage() {
   // The whole record, not a page of it: this table's entire purpose is that
   // nothing is left out, and `include_inactive` is what keeps dead entries in.
   const record = useRadar({ pageSize: 100, includeInactive: true, sort: "detected" });
+  // "Was this token traded?" answered from the wallet's own rows. One request
+  // for the page, indexed by mint — the paper slice stays independent of the
+  // Radar, and the Radar's hot path takes no extra query.
+  const paper = usePaperPositions();
 
   const [reached, setReached] = useState<ReachedFilter>("all");
   const [sort, setSort] = useState<SortKey>("newest");
+
+  const traded = useMemo(() => byMint(paper.data?.items ?? []), [paper.data]);
 
   const rows = useMemo(() => {
     const items: RadarEntry[] = record.data?.items ?? [];
@@ -379,7 +429,7 @@ export default function TrackRecordPage() {
               </div>
             ) : (
               <div className="mt-3 overflow-x-auto rounded-card border border-line">
-                <table className="w-full min-w-[1180px] text-sm">
+                <table className="w-full min-w-[1320px] text-sm">
                   <thead>
                     <tr className="border-b border-line text-label uppercase tracking-wide text-ink-faint">
                       <th className="px-3 py-2 text-left font-normal">#</th>
@@ -397,6 +447,7 @@ export default function TrackRecordPage() {
                       <th className="px-3 py-2 text-left font-normal">Journey</th>
                       <th className="px-3 py-2 text-center font-normal">Badges</th>
                       <th className="px-3 py-2 text-left font-normal">Status</th>
+                      <th className="px-3 py-2 text-right font-normal">Paper trade</th>
                       <th className="px-3 py-2 text-right font-normal">Actions</th>
                     </tr>
                   </thead>
@@ -483,6 +534,9 @@ export default function TrackRecordPage() {
                             }
                           >
                             {entry.liveness === "alive" ? "Alive" : "Unknown"}
+                          </td>
+                          <td className="px-3 py-2 text-right">
+                            <PaperCell position={traded.get(entry.mint_address)} />
                           </td>
                           <td className="px-3 py-2 text-right">
                             <TokenActions mint={entry.mint_address} />

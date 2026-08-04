@@ -21,6 +21,7 @@ celery_app = Celery(
         "app.radar.scheduler",
         "app.events.scheduler",
         "app.opportunities.scheduler",
+        "app.paper.scheduler",
     ],
 )
 
@@ -85,6 +86,16 @@ celery_app.conf.beat_schedule = {
     # opportunity as ACTIVE is making a claim about now from data about then.
     "opportunity-review": {
         "task": "app.opportunities.scheduler.opportunity_review",
+        "schedule": crontab(minute="*/5"),
+    },
+    # The paper wallet advances on its own beat because nothing else can move
+    # it: a position whose token stopped being enriched is exactly the one most
+    # likely to be sitting through its stop. Every five minutes, matching the
+    # opportunity review — exits are resolved from the stored observation
+    # series, so a missed pass changes when a close is *recorded*, never which
+    # close it was or at what price.
+    "paper-review": {
+        "task": "app.paper.scheduler.paper_review",
         "schedule": crontab(minute="*/5"),
     },
 }

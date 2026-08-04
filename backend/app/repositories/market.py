@@ -122,6 +122,46 @@ class MarketSnapshotRepository(BaseRepository[TokenMarketSnapshot]):
             if row.price_usd is not None and row.price_usd > 0
         }
 
+    async def series_for_mints(
+        self, mints: Sequence[str], *, since: datetime
+    ) -> dict[str, list[TokenMarketSnapshot]]:
+        """Every priced observation after `since`, per mint, **oldest first**.
+
+        Ascending, unlike `window_for_mints`, because the paper wallet replays
+        this series in the order it happened: an exit is decided by the *first*
+        reading that breached a rule, so reversing it would book the last breach
+        instead of the first and quietly improve every result.
+
+        Unbounded per mint by design. A `LIMIT` here would silently drop the
+        oldest readings — exactly the ones that decide an exit — and turn a
+        missed evaluation window into a better-looking track record.
+
+        `since` is the widest window in the batch; a caller holding a different
+        watermark per row trims in memory, as `window_for_mints` documents.
+        Rows with no price are excluded: an unpriced observation cannot breach a
+        price rule, and treating it as zero would stop out every position.
+        """
+        unique = list(dict.fromkeys(mints))
+        if not unique:
+            return {}
+
+        stmt = (
+            select(TokenMarketSnapshot)
+            .where(
+                TokenMarketSnapshot.mint_address.in_(unique),
+                TokenMarketSnapshot.captured_at > since,
+                TokenMarketSnapshot.price_usd.is_not(None),
+            )
+            .order_by(
+                TokenMarketSnapshot.mint_address,
+                TokenMarketSnapshot.captured_at.asc(),
+            )
+        )
+        series: dict[str, list[TokenMarketSnapshot]] = {}
+        for snapshot in (await self.session.execute(stmt)).scalars().all():
+            series.setdefault(snapshot.mint_address, []).append(snapshot)
+        return series
+
     async def history_for_mint(
         self,
         mint_address: str,

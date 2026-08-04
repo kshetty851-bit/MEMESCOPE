@@ -313,6 +313,28 @@ class Settings(BaseSettings):
     #: building, which either realises into a breakout or quietly does not.
     OPPORTUNITY_TTL_PRE_BREAKOUT_SECONDS: int = Field(default=86_400, ge=60)
 
+    # --- Paper wallet ---------------------------------------------------------
+    # A deterministic simulation over stored market history. No wallet is
+    # connected, no order is routed and no chain is touched: a position is a row
+    # recording what a published rule would have done.
+    #
+    # Off by default like every other pipeline flag. While off, nothing opens,
+    # nothing closes, and the API reports the wallet as not running rather than
+    # serving an empty one that looks like a strategy which never traded.
+    FEATURE_PAPER_WALLET_ENABLED: bool = False
+    #: Starting capital. Configurable, but written onto the wallet row at
+    #: creation and read from there afterwards — every return is measured
+    #: against the balance the wallet *started* with, so changing this setting
+    #: later must not restate results that were already published.
+    PAPER_WALLET_STARTING_BALANCE: float = Field(default=1_000.0, gt=0)
+    #: Which published strategy trades. One at a time, so the wallet measures
+    #: the Radar rather than a comparison between rules.
+    PAPER_WALLET_STRATEGY_ID: str = "equal_weight_v1"
+    #: How many positions the evaluator advances per pass. Bounded and ordered
+    #: oldest-watermark-first, which is what keeps a growing book from starving
+    #: its own tail — the failure that livelocked the score sweep.
+    PAPER_WALLET_REVIEW_BATCH_LIMIT: int = Field(default=200, ge=1, le=2000)
+
     # --- Breakout provider ----------------------------------------------------
     # Every threshold measured against the stored history on 2026-08-03 (1.37 M
     # evaluable observations). At these values the provider fires on 0.03 % of

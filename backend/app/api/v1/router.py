@@ -21,6 +21,7 @@ from app.api.v1.endpoints import (
 from app.exit_signals import api as intelligence
 from app.health import api as pipeline_health
 from app.opportunities import api as opportunities
+from app.paper import api as paper
 from app.radar import api as radar
 
 api_router = APIRouter()
@@ -62,3 +63,8 @@ api_router.include_router(events.router)
 # established shape driven by a different model. Additive: no existing route
 # changes, and the board is empty while the engine's feature flag is off.
 api_router.include_router(opportunities.router)
+# Sprint 25: the paper wallet. Its own namespace, and read-only throughout —
+# there is no manual entry, so there is no write endpoint to register. Additive:
+# no existing route changes, and the wallet reports itself as not running while
+# its feature flag is off rather than serving an empty book.
+api_router.include_router(paper.router)

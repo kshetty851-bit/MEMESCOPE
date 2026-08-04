@@ -15,6 +15,7 @@ import {
   signedPct,
   tokenNaming,
 } from "@/lib/radar-row";
+import type { PaperTokenState } from "@/lib/paper";
 import { cn } from "@/lib/utils";
 import type { RadarEntry } from "@/types/radar";
 
@@ -111,7 +112,13 @@ function EvidenceDots({ evidence }: { evidence: string | null }) {
 }
 
 /** One-click paths out of the row. Every destination is distinct. */
-function RowActions({ mint }: { mint: string }) {
+function RowActions({
+  mint,
+  paperState,
+}: {
+  mint: string;
+  paperState: PaperTokenState;
+}) {
   const link =
     "rounded px-1.5 py-1 text-xs text-ink-faint transition-colors hover:bg-elevated hover:text-ink";
 
@@ -159,21 +166,41 @@ function RowActions({ mint }: { mint: string }) {
       >
         Solscan
       </a>
-      {/* Rendered unavailable rather than omitted or faked. The paper wallet
-          has no engine yet, and a button that silently does nothing is worse
-          than one that says why it cannot. */}
-      <span
-        aria-disabled
-        title="Paper trading is not built yet. No position can be opened."
-        className="cursor-not-allowed rounded px-1.5 py-1 text-xs text-ink-faint/40"
-      >
-        Paper trade
-      </span>
+      {/* Since Sprint 25 this is a *fact*, not a control. The strategy enters
+          on its own published rule with no manual step, so there is nothing to
+          click — what a reader needs to know is whether the wallet took this
+          token, and a button implying otherwise would be the discretion the
+          whole design excludes. */}
+      {paperState === "not-held" ? null : (
+        <Link
+          href="/wallet"
+          title={
+            paperState === "open"
+              ? "The paper wallet holds a position in this token"
+              : "The paper wallet has traded this token and closed the position"
+          }
+          className={cn(
+            "rounded px-1.5 py-1 text-xs transition-colors hover:bg-elevated",
+            paperState === "open" ? "text-plasma" : "text-ink-faint",
+          )}
+        >
+          {paperState === "open" ? "In wallet" : "Traded"}
+        </Link>
+      )}
     </div>
   );
 }
 
-export function RadarRow({ entry, rank }: { entry: RadarEntry; rank: number }) {
+export function RadarRow({
+  entry,
+  rank,
+  paperState = "not-held",
+}: {
+  entry: RadarEntry;
+  rank: number;
+  /** Whether the paper wallet holds or has traded this token. */
+  paperState?: PaperTokenState;
+}) {
   const risk = riskLabel(entry.risk_band);
   const rate = baseRateSummary(entry.base_rate);
   const change = entry.market?.change_24h_pct ?? null;
@@ -322,7 +349,7 @@ export function RadarRow({ entry, rank }: { entry: RadarEntry; rank: number }) {
       ) : null}
 
       <div className="mt-3 flex justify-end pl-8">
-        <RowActions mint={entry.mint_address} />
+        <RowActions mint={entry.mint_address} paperState={paperState} />
       </div>
     </article>
   );
