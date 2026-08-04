@@ -74,6 +74,8 @@ export interface RadarEntry {
   detection_reason: string[];
   /** Tiers ever reached, from the achievement record. Permanent once earned. */
   achieved_tiers: string[];
+  /** `alive` | `unknown`. Never `inactive` — nothing establishes death. */
+  liveness: string;
   model_version: string;
   last_evaluated_at: string;
 }
@@ -138,7 +140,38 @@ export interface RadarPerformance {
   average_detection_market_cap: string | null;
   average_peak_market_cap: string | null;
   largest_peak_market_cap: string | null;
+  average_current_multiple: string | null;
+  average_days_to_5x: string | null;
+  above_entry: number;
+  below_entry: number;
+  alive: number;
+  unknown: number;
+  inactive: number;
+  last_detection_at: string | null;
   observed_at: string | null;
+}
+
+export interface RadarTimelineEvent {
+  kind: string;
+  mint_address: string;
+  name: string | null;
+  symbol: string | null;
+  occurred_at: string;
+  tier: string | null;
+  market_cap: string | null;
+  value: string | null;
+}
+
+export interface RadarBenchmark {
+  entries: number;
+  average_current_multiple: string | null;
+  average_peak_multiple: string | null;
+  median_current_multiple: string | null;
+  above_entry: number;
+  below_entry: number;
+  /** Why holding SOL is not shown. Measured absence, stated. */
+  sol_note: string;
+  paper_wallet_note: string;
 }
 
 export interface RadarCategorySpec {

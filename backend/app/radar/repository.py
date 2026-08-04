@@ -66,6 +66,15 @@ class PerformanceSummary:
     average_peak_market_cap: Decimal | None = None
     #: The largest peak market cap any single detection ever reached.
     largest_peak_market_cap: Decimal | None = None
+    average_current_multiple: Decimal | None = None
+    #: Mean days from detection to the first 5x, over entries that reached it.
+    average_days_to_5x: Decimal | None = None
+    above_entry: int = 0
+    below_entry: int = 0
+    #: When the most recent detection was recorded. Distinct from "last
+    #: updated": one says when the Radar last found something, the other when
+    #: this page was rendered.
+    last_detection_at: datetime | None = None
 
 
 class RadarRepository:
@@ -596,6 +605,14 @@ class RadarRepository:
                     func.avg(RadarToken.first_market_cap).label("avg_detection_mcap"),
                     func.avg(RadarToken.peak_market_cap).label("avg_peak_mcap"),
                     func.max(RadarToken.peak_market_cap).label("largest_peak_mcap"),
+                    func.avg(RadarToken.current_multiple).label("avg_current"),
+                    func.count()
+                    .filter(RadarToken.current_multiple >= 1)
+                    .label("above_entry"),
+                    func.count()
+                    .filter(RadarToken.current_multiple < 1)
+                    .label("below_entry"),
+                    func.max(RadarToken.first_detected_at).label("last_detection"),
                 )
             )
         ).one()
@@ -603,13 +620,20 @@ class RadarRepository:
         # Time-to-2x comes from the achievement row, which records *when* the
         # tier was crossed. Peak multiple cannot answer this: a token that ended
         # at 30x says nothing about how long it took to first double.
-        average_days_to_2x = (
-            await self._session.execute(
-                select(func.avg(RadarAchievement.days_to_achieve)).where(
-                    RadarAchievement.tier == "2x"
+        # Both tiers in one grouped pass rather than a query each.
+        tier_days = {
+            str(tier): value
+            for tier, value in (
+                await self._session.execute(
+                    select(
+                        RadarAchievement.tier,
+                        func.avg(RadarAchievement.days_to_achieve),
+                    )
+                    .where(RadarAchievement.tier.in_(["2x", "5x"]))
+                    .group_by(RadarAchievement.tier)
                 )
-            )
-        ).scalar()
+            ).all()
+        }
 
         # Tier counts come from the achievement table rather than by comparing
         # peak_multiple, so the two can never disagree about what was reached.
@@ -631,12 +655,138 @@ class RadarRepository:
             tier_counts={str(tier): int(count) for tier, count in tiers},
             median_peak_multiple=totals.median_peak,
             average_drawdown=totals.avg_drawdown,
-            average_days_to_2x=average_days_to_2x,
+            average_days_to_2x=tier_days.get("2x"),
+            average_days_to_5x=tier_days.get("5x"),
             average_days_tracked=totals.avg_days_tracked,
             average_detection_market_cap=totals.avg_detection_mcap,
             average_peak_market_cap=totals.avg_peak_mcap,
             largest_peak_market_cap=totals.largest_peak_mcap,
+            average_current_multiple=totals.avg_current,
+            above_entry=int(totals.above_entry or 0),
+            below_entry=int(totals.below_entry or 0),
+            last_detection_at=totals.last_detection,
         )
+
+    async def all_mints(self) -> list[str]:
+        """Every mint on the record. Small by construction — admission is
+        strict — and needed whole because liveness is a summary over all of
+        them, not over a page."""
+        rows = await self._session.scalars(select(RadarToken.mint_address))
+        return [str(mint) for mint in rows]
+
+    async def observed_within(self, mints: Sequence[str], *, since: datetime) -> set[str]:
+        """Mints with a market observation at or after `since`, batched.
+
+        This is the *only* liveness signal the platform can defend. Nothing in
+        the system establishes that a token has died — no rule marks one
+        inactive, and "the price went to zero" is a price, not a death. What is
+        measurable is whether the market was observed recently, so that is what
+        is reported: a mint in this set is `alive`, one outside it is `unknown`.
+
+        `inactive` is deliberately never returned. Inventing a death rule would
+        put a permanent, wrong verdict on the permanent record.
+        """
+        unique = list(dict.fromkeys(mints))
+        if not unique:
+            return set()
+
+        rows = await self._session.scalars(
+            select(TokenMarketSnapshot.mint_address)
+            .where(
+                TokenMarketSnapshot.mint_address.in_(unique),
+                TokenMarketSnapshot.captured_at >= since,
+            )
+            .distinct()
+        )
+        return {str(mint) for mint in rows}
+
+    async def timeline(self, *, limit: int = 50) -> list[dict[str, Any]]:
+        """The Radar's own history, newest first, from stored events only.
+
+        Two kinds of event exist in the record and both carry their own
+        timestamp: a detection (`radar_tokens.first_detected_at`) and a tier
+        crossing (`radar_achievements.achieved_at`). They are unioned and
+        ordered — nothing is synthesised, and no event is written for this feed.
+
+        Deliberately not a table: it is a projection of rows that already exist,
+        so it can never disagree with them and needs no backfill.
+        """
+        detections: Select[Any] = select(
+            literal_column("'detection'").label("kind"),
+            RadarToken.mint_address.label("mint_address"),
+            RadarToken.first_detected_at.label("occurred_at"),
+            literal_column("NULL::varchar").label("tier"),
+            RadarToken.first_market_cap.label("market_cap"),
+            RadarToken.first_opportunity_score.label("value"),
+        )
+        achievements: Select[Any] = select(
+            literal_column("'achievement'").label("kind"),
+            RadarAchievement.mint_address.label("mint_address"),
+            RadarAchievement.achieved_at.label("occurred_at"),
+            RadarAchievement.tier.label("tier"),
+            RadarAchievement.market_cap_at_achievement.label("market_cap"),
+            RadarAchievement.multiple.label("value"),
+        )
+
+        unioned = detections.union_all(achievements).subquery("events")
+        rows = (
+            await self._session.execute(
+                select(unioned)
+                .order_by(unioned.c.occurred_at.desc())
+                .limit(limit)
+            )
+        ).all()
+
+        return [
+            {
+                "kind": row.kind,
+                "mint_address": row.mint_address,
+                "occurred_at": row.occurred_at,
+                "tier": row.tier,
+                "market_cap": row.market_cap,
+                "value": row.value,
+            }
+            for row in rows
+        ]
+
+    async def benchmark(self) -> dict[str, Decimal | int | None]:
+        """What buying every detection equally would have returned.
+
+        The one benchmark the stored history can answer. Each entry's
+        `current_multiple` is its return from detection, so the mean across all
+        of them *is* an equal-weight portfolio — no simulation, no assumed entry
+        or exit, no position sizing.
+
+        Holding SOL is deliberately absent: the platform stores no SOL price
+        history, and a comparison against a series it never recorded would be
+        fabricated. The page says so rather than showing a number.
+        """
+        row = (
+            await self._session.execute(
+                select(
+                    func.count().label("entries"),
+                    func.avg(RadarToken.current_multiple).label("avg_current"),
+                    func.avg(RadarToken.peak_multiple).label("avg_peak"),
+                    func.percentile_cont(0.5)
+                    .within_group(RadarToken.current_multiple.asc())
+                    .label("median_current"),
+                    func.count()
+                    .filter(RadarToken.current_multiple >= 1)
+                    .label("above_entry"),
+                    func.count()
+                    .filter(RadarToken.current_multiple < 1)
+                    .label("below_entry"),
+                )
+            )
+        ).one()
+        return {
+            "entries": int(row.entries or 0),
+            "average_current_multiple": row.avg_current,
+            "average_peak_multiple": row.avg_peak,
+            "median_current_multiple": row.median_current,
+            "above_entry": int(row.above_entry or 0),
+            "below_entry": int(row.below_entry or 0),
+        }
 
     async def tiers_for(self, mints: Sequence[str]) -> dict[str, list[str]]:
         """Tiers each mint has ever reached, batched, ordered by multiple.

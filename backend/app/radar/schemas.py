@@ -87,6 +87,8 @@ class RadarEntryOut(BaseSchema):
     #: badge and the tier counts can never disagree — and so a badge, once
     #: earned, survives a later correction to the peak.
     achieved_tiers: list[str] = Field(default_factory=list)
+    #: `alive` | `unknown`. Never `inactive` — see `observed_within`.
+    liveness: str = "unknown"
 
 
 class RadarDetailOut(RadarEntryOut):
@@ -178,8 +180,54 @@ class PerformanceOut(BaseSchema):
     average_detection_market_cap: Decimal | None = None
     average_peak_market_cap: Decimal | None = None
     largest_peak_market_cap: Decimal | None = None
+    average_current_multiple: Decimal | None = None
+    average_days_to_5x: Decimal | None = None
+    above_entry: int = 0
+    below_entry: int = 0
+    #: Liveness, measured only. `alive` means a market was observed recently;
+    #: `unknown` means it was not, which is not the same as dead. `inactive` is
+    #: never reported because nothing in the record establishes death.
+    alive: int = 0
+    unknown: int = 0
+    inactive: int = 0
+    last_detection_at: datetime | None = None
     #: When this reading was taken, so a stale page is visibly stale.
     observed_at: datetime | None = None
+
+
+class TimelineEventOut(BaseSchema):
+    """One entry in the Radar's own history.
+
+    Projected from stored rows — a detection or a tier crossing — never written
+    for the feed itself, so it can never disagree with the record.
+    """
+
+    kind: str
+    mint_address: str
+    name: str | None = None
+    symbol: str | None = None
+    occurred_at: datetime
+    tier: str | None = None
+    market_cap: Decimal | None = None
+    value: Decimal | None = None
+
+
+class BenchmarkOut(BaseSchema):
+    """What buying every detection equally would have returned.
+
+    The only benchmark the stored history can answer. Holding SOL is absent
+    because no SOL price series is recorded, and `sol_note` says so rather than
+    leaving the reader to assume it was omitted by accident.
+    """
+
+    entries: int
+    average_current_multiple: Decimal | None = None
+    average_peak_multiple: Decimal | None = None
+    median_current_multiple: Decimal | None = None
+    above_entry: int = 0
+    below_entry: int = 0
+    sol_note: str
+    paper_wallet_note: str
 
 
 class CategoryOut(BaseSchema):

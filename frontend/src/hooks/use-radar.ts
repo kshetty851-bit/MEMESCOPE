@@ -7,7 +7,9 @@ import {
   fetchRadarEntry,
   fetchRadarHistory,
   fetchRadarModel,
+  fetchRadarBenchmark,
   fetchRadarPerformance,
+  fetchRadarTimeline,
 } from "@/lib/radar";
 import type { RadarCategory } from "@/types/radar";
 
@@ -70,6 +72,22 @@ export function useRadarPerformance() {
  * Publishing it is what lets the UI state honestly that a category is declared
  * but unreachable, rather than silently never showing it.
  */
+export function useRadarTimeline(limit = 50) {
+  return useQuery({
+    queryKey: ["radar", "timeline", limit],
+    queryFn: () => fetchRadarTimeline(limit),
+    staleTime: 30_000,
+  });
+}
+
+export function useRadarBenchmark() {
+  return useQuery({
+    queryKey: ["radar", "benchmark"],
+    queryFn: fetchRadarBenchmark,
+    staleTime: 30_000,
+  });
+}
+
 export function useRadarModel() {
   return useQuery({
     queryKey: ["radar", "model"],

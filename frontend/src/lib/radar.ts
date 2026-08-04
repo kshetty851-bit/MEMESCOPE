@@ -6,7 +6,9 @@ import type {
   RadarHistory,
   RadarModel,
   RadarPage,
+  RadarBenchmark,
   RadarPerformance,
+  RadarTimelineEvent,
 } from "@/types/radar";
 
 /**
@@ -41,6 +43,14 @@ export function fetchRadarEntry(mint: string): Promise<RadarDetail> {
 
 export function fetchRadarHistory(mint: string, limit = 100): Promise<RadarHistory> {
   return api.get<RadarHistory>(`/radar/${mint}/history?limit=${limit}`);
+}
+
+export function fetchRadarTimeline(limit = 50): Promise<RadarTimelineEvent[]> {
+  return api.get<RadarTimelineEvent[]>(`/radar/timeline?limit=${limit}`);
+}
+
+export function fetchRadarBenchmark(): Promise<RadarBenchmark> {
+  return api.get<RadarBenchmark>("/radar/benchmark");
 }
 
 export function fetchRadarPerformance(): Promise<RadarPerformance> {

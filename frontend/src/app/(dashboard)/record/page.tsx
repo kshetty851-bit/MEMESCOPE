@@ -6,7 +6,10 @@ import { useMemo, useState } from "react";
 import { Label } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/states";
-import { useRadar, useRadarPerformance } from "@/hooks/use-radar";
+import { HistoryFeed } from "@/components/record/history-feed";
+import { Journey } from "@/components/record/journey";
+import { TokenActions } from "@/components/record/token-actions";
+import { useRadar, useRadarBenchmark, useRadarPerformance } from "@/hooks/use-radar";
 import { formatMultiple } from "@/lib/radar";
 import { cn } from "@/lib/utils";
 import type { RadarEntry, RadarPerformance } from "@/types/radar";
@@ -152,6 +155,7 @@ function Reached({ ok }: { ok: boolean }) {
 
 export default function TrackRecordPage() {
   const performance = useRadarPerformance();
+  const benchmark = useRadarBenchmark();
   // The whole record, not a page of it: this table's entire purpose is that
   // nothing is left out, and `include_inactive` is what keeps dead entries in.
   const record = useRadar({ pageSize: 100, includeInactive: true, sort: "detected" });
@@ -375,7 +379,7 @@ export default function TrackRecordPage() {
               </div>
             ) : (
               <div className="mt-3 overflow-x-auto rounded-card border border-line">
-                <table className="w-full min-w-[900px] text-sm">
+                <table className="w-full min-w-[1180px] text-sm">
                   <thead>
                     <tr className="border-b border-line text-label uppercase tracking-wide text-ink-faint">
                       <th className="px-3 py-2 text-left font-normal">#</th>
@@ -390,8 +394,10 @@ export default function TrackRecordPage() {
                       <th className="px-3 py-2 text-center font-normal">10×</th>
                       <th className="px-3 py-2 text-center font-normal">100×</th>
                       <th className="px-3 py-2 text-right font-normal">Age</th>
+                      <th className="px-3 py-2 text-left font-normal">Journey</th>
                       <th className="px-3 py-2 text-center font-normal">Badges</th>
                       <th className="px-3 py-2 text-left font-normal">Status</th>
+                      <th className="px-3 py-2 text-right font-normal">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -455,11 +461,31 @@ export default function TrackRecordPage() {
                           <td className="px-3 py-2 text-right tabular-nums text-ink-faint">
                             {days(entry.days_since_detection) ?? "—"}
                           </td>
+                          <td className="px-3 py-2">
+                            <Journey
+                              tiers={entry.achieved_tiers ?? []}
+                              peakMultiple={entry.peak_multiple}
+                              currentMultiple={entry.current_multiple}
+                            />
+                          </td>
                           <td className="px-3 py-2 text-center">
                             <Badges tiers={entry.achieved_tiers ?? []} />
                           </td>
-                          <td className="px-3 py-2 text-ink-dim">
-                            {entry.is_active ? "Alive" : "Closed"}
+                          <td
+                            className={cn(
+                              "px-3 py-2",
+                              entry.liveness === "alive" ? "text-ink-dim" : "text-ink-faint",
+                            )}
+                            title={
+                              entry.liveness === "alive"
+                                ? "A market was observed in the last 24 hours"
+                                : "No market observed recently — this is not a claim that it died"
+                            }
+                          >
+                            {entry.liveness === "alive" ? "Alive" : "Unknown"}
+                          </td>
+                          <td className="px-3 py-2 text-right">
+                            <TokenActions mint={entry.mint_address} />
                           </td>
                         </tr>
                       );
@@ -473,6 +499,68 @@ export default function TrackRecordPage() {
               Peak and current are always shown together. A call that reached 18× and
               gave it back is not an 18× call.
             </p>
+          </section>
+
+          {/* Benchmark ----------------------------------------------------- */}
+          <section className="rounded-card border border-line bg-surface/40 p-5">
+            <h2 className="text-sm font-semibold text-ink">Benchmark</h2>
+            <p className="mt-1 text-xs text-ink-faint">
+              What buying every detection in equal size would have returned. Measured
+              from the record, not simulated.
+            </p>
+            {benchmark.data ? (
+              <>
+                <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <Stat
+                    label="Buy every detection"
+                    value={formatMultiple(benchmark.data.average_current_multiple)}
+                    tone={
+                      Number(benchmark.data.average_current_multiple ?? 0) >= 1
+                        ? "good"
+                        : "bad"
+                    }
+                    note="Mean current multiple"
+                  />
+                  <Stat
+                    label="Median outcome"
+                    value={formatMultiple(benchmark.data.median_current_multiple)}
+                    tone="bad"
+                    note="The typical call"
+                  />
+                  <Stat
+                    label="Above entry"
+                    value={`${benchmark.data.above_entry} of ${benchmark.data.entries}`}
+                  />
+                  <Stat
+                    label="Below entry"
+                    value={`${benchmark.data.below_entry} of ${benchmark.data.entries}`}
+                    tone="bad"
+                  />
+                </div>
+                <div className="mt-4 flex flex-col gap-1 text-xs text-ink-faint">
+                  <p>Hold SOL — {benchmark.data.sol_note}</p>
+                  <p>Paper wallet — {benchmark.data.paper_wallet_note}</p>
+                </div>
+              </>
+            ) : (
+              <div className="mt-4 grid gap-3 sm:grid-cols-4">
+                {Array.from({ length: 4 }, (_, index) => (
+                  <Skeleton key={index} className="h-20" />
+                ))}
+              </div>
+            )}
+          </section>
+
+          {/* Hall of history ------------------------------------------------ */}
+          <section>
+            <h2 className="text-sm font-semibold text-ink">History</h2>
+            <p className="mt-1 text-xs text-ink-faint">
+              Every detection and every milestone, newest first. Each line is a stored
+              row — nothing is written for this feed.
+            </p>
+            <div className="mt-3 rounded-card border border-line px-4">
+              <HistoryFeed />
+            </div>
           </section>
         </>
       )}

@@ -10,7 +10,7 @@ matched as a mint address.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Annotated
 
@@ -25,6 +25,7 @@ from app.radar.models import RadarCategory, RadarDimension, RadarReason
 from app.radar.repository import RadarRepository
 from app.radar.schemas import (
     AchievementOut,
+    BenchmarkOut,
     CategoryOut,
     DimensionOut,
     ModelOut,
@@ -38,12 +39,20 @@ from app.radar.schemas import (
     RadarSnapshotOut,
     ReasonOut,
     TierCount,
+    TimelineEventOut,
 )
 from app.services.pumpfun_radar import PumpfunRadarScanner
 
 router = APIRouter(prefix="/radar", tags=["radar"])
 
 _SECONDS_PER_DAY = Decimal(86_400)
+
+#: How recently a market must have been observed for an entry to read `alive`.
+#: Published rather than buried: it is the entire basis of the liveness claim,
+#: and a reader is entitled to know the window it was measured over. Beyond it
+#: the answer is `unknown` — never `inactive`, because no rule in this system
+#: establishes that a token died.
+LIVENESS_WINDOW = timedelta(hours=24)
 
 CATEGORY_COPY: dict[RadarCategory, tuple[str, str]] = {
     RadarCategory.EARLY_MOMENTUM: (
@@ -79,6 +88,7 @@ def _to_entry(
     now: datetime,
     names: dict[str, tuple[str | None, str | None]] | None = None,
     tiers: dict[str, list[str]] | None = None,
+    alive: set[str] | None = None,
 ) -> RadarEntryOut:
     """Assemble one Radar entry.
 
@@ -115,6 +125,11 @@ def _to_entry(
         model_version=entry.model_version,
         last_evaluated_at=entry.last_evaluated_at,
         achieved_tiers=(tiers or {}).get(entry.mint_address, []),
+        liveness=(
+            "alive"
+            if alive is not None and entry.mint_address in alive
+            else "unknown"
+        ),
     )
 
 
@@ -176,7 +191,14 @@ async def get_performance(session: DbSession) -> PerformanceOut:
     worked is not a success rate, and hiding the losers would make the whole
     record worthless as evidence.
     """
-    summary = await RadarRepository(session).performance_summary()
+    repository = RadarRepository(session)
+    now = datetime.now(UTC)
+    summary = await repository.performance_summary()
+    alive_count = len(
+        await repository.observed_within(
+            await repository.all_mints(), since=now - LIVENESS_WINDOW
+        )
+    )
 
     reached_2x = summary.tier_counts.get("2x", 0)
     success_rate = Decimal(reached_2x) / Decimal(summary.total) if summary.total else None
@@ -204,7 +226,17 @@ async def get_performance(session: DbSession) -> PerformanceOut:
         average_detection_market_cap=summary.average_detection_market_cap,
         average_peak_market_cap=summary.average_peak_market_cap,
         largest_peak_market_cap=summary.largest_peak_market_cap,
-        observed_at=datetime.now(UTC),
+        average_current_multiple=summary.average_current_multiple,
+        average_days_to_5x=summary.average_days_to_5x,
+        above_entry=summary.above_entry,
+        below_entry=summary.below_entry,
+        alive=alive_count,
+        # Everything not observed recently is `unknown`, never `inactive`:
+        # absence of an observation is not evidence of death.
+        unknown=summary.total - alive_count,
+        inactive=0,
+        last_detection_at=summary.last_detection_at,
+        observed_at=now,
     )
 
 
@@ -217,8 +249,10 @@ async def get_leaderboard(
     repository = RadarRepository(session)
     entries = await repository.leaderboard(limit=limit)
     names = await repository.names_for([entry.mint_address for entry in entries])
-    tiers = await repository.tiers_for([entry.mint_address for entry in entries])
-    return [_to_entry(entry, now, names, tiers) for entry in entries]
+    board_mints = [entry.mint_address for entry in entries]
+    tiers = await repository.tiers_for(board_mints)
+    alive = await repository.observed_within(board_mints, since=now - LIVENESS_WINDOW)
+    return [_to_entry(entry, now, names, tiers, alive) for entry in entries]
 
 
 @router.get("/achievements", response_model=list[AchievementOut], summary="Recent milestones")
@@ -271,9 +305,10 @@ async def list_radar(
     mints = [entry.mint_address for entry in entries]
     names = await repository.names_for(mints)
     tiers = await repository.tiers_for(mints)
+    alive = await repository.observed_within(mints, since=now - LIVENESS_WINDOW)
 
     return RadarPage(
-        items=[_to_entry(entry, now, names, tiers) for entry in entries],
+        items=[_to_entry(entry, now, names, tiers, alive) for entry in entries],
         total=total,
         page=page,
         page_size=page_size,
@@ -331,6 +366,68 @@ async def list_discovered(
     )
 
 
+@router.get(
+    "/timeline",
+    response_model=list[TimelineEventOut],
+    summary="The Radar's own history",
+)
+async def get_timeline(
+    session: DbSession,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> list[TimelineEventOut]:
+    """Every detection and every tier crossing, newest first.
+
+    Projected from stored rows rather than written to a feed table, so it can
+    never drift from the record it describes. Nothing is authored here: if an
+    event appears in this list, a row with that timestamp exists.
+    """
+    repository = RadarRepository(session)
+    events = await repository.timeline(limit=limit)
+    names = await repository.names_for([str(event["mint_address"]) for event in events])
+
+    return [
+        TimelineEventOut(
+            kind=str(event["kind"]),
+            mint_address=str(event["mint_address"]),
+            name=names.get(str(event["mint_address"]), (None, None))[0],
+            symbol=names.get(str(event["mint_address"]), (None, None))[1],
+            occurred_at=event["occurred_at"],
+            tier=event["tier"],
+            market_cap=event["market_cap"],
+            value=event["value"],
+        )
+        for event in events
+    ]
+
+
+@router.get("/benchmark", response_model=BenchmarkOut, summary="Equal-weight benchmark")
+async def get_benchmark(session: DbSession) -> BenchmarkOut:
+    """What buying every Radar detection equally would have returned.
+
+    Measured, not simulated: each entry's `current_multiple` is its own return
+    from detection, so their mean *is* the equal-weight result. No assumed
+    entry, exit or position size enters it.
+    """
+    result = await RadarRepository(session).benchmark()
+    return BenchmarkOut(
+        entries=int(result["entries"] or 0),
+        average_current_multiple=result["average_current_multiple"],
+        average_peak_multiple=result["average_peak_multiple"],
+        median_current_multiple=result["median_current_multiple"],
+        above_entry=int(result["above_entry"] or 0),
+        below_entry=int(result["below_entry"] or 0),
+        sol_note=(
+            "Not shown. The platform records no SOL price history, so a "
+            "comparison against holding SOL would be fabricated rather than "
+            "measured."
+        ),
+        paper_wallet_note=(
+            "Not shown. The paper wallet does not exist yet, so there is no "
+            "strategy result to compare against."
+        ),
+    )
+
+
 @router.get("/{mint}/history", response_model=RadarHistoryOut, summary="Score timeline")
 async def get_history(
     session: DbSession,
@@ -381,6 +478,9 @@ async def get_entry(session: DbSession, mint: str) -> RadarDetailOut:
         now,
         await repository.names_for([entry.mint_address]),
         await repository.tiers_for([entry.mint_address]),
+        await repository.observed_within(
+            [entry.mint_address], since=now - LIVENESS_WINDOW
+        ),
     )
 
     dimensions: list[DimensionOut] = []
