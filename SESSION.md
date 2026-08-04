@@ -298,6 +298,54 @@ Validated: byte-identical across 10 runs and after reloading from Postgres.
 - Ranking is on marked total return, stated. A composite score would be an
   opinion wearing a measurement's clothes.
 
+## Sprint 27 — execution costs (done)
+
+Raised by a question about whether Radar tokens are really tradeable.
+
+**Provenance, settled.** All 84 Radar entries carry
+`source_program = 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P` — the pump.fun
+program id, written by the scanner at creation, and the column admission
+actually filters on. **The "pump" mint suffix is not the gate and must not be
+used as one**: 82 of 84 have it, two do not, and a vanity suffix can be ground
+by anyone. Venues observed: pumpswap (84), pumpfun bonding curve (39),
+meteora (4).
+
+**The measurement that mattered.** Median pool depth is **$1,857**; 57 of 85
+tokens hold under $5,000. A $100 order moves that price ~10.8% each way. Every
+figure published in Sprints 25 and 26 assumed a fill at the observed mid with no
+fee and infinite depth.
+
+`app/paper/costs.py` (pure) charges the published swap fee per side plus the
+exact constant-product impact `S/Y`, against the depth observed **at each end**.
+The exit is charged on the position's value *when it closes*.
+
+**Cost is progressive** — 3.70 points on the worst rule, 11.56 on the best,
+because winners sell bigger positions. A flat per-trade estimate reports a
+uniform drag and misses this entirely; the first rough pass did exactly that.
+
+Net sits **beside** gross and ranking still uses gross, so the frozen benchmark
+does not move because a lens was added. After costs 5 of 9 rules stay positive;
+Time Exit 7d flips negative and the benchmark goes -7.84% -> -12.74%.
+
+Refused, with the reasons shipped on every response: slippage from competing
+flow, priority-fee competition and MEV (snapshots are not fills), and impact on
+bonding-curve pairs (no liquidity reported at all — excluded from net, count
+published).
+
+3369 backend passed (+22), 305 frontend passed (+3).
+
+**Corrections recorded:**
+
+- `current == peak` on 9 of 84 entries is correct — those tokens are at their
+  high since detection. Four had a stored peak below the true observed maximum,
+  but every missed high landed *after* the last sweep: 15-minute sweep latency,
+  self-correcting. The real bug here was fixed earlier by `window_high`.
+- Two assumptions in the cost model are **unverified** and would change every
+  net figure: that `liquidity_usd` reports both sides of the pool (the model
+  halves it — if it is one-sided, every impact figure doubles), and the 30 bps
+  default swap fee. Both are configuration, not measurements. Verify against the
+  venue before quoting a net figure as precise.
+
 ## Known blockers
 
 - **Helius plan quota exhausted (HTTP 429).** Discovery is down and curve
