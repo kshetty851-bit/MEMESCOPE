@@ -202,6 +202,55 @@ about *informativeness*, not a measured result, and it is the one thing in this
 sprint that is not reproducible from stored data. Re-measure before trusting it
 on a materially different universe.
 
+## Sprint 25 — paper wallet & strategy engine (done)
+
+A deterministic simulation of one published rule over stored prices. No wallet,
+no order, no chain.
+
+**The finding.** Replayed over the full stored history (83 detections, 38 closed
+trades) the published rule returns **-60.98%** against **+22.74%** for buying
+everything equal-weight: 26.3% win rate, profit factor 0.58, 65.5% max drawdown,
+22 stop-outs against 7 targets. The -50% stop is what does the damage on this
+market. **No threshold was adjusted after seeing this** — tuning until the number
+looks good is the hindsight the design exists to prevent.
+
+`app/paper/`: `models`, `strategy`, `engine`, `metrics` pure (AST-enforced, and
+the core imports nothing outside `app.paper` — the strategy takes a signal type
+as a plain string to keep that boundary at one entry); `repository`, `service`,
+`api`, `scheduler` are the I/O seams.
+
+**Exits resolve against the observation series, not against "the price now."**
+`resolve_exit` walks readings in order and closes at the first breach, dated to
+the observation. A worker that missed six hours produces the same trades as one
+that missed none. This is the whole claim, and it is asserted by replaying the
+same history in different chunks in both unit and integration tests.
+
+Two tables (`0011_paper_wallet`). Cash, equity, ROI, win rate and drawdown are
+derived at read time; no price and no strategy definition is stored.
+`uq_paper_positions_wallet_mint` **is** the entry rule — re-entry is a state the
+schema cannot represent. The entry block is written once, so a target cannot be
+recomputed favourably.
+
+One wallet per strategy, not per user: the rule is mechanical, so per-user
+wallets would hold identical rows. Three endpoints, none of them POST — there is
+no manual entry, so there is no write endpoint.
+
+Measured: 3167 backend passed (+85), 291 frontend passed (+23). Live: 10
+positions opened from the Radar top 10, $1000 fully deployed, replay
+deterministic on re-run.
+
+**Corrections recorded:**
+
+- Sprint 24's Radar "Paper trade" placeholder is retired. It is now a *fact*
+  ("In wallet" / "Traded"), never a control — the strategy has no manual step,
+  so a button would imply discretion the design excludes.
+- Max drawdown is measured on the **realised** equity curve only. The path
+  between closes is not reconstructed, so it is a floor on the true figure. The
+  API ships that caveat as `max_drawdown_note` rather than leaving the page to
+  imply otherwise.
+- "Buy every Radar token" and "equal-weight Radar" are the **same measurement**
+  on this data. Reported once; two labels over one number would be duplication.
+
 ## Known blockers
 
 - **Helius plan quota exhausted (HTTP 429).** Discovery is down and curve
