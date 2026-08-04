@@ -78,6 +78,7 @@ def _to_entry(
     entry: RadarToken,
     now: datetime,
     names: dict[str, tuple[str | None, str | None]] | None = None,
+    tiers: dict[str, list[str]] | None = None,
 ) -> RadarEntryOut:
     """Assemble one Radar entry.
 
@@ -106,12 +107,14 @@ def _to_entry(
         current_multiple=entry.current_multiple,
         peak_multiple=entry.peak_multiple,
         peak_price=entry.peak_price,
+        peak_market_cap=entry.peak_market_cap,
         peak_at=entry.peak_at,
         days_since_detection=_days_since(entry.first_detected_at, now),
         is_active=entry.is_active,
         detection_reason=list(entry.detection_reason or []),
         model_version=entry.model_version,
         last_evaluated_at=entry.last_evaluated_at,
+        achieved_tiers=(tiers or {}).get(entry.mint_address, []),
     )
 
 
@@ -190,6 +193,18 @@ async def get_performance(session: DbSession) -> PerformanceOut:
             for tier in achievement_tiers.TIERS
         ],
         success_rate=success_rate,
+        # Nothing currently marks an entry inactive, so this reads 0 today. It
+        # is reported as a measured count rather than omitted: a zero the reader
+        # can see is honest, and a missing field looks like an oversight.
+        expired_opportunities=summary.total - summary.active,
+        median_peak_multiple=summary.median_peak_multiple,
+        average_drawdown=summary.average_drawdown,
+        average_days_to_2x=summary.average_days_to_2x,
+        average_days_tracked=summary.average_days_tracked,
+        average_detection_market_cap=summary.average_detection_market_cap,
+        average_peak_market_cap=summary.average_peak_market_cap,
+        largest_peak_market_cap=summary.largest_peak_market_cap,
+        observed_at=datetime.now(UTC),
     )
 
 
@@ -202,7 +217,8 @@ async def get_leaderboard(
     repository = RadarRepository(session)
     entries = await repository.leaderboard(limit=limit)
     names = await repository.names_for([entry.mint_address for entry in entries])
-    return [_to_entry(entry, now, names) for entry in entries]
+    tiers = await repository.tiers_for([entry.mint_address for entry in entries])
+    return [_to_entry(entry, now, names, tiers) for entry in entries]
 
 
 @router.get("/achievements", response_model=list[AchievementOut], summary="Recent milestones")
@@ -252,10 +268,12 @@ async def list_radar(
     )
     total = await repository.count_entries(category=category, active_only=active_only)
 
-    names = await repository.names_for([entry.mint_address for entry in entries])
+    mints = [entry.mint_address for entry in entries]
+    names = await repository.names_for(mints)
+    tiers = await repository.tiers_for(mints)
 
     return RadarPage(
-        items=[_to_entry(entry, now, names) for entry in entries],
+        items=[_to_entry(entry, now, names, tiers) for entry in entries],
         total=total,
         page=page,
         page_size=page_size,
@@ -358,7 +376,12 @@ async def get_entry(session: DbSession, mint: str) -> RadarDetailOut:
         raise NotFoundError(f"{mint} is not on the Radar.")
 
     now = datetime.now(UTC)
-    base = _to_entry(entry, now, await repository.names_for([entry.mint_address]))
+    base = _to_entry(
+        entry,
+        now,
+        await repository.names_for([entry.mint_address]),
+        await repository.tiers_for([entry.mint_address]),
+    )
 
     dimensions: list[DimensionOut] = []
     reasons: list[ReasonOut] = []

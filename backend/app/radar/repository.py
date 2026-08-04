@@ -46,6 +46,27 @@ class PerformanceSummary:
     worst_current_multiple: Decimal | None
     tier_counts: dict[str, int]
 
+    # --- Track-record additions ---------------------------------------------
+    # Every field below is an aggregate over rows that already exist. Nothing
+    # here is stored, and nothing is estimated: a figure with no rows behind it
+    # is `None`, which the page renders as "—" rather than as zero.
+    median_peak_multiple: Decimal | None = None
+    #: Mean drawdown from peak, as a fraction: 0.94 means the average entry
+    #: gave back 94% of its high. Computed only over entries that have both a
+    #: peak and a current reading.
+    average_drawdown: Decimal | None = None
+    #: Mean days from detection to the first 2x, over entries that reached it.
+    #: Read from `radar_achievements`, which records when each tier was hit —
+    #: not inferred from the peak, which says nothing about *when*.
+    average_days_to_2x: Decimal | None = None
+    #: Mean days a detection has been tracked. Survival, not lifetime: nothing
+    #: currently marks an entry inactive, so this is age, and the page says so.
+    average_days_tracked: Decimal | None = None
+    average_detection_market_cap: Decimal | None = None
+    average_peak_market_cap: Decimal | None = None
+    #: The largest peak market cap any single detection ever reached.
+    largest_peak_market_cap: Decimal | None = None
+
 
 class RadarRepository:
     """All Radar persistence. Holds a session; owns no transaction."""
@@ -556,9 +577,39 @@ class RadarRepository:
                     .label("median_current"),
                     func.max(RadarToken.peak_multiple).label("best_peak"),
                     func.min(RadarToken.current_multiple).label("worst_current"),
+                    func.percentile_cont(0.5)
+                    .within_group(RadarToken.peak_multiple.asc())
+                    .label("median_peak"),
+                    # Drawdown is derived here rather than stored: it is a pure
+                    # function of two columns on the same row, and a stored copy
+                    # would drift the moment either is corrected.
+                    func.avg(
+                        (RadarToken.peak_multiple - RadarToken.current_multiple)
+                        / func.nullif(RadarToken.peak_multiple, 0)
+                    ).label("avg_drawdown"),
+                    func.avg(
+                        func.extract(
+                            "epoch", func.now() - RadarToken.first_detected_at
+                        )
+                        / 86400.0
+                    ).label("avg_days_tracked"),
+                    func.avg(RadarToken.first_market_cap).label("avg_detection_mcap"),
+                    func.avg(RadarToken.peak_market_cap).label("avg_peak_mcap"),
+                    func.max(RadarToken.peak_market_cap).label("largest_peak_mcap"),
                 )
             )
         ).one()
+
+        # Time-to-2x comes from the achievement row, which records *when* the
+        # tier was crossed. Peak multiple cannot answer this: a token that ended
+        # at 30x says nothing about how long it took to first double.
+        average_days_to_2x = (
+            await self._session.execute(
+                select(func.avg(RadarAchievement.days_to_achieve)).where(
+                    RadarAchievement.tier == "2x"
+                )
+            )
+        ).scalar()
 
         # Tier counts come from the achievement table rather than by comparing
         # peak_multiple, so the two can never disagree about what was reached.
@@ -578,7 +629,40 @@ class RadarRepository:
             best_peak_multiple=totals.best_peak,
             worst_current_multiple=totals.worst_current,
             tier_counts={str(tier): int(count) for tier, count in tiers},
+            median_peak_multiple=totals.median_peak,
+            average_drawdown=totals.avg_drawdown,
+            average_days_to_2x=average_days_to_2x,
+            average_days_tracked=totals.avg_days_tracked,
+            average_detection_market_cap=totals.avg_detection_mcap,
+            average_peak_market_cap=totals.avg_peak_mcap,
+            largest_peak_market_cap=totals.largest_peak_mcap,
         )
+
+    async def tiers_for(self, mints: Sequence[str]) -> dict[str, list[str]]:
+        """Tiers each mint has ever reached, batched, ordered by multiple.
+
+        One query for a whole page. Read from `radar_achievements` rather than
+        recomputed from `peak_multiple` for the same reason the tier counts are:
+        an achievement is a permanent fact recorded when it happened, and a
+        badge derived from a live column would silently vanish if that column
+        were ever corrected downward.
+        """
+        unique = list(dict.fromkeys(mints))
+        if not unique:
+            return {}
+
+        rows = (
+            await self._session.execute(
+                select(RadarAchievement.mint_address, RadarAchievement.tier)
+                .where(RadarAchievement.mint_address.in_(unique))
+                .order_by(RadarAchievement.mint_address, RadarAchievement.multiple.asc())
+            )
+        ).all()
+
+        collected: dict[str, list[str]] = {}
+        for mint, tier in rows:
+            collected.setdefault(str(mint), []).append(str(tier))
+        return collected
 
     async def leaderboard(self, *, limit: int = 25) -> Sequence[RadarToken]:
         return (

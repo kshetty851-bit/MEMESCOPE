@@ -71,6 +71,10 @@ class RadarEntryOut(BaseSchema):
     current_multiple: Decimal | None
     peak_multiple: Decimal | None
     peak_price: Decimal | None
+    #: The highest market cap this entry ever reached. Stored on the row since
+    #: detection; surfaced because the record shows detection/current/peak
+    #: together and a multiple alone hides the scale it moved at.
+    peak_market_cap: Decimal | None
     peak_at: datetime | None
     days_since_detection: Decimal
 
@@ -78,6 +82,11 @@ class RadarEntryOut(BaseSchema):
     detection_reason: list[str]
     model_version: str
     last_evaluated_at: datetime
+    #: Tiers this entry has ever reached, from `radar_achievements`. Read from
+    #: the achievement rows rather than recomputed from `peak_multiple` so the
+    #: badge and the tier counts can never disagree — and so a badge, once
+    #: earned, survives a later correction to the peak.
+    achieved_tiers: list[str] = Field(default_factory=list)
 
 
 class RadarDetailOut(RadarEntryOut):
@@ -157,6 +166,20 @@ class PerformanceOut(BaseSchema):
     tiers: list[TierCount]
     #: Share that reached at least 2x, as a fraction of everything ever detected.
     success_rate: Decimal | None
+
+    # --- Track record --------------------------------------------------------
+    # Measured aggregates over the permanent record. `None` where no row
+    # supports the figure — rendered as "—", never as zero.
+    expired_opportunities: int = 0
+    median_peak_multiple: Decimal | None = None
+    average_drawdown: Decimal | None = None
+    average_days_to_2x: Decimal | None = None
+    average_days_tracked: Decimal | None = None
+    average_detection_market_cap: Decimal | None = None
+    average_peak_market_cap: Decimal | None = None
+    largest_peak_market_cap: Decimal | None = None
+    #: When this reading was taken, so a stale page is visibly stale.
+    observed_at: datetime | None = None
 
 
 class CategoryOut(BaseSchema):

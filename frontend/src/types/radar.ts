@@ -66,11 +66,14 @@ export interface RadarEntry {
   current_multiple: string | null;
   peak_multiple: string | null;
   peak_price: string | null;
+  peak_market_cap: string | null;
   peak_at: string | null;
   days_since_detection: string;
 
   is_active: boolean;
   detection_reason: string[];
+  /** Tiers ever reached, from the achievement record. Permanent once earned. */
+  achieved_tiers: string[];
   model_version: string;
   last_evaluated_at: string;
 }
@@ -122,6 +125,20 @@ export interface RadarPerformance {
   tiers: TierCount[];
   /** Share that reached 2x, over everything ever detected — losers included. */
   success_rate: string | null;
+
+  /**
+   * Track-record aggregates. Every one is measured over the permanent record;
+   * `null` means no row supports the figure and the page renders "—".
+   */
+  expired_opportunities: number;
+  median_peak_multiple: string | null;
+  average_drawdown: string | null;
+  average_days_to_2x: string | null;
+  average_days_tracked: string | null;
+  average_detection_market_cap: string | null;
+  average_peak_market_cap: string | null;
+  largest_peak_market_cap: string | null;
+  observed_at: string | null;
 }
 
 export interface RadarCategorySpec {
