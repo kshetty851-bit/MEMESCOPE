@@ -43,9 +43,7 @@ def account(
     """Account bytes in the documented layout."""
     return (
         discriminator
-        + struct.pack(
-            "<QQQQQ", virtual_token, virtual_sol, real_token, real_sol, total_supply
-        )
+        + struct.pack("<QQQQQ", virtual_token, virtual_sol, real_token, real_sol, total_supply)
         + bytes([complete])
         + trailing
     )

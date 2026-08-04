@@ -170,7 +170,7 @@ class TestAbsence:
     async def test_a_token_younger_than_the_window_shows_no_24h_change(
         self, client: AsyncClient, db_session: AsyncSession
     ) -> None:
-        """"Unchanged" and "we were not watching yet" are different claims.
+        """ "Unchanged" and "we were not watching yet" are different claims.
         Only one of them is true for a token minutes old."""
         token = await _token(db_session, MINT, age=timedelta(minutes=10))
         await _snapshot(db_session, token, MINT, at=NOW, price="0.000021")

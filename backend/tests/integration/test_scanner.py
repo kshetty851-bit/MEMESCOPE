@@ -203,9 +203,7 @@ async def test_duplicate_event_is_suppressed(db_session: Any, client: Any) -> No
 
 async def test_missing_metadata_is_saved_as_pending(db_session: Any, client: Any) -> None:
     """A token with no metadata yet must still be recorded, not dropped."""
-    scanner = TokenScanner(
-        rpc=FakeHelius(asset=None), ws_url="ws://fake", programs=["prog"]
-    )
+    scanner = TokenScanner(rpc=FakeHelius(asset=None), ws_url="ws://fake", programs=["prog"])
     await _run_one_event(scanner, _notification())
 
     from app.db.session import SessionFactory

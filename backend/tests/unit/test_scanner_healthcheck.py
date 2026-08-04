@@ -92,9 +92,7 @@ class TestVerdict:
 
 
 class TestExitCodes:
-    def test_healthy_exits_zero(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_healthy_exits_zero(self, monkeypatch: pytest.MonkeyPatch) -> None:
         async def _ok() -> bool:
             return True
 

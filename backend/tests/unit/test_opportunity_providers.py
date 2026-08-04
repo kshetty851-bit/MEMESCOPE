@@ -161,9 +161,7 @@ class TestFreshGraduation:
             graduated_venues=frozenset({"pumpswap"}),
         )
 
-    def test_it_detects_the_transition(
-        self, provider: FreshGraduationProvider
-    ) -> None:
+    def test_it_detects_the_transition(self, provider: FreshGraduationProvider) -> None:
         result = provider.evaluate(_window("pumpfun", "pumpswap"), now=NOW)
 
         assert result.available
@@ -186,9 +184,7 @@ class TestFreshGraduation:
         The opportunity is new; the token need not be — but the *signal* must
         be, which is the whole premise.
         """
-        assert (
-            provider.evaluate(_window("pumpswap", "pumpswap"), now=NOW).candidates == ()
-        )
+        assert provider.evaluate(_window("pumpswap", "pumpswap"), now=NOW).candidates == ()
 
     def test_a_first_ever_venue_is_not_a_graduation(
         self, provider: FreshGraduationProvider
@@ -208,20 +204,13 @@ class TestFreshGraduation:
         result = provider.evaluate(_window("pumpfun", None, None, "pumpswap"), now=NOW)
         assert len(result.candidates) == 1
 
-    def test_a_null_latest_venue_says_nothing(
-        self, provider: FreshGraduationProvider
-    ) -> None:
+    def test_a_null_latest_venue_says_nothing(self, provider: FreshGraduationProvider) -> None:
         assert provider.evaluate(_window("pumpfun", None), now=NOW).candidates == ()
 
-    def test_an_empty_window_says_nothing(
-        self, provider: FreshGraduationProvider
-    ) -> None:
+    def test_an_empty_window_says_nothing(self, provider: FreshGraduationProvider) -> None:
         """Total on every input, including the degenerate ones."""
         assert (
-            provider.evaluate(
-                ObservationWindow(mint_address=MINT), now=NOW
-            ).candidates
-            == ()
+            provider.evaluate(ObservationWindow(mint_address=MINT), now=NOW).candidates == ()
         )
 
     def test_an_unrelated_venue_change_is_not_its_subject(
@@ -229,18 +218,14 @@ class TestFreshGraduation:
     ) -> None:
         """A new pool on an established token is a real change, but not this
         provider's."""
-        assert (
-            provider.evaluate(_window("meteora", "pumpswap"), now=NOW).candidates == ()
-        )
+        assert provider.evaluate(_window("meteora", "pumpswap"), now=NOW).candidates == ()
 
     def test_venue_matching_is_case_insensitive(
         self, provider: FreshGraduationProvider
     ) -> None:
         assert len(provider.evaluate(_window("PumpFun", "PumpSwap"), now=NOW).candidates) == 1
 
-    def test_the_evidence_names_both_venues(
-        self, provider: FreshGraduationProvider
-    ) -> None:
+    def test_the_evidence_names_both_venues(self, provider: FreshGraduationProvider) -> None:
         """Enough for a client to render the explanation without inventing it."""
         candidate = provider.evaluate(_window("pumpfun", "pumpswap"), now=NOW).candidates[0]
         labels = {item.label: item.value for item in candidate.evidence}

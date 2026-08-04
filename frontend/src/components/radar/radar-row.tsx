@@ -3,6 +3,8 @@
 import Link from "next/link";
 
 import { TokenAvatar } from "@/components/brand/token-avatar";
+import { FreshnessLabel, NoMarketData } from "@/components/ui/freshness";
+import { shortMint } from "@/lib/freshness";
 import { formatMultiple, multipleTone } from "@/lib/radar";
 import {
   baseRateSummary,
@@ -230,6 +232,17 @@ export function RadarRow({
             {secondary ? (
               <span className="truncate text-xs text-ink-faint">{secondary}</span>
             ) : null}
+            {/* Always shown, never conditionally. The audit found nine distinct
+                mints named TNOS and five named SAOF — all genuine pump.fun
+                tokens. A symbol cannot identify a token here, so the mint is
+                part of the identity rather than a disambiguator that appears
+                only when we happen to notice a clash. */}
+            <span
+              className="font-mono text-xs text-ink-faint/70"
+              title={entry.mint_address}
+            >
+              {shortMint(entry.mint_address)}
+            </span>
           </div>
         </div>
 
@@ -281,19 +294,7 @@ export function RadarRow({
 
       {/* The market strip. Dashes where nothing was observed — never zeroes. */}
       <div className="mt-3 grid grid-cols-3 gap-x-4 gap-y-3 pl-8 sm:grid-cols-4 lg:grid-cols-8">
-        {/* The reading's own timestamp rides on the price rather than on a
-            "liveness" chip. Sprint 24 removed that chip as internal
-            vocabulary, and dropping the fact with it would have made a stale
-            row indistinguishable from a live one. */}
-        <Cell
-          label="Price"
-          value={compactUsd(entry.market?.price_usd)}
-          title={
-            entry.market?.captured_at
-              ? `Last observed ${new Date(entry.market.captured_at).toLocaleString()}`
-              : "Never observed."
-          }
-        />
+        <Cell label="Price" value={compactUsd(entry.market?.price_usd)} />
         <Cell label="Mkt cap" value={compactUsd(entry.market?.market_cap)} />
         <Cell label="Liquidity" value={compactUsd(entry.market?.liquidity_usd)} />
         <Cell label="Vol 24h" value={compactUsd(entry.market?.volume_24h)} />
@@ -318,6 +319,19 @@ export function RadarRow({
           value={formatMultiple(entry.peak_multiple)}
           tone={multipleTone(entry.peak_multiple)}
         />
+      </div>
+
+      {/* Freshness sits directly under the strip because it qualifies every
+          figure in it. A token the provider indexes no pool for says so rather
+          than letting the last price anyone happened to see stand in for a
+          current one — measured, one such token has returned nothing on 34
+          consecutive polls and is still being polled every fifteen seconds. */}
+      <div className="mt-2 pl-8">
+        {entry.market ? (
+          <FreshnessLabel capturedAt={entry.market.captured_at} withDot />
+        ) : (
+          <NoMarketData />
+        )}
       </div>
 
       {/* The base rate, given its own block. This is the moat, and it spent

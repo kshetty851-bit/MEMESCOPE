@@ -88,13 +88,21 @@ class TestAggregates:
     ) -> None:
         """A rate computed only over the entries that worked is not a rate."""
         winner = await _entry(
-            db_session, "TrackWin1111111111111111111111111111111111", first_mcap="10000",
-            current_multiple="3.0", peak_multiple="5.0", peak_mcap="50000",
+            db_session,
+            "TrackWin1111111111111111111111111111111111",
+            first_mcap="10000",
+            current_multiple="3.0",
+            peak_multiple="5.0",
+            peak_mcap="50000",
         )
         await _achievement(db_session, winner, "2x", days_to_achieve="1.0")
         await _entry(
-            db_session, "TrackLose111111111111111111111111111111111", first_mcap="10000",
-            current_multiple="0.01", peak_multiple="1.1", peak_mcap="11000",
+            db_session,
+            "TrackLose111111111111111111111111111111111",
+            first_mcap="10000",
+            current_multiple="0.01",
+            peak_multiple="1.1",
+            peak_mcap="11000",
         )
         await db_session.commit()
 
@@ -108,8 +116,12 @@ class TestAggregates:
         self, client: AsyncClient, db_session: AsyncSession
     ) -> None:
         await _entry(
-            db_session, "TrackMed1111111111111111111111111111111111", first_mcap="10000",
-            current_multiple="1.0", peak_multiple="4.0", peak_mcap="40000",
+            db_session,
+            "TrackMed1111111111111111111111111111111111",
+            first_mcap="10000",
+            current_multiple="1.0",
+            peak_multiple="4.0",
+            peak_mcap="40000",
         )
         await db_session.commit()
 
@@ -125,8 +137,12 @@ class TestAggregates:
         """Peak multiple says how far it ran, never how long it took. Only the
         achievement row records when the tier was actually crossed."""
         entry = await _entry(
-            db_session, "TrackTime111111111111111111111111111111111", first_mcap="10000",
-            current_multiple="1.0", peak_multiple="9.0", peak_mcap="90000",
+            db_session,
+            "TrackTime111111111111111111111111111111111",
+            first_mcap="10000",
+            current_multiple="1.0",
+            peak_multiple="9.0",
+            peak_mcap="90000",
         )
         await _achievement(db_session, entry, "2x", days_to_achieve="0.5")
         await db_session.commit()
@@ -139,12 +155,20 @@ class TestAggregates:
         self, client: AsyncClient, db_session: AsyncSession
     ) -> None:
         await _entry(
-            db_session, "TrackBig1111111111111111111111111111111111", first_mcap="10000",
-            current_multiple="0.1", peak_multiple="8.0", peak_mcap="800000",
+            db_session,
+            "TrackBig1111111111111111111111111111111111",
+            first_mcap="10000",
+            current_multiple="0.1",
+            peak_multiple="8.0",
+            peak_mcap="800000",
         )
         await _entry(
-            db_session, "TrackSml1111111111111111111111111111111111", first_mcap="10000",
-            current_multiple="0.1", peak_multiple="2.0", peak_mcap="20000",
+            db_session,
+            "TrackSml1111111111111111111111111111111111",
+            first_mcap="10000",
+            current_multiple="0.1",
+            peak_multiple="2.0",
+            peak_mcap="20000",
         )
         await db_session.commit()
 
@@ -155,7 +179,7 @@ class TestAggregates:
     async def test_an_empty_record_reports_absent_not_zero(
         self, client: AsyncClient, db_session: AsyncSession
     ) -> None:
-        """"We have not measured this" and "this is zero" are different claims,
+        """ "We have not measured this" and "this is zero" are different claims,
         and a track record that confuses them is not evidence."""
         body = (await client.get("/api/v1/radar/performance")).json()
 
@@ -173,8 +197,12 @@ class TestBadges:
         `peak_multiple`, so a badge once earned survives a later correction to
         the peak — and the badge can never disagree with the tier counts."""
         entry = await _entry(
-            db_session, "TrackBadge11111111111111111111111111111111", first_mcap="10000",
-            current_multiple="0.3", peak_multiple="6.0", peak_mcap="60000",
+            db_session,
+            "TrackBadge11111111111111111111111111111111",
+            first_mcap="10000",
+            current_multiple="0.3",
+            peak_multiple="6.0",
+            peak_mcap="60000",
         )
         await _achievement(db_session, entry, "2x", days_to_achieve="1.0")
         await _achievement(db_session, entry, "5x", days_to_achieve="2.0")
@@ -191,8 +219,12 @@ class TestBadges:
         self, client: AsyncClient, db_session: AsyncSession
     ) -> None:
         entry = await _entry(
-            db_session, "TrackNone111111111111111111111111111111111", first_mcap="10000",
-            current_multiple="0.02", peak_multiple="1.2", peak_mcap="12000",
+            db_session,
+            "TrackNone111111111111111111111111111111111",
+            first_mcap="10000",
+            current_multiple="0.02",
+            peak_multiple="1.2",
+            peak_mcap="12000",
         )
         await db_session.commit()
 
@@ -209,8 +241,12 @@ class TestBadges:
         """A multiple alone hides the scale it moved at: 5x from $4K and 5x from
         $4M are not the same call."""
         entry = await _entry(
-            db_session, "TrackMcap111111111111111111111111111111111", first_mcap="18000",
-            current_multiple="5.66", peak_multiple="34.4", peak_mcap="620000",
+            db_session,
+            "TrackMcap111111111111111111111111111111111",
+            first_mcap="18000",
+            current_multiple="5.66",
+            peak_multiple="34.4",
+            peak_mcap="620000",
         )
         await db_session.commit()
 

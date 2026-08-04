@@ -125,9 +125,7 @@ class TestAddressing:
         assert MINT in addresses
         assert len(addresses) == 1
 
-    async def test_duplicates_are_addressed_once(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_duplicates_are_addressed_once(self, db_session: AsyncSession) -> None:
         collector = BondingCurveCollector(db_session, program_id=PUMP)
         assert len(collector.addresses_for([MINT, MINT, MINT])) == 1
 
@@ -152,9 +150,7 @@ class TestCollection:
         assert row.real_token_reserves == Decimal(400_000_000_000_000)
         assert row.complete is False
 
-    async def test_it_asks_for_the_derived_addresses(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_it_asks_for_the_derived_addresses(self, db_session: AsyncSession) -> None:
         await _token(db_session, MINT)
         stub = StubRpc([{"data": [account_bytes(), "base64"]}])
         collector = BondingCurveCollector(db_session, rpc=stub, program_id=PUMP)  # type: ignore[arg-type]
@@ -193,9 +189,7 @@ class TestCollection:
 
         assert outcome.unparsable == 1
         assert outcome.written == 0
-        total = await db_session.scalar(
-            select(func.count()).select_from(TokenCurveSnapshot)
-        )
+        total = await db_session.scalar(select(func.count()).select_from(TokenCurveSnapshot))
         assert total == 0
 
     async def test_an_rpc_failure_is_contained(self, db_session: AsyncSession) -> None:
@@ -226,9 +220,7 @@ class TestCollection:
         assert outcome.parsed == 1
         assert outcome.written == 0
 
-    async def test_an_empty_request_does_nothing(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_an_empty_request_does_nothing(self, db_session: AsyncSession) -> None:
         stub = StubRpc([])
         collector = BondingCurveCollector(db_session, rpc=stub, program_id=PUMP)  # type: ignore[arg-type]
 
@@ -252,9 +244,7 @@ class TestAppendOnly:
         second = await collector.collect([MINT], now=NOW)
 
         assert second.written == 0
-        total = await db_session.scalar(
-            select(func.count()).select_from(TokenCurveSnapshot)
-        )
+        total = await db_session.scalar(select(func.count()).select_from(TokenCurveSnapshot))
         assert total == 1
 
     async def test_a_later_read_appends_rather_than_updating(
@@ -328,9 +318,7 @@ class TestReplay:
         assert progress[0] == Decimal(0)
         assert progress[-1] > Decimal("0.85")
 
-    async def test_completion_is_recorded_as_a_fact(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_completion_is_recorded_as_a_fact(self, db_session: AsyncSession) -> None:
         """`complete` states graduation directly, where the fresh-graduation
         provider has to infer it from a venue transition. Both are kept: the
         venue is observable without RPC, the flag is authoritative."""
@@ -388,9 +376,7 @@ class TestClientLifecycle:
                 self, addresses: list[str], *, encoding: str = "base64"
             ) -> Any:
                 assert started, "called before start()"
-                return await super().get_multiple_accounts(
-                    addresses, encoding=encoding
-                )
+                return await super().get_multiple_accounts(addresses, encoding=encoding)
 
         await _token(db_session, MINT)
         stub = LifecycleStub([{"data": [account_bytes(), "base64"]}])
@@ -404,9 +390,7 @@ class TestClientLifecycle:
         assert outcome.written == 1
         assert len(stub.calls) == 1
 
-    async def test_chunking_respects_the_rpc_limit(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_chunking_respects_the_rpc_limit(self, db_session: AsyncSession) -> None:
         """`getMultipleAccounts` accepts 100 addresses; more must be split."""
         from app.services.curve.collector import MAX_ACCOUNTS_PER_CALL
 

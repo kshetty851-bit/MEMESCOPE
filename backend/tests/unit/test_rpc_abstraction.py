@@ -185,7 +185,7 @@ class TestAccountReads:
     async def test_a_missing_value_array_raises_rather_than_reading_as_absent(
         self,
     ) -> None:
-        """"This account does not exist" and "this read did not happen" must
+        """ "This account does not exist" and "this read did not happen" must
         stay distinguishable — the caller pairs results back to mints by
         position."""
         async with StandardSolanaRPC(

@@ -109,9 +109,9 @@ class TestSufficiency:
         )
         await db_session.commit()
 
-        rate = (await client.get("/api/v1/radar?include_inactive=true")).json()["items"][
-            0
-        ]["base_rate"]
+        rate = (await client.get("/api/v1/radar?include_inactive=true")).json()["items"][0][
+            "base_rate"
+        ]
 
         assert rate["sample"] == 1
         assert rate["reached_2x"] == 1
@@ -124,9 +124,9 @@ class TestSufficiency:
         await _entry(db_session, "BRBar111111111111111111111111111111111111")
         await db_session.commit()
 
-        rate = (await client.get("/api/v1/radar?include_inactive=true")).json()["items"][
-            0
-        ]["base_rate"]
+        rate = (await client.get("/api/v1/radar?include_inactive=true")).json()["items"][0][
+            "base_rate"
+        ]
 
         assert rate["minimum_sample"] == MIN_BASE_RATE_SAMPLE
 
@@ -136,9 +136,9 @@ class TestSufficiency:
         await _fill(db_session, MIN_BASE_RATE_SAMPLE, category="breakout", peak="3.0")
         await db_session.commit()
 
-        rate = (await client.get("/api/v1/radar?include_inactive=true")).json()["items"][
-            0
-        ]["base_rate"]
+        rate = (await client.get("/api/v1/radar?include_inactive=true")).json()["items"][0][
+            "base_rate"
+        ]
 
         assert rate["sufficient"] is True
         assert rate["insufficient_reason"] is None
@@ -147,9 +147,7 @@ class TestSufficiency:
 
 
 class TestGrouping:
-    async def test_losers_share_the_denominator(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_losers_share_the_denominator(self, db_session: AsyncSession) -> None:
         """A rate over winners only is not a rate."""
         await _fill(db_session, 6, category="breakout", peak="3.0")
         await _fill(db_session, 6, category="breakout", peak="1.1")
@@ -179,9 +177,7 @@ class TestGrouping:
         assert rates["early_momentum"]["sample"] == 1
         assert "elite" not in rates
 
-    async def test_categories_are_measured_separately(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_categories_are_measured_separately(self, db_session: AsyncSession) -> None:
         await _fill(db_session, 4, category="breakout", peak="3.0")
         await _fill(db_session, 3, category="undervalued", peak="1.0")
         await db_session.flush()
@@ -191,9 +187,7 @@ class TestGrouping:
         assert rates["breakout"]["reached_2x"] == 4
         assert rates["undervalued"]["reached_2x"] == 0
 
-    async def test_an_empty_record_produces_no_rates(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_an_empty_record_produces_no_rates(self, db_session: AsyncSession) -> None:
         assert await RadarRepository(db_session).base_rates() == {}
 
 

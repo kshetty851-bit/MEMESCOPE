@@ -5,7 +5,7 @@ import Link from "next/link";
 
 import { PaperWalletWidget } from "@/components/paper/wallet-widget";
 import { RadarRow } from "@/components/radar/radar-row";
-import { StatusDot } from "@/components/ui/badge";
+import { LiveStatus } from "@/components/ui/freshness";
 import { Label, Panel } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/states";
@@ -38,7 +38,7 @@ const TOP_N = 10;
 
 export default function RadarPage() {
   // Ranked server-side by score; the page holds exactly what it shows.
-  const { data, isPending, isError, refetch, isFetching } = useRadar({
+  const { data, isPending, isError, refetch } = useRadar({
     pageSize: TOP_N,
     sort: "score",
   });
@@ -65,10 +65,14 @@ export default function RadarPage() {
             and nothing here is a prediction.
           </p>
         </div>
-        <div className="flex items-center gap-2 text-xs text-ink-faint">
-          <StatusDot live={isFetching} tone="var(--color-plasma)" />
-          <span>{isFetching ? "Refreshing" : "Every 2 min"}</span>
-        </div>
+        {/* Reports the newest *market* reading on screen, not the browser's
+            polling state. "Refreshing" said the page was fetching; it said
+            nothing about whether the data it fetched was current, which is the
+            only question a reader has. */}
+        <LiveStatus
+          timestamps={visible.map((entry) => entry.market?.captured_at)}
+          pending={isPending}
+        />
       </header>
 
       {/* The ranking and the result of mechanically trading it, adjacent. That

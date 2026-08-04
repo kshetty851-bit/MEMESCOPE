@@ -50,6 +50,8 @@ export interface PaperPosition {
   /** Null for a token nobody has priced since — unmeasured, not worthless. */
   current_price: string | null;
   current_pct: string | null;
+  /** When the mark was observed. Exit time for a closed trade. */
+  current_price_at: string | null;
   /** For a closed trade this stops at the exit, not at the token's later high. */
   peak_pct: string | null;
 

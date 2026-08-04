@@ -207,6 +207,9 @@ def _to_position(row: PaperPosition, read: WalletRead) -> PositionOut:
     # Using the live price for a closed trade would restate a finished result
     # every time the token moved, which is the opposite of a permanent record.
     current = row.exit_price if closed else read.prices.get(row.mint_address)
+    # The mark's own timestamp: the exit for a finished trade, the observation
+    # for a running one.
+    observed_at = row.closed_at if closed else read.price_times.get(row.mint_address)
 
     pnl: Decimal | None = None
     if current is not None:
@@ -227,6 +230,7 @@ def _to_position(row: PaperPosition, read: WalletRead) -> PositionOut:
         expires_at=row.expires_at,
         current_price=current,
         current_pct=_pct_from(row.entry_price, current),
+        current_price_at=observed_at,
         peak_pct=_pct_from(row.entry_price, row.peak_price),
         closed_at=row.closed_at,
         exit_price=row.exit_price,

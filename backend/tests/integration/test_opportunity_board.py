@@ -173,9 +173,7 @@ class TestCorrectnessWithoutTheSweep:
         """
         mint = _mint("marked")
         opportunity = await _opportunity(db_session, mint)
-        await _signal(
-            db_session, opportunity, status=SignalStatus.EXPIRED, expires_in=3600
-        )
+        await _signal(db_session, opportunity, status=SignalStatus.EXPIRED, expires_in=3600)
 
         assert (await client.get(BOARD)).json()["items"] == []
 
@@ -183,9 +181,7 @@ class TestCorrectnessWithoutTheSweep:
         self, client: AsyncClient, db_session: AsyncSession
     ) -> None:
         mint = _mint("closed")
-        opportunity = await _opportunity(
-            db_session, mint, status=OpportunityStatus.CLOSED
-        )
+        opportunity = await _opportunity(db_session, mint, status=OpportunityStatus.CLOSED)
         await _signal(db_session, opportunity)
 
         assert (await client.get(BOARD)).json()["items"] == []
@@ -387,9 +383,7 @@ class TestRendering:
         opportunity = await _opportunity(db_session, mint)
         await _signal(db_session, opportunity)
 
-        explanation = (await client.get(BOARD)).json()["items"][0]["signals"][0][
-            "explanation"
-        ]
+        explanation = (await client.get(BOARD)).json()["items"][0]["signals"][0]["explanation"]
 
         assert explanation["headline"] == "Freshly graduated"
         assert "bonding curve" in explanation["trigger"]
@@ -408,9 +402,9 @@ class TestRendering:
         opportunity = await _opportunity(db_session, mint)
         await _signal(db_session, opportunity)
 
-        limits = (await client.get(BOARD)).json()["items"][0]["signals"][0][
-            "explanation"
-        ]["limits"]
+        limits = (await client.get(BOARD)).json()["items"][0]["signals"][0]["explanation"][
+            "limits"
+        ]
 
         assert limits
         assert any("Liquidity" in line for line in limits)
@@ -541,9 +535,7 @@ class TestFeatureFlag:
 
 
 class TestEmptyBoard:
-    async def test_an_empty_board_is_a_valid_answer(
-        self, client: AsyncClient
-    ) -> None:
+    async def test_an_empty_board_is_a_valid_answer(self, client: AsyncClient) -> None:
         """Nothing changed is information, not a fault.
 
         It must never be resolved by relaxing admission — the recorded

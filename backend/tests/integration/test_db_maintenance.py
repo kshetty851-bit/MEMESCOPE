@@ -23,14 +23,12 @@ class TestNeverAutomatic:
         """
         from app.workers.celery_app import celery_app
 
-        scheduled = {
-            entry["task"] for entry in celery_app.conf.beat_schedule.values()
-        }
+        scheduled = {entry["task"] for entry in celery_app.conf.beat_schedule.values()}
 
         assert not any("maintenance" in task for task in scheduled)
 
     def test_the_module_registers_no_celery_task(self) -> None:
-        source = (maintenance.__file__ or "")
+        source = maintenance.__file__ or ""
         assert source.endswith("maintenance.py")
         with open(source) as handle:
             text = handle.read()

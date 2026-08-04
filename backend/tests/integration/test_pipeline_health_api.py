@@ -338,9 +338,7 @@ class TestRollUp:
         """Degraded is a warning. Paging on it trains the reader to ignore it."""
         now = datetime.now(UTC)
         stale = settings.HEALTH_SCANNER_DEGRADED_MINUTES + 1
-        await _seed(
-            db_session, discovered_at=now - timedelta(minutes=stale), captured_at=now
-        )
+        await _seed(db_session, discovered_at=now - timedelta(minutes=stale), captured_at=now)
         monkeypatch.setattr(settings, "FEATURE_SCANNER_ENABLED", True)
         monkeypatch.setattr(settings, "FEATURE_ENRICHMENT_ENABLED", True)
         monkeypatch.setattr(settings, "FEATURE_AI_SCORING_ENABLED", False)

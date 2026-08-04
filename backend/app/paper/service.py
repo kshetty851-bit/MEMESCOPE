@@ -314,6 +314,14 @@ class PaperWalletService:
             )
             for row in open_rows
         }
+        price_times: dict[str, datetime | None] = {
+            row.mint_address: (
+                snapshots[row.mint_address].captured_at
+                if row.mint_address in snapshots
+                else None
+            )
+            for row in open_rows
+        }
         names = await TokenRepository(self._session).get_many_by_mints(
             [row.mint_address for row in positions]
         )
@@ -332,6 +340,7 @@ class PaperWalletService:
             metrics=summary,
             positions=list(positions),
             prices=prices,
+            price_times=price_times,
             names={mint: (token.name, token.symbol) for mint, token in names.items()},
             benchmark=benchmark,
             pnl_today=metrics.pnl_since(
@@ -350,6 +359,8 @@ class WalletRead:
     metrics: metrics.WalletMetrics
     positions: list[PaperPosition]
     prices: dict[str, Decimal | None]
+    #: When each mark was observed, so a surface can say how old it is.
+    price_times: dict[str, datetime | None]
     names: dict[str, tuple[str | None, str | None]]
     benchmark: dict[str, Decimal | int | None]
     pnl_today: Decimal

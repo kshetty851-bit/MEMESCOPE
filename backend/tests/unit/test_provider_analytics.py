@@ -53,9 +53,7 @@ class TestAverages:
         Counting it as zero would drag the average toward a duration nothing
         ever had — the estimate dressed as a measurement.
         """
-        record = _record(
-            signals=9, lifetime_seconds_total=Decimal(7_200), lifetime_samples=2
-        )
+        record = _record(signals=9, lifetime_seconds_total=Decimal(7_200), lifetime_samples=2)
 
         assert record.average_lifetime_seconds == 3_600
 
@@ -147,7 +145,7 @@ class TestPredictiveSplit:
         assert record.contradicted == 3
 
     def test_the_two_gaps_are_distinguishable(self) -> None:
-        """"Never forecasts" and "has not resolved a forecast yet" are
+        """ "Never forecasts" and "has not resolved a forecast yet" are
         different facts, and a reader waiting for a number deserves to know
         which one they are looking at."""
         waiting = _record(signals=10)

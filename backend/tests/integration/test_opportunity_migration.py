@@ -48,9 +48,7 @@ _NEW_EVENT_KINDS = _migration()._NEW_EVENT_KINDS
 
 class TestTables:
     async def test_both_tables_exist(self, db_session: AsyncSession) -> None:
-        names = await db_session.run_sync(
-            lambda sync: inspect(sync.bind).get_table_names()
-        )
+        names = await db_session.run_sync(lambda sync: inspect(sync.bind).get_table_names())
         assert "opportunities" in names
         assert "opportunity_signals" in names
 
@@ -112,15 +110,11 @@ class TestConstraints:
             lambda sync: inspect(sync.bind).get_unique_constraints("opportunity_signals")
         )
         dedupe = next(
-            item
-            for item in constraints
-            if item["name"] == "uq_opportunity_signals_dedupe"
+            item for item in constraints if item["name"] == "uq_opportunity_signals_dedupe"
         )
         assert dedupe["column_names"] == ["opportunity_id", "signal_type", "provider_id"]
 
-    async def test_generation_is_scoped_per_token(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_generation_is_scoped_per_token(self, db_session: AsyncSession) -> None:
         constraints = await db_session.run_sync(
             lambda sync: inspect(sync.bind).get_unique_constraints("opportunities")
         )
@@ -147,9 +141,7 @@ class TestEventKinds:
         stored = set(
             (
                 await db_session.scalars(
-                    text(
-                        "SELECT unnest(enum_range(NULL::event_kind))::text"
-                    )
+                    text("SELECT unnest(enum_range(NULL::event_kind))::text")
                 )
             ).all()
         )
@@ -159,9 +151,7 @@ class TestEventKinds:
         model_kinds = {kind.value for kind in EventKind}
         assert set(_NEW_EVENT_KINDS) <= model_kinds
 
-    async def test_existing_kinds_are_preserved(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_existing_kinds_are_preserved(self, db_session: AsyncSession) -> None:
         """Additive only. Every kind that existed keeps its meaning, and a
         removed value would break `intelligence_events` rows already written.
         """

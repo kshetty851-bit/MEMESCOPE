@@ -29,6 +29,7 @@ function position(overrides: Partial<PaperPosition> = {}): PaperPosition {
     expires_at: "2026-08-03T12:00:00Z",
     current_price: "12",
     current_pct: "20.00",
+    current_price_at: "2026-08-01T12:00:00Z",
     peak_pct: "35.00",
     closed_at: null,
     exit_price: null,

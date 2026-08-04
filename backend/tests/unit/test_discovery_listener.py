@@ -116,12 +116,8 @@ class TestDatabaseFailures:
                     raise RuntimeError("ForeignKeyViolationError")
                 return True
 
-        monkeypatch.setattr(
-            "app.services.market.worker.SessionFactory", lambda: _Session()
-        )
-        monkeypatch.setattr(
-            "app.services.market.worker.MarketEnrichmentService", _Service
-        )
+        monkeypatch.setattr("app.services.market.worker.SessionFactory", lambda: _Session())
+        monkeypatch.setattr("app.services.market.worker.MarketEnrichmentService", _Service)
 
         for mint in ["bad-one", "good-one", "bad-two", "good-two"]:
             await worker._handle_discovery_message(_message({"mint_address": mint}))
@@ -171,12 +167,8 @@ class TestCounters:
             async def register_token(self, mint: str) -> bool:
                 return True
 
-        monkeypatch.setattr(
-            "app.services.market.worker.SessionFactory", lambda: _Session()
-        )
-        monkeypatch.setattr(
-            "app.services.market.worker.MarketEnrichmentService", _Service
-        )
+        monkeypatch.setattr("app.services.market.worker.SessionFactory", lambda: _Session())
+        monkeypatch.setattr("app.services.market.worker.MarketEnrichmentService", _Service)
 
         await worker._handle_discovery_message(_message({"mint_address": "mint-1"}))
 

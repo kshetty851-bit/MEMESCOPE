@@ -318,16 +318,47 @@ describe("RadarRow", () => {
     expect((container.textContent ?? "").toLowerCase()).not.toContain("inactive");
   });
 
-  it("keeps the reading's own timestamp reachable", () => {
-    // The "liveness" chip was internal vocabulary and went; dropping the fact
-    // with it would make a stale row indistinguishable from a live one.
-    render(<RadarRow entry={entry()} rank={1} />);
+  it("shows the reading's age on the face of the row, not in a tooltip", () => {
+    // Sprint 28.1. This was a `title` attribute, which is invisible on touch
+    // and to anyone not hovering — a three-hour-old price rendered identically
+    // to a seven-second-old one.
+    const justNow = new Date(Date.now() - 12_000).toISOString();
+    render(
+      <RadarRow
+        entry={entry({ market: { ...entry().market!, captured_at: justNow } })}
+        rank={1}
+      />,
+    );
 
-    expect(screen.getByTitle(/Last observed/)).toBeInTheDocument();
+    expect(screen.getByText("Updated 12 sec ago")).toBeInTheDocument();
   });
 
-  it("says a token was never observed rather than dating it to now", () => {
+  it("marks a stale reading differently from a fresh one", () => {
+    const old = new Date(Date.now() - 3 * 3_600_000).toISOString();
+    render(
+      <RadarRow
+        entry={entry({ market: { ...entry().market!, captured_at: old } })}
+        rank={1}
+      />,
+    );
+
+    expect(screen.getByText("Updated 3 h ago")).toBeInTheDocument();
+  });
+
+  it("says a token has no market rather than dating a price to now", () => {
+    // A token the provider indexes no pool for is a real state, and it is not
+    // the same as a price that has gone stale.
     render(<RadarRow entry={entry({ market: null })} rank={1} />);
-    expect(screen.getByTitle("Never observed.")).toBeInTheDocument();
+
+    expect(screen.getByText("Waiting for liquidity")).toBeInTheDocument();
+    expect(screen.queryByText(/Updated/)).not.toBeInTheDocument();
+  });
+
+  it("shows the mint so a symbol collision is resolvable", () => {
+    // Nine distinct mints are named TNOS and five SAOF, all genuine pump.fun
+    // tokens. The symbol alone cannot identify one.
+    render(<RadarRow entry={entry()} rank={1} />);
+
+    expect(screen.getByText("HHbR…pump")).toBeInTheDocument();
   });
 });

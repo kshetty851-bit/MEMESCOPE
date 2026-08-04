@@ -84,9 +84,7 @@ def _window(
                 curve_progress=(
                     None if progress[index] is None else Decimal(str(progress[index]))
                 ),
-                volume_24h=(
-                None if volumes[index] is None else Decimal(str(volumes[index]))
-            ),
+                volume_24h=(None if volumes[index] is None else Decimal(str(volumes[index]))),
                 buy_count_24h=buys[index],
                 sell_count_24h=sells[index],
                 dex_name=venue,
@@ -171,9 +169,7 @@ class TestAdmission:
         fallback would quietly reintroduce a signal already disproven, so a
         window with a market cap and no curve reading reports nothing.
         """
-        result = _enabled().evaluate(
-            _window(caps=[60_000] * 6, progress=[None] * 6), now=NOW
-        )
+        result = _enabled().evaluate(_window(caps=[60_000] * 6, progress=[None] * 6), now=NOW)
         assert result.candidates == ()
 
     def test_curve_progress_alone_is_enough(self) -> None:
@@ -182,9 +178,7 @@ class TestAdmission:
         This is the whole point of Sprint 8 — the signal no longer depends on a
         field that cannot carry it.
         """
-        result = _enabled().evaluate(
-            _window(caps=[None] * 6, progress=[0.88] * 6), now=NOW
-        )
+        result = _enabled().evaluate(_window(caps=[None] * 6, progress=[0.88] * 6), now=NOW)
         assert len(result.candidates) == 1
 
     def test_an_empty_window_says_nothing(self) -> None:
@@ -247,8 +241,7 @@ class TestModel:
         expanding = (
             _enabled()
             .evaluate(
-                _window(caps=[60_000] * 6,
-                volumes=[100, 100, 100, 400, 400, 400]),
+                _window(caps=[60_000] * 6, volumes=[100, 100, 100, 400, 400, 400]),
                 now=NOW,
             )
             .candidates[0]
@@ -256,8 +249,7 @@ class TestModel:
         fading = (
             _enabled()
             .evaluate(
-                _window(caps=[60_000] * 6,
-                volumes=[400, 400, 400, 100, 100, 100]),
+                _window(caps=[60_000] * 6, volumes=[400, 400, 400, 100, 100, 100]),
                 now=NOW,
             )
             .candidates[0]
@@ -416,7 +408,7 @@ class TestEvidenceAndExplanation:
                 assert not re.search(rf"\b{word}\b", text, re.IGNORECASE)
 
     def test_messages_are_indicative_not_predictive(self) -> None:
-        """"is approaching", never "will graduate". The provider reports a
+        """ "is approaching", never "will graduate". The provider reports a
         trajectory it observed, not an outcome it expects."""
         for code, text in REASON_MESSAGE.items():
             assert " will " not in text.lower(), code

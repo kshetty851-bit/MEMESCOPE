@@ -166,13 +166,9 @@ class TestPreBreakout:
 
 class TestNearGraduation:
     def test_reaching_a_graduated_venue_realises_it(self) -> None:
-        window = _window(
-            _observation(0, venue="pumpfun"), _observation(5, venue="pumpswap")
-        )
+        window = _window(_observation(0, venue="pumpfun"), _observation(5, venue="pumpswap"))
 
-        verdict = assess(
-            SignalType.NEAR_GRADUATION, window, observed_at=None, rules=RULES
-        )
+        verdict = assess(SignalType.NEAR_GRADUATION, window, observed_at=None, rules=RULES)
 
         assert verdict is not None
         assert verdict.status is SignalStatus.REALISED
@@ -184,9 +180,7 @@ class TestNearGraduation:
             _observation(5, venue="pumpfun", progress="0.2"),
         )
 
-        verdict = assess(
-            SignalType.NEAR_GRADUATION, window, observed_at=None, rules=RULES
-        )
+        verdict = assess(SignalType.NEAR_GRADUATION, window, observed_at=None, rules=RULES)
 
         assert verdict is not None
         assert verdict.status is SignalStatus.INVALIDATED
@@ -196,13 +190,10 @@ class TestNearGraduation:
         """Never inferred from market cap. §14a measured that as unusable, and
         an outcome derived from it would be an estimate presented as a result.
         """
-        window = _window(
-            _observation(0, venue="pumpfun"), _observation(5, venue="pumpfun")
-        )
+        window = _window(_observation(0, venue="pumpfun"), _observation(5, venue="pumpfun"))
 
         assert (
-            assess(SignalType.NEAR_GRADUATION, window, observed_at=None, rules=RULES)
-            is None
+            assess(SignalType.NEAR_GRADUATION, window, observed_at=None, rules=RULES) is None
         )
 
 
@@ -210,26 +201,19 @@ class TestFreshGraduation:
     def test_a_venue_reverting_contradicts_the_reading(self) -> None:
         """Factual, so this is a correction rather than a failed forecast — it
         is counted as a contradiction and never reaches precision."""
-        window = _window(
-            _observation(0, venue="pumpswap"), _observation(5, venue="pumpfun")
-        )
+        window = _window(_observation(0, venue="pumpswap"), _observation(5, venue="pumpfun"))
 
-        verdict = assess(
-            SignalType.FRESH_GRADUATION, window, observed_at=None, rules=RULES
-        )
+        verdict = assess(SignalType.FRESH_GRADUATION, window, observed_at=None, rules=RULES)
 
         assert verdict is not None
         assert verdict.status is SignalStatus.INVALIDATED
         assert verdict.reason_code == REASON_VENUE_REVERTED
 
     def test_a_token_that_stays_graduated_is_left_alone(self) -> None:
-        window = _window(
-            _observation(0, venue="pumpswap"), _observation(5, venue="pumpswap")
-        )
+        window = _window(_observation(0, venue="pumpswap"), _observation(5, venue="pumpswap"))
 
         assert (
-            assess(SignalType.FRESH_GRADUATION, window, observed_at=None, rules=RULES)
-            is None
+            assess(SignalType.FRESH_GRADUATION, window, observed_at=None, rules=RULES) is None
         )
 
 

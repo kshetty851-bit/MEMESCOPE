@@ -309,9 +309,7 @@ async def test_a_token_whose_data_aged_out_does_not_consume_the_batch(
     Asserted through the batch budget: with a batch of one, the scorable token
     is only reached if the aged-out one is no longer selected at all.
     """
-    monkeypatch.setattr(
-        "app.workers.scoring_tasks.settings.SCORING_SWEEP_BATCH_LIMIT", 1
-    )
+    monkeypatch.setattr("app.workers.scoring_tasks.settings.SCORING_SWEEP_BATCH_LIMIT", 1)
     now = datetime.now(UTC)
     async with sessions() as session:
         # Enriched ten days ago: outside the widest window the engine can build.

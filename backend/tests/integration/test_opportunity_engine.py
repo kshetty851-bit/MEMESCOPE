@@ -99,9 +99,7 @@ async def _events(session: AsyncSession, mint: str) -> list[IntelligenceEvent]:
 
 
 class TestDetection:
-    async def test_a_graduation_opens_an_opportunity(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_a_graduation_opens_an_opportunity(self, db_session: AsyncSession) -> None:
         await _seed(db_session, MINT, "pumpfun", "pumpswap")
 
         outcome = await _engine(db_session).detect([MINT], now=NOW)
@@ -156,14 +154,10 @@ class TestDeduplication:
         assert second.signals_added == 0
         assert second.signals_confirmed == 1
 
-        count = await db_session.scalar(
-            select(func.count()).select_from(OpportunitySignal)
-        )
+        count = await db_session.scalar(select(func.count()).select_from(OpportunitySignal))
         assert count == 1
 
-    async def test_only_one_opportunity_per_token(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_only_one_opportunity_per_token(self, db_session: AsyncSession) -> None:
         await _seed(db_session, MINT, "pumpfun", "pumpswap")
         engine = _engine(db_session)
 
@@ -193,9 +187,7 @@ class TestDeduplication:
         assert signal is not None
         assert signal.confirmations == 1
 
-    async def test_a_new_observation_does_confirm(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_a_new_observation_does_confirm(self, db_session: AsyncSession) -> None:
         token = await _seed(db_session, MINT, "pumpfun", "pumpswap")
         engine = _engine(db_session)
         await engine.detect([MINT], now=NOW)
@@ -218,9 +210,7 @@ class TestDeduplication:
         assert signal is not None
         # The second snapshot is still pumpswap→pumpswap, so no new candidate;
         # what matters is that no duplicate row appeared.
-        count = await db_session.scalar(
-            select(func.count()).select_from(OpportunitySignal)
-        )
+        count = await db_session.scalar(select(func.count()).select_from(OpportunitySignal))
         assert count == 1
 
 
@@ -236,9 +226,7 @@ class TestLifecycle:
         opportunity = (await OpportunityRepository(db_session).live_for([MINT]))[MINT]
         assert opportunity.status == OpportunityStatus.PENDING_CONFIRMATION.value
 
-    async def test_a_second_confirmation_activates(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_a_second_confirmation_activates(self, db_session: AsyncSession) -> None:
         token = await _seed(db_session, MINT, "pumpfun", "pumpswap")
         engine = _engine(db_session)
         await engine.detect([MINT], now=NOW)
@@ -316,9 +304,7 @@ class TestLifecycle:
         assert archived.status == OpportunityStatus.ARCHIVED.value
         assert archived.archived_at is not None
 
-    async def test_detected_at_is_never_revised(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_detected_at_is_never_revised(self, db_session: AsyncSession) -> None:
         """Every claim about performance is measured from it.
 
         The same discipline `radar_tokens.first_*` holds.
@@ -327,9 +313,7 @@ class TestLifecycle:
         engine = _engine(db_session)
         await engine.detect([MINT], now=NOW)
 
-        original = (await OpportunityRepository(db_session).live_for([MINT]))[
-            MINT
-        ].detected_at
+        original = (await OpportunityRepository(db_session).live_for([MINT]))[MINT].detected_at
 
         await engine.detect([MINT], now=NOW + timedelta(minutes=30))
 
@@ -372,9 +356,7 @@ class TestGenerations:
         assert second.generation == 2
         assert second.id != first.id
 
-    async def test_generations_are_never_reused(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_generations_are_never_reused(self, db_session: AsyncSession) -> None:
         token = await _seed(db_session, MINT, "pumpfun", "pumpswap")
         repository = OpportunityRepository(db_session)
 
@@ -392,9 +374,7 @@ class TestGenerations:
 
 
 class TestEvents:
-    async def test_opening_emits_an_immutable_event(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_opening_emits_an_immutable_event(self, db_session: AsyncSession) -> None:
         await _seed(db_session, MINT, "pumpfun", "pumpswap")
 
         await _engine(db_session).detect([MINT], now=NOW)
@@ -453,9 +433,7 @@ class TestEvents:
         emitted = {event.kind for event in await _events(db_session, MINT)}
         assert not (emitted & analyst_kinds)
 
-    async def test_events_are_appended_not_updated(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_events_are_appended_not_updated(self, db_session: AsyncSession) -> None:
         await _seed(db_session, MINT, "pumpfun", "pumpswap")
         engine = _engine(db_session)
 

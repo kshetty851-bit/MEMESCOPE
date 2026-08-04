@@ -246,9 +246,7 @@ class TestFreshness:
 
     def test_decays_linearly_in_between(self) -> None:
         """Predictable on purpose: half the life, half the decayable part."""
-        assert freshness(1800, 3600, floor=Decimal("0.4")) == pytest.approx(
-            Decimal("0.7")
-        )
+        assert freshness(1800, 3600, floor=Decimal("0.4")) == pytest.approx(Decimal("0.7"))
 
     def test_never_below_the_floor(self) -> None:
         assert freshness(999_999, 3600, floor=Decimal("0.4")) == Decimal("0.4")
@@ -343,24 +341,18 @@ class TestPriority:
         A multiplier would let a confident-looking, thinly-evidenced signal
         climb the board. A gate cannot.
         """
-        assert (
-            priority_for(
-                severity=SignalSeverity.CRITICAL,
-                confidence=Decimal(100),
-                observations=1,
-            )
-            == Decimal(0)
-        )
+        assert priority_for(
+            severity=SignalSeverity.CRITICAL,
+            confidence=Decimal(100),
+            observations=1,
+        ) == Decimal(0)
 
     def test_just_above_the_gate_ranks(self) -> None:
-        assert (
-            priority_for(
-                severity=SignalSeverity.CRITICAL,
-                confidence=Decimal(100),
-                observations=2,
-            )
-            > Decimal(0)
-        )
+        assert priority_for(
+            severity=SignalSeverity.CRITICAL,
+            confidence=Decimal(100),
+            observations=2,
+        ) > Decimal(0)
 
     @pytest.mark.parametrize(
         ("value", "band"),

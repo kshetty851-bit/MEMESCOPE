@@ -87,9 +87,7 @@ class TestStarvationPrevention:
 
         # A batch smaller than the stuck set: before the fix this could not
         # possibly reach the scorable token.
-        selected = await ScoreRepository(db_session).mints_without_scores(
-            since=SINCE, limit=5
-        )
+        selected = await ScoreRepository(db_session).mints_without_scores(since=SINCE, limit=5)
 
         assert list(selected) == ["MintScorable"]
 
@@ -204,9 +202,7 @@ class TestBatchingContract:
                 db_session, f"MintBatch{index}", captured_at=FRESH - timedelta(seconds=index)
             )
 
-        selected = await ScoreRepository(db_session).mints_without_scores(
-            since=SINCE, limit=3
-        )
+        selected = await ScoreRepository(db_session).mints_without_scores(since=SINCE, limit=3)
 
         assert len(selected) == 3
 
@@ -250,9 +246,7 @@ class TestBatchingContract:
 
         assert "MintNoMarket" not in selected
 
-    async def test_already_scored_tokens_are_excluded(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_already_scored_tokens_are_excluded(self, db_session: AsyncSession) -> None:
         """This arm is "missing", not "stale" — `find_stale` owns re-evaluation."""
         from app.models.score import ScoreGrade
 
@@ -298,9 +292,7 @@ class TestCutoffDerivation:
         service = TokenScoringService(db_session)
         cutoff = service.scorable_since(now=NOW)
 
-        expected = NOW - timedelta(
-            seconds=12 * service.policy.old_interval_seconds
-        )
+        expected = NOW - timedelta(seconds=12 * service.policy.old_interval_seconds)
         assert cutoff == expected
 
     async def test_a_token_just_inside_the_cutoff_is_selected(

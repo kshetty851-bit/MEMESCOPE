@@ -130,9 +130,7 @@ class TestLiveness:
         assert body["inactive"] == 0
         assert body["alive"] + body["unknown"] == body["total_opportunities"]
 
-    async def test_liveness_is_batched_not_per_row(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_liveness_is_batched_not_per_row(self, db_session: AsyncSession) -> None:
         entries = []
         for index in range(3):
             entry = await _entry(db_session, f"LiveBatch{index}".ljust(44, "1")[:44])
@@ -180,9 +178,7 @@ class TestTimeline:
         assert {e["kind"] for e in mine} == {"detection", "achievement"}
         assert len(mine) == 2
 
-    async def test_newest_first(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
+    async def test_newest_first(self, client: AsyncClient, db_session: AsyncSession) -> None:
         await _entry(
             db_session, "TimeOld11111111111111111111111111111111111", detected_days_ago=9
         )

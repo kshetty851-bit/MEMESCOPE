@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 
+import { FreshnessLabel, NoMarketData } from "@/components/ui/freshness";
 import { Skeleton } from "@/components/ui/skeleton";
 import { exitLabel, pct, usd } from "@/lib/paper";
 import { formatPrice } from "@/lib/format";
@@ -82,7 +83,7 @@ export function PositionsTable({
 
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[880px] text-sm">
+      <table className="w-full min-w-[980px] text-sm">
         <thead>
           <tr className="border-b border-line text-label uppercase tracking-wide text-ink-faint">
             <th className="py-2 text-left font-medium">Token</th>
@@ -96,6 +97,7 @@ export function PositionsTable({
             <th className="py-2 text-right font-medium">Peak</th>
             <th className="py-2 text-right font-medium">P/L</th>
             <th className="py-2 text-right font-medium">Status</th>
+            <th className="py-2 text-right font-medium">Quote</th>
           </tr>
         </thead>
         <tbody>
@@ -138,6 +140,20 @@ export function PositionsTable({
                   >
                     {closed ? (exitLabel(position.exit_reason) ?? "Closed") : "Open"}
                   </span>
+                </td>
+                {/* An open position is marked to a stored reading, not to a
+                    live quote. Saying when it was observed is the difference
+                    between a mark and a claim. A closed trade settled at its
+                    exit and shows nothing here — a finished result cannot go
+                    stale. */}
+                <td className="py-2.5 text-right">
+                  {closed ? (
+                    <span className="text-xs text-ink-faint">settled</span>
+                  ) : position.current_price_at ? (
+                    <FreshnessLabel capturedAt={position.current_price_at} />
+                  ) : (
+                    <NoMarketData />
+                  )}
                 </td>
               </tr>
             );

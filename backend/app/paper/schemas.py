@@ -77,6 +77,11 @@ class PositionOut(BaseSchema):
     current_price: Decimal | None = None
     #: Percent from entry, on the current price. `None` follows `current_price`.
     current_pct: Decimal | None = None
+    #: When the price above was observed. Sprint 28.1: without it the wallet
+    #: implies a live quote for an open position whose token may not have been
+    #: priced in hours. For a closed trade this is the exit time — a settled
+    #: result does not go stale.
+    current_price_at: datetime | None = None
     #: Percent from entry at the highest price observed while open. For a closed
     #: trade this stops at the exit: a high printed after the position closed
     #: belongs to the token, not to the trade.

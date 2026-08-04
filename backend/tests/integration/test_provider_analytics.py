@@ -171,9 +171,7 @@ class TestAggregation:
 
         assert totals[PROVIDER].lifetime_samples == 0
 
-    async def test_archived_generations_still_count(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_archived_generations_still_count(self, db_session: AsyncSession) -> None:
         """A provider's record must not improve because its calls settled.
 
         The permanent record is the point of measuring at all — excluding
@@ -194,9 +192,7 @@ class TestAggregation:
         assert totals[PROVIDER].signals == 1
         assert totals[PROVIDER].lifetime_samples == 1
 
-    async def test_providers_are_counted_separately(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_providers_are_counted_separately(self, db_session: AsyncSession) -> None:
         opportunity = await _opportunity(db_session, MINT)
         await _signal(db_session, opportunity, provider_id=PROVIDER)
         await _signal(
@@ -243,9 +239,7 @@ class TestEndpoint:
 
         body = (await client.get("/api/v1/opportunities/providers")).json()
 
-        record = next(
-            item for item in body["providers"] if item["provider_id"] == PROVIDER
-        )
+        record = next(item for item in body["providers"] if item["provider_id"] == PROVIDER)
         assert record["precision"] is None
         assert "not forecasts" in record["precision_unavailable_reason"]
         assert record["hit_rate"] is not None
@@ -255,9 +249,7 @@ class TestEndpoint:
     ) -> None:
         body = (await client.get("/api/v1/opportunities/providers")).json()
 
-        record = next(
-            item for item in body["providers"] if item["provider_id"] == "breakout"
-        )
+        record = next(item for item in body["providers"] if item["provider_id"] == "breakout")
         assert "has resolved yet" in record["precision_unavailable_reason"]
 
     async def test_the_route_is_not_read_as_a_mint(

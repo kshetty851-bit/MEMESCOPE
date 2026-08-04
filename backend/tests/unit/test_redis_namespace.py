@@ -39,25 +39,19 @@ class TestIsolation:
         ("left", "right"),
         [("local", "test"), ("local", "production"), ("test", "production")],
     )
-    def test_environments_never_share_a_discovery_channel(
-        self, left: str, right: str
-    ) -> None:
+    def test_environments_never_share_a_discovery_channel(self, left: str, right: str) -> None:
         assert _settings(left).token_channel != _settings(right).token_channel
 
     @pytest.mark.parametrize(
         ("left", "right"),
         [("local", "test"), ("local", "production"), ("test", "production")],
     )
-    def test_environments_never_share_a_score_channel(
-        self, left: str, right: str
-    ) -> None:
+    def test_environments_never_share_a_score_channel(self, left: str, right: str) -> None:
         assert _settings(left).score_channel != _settings(right).score_channel
 
     def test_environments_never_share_the_scanner_state_key(self) -> None:
         """Otherwise a test run would report the development scanner as down."""
-        assert (
-            _settings("test").scanner_state_key != _settings("local").scanner_state_key
-        )
+        assert _settings("test").scanner_state_key != _settings("local").scanner_state_key
 
     def test_the_test_environment_cannot_reach_a_development_worker(self) -> None:
         """The precise failure, asserted directly."""

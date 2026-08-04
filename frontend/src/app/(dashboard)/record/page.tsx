@@ -9,6 +9,7 @@ import { EmptyState, ErrorState } from "@/components/ui/states";
 import { HistoryFeed } from "@/components/record/history-feed";
 import { Journey } from "@/components/record/journey";
 import { TokenActions } from "@/components/token/token-actions";
+import { LiveStatus } from "@/components/ui/freshness";
 import { usePaperPositions } from "@/hooks/use-paper";
 import { byMint, exitLabel, usd } from "@/lib/paper";
 import { useRadar, useRadarBenchmark, useRadarPerformance } from "@/hooks/use-radar";
@@ -253,6 +254,17 @@ export default function TrackRecordPage() {
         <h1 className="mt-2 text-title font-semibold text-ink">
           Every Radar detection. Every outcome. Nothing hidden.
         </h1>
+        {/* Current values are marked to the newest reading on the page.
+            Detection and peak figures are historical and carry no freshness —
+            a recorded past does not go stale. */}
+        <div className="mt-2">
+          <LiveStatus
+            timestamps={(record.data?.items ?? []).map(
+              (item) => item.market?.captured_at,
+            )}
+            pending={record.isPending}
+          />
+        </div>
         <p className="mt-2 max-w-2xl text-sm text-ink-dim">
           Measured from the moment each project was detected — never from launch.
           Losses are counted in the same denominator as wins, and nothing is removed
