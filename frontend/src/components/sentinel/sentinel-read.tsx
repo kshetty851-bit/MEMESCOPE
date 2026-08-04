@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 import type { ScoreStatus, TokenScore } from "@/types/score";
 
 /**
- * SENTINEL — the read on one token.
+ * The risk read on one token.
  *
  * The detail view is the only place the engine's `reasons` and component
  * breakdown exist: the ranking endpoint omits both, because a list is scanned
@@ -64,12 +64,12 @@ export function SentinelRead({
         </span>
         <div className="min-w-0">
           <p
-            className="text-sm font-semibold tracking-[0.12em]"
+            className="text-sm font-semibold"
             style={{ color: AGENTS.sentinel.hue }}
           >
-            SENTINEL
+            Risk
           </p>
-          <p className="mt-0.5 text-xs text-ink-faint">Operator read</p>
+          <p className="mt-0.5 text-xs text-ink-faint">What the risk checks found</p>
         </div>
       </div>
 

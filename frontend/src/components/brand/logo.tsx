@@ -1,7 +1,7 @@
 import { cn } from "@/lib/utils";
 
 /**
- * The LETZMOON mark: an aperture.
+ * The MEMESCOPE mark: an aperture.
  *
  * A ring of segments closing on a single lit point — an instrument iris the
  * moment it resolves a signal. It carries the whole product thesis (something
@@ -38,7 +38,7 @@ export function Wordmark({ className }: { className?: string }) {
     <span
       className={cn("text-[0.9375rem] font-semibold tracking-[0.16em] text-ink", className)}
     >
-      LETZMOON
+      MEMESCOPE
     </span>
   );
 }

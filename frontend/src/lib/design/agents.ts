@@ -46,10 +46,13 @@ export interface Agent {
   step: number;
 }
 
+// Sprint 28.2: `name` is what each analyst *measures*, not a codename.
+// SCOUT/PULSE/SENTINEL were characters; a terminal names its dimensions. The
+// ids, hues and sigils are unchanged — only the words a reader sees.
 export const AGENTS: Record<AgentId, Agent> = {
   scout: {
     id: "scout",
-    name: "SCOUT",
+    name: "Discovery",
     mission: "Discovers newly launched tokens",
     traits: ["Curious", "Fearless", "Relentless"],
     tone: "explorer",
@@ -60,7 +63,7 @@ export const AGENTS: Record<AgentId, Agent> = {
   },
   titan: {
     id: "titan",
-    name: "TITAN",
+    name: "Large flows",
     mission: "Tracks whale wallets and large flows",
     traits: ["Patient", "Powerful", "Protective"],
     tone: "protective",
@@ -71,7 +74,7 @@ export const AGENTS: Record<AgentId, Agent> = {
   },
   pulse: {
     id: "pulse",
-    name: "PULSE",
+    name: "Momentum",
     mission: "Measures momentum and acceleration",
     traits: ["Fast", "Precise", "Unrelenting"],
     tone: "energetic",
@@ -82,7 +85,7 @@ export const AGENTS: Record<AgentId, Agent> = {
   },
   echo: {
     id: "echo",
-    name: "ECHO",
+    name: "Narrative",
     mission: "Reads narrative and social attention",
     traits: ["Adaptive", "Attuned", "Perceptive"],
     tone: "observant",
@@ -93,7 +96,7 @@ export const AGENTS: Record<AgentId, Agent> = {
   },
   sentinel: {
     id: "sentinel",
-    name: "SENTINEL",
+    name: "Risk",
     mission: "Detects rugs, scams and hidden risk",
     traits: ["Silent", "Observant", "Unyielding"],
     tone: "guardian",
@@ -104,7 +107,7 @@ export const AGENTS: Record<AgentId, Agent> = {
   },
   oracle: {
     id: "oracle",
-    name: "ORACLE",
+    name: "Confidence",
     mission: "Reasons over evidence and scores confidence",
     traits: ["Rigorous", "Calm", "Exacting"],
     tone: "scientific",
@@ -115,7 +118,7 @@ export const AGENTS: Record<AgentId, Agent> = {
   },
   apex: {
     id: "apex",
-    name: "APEX",
+    name: "Elite",
     mission: "Grants Elite classification",
     traits: ["Rare", "Absolute", "Final"],
     tone: "authority",

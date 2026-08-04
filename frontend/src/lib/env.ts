@@ -9,7 +9,7 @@ import { z } from "zod";
  */
 const publicEnvSchema = z.object({
   NEXT_PUBLIC_API_URL: z.string().url().default("http://localhost:8000"),
-  NEXT_PUBLIC_APP_NAME: z.string().default("LetzMooN AI"),
+  NEXT_PUBLIC_APP_NAME: z.string().default("MEMESCOPE"),
   NEXT_PUBLIC_ENVIRONMENT: z.enum(["local", "staging", "production"]).default("local"),
   // Development only. Read through `AUTH_BYPASS`, never directly.
   NEXT_PUBLIC_DEVELOPMENT_BYPASS_AUTH: z.enum(["true", "false"]).default("false"),

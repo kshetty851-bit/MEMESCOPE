@@ -5,7 +5,7 @@ import { useCallback, useEffect, useSyncExternalStore } from "react";
 /**
  * OBSERVATORY / COMMAND
  *
- * Two ways to look at the same instrument. Observatory is the full atmosphere;
+ * Two ways to look at the same instrument. Full carries the ambient depth;
  * Command strips every non-informational effect for someone who keeps this
  * open all day. Functionality is identical in both — only ornament changes.
  *
@@ -15,15 +15,15 @@ import { useCallback, useEffect, useSyncExternalStore } from "react";
  * without a provider wrapping the app.
  */
 
-export type ObservatoryMode = "observatory" | "command";
+export type DisplayMode = "full" | "compact";
 
 const STORAGE_KEY = "memescope:mode";
 
 const listeners = new Set<() => void>();
 
-function currentMode(): ObservatoryMode {
-  if (typeof document === "undefined") return "observatory";
-  return document.documentElement.dataset.mode === "command" ? "command" : "observatory";
+function currentMode(): DisplayMode {
+  if (typeof document === "undefined") return "full";
+  return document.documentElement.dataset.mode === "compact" ? "compact" : "full";
 }
 
 function subscribe(listener: () => void): () => void {
@@ -31,7 +31,7 @@ function subscribe(listener: () => void): () => void {
   return () => listeners.delete(listener);
 }
 
-export function setObservatoryMode(mode: ObservatoryMode): void {
+export function setDisplayMode(mode: DisplayMode): void {
   document.documentElement.dataset.mode = mode;
   try {
     window.localStorage.setItem(STORAGE_KEY, mode);
@@ -42,13 +42,13 @@ export function setObservatoryMode(mode: ObservatoryMode): void {
   listeners.forEach((listener) => listener());
 }
 
-export function useObservatoryMode() {
+export function useDisplayMode() {
   const mode = useSyncExternalStore(
     subscribe,
     currentMode,
-    // Server render always assumes Observatory; the inline boot script in the
+    // Server render always assumes Full; the inline boot script in the
     // document head corrects it before first paint, so there is no flash.
-    () => "observatory" as ObservatoryMode,
+    () => "full" as DisplayMode,
   );
 
   // Restore the persisted choice once on mount, in case the boot script was
@@ -56,8 +56,8 @@ export function useObservatoryMode() {
   useEffect(() => {
     try {
       const stored = window.localStorage.getItem(STORAGE_KEY);
-      if (stored === "command" || stored === "observatory") {
-        if (currentMode() !== stored) setObservatoryMode(stored);
+      if (stored === "compact" || stored === "full") {
+        if (currentMode() !== stored) setDisplayMode(stored);
       }
     } catch {
       /* ignore */
@@ -65,14 +65,14 @@ export function useObservatoryMode() {
   }, []);
 
   const toggle = useCallback(() => {
-    setObservatoryMode(currentMode() === "command" ? "observatory" : "command");
+    setDisplayMode(currentMode() === "compact" ? "full" : "compact");
   }, []);
 
-  return { mode, toggle, setMode: setObservatoryMode };
+  return { mode, toggle, setMode: setDisplayMode };
 }
 
 /**
  * Runs before first paint to apply the stored mode, preventing a flash of
- * Observatory atmosphere for a user who chose Command.
+ * Full atmosphere for a user who chose Command.
  */
-export const MODE_BOOT_SCRIPT = `(function(){try{var m=localStorage.getItem("${STORAGE_KEY}");document.documentElement.dataset.mode=m==="command"?"command":"observatory"}catch(e){document.documentElement.dataset.mode="observatory"}})()`;
+export const MODE_BOOT_SCRIPT = `(function(){try{var m=localStorage.getItem("${STORAGE_KEY}");document.documentElement.dataset.mode=m==="compact"?"compact":"full"}catch(e){document.documentElement.dataset.mode="full"}})()`;

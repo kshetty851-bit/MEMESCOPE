@@ -19,6 +19,7 @@ import { InvestmentThesis } from "@/components/decision/investment-thesis";
 import { OpportunityTimeline } from "@/components/decision/opportunity-timeline";
 import { ProjectHealth } from "@/components/decision/project-health";
 import { useIdentity } from "@/hooks/use-identity";
+import { FreshnessLabel, NoMarketData } from "@/components/ui/freshness";
 import { useRadarEntry } from "@/hooks/use-radar";
 import { buildHealth } from "@/lib/health";
 import { buildThesis } from "@/lib/thesis";
@@ -26,7 +27,6 @@ import { SentinelRead } from "@/components/sentinel/sentinel-read";
 import { useTokenScore } from "@/hooks/use-scores";
 import { ApiError, api } from "@/lib/api-client";
 import {
-  formatAge,
   formatCount,
   formatPrice,
   formatUsd,
@@ -85,11 +85,11 @@ export default function TokenDetailPage() {
       <EmptyState
         agent="scout"
         title="Not in the archive"
-        body={`${shortenAddress(mint, 8, 8)} has not been discovered by LETZMOON. If it launched moments ago, SCOUT may still be resolving it.`}
+        body={`${shortenAddress(mint, 8, 8)} has not been discovered by MEMESCOPE. If it launched moments ago, discovery may still be resolving it.`}
         action={
           <Link href="/">
             <Button variant="outline" size="sm">
-              Back to Market Observatory
+              Back to the Radar
             </Button>
           </Link>
         }
@@ -147,7 +147,7 @@ export default function TokenDetailPage() {
         <div className="flex items-center gap-2">
           <Link href="/">
             <Button variant="ghost" size="sm">
-              ← Observatory
+              ← Radar
             </Button>
           </Link>
         </div>
@@ -162,11 +162,16 @@ export default function TokenDetailPage() {
             <PanelHeader>
               <div>
                 <Label>Current market</Label>
-                <PanelTitle className="mt-1">
-                  {snapshot
-                    ? `Updated ${formatAge(snapshot.captured_at)} ago`
-                    : "No pool indexed yet"}
-                </PanelTitle>
+                {/* One shared indicator, not a second `formatAge` call. Before
+                    this the token page computed its own age with no band, so a
+                    forty-minute-old price read the same as a nine-second one. */}
+                <div className="mt-1">
+                  {snapshot ? (
+                    <FreshnessLabel capturedAt={snapshot.captured_at} withDot />
+                  ) : (
+                    <NoMarketData />
+                  )}
+                </div>
               </div>
               {snapshot?.dex_name && <Badge tone="plasma">{snapshot.dex_name}</Badge>}
             </PanelHeader>

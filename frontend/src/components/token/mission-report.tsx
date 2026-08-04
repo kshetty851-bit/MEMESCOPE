@@ -151,8 +151,8 @@ export function MissionReport({
       <Panel className={cn("overflow-visible", className)}>
         <div className="mb-5 flex items-center justify-between gap-4">
           <div>
-            <Label>Mission report</Label>
-            <p className="mt-1 text-heading font-medium text-ink">Division findings</p>
+            <Label>Analysis</Label>
+            <p className="mt-1 text-heading font-medium text-ink">What the analysts found</p>
           </div>
           <Badge tone="neutral">Awaiting score</Badge>
         </div>
@@ -171,8 +171,8 @@ export function MissionReport({
     <Panel className={cn("overflow-visible", className)}>
       <div className="mb-5 flex items-center justify-between gap-4">
         <div>
-          <Label>Mission report</Label>
-          <p className="mt-1 text-heading font-medium text-ink">Division findings</p>
+          <Label>Analysis</Label>
+          <p className="mt-1 text-heading font-medium text-ink">What the analysts found</p>
         </div>
         {score.risk.has_veto && <Badge tone="danger">Vetoed</Badge>}
       </div>

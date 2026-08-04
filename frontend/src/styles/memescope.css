@@ -4,7 +4,7 @@
    Every animation in this file moves `transform` or `opacity` and nothing else.
    Both are composited, so none of this touches layout, paint or the main
    thread, and the scene costs zero JavaScript per frame — the same discipline
-   the observatory scene already holds.
+   the ambient scene already holds.
 
    Durations are deliberately co-prime (5s, 7s, 11s, 13s, 19s, 23s). Loops on
    round numbers resynchronise every few cycles and the eye catches the beat;

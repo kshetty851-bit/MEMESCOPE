@@ -5,7 +5,7 @@
    ----------------------------------------------------------------------------
    Concept: "Signal in the void."
 
-   LETZMOON is an observatory, not a trading terminal. The canvas is deep,
+   MEMESCOPE is dense and dark, like a terminal. The canvas is deep,
    dimensional dark — never flat black. Intelligence arrives as light. Data has
    mass, temperature and glow. Everything is seen through an instrument.
 
@@ -550,7 +550,7 @@
 
   /* THE CAMERA
      One composited transform wrapping every parallax plane, so moving between
-     views reads as the observatory turning to look rather than the page
+     views reads as the instrument turning to look rather than the page
      swapping underneath you. Nested inside the pointer parallax rather than
      replacing it: the camera says where we are pointed, the pointer says how
      the head moves within that. Transitioning the wrapper keeps this to a
@@ -617,35 +617,35 @@
    thing. `.ambient` is pure atmosphere and disappears. `.motion-loop` marks
    elements that animate continuously but carry meaning — the Core body, the
    specialist nodes — so Command mode stills them rather than removing them. */
-[data-mode="command"] .ambient {
+[data-mode="compact"] .ambient {
   display: none !important;
 }
 
-[data-mode="command"] .motion-loop {
+[data-mode="compact"] .motion-loop {
   animation: none !important;
 }
 
-[data-mode="command"] .observatory-only {
+[data-mode="compact"] .full-only {
   display: none !important;
 }
 
-[data-mode="command"] body {
+[data-mode="compact"] body {
   /* The void goes flat: no light sources, no depth. */
   background-image: none;
 }
 
-[data-mode="command"] {
+[data-mode="compact"] {
   /* Backdrop blur is the single most expensive effect on screen and buys
      nothing when information density is the goal. */
   --blur-panel: 0px;
 }
 
-[data-mode="command"] .grid-field {
+[data-mode="compact"] .grid-field {
   display: none;
 }
 
 /* Panels tighten and lose their translucency so rows read as a dense table. */
-[data-mode="command"] [data-panel] {
+[data-mode="compact"] [data-panel] {
   backdrop-filter: none;
   background-color: var(--color-abyss);
 }

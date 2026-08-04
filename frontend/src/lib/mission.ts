@@ -74,7 +74,7 @@ export const MISSION_LABEL: Record<MissionState, string> = {
 /** What the state means, in the user's terms. Shown behind every badge. */
 export const MISSION_MEANING: Record<MissionState, string> = {
   recon:
-    "Too little observed history for LETZMOON to have a view. It is being " +
+    "Too little observed history for MEMESCOPE to have a view. It is being " +
     "watched, not assessed.",
   launch_window:
     "Detected within the last day and still close to the price it was found " +

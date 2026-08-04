@@ -182,7 +182,7 @@ function summarise(quality: MarketQuality, strongOrBetter: number): string {
   if (strongOrBetter === 0) {
     return (
       "No project reached the engine's stronger bands today. That is a reading, " +
-      "not a gap — on a day like this the most valuable thing LETZMOON can do is " +
+      "not a gap — on a day like this the most valuable thing MEMESCOPE can do is " +
       "tell you there is little worth your time."
     );
   }

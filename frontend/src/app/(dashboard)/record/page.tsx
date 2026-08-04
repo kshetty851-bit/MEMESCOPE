@@ -9,7 +9,7 @@ import { EmptyState, ErrorState } from "@/components/ui/states";
 import { HistoryFeed } from "@/components/record/history-feed";
 import { Journey } from "@/components/record/journey";
 import { TokenActions } from "@/components/token/token-actions";
-import { LiveStatus } from "@/components/ui/freshness";
+import { FreshnessLabel, LiveStatus, NoMarketData } from "@/components/ui/freshness";
 import { usePaperPositions } from "@/hooks/use-paper";
 import { byMint, exitLabel, usd } from "@/lib/paper";
 import { useRadar, useRadarBenchmark, useRadarPerformance } from "@/hooks/use-radar";
@@ -488,8 +488,22 @@ export default function TrackRecordPage() {
                           <td className="px-3 py-2 text-right tabular-nums text-ink-dim">
                             {money(entry.first_market_cap) ?? "—"}
                           </td>
+                          {/* "Now" is a live value and carries its reading's
+                              age. "Detected" above and "Peak" below are
+                              historical: a recorded past cannot go stale, and
+                              labelling it would imply it could. */}
                           <td className="px-3 py-2 text-right tabular-nums text-ink-dim">
-                            {money(entry.current_market_cap) ?? "—"}
+                            <div>{money(entry.current_market_cap) ?? "—"}</div>
+                            <div className="mt-0.5">
+                              {entry.market ? (
+                                <FreshnessLabel
+                                  capturedAt={entry.market.captured_at}
+                                  className="justify-end text-[0.6875rem]"
+                                />
+                              ) : (
+                                <NoMarketData className="text-[0.6875rem]" />
+                              )}
+                            </div>
                           </td>
                           <td className="px-3 py-2 text-right tabular-nums text-ink-dim">
                             {money(entry.peak_market_cap) ?? "—"}
@@ -504,7 +518,15 @@ export default function TrackRecordPage() {
                                 : "text-danger",
                             )}
                           >
-                            {formatMultiple(entry.current_multiple)}
+                            <div>{formatMultiple(entry.current_multiple)}</div>
+                            <div className="mt-0.5">
+                              {entry.market ? (
+                                <FreshnessLabel
+                                  capturedAt={entry.market.captured_at}
+                                  className="justify-end text-[0.6875rem] font-normal"
+                                />
+                              ) : null}
+                            </div>
                           </td>
                           <td className="px-3 py-2 text-right tabular-nums text-ink">
                             {formatMultiple(entry.peak_multiple)}
