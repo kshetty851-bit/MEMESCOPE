@@ -43,6 +43,34 @@ class AchievementOut(BaseSchema):
     days_to_achieve: Decimal | None
 
 
+class BaseRateOut(BaseSchema):
+    """What happened to past detections of this kind.
+
+    Measured history, never a forecast. A rate here says "of the N tokens the
+    Radar previously called this, X reached 2x" — it makes no claim about the
+    token in front of you, and the wording on every surface must keep that
+    distinction.
+
+    `sufficient` is false when the sample is too small to quote. The counts are
+    still returned so a reader can see exactly how thin it is, but the page must
+    print `insufficient_reason` instead of a percentage: a rate from n=1 is
+    noise wearing the costume of evidence.
+    """
+
+    category: str
+    sample: int
+    reached_2x: int
+    reached_5x: int
+    reached_10x: int
+    reached_100x: int
+    median_peak_multiple: Decimal | None = None
+    median_current_multiple: Decimal | None = None
+    sufficient: bool = False
+    insufficient_reason: str | None = None
+    #: Published so the bar is checkable rather than asserted.
+    minimum_sample: int = 0
+
+
 class RadarEntryOut(BaseSchema):
     """A Radar opportunity, with everything measured from first detection."""
 
@@ -89,6 +117,9 @@ class RadarEntryOut(BaseSchema):
     achieved_tiers: list[str] = Field(default_factory=list)
     #: `alive` | `unknown`. Never `inactive` — see `observed_within`.
     liveness: str = "unknown"
+    #: How past detections in this same category actually performed. A property
+    #: of the category, not a prediction about this token.
+    base_rate: BaseRateOut | None = None
 
 
 class RadarDetailOut(RadarEntryOut):

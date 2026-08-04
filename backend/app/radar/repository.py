@@ -667,6 +667,53 @@ class RadarRepository:
             last_detection_at=totals.last_detection,
         )
 
+    async def base_rates(self) -> dict[str, dict[str, Any]]:
+        """What actually happened to every past detection, grouped by category.
+
+        The one question a reader can check the platform against: *of the
+        tokens you called a breakout before, how many worked?* It is answered
+        from the permanent record — every detection ever made, winners and
+        losers in the same denominator — and never from a model.
+
+        Grouped by `category` (the label assigned at **first** detection) rather
+        than `current_category`. A token re-classified later must not move
+        between buckets, or the rate would silently rewrite its own history.
+
+        Returns raw counts. Whether a sample is large enough to quote is a
+        judgement the caller publishes, not one buried here.
+        """
+        rows = (
+            await self._session.execute(
+                select(
+                    RadarToken.category,
+                    func.count().label("n"),
+                    func.count().filter(RadarToken.peak_multiple >= 2).label("r2"),
+                    func.count().filter(RadarToken.peak_multiple >= 5).label("r5"),
+                    func.count().filter(RadarToken.peak_multiple >= 10).label("r10"),
+                    func.count().filter(RadarToken.peak_multiple >= 100).label("r100"),
+                    func.percentile_cont(0.5)
+                    .within_group(RadarToken.peak_multiple.asc())
+                    .label("median_peak"),
+                    func.percentile_cont(0.5)
+                    .within_group(RadarToken.current_multiple.asc())
+                    .label("median_current"),
+                ).group_by(RadarToken.category)
+            )
+        ).all()
+
+        return {
+            str(row.category): {
+                "sample": int(row.n or 0),
+                "reached_2x": int(row.r2 or 0),
+                "reached_5x": int(row.r5 or 0),
+                "reached_10x": int(row.r10 or 0),
+                "reached_100x": int(row.r100 or 0),
+                "median_peak_multiple": row.median_peak,
+                "median_current_multiple": row.median_current,
+            }
+            for row in rows
+        }
+
     async def all_mints(self) -> list[str]:
         """Every mint on the record. Small by construction — admission is
         strict — and needed whole because liveness is a summary over all of

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Query
 
@@ -25,6 +25,7 @@ from app.radar.models import RadarCategory, RadarDimension, RadarReason
 from app.radar.repository import RadarRepository
 from app.radar.schemas import (
     AchievementOut,
+    BaseRateOut,
     BenchmarkOut,
     CategoryOut,
     DimensionOut,
@@ -53,6 +54,12 @@ _SECONDS_PER_DAY = Decimal(86_400)
 #: the answer is `unknown` — never `inactive`, because no rule in this system
 #: establishes that a token died.
 LIVENESS_WINDOW = timedelta(hours=24)
+
+#: Fewest past detections a category needs before its rate is quoted. Published
+#: rather than buried: the bar is part of the claim. Below it the surface prints
+#: "too few observations" and the raw counts, never a percentage — a rate from
+#: three detections is noise wearing the costume of evidence.
+MIN_BASE_RATE_SAMPLE = 10
 
 CATEGORY_COPY: dict[RadarCategory, tuple[str, str]] = {
     RadarCategory.EARLY_MOMENTUM: (
@@ -83,12 +90,43 @@ def _days_since(moment: datetime, now: datetime) -> Decimal:
     return Decimal(max((now - moment).total_seconds(), 0)) / _SECONDS_PER_DAY
 
 
+def _to_base_rate(category: str, raw: dict[str, Any] | None) -> BaseRateOut | None:
+    """Render one category's measured history, or say why it cannot be quoted."""
+    if raw is None:
+        return None
+
+    sample = int(raw["sample"])
+    sufficient = sample >= MIN_BASE_RATE_SAMPLE
+    return BaseRateOut(
+        category=category,
+        sample=sample,
+        reached_2x=int(raw["reached_2x"]),
+        reached_5x=int(raw["reached_5x"]),
+        reached_10x=int(raw["reached_10x"]),
+        reached_100x=int(raw["reached_100x"]),
+        median_peak_multiple=raw["median_peak_multiple"],
+        median_current_multiple=raw["median_current_multiple"],
+        sufficient=sufficient,
+        insufficient_reason=(
+            None
+            if sufficient
+            else (
+                f"Too few observations. The Radar has detected {sample} token"
+                f"{'' if sample == 1 else 's'} in this category, below the "
+                f"{MIN_BASE_RATE_SAMPLE} needed to quote a rate."
+            )
+        ),
+        minimum_sample=MIN_BASE_RATE_SAMPLE,
+    )
+
+
 def _to_entry(
     entry: RadarToken,
     now: datetime,
     names: dict[str, tuple[str | None, str | None]] | None = None,
     tiers: dict[str, list[str]] | None = None,
     alive: set[str] | None = None,
+    base_rates: dict[str, dict[str, Any]] | None = None,
 ) -> RadarEntryOut:
     """Assemble one Radar entry.
 
@@ -129,6 +167,12 @@ def _to_entry(
             "alive"
             if alive is not None and entry.mint_address in alive
             else "unknown"
+        ),
+        # Keyed on the category assigned at first detection, matching how the
+        # rate itself is grouped — a later re-classification must not silently
+        # move a token into a different history.
+        base_rate=_to_base_rate(
+            entry.category, (base_rates or {}).get(entry.category)
         ),
     )
 
@@ -252,7 +296,8 @@ async def get_leaderboard(
     board_mints = [entry.mint_address for entry in entries]
     tiers = await repository.tiers_for(board_mints)
     alive = await repository.observed_within(board_mints, since=now - LIVENESS_WINDOW)
-    return [_to_entry(entry, now, names, tiers, alive) for entry in entries]
+    rates = await repository.base_rates()
+    return [_to_entry(entry, now, names, tiers, alive, rates) for entry in entries]
 
 
 @router.get("/achievements", response_model=list[AchievementOut], summary="Recent milestones")
@@ -306,9 +351,13 @@ async def list_radar(
     names = await repository.names_for(mints)
     tiers = await repository.tiers_for(mints)
     alive = await repository.observed_within(mints, since=now - LIVENESS_WINDOW)
+    # One grouped query for the whole page, not one per row.
+    rates = await repository.base_rates()
 
     return RadarPage(
-        items=[_to_entry(entry, now, names, tiers, alive) for entry in entries],
+        items=[
+            _to_entry(entry, now, names, tiers, alive, rates) for entry in entries
+        ],
         total=total,
         page=page,
         page_size=page_size,
@@ -481,6 +530,7 @@ async def get_entry(session: DbSession, mint: str) -> RadarDetailOut:
         await repository.observed_within(
             [entry.mint_address], since=now - LIVENESS_WINDOW
         ),
+        await repository.base_rates(),
     )
 
     dimensions: list[DimensionOut] = []
