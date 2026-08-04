@@ -346,6 +346,53 @@ published).
   default swap fee. Both are configuration, not measurements. Verify against the
   venue before quoting a net figure as precise.
 
+## Sprint 28 — reality audit (design only, not implemented)
+
+Full report: `docs/SPRINT_28_REALITY_AUDIT.md`. Measured 2026-08-04 against the
+running system, 88 Radar tokens. **No code written; awaiting approval.**
+
+**Provenance: settled.** 88/88 carry `source_program = 6EF8rrec…` with a creation
+signature and block time. No token can enter from another launchpad — admission
+joins on that column. All 88 have graduated; none is currently on a bonding
+curve. Venues: pumpswap 87, meteora 1.
+
+**Three defects found.**
+
+1. **`peak_market_cap` is not raised with `peak_price`** — 6 of 88 (6.8%) are
+   internally inconsistent, one showing `peak_price` 30× `current_price` while
+   `peak_market_cap = current_market_cap`. Cause: `update_current` writes the
+   market cap only when the peak candidate *is* the current price, so a peak
+   raised via `window_high` leaves it behind. The snapshot holding that high
+   does carry a market cap — reading it is not inventing. **Fix must be
+   forward-only; the historical rows are a permanent record.**
+2. **43% of Radar tokens have market data over an hour old**; p95 snapshot age
+   is 7,347 minutes. Three of the visible Top 10 carry 169-minute-old prices with
+   no staleness marker on the row. Root cause is **queue depth (36,154 active),
+   not a broken worker** — tracked tokens are not prioritised and wait behind
+   36,000 others. `/health/pipeline` calls this "healthy" because it only checks
+   whether *any* snapshot was recent.
+3. **Symbol collision** — 9 distinct mints named TNOS ($1,307 to $83M), 5 named
+   SAOF. All genuine pump.fun mints; standard copycat pattern. The Radar shows
+   them side by side with no way to tell them apart.
+
+**Latency, chain to browser:** median ~15 min, p95 ~123 min. Enrichment revisit
+(p95 106 min) is **53× the 2-minute polling interval**. Building WebSockets first
+would remove the smallest term and animate two-hour-old data.
+
+**Correction to Sprint 27's framing.** I characterised median liquidity of
+~$1,857 as evidence these tokens are barely tradeable, citing a 178× mcap/liquidity
+ratio. That ratio was an outlier. Median market cap is $1,717 against median
+liquidity $1,814 — **ratio ≈ 1×**, with only 2 tokens above 50×. Liquidity is
+proportionate to size. The ~11% price-impact figure for a $100 order stands;
+"you could not exit" was wrong for the median case.
+
+**Recommended order (reverses the brief):** enrichment priority lane → visible
+staleness → collision marker → `peak_market_cap` fix → WebSockets last.
+
+**Not verifiable from stored data, and stated as such:** whether provider prices
+match the chain. The platform records what the provider returned and has no
+independent oracle; only faithful recording can be claimed, not accuracy.
+
 ## Known blockers
 
 - **Helius plan quota exhausted (HTTP 429).** Discovery is down and curve
