@@ -139,6 +139,33 @@ Absence is a first-class state: an unpriced token returns `market: null`, never
 zero; a token younger than 24h returns `change_24h_pct: null`, never 0%.
 8 new tests; suite 3001 passed. Verified live — 25 cards carrying real figures.
 
+## Sprint 23 — the Radar becomes the homepage (done)
+
+Launch blocker #1 of the V1 review: the nav called `/` the Radar and it
+rendered the Opportunity board — 100 cards with more available, ranked by
+signal freshness — while `useRadar` was imported only by the Track Record. The
+ranked list carrying the Radar score and the base rates was never rendered as a
+list.
+
+`/` is now the top 10 by Radar score. `services/market_context.py` holds the
+shared identity/market/age resolution (three batched queries) that was a
+private helper on the board; `opportunities.MarketOut` is now an alias for
+`MarketStripOut` and the wire format is unchanged. `RadarEntryOut` gained
+`market`, `age_seconds`, `risk_score`, `risk_reasons`, `evidence` and `signal`.
+
+Risk and evidence come from the newest `radar_snapshots` row, batched with
+`DISTINCT ON` and **read rather than recomputed** — the risk beside a score must
+be the one the sweep that produced that score measured. The signal is joined
+from the Opportunity Engine through the board's own explanation renderer.
+
+Measured: `/radar?page_size=10` 8ms, the 100-row record page 22ms. 3048 backend
+passed (+17), 258 frontend passed (+38).
+
+**Correction recorded:** the Radar and the board rank different tokens — 9 mints
+of 72 overlap, and 12 of 72 Radar rows carry a live signal. This is expected
+(one ranks quality, the other ranks recency), but it means the signal column is
+sparse by construction and must never be read as "the other 60 have no story".
+
 ## Known blockers
 
 - **Helius plan quota exhausted (HTTP 429).** Discovery is down and curve
@@ -151,9 +178,21 @@ zero; a token younger than 24h returns `change_24h_pct: null`, never 0%.
   reverted the same day; still the largest signal-quality constraint.
 - `review_expired` has no scheduled caller yet.
 
-## Next sprint (not started — needs approval)
+## Next sprints (planned, not started)
 
-**Sprint 9: Breakout / pre-breakout provider** — ADR §15 step 3, now the next
-buildable signal since step 2 waits on data. Introduces multi-observation
-windows and the realisation exit path. Open question to settle with
-measurement: the baseline for surge detection (ADR §16).
+- **Sprint 24 — paper wallet.** The only V1 destination that is still a
+  placeholder. Model, migration, deterministic strategy engine ($100 equal
+  weight, TP +100%, SL −50%, expiry = signal expiry), `/api/v1/paper`, and the
+  wallet page. `/radar/benchmark` already reports `paper_wallet_note` honestly;
+  that note is what this sprint retires.
+- **Sprint 25 — de-theming.** `agent-sigil`, `ai-core`, `universe` and
+  `sentinel` are wired into `error.tsx`, `not-found.tsx`, `states.tsx`,
+  `badge.tsx` and the auth layout, so removing them is a design-system change,
+  not a rename. Also retires ~1,400 lines of client-side derivation
+  (`lib/sentinel.ts`, `mission.ts`, `research-priority.ts`, `conviction.ts`,
+  `thesis.ts`, `scoreboard.ts`) that forms a second opinion competing with the
+  server-rendered reason codes. The brand still reads **LETZMOON** in
+  `components/brand/logo.tsx` and `app/layout.tsx`.
+- **Sprint 26 — Track Record analytics.** Sort by drawdown, age, market cap,
+  signal and Radar score; detection/current/peak market-cap columns in the
+  table. The page is already the strongest in the product; these are its gaps.
