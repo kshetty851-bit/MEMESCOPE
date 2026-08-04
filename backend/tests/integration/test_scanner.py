@@ -127,7 +127,7 @@ async def _run_one_event(scanner: TokenScanner, payload: str) -> None:
 
 async def test_discovers_persists_and_broadcasts(db_session: Any, client: Any) -> None:
     helius = FakeHelius(asset=RESOLVED_ASSET)
-    scanner = TokenScanner(helius=helius, ws_url="ws://fake", programs=["prog"])
+    scanner = TokenScanner(rpc=helius, ws_url="ws://fake", programs=["prog"])
 
     received: list[dict[str, Any]] = []
     from app.core.redis import get_redis
@@ -175,7 +175,7 @@ async def test_discovers_persists_and_broadcasts(db_session: Any, client: Any) -
 async def test_duplicate_event_is_suppressed(db_session: Any, client: Any) -> None:
     """The same event replayed must not produce a second row or broadcast."""
     helius = FakeHelius(asset=RESOLVED_ASSET)
-    scanner = TokenScanner(helius=helius, ws_url="ws://fake", programs=["prog"])
+    scanner = TokenScanner(rpc=helius, ws_url="ws://fake", programs=["prog"])
 
     await _run_one_event(scanner, _notification())
     await _run_one_event(scanner, _notification())
@@ -204,7 +204,7 @@ async def test_duplicate_event_is_suppressed(db_session: Any, client: Any) -> No
 async def test_missing_metadata_is_saved_as_pending(db_session: Any, client: Any) -> None:
     """A token with no metadata yet must still be recorded, not dropped."""
     scanner = TokenScanner(
-        helius=FakeHelius(asset=None), ws_url="ws://fake", programs=["prog"]
+        rpc=FakeHelius(asset=None), ws_url="ws://fake", programs=["prog"]
     )
     await _run_one_event(scanner, _notification())
 
@@ -233,7 +233,7 @@ async def test_missing_metadata_is_saved_as_pending(db_session: Any, client: Any
 
 async def test_unavailable_transaction_is_counted_not_crashed(client: Any) -> None:
     scanner = TokenScanner(
-        helius=FakeHelius(transaction=None), ws_url="ws://fake", programs=["prog"]
+        rpc=FakeHelius(transaction=None), ws_url="ws://fake", programs=["prog"]
     )
     await _run_one_event(scanner, _notification())
 
@@ -243,7 +243,7 @@ async def test_unavailable_transaction_is_counted_not_crashed(client: Any) -> No
 
 async def test_queue_overflow_drops_instead_of_blocking(client: Any) -> None:
     """Under a launch burst the scanner sheds load rather than stalling the socket."""
-    scanner = TokenScanner(helius=FakeHelius(), ws_url="ws://fake", programs=["prog"])
+    scanner = TokenScanner(rpc=FakeHelius(), ws_url="ws://fake", programs=["prog"])
     scanner._queue = asyncio.Queue(maxsize=2)
 
     class FakeSocket:
@@ -263,7 +263,7 @@ async def test_queue_overflow_drops_instead_of_blocking(client: Any) -> None:
 
 
 async def test_non_creation_logs_are_filtered_out(client: Any) -> None:
-    scanner = TokenScanner(helius=FakeHelius(), ws_url="ws://fake", programs=["prog"])
+    scanner = TokenScanner(rpc=FakeHelius(), ws_url="ws://fake", programs=["prog"])
 
     noise = json.dumps(
         {

@@ -13,8 +13,9 @@ such feature", and the honest answer is "it is not switched on here".
 
 from __future__ import annotations
 
-from dataclasses import asdict
-from datetime import UTC, datetime
+from dataclasses import asdict, dataclass
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import Annotated
 
 from fastapi import APIRouter, Query
@@ -22,6 +23,7 @@ from fastapi import APIRouter, Query
 from app.api.deps import DbSession
 from app.core.config import settings
 from app.core.exceptions import NotFoundError
+from app.models.market import TokenMarketSnapshot
 from app.models.opportunity import Opportunity, OpportunitySignal
 from app.opportunities.analytics import ProviderTotals, summarise
 from app.opportunities.explain import explain
@@ -32,12 +34,14 @@ from app.opportunities.repository import OpportunityRepository
 from app.opportunities.schemas import (
     EvidenceOut,
     ExplanationOut,
+    MarketOut,
     OpportunityBoard,
     OpportunityOut,
     ProviderAnalyticsOut,
     ProviderAnalyticsReport,
     SignalOut,
 )
+from app.repositories.market import MarketSnapshotRepository
 from app.repositories.token import TokenRepository
 
 router = APIRouter(prefix="/opportunities", tags=["opportunities"])
@@ -87,7 +91,7 @@ async def list_opportunities(
         stage=resolved_stage,
     )
     signals = await repository.live_signals_for([row.id for row in rows], now=now)
-    names = await _names_for(session, [row.mint_address for row in rows])
+    context = await _context_for(session, [row.mint_address for row in rows], now=now)
     has_more = await repository.board_has_more(
         now=now,
         offset=offset,
@@ -98,7 +102,8 @@ async def list_opportunities(
 
     return OpportunityBoard(
         items=[
-            _to_card(row, signals.get(row.id, []), names=names, now=now) for row in rows
+            _to_card(row, signals.get(row.id, []), context=context, now=now)
+            for row in rows
         ],
         page=page,
         page_size=page_size,
@@ -168,8 +173,10 @@ async def get_opportunity(
         raise NotFoundError(f"No opportunity for {mint}")
 
     signals = await repository.live_signals_for([opportunity.id], now=now)
-    names = await _names_for(session, [opportunity.mint_address])
-    return _to_card(opportunity, signals.get(opportunity.id, []), names=names, now=now)
+    context = await _context_for(session, [opportunity.mint_address], now=now)
+    return _to_card(
+        opportunity, signals.get(opportunity.id, []), context=context, now=now
+    )
 
 
 # --- Rendering ---------------------------------------------------------------
@@ -187,33 +194,96 @@ def _valid_stage(value: str | None) -> str | None:
     return value if value in {member.value for member in OpportunityStage} else "__unknown__"
 
 
-async def _names_for(
-    session: DbSession, mints: list[str]
-) -> dict[str, tuple[str | None, str | None]]:
-    """Token identity for the page, in one query.
+@dataclass(frozen=True, slots=True)
+class CardContext:
+    """Everything a card needs beyond the opportunity row itself.
 
-    Name and symbol are not copied onto `opportunities` — identity lives in
-    `discovered_tokens` and is joined at read time, so a metadata resolution
-    that lands later is reflected without a backfill.
+    Gathered once per page in three batched queries rather than per card. Each
+    field is independently optional: a token can have a name and no market, or
+    a market and no age, and the card renders whichever facts exist.
+    """
+
+    names: dict[str, tuple[str | None, str | None]]
+    markets: dict[str, TokenMarketSnapshot]
+    prior_prices: dict[str, Decimal]
+    ages: dict[str, datetime]
+
+
+async def _context_for(session: DbSession, mints: list[str], *, now: datetime) -> CardContext:
+    """Identity, market and age for a page of cards, in three queries.
+
+    A trader cannot evaluate a signal without price, liquidity, volume and age;
+    before this the board carried none of them and the card was unactionable.
+    Joined at read time rather than copied onto `opportunities`, for the same
+    reason identity is: a snapshot that lands later is reflected without a
+    backfill, and the opportunity row stays the immutable record of a detection.
     """
     if not mints:
-        return {}
+        return CardContext(names={}, markets={}, prior_prices={}, ages={})
+
     tokens = await TokenRepository(session).get_many_by_mints(mints)
-    return {mint: (token.name, token.symbol) for mint, token in tokens.items()}
+    market_repository = MarketSnapshotRepository(session)
+    markets = await market_repository.latest_for_mints(mints)
+    prior_prices = await market_repository.price_as_of_for_mints(
+        mints, as_of=now - timedelta(hours=24)
+    )
+    return CardContext(
+        names={mint: (token.name, token.symbol) for mint, token in tokens.items()},
+        markets=markets,
+        prior_prices=prior_prices,
+        ages={
+            mint: (token.block_time or token.discovered_at)
+            for mint, token in tokens.items()
+        },
+    )
+
+
+def _to_market(
+    snapshot: TokenMarketSnapshot | None, *, prior_price: Decimal | None
+) -> MarketOut | None:
+    """Render the market strip, or `None` when the token has never been priced.
+
+    The 24-hour change is omitted rather than zeroed when there is no reading
+    from far enough back — a token four minutes old has not been flat for a
+    day, it simply did not exist.
+    """
+    if snapshot is None:
+        return None
+
+    change: Decimal | None = None
+    price = snapshot.price_usd
+    if price is not None and price > 0 and prior_price is not None and prior_price > 0:
+        change = ((price - prior_price) / prior_price * 100).quantize(Decimal("0.01"))
+
+    return MarketOut(
+        price_usd=price,
+        market_cap=snapshot.market_cap,
+        liquidity_usd=snapshot.liquidity_usd,
+        volume_24h=snapshot.volume_24h,
+        change_24h_pct=change,
+        captured_at=snapshot.captured_at,
+        dex_name=snapshot.dex_name,
+    )
 
 
 def _to_card(
     opportunity: Opportunity,
     signals: list[OpportunitySignal],
     *,
-    names: dict[str, tuple[str | None, str | None]],
+    context: CardContext,
     now: datetime,
 ) -> OpportunityOut:
-    name, symbol = names.get(opportunity.mint_address, (None, None))
+    mint = opportunity.mint_address
+    name, symbol = context.names.get(mint, (None, None))
+    origin = context.ages.get(mint)
     return OpportunityOut(
         mint_address=opportunity.mint_address,
         name=name,
         symbol=symbol,
+        market=_to_market(
+            context.markets.get(mint), prior_price=context.prior_prices.get(mint)
+        ),
+        age_seconds=_age(origin, now=now) if origin is not None else None,
         generation=opportunity.generation,
         status=opportunity.status,
         stage=opportunity.stage,

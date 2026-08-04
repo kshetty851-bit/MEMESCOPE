@@ -7,9 +7,15 @@ module, and pure functions let the whole matrix be unit-tested from fixtures.
 
 from __future__ import annotations
 
+import base64
+import binascii
+import struct
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
+
+from app.services.curve.pda import b58encode
 
 # Log markers that indicate a mint is being created. `initializeMint`/
 # `initializeMint2` is the authoritative signal — a mint account cannot come
@@ -231,6 +237,167 @@ def _clean(value: Any, limit: int) -> str | None:
     if not cleaned:
         return None
     return cleaned[:limit]
+
+
+@dataclass(frozen=True, slots=True)
+class CreateEvent:
+    """A launchpad creation event decoded straight from the log stream.
+
+    Carries everything `TokenCreation` needs except `decimals`, plus the
+    metadata that would otherwise cost a DAS `getAsset` call.
+    """
+
+    mint_address: str
+    creator_address: str | None
+    name: str | None
+    symbol: str | None
+    metadata_uri: str | None
+    block_time: datetime | None
+
+
+#: Anchor derives an event discriminator as `sha256("event:<Name>")[:8]`. Pinned
+#: as literal bytes so the value is greppable when reading a raw payload; the
+#: derivation is recorded so a second event type can be added without guessing.
+#: Verified equal to the bytes observed on mainnet, 2026-08-03.
+CREATE_EVENT_DISCRIMINATOR = bytes.fromhex("1b72a94ddeeb6376")
+
+_PROGRAM_DATA_PREFIX = "Program data: "
+
+#: Plausibility bounds on the borsh length prefixes. A value outside these does
+#: not mean a token has a very long name — it means the offsets are wrong, and
+#: every field read after it is garbage. Same discipline as `curve/state.py`:
+#: refuse the whole reading rather than report a plausible-looking wrong one.
+_MAX_NAME_BYTES = 200
+_MAX_SYMBOL_BYTES = 64
+_MAX_URI_BYTES = 2048
+
+#: A Unix timestamp outside this range is the strongest single signal that the
+#: layout has shifted, because it is read *after* three variable-length strings
+#: and four public keys — it validates every offset before it in one check.
+_MIN_BLOCK_TIME = 1_600_000_000  # 2020-09
+_MAX_BLOCK_TIME = 4_100_000_000  # 2100-01
+
+_PUBKEY_BYTES = 32
+
+
+class _Reader:
+    """Minimal borsh cursor. Raises `ValueError` the moment anything is off."""
+
+    __slots__ = ("_data", "_offset")
+
+    def __init__(self, data: bytes, offset: int = 0) -> None:
+        self._data = data
+        self._offset = offset
+
+    @property
+    def remaining(self) -> int:
+        return len(self._data) - self._offset
+
+    def string(self, limit: int) -> str:
+        if self.remaining < 4:
+            raise ValueError("truncated length prefix")
+        (length,) = struct.unpack_from("<I", self._data, self._offset)
+        length = int(length)
+        self._offset += 4
+        if length > limit or length > self.remaining:
+            raise ValueError(f"implausible string length {length}")
+        raw = self._data[self._offset : self._offset + length]
+        self._offset += length
+        # `strict` on purpose: on-chain bytes that are not valid UTF-8 mean the
+        # offsets are wrong. Replacing them would manufacture a readable name
+        # out of a misread and hide the fault.
+        return raw.decode("utf-8")
+
+    def pubkey(self) -> str:
+        if self.remaining < _PUBKEY_BYTES:
+            raise ValueError("truncated public key")
+        raw = self._data[self._offset : self._offset + _PUBKEY_BYTES]
+        self._offset += _PUBKEY_BYTES
+        return b58encode(raw)
+
+    def i64(self) -> int:
+        if self.remaining < 8:
+            raise ValueError("truncated i64")
+        (value,) = struct.unpack_from("<q", self._data, self._offset)
+        self._offset += 8
+        return int(value)
+
+
+def parse_create_event(logs: Sequence[str]) -> CreateEvent | None:
+    """Decode a launchpad `CreateEvent` from log lines, or None if absent.
+
+    The launchpad emits an Anchor event carrying the mint, the creator and the
+    token's own metadata. Reading it costs nothing: the bytes are already in the
+    log notification the scanner subscribed to, so a token resolved this way
+    needs neither `getTransaction` nor a DAS `getAsset` call.
+
+    That matters twice over. Public RPC endpoints rate-limit `getTransaction`
+    hard enough that roughly half of all creation events were being lost, and
+    DAS is an indexer extension no standard node serves at all — which is why
+    every token discovered since the switch to standard RPC has sat at
+    `MetadataStatus.PENDING` with no name.
+
+    Returns None whenever the event is absent or fails a single invariant, so
+    the caller falls back to fetching the transaction. That fallback is what
+    keeps the scanner launchpad-agnostic: a program that emits `InitializeMint`
+    without this event is still discovered exactly as before.
+
+    `decimals` is deliberately not returned. The event does not carry it, and
+    while these mints are conventionally six, asserting a value the chain did
+    not report would be estimating missing data. It stays null and the metadata
+    step fills it in later.
+    """
+    for line in logs:
+        if not line.startswith(_PROGRAM_DATA_PREFIX):
+            continue
+
+        try:
+            payload = base64.b64decode(line[len(_PROGRAM_DATA_PREFIX) :], validate=True)
+        except (ValueError, binascii.Error):
+            continue
+
+        if not payload.startswith(CREATE_EVENT_DISCRIMINATOR):
+            # A different event on the same transaction — a trade, a fee read.
+            # Discriminating by prefix is what stops one being decoded as the
+            # other and producing a confident, wrong reading.
+            continue
+
+        try:
+            reader = _Reader(payload, offset=len(CREATE_EVENT_DISCRIMINATOR))
+            name = reader.string(_MAX_NAME_BYTES)
+            symbol = reader.string(_MAX_SYMBOL_BYTES)
+            uri = reader.string(_MAX_URI_BYTES)
+            mint = reader.pubkey()
+            reader.pubkey()  # bonding curve — not needed here
+            reader.pubkey()  # user
+            creator = reader.pubkey() if reader.remaining >= _PUBKEY_BYTES else None
+            timestamp = reader.i64() if reader.remaining >= 8 else None
+        except ValueError:
+            # The layout moved. Refuse the reading and let the caller fall back
+            # to the transaction, which is the pre-existing behaviour.
+            return None
+
+        if timestamp is not None and not (
+            _MIN_BLOCK_TIME <= timestamp <= _MAX_BLOCK_TIME
+        ):
+            return None
+
+        return CreateEvent(
+            mint_address=mint,
+            creator_address=creator,
+            # Cleaned exactly like DAS metadata: these strings are chosen by
+            # whoever launched the token and reach the UI unmodified otherwise.
+            name=_clean(name, 200),
+            symbol=_clean(symbol, 64),
+            metadata_uri=_clean(uri, 2048),
+            block_time=(
+                datetime.fromtimestamp(timestamp, tz=UTC)
+                if timestamp is not None
+                else None
+            ),
+        )
+
+    return None
 
 
 def parse_asset_metadata(asset: dict[str, Any]) -> TokenMetadata:

@@ -122,7 +122,22 @@ class Settings(BaseSettings):
     # --- Frontend ------------------------------------------------------------
     FRONTEND_URL: str = "http://localhost:3000"
 
-    # --- Solana / Helius -----------------------------------------------------
+    # --- Solana RPC ----------------------------------------------------------
+    # Which implementation the scanner and curve collection talk to. `solana`
+    # is plain JSON-RPC against any compliant node; `helius` adds the DAS
+    # metadata read on top of the same standard calls. Default stays `helius`
+    # so an existing deployment's behaviour is unchanged by this setting
+    # appearing — switching is a deliberate act, not a silent migration.
+    SOLANA_RPC_PROVIDER: str = "helius"
+    #: The endpoint used when the provider is not vendor-specific. Any public
+    #: endpoint, self-hosted validator, or paid provider's standard URL.
+    SOLANA_RPC_URL: str = "https://api.mainnet-beta.solana.com"
+    #: Subscription endpoint for the scanner. `logsSubscribe` is standard, so
+    #: any node exposing a WebSocket serves it.
+    SOLANA_WS_URL: str = "wss://api.mainnet-beta.solana.com"
+    SOLANA_RPC_TIMEOUT_SECONDS: float = 20.0
+
+    # --- Helius (one RPC implementation) -------------------------------------
     # Never hardcoded: SecretStr keeps the key out of logs and repr output.
     HELIUS_API_KEY: SecretStr = SecretStr("")
     HELIUS_RPC_BASE: str = "https://mainnet.helius-rpc.com"
@@ -456,6 +471,28 @@ class Settings(BaseSettings):
     def helius_configured(self) -> bool:
         return bool(self.HELIUS_API_KEY.get_secret_value())
 
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def uses_helius(self) -> bool:
+        """Whether the configured RPC is the vendor-specific one.
+
+        One place answers this. Before the abstraction, "are we on Helius" was
+        implied by a key being present, which is why the key was required even
+        where nothing vendor-specific was called.
+        """
+        return self.SOLANA_RPC_PROVIDER.strip().lower() == "helius"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def rpc_ws_url(self) -> str:
+        """The subscription endpoint for the configured provider.
+
+        The scanner's only vendor coupling was this URL. `logsSubscribe` is
+        standard Solana WebSocket RPC, so the scanner itself needed no change
+        beyond asking here instead of asking for Helius by name.
+        """
+        return self.HELIUS_WS_URL if self.uses_helius else self.SOLANA_WS_URL
+
     # Every `CsvList` field must be named here or it will only accept a JSON
     # array, and a plain `A,B` in an env file fails validation at boot. The list
     # is explicit rather than inferred from the annotation because the failure
@@ -609,8 +646,19 @@ class Settings(BaseSettings):
                 raise ValueError("ALLOWED_HOSTS must be explicit in production")
             if not self.REFRESH_COOKIE_SECURE:
                 raise ValueError("REFRESH_COOKIE_SECURE must be true in production")
-        if self.FEATURE_SCANNER_ENABLED and not self.HELIUS_API_KEY.get_secret_value():
-            raise ValueError("HELIUS_API_KEY is required when FEATURE_SCANNER_ENABLED is true")
+        # Required only when Helius is the configured provider. Demanding a
+        # vendor key to run the scanner against a public endpoint was the
+        # hard dependency this sprint removed.
+        if (
+            self.FEATURE_SCANNER_ENABLED
+            and self.uses_helius
+            and not self.HELIUS_API_KEY.get_secret_value()
+        ):
+            raise ValueError(
+                "HELIUS_API_KEY is required when FEATURE_SCANNER_ENABLED is true "
+                "and SOLANA_RPC_PROVIDER is 'helius'. Set SOLANA_RPC_PROVIDER=solana "
+                "to run against a standard endpoint instead."
+            )
         if self.PUMPFUN_RADAR_MIN_AGE_DAYS > self.PUMPFUN_RADAR_MAX_AGE_DAYS:
             raise ValueError(
                 "PUMPFUN_RADAR_MIN_AGE_DAYS must not exceed PUMPFUN_RADAR_MAX_AGE_DAYS"

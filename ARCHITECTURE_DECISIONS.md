@@ -521,6 +521,77 @@ implementation:
 
 ---
 
+## 18. Amendment — Discovery reads the launchpad's own creation event
+
+> **Status:** Accepted · **Date:** 2026-08-03 · **Type:** Architectural trade
+> **Revises:** the scanner's launchpad-agnostic property, recorded in
+> `services/scanner/parser.py` as the reason `MINT_INIT_MARKERS` is the filter.
+> **Raised by:** Sprint 18, from measurement against the live public endpoint.
+
+The scanner now decodes the launchpad's Anchor `CreateEvent` out of the
+`logsSubscribe` payload, and falls back to `getTransaction` only when no such
+event is present.
+
+### What was measured
+
+Against `api.mainnet-beta.solana.com`, 2026-08-03:
+
+| Measurement | Result |
+| --- | --- |
+| Creation events observed in one 90-second window | 63 |
+| Carrying a decodable creation event | **60 (95.2%)** |
+| Requiring the `getTransaction` fallback | 3 (4.8%) |
+| Capture rate on the pre-existing path | **46–54%** (164 captured, 193 lost to HTTP 429 over 30 minutes) |
+
+Three mints decoded from the log stream during the investigation
+(`2rbwYUGL…`, `EACKGViw…`, `5f8Cijcr…`) were **absent from
+`discovered_tokens`** — lost to rate limiting in the same window they were
+being read, for free, from bytes already in hand.
+
+### Why this is worth the trade
+
+`getTransaction` is rate limited on every free endpoint; the log payload is
+not, because it arrives on a subscription already open. The event also carries
+`name`, `symbol` and `uri`, which had been supplied by the DAS `getAsset` call
+— an indexer extension no standard node serves. Since the Sprint 16 switch to
+standard RPC, **every token discovered had a null name** (measured: 335 of 335).
+One change fixes capture and identity together.
+
+### The cost, stated plainly
+
+`MINT_INIT_MARKERS` is launchpad-agnostic by design: any program bringing a
+mint into existence is discovered without a code change. Decoding an Anchor
+event binds to one launchpad's event schema and field order.
+
+Three things make that acceptable rather than a regression:
+
+1. The coupling **already existed** — `services/curve/state.py` binds to
+   pump.fun's account layout, and pump.fun has renamed an instruction before.
+   This deepens an accepted coupling; it does not introduce a new class of one.
+2. **The fallback preserves the agnostic path.** A program emitting
+   `InitializeMint` without a decodable event is discovered exactly as before.
+   Nothing is lost, only made cheaper where it can be.
+3. **The failure mode is safe.** Every invariant is checked and a failed check
+   refuses the whole reading, degrading to the previous behaviour rather than
+   reporting a plausible-looking wrong one — the contract `state.py` already
+   holds. The discriminator is matched before decoding, so a trade event
+   sharing the transaction cannot be misread as a creation.
+
+`decimals` is **not** taken from the event, which does not carry it. These
+mints are conventionally six, and asserting that would be estimating missing
+data. It stays null and the metadata step fills it in later.
+
+### Consequences
+
+- Expected capture ≈ 99%: 95.2% at zero RPC cost, the remainder through a
+  fallback running at ~1/20th of the previous request volume.
+- `ScannerStats` reports `resolved_from_logs` and `resolved_from_transaction`
+  separately, so the split is observable rather than assumed.
+- Tokens discovered before this change keep their null names. Backfilling them
+  is a separate decision and is **not** covered here.
+
+---
+
 *Recorded 2026-08-02, before implementation. Amendments belong in this document
 with a date, in the style of ADR 0002's field-result addendum — not as silent
 edits.*

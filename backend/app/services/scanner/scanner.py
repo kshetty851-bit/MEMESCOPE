@@ -2,7 +2,7 @@
 
 Shape of the pipeline:
 
-    Helius logsSubscribe ──▶ cheap log filter ──▶ bounded queue ──▶ N workers
+    logsSubscribe ──▶ cheap log filter ──▶ bounded queue ──▶ N workers
                                                                       │
                                           getTransaction + getAsset ◀──┤
                                                                       │
@@ -37,11 +37,15 @@ from app.db.session import SessionFactory
 from app.health.service import publish_scanner_state
 from app.models.token import MetadataStatus
 from app.repositories.token import TokenRepository
-from app.services.helius.client import HeliusClient
+from app.services.rpc.base import SolanaRPC
+from app.services.rpc.registry import get_rpc
 from app.services.scanner.parser import (
     LogEvent,
+    TokenCreation,
+    TokenMetadata,
     is_token_creation_log,
     parse_asset_metadata,
+    parse_create_event,
     parse_log_notification,
     parse_transaction,
 )
@@ -60,6 +64,12 @@ class ScannerStats:
     tokens_discovered: int = 0
     tokens_duplicate: int = 0
     resolve_failures: int = 0
+    #: How each creation was resolved. The split is the whole point of reading
+    #: the log event: a token resolved from logs cost no RPC call at all, and
+    #: on a rate-limited public endpoint that is the difference between
+    #: capturing it and losing it.
+    resolved_from_logs: int = 0
+    resolved_from_transaction: int = 0
     reconnects: int = 0
     #: Failures since the last clean connection. `reconnects` is the lifetime
     #: total and never falls, so it cannot answer "is it failing *now*" — which
@@ -75,6 +85,8 @@ class ScannerStats:
             "events_queued": self.events_queued,
             "events_dropped": self.events_dropped,
             "tokens_discovered": self.tokens_discovered,
+            "resolved_from_logs": self.resolved_from_logs,
+            "resolved_from_transaction": self.resolved_from_transaction,
             "tokens_duplicate": self.tokens_duplicate,
             "resolve_failures": self.resolve_failures,
             "reconnects": self.reconnects,
@@ -88,12 +100,12 @@ class TokenScanner:
     def __init__(
         self,
         *,
-        helius: HeliusClient | None = None,
+        rpc: SolanaRPC | None = None,
         ws_url: str | None = None,
         programs: list[str] | None = None,
     ) -> None:
-        self._helius = helius or HeliusClient()
-        self._ws_url = ws_url or settings.HELIUS_WS_URL
+        self._rpc = rpc or get_rpc()
+        self._ws_url = ws_url or settings.rpc_ws_url
         self._programs = programs or list(settings.SCANNER_WATCH_PROGRAMS)
         self._queue: asyncio.Queue[LogEvent] = asyncio.Queue(
             maxsize=settings.SCANNER_QUEUE_SIZE
@@ -107,11 +119,15 @@ class TokenScanner:
 
     async def run(self) -> None:
         """Run until `stop()` is called. Reconnects on its own."""
-        if not settings.helius_configured:
+        # Only the vendor implementation needs a key. Against a standard
+        # endpoint there is nothing to configure, which is the point of the
+        # abstraction — the scanner subscribes with `logsSubscribe`, which every
+        # compliant node serves.
+        if settings.uses_helius and not settings.helius_configured:
             raise RuntimeError("HELIUS_API_KEY is not configured; scanner cannot start.")
 
         self.stats.started_at = datetime.now(UTC)
-        await self._helius.start()
+        await self._rpc.start()
 
         logger.info(
             "scanner_started",
@@ -132,7 +148,7 @@ class TokenScanner:
             for worker in self._workers:
                 worker.cancel()
             await asyncio.gather(*self._workers, return_exceptions=True)
-            await self._helius.close()
+            await self._rpc.close()
             logger.info("scanner_stopped", **self.stats.as_dict())
 
     def stop(self) -> None:
@@ -281,11 +297,50 @@ class TokenScanner:
             finally:
                 self._queue.task_done()
 
-    async def _handle_event(self, event: LogEvent) -> None:
-        transaction = await self._helius.get_transaction(event.signature)
+    def _from_logs(
+        self, event: LogEvent
+    ) -> tuple[TokenCreation, TokenMetadata | None] | None:
+        """Resolve a creation from the log payload alone, or None.
+
+        The fast path, and the one that survives a rate limit: the launchpad's
+        own creation event carries the mint, the creator and the token's
+        metadata, so nothing here touches the network. `decimals` is absent from
+        the event and stays null rather than being assumed.
+        """
+        decoded = parse_create_event(event.logs)
+        if decoded is None:
+            return None
+
+        creation = TokenCreation(
+            mint_address=decoded.mint_address,
+            signature=event.signature,
+            slot=event.slot,
+            creator_address=decoded.creator_address,
+            decimals=None,
+            block_time=decoded.block_time,
+            source_program=self._programs[0] if self._programs else None,
+        )
+        metadata = TokenMetadata(
+            name=decoded.name,
+            symbol=decoded.symbol,
+            metadata_uri=decoded.metadata_uri,
+            decimals=None,
+        )
+        return creation, metadata
+
+    async def _from_transaction(
+        self, event: LogEvent
+    ) -> tuple[TokenCreation, TokenMetadata | None] | None:
+        """Resolve a creation by fetching the transaction. The fallback path.
+
+        Unchanged behaviour, and deliberately still here: it is what keeps the
+        scanner launchpad-agnostic. A program that emits `InitializeMint`
+        without a decodable creation event is discovered exactly as before.
+        """
+        transaction = await self._rpc.get_transaction(event.signature)
         if transaction is None:
             self.stats.resolve_failures += 1
-            return
+            return None
 
         creation = parse_transaction(
             transaction,
@@ -294,7 +349,32 @@ class TokenScanner:
             source_program=self._programs[0] if self._programs else None,
         )
         if creation is None:
-            return
+            return None
+
+        # `None` covers two different facts and both end the same way: the
+        # indexer has not caught up yet, or this node does not index at all
+        # (`supports_metadata` is False on a plain validator). Either leaves the
+        # token at `MetadataStatus.PENDING` — unresolved so far, not nameless —
+        # and a later resolution needs no backfill.
+        metadata = None
+        asset = await self._rpc.get_asset(creation.mint_address)
+        if asset is not None:
+            metadata = parse_asset_metadata(asset)
+        return creation, metadata
+
+    async def _handle_event(self, event: LogEvent) -> None:
+        resolved: tuple[TokenCreation, TokenMetadata | None] | None = self._from_logs(
+            event
+        )
+        if resolved is not None:
+            self.stats.resolved_from_logs += 1
+        else:
+            resolved = await self._from_transaction(event)
+            if resolved is None:
+                return
+            self.stats.resolved_from_transaction += 1
+
+        creation, metadata = resolved
 
         # Cheap pre-check against Redis so a repeated event does not cost a
         # database round trip. The unique index remains the real guarantee.
@@ -310,11 +390,6 @@ class TokenScanner:
             slot=creation.slot,
             creator=creation.creator_address,
         )
-
-        metadata = None
-        asset = await self._helius.get_asset(creation.mint_address)
-        if asset is not None:
-            metadata = parse_asset_metadata(asset)
 
         values: dict[str, Any] = {
             "mint_address": creation.mint_address,

@@ -97,6 +97,48 @@ so scoring them would publish 0.00 against providers that never forecast.
 Their invalidations are counted as `contradicted` instead. Replay: pre-breakout
 precision 4/13 = 0.31 over 800 tokens; deterministic across 2,009 assessments.
 
+## Sprint 13 — RPC abstraction (done)
+
+`services/rpc/`: `SolanaRPC` interface, `StandardSolanaRPC` (plain JSON-RPC,
+any node), `HeliusRPC` (standard + DAS `getAsset`), registry mirroring the
+market-provider pattern. `services/helius/client.py` is now an alias shim.
+`SOLANA_RPC_PROVIDER=solana` runs the platform with **no Helius key**; the key
+is required only when Helius is the configured provider.
+
+Verified live against `api.mainnet-beta.solana.com`, no API key: `getSlot`,
+`getMultipleAccounts`, and a real pump.fun curve account parsed.
+
+**Curve layout is now verified against mainnet** (closes the Sprint 8 unknown):
+on-curve accounts return `token_total_supply=1e15` and
+`real_token_reserves=793_100_000_000_000` — both exactly the documented
+pump.fun constants — and `complete_byte` sits at offset 48 as documented.
+
+## Sprint 14 — curve parser finalization (done)
+
+`services/curve/state.py`: the "virtual reserves never drain to zero"
+invariant now scopes to `complete=0` only. A live graduated account zeroes all
+four reserves on migration — that's a fact of completion, not a misread.
+`_U64_MAX` sentinel check still applies unconditionally. Re-ran Sprint 13's
+four real graduated accounts against mainnet: all 4 previously-refused reads
+now parse, `complete=True`, `progress=1`. 5 new regression tests pinned to the
+observed bytes (incl. the real 115/151-byte account lengths); 2978 passed.
+
+## V1 redesign — Week 1, item 1 (done)
+
+**Market data on the opportunity board.** Launch blocker #1 from the V1 spec:
+the board carried no price, liquidity, volume or age, so a trader could read a
+signal and had no way to evaluate it.
+
+`MarketOut` (nullable) + `age_seconds` on `OpportunityOut`;
+`latest_for_mints` and `price_as_of_for_mints` batched on the market
+repository; `_context_for` resolves a whole page in three queries, not one per
+card. 24h change is derived at read time from two stored readings — no
+`price_change_24h` column, because a stored delta drifts from its source.
+
+Absence is a first-class state: an unpriced token returns `market: null`, never
+zero; a token younger than 24h returns `change_24h_pct: null`, never 0%.
+8 new tests; suite 3001 passed. Verified live — 25 cards carrying real figures.
+
 ## Known blockers
 
 - **Helius plan quota exhausted (HTTP 429).** Discovery is down and curve

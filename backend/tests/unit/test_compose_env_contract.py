@@ -96,6 +96,10 @@ REQUIRED_IN_ANCHOR = {
     "OPPORTUNITY_GRADUATED_VENUES": "defines the transition; must not differ per service",
     # The enrichment worker collects curve readings and the API reads them back.
     "FEATURE_CURVE_COLLECTION_ENABLED": "read by the enrichment worker's curve pass",
+    # The scanner subscribes and the enrichment worker reads accounts. Split
+    # across services, the two would talk to different nodes.
+    "SOLANA_RPC_PROVIDER": "selects the RPC implementation for every service",
+    "SOLANA_RPC_URL": "the endpoint when the provider is not vendor-specific",
     # The enrichment worker stamps a signal's expiry at detection; the beat
     # scheduler decides what has lapsed. Divergent TTLs mean one service opens
     # signals the other closes early, or never closes at all.

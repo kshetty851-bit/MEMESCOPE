@@ -56,8 +56,13 @@ def account_bytes(*, real_token: int = INITIAL_REAL_TOKENS, complete: int = 0) -
     return base64.b64encode(raw).decode()
 
 
-class StubHelius:
-    """Records calls and replays canned account values."""
+class StubRpc:
+    """Records reads and replays canned account values.
+
+    Stands in for a `SolanaRPC`, not for Helius: since Sprint 13 the collector
+    asks the interface for a batched account read and never names a vendor, so
+    the stub is written against the same surface any node implements.
+    """
 
     def __init__(self, values: list[dict[str, Any] | None] | Exception) -> None:
         self._values = values
@@ -66,16 +71,18 @@ class StubHelius:
     async def start(self) -> None: ...
     async def close(self) -> None: ...
 
-    async def call(self, method: str, params: Any, **kwargs: Any) -> Any:
-        self.calls.append((method, params))
+    async def get_multiple_accounts(
+        self, addresses: list[str], *, encoding: str = "base64"
+    ) -> list[dict[str, Any] | None]:
+        self.calls.append(("getMultipleAccounts", addresses))
         if isinstance(self._values, Exception):
             raise self._values
-        return {"value": self._values}
+        return list(self._values)
 
 
 def _stub(real_token: int, *, complete: int = 0) -> Any:
     """A stub returning one curve account. Keeps the call sites readable."""
-    return StubHelius(
+    return StubRpc(
         [{"data": [account_bytes(real_token=real_token, complete=complete), "base64"]}]
     )
 
@@ -128,10 +135,10 @@ class TestAddressing:
 class TestCollection:
     async def test_it_appends_a_parsed_curve(self, db_session: AsyncSession) -> None:
         await _token(db_session, MINT)
-        stub = StubHelius(
+        stub = StubRpc(
             [{"data": [account_bytes(real_token=400_000_000_000_000), "base64"]}],
         )
-        collector = BondingCurveCollector(db_session, helius=stub, program_id=PUMP)  # type: ignore[arg-type]
+        collector = BondingCurveCollector(db_session, rpc=stub, program_id=PUMP)  # type: ignore[arg-type]
 
         outcome = await collector.collect([MINT], now=NOW)
 
@@ -149,14 +156,14 @@ class TestCollection:
         self, db_session: AsyncSession
     ) -> None:
         await _token(db_session, MINT)
-        stub = StubHelius([{"data": [account_bytes(), "base64"]}])
-        collector = BondingCurveCollector(db_session, helius=stub, program_id=PUMP)  # type: ignore[arg-type]
+        stub = StubRpc([{"data": [account_bytes(), "base64"]}])
+        collector = BondingCurveCollector(db_session, rpc=stub, program_id=PUMP)  # type: ignore[arg-type]
 
         await collector.collect([MINT], now=NOW)
 
-        method, params = stub.calls[0]
+        method, addresses = stub.calls[0]
         assert method == "getMultipleAccounts"
-        assert params[0] == [bonding_curve_address(MINT, program_id=PUMP)]
+        assert addresses == [bonding_curve_address(MINT, program_id=PUMP)]
 
     async def test_an_absent_account_is_normal_not_an_error(
         self, db_session: AsyncSession
@@ -164,8 +171,8 @@ class TestCollection:
         """No curve account is the expected state for a token that never had
         one, and for one whose account closed after migrating."""
         await _token(db_session, MINT)
-        stub = StubHelius([None])
-        collector = BondingCurveCollector(db_session, helius=stub, program_id=PUMP)  # type: ignore[arg-type]
+        stub = StubRpc([None])
+        collector = BondingCurveCollector(db_session, rpc=stub, program_id=PUMP)  # type: ignore[arg-type]
 
         outcome = await collector.collect([MINT], now=NOW)
 
@@ -179,8 +186,8 @@ class TestCollection:
         """The layout is unverified, so a reading that fails its invariants must
         produce no row rather than a plausible wrong one."""
         await _token(db_session, MINT)
-        stub = StubHelius([{"data": [base64.b64encode(b"\xff" * 64).decode(), "base64"]}])
-        collector = BondingCurveCollector(db_session, helius=stub, program_id=PUMP)  # type: ignore[arg-type]
+        stub = StubRpc([{"data": [base64.b64encode(b"\xff" * 64).decode(), "base64"]}])
+        collector = BondingCurveCollector(db_session, rpc=stub, program_id=PUMP)  # type: ignore[arg-type]
 
         outcome = await collector.collect([MINT], now=NOW)
 
@@ -198,8 +205,8 @@ class TestCollection:
         `429 max usage reached`.
         """
         await _token(db_session, MINT)
-        stub = StubHelius(HeliusError("getMultipleAccounts rate limited"))
-        collector = BondingCurveCollector(db_session, helius=stub, program_id=PUMP)  # type: ignore[arg-type]
+        stub = StubRpc(HeliusError("getMultipleAccounts rate limited"))
+        collector = BondingCurveCollector(db_session, rpc=stub, program_id=PUMP)  # type: ignore[arg-type]
 
         outcome = await collector.collect([MINT], now=NOW)
 
@@ -211,8 +218,8 @@ class TestCollection:
     ) -> None:
         """The foreign key would reject it; one unknown mint must not cost the
         batch — the same lesson as the discovery listener's poison message."""
-        stub = StubHelius([{"data": [account_bytes(), "base64"]}])
-        collector = BondingCurveCollector(db_session, helius=stub, program_id=PUMP)  # type: ignore[arg-type]
+        stub = StubRpc([{"data": [account_bytes(), "base64"]}])
+        collector = BondingCurveCollector(db_session, rpc=stub, program_id=PUMP)  # type: ignore[arg-type]
 
         outcome = await collector.collect([MINT], now=NOW)
 
@@ -222,8 +229,8 @@ class TestCollection:
     async def test_an_empty_request_does_nothing(
         self, db_session: AsyncSession
     ) -> None:
-        stub = StubHelius([])
-        collector = BondingCurveCollector(db_session, helius=stub, program_id=PUMP)  # type: ignore[arg-type]
+        stub = StubRpc([])
+        collector = BondingCurveCollector(db_session, rpc=stub, program_id=PUMP)  # type: ignore[arg-type]
 
         outcome = await collector.collect([], now=NOW)
 
@@ -238,8 +245,8 @@ class TestAppendOnly:
         """A cycle that runs twice — a retry, a restart, two workers racing —
         must record one state once. The unique key is the guarantee."""
         await _token(db_session, MINT)
-        stub = StubHelius([{"data": [account_bytes(), "base64"]}])
-        collector = BondingCurveCollector(db_session, helius=stub, program_id=PUMP)  # type: ignore[arg-type]
+        stub = StubRpc([{"data": [account_bytes(), "base64"]}])
+        collector = BondingCurveCollector(db_session, rpc=stub, program_id=PUMP)  # type: ignore[arg-type]
 
         await collector.collect([MINT], now=NOW)
         second = await collector.collect([MINT], now=NOW)
@@ -258,14 +265,14 @@ class TestAppendOnly:
         await _token(db_session, MINT)
         collector = BondingCurveCollector(
             db_session,
-            helius=_stub(700_000_000_000_000),
+            rpc=_stub(700_000_000_000_000),
             program_id=PUMP,
         )
         await collector.collect([MINT], now=NOW)
 
         later = BondingCurveCollector(
             db_session,
-            helius=_stub(300_000_000_000_000),
+            rpc=_stub(300_000_000_000_000),
             program_id=PUMP,
         )
         await later.collect([MINT], now=NOW + timedelta(minutes=30))
@@ -296,7 +303,7 @@ class TestReplay:
         for index, remaining in enumerate(reserves):
             collector = BondingCurveCollector(
                 db_session,
-                helius=_stub(remaining),
+                rpc=_stub(remaining),
                 program_id=PUMP,
             )
             await collector.collect([MINT], now=NOW + timedelta(minutes=15 * index))
@@ -330,7 +337,7 @@ class TestReplay:
         await _token(db_session, MINT)
         collector = BondingCurveCollector(
             db_session,
-            helius=_stub(0, complete=1),
+            rpc=_stub(0, complete=1),
             program_id=PUMP,
         )
 
@@ -351,7 +358,7 @@ class TestReplay:
         for index, mint in enumerate((MINT, OTHER)):
             collector = BondingCurveCollector(
                 db_session,
-                helius=_stub(500_000_000_000_000 - index),
+                rpc=_stub(500_000_000_000_000 - index),
                 program_id=PUMP,
             )
             await collector.collect([mint], now=NOW + timedelta(seconds=index))
@@ -373,19 +380,23 @@ class TestClientLifecycle:
     ) -> None:
         started: list[str] = []
 
-        class LifecycleStub(StubHelius):
+        class LifecycleStub(StubRpc):
             async def start(self) -> None:
                 started.append("start")
 
-            async def call(self, method: str, params: Any, **kwargs: Any) -> Any:
+            async def get_multiple_accounts(
+                self, addresses: list[str], *, encoding: str = "base64"
+            ) -> Any:
                 assert started, "called before start()"
-                return await super().call(method, params, **kwargs)
+                return await super().get_multiple_accounts(
+                    addresses, encoding=encoding
+                )
 
         await _token(db_session, MINT)
         stub = LifecycleStub([{"data": [account_bytes(), "base64"]}])
         # Injected clients are not owned, so the collector must not start them —
         # but it must still route every chunk through the same instance.
-        collector = BondingCurveCollector(db_session, helius=stub, program_id=PUMP)  # type: ignore[arg-type]
+        collector = BondingCurveCollector(db_session, rpc=stub, program_id=PUMP)  # type: ignore[arg-type]
         started.append("injected")
 
         outcome = await collector.collect([MINT], now=NOW)
@@ -428,7 +439,7 @@ class TestProviderInput:
         # Collected a minute before the market observation, as the worker does:
         # curve collection is TX-3 and detection reads what it wrote.
         collector = BondingCurveCollector(
-            db_session, helius=_stub(INITIAL_REAL_TOKENS // 4), program_id=PUMP
+            db_session, rpc=_stub(INITIAL_REAL_TOKENS // 4), program_id=PUMP
         )
         await collector.collect([MINT], now=NOW - timedelta(minutes=1))
         await db_session.flush()
@@ -463,7 +474,7 @@ class TestProviderInput:
             }
         )
         collector = BondingCurveCollector(
-            db_session, helius=_stub(INITIAL_REAL_TOKENS // 4), program_id=PUMP
+            db_session, rpc=_stub(INITIAL_REAL_TOKENS // 4), program_id=PUMP
         )
         await collector.collect([MINT], now=NOW - timedelta(minutes=1))
         await db_session.flush()

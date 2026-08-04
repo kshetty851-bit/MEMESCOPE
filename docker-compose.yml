@@ -36,6 +36,13 @@ x-backend-env: &backend-env
   SENTRY_DSN: ${SENTRY_DSN:-}
   SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0.1}
   BUILD_SHA: ${BUILD_SHA:-unknown}
+  # Which RPC implementation every service talks to. In the anchor, not on the
+  # scanner: the scanner subscribes and the enrichment worker reads accounts,
+  # and a value set on one service only would point the two at different nodes.
+  # `solana` is plain JSON-RPC and needs no key.
+  SOLANA_RPC_PROVIDER: ${SOLANA_RPC_PROVIDER:-helius}
+  SOLANA_RPC_URL: ${SOLANA_RPC_URL:-https://api.mainnet-beta.solana.com}
+  SOLANA_WS_URL: ${SOLANA_WS_URL:-wss://api.mainnet-beta.solana.com}
   HELIUS_API_KEY: ${HELIUS_API_KEY:-}
   FEATURE_SCANNER_ENABLED: ${FEATURE_SCANNER_ENABLED:-false}
   SCANNER_WATCH_PROGRAMS: ${SCANNER_WATCH_PROGRAMS:-6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P}

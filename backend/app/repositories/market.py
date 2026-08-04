@@ -9,6 +9,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Sequence
 from datetime import datetime, timedelta
+from decimal import Decimal
 from typing import Any, cast
 
 from sqlalchemy import CursorResult, Select, and_, func, select, true, update
@@ -51,6 +52,75 @@ class MarketSnapshotRepository(BaseRepository[TokenMarketSnapshot]):
             .limit(1)
         )
         return (await self.session.execute(stmt)).scalars().first()
+
+    async def latest_for_mints(
+        self, mints: Sequence[str]
+    ) -> dict[str, TokenMarketSnapshot]:
+        """Newest snapshot per mint, for a batch, in one query.
+
+        The board renders market data for a whole page of cards, and a query per
+        card is what turns one page load into twenty-five round trips. `DISTINCT
+        ON` rides the `(mint_address, captured_at DESC)` index for the same
+        reason `latest_per_token` uses it.
+
+        A mint with no snapshot is simply absent from the result. That is the
+        honest shape: the caller must render "no market data" rather than a
+        zero, because a token nobody has priced yet is not a token worth $0.
+        """
+        unique = list(dict.fromkeys(mints))
+        if not unique:
+            return {}
+
+        stmt = (
+            select(TokenMarketSnapshot)
+            .distinct(TokenMarketSnapshot.mint_address)
+            .where(TokenMarketSnapshot.mint_address.in_(unique))
+            .order_by(
+                TokenMarketSnapshot.mint_address,
+                TokenMarketSnapshot.captured_at.desc(),
+            )
+        )
+        rows = (await self.session.execute(stmt)).scalars().all()
+        return {row.mint_address: row for row in rows}
+
+    async def price_as_of_for_mints(
+        self, mints: Sequence[str], *, as_of: datetime
+    ) -> dict[str, Decimal]:
+        """Each mint's last observed price at or before `as_of`, batched.
+
+        The platform stores no `price_change_24h` column, and it should not
+        start: a stored delta is a second copy of what the history already says
+        and drifts the moment a snapshot is corrected or pruned. The change is
+        derived at read time from the two readings that actually exist.
+
+        A mint absent from the result had no observation that far back — it is
+        newer than the window. The caller must render no change rather than
+        0%, because "unchanged" and "we were not watching yet" are different
+        claims and only one of them is true.
+        """
+        unique = list(dict.fromkeys(mints))
+        if not unique:
+            return {}
+
+        stmt = (
+            select(TokenMarketSnapshot)
+            .distinct(TokenMarketSnapshot.mint_address)
+            .where(
+                TokenMarketSnapshot.mint_address.in_(unique),
+                TokenMarketSnapshot.captured_at <= as_of,
+                TokenMarketSnapshot.price_usd.is_not(None),
+            )
+            .order_by(
+                TokenMarketSnapshot.mint_address,
+                TokenMarketSnapshot.captured_at.desc(),
+            )
+        )
+        rows = (await self.session.execute(stmt)).scalars().all()
+        return {
+            row.mint_address: row.price_usd
+            for row in rows
+            if row.price_usd is not None and row.price_usd > 0
+        }
 
     async def history_for_mint(
         self,

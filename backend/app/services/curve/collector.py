@@ -31,7 +31,8 @@ from app.core.logging import get_logger
 from app.repositories.curve import CurveSnapshotRepository
 from app.services.curve.pda import InvalidAddressError, bonding_curve_address
 from app.services.curve.state import CurveReading, parse
-from app.services.helius.client import HeliusClient, HeliusError
+from app.services.rpc.base import RpcError, SolanaRPC
+from app.services.rpc.registry import get_rpc
 
 logger = get_logger(__name__)
 
@@ -73,12 +74,12 @@ class BondingCurveCollector:
         self,
         session: AsyncSession,
         *,
-        helius: HeliusClient | None = None,
+        rpc: SolanaRPC | None = None,
         program_id: str | None = None,
     ) -> None:
         self._repository = CurveSnapshotRepository(session)
-        self._helius = helius
-        self._owns_client = helius is None
+        self._rpc = rpc
+        self._owns_client = rpc is None
         self._program_id = program_id or settings.PUMPFUN_PROGRAM_ID
 
     # --- Address derivation ---------------------------------------------------
@@ -125,7 +126,7 @@ class BondingCurveCollector:
         self, addresses: dict[str, str], *, outcome: CollectionOutcome
     ) -> list[CurveReading]:
         """Fetch and parse, in chunks the RPC will accept."""
-        client = self._helius or HeliusClient()
+        client = self._rpc or get_rpc()
         if self._owns_client:
             await client.start()
 
@@ -149,7 +150,7 @@ class BondingCurveCollector:
         mints: list[str],
         addresses: dict[str, str],
         *,
-        client: HeliusClient,
+        client: SolanaRPC,
         outcome: CollectionOutcome,
     ) -> list[CurveReading]:
         """One RPC read.
@@ -159,11 +160,13 @@ class BondingCurveCollector:
         run surfaced immediately.
         """
         try:
-            response = await client.call(
-                "getMultipleAccounts",
-                [[addresses[mint] for mint in mints], {"encoding": "base64"}],
+            # The interface's own batched read, rather than a raw `call`. The
+            # chunk limit and the "a short list is not an absent account" rule
+            # are properties of the RPC, so they live with it.
+            values = await client.get_multiple_accounts(
+                [addresses[mint] for mint in mints]
             )
-        except HeliusError as exc:
+        except RpcError as exc:
             # A whole chunk lost. Contained and counted: the curve history is a
             # series, so a missed read costs one point rather than the token.
             outcome.failed += len(mints)
@@ -173,7 +176,6 @@ class BondingCurveCollector:
             )
             return []
 
-        values = (response or {}).get("value") or []
         readings: list[CurveReading] = []
 
         for mint, value in zip(mints, values, strict=False):

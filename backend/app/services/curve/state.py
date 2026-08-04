@@ -18,11 +18,22 @@ little-endian `u64` fields and a one-byte flag.
     40      8     token_total_supply
     48      1     complete
 
-**This layout is unverified against mainnet.** The Helius plan is quota
-exhausted — every RPC method returns `429 max usage reached` — so no account has
-been read to confirm it. `parse` therefore checks invariants and returns `None`
-rather than a reading whenever they fail, so a wrong layout produces no signal
-instead of a plausible-looking wrong one. See the sprint notes and §14a.
+**This layout is verified against mainnet** (Sprint 13, via the standard RPC
+path added that sprint — no Helius key required to check it). An on-curve
+account's `real_token_reserves` and `token_total_supply` landed exactly on the
+documented pump.fun constants, and `complete_byte` sits at offset 48 as
+declared. `parse` still checks every invariant it can and returns `None` rather
+than a reading whenever one fails, so a *future* protocol change produces no
+signal instead of a plausible-looking wrong one — the same contract, kept for
+the same reason, now backed by a live read instead of only a hypothesis.
+
+**Completed accounts zero their reserves.** A live graduated account observed
+in Sprint 13 returned `complete_byte=1` with `virtual_token_reserves`,
+`virtual_sol_reserves`, `real_token_reserves` and `real_sol_reserves` all `0`,
+and `token_total_supply` unchanged at the seeded constant. That is pump.fun
+clearing the curve's balances on migration, not a misread — the "virtual
+reserves are seeded non-zero and never drain to zero" invariant is true only
+*while the curve is still open*, and `parse` now scopes it that way.
 """
 
 from __future__ import annotations
@@ -108,9 +119,11 @@ _INITIAL_REAL_TOKEN_RESERVES = 793_100_000_000_000
 def parse(data: bytes) -> CurveState | None:
     """Decode a curve account, or `None` when the bytes are not one.
 
-    Returns `None` rather than raising, and rather than guessing: the layout
-    above has not been confirmed against a live account, so every invariant
-    that can be checked is checked. A reading that fails them is not reported.
+    Returns `None` rather than raising, and rather than guessing: every
+    invariant that can be checked is checked, and a reading that fails one is
+    not reported. That stays true even though the layout is now verified live
+    (see the module docstring) — a future protocol change should still produce
+    no signal rather than a plausible-looking wrong one.
 
     This is the same contract the market adapters hold at their boundary —
     junk is coerced to absent, never to a number.
@@ -136,9 +149,15 @@ def parse(data: bytes) -> CurveState | None:
         return None
 
     values = (virtual_token, virtual_sol, real_token, real_sol, total_supply)
-    if any(value in (0, _U64_MAX) for value in (virtual_token, virtual_sol)):
-        # Virtual reserves are seeded non-zero at creation and never drain to
-        # zero; both extremes mean this is not the struct we think it is.
+    complete = complete_byte == 1
+
+    # `_U64_MAX` is a misread sentinel regardless of completion — nothing ever
+    # legitimately reports the ceiling. Zero virtual reserves, though, is only
+    # impossible on a curve that is still open: a completed migration clears
+    # them, which is exactly the account Sprint 13 observed live.
+    if any(value == _U64_MAX for value in (virtual_token, virtual_sol)):
+        return None
+    if not complete and any(value == 0 for value in (virtual_token, virtual_sol)):
         return None
     if any(value > total_supply for value in (real_token,)):
         return None
@@ -151,5 +170,5 @@ def parse(data: bytes) -> CurveState | None:
         real_token_reserves=real_token,
         real_sol_reserves=real_sol,
         token_total_supply=total_supply,
-        complete=complete_byte == 1,
+        complete=complete,
     )
