@@ -34,9 +34,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" data-mode="observatory" suppressHydrationWarning>
       <head>
-        {/* Applies the stored display mode before first paint, so a user who
-            chose Command never sees a flash of Observatory atmosphere. */}
-        <script dangerouslySetInnerHTML={{ __html: MODE_BOOT_SCRIPT }} />
+                <script dangerouslySetInnerHTML={{ __html: MODE_BOOT_SCRIPT }} />
       </head>
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         <Providers>{children}</Providers>

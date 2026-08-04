@@ -150,13 +150,13 @@ export default function TrackRecordPage() {
 
       <div className="flex flex-wrap gap-4 border-t border-line/60 pt-4">
         <Link
-          href="/radar"
+          href="/"
           className="text-sm text-plasma transition-colors hover:text-ink"
         >
           ← Back to the Radar
         </Link>
         <Link
-          href="/about"
+          href="/settings"
           className="text-sm text-ink-faint transition-colors hover:text-ink"
         >
           How scoring works

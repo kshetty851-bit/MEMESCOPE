@@ -87,7 +87,7 @@ export default function TokenDetailPage() {
         title="Not in the archive"
         body={`${shortenAddress(mint, 8, 8)} has not been discovered by LETZMOON. If it launched moments ago, SCOUT may still be resolving it.`}
         action={
-          <Link href="/feed">
+          <Link href="/">
             <Button variant="outline" size="sm">
               Back to Market Observatory
             </Button>
@@ -145,7 +145,7 @@ export default function TokenDetailPage() {
         </div>
 
         <div className="flex items-center gap-2">
-          <Link href="/feed">
+          <Link href="/">
             <Button variant="ghost" size="sm">
               ← Observatory
             </Button>

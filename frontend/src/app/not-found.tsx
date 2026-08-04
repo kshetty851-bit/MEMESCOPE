@@ -23,17 +23,13 @@ export default function NotFound() {
           SCOUT swept this sector. Nothing here.
         </h1>
         <p className="text-sm text-ink-faint">
-          The page you asked for does not exist. The division is still watching everything
-          that does.
+          That page does not exist.
         </p>
       </div>
 
       <div className="flex gap-3">
-        <Link href="/command">
-          <Button variant="primary">Return to Command Center</Button>
-        </Link>
-        <Link href="/feed">
-          <Button variant="outline">Open Market Observatory</Button>
+        <Link href="/">
+          <Button variant="primary">Back to the radar</Button>
         </Link>
       </div>
     </main>
