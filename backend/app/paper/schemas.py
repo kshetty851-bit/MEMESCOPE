@@ -213,6 +213,17 @@ class LabStrategyOut(BaseSchema):
     realised_return_pct: Decimal | None = None
     #: Share of trades still open — how much of the total is a mark, not a result.
     open_share_pct: Decimal | None = None
+    #: Return after the venue's published fee and the order's price impact,
+    #: over the trades whose pool depth was reported. Gross stays the headline;
+    #: this sits beside it.
+    net_return_pct: Decimal | None = None
+    #: What execution took, in percentage points, measured over the same subset
+    #: as `net_return_pct` so the two compare like with like.
+    cost_drag_pct: Decimal | None = None
+    #: Coverage of the net figure. Bonding-curve pairs report no liquidity and
+    #: are excluded rather than costed against an invented depth.
+    costed_trades: int = 0
+    uncosted_trades: int = 0
     #: Difference against the baseline, in percentage points. Null for the
     #: baseline itself — a benchmark does not differ from itself.
     baseline_difference_pct: Decimal | None = None
@@ -274,6 +285,10 @@ class LabOut(BaseSchema):
     observed_days: Decimal | None = None
     #: Why a lab return is not a wallet balance. Served on every response.
     methodology: str
+    #: What the net figures charge, and the three things they refuse to model.
+    cost_disclosure: str
+    #: The published rates the net figures apply, so a reader can check them.
+    cost_rules: list[LabRuleOut] = Field(default_factory=list)
     observed_at: datetime
 
 

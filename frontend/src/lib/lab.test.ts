@@ -23,6 +23,10 @@ function strategy(overrides: Partial<LabStrategy> = {}): LabStrategy {
     total_return_pct: "10.00",
     realised_return_pct: "5.00",
     open_share_pct: "20.00",
+    net_return_pct: "-5.00",
+    cost_drag_pct: "-10.00",
+    costed_trades: 80,
+    uncosted_trades: 0,
     baseline_difference_pct: "14.00",
     annualised_return_pct: null,
     annualised_unavailable_reason: "Not shown.",
@@ -81,6 +85,31 @@ describe("sortLab", () => {
     const first = strategy({ id: "p", rank: 1, total_return_pct: "10" });
     const second = strategy({ id: "q", rank: 4, total_return_pct: "10" });
     expect(sortLab([second, first], "total").map((row) => row.id)).toEqual(["p", "q"]);
+  });
+});
+
+describe("net of costs", () => {
+  it("sorts by net without disturbing the published rank as the tiebreak", () => {
+    const a = strategy({ id: "a", rank: 1, net_return_pct: "10" });
+    const b = strategy({ id: "b", rank: 2, net_return_pct: "40" });
+    expect(sortLab([a, b], "net").map((row) => row.id)).toEqual(["b", "a"]);
+  });
+
+  it("sinks a strategy with no costable trades rather than ranking it first", () => {
+    // Bonding-curve pairs report no depth; a rule covering none of them has
+    // not out-performed one that was measured.
+    const measured = strategy({ id: "m", rank: 2, net_return_pct: "-30" });
+    const unmeasured = strategy({ id: "u", rank: 1, net_return_pct: null });
+    expect(sortLab([unmeasured, measured], "net").map((row) => row.id)).toEqual([
+      "m",
+      "u",
+    ]);
+  });
+
+  it("keeps gross and net as separate fields so neither replaces the other", () => {
+    const row = strategy({ total_return_pct: "50", net_return_pct: "38" });
+    expect(row.total_return_pct).toBe("50");
+    expect(row.net_return_pct).toBe("38");
   });
 });
 

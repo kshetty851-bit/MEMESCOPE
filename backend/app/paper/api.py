@@ -26,7 +26,7 @@ from fastapi import APIRouter, Query
 from app.api.deps import DbSession
 from app.core.config import settings
 from app.models.paper import PaperPosition
-from app.paper import exits, lab
+from app.paper import costs, exits, lab
 from app.paper.lab_service import load_dataset, replay_all
 from app.paper.metrics import WalletMetrics
 from app.paper.models import PositionStatus
@@ -347,6 +347,23 @@ async def get_lab(session: DbSession) -> LabOut:
             else (Decimal(span.total_seconds()) / Decimal(86_400)).quantize(Decimal("0.1"))
         ),
         methodology=METHODOLOGY,
+        cost_disclosure=costs.DISCLOSURE,
+        cost_rules=[
+            LabRuleOut(
+                label="Swap fee",
+                value=f"{costs.DEFAULT.swap_fee_bps} bps per side",
+            ),
+            LabRuleOut(
+                label="Price impact",
+                value="Constant product against the pool depth observed at each end",
+            ),
+            LabRuleOut(label="Slippage from competing flow", value="Not modelled"),
+            LabRuleOut(label="Priority fees and MEV", value="Not modelled"),
+            LabRuleOut(
+                label="Bonding-curve pairs",
+                value="Excluded — the venue reports no liquidity",
+            ),
+        ],
         observed_at=now,
     )
 
@@ -405,6 +422,10 @@ def _to_lab_strategy(
         total_return_pct=result.total_return_pct,
         realised_return_pct=result.realised_return_pct,
         open_share_pct=result.open_share_pct,
+        net_return_pct=result.net_return_pct,
+        cost_drag_pct=result.cost_drag_pct,
+        costed_trades=result.costed_trades,
+        uncosted_trades=result.uncosted_trades,
         baseline_difference_pct=difference,
         annualised_return_pct=result.annualised_return_pct,
         annualised_unavailable_reason=result.annualised_unavailable_reason,
@@ -543,6 +564,37 @@ def _findings(
                     strategy_id=sid,
                 )
             )
+
+    # Execution cost is **progressive**, and that is the interesting part: the
+    # exit is charged on the position's value when it closes, so a rule that
+    # doubles a position sells twice the notional and pays twice the impact.
+    # The rules that win most pay most to leave.
+    costed = [
+        (sid, result)
+        for sid, result in results.items()
+        if result.net_return_pct is not None and result.cost_drag_pct is not None
+    ]
+    if costed:
+        sid, result = max(costed, key=lambda item: (item[1].net_return_pct, item[0]))
+        survivors = sum(1 for _, r in costed if (r.net_return_pct or Decimal(0)) > 0)
+        drags = [abs(r.cost_drag_pct or Decimal(0)) for _, r in costed]
+        findings.append(
+            LabFindingOut(
+                headline=(
+                    f"After execution costs, {survivors} of {len(costed)} rules stay positive"
+                ),
+                detail=(
+                    f"Fee and price impact take between {min(drags)} and "
+                    f"{max(drags)} points. The cost is progressive — the exit is "
+                    "charged on what the position is worth when it closes, so the "
+                    f"rules that win most pay most to leave. {names[sid]} nets "
+                    f"{result.net_return_pct}% over {result.costed_trades} costed "
+                    f"trades; {result.uncosted_trades} were excluded for reporting "
+                    "no pool depth."
+                ),
+                strategy_id=sid,
+            )
+        )
 
     stopped = [
         (sid, result.exits_by_reason.get("stop", 0), result.closed_count)

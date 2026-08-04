@@ -148,6 +148,14 @@ export interface LabStrategy {
   realised_return_pct: string | null;
   /** How much of the total is a mark rather than a result. */
   open_share_pct: string | null;
+  /** Return after the venue's fee and the order's price impact. Gross stays
+   *  the headline; this sits beside it. */
+  net_return_pct: string | null;
+  /** What execution took, in points, over the same subset as net. */
+  cost_drag_pct: string | null;
+  /** Coverage: bonding-curve pairs report no depth and are excluded. */
+  costed_trades: number;
+  uncosted_trades: number;
   baseline_difference_pct: string | null;
   annualised_return_pct: string | null;
   annualised_unavailable_reason: string | null;
@@ -195,6 +203,9 @@ export interface Lab {
   observed_days: string | null;
   /** Why a lab return is not a wallet balance. Render it. */
   methodology: string;
+  /** What the net figures charge, and what they refuse to model. Render it. */
+  cost_disclosure: string;
+  cost_rules: LabRule[];
   observed_at: string;
 }
 

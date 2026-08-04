@@ -35,6 +35,11 @@ const COLUMNS: { key: LabSortKey; label: string; hint?: string }[] = [
   { key: "rank", label: "#" },
   { key: "total", label: "Marked", hint: "Includes open positions at the latest price" },
   { key: "realised", label: "Realised", hint: "Closed trades only" },
+  {
+    key: "net",
+    label: "Net of costs",
+    hint: "After the venue's fee and the order's price impact",
+  },
   { key: "win", label: "Win rate" },
   { key: "drawdown", label: "Drawdown", hint: "Realised curve; smaller is better" },
   { key: "profit", label: "Profit factor" },
@@ -119,9 +124,21 @@ export default function StrategyLabPage() {
         </p>
       </header>
 
-      {/* The distinction that has to stay visible. */}
+      {/* The two distinctions that have to stay visible: what a lab return
+          is not, and what the net figures do and do not charge. */}
       <Panel density="compact" className="border-line/60">
         <p className="text-xs leading-relaxed text-ink-dim">{methodology}</p>
+        <p className="mt-3 text-xs leading-relaxed text-ink-dim">
+          {lab.data.cost_disclosure}
+        </p>
+        <dl className="mt-3 grid gap-x-6 gap-y-1 sm:grid-cols-2 lg:grid-cols-3">
+          {lab.data.cost_rules.map((rule) => (
+            <div key={rule.label} className="flex items-baseline justify-between gap-3">
+              <dt className="text-xs text-ink-faint">{rule.label}</dt>
+              <dd className="text-right text-xs text-ink-dim">{rule.value}</dd>
+            </div>
+          ))}
+        </dl>
       </Panel>
 
       {/* Findings first: they are the deliverable, and they are drawn only from
@@ -212,6 +229,20 @@ export default function StrategyLabPage() {
                   </td>
                   {/* Not signed: a win rate is a share, not a gain. "+36%"
                       reads as an improvement on something. */}
+                  {/* Net sits beside gross rather than replacing it. The
+                      published rules are frozen; this is a cost lens on the
+                      same trades, not a restatement of what they were. */}
+                  <td className="px-3 py-2 text-right">
+                    <Value value={row.net_return_pct} signed />
+                    {row.uncosted_trades > 0 ? (
+                      <span
+                        className="ml-1 text-xs text-ink-faint"
+                        title={`${row.uncosted_trades} trades reported no pool depth and are excluded from net.`}
+                      >
+                        ({row.costed_trades}/{row.costed_trades + row.uncosted_trades})
+                      </span>
+                    ) : null}
+                  </td>
                   <td className="px-3 py-2 text-right">
                     <Value
                       value={row.win_rate_pct === null ? null : `${row.win_rate_pct}%`}

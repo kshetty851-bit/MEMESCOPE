@@ -67,7 +67,11 @@ async def load_dataset(session: AsyncSession, *, now: datetime) -> LabDataset:
     for entry in entries:
         cutoff = entry.first_detected_at - _ENTRY_LOOKBACK
         quotes = tuple(
-            Quote(captured_at=row.captured_at, price_usd=row.price_usd)
+            Quote(
+                captured_at=row.captured_at,
+                price_usd=row.price_usd,
+                liquidity_usd=row.liquidity_usd,
+            )
             for row in series.get(entry.mint_address, [])
             if row.price_usd is not None and row.price_usd > 0 and row.captured_at >= cutoff
         )

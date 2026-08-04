@@ -317,3 +317,81 @@ class TestApi:
         loser = [i for i in body["items"] if i["mint_address"] == LOSER]
 
         assert loser and loser[0]["best_strategy_id"] is None
+
+
+class TestExecutionCosts:
+    """Net beside gross, never replacing it.
+
+    The published rules are frozen; this is a cost lens on the same trades, not
+    a restatement of what those trades were.
+    """
+
+    async def test_gross_is_still_served_beside_net(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        await _dataset(db_session)
+        await db_session.commit()
+
+        body = (await client.get("/api/v1/paper/lab")).json()
+
+        for strategy in body["strategies"]:
+            assert "total_return_pct" in strategy
+            assert "net_return_pct" in strategy
+            # Ranking is still on gross — the frozen benchmark's standing must
+            # not move because a cost model was added.
+            assert strategy["rank"] >= 1
+
+    async def test_net_is_never_better_than_gross(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """A venue does not pay you to trade."""
+        await _dataset(db_session)
+        await db_session.commit()
+
+        body = (await client.get("/api/v1/paper/lab")).json()
+
+        for strategy in body["strategies"]:
+            if strategy["cost_drag_pct"] is None:
+                continue
+            assert Decimal(strategy["cost_drag_pct"]) <= 0, strategy["id"]
+
+    async def test_coverage_of_the_net_figure_is_published(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """Bonding-curve pairs report no depth and are excluded. How many is a
+        fact a reader is entitled to, not a footnote."""
+        await _dataset(db_session)
+        await db_session.commit()
+
+        body = (await client.get("/api/v1/paper/lab")).json()
+
+        for strategy in body["strategies"]:
+            total = strategy["costed_trades"] + strategy["uncosted_trades"]
+            assert total == strategy["closed_count"] + strategy["open_count"]
+
+    async def test_the_refusals_ship_with_the_model(self, client: AsyncClient) -> None:
+        """Slippage, priority fees and MEV are not modelled, and the page says
+        so rather than letting a net figure imply completeness."""
+        body = (await client.get("/api/v1/paper/lab")).json()
+
+        disclosure = body["cost_disclosure"].lower()
+        assert "slippage" in disclosure
+        assert "mev" in disclosure or "priority" in disclosure
+        assert body["cost_rules"]
+        labels = {rule["label"] for rule in body["cost_rules"]}
+        assert "Swap fee" in labels
+        assert "Price impact" in labels
+
+    async def test_the_baseline_is_still_the_baseline_after_costs(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """Adding a cost lens must not promote or demote the frozen benchmark."""
+        await _dataset(db_session)
+        await db_session.commit()
+
+        body = (await client.get("/api/v1/paper/lab")).json()
+        baseline = [s for s in body["strategies"] if s["is_baseline"]]
+
+        assert len(baseline) == 1
+        assert baseline[0]["id"] == "equal_weight_v1"
+        assert baseline[0]["baseline_difference_pct"] is None

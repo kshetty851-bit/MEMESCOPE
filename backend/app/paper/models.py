@@ -61,6 +61,11 @@ class Quote:
 
     captured_at: datetime
     price_usd: Decimal
+    #: Pool depth at this reading, when the venue reports it. `None` on
+    #: bonding-curve pairs, which report no liquidity at all (ADR 0002) — the
+    #: execution-cost model excludes those trades rather than costing them
+    #: against an invented depth.
+    liquidity_usd: Decimal | None = None
 
 
 @dataclass(frozen=True, slots=True)

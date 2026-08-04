@@ -142,6 +142,7 @@ export type LabSortKey =
   | "rank"
   | "total"
   | "realised"
+  | "net"
   | "win"
   | "drawdown"
   | "profit"
@@ -154,6 +155,8 @@ export function sortLab(items: LabStrategy[], key: LabSortKey): LabStrategy[] {
         return n(item.total_return_pct) ?? -Infinity;
       case "realised":
         return n(item.realised_return_pct) ?? -Infinity;
+      case "net":
+        return n(item.net_return_pct) ?? -Infinity;
       case "win":
         return n(item.win_rate_pct) ?? -Infinity;
       case "drawdown":

@@ -33,7 +33,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from decimal import Decimal
 
-from app.paper import exits
+from app.paper import costs, exits
 from app.paper.models import ExitReason, Quote
 
 _ZERO = Decimal(0)
@@ -79,6 +79,11 @@ class Trade:
     peak_price: Decimal
     #: Latest observed price, for a position still running.
     mark_price: Decimal | None
+    #: Pool depth at entry and at settlement. `None` on bonding-curve pairs,
+    #: which report no liquidity — such a trade is excluded from net entirely
+    #: rather than costed against a depth nobody observed.
+    entry_liquidity: Decimal | None = None
+    settle_liquidity: Decimal | None = None
 
     @property
     def is_open(self) -> bool:
@@ -119,6 +124,37 @@ class Trade:
         if price is None or self.peak_price <= 0:
             return None
         return (self.peak_price - price) / self.peak_price * _HUNDRED
+
+    @property
+    def execution_costs(self) -> costs.RoundTrip | None:
+        """What the venue would have taken, or `None` if depth is unknown."""
+        settle = self.settle_price
+        if settle is None or self.entry_price <= 0:
+            return None
+        exit_notional = TRADE_SIZE * settle / self.entry_price
+        return costs.round_trip(
+            entry_notional=TRADE_SIZE,
+            entry_liquidity=self.entry_liquidity,
+            exit_notional=exit_notional,
+            exit_liquidity=self.settle_liquidity,
+        )
+
+    @property
+    def net_pnl(self) -> Decimal | None:
+        """Profit after fee and price impact on both sides.
+
+        `None` when the trade cannot be costed. The caller excludes it from the
+        net aggregate rather than reporting it as costless, which would flatter
+        exactly the thin-pool trades most likely to be expensive.
+        """
+        found = self.execution_costs
+        settle = self.settle_price
+        if found is None or settle is None or self.entry_price <= 0:
+            return None
+        exit_notional = TRADE_SIZE * settle / self.entry_price
+        return costs.net_proceeds(
+            entry_notional=TRADE_SIZE, exit_notional=exit_notional, costs=found
+        )
 
     @property
     def hold_hours(self) -> Decimal | None:
@@ -168,6 +204,15 @@ class LabResult:
     average_peak_pct: Decimal | None
     average_giveback_pct: Decimal | None
     exits_by_reason: dict[str, int]
+    #: Return after the venue's fee and the order's price impact, over the
+    #: trades that could be costed. `None` when none could.
+    net_return_pct: Decimal | None = None
+    #: What execution took, in percentage points of the gross figure.
+    cost_drag_pct: Decimal | None = None
+    #: How many trades the net figure covers, and how many were excluded for
+    #: reporting no pool depth. Published so the coverage is checkable.
+    costed_trades: int = 0
+    uncosted_trades: int = 0
     equity_curve: tuple[EquityPoint, ...] = field(default=())
     #: Per-trade returns, for the distribution chart. Closed trades only.
     return_distribution: tuple[Decimal, ...] = field(default=())
@@ -176,6 +221,19 @@ class LabResult:
 
 def _quantize(value: Decimal | None, places: str = "0.01") -> Decimal | None:
     return None if value is None else value.quantize(Decimal(places))
+
+
+def _liquidity_at(quotes: Sequence[Quote], moment: datetime) -> Decimal | None:
+    """Pool depth at a given observation, or `None` if that reading had none.
+
+    The exit is costed against the depth observed *when it closed*, not against
+    the latest reading — a pool that drained afterwards did not affect a trade
+    that had already left it, and one that filled up afterwards did not help it.
+    """
+    for quote in quotes:
+        if quote.captured_at == moment:
+            return quote.liquidity_usd
+    return None
 
 
 def replay(detections: Sequence[Detection], strategy: exits.LabStrategy) -> LabResult:
@@ -216,6 +274,10 @@ def replay(detections: Sequence[Detection], strategy: exits.LabStrategy) -> LabR
                 reason=None if found is None else found.reason,
                 peak_price=peak,
                 mark_price=detection.quotes[-1].price_usd if found is None else None,
+                entry_liquidity=first.liquidity_usd,
+                settle_liquidity=_liquidity_at(detection.quotes, found.at)
+                if found is not None
+                else detection.quotes[-1].liquidity_usd,
             )
         )
 
@@ -247,6 +309,25 @@ def _summarise(strategy_id: str, trades: tuple[Trade, ...]) -> LabResult:
 
     curve = _equity_curve(invested, closed)
 
+    # Net is computed only over trades whose depth was reported. Bonding-curve
+    # pairs report none, so they are excluded and counted rather than costed
+    # against a depth nobody observed.
+    costed = [trade for trade in trades if trade.net_pnl is not None]
+    net_invested = TRADE_SIZE * len(costed)
+    net_return = (
+        None
+        if net_invested <= 0
+        else sum((trade.net_pnl or _ZERO for trade in costed), _ZERO) / net_invested * _HUNDRED
+    )
+    # Gross measured over the *same* subset, so the drag compares like with
+    # like — differencing net against the all-trades gross would attribute the
+    # excluded trades' performance to execution cost.
+    gross_on_costed = (
+        None
+        if net_invested <= 0
+        else sum((trade.pnl or _ZERO for trade in costed), _ZERO) / net_invested * _HUNDRED
+    )
+
     return LabResult(
         strategy_id=strategy_id,
         trades=trades,
@@ -258,6 +339,14 @@ def _summarise(strategy_id: str, trades: tuple[Trade, ...]) -> LabResult:
             if not trades
             else _quantize(Decimal(len(still_open)) / Decimal(len(trades)) * _HUNDRED)
         ),
+        net_return_pct=_quantize(net_return),
+        cost_drag_pct=(
+            None
+            if net_return is None or gross_on_costed is None
+            else _quantize(net_return - gross_on_costed)
+        ),
+        costed_trades=len(costed),
+        uncosted_trades=len(trades) - len(costed),
         annualised_return_pct=_annualised(total_return, trades),
         annualised_unavailable_reason=_annualise_reason(trades),
         closed_count=len(closed),
