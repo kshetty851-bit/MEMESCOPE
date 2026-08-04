@@ -17,8 +17,16 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Query
 
 from app.api.deps import DbSession
+from app.core.config import settings
 from app.core.exceptions import NotFoundError
-from app.models.radar import RadarToken
+from app.models.opportunity import OpportunitySignal
+from app.models.radar import RadarSnapshot, RadarToken
+
+# Aliased: `app.radar.explain` is a module and is already imported below under
+# its own name. Two packages legitimately own an `explain`.
+from app.opportunities.explain import explain as explain_signal
+from app.opportunities.models import SignalType
+from app.opportunities.repository import OpportunityRepository
 from app.radar import achievements as achievement_tiers
 from app.radar import detector, explain, scorer
 from app.radar.models import RadarCategory, RadarDimension, RadarReason
@@ -37,11 +45,13 @@ from app.radar.schemas import (
     RadarEntryOut,
     RadarHistoryOut,
     RadarPage,
+    RadarSignalOut,
     RadarSnapshotOut,
     ReasonOut,
     TierCount,
     TimelineEventOut,
 )
+from app.services.market_context import TokenContext, resolve_token_context
 from app.services.pumpfun_radar import PumpfunRadarScanner
 
 router = APIRouter(prefix="/radar", tags=["radar"])
@@ -120,6 +130,91 @@ def _to_base_rate(category: str, raw: dict[str, Any] | None) -> BaseRateOut | No
     )
 
 
+async def _live_signals_for(
+    session: DbSession, mints: list[str], *, now: datetime
+) -> dict[str, OpportunitySignal]:
+    """The strongest live signal per mint, for a whole page, in two queries.
+
+    Returns at most one signal per token: the Radar row has one "why now" line,
+    and `live_signals_for` already orders by confidence, so the first is the
+    engine's own strongest claim rather than a choice made here.
+
+    Empty — never absent — while the engine is switched off. A Radar row is
+    ranked by the Radar score, and it stays a complete row without a signal;
+    the signal is the answer to "why now", not to "is this worth ranking".
+    """
+    if not mints or not settings.FEATURE_OPPORTUNITY_ENGINE_ENABLED:
+        return {}
+
+    repository = OpportunityRepository(session)
+    live = await repository.live_for(mints)
+    if not live:
+        return {}
+
+    by_opportunity = await repository.live_signals_for(
+        [opportunity.id for opportunity in live.values()], now=now
+    )
+    strongest: dict[str, OpportunitySignal] = {}
+    for mint, opportunity in live.items():
+        found = by_opportunity.get(opportunity.id) or []
+        if found:
+            strongest[mint] = found[0]
+    return strongest
+
+
+def _risk_from(snapshot: RadarSnapshot | None) -> tuple[Decimal | None, list[str]]:
+    """Risk score and its reasons, from the newest recorded snapshot.
+
+    Read from the stored dimension breakdown rather than recomputed, so the
+    risk beside a row is the one the sweep that produced that row measured. A
+    dimension the sweep could not assess returns `None` and keeps its reasons —
+    "not checked" is a fact worth showing, and it is already charged to
+    `coverage`.
+    """
+    if snapshot is None:
+        return None, []
+
+    dimensions = snapshot.dimensions or {}
+    risk = dimensions.get("risk") if isinstance(dimensions, dict) else None
+    if not isinstance(risk, dict):
+        return None, []
+
+    raw = risk.get("score")
+    reasons = [str(code) for code in risk.get("reasons") or []]
+    if raw is None or not risk.get("available", False):
+        return None, reasons
+    return Decimal(str(raw)).quantize(Decimal("0.01")), reasons
+
+
+def _to_radar_signal(
+    signal: OpportunitySignal | None, *, now: datetime
+) -> RadarSignalOut | None:
+    """Render the live signal beside a row, or `None` when nothing is live.
+
+    Reuses the board's own explanation renderer rather than writing a second
+    one: the Radar and the board must never describe the same signal in two
+    different sentences.
+    """
+    if signal is None:
+        return None
+
+    signal_type = SignalType(signal.signal_type)
+    rendered = explain_signal(
+        signal_type=signal_type,
+        reason_codes=tuple(signal.reason_codes or ()),
+        evidence=tuple(signal.evidence or ()),
+    )
+    return RadarSignalOut(
+        signal_type=signal.signal_type,
+        provider=signal.provider_id,
+        severity=signal.severity,
+        headline=rendered.headline,
+        why_now=rendered.trigger,
+        confidence=signal.confidence,
+        expires_in_seconds=max(0, int((signal.expires_at - now).total_seconds())),
+    )
+
+
 def _to_entry(
     entry: RadarToken,
     now: datetime,
@@ -127,6 +222,10 @@ def _to_entry(
     tiers: dict[str, list[str]] | None = None,
     alive: set[str] | None = None,
     base_rates: dict[str, dict[str, Any]] | None = None,
+    *,
+    context: TokenContext | None = None,
+    snapshots: dict[str, RadarSnapshot] | None = None,
+    signals: dict[str, OpportunitySignal] | None = None,
 ) -> RadarEntryOut:
     """Assemble one Radar entry.
 
@@ -134,12 +233,26 @@ def _to_entry(
     usable without a lookup, but omitting it renders every entry nameless: the
     schema declares both fields and `RadarToken` stores neither, so they were
     previously always null on every Radar surface.
+
+    `context`, `snapshots` and `signals` are the Sprint 23 additions and are
+    optional for the same reason: a caller that has not resolved them renders a
+    row without a market strip rather than a row with an invented one.
     """
-    name, symbol = (names or {}).get(entry.mint_address, (None, None))
+    mint = entry.mint_address
+    name, symbol = (names or {}).get(mint, (None, None))
+    resolved = context or TokenContext.empty()
+    risk_score, risk_reasons = _risk_from((snapshots or {}).get(mint))
+    snapshot = (snapshots or {}).get(mint)
     return RadarEntryOut(
         mint_address=entry.mint_address,
         name=name,
         symbol=symbol,
+        market=resolved.strip_for(mint),
+        age_seconds=resolved.age_seconds(mint, now=now),
+        risk_score=risk_score,
+        risk_reasons=risk_reasons,
+        evidence=snapshot.coverage if snapshot is not None else None,
+        signal=_to_radar_signal((signals or {}).get(mint), now=now),
         category=entry.current_category,
         original_category=entry.category,
         opportunity_score=entry.current_opportunity_score,
@@ -297,7 +410,23 @@ async def get_leaderboard(
     tiers = await repository.tiers_for(board_mints)
     alive = await repository.observed_within(board_mints, since=now - LIVENESS_WINDOW)
     rates = await repository.base_rates()
-    return [_to_entry(entry, now, names, tiers, alive, rates) for entry in entries]
+    context = await resolve_token_context(session, board_mints, now=now)
+    snapshots = await repository.latest_snapshots_for(board_mints)
+    signals = await _live_signals_for(session, board_mints, now=now)
+    return [
+        _to_entry(
+            entry,
+            now,
+            names,
+            tiers,
+            alive,
+            rates,
+            context=context,
+            snapshots=snapshots,
+            signals=signals,
+        )
+        for entry in entries
+    ]
 
 
 @router.get("/achievements", response_model=list[AchievementOut], summary="Recent milestones")
@@ -353,10 +482,24 @@ async def list_radar(
     alive = await repository.observed_within(mints, since=now - LIVENESS_WINDOW)
     # One grouped query for the whole page, not one per row.
     rates = await repository.base_rates()
+    context = await resolve_token_context(session, mints, now=now)
+    snapshots = await repository.latest_snapshots_for(mints)
+    signals = await _live_signals_for(session, mints, now=now)
 
     return RadarPage(
         items=[
-            _to_entry(entry, now, names, tiers, alive, rates) for entry in entries
+            _to_entry(
+                entry,
+                now,
+                names,
+                tiers,
+                alive,
+                rates,
+                context=context,
+                snapshots=snapshots,
+                signals=signals,
+            )
+            for entry in entries
         ],
         total=total,
         page=page,
@@ -531,6 +674,9 @@ async def get_entry(session: DbSession, mint: str) -> RadarDetailOut:
             [entry.mint_address], since=now - LIVENESS_WINDOW
         ),
         await repository.base_rates(),
+        context=await resolve_token_context(session, [entry.mint_address], now=now),
+        snapshots=await repository.latest_snapshots_for([entry.mint_address]),
+        signals=await _live_signals_for(session, [entry.mint_address], now=now),
     )
 
     dimensions: list[DimensionOut] = []

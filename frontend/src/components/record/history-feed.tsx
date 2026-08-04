@@ -86,7 +86,10 @@ export function HistoryFeed() {
         const { icon, text } = describe(event);
         return (
           <li
-            key={`${event.kind}-${event.mint_address}-${event.occurred_at}`}
+            // Tier is part of the key because a token that crosses 2× and 5× in
+            // one sweep earns both milestones at the same instant — without it
+            // React drops one of two real events.
+            key={`${event.kind}-${event.mint_address}-${event.occurred_at}-${event.tier ?? ""}`}
             className="flex items-center gap-3 border-b border-line/50 py-2 last:border-0"
           >
             <span className="w-6 shrink-0 text-center" aria-hidden>

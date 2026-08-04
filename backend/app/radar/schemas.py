@@ -13,6 +13,7 @@ from decimal import Decimal
 from pydantic import Field
 
 from app.schemas.common import BaseSchema
+from app.schemas.market_strip import MarketStripOut
 
 
 class DimensionOut(BaseSchema):
@@ -71,6 +72,29 @@ class BaseRateOut(BaseSchema):
     minimum_sample: int = 0
 
 
+class RadarSignalOut(BaseSchema):
+    """The live signal beside a Radar row, if the engine has one.
+
+    A deliberate subset of the board's `SignalOut`: the Radar answers "should I
+    care, and why now?" in one line, and the full evidence list belongs on the
+    token page. Every string here is rendered by the backend from stable reason
+    codes — the client never composes prose about a token.
+    """
+
+    signal_type: str
+    provider: str
+    severity: str
+    #: The engine's own headline for the transition. Displayed verbatim.
+    headline: str
+    #: One sentence on what changed. This is the "why now" column.
+    why_now: str
+    #: What the engine derived from the provider's claim, 0-100.
+    confidence: Decimal
+    #: Seconds until the claim lapses. A signal is a statement with a shelf
+    #: life, and a row that does not show it invites acting on a stale one.
+    expires_in_seconds: int
+
+
 class RadarEntryOut(BaseSchema):
     """A Radar opportunity, with everything measured from first detection."""
 
@@ -120,6 +144,30 @@ class RadarEntryOut(BaseSchema):
     #: How past detections in this same category actually performed. A property
     #: of the category, not a prediction about this token.
     base_rate: BaseRateOut | None = None
+
+    # --- Sprint 23: what a trader needs before acting on a row ---------------
+
+    #: Price, size and flow as last observed. `None` when the token has never
+    #: been priced — never a zeroed strip.
+    market: MarketStripOut | None = None
+    #: Seconds since the mint existed on chain, falling back to when we first
+    #: saw it. `None` when neither is known.
+    age_seconds: int | None = None
+    #: The risk dimension from the newest recorded snapshot, 0-100, where a
+    #: **low** score is the dangerous one — it is scored like every other
+    #: dimension, so "good" is high throughout. `None` when the sweep could not
+    #: assess risk, which is charged to `evidence` rather than hidden.
+    risk_score: Decimal | None = None
+    #: The reason codes behind that risk score, verbatim from the snapshot.
+    risk_reasons: list[str] = Field(default_factory=list)
+    #: Share of the model's declared weight that had data when this row was
+    #: last scored, 0-100. This is the honesty number: a 90 scored on a third
+    #: of the model is not the same claim as a 90 scored on all of it.
+    evidence: Decimal | None = None
+    #: The live Opportunity Engine signal for this token, when one exists. The
+    #: Radar ranks; the signal says what changed and when the claim expires.
+    #: `None` means nothing is live — never that nothing ever happened.
+    signal: RadarSignalOut | None = None
 
 
 class RadarDetailOut(RadarEntryOut):

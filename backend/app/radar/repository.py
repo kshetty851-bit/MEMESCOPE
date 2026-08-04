@@ -479,6 +479,35 @@ class RadarRepository:
         )
         return found
 
+    async def latest_snapshots_for(
+        self, mints: Sequence[str]
+    ) -> dict[str, RadarSnapshot]:
+        """The newest snapshot per mint, for a whole page, in one query.
+
+        `DISTINCT ON` rather than a correlated subquery per row: the Radar list
+        renders risk and evidence for every entry, and a query per entry is the
+        N+1 that made the board unusable before Sprint 23.
+
+        The stored snapshot is used rather than a recompute because the two must
+        agree — the dimension breakdown behind a row's risk score is the one the
+        sweep actually recorded, not a fresh evaluation that could disagree with
+        the score sitting next to it.
+        """
+        unique = list(dict.fromkeys(mints))
+        if not unique:
+            return {}
+
+        rows = await self._session.scalars(
+            select(RadarSnapshot)
+            .where(RadarSnapshot.mint_address.in_(unique))
+            .distinct(RadarSnapshot.mint_address)
+            .order_by(
+                RadarSnapshot.mint_address,
+                RadarSnapshot.captured_at.desc(),
+            )
+        )
+        return {row.mint_address: row for row in rows.all()}
+
     async def snapshots(
         self, mint_address: str, *, limit: int = 200
     ) -> Sequence[RadarSnapshot]:

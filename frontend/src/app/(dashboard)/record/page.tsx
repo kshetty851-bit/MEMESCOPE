@@ -8,7 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/states";
 import { HistoryFeed } from "@/components/record/history-feed";
 import { Journey } from "@/components/record/journey";
-import { TokenActions } from "@/components/record/token-actions";
+import { TokenActions } from "@/components/token/token-actions";
 import { useRadar, useRadarBenchmark, useRadarPerformance } from "@/hooks/use-radar";
 import { formatMultiple } from "@/lib/radar";
 import { cn } from "@/lib/utils";

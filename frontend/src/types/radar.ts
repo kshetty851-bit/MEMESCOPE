@@ -40,6 +40,39 @@ export interface RadarAchievement {
   days_to_achieve: string | null;
 }
 
+/**
+ * Price, size and flow as last observed. Shared verbatim with the Opportunity
+ * board — one object, two surfaces, so they cannot disagree about a token.
+ *
+ * The whole object is nullable and so is every field: a token nobody has
+ * priced must render as "no market data", never as being worth zero.
+ */
+export interface MarketStrip {
+  price_usd: string | null;
+  market_cap: string | null;
+  liquidity_usd: string | null;
+  volume_24h: string | null;
+  /** Null when no reading exists from a full 24h back. Never 0%. */
+  change_24h_pct: string | null;
+  captured_at: string | null;
+  dex_name: string | null;
+}
+
+/**
+ * The live signal beside a Radar row. Null means nothing is live right now —
+ * never that nothing ever happened.
+ */
+export interface RadarSignal {
+  signal_type: string;
+  provider: string;
+  severity: string;
+  /** Rendered by the backend. The client never composes these. */
+  headline: string;
+  why_now: string;
+  confidence: string;
+  expires_in_seconds: number;
+}
+
 export interface RadarEntry {
   mint_address: string;
   name: string | null;
@@ -78,6 +111,44 @@ export interface RadarEntry {
   liveness: string;
   model_version: string;
   last_evaluated_at: string;
+
+  /** How past detections in this category actually performed. Not a forecast. */
+  base_rate: BaseRate | null;
+
+  market: MarketStrip | null;
+  /** Seconds since the mint existed on chain. Null when unknown, never 0. */
+  age_seconds: number | null;
+  /**
+   * Risk from the last recorded sweep, 0–100, scored like every other
+   * dimension — so a **low** number is the dangerous one. Null when the sweep
+   * had no source, which is charged to `evidence` rather than hidden.
+   */
+  risk_score: string | null;
+  risk_reasons: string[];
+  /** Share of the model's weight that had data, 0–100. The honesty number. */
+  evidence: string | null;
+  signal: RadarSignal | null;
+}
+
+/**
+ * What happened to past detections of this kind. Measured history, never a
+ * forecast — it makes no claim about the token in front of you.
+ *
+ * When `sufficient` is false the surface must print `insufficient_reason`
+ * instead of a percentage: a rate from n=1 is noise wearing evidence's costume.
+ */
+export interface BaseRate {
+  category: string;
+  sample: number;
+  reached_2x: number;
+  reached_5x: number;
+  reached_10x: number;
+  reached_100x: number;
+  median_peak_multiple: string | null;
+  median_current_multiple: string | null;
+  sufficient: boolean;
+  insufficient_reason: string | null;
+  minimum_sample: number;
 }
 
 export interface RadarDetail extends RadarEntry {
