@@ -21,14 +21,9 @@ from app.core.config import settings
 from app.core.exceptions import NotFoundError
 from app.models.opportunity import OpportunitySignal
 from app.models.radar import RadarSnapshot, RadarToken
-
-# Aliased: `app.radar.explain` is a module and is already imported below under
-# its own name. Two packages legitimately own an `explain`.
-from app.opportunities.explain import explain as explain_signal
-from app.opportunities.models import SignalType
 from app.opportunities.repository import OpportunityRepository
 from app.radar import achievements as achievement_tiers
-from app.radar import detector, explain, scorer
+from app.radar import detector, explain, readout, scorer
 from app.radar.models import RadarCategory, RadarDimension, RadarReason
 from app.radar.repository import RadarRepository
 from app.radar.schemas import (
@@ -50,6 +45,7 @@ from app.radar.schemas import (
     ReasonOut,
     TierCount,
     TimelineEventOut,
+    WhyNowOut,
 )
 from app.services.market_context import TokenContext, resolve_token_context
 from app.services.pumpfun_radar import PumpfunRadarScanner
@@ -191,26 +187,26 @@ def _to_radar_signal(
 ) -> RadarSignalOut | None:
     """Render the live signal beside a row, or `None` when nothing is live.
 
-    Reuses the board's own explanation renderer rather than writing a second
-    one: the Radar and the board must never describe the same signal in two
-    different sentences.
+    Sprint 24 narrowed this to a code and a label. The board's explanation
+    renderer is no longer called here: it produces the engine's own phrasing
+    ("Freshly graduated"), which is right on a card that also shows the
+    evidence list and wrong on a row read in three seconds. `readout` owns the
+    trader-facing wording for both, so the two surfaces still cannot disagree —
+    they now share a vocabulary rather than a sentence.
+
+    An unlabelled signal type renders `None`. A provider shipping ahead of its
+    label leaves the row without a signal, never with `pre_breakout` on screen.
     """
     if signal is None:
         return None
 
-    signal_type = SignalType(signal.signal_type)
-    rendered = explain_signal(
-        signal_type=signal_type,
-        reason_codes=tuple(signal.reason_codes or ()),
-        evidence=tuple(signal.evidence or ()),
-    )
+    label = readout.signal_label(signal.signal_type)
+    if label is None:
+        return None
+
     return RadarSignalOut(
         signal_type=signal.signal_type,
-        provider=signal.provider_id,
-        severity=signal.severity,
-        headline=rendered.headline,
-        why_now=rendered.trigger,
-        confidence=signal.confidence,
+        label=label,
         expires_in_seconds=max(0, int((signal.expires_at - now).total_seconds())),
     )
 
@@ -243,6 +239,18 @@ def _to_entry(
     resolved = context or TokenContext.empty()
     risk_score, risk_reasons = _risk_from((snapshots or {}).get(mint))
     snapshot = (snapshots or {}).get(mint)
+    signal = (signals or {}).get(mint)
+    # Derived from rows already loaded — `detection_reason` and
+    # `current_multiple` sit on the entry, and the signal was batched with the
+    # page. The sentence costs no query.
+    explanation = readout.why_now(
+        now=now,
+        signal_type=signal.signal_type if signal is not None else None,
+        signal_detected_at=signal.detected_at if signal is not None else None,
+        current_multiple=entry.current_multiple,
+        detection_reasons=tuple(entry.detection_reason or ()),
+        first_detected_at=entry.first_detected_at,
+    )
     return RadarEntryOut(
         mint_address=entry.mint_address,
         name=name,
@@ -250,9 +258,11 @@ def _to_entry(
         market=resolved.strip_for(mint),
         age_seconds=resolved.age_seconds(mint, now=now),
         risk_score=risk_score,
+        risk_band=readout.risk_band(risk_score),
         risk_reasons=risk_reasons,
         evidence=snapshot.coverage if snapshot is not None else None,
-        signal=_to_radar_signal((signals or {}).get(mint), now=now),
+        signal=_to_radar_signal(signal, now=now),
+        why_now=WhyNowOut(code=explanation.code, sentence=explanation.sentence),
         category=entry.current_category,
         original_category=entry.category,
         opportunity_score=entry.current_opportunity_score,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import Link from "next/link";
 
 import { RadarRow } from "@/components/radar/radar-row";
@@ -9,8 +9,6 @@ import { Label, Panel } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/states";
 import { useRadar } from "@/hooks/use-radar";
-import { sortRadarEntries, type RadarSortKey } from "@/lib/radar-row";
-import { cn } from "@/lib/utils";
 
 /**
  * THE RADAR — the homepage.
@@ -26,29 +24,23 @@ import { cn } from "@/lib/utils";
  *
  * **An empty Radar is a truthful Radar.** It means nothing currently clears the
  * model's floor, and it is never to be "fixed" by relaxing admission.
+ *
+ * There is no sort control. The Radar has one ranking, and re-ordering ten rows
+ * by peak or age leaves the rank number beside each one saying something that
+ * is no longer true. Sorting the permanent record is the Track Record's job,
+ * where the rank is not a claim.
  */
 
 const TOP_N = 10;
 
-const SORTS: { key: RadarSortKey; label: string }[] = [
-  { key: "score", label: "Radar score" },
-  { key: "peak", label: "Peak" },
-  { key: "current", label: "Current" },
-  { key: "age", label: "Newest" },
-];
-
 export default function RadarPage() {
-  const [sort, setSort] = useState<RadarSortKey>("score");
-
-  // Ranked server-side by score; the page holds exactly what it shows. Sorting
-  // re-orders those ten, and never silently swaps in an eleventh.
+  // Ranked server-side by score; the page holds exactly what it shows.
   const { data, isPending, isError, refetch, isFetching } = useRadar({
     pageSize: TOP_N,
     sort: "score",
   });
 
-  const items = useMemo(() => data?.items ?? [], [data]);
-  const visible = useMemo(() => sortRadarEntries(items, sort), [items, sort]);
+  const visible = useMemo(() => data?.items ?? [], [data]);
   const total = data?.total ?? 0;
 
   return (
@@ -70,25 +62,6 @@ export default function RadarPage() {
           <span>{isFetching ? "Refreshing" : "Every 2 min"}</span>
         </div>
       </header>
-
-      <div className="flex flex-wrap items-center gap-1">
-        {SORTS.map((option) => (
-          <button
-            key={option.key}
-            type="button"
-            onClick={() => setSort(option.key)}
-            aria-pressed={sort === option.key}
-            className={cn(
-              "rounded-chip border px-2.5 py-1 text-xs transition-colors",
-              sort === option.key
-                ? "border-line-bright bg-elevated text-ink"
-                : "border-line text-ink-faint hover:border-line-bright hover:text-ink",
-            )}
-          >
-            {option.label}
-          </button>
-        ))}
-      </div>
 
       {isError ? (
         <ErrorState

@@ -67,34 +67,45 @@ export function expiresIn(seconds: number | null | undefined): string | null {
 }
 
 /**
- * Risk, in words.
+ * Risk, in one word.
  *
- * The score is a dimension like every other, so **high is safe** — the exact
- * inversion a reader will assume wrong if the number is shown bare. Never
- * returns a band for an unmeasured risk.
+ * The band itself is cut on the server, beside the number that produced it, so
+ * this only names it. A band the client has not learned renders as unmeasured
+ * rather than as its raw code.
  */
-export function riskBand(
-  value: string | null | undefined,
+const RISK_LABEL: Record<string, { label: string; tone: "safe" | "warn" | "danger" }> = {
+  low: { label: "Low", tone: "safe" },
+  medium: { label: "Medium", tone: "warn" },
+  high: { label: "High", tone: "danger" },
+  extreme: { label: "Extreme", tone: "danger" },
+};
+
+export function riskLabel(
+  band: string | null | undefined,
 ): { label: string; tone: "safe" | "warn" | "danger" } | null {
-  const score = n(value);
-  if (score === null) return null;
-  if (score >= 70) return { label: "Low risk", tone: "safe" };
-  if (score >= 40) return { label: "Elevated risk", tone: "warn" };
-  return { label: "High risk", tone: "danger" };
+  if (!band) return null;
+  return RISK_LABEL[band] ?? null;
 }
 
 /**
- * Evidence, in words. The share of the model that had data when this row was
- * scored — a 90 scored on a third of the model is not a 90.
+ * Evidence as four dots.
+ *
+ * A percentage invites arithmetic nobody wants to do mid-scan; four dots read
+ * at a glance and cannot be mistaken for a probability. The underlying figure
+ * stays available as the title, so the dots are a summary rather than a
+ * replacement.
+ *
+ * `filled: 0` is a measured floor — the model had data for none of its weight.
+ * `null` is the different claim that this row was never scored at all.
  */
-export function evidenceBand(
-  value: string | null | undefined,
-): { label: string; tone: "safe" | "warn" | "danger" } | null {
+export function evidenceDots(value: string | null | undefined): number | null {
   const score = n(value);
   if (score === null) return null;
-  if (score >= 80) return { label: "Full", tone: "safe" };
-  if (score >= 50) return { label: "Partial", tone: "warn" };
-  return { label: "Thin", tone: "danger" };
+  if (score <= 0) return 0;
+  if (score < 25) return 1;
+  if (score < 50) return 2;
+  if (score < 75) return 3;
+  return 4;
 }
 
 /**

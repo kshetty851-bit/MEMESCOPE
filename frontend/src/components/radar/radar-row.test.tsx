@@ -65,9 +65,14 @@ function entry(overrides: Partial<RadarEntry> = {}): RadarEntry {
     },
     age_seconds: 21_600,
     risk_score: "82.00",
+    risk_band: "low",
     risk_reasons: [],
     evidence: "85.00",
     signal: null,
+    why_now: {
+      code: "reason:resistance_broken",
+      sentence: "Price has pushed above its recent high.",
+    },
     ...overrides,
   };
 }
@@ -93,40 +98,54 @@ describe("RadarRow", () => {
     expect(screen.getByText("$40.0K")).toBeInTheDocument();
     expect(screen.getByText("$89.0K")).toBeInTheDocument();
     expect(screen.getByText("+12.5%")).toBeInTheDocument();
-    expect(screen.getByText("Age 6h")).toBeInTheDocument();
+    expect(screen.getByText("6h")).toBeInTheDocument();
+  });
+
+  it("shows the price, which a trader cannot size a position without", () => {
+    render(<RadarRow entry={entry()} rank={1} />);
+    expect(screen.getByText("$0.0000")).toBeInTheDocument();
   });
 
   it("dashes an unpriced token rather than pricing it at zero", () => {
     render(<RadarRow entry={entry({ market: null })} rank={1} />);
 
-    // Four market cells, all absent, all dashed — never $0.
-    expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(4);
+    // Five market cells, all absent, all dashed — never $0.
+    expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(5);
     expect(screen.queryByText("$0")).not.toBeInTheDocument();
   });
 
-  it("says risk was not assessed rather than scoring it zero", () => {
-    render(<RadarRow entry={entry({ risk_score: null })} rank={1} />);
+  it("says risk is unmeasured rather than banding it as safe or extreme", () => {
+    render(<RadarRow entry={entry({ risk_band: null })} rank={1} />);
 
-    expect(screen.getByText("Risk not assessed")).toBeInTheDocument();
+    expect(screen.getByText("Risk —")).toBeInTheDocument();
   });
 
-  it("names the risk band, reading high as safe", () => {
-    render(<RadarRow entry={entry({ risk_score: "20" })} rank={1} />);
-    expect(screen.getByText("High risk")).toBeInTheDocument();
+  it("names the band the server cut", () => {
+    render(<RadarRow entry={entry({ risk_band: "extreme" })} rank={1} />);
+    expect(screen.getByText("Extreme risk")).toBeInTheDocument();
 
     cleanup();
-    render(<RadarRow entry={entry({ risk_score: "88" })} rank={1} />);
+    render(<RadarRow entry={entry({ risk_band: "low" })} rank={1} />);
     expect(screen.getByText("Low risk")).toBeInTheDocument();
   });
 
-  it("publishes how much of the model had data", () => {
+  it("shows evidence as dots rather than a number beside the score", () => {
+    // A percentage beside a score invites the reader to multiply them.
     render(<RadarRow entry={entry({ evidence: "40" })} rank={1} />);
-    expect(screen.getByText("Evidence Thin")).toBeInTheDocument();
+
+    expect(screen.getByLabelText("Evidence 2 of 4")).toBeInTheDocument();
+    expect(screen.queryByText(/40%/)).not.toBeInTheDocument();
+  });
+
+  it("distinguishes an unscored row from one scored on nothing", () => {
+    render(<RadarRow entry={entry({ evidence: null })} rank={1} />);
+    expect(screen.getByLabelText("Evidence not recorded")).toBeInTheDocument();
   });
 
   it("quotes the base rate as history, not as a forecast", () => {
     render(<RadarRow entry={entry()} rank={1} />);
 
+    expect(screen.getByText("Similar historical signals")).toBeInTheDocument();
     expect(screen.getByText("41 similar signals")).toBeInTheDocument();
     expect(screen.getByText("32% reached 2×")).toBeInTheDocument();
   });
@@ -158,17 +177,72 @@ describe("RadarRow", () => {
     expect(screen.queryByText(/67%/)).not.toBeInTheDocument();
   });
 
-  it("displays the engine's own why-now line verbatim", () => {
+  it("displays the backend's why-now sentence on every row", () => {
+    render(<RadarRow entry={entry({ signal: null })} rank={1} />);
+
+    expect(
+      screen.getByText("Price has pushed above its recent high."),
+    ).toBeInTheDocument();
+  });
+
+  it("names a live signal in trader language, never in the engine's", () => {
+    render(
+      <RadarRow
+        entry={entry({
+          signal: {
+            signal_type: "fresh_graduation",
+            label: "Recently graduated from Pump.fun",
+            expires_in_seconds: 20_745,
+          },
+          why_now: {
+            code: "signal:fresh_graduation",
+            sentence: "Graduated from Pump.fun 18 minutes ago.",
+          },
+        })}
+        rank={1}
+      />,
+    );
+
+    // The sentence already names the signal and adds the timing, so the chip
+    // would print one fact twice. The expiry still has to survive.
+    expect(screen.getByText("Graduated from Pump.fun 18 minutes ago.")).toBeInTheDocument();
+    expect(screen.queryByText("Recently graduated from Pump.fun")).not.toBeInTheDocument();
+    expect(screen.getByText(/Expires in 5h/)).toBeInTheDocument();
+    // The stable code is for branching, never for reading.
+    expect(screen.queryByText(/fresh_graduation/)).not.toBeInTheDocument();
+  });
+
+  it("shows the signal chip when the sentence is about something else", () => {
     render(
       <RadarRow
         entry={entry({
           signal: {
             signal_type: "breakout",
-            provider: "breakout",
-            severity: "major",
-            headline: "Breaking out",
-            why_now: "The price has moved above the highest level of its own recent observations.",
-            confidence: "61.53",
+            label: "Strong buying pressure",
+            expires_in_seconds: 20_745,
+          },
+          why_now: {
+            code: "move_up",
+            sentence: "Trading 3.5x above where it was detected.",
+          },
+        })}
+        rank={1}
+      />,
+    );
+
+    expect(screen.getByText("Strong buying pressure")).toBeInTheDocument();
+    expect(
+      screen.getByText("Trading 3.5x above where it was detected."),
+    ).toBeInTheDocument();
+  });
+
+  it("never puts engine vocabulary on screen", () => {
+    const { container } = render(
+      <RadarRow
+        entry={entry({
+          signal: {
+            signal_type: "breakout",
+            label: "Strong buying pressure",
             expires_in_seconds: 20_745,
           },
         })}
@@ -176,26 +250,67 @@ describe("RadarRow", () => {
       />,
     );
 
-    expect(screen.getByText("Breaking out")).toBeInTheDocument();
-    expect(
-      screen.getByText(/moved above the highest level of its own recent observations/),
-    ).toBeInTheDocument();
-    // A signal is a statement with a shelf life; a row that hides it invites
-    // acting on a stale one.
-    expect(screen.getByText("expires in 5h")).toBeInTheDocument();
+    const text = container.textContent ?? "";
+    for (const jargon of [
+      "priority",
+      "provider",
+      "confidence",
+      "strength",
+      "confirmations",
+      "severity",
+      "breakout",
+      "_",
+    ]) {
+      expect(text.toLowerCase()).not.toContain(jargon);
+    }
+  });
+
+  it("offers four distinct destinations, not the same one twice", () => {
+    // Before this, "Chart" and "DexScreener" were the same URL wearing two icons.
+    const { container } = render(<RadarRow entry={entry()} rank={1} />);
+
+    const hrefs = Array.from(container.querySelectorAll("a[target=_blank]")).map((a) =>
+      a.getAttribute("href"),
+    );
+    expect(new Set(hrefs).size).toBe(hrefs.length);
+    expect(hrefs.some((h) => h?.includes("pump.fun"))).toBe(true);
+    expect(hrefs.some((h) => h?.includes("dexscreener"))).toBe(true);
+    expect(hrefs.some((h) => h?.includes("solscan"))).toBe(true);
+  });
+
+  it("marks paper trading unavailable rather than offering a button that does nothing", () => {
+    render(<RadarRow entry={entry()} rank={1} />);
+
+    const action = screen.getByText("Paper trade");
+    expect(action).toHaveAttribute("aria-disabled");
+    expect(action.tagName).not.toBe("BUTTON");
   });
 
   it("is a complete row when nothing is live", () => {
     render(<RadarRow entry={entry({ signal: null })} rank={1} />);
 
     expect(screen.getByText("78")).toBeInTheDocument();
-    expect(screen.queryByText(/expires in/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Recently graduated/)).not.toBeInTheDocument();
   });
 
-  it("marks a token not seen in 24 hours as unknown rather than dead", () => {
-    render(<RadarRow entry={entry({ liveness: "unknown" })} rank={1} />);
+  it("never claims a token is dead", () => {
+    // Nothing in this system establishes death, so no row may imply it.
+    const { container } = render(
+      <RadarRow entry={entry({ liveness: "unknown" })} rank={1} />,
+    );
+    expect((container.textContent ?? "").toLowerCase()).not.toContain("inactive");
+  });
 
-    expect(screen.getByText("Liveness unknown")).toBeInTheDocument();
-    expect(screen.queryByText(/inactive/i)).not.toBeInTheDocument();
+  it("keeps the reading's own timestamp reachable", () => {
+    // The "liveness" chip was internal vocabulary and went; dropping the fact
+    // with it would make a stale row indistinguishable from a live one.
+    render(<RadarRow entry={entry()} rank={1} />);
+
+    expect(screen.getByTitle(/Last observed/)).toBeInTheDocument();
+  });
+
+  it("says a token was never observed rather than dating it to now", () => {
+    render(<RadarRow entry={entry({ market: null })} rank={1} />);
+    expect(screen.getByTitle("Never observed.")).toBeInTheDocument();
   });
 });

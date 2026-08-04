@@ -5,9 +5,9 @@ import {
   changeTone,
   compactAge,
   compactUsd,
-  evidenceBand,
+  evidenceDots,
   expiresIn,
-  riskBand,
+  riskLabel,
   signedPct,
   sortRadarEntries,
   tokenNaming,
@@ -56,9 +56,11 @@ function entry(overrides: Partial<RadarEntry>): RadarEntry {
     market: null,
     age_seconds: null,
     risk_score: null,
+    risk_band: null,
     risk_reasons: [],
     evidence: null,
     signal: null,
+    why_now: null,
     ...overrides,
   };
 }
@@ -148,29 +150,40 @@ describe("expiresIn", () => {
   });
 });
 
-describe("riskBand", () => {
+describe("riskLabel", () => {
   it("returns nothing for an unassessed risk", () => {
-    // On this model a score of 0 reads as maximum danger, so inventing one for
-    // a dimension with no source would be the most consequential lie on the row.
-    expect(riskBand(null)).toBeNull();
+    // On this model a score of 0 reads as maximum danger, so inventing a band
+    // for a dimension with no source would be the most consequential lie here.
+    expect(riskLabel(null)).toBeNull();
+    expect(riskLabel(undefined)).toBeNull();
   });
 
-  it("reads high as safe, matching how the dimension is scored", () => {
-    expect(riskBand("85")?.tone).toBe("safe");
-    expect(riskBand("50")?.tone).toBe("warn");
-    expect(riskBand("20")?.tone).toBe("danger");
+  it("names each band the server cut", () => {
+    expect(riskLabel("low")).toEqual({ label: "Low", tone: "safe" });
+    expect(riskLabel("medium")).toEqual({ label: "Medium", tone: "warn" });
+    expect(riskLabel("high")).toEqual({ label: "High", tone: "danger" });
+    expect(riskLabel("extreme")).toEqual({ label: "Extreme", tone: "danger" });
+  });
+
+  it("renders an unknown band as unmeasured rather than as its raw code", () => {
+    expect(riskLabel("catastrophic")).toBeNull();
   });
 });
 
-describe("evidenceBand", () => {
+describe("evidenceDots", () => {
   it("is absent when the row was never scored", () => {
-    expect(evidenceBand(null)).toBeNull();
+    // Distinct from zero dots, which is the measured claim that the model had
+    // data for none of its weight.
+    expect(evidenceDots(null)).toBeNull();
+    expect(evidenceDots("0")).toBe(0);
   });
 
-  it("names how much of the model actually had data", () => {
-    expect(evidenceBand("85")?.label).toBe("Full");
-    expect(evidenceBand("62")?.label).toBe("Partial");
-    expect(evidenceBand("30")?.label).toBe("Thin");
+  it("fills by quartile", () => {
+    expect(evidenceDots("10")).toBe(1);
+    expect(evidenceDots("40")).toBe(2);
+    expect(evidenceDots("62")).toBe(3);
+    expect(evidenceDots("85")).toBe(4);
+    expect(evidenceDots("100")).toBe(4);
   });
 });
 

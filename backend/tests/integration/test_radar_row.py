@@ -128,7 +128,13 @@ async def _market(
     )
 
 
-async def _live_signal(session: AsyncSession, token: object, mint: str) -> None:
+async def _live_signal(
+    session: AsyncSession,
+    token: object,
+    mint: str,
+    *,
+    signal_type: str = SignalType.FRESH_GRADUATION.value,
+) -> None:
     opportunity = Opportunity(
         token_id=token.id,  # type: ignore[attr-defined]
         mint_address=mint,
@@ -144,7 +150,7 @@ async def _live_signal(session: AsyncSession, token: object, mint: str) -> None:
         OpportunitySignal(
             opportunity_id=opportunity.id,
             mint_address=mint,
-            signal_type=SignalType.FRESH_GRADUATION.value,
+            signal_type=signal_type,
             provider_id="fresh_graduation",
             status=SignalStatus.ACTIVE.value,
             severity="major",
@@ -259,11 +265,12 @@ class TestTheRowCarriesWhatActingRequires:
         assert Decimal(row["evidence"]) == Decimal("90")
         assert Decimal(row["risk_score"]) == Decimal("80.00")
 
-    async def test_a_live_signal_answers_why_now(
+    async def test_a_live_signal_is_named_in_trader_language(
         self, client: AsyncClient, db_session: AsyncSession
     ) -> None:
-        """The Radar ranks; the signal says what changed. The prose is rendered
-        by the backend from stored reason codes, never composed on the client."""
+        """The Radar ranks; the signal says what changed. The label is rendered
+        by the backend, never composed on the client — and it is the trader's
+        wording, not the engine's."""
         token = await _token(db_session, MINT, age=timedelta(hours=6))
         entry = await _entry(db_session, token, MINT)
         await _snapshot(db_session, entry, MINT, dimensions={})
@@ -275,9 +282,124 @@ class TestTheRowCarriesWhatActingRequires:
         signal = row["signal"]
         assert signal is not None
         assert signal["signal_type"] == SignalType.FRESH_GRADUATION.value
-        assert signal["headline"]
-        assert signal["why_now"]
+        assert signal["label"] == "Recently graduated from Pump.fun"
         assert signal["expires_in_seconds"] > 0
+
+    async def test_engine_vocabulary_never_reaches_the_row(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """Provider id, severity, engine strength, confirmations and the
+        engine's own confidence are accurate and internal. A reader who sees
+        `confidence: 61.53` will read it as a probability, which it is not."""
+        token = await _token(db_session, MINT, age=timedelta(hours=6))
+        entry = await _entry(db_session, token, MINT)
+        await _snapshot(db_session, entry, MINT, dimensions={})
+        await _live_signal(db_session, token, MINT)
+        await db_session.commit()
+
+        signal = _row((await client.get("/api/v1/radar?page_size=100")).json(), MINT)["signal"]
+
+        for internal in ("provider", "severity", "strength", "confirmations", "confidence"):
+            assert internal not in signal, f"{internal} leaked onto the Radar row"
+
+    async def test_an_unlabelled_signal_type_renders_nothing(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """A provider shipping ahead of its label leaves the row without a
+        signal, never with `accumulation` printed as though it were English."""
+        token = await _token(db_session, MINT, age=timedelta(hours=6))
+        entry = await _entry(db_session, token, MINT)
+        await _snapshot(db_session, entry, MINT, dimensions={})
+        await _live_signal(db_session, token, MINT, signal_type="__unlabelled__")
+        await db_session.commit()
+
+        row = _row((await client.get("/api/v1/radar?page_size=100")).json(), MINT)
+
+        assert row["signal"] is None
+
+
+class TestWhyNow:
+    async def test_every_row_gets_a_sentence(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """Measured on the live board, nine of the top ten carried no signal. A
+        why-now derived from signals alone left nine rows silent."""
+        token = await _token(db_session, MINT, age=timedelta(hours=6))
+        entry = await _entry(db_session, token, MINT)
+        await _snapshot(db_session, entry, MINT, dimensions={})
+        await db_session.commit()
+
+        row = _row((await client.get("/api/v1/radar?page_size=100")).json(), MINT)
+
+        assert row["signal"] is None
+        assert row["why_now"]["sentence"].endswith(".")
+        assert row["why_now"]["code"]
+
+    async def test_a_live_signal_outranks_everything_else(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """The signal is the only input that is about *now* rather than about
+        the token's state, so it wins even against a large move."""
+        token = await _token(db_session, MINT, age=timedelta(hours=6))
+        entry = await _entry(db_session, token, MINT)  # current_multiple 2.0
+        await _snapshot(db_session, entry, MINT, dimensions={})
+        await _live_signal(db_session, token, MINT)
+        await db_session.commit()
+
+        why = _row((await client.get("/api/v1/radar?page_size=100")).json(), MINT)["why_now"]
+
+        assert why["code"] == "signal:fresh_graduation"
+        assert "Graduated from Pump.fun" in why["sentence"]
+
+    async def test_the_sentence_never_names_a_raw_code(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """`volume_expanding` is a contract between modules, not a sentence."""
+        token = await _token(db_session, MINT, age=timedelta(hours=6))
+        entry = await _entry(db_session, token, MINT)
+        await _snapshot(db_session, entry, MINT, dimensions={})
+        await db_session.commit()
+
+        sentence = _row((await client.get("/api/v1/radar?page_size=100")).json(), MINT)[
+            "why_now"
+        ]["sentence"]
+
+        assert "_" not in sentence
+
+
+class TestRiskBand:
+    async def test_the_band_is_cut_on_the_server(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """Banded beside the number that produced it, so the cuts are auditable
+        rather than invented in a component."""
+        token = await _token(db_session, MINT, age=timedelta(hours=6))
+        entry = await _entry(db_session, token, MINT)
+        await _snapshot(
+            db_session,
+            entry,
+            MINT,
+            dimensions={"risk": {"score": "20", "available": True, "reasons": []}},
+        )
+        await db_session.commit()
+
+        row = _row((await client.get("/api/v1/radar?page_size=100")).json(), MINT)
+
+        assert row["risk_band"] == "extreme"
+
+    async def test_an_unassessed_risk_has_no_band(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """`None` is an absence, not a fifth band. On this scale an invented
+        zero would read as the most dangerous token on the page."""
+        token = await _token(db_session, MINT, age=timedelta(hours=6))
+        entry = await _entry(db_session, token, MINT)
+        await _snapshot(db_session, entry, MINT, dimensions={})
+        await db_session.commit()
+
+        row = _row((await client.get("/api/v1/radar?page_size=100")).json(), MINT)
+
+        assert row["risk_band"] is None
 
     async def test_the_detail_view_carries_the_same_row(
         self, client: AsyncClient, db_session: AsyncSession

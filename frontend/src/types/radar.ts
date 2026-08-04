@@ -61,16 +61,29 @@ export interface MarketStrip {
 /**
  * The live signal beside a Radar row. Null means nothing is live right now —
  * never that nothing ever happened.
+ *
+ * Deliberately narrow: `provider`, `severity`, `strength`, `confirmations` and
+ * the engine's own `confidence` are not on this surface. They are accurate and
+ * internal, and a reader who sees `confidence: 61.53` will read it as a
+ * probability, which it is not.
  */
 export interface RadarSignal {
+  /** A stable code to branch on. Never printed — an unlabelled type is absent. */
   signal_type: string;
-  provider: string;
-  severity: string;
-  /** Rendered by the backend. The client never composes these. */
-  headline: string;
-  why_now: string;
-  confidence: string;
+  /** Rendered by the backend in trader language. Displayed verbatim. */
+  label: string;
   expires_in_seconds: number;
+}
+
+/**
+ * Why this row is interesting now, in one sentence. Present on every entry.
+ *
+ * Rendered server-side from stored facts. `code` is what the client keys on;
+ * `sentence` is what it displays. The client composes neither.
+ */
+export interface WhyNow {
+  code: string;
+  sentence: string;
 }
 
 export interface RadarEntry {
@@ -124,10 +137,17 @@ export interface RadarEntry {
    * had no source, which is charged to `evidence` rather than hidden.
    */
   risk_score: string | null;
+  /**
+   * `low` | `medium` | `high` | `extreme`, cut on the server against published
+   * thresholds. Null means risk was not assessed — an absence, not a fifth
+   * band, and it must never render as one.
+   */
+  risk_band: string | null;
   risk_reasons: string[];
   /** Share of the model's weight that had data, 0–100. The honesty number. */
   evidence: string | null;
   signal: RadarSignal | null;
+  why_now: WhyNow | null;
 }
 
 /**

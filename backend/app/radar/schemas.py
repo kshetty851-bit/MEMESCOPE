@@ -75,24 +75,41 @@ class BaseRateOut(BaseSchema):
 class RadarSignalOut(BaseSchema):
     """The live signal beside a Radar row, if the engine has one.
 
-    A deliberate subset of the board's `SignalOut`: the Radar answers "should I
-    care, and why now?" in one line, and the full evidence list belongs on the
-    token page. Every string here is rendered by the backend from stable reason
-    codes — the client never composes prose about a token.
+    A deliberate subset of the board's `SignalOut`, narrowed again in Sprint 24:
+    `provider`, `severity`, `strength`, `confirmations` and the engine's own
+    `confidence` are gone from this surface. They are accurate and they are
+    internal — a reader who sees `provider: breakout` learns nothing they can
+    act on, and a reader who sees `confidence: 61.53` will read it as a
+    probability, which it is not.
+
+    What remains is a stable code to key on and one label to display.
     """
 
+    #: A stable identifier, not prose. Clients may branch on it; they must not
+    #: print it — an unlabelled type renders nothing rather than its raw code.
     signal_type: str
-    provider: str
-    severity: str
-    #: The engine's own headline for the transition. Displayed verbatim.
-    headline: str
-    #: One sentence on what changed. This is the "why now" column.
-    why_now: str
-    #: What the engine derived from the provider's claim, 0-100.
-    confidence: Decimal
+    #: The signal in trader language, rendered by the backend from
+    #: `readout.SIGNAL_LABEL`. Displayed verbatim.
+    label: str
     #: Seconds until the claim lapses. A signal is a statement with a shelf
     #: life, and a row that does not show it invites acting on a stale one.
     expires_in_seconds: int
+
+
+class WhyNowOut(BaseSchema):
+    """One sentence on why this row is interesting now.
+
+    Present on **every** entry, not only the ones carrying a live signal —
+    measured on the live board, nine of the top ten had no signal, so a
+    why-now derived from signals alone left nine rows silent.
+
+    Rendered server-side from stored facts, like every other explanation in
+    this codebase. `code` is what a client keys on; `sentence` is what it
+    displays. The client never composes either.
+    """
+
+    code: str
+    sentence: str
 
 
 class RadarEntryOut(BaseSchema):
@@ -158,6 +175,12 @@ class RadarEntryOut(BaseSchema):
     #: dimension, so "good" is high throughout. `None` when the sweep could not
     #: assess risk, which is charged to `evidence` rather than hidden.
     risk_score: Decimal | None = None
+    #: `low` | `medium` | `high` | `extreme`, cut from `risk_score` against the
+    #: thresholds published in `readout.RISK_BANDS`. `None` when risk was not
+    #: assessed — that is an absence, not a fifth band, and must not render as
+    #: one. Banded on the server so the cuts are auditable beside the number
+    #: that produced them rather than invented in a component.
+    risk_band: str | None = None
     #: The reason codes behind that risk score, verbatim from the snapshot.
     risk_reasons: list[str] = Field(default_factory=list)
     #: Share of the model's declared weight that had data when this row was
@@ -168,6 +191,9 @@ class RadarEntryOut(BaseSchema):
     #: Radar ranks; the signal says what changed and when the claim expires.
     #: `None` means nothing is live — never that nothing ever happened.
     signal: RadarSignalOut | None = None
+    #: Why this row is interesting now, in one sentence. Always present: the
+    #: fallback describes the detection itself, which is always true.
+    why_now: WhyNowOut | None = None
 
 
 class RadarDetailOut(RadarEntryOut):
