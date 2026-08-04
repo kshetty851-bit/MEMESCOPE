@@ -53,9 +53,7 @@ class MarketSnapshotRepository(BaseRepository[TokenMarketSnapshot]):
         )
         return (await self.session.execute(stmt)).scalars().first()
 
-    async def latest_for_mints(
-        self, mints: Sequence[str]
-    ) -> dict[str, TokenMarketSnapshot]:
+    async def latest_for_mints(self, mints: Sequence[str]) -> dict[str, TokenMarketSnapshot]:
         """Newest snapshot per mint, for a batch, in one query.
 
         The board renders market data for a whole page of cards, and a query per
@@ -389,6 +387,15 @@ class EnrichmentStateRepository(BaseRepository[TokenEnrichmentState]):
         every worker fetching the same head of the queue. Claimed rows are
         pushed forward by `lease_seconds` so a worker that dies mid-batch
         releases its tokens automatically rather than stranding them.
+
+        **Ordered by lane, then by due time.** Sprint 28: the backlog reached
+        36,154 active tokens, so a Radar token asking for a 15-second refresh
+        sorted behind 36,000 rows that were hours overdue and waited a measured
+        p95 of 106 minutes. One lane column and one ORDER BY term fix that
+        without a second queue, a second worker or a second scheduler.
+
+        Within a lane the order is unchanged — oldest due first — so the
+        ordinary population still cannot starve its own tail.
         """
         due = (
             select(TokenEnrichmentState.id)
@@ -396,7 +403,10 @@ class EnrichmentStateRepository(BaseRepository[TokenEnrichmentState]):
                 TokenEnrichmentState.status == EnrichmentStatus.ACTIVE,
                 TokenEnrichmentState.next_refresh_at <= now,
             )
-            .order_by(TokenEnrichmentState.next_refresh_at.asc())
+            .order_by(
+                TokenEnrichmentState.priority.desc(),
+                TokenEnrichmentState.next_refresh_at.asc(),
+            )
             .limit(limit)
             .with_for_update(skip_locked=True)
             .scalar_subquery()

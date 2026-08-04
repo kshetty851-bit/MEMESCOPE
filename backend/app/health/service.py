@@ -40,9 +40,7 @@ from app.models.token import DiscoveredToken
 logger = get_logger(__name__)
 
 
-def classify(
-    minutes: float | None, *, degraded_after: int, down_after: int
-) -> StageStatus:
+def classify(minutes: float | None, *, degraded_after: int, down_after: int) -> StageStatus:
     """Map staleness to a status.
 
     `None` means the stage has never written anything. That is reported as
@@ -233,6 +231,71 @@ class PipelineHealthService:
         )
         minutes = _minutes_since(last, now=now)
 
+        # Sprint 28. Everything above measures the *queue*; none of it measured
+        # what the product is displaying, which is why this endpoint reported
+        # "healthy" while 43% of Radar tokens were over an hour stale.
+        lanes = (
+            await self._session.execute(
+                select(
+                    func.count()
+                    .filter(TokenEnrichmentState.priority > 0)
+                    .label("priority_total"),
+                    func.count()
+                    .filter(
+                        TokenEnrichmentState.priority > 0,
+                        TokenEnrichmentState.next_refresh_at <= now,
+                    )
+                    .label("priority_due"),
+                    func.min(TokenEnrichmentState.next_refresh_at)
+                    .filter(
+                        TokenEnrichmentState.priority > 0,
+                        TokenEnrichmentState.next_refresh_at <= now,
+                    )
+                    .label("oldest_priority"),
+                    func.min(TokenEnrichmentState.next_refresh_at)
+                    .filter(
+                        TokenEnrichmentState.priority == 0,
+                        TokenEnrichmentState.next_refresh_at <= now,
+                    )
+                    .label("oldest_normal"),
+                ).where(TokenEnrichmentState.status == EnrichmentStatus.ACTIVE)
+            )
+        ).one()
+
+        # Observed freshness of the tracked set — what the lane actually
+        # delivers, as opposed to the interval it was configured to promise.
+        newest = (
+            select(
+                TokenMarketSnapshot.mint_address.label("mint"),
+                func.max(TokenMarketSnapshot.captured_at).label("newest"),
+            )
+            .where(
+                TokenMarketSnapshot.mint_address.in_(
+                    select(RadarToken.mint_address).where(RadarToken.is_active.is_(True))
+                )
+            )
+            .group_by(TokenMarketSnapshot.mint_address)
+            .subquery()
+        )
+        age = func.extract("epoch", now - newest.c.newest)
+        freshness = (
+            await self._session.execute(
+                select(
+                    func.percentile_cont(0.5).within_group(age.asc()).label("p50"),
+                    func.percentile_cont(0.95).within_group(age.asc()).label("p95"),
+                    func.max(age).label("worst"),
+                    func.count()
+                    .filter(age > settings.HEALTH_TRACKED_STALE_SECONDS)
+                    .label("stale"),
+                )
+            )
+        ).one()
+
+        def _wait(due_at: datetime | None) -> float | None:
+            if due_at is None:
+                return None
+            return round(max((now - due_at).total_seconds(), 0.0), 1)
+
         return EnrichmentHealth(
             status=classify(
                 minutes,
@@ -243,6 +306,20 @@ class PipelineHealthService:
             minutes_since_last_snapshot=None if minutes is None else round(minutes, 1),
             queue_depth=int(due or 0),
             dead_lettered=int(parked or 0),
+            priority_tokens=int(lanes.priority_total or 0),
+            priority_queue_depth=int(lanes.priority_due or 0),
+            oldest_priority_wait_seconds=_wait(lanes.oldest_priority),
+            oldest_normal_wait_seconds=_wait(lanes.oldest_normal),
+            tracked_freshness_p50_seconds=(
+                None if freshness.p50 is None else round(float(freshness.p50), 1)
+            ),
+            tracked_freshness_p95_seconds=(
+                None if freshness.p95 is None else round(float(freshness.p95), 1)
+            ),
+            tracked_freshness_worst_seconds=(
+                None if freshness.worst is None else round(float(freshness.worst), 1)
+            ),
+            tracked_stale_count=int(freshness.stale or 0),
         )
 
     async def _scoring(self, now: datetime) -> ScoringHealth:

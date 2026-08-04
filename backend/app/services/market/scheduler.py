@@ -25,6 +25,11 @@ class RefreshTier(enum.StrEnum):
     YOUNG = "young"
     MATURE = "mature"
     OLD = "old"
+    #: Not an age band. A token the product is actively displaying — a visible
+    #: Radar rank, an open opportunity, a paper position — refreshed on the
+    #: cadence the screen implies rather than on the cadence its age implies.
+    #: A six-day-old token at Radar rank 3 is OLD by age and PRIORITY by use.
+    PRIORITY = "priority"
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,6 +43,9 @@ class SchedulePolicy:
     mature_max_minutes: int = 1440
     mature_interval_seconds: int = 1800
     old_interval_seconds: int = 21600
+    #: What a displayed token gets, regardless of age. Published because it is
+    #: the promise the freshness indicator is measured against.
+    priority_interval_seconds: int = 15
 
     @classmethod
     def from_settings(cls) -> SchedulePolicy:
@@ -49,6 +57,7 @@ class SchedulePolicy:
             mature_max_minutes=settings.ENRICHMENT_TIER_MATURE_MAX_MINUTES,
             mature_interval_seconds=settings.ENRICHMENT_TIER_MATURE_INTERVAL_SECONDS,
             old_interval_seconds=settings.ENRICHMENT_TIER_OLD_INTERVAL_SECONDS,
+            priority_interval_seconds=settings.ENRICHMENT_PRIORITY_INTERVAL_SECONDS,
         )
 
     def tier_for_age(self, age_minutes: float) -> RefreshTier:
@@ -62,6 +71,7 @@ class SchedulePolicy:
 
     def interval_for_tier(self, tier: RefreshTier) -> int:
         return {
+            RefreshTier.PRIORITY: self.priority_interval_seconds,
             RefreshTier.FRESH: self.fresh_interval_seconds,
             RefreshTier.YOUNG: self.young_interval_seconds,
             RefreshTier.MATURE: self.mature_interval_seconds,
@@ -100,10 +110,19 @@ class RefreshScheduler:
         discovered_at: datetime,
         consecutive_failures: int = 0,
         consecutive_empty: int = 0,
+        priority: bool = False,
     ) -> ScheduleDecision:
-        """Compute the next refresh time for one token."""
+        """Compute the next refresh time for one token.
+
+        `priority` overrides the age tier but **not** the failure and
+        empty-listing paths below. A displayed token that the provider keeps
+        erroring on still backs off: hammering a broken endpoint every fifteen
+        seconds would spend the whole budget on the one token least able to use
+        it, and the freshness indicator will show the staleness honestly rather
+        than the scheduler hiding it.
+        """
         age_minutes = max(0.0, (now - discovered_at).total_seconds() / 60.0)
-        tier = self.policy.tier_for_age(age_minutes)
+        tier = RefreshTier.PRIORITY if priority else self.policy.tier_for_age(age_minutes)
         base_interval = float(self.policy.interval_for_tier(tier))
 
         if consecutive_failures > 0:

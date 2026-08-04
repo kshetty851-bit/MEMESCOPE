@@ -104,6 +104,13 @@ x-backend-env: &backend-env
   # config, so a value set on one service only would let the two disagree about
   # what counts as a graduation.
   FEATURE_OPPORTUNITY_ENGINE_ENABLED: ${FEATURE_OPPORTUNITY_ENGINE_ENABLED:-false}
+  # Priority enrichment lane. In the anchor because the scheduler beat marks
+  # the lane and the enrichment worker reads it — a cadence set on one service
+  # only would let them disagree about what "displayed" means.
+  FEATURE_PRIORITY_ENRICHMENT_ENABLED: ${FEATURE_PRIORITY_ENRICHMENT_ENABLED:-false}
+  ENRICHMENT_PRIORITY_INTERVAL_SECONDS: ${ENRICHMENT_PRIORITY_INTERVAL_SECONDS:-15}
+  ENRICHMENT_PRIORITY_RADAR_RANKS: ${ENRICHMENT_PRIORITY_RADAR_RANKS:-25}
+  ENRICHMENT_PRIORITY_MAX_TOKENS: ${ENRICHMENT_PRIORITY_MAX_TOKENS:-200}
   # Paper wallet. In the anchor because two services read it: the scheduler
   # runs the review beat and the API serves the wallet, and a starting balance
   # set on one service only would let them disagree about what every return is

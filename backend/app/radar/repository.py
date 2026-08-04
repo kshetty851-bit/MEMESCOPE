@@ -31,6 +31,22 @@ from app.radar.models import Observation, RadarCandidate, RadarSeries
 
 
 @dataclass(frozen=True, slots=True)
+class PeakObservation:
+    """One market reading, kept whole.
+
+    Exists so a peak's price, market cap, liquidity and volume can only ever be
+    written from the *same* observation. Passing four loose values invites the
+    inconsistency Sprint 28 measured.
+    """
+
+    captured_at: datetime
+    price_usd: Decimal
+    market_cap: Decimal | None
+    liquidity_usd: Decimal | None
+    volume_24h: Decimal | None
+
+
+@dataclass(frozen=True, slots=True)
 class PerformanceSummary:
     """Track-record aggregates.
 
@@ -420,7 +436,10 @@ class RadarRepository:
         category: str,
         current_multiple: Decimal | None,
         evaluated_at: datetime,
+        volume_24h: Decimal | None = None,
+        observed_at: datetime | None = None,
         window_high: Decimal | None = None,
+        window_high_observation: PeakObservation | None = None,
     ) -> None:
         """Move the current-state columns, and raise the peak if it has risen.
 
@@ -458,11 +477,34 @@ class RadarRepository:
             entry.peak_price is None or candidate > entry.peak_price
         ):
             entry.peak_price = candidate
-            # Market cap is only carried across when the peak is the *current*
-            # observation. A historical high has no market cap stored beside it
-            # here, and inventing one by reusing today's would be wrong.
+
+            # **Every peak_* column comes from one observation, or none does.**
+            #
+            # Before Sprint 28 the market cap was written only when the peak
+            # happened to be the *current* price, on the reasoning that a
+            # historical high had no market cap stored beside it. The reasoning
+            # was wrong: the snapshot holding that high carries its own market
+            # cap, liquidity and volume, so reading them is not inventing. The
+            # old behaviour left 6 of 88 rows with `peak_price` above
+            # `current_price` while `peak_market_cap` equalled
+            # `current_market_cap` — a peak that disagreed with itself.
             if price is not None and candidate == price:
                 entry.peak_market_cap = market_cap
+                entry.peak_liquidity = liquidity
+                entry.peak_observed_at = observed_at
+                entry.peak_volume_24h = volume_24h
+            elif (
+                window_high_observation is not None
+                and window_high_observation.price_usd == candidate
+            ):
+                entry.peak_market_cap = window_high_observation.market_cap
+                entry.peak_liquidity = window_high_observation.liquidity_usd
+                entry.peak_volume_24h = window_high_observation.volume_24h
+                entry.peak_observed_at = window_high_observation.captured_at
+            # No else. If neither source can be identified the companion columns
+            # are left as they are rather than paired with a price they did not
+            # come from — the whole point of this block.
+
             entry.peak_at = evaluated_at
             if entry.first_price is not None and entry.first_price > 0:
                 entry.peak_multiple = candidate / entry.first_price
@@ -479,9 +521,7 @@ class RadarRepository:
         )
         return found
 
-    async def latest_snapshots_for(
-        self, mints: Sequence[str]
-    ) -> dict[str, RadarSnapshot]:
+    async def latest_snapshots_for(self, mints: Sequence[str]) -> dict[str, RadarSnapshot]:
         """The newest snapshot per mint, for a whole page, in one query.
 
         `DISTINCT ON` rather than a correlated subquery per row: the Radar list
@@ -626,21 +666,15 @@ class RadarRepository:
                         / func.nullif(RadarToken.peak_multiple, 0)
                     ).label("avg_drawdown"),
                     func.avg(
-                        func.extract(
-                            "epoch", func.now() - RadarToken.first_detected_at
-                        )
+                        func.extract("epoch", func.now() - RadarToken.first_detected_at)
                         / 86400.0
                     ).label("avg_days_tracked"),
                     func.avg(RadarToken.first_market_cap).label("avg_detection_mcap"),
                     func.avg(RadarToken.peak_market_cap).label("avg_peak_mcap"),
                     func.max(RadarToken.peak_market_cap).label("largest_peak_mcap"),
                     func.avg(RadarToken.current_multiple).label("avg_current"),
-                    func.count()
-                    .filter(RadarToken.current_multiple >= 1)
-                    .label("above_entry"),
-                    func.count()
-                    .filter(RadarToken.current_multiple < 1)
-                    .label("below_entry"),
+                    func.count().filter(RadarToken.current_multiple >= 1).label("above_entry"),
+                    func.count().filter(RadarToken.current_multiple < 1).label("below_entry"),
                     func.max(RadarToken.first_detected_at).label("last_detection"),
                 )
             )
@@ -807,9 +841,7 @@ class RadarRepository:
         unioned = detections.union_all(achievements).subquery("events")
         rows = (
             await self._session.execute(
-                select(unioned)
-                .order_by(unioned.c.occurred_at.desc())
-                .limit(limit)
+                select(unioned).order_by(unioned.c.occurred_at.desc()).limit(limit)
             )
         ).all()
 
@@ -846,12 +878,8 @@ class RadarRepository:
                     func.percentile_cont(0.5)
                     .within_group(RadarToken.current_multiple.asc())
                     .label("median_current"),
-                    func.count()
-                    .filter(RadarToken.current_multiple >= 1)
-                    .label("above_entry"),
-                    func.count()
-                    .filter(RadarToken.current_multiple < 1)
-                    .label("below_entry"),
+                    func.count().filter(RadarToken.current_multiple >= 1).label("above_entry"),
+                    func.count().filter(RadarToken.current_multiple < 1).label("below_entry"),
                 )
             )
         ).one()

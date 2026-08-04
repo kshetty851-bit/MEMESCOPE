@@ -22,6 +22,7 @@ celery_app = Celery(
         "app.events.scheduler",
         "app.opportunities.scheduler",
         "app.paper.scheduler",
+        "app.workers.priority_tasks",
     ],
 )
 
@@ -97,5 +98,14 @@ celery_app.conf.beat_schedule = {
     "paper-review": {
         "task": "app.paper.scheduler.paper_review",
         "schedule": crontab(minute="*/5"),
+    },
+    # Membership of the priority enrichment lane is derived from what the
+    # product currently displays, so it has to be recomputed rather than
+    # accumulated. Every minute: the lane refreshes its members every fifteen
+    # seconds, so a minute of membership lag costs at most four refreshes on a
+    # token that just entered the visible ranks.
+    "priority-lane": {
+        "task": "app.workers.priority_tasks.refresh_priority_lane",
+        "schedule": crontab(minute="*"),
     },
 }

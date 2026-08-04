@@ -33,6 +33,28 @@ class EnrichmentHealth(BaseSchema):
     #: Tokens that failed often enough to be parked. Not counted in the queue.
     dead_lettered: int
 
+    # --- Sprint 28: the lane, and what it is actually delivering -------------
+    # `queue_depth` above says how much work is waiting. None of it said
+    # anything about the tokens the product is *displaying*, which is why this
+    # endpoint reported "healthy" while 43% of Radar tokens were over an hour
+    # stale and three of the visible Top 10 carried three-hour-old prices.
+
+    #: Tokens in the priority lane, and how many of those are already due.
+    priority_queue_depth: int = 0
+    priority_tokens: int = 0
+    #: How long the oldest waiting item in each lane has been due, in seconds.
+    #: `None` when that lane has nothing overdue.
+    oldest_priority_wait_seconds: float | None = None
+    oldest_normal_wait_seconds: float | None = None
+    #: Observed refresh gap for tracked tokens — what the lane is *delivering*,
+    #: as opposed to what it was configured to promise.
+    tracked_freshness_p50_seconds: float | None = None
+    tracked_freshness_p95_seconds: float | None = None
+    tracked_freshness_worst_seconds: float | None = None
+    #: Tracked tokens whose newest snapshot is older than the stale threshold.
+    #: This is the number that should have been degrading `status` all along.
+    tracked_stale_count: int = 0
+
 
 class ScoringHealth(BaseSchema):
     status: StageStatus

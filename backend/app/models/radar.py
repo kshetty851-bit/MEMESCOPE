@@ -99,6 +99,20 @@ class RadarToken(Base):
     #: genuinely happened.
     peak_price: Mapped[Decimal | None] = mapped_column(_PRICE)
     peak_market_cap: Mapped[Decimal | None] = mapped_column(_MONEY)
+    #: The rest of the observation the peak price came from. Added in Sprint 28
+    #: because `peak_market_cap` was written only when the peak happened to be
+    #: the *current* price: a peak raised from a between-sweeps high left the
+    #: market cap behind, and 6 of 88 rows ended up with `peak_price` above
+    #: `current_price` while `peak_market_cap` equalled `current_market_cap`.
+    #:
+    #: The snapshot holding the high already carries these figures, so reading
+    #: them is not inventing. **Every peak_* column is written from exactly one
+    #: observation, together, or none of them is.**
+    peak_liquidity: Mapped[Decimal | None] = mapped_column(_MONEY)
+    peak_volume_24h: Mapped[Decimal | None] = mapped_column(_MONEY)
+    #: When the observation behind the peak was *captured*, as distinct from
+    #: `peak_at`, which is when the sweep noticed it.
+    peak_observed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     peak_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     peak_multiple: Mapped[Decimal | None] = mapped_column(_MULTIPLE)
     current_multiple: Mapped[Decimal | None] = mapped_column(_MULTIPLE)

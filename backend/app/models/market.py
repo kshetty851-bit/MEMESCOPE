@@ -26,8 +26,11 @@ from sqlalchemy import (
     Index,
     Integer,
     Numeric,
+    SmallInteger,
     String,
+    desc,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -191,6 +194,18 @@ class TokenEnrichmentState(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     last_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
     # Which adaptive tier produced the current interval; logged for tuning.
     tier: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    #: Lane, not a queue. 0 is the ordinary adaptive population; 1 is a token
+    #: the product is actively displaying — the Radar's visible ranks, an open
+    #: opportunity, or a paper position.
+    #:
+    #: This exists because the claim query orders by `next_refresh_at` and the
+    #: backlog reached 36,154 tokens: a tracked token asking for a 15-second
+    #: refresh queued behind 36,000 rows that were hours overdue, so its p95
+    #: observed gap was 106 minutes. Sorting on this column first is what lets
+    #: the lane jump the backlog **without a second queue or a second worker**.
+    priority: Mapped[int] = mapped_column(
+        SmallInteger, nullable=False, server_default=text("0")
+    )
 
     token: Mapped[DiscoveredToken] = relationship(lazy="raise")
 
@@ -198,4 +213,14 @@ class TokenEnrichmentState(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         # The claim query: WHERE status='active' AND next_refresh_at <= now()
         # ORDER BY next_refresh_at. A composite index keeps it index-only.
         Index("ix_enrichment_due", "status", "next_refresh_at"),
+        # The claim query after Sprint 28: WHERE status='active' AND
+        # next_refresh_at <= now() ORDER BY priority DESC, next_refresh_at.
+        # Without this the priority sort degrades into a heap sort over the
+        # whole backlog on every claim.
+        Index(
+            "ix_enrichment_priority_due",
+            "status",
+            desc("priority"),
+            "next_refresh_at",
+        ),
     )

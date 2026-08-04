@@ -313,6 +313,23 @@ class Settings(BaseSettings):
     #: building, which either realises into a breakout or quietly does not.
     OPPORTUNITY_TTL_PRE_BREAKOUT_SECONDS: int = Field(default=86_400, ge=60)
 
+    # --- Priority enrichment lane ---------------------------------------------
+    # Sprint 28. A lane inside the existing queue, not a second queue: the claim
+    # query sorts on `priority` before `next_refresh_at`, so a displayed token
+    # jumps a backlog that reached 36,154 rows. Measured before this, a tracked
+    # token's p95 refresh gap was 106 minutes.
+    FEATURE_PRIORITY_ENRICHMENT_ENABLED: bool = False
+    #: What a displayed token gets regardless of age. Published because the
+    #: freshness indicator on every surface is measured against it.
+    ENRICHMENT_PRIORITY_INTERVAL_SECONDS: int = Field(default=15, ge=5, le=600)
+    #: How many Radar ranks are treated as displayed. The homepage shows 10; the
+    #: extra ranks cover the churn just below the fold so a token entering the
+    #: visible set is already fresh rather than starting stale.
+    ENRICHMENT_PRIORITY_RADAR_RANKS: int = Field(default=25, ge=1, le=200)
+    #: Ceiling on the lane. Without it a bug that marks everything priority
+    #: turns the lane back into the backlog it was built to escape.
+    ENRICHMENT_PRIORITY_MAX_TOKENS: int = Field(default=200, ge=1, le=2000)
+
     # --- Paper wallet ---------------------------------------------------------
     # A deterministic simulation over stored market history. No wallet is
     # connected, no order is routed and no chain is touched: a position is a row
@@ -415,6 +432,11 @@ class Settings(BaseSettings):
     # degraded and several in a row is down.
     HEALTH_SCORING_DEGRADED_MINUTES: int = Field(default=30, ge=1)
     HEALTH_SCORING_DOWN_MINUTES: int = Field(default=120, ge=1)
+    #: How old a *tracked* token's newest snapshot may be before it counts as
+    #: stale. 300s = five minutes, matching the "normal" band the freshness
+    #: indicator uses on every surface, so the API and the screen agree about
+    #: what stale means.
+    HEALTH_TRACKED_STALE_SECONDS: int = Field(default=300, ge=30, le=86_400)
     HEALTH_RADAR_DEGRADED_MINUTES: int = Field(default=30, ge=1)
     HEALTH_RADAR_DOWN_MINUTES: int = Field(default=120, ge=1)
 

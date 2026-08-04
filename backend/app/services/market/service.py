@@ -168,6 +168,12 @@ class MarketEnrichmentService:
                 consecutive_empty=(
                     (state.consecutive_empty + 1) if succeeded and not had_data else 0
                 ),
+                # The lane the priority beat placed this token in. Read from the
+                # row rather than recomputed here: membership is decided in one
+                # place, and the worker only honours it.
+                priority=(
+                    settings.FEATURE_PRIORITY_ENRICHMENT_ENABLED and state.priority > 0
+                ),
             )
 
             should_dead_letter = not succeeded and self.scheduler.should_dead_letter(

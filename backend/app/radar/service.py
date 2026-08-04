@@ -28,7 +28,7 @@ from app.core.logging import get_logger
 from app.models.radar import RadarToken
 from app.radar import achievements, detector, scorer
 from app.radar.models import OpportunityResult, RadarSeries
-from app.radar.repository import RadarRepository
+from app.radar.repository import PeakObservation, RadarRepository
 
 logger = get_logger(__name__)
 
@@ -162,9 +162,22 @@ class RadarService:
         # This reads the window the engine was already given, so it costs no
         # extra query, and it only ever raises the peak — the monotonic
         # guarantee the track record depends on is untouched.
-        window_high = max(
-            (o.price_usd for o in series.observations if o.price_usd is not None),
-            default=None,
+        # Sprint 28: take the whole observation, not just its price. Writing
+        # the peak's market cap from a *different* reading than its price is
+        # what left 6 of 88 rows with a peak that disagreed with itself.
+        priced = [o for o in series.observations if o.price_usd is not None]
+        best = max(priced, key=lambda o: (o.price_usd, o.captured_at), default=None)
+        window_high = best.price_usd if best is not None else None
+        window_high_observation = (
+            PeakObservation(
+                captured_at=best.captured_at,
+                price_usd=best.price_usd,  # type: ignore[arg-type]
+                market_cap=best.market_cap,
+                liquidity_usd=best.liquidity_usd,
+                volume_24h=best.volume_24h,
+            )
+            if best is not None
+            else None
         )
 
         await self._repository.update_current(
@@ -179,7 +192,10 @@ class RadarService:
             category=str(category) if category else entry.current_category,
             current_multiple=current_multiple,
             evaluated_at=moment,
+            volume_24h=latest.volume_24h if latest else None,
+            observed_at=latest.captured_at if latest else None,
             window_high=window_high,
+            window_high_observation=window_high_observation,
         )
 
         await self._maybe_write_snapshot(entry, series, result, category, moment)
