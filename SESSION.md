@@ -251,6 +251,53 @@ deterministic on re-run.
 - "Buy every Radar token" and "equal-weight Radar" are the **same measurement**
   on this data. Reported once; two labels over one number would be duplication.
 
+## Sprint 26 — Strategy Lab (done)
+
+Nine published exit rules replayed over the same detections and the same stored
+prices. Only the exit logic differs.
+
+**Equal Weight v1 is frozen and placed 7th of 9** (-3.84% marked) against
+Trailing Stop 25% at +54.58%. It has not been tuned in response and must not be:
+every comparison is drawn against it. `test_paper_exits.py` replays 120
+orderings through both the new rule engine and the original
+`engine.resolve_exit` and demands identical answers.
+
+**The correction the data forced.** The first run showed Time Exit 24h at
++23.44% return with a 0.11 profit factor — both correct, and together
+misleading: total return marked open positions while win rate and profit factor
+counted only closed ones. The lab now serves `realised_return_pct` and
+`open_share_pct` beside every marked figure, and a finding fires on the largest
+divergence. Time Exit 72h reads **+18.84% marked against -62.72% realised** with
+62% still open. Without that column three rules would have been promoted whose
+closed trades lost badly.
+
+Architecture: exit rules are **data**. `ExitRules` has four optional fields and
+one `resolve` covers all nine strategies — no duplicated replay engine. The
+dataset is loaded once and shared, because separately-loaded datasets could
+differ by a snapshot landing between loads.
+
+Refused, each with its reason on the page: **ATR** (needs a true range; this
+platform stores one price per observation with no OHLC), **annualised return**
+(below the published 90-day floor; the replay covers 6.3 days), **monthly
+returns** (less than one month exists).
+
+Validated: byte-identical across 10 runs and after reloading from Postgres.
+5.3ms to replay 9 strategies over 84 detections (756 trades), 183ms to load.
+3347 backend passed (+180), 302 frontend passed (+11).
+
+**Corrections recorded:**
+
+- The Sprint 25 replay reported the baseline at -60.98%; the lab reports -3.84%.
+  Both are correct and they measure **different things**. Sprint 25 was
+  cash-constrained ($1,000, 41 of 83 detections funded); the lab is
+  unconstrained so entries stay identical across rules. The API ships that
+  distinction as `methodology` on every response. Never quote one as the other.
+- `lab_service.py` was added to the paper purity boundary's `IO_MODULES`. That
+  set should grow only for a genuinely new seam — a name appearing there because
+  a *decision* moved into an I/O module is the boundary eroding.
+- Ranking is on marked total return, stated. A composite score would be an
+  opinion wearing a measurement's clothes.
+
 ## Known blockers
 
 - **Helius plan quota exhausted (HTTP 429).** Discovery is down and curve
