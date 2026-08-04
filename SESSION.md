@@ -166,6 +166,42 @@ of 72 overlap, and 12 of 72 Radar rows carry a live signal. This is expected
 (one ranks quality, the other ranks recency), but it means the signal column is
 sparse by construction and must never be read as "the other 60 have no story".
 
+## Sprint 24 — the Radar row in trader language (done)
+
+Sprint 23's correction became this sprint's central fix. Why-now was derived
+from the Opportunity Engine, and on the live top ten exactly **one row carried
+a signal** — so nine of ten rows explained nothing.
+
+`app/radar/readout.py` (pure, inside the purity boundary — signal types arrive
+as plain strings so it imports nothing from `app.opportunities`) renders one
+sentence per row from stored facts, in priority order: live signal → large move
+from detection → strongest detection reason → the detection itself. Measured
+live: **10 of 10 rows explain themselves, against 1 of 10 before.**
+
+Engine vocabulary is off the wire, not just off the screen. `RadarSignalOut`
+lost `provider`, `severity`, `headline` and the engine's `confidence`; it now
+carries a stable code and one label. `risk_band` is cut server-side against
+`readout.RISK_BANDS` so the thresholds sit beside the number that produced
+them. Evidence renders as four dots.
+
+Removed from the row: the category chip, "Detected at $X", the venue name, the
+"Liveness unknown" chip, and the sort tabs. Added: logo, price, and the base
+rate in its own block.
+
+Measured: `/radar?page_size=10` 8ms (unchanged), **11 statements for ten rows,
+identical to one row**. 3082 backend passed (+34), 268 frontend passed (+10).
+
+**Guard added:** `tests/integration/test_radar_query_budget.py` asserts that
+serving ten rows and one row issue the same number of statements. A latency
+benchmark only catches an N+1 once the table is big enough to hurt.
+
+**Correction recorded:** the reason-priority order in `readout.REASON_PRIORITY`
+is calibrated against one observation of the live board (`trend_aligned` on 10
+of 10, `resistance_broken` on 8, `volume_expanding` on 4). It is a judgement
+about *informativeness*, not a measured result, and it is the one thing in this
+sprint that is not reproducible from stored data. Re-measure before trusting it
+on a materially different universe.
+
 ## Known blockers
 
 - **Helius plan quota exhausted (HTTP 429).** Discovery is down and curve
@@ -180,12 +216,17 @@ sparse by construction and must never be read as "the other 60 have no story".
 
 ## Next sprints (planned, not started)
 
-- **Sprint 24 — paper wallet.** The only V1 destination that is still a
+Numbering note: Sprint 24 was planned here as the paper wallet and was spent on
+the Radar readout instead. The wallet moves to 25 and everything shifts by one.
+
+- **Sprint 25 — paper wallet.** The only V1 destination that is still a
   placeholder. Model, migration, deterministic strategy engine ($100 equal
   weight, TP +100%, SL −50%, expiry = signal expiry), `/api/v1/paper`, and the
   wallet page. `/radar/benchmark` already reports `paper_wallet_note` honestly;
-  that note is what this sprint retires.
-- **Sprint 25 — de-theming.** `agent-sigil`, `ai-core`, `universe` and
+  that note is what this sprint retires. **The Radar row's "Paper trade" action
+  ships disabled until this lands** — `RowActions` renders it `aria-disabled`
+  with a plain-language title, and a test asserts it is not a button.
+- **Sprint 26 — de-theming.** `agent-sigil`, `ai-core`, `universe` and
   `sentinel` are wired into `error.tsx`, `not-found.tsx`, `states.tsx`,
   `badge.tsx` and the auth layout, so removing them is a design-system change,
   not a rename. Also retires ~1,400 lines of client-side derivation
@@ -193,6 +234,6 @@ sparse by construction and must never be read as "the other 60 have no story".
   `thesis.ts`, `scoreboard.ts`) that forms a second opinion competing with the
   server-rendered reason codes. The brand still reads **LETZMOON** in
   `components/brand/logo.tsx` and `app/layout.tsx`.
-- **Sprint 26 — Track Record analytics.** Sort by drawdown, age, market cap,
+- **Sprint 27 — Track Record analytics.** Sort by drawdown, age, market cap,
   signal and Radar score; detection/current/peak market-cap columns in the
   table. The page is already the strongest in the product; these are its gaps.
