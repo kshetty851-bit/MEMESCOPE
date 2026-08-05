@@ -3,8 +3,10 @@
 import Link from "next/link";
 
 import { TokenAvatar } from "@/components/brand/token-avatar";
+import { LiveValue } from "@/components/ui/live-value";
 import { FreshnessLabel, NoMarketData } from "@/components/ui/freshness";
 import { shortMint } from "@/lib/freshness";
+import { describeMove } from "@/lib/motion";
 import { formatMultiple, multipleTone } from "@/lib/radar";
 import {
   baseRateSummary,
@@ -52,27 +54,37 @@ import type { RadarEntry } from "@/types/radar";
 function Cell({
   label,
   value,
+  raw,
   tone,
   title,
 }: {
   label: string;
   value: string | null;
+  /**
+   * The unformatted figure. Supplied only for values that move on a tick, and
+   * the flash is detected on this rather than on `value` — a change too small
+   * to render must not flash, and a rounding artefact must not either.
+   */
+  raw?: string | null;
   tone?: "positive" | "negative" | "neutral";
   title?: string;
 }) {
+  const toned = cn(
+    value === null && "text-ink-faint",
+    tone === "positive" && "text-safe",
+    tone === "negative" && "text-danger",
+    (!tone || tone === "neutral") && value !== null && "text-ink",
+  );
+
   return (
     <div title={title}>
       <p className="text-label uppercase tracking-wide text-ink-faint">{label}</p>
-      <p
-        className={cn(
-          "mt-0.5 text-sm tabular-nums",
-          value === null && "text-ink-faint",
-          tone === "positive" && "text-safe",
-          tone === "negative" && "text-danger",
-          (!tone || tone === "neutral") && value !== null && "text-ink",
+      <p className="mt-0.5 text-sm tabular-nums">
+        {raw === undefined ? (
+          <span className={toned}>{value ?? "—"}</span>
+        ) : (
+          <LiveValue value={raw} display={value} className={toned} />
         )}
-      >
-        {value ?? "—"}
       </p>
     </div>
   );
@@ -197,11 +209,17 @@ export function RadarRow({
   entry,
   rank,
   paperState = "not-held",
+  rankDelta = 0,
+  nodeRef,
 }: {
   entry: RadarEntry;
   rank: number;
   /** Whether the paper wallet holds or has traded this token. */
   paperState?: PaperTokenState;
+  /** Places moved since the last page. Positive is a climb. */
+  rankDelta?: number;
+  /** FLIP target. The list measures this node to animate a reorder. */
+  nodeRef?: (node: HTMLElement | null) => void;
 }) {
   const risk = riskLabel(entry.risk_band);
   const rate = baseRateSummary(entry.base_rate);
@@ -214,13 +232,34 @@ export function RadarRow({
   const signalIsTheSentence = entry.why_now?.code.startsWith("signal:") ?? false;
 
   return (
-    <article className="rounded-card border border-line bg-surface/40 p-4 transition-colors hover:border-line-bright">
+    <article
+      ref={nodeRef}
+      className="rounded-card border border-line bg-surface/40 p-4 transition-colors hover:border-line-bright"
+    >
       {/* Identity and verdict. The two things scanned first, on one line. */}
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <div className="flex min-w-0 items-center gap-3">
-          <span className="w-5 shrink-0 text-right text-sm tabular-nums text-ink-faint">
+          <span className="flex w-9 shrink-0 items-baseline justify-end gap-0.5 text-sm tabular-nums text-ink-faint">
             {rank}
+            {/* The direction it came from. Shown only while it is news — the
+                arrow disappears on the next page that leaves it in place, so a
+                settled ranking carries no marks at all. Sighted readers get
+                the movement; the label below carries the same fact in words. */}
+            {rankDelta !== 0 ? (
+              <span
+                aria-hidden
+                className={cn(
+                  "text-[0.625rem] leading-none",
+                  rankDelta > 0 ? "text-safe" : "text-danger",
+                )}
+              >
+                {rankDelta > 0 ? "▲" : "▼"}
+              </span>
+            ) : null}
           </span>
+          {rankDelta !== 0 ? (
+            <span className="sr-only">{describeMove(rankDelta)}</span>
+          ) : null}
           <TokenAvatar mint={entry.mint_address} size={28} />
           <div className="flex min-w-0 flex-wrap items-baseline gap-x-2">
             <Link
@@ -294,10 +333,26 @@ export function RadarRow({
 
       {/* The market strip. Dashes where nothing was observed — never zeroes. */}
       <div className="mt-3 grid grid-cols-3 gap-x-4 gap-y-3 pl-8 sm:grid-cols-4 lg:grid-cols-8">
-        <Cell label="Price" value={compactUsd(entry.market?.price_usd)} />
-        <Cell label="Mkt cap" value={compactUsd(entry.market?.market_cap)} />
-        <Cell label="Liquidity" value={compactUsd(entry.market?.liquidity_usd)} />
-        <Cell label="Vol 24h" value={compactUsd(entry.market?.volume_24h)} />
+        <Cell
+          label="Price"
+          value={compactUsd(entry.market?.price_usd)}
+          raw={entry.market?.price_usd ?? null}
+        />
+        <Cell
+          label="Mkt cap"
+          value={compactUsd(entry.market?.market_cap)}
+          raw={entry.market?.market_cap ?? null}
+        />
+        <Cell
+          label="Liquidity"
+          value={compactUsd(entry.market?.liquidity_usd)}
+          raw={entry.market?.liquidity_usd ?? null}
+        />
+        <Cell
+          label="Vol 24h"
+          value={compactUsd(entry.market?.volume_24h)}
+          raw={entry.market?.volume_24h ?? null}
+        />
         <Cell
           label="Chg 24h"
           value={signedPct(change)}
@@ -312,6 +367,7 @@ export function RadarRow({
         <Cell
           label="Current"
           value={formatMultiple(entry.current_multiple)}
+          raw={entry.current_multiple}
           tone={multipleTone(entry.current_multiple)}
         />
         <Cell

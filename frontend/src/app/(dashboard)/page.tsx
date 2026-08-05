@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import Link from "next/link";
 
 import { PaperWalletWidget } from "@/components/paper/wallet-widget";
@@ -12,6 +12,8 @@ import { EmptyState, ErrorState } from "@/components/ui/states";
 import { usePaperPositions } from "@/hooks/use-paper";
 import { useRadar } from "@/hooks/use-radar";
 import { byMint, paperStateFor } from "@/lib/paper";
+import { rankDeltas } from "@/lib/motion";
+import { useFlipOrder } from "@/hooks/use-motion";
 
 /**
  * THE RADAR — the homepage.
@@ -50,6 +52,19 @@ export default function RadarPage() {
 
   const visible = useMemo(() => data?.items ?? [], [data]);
   const total = data?.total ?? 0;
+
+  // The reorder is the one authored moment on this page: the ranking *is* the
+  // product's opinion, so a token changing place is the opinion changing while
+  // someone watches. FLIP moves rows from where they were rather than letting
+  // them jump.
+  const order = useMemo(() => visible.map((entry) => entry.mint_address), [visible]);
+  const previousOrder = useRef<string[]>([]);
+  const deltas = useMemo(() => {
+    const moved = rankDeltas(previousOrder.current, order);
+    previousOrder.current = order;
+    return moved;
+  }, [order]);
+  const registerRow = useFlipOrder(order);
 
   return (
     <div className="flex flex-col gap-6">
@@ -113,6 +128,8 @@ export default function RadarPage() {
               entry={entry}
               rank={index + 1}
               paperState={paperStateFor(traded.get(entry.mint_address))}
+              rankDelta={deltas.get(entry.mint_address) ?? 0}
+              nodeRef={registerRow(entry.mint_address)}
             />
           ))}
         </div>
