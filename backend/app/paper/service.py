@@ -584,28 +584,65 @@ class PaperWalletService:
     async def _waiting_for(self, wallet: PaperWallet, *, cash: Decimal) -> WaitingState | None:
         """Why the wallet is holding cash, when it is.
 
-        `None` when there is nothing to explain — either the cash is below one
-        position, or a qualified token exists and the next pass will take it.
-        The message is only published when it is true: a page that says it is
-        waiting for an opportunity while one is sitting in front of it is worse
-        than a page that says nothing.
+        **Two different idle states, and the wallet must name which one.** The
+        first version of this returned `None` when cash was below one position,
+        on the reasoning that there was nothing to explain. That was wrong, and
+        it showed: on 2026-08-05 the wallet sat on $92.38 with nine positions
+        open for an hour, opening nothing and saying nothing, and the page gave
+        a reader no way to tell that from a broken evaluator.
+
+        So:
+
+        * **Cash below one position** — something may well qualify, but the
+          strategy declines rather than part-filling, so this is a wait for a
+          *close*. Reported with the shortfall, and with how many tokens are
+          queued behind it so the reader can see the opportunity is there and
+          the capital is not.
+        * **Cash available, nothing qualifies** — §9's state, with a count per
+          refused condition.
+
+        `None` in two cases, both of which have nothing to say. Fundable cash
+        with a qualified token in front of it, which the next pass will take —
+        a page that claimed to be waiting then would be worse than one that said
+        nothing. And **no cash at all**, which is a fully invested wallet rather
+        than an idle one; "holding cash until a position closes" printed over
+        $0.00 would be nonsense.
         """
         trade_size = self.strategy.trade_size_usd
-        if cash < trade_size:
+        if cash <= 0:
             return None
-
         limit = self.strategy.top_n or settings.PAPER_WALLET_CANDIDATE_LIMIT
         entries = await self._radar.list_entries(
             category=None, active_only=True, sort="score", limit=limit, offset=0
         )
         verdicts = await self._screen(wallet, entries)
-        if eligibility.first_eligible(verdicts) is not None:
+        eligible = sum(1 for verdict in verdicts if verdict.eligible)
+
+        if cash < trade_size:
+            return WaitingState(
+                reason=eligibility.Idle.CASH_BELOW_TRADE_SIZE.value,
+                message=eligibility.CASH_SHORT_MESSAGE,
+                idle_cash=cash,
+                trade_size=trade_size,
+                # What it is short by. Published because "$92.38 of cash" alone
+                # reads as money the wallet is choosing not to use.
+                shortfall=trade_size - cash,
+                considered=len(verdicts),
+                eligible=eligible,
+                refusals=eligibility.refusal_counts(verdicts),
+            )
+
+        if eligible:
             return None
 
         return WaitingState(
+            reason=eligibility.Idle.NOTHING_QUALIFIES.value,
             message=eligibility.WAITING_MESSAGE,
             idle_cash=cash,
+            trade_size=trade_size,
+            shortfall=Decimal(0),
             considered=len(verdicts),
+            eligible=0,
             refusals=eligibility.refusal_counts(verdicts),
         )
 
@@ -630,11 +667,23 @@ def _reading_at(
 
 @dataclass(frozen=True, slots=True)
 class WaitingState:
-    """Published when the wallet holds fundable cash and nothing qualifies."""
+    """Why the wallet is idle, whenever it is.
 
+    `reason` is a stable code (`eligibility.Idle`); `message` is the sentence
+    rendered from it server-side, the same rule as every other piece of prose
+    here. A surface never composes one from the other.
+    """
+
+    reason: str
     message: str
     idle_cash: Decimal
+    trade_size: Decimal
+    #: How far the cash is short of one position. Zero when it is not short.
+    shortfall: Decimal
     considered: int
+    #: How many Radar tokens *would* be bought if the cash were there. The
+    #: figure that separates "no opportunity" from "no capital".
+    eligible: int
     refusals: dict[str, int]
 
 

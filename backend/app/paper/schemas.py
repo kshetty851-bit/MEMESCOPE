@@ -173,20 +173,34 @@ class MetricsOut(BaseSchema):
 
 
 class WaitingOut(BaseSchema):
-    """Why the wallet is holding cash, when it is.
+    """Why the wallet is idle, whenever it is.
 
-    Served only when it is true: the wallet has enough cash for a full position
-    and nothing on the Radar qualifies. A page that claimed to be waiting for an
-    opportunity while one sat in front of it would be worse than one that said
-    nothing.
+    Two distinct states, named by `reason`:
 
-    `refusals` is a count per published entry condition. "No qualified token"
-    with no denominator is a claim; with one it is a measurement.
+    * `no_qualified_token` — cash enough for a position, nothing on the Radar
+      passing the entry conditions. Sprint 30 §9.
+    * `cash_below_trade_size` — something may qualify, but what is left will not
+      fund a whole position and the strategy never part-fills. This is a wait
+      for a **close**, not for an opportunity.
+
+    Served only when one of them is true. A page that claimed to be waiting for
+    an opportunity while one sat in front of it, fundable, would be worse than
+    one that said nothing.
+
+    `refusals` is a count per published entry condition, and `eligible` is how
+    many tokens would be bought if the cash were there. A denominator is what
+    turns "idle" from a claim into a measurement.
     """
 
+    #: Stable code. The client switches on this, never on the message text.
+    reason: str
     message: str
     idle_cash: Decimal
+    trade_size: Decimal
+    #: How far the cash is short of one position. Zero when it is not short.
+    shortfall: Decimal = Decimal(0)
     considered: int
+    eligible: int = 0
     refusals: dict[str, int] = Field(default_factory=dict)
     #: The sentence each refusal code renders as, so the client never composes
     #: prose from a code. Rewording stays a deploy, not a migration.

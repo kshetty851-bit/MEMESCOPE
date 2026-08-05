@@ -88,16 +88,29 @@ export interface PaperBenchmark {
 }
 
 /**
- * Why the wallet is holding cash, when it is.
+ * Why the wallet is idle, whenever it is.
  *
- * Present only when it is true — enough cash for a full position and nothing on
- * the Radar qualifying. `labels` carries the server-rendered sentence for each
- * refusal code, so the client never composes prose from a slug.
+ * Two distinct states, named by `reason`:
+ *  - `nothing_qualifies` — cash enough for a position, nothing on the Radar
+ *    passing the entry conditions.
+ *  - `cash_below_trade_size` — something may qualify, but what is left will not
+ *    fund a whole position and the strategy never part-fills. A wait for a
+ *    close, not for an opportunity.
+ *
+ * `labels` carries the server-rendered sentence for each refusal code, so the
+ * client never composes prose from a slug.
  */
 export interface PaperWaiting {
+  reason: string;
   message: string;
   idle_cash: string;
+  trade_size: string;
+  /** How far short of one position. "0" when not short. */
+  shortfall: string;
   considered: number;
+  /** How many would be bought if the cash were there. Separates "no
+   * opportunity" from "no capital". */
+  eligible: number;
   refusals: Record<string, number>;
   labels: Record<string, string>;
 }

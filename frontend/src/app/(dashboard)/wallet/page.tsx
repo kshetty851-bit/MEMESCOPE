@@ -149,23 +149,37 @@ export default function WalletPage() {
         ) : null}
       </header>
 
-      {/* Sprint 30 §9. Published only while it is true: enough cash for a full
-          position and nothing on the Radar qualifying. The wallet never buys a
-          lower-quality token to avoid an empty screen, so it says so instead. */}
+      {/* Why the wallet is idle, whenever it is. Two different states and the
+          page names which — a wallet sitting on cash with no explanation reads
+          as broken, which is exactly how it read before this existed. The
+          message comes from the server off a stable `reason` code; nothing here
+          composes prose from a slug. */}
       {waiting ? (
         <Panel density="compact" className="border-line-bright bg-elevated/40">
           <p className="text-sm text-ink">{waiting.message}</p>
-          <p className="mt-1 text-xs text-ink-faint">
-            {usd(waiting.idle_cash)} uninvested. {waiting.considered} Radar token
-            {waiting.considered === 1 ? "" : "s"} considered on the last pass.
-          </p>
-          <ul className="mt-2 flex flex-col gap-1">
-            {Object.entries(waiting.refusals).map(([code, count]) => (
-              <li key={code} className="text-xs text-ink-faint">
-                {count} · {waiting.labels[code] ?? code}
-              </li>
-            ))}
-          </ul>
+          {waiting.reason === "cash_below_trade_size" ? (
+            <p className="mt-1 text-xs text-ink-faint">
+              {usd(waiting.idle_cash)} uninvested against a {usd(waiting.trade_size)}{" "}
+              position — {usd(waiting.shortfall)} short.{" "}
+              {waiting.eligible > 0
+                ? `${waiting.eligible} Radar token${waiting.eligible === 1 ? "" : "s"} would qualify if the cash were there.`
+                : "Nothing on the Radar qualifies right now either."}
+            </p>
+          ) : (
+            <>
+              <p className="mt-1 text-xs text-ink-faint">
+                {usd(waiting.idle_cash)} uninvested. {waiting.considered} Radar token
+                {waiting.considered === 1 ? "" : "s"} considered on the last pass.
+              </p>
+              <ul className="mt-2 flex flex-col gap-1">
+                {Object.entries(waiting.refusals).map(([code, count]) => (
+                  <li key={code} className="text-xs text-ink-faint">
+                    {count} · {waiting.labels[code] ?? code}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
         </Panel>
       ) : null}
 

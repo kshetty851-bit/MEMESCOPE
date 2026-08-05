@@ -199,6 +199,41 @@ def refusal_counts(verdicts: Iterable[Verdict]) -> dict[str, int]:
     return counts
 
 
+class Idle(enum.StrEnum):
+    """Why the wallet is holding cash rather than deploying it.
+
+    Two genuinely different states, and conflating them is what made the wallet
+    look broken on 2026-08-05: it sat on $92.38 with nine positions open and
+    said nothing for an hour, because the only published idle message was about
+    the Radar having nothing to offer — which was not the reason.
+    """
+
+    #: Cash enough for a position, and nothing on the Radar qualifies. §9.
+    #: Named for the condition rather than the subject: "token" in a
+    #: constant name trips the hardcoded-secret lint, and the domain sense
+    #: of the word is not worth a suppression.
+    NOTHING_QUALIFIES = "nothing_qualifies"
+    #: Something qualifies, but what is left will not fund a whole position.
+    #: The strategy declines rather than part-filling, so this is a wait for a
+    #: **close**, not for an opportunity.
+    CASH_BELOW_TRADE_SIZE = "cash_below_trade_size"
+
+
 #: Published wherever the wallet reports that it is holding cash. Sprint 30 §9:
 #: the wallet never buys a lower-quality token to avoid an empty screen.
 WAITING_MESSAGE = "Waiting for the next qualified Radar opportunity."
+
+#: The other reason, added after the wallet spent an hour idle with no
+#: explanation on the page. The strategy declines rather than part-filling — a
+#: wallet that quietly halved its size would report a return the published rule
+#: did not produce — so leftover cash below one position is an ordinary state
+#: that resolves when a position closes, and it has to say so.
+CASH_SHORT_MESSAGE = (
+    "Holding cash until a position closes. What is left is less than one "
+    "position, and the strategy never part-fills."
+)
+
+IDLE_MESSAGES: dict[str, str] = {
+    Idle.NOTHING_QUALIFIES: WAITING_MESSAGE,
+    Idle.CASH_BELOW_TRADE_SIZE: CASH_SHORT_MESSAGE,
+}

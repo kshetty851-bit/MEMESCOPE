@@ -437,9 +437,13 @@ def _to_waiting(read: WalletRead) -> WaitingOut | None:
     if state is None:
         return None
     return WaitingOut(
+        reason=state.reason,
         message=state.message,
         idle_cash=state.idle_cash,
+        trade_size=state.trade_size,
+        shortfall=state.shortfall,
         considered=state.considered,
+        eligible=state.eligible,
         refusals=state.refusals,
         # Prose from stable codes, rendered server-side. The client never
         # composes a sentence out of a reason code.

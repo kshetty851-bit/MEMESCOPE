@@ -600,6 +600,7 @@ class TestTheWaitingState:
         body = (await client.get("/api/v1/paper")).json()
 
         assert body["waiting"] is not None
+        assert body["waiting"]["reason"] == "nothing_qualifies"
         assert body["waiting"]["message"] == (
             "Waiting for the next qualified Radar opportunity."
         )
@@ -618,6 +619,63 @@ class TestTheWaitingState:
 
         body = (await client.get("/api/v1/paper")).json()
 
+        assert body["waiting"] is None
+
+    async def test_cash_short_of_one_position_is_its_own_stated_reason(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """The state that made the wallet look broken on 2026-08-05.
+
+        It held $92.38 with nine positions open, opened nothing for an hour and
+        said nothing, because the only published idle message was about the
+        Radar having nothing to offer — which was not the reason. Leftover cash
+        below one position is an ordinary consequence of never part-filling, and
+        it resolves when a position closes. The page has to say that.
+        """
+        # Ten tokens take the whole $1,000, then a loss leaves a stub of cash.
+        for index in range(10):
+            await _seed(db_session, f"PaperStub{index:034d}", score=90 - index, price="10")
+        await db_session.commit()
+        service = PaperWalletService(db_session)
+        await service.review(now=NOW)
+        await db_session.commit()
+
+        first = f"PaperStub{0:034d}"
+        token = await TokenRepository(db_session).get_by_mint(first)
+        await _price(db_session, token, first, at=NOW + timedelta(hours=1), price="5")
+        # An eleventh token qualifies, so the wallet is short of cash and not of
+        # opportunity — the distinction the reason code exists to make.
+        await _seed(db_session, MINT_B, score=50, price="10")
+        await db_session.commit()
+        await service.review(now=NOW + timedelta(hours=2))
+        await db_session.commit()
+
+        body = (await client.get("/api/v1/paper")).json()
+        waiting = body["waiting"]
+
+        assert waiting is not None
+        assert waiting["reason"] == "cash_below_trade_size"
+        assert "never part-fills" in waiting["message"]
+        assert Decimal(waiting["trade_size"]) == Decimal(100)
+        assert Decimal(waiting["idle_cash"]) < Decimal(100)
+        assert Decimal(waiting["shortfall"]) > Decimal(0)
+        # The figure that separates "no opportunity" from "no capital".
+        assert waiting["eligible"] >= 1
+
+    async def test_a_fully_deployed_wallet_with_no_spare_cash_is_not_waiting(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """Zero cash is not an idle state — it is a fully invested one, and
+        saying "holding cash" over $0.00 would be nonsense."""
+        for index in range(10):
+            await _seed(db_session, f"PaperFull{index:034d}", score=90 - index, price="10")
+        await db_session.commit()
+        await PaperWalletService(db_session).review(now=NOW)
+        await db_session.commit()
+
+        body = (await client.get("/api/v1/paper")).json()
+
+        assert Decimal(body["metrics"]["cash"]) == Decimal(0)
         assert body["waiting"] is None
 
 
