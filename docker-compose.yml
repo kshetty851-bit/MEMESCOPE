@@ -80,6 +80,17 @@ x-backend-env: &backend-env
   MARKET_SECONDARY_CALLS_PER_MINUTE: ${MARKET_SECONDARY_CALLS_PER_MINUTE:-25}
   ENRICHMENT_BATCH_LIMIT: ${ENRICHMENT_BATCH_LIMIT:-60}
   ENRICHMENT_POLL_INTERVAL_SECONDS: ${ENRICHMENT_POLL_INTERVAL_SECONDS:-5}
+  # Dead-letter policy. In the anchor because two services read it: the
+  # enrichment worker decides when to park a token and the scheduler runs the
+  # readmission beat, and a threshold set on one only would let them disagree
+  # about what "parked" means. Both conditions must hold before a token is
+  # parked — a count alone is cadence-dependent, and on 2026-08-05 a 60-second
+  # provider outage parked 163 of the 200 priority-lane tokens.
+  ENRICHMENT_DEAD_LETTER_THRESHOLD: ${ENRICHMENT_DEAD_LETTER_THRESHOLD:-10}
+  ENRICHMENT_DEAD_LETTER_MIN_MINUTES: ${ENRICHMENT_DEAD_LETTER_MIN_MINUTES:-30}
+  ENRICHMENT_DEAD_LETTER_RETRY_MINUTES: ${ENRICHMENT_DEAD_LETTER_RETRY_MINUTES:-60}
+  ENRICHMENT_DEAD_LETTER_REQUEUE_LIMIT: ${ENRICHMENT_DEAD_LETTER_REQUEUE_LIMIT:-250}
+  ENRICHMENT_DEFER_MIN_SECONDS: ${ENRICHMENT_DEFER_MIN_SECONDS:-15}
   FEATURE_AI_SCORING_ENABLED: ${FEATURE_AI_SCORING_ENABLED:-false}
   # The Opportunity Radar. In the anchor, not on one service: the API reads it
   # to report whether the Radar is running and the beat worker needs it to

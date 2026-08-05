@@ -149,5 +149,34 @@ class RefreshScheduler:
             reason=reason,
         )
 
-    def should_dead_letter(self, consecutive_failures: int) -> bool:
-        return consecutive_failures >= settings.ENRICHMENT_DEAD_LETTER_THRESHOLD
+    def should_dead_letter(
+        self,
+        consecutive_failures: int,
+        *,
+        now: datetime | None = None,
+        failing_since: datetime | None = None,
+    ) -> bool:
+        """Whether a token has failed enough, for long enough, to be parked.
+
+        A count alone is the wrong test, and the incident of 2026-08-05 is why.
+        The threshold is ten failures; the priority lane re-claims every fifteen
+        seconds and the normal lane every couple of minutes, so the same ten
+        failures mean two and a half minutes of trouble in one lane and twenty
+        in the other. **The tokens the product most wants fresh were therefore
+        the most fragile**, which is exactly backwards.
+
+        So elapsed time is now a second, independent condition: a token is only
+        dead-lettered once it has been failing for at least
+        `ENRICHMENT_DEAD_LETTER_MIN_MINUTES` as well. A brief outage can no
+        longer park anything, whatever cadence it happens to hit.
+
+        `failing_since` is the token's last success, or `None` if it has never
+        had one — in which case only the count applies, since there is no
+        healthy moment to measure from and the token has never worked at all.
+        """
+        if consecutive_failures < settings.ENRICHMENT_DEAD_LETTER_THRESHOLD:
+            return False
+        if now is None or failing_since is None:
+            return True
+        minimum = timedelta(minutes=settings.ENRICHMENT_DEAD_LETTER_MIN_MINUTES)
+        return now - failing_since >= minimum

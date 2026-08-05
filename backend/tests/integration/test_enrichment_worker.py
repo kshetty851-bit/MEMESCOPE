@@ -182,15 +182,107 @@ async def test_provider_outage_degrades_without_raising(db_session: AsyncSession
     assert state.last_error is not None
 
 
-async def test_open_circuit_is_handled_as_degradation(db_session: AsyncSession) -> None:
-    state = await _token_with_state(db_session, "MintCircuit")
-    service = MarketEnrichmentService(
-        db_session, FakeProvider(raises=ProviderUnavailableError("circuit open"))
-    )
+class TestAProviderOutageIsNotTheTokensFault:
+    """The incident of 2026-08-05, and the rules that now prevent it.
 
-    outcome = await service.enrich([state])
-    assert outcome.degraded is True
-    assert outcome.failed == 1
+    DexScreener's circuit opened for a 60-second cooldown. Every rejected batch
+    was counted as a failure against every token in it, and because a rejection
+    returns in zero milliseconds the worker re-claimed and re-rejected at full
+    speed — so the ten-failure dead-letter budget was spent in seconds. 163 of
+    the 200 tokens in the priority enrichment lane were parked by an outage they
+    had nothing to do with, and nothing ever brought them back.
+
+    The distinction these tests defend is simple: **a token cannot be judged by
+    a call that never left the process.**
+    """
+
+    async def test_an_unavailable_provider_costs_the_token_nothing(
+        self, db_session: AsyncSession
+    ) -> None:
+        state = await _token_with_state(db_session, "MintCircuit")
+        state.consecutive_failures = 3
+        service = MarketEnrichmentService(
+            db_session, FakeProvider(raises=ProviderUnavailableError("circuit open"))
+        )
+
+        outcome = await service.enrich([state])
+
+        assert outcome.degraded is True
+        # Reported as deferred, not failed. The two are different facts.
+        assert outcome.deferred == 1
+        assert outcome.failed == 0
+        # And nothing about the token moved: no failure, no attempt, no error.
+        assert state.consecutive_failures == 3
+        assert state.status is EnrichmentStatus.ACTIVE
+
+    async def test_an_outage_can_never_dead_letter_a_token(
+        self, db_session: AsyncSession
+    ) -> None:
+        """The exact shape of the incident: a token one failure short of the
+        threshold, hammered by a hundred circuit rejections."""
+        state = await _token_with_state(db_session, "MintNearThreshold")
+        state.consecutive_failures = 9
+        service = MarketEnrichmentService(
+            db_session, FakeProvider(raises=ProviderUnavailableError("circuit open"))
+        )
+
+        for _ in range(100):
+            state.next_refresh_at = datetime.now(UTC) - timedelta(seconds=1)
+            await service.enrich([state])
+
+        assert state.status is EnrichmentStatus.ACTIVE
+        assert state.consecutive_failures == 9
+
+    async def test_the_batch_is_pushed_back_by_the_remaining_cooldown(
+        self, db_session: AsyncSession
+    ) -> None:
+        """What stops the spin. A rejection costs nothing to produce, so
+        without this the worker re-claims the same batch immediately and burns
+        the whole budget in one second."""
+        state = await _token_with_state(db_session, "MintBackoff")
+        service = MarketEnrichmentService(
+            db_session,
+            FakeProvider(
+                raises=ProviderUnavailableError("circuit open", retry_after_seconds=45.0)
+            ),
+        )
+
+        await service.enrich([state])
+
+        assert state.next_refresh_at >= datetime.now(UTC) + timedelta(seconds=40)
+
+    async def test_a_breaker_reporting_no_cooldown_still_defers(
+        self, db_session: AsyncSession
+    ) -> None:
+        """The floor. A cooldown of nearly zero would otherwise reschedule the
+        batch into the past and spin exactly as before."""
+        state = await _token_with_state(db_session, "MintNoCooldown")
+        service = MarketEnrichmentService(
+            db_session,
+            FakeProvider(
+                raises=ProviderUnavailableError("circuit open", retry_after_seconds=0.0)
+            ),
+        )
+
+        await service.enrich([state])
+
+        assert state.next_refresh_at > datetime.now(UTC) + timedelta(seconds=5)
+
+    async def test_a_real_provider_error_is_still_the_tokens_failure(
+        self, db_session: AsyncSession
+    ) -> None:
+        """The fix must not swallow genuine failures. A call that was made and
+        went wrong is evidence about the token; a call never made is not."""
+        state = await _token_with_state(db_session, "MintRealError")
+        service = MarketEnrichmentService(
+            db_session, FakeProvider(raises=ProviderError("provider exploded"))
+        )
+
+        outcome = await service.enrich([state])
+
+        assert outcome.failed == 1
+        assert outcome.deferred == 0
+        assert state.consecutive_failures == 1
 
 
 async def test_repeated_failures_dead_letter_the_token(db_session: AsyncSession) -> None:

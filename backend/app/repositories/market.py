@@ -459,6 +459,33 @@ class EnrichmentStateRepository(BaseRepository[TokenEnrichmentState]):
         await self.session.flush()
         return state
 
+    async def defer_batch(
+        self, state_ids: Sequence[uuid.UUID], *, next_refresh_at: datetime
+    ) -> int:
+        """Move a batch's next refresh out, and touch nothing else.
+
+        Used when the provider was unavailable and **no call was made on any
+        token's behalf**. The deliberate omissions are the point: no
+        `consecutive_failures`, no `last_attempt_at`, no `total_refreshes`, no
+        dead-letter. A token cannot be judged by a request that never left the
+        process — that conflation dead-lettered 163 tokens on 2026-08-05.
+
+        One statement for the batch rather than a row at a time: this runs on
+        the failure path, which is exactly when the database is least likely to
+        want N round trips.
+        """
+        if not state_ids:
+            return 0
+        result = cast(
+            "CursorResult[Any]",
+            await self.session.execute(
+                update(TokenEnrichmentState)
+                .where(TokenEnrichmentState.id.in_(list(state_ids)))
+                .values(next_refresh_at=next_refresh_at)
+            ),
+        )
+        return int(result.rowcount or 0)
+
     async def counts_by_status(self) -> dict[str, int]:
         stmt = select(TokenEnrichmentState.status, func.count()).group_by(
             TokenEnrichmentState.status
@@ -467,11 +494,29 @@ class EnrichmentStateRepository(BaseRepository[TokenEnrichmentState]):
             str(status): int(count) for status, count in (await self.session.execute(stmt))
         }
 
-    async def requeue_dead_letters(self, *, now: datetime, limit: int = 100) -> int:
-        """Return dead-lettered tokens to the active queue (operator action)."""
+    async def requeue_dead_letters(
+        self, *, now: datetime, limit: int = 100, idle_for: timedelta | None = None
+    ) -> int:
+        """Return dead-lettered tokens to the active queue.
+
+        Was an operator action with no caller, which meant dead-lettering was
+        terminal in practice: a token removed by one bad minute never came back.
+        `app.workers.enrichment_tasks.requeue_dead_letters` now runs it on a
+        beat, so the state is a **quarantine rather than a grave**.
+
+        `idle_for` keeps that from becoming a retry loop. A token is only
+        readmitted once it has sat dead-lettered for that long, so a genuinely
+        broken mint costs one wasted call per interval instead of one per pass.
+        Ordered oldest-attempt-first so the queue drains fairly under `limit`.
+        """
+        conditions = [TokenEnrichmentState.status == EnrichmentStatus.DEAD_LETTER]
+        if idle_for is not None:
+            conditions.append(TokenEnrichmentState.last_attempt_at <= now - idle_for)
+
         ids = (
             select(TokenEnrichmentState.id)
-            .where(TokenEnrichmentState.status == EnrichmentStatus.DEAD_LETTER)
+            .where(*conditions)
+            .order_by(TokenEnrichmentState.last_attempt_at.asc())
             .limit(limit)
             .scalar_subquery()
         )

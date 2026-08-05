@@ -224,7 +224,28 @@ class Settings(BaseSettings):
     ENRICHMENT_BATCH_LIMIT: int = 60
     ENRICHMENT_CONCURRENCY: int = 4
     # Consecutive failures before a token is parked in the dead-letter state.
+    # **Both conditions must hold** — see `RefreshScheduler.should_dead_letter`.
+    # A count alone is cadence-dependent: ten failures is 2.5 minutes on the
+    # 15-second priority lane and 20 on the normal one, which made the tokens
+    # the product most wants fresh the easiest to park. On 2026-08-05 a
+    # 60-second provider outage dead-lettered 163 of the 200 lane members.
     ENRICHMENT_DEAD_LETTER_THRESHOLD: int = 10
+    #: ...and it must have been failing at least this long. The time condition
+    #: is what makes the threshold mean the same thing in every lane.
+    ENRICHMENT_DEAD_LETTER_MIN_MINUTES: int = Field(default=30, ge=1, le=1440)
+    #: How long a dead-lettered token waits before the requeue beat readmits it.
+    #: Dead-lettering is a quarantine, not a grave — but a token that is
+    #: genuinely broken should cost one wasted call per interval, not one per
+    #: pass, which is what this interval buys.
+    ENRICHMENT_DEAD_LETTER_RETRY_MINUTES: int = Field(default=60, ge=5, le=10_080)
+    #: How many to readmit per pass, so a large backlog drains gradually rather
+    #: than arriving as one spike on a provider that may still be unwell.
+    ENRICHMENT_DEAD_LETTER_REQUEUE_LIMIT: int = Field(default=250, ge=1, le=5000)
+    #: Floor on how long a batch is pushed back when the provider is
+    #: unavailable. The breaker's own remaining cooldown is used when it is
+    #: longer; this is the guard for when it reports nearly zero, which would
+    #: otherwise let the worker spin on a rejection that costs nothing to make.
+    ENRICHMENT_DEFER_MIN_SECONDS: float = Field(default=15.0, ge=1.0, le=600.0)
     # How often to sweep for discovered tokens that have no scheduling row.
     # Runs at startup and then periodically: the Redis listener can miss events
     # (Redis restart, worker lag, state loss), and a startup-only sweep would

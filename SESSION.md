@@ -464,6 +464,46 @@ were formatted in their own commit first.
   every realised metric are proven by tests only. The empty state has not fired
   either — the wallet deployed its full $1,000 on pass one.
 
+## Incident 2026-08-05 — the dead-letter cascade (fixed)
+
+Full record: `docs/incidents/2026-08-05-dead-letter-cascade.md`. Found because
+the wallet's positions read "updated 25 minutes ago" and kept ageing — the
+freshness label from Sprint 28.1 is the only reason this surfaced at all.
+
+A 60-second DexScreener circuit-breaker cooldown **permanently removed 163 of
+the 200 tokens in the priority enrichment lane**, including 10 of the paper
+wallet's 12 holdings. `succeeded = error is None` charged the outage to every
+token in the batch; a rejection returns at `latency_ms=0` so the worker spun and
+burned the 10-failure budget in seconds; `claim_due` filters on `ACTIVE`, and
+`requeue_dead_letters` existed with **no caller anywhere in the codebase**.
+
+Three fixes, matching the three defects:
+
+- `_defer` treats provider-unavailable as a **batch deferral** — one UPDATE to
+  `next_refresh_at`, no failure count, no attempt, no status change — pushed
+  back by the breaker's own `retry_after_seconds`, which the error now carries
+  rather than hiding in its message. Counted as `deferred`, never as `failed`.
+- `should_dead_letter` now needs elapsed failing time as an independent second
+  condition. A count alone is cadence-dependent: ten failures is 2.5 minutes on
+  the 15-second lane and 20 on the normal one, so the tokens the product most
+  wants fresh were the easiest to park.
+- `enrichment-requeue-dead-letters` beat, every 5 minutes, bounded and
+  oldest-first. Dead-lettering is a **quarantine, not a grave**.
+
+Live: 154 tokens readmitted, every holding back to a 0-minute price age inside a
+minute. 3472 backend passed (+15), 374 frontend. `make check` green.
+
+**No figure was ever wrong.** Exits resolve from the stored series, so the
+trailing stops still closed at the reading that breached them — the outage
+delayed *when a decision was recorded*, never which one. After recovery the
+wallet settled 4 trades and wrote its first 4 audit rows, so the permanent
+record is now proven live rather than only by test.
+
+**Worth watching:** `Falcon9` closed -11.64% gross against **-24.29% net** —
+$12.09 of impact on a $100 position, exiting a far thinner pool than it entered.
+The clearest live evidence yet for Sprint 27's finding that a flat per-trade
+cost estimate misreports this market.
+
 ## Known blockers
 
 - **Helius plan quota exhausted (HTTP 429).** Discovery is down and curve

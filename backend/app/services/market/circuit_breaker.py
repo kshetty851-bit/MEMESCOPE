@@ -32,7 +32,16 @@ class CircuitState(enum.StrEnum):
 
 
 class CircuitOpenError(RuntimeError):
-    """Raised when a call is rejected because the breaker is open."""
+    """Raised when a call is rejected because the breaker is open.
+
+    `retry_after_seconds` is the cooldown still to run. Callers use it to defer
+    work by the right amount instead of retrying immediately — without it, a
+    rejection costs nothing to produce and the caller spins.
+    """
+
+    def __init__(self, message: str, *, retry_after_seconds: float = 0.0) -> None:
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
 
 
 @dataclass
@@ -78,7 +87,10 @@ class CircuitBreaker:
         """Raise `CircuitOpenError` if calls are currently being rejected."""
         if not self.allows_request():
             remaining = max(0.0, self.reset_seconds - (self._now() - self._opened_at))
-            raise CircuitOpenError(f"{self.name} circuit is open; retry in {remaining:.1f}s")
+            raise CircuitOpenError(
+                f"{self.name} circuit is open; retry in {remaining:.1f}s",
+                retry_after_seconds=remaining,
+            )
 
     def record_success(self) -> None:
         if self.state is CircuitState.HALF_OPEN:

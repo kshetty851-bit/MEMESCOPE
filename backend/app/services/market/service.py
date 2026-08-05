@@ -11,7 +11,7 @@ from __future__ import annotations
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -41,6 +41,10 @@ class EnrichmentOutcome:
     dead_lettered: int
     provider_latency_ms: int | None = None
     degraded: bool = False
+    #: Tokens the provider was never asked about, because it was unavailable.
+    #: Counted apart from `failed` on purpose — these carry no blame and no
+    #: consequence for the token, and merging them would hide the difference.
+    deferred: int = 0
 
 
 class MarketEnrichmentService:
@@ -110,13 +114,22 @@ class MarketEnrichmentService:
         results: dict[str, MarketData] = {}
         error: str | None = None
         degraded = False
+        # A separate flag, not `retry_after_seconds is not None`: a breaker that
+        # reports no cooldown is still an outage, and conflating the two would
+        # send the batch down the failure path — which is the whole bug.
+        unavailable = False
+        retry_after: float | None = None
 
         try:
             results = await self.provider.fetch_many(mints)
         except ProviderUnavailableError as exc:
-            # Circuit is open. Expected during an outage; log at warning, not error.
+            # Circuit is open. **No call was made on any token's behalf**, so
+            # this is not evidence about any token in the batch. It is recorded
+            # as a deferral below rather than as a failure — see `_defer`.
             error = str(exc)
             degraded = True
+            unavailable = True
+            retry_after = exc.retry_after_seconds
             logger.warning("refresh_degraded", reason="provider_unavailable", detail=error)
         except ProviderError as exc:
             error = str(exc)
@@ -135,6 +148,11 @@ class MarketEnrichmentService:
             requested=len(mints),
             returned=len(results),
         )
+
+        if unavailable:
+            return await self._defer(
+                states, now=now, retry_after_seconds=retry_after, error=error
+            )
 
         snapshot_rows: list[dict[str, Any]] = []
         written = 0
@@ -175,7 +193,12 @@ class MarketEnrichmentService:
             )
 
             should_dead_letter = not succeeded and self.scheduler.should_dead_letter(
-                state.consecutive_failures + 1
+                state.consecutive_failures + 1,
+                now=now,
+                # The last moment this token demonstrably worked. Elapsed
+                # failing time is a second condition on top of the count, so a
+                # short outage cannot park a token whatever lane it is in.
+                failing_since=state.last_success_at,
             )
             if should_dead_letter:
                 dead_lettered += 1
@@ -230,6 +253,61 @@ class MarketEnrichmentService:
             dead_lettered=dead_lettered,
             provider_latency_ms=latency_ms,
             degraded=degraded,
+        )
+
+    async def _defer(
+        self,
+        states: Sequence[TokenEnrichmentState],
+        *,
+        now: datetime,
+        retry_after_seconds: float | None,
+        error: str | None,
+    ) -> EnrichmentOutcome:
+        """Push a batch back when the provider was never called.
+
+        **This is the fix for the incident of 2026-08-05.** DexScreener's
+        circuit opened for a 60-second cooldown. Every rejected batch was
+        counted as a failure against every token in it, and because a rejection
+        returns in zero milliseconds the worker re-claimed and re-rejected at
+        full speed — so the ten-failure dead-letter budget was spent in seconds.
+        163 of the 200 tokens in the priority lane were dead-lettered by a
+        provider blip they had nothing to do with, and dead-lettering had no
+        recovery path, so they stopped refreshing permanently. Ten of the paper
+        wallet's twelve holdings went dark for over an hour.
+
+        Two things are wrong with charging that to the token and both are fixed
+        here. A token cannot be judged by a call that never left the process;
+        and the faster a lane refreshes, the faster it would burn its budget,
+        so the tokens the product most wants fresh were the most fragile.
+
+        So this touches **only** `next_refresh_at`, in one statement for the
+        batch. No failure count, no attempt count, no dead-letter, no
+        `last_attempt_at` — nothing was attempted. The delay is the breaker's
+        own remaining cooldown, which is what stops the spin.
+        """
+        delay = max(float(retry_after_seconds or 0.0), settings.ENRICHMENT_DEFER_MIN_SECONDS)
+        next_refresh_at = now + timedelta(seconds=delay)
+        await self.states.defer_batch(
+            [state.id for state in states], next_refresh_at=next_refresh_at
+        )
+
+        logger.info(
+            "refresh_deferred",
+            provider=self.provider.name,
+            deferred=len(states),
+            retry_in_seconds=round(delay, 1),
+            detail=error,
+        )
+        return EnrichmentOutcome(
+            requested=len(states),
+            snapshots_written=0,
+            without_market=0,
+            # Deliberately zero. These tokens did not fail; nobody asked them.
+            failed=0,
+            dead_lettered=0,
+            provider_latency_ms=0,
+            degraded=True,
+            deferred=len(states),
         )
 
     @staticmethod

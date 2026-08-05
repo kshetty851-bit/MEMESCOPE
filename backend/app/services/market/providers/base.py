@@ -28,7 +28,22 @@ class ProviderError(RuntimeError):
 
 
 class ProviderUnavailableError(ProviderError):
-    """The provider is down or the circuit breaker is open."""
+    """The provider is down or the circuit breaker is open.
+
+    **No request was made on any token's behalf.** That distinction is the whole
+    reason this class is separate from `ProviderError`: a token cannot be judged
+    by a call that never left the process, and the enrichment service must not
+    charge this to a token's failure budget. See `MarketEnrichmentService.enrich`.
+
+    `retry_after_seconds` carries the breaker's own remaining cooldown so the
+    caller can defer the batch by exactly that long. It was previously only
+    available inside the message string; parsing prose to decide a schedule is
+    the kind of thing that works until someone rewords the sentence.
+    """
+
+    def __init__(self, message: str, *, retry_after_seconds: float | None = None) -> None:
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
 
 
 class ProviderRateLimitError(ProviderError):

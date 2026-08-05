@@ -135,3 +135,40 @@ def test_policy_reads_from_settings() -> None:
     policy = SchedulePolicy.from_settings()
     assert policy.fresh_interval_seconds > 0
     assert policy.old_interval_seconds > policy.fresh_interval_seconds
+
+
+class TestDeadLetteringNeedsTimeAsWellAsCount:
+    """Why a failure count alone is the wrong test.
+
+    The threshold is ten failures. The priority lane re-claims every fifteen
+    seconds and the normal lane every couple of minutes, so the same ten
+    failures mean two and a half minutes of trouble in one lane and twenty in
+    the other — the tokens the product most wants fresh were the easiest to
+    park, which is exactly backwards. On 2026-08-05 that removed 163 of the 200
+    priority-lane tokens during a single 60-second provider outage.
+
+    Elapsed failing time is now an independent second condition.
+    """
+
+    def test_the_count_alone_no_longer_parks_a_token(self) -> None:
+        assert not _scheduler().should_dead_letter(
+            50, now=NOW, failing_since=NOW - timedelta(minutes=2)
+        )
+
+    def test_a_token_failing_long_enough_is_parked(self) -> None:
+        assert _scheduler().should_dead_letter(
+            10, now=NOW, failing_since=NOW - timedelta(hours=6)
+        )
+
+    def test_time_alone_does_not_park_a_token_either(self) -> None:
+        """Both conditions, not either. A token that failed twice a week ago
+        and has worked since is not a dead letter."""
+        assert not _scheduler().should_dead_letter(
+            2, now=NOW, failing_since=NOW - timedelta(days=7)
+        )
+
+    def test_a_token_that_never_succeeded_falls_back_to_the_count(self) -> None:
+        """There is no healthy moment to measure elapsed failure from, and a
+        mint that has never once returned data is a different case from one
+        that broke this afternoon."""
+        assert _scheduler().should_dead_letter(10, now=NOW, failing_since=None)

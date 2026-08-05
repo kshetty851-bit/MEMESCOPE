@@ -56,6 +56,11 @@ class WorkerStats:
     snapshots_written: int = 0
     without_market: int = 0
     failures: int = 0
+    #: Tokens the provider was never asked about because it was unavailable.
+    #: Kept apart from `failures` so an outage cannot be read as tokens
+    #: going bad — the conflation that dead-lettered the priority lane on
+    #: 2026-08-05.
+    deferred: int = 0
     dead_lettered: int = 0
     degraded_cycles: int = 0
     # Scoring runs in its own transaction after enrichment commits, so its
@@ -92,6 +97,7 @@ class WorkerStats:
             "snapshots_written": self.snapshots_written,
             "without_market": self.without_market,
             "failures": self.failures,
+            "deferred": self.deferred,
             "dead_lettered": self.dead_lettered,
             "degraded_cycles": self.degraded_cycles,
             "tokens_scored": self.tokens_scored,
@@ -321,6 +327,7 @@ class MarketEnrichmentWorker:
                 self.stats.snapshots_written += outcome.snapshots_written
                 self.stats.without_market += outcome.without_market
                 self.stats.failures += outcome.failed
+                self.stats.deferred += outcome.deferred
                 self.stats.dead_lettered += outcome.dead_lettered
                 if outcome.degraded:
                     self.stats.degraded_cycles += 1

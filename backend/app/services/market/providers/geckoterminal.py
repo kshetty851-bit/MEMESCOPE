@@ -176,7 +176,11 @@ class GeckoTerminalPoolLiquidity:
         try:
             self._breaker.ensure_closed()
         except CircuitOpenError as exc:
-            raise ProviderUnavailableError(str(exc)) from exc
+            # The cooldown travels with the error so the caller can defer the
+            # batch by exactly that long rather than re-claiming immediately.
+            raise ProviderUnavailableError(
+                str(exc), retry_after_seconds=exc.retry_after_seconds
+            ) from exc
 
         if not self._budget.try_acquire():
             raise ProviderRateLimitError(

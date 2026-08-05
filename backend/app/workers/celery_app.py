@@ -23,6 +23,7 @@ celery_app = Celery(
         "app.opportunities.scheduler",
         "app.paper.scheduler",
         "app.workers.priority_tasks",
+        "app.workers.enrichment_tasks",
     ],
 )
 
@@ -107,5 +108,14 @@ celery_app.conf.beat_schedule = {
     "priority-lane": {
         "task": "app.workers.priority_tasks.refresh_priority_lane",
         "schedule": crontab(minute="*"),
+    },
+    # Dead-lettering is a quarantine, not a grave. Every five minutes the
+    # readmission pass returns tokens that have served their idle period — the
+    # beat that did not exist when a 60-second provider outage parked 163 of the
+    # 200 priority-lane tokens on 2026-08-05 and nothing brought them back.
+    # Cheap by construction: one predicated UPDATE, bounded per pass.
+    "enrichment-requeue-dead-letters": {
+        "task": "app.workers.enrichment_tasks.requeue_dead_letters",
+        "schedule": crontab(minute="*/5"),
     },
 }
