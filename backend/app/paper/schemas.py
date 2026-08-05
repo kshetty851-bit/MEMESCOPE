@@ -279,6 +279,24 @@ class LabFindingOut(BaseSchema):
     strategy_id: str | None = None
 
 
+class EntryDivergenceOut(BaseSchema):
+    """Why the lab's benchmark row and the wallet's ROI are different numbers.
+
+    Measured, not asserted: the gap moves with the market, so a figure written
+    into product copy would go stale the day it shipped.
+    """
+
+    positions: int
+    #: Median wallet entry / lab entry. Above 1 means the wallet paid more.
+    median_ratio: Decimal | None = None
+    worst_ratio: Decimal | None = None
+    wallet_paid_more: int = 0
+    median_lag_hours: Decimal | None = None
+    #: Stated in full, including why the lab cannot simply replay the wallet's
+    #: entry rule.
+    explanation: str
+
+
 class LabOut(BaseSchema):
     strategies: list[LabStrategyOut]
     unavailable: list[UnavailableStrategyOut]
@@ -292,6 +310,9 @@ class LabOut(BaseSchema):
     methodology: str
     #: What the net figures charge, and the three things they refuse to model.
     cost_disclosure: str
+    #: The entry-price gap against the live wallet. Served so the two numbers
+    #: are never compared naively.
+    entry_divergence: EntryDivergenceOut
     #: The published rates the net figures apply, so a reader can check them.
     cost_rules: list[LabRuleOut] = Field(default_factory=list)
     observed_at: datetime

@@ -216,9 +216,11 @@ LAB_STRATEGIES: tuple[LabStrategy, ...] = (
         id="equal_weight_v1",
         name="Equal Weight v1",
         description=(
-            "The live wallet's rule and the permanent benchmark. Frozen: its "
-            "numbers are never tuned, because every comparison here is drawn "
-            "against them."
+            "The live wallet's **exit** rule, and the permanent benchmark. "
+            "Frozen: its numbers are never tuned, because every comparison here "
+            "is drawn against them. It is not the wallet's *entry* rule — see "
+            "the entry note above, which is why this figure and the wallet's "
+            "ROI are not the same number and must not be compared directly."
         ),
         rules=BASELINE,
         is_baseline=True,

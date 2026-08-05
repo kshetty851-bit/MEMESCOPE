@@ -207,8 +207,20 @@ export interface Lab {
   methodology: string;
   /** What the net figures charge, and what they refuse to model. Render it. */
   cost_disclosure: string;
+  /** Why this page's benchmark and the wallet's ROI are different numbers. */
+  entry_divergence: EntryDivergence;
   cost_rules: LabRule[];
   observed_at: string;
+}
+
+export interface EntryDivergence {
+  positions: number;
+  /** Median wallet entry / lab entry. Above 1 means the wallet paid more. */
+  median_ratio: string | null;
+  worst_ratio: string | null;
+  wallet_paid_more: number;
+  median_lag_hours: string | null;
+  explanation: string;
 }
 
 export interface TokenComparison {

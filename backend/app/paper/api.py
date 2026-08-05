@@ -27,11 +27,12 @@ from app.api.deps import DbSession
 from app.core.config import settings
 from app.models.paper import PaperPosition
 from app.paper import costs, exits, lab
-from app.paper.lab_service import load_dataset, replay_all
+from app.paper.lab_service import load_dataset, measure_entry_divergence, replay_all
 from app.paper.metrics import WalletMetrics
 from app.paper.models import PositionStatus
 from app.paper.schemas import (
     BenchmarkOut,
+    EntryDivergenceOut,
     EquityPointOut,
     LabFindingOut,
     LabOut,
@@ -294,6 +295,20 @@ def _benchmarks(read: WalletRead) -> list[BenchmarkOut]:
 
 # --- Strategy Lab -------------------------------------------------------------
 
+ENTRY_DIVERGENCE_NOTE = (
+    "The lab enters every detection at its **detection price**. The live wallet "
+    "enters when a token first reaches the Radar's top 10 — typically hours "
+    "later, and after the move that put it there. The lab's entries are "
+    "therefore systematically cheaper, in one direction, so its returns are "
+    "optimistic relative to anything the wallet could have achieved. The two "
+    "figures answer different questions and must not be compared directly.\n\n"
+    "The lab does not replay the wallet's entry rule because it cannot: the "
+    "Radar sweep rotates through buckets, so `radar_snapshots` holds a slice of "
+    "the universe per sweep rather than the full ranking, and historical top-10 "
+    "membership is not reconstructible from stored data. Publishing the gap is "
+    "honest; modelling it with a proxy would not be."
+)
+
 METHODOLOGY = (
     "Every rule is replayed over the same detections and the same stored prices; "
     "only the exit logic differs. Capital is unconstrained here — each detection "
@@ -319,6 +334,7 @@ async def get_lab(session: DbSession) -> LabOut:
     now = datetime.now(UTC)
     dataset = await load_dataset(session, now=now)
     results = replay_all(dataset)
+    divergence = await measure_entry_divergence(session, dataset)
     order = lab.rank(results)
     baseline_id = exits.baseline().id
     baseline_return = results[baseline_id].total_return_pct
@@ -352,6 +368,14 @@ async def get_lab(session: DbSession) -> LabOut:
         ),
         methodology=METHODOLOGY,
         cost_disclosure=costs.DISCLOSURE,
+        entry_divergence=EntryDivergenceOut(
+            positions=divergence.positions,
+            median_ratio=divergence.median_ratio,
+            worst_ratio=divergence.worst_ratio,
+            wallet_paid_more=divergence.wallet_paid_more,
+            median_lag_hours=divergence.median_lag_hours,
+            explanation=ENTRY_DIVERGENCE_NOTE,
+        ),
         cost_rules=[
             LabRuleOut(
                 label="Swap fee",

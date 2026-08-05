@@ -12,13 +12,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.paper import PaperPosition
 from app.models.radar import RadarToken
 from app.paper import exits, lab
-from app.paper.models import Quote
+from app.paper.models import PositionStatus, Quote
 from app.radar.repository import RadarRepository
 from app.repositories.market import MarketSnapshotRepository
 
@@ -100,3 +102,89 @@ def replay_all(dataset: LabDataset) -> dict[str, lab.LabResult]:
         strategy.id: lab.replay(dataset.detections, strategy)
         for strategy in exits.LAB_STRATEGIES
     }
+
+
+@dataclass(frozen=True, slots=True)
+class EntryDivergence:
+    """How far the lab's entry price sits from the live wallet's, measured.
+
+    The lab enters every detection at its **detection price**. The wallet
+    enters when a token first reaches the Radar's Top N — typically hours
+    later, and *after the run-up that put it there*. That makes the lab's
+    entries systematically cheaper, in one direction, so its returns are
+    optimistic relative to anything the wallet could have achieved.
+
+    This is measured rather than asserted because the gap moves with the
+    market, and a hardcoded figure in product copy goes stale the day it ships.
+
+    **Why the lab does not simply replay the wallet's entry:** it cannot. The
+    Radar sweep rotates through buckets, so `radar_snapshots` holds a slice of
+    the universe per sweep (6-16 rows of 108), never the full ranking. Historical
+    Top-N membership is therefore not reconstructible from stored data, and
+    inventing a proxy for it would be exactly the estimate this platform
+    refuses. The honest move is to publish the divergence, not to model it away.
+    """
+
+    positions: int
+    #: Median wallet entry / lab entry. Above 1 means the wallet paid more.
+    median_ratio: Decimal | None
+    worst_ratio: Decimal | None
+    #: How many positions the wallet entered at a higher price than the lab.
+    wallet_paid_more: int
+    #: Median hours between detection and the wallet's entry.
+    median_lag_hours: Decimal | None
+
+
+async def measure_entry_divergence(
+    session: AsyncSession, dataset: LabDataset
+) -> EntryDivergence:
+    """Compare every live wallet entry against the lab's for the same token."""
+    positions = (
+        await session.scalars(
+            select(PaperPosition).where(PaperPosition.status == PositionStatus.OPEN.value)
+        )
+    ).all()
+    closed = (
+        await session.scalars(
+            select(PaperPosition).where(PaperPosition.status == PositionStatus.CLOSED.value)
+        )
+    ).all()
+
+    lab_entry = {
+        detection.mint_address: detection.quotes[0]
+        for detection in dataset.detections
+        if detection.quotes
+    }
+
+    ratios: list[Decimal] = []
+    lags: list[Decimal] = []
+    paid_more = 0
+
+    for position in [*positions, *closed]:
+        quote = lab_entry.get(position.mint_address)
+        if quote is None or quote.price_usd <= 0:
+            continue
+        ratio = position.entry_price / quote.price_usd
+        ratios.append(ratio)
+        if ratio > 1:
+            paid_more += 1
+        lags.append(
+            Decimal((position.opened_at - quote.captured_at).total_seconds()) / Decimal(3600)
+        )
+
+    def _median(values: list[Decimal]) -> Decimal | None:
+        if not values:
+            return None
+        ordered = sorted(values)
+        middle = len(ordered) // 2
+        if len(ordered) % 2 == 1:
+            return ordered[middle].quantize(Decimal("0.01"))
+        return ((ordered[middle - 1] + ordered[middle]) / 2).quantize(Decimal("0.01"))
+
+    return EntryDivergence(
+        positions=len(ratios),
+        median_ratio=_median(ratios),
+        worst_ratio=(max(ratios).quantize(Decimal("0.1")) if ratios else None),
+        wallet_paid_more=paid_more,
+        median_lag_hours=_median(lags),
+    )

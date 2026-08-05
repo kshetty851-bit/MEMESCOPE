@@ -395,3 +395,73 @@ class TestExecutionCosts:
         assert len(baseline) == 1
         assert baseline[0]["id"] == "equal_weight_v1"
         assert baseline[0]["baseline_difference_pct"] is None
+
+
+class TestEntryDivergence:
+    """Why the lab's benchmark row and the wallet's ROI are different numbers.
+
+    Reported by a user comparing the two figures, which the product invited by
+    describing the lab's baseline as "the live wallet's rule". It was only ever
+    the wallet's *exit* rule: the lab enters at detection price, while the
+    wallet enters when a token first reaches the top 10 — measured at a median
+    of 6.7 hours later, and after the move that put it there. On live data the
+    wallet paid more on 10 of 13 positions, median 1.40x and worst 46.7x.
+    """
+
+    async def test_the_gap_is_measured_not_asserted(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """A figure written into copy goes stale the day it ships."""
+        await _dataset(db_session)
+        await db_session.commit()
+
+        divergence = (await client.get("/api/v1/paper/lab")).json()["entry_divergence"]
+
+        assert "positions" in divergence
+        assert "median_ratio" in divergence
+        assert divergence["explanation"]
+
+    async def test_it_states_why_the_wallet_entry_cannot_be_replayed(
+        self, client: AsyncClient
+    ) -> None:
+        """The Radar sweep rotates, so `radar_snapshots` holds a slice per
+        sweep rather than the full ranking. Historical top-10 membership is not
+        reconstructible, and a proxy for it would be the estimate this platform
+        refuses."""
+        note = (await client.get("/api/v1/paper/lab")).json()["entry_divergence"][
+            "explanation"
+        ]
+
+        assert "detection price" in note
+        assert "not reconstructible" in note
+        assert "must not be compared" in note
+
+    async def test_the_baseline_no_longer_claims_to_be_the_wallets_rule(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """It is the wallet's exit rule. Saying otherwise invited exactly the
+        comparison that produced this bug report."""
+        await _dataset(db_session)
+        await db_session.commit()
+
+        baseline = next(
+            s
+            for s in (await client.get("/api/v1/paper/lab")).json()["strategies"]
+            if s["is_baseline"]
+        )
+
+        assert "exit" in baseline["description"]
+        assert "not the wallet's *entry* rule" in baseline["description"]
+
+    async def test_a_wallet_with_no_positions_reports_no_gap_rather_than_zero(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """Nothing has been compared, which is not the same as the two agreeing."""
+        await _dataset(db_session)
+        await db_session.commit()
+
+        divergence = (await client.get("/api/v1/paper/lab")).json()["entry_divergence"]
+
+        assert divergence["positions"] == 0
+        assert divergence["median_ratio"] is None
+        assert divergence["worst_ratio"] is None

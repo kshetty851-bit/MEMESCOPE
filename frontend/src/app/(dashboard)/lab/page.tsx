@@ -141,6 +141,48 @@ export default function StrategyLabPage() {
         </dl>
       </Panel>
 
+      {/* The comparison this page invites, and the reason it does not hold.
+          Raised by a reader who put the benchmark row next to the wallet's ROI
+          and found two different numbers — which the old copy encouraged by
+          calling this row "the live wallet's rule". */}
+      {lab.data.entry_divergence.positions > 0 ? (
+        <Panel density="compact" className="border-warn/20 bg-warn/[0.03]">
+          <Label>Not the same number as the paper wallet</Label>
+          <p className="mt-2 max-w-3xl whitespace-pre-line text-xs leading-relaxed text-ink-dim">
+            {lab.data.entry_divergence.explanation}
+          </p>
+          <dl className="mt-3 grid gap-x-6 gap-y-1 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="flex items-baseline justify-between gap-3">
+              <dt className="text-xs text-ink-faint">Positions compared</dt>
+              <dd className="text-xs tabular-nums text-ink-dim">
+                {lab.data.entry_divergence.positions}
+              </dd>
+            </div>
+            <div className="flex items-baseline justify-between gap-3">
+              <dt className="text-xs text-ink-faint">Wallet paid more</dt>
+              <dd className="text-xs tabular-nums text-ink-dim">
+                {lab.data.entry_divergence.wallet_paid_more} of{" "}
+                {lab.data.entry_divergence.positions}
+              </dd>
+            </div>
+            <div className="flex items-baseline justify-between gap-3">
+              <dt className="text-xs text-ink-faint">Median entry ratio</dt>
+              <dd className="text-xs tabular-nums text-ink-dim">
+                {lab.data.entry_divergence.median_ratio
+                  ? `${lab.data.entry_divergence.median_ratio}×`
+                  : "—"}
+              </dd>
+            </div>
+            <div className="flex items-baseline justify-between gap-3">
+              <dt className="text-xs text-ink-faint">Median lag to entry</dt>
+              <dd className="text-xs tabular-nums text-ink-dim">
+                {hours(lab.data.entry_divergence.median_lag_hours) ?? "—"}
+              </dd>
+            </div>
+          </dl>
+        </Panel>
+      ) : null}
+
       {/* Findings first: they are the deliverable, and they are drawn only from
           the figures in the table below. */}
       <section className="flex flex-col gap-3">
