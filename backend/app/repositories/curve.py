@@ -40,9 +40,7 @@ class CurveSnapshotRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def append(
-        self, readings: Sequence[CurveReading], *, captured_at: datetime
-    ) -> int:
+    async def append(self, readings: Sequence[CurveReading], *, captured_at: datetime) -> int:
         """Append one observation per reading. Returns how many landed.
 
         `ON CONFLICT DO NOTHING` against `(mint_address, captured_at)`: a cycle
@@ -101,9 +99,7 @@ class CurveSnapshotRepository:
         ).all()
         return {row.mint_address: row.id for row in rows}
 
-    async def latest_for(
-        self, mints: Sequence[str]
-    ) -> dict[str, TokenCurveSnapshot]:
+    async def latest_for(self, mints: Sequence[str]) -> dict[str, TokenCurveSnapshot]:
         """The newest curve observation per mint, in one query."""
         unique = list(dict.fromkeys(mints))
         if not unique:

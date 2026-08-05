@@ -95,9 +95,7 @@ class ExpiryPolicy:
     archive_after_seconds: int
 
     def ttl_for(self, signal_type: SignalType) -> timedelta:
-        return timedelta(
-            seconds=self.ttl_seconds.get(signal_type, self.default_ttl_seconds)
-        )
+        return timedelta(seconds=self.ttl_seconds.get(signal_type, self.default_ttl_seconds))
 
     def expires_at(self, signal_type: SignalType, *, detected_at: datetime) -> datetime:
         return detected_at + self.ttl_for(signal_type)
@@ -201,9 +199,7 @@ def confidence_for(
         + resolved.corroboration_weight * corroboration
         + resolved.evidence_weight * evidence
     )
-    decayed = freshness(
-        inputs.age_seconds, inputs.ttl_seconds, floor=resolved.freshness_floor
-    )
+    decayed = freshness(inputs.age_seconds, inputs.ttl_seconds, floor=resolved.freshness_floor)
 
     return clamp(clamp(inputs.strength) * supported * decayed)
 
@@ -310,9 +306,7 @@ def resolve_status(
     return OpportunityStatus.PENDING_CONFIRMATION
 
 
-def should_archive(
-    *, closed_at: datetime | None, now: datetime, policy: ExpiryPolicy
-) -> bool:
+def should_archive(*, closed_at: datetime | None, now: datetime, policy: ExpiryPolicy) -> bool:
     """Whether a closed opportunity has settled long enough to be archived.
 
     Archival is what frees a token to open a new generation, so it is a real

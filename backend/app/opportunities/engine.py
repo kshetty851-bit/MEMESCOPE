@@ -169,16 +169,12 @@ def outcome_rules_from_settings() -> OutcomeRules:
         graduated_venues=frozenset(
             venue.lower() for venue in settings.OPPORTUNITY_GRADUATED_VENUES
         ),
-        min_curve_progress=Decimal(
-            str(settings.OPPORTUNITY_NEAR_GRADUATION_MIN_PROGRESS)
-        ),
+        min_curve_progress=Decimal(str(settings.OPPORTUNITY_NEAR_GRADUATION_MIN_PROGRESS)),
     )
 
 
 def confidence_policy_from_settings() -> ConfidencePolicy:
-    return ConfidencePolicy(
-        required_confirmations=settings.OPPORTUNITY_REQUIRED_CONFIRMATIONS
-    )
+    return ConfidencePolicy(required_confirmations=settings.OPPORTUNITY_REQUIRED_CONFIRMATIONS)
 
 
 class OpportunityEngine:
@@ -225,9 +221,7 @@ class OpportunityEngine:
             # attaching it to today's observations would report a stalled curve
             # rather than an absent one — see `windows_for`.
             curve_limit_per_mint=(
-                settings.CURVE_WINDOW_SIZE
-                if settings.FEATURE_CURVE_COLLECTION_ENABLED
-                else 0
+                settings.CURVE_WINDOW_SIZE if settings.FEATURE_CURVE_COLLECTION_ENABLED else 0
             ),
         )
         pending = _Pending()
@@ -248,9 +242,7 @@ class OpportunityEngine:
         await self._review(
             unique, windows=windows, now=moment, outcome=outcome, pending=pending
         )
-        outcome.events_recorded = await self._events.record(
-            pending.events, occurred_at=moment
-        )
+        outcome.events_recorded = await self._events.record(pending.events, occurred_at=moment)
 
         logger.info("opportunity_detection_completed", **outcome.as_dict())
         return outcome
@@ -348,8 +340,7 @@ class OpportunityEngine:
                     kind=EventKind.OPPORTUNITY_OPENED,
                     severity=EventSeverity.NOTABLE,
                     summary=(
-                        f"An opportunity opened on {mint[:8]} "
-                        f"(generation {live.generation})."
+                        f"An opportunity opened on {mint[:8]} (generation {live.generation})."
                     ),
                     current=stage.value,
                 )
@@ -365,9 +356,7 @@ class OpportunityEngine:
                 strength=candidate.strength,
                 observations=observations,
                 detected_at=now,
-                expires_at=self._expiry.expires_at(
-                    candidate.signal_type, detected_at=now
-                ),
+                expires_at=self._expiry.expires_at(candidate.signal_type, detected_at=now),
                 observed_at=candidate.observed_at,
                 reason_codes=candidate.reason_codes,
                 evidence=[
@@ -412,9 +401,7 @@ class OpportunityEngine:
         if stage_opinion is not OpportunityStage.UNKNOWN:
             live.stage = stage_opinion.value
 
-        await self._advance(
-            [live], now=now, outcome=outcome, pending=pending, confirmed=True
-        )
+        await self._advance([live], now=now, outcome=outcome, pending=pending, confirmed=True)
 
     # --- Lifecycle -----------------------------------------------------------
 
@@ -444,9 +431,7 @@ class OpportunityEngine:
         await self._settle_outcomes(
             list(live.values()), windows=windows, outcome=outcome, pending=pending
         )
-        await self._advance(
-            list(live.values()), now=now, outcome=outcome, pending=pending
-        )
+        await self._advance(list(live.values()), now=now, outcome=outcome, pending=pending)
 
     async def _settle_outcomes(
         self,
@@ -463,9 +448,7 @@ class OpportunityEngine:
         as it was decided live. A signal with no rule, or an open question,
         simply stays live and exits on its TTL like before.
         """
-        signals = await self._repository.signals_for(
-            [item.id for item in opportunities]
-        )
+        signals = await self._repository.signals_for([item.id for item in opportunities])
         for opportunity in opportunities:
             window = windows.get(opportunity.mint_address)
             if window is None or not len(window):
@@ -480,9 +463,7 @@ class OpportunityEngine:
                     rules=self._outcomes,
                 )
                 if verdict is not None:
-                    self._apply_outcome(
-                        signal, verdict, outcome=outcome, pending=pending
-                    )
+                    self._apply_outcome(signal, verdict, outcome=outcome, pending=pending)
 
     def _apply_outcome(
         self,
@@ -683,9 +664,7 @@ class OpportunityEngine:
 
 # --- Helpers -----------------------------------------------------------------
 
-_TRANSITION_EVENTS: dict[
-    OpportunityStatus, tuple[EventKind, EventSeverity, str]
-] = {
+_TRANSITION_EVENTS: dict[OpportunityStatus, tuple[EventKind, EventSeverity, str]] = {
     OpportunityStatus.PENDING_CONFIRMATION: (
         EventKind.OPPORTUNITY_OPENED,
         EventSeverity.INFO,

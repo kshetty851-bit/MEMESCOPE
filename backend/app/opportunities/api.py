@@ -87,9 +87,7 @@ async def list_opportunities(
         stage=resolved_stage,
     )
     signals = await repository.live_signals_for([row.id for row in rows], now=now)
-    context = await resolve_token_context(
-        session, [row.mint_address for row in rows], now=now
-    )
+    context = await resolve_token_context(session, [row.mint_address for row in rows], now=now)
     has_more = await repository.board_has_more(
         now=now,
         offset=offset,
@@ -100,8 +98,7 @@ async def list_opportunities(
 
     return OpportunityBoard(
         items=[
-            _to_card(row, signals.get(row.id, []), context=context, now=now)
-            for row in rows
+            _to_card(row, signals.get(row.id, []), context=context, now=now) for row in rows
         ],
         page=page,
         page_size=page_size,
@@ -150,9 +147,7 @@ async def provider_analytics(session: DbSession) -> ProviderAnalyticsReport:
     )
 
 
-@router.get(
-    "/{mint}", response_model=OpportunityOut, summary="One opportunity in full"
-)
+@router.get("/{mint}", response_model=OpportunityOut, summary="One opportunity in full")
 async def get_opportunity(
     session: DbSession,
     mint: str,
@@ -172,9 +167,7 @@ async def get_opportunity(
 
     signals = await repository.live_signals_for([opportunity.id], now=now)
     context = await resolve_token_context(session, [opportunity.mint_address], now=now)
-    return _to_card(
-        opportunity, signals.get(opportunity.id, []), context=context, now=now
-    )
+    return _to_card(opportunity, signals.get(opportunity.id, []), context=context, now=now)
 
 
 # --- Rendering ---------------------------------------------------------------

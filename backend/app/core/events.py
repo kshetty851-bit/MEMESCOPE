@@ -36,9 +36,7 @@ async def publish_token_discovered(
 ) -> int:
     """Publish a discovery. Returns the number of Redis subscribers reached."""
     client = redis or get_redis()
-    receivers = await client.publish(
-        settings.token_channel, json.dumps(payload, default=str)
-    )
+    receivers = await client.publish(settings.token_channel, json.dumps(payload, default=str))
     return int(receivers)
 
 
@@ -55,9 +53,7 @@ async def publish_score_changed(payload: dict[str, Any], *, redis: Redis | None 
     scanner already follows.
     """
     client = redis or get_redis()
-    receivers = await client.publish(
-        settings.score_channel, json.dumps(payload, default=str)
-    )
+    receivers = await client.publish(settings.score_channel, json.dumps(payload, default=str))
     return int(receivers)
 
 

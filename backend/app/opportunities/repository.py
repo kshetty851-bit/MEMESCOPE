@@ -140,9 +140,7 @@ class OpportunityRepository:
             .subquery()
         )
         rows = (
-            await self._session.execute(
-                select(ranked).where(ranked.c.rank <= limit_per_mint)
-            )
+            await self._session.execute(select(ranked).where(ranked.c.rank <= limit_per_mint))
         ).all()
 
         collected: dict[str, list[Any]] = {mint: [] for mint in unique}
@@ -152,9 +150,7 @@ class OpportunityRepository:
         curves: dict[str, list[TokenCurveSnapshot]] = {}
         if curve_limit_per_mint > 0:
             repository = curve_repository or CurveSnapshotRepository(self._session)
-            curves = await repository.windows_for(
-                unique, limit_per_mint=curve_limit_per_mint
-            )
+            curves = await repository.windows_for(unique, limit_per_mint=curve_limit_per_mint)
 
         # The window function returns newest-first; providers read oldest-first.
         windows: dict[str, ObservationWindow] = {}
@@ -509,9 +505,7 @@ class OpportunityRepository:
             return {}
         rows = (
             await self._session.scalars(
-                select(OpportunitySignal).where(
-                    OpportunitySignal.opportunity_id.in_(unique)
-                )
+                select(OpportunitySignal).where(OpportunitySignal.opportunity_id.in_(unique))
             )
         ).all()
         grouped: dict[uuid.UUID, list[OpportunitySignal]] = {key: [] for key in unique}
@@ -699,8 +693,7 @@ class OpportunityRepository:
         )
         if existing is None:  # pragma: no cover - the unique key guarantees it
             raise RuntimeError(
-                f"signal insert for {mint_address}/{signal_type} conflicted "
-                "but no row exists"
+                f"signal insert for {mint_address}/{signal_type} conflicted but no row exists"
             )
 
         repeat = existing.observed_at is not None and existing.observed_at == observed_at

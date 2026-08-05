@@ -286,17 +286,11 @@ def _to_entry(
         model_version=entry.model_version,
         last_evaluated_at=entry.last_evaluated_at,
         achieved_tiers=(tiers or {}).get(entry.mint_address, []),
-        liveness=(
-            "alive"
-            if alive is not None and entry.mint_address in alive
-            else "unknown"
-        ),
+        liveness=("alive" if alive is not None and entry.mint_address in alive else "unknown"),
         # Keyed on the category assigned at first detection, matching how the
         # rate itself is grouped — a later re-classification must not silently
         # move a token into a different history.
-        base_rate=_to_base_rate(
-            entry.category, (base_rates or {}).get(entry.category)
-        ),
+        base_rate=_to_base_rate(entry.category, (base_rates or {}).get(entry.category)),
     )
 
 
@@ -680,9 +674,7 @@ async def get_entry(session: DbSession, mint: str) -> RadarDetailOut:
         now,
         await repository.names_for([entry.mint_address]),
         await repository.tiers_for([entry.mint_address]),
-        await repository.observed_within(
-            [entry.mint_address], since=now - LIVENESS_WINDOW
-        ),
+        await repository.observed_within([entry.mint_address], since=now - LIVENESS_WINDOW),
         await repository.base_rates(),
         context=await resolve_token_context(session, [entry.mint_address], now=now),
         snapshots=await repository.latest_snapshots_for([entry.mint_address]),

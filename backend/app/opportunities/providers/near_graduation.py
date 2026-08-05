@@ -257,9 +257,7 @@ class NearGraduationProvider(SignalProvider):
                 WEIGHTS["volume_trend"],
                 _volume_trend(observations) if enough else None,
             ),
-            Component(
-                "buy_pressure", WEIGHTS["buy_pressure"], _buy_pressure(observations)
-            ),
+            Component("buy_pressure", WEIGHTS["buy_pressure"], _buy_pressure(observations)),
             Component(
                 "transaction_rate",
                 WEIGHTS["transaction_rate"],
@@ -360,9 +358,7 @@ def _volume_trend(observations: list[MarketObservation]) -> Decimal | None:
     Its own baseline, never a cross-token one: comparing a token's volume to
     another token's says more about their sizes than about either's trend.
     """
-    values = [
-        item.volume_24h for item in observations if item.volume_24h is not None
-    ]
+    values = [item.volume_24h for item in observations if item.volume_24h is not None]
     if len(values) < 4:
         return None
 

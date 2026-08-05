@@ -171,9 +171,7 @@ class MarketEnrichmentWorker:
                 pubsub = get_redis().pubsub()
                 await pubsub.subscribe(settings.token_channel)
                 attempt = 0
-                logger.info(
-                    "enrichment_listener_subscribed", channel=settings.token_channel
-                )
+                logger.info("enrichment_listener_subscribed", channel=settings.token_channel)
 
                 async for message in pubsub.listen():
                     if self._stop.is_set():
@@ -375,7 +373,6 @@ class MarketEnrichmentWorker:
         if outcome.events:
             await publish_score_events(outcome.events)
             self.stats.score_events_published += len(outcome.events)
-
 
     # --- Bonding curve collection (TX-3) ------------------------------------
 

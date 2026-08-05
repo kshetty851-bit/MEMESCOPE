@@ -96,7 +96,5 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_index("ix_curve_snapshots_complete", table_name="token_curve_snapshots")
-    op.drop_index(
-        "ix_curve_snapshots_mint_captured", table_name="token_curve_snapshots"
-    )
+    op.drop_index("ix_curve_snapshots_mint_captured", table_name="token_curve_snapshots")
     op.drop_table("token_curve_snapshots")

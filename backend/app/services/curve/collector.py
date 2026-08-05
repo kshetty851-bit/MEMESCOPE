@@ -136,9 +136,7 @@ class BondingCurveCollector:
             for start in range(0, len(mints), MAX_ACCOUNTS_PER_CALL):
                 chunk = mints[start : start + MAX_ACCOUNTS_PER_CALL]
                 readings.extend(
-                    await self._fetch_chunk(
-                        chunk, addresses, client=client, outcome=outcome
-                    )
+                    await self._fetch_chunk(chunk, addresses, client=client, outcome=outcome)
                 )
         finally:
             if self._owns_client:
@@ -163,17 +161,13 @@ class BondingCurveCollector:
             # The interface's own batched read, rather than a raw `call`. The
             # chunk limit and the "a short list is not an absent account" rule
             # are properties of the RPC, so they live with it.
-            values = await client.get_multiple_accounts(
-                [addresses[mint] for mint in mints]
-            )
+            values = await client.get_multiple_accounts([addresses[mint] for mint in mints])
         except RpcError as exc:
             # A whole chunk lost. Contained and counted: the curve history is a
             # series, so a missed read costs one point rather than the token.
             outcome.failed += len(mints)
             outcome.errors.append(str(exc))
-            logger.warning(
-                "curve_fetch_failed", tokens=len(mints), error=str(exc)[:200]
-            )
+            logger.warning("curve_fetch_failed", tokens=len(mints), error=str(exc)[:200])
             return []
 
         readings: list[CurveReading] = []

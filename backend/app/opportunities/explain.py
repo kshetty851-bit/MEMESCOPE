@@ -30,8 +30,7 @@ REASON_MESSAGE: dict[str, str] = {
         "The venue reporting this token's market changed between observations."
     ),
     "approaching_graduation": (
-        "This token has filled enough of its bonding curve to be approaching "
-        "graduation."
+        "This token has filled enough of its bonding curve to be approaching graduation."
     ),
     "curve_progress_rising": "Curve progress has increased across the window.",
     "curve_progress_stalled": "Curve progress has not moved across the window.",
@@ -41,16 +40,14 @@ REASON_MESSAGE: dict[str, str] = {
     "buy_pressure_dominant": "Buys outnumbered sells across the window.",
     "trade_rate_rising": "Trades are arriving faster than one a minute.",
     "price_broke_trailing_high": (
-        "The price has moved above the highest level of this token's own recent "
-        "observations."
+        "The price has moved above the highest level of this token's own recent observations."
     ),
     "approaching_trailing_high": (
         "The price is trading close to the highest level of this token's own "
         "recent observations, without having passed it."
     ),
     "volume_expanded_over_baseline": (
-        "Hourly volume is running above the median of this token's own recent "
-        "observations."
+        "Hourly volume is running above the median of this token's own recent observations."
     ),
     "pre_breakout_became_breakout": (
         "The price cleared the range it had been pressing against, so this "
@@ -64,16 +61,14 @@ REASON_MESSAGE: dict[str, str] = {
         "The token graduated to an open pool, resolving this reading."
     ),
     "curve_progress_retreated": (
-        "Bonding-curve progress fell back below the level this reading was "
-        "made at."
+        "Bonding-curve progress fell back below the level this reading was made at."
     ),
     "graduation_venue_reverted": (
         "The token was observed back on a bonding curve, which contradicts the "
         "venue change this reading reported."
     ),
     "thin_observation_window": (
-        "Few observations stand behind this reading, so it is held with less "
-        "confidence."
+        "Few observations stand behind this reading, so it is held with less confidence."
     ),
 }
 
@@ -100,16 +95,14 @@ SIGNAL_HEADLINE: dict[SignalType, str] = {
 #: See ARCHITECTURE_DECISIONS.md §14 for why each is absent.
 SIGNAL_LIMITS: dict[SignalType, tuple[str, ...]] = {
     SignalType.FRESH_GRADUATION: (
-        "Liquidity could not be verified before graduation — bonding-curve pools "
-        "report none.",
+        "Liquidity could not be verified before graduation — bonding-curve pools report none.",
         "Holder distribution is not collected, so concentration was not checked.",
     ),
     SignalType.BREAKOUT: (
         "The range is this token's own recent observations, not a fixed period "
         "— snapshot cadence varies by token age.",
         "Holder distribution is not collected, so concentration was not checked.",
-        "Liquidity is not reported for bonding-curve pools, so depth was not "
-        "checked.",
+        "Liquidity is not reported for bonding-curve pools, so depth was not checked.",
     ),
     SignalType.PRE_BREAKOUT: (
         "The range is this token's own recent observations, not a fixed period "
@@ -121,17 +114,14 @@ SIGNAL_LIMITS: dict[SignalType, tuple[str, ...]] = {
     SignalType.NEAR_GRADUATION: (
         "Curve progress is inferred from reported market cap, which is not a "
         "direct read of the bonding curve.",
-        "Liquidity is not reported for bonding-curve pools, so depth was not "
-        "checked.",
+        "Liquidity is not reported for bonding-curve pools, so depth was not checked.",
         "Holder distribution is not collected, so concentration was not checked.",
     ),
 }
 
 
 def headline(signal_type: SignalType) -> str:
-    return SIGNAL_HEADLINE.get(
-        signal_type, signal_type.value.replace("_", " ").capitalize()
-    )
+    return SIGNAL_HEADLINE.get(signal_type, signal_type.value.replace("_", " ").capitalize())
 
 
 def message(code: str) -> str:

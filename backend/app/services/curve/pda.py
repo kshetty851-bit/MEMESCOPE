@@ -122,9 +122,7 @@ def find_program_address(seeds: list[bytes], program_id: str) -> tuple[str, int]
     prefix = b"".join(seeds)
 
     for bump in range(255, -1, -1):
-        digest = hashlib.sha256(
-            prefix + bytes([bump]) + program + _PDA_MARKER
-        ).digest()
+        digest = hashlib.sha256(prefix + bytes([bump]) + program + _PDA_MARKER).digest()
         if not is_on_curve(digest):
             return b58encode(digest), bump
 
@@ -133,7 +131,5 @@ def find_program_address(seeds: list[bytes], program_id: str) -> tuple[str, int]
 
 def bonding_curve_address(mint_address: str, *, program_id: str) -> str:
     """The bonding curve account for one mint."""
-    address, _ = find_program_address(
-        [CURVE_SEED, b58decode(mint_address)], program_id
-    )
+    address, _ = find_program_address([CURVE_SEED, b58decode(mint_address)], program_id)
     return address

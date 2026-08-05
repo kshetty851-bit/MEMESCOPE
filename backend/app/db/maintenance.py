@@ -164,9 +164,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         completed = asyncio.run(_run())
     except Exception as exc:
-        logger.error(
-            "maintenance_failed", error=str(exc), error_type=type(exc).__name__
-        )
+        logger.error("maintenance_failed", error=str(exc), error_type=type(exc).__name__)
         return 1
 
     logger.info("maintenance_finished", tables_maintained=completed)

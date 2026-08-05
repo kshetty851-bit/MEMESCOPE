@@ -119,9 +119,7 @@ class BreakoutProvider(SignalProvider):
             if min_observations is not None
             else settings.OPPORTUNITY_BREAKOUT_MIN_OBSERVATIONS
         )
-        self._price_margin = _decimal(
-            price_margin, settings.OPPORTUNITY_BREAKOUT_PRICE_MARGIN
-        )
+        self._price_margin = _decimal(price_margin, settings.OPPORTUNITY_BREAKOUT_PRICE_MARGIN)
         self._volume_multiple = _decimal(
             volume_multiple, settings.OPPORTUNITY_BREAKOUT_VOLUME_MULTIPLE
         )

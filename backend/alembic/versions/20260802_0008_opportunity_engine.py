@@ -76,7 +76,9 @@ def upgrade() -> None:
         sa.Column("generation", sa.Integer(), server_default="1", nullable=False),
         sa.Column("status", sa.String(length=32), nullable=False),
         sa.Column("stage", sa.String(length=32), nullable=False),
-        sa.Column("priority", sa.Numeric(precision=5, scale=2), server_default="0", nullable=False),
+        sa.Column(
+            "priority", sa.Numeric(precision=5, scale=2), server_default="0", nullable=False
+        ),
         sa.Column("priority_band", sa.String(length=16), nullable=False),
         sa.Column(
             "confidence", sa.Numeric(precision=5, scale=2), server_default="0", nullable=False

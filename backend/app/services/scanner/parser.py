@@ -377,9 +377,7 @@ def parse_create_event(logs: Sequence[str]) -> CreateEvent | None:
             # to the transaction, which is the pre-existing behaviour.
             return None
 
-        if timestamp is not None and not (
-            _MIN_BLOCK_TIME <= timestamp <= _MAX_BLOCK_TIME
-        ):
+        if timestamp is not None and not (_MIN_BLOCK_TIME <= timestamp <= _MAX_BLOCK_TIME):
             return None
 
         return CreateEvent(
@@ -391,9 +389,7 @@ def parse_create_event(logs: Sequence[str]) -> CreateEvent | None:
             symbol=_clean(symbol, 64),
             metadata_uri=_clean(uri, 2048),
             block_time=(
-                datetime.fromtimestamp(timestamp, tz=UTC)
-                if timestamp is not None
-                else None
+                datetime.fromtimestamp(timestamp, tz=UTC) if timestamp is not None else None
             ),
         )
 

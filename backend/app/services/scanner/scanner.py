@@ -297,9 +297,7 @@ class TokenScanner:
             finally:
                 self._queue.task_done()
 
-    def _from_logs(
-        self, event: LogEvent
-    ) -> tuple[TokenCreation, TokenMetadata | None] | None:
+    def _from_logs(self, event: LogEvent) -> tuple[TokenCreation, TokenMetadata | None] | None:
         """Resolve a creation from the log payload alone, or None.
 
         The fast path, and the one that survives a rate limit: the launchpad's
@@ -363,9 +361,7 @@ class TokenScanner:
         return creation, metadata
 
     async def _handle_event(self, event: LogEvent) -> None:
-        resolved: tuple[TokenCreation, TokenMetadata | None] | None = self._from_logs(
-            event
-        )
+        resolved: tuple[TokenCreation, TokenMetadata | None] | None = self._from_logs(event)
         if resolved is not None:
             self.stats.resolved_from_logs += 1
         else:

@@ -171,9 +171,7 @@ class MarketEnrichmentService:
                 # The lane the priority beat placed this token in. Read from the
                 # row rather than recomputed here: membership is decided in one
                 # place, and the worker only honours it.
-                priority=(
-                    settings.FEATURE_PRIORITY_ENRICHMENT_ENABLED and state.priority > 0
-                ),
+                priority=(settings.FEATURE_PRIORITY_ENRICHMENT_ENABLED and state.priority > 0),
             )
 
             should_dead_letter = not succeeded and self.scheduler.should_dead_letter(

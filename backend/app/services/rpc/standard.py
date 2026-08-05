@@ -181,9 +181,7 @@ class StandardSolanaRPC(SolanaRPC):
             if attempt < total:
                 await asyncio.sleep(self._backoff.delay_for(attempt))
 
-        logger.warning(
-            "rpc_transaction_unavailable", signature=signature, attempts=total
-        )
+        logger.warning("rpc_transaction_unavailable", signature=signature, attempts=total)
         return None
 
     async def get_multiple_accounts(
@@ -204,9 +202,7 @@ class StandardSolanaRPC(SolanaRPC):
                 f"addresses; {len(addresses)} were given. Chunk before calling."
             )
 
-        response = await self.call(
-            "getMultipleAccounts", [addresses, {"encoding": encoding}]
-        )
+        response = await self.call("getMultipleAccounts", [addresses, {"encoding": encoding}])
         values = (response or {}).get("value")
         if not isinstance(values, list):
             raise RpcError("getMultipleAccounts returned no value array")

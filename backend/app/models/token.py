@@ -59,9 +59,7 @@ class DiscoveredToken(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     # or sorts on it — the natural key is `mint_address`, which is what
     # ingestion deduplicates on. The index cost 3.7 MB of write amplification on
     # the hottest insert path in the system to serve nothing (Sprint 2, §3).
-    signature: Mapped[str] = mapped_column(
-        String(SIGNATURE_MAX_LENGTH), nullable=False
-    )
+    signature: Mapped[str] = mapped_column(String(SIGNATURE_MAX_LENGTH), nullable=False)
     # Slots exceed the 32-bit integer range, so BigInteger is not optional here.
     slot: Mapped[int] = mapped_column(BigInteger, index=True, nullable=False)
 

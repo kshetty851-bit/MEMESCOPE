@@ -61,8 +61,7 @@ class ProviderRegistry:
             return self._providers[provider_id]
         except KeyError as exc:
             raise UnknownProviderError(
-                f"unknown provider '{provider_id}'. Registered: "
-                f"{sorted(self._providers)}"
+                f"unknown provider '{provider_id}'. Registered: {sorted(self._providers)}"
             ) from exc
 
     def __contains__(self, provider_id: object) -> bool:
