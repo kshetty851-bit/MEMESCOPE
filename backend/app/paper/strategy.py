@@ -27,11 +27,12 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Protocol
 
+from app.paper.exits import ExitRules
 from app.paper.models import Candidate, Entry
 
-#: How many Radar places the default strategy watches. Published because it is
-#: half the entry rule: a token that never reaches the top ten is never bought,
-#: and a reader comparing the wallet against the Radar needs to know the cut.
+#: How many Radar places the retired Equal Weight strategy watched. Published
+#: because it was half its entry rule: a token that never reached the top ten
+#: was never bought.
 DEFAULT_TOP_N = 10
 
 
@@ -73,6 +74,11 @@ class Strategy(Protocol):
     """
 
     spec: StrategySpec
+    #: The exit rule set, as data. One `exits.resolve` runs every strategy, so
+    #: there is exactly one implementation of "which rule closed this and when".
+    exit_rules: ExitRules
+    #: How many Radar places to watch, or `None` for the whole ranked Radar.
+    top_n: int | None
 
     def describe(self) -> StrategySpec: ...
 
@@ -111,6 +117,19 @@ class FixedSizeStrategy:
     @property
     def spec(self) -> StrategySpec:
         return self.describe()
+
+    @property
+    def exit_rules(self) -> ExitRules:
+        """The bracket, as data for the one shared exit resolver.
+
+        Built from the same three fields `describe()` publishes, so the rule
+        that runs and the rule that is printed cannot come apart.
+        """
+        return ExitRules(
+            take_profit_multiple=self.take_profit_multiple,
+            stop_loss_multiple=self.stop_loss_multiple,
+            hold_for=self.hold_for,
+        )
 
     def describe(self) -> StrategySpec:
         """The rules, in the words the API serves and the page prints.
@@ -177,13 +196,171 @@ class FixedSizeStrategy:
             stop_price=candidate.price_usd * self.stop_loss_multiple,
             expires_at=now + self.hold_for,
             opened_at=now,
+            market_cap=candidate.market_cap,
+            liquidity_usd=candidate.liquidity_usd,
         )
 
 
-#: The default, and the only operational strategy. Its numbers are the ones the
-#: brief published: $100 equal weight, +100% / -50%, and a holding period that
-#: matches the Opportunity Engine's own fresh-graduation TTL so a position is not
-#: still running long after the signal that justified it has lapsed.
+@dataclass(frozen=True, slots=True)
+class TrailingStopStrategy:
+    """Equal weight in, and one trailing stop out. **The published strategy.**
+
+    Sprint 30 relaunched the wallet under a single rule, chosen before the
+    relaunch and never revisited after seeing a result. Everything about it is
+    mechanical:
+
+    * **Entry** is the highest-ranked eligible token on the Radar, whatever its
+      place. Not a top-ten cut — the wallet is meant to stay invested whenever a
+      qualified opportunity exists, and a rule that only ever looked at ten rows
+      would sit on idle cash the moment those ten had all been traded once.
+    * **Size** is the same dollar amount every time. Equal weight is the only
+      allocation that cannot flatter the Radar: any size varying with score,
+      confidence or base rate mixes a second opinion into a result presented as
+      a test of the first.
+    * **Exit** is a trailing stop and *nothing else*. No target, no fixed stop,
+      no holding period. A position closes when the price has given back a
+      published fraction of the highest level observed while it was open.
+
+    The trailing distance is fixed at entry and stored on the position for the
+    same reason a target used to be: a distance re-read from configuration after
+    the fact could be re-read favourably.
+
+    Two consequences are stated rather than hidden, because both are real:
+
+    * **A position can run indefinitely.** With no expiry, a token that never
+      gives back a quarter of its high is never sold, and that capital is not
+      available for the next entry. The equity curve shows this; nothing about
+      it is smoothed over.
+    * **The fill is assumed at the trigger level.** A reading far below the
+      trigger closes the position at the trigger, not at the reading. That is
+      the frozen convention of the shared resolver, it is optimistic on a gap
+      down, and it is published on the strategy card as a rule of its own.
+    """
+
+    id: str
+    name: str
+    version: str
+    trade_size_usd: Decimal
+    #: Fraction back from the running high that closes a position. 0.25 is 25%.
+    trailing_drawdown: Decimal
+    #: `None` means the whole ranked Radar, which is what this strategy uses.
+    top_n: int | None = None
+    operational: bool = True
+    unavailable_reason: str | None = None
+
+    @property
+    def spec(self) -> StrategySpec:
+        return self.describe()
+
+    @property
+    def exit_rules(self) -> ExitRules:
+        """One rule, and deliberately only one.
+
+        Every other field on `ExitRules` stays `None` — not zero. `resolve`
+        skips a rule that is absent, so "no take profit" is expressed as the
+        absence of a take profit rather than as a target nothing can reach.
+        """
+        return ExitRules(trailing_drawdown=self.trailing_drawdown)
+
+    def describe(self) -> StrategySpec:
+        """The rules, in the words the API serves and the page prints."""
+        back = self.trailing_drawdown * 100
+        return StrategySpec(
+            id=self.id,
+            name=self.name,
+            version=self.version,
+            summary=(
+                f"Buys ${self.trade_size_usd:,.0f} of the highest-ranked eligible "
+                "token on the Radar, and sells it once the price has given back "
+                f"{back:.0f}% of the highest level seen since the position opened. "
+                "There is no profit target, no fixed stop and no time limit."
+            ),
+            rules=(
+                Rule("Allocation", "Equal weight"),
+                Rule("Trade size", f"${self.trade_size_usd:,.0f}"),
+                Rule(
+                    "Entry",
+                    "Highest-ranked eligible token on the Radar, whenever cash allows"
+                    if self.top_n is None
+                    else f"Highest-ranked eligible token in the Radar top {self.top_n}",
+                ),
+                Rule("Re-entry", "Never. One position per token, ever."),
+                Rule("Take profit", "None"),
+                Rule("Fixed stop", "None"),
+                Rule("Maximum hold", "None. A position runs until the trailing stop."),
+                Rule("Trailing stop", f"-{back:.0f}% from the highest price observed"),
+                Rule(
+                    "Trailing reference",
+                    "The high before the current reading. One snapshot cannot both "
+                    "set a new high and fall away from it.",
+                ),
+                Rule(
+                    "Fill assumption",
+                    "At the trigger level. A gap below it is not modelled, which "
+                    "makes this figure optimistic on a fast fall.",
+                ),
+                Rule("Discretion", "None. No rule is applied by hand."),
+            ),
+            operational=self.operational,
+            unavailable_reason=self.unavailable_reason,
+        )
+
+    def entry_for(
+        self, candidate: Candidate, *, cash_available: Decimal, now: datetime
+    ) -> Entry | None:
+        """Size one entry, or decline it.
+
+        Declines rather than part-fills when cash is short, exactly as the
+        retired strategy did: a wallet that quietly halved its size would report
+        a return the published rule did not produce, and "there was not enough
+        cash for the next one" is a real outcome the equity curve should show.
+        """
+        if not self.operational:
+            return None
+        if self.top_n is not None and candidate.rank > self.top_n:
+            return None
+        if candidate.price_usd <= 0:
+            # Unpriced, not free. A position cannot be sized against a price
+            # nobody observed, and inventing one would be the estimate this
+            # platform refuses to make.
+            return None
+        if cash_available < self.trade_size_usd:
+            return None
+
+        return Entry(
+            mint_address=candidate.mint_address,
+            price_usd=candidate.price_usd,
+            size_usd=self.trade_size_usd,
+            quantity=self.trade_size_usd / candidate.price_usd,
+            opened_at=now,
+            # No target, no stop, no expiry — the three rules this strategy does
+            # not have. Left `None` rather than set out of reach, so the position
+            # row says "there is no such rule" instead of "the rule is 1,000,000x".
+            trailing_drawdown=self.trailing_drawdown,
+            market_cap=candidate.market_cap,
+            liquidity_usd=candidate.liquidity_usd,
+        )
+
+
+#: **The published MEMESCOPE strategy.** One rule, chosen before the relaunch,
+#: applied without exception and never tuned in response to a result. $100 equal
+#: weight into the highest-ranked eligible Radar token; out at 25% back from the
+#: high; nothing else closes a position.
+TRAILING_STOP_25_V1 = TrailingStopStrategy(
+    id="trailing_stop_25_v1",
+    name="Trailing Stop 25%",
+    version="1.0.0",
+    trade_size_usd=Decimal(100),
+    trailing_drawdown=Decimal("0.25"),
+)
+
+#: **Retired at the Sprint 30 relaunch, and kept because its wallet still
+#: exists.** Its trades are a permanent record; an archived wallet has to be
+#: able to name the rules that produced them, and a strategy that vanished from
+#: the registry would leave a wallet describing itself by an id alone.
+#:
+#: It does not trade, and there is no way to make it trade: the registry has one
+#: operational strategy and there is no selector anywhere in the product.
 EQUAL_WEIGHT_V1 = FixedSizeStrategy(
     id="equal_weight_v1",
     name="Equal Weight v1",
@@ -192,87 +369,58 @@ EQUAL_WEIGHT_V1 = FixedSizeStrategy(
     take_profit_multiple=Decimal(2),
     stop_loss_multiple=Decimal("0.5"),
     hold_for=timedelta(hours=48),
-)
-
-#: Declared, not runnable. Registered so the interface is exercised by more than
-#: one shape and so the page can say "one of four strategies runs" rather than
-#: implying the architecture supports only what it currently does. Each states
-#: why it is off; none of them is a recommendation, and none of them trades.
-CONSERVATIVE_V1 = FixedSizeStrategy(
-    id="conservative_v1",
-    name="Conservative v1",
-    version="1.0.0",
-    trade_size_usd=Decimal(50),
-    take_profit_multiple=Decimal("1.5"),
-    stop_loss_multiple=Decimal("0.75"),
-    hold_for=timedelta(hours=24),
-    top_n=5,
     operational=False,
     unavailable_reason=(
-        "Declared but not running. Only one strategy trades at a time, so that "
-        "the wallet measures the Radar rather than a comparison between rules."
+        "Retired at the Sprint 30 relaunch. Its wallet is archived and frozen — "
+        "the trades it took are kept unchanged for internal comparison and are "
+        "never mixed into the live wallet's figures."
     ),
 )
 
-AGGRESSIVE_V1 = FixedSizeStrategy(
-    id="aggressive_v1",
-    name="Aggressive v1",
-    version="1.0.0",
-    trade_size_usd=Decimal(200),
-    take_profit_multiple=Decimal(4),
-    stop_loss_multiple=Decimal("0.4"),
-    hold_for=timedelta(hours=72),
-    operational=False,
-    unavailable_reason=(
-        "Declared but not running. Only one strategy trades at a time, so that "
-        "the wallet measures the Radar rather than a comparison between rules."
-    ),
-)
-
-HOLD_UNTIL_EXPIRY_V1 = FixedSizeStrategy(
-    id="hold_until_expiry_v1",
-    name="Hold Until Exit v1",
-    version="1.0.0",
-    trade_size_usd=Decimal(100),
-    # No take profit and no stop in practice: the bounds are set beyond any
-    # move this market produces, so only the holding period can close a trade.
-    take_profit_multiple=Decimal(1_000_000),
-    stop_loss_multiple=Decimal(0),
-    hold_for=timedelta(days=30),
-    operational=False,
-    unavailable_reason=(
-        "Declared but not running. Only one strategy trades at a time, so that "
-        "the wallet measures the Radar rather than a comparison between rules."
-    ),
-)
+#: What a wallet may follow. Kept as a Protocol union rather than one class so
+#: the archived bracket and the live trailing stop can both be described without
+#: one pretending to be the other.
+AnyStrategy = FixedSizeStrategy | TrailingStopStrategy
 
 
 class StrategyRegistry:
     """Every declared strategy, and the one that actually trades.
 
     Mirrors `opportunities.providers.registry`: declaration is separate from
-    operation, so a strategy that exists and does not run is visible rather than
-    absent.
+    operation, so a retired strategy is visible rather than absent.
+
+    **Exactly one strategy is operational, asserted at construction.** Sprint 30
+    published a single strategy and removed the selector; a second operational
+    entry would be a mode nobody chose, and the failure should happen at import
+    rather than as a surprise in a wallet's figures.
     """
 
-    def __init__(self, strategies: tuple[FixedSizeStrategy, ...], *, default: str) -> None:
-        self._by_id = {strategy.id: strategy for strategy in strategies}
+    def __init__(self, strategies: tuple[AnyStrategy, ...], *, default: str) -> None:
+        self._by_id: dict[str, AnyStrategy] = {
+            strategy.id: strategy for strategy in strategies
+        }
         if default not in self._by_id:
             raise ValueError(f"default strategy {default!r} is not registered")
+        operational = [strategy.id for strategy in strategies if strategy.operational]
+        if operational != [default]:
+            raise ValueError(
+                f"exactly one strategy must be operational and it must be the "
+                f"default; found {operational!r} against default {default!r}"
+            )
         self._default = default
 
-    def all(self) -> tuple[FixedSizeStrategy, ...]:
+    def all(self) -> tuple[AnyStrategy, ...]:
         return tuple(self._by_id.values())
 
-    def get(self, strategy_id: str) -> FixedSizeStrategy | None:
+    def get(self, strategy_id: str) -> AnyStrategy | None:
         return self._by_id.get(strategy_id)
 
     @property
-    def default(self) -> FixedSizeStrategy:
+    def default(self) -> AnyStrategy:
         return self._by_id[self._default]
 
 
 registry = StrategyRegistry(
-    (EQUAL_WEIGHT_V1, CONSERVATIVE_V1, AGGRESSIVE_V1, HOLD_UNTIL_EXPIRY_V1),
-    default=EQUAL_WEIGHT_V1.id,
+    (TRAILING_STOP_25_V1, EQUAL_WEIGHT_V1),
+    default=TRAILING_STOP_25_V1.id,
 )

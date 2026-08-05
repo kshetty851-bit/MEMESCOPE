@@ -19,7 +19,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import BigInteger, Select, String, func, literal_column, select
+from sqlalchemy import BigInteger, Select, String, func, literal_column, or_, select
 from sqlalchemy.dialects.postgresql import BIT, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
@@ -783,6 +783,37 @@ class RadarRepository:
         them, not over a page."""
         rows = await self._session.scalars(select(RadarToken.mint_address))
         return [str(mint) for mint in rows]
+
+    async def entries_present_since(self, since: datetime) -> Sequence[RadarToken]:
+        """Every token the Radar carried at any point at or after `since`.
+
+        The benchmark universe for a wallet launched at `since`. Membership is
+        active **or** swept during the period, and the second half is the whole
+        point: a token that qualified, was bought by the benchmark and then
+        dropped off the Radar must stay in the measurement. Filtering to what is
+        still active would hand every benchmark a survivorship bonus the wallet
+        itself never got — the strategy had to hold what it bought.
+
+        The first half covers the launch itself. `last_evaluated_at` only moves
+        when the sweep touches a row, so a wallet that starts between sweeps
+        would otherwise see an empty universe for fifteen minutes and report its
+        benchmarks as unmeasurable when they are simply flat.
+
+        Ordered by detection so a caller filling a cash-constrained portfolio
+        takes them in the order they became available, deterministically.
+        """
+        return (
+            await self._session.scalars(
+                self._base_query()
+                .where(
+                    or_(
+                        RadarToken.is_active.is_(True),
+                        RadarToken.last_evaluated_at >= since,
+                    )
+                )
+                .order_by(RadarToken.first_detected_at.asc(), RadarToken.mint_address.asc())
+            )
+        ).all()
 
     async def observed_within(self, mints: Sequence[str], *, since: datetime) -> set[str]:
         """Mints with a market observation at or after `since`, batched.

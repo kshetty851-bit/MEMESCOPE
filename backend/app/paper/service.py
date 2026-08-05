@@ -5,29 +5,39 @@ Two responsibilities, deliberately in one place because they share a shape:
 * `review` advances the wallet — **exits first, then entries**, so cash freed by
   a close is available to the same pass. The order is part of the published
   rule, not an implementation detail: the other order would decline entries the
-  strategy could actually have funded.
+  strategy could actually have funded, and Sprint 30 §4 states the loop as
+  "exit, cash becomes available, immediately buy the next highest-ranked
+  eligible token".
 * `read` assembles everything the API serves, from positions and market history.
 
 Neither invents anything. Prices come from `token_market_snapshots`, candidates
-come from the Radar's own ranking, and the benchmark comes from
-`RadarRepository.benchmark` — the equal-weight figure that already existed.
-Nothing here is a recommendation, and nothing here touches a chain.
+come from the Radar's own ranking, and the benchmarks are measured from the
+wallet's own start instant over the same universe. Nothing here is a
+recommendation, and nothing here touches a chain.
+
+**Only the live wallet moves.** Every read filters on `archived_at IS NULL`;
+archived generations are frozen where they were, including any positions that
+were open at the moment of archival. Those never settle, and the archive view
+says so rather than letting a reader assume they were closed at a fair price.
 """
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.models.paper import PaperPosition, PaperWallet
-from app.paper import engine, metrics
+from app.models.market import TokenMarketSnapshot
+from app.models.paper import PaperPosition, PaperTradeAudit, PaperWallet
+from app.models.radar import RadarToken
+from app.paper import audit, benchmark, eligibility, exits, metrics
+from app.paper.exits import ExitRules
 from app.paper.models import (
-    Candidate,
     ClosedTrade,
     ExitReason,
     OpenPosition,
@@ -35,7 +45,7 @@ from app.paper.models import (
     Quote,
 )
 from app.paper.repository import PaperRepository
-from app.paper.strategy import FixedSizeStrategy, registry
+from app.paper.strategy import AnyStrategy, registry
 from app.radar.repository import RadarRepository
 from app.repositories.market import MarketSnapshotRepository
 from app.repositories.token import TokenRepository
@@ -45,22 +55,66 @@ logger = get_logger(__name__)
 
 @dataclass(frozen=True, slots=True)
 class ReviewOutcome:
-    """What one pass did. Reported so a stalled evaluator is visible."""
+    """What one pass did. Reported so a stalled evaluator is visible.
+
+    `refusals` is a count per published entry condition. Without it, "opened 0"
+    is ambiguous between "nothing qualified" and "the evaluator is broken", and
+    the wallet has to be able to tell those apart on its own log line.
+    """
 
     evaluated: int
     closed: int
     opened: int
-    skipped_held: int
-    skipped_unfunded: int
+    audited: int
+    candidates: int
+    #: True when the scan hit its bound before running out of Radar. A capped
+    #: search that says nothing looks exactly like an exhaustive one.
+    candidates_truncated: bool
+    refusals: dict[str, int]
 
-    def as_dict(self) -> dict[str, int]:
+    def as_dict(self) -> dict[str, object]:
         return {
             "evaluated": self.evaluated,
             "closed": self.closed,
             "opened": self.opened,
-            "skipped_held": self.skipped_held,
-            "skipped_unfunded": self.skipped_unfunded,
+            "audited": self.audited,
+            "candidates": self.candidates,
+            "candidates_truncated": self.candidates_truncated,
+            **{f"refused_{reason}": count for reason, count in sorted(self.refusals.items())},
         }
+
+
+def _rules_for(position: PaperPosition) -> ExitRules:
+    """The exit rules **this position was opened under**, read off its own row.
+
+    Not from the configured strategy. That is the anti-hindsight guarantee made
+    concrete: the bounds were fixed at entry and written once, so a position
+    settles under the rules that were published when it was taken, even if the
+    live strategy is later replaced. A wallet that re-read its exits from
+    current configuration could re-read them favourably.
+
+    One exactness note, stated because it is the kind of thing that quietly
+    stops being true: `ExitRules` expresses a target and a stop as *multiples*
+    of entry, while the row stores them as absolute prices, so a bracket
+    position's rules are reconstructed by division and multiplied back. That
+    round trip is exact to Decimal's working precision but not bit-identical.
+    It never runs in production — the live strategy has no target and no fixed
+    stop, and archived generations are frozen and never re-evaluated — and if a
+    bracket strategy is ever relaunched, this is the line to revisit first.
+    """
+    hold_for: timedelta | None = None
+    if position.expires_at is not None:
+        hold_for = position.expires_at - position.opened_at
+
+    entry = position.entry_price
+    priced = entry > 0
+    target, stop = position.target_price, position.stop_price
+    return ExitRules(
+        take_profit_multiple=(None if target is None or not priced else target / entry),
+        stop_loss_multiple=(None if stop is None or not priced else stop / entry),
+        trailing_drawdown=position.trailing_drawdown,
+        hold_for=hold_for,
+    )
 
 
 def _to_open(position: PaperPosition) -> OpenPosition:
@@ -70,10 +124,11 @@ def _to_open(position: PaperPosition) -> OpenPosition:
         entry_price=position.entry_price,
         quantity=position.quantity,
         size_usd=position.size_usd,
+        peak_price=position.peak_price,
         target_price=position.target_price,
         stop_price=position.stop_price,
         expires_at=position.expires_at,
-        peak_price=position.peak_price,
+        trailing_drawdown=position.trailing_drawdown,
     )
 
 
@@ -101,6 +156,17 @@ def _to_closed(position: PaperPosition) -> ClosedTrade | None:
     )
 
 
+def _quote(row: TokenMarketSnapshot) -> Quote | None:
+    if row.price_usd is None:
+        return None
+    return Quote(
+        captured_at=row.captured_at,
+        price_usd=row.price_usd,
+        liquidity_usd=row.liquidity_usd,
+        market_cap=row.market_cap,
+    )
+
+
 class PaperWalletService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -109,15 +175,17 @@ class PaperWalletService:
         self._radar = RadarRepository(session)
 
     @property
-    def strategy(self) -> FixedSizeStrategy:
+    def strategy(self) -> AnyStrategy:
         """The strategy that trades, falling back to the registry default.
 
         A configured id that is not registered falls back rather than crashing,
         and says so: a typo in an environment variable must not stop the wallet,
-        and it must not silently trade rules nobody chose either.
+        and it must not silently trade rules nobody chose either. Since Sprint 30
+        the registry holds exactly one operational strategy, so this is a
+        validation of configuration rather than a choice between modes.
         """
         configured = registry.get(settings.PAPER_WALLET_STRATEGY_ID)
-        if configured is None:
+        if configured is None or not configured.operational:
             logger.warning(
                 "paper_strategy_unknown",
                 configured=settings.PAPER_WALLET_STRATEGY_ID,
@@ -126,27 +194,42 @@ class PaperWalletService:
             return registry.default
         return configured
 
-    async def wallet(self) -> PaperWallet:
+    async def wallet(self, *, now: datetime) -> PaperWallet:
+        """The live wallet, created once at the moment of the first pass.
+
+        `started_at` is that moment, and every benchmark is measured from it —
+        which is why it is written here rather than defaulted in the database:
+        the wallet and its comparisons must begin at exactly the same instant.
+        """
+        existing = await self._repository.live_wallet()
+        if existing is not None:
+            return existing
+
         strategy = self.strategy
         return await self._repository.ensure_wallet(
             strategy_id=strategy.id,
             strategy_version=strategy.version,
             starting_balance=Decimal(str(settings.PAPER_WALLET_STARTING_BALANCE)),
+            generation=await self._repository.next_generation(),
+            started_at=now,
         )
 
     # --- Advancing the simulation -------------------------------------------
 
     async def review(self, *, now: datetime) -> ReviewOutcome:
-        """One pass: settle exits, then open what the strategy can fund."""
-        wallet = await self.wallet()
+        """One pass: settle exits, record them, then open what cash allows."""
+        wallet = await self.wallet(now=now)
         evaluated, closed = await self._settle_exits(wallet, now=now)
-        opened, held, unfunded = await self._open_entries(wallet, now=now)
+        audited = await self._record_audits(wallet)
+        opened, candidates, truncated, refusals = await self._open_entries(wallet, now=now)
         return ReviewOutcome(
             evaluated=evaluated,
             closed=closed,
             opened=opened,
-            skipped_held=held,
-            skipped_unfunded=unfunded,
+            audited=audited,
+            candidates=candidates,
+            candidates_truncated=truncated,
+            refusals=refusals,
         )
 
     async def _settle_exits(self, wallet: PaperWallet, *, now: datetime) -> tuple[int, int]:
@@ -156,6 +239,10 @@ class PaperWalletService:
         position is replayed over **every** reading since its own watermark, in
         order, and closes at the first breach — so a worker that missed six
         hours produces the same trades as one that missed none.
+
+        One resolver runs every rule set. The trailing stop is not a second
+        code path: `exits.resolve` takes the rules as data, and the rules come
+        off the position's own row.
         """
         positions = await self._repository.open_positions(
             wallet.id, limit=settings.PAPER_WALLET_REVIEW_BATCH_LIMIT
@@ -173,12 +260,17 @@ class PaperWalletService:
         closed = 0
         for position in positions:
             quotes = [
-                Quote(captured_at=row.captured_at, price_usd=row.price_usd)
-                for row in series.get(position.mint_address, [])
-                if row.price_usd is not None and row.captured_at > position.last_evaluated_at
+                quote
+                for quote in (_quote(row) for row in series.get(position.mint_address, []))
+                if quote is not None and quote.captured_at > position.last_evaluated_at
             ]
-            domain = _to_open(position)
-            found = engine.resolve_exit(domain, quotes)
+            found, running_peak = exits.resolve(
+                _rules_for(position),
+                entry_price=position.entry_price,
+                opened_at=position.opened_at,
+                quotes=quotes,
+                peak=position.peak_price,
+            )
 
             if found is None:
                 # Nothing breached. Carry the peak and the watermark forward so
@@ -186,7 +278,7 @@ class PaperWalletService:
                 # survives snapshot pruning.
                 await self._repository.advance(
                     position.id,
-                    peak_price=engine.peak_through(domain, quotes),
+                    peak_price=running_peak,
                     last_evaluated_at=quotes[-1].captured_at if quotes else now,
                 )
                 continue
@@ -196,34 +288,97 @@ class PaperWalletService:
                 exit_price=found.price_usd,
                 closed_at=found.at,
                 exit_reason=found.reason.value,
-                # Only the peak up to the exit belongs to the trade. A high
-                # printed after the position closed belongs to the token.
-                peak_price=engine.peak_before(domain, quotes, found.at),
+                # `resolve` returns the high *before* the breaching reading, so
+                # this is already the peak that belongs to the trade rather than
+                # to the token. A high printed after the exit is not this
+                # position's — it sold before it.
+                peak_price=running_peak,
             )
             closed += 1
 
         return len(positions), closed
 
+    async def _record_audits(self, wallet: PaperWallet) -> int:
+        """Write the permanent record for any closed trade that lacks one.
+
+        Separated from `_settle_exits` on purpose. A close and its audit row are
+        written in the same transaction, but the audit is driven by *state* — "is
+        there a closed position with no record?" — rather than by the event, so a
+        trade closed before this sprint, or by a pass that crashed between the
+        two writes, is picked up on the next run instead of being lost.
+
+        The exit market cap and pool depth come from the reading nearest the exit
+        timestamp. That is what the platform observed; it is not the fill, and
+        the disclosure on every net figure says so.
+        """
+        closed_rows = await self._repository.closed_positions(wallet.id)
+        if not closed_rows:
+            return 0
+
+        already = await self._repository.audited_position_ids(wallet.id)
+        pending = [row for row in closed_rows if str(row.id) not in already]
+        if not pending:
+            return 0
+
+        mints = [row.mint_address for row in pending]
+        tokens = await TokenRepository(self._session).get_many_by_mints(mints)
+        # From the earliest entry in the batch, so every exit reading is inside
+        # the window. Trimmed per position below.
+        oldest = min(row.opened_at for row in pending)
+        series = await self._market.series_for_mints(mints, since=oldest)
+
+        written = 0
+        for row in pending:
+            trade = _to_closed(row)
+            if trade is None:  # pragma: no cover - guarded by the writer
+                continue
+
+            exit_reading = _reading_at(series.get(row.mint_address, []), trade.closed_at)
+            token = tokens.get(row.mint_address)
+            record = audit.record(
+                trade,
+                symbol=token.symbol if token is not None else None,
+                entry_market_cap=row.entry_market_cap,
+                entry_liquidity_usd=row.entry_liquidity_usd,
+                exit_market_cap=exit_reading.market_cap if exit_reading else None,
+                exit_liquidity_usd=exit_reading.liquidity_usd if exit_reading else None,
+                strategy_id=wallet.strategy_id,
+                strategy_version=wallet.strategy_version,
+                wallet_generation=wallet.generation,
+            )
+            if await self._repository.record_audit(
+                position_id=row.id, wallet_id=wallet.id, **record.as_row()
+            ):
+                written += 1
+
+        return written
+
     async def _open_entries(
         self, wallet: PaperWallet, *, now: datetime
-    ) -> tuple[int, int, int]:
-        """Offer every Top-N Radar token to the strategy, in rank order.
+    ) -> tuple[int, int, bool, dict[str, int]]:
+        """Offer the ranked Radar to the strategy, highest score first.
 
-        Rank order matters when cash is short: the wallet fills from the top of
-        the Radar down, which is the only ordering consistent with a ranking
-        the platform publishes. Filling by whichever row the database returned
-        first would make the result depend on a query plan.
+        Rank order is the rule, not an optimisation: §4 says the wallet buys the
+        *highest-ranked eligible* token, so the scan takes the Radar's own
+        ordering and stops at the first token that passes. Filling by whichever
+        row the database returned first would make the result depend on a query
+        plan.
+
+        The scan is bounded by `PAPER_WALLET_CANDIDATE_LIMIT`, and when that
+        bound is reached it is **reported**. A capped search that says nothing
+        reads exactly like an exhaustive one that found nothing.
         """
         strategy = self.strategy
+        limit = strategy.top_n or settings.PAPER_WALLET_CANDIDATE_LIMIT
         entries = await self._radar.list_entries(
-            category=None, active_only=True, sort="score", limit=strategy.top_n, offset=0
+            category=None, active_only=True, sort="score", limit=limit, offset=0
         )
         if not entries:
-            return 0, 0, 0
+            return 0, 0, False, {}
 
-        mints = [entry.mint_address for entry in entries]
-        held = await self._repository.held_mints(wallet.id)
-        prices = await self._market.latest_for_mints(mints)
+        verdicts = await self._screen(wallet, entries)
+
+        mints = [verdict.mint_address for verdict in verdicts if verdict.eligible]
         tokens = await TokenRepository(self._session).get_many_by_mints(mints)
         token_ids = {mint: token.id for mint, token in tokens.items()}
 
@@ -232,57 +387,85 @@ class PaperWalletService:
         # spend the same dollar.
         cash = await self._cash_for(wallet)
 
-        opened = skipped_held = skipped_unfunded = 0
-        for rank, entry in enumerate(entries, start=1):
-            mint = entry.mint_address
-            if mint in held:
-                skipped_held += 1
+        opened = 0
+        refusals = eligibility.refusal_counts(verdicts)
+        for verdict in verdicts:
+            candidate = verdict.candidate
+            if candidate is None:
                 continue
 
-            snapshot = prices.get(mint)
-            price = snapshot.price_usd if snapshot is not None else None
-            if price is None or price <= 0:
-                # Unpriced, not free. A position cannot be sized against a price
-                # nobody observed, and inventing one would be the estimate this
-                # platform refuses to make.
-                continue
-
-            candidate = Candidate(
-                mint_address=mint,
-                rank=rank,
-                price_usd=price,
-                observed_at=snapshot.captured_at if snapshot is not None else now,
-            )
             instruction = strategy.entry_for(candidate, cash_available=cash, now=now)
             if instruction is None:
-                skipped_unfunded += 1
+                # Every eligibility condition already passed, so the only reason
+                # left is cash. Counted, because idle capital with qualified
+                # tokens in front of it is a fact the dashboard has to state.
+                refusals[eligibility.Refusal.INSUFFICIENT_CASH] = (
+                    refusals.get(eligibility.Refusal.INSUFFICIENT_CASH, 0) + 1
+                )
                 continue
 
             created = await self._repository.open_position(
                 wallet_id=wallet.id,
-                mint_address=mint,
-                token_id=token_ids.get(mint),
+                mint_address=candidate.mint_address,
+                token_id=token_ids.get(candidate.mint_address),
                 opened_at=instruction.opened_at,
-                entry_rank=rank,
+                entry_rank=candidate.rank,
                 entry_price=instruction.price_usd,
                 size_usd=instruction.size_usd,
                 quantity=instruction.quantity,
                 target_price=instruction.target_price,
                 stop_price=instruction.stop_price,
                 expires_at=instruction.expires_at,
+                trailing_drawdown=instruction.trailing_drawdown,
+                entry_market_cap=instruction.market_cap,
+                entry_liquidity_usd=instruction.liquidity_usd,
                 status=PositionStatus.OPEN.value,
                 peak_price=instruction.price_usd,
                 last_evaluated_at=instruction.opened_at,
             )
             if created is None:
                 # Lost the race to another evaluator. Ordinary, not an error.
-                skipped_held += 1
+                refusals[eligibility.Refusal.ALREADY_HELD] = (
+                    refusals.get(eligibility.Refusal.ALREADY_HELD, 0) + 1
+                )
                 continue
 
             cash -= instruction.size_usd
             opened += 1
 
-        return opened, skipped_held, skipped_unfunded
+        return opened, len(entries), len(entries) >= limit, dict(refusals)
+
+    async def _screen(
+        self, wallet: PaperWallet, entries: Sequence[RadarToken]
+    ) -> list[eligibility.Verdict]:
+        """Judge a ranked Radar page against §5's conditions.
+
+        Shared by the evaluator and the read path so the page and the trades can
+        never disagree about what qualified.
+        """
+        rows = list(entries)
+        mints = [row.mint_address for row in rows]
+        held = await self._repository.held_mints(wallet.id)
+        open_now = await self._repository.open_mints(wallet.id)
+        prices = await self._market.latest_for_mints(mints)
+
+        observations = []
+        for rank, row in enumerate(rows, start=1):
+            snapshot = prices.get(row.mint_address)
+            observations.append(
+                eligibility.Observation(
+                    mint_address=row.mint_address,
+                    rank=rank,
+                    has_snapshot=snapshot is not None,
+                    observed_at=snapshot.captured_at if snapshot else None,
+                    price_usd=snapshot.price_usd if snapshot else None,
+                    liquidity_usd=snapshot.liquidity_usd if snapshot else None,
+                    market_cap=snapshot.market_cap if snapshot else None,
+                    trading_status=(str(snapshot.trading_status.value) if snapshot else None),
+                )
+            )
+
+        return eligibility.screen(observations, held_ever=held, open_now=open_now)
 
     async def _cash_for(self, wallet: PaperWallet) -> Decimal:
         open_rows = await self._repository.open_positions(wallet.id)
@@ -295,8 +478,8 @@ class PaperWalletService:
     # --- Reading it back -----------------------------------------------------
 
     async def read(self, *, now: datetime) -> WalletRead:
-        """Everything the API serves, in five queries."""
-        wallet = await self.wallet()
+        """Everything the API serves."""
+        wallet = await self.wallet(now=now)
         positions = await self._repository.all_positions(wallet.id)
 
         open_rows = [row for row in positions if row.status == PositionStatus.OPEN.value]
@@ -332,7 +515,6 @@ class PaperWalletService:
             prices=prices,
             closed=closed,
         )
-        benchmark = await self._radar.benchmark()
 
         return WalletRead(
             wallet=wallet,
@@ -342,12 +524,118 @@ class PaperWalletService:
             prices=prices,
             price_times=price_times,
             names={mint: (token.name, token.symbol) for mint, token in names.items()},
-            benchmark=benchmark,
+            benchmarks=await self.benchmarks(wallet),
+            waiting_for=await self._waiting_for(wallet, cash=summary.cash),
+            audit_log=await self._repository.audit_log(wallet.id, limit=200),
+            audit_count=await self._repository.audit_count(wallet.id),
             pnl_today=metrics.pnl_since(
                 closed, since=now.replace(hour=0, minute=0, second=0, microsecond=0)
             ),
             observed_at=now,
         )
+
+    async def benchmarks(self, wallet: PaperWallet) -> list[benchmark.BenchmarkResult]:
+        """Both Radar comparisons, measured from the wallet's own start.
+
+        Deliberately **not** `RadarRepository.benchmark`, which averages the
+        return-since-detection of every token the Radar has ever seen. That
+        covers a different period with different capital, and a wallet launched
+        today has not lived through it. Sprint 30 §2 is explicit: the wallet and
+        its benchmarks begin at exactly the same timestamp.
+        """
+        universe = await self._radar.entries_present_since(wallet.started_at)
+        if not universe:
+            return []
+
+        mints = [row.mint_address for row in universe]
+        # The price at the wallet's start, for tokens that were already on the
+        # Radar then. A token detected later is bought at its detection price,
+        # which is the first price the benchmark could have paid for it.
+        at_start = await self._market.price_as_of_for_mints(mints, as_of=wallet.started_at)
+        current = await self._market.latest_for_mints(mints)
+
+        constituents = []
+        for row in universe:
+            available_at = max(row.first_detected_at, wallet.started_at)
+            entry_price = (
+                at_start.get(row.mint_address)
+                if row.first_detected_at <= wallet.started_at
+                else row.first_price
+            )
+            snapshot = current.get(row.mint_address)
+            constituents.append(
+                benchmark.Constituent(
+                    mint_address=row.mint_address,
+                    available_at=available_at,
+                    entry_price=entry_price,
+                    current_price=snapshot.price_usd if snapshot else None,
+                )
+            )
+
+        capital = wallet.starting_balance
+        trade_size = self.strategy.trade_size_usd
+        return [
+            benchmark.buy_every_radar_token(
+                constituents, capital=capital, trade_size=trade_size
+            ),
+            benchmark.equal_weight_radar(constituents, capital=capital),
+        ]
+
+    async def _waiting_for(self, wallet: PaperWallet, *, cash: Decimal) -> WaitingState | None:
+        """Why the wallet is holding cash, when it is.
+
+        `None` when there is nothing to explain — either the cash is below one
+        position, or a qualified token exists and the next pass will take it.
+        The message is only published when it is true: a page that says it is
+        waiting for an opportunity while one is sitting in front of it is worse
+        than a page that says nothing.
+        """
+        trade_size = self.strategy.trade_size_usd
+        if cash < trade_size:
+            return None
+
+        limit = self.strategy.top_n or settings.PAPER_WALLET_CANDIDATE_LIMIT
+        entries = await self._radar.list_entries(
+            category=None, active_only=True, sort="score", limit=limit, offset=0
+        )
+        verdicts = await self._screen(wallet, entries)
+        if eligibility.first_eligible(verdicts) is not None:
+            return None
+
+        return WaitingState(
+            message=eligibility.WAITING_MESSAGE,
+            idle_cash=cash,
+            considered=len(verdicts),
+            refusals=eligibility.refusal_counts(verdicts),
+        )
+
+
+def _reading_at(
+    series: Sequence[TokenMarketSnapshot], at: datetime
+) -> TokenMarketSnapshot | None:
+    """The observation that dated an exit, or the closest one at or before it.
+
+    Exits are dated to an observation, so the exact reading is normally present.
+    The `<=` fallback covers a trailing stop, whose exit *price* is the trigger
+    level rather than the observed price — the reading that breached it is still
+    the one whose market cap and depth belong to the trade.
+    """
+    best: TokenMarketSnapshot | None = None
+    for row in series:
+        if row.captured_at > at:
+            break
+        best = row
+    return best
+
+
+@dataclass(frozen=True, slots=True)
+class WaitingState:
+    """Published when the wallet holds fundable cash and nothing qualifies."""
+
+    message: str
+    idle_cash: Decimal
+    considered: int
+    refusals: dict[str, int]
 
 
 @dataclass(frozen=True, slots=True)
@@ -355,14 +643,18 @@ class WalletRead:
     """The assembled read model. Rendering happens in `api.py`."""
 
     wallet: PaperWallet
-    strategy: FixedSizeStrategy
+    strategy: AnyStrategy
     metrics: metrics.WalletMetrics
     positions: list[PaperPosition]
     prices: dict[str, Decimal | None]
     #: When each mark was observed, so a surface can say how old it is.
     price_times: dict[str, datetime | None]
     names: dict[str, tuple[str | None, str | None]]
-    benchmark: dict[str, Decimal | int | None]
+    benchmarks: list[benchmark.BenchmarkResult]
+    #: `None` unless the wallet is holding fundable cash with nothing eligible.
+    waiting_for: WaitingState | None
+    audit_log: Sequence[PaperTradeAudit]
+    audit_count: int
     pnl_today: Decimal
     observed_at: datetime
 
@@ -372,4 +664,10 @@ def utcnow() -> datetime:
     return datetime.now(UTC)
 
 
-__all__ = ["PaperWalletService", "ReviewOutcome", "WalletRead", "utcnow"]
+__all__ = [
+    "PaperWalletService",
+    "ReviewOutcome",
+    "WaitingState",
+    "WalletRead",
+    "utcnow",
+]

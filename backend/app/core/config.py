@@ -283,9 +283,7 @@ class Settings(BaseSettings):
     #: Configurable because a launchpad renaming its venue must be a config
     #: change, not a code change — pump.fun has already renamed an instruction
     #: once (see the scanner's `InitializeMint` reasoning).
-    OPPORTUNITY_BONDING_CURVE_VENUES: CsvList = Field(
-        default_factory=lambda: ["pumpfun"]
-    )
+    OPPORTUNITY_BONDING_CURVE_VENUES: CsvList = Field(default_factory=lambda: ["pumpfun"])
     OPPORTUNITY_GRADUATED_VENUES: CsvList = Field(default_factory=lambda: ["pumpswap"])
     #: Observations a signal needs before it may become ACTIVE. Below this the
     #: opportunity sits in PENDING_CONFIRMATION and reaches no board: one
@@ -344,13 +342,19 @@ class Settings(BaseSettings):
     #: against the balance the wallet *started* with, so changing this setting
     #: later must not restate results that were already published.
     PAPER_WALLET_STARTING_BALANCE: float = Field(default=1_000.0, gt=0)
-    #: Which published strategy trades. One at a time, so the wallet measures
-    #: the Radar rather than a comparison between rules.
-    PAPER_WALLET_STRATEGY_ID: str = "equal_weight_v1"
+    #: Which published strategy trades. Sprint 30 made this one value rather
+    #: than a choice: the registry holds exactly one operational strategy, so a
+    #: different id here does not switch modes, it falls back with a warning.
+    PAPER_WALLET_STRATEGY_ID: str = "trailing_stop_25_v1"
     #: How many positions the evaluator advances per pass. Bounded and ordered
     #: oldest-watermark-first, which is what keeps a growing book from starving
     #: its own tail — the failure that livelocked the score sweep.
     PAPER_WALLET_REVIEW_BATCH_LIMIT: int = Field(default=200, ge=1, le=2000)
+    #: How far down the ranked Radar the evaluator looks for the next entry.
+    #: Not a rule — the rule is "the highest-ranked eligible token" — but a scan
+    #: has to stop somewhere, and a bound that is hit is *reported* rather than
+    #: silently truncating the search (`candidates_truncated` on every pass).
+    PAPER_WALLET_CANDIDATE_LIMIT: int = Field(default=250, ge=1, le=2000)
 
     # --- Breakout provider ----------------------------------------------------
     # Every threshold measured against the stored history on 2026-08-03 (1.37 M

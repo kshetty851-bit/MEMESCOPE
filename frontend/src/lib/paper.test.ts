@@ -31,9 +31,13 @@ function position(overrides: Partial<PaperPosition> = {}): PaperPosition {
     entry_price: "10",
     size_usd: "100",
     quantity: "10",
-    target_price: "20",
-    stop_price: "5",
-    expires_at: "2026-08-03T12:00:00Z",
+    entry_market_cap: "124000",
+    entry_liquidity_usd: "18000",
+    target_price: null,
+    stop_price: null,
+    expires_at: null,
+    trailing_drawdown: "0.2500",
+    trailing_stop_price: "10.125",
     current_price: "12",
     current_pct: "20.00",
     current_price_at: "2026-08-01T12:00:00Z",
@@ -96,7 +100,9 @@ describe("hours", () => {
 describe("exitLabel", () => {
   it("renders reasons in plain language", () => {
     expect(exitLabel("target")).toBe("Hit target");
-    expect(exitLabel("stop")).toBe("Hit stop");
+    // "Trailing stop", not "Hit stop": the level moved with the price, and
+    // calling it a stop would suggest a fixed one the strategy does not have.
+    expect(exitLabel("stop")).toBe("Trailing stop");
     expect(exitLabel("expiry")).toBe("Held to expiry");
   });
 

@@ -2,12 +2,14 @@
 
 import { useMemo, useState } from "react";
 
+import { AuditLog } from "@/components/paper/audit-log";
 import { PositionsTable } from "@/components/paper/positions-table";
 import { StrategyCard } from "@/components/paper/strategy-card";
 import { Label, Panel } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/states";
-import { usePaperPositions, usePaperWallet } from "@/hooks/use-paper";
+import { usePaperAudit, usePaperPositions, usePaperWallet } from "@/hooks/use-paper";
+import { formatAge } from "@/lib/format";
 import { hours, pct, tone, usd } from "@/lib/paper";
 import { cn } from "@/lib/utils";
 
@@ -26,6 +28,11 @@ import { cn } from "@/lib/utils";
  * Every figure is derived from the positions. Where no trade supports a number
  * it renders "—", never zero: "we have not measured this" and "this is zero"
  * are different claims.
+ *
+ * **There is no strategy selector, and there is no button.** One rule runs;
+ * choosing between rules after seeing their results would be the hindsight the
+ * whole design exists to prevent, and a manual entry would make this a record
+ * of judgement rather than of a rule.
  */
 
 type Tab = "open" | "closed";
@@ -66,6 +73,7 @@ function Stat({
 export default function WalletPage() {
   const wallet = usePaperWallet();
   const positions = usePaperPositions();
+  const auditQuery = usePaperAudit();
   const [tab, setTab] = useState<Tab>("open");
 
   const items = useMemo(() => positions.data?.items ?? [], [positions.data]);
@@ -96,7 +104,7 @@ export default function WalletPage() {
     );
   }
 
-  const { metrics: m, strategy, benchmarks, disclosure } = wallet.data;
+  const { metrics: m, strategy, benchmarks, disclosure, waiting, last_trade: last } = wallet.data;
 
   if (!wallet.data.enabled) {
     return (
@@ -130,7 +138,36 @@ export default function WalletPage() {
           </h1>
           <p className="mt-2 max-w-2xl text-sm text-ink-dim">{disclosure}</p>
         </div>
+        {/* When the wallet started is not decoration: every benchmark below is
+            measured from this exact instant, so a reader can check that the
+            comparison covers the same period the strategy traded. */}
+        {wallet.data.started_at ? (
+          <p className="text-xs text-ink-faint">
+            Running since {new Date(wallet.data.started_at).toLocaleString()} · wallet
+            v{wallet.data.generation}
+          </p>
+        ) : null}
       </header>
+
+      {/* Sprint 30 §9. Published only while it is true: enough cash for a full
+          position and nothing on the Radar qualifying. The wallet never buys a
+          lower-quality token to avoid an empty screen, so it says so instead. */}
+      {waiting ? (
+        <Panel density="compact" className="border-line-bright bg-elevated/40">
+          <p className="text-sm text-ink">{waiting.message}</p>
+          <p className="mt-1 text-xs text-ink-faint">
+            {usd(waiting.idle_cash)} uninvested. {waiting.considered} Radar token
+            {waiting.considered === 1 ? "" : "s"} considered on the last pass.
+          </p>
+          <ul className="mt-2 flex flex-col gap-1">
+            {Object.entries(waiting.refusals).map(([code, count]) => (
+              <li key={code} className="text-xs text-ink-faint">
+                {count} · {waiting.labels[code] ?? code}
+              </li>
+            ))}
+          </ul>
+        </Panel>
+      ) : null}
 
       {/* The headline four. ROI is given the same prominence whether it is
           positive or negative — a wallet that only reported wins would be
@@ -147,21 +184,23 @@ export default function WalletPage() {
           }
         />
         <Stat label="Return" value={pct(m.roi_pct)} emphasis valueTone={roiTone} />
-        <Stat label="Cash" value={usd(m.cash)} hint={`${usd(m.open_value)} in positions`} />
+        <Stat label="Cash" value={usd(m.cash)} hint={`${usd(m.open_value)} at market`} />
+        {/* Invested is what the open positions **cost**, not what they are
+            worth. It survives a token going unpriced, where the market value
+            does not. */}
         <Stat
-          label="Realised P/L"
-          value={usd(m.realised_pnl)}
-          valueTone={tone(m.realised_pnl)}
-          hint={`${m.closed_positions} closed · ${m.open_positions} open`}
+          label="Invested"
+          value={usd(m.invested_usd)}
+          hint={`${m.open_positions} open · ${m.closed_positions} closed`}
         />
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="Win rate" value={pct(m.win_rate_pct)} />
         <Stat
-          label="Profit factor"
-          value={m.profit_factor}
-          hint={m.profit_factor === null ? "Nothing has lost yet" : "Gross profit ÷ gross loss"}
+          label="Realised P/L"
+          value={usd(m.realised_pnl)}
+          valueTone={tone(m.realised_pnl)}
         />
         <Stat label="Average win" value={usd(m.average_win)} valueTone="positive" />
         <Stat label="Average loss" value={usd(m.average_loss)} valueTone="negative" />
@@ -179,13 +218,51 @@ export default function WalletPage() {
           the intraday number. */}
       <p className="text-xs leading-relaxed text-ink-faint">{m.max_drawdown_note}</p>
 
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <Stat
+          label="Current strategy"
+          value={`${strategy.name} v${strategy.version}`}
+          hint="The only strategy that runs. There is no selector."
+        />
+        {/* Opens count as trades, not only closes. A wallet that deployed its
+            last dollar an hour ago acted; showing only exits would read as idle
+            on a fully-invested book. */}
+        <Stat
+          label="Last trade"
+          value={
+            last
+              ? `${last.action === "closed" ? "Closed" : "Opened"} ${last.symbol ?? `${last.mint_address.slice(0, 4)}…`}`
+              : null
+          }
+          hint={last ? `${formatAge(last.at)} ago` : "Nothing has traded yet"}
+        />
+        <Stat
+          label="Next Radar evaluation"
+          value={
+            wallet.data.next_radar_evaluation_at
+              ? new Date(wallet.data.next_radar_evaluation_at).toLocaleTimeString()
+              : null
+          }
+          hint="Exits do not wait for it — they resolve from stored readings."
+        />
+      </div>
+
       <section className="flex flex-col gap-3">
         <h2 className="text-heading font-medium text-ink">Measured against</h2>
+        {/* Both comparisons start with the same capital at the same instant as
+            the wallet. A benchmark drawn over a period the strategy did not
+            trade would credit or punish it for free. */}
+        {wallet.data.benchmark_note ? (
+          <p className="text-xs leading-relaxed text-ink-faint">
+            {wallet.data.benchmark_note}
+          </p>
+        ) : null}
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[560px] text-sm">
+          <table className="w-full min-w-[640px] text-sm">
             <thead>
               <tr className="border-b border-line text-label uppercase tracking-wide text-ink-faint">
                 <th className="py-2 text-left font-medium">Benchmark</th>
+                <th className="py-2 text-right font-medium">Held</th>
                 <th className="py-2 text-right font-medium">Benchmark return</th>
                 <th className="py-2 text-right font-medium">This strategy</th>
                 <th className="py-2 text-right font-medium">Difference</th>
@@ -202,6 +279,14 @@ export default function WalletPage() {
                         {benchmark.unavailable_reason}
                       </p>
                     ) : null}
+                  </td>
+                  {/* Unpriceable constituents are shown rather than dropped:
+                      excluding them would hand the benchmark a survivorship
+                      advantage the wallet never had. */}
+                  <td className="py-3 text-right tabular-nums text-ink-faint">
+                    {benchmark.positions > 0 || benchmark.unpriced > 0
+                      ? `${benchmark.positions}${benchmark.unpriced > 0 ? ` (+${benchmark.unpriced} unpriced)` : ""}`
+                      : "—"}
                   </td>
                   <td className="py-3 text-right tabular-nums text-ink-dim">
                     {pct(benchmark.return_pct) ?? "—"}
@@ -252,9 +337,26 @@ export default function WalletPage() {
           isPending={positions.isPending}
           emptyLabel={
             tab === "open"
-              ? "No position is open. The strategy enters only when a token first reaches the Radar's top ten."
-              : "Nothing has closed yet. Positions close at the target, the stop, or the end of the holding period."
+              ? "No position is open. The strategy buys the highest-ranked eligible token on the Radar whenever cash allows."
+              : "Nothing has closed yet. A position closes only when the price gives back a quarter of its highest level."
           }
+        />
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <div>
+          <h2 className="text-heading font-medium text-ink">Permanent record</h2>
+          <p className="mt-1 text-sm text-ink-dim">
+            {wallet.data.audited_trades} completed trade
+            {wallet.data.audited_trades === 1 ? "" : "s"}, each written once at the
+            moment it closed. Nothing in this record is ever rewritten.
+          </p>
+        </div>
+        <AuditLog
+          items={auditQuery.data?.items ?? []}
+          total={auditQuery.data?.total ?? 0}
+          disclosure={auditQuery.data?.disclosure ?? ""}
+          isPending={auditQuery.isPending}
         />
       </section>
     </div>

@@ -1,10 +1,15 @@
-"""`GET /api/v1/paper` — the wallet, its positions, and the published strategies.
+"""`GET /api/v1/paper` — the wallet, its positions, its record, and its archive.
 
-**Three endpoints, none of them POST.** There is no manual entry, so there is
-no write endpoint to have. That is not an omission: a button that opened a
-position by hand would make the wallet a record of somebody's judgement rather
-than of a published rule, and the whole claim here is that no judgement was
-applied.
+**Nothing here is a POST.** There is no manual entry, so there is no write
+endpoint to have. That is not an omission: a button that opened a position by
+hand would make the wallet a record of somebody's judgement rather than of a
+published rule, and the whole claim here is that no judgement was applied. The
+same reasoning removed the strategy selector in Sprint 30 — one strategy is
+operational, and choosing between rules after seeing their results is the
+hindsight this package exists to prevent.
+
+`/paper/archive` is served for internal historical comparison and is not linked
+from the product. It reports retired generations frozen exactly as they were.
 
 Gated on `FEATURE_PAPER_WALLET_ENABLED`. While off the wallet reports
 `enabled: false` rather than 404ing or serving an empty book — "not switched on
@@ -25,12 +30,17 @@ from fastapi import APIRouter, Query
 
 from app.api.deps import DbSession
 from app.core.config import settings
-from app.models.paper import PaperPosition
-from app.paper import costs, exits, lab
+from app.models.paper import PaperPosition, PaperTradeAudit
+from app.paper import audit, benchmark, cadence, costs, eligibility, exits, lab
 from app.paper.lab_service import load_dataset, measure_entry_divergence, replay_all
 from app.paper.metrics import WalletMetrics
 from app.paper.models import PositionStatus
+from app.paper.repository import PaperRepository
 from app.paper.schemas import (
+    ArchivedWalletOut,
+    ArchiveOut,
+    AuditEntryOut,
+    AuditOut,
     BenchmarkOut,
     EntryDivergenceOut,
     EquityPointOut,
@@ -39,6 +49,7 @@ from app.paper.schemas import (
     LabRuleOut,
     LabStrategyOut,
     LabTokensOut,
+    LastTradeOut,
     MetricsOut,
     PositionOut,
     PositionsOut,
@@ -47,10 +58,11 @@ from app.paper.schemas import (
     StrategyOut,
     TokenComparisonOut,
     UnavailableStrategyOut,
+    WaitingOut,
     WalletOut,
 )
 from app.paper.service import PaperWalletService, WalletRead
-from app.paper.strategy import FixedSizeStrategy, registry
+from app.paper.strategy import AnyStrategy, registry
 
 router = APIRouter(prefix="/paper", tags=["paper"])
 
@@ -102,6 +114,81 @@ async def list_positions(session: DbSession) -> PositionsOut:
     )
 
 
+@router.get("/audit", response_model=AuditOut, summary="The permanent trade record")
+async def get_audit(
+    session: DbSession,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> AuditOut:
+    """Every completed trade, as it was written down and never rewritten.
+
+    Declared before `/{...}`-shaped routes, matching the ordering rule the rest
+    of the API follows.
+
+    This is not a re-derivation of the positions table. Each row was computed at
+    the moment its trade closed, from the market data observed at each end —
+    including the pool depth the fee and impact were charged against, which
+    `token_market_snapshots` will eventually prune.
+    """
+    now = datetime.now(UTC)
+    if not settings.FEATURE_PAPER_WALLET_ENABLED:
+        return AuditOut(
+            items=[], total=0, enabled=False, disclosure=audit.DISCLOSURE, observed_at=now
+        )
+
+    repository = PaperRepository(session)
+    wallet = await repository.live_wallet()
+    if wallet is None:
+        return AuditOut(
+            items=[], total=0, enabled=True, disclosure=audit.DISCLOSURE, observed_at=now
+        )
+
+    rows = await repository.audit_log(wallet.id, limit=limit, offset=offset)
+    return AuditOut(
+        items=[_to_audit_entry(row) for row in rows],
+        total=await repository.audit_count(wallet.id),
+        enabled=True,
+        disclosure=audit.DISCLOSURE,
+        observed_at=now,
+    )
+
+
+@router.get("/archive", response_model=ArchiveOut, summary="Retired wallets (internal)")
+async def get_archive(session: DbSession) -> ArchiveOut:
+    """Retired generations, for internal historical comparison.
+
+    Not linked from the product, and deliberately so: Sprint 30 relaunched the
+    wallet, and showing two track records side by side invites the reader to
+    pick the flattering one. The archive exists so the old figures are not lost,
+    not so they can be quoted beside the live ones.
+    """
+    now = datetime.now(UTC)
+    repository = PaperRepository(session)
+    items = []
+    for wallet in await repository.archived_wallets():
+        counts = await repository.position_counts(wallet.id)
+        open_count = counts.get(PositionStatus.OPEN.value, 0)
+        declared = registry.get(wallet.strategy_id)
+        items.append(
+            ArchivedWalletOut(
+                strategy_id=wallet.strategy_id,
+                strategy_name=(declared.name if declared is not None else wallet.strategy_id),
+                strategy_version=wallet.strategy_version,
+                generation=wallet.generation,
+                starting_balance=wallet.starting_balance,
+                started_at=wallet.started_at,
+                # Non-null by construction: `archived_wallets` filters on it.
+                archived_at=wallet.archived_at,
+                archive_reason=wallet.archive_reason,
+                open_positions=open_count,
+                closed_positions=counts.get(PositionStatus.CLOSED.value, 0),
+                frozen_note=_frozen_note(open_count),
+            )
+        )
+
+    return ArchiveOut(items=items, note=ARCHIVE_NOTE, observed_at=now)
+
+
 @router.get("", response_model=WalletOut, summary="The paper wallet")
 async def get_wallet(session: DbSession) -> WalletOut:
     """Balance, equity, every metric, and the benchmarks it is measured against."""
@@ -121,11 +208,19 @@ async def get_wallet(session: DbSession) -> WalletOut:
         )
 
     read = await PaperWalletService(session).read(now=now)
+    benchmarks = _benchmarks(read)
     return WalletOut(
         enabled=True,
         strategy=_to_strategy(read.strategy, active_id=read.strategy.id),
         metrics=_to_metrics(read.metrics),
-        benchmarks=_benchmarks(read),
+        benchmarks=benchmarks,
+        generation=read.wallet.generation,
+        started_at=read.wallet.started_at,
+        benchmark_note=_benchmark_note(read),
+        waiting=_to_waiting(read),
+        last_trade=_last_trade(read),
+        next_radar_evaluation_at=cadence.next_evaluation(now),
+        audited_trades=read.audit_count,
         pnl_today=read.pnl_today,
         disclosure=DISCLOSURE,
         observed_at=now,
@@ -134,12 +229,38 @@ async def get_wallet(session: DbSession) -> WalletOut:
 
 # --- Rendering ----------------------------------------------------------------
 
+ARCHIVE_NOTE = (
+    "Retired wallets, kept for internal historical comparison and shown nowhere "
+    "in the product. Their figures are frozen at the moment they were archived "
+    "and are never mixed into the live wallet's."
+)
 
-def _active_strategy() -> FixedSizeStrategy:
-    return registry.get(settings.PAPER_WALLET_STRATEGY_ID) or registry.default
+
+def _frozen_note(open_positions: int) -> str:
+    """What an archived wallet's remaining open positions mean.
+
+    They never settle. Closing them at the price on the day of archival would be
+    an exit no published rule chose, and marking them to a later price would let
+    a retired wallet's figure keep moving. Both are worse than saying it.
+    """
+    if open_positions == 0:
+        return "Every position in this wallet was closed by its own rule before archival."
+    return (
+        f"{open_positions} position(s) were still open when this wallet was "
+        "archived and are frozen in that state. They will never settle: closing "
+        "them would be an exit no published rule chose, and marking them to a "
+        "later price would let a retired result keep moving."
+    )
 
 
-def _to_strategy(strategy: FixedSizeStrategy, *, active_id: str) -> StrategyOut:
+def _active_strategy() -> AnyStrategy:
+    configured = registry.get(settings.PAPER_WALLET_STRATEGY_ID)
+    if configured is None or not configured.operational:
+        return registry.default
+    return configured
+
+
+def _to_strategy(strategy: AnyStrategy, *, active_id: str) -> StrategyOut:
     spec = strategy.describe()
     return StrategyOut(
         id=spec.id,
@@ -165,6 +286,7 @@ def _empty_metrics(starting: Decimal) -> MetricsOut:
         equity=starting,
         roi_pct=Decimal(0),
         open_value=Decimal(0),
+        invested_usd=Decimal(0),
         realised_pnl=Decimal(0),
         max_drawdown_note=MAX_DRAWDOWN_NOTE,
     )
@@ -177,6 +299,7 @@ def _to_metrics(summary: WalletMetrics) -> MetricsOut:
         equity=summary.equity,
         roi_pct=summary.roi_pct,
         open_value=summary.open_value,
+        invested_usd=summary.invested_usd,
         unpriced_positions=summary.unpriced_positions,
         open_positions=summary.open_positions,
         closed_positions=summary.closed_positions,
@@ -216,6 +339,13 @@ def _to_position(row: PaperPosition, read: WalletRead) -> PositionOut:
     if current is not None:
         pnl = (row.quantity * current - row.size_usd).quantize(Decimal("0.01"))
 
+    # Where the trailing stop sits right now: the running high less the fixed
+    # fraction. Derived here rather than stored, because a stored level would be
+    # a second source of truth for the only rule this strategy has.
+    trailing_stop: Decimal | None = None
+    if row.trailing_drawdown is not None and not closed:
+        trailing_stop = row.peak_price * (Decimal(1) - row.trailing_drawdown)
+
     return PositionOut(
         mint_address=row.mint_address,
         name=name,
@@ -226,9 +356,13 @@ def _to_position(row: PaperPosition, read: WalletRead) -> PositionOut:
         entry_price=row.entry_price,
         size_usd=row.size_usd,
         quantity=row.quantity,
+        entry_market_cap=row.entry_market_cap,
+        entry_liquidity_usd=row.entry_liquidity_usd,
         target_price=row.target_price,
         stop_price=row.stop_price,
         expires_at=row.expires_at,
+        trailing_drawdown=row.trailing_drawdown,
+        trailing_stop_price=trailing_stop,
         current_price=current,
         current_pct=_pct_from(row.entry_price, current),
         current_price_at=observed_at,
@@ -241,56 +375,152 @@ def _to_position(row: PaperPosition, read: WalletRead) -> PositionOut:
 
 
 def _benchmarks(read: WalletRead) -> list[BenchmarkOut]:
-    """What the strategy is measured against.
+    """What the strategy is measured against, over its own period.
 
-    Two comparisons, not three. "Buy every Radar token" and "equal-weight Radar"
-    are the **same measurement** on this data — the mean `current_multiple`
-    across every detection *is* an equal-weight buy-everything portfolio — so it
-    is reported once. Printing one number under two labels would be exactly the
-    duplication this platform refuses.
+    Both comparisons start with the wallet's capital at the wallet's own start
+    instant (Sprint 30 §2). They are two genuinely different measurements:
+    "buy every Radar token" carries the wallet's cash constraint and no exit
+    rule, so the gap against it is what the exit rule did; "equal weight Radar"
+    is the unconstrained index, so the gap against it is what the ranking did.
+    They coincide while fewer tokens qualify than $1,000 can fund, and
+    `benchmark_note` says so rather than passing one number off as two checks.
 
     Holding SOL stays unavailable with its reason. The platform records no SOL
     price history, and a comparison against a series it never stored would be
     fabricated.
     """
     roi = read.metrics.roi_pct
-    average = read.benchmark.get("average_current_multiple")
-    entries = int(read.benchmark.get("entries") or 0)
 
-    equal_weight: Decimal | None = None
-    if isinstance(average, Decimal) and entries > 0:
-        equal_weight = ((average - 1) * 100).quantize(Decimal("0.01"))
-
-    return [
+    out = [
         BenchmarkOut(
-            id="equal_weight_radar",
-            label="Buy every Radar token",
-            description=(
-                f"An equal-weight position in all {entries} tokens the Radar has "
-                "ever detected, held from detection to now. No exits, no sizing."
-            ),
-            return_pct=equal_weight,
+            id=result.id,
+            label=result.label,
+            description=result.description,
+            return_pct=result.return_pct,
             difference_pct=(
                 None
-                if equal_weight is None or roi is None
-                else (roi - equal_weight).quantize(Decimal("0.01"))
+                if result.return_pct is None or roi is None
+                else (roi - result.return_pct).quantize(Decimal("0.01"))
             ),
-            unavailable_reason=(
-                None if equal_weight is not None else "No detection has a measured return yet."
-            ),
-        ),
+            unavailable_reason=result.unavailable_reason,
+            positions=result.positions,
+            unpriced=result.unpriced,
+        )
+        for result in read.benchmarks
+    ]
+    out.append(
         BenchmarkOut(
             id="hold_sol",
             label="Hold SOL",
             description="The same capital left in SOL over the same period.",
             return_pct=None,
             difference_pct=None,
-            unavailable_reason=(
-                "Not shown. The platform records no SOL price history, so this "
-                "comparison would be fabricated rather than measured."
-            ),
-        ),
-    ]
+            unavailable_reason=benchmark.HOLD_SOL_UNAVAILABLE,
+        )
+    )
+    return out
+
+
+def _benchmark_note(read: WalletRead) -> str | None:
+    """Set only while both benchmarks hold the same set of tokens."""
+    if len(read.benchmarks) < 2:
+        return None
+    first, second = read.benchmarks[0], read.benchmarks[1]
+    if first.positions == 0 or first.positions != second.positions:
+        return None
+    return benchmark.COINCIDENCE_NOTE
+
+
+def _to_waiting(read: WalletRead) -> WaitingOut | None:
+    """The empty state, published only when it is true."""
+    state = read.waiting_for
+    if state is None:
+        return None
+    return WaitingOut(
+        message=state.message,
+        idle_cash=state.idle_cash,
+        considered=state.considered,
+        refusals=state.refusals,
+        # Prose from stable codes, rendered server-side. The client never
+        # composes a sentence out of a reason code.
+        labels={
+            code: eligibility.REFUSAL_LABELS[code]
+            for code in state.refusals
+            if code in eligibility.REFUSAL_LABELS
+        },
+    )
+
+
+def _last_trade(read: WalletRead) -> LastTradeOut | None:
+    """The most recent action, whichever kind it was.
+
+    Opens count, not only closes. A wallet that deployed its last dollar an hour
+    ago did something; reporting only exits would show it as idle since its last
+    close, which on a fully-invested book could be never.
+    """
+    latest: LastTradeOut | None = None
+    at: datetime | None = None
+
+    for row in read.positions:
+        _, symbol = read.names.get(row.mint_address, (None, None))
+        if row.closed_at is not None and (at is None or row.closed_at > at):
+            at = row.closed_at
+            latest = LastTradeOut(
+                action="closed",
+                mint_address=row.mint_address,
+                symbol=symbol,
+                at=row.closed_at,
+                price_usd=row.exit_price,
+                exit_reason=row.exit_reason,
+                pnl_usd=(
+                    None
+                    if row.exit_price is None
+                    else (row.quantity * row.exit_price - row.size_usd).quantize(
+                        Decimal("0.01")
+                    )
+                ),
+            )
+        if at is None or row.opened_at > at:
+            at = row.opened_at
+            latest = LastTradeOut(
+                action="opened",
+                mint_address=row.mint_address,
+                symbol=symbol,
+                at=row.opened_at,
+                price_usd=row.entry_price,
+            )
+
+    return latest
+
+
+def _to_audit_entry(row: PaperTradeAudit) -> AuditEntryOut:
+    hold = (row.exit_at - row.entry_at).total_seconds() / 3600
+    return AuditEntryOut(
+        mint_address=row.mint_address,
+        symbol=row.symbol,
+        entry_at=row.entry_at,
+        entry_price=row.entry_price,
+        entry_market_cap=row.entry_market_cap,
+        entry_liquidity_usd=row.entry_liquidity_usd,
+        size_usd=row.size_usd,
+        quantity=row.quantity,
+        exit_at=row.exit_at,
+        exit_price=row.exit_price,
+        exit_market_cap=row.exit_market_cap,
+        exit_liquidity_usd=row.exit_liquidity_usd,
+        gross_return_usd=row.gross_return_usd,
+        gross_return_pct=row.gross_return_pct,
+        fee_usd=row.fee_usd,
+        slippage_usd=row.slippage_usd,
+        net_return_usd=row.net_return_usd,
+        net_return_pct=row.net_return_pct,
+        cost_unavailable_reason=row.cost_unavailable_reason,
+        exit_reason=row.exit_reason,
+        strategy_id=row.strategy_id,
+        strategy_version=row.strategy_version,
+        wallet_generation=row.wallet_generation,
+        hold_hours=Decimal(str(hold)).quantize(Decimal("0.01")),
+    )
 
 
 # --- Strategy Lab -------------------------------------------------------------

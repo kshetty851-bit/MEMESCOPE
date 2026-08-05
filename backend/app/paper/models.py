@@ -66,6 +66,10 @@ class Quote:
     #: execution-cost model excludes those trades rather than costing them
     #: against an invented depth.
     liquidity_usd: Decimal | None = None
+    #: Market cap at this reading. Carried because the audit log records the
+    #: valuation at each end of a trade, and the snapshot that held it is
+    #: prunable — a figure read later could be gone.
+    market_cap: Decimal | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,31 +80,47 @@ class Candidate:
     or the Radar score would be tempted to weight by them, and the moment
     position size depends on a score the wallet stops measuring the Radar and
     starts measuring a second, unpublished model.
+
+    `liquidity_usd` and `market_cap` are here for the *entry gate* and the audit
+    record, not for sizing: liquidity decides whether a token is tradeable at
+    all, and both are recorded as observed. Nothing scales a position by them.
     """
 
     mint_address: str
     rank: int
     price_usd: Decimal
     observed_at: datetime
+    liquidity_usd: Decimal | None = None
+    market_cap: Decimal | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class Entry:
     """An instruction to open one position, priced and bounded at entry.
 
-    `target_price`, `stop_price` and `expires_at` are computed here and stored
-    once. Fixing them at entry is the anti-hindsight guarantee: an exit level
-    that could be recomputed later could be recomputed favourably.
+    Every exit parameter is computed here and stored once. Fixing them at entry
+    is the anti-hindsight guarantee: an exit level that could be recomputed
+    later could be recomputed favourably.
+
+    All four bound fields are optional because a strategy publishes only the
+    rules it actually has. Trailing Stop 25% — the one operational strategy
+    since Sprint 30 — carries `trailing_drawdown` and nothing else; a zeroed
+    target would read as a rule that exists and sits at zero.
     """
 
     mint_address: str
     price_usd: Decimal
     size_usd: Decimal
     quantity: Decimal
-    target_price: Decimal
-    stop_price: Decimal
-    expires_at: datetime
     opened_at: datetime
+    target_price: Decimal | None = None
+    stop_price: Decimal | None = None
+    expires_at: datetime | None = None
+    trailing_drawdown: Decimal | None = None
+    #: The market observed at entry, recorded rather than used. Perishable, and
+    #: required by the permanent audit record at close.
+    market_cap: Decimal | None = None
+    liquidity_usd: Decimal | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,17 +139,24 @@ class Exit:
 
 @dataclass(frozen=True, slots=True)
 class OpenPosition:
-    """A running position, as the engine reads it."""
+    """A running position, as the engine reads it.
+
+    The three bounds are optional for the same reason `Entry`'s are: a strategy
+    carries only the rules it published, and a rule that does not exist cannot
+    be breached. `peak_price` is not optional — every strategy has a running
+    high, and the trailing stop is measured from it.
+    """
 
     mint_address: str
     opened_at: datetime
     entry_price: Decimal
     quantity: Decimal
     size_usd: Decimal
-    target_price: Decimal
-    stop_price: Decimal
-    expires_at: datetime
     peak_price: Decimal
+    target_price: Decimal | None = None
+    stop_price: Decimal | None = None
+    expires_at: datetime | None = None
+    trailing_drawdown: Decimal | None = None
 
 
 @dataclass(frozen=True, slots=True)

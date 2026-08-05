@@ -393,6 +393,77 @@ staleness → collision marker → `peak_market_cap` fix → WebSockets last.
 match the chain. The platform records what the provider returned and has no
 independent oracle; only faithful recording can be claimed, not accuracy.
 
+## Sprint 30 — Paper Wallet V2, a fresh launch (done)
+
+Full report: `docs/SPRINT_30_PAPER_WALLET_V2.md`. An operational reset, not a
+redesign: the Radar, the scoring and the Strategy Lab are untouched.
+
+**A wallet is now a generation, not a singleton.** `uq_paper_wallets_live` — a
+unique index on a constant, partial on `archived_at IS NULL` — makes "exactly
+one live wallet" a database fact rather than an application promise. Migration
+`0013` archives generation 1 (`accb18fc…`, 13 positions, nothing deleted); that
+step is what makes the index satisfiable, which is why it is in the migration.
+
+Live: **generation 2, `trailing_stop_25_v1` v1.0.0, started
+2026-08-05T06:34:19.840157Z**, $1,000 fully deployed into 10 positions on the
+first pass. 115 Radar tokens considered, 105 refused for cash and **none for
+eligibility**. First purchase GOAP at $0.004034, rank 1. Equity $1,110.03
+(+11.00%) nine minutes in — entirely unrealised, and nine minutes is not a
+result.
+
+**The published rule is a trailing stop and nothing else.** No target, no fixed
+stop, no holding period — `NULL` on the row, not zero, so "no such rule" and "a
+rule set to zero" stay distinguishable. Entry reads the **whole ranked Radar**,
+not a top-ten cut: §4's loop only terminates in permanent idleness otherwise.
+The registry refuses to construct with two operational strategies, so removing
+the selector is enforced at import.
+
+`app/paper/eligibility.py` holds §5's conditions once, called by both the
+evaluator and the read path — "no qualified token" on the page and "opened 0" in
+the log cannot come from different rules. Liquidity is a new gate, earning its
+place twice: bonding-curve pairs report no depth, and an uncostable trade is an
+unauditable one.
+
+`paper_trade_audit` is append-only by construction — **one INSERT in the whole
+codebase, no UPDATE, no DELETE**. It stores market cap and pool depth at each
+end because those live in prunable snapshots: a figure that is only derivable is
+only derivable while its rows survive, and the oldest trades would go dark first.
+
+The wallet now advances on every Radar refresh as well as its own beat; verified
+live (`paper_review_requested trigger=radar_sweep`, pass ran 0.1s later). It is a
+trigger, not a second evaluator — exits still resolve from the stored series, so
+more frequent passes change when a decision is *recorded*, never which one.
+
+Measured: 3457 backend passed (+88), 374 frontend passed (+69). `make check`
+green, including `ruff format --check` — the 23 pre-existing unformatted files
+were formatted in their own commit first.
+
+**Corrections recorded:**
+
+- The generation number is **global, not per strategy**. The first version
+  numbered within a strategy id, making the relaunch "v1" because its rule was
+  new. Caught on the first live pass; the ten positions it had opened were
+  deleted and re-opened under the corrected numbering, before any audit row or
+  published figure existed.
+- The exit books **at the trigger level, not at the price that breached it**.
+  That is the frozen resolver's convention and it is optimistic on a gap down.
+  It is now published on the strategy card as a rule of its own.
+- **A position can run indefinitely.** No expiry means capital can stay locked
+  in a token that never gives back a quarter of its high. This follows from §7
+  and is left on the equity curve rather than smoothed over.
+- The two benchmarks were made **genuinely different**, not renamed: one carries
+  the wallet's cash constraint, one is the unconstrained index. Sprint 25's
+  refusal of one-number-two-labels stands; a note fires when they coincide.
+- Benchmark membership is `is_active OR swept during the period`. Filtering to
+  what is still active would hand every benchmark survivorship the wallet never
+  had.
+- **The wallet's rule is not the lab's `trailing_25`** — the lab's carries a
+  48-hour hold. The correction the previous commit recorded still applies; the
+  two figures must not be quoted against each other.
+- Not demonstrated live: **no trade has closed**, so the audit-writing path and
+  every realised metric are proven by tests only. The empty state has not fired
+  either — the wallet deployed its full $1,000 on pass one.
+
 ## Known blockers
 
 - **Helius plan quota exhausted (HTTP 429).** Discovery is down and curve

@@ -66,11 +66,23 @@ class PositionOut(BaseSchema):
     entry_price: Decimal
     size_usd: Decimal
     quantity: Decimal
+    #: The market as it stood when the position opened. Recorded, never used to
+    #: size anything.
+    entry_market_cap: Decimal | None = None
+    entry_liquidity_usd: Decimal | None = None
 
-    #: Fixed at entry, never recomputed.
-    target_price: Decimal
-    stop_price: Decimal
-    expires_at: datetime
+    #: Fixed at entry, never recomputed. `None` where the strategy publishes no
+    #: such rule — since Sprint 30 the live strategy has no target, no fixed
+    #: stop and no expiry, and a zero would read as a rule sitting at zero.
+    target_price: Decimal | None = None
+    stop_price: Decimal | None = None
+    expires_at: datetime | None = None
+    #: The trailing fraction fixed at entry. 0.25 is "25% back from the high".
+    trailing_drawdown: Decimal | None = None
+    #: Where the trailing stop currently sits: the running high less the fixed
+    #: fraction. Derived at read time from `peak_price`, never stored — a stored
+    #: level would be a second source of truth for the one rule that matters.
+    trailing_stop_price: Decimal | None = None
 
     #: Latest observed price. `None` for a token nobody has priced since — the
     #: holding is unmeasured, not worthless.
@@ -102,6 +114,11 @@ class BenchmarkOut(BaseSchema):
 
     `difference_pct` is served rather than left to the client so the two
     surfaces that show it cannot disagree about the subtraction.
+
+    Every benchmark starts with the wallet's capital at the wallet's own start
+    instant (Sprint 30 §2). A comparison drawn over a different period is not a
+    comparison, and this schema carries the constituent counts so a reader can
+    see what each figure was measured over.
     """
 
     id: str
@@ -111,6 +128,12 @@ class BenchmarkOut(BaseSchema):
     return_pct: Decimal | None = None
     difference_pct: Decimal | None = None
     unavailable_reason: str | None = None
+    #: How many tokens the comparison held, and how many were in its universe
+    #: but unpriceable at one end. The second is published rather than dropped:
+    #: silently excluding them would hand the benchmark survivorship it did not
+    #: earn.
+    positions: int = 0
+    unpriced: int = 0
 
 
 class MetricsOut(BaseSchema):
@@ -122,6 +145,10 @@ class MetricsOut(BaseSchema):
     equity: Decimal | None = None
     roi_pct: Decimal | None = None
     open_value: Decimal | None = None
+    #: What the open holdings cost, as committed at entry. Never `None`: an
+    #: unpriced holding has an unknown *value* but a known cost, and letting
+    #: "invested" disappear with a price would misreport how much is deployed.
+    invested_usd: Decimal = Decimal(0)
     #: How many open positions could not be priced. The reason equity is null.
     unpriced_positions: int = 0
 
@@ -145,6 +172,124 @@ class MetricsOut(BaseSchema):
     exits_by_reason: dict[str, int] = Field(default_factory=dict)
 
 
+class WaitingOut(BaseSchema):
+    """Why the wallet is holding cash, when it is.
+
+    Served only when it is true: the wallet has enough cash for a full position
+    and nothing on the Radar qualifies. A page that claimed to be waiting for an
+    opportunity while one sat in front of it would be worse than one that said
+    nothing.
+
+    `refusals` is a count per published entry condition. "No qualified token"
+    with no denominator is a claim; with one it is a measurement.
+    """
+
+    message: str
+    idle_cash: Decimal
+    considered: int
+    refusals: dict[str, int] = Field(default_factory=dict)
+    #: The sentence each refusal code renders as, so the client never composes
+    #: prose from a code. Rewording stays a deploy, not a migration.
+    labels: dict[str, str] = Field(default_factory=dict)
+
+
+class LastTradeOut(BaseSchema):
+    """The most recent thing the wallet did, whichever kind it was.
+
+    `action` is `opened` or `closed`. Both are shown because a wallet that has
+    been fully invested for a day did something last — it just was not an exit,
+    and reporting only closes would make it look idle.
+    """
+
+    action: str
+    mint_address: str
+    symbol: str | None = None
+    at: datetime
+    price_usd: Decimal | None = None
+    exit_reason: str | None = None
+    pnl_usd: Decimal | None = None
+
+
+class AuditEntryOut(BaseSchema):
+    """One completed trade, exactly as it was written down.
+
+    Never recomputed at read time. The market cap and depth are the ones
+    observed at each end of the trade, and the fee and impact were charged
+    against that depth when it was still on record.
+    """
+
+    mint_address: str
+    symbol: str | None = None
+
+    entry_at: datetime
+    entry_price: Decimal
+    entry_market_cap: Decimal | None = None
+    entry_liquidity_usd: Decimal | None = None
+    size_usd: Decimal
+    quantity: Decimal
+
+    exit_at: datetime
+    exit_price: Decimal
+    exit_market_cap: Decimal | None = None
+    exit_liquidity_usd: Decimal | None = None
+
+    gross_return_usd: Decimal
+    gross_return_pct: Decimal
+    #: `None` together, with the reason set, when the venue reported no depth at
+    #: one end. A half-costed trade is worse than an uncosted one.
+    fee_usd: Decimal | None = None
+    slippage_usd: Decimal | None = None
+    net_return_usd: Decimal | None = None
+    net_return_pct: Decimal | None = None
+    cost_unavailable_reason: str | None = None
+
+    exit_reason: str
+    strategy_id: str
+    strategy_version: str
+    wallet_generation: int
+    hold_hours: Decimal | None = None
+
+
+class AuditOut(BaseSchema):
+    """The permanent record, newest exit first. Losers are never filtered out."""
+
+    items: list[AuditEntryOut]
+    total: int
+    enabled: bool
+    #: What the net figures include and what they refuse. Both halves.
+    disclosure: str
+    observed_at: datetime
+
+
+class ArchivedWalletOut(BaseSchema):
+    """A retired generation, for internal historical comparison only.
+
+    Not linked from the product. Its figures are frozen at the moment it was
+    archived, including any position that was still open — those never settle,
+    and this schema says so rather than letting a reader assume they closed at a
+    fair price.
+    """
+
+    strategy_id: str
+    strategy_name: str
+    strategy_version: str
+    generation: int
+    starting_balance: Decimal
+    started_at: datetime
+    archived_at: datetime
+    archive_reason: str | None = None
+    open_positions: int
+    closed_positions: int
+    #: Stated on every archived wallet with unsettled positions.
+    frozen_note: str
+
+
+class ArchiveOut(BaseSchema):
+    items: list[ArchivedWalletOut]
+    note: str
+    observed_at: datetime
+
+
 class WalletOut(BaseSchema):
     """The wallet, its strategy, its metrics and its benchmarks."""
 
@@ -155,6 +300,23 @@ class WalletOut(BaseSchema):
     strategy: StrategyOut
     metrics: MetricsOut
     benchmarks: list[BenchmarkOut]
+    #: Which launch this is, and when it began. The benchmarks above start from
+    #: the same instant — that is the point of publishing it.
+    generation: int = 1
+    started_at: datetime | None = None
+    #: Set when both benchmarks currently hold the same tokens. They are
+    #: distinct measurements that happen to coincide, and saying so beats hiding
+    #: one or implying two independent checks.
+    benchmark_note: str | None = None
+    #: Present only while the wallet is holding fundable cash with nothing
+    #: eligible in front of it.
+    waiting: WaitingOut | None = None
+    last_trade: LastTradeOut | None = None
+    #: The next moment the Radar's ranking can change, from the sweep's own
+    #: cadence. Exits do not wait for it — they resolve from stored readings.
+    next_radar_evaluation_at: datetime | None = None
+    #: How many trades are in the permanent record.
+    audited_trades: int = 0
     #: Realised profit from trades closed since midnight UTC. Realised only —
     #: an open position's unrealised move is not a figure anyone can act on.
     pnl_today: Decimal

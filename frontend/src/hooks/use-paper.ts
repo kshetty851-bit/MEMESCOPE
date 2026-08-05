@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   fetchLab,
   fetchLabTokens,
+  fetchPaperAudit,
   fetchPaperPositions,
   fetchPaperStrategies,
   fetchPaperWallet,
@@ -36,6 +37,23 @@ export function usePaperPositions() {
   return useQuery({
     queryKey: ["paper", "positions"],
     queryFn: fetchPaperPositions,
+    refetchInterval: PAPER_POLL_MS,
+    staleTime: PAPER_POLL_MS / 2,
+  });
+}
+
+/**
+ * The permanent trade record.
+ *
+ * Polled on the same cadence as the wallet. It only grows when a position
+ * closes, and a row in it never changes — nothing in the backend updates the
+ * audit table — so a cached page can never be showing a stale version of a
+ * trade, only a shorter list.
+ */
+export function usePaperAudit(limit = 100) {
+  return useQuery({
+    queryKey: ["paper", "audit", limit],
+    queryFn: () => fetchPaperAudit(limit),
     refetchInterval: PAPER_POLL_MS,
     staleTime: PAPER_POLL_MS / 2,
   });

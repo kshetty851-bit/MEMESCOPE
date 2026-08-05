@@ -8,8 +8,8 @@ import type { PaperPosition } from "@/types/paper";
  * The positions table.
  *
  * What matters here is that a reader can check any trade against the published
- * rule without taking the result on trust: the stop and the target that were
- * fixed at entry sit beside the outcome, and losses are never filtered out or
+ * rule without taking the result on trust: the trailing stop the rule currently
+ * sits at is beside the current price, and losses are never filtered out or
  * softened.
  */
 
@@ -24,9 +24,14 @@ function position(overrides: Partial<PaperPosition> = {}): PaperPosition {
     entry_price: "10",
     size_usd: "100",
     quantity: "10",
-    target_price: "20",
-    stop_price: "5",
-    expires_at: "2026-08-03T12:00:00Z",
+    entry_market_cap: "124000",
+    entry_liquidity_usd: "18000",
+    // The live strategy publishes one exit rule and three absences.
+    target_price: null,
+    stop_price: null,
+    expires_at: null,
+    trailing_drawdown: "0.2500",
+    trailing_stop_price: "10.125",
     current_price: "12",
     current_pct: "20.00",
     current_price_at: "2026-08-01T12:00:00Z",
@@ -42,15 +47,25 @@ function position(overrides: Partial<PaperPosition> = {}): PaperPosition {
 afterEach(cleanup);
 
 describe("PositionsTable", () => {
-  it("shows the levels fixed at entry beside the outcome", () => {
-    // Without these a reader must take the exit on trust. With them, any trade
-    // can be checked against the rule that produced it.
+  it("shows where the exit rule currently sits beside the price", () => {
+    // Without this a reader must take the exit on trust. With it, any trade can
+    // be checked against the rule that will produce it.
     render(<PositionsTable positions={[position()]} isPending={false} emptyLabel="none" />);
 
-    expect(screen.getByText("Stop")).toBeInTheDocument();
-    expect(screen.getByText("Target")).toBeInTheDocument();
-    expect(screen.getByText("$5.0000")).toBeInTheDocument();
-    expect(screen.getByText("$20.0000")).toBeInTheDocument();
+    expect(screen.getByText("Trailing stop")).toBeInTheDocument();
+    expect(screen.getByText("$10.1250")).toBeInTheDocument();
+    expect(screen.getByText("$12.0000")).toBeInTheDocument();
+  });
+
+  it("shows no target column, because the strategy has no target", () => {
+    // A column of dashes would imply a rule that exists and is unmeasured. The
+    // strategy publishes "Take profit: None", and the table agrees with it.
+    const { container } = render(
+      <PositionsTable positions={[position()]} isPending={false} emptyLabel="none" />,
+    );
+
+    expect(screen.queryByText("Target")).not.toBeInTheDocument();
+    expect(container.textContent).not.toContain("Expires");
   });
 
   it("names the rule that closed a trade", () => {
@@ -65,6 +80,7 @@ describe("PositionsTable", () => {
             current_pct: "-50.00",
             pnl_usd: "-50.00",
             closed_at: "2026-08-02T12:00:00Z",
+            trailing_stop_price: null,
           }),
         ]}
         isPending={false}
@@ -72,7 +88,7 @@ describe("PositionsTable", () => {
       />,
     );
 
-    expect(screen.getByText("Hit stop")).toBeInTheDocument();
+    expect(screen.getByText("Trailing stop", { selector: "span" })).toBeInTheDocument();
     expect(screen.getByText("-$50.00")).toBeInTheDocument();
     expect(screen.getByText("-50.00%")).toBeInTheDocument();
   });

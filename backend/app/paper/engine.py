@@ -43,9 +43,15 @@ def resolve_exit(
     Expiry is checked against each observation's own timestamp rather than
     against `now`, so a position that should have expired at noon closes at
     noon's price even if nothing evaluated it until midnight.
+
+    A bound that is `None` is skipped: since Sprint 30 a position may carry no
+    target, no fixed stop and no holding period at all, and **a rule that does
+    not exist cannot be breached**. For the frozen Equal Weight bracket, where
+    all three are set, the behaviour is unchanged — which is what
+    `test_paper_exits.py` asserts across every ordering.
     """
     for quote in quotes:
-        if quote.captured_at >= position.expires_at:
+        if position.expires_at is not None and quote.captured_at >= position.expires_at:
             # The published holding period elapsed at or before this reading, so
             # this is the first price at which the rule could have been applied.
             return Exit(
@@ -53,13 +59,13 @@ def resolve_exit(
                 at=quote.captured_at,
                 reason=ExitReason.EXPIRY,
             )
-        if quote.price_usd <= position.stop_price:
+        if position.stop_price is not None and quote.price_usd <= position.stop_price:
             return Exit(
                 price_usd=position.stop_price,
                 at=quote.captured_at,
                 reason=ExitReason.STOP,
             )
-        if quote.price_usd >= position.target_price:
+        if position.target_price is not None and quote.price_usd >= position.target_price:
             return Exit(
                 price_usd=position.target_price,
                 at=quote.captured_at,

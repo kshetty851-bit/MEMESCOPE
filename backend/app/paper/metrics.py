@@ -44,6 +44,10 @@ class WalletMetrics:
     roi_pct: Decimal | None
     #: Value of open holdings, and how many could not be priced.
     open_value: Decimal | None
+    #: What the open holdings **cost** — the sum of what was committed at entry.
+    #: Never `None`: an unpriced holding has an unknown value but a known cost,
+    #: and conflating the two would make "invested" disappear when a price does.
+    invested_usd: Decimal
     unpriced_positions: int
 
     open_positions: int
@@ -150,6 +154,9 @@ def summarise(
         equity=None if equity is None else equity.quantize(Decimal("0.01")),
         roi_pct=roi,
         open_value=None if open_value is None else open_value.quantize(Decimal("0.01")),
+        invested_usd=sum((position.size_usd for position in open_positions), _ZERO).quantize(
+            Decimal("0.01")
+        ),
         unpriced_positions=unpriced,
         open_positions=len(open_positions),
         closed_positions=len(closed),

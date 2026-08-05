@@ -3,6 +3,7 @@ import type {
   Lab,
   LabStrategy,
   LabTokens,
+  PaperAudit,
   PaperPosition,
   PaperPositions,
   PaperStrategies,
@@ -31,6 +32,17 @@ export function fetchPaperPositions(): Promise<PaperPositions> {
 
 export function fetchPaperStrategies(): Promise<PaperStrategies> {
   return api.get<PaperStrategies>("/paper/strategies");
+}
+
+/**
+ * The permanent record.
+ *
+ * Read-only, like everything else here, and deliberately a separate request
+ * from the wallet: the summary polls on the review cadence, and the log only
+ * changes when a trade closes.
+ */
+export function fetchPaperAudit(limit = 100): Promise<PaperAudit> {
+  return api.get<PaperAudit>(`/paper/audit?limit=${limit}`);
 }
 
 // --- Presentation ------------------------------------------------------------
@@ -84,7 +96,10 @@ export function hours(value: string | null | undefined): string | null {
  */
 const EXIT_LABEL: Record<string, string> = {
   target: "Hit target",
-  stop: "Hit stop",
+  // The live strategy has one exit, and `stop` is what it records. "Trailing
+  // stop" rather than "hit stop": the level moved with the price, and calling
+  // it a stop would suggest a fixed one the strategy does not have.
+  stop: "Trailing stop",
   expiry: "Held to expiry",
 };
 

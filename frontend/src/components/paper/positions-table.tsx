@@ -18,9 +18,11 @@ import type { PaperPosition } from "@/types/paper";
  *
  * Two columns carry the honesty of the whole table:
  *
- *  - **Stop and target** are the levels fixed at entry. Showing them beside the
- *    outcome is what lets a reader check that the exit followed the rule rather
- *    than taking the result on trust.
+ *  - **Trailing stop** is where the only exit rule currently sits: the running
+ *    high, less the fraction fixed at entry. Showing it beside the current
+ *    price is what lets a reader check the exit against the rule rather than
+ *    taking the result on trust. It is blank for a closed trade — the level
+ *    that mattered is the exit price, which is its own column.
  *  - **Peak** stops at the exit for a closed trade. A high the token printed
  *    after the position closed belongs to the token, not to the trade, and
  *    crediting it would be the most flattering error available here.
@@ -83,13 +85,12 @@ export function PositionsTable({
 
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[980px] text-sm">
+      <table className="w-full min-w-[880px] text-sm">
         <thead>
           <tr className="border-b border-line text-label uppercase tracking-wide text-ink-faint">
             <th className="py-2 text-left font-medium">Token</th>
             <th className="py-2 text-right font-medium">Entry</th>
-            <th className="py-2 text-right font-medium">Stop</th>
-            <th className="py-2 text-right font-medium">Target</th>
+            <th className="py-2 text-right font-medium">Trailing stop</th>
             <th className="py-2 text-right font-medium">
               {positions[0]?.status === "closed" ? "Exit" : "Current"}
             </th>
@@ -120,8 +121,7 @@ export function PositionsTable({
                   </span>
                 </td>
                 <Cell value={formatPrice(position.entry_price)} />
-                <Cell value={formatPrice(position.stop_price)} />
-                <Cell value={formatPrice(position.target_price)} />
+                <Cell value={formatPrice(position.trailing_stop_price)} />
                 <Cell value={formatPrice(position.current_price)} />
                 <Cell
                   value={pct(position.current_pct)}

@@ -41,11 +41,22 @@ export interface PaperPosition {
   entry_price: string;
   size_usd: string;
   quantity: string;
+  /** The market as it stood at entry. Recorded, never used to size anything. */
+  entry_market_cap: string | null;
+  entry_liquidity_usd: string | null;
 
-  /** Fixed at entry, never recomputed. */
-  target_price: string;
-  stop_price: string;
-  expires_at: string;
+  /**
+   * Fixed at entry, never recomputed. Null where the strategy publishes no such
+   * rule — the live strategy has no target, no fixed stop and no expiry, and a
+   * zero would read as a rule sitting at zero.
+   */
+  target_price: string | null;
+  stop_price: string | null;
+  expires_at: string | null;
+  /** The trailing fraction fixed at entry. "0.25" is 25% back from the high. */
+  trailing_drawdown: string | null;
+  /** Where the trail sits now: the running high less the fixed fraction. */
+  trailing_stop_price: string | null;
 
   /** Null for a token nobody has priced since — unmeasured, not worthless. */
   current_price: string | null;
@@ -69,6 +80,78 @@ export interface PaperBenchmark {
   return_pct: string | null;
   difference_pct: string | null;
   unavailable_reason: string | null;
+  /** How many tokens it held, and how many were unpriceable at one end. The
+   * second is published rather than dropped: excluding them would hand the
+   * benchmark survivorship it did not earn. */
+  positions: number;
+  unpriced: number;
+}
+
+/**
+ * Why the wallet is holding cash, when it is.
+ *
+ * Present only when it is true — enough cash for a full position and nothing on
+ * the Radar qualifying. `labels` carries the server-rendered sentence for each
+ * refusal code, so the client never composes prose from a slug.
+ */
+export interface PaperWaiting {
+  message: string;
+  idle_cash: string;
+  considered: number;
+  refusals: Record<string, number>;
+  labels: Record<string, string>;
+}
+
+export interface PaperLastTrade {
+  /** `opened` or `closed`. Opens count — a fully-invested wallet still acted. */
+  action: string;
+  mint_address: string;
+  symbol: string | null;
+  at: string;
+  price_usd: string | null;
+  exit_reason: string | null;
+  pnl_usd: string | null;
+}
+
+/** One completed trade, as it was written down and never rewritten. */
+export interface PaperAuditEntry {
+  mint_address: string;
+  symbol: string | null;
+
+  entry_at: string;
+  entry_price: string;
+  entry_market_cap: string | null;
+  entry_liquidity_usd: string | null;
+  size_usd: string;
+  quantity: string;
+
+  exit_at: string;
+  exit_price: string;
+  exit_market_cap: string | null;
+  exit_liquidity_usd: string | null;
+
+  gross_return_usd: string;
+  gross_return_pct: string;
+  /** Null together, with the reason set, when the venue reported no depth. */
+  fee_usd: string | null;
+  slippage_usd: string | null;
+  net_return_usd: string | null;
+  net_return_pct: string | null;
+  cost_unavailable_reason: string | null;
+
+  exit_reason: string;
+  strategy_id: string;
+  strategy_version: string;
+  wallet_generation: number;
+  hold_hours: string | null;
+}
+
+export interface PaperAudit {
+  items: PaperAuditEntry[];
+  total: number;
+  enabled: boolean;
+  disclosure: string;
+  observed_at: string;
 }
 
 export interface PaperMetrics {
@@ -78,6 +161,9 @@ export interface PaperMetrics {
   equity: string | null;
   roi_pct: string | null;
   open_value: string | null;
+  /** What the open holdings cost at entry. Never null: an unpriced holding has
+   * an unknown value but a known cost. */
+  invested_usd: string;
   unpriced_positions: number;
 
   open_positions: number;
@@ -104,6 +190,16 @@ export interface PaperWallet {
   strategy: PaperStrategy;
   metrics: PaperMetrics;
   benchmarks: PaperBenchmark[];
+  /** Which launch this is, and when it began. The benchmarks start there too. */
+  generation: number;
+  started_at: string | null;
+  /** Set while both benchmarks hold the same tokens. */
+  benchmark_note: string | null;
+  waiting: PaperWaiting | null;
+  last_trade: PaperLastTrade | null;
+  /** The next moment the ranking can change. Exits do not wait for it. */
+  next_radar_evaluation_at: string | null;
+  audited_trades: number;
   /** Realised profit since midnight UTC. Realised only. */
   pnl_today: string;
   /** Rendered on every surface that shows the numbers. */

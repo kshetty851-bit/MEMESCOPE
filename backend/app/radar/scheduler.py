@@ -17,6 +17,7 @@ from typing import Any
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.db.session import SessionFactory
+from app.paper.scheduler import request_review
 from app.radar.service import RadarService
 from app.services.pumpfun_radar import PumpfunRadarScanner
 from app.workers.celery_app import celery_app
@@ -43,7 +44,14 @@ async def _radar_sweep(limit: int | None = None) -> dict[str, Any]:
 
     batch = limit or settings.RADAR_SWEEP_BATCH_LIMIT
     async with SessionFactory() as session:
-        return await RadarService(session).sweep(limit=batch)
+        result = await RadarService(session).sweep(limit=batch)
+
+    # The ranking just moved, so the wallet evaluates against the ranking that
+    # exists now rather than waiting for its own beat (Sprint 30 §8). Enqueued
+    # after the session closes: the pass reads the sweep's committed rows, and a
+    # wallet failure cannot roll back a completed sweep.
+    request_review(trigger="radar_sweep")
+    return result
 
 
 @celery_app.task(name="app.radar.scheduler.pumpfun_radar_scan")
@@ -57,4 +65,9 @@ async def _pumpfun_radar_scan(limit: int | None = None) -> dict[str, Any]:
         return {"skipped": "pumpfun_radar_disabled"}
 
     async with SessionFactory() as session:
-        return await PumpfunRadarScanner(session).scan(limit=limit)
+        result = await PumpfunRadarScanner(session).scan(limit=limit)
+
+    # Admission can add a token at the top of the ranking, which is a new
+    # eligible entry the wallet should see immediately rather than at :05.
+    request_review(trigger="pumpfun_radar_scan")
+    return result
