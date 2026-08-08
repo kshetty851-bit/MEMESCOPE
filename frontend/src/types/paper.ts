@@ -68,9 +68,43 @@ export interface PaperPosition {
 
   closed_at: string | null;
   exit_price: string | null;
-  /** `target` | `stop` | `expiry`. Never `manual`. */
+  /** `target` | `stop` | `expiry` | `manual`. */
   exit_reason: string | null;
+  manual_action_at: string | null;
   pnl_usd: string | null;
+}
+
+export interface ManualSellPreview {
+  mint_address: string;
+  name: string | null;
+  symbol: string | null;
+  short_mint: string;
+  entry_price: string;
+  latest_price: string;
+  quote_observed_at: string;
+  quote_age_seconds: string;
+  is_stale: boolean;
+  warning: string | null;
+  entry_market_cap: string | null;
+  current_market_cap: string | null;
+  liquidity_usd: string | null;
+  gross_return_usd: string;
+  gross_return_pct: string;
+  fee_usd: string | null;
+  slippage_usd: string | null;
+  net_return_usd: string | null;
+  net_return_pct: string | null;
+  cost_unavailable_reason: string | null;
+}
+
+export interface ManualSellResult {
+  closed: boolean;
+  preview: ManualSellPreview;
+  audited: boolean;
+  opened: number;
+  candidates: number;
+  candidates_truncated: boolean;
+  refusals: Record<string, number>;
 }
 
 export interface PaperBenchmark {
@@ -153,6 +187,7 @@ export interface PaperAuditEntry {
   cost_unavailable_reason: string | null;
 
   exit_reason: string;
+  manual_action_at: string | null;
   strategy_id: string;
   strategy_version: string;
   wallet_generation: number;

@@ -38,9 +38,9 @@ class PositionStatus(enum.StrEnum):
 class ExitReason(enum.StrEnum):
     """Why a position closed.
 
-    Every member corresponds to a rule published in the strategy. There is
-    deliberately no `MANUAL` and no `DISCRETIONARY`: nothing in this system may
-    close a position for a reason a reader cannot check against the rule.
+    Automated members correspond to rules published in the strategy. `MANUAL`
+    is deliberately separate: it is a paper-only override, never evidence that
+    the automated strategy chose that exit.
     """
 
     #: Price reached the target fixed at entry.
@@ -49,6 +49,8 @@ class ExitReason(enum.StrEnum):
     STOP = "stop"
     #: The holding period published by the strategy elapsed.
     EXPIRY = "expiry"
+    #: A paper-only human override closed the position at an observed quote.
+    MANUAL = "manual"
 
 
 @dataclass(frozen=True, slots=True)

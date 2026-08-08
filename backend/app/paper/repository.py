@@ -286,6 +286,7 @@ class PaperRepository:
         closed_at: datetime,
         exit_reason: str,
         peak_price: Decimal,
+        manual_action_at: datetime | None = None,
     ) -> bool:
         """Record a close, once.
 
@@ -304,6 +305,7 @@ class PaperRepository:
                 exit_price=exit_price,
                 closed_at=closed_at,
                 exit_reason=exit_reason,
+                manual_action_at=manual_action_at,
                 peak_price=peak_price,
                 last_evaluated_at=closed_at,
             )

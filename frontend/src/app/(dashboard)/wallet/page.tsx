@@ -8,7 +8,13 @@ import { StrategyCard } from "@/components/paper/strategy-card";
 import { Label, Panel } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/states";
-import { usePaperAudit, usePaperPositions, usePaperWallet } from "@/hooks/use-paper";
+import {
+  useManualSell,
+  useManualSellPreview,
+  usePaperAudit,
+  usePaperPositions,
+  usePaperWallet,
+} from "@/hooks/use-paper";
 import { formatAge } from "@/lib/format";
 import { hours, pct, tone, usd } from "@/lib/paper";
 import { cn } from "@/lib/utils";
@@ -29,10 +35,9 @@ import { cn } from "@/lib/utils";
  * it renders "—", never zero: "we have not measured this" and "this is zero"
  * are different claims.
  *
- * **There is no strategy selector, and there is no button.** One rule runs;
- * choosing between rules after seeing their results would be the hindsight the
- * whole design exists to prevent, and a manual entry would make this a record
- * of judgement rather than of a rule.
+ * **There is no strategy selector and no manual entry.** One rule opens
+ * positions. A manual paper exit is recorded separately as an override, never
+ * as evidence that the automated rule chose that close.
  */
 
 type Tab = "open" | "closed";
@@ -74,6 +79,8 @@ export default function WalletPage() {
   const wallet = usePaperWallet();
   const positions = usePaperPositions();
   const auditQuery = usePaperAudit();
+  const manualPreview = useManualSellPreview();
+  const manualSell = useManualSell();
   const [tab, setTab] = useState<Tab>("open");
 
   const items = useMemo(() => positions.data?.items ?? [], [positions.data]);
@@ -349,6 +356,8 @@ export default function WalletPage() {
         <PositionsTable
           positions={visible}
           isPending={positions.isPending}
+          onPreviewManualSell={(mint) => manualPreview.mutateAsync(mint)}
+          onManualSell={(mint) => manualSell.mutateAsync(mint)}
           emptyLabel={
             tab === "open"
               ? "No position is open. The strategy buys the highest-ranked eligible token on the Radar whenever cash allows."

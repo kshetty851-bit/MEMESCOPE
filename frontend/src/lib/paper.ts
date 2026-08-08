@@ -3,6 +3,8 @@ import type {
   Lab,
   LabStrategy,
   LabTokens,
+  ManualSellPreview,
+  ManualSellResult,
   PaperAudit,
   PaperPosition,
   PaperPositions,
@@ -18,8 +20,8 @@ import type {
  * threshold applied here would be a second, unpublished rule competing with the
  * one the simulation actually followed.
  *
- * There is no write function, because there is no write endpoint. Nothing in
- * this product opens a position by hand.
+ * Manual writes are limited to paper-only exits. There is still no manual
+ * entry, no real execution and no client-side pricing.
  */
 
 export function fetchPaperWallet(): Promise<PaperWallet> {
@@ -43,6 +45,14 @@ export function fetchPaperStrategies(): Promise<PaperStrategies> {
  */
 export function fetchPaperAudit(limit = 100): Promise<PaperAudit> {
   return api.get<PaperAudit>(`/paper/audit?limit=${limit}`);
+}
+
+export function previewManualSell(mint: string): Promise<ManualSellPreview> {
+  return api.get<ManualSellPreview>(`/paper/positions/${mint}/manual-sell`);
+}
+
+export function sellPaperPosition(mint: string): Promise<ManualSellResult> {
+  return api.post<ManualSellResult>(`/paper/positions/${mint}/manual-sell`);
 }
 
 // --- Presentation ------------------------------------------------------------
@@ -101,6 +111,7 @@ const EXIT_LABEL: Record<string, string> = {
   // it a stop would suggest a fixed one the strategy does not have.
   stop: "Trailing stop",
   expiry: "Held to expiry",
+  manual: "Manual sell",
 };
 
 export function exitLabel(reason: string | null | undefined): string | null {
@@ -189,4 +200,4 @@ export function sortLab(items: LabStrategy[], key: LabSortKey): LabStrategy[] {
 }
 
 /** Exit reasons in the order they are always displayed, so columns line up. */
-export const EXIT_ORDER = ["target", "stop", "expiry"] as const;
+export const EXIT_ORDER = ["target", "stop", "expiry", "manual"] as const;

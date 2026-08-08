@@ -31,6 +31,7 @@ from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.exceptions import ConflictError, NotFoundError, ValidationError
 from app.core.logging import get_logger
 from app.models.market import TokenMarketSnapshot
 from app.models.paper import PaperPosition, PaperTradeAudit, PaperWallet
@@ -51,6 +52,8 @@ from app.repositories.market import MarketSnapshotRepository
 from app.repositories.token import TokenRepository
 
 logger = get_logger(__name__)
+
+_PCT = Decimal("0.0001")
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,6 +85,32 @@ class ReviewOutcome:
             "candidates_truncated": self.candidates_truncated,
             **{f"refused_{reason}": count for reason, count in sorted(self.refusals.items())},
         }
+
+
+@dataclass(frozen=True, slots=True)
+class ManualSellPreview:
+    """The exact observed quote and cost model a manual close would use."""
+
+    position: PaperPosition
+    symbol: str | None
+    name: str | None
+    quote: TokenMarketSnapshot
+    quote_age_seconds: Decimal
+    is_stale: bool
+    warning: str | None
+    audit: audit.TradeAudit
+
+
+@dataclass(frozen=True, slots=True)
+class ManualSellOutcome:
+    """What a confirmed manual paper close did."""
+
+    preview: ManualSellPreview
+    audited: bool
+    opened: int
+    candidates: int
+    candidates_truncated: bool
+    refusals: dict[str, int]
 
 
 def _rules_for(position: PaperPosition) -> ExitRules:
@@ -230,6 +259,153 @@ class PaperWalletService:
             candidates=candidates,
             candidates_truncated=truncated,
             refusals=refusals,
+        )
+
+    async def manual_sell_preview(
+        self, mint_address: str, *, now: datetime
+    ) -> ManualSellPreview:
+        """A paper-only close preview priced from the newest observable quote."""
+        wallet = await self._repository.live_wallet()
+        if wallet is None:
+            raise NotFoundError(
+                "The paper wallet has not been created yet.",
+                code="paper_wallet_not_found",
+            )
+
+        position = await self._repository.position_for(wallet.id, mint_address)
+        if position is None:
+            raise NotFoundError(
+                "This token is not in the live paper wallet.",
+                code="paper_position_not_found",
+                details={"mint_address": mint_address},
+            )
+        if position.status != PositionStatus.OPEN.value:
+            raise ConflictError(
+                "This paper position is already closed.",
+                code="paper_position_already_closed",
+                details={"mint_address": mint_address, "status": position.status},
+            )
+
+        quote = await self._market.latest_priced_for_mint_as_of(mint_address, as_of=now)
+        if quote is None:
+            raise ValidationError(
+                "No usable observed quote exists for this paper position.",
+                code="paper_quote_unavailable",
+                details={"mint_address": mint_address},
+            )
+
+        token = (await TokenRepository(self._session).get_many_by_mints([mint_address])).get(
+            mint_address
+        )
+        return self._manual_preview_from(
+            wallet=wallet,
+            position=position,
+            quote=quote,
+            name=token.name if token is not None else None,
+            symbol=token.symbol if token is not None else None,
+            now=now,
+        )
+
+    async def manual_sell(self, mint_address: str, *, now: datetime) -> ManualSellOutcome:
+        """Close one open paper position at the newest observed quote.
+
+        The close guard, audit uniqueness and replacement allocator are the same
+        ones the automated evaluator uses. A duplicate request can therefore
+        fail cleanly, but it cannot close, audit, release cash or replace twice.
+        """
+        wallet = await self._repository.live_wallet()
+        if wallet is None:
+            raise NotFoundError(
+                "The paper wallet has not been created yet.",
+                code="paper_wallet_not_found",
+            )
+
+        preview = await self.manual_sell_preview(mint_address, now=now)
+        closed = await self._repository.close(
+            preview.position.id,
+            exit_price=preview.audit.exit_price,
+            closed_at=preview.quote.captured_at,
+            exit_reason=ExitReason.MANUAL.value,
+            peak_price=max(preview.position.peak_price, preview.audit.exit_price),
+            manual_action_at=now,
+        )
+        if not closed:
+            raise ConflictError(
+                "This paper position is already closed.",
+                code="paper_position_already_closed",
+                details={"mint_address": mint_address},
+            )
+
+        audited = await self._repository.record_audit(
+            position_id=preview.position.id,
+            wallet_id=wallet.id,
+            **preview.audit.as_row(),
+        )
+        opened, candidates, truncated, refusals = await self._open_entries(wallet, now=now)
+        return ManualSellOutcome(
+            preview=preview,
+            audited=audited,
+            opened=opened,
+            candidates=candidates,
+            candidates_truncated=truncated,
+            refusals=refusals,
+        )
+
+    def _manual_preview_from(
+        self,
+        *,
+        wallet: PaperWallet,
+        position: PaperPosition,
+        quote: TokenMarketSnapshot,
+        name: str | None,
+        symbol: str | None,
+        now: datetime,
+    ) -> ManualSellPreview:
+        exit_price = quote.price_usd
+        if exit_price is None or exit_price <= 0:  # pragma: no cover - query filters this
+            raise ValidationError(
+                "No usable observed quote exists for this paper position.",
+                code="paper_quote_unavailable",
+                details={"mint_address": position.mint_address},
+            )
+        observed_trade = ClosedTrade(
+            mint_address=position.mint_address,
+            opened_at=position.opened_at,
+            closed_at=quote.captured_at,
+            size_usd=position.size_usd,
+            entry_price=position.entry_price,
+            exit_price=exit_price,
+            quantity=position.quantity,
+            reason=ExitReason.MANUAL,
+        )
+        record = audit.record(
+            observed_trade,
+            symbol=symbol,
+            entry_market_cap=position.entry_market_cap,
+            entry_liquidity_usd=position.entry_liquidity_usd,
+            exit_market_cap=quote.market_cap,
+            exit_liquidity_usd=quote.liquidity_usd,
+            strategy_id=wallet.strategy_id,
+            strategy_version=wallet.strategy_version,
+            wallet_generation=wallet.generation,
+            manual_action_at=now,
+        )
+        age = Decimal(max(0.0, (now - quote.captured_at).total_seconds())).quantize(_PCT)
+        is_stale = age > Decimal(settings.HEALTH_TRACKED_STALE_SECONDS)
+        return ManualSellPreview(
+            position=position,
+            symbol=symbol,
+            name=name,
+            quote=quote,
+            quote_age_seconds=age,
+            is_stale=is_stale,
+            warning=(
+                "This quote is stale. Confirming will still use this observed price; "
+                "the system will not invent a fresher fill."
+                if is_stale
+                else None
+            ),
+            audit=record,
         )
 
     async def review_observed_mints(
@@ -389,6 +565,7 @@ class PaperWalletService:
                 strategy_id=wallet.strategy_id,
                 strategy_version=wallet.strategy_version,
                 wallet_generation=wallet.generation,
+                manual_action_at=row.manual_action_at,
             )
             if await self._repository.record_audit(
                 position_id=row.id, wallet_id=wallet.id, **record.as_row()

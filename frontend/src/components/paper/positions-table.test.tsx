@@ -1,8 +1,8 @@
-import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PositionsTable } from "@/components/paper/positions-table";
-import type { PaperPosition } from "@/types/paper";
+import type { ManualSellPreview, PaperPosition } from "@/types/paper";
 
 /**
  * The positions table.
@@ -39,7 +39,34 @@ function position(overrides: Partial<PaperPosition> = {}): PaperPosition {
     closed_at: null,
     exit_price: null,
     exit_reason: null,
+    manual_action_at: null,
     pnl_usd: "20.00",
+    ...overrides,
+  };
+}
+
+function manualPreview(overrides: Partial<ManualSellPreview> = {}): ManualSellPreview {
+  return {
+    mint_address: "HHbRJ9Fw2tPxETGSsaeQhpgdizfVafLvXK7eo5mwpump",
+    name: "Inward Unrest",
+    symbol: "NWRDN",
+    short_mint: "HHbR...pump",
+    entry_price: "10",
+    latest_price: "12",
+    quote_observed_at: "2026-08-01T12:01:00Z",
+    quote_age_seconds: "120.0000",
+    is_stale: true,
+    warning: "This quote is stale.",
+    entry_market_cap: "124000",
+    current_market_cap: "148800",
+    liquidity_usd: "18000",
+    gross_return_usd: "20.0000",
+    gross_return_pct: "20.0000",
+    fee_usd: "0.6600",
+    slippage_usd: "2.8222",
+    net_return_usd: "16.5178",
+    net_return_pct: "16.5178",
+    cost_unavailable_reason: null,
     ...overrides,
   };
 }
@@ -147,5 +174,39 @@ describe("PositionsTable", () => {
       <PositionsTable positions={[]} isPending={false} emptyLabel="No position is open." />,
     );
     expect(screen.getByText("No position is open.")).toBeInTheDocument();
+  });
+
+  it("previews and confirms a manual paper sell with server-derived figures", async () => {
+    const preview = vi.fn().mockResolvedValue(manualPreview());
+    const sell = vi.fn().mockResolvedValue({
+      closed: true,
+      preview: manualPreview(),
+      audited: true,
+      opened: 0,
+      candidates: 0,
+      candidates_truncated: false,
+      refusals: {},
+    });
+
+    render(
+      <PositionsTable
+        positions={[position()]}
+        isPending={false}
+        emptyLabel="none"
+        onPreviewManualSell={preview}
+        onManualSell={sell}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Sell" }));
+
+    await waitFor(() => expect(preview).toHaveBeenCalledWith(position().mint_address));
+    expect(await screen.findByText("Confirm paper sell")).toBeInTheDocument();
+    expect(screen.getByText("This quote is stale.")).toBeInTheDocument();
+    expect(screen.getByText("$16.52")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Confirm sell" }));
+
+    await waitFor(() => expect(sell).toHaveBeenCalledWith(position().mint_address));
   });
 });

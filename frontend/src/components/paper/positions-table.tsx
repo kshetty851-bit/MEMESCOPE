@@ -1,13 +1,14 @@
 "use client";
 
 import Link from "next/link";
+import { Fragment, useState } from "react";
 
 import { FreshnessLabel, NoMarketData } from "@/components/ui/freshness";
 import { Skeleton } from "@/components/ui/skeleton";
 import { exitLabel, pct, usd } from "@/lib/paper";
 import { formatPrice } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import type { PaperPosition } from "@/types/paper";
+import type { ManualSellPreview, ManualSellResult, PaperPosition } from "@/types/paper";
 
 /**
  * EVERY SIMULATED TRADE
@@ -64,11 +65,20 @@ export function PositionsTable({
   positions,
   isPending,
   emptyLabel,
+  onPreviewManualSell,
+  onManualSell,
 }: {
   positions: PaperPosition[];
   isPending: boolean;
   emptyLabel: string;
+  onPreviewManualSell?: (mint: string) => Promise<ManualSellPreview>;
+  onManualSell?: (mint: string) => Promise<ManualSellResult>;
 }) {
+  const [preview, setPreview] = useState<ManualSellPreview | null>(null);
+  const [previewing, setPreviewing] = useState<string | null>(null);
+  const [selling, setSelling] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
   if (isPending) {
     return (
       <div className="flex flex-col gap-2">
@@ -83,9 +93,37 @@ export function PositionsTable({
     return <p className="text-sm text-ink-faint">{emptyLabel}</p>;
   }
 
+  const loadPreview = async (mint: string) => {
+    if (!onPreviewManualSell) return;
+    setError(null);
+    setPreviewing(mint);
+    try {
+      setPreview(await onPreviewManualSell(mint));
+    } catch (caught) {
+      setPreview(null);
+      setError(caught instanceof Error ? caught.message : "Manual sell preview failed.");
+    } finally {
+      setPreviewing(null);
+    }
+  };
+
+  const confirmSell = async (mint: string) => {
+    if (!onManualSell) return;
+    setError(null);
+    setSelling(mint);
+    try {
+      await onManualSell(mint);
+      setPreview(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Manual sell failed.");
+    } finally {
+      setSelling(null);
+    }
+  };
+
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[880px] text-sm">
+      <table className="w-full min-w-[1040px] text-sm">
         <thead>
           <tr className="border-b border-line text-label uppercase tracking-wide text-ink-faint">
             <th className="py-2 text-left font-medium">Token</th>
@@ -99,67 +137,183 @@ export function PositionsTable({
             <th className="py-2 text-right font-medium">P/L</th>
             <th className="py-2 text-right font-medium">Status</th>
             <th className="py-2 text-right font-medium">Quote</th>
+            {onPreviewManualSell ? (
+              <th className="py-2 text-right font-medium">Action</th>
+            ) : null}
           </tr>
         </thead>
         <tbody>
           {positions.map((position) => {
             const closed = position.status === "closed";
+            const selected = preview?.mint_address === position.mint_address;
             return (
-              <tr
-                key={position.mint_address}
-                className="border-b border-line/50 transition-colors hover:bg-elevated/40"
-              >
-                <td className="py-2.5 pr-4">
-                  <Link
-                    href={`/tokens/${position.mint_address}`}
-                    className="text-ink hover:underline"
-                  >
-                    {position.symbol ?? position.name ?? `${position.mint_address.slice(0, 4)}…`}
-                  </Link>
-                  <span className="ml-2 text-xs text-ink-faint">
-                    #{position.entry_rank} at entry
-                  </span>
-                </td>
-                <Cell value={formatPrice(position.entry_price)} />
-                <Cell value={formatPrice(position.trailing_stop_price)} />
-                <Cell value={formatPrice(position.current_price)} />
-                <Cell
-                  value={pct(position.current_pct)}
-                  tone={signTone(position.current_pct)}
-                />
-                <Cell value={pct(position.peak_pct)} tone="neutral" />
-                <Cell value={usd(position.pnl_usd)} tone={signTone(position.pnl_usd)} />
-                <td className="py-2.5 text-right">
-                  <span
-                    className={cn(
-                      "rounded-chip border px-1.5 py-0.5 text-label uppercase tracking-wide",
-                      closed
-                        ? "border-line bg-elevated text-ink-faint"
-                        : "border-plasma/25 bg-plasma/[0.07] text-plasma",
+              <Fragment key={position.mint_address}>
+                <tr
+                  className="border-b border-line/50 transition-colors hover:bg-elevated/40"
+                >
+                  <td className="py-2.5 pr-4">
+                    <Link
+                      href={`/tokens/${position.mint_address}`}
+                      className="text-ink hover:underline"
+                    >
+                      {position.symbol ??
+                        position.name ??
+                        `${position.mint_address.slice(0, 4)}...`}
+                    </Link>
+                    <span className="ml-2 text-xs text-ink-faint">
+                      #{position.entry_rank} at entry
+                    </span>
+                  </td>
+                  <Cell value={formatPrice(position.entry_price)} />
+                  <Cell value={formatPrice(position.trailing_stop_price)} />
+                  <Cell value={formatPrice(position.current_price)} />
+                  <Cell
+                    value={pct(position.current_pct)}
+                    tone={signTone(position.current_pct)}
+                  />
+                  <Cell value={pct(position.peak_pct)} tone="neutral" />
+                  <Cell value={usd(position.pnl_usd)} tone={signTone(position.pnl_usd)} />
+                  <td className="py-2.5 text-right">
+                    <span
+                      className={cn(
+                        "rounded-chip border px-1.5 py-0.5 text-label uppercase tracking-wide",
+                        closed
+                          ? "border-line bg-elevated text-ink-faint"
+                          : "border-plasma/25 bg-plasma/[0.07] text-plasma",
+                      )}
+                    >
+                      {closed ? (exitLabel(position.exit_reason) ?? "Closed") : "Open"}
+                    </span>
+                  </td>
+                  {/* An open position is marked to a stored reading, not to a
+                      live quote. Saying when it was observed is the difference
+                      between a mark and a claim. A closed trade settled at its
+                      exit and shows nothing here — a finished result cannot go
+                      stale. */}
+                  <td className="py-2.5 text-right">
+                    {closed ? (
+                      <span className="text-xs text-ink-faint">settled</span>
+                    ) : position.current_price_at ? (
+                      <FreshnessLabel capturedAt={position.current_price_at} />
+                    ) : (
+                      <NoMarketData />
                     )}
-                  >
-                    {closed ? (exitLabel(position.exit_reason) ?? "Closed") : "Open"}
-                  </span>
-                </td>
-                {/* An open position is marked to a stored reading, not to a
-                    live quote. Saying when it was observed is the difference
-                    between a mark and a claim. A closed trade settled at its
-                    exit and shows nothing here — a finished result cannot go
-                    stale. */}
-                <td className="py-2.5 text-right">
-                  {closed ? (
-                    <span className="text-xs text-ink-faint">settled</span>
-                  ) : position.current_price_at ? (
-                    <FreshnessLabel capturedAt={position.current_price_at} />
-                  ) : (
-                    <NoMarketData />
-                  )}
-                </td>
-              </tr>
+                  </td>
+                  {onPreviewManualSell ? (
+                    <td className="py-2.5 text-right">
+                      {closed ? null : (
+                        <button
+                          type="button"
+                          onClick={() => void loadPreview(position.mint_address)}
+                          disabled={previewing === position.mint_address}
+                          className="rounded-chip border border-line px-2 py-1 text-xs text-ink-dim transition-colors hover:border-line-bright hover:text-ink disabled:cursor-wait disabled:opacity-60"
+                        >
+                          {previewing === position.mint_address ? "Loading" : "Sell"}
+                        </button>
+                      )}
+                    </td>
+                  ) : null}
+                </tr>
+                {selected ? (
+                  <tr className="border-b border-line bg-elevated/40">
+                    <td colSpan={onPreviewManualSell ? 10 : 9} className="py-3">
+                      <ManualSellPreviewPanel
+                        preview={preview}
+                        error={error}
+                        isSelling={selling === position.mint_address}
+                        onCancel={() => {
+                          setPreview(null);
+                          setError(null);
+                        }}
+                        onConfirm={() => void confirmSell(position.mint_address)}
+                      />
+                    </td>
+                  </tr>
+                ) : null}
+              </Fragment>
             );
           })}
         </tbody>
       </table>
+      {error && preview === null ? (
+        <p className="mt-2 text-sm text-danger">{error}</p>
+      ) : null}
+    </div>
+  );
+}
+
+function ManualSellPreviewPanel({
+  preview,
+  error,
+  isSelling,
+  onCancel,
+  onConfirm,
+}: {
+  preview: ManualSellPreview;
+  error: string | null;
+  isSelling: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const fields = [
+    ["Token", preview.symbol ?? preview.name ?? preview.short_mint],
+    ["Mint", preview.short_mint],
+    ["Entry", formatPrice(preview.entry_price)],
+    ["Latest", formatPrice(preview.latest_price)],
+    ["Entry cap", usd(preview.entry_market_cap)],
+    ["Current cap", usd(preview.current_market_cap)],
+    ["Liquidity", usd(preview.liquidity_usd)],
+    ["Gross P/L", usd(preview.gross_return_usd)],
+    ["Fees", usd(preview.fee_usd)],
+    ["Slippage", usd(preview.slippage_usd)],
+    ["Net P/L", usd(preview.net_return_usd)],
+  ];
+
+  return (
+    <div className="rounded-md border border-line bg-canvas p-3 text-left">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-sm font-medium text-ink">Confirm paper sell</p>
+          <p className="mt-0.5 text-xs text-ink-faint">
+            Uses the latest observed market snapshot. No real order will be placed.
+          </p>
+        </div>
+        <FreshnessLabel capturedAt={preview.quote_observed_at} />
+      </div>
+      {preview.warning ? (
+        <p className="mt-2 rounded-md border border-danger/30 bg-danger/[0.06] px-2 py-1 text-xs text-danger">
+          {preview.warning}
+        </p>
+      ) : null}
+      <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 md:grid-cols-4">
+        {fields.map(([label, value]) => (
+          <div key={label}>
+            <dt className="text-label uppercase tracking-wide text-ink-faint">{label}</dt>
+            <dd className="mt-0.5 text-sm tabular-nums text-ink">{value ?? "—"}</dd>
+          </div>
+        ))}
+      </dl>
+      {preview.cost_unavailable_reason ? (
+        <p className="mt-2 text-xs text-ink-faint">{preview.cost_unavailable_reason}</p>
+      ) : null}
+      {error ? <p className="mt-2 text-sm text-danger">{error}</p> : null}
+      <div className="mt-3 flex justify-end gap-2">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="rounded-chip border border-line px-2.5 py-1 text-xs text-ink-dim transition-colors hover:border-line-bright hover:text-ink"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={onConfirm}
+          disabled={isSelling}
+          className="rounded-chip border border-danger/35 bg-danger/[0.08] px-2.5 py-1 text-xs text-danger transition-colors hover:border-danger disabled:cursor-wait disabled:opacity-60"
+        >
+          {isSelling ? "Selling" : "Confirm sell"}
+        </button>
+      </div>
     </div>
   );
 }

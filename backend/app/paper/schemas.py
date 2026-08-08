@@ -101,12 +101,50 @@ class PositionOut(BaseSchema):
 
     closed_at: datetime | None = None
     exit_price: Decimal | None = None
-    #: `target` | `stop` | `expiry`. Never `manual` — nothing may close a
-    #: position for a reason a reader cannot check against the published rule.
+    #: `target` | `stop` | `expiry` | `manual`. Manual is paper-only and must
+    #: stay distinguishable from automated V1 exits.
     exit_reason: str | None = None
+    manual_action_at: datetime | None = None
     #: Realised for a closed trade, marked-to-market for an open one, `None`
     #: when the token has no current reading.
     pnl_usd: Decimal | None = None
+
+
+class ManualSellPreviewOut(BaseSchema):
+    """The exact paper-only close the user is being asked to confirm."""
+
+    mint_address: str
+    name: str | None = None
+    symbol: str | None = None
+    short_mint: str
+    entry_price: Decimal
+    latest_price: Decimal
+    quote_observed_at: datetime
+    quote_age_seconds: Decimal
+    is_stale: bool
+    warning: str | None = None
+    entry_market_cap: Decimal | None = None
+    current_market_cap: Decimal | None = None
+    liquidity_usd: Decimal | None = None
+    gross_return_usd: Decimal
+    gross_return_pct: Decimal
+    fee_usd: Decimal | None = None
+    slippage_usd: Decimal | None = None
+    net_return_usd: Decimal | None = None
+    net_return_pct: Decimal | None = None
+    cost_unavailable_reason: str | None = None
+
+
+class ManualSellOut(BaseSchema):
+    """Result of one confirmed paper-only manual close."""
+
+    closed: bool
+    preview: ManualSellPreviewOut
+    audited: bool
+    opened: int
+    candidates: int
+    candidates_truncated: bool
+    refusals: dict[str, int] = Field(default_factory=dict)
 
 
 class BenchmarkOut(BaseSchema):
@@ -258,6 +296,7 @@ class AuditEntryOut(BaseSchema):
     cost_unavailable_reason: str | None = None
 
     exit_reason: str
+    manual_action_at: datetime | None = None
     strategy_id: str
     strategy_version: str
     wallet_generation: int

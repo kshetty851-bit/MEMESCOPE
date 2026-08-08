@@ -243,9 +243,12 @@ class PaperPosition(Base):
 
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     exit_price: Mapped[Decimal | None] = mapped_column(_PRICE)
-    #: `target` | `stop` | `expiry`. There is no `manual`: nothing may close a
-    #: position for a reason a reader cannot check against the published rule.
+    #: `target` | `stop` | `expiry` | `manual`. Manual is a paper-only override,
+    #: permanently distinguishable from exits chosen by the published rule.
     exit_reason: Mapped[str | None] = mapped_column(String(16))
+    #: When the manual override was requested. Distinct from `closed_at`, which
+    #: remains the timestamp of the market observation used as the exit quote.
+    manual_action_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
@@ -346,6 +349,9 @@ class PaperTradeAudit(Base):
     #: The cost model's published fee, stored beside the figure it produced. A
     #: rate change later must not silently restate a net return already served.
     swap_fee_bps: Mapped[Decimal | None] = mapped_column(_BPS)
+    #: Set only for paper-only overrides. `exit_at` remains the observed quote's
+    #: timestamp; this records when the action was confirmed.
+    manual_action_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

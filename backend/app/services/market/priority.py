@@ -100,10 +100,14 @@ async def resolve_membership(session: AsyncSession) -> tuple[set[str], PriorityM
         ).all()
     )
 
-    # Radar first so the cap truncates the least-looked-at members.
+    # Open paper positions first. A paper holding is not merely displayed: its
+    # next quote can settle an existing position, so allowing the Radar or an
+    # opportunity list to consume the cap first can strand it on an old tier.
+    # The lane is still one bounded, derived set; this only gives the wallet's
+    # already-committed capital precedence within that set.
     ordered: list[str] = []
     seen: set[str] = set()
-    for mint in [*radar_mints, *opportunity_mints, *paper_mints]:
+    for mint in [*paper_mints, *radar_mints, *opportunity_mints]:
         if mint not in seen:
             seen.add(mint)
             ordered.append(mint)

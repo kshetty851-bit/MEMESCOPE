@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLiveUpdates } from "@/hooks/use-live-updates";
 
 import {
@@ -10,6 +10,8 @@ import {
   fetchPaperPositions,
   fetchPaperStrategies,
   fetchPaperWallet,
+  previewManualSell,
+  sellPaperPosition,
 } from "@/lib/paper";
 
 /**
@@ -70,6 +72,24 @@ export function usePaperStrategies() {
     staleTime: Infinity,
     gcTime: Infinity,
     refetchOnWindowFocus: false,
+  });
+}
+
+export function useManualSellPreview() {
+  return useMutation({
+    mutationFn: previewManualSell,
+  });
+}
+
+export function useManualSell() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: sellPaperPosition,
+    onSuccess: () => {
+      for (const key of [["paper", "wallet"], ["paper", "positions"], ["paper", "audit"]]) {
+        void queryClient.invalidateQueries({ queryKey: key });
+      }
+    },
   });
 }
 

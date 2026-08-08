@@ -53,6 +53,27 @@ class MarketSnapshotRepository(BaseRepository[TokenMarketSnapshot]):
         )
         return (await self.session.execute(stmt)).scalars().first()
 
+    async def latest_priced_for_mint_as_of(
+        self, mint_address: str, *, as_of: datetime
+    ) -> TokenMarketSnapshot | None:
+        """Newest usable price at or before `as_of`.
+
+        Manual paper exits use this instead of the unconstrained latest row so a
+        future-dated observation cannot become a fill.
+        """
+        stmt = (
+            select(TokenMarketSnapshot)
+            .where(
+                TokenMarketSnapshot.mint_address == mint_address,
+                TokenMarketSnapshot.captured_at <= as_of,
+                TokenMarketSnapshot.price_usd.is_not(None),
+                TokenMarketSnapshot.price_usd > 0,
+            )
+            .order_by(TokenMarketSnapshot.captured_at.desc())
+            .limit(1)
+        )
+        return (await self.session.execute(stmt)).scalars().first()
+
     async def latest_for_mints(self, mints: Sequence[str]) -> dict[str, TokenMarketSnapshot]:
         """Newest snapshot per mint, for a batch, in one query.
 

@@ -87,6 +87,7 @@ class TradeAudit:
     strategy_version: str
     wallet_generation: int
     swap_fee_bps: Decimal | None
+    manual_action_at: datetime | None = None
 
     def as_row(self) -> dict[str, object]:
         """The record as column values, ready for a single INSERT."""
@@ -115,6 +116,7 @@ class TradeAudit:
             "strategy_version": self.strategy_version,
             "wallet_generation": self.wallet_generation,
             "swap_fee_bps": self.swap_fee_bps,
+            "manual_action_at": self.manual_action_at,
         }
 
 
@@ -129,6 +131,7 @@ def record(
     strategy_id: str,
     strategy_version: str,
     wallet_generation: int,
+    manual_action_at: datetime | None = None,
     model: costs.CostModel = costs.DEFAULT,
 ) -> TradeAudit:
     """Compute the permanent record for one closed position.
@@ -194,6 +197,7 @@ def record(
         strategy_version=strategy_version,
         wallet_generation=wallet_generation,
         swap_fee_bps=model.swap_fee_bps,
+        manual_action_at=manual_action_at,
     )
 
 

@@ -115,7 +115,7 @@ describe("net of costs", () => {
 
 describe("EXIT_ORDER", () => {
   it("is fixed so columns line up between strategies", () => {
-    expect([...EXIT_ORDER]).toEqual(["target", "stop", "expiry"]);
+    expect([...EXIT_ORDER]).toEqual(["target", "stop", "expiry", "manual"]);
   });
 });
 

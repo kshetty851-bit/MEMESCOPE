@@ -1,12 +1,9 @@
-"""`GET /api/v1/paper` — the wallet, its positions, its record, and its archive.
+"""`/api/v1/paper` — the wallet, its positions, its record, and its archive.
 
-**Nothing here is a POST.** There is no manual entry, so there is no write
-endpoint to have. That is not an omission: a button that opened a position by
-hand would make the wallet a record of somebody's judgement rather than of a
-published rule, and the whole claim here is that no judgement was applied. The
-same reasoning removed the strategy selector in Sprint 30 — one strategy is
-operational, and choosing between rules after seeing their results is the
-hindsight this package exists to prevent.
+Manual writes are limited to paper-only exits. There is still no manual entry
+and no real execution path: a user may close an open simulated position at the
+latest observed market quote, and that override is recorded as `manual` so it
+never contaminates automated V1 evidence.
 
 `/paper/archive` is served for internal historical comparison and is not linked
 from the product. It reports retired generations frozen exactly as they were.
@@ -50,6 +47,8 @@ from app.paper.schemas import (
     LabStrategyOut,
     LabTokensOut,
     LastTradeOut,
+    ManualSellOut,
+    ManualSellPreviewOut,
     MetricsOut,
     PositionOut,
     PositionsOut,
@@ -61,7 +60,12 @@ from app.paper.schemas import (
     WaitingOut,
     WalletOut,
 )
-from app.paper.service import PaperWalletService, WalletRead
+from app.paper.service import (
+    ManualSellOutcome,
+    ManualSellPreview,
+    PaperWalletService,
+    WalletRead,
+)
 from app.paper.strategy import AnyStrategy, registry
 
 router = APIRouter(prefix="/paper", tags=["paper"])
@@ -112,6 +116,30 @@ async def list_positions(session: DbSession) -> PositionsOut:
         enabled=True,
         observed_at=now,
     )
+
+
+@router.get(
+    "/positions/{mint_address}/manual-sell",
+    response_model=ManualSellPreviewOut,
+    summary="Preview a paper-only manual close",
+)
+async def preview_manual_sell(mint_address: str, session: DbSession) -> ManualSellPreviewOut:
+    """Show the exact observed quote and cost model a manual close would use."""
+    now = datetime.now(UTC)
+    preview = await PaperWalletService(session).manual_sell_preview(mint_address, now=now)
+    return _to_manual_preview(preview)
+
+
+@router.post(
+    "/positions/{mint_address}/manual-sell",
+    response_model=ManualSellOut,
+    summary="Close one open paper position manually",
+)
+async def manual_sell(mint_address: str, session: DbSession) -> ManualSellOut:
+    """Paper-only: no wallet, order, chain transaction or strategy change."""
+    now = datetime.now(UTC)
+    outcome = await PaperWalletService(session).manual_sell(mint_address, now=now)
+    return _to_manual_sell(outcome)
 
 
 @router.get("/audit", response_model=AuditOut, summary="The permanent trade record")
@@ -370,7 +398,52 @@ def _to_position(row: PaperPosition, read: WalletRead) -> PositionOut:
         closed_at=row.closed_at,
         exit_price=row.exit_price,
         exit_reason=row.exit_reason,
+        manual_action_at=row.manual_action_at,
         pnl_usd=pnl,
+    )
+
+
+def _short_mint(mint_address: str) -> str:
+    if len(mint_address) <= 12:
+        return mint_address
+    return f"{mint_address[:4]}...{mint_address[-4:]}"
+
+
+def _to_manual_preview(preview: ManualSellPreview) -> ManualSellPreviewOut:
+    record = preview.audit
+    return ManualSellPreviewOut(
+        mint_address=preview.position.mint_address,
+        name=preview.name,
+        symbol=preview.symbol,
+        short_mint=_short_mint(preview.position.mint_address),
+        entry_price=preview.position.entry_price,
+        latest_price=record.exit_price,
+        quote_observed_at=preview.quote.captured_at,
+        quote_age_seconds=preview.quote_age_seconds,
+        is_stale=preview.is_stale,
+        warning=preview.warning,
+        entry_market_cap=preview.position.entry_market_cap,
+        current_market_cap=preview.quote.market_cap,
+        liquidity_usd=preview.quote.liquidity_usd,
+        gross_return_usd=record.gross_return_usd,
+        gross_return_pct=record.gross_return_pct,
+        fee_usd=record.fee_usd,
+        slippage_usd=record.slippage_usd,
+        net_return_usd=record.net_return_usd,
+        net_return_pct=record.net_return_pct,
+        cost_unavailable_reason=record.cost_unavailable_reason,
+    )
+
+
+def _to_manual_sell(outcome: ManualSellOutcome) -> ManualSellOut:
+    return ManualSellOut(
+        closed=True,
+        preview=_to_manual_preview(outcome.preview),
+        audited=outcome.audited,
+        opened=outcome.opened,
+        candidates=outcome.candidates,
+        candidates_truncated=outcome.candidates_truncated,
+        refusals=outcome.refusals,
     )
 
 
@@ -520,6 +593,7 @@ def _to_audit_entry(row: PaperTradeAudit) -> AuditEntryOut:
         net_return_pct=row.net_return_pct,
         cost_unavailable_reason=row.cost_unavailable_reason,
         exit_reason=row.exit_reason,
+        manual_action_at=row.manual_action_at,
         strategy_id=row.strategy_id,
         strategy_version=row.strategy_version,
         wallet_generation=row.wallet_generation,

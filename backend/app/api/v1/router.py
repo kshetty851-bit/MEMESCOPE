@@ -63,8 +63,8 @@ api_router.include_router(events.router)
 # established shape driven by a different model. Additive: no existing route
 # changes, and the board is empty while the engine's feature flag is off.
 api_router.include_router(opportunities.router)
-# Sprint 25: the paper wallet. Its own namespace, and read-only throughout —
-# there is no manual entry, so there is no write endpoint to register. Additive:
-# no existing route changes, and the wallet reports itself as not running while
-# its feature flag is off rather than serving an empty book.
+# Sprint 25: the paper wallet. Its own namespace. Sprint 35 adds a paper-only
+# manual close endpoint, but still no manual entry and no real execution path.
+# Additive: no existing route changes, and the wallet reports itself as not
+# running while its feature flag is off rather than serving an empty book.
 api_router.include_router(paper.router)

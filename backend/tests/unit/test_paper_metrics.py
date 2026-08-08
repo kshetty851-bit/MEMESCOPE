@@ -147,7 +147,12 @@ class TestMeasured:
         result = summarise(
             starting_balance=START, open_positions=[], prices={}, closed=[closed("a")]
         )
-        assert result.exits_by_reason == {"target": 1, "stop": 0, "expiry": 0}
+        assert result.exits_by_reason == {
+            "target": 1,
+            "stop": 0,
+            "expiry": 0,
+            "manual": 0,
+        }
 
     def test_hold_time_averages_the_closed_trades(self) -> None:
         result = summarise(

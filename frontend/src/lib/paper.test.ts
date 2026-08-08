@@ -45,6 +45,7 @@ function position(overrides: Partial<PaperPosition> = {}): PaperPosition {
     closed_at: null,
     exit_price: null,
     exit_reason: null,
+    manual_action_at: null,
     pnl_usd: "20.00",
     ...overrides,
   };
@@ -113,8 +114,8 @@ describe("exitLabel", () => {
     expect(exitLabel(null)).toBeNull();
   });
 
-  it("has no label for a manual exit, because there is no such thing", () => {
-    expect(exitLabel("manual")).toBeNull();
+  it("labels a manual paper override distinctly", () => {
+    expect(exitLabel("manual")).toBe("Manual sell");
   });
 });
 

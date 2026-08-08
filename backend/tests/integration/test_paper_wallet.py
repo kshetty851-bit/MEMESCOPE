@@ -27,6 +27,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.exceptions import ConflictError, ValidationError
 from app.models.market import TradingStatus
 from app.models.paper import PaperPosition, PaperTradeAudit, PaperWallet
 from app.models.radar import RadarToken
@@ -126,6 +127,7 @@ async def _seed(
 
 MINT_A = "PaperWalletMintAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 MINT_B = "PaperWalletMintBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+MINT_C = "PaperWalletMintCCCCCCCCCCCCCCCCCCCCCCCCCCCC"
 
 
 class TestEntries:
@@ -636,6 +638,147 @@ class TestTheAuditLog:
         assert entry["exit_reason"] == "stop"
         assert Decimal(entry["net_return_usd"]) == Decimal("45.6389")
         assert "MEV" in body["disclosure"]
+
+
+class TestManualSell:
+    async def _open_one(self, db_session: AsyncSession) -> None:
+        await _seed(db_session, MINT_A, score=90, price="10")
+        await db_session.commit()
+        await PaperWalletService(db_session).review(now=NOW)
+        await db_session.commit()
+
+    async def test_preview_uses_the_latest_observed_quote_and_cost_model(
+        self, db_session: AsyncSession
+    ) -> None:
+        token = await _seed(db_session, MINT_A, score=90, price="10")
+        await db_session.commit()
+        service = PaperWalletService(db_session)
+        await service.review(now=NOW)
+        await db_session.commit()
+        await _price(db_session, token, MINT_A, at=NOW + timedelta(minutes=1), price="12")
+        await db_session.commit()
+
+        preview = await service.manual_sell_preview(MINT_A, now=NOW + timedelta(minutes=2))
+
+        assert preview.quote.price_usd == Decimal("12")
+        assert preview.quote.captured_at == NOW + timedelta(minutes=1)
+        assert preview.audit.exit_reason == "manual"
+        assert preview.audit.gross_return_usd == Decimal("20.0000")
+        assert preview.audit.fee_usd == Decimal("0.6600")
+        assert preview.audit.slippage_usd is not None
+        assert preview.is_stale is False
+
+    async def test_stale_quotes_warn_but_still_use_the_observed_price(
+        self, db_session: AsyncSession
+    ) -> None:
+        await self._open_one(db_session)
+
+        preview = await PaperWalletService(db_session).manual_sell_preview(
+            MINT_A, now=NOW + timedelta(hours=2)
+        )
+
+        assert preview.is_stale is True
+        assert preview.warning is not None
+        assert preview.quote.price_usd == Decimal("10")
+
+    async def test_missing_quote_refuses_manual_sell(self, db_session: AsyncSession) -> None:
+        service = PaperWalletService(db_session)
+        wallet = await service.wallet(now=NOW)
+        await PaperRepository(db_session).open_position(
+            wallet_id=wallet.id,
+            mint_address=MINT_C,
+            opened_at=NOW,
+            entry_rank=1,
+            entry_price=Decimal("10"),
+            size_usd=Decimal("100"),
+            quantity=Decimal("10"),
+            status="open",
+            peak_price=Decimal("10"),
+            last_evaluated_at=NOW,
+        )
+        await db_session.commit()
+
+        with pytest.raises(ValidationError) as exc:
+            await service.manual_sell(MINT_C, now=NOW + timedelta(minutes=1))
+
+        assert exc.value.code == "paper_quote_unavailable"
+
+    async def test_confirm_closes_once_audits_once_and_marks_manual(
+        self, db_session: AsyncSession
+    ) -> None:
+        token = await _seed(db_session, MINT_A, score=90, price="10")
+        await db_session.commit()
+        service = PaperWalletService(db_session)
+        await service.review(now=NOW)
+        await db_session.commit()
+        await _price(db_session, token, MINT_A, at=NOW + timedelta(minutes=1), price="12")
+        await db_session.commit()
+
+        outcome = await service.manual_sell(MINT_A, now=NOW + timedelta(minutes=2))
+        await db_session.commit()
+
+        position = (await db_session.scalars(select(PaperPosition))).one()
+        audit_row = (await db_session.scalars(select(PaperTradeAudit))).one()
+        assert outcome.audited is True
+        assert position.status == "closed"
+        assert position.exit_reason == "manual"
+        assert position.exit_price == Decimal("12")
+        assert position.closed_at == NOW + timedelta(minutes=1)
+        assert position.manual_action_at == NOW + timedelta(minutes=2)
+        assert audit_row.exit_reason == "manual"
+        assert audit_row.manual_action_at == NOW + timedelta(minutes=2)
+
+        with pytest.raises(ConflictError) as exc:
+            await service.manual_sell(MINT_A, now=NOW + timedelta(minutes=3))
+
+        assert exc.value.code == "paper_position_already_closed"
+        assert len((await db_session.scalars(select(PaperTradeAudit))).all()) == 1
+        assert len((await db_session.scalars(select(PaperPosition))).all()) == 1
+
+    async def test_manual_close_reuses_the_allocator_for_replacement(
+        self, db_session: AsyncSession
+    ) -> None:
+        service = PaperWalletService(db_session)
+        opened = []
+        for index in range(10):
+            mint = f"PaperWalletMint{index:02d}AAAAAAAAAAAAAAAAAAAAAAAA"
+            opened.append(mint)
+            await _seed(db_session, mint, score=100 - index, price="10")
+        await db_session.commit()
+
+        await service.review(now=NOW)
+        await db_session.commit()
+        assert len((await db_session.scalars(select(PaperPosition))).all()) == 10
+        replacement = "PaperWalletReplacementAAAAAAAAAAAAAAAAAAAA"
+        await _seed(db_session, replacement, score=95, price="10")
+        await db_session.commit()
+
+        outcome = await service.manual_sell(opened[-1], now=NOW + timedelta(minutes=1))
+        await db_session.commit()
+
+        rows = (await db_session.scalars(select(PaperPosition))).all()
+        statuses = {row.mint_address: row.status for row in rows}
+        assert outcome.opened == 1
+        assert statuses[opened[-1]] == "closed"
+        assert statuses[replacement] == "open"
+        assert len(rows) == 11
+
+    async def test_api_reports_preview_and_conflict_cleanly(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        await self._open_one(db_session)
+
+        preview = await client.get(f"/api/v1/paper/positions/{MINT_A}/manual-sell")
+        assert preview.status_code == 200
+        assert preview.json()["short_mint"].startswith(MINT_A[:4])
+
+        sold = await client.post(f"/api/v1/paper/positions/{MINT_A}/manual-sell")
+        assert sold.status_code == 200
+        assert sold.json()["preview"]["gross_return_usd"] == "0.0000"
+
+        duplicate = await client.post(f"/api/v1/paper/positions/{MINT_A}/manual-sell")
+        assert duplicate.status_code == 409
+        assert duplicate.json()["error"]["code"] == "paper_position_already_closed"
 
 
 class TestTheWaitingState:

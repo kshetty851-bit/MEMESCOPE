@@ -35,6 +35,7 @@ function entry(overrides: Partial<PaperAuditEntry> = {}): PaperAuditEntry {
     net_return_pct: "45.6389",
     cost_unavailable_reason: null,
     exit_reason: "stop",
+    manual_action_at: null,
     strategy_id: "trailing_stop_25_v1",
     strategy_version: "1.0.0",
     wallet_generation: 2,
