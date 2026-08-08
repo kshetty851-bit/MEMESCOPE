@@ -18,6 +18,7 @@ import asyncio
 import contextlib
 import json
 from collections.abc import AsyncIterator, Sequence
+from datetime import UTC, datetime
 from typing import Any
 
 from redis.asyncio import Redis
@@ -102,6 +103,13 @@ async def publish_live_update(
         # fail enrichment or turn a Redis outage into lost market evidence.
         logger.warning("live_event_publish_failed", event_type=event_type, error=str(exc))
         return 0
+    logger.info(
+        "live_event_published",
+        event_type=event_type,
+        mints=len(payload["mints"]),
+        receivers=int(receivers),
+        published_at=datetime.now(UTC).isoformat(),
+    )
     return int(receivers)
 
 

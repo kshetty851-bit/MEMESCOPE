@@ -341,12 +341,18 @@ class MarketEnrichmentWorker:
             # TX-1 ends here. Snapshots are durable from this point, whatever
             # scoring does next.
             await session.commit()
+            snapshot_committed_at = datetime.now(UTC)
             self.stats.cycles += 1
 
         # A browser never receives a market value from the worker. It receives
         # only the mints whose snapshots committed, then refetches active
         # server-owned views. One batch event prevents one publish per token.
         if refreshed_mints:
+            logger.info(
+                "market_snapshots_committed",
+                mints=len(refreshed_mints),
+                committed_at=snapshot_committed_at.isoformat(),
+            )
             await publish_live_update("market.changed", mints=refreshed_mints)
 
         await self._score_batch(mints)
@@ -405,6 +411,7 @@ class MarketEnrichmentWorker:
         if not settings.FEATURE_RADAR_ENABLED or not mints:
             return
 
+        started_at = datetime.now(UTC)
         try:
             async with SessionFactory() as session:
                 outcome = await RadarService(session).refresh_mints(
@@ -415,6 +422,8 @@ class MarketEnrichmentWorker:
             logger.exception("radar_event_refresh_failed", tokens=len(mints))
             return
 
+        persisted_at = datetime.now(UTC)
+
         if outcome.updated_mints:
             await publish_live_update("radar.score_updated", mints=outcome.updated_mints)
         if outcome.ranking_changed:
@@ -424,6 +433,9 @@ class MarketEnrichmentWorker:
             evaluated=outcome.evaluated,
             tracked=outcome.tracked,
             ranking_changed=outcome.ranking_changed,
+            started_at=started_at.isoformat(),
+            persisted_at=persisted_at.isoformat(),
+            duration_ms=round((persisted_at - started_at).total_seconds() * 1000, 3),
         )
 
     async def _review_held_positions(self, mints: Sequence[str]) -> None:
@@ -431,6 +443,7 @@ class MarketEnrichmentWorker:
         if not settings.FEATURE_PAPER_WALLET_ENABLED or not mints:
             return
 
+        started_at = datetime.now(UTC)
         try:
             async with SessionFactory() as session:
                 outcome = await PaperWalletService(session).review_observed_mints(
@@ -441,10 +454,18 @@ class MarketEnrichmentWorker:
             logger.exception("paper_event_review_failed", tokens=len(mints))
             return
 
+        persisted_at = datetime.now(UTC)
+
         if outcome is None:
             return
         await publish_live_update("paper.changed", mints=mints)
-        logger.info("paper_event_review_completed", **outcome.as_dict())
+        logger.info(
+            "paper_event_review_completed",
+            **outcome.as_dict(),
+            started_at=started_at.isoformat(),
+            persisted_at=persisted_at.isoformat(),
+            duration_ms=round((persisted_at - started_at).total_seconds() * 1000, 3),
+        )
 
     # --- Bonding curve collection (TX-5) ------------------------------------
 
