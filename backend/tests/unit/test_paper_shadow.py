@@ -407,3 +407,36 @@ class TestPromotionRules:
             max_drawdown=Decimal("10"),
         )
         assert score > Decimal(50)
+
+
+def test_rejects_jupiter_quote_with_extreme_market_price_mismatch() -> None:
+    """A valid Jupiter quote must not create fake paper P/L from a bad price."""
+    observed_price = Decimal("0.00003271")
+    from dataclasses import replace
+
+    quote = replace(
+        make_quote(impact_pct=Decimal("0.5")),
+        estimated_price_usd=Decimal("0.000001543318715779"),
+    )
+
+    # Reproduce the real failure mode: Jupiter implied a price ~21x below
+    # the contemporaneous market snapshot.
+
+    opportunity = Opportunity(
+        radar=make_radar(score=Decimal(75)),
+        rank=1,
+        snapshot=make_snapshot(
+            price_usd=observed_price,
+            market_cap=Decimal(35_000),
+        ),
+        token_id=None,
+        symbol="TEST",
+        decimals=6,
+        age_seconds=3600,
+        execution_quote=quote,
+    )
+
+    spec = _spec_for("v5")
+    reasons = _reasons_for(spec, opportunity, held=set(), open_now=set())
+
+    assert ShadowReason.EXECUTION_PRICE_MISMATCH in reasons

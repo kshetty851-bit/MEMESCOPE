@@ -63,6 +63,7 @@ class ShadowReason:
     EXECUTION_QUALITY_BELOW_THRESHOLD = "execution_quality_below_threshold"
     PRICE_IMPACT_TOO_HIGH = "price_impact_too_high"
     JUPITER_QUOTE_UNAVAILABLE = "jupiter_quote_unavailable"
+    EXECUTION_PRICE_MISMATCH = "execution_price_mismatch"
 
 
 @dataclass(frozen=True, slots=True)
@@ -902,6 +903,23 @@ def _reasons_for(
     found = opportunity.execution_quote
     if spec.require_jupiter and not isinstance(found, ExecutionQuote):
         reasons.append(ShadowReason.JUPITER_QUOTE_UNAVAILABLE)
+
+    # A Jupiter quote can be structurally valid while being economically
+    # inconsistent with the market snapshot (for example because token
+    # decimals or the quoted route are stale/bad). Never allow such a quote
+    # to manufacture an instant paper gain or loss.
+    if (
+        isinstance(found, ExecutionQuote)
+        and opportunity.price_usd is not None
+        and opportunity.price_usd > 0
+    ):
+        execution_price_deviation = (
+            abs(found.estimated_price_usd - opportunity.price_usd)
+            / opportunity.price_usd
+        )
+        if execution_price_deviation > Decimal("0.50"):
+            reasons.append(ShadowReason.EXECUTION_PRICE_MISMATCH)
+
     quality = opportunity.execution_quality
     if spec.allowed_qualities is not None and quality not in spec.allowed_qualities:
         reasons.append(ShadowReason.EXECUTION_QUALITY_BELOW_THRESHOLD)
