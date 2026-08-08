@@ -5,14 +5,12 @@ import { usePathname, useRouter } from "next/navigation";
 
 import { FeedbackWidget } from "@/components/alpha/feedback-widget";
 import { SiteNav } from "@/components/layout/site-nav";
-import { useRequireAuth } from "@/hooks/use-auth";
 import { ALPHA_ACCESS } from "@/lib/env";
 import { cn } from "@/lib/utils";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { isReady } = useRequireAuth();
   const [alphaReady, setAlphaReady] = useState(false);
   const [enteredFromAlpha, setEnteredFromAlpha] = useState(false);
 
@@ -30,10 +28,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     }
   }, [pathname, router]);
 
-  // Hold the shell until the session resolves, so protected content never
-  // flashes before a redirect. Plain text rather than an animated core: a
-  // loading state should say what is happening, not perform.
-  if (!isReady || !alphaReady) {
+  // Alpha Access is the only temporary private gate. Hold the shell until the
+  // browser-level access grant is confirmed so the dashboard never flashes
+  // before redirecting back to the launch screen.
+  if (!alphaReady) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <p className="text-sm text-ink-faint">Loading…</p>

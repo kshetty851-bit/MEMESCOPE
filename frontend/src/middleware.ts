@@ -1,48 +1,20 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-import { AUTH_BYPASS } from "@/lib/env";
-
 /**
- * Development routing bypass.
+ * Temporary alpha routing.
  *
- * While `NEXT_PUBLIC_DEVELOPMENT_BYPASS_AUTH` is on (and the build is not
- * production), the sign-in flow is taken out of the user's path: both auth
- * pages send the visitor straight to the Command Center, because a credential
- * form that grants nothing is a control that lies about what it does.
- *
- * `/` is deliberately NOT bypassed. It was, until Phase 5A, and the cost was
- * that the landing page - the product's front door - rendered for nobody in the
- * only environment anyone was running. Skipping the login screen is a
- * development convenience; skipping the landing page hides a shipped surface
- * and lets it rot unnoticed. The two are separate concerns and only one of them
- * belongs behind this flag.
- *
- * One control point rather than a redirect scattered through the auth pages, so
- * turning the flag off restores the original flow exactly - nothing is deleted
- * and no page keeps a conditional it would otherwise not need.
- *
- * With the flag off this middleware is a no-op on every request, leaving the
- * production path untouched.
+ * During private alpha, the access-code homepage is the only entry gate. The
+ * real auth pages remain in the tree for later, but they are not part of the
+ * current product flow and should not appear after unlocking alpha access.
  */
 const BYPASSED_ROUTES = new Set(["/login", "/register"]);
 
-const DASHBOARD = "/command";
-const MANUAL_AUTH_QUERY = "manual";
-
 export function middleware(request: NextRequest) {
-  if (!AUTH_BYPASS) {
-    return NextResponse.next();
-  }
-
-  if (request.nextUrl.searchParams.get("auth") === MANUAL_AUTH_QUERY) {
-    return NextResponse.next();
-  }
-
   if (BYPASSED_ROUTES.has(request.nextUrl.pathname)) {
-    const target = new URL(DASHBOARD, request.url);
+    const target = new URL("/", request.url);
     // Temporary, deliberately: a permanent redirect would be cached by the
-    // browser and would keep firing after the flag is turned back off.
+    // browser after the real auth flow replaces the alpha access gate.
     return NextResponse.redirect(target, 307);
   }
 

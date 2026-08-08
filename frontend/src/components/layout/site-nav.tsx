@@ -1,10 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 
 import { Logo } from "@/components/brand/logo";
-import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/lib/utils";
 
 /**
@@ -35,20 +34,11 @@ const NAV: NavItem[] = [
   { href: "/settings", label: "Settings" },
 ];
 
-const EXPLICIT_LOGIN_PATH = "/login?auth=manual";
-
 export function SiteNav() {
   const pathname = usePathname();
-  const router = useRouter();
-  const { user, logout } = useAuth();
 
   // The Radar is the root, so a prefix match would mark it active everywhere.
   const isActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
-
-  async function handleSignOut() {
-    await logout();
-    router.replace(EXPLICIT_LOGIN_PATH);
-  }
 
   return (
     <>
@@ -80,24 +70,7 @@ export function SiteNav() {
             </ul>
           </nav>
 
-          <div className="ml-auto flex items-center gap-4">
-            {user ? (
-              <button
-                type="button"
-                onClick={handleSignOut}
-                className="text-sm text-ink-faint transition-colors hover:text-ink"
-              >
-                Sign out
-              </button>
-            ) : (
-              <Link
-                href={EXPLICIT_LOGIN_PATH}
-                className="text-sm text-ink-faint transition-colors hover:text-ink"
-              >
-                Sign in
-              </Link>
-            )}
-          </div>
+          <div className="ml-auto" />
         </div>
       </header>
 
