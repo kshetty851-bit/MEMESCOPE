@@ -21,6 +21,7 @@ const publicEnvSchema = z.object({
   NEXT_PUBLIC_BUILD_SHA: z.string().default("unknown"),
   NEXT_PUBLIC_VERSION: z.string().default("0.8.0-rc1"),
   NEXT_PUBLIC_ALPHA: z.enum(["true", "false"]).default("false"),
+  NEXT_PUBLIC_ALPHA_ACCESS_CODE: z.string().min(1).default("619554"),
   // Blank hides the feedback control entirely. A button that goes nowhere is
   // worse than no button: it collects nothing and spends the tester's goodwill
   // the first time they press it.
@@ -45,6 +46,7 @@ const parsed = publicEnvSchema.safeParse({
   NEXT_PUBLIC_BUILD_SHA: process.env.NEXT_PUBLIC_BUILD_SHA,
   NEXT_PUBLIC_VERSION: process.env.NEXT_PUBLIC_VERSION,
   NEXT_PUBLIC_ALPHA: process.env.NEXT_PUBLIC_ALPHA,
+  NEXT_PUBLIC_ALPHA_ACCESS_CODE: process.env.NEXT_PUBLIC_ALPHA_ACCESS_CODE,
   NEXT_PUBLIC_FEEDBACK_URL: process.env.NEXT_PUBLIC_FEEDBACK_URL,
   NEXT_PUBLIC_FEEDBACK_ENDPOINT: process.env.NEXT_PUBLIC_FEEDBACK_ENDPOINT,
   NEXT_PUBLIC_POSTHOG_KEY: process.env.NEXT_PUBLIC_POSTHOG_KEY,
@@ -96,6 +98,20 @@ export const BUILD = {
   environment: env.NEXT_PUBLIC_ENVIRONMENT,
   isAlpha: env.NEXT_PUBLIC_ALPHA === "true",
   feedbackUrl: env.NEXT_PUBLIC_FEEDBACK_URL,
+} as const;
+
+/**
+ * Temporary private-alpha gate.
+ *
+ * This is not authentication and should not grow into authentication. The code
+ * is public build configuration so the UI can stay backend-free until the real
+ * auth path is ready.
+ */
+export const ALPHA_ACCESS = {
+  code: env.NEXT_PUBLIC_ALPHA_ACCESS_CODE,
+  storageKey: "memescope.alpha.access",
+  transitionKey: "memescope.alpha.justUnlocked",
+  dashboardPath: "/command",
 } as const;
 
 /**

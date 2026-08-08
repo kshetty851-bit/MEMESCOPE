@@ -25,7 +25,7 @@ interface NavItem {
 }
 
 const NAV: NavItem[] = [
-  { href: "/", label: "Radar" },
+  { href: "/command", label: "Radar" },
   { href: "/record", label: "Track record" },
   { href: "/wallet", label: "Paper wallet" },
   // Sprint 26. Sits beside the wallet because it answers the question the
@@ -41,8 +41,7 @@ export function SiteNav() {
   const { user, logout } = useAuth();
 
   // The Radar is the root, so a prefix match would mark it active everywhere.
-  const isActive = (href: string) =>
-    href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(`${href}/`);
+  const isActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
 
   async function handleSignOut() {
     await logout();
@@ -53,7 +52,7 @@ export function SiteNav() {
     <>
       <header className="sticky top-0 z-40 border-b border-line bg-abyss/85 backdrop-blur-xl">
         <div className="mx-auto flex h-14 max-w-[1120px] items-center gap-8 px-6">
-          <Link href="/" aria-label="MEMESCOPE — Radar">
+          <Link href="/command" aria-label="MEMESCOPE — Radar">
             <Logo />
           </Link>
 

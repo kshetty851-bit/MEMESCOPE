@@ -404,3 +404,442 @@
     transform: none;
   }
 }
+
+/* ============================================================================
+   ALPHA ACCESS — private front door
+   ----------------------------------------------------------------------------
+   Premium motion, not spectacle. Every moving layer uses transform or opacity,
+   so the landing page stays composited and cheap while it feels alive.
+   ========================================================================== */
+
+.alpha-landing {
+  background: var(--color-void);
+}
+
+.alpha-copy,
+.alpha-hero,
+.alpha-access {
+  animation: alpha-rise 720ms var(--ease-instrument) both;
+}
+
+.alpha-hero {
+  animation-delay: 120ms;
+}
+
+.alpha-access {
+  animation-delay: 220ms;
+}
+
+.alpha-logo {
+  text-shadow: 0 0 42px color-mix(in oklch, var(--color-plasma) 18%, transparent);
+}
+
+.alpha-space {
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 50% 105%, oklch(0.25 0.08 270 / 0.35), transparent 46%),
+    radial-gradient(circle at 20% 15%, oklch(0.36 0.14 295 / 0.18), transparent 38%),
+    linear-gradient(160deg, oklch(0.055 0.02 260), var(--color-void) 42%, #02040b);
+  transition:
+    filter 1700ms var(--ease-instrument),
+    transform 1700ms var(--ease-instrument);
+}
+
+.alpha-space--unlock {
+  filter: brightness(1.28) saturate(1.18);
+  transform: scale(1.08);
+}
+
+.alpha-space__nebula,
+.alpha-space__planet,
+.alpha-space__stars,
+.alpha-space__scan {
+  position: absolute;
+  will-change: transform, opacity;
+}
+
+.alpha-space__nebula {
+  border-radius: 999px;
+  filter: blur(56px);
+  opacity: 0.54;
+}
+
+.alpha-space__nebula--violet {
+  left: -12%;
+  top: 10%;
+  width: min(620px, 60vw);
+  height: min(620px, 60vw);
+  background: radial-gradient(circle, oklch(0.52 0.18 295 / 0.42), transparent 68%);
+  animation: alpha-nebula-a 82s ease-in-out infinite;
+}
+
+.alpha-space__nebula--cyan {
+  right: -14%;
+  bottom: -18%;
+  width: min(760px, 66vw);
+  height: min(760px, 66vw);
+  background: radial-gradient(circle, oklch(0.48 0.13 205 / 0.38), transparent 70%);
+  animation: alpha-nebula-b 97s ease-in-out infinite;
+}
+
+.alpha-space__planet {
+  right: clamp(-160px, -8vw, -40px);
+  top: clamp(28px, 7vh, 96px);
+  width: clamp(220px, 31vw, 470px);
+  aspect-ratio: 1;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 35% 28%, oklch(0.92 0.025 235 / 0.9), transparent 0 10%, transparent 32%),
+    radial-gradient(circle at 35% 28%, oklch(0.68 0.08 220), oklch(0.34 0.12 245) 42%, oklch(0.11 0.05 255) 71%),
+    oklch(0.12 0.04 250);
+  box-shadow:
+    inset -42px -34px 70px oklch(0.02 0.01 250 / 0.85),
+    0 0 42px oklch(0.7 0.12 220 / 0.55);
+  opacity: 0.74;
+  animation: alpha-planet 54s linear infinite;
+}
+
+.alpha-space__stars {
+  inset: -30% 0 0;
+  height: 160%;
+  background-repeat: repeat;
+}
+
+.alpha-space__stars--far {
+  background-image:
+    radial-gradient(1px 1px at 20% 30%, oklch(0.94 0.02 270 / 0.46), transparent),
+    radial-gradient(1px 1px at 70% 60%, oklch(0.94 0.02 210 / 0.34), transparent),
+    radial-gradient(1px 1px at 45% 85%, oklch(0.94 0.02 270 / 0.42), transparent);
+  background-size: 220px 220px;
+  animation: alpha-stars 210s linear infinite;
+}
+
+.alpha-space__stars--near {
+  background-image:
+    radial-gradient(1.8px 1.8px at 22% 12%, oklch(0.98 0.04 200 / 0.55), transparent),
+    radial-gradient(1.6px 1.6px at 82% 74%, oklch(0.98 0.04 295 / 0.45), transparent);
+  background-size: 520px 520px;
+  animation: alpha-stars 128s linear infinite;
+}
+
+.alpha-space__scan {
+  inset: 0;
+  background: linear-gradient(115deg, transparent 30%, oklch(0.9 0.09 196 / 0.08), transparent 52%);
+  opacity: 0.28;
+  transform: translate3d(-26%, -12%, 0);
+  animation: alpha-scan 16s ease-in-out infinite;
+}
+
+.alpha-mascot {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  transform: translateZ(0);
+}
+
+.alpha-mascot__frame {
+  position: relative;
+  width: min(72vw, 520px);
+  filter: drop-shadow(0 30px 70px rgb(0 0 0 / 0.52));
+  transform-origin: center;
+  transition:
+    transform 1700ms var(--ease-instrument),
+    filter 1700ms var(--ease-instrument);
+}
+
+.alpha-mascot--unlock .alpha-mascot__frame {
+  filter:
+    drop-shadow(0 30px 70px rgb(0 0 0 / 0.48))
+    drop-shadow(0 0 36px oklch(0.84 0.16 158 / 0.42));
+  transform: scale(1.05);
+}
+
+.alpha-mascot__image {
+  height: auto;
+  width: 100%;
+  user-select: none;
+}
+
+.alpha-mascot__reflection {
+  position: absolute;
+  left: 20%;
+  top: 16%;
+  width: 36%;
+  height: 18%;
+  border-radius: 999px;
+  background: linear-gradient(110deg, transparent, rgb(255 255 255 / 0.36), transparent);
+  mix-blend-mode: screen;
+  transform: rotate(-18deg);
+}
+
+.alpha-mascot__blink {
+  position: absolute;
+  width: 9.5%;
+  height: 3.2%;
+  border-radius: 999px;
+  background: oklch(0.08 0.02 80 / 0.82);
+  opacity: 0;
+  transform: translate3d(var(--gaze-x), var(--gaze-y), 0) scaleY(0);
+  animation: alpha-blink 9.5s steps(1, end) infinite;
+}
+
+.alpha-mascot__blink--left {
+  left: 35.5%;
+  top: 26.1%;
+}
+
+.alpha-mascot__blink--right {
+  left: 56.8%;
+  top: 25.6%;
+  animation-delay: 80ms;
+}
+
+.alpha-mascot__hand {
+  position: absolute;
+  right: 10.4%;
+  top: 49%;
+  width: 16%;
+  height: 9%;
+  border-radius: 999px;
+  background: radial-gradient(circle at 75% 30%, oklch(0.82 0.16 158 / 0.24), transparent 58%);
+  opacity: 0.6;
+  animation: alpha-hand 6.7s ease-in-out infinite;
+}
+
+.alpha-mascot__helmet-light {
+  position: absolute;
+  left: 23%;
+  top: 18%;
+  width: 8%;
+  aspect-ratio: 1;
+  border-radius: 999px;
+  background: radial-gradient(circle, white, oklch(0.82 0.14 196 / 0.55), transparent 68%);
+  opacity: 0.34;
+  mix-blend-mode: screen;
+  transition: opacity 900ms var(--ease-instrument), transform 900ms var(--ease-instrument);
+}
+
+.alpha-mascot--unlock .alpha-mascot__helmet-light {
+  opacity: 0.95;
+  transform: scale(1.6);
+}
+
+.alpha-transition {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  background: radial-gradient(circle at 58% 44%, oklch(0.96 0.08 196 / 0.7), transparent 8%, transparent 64%);
+  opacity: 0;
+  transform: scale(0.7);
+}
+
+.alpha-landing--unlock .alpha-transition {
+  animation: alpha-unlock 1700ms var(--ease-instrument) forwards;
+}
+
+.alpha-landing--unlock .alpha-copy {
+  animation: alpha-copy-unlock 1700ms var(--ease-instrument) forwards;
+}
+
+.alpha-dashboard-enter main > * {
+  animation: alpha-dashboard-card 620ms var(--ease-instrument) both;
+}
+
+.alpha-dashboard-enter main > *:nth-child(2) {
+  animation-delay: 80ms;
+}
+
+.alpha-dashboard-enter main > *:nth-child(3) {
+  animation-delay: 150ms;
+}
+
+.alpha-dashboard-enter main > *:nth-child(4) {
+  animation-delay: 220ms;
+}
+
+.alpha-mascot--compact {
+  position: relative;
+  width: 92px;
+  height: 118px;
+}
+
+.alpha-mascot--compact .alpha-mascot__frame {
+  width: 92px;
+}
+
+@keyframes alpha-rise {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 16px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes alpha-nebula-a {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(4vw, -2vh, 0) scale(1.12);
+  }
+}
+
+@keyframes alpha-nebula-b {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1.06);
+  }
+  50% {
+    transform: translate3d(-5vw, 3vh, 0) scale(1);
+  }
+}
+
+@keyframes alpha-planet {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes alpha-stars {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(0, 30%, 0);
+  }
+}
+
+@keyframes alpha-scan {
+  0%,
+  100% {
+    opacity: 0.16;
+    transform: translate3d(-28%, -14%, 0);
+  }
+  50% {
+    opacity: 0.34;
+    transform: translate3d(16%, 10%, 0);
+  }
+}
+
+@keyframes alpha-blink {
+  0%,
+  94%,
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--gaze-x), var(--gaze-y), 0) scaleY(0);
+  }
+  95%,
+  97% {
+    opacity: 0.7;
+    transform: translate3d(var(--gaze-x), var(--gaze-y), 0) scaleY(1);
+  }
+}
+
+@keyframes alpha-hand {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) rotate(0deg);
+  }
+  50% {
+    transform: translate3d(5px, -6px, 0) rotate(2deg);
+  }
+}
+
+@keyframes alpha-unlock {
+  0% {
+    opacity: 0;
+    transform: scale(0.7);
+  }
+  42% {
+    opacity: 0.45;
+  }
+  100% {
+    opacity: 1;
+    transform: scale(2.8);
+  }
+}
+
+@keyframes alpha-copy-unlock {
+  0% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(0, -18px, 0) scale(1.035);
+  }
+}
+
+@keyframes alpha-dashboard-card {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 16px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@media (max-width: 900px) {
+  .alpha-hero {
+    order: -1;
+    min-height: 330px;
+  }
+
+  .alpha-mascot__frame {
+    width: min(70vw, 340px);
+  }
+
+  .alpha-space__planet {
+    opacity: 0.48;
+  }
+}
+
+@media (max-width: 640px) {
+  .alpha-landing > .grid {
+    max-width: calc(100vw - 2.5rem);
+  }
+
+  .alpha-copy {
+    max-width: 100%;
+  }
+
+  .alpha-access {
+    width: min(100%, 18.5rem);
+    margin-inline: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .alpha-copy,
+  .alpha-hero,
+  .alpha-access,
+  .alpha-space__nebula,
+  .alpha-space__planet,
+  .alpha-space__stars,
+  .alpha-space__scan,
+  .alpha-mascot__hand,
+  .alpha-mascot__blink,
+  .alpha-dashboard-enter main > * {
+    animation: none !important;
+  }
+
+  .alpha-space--unlock,
+  .alpha-mascot--unlock .alpha-mascot__frame {
+    transform: none;
+  }
+}

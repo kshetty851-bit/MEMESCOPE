@@ -3,12 +3,13 @@
 import { useMemo, useRef } from "react";
 import Link from "next/link";
 
+import { MascotState } from "@/components/alpha/mascot-state";
 import { PaperWalletWidget } from "@/components/paper/wallet-widget";
 import { RadarRow } from "@/components/radar/radar-row";
 import { LiveStatus } from "@/components/ui/freshness";
 import { Label, Panel } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
-import { EmptyState, ErrorState } from "@/components/ui/states";
+import { ErrorState } from "@/components/ui/states";
 import { usePaperPositions } from "@/hooks/use-paper";
 import { useRadar } from "@/hooks/use-radar";
 import { byMint, paperStateFor } from "@/lib/paper";
@@ -16,7 +17,7 @@ import { rankDeltas } from "@/lib/motion";
 import { useFlipOrder } from "@/hooks/use-motion";
 
 /**
- * THE RADAR — the homepage.
+ * THE RADAR — the command center.
  *
  * One question: **what are today's best opportunities?** Ten rows, ranked by
  * the Radar score, each answering "should I care, why, and what usually
@@ -107,10 +108,8 @@ export default function RadarPage() {
           ))}
         </div>
       ) : visible.length === 0 ? (
-        <EmptyState
-          agent="scout"
-          title="Nothing clears the bar right now"
-          body="An empty Radar means no token currently meets the model's floor — not that the platform is idle. Every detection ever made is still on the Track Record."
+        <MascotState
+          kind="waiting"
           action={
             <Link
               href="/record"
