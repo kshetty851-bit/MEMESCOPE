@@ -53,6 +53,12 @@ describe("middleware", () => {
       expect(response.status).toBe(307);
     });
 
+    it("allows an explicit manual login request through", async () => {
+      const middleware = await loadMiddleware({ bypass: "true" });
+
+      expect(redirectTarget(middleware(request("/login?auth=manual")))).toBeNull();
+    });
+
     it.each(["/command", "/feed", "/division", "/system"])(
       "leaves %s untouched",
       async (pathname) => {

@@ -35,6 +35,8 @@ const NAV: NavItem[] = [
   { href: "/settings", label: "Settings" },
 ];
 
+const EXPLICIT_LOGIN_PATH = "/login?auth=manual";
+
 export function SiteNav() {
   const pathname = usePathname();
   const router = useRouter();
@@ -45,7 +47,7 @@ export function SiteNav() {
 
   async function handleSignOut() {
     await logout();
-    router.replace("/login");
+    router.replace(EXPLICIT_LOGIN_PATH);
   }
 
   return (
@@ -89,7 +91,7 @@ export function SiteNav() {
               </button>
             ) : (
               <Link
-                href="/login"
+                href={EXPLICIT_LOGIN_PATH}
                 className="text-sm text-ink-faint transition-colors hover:text-ink"
               >
                 Sign in

@@ -28,9 +28,14 @@ import { AUTH_BYPASS } from "@/lib/env";
 const BYPASSED_ROUTES = new Set(["/login", "/register"]);
 
 const DASHBOARD = "/command";
+const MANUAL_AUTH_QUERY = "manual";
 
 export function middleware(request: NextRequest) {
   if (!AUTH_BYPASS) {
+    return NextResponse.next();
+  }
+
+  if (request.nextUrl.searchParams.get("auth") === MANUAL_AUTH_QUERY) {
     return NextResponse.next();
   }
 

@@ -17,7 +17,8 @@ export default function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    if (isAuthenticated) router.replace("/command");
+    const manualAuth = new URLSearchParams(window.location.search).get("auth") === "manual";
+    if (!manualAuth && isAuthenticated) router.replace("/command");
   }, [isAuthenticated, router]);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
