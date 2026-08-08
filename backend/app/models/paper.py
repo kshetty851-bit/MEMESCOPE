@@ -35,6 +35,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import (
+    JSON,
     DateTime,
     ForeignKey,
     Index,
@@ -46,7 +47,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -64,6 +65,7 @@ _PCT = Numeric(20, 4)
 _FRACTION = Numeric(6, 4)
 #: Basis points, with room for a venue that charges whole percents.
 _BPS = Numeric(10, 4)
+_JSON = JSONB().with_variant(JSON(), "sqlite")
 
 
 class PaperWallet(Base):
@@ -207,8 +209,24 @@ class PaperPosition(Base):
     #: against the rule without reconstructing a past ranking.
     entry_rank: Mapped[int] = mapped_column(nullable=False)
     entry_price: Mapped[Decimal] = mapped_column(_PRICE, nullable=False)
+    #: The market price that triggered the buy decision. For legacy rows this
+    #: is null because `entry_price` carried both the decision mark and the
+    #: execution assumption. Future Jupiter rows keep the two separate:
+    #: decision price here, execution estimate in `entry_price`.
+    entry_observed_price: Mapped[Decimal | None] = mapped_column(_PRICE)
     size_usd: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
     quantity: Mapped[Decimal] = mapped_column(_QUANTITY, nullable=False)
+    #: Which execution model produced the entry quantity/price. Null on legacy
+    #: historical rows so adding V2 does not rewrite history.
+    entry_execution_model_version: Mapped[str | None] = mapped_column(String(64))
+    entry_execution_quote: Mapped[dict[str, object] | None] = mapped_column(_JSON)
+    entry_execution_quoted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    entry_execution_context_slot: Mapped[int | None] = mapped_column(Integer)
+    entry_execution_price_impact_pct: Mapped[Decimal | None] = mapped_column(_PCT)
+    entry_execution_fee_usd: Mapped[Decimal | None] = mapped_column(_MONEY)
+    entry_execution_route: Mapped[str | None] = mapped_column(Text)
+    entry_execution_confidence: Mapped[str | None] = mapped_column(String(32))
+    entry_execution_fallback_reason: Mapped[str | None] = mapped_column(Text)
     #: Nullable since Sprint 30. The relaunched wallet runs a **trailing stop
     #: only** — no target, no fixed stop, no holding period — so these three
     #: carry no value for its positions and a zero would read as a rule that
@@ -243,6 +261,20 @@ class PaperPosition(Base):
 
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     exit_price: Mapped[Decimal | None] = mapped_column(_PRICE)
+    #: The observed market price that breached the exit rule. Future Jupiter
+    #: rows keep the decision mark here while `exit_price` stores the execution
+    #: estimate. Legacy rows leave this null because the old model had one
+    #: trigger-level price.
+    exit_observed_price: Mapped[Decimal | None] = mapped_column(_PRICE)
+    exit_execution_model_version: Mapped[str | None] = mapped_column(String(64))
+    exit_execution_quote: Mapped[dict[str, object] | None] = mapped_column(_JSON)
+    exit_execution_quoted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    exit_execution_context_slot: Mapped[int | None] = mapped_column(Integer)
+    exit_execution_price_impact_pct: Mapped[Decimal | None] = mapped_column(_PCT)
+    exit_execution_fee_usd: Mapped[Decimal | None] = mapped_column(_MONEY)
+    exit_execution_route: Mapped[str | None] = mapped_column(Text)
+    exit_execution_confidence: Mapped[str | None] = mapped_column(String(32))
+    exit_execution_fallback_reason: Mapped[str | None] = mapped_column(Text)
     #: `target` | `stop` | `expiry` | `manual`. Manual is a paper-only override,
     #: permanently distinguishable from exits chosen by the published rule.
     exit_reason: Mapped[str | None] = mapped_column(String(16))
@@ -313,6 +345,7 @@ class PaperTradeAudit(Base):
 
     entry_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     entry_price: Mapped[Decimal] = mapped_column(_PRICE, nullable=False)
+    entry_observed_price: Mapped[Decimal | None] = mapped_column(_PRICE)
     entry_market_cap: Mapped[Decimal | None] = mapped_column(_MONEY)
     entry_liquidity_usd: Mapped[Decimal | None] = mapped_column(_MONEY)
     size_usd: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
@@ -322,6 +355,7 @@ class PaperTradeAudit(Base):
 
     exit_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     exit_price: Mapped[Decimal] = mapped_column(_PRICE, nullable=False)
+    exit_observed_price: Mapped[Decimal | None] = mapped_column(_PRICE)
     exit_market_cap: Mapped[Decimal | None] = mapped_column(_MONEY)
     exit_liquidity_usd: Mapped[Decimal | None] = mapped_column(_MONEY)
 
@@ -349,6 +383,24 @@ class PaperTradeAudit(Base):
     #: The cost model's published fee, stored beside the figure it produced. A
     #: rate change later must not silently restate a net return already served.
     swap_fee_bps: Mapped[Decimal | None] = mapped_column(_BPS)
+    #: Null on historical rows. Future rows say which model produced net costs.
+    execution_model_version: Mapped[str | None] = mapped_column(String(64))
+    entry_execution_model_version: Mapped[str | None] = mapped_column(String(64))
+    exit_execution_model_version: Mapped[str | None] = mapped_column(String(64))
+    entry_execution_quote: Mapped[dict[str, object] | None] = mapped_column(_JSON)
+    exit_execution_quote: Mapped[dict[str, object] | None] = mapped_column(_JSON)
+    entry_execution_quoted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    exit_execution_quoted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    entry_execution_context_slot: Mapped[int | None] = mapped_column(Integer)
+    exit_execution_context_slot: Mapped[int | None] = mapped_column(Integer)
+    entry_execution_price_impact_pct: Mapped[Decimal | None] = mapped_column(_PCT)
+    exit_execution_price_impact_pct: Mapped[Decimal | None] = mapped_column(_PCT)
+    entry_execution_fee_usd: Mapped[Decimal | None] = mapped_column(_MONEY)
+    exit_execution_fee_usd: Mapped[Decimal | None] = mapped_column(_MONEY)
+    entry_execution_route: Mapped[str | None] = mapped_column(Text)
+    exit_execution_route: Mapped[str | None] = mapped_column(Text)
+    execution_confidence: Mapped[str | None] = mapped_column(String(32))
+    execution_fallback_reason: Mapped[str | None] = mapped_column(Text)
     #: Set only for paper-only overrides. `exit_at` remains the observed quote's
     #: timestamp; this records when the action was confirmed.
     manual_action_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

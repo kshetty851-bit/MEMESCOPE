@@ -219,6 +219,49 @@ export default function StrategyLabPage() {
         <Metric label="Manual overrides" value={integrity.manual_overrides} />
         <Metric label="Archived Gen 1" value={integrity.archived_generation_positions} />
       </section>
+      <section className="grid gap-3 sm:grid-cols-3">
+        <Metric label="Legacy execution rows" value={integrity.legacy_execution_model_rows} />
+        <Metric label="Jupiter execution rows" value={integrity.jupiter_execution_model_rows} />
+        <Metric label="Unknown execution rows" value={integrity.unknown_execution_model_rows} />
+      </section>
+
+      <Panel>
+        <Label>Execution model performance</Label>
+        <p className="mt-2 text-sm text-ink-dim">
+          Closed audit rows are grouped by the execution model that produced their stored net result.
+          Historical legacy rows and future Jupiter rows are not blended.
+        </p>
+        <div className="mt-4 overflow-x-auto">
+          <table className="w-full min-w-[760px] text-left text-sm">
+            <thead className="text-xs uppercase tracking-wide text-ink-faint">
+              <tr>
+                <th className="py-2">Model</th>
+                <th className="py-2 text-right">Trades</th>
+                <th className="py-2 text-right">Gross P/L</th>
+                <th className="py-2 text-right">Net P/L</th>
+                <th className="py-2 text-right">Win rate</th>
+                <th className="py-2 text-right">Profit factor</th>
+                <th className="py-2 text-right">Fees</th>
+                <th className="py-2 text-right">Slippage / drag</th>
+              </tr>
+            </thead>
+            <tbody>
+              {lab.data.execution_models.map((row) => (
+                <tr key={row.model_version} className="border-t border-line/70">
+                  <td className="py-3 font-medium text-ink">{row.label}</td>
+                  <td className="py-3 text-right tabular-nums text-ink-dim">{row.trades}</td>
+                  <td className="py-3 text-right tabular-nums text-ink-dim">{usd(row.gross_return_usd)}</td>
+                  <td className="py-3 text-right tabular-nums"><span className={tone(row.net_return_usd) === "positive" ? "text-safe" : tone(row.net_return_usd) === "negative" ? "text-danger" : "text-ink-dim"}>{usd(row.net_return_usd)}</span></td>
+                  <td className="py-3 text-right"><SignedPct value={row.win_rate_pct} /></td>
+                  <td className="py-3 text-right tabular-nums text-ink-dim">{row.profit_factor ?? "—"}</td>
+                  <td className="py-3 text-right tabular-nums text-ink-dim">{usd(row.fees_usd)}</td>
+                  <td className="py-3 text-right tabular-nums text-ink-dim">{usd(row.slippage_usd)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
 
       <section>
         <Label>Current Production Strategy</Label>

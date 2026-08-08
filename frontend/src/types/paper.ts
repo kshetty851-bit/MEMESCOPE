@@ -39,8 +39,16 @@ export interface PaperPosition {
   /** The Radar place the token held when it was bought. */
   entry_rank: number;
   entry_price: string;
+  entry_observed_price: string | null;
   size_usd: string;
   quantity: string;
+  entry_execution_model_version: string | null;
+  entry_execution_price_impact_pct: string | null;
+  entry_execution_fee_usd: string | null;
+  entry_execution_route: string | null;
+  entry_execution_quoted_at: string | null;
+  entry_execution_confidence: string | null;
+  entry_execution_fallback_reason: string | null;
   /** The market as it stood at entry. Recorded, never used to size anything. */
   entry_market_cap: string | null;
   entry_liquidity_usd: string | null;
@@ -68,6 +76,14 @@ export interface PaperPosition {
 
   closed_at: string | null;
   exit_price: string | null;
+  exit_observed_price: string | null;
+  exit_execution_model_version: string | null;
+  exit_execution_price_impact_pct: string | null;
+  exit_execution_fee_usd: string | null;
+  exit_execution_route: string | null;
+  exit_execution_quoted_at: string | null;
+  exit_execution_confidence: string | null;
+  exit_execution_fallback_reason: string | null;
   /** `target` | `stop` | `expiry` | `manual`. */
   exit_reason: string | null;
   manual_action_at: string | null;
@@ -80,6 +96,7 @@ export interface ManualSellPreview {
   symbol: string | null;
   short_mint: string;
   entry_price: string;
+  entry_observed_price: string | null;
   latest_price: string;
   quote_observed_at: string;
   quote_age_seconds: string;
@@ -95,6 +112,13 @@ export interface ManualSellPreview {
   net_return_usd: string | null;
   net_return_pct: string | null;
   cost_unavailable_reason: string | null;
+  execution_model_version: string | null;
+  exit_execution_price_impact_pct: string | null;
+  exit_execution_fee_usd: string | null;
+  exit_execution_route: string | null;
+  exit_execution_quoted_at: string | null;
+  execution_confidence: string | null;
+  execution_fallback_reason: string | null;
 }
 
 export interface ManualSellResult {
@@ -167,6 +191,7 @@ export interface PaperAuditEntry {
 
   entry_at: string;
   entry_price: string;
+  entry_observed_price: string | null;
   entry_market_cap: string | null;
   entry_liquidity_usd: string | null;
   size_usd: string;
@@ -174,6 +199,7 @@ export interface PaperAuditEntry {
 
   exit_at: string;
   exit_price: string;
+  exit_observed_price: string | null;
   exit_market_cap: string | null;
   exit_liquidity_usd: string | null;
 
@@ -192,6 +218,19 @@ export interface PaperAuditEntry {
   strategy_version: string;
   wallet_generation: number;
   hold_hours: string | null;
+  execution_model_version: string | null;
+  entry_execution_model_version: string | null;
+  exit_execution_model_version: string | null;
+  entry_execution_price_impact_pct: string | null;
+  exit_execution_price_impact_pct: string | null;
+  entry_execution_fee_usd: string | null;
+  exit_execution_fee_usd: string | null;
+  entry_execution_route: string | null;
+  exit_execution_route: string | null;
+  entry_execution_quoted_at: string | null;
+  exit_execution_quoted_at: string | null;
+  execution_confidence: string | null;
+  execution_fallback_reason: string | null;
 }
 
 export interface PaperAudit {
@@ -347,9 +386,24 @@ export interface LabDataIntegrity {
   audited_closed_positions: number;
   missing_audit_rows: number;
   manual_overrides: number;
+  legacy_execution_model_rows: number;
+  jupiter_execution_model_rows: number;
+  unknown_execution_model_rows: number;
   archived_generation_positions: number;
   archived_missing_audit_rows: number;
   verdict: string;
+}
+
+export interface ExecutionModelPerformance {
+  model_version: string;
+  label: string;
+  trades: number;
+  gross_return_usd: string;
+  net_return_usd: string;
+  win_rate_pct: string | null;
+  profit_factor: string | null;
+  fees_usd: string;
+  slippage_usd: string;
 }
 
 export interface SegmentRow {
@@ -405,6 +459,7 @@ export interface Lab {
   findings: LabFinding[];
   baseline_id: string;
   data_integrity: LabDataIntegrity;
+  execution_models: ExecutionModelPerformance[];
   production_summary: LabStrategy;
   pattern_analysis: PatternAnalysis;
   largest_winners: TradeCard[];

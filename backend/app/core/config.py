@@ -389,6 +389,14 @@ class Settings(BaseSettings):
     #: has to stop somewhere, and a bound that is hit is *reported* rather than
     #: silently truncating the search (`candidates_truncated` on every pass).
     PAPER_WALLET_CANDIDATE_LIMIT: int = Field(default=250, ge=1, le=2000)
+    #: Future paper trades use Jupiter quotes captured at decision time. When a
+    #: quote cannot be obtained, the writer records the fallback reason and uses
+    #: the legacy deterministic estimate rather than pretending a route existed.
+    PAPER_EXECUTION_MODEL: Literal["legacy", "jupiter"] = "jupiter"
+    JUPITER_QUOTE_BASE_URL: str = "https://lite-api.jup.ag/swap/v1"
+    JUPITER_QUOTE_TIMEOUT_SECONDS: float = Field(default=6.0, gt=0, le=30)
+    JUPITER_QUOTE_SLIPPAGE_BPS: int = Field(default=50, ge=0, le=10_000)
+    JUPITER_USDC_MINT: str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 
     # --- Breakout provider ----------------------------------------------------
     # Every threshold measured against the stored history on 2026-08-03 (1.37 M

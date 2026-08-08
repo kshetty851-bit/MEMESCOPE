@@ -13,6 +13,7 @@ from decimal import Decimal
 import pytest
 
 from app.paper import audit
+from app.paper.execution import JUPITER_MODEL_VERSION, jupiter_quote_from_raw
 from app.paper.models import ClosedTrade, ExitReason
 
 pytestmark = pytest.mark.unit
@@ -128,6 +129,73 @@ class TestNet:
         """A rate change later must not silently restate a net return already
         served."""
         assert record().swap_fee_bps == Decimal(30)
+
+    async def test_jupiter_execution_uses_stored_usdc_out_for_future_net(self) -> None:
+        """Gross stays the observed market move; net is the captured quote."""
+        entry_execution = jupiter_quote_from_raw(
+            {
+                "inputMint": "usdc",
+                "outputMint": "probe",
+                "inAmount": "100000000",
+                "outAmount": "100000000",
+                "priceImpactPct": "0.01",
+                "contextSlot": 1,
+                "platformFee": None,
+                "routePlan": [{"swapInfo": {"label": "Pump.fun Amm"}}],
+                "_memescope_latency_ms": "3",
+            },
+            side="entry",
+            quoted_at=NOW,
+            input_decimals=6,
+            output_decimals=6,
+            input_amount_usd=Decimal(100),
+            output_amount_usd=None,
+            estimated_price_usd=Decimal(1),
+            usdc_mint="usdc",
+        )
+        exit_execution = jupiter_quote_from_raw(
+            {
+                "inputMint": "probe",
+                "outputMint": "usdc",
+                "inAmount": "100000000",
+                "outAmount": "120000000",
+                "priceImpactPct": "0.02",
+                "contextSlot": 2,
+                "platformFee": None,
+                "routePlan": [{"swapInfo": {"label": "Pump.fun Amm"}}],
+                "_memescope_latency_ms": "4",
+            },
+            side="exit",
+            quoted_at=NOW + timedelta(hours=1),
+            input_decimals=6,
+            output_decimals=6,
+            input_amount_usd=None,
+            output_amount_usd=Decimal(120),
+            estimated_price_usd=Decimal("1.2"),
+            usdc_mint="usdc",
+        )
+
+        result = audit.record(
+            trade(entry_price=Decimal(1), exit_price=Decimal("1.2"), quantity=Decimal(100)),
+            symbol="PROBE",
+            entry_market_cap=Decimal(100_000),
+            entry_liquidity_usd=Decimal(10_000),
+            exit_market_cap=Decimal(150_000),
+            exit_liquidity_usd=Decimal(10_000),
+            strategy_id="trailing_stop_25_v1",
+            strategy_version="1.0.0",
+            wallet_generation=2,
+            entry_observed_price=Decimal(1),
+            exit_observed_price=Decimal("1.5"),
+            entry_execution=entry_execution,
+            exit_execution=exit_execution,
+        )
+
+        assert result.execution_model_version == JUPITER_MODEL_VERSION
+        assert result.gross_return_usd == Decimal("50.0000")
+        assert result.net_return_usd == Decimal("20.0000")
+        assert result.slippage_usd == Decimal("30.0000")
+        assert result.exit_execution_route == "Pump.fun Amm"
 
 
 class TestWhatTheRecordCarries:

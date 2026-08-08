@@ -8,13 +8,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.paper import PaperPosition, PaperTradeAudit, PaperWallet
 from app.models.radar import RadarToken
-from app.paper import lab
+from app.paper import execution, lab
 from app.paper.models import PositionStatus
 from app.repositories.market import MarketSnapshotRepository
 
@@ -23,7 +24,67 @@ from app.repositories.market import MarketSnapshotRepository
 class LabDataset:
     entries: tuple[lab.TradeInput, ...]
     integrity: lab.DataIntegrity
+    execution_models: tuple[lab.ExecutionModelPerformance, ...]
     loaded_at: datetime
+
+
+_ZERO = Decimal(0)
+_HUNDRED = Decimal(100)
+
+
+def _model_label(model: str) -> str:
+    if model == execution.JUPITER_MODEL_VERSION:
+        return "Jupiter Execution Model V2"
+    if model == execution.LEGACY_MODEL_VERSION:
+        return "Legacy Execution Model V1"
+    return "Unknown execution model"
+
+
+def _execution_model_performance(
+    audits: list[PaperTradeAudit],
+) -> tuple[lab.ExecutionModelPerformance, ...]:
+    groups: dict[str, list[PaperTradeAudit]] = {}
+    for row in audits:
+        model = row.execution_model_version or execution.LEGACY_MODEL_VERSION
+        groups.setdefault(model, []).append(row)
+
+    results: list[lab.ExecutionModelPerformance] = []
+    for model, rows in sorted(groups.items()):
+        net_returns = [row.net_return_usd for row in rows if row.net_return_usd is not None]
+        wins = [value for value in net_returns if value > 0]
+        losses = [abs(value) for value in net_returns if value < 0]
+        gross_profit = sum(wins, _ZERO)
+        gross_loss = sum(losses, _ZERO)
+        results.append(
+            lab.ExecutionModelPerformance(
+                model_version=model,
+                label=_model_label(model),
+                trades=len(rows),
+                gross_return_usd=sum(
+                    ((row.gross_return_usd or _ZERO) for row in rows), _ZERO
+                ).quantize(Decimal("0.0001")),
+                net_return_usd=sum(net_returns, _ZERO).quantize(Decimal("0.0001")),
+                win_rate_pct=(
+                    None
+                    if not net_returns
+                    else (Decimal(len(wins)) / Decimal(len(net_returns)) * _HUNDRED).quantize(
+                        Decimal("0.01")
+                    )
+                ),
+                profit_factor=(
+                    None
+                    if gross_loss <= 0
+                    else (gross_profit / gross_loss).quantize(Decimal("0.01"))
+                ),
+                fees_usd=sum(((row.fee_usd or _ZERO) for row in rows), _ZERO).quantize(
+                    Decimal("0.0001")
+                ),
+                slippage_usd=sum(
+                    ((row.slippage_usd or _ZERO) for row in rows), _ZERO
+                ).quantize(Decimal("0.0001")),
+            )
+        )
+    return tuple(results)
 
 
 async def load_dataset(session: AsyncSession, *, now: datetime) -> LabDataset:
@@ -50,10 +111,14 @@ async def load_dataset(session: AsyncSession, *, now: datetime) -> LabDataset:
                 audited_closed_positions=0,
                 missing_audit_rows=0,
                 manual_overrides=0,
+                legacy_execution_model_rows=0,
+                jupiter_execution_model_rows=0,
+                unknown_execution_model_rows=0,
                 archived_generation_positions=0,
                 archived_missing_audit_rows=0,
                 verdict="No Generation 2 wallet exists in this database.",
             ),
+            execution_models=(),
             loaded_at=now,
         )
 
@@ -132,6 +197,15 @@ async def load_dataset(session: AsyncSession, *, now: datetime) -> LabDataset:
 
     closed = [row for row in positions if row.status == PositionStatus.CLOSED.value]
     missing = [row for row in closed if row.id not in audits_by_position]
+    legacy_execution = sum(
+        1
+        for row in audits
+        if row.execution_model_version in (None, "legacy_constant_product_v1")
+    )
+    jupiter_execution = sum(
+        1 for row in audits if row.execution_model_version == "jupiter_quote_v2"
+    )
+    unknown_execution = len(audits) - legacy_execution - jupiter_execution
     archived_positions = int(
         await session.scalar(
             select(func.count())
@@ -168,6 +242,9 @@ async def load_dataset(session: AsyncSession, *, now: datetime) -> LabDataset:
             audited_closed_positions=len(closed) - len(missing),
             missing_audit_rows=len(missing),
             manual_overrides=sum(1 for row in positions if row.exit_reason == "manual"),
+            legacy_execution_model_rows=legacy_execution,
+            jupiter_execution_model_rows=jupiter_execution,
+            unknown_execution_model_rows=unknown_execution,
             archived_generation_positions=archived_positions,
             archived_missing_audit_rows=archived_missing,
             verdict=(
@@ -176,6 +253,7 @@ async def load_dataset(session: AsyncSession, *, now: datetime) -> LabDataset:
                 else "Generation 2 has missing audit rows; optimisation should stop."
             ),
         ),
+        execution_models=_execution_model_performance(audits),
         loaded_at=now,
     )
 

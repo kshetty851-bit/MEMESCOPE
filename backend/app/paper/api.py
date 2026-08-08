@@ -41,6 +41,7 @@ from app.paper.schemas import (
     AuditOut,
     BenchmarkOut,
     EquityPointOut,
+    ExecutionModelPerformanceOut,
     LabDataIntegrityOut,
     LabFindingOut,
     LabOut,
@@ -387,8 +388,16 @@ def _to_position(row: PaperPosition, read: WalletRead) -> PositionOut:
         opened_at=row.opened_at,
         entry_rank=row.entry_rank,
         entry_price=row.entry_price,
+        entry_observed_price=row.entry_observed_price,
         size_usd=row.size_usd,
         quantity=row.quantity,
+        entry_execution_model_version=row.entry_execution_model_version,
+        entry_execution_price_impact_pct=row.entry_execution_price_impact_pct,
+        entry_execution_fee_usd=row.entry_execution_fee_usd,
+        entry_execution_route=row.entry_execution_route,
+        entry_execution_quoted_at=row.entry_execution_quoted_at,
+        entry_execution_confidence=row.entry_execution_confidence,
+        entry_execution_fallback_reason=row.entry_execution_fallback_reason,
         entry_market_cap=row.entry_market_cap,
         entry_liquidity_usd=row.entry_liquidity_usd,
         target_price=row.target_price,
@@ -402,6 +411,14 @@ def _to_position(row: PaperPosition, read: WalletRead) -> PositionOut:
         peak_pct=_pct_from(row.entry_price, row.peak_price),
         closed_at=row.closed_at,
         exit_price=row.exit_price,
+        exit_observed_price=row.exit_observed_price,
+        exit_execution_model_version=row.exit_execution_model_version,
+        exit_execution_price_impact_pct=row.exit_execution_price_impact_pct,
+        exit_execution_fee_usd=row.exit_execution_fee_usd,
+        exit_execution_route=row.exit_execution_route,
+        exit_execution_quoted_at=row.exit_execution_quoted_at,
+        exit_execution_confidence=row.exit_execution_confidence,
+        exit_execution_fallback_reason=row.exit_execution_fallback_reason,
         exit_reason=row.exit_reason,
         manual_action_at=row.manual_action_at,
         pnl_usd=pnl,
@@ -422,6 +439,7 @@ def _to_manual_preview(preview: ManualSellPreview) -> ManualSellPreviewOut:
         symbol=preview.symbol,
         short_mint=_short_mint(preview.position.mint_address),
         entry_price=preview.position.entry_price,
+        entry_observed_price=preview.position.entry_observed_price,
         latest_price=record.exit_price,
         quote_observed_at=preview.quote.captured_at,
         quote_age_seconds=preview.quote_age_seconds,
@@ -437,6 +455,13 @@ def _to_manual_preview(preview: ManualSellPreview) -> ManualSellPreviewOut:
         net_return_usd=record.net_return_usd,
         net_return_pct=record.net_return_pct,
         cost_unavailable_reason=record.cost_unavailable_reason,
+        execution_model_version=record.execution_model_version,
+        exit_execution_price_impact_pct=record.exit_execution_price_impact_pct,
+        exit_execution_fee_usd=record.exit_execution_fee_usd,
+        exit_execution_route=record.exit_execution_route,
+        exit_execution_quoted_at=record.exit_execution_quoted_at,
+        execution_confidence=record.execution_confidence,
+        execution_fallback_reason=record.execution_fallback_reason,
     )
 
 
@@ -582,12 +607,14 @@ def _to_audit_entry(row: PaperTradeAudit) -> AuditEntryOut:
         symbol=row.symbol,
         entry_at=row.entry_at,
         entry_price=row.entry_price,
+        entry_observed_price=row.entry_observed_price,
         entry_market_cap=row.entry_market_cap,
         entry_liquidity_usd=row.entry_liquidity_usd,
         size_usd=row.size_usd,
         quantity=row.quantity,
         exit_at=row.exit_at,
         exit_price=row.exit_price,
+        exit_observed_price=row.exit_observed_price,
         exit_market_cap=row.exit_market_cap,
         exit_liquidity_usd=row.exit_liquidity_usd,
         gross_return_usd=row.gross_return_usd,
@@ -603,6 +630,19 @@ def _to_audit_entry(row: PaperTradeAudit) -> AuditEntryOut:
         strategy_version=row.strategy_version,
         wallet_generation=row.wallet_generation,
         hold_hours=Decimal(str(hold)).quantize(Decimal("0.01")),
+        execution_model_version=row.execution_model_version,
+        entry_execution_model_version=row.entry_execution_model_version,
+        exit_execution_model_version=row.exit_execution_model_version,
+        entry_execution_price_impact_pct=row.entry_execution_price_impact_pct,
+        exit_execution_price_impact_pct=row.exit_execution_price_impact_pct,
+        entry_execution_fee_usd=row.entry_execution_fee_usd,
+        exit_execution_fee_usd=row.exit_execution_fee_usd,
+        entry_execution_route=row.entry_execution_route,
+        exit_execution_route=row.exit_execution_route,
+        entry_execution_quoted_at=row.entry_execution_quoted_at,
+        exit_execution_quoted_at=row.exit_execution_quoted_at,
+        execution_confidence=row.execution_confidence,
+        execution_fallback_reason=row.execution_fallback_reason,
     )
 
 
@@ -637,6 +677,9 @@ async def get_lab(session: DbSession) -> LabOut:
         findings=_findings(results),
         baseline_id=lab.BASELINE_ID,
         data_integrity=LabDataIntegrityOut(**asdict(dataset.integrity)),
+        execution_models=[
+            ExecutionModelPerformanceOut(**asdict(row)) for row in dataset.execution_models
+        ],
         production_summary=_to_lab_strategy(baseline, baseline_net=baseline_net),
         pattern_analysis=PatternAnalysisOut(
             entry_market_cap=[
@@ -686,11 +729,18 @@ async def get_lab(session: DbSession) -> LabOut:
         cost_rules=[
             LabRuleOut(
                 label="Swap fee",
-                value=f"{costs.DEFAULT.swap_fee_bps} bps per side",
+                value=f"{costs.DEFAULT.swap_fee_bps} bps per side on legacy rows",
             ),
             LabRuleOut(
                 label="Price impact",
                 value="Constant product against the pool depth observed at each end",
+            ),
+            LabRuleOut(
+                label="Jupiter execution",
+                value=(
+                    "Future rows store the quote route, impact and estimated "
+                    "USDC received at decision time; historical rows are not re-quoted"
+                ),
             ),
             LabRuleOut(label="Slippage from competing flow", value="Not modelled"),
             LabRuleOut(label="Priority fees and MEV", value="Not modelled"),

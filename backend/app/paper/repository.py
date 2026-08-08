@@ -287,6 +287,16 @@ class PaperRepository:
         exit_reason: str,
         peak_price: Decimal,
         manual_action_at: datetime | None = None,
+        exit_observed_price: Decimal | None = None,
+        exit_execution_model_version: str | None = None,
+        exit_execution_quote: dict[str, object] | None = None,
+        exit_execution_quoted_at: datetime | None = None,
+        exit_execution_context_slot: int | None = None,
+        exit_execution_price_impact_pct: Decimal | None = None,
+        exit_execution_fee_usd: Decimal | None = None,
+        exit_execution_route: str | None = None,
+        exit_execution_confidence: str | None = None,
+        exit_execution_fallback_reason: str | None = None,
     ) -> bool:
         """Record a close, once.
 
@@ -303,9 +313,19 @@ class PaperRepository:
             .values(
                 status=PositionStatus.CLOSED.value,
                 exit_price=exit_price,
+                exit_observed_price=exit_observed_price,
                 closed_at=closed_at,
                 exit_reason=exit_reason,
                 manual_action_at=manual_action_at,
+                exit_execution_model_version=exit_execution_model_version,
+                exit_execution_quote=exit_execution_quote,
+                exit_execution_quoted_at=exit_execution_quoted_at,
+                exit_execution_context_slot=exit_execution_context_slot,
+                exit_execution_price_impact_pct=exit_execution_price_impact_pct,
+                exit_execution_fee_usd=exit_execution_fee_usd,
+                exit_execution_route=exit_execution_route,
+                exit_execution_confidence=exit_execution_confidence,
+                exit_execution_fallback_reason=exit_execution_fallback_reason,
                 peak_price=peak_price,
                 last_evaluated_at=closed_at,
             )

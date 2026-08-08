@@ -27,6 +27,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from typing import Any, cast
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,9 +37,14 @@ from app.core.logging import get_logger
 from app.models.market import TokenMarketSnapshot
 from app.models.paper import PaperPosition, PaperTradeAudit, PaperWallet
 from app.models.radar import RadarToken
-from app.paper import audit, benchmark, eligibility, exits, metrics
+from app.paper import audit, benchmark, eligibility, execution, exits, metrics
+from app.paper.execution import (
+    ExecutionQuote,
+    ExecutionQuoteUnavailableError,
+)
 from app.paper.exits import ExitRules
 from app.paper.models import (
+    Candidate,
     ClosedTrade,
     ExitReason,
     OpenPosition,
@@ -50,6 +56,7 @@ from app.paper.strategy import AnyStrategy, registry
 from app.radar.repository import RadarRepository
 from app.repositories.market import MarketSnapshotRepository
 from app.repositories.token import TokenRepository
+from app.services.jupiter import JupiterExecutionClient
 
 logger = get_logger(__name__)
 
@@ -99,6 +106,7 @@ class ManualSellPreview:
     is_stale: bool
     warning: str | None
     audit: audit.TradeAudit
+    exit_execution: ExecutionQuote | execution.LegacyExecution
 
 
 @dataclass(frozen=True, slots=True)
@@ -202,6 +210,7 @@ class PaperWalletService:
         self._repository = PaperRepository(session)
         self._market = MarketSnapshotRepository(session)
         self._radar = RadarRepository(session)
+        self._execution = JupiterExecutionClient()
 
     @property
     def strategy(self) -> AnyStrategy:
@@ -297,7 +306,7 @@ class PaperWalletService:
         token = (await TokenRepository(self._session).get_many_by_mints([mint_address])).get(
             mint_address
         )
-        return self._manual_preview_from(
+        return await self._manual_preview_from(
             wallet=wallet,
             position=position,
             quote=quote,
@@ -324,10 +333,20 @@ class PaperWalletService:
         closed = await self._repository.close(
             preview.position.id,
             exit_price=preview.audit.exit_price,
-            closed_at=preview.quote.captured_at,
+            closed_at=preview.audit.exit_at,
             exit_reason=ExitReason.MANUAL.value,
             peak_price=max(preview.position.peak_price, preview.audit.exit_price),
             manual_action_at=now,
+            exit_observed_price=preview.audit.exit_observed_price,
+            exit_execution_model_version=preview.audit.exit_execution_model_version,
+            exit_execution_quote=preview.audit.exit_execution_quote,
+            exit_execution_quoted_at=preview.audit.exit_execution_quoted_at,
+            exit_execution_context_slot=preview.audit.exit_execution_context_slot,
+            exit_execution_price_impact_pct=preview.audit.exit_execution_price_impact_pct,
+            exit_execution_fee_usd=preview.audit.exit_execution_fee_usd,
+            exit_execution_route=preview.audit.exit_execution_route,
+            exit_execution_confidence=preview.audit.execution_confidence,
+            exit_execution_fallback_reason=preview.audit.execution_fallback_reason,
         )
         if not closed:
             raise ConflictError(
@@ -351,7 +370,7 @@ class PaperWalletService:
             refusals=refusals,
         )
 
-    def _manual_preview_from(
+    async def _manual_preview_from(
         self,
         *,
         wallet: PaperWallet,
@@ -368,13 +387,25 @@ class PaperWalletService:
                 code="paper_quote_unavailable",
                 details={"mint_address": position.mint_address},
             )
+        exit_execution = await self._exit_execution_for(
+            position=position,
+            decision_price=exit_price,
+            decision_liquidity=quote.liquidity_usd,
+            now=now,
+        )
+        execution_price = (
+            exit_execution.estimated_price_usd
+            if isinstance(exit_execution, ExecutionQuote)
+            else exit_price
+        )
+        exit_at = now if isinstance(exit_execution, ExecutionQuote) else quote.captured_at
         observed_trade = ClosedTrade(
             mint_address=position.mint_address,
             opened_at=position.opened_at,
-            closed_at=quote.captured_at,
+            closed_at=exit_at,
             size_usd=position.size_usd,
             entry_price=position.entry_price,
-            exit_price=exit_price,
+            exit_price=execution_price,
             quantity=position.quantity,
             reason=ExitReason.MANUAL,
         )
@@ -389,6 +420,17 @@ class PaperWalletService:
             strategy_version=wallet.strategy_version,
             wallet_generation=wallet.generation,
             manual_action_at=now,
+            entry_observed_price=position.entry_observed_price,
+            exit_observed_price=exit_price,
+            entry_execution=self._entry_execution_from(position),
+            exit_execution=exit_execution
+            if isinstance(exit_execution, ExecutionQuote)
+            else None,
+            execution_fallback_reason=(
+                exit_execution.reason
+                if isinstance(exit_execution, execution.LegacyExecution)
+                else None
+            ),
         )
         age = Decimal(max(0.0, (now - quote.captured_at).total_seconds())).quantize(_PCT)
         is_stale = age > Decimal(settings.HEALTH_TRACKED_STALE_SECONDS)
@@ -406,7 +448,204 @@ class PaperWalletService:
                 else None
             ),
             audit=record,
+            exit_execution=exit_execution,
         )
+
+    async def _entry_execution_for(
+        self,
+        *,
+        candidate: Candidate,
+        input_usd: Decimal,
+        decimals: int | None,
+        now: datetime,
+    ) -> ExecutionQuote | execution.LegacyExecution:
+        if settings.PAPER_EXECUTION_MODEL != "jupiter":
+            return execution.LegacyExecution("PAPER_EXECUTION_MODEL=legacy")
+        if decimals is None:
+            return execution.LegacyExecution(
+                "Token decimals unavailable for Jupiter entry quote."
+            )
+        try:
+            return await self._execution.buy_quote(
+                output_mint=candidate.mint_address,
+                input_usd=input_usd,
+                output_decimals=decimals,
+                now=now,
+            )
+        except ExecutionQuoteUnavailableError as exc:
+            logger.warning(
+                "paper_jupiter_entry_quote_failed",
+                mint_address=candidate.mint_address,
+                reason=str(exc),
+            )
+            return execution.LegacyExecution(str(exc))
+
+    async def _exit_execution_for(
+        self,
+        *,
+        position: PaperPosition,
+        decision_price: Decimal,
+        decision_liquidity: Decimal | None,
+        now: datetime,
+    ) -> ExecutionQuote | execution.LegacyExecution:
+        if settings.PAPER_EXECUTION_MODEL != "jupiter":
+            return execution.LegacyExecution("PAPER_EXECUTION_MODEL=legacy")
+
+        decimals = self._entry_output_decimals(position)
+        if decimals is None:
+            token = (
+                await TokenRepository(self._session).get_many_by_mints([position.mint_address])
+            ).get(position.mint_address)
+            decimals = token.decimals if token is not None else None
+        if decimals is None:
+            return execution.LegacyExecution(
+                "Token decimals unavailable for Jupiter exit quote."
+            )
+
+        try:
+            return await self._execution.sell_quote(
+                input_mint=position.mint_address,
+                quantity=position.quantity,
+                input_decimals=decimals,
+                now=now,
+            )
+        except ExecutionQuoteUnavailableError as exc:
+            logger.warning(
+                "paper_jupiter_exit_quote_failed",
+                mint_address=position.mint_address,
+                reason=str(exc),
+            )
+            notional = position.quantity * decision_price
+            return execution.LegacyExecution(
+                f"{exc}; fallback priced at observed notional {notional} "
+                f"with liquidity {decision_liquidity}"
+            )
+
+    def _entry_output_decimals(self, position: PaperPosition) -> int | None:
+        quote = position.entry_execution_quote
+        if not isinstance(quote, dict):
+            return None
+        value = quote.get("output_decimals")
+        return value if isinstance(value, int) else None
+
+    def _quote_from_json(self, quote: dict[str, object] | None) -> ExecutionQuote | None:
+        if (
+            not isinstance(quote, dict)
+            or quote.get("model_version") != execution.JUPITER_MODEL_VERSION
+        ):
+            return None
+        try:
+            amms = quote.get("amms")
+            raw = quote.get("raw")
+            return ExecutionQuote(
+                side=str(quote["side"]),
+                model_version=str(quote["model_version"]),
+                quoted_at=datetime.fromisoformat(str(quote["quoted_at"])),
+                latency_ms=Decimal(str(quote["latency_ms"])),
+                input_mint=str(quote["input_mint"]),
+                output_mint=str(quote["output_mint"]),
+                input_amount_raw=str(quote["input_amount_raw"]),
+                output_amount_raw=str(quote["output_amount_raw"]),
+                input_decimals=int(str(quote["input_decimals"])),
+                output_decimals=int(str(quote["output_decimals"])),
+                input_amount=Decimal(str(quote["input_amount"])),
+                output_amount=Decimal(str(quote["output_amount"])),
+                input_amount_usd=(
+                    None
+                    if quote.get("input_amount_usd") is None
+                    else Decimal(str(quote["input_amount_usd"]))
+                ),
+                output_amount_usd=(
+                    None
+                    if quote.get("output_amount_usd") is None
+                    else Decimal(str(quote["output_amount_usd"]))
+                ),
+                estimated_price_usd=Decimal(str(quote["estimated_price_usd"])),
+                price_impact_pct=(
+                    None
+                    if quote.get("price_impact_pct") is None
+                    else Decimal(str(quote["price_impact_pct"]))
+                ),
+                context_slot=(
+                    None
+                    if quote.get("context_slot") is None
+                    else int(str(quote["context_slot"]))
+                ),
+                platform_fee_usd=(
+                    None
+                    if quote.get("platform_fee_usd") is None
+                    else Decimal(str(quote["platform_fee_usd"]))
+                ),
+                route=str(quote.get("route") or ""),
+                amms=(
+                    tuple(str(item) for item in amms if isinstance(item, str))
+                    if isinstance(amms, list)
+                    else ()
+                ),
+                raw=cast(dict[str, object], raw) if isinstance(raw, dict) else {},
+            )
+        except (KeyError, ValueError):
+            return None
+
+    def _entry_execution_from(self, position: PaperPosition) -> ExecutionQuote | None:
+        return self._quote_from_json(position.entry_execution_quote)
+
+    def _exit_execution_from(self, position: PaperPosition) -> ExecutionQuote | None:
+        return self._quote_from_json(position.exit_execution_quote)
+
+    def _execution_open_values(
+        self, found: ExecutionQuote | execution.LegacyExecution
+    ) -> dict[str, Any]:
+        if isinstance(found, ExecutionQuote):
+            return {
+                "entry_execution_model_version": found.model_version,
+                "entry_execution_quote": found.as_json(),
+                "entry_execution_quoted_at": found.quoted_at,
+                "entry_execution_context_slot": found.context_slot,
+                "entry_execution_price_impact_pct": found.price_impact_pct,
+                "entry_execution_fee_usd": found.platform_fee_usd,
+                "entry_execution_route": found.route,
+                "entry_execution_confidence": found.confidence,
+                "entry_execution_fallback_reason": None,
+            }
+        return {
+            "entry_execution_model_version": found.model_version,
+            "entry_execution_quote": None,
+            "entry_execution_quoted_at": None,
+            "entry_execution_context_slot": None,
+            "entry_execution_price_impact_pct": None,
+            "entry_execution_fee_usd": None,
+            "entry_execution_route": None,
+            "entry_execution_confidence": found.confidence,
+            "entry_execution_fallback_reason": found.reason,
+        }
+
+    def _execution_close_values(
+        self, found: ExecutionQuote | execution.LegacyExecution
+    ) -> dict[str, Any]:
+        if isinstance(found, ExecutionQuote):
+            return {
+                "exit_execution_model_version": found.model_version,
+                "exit_execution_quote": found.as_json(),
+                "exit_execution_quoted_at": found.quoted_at,
+                "exit_execution_context_slot": found.context_slot,
+                "exit_execution_price_impact_pct": found.price_impact_pct,
+                "exit_execution_fee_usd": found.platform_fee_usd,
+                "exit_execution_route": found.route,
+                "exit_execution_confidence": found.confidence,
+                "exit_execution_fallback_reason": None,
+            }
+        return {
+            "exit_execution_model_version": found.model_version,
+            "exit_execution_quote": None,
+            "exit_execution_quoted_at": None,
+            "exit_execution_context_slot": None,
+            "exit_execution_price_impact_pct": None,
+            "exit_execution_fee_usd": None,
+            "exit_execution_route": None,
+            "exit_execution_confidence": found.confidence,
+            "exit_execution_fallback_reason": found.reason,
+        }
 
     async def review_observed_mints(
         self, mint_addresses: Sequence[str], *, now: datetime
@@ -503,16 +742,34 @@ class PaperWalletService:
                 )
                 continue
 
+            decision_quote = next(
+                (quote for quote in quotes if quote.captured_at == found.at),
+                None,
+            )
+            exit_execution = await self._exit_execution_for(
+                position=position,
+                decision_price=found.price_usd,
+                decision_liquidity=(
+                    decision_quote.liquidity_usd if decision_quote is not None else None
+                ),
+                now=now,
+            )
             closed_now = await self._repository.close(
                 position.id,
-                exit_price=found.price_usd,
-                closed_at=found.at,
+                exit_price=(
+                    exit_execution.estimated_price_usd
+                    if isinstance(exit_execution, ExecutionQuote)
+                    else found.price_usd
+                ),
+                closed_at=now if isinstance(exit_execution, ExecutionQuote) else found.at,
                 exit_reason=found.reason.value,
                 # `resolve` returns the high *before* the breaching reading, so
                 # this is already the peak that belongs to the trade rather than
                 # to the token. A high printed after the exit is not this
                 # position's — it sold before it.
                 peak_price=running_peak,
+                exit_observed_price=found.price_usd,
+                **self._execution_close_values(exit_execution),
             )
             closed += int(closed_now)
 
@@ -566,6 +823,13 @@ class PaperWalletService:
                 strategy_version=wallet.strategy_version,
                 wallet_generation=wallet.generation,
                 manual_action_at=row.manual_action_at,
+                entry_observed_price=row.entry_observed_price,
+                exit_observed_price=row.exit_observed_price,
+                entry_execution=self._entry_execution_from(row),
+                exit_execution=self._exit_execution_from(row),
+                execution_fallback_reason=(
+                    row.exit_execution_fallback_reason or row.entry_execution_fallback_reason
+                ),
             )
             if await self._repository.record_audit(
                 position_id=row.id, wallet_id=wallet.id, **record.as_row()
@@ -625,15 +889,38 @@ class PaperWalletService:
                 )
                 continue
 
+            entry_execution = await self._entry_execution_for(
+                candidate=candidate,
+                input_usd=instruction.size_usd,
+                decimals=(
+                    tokens[candidate.mint_address].decimals
+                    if candidate.mint_address in tokens
+                    else None
+                ),
+                now=now,
+            )
+            execution_price = (
+                entry_execution.estimated_price_usd
+                if isinstance(entry_execution, ExecutionQuote)
+                else instruction.price_usd
+            )
+            quantity = (
+                entry_execution.output_amount
+                if isinstance(entry_execution, ExecutionQuote)
+                else instruction.quantity
+            )
+
             created = await self._repository.open_position(
                 wallet_id=wallet.id,
                 mint_address=candidate.mint_address,
                 token_id=token_ids.get(candidate.mint_address),
                 opened_at=instruction.opened_at,
                 entry_rank=candidate.rank,
-                entry_price=instruction.price_usd,
+                entry_price=execution_price,
+                entry_observed_price=instruction.price_usd,
                 size_usd=instruction.size_usd,
-                quantity=instruction.quantity,
+                quantity=quantity,
+                **self._execution_open_values(entry_execution),
                 target_price=instruction.target_price,
                 stop_price=instruction.stop_price,
                 expires_at=instruction.expires_at,
@@ -641,7 +928,7 @@ class PaperWalletService:
                 entry_market_cap=instruction.market_cap,
                 entry_liquidity_usd=instruction.liquidity_usd,
                 status=PositionStatus.OPEN.value,
-                peak_price=instruction.price_usd,
+                peak_price=execution_price,
                 last_evaluated_at=instruction.opened_at,
             )
             if created is None:

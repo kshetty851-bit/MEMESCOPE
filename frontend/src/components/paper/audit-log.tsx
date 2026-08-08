@@ -66,6 +66,12 @@ function marketCap(value: string | null): string | null {
   return `$${amount.toFixed(0)}`;
 }
 
+function modelLabel(value: string | null): string {
+  if (value === "jupiter_quote_v2") return "Jupiter";
+  if (value === "legacy_constant_product_v1" || value === null) return "Legacy";
+  return value;
+}
+
 export function AuditLog({
   items,
   total,
@@ -112,6 +118,7 @@ export function AuditLog({
               <th className="py-2 text-right font-medium">Fees</th>
               <th className="py-2 text-right font-medium">Slippage</th>
               <th className="py-2 text-right font-medium">Net</th>
+              <th className="py-2 text-right font-medium">Execution</th>
               <th className="py-2 text-right font-medium">Exit rule</th>
             </tr>
           </thead>
@@ -151,6 +158,17 @@ export function AuditLog({
                   tone={signTone(row.net_return_pct)}
                   hint={row.cost_unavailable_reason}
                 />
+                <td
+                  className="py-2.5 text-right text-xs text-ink-faint"
+                  title={
+                    row.execution_fallback_reason ??
+                    row.exit_execution_route ??
+                    row.entry_execution_route ??
+                    undefined
+                  }
+                >
+                  {modelLabel(row.execution_model_version)}
+                </td>
                 <td className="py-2.5 text-right text-xs text-ink-faint">
                   {exitLabel(row.exit_reason) ?? row.exit_reason}
                 </td>

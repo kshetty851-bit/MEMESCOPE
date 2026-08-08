@@ -251,9 +251,25 @@ class DataIntegrity:
     audited_closed_positions: int
     missing_audit_rows: int
     manual_overrides: int
+    legacy_execution_model_rows: int
+    jupiter_execution_model_rows: int
+    unknown_execution_model_rows: int
     archived_generation_positions: int
     archived_missing_audit_rows: int
     verdict: str
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutionModelPerformance:
+    model_version: str
+    label: str
+    trades: int
+    gross_return_usd: Decimal
+    net_return_usd: Decimal
+    win_rate_pct: Decimal | None
+    profit_factor: Decimal | None
+    fees_usd: Decimal
+    slippage_usd: Decimal
 
 
 @dataclass(frozen=True, slots=True)

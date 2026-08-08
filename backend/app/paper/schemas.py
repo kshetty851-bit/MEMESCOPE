@@ -64,8 +64,16 @@ class PositionOut(BaseSchema):
     #: stated in terms of it, so a reader can check the trade against the rule.
     entry_rank: int
     entry_price: Decimal
+    entry_observed_price: Decimal | None = None
     size_usd: Decimal
     quantity: Decimal
+    entry_execution_model_version: str | None = None
+    entry_execution_price_impact_pct: Decimal | None = None
+    entry_execution_fee_usd: Decimal | None = None
+    entry_execution_route: str | None = None
+    entry_execution_quoted_at: datetime | None = None
+    entry_execution_confidence: str | None = None
+    entry_execution_fallback_reason: str | None = None
     #: The market as it stood when the position opened. Recorded, never used to
     #: size anything.
     entry_market_cap: Decimal | None = None
@@ -101,6 +109,14 @@ class PositionOut(BaseSchema):
 
     closed_at: datetime | None = None
     exit_price: Decimal | None = None
+    exit_observed_price: Decimal | None = None
+    exit_execution_model_version: str | None = None
+    exit_execution_price_impact_pct: Decimal | None = None
+    exit_execution_fee_usd: Decimal | None = None
+    exit_execution_route: str | None = None
+    exit_execution_quoted_at: datetime | None = None
+    exit_execution_confidence: str | None = None
+    exit_execution_fallback_reason: str | None = None
     #: `target` | `stop` | `expiry` | `manual`. Manual is paper-only and must
     #: stay distinguishable from automated V1 exits.
     exit_reason: str | None = None
@@ -118,6 +134,7 @@ class ManualSellPreviewOut(BaseSchema):
     symbol: str | None = None
     short_mint: str
     entry_price: Decimal
+    entry_observed_price: Decimal | None = None
     latest_price: Decimal
     quote_observed_at: datetime
     quote_age_seconds: Decimal
@@ -133,6 +150,13 @@ class ManualSellPreviewOut(BaseSchema):
     net_return_usd: Decimal | None = None
     net_return_pct: Decimal | None = None
     cost_unavailable_reason: str | None = None
+    execution_model_version: str | None = None
+    exit_execution_price_impact_pct: Decimal | None = None
+    exit_execution_fee_usd: Decimal | None = None
+    exit_execution_route: str | None = None
+    exit_execution_quoted_at: datetime | None = None
+    execution_confidence: str | None = None
+    execution_fallback_reason: str | None = None
 
 
 class ManualSellOut(BaseSchema):
@@ -275,6 +299,7 @@ class AuditEntryOut(BaseSchema):
 
     entry_at: datetime
     entry_price: Decimal
+    entry_observed_price: Decimal | None = None
     entry_market_cap: Decimal | None = None
     entry_liquidity_usd: Decimal | None = None
     size_usd: Decimal
@@ -282,6 +307,7 @@ class AuditEntryOut(BaseSchema):
 
     exit_at: datetime
     exit_price: Decimal
+    exit_observed_price: Decimal | None = None
     exit_market_cap: Decimal | None = None
     exit_liquidity_usd: Decimal | None = None
 
@@ -301,6 +327,19 @@ class AuditEntryOut(BaseSchema):
     strategy_version: str
     wallet_generation: int
     hold_hours: Decimal | None = None
+    execution_model_version: str | None = None
+    entry_execution_model_version: str | None = None
+    exit_execution_model_version: str | None = None
+    entry_execution_price_impact_pct: Decimal | None = None
+    exit_execution_price_impact_pct: Decimal | None = None
+    entry_execution_fee_usd: Decimal | None = None
+    exit_execution_fee_usd: Decimal | None = None
+    entry_execution_route: str | None = None
+    exit_execution_route: str | None = None
+    entry_execution_quoted_at: datetime | None = None
+    exit_execution_quoted_at: datetime | None = None
+    execution_confidence: str | None = None
+    execution_fallback_reason: str | None = None
 
 
 class AuditOut(BaseSchema):
@@ -500,9 +539,24 @@ class LabDataIntegrityOut(BaseSchema):
     audited_closed_positions: int
     missing_audit_rows: int
     manual_overrides: int
+    legacy_execution_model_rows: int
+    jupiter_execution_model_rows: int
+    unknown_execution_model_rows: int
     archived_generation_positions: int
     archived_missing_audit_rows: int
     verdict: str
+
+
+class ExecutionModelPerformanceOut(BaseSchema):
+    model_version: str
+    label: str
+    trades: int
+    gross_return_usd: Decimal
+    net_return_usd: Decimal
+    win_rate_pct: Decimal | None = None
+    profit_factor: Decimal | None = None
+    fees_usd: Decimal
+    slippage_usd: Decimal
 
 
 class SegmentRowOut(BaseSchema):
@@ -558,6 +612,7 @@ class LabOut(BaseSchema):
     findings: list[LabFindingOut]
     baseline_id: str
     data_integrity: LabDataIntegrityOut
+    execution_models: list[ExecutionModelPerformanceOut] = Field(default_factory=list)
     production_summary: LabStrategyOut
     pattern_analysis: PatternAnalysisOut
     largest_winners: list[TradeCardOut] = Field(default_factory=list)

@@ -61,6 +61,12 @@ function signTone(value: string | null): "positive" | "negative" | "neutral" {
   return parsed > 0 ? "positive" : "negative";
 }
 
+function modelLabel(value: string | null): string {
+  if (value === "jupiter_quote_v2") return "Jupiter";
+  if (value === "legacy_constant_product_v1" || value === null) return "Legacy";
+  return value;
+}
+
 export function PositionsTable({
   positions,
   isPending,
@@ -135,6 +141,7 @@ export function PositionsTable({
             <th className="py-2 text-right font-medium">Result</th>
             <th className="py-2 text-right font-medium">Peak</th>
             <th className="py-2 text-right font-medium">P/L</th>
+            <th className="py-2 text-right font-medium">Execution</th>
             <th className="py-2 text-right font-medium">Status</th>
             <th className="py-2 text-right font-medium">Quote</th>
             {onPreviewManualSell ? (
@@ -173,6 +180,22 @@ export function PositionsTable({
                   />
                   <Cell value={pct(position.peak_pct)} tone="neutral" />
                   <Cell value={usd(position.pnl_usd)} tone={signTone(position.pnl_usd)} />
+                  <td
+                    className="py-2.5 text-right text-xs text-ink-faint"
+                    title={
+                      position.exit_execution_fallback_reason ??
+                      position.entry_execution_fallback_reason ??
+                      position.exit_execution_route ??
+                      position.entry_execution_route ??
+                      undefined
+                    }
+                  >
+                    {modelLabel(
+                      closed
+                        ? position.exit_execution_model_version
+                        : position.entry_execution_model_version,
+                    )}
+                  </td>
                   <td className="py-2.5 text-right">
                     <span
                       className={cn(
@@ -216,7 +239,7 @@ export function PositionsTable({
                 </tr>
                 {selected ? (
                   <tr className="border-b border-line bg-elevated/40">
-                    <td colSpan={onPreviewManualSell ? 10 : 9} className="py-3">
+                    <td colSpan={onPreviewManualSell ? 11 : 10} className="py-3">
                       <ManualSellPreviewPanel
                         preview={preview}
                         error={error}
@@ -259,6 +282,7 @@ function ManualSellPreviewPanel({
     ["Token", preview.symbol ?? preview.name ?? preview.short_mint],
     ["Mint", preview.short_mint],
     ["Entry", formatPrice(preview.entry_price)],
+    ["Observed entry", formatPrice(preview.entry_observed_price)],
     ["Latest", formatPrice(preview.latest_price)],
     ["Entry cap", usd(preview.entry_market_cap)],
     ["Current cap", usd(preview.current_market_cap)],
@@ -267,6 +291,9 @@ function ManualSellPreviewPanel({
     ["Fees", usd(preview.fee_usd)],
     ["Slippage", usd(preview.slippage_usd)],
     ["Net P/L", usd(preview.net_return_usd)],
+    ["Execution", modelLabel(preview.execution_model_version)],
+    ["Price impact", pct(preview.exit_execution_price_impact_pct)],
+    ["Route", preview.exit_execution_route],
   ];
 
   return (
@@ -295,6 +322,11 @@ function ManualSellPreviewPanel({
       </dl>
       {preview.cost_unavailable_reason ? (
         <p className="mt-2 text-xs text-ink-faint">{preview.cost_unavailable_reason}</p>
+      ) : null}
+      {preview.execution_fallback_reason ? (
+        <p className="mt-2 text-xs text-ink-faint">
+          Fallback: {preview.execution_fallback_reason}
+        </p>
       ) : null}
       {error ? <p className="mt-2 text-sm text-danger">{error}</p> : null}
       <div className="mt-3 flex justify-end gap-2">
