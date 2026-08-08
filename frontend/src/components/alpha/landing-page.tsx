@@ -14,34 +14,39 @@ export function LandingPage() {
   return (
     <main
       className={cn(
-        "alpha-landing relative isolate flex min-h-screen overflow-hidden px-5 py-8 text-ink",
+        "alpha-landing relative isolate min-h-screen overflow-hidden text-ink",
         unlocking && "alpha-landing--unlock",
       )}
     >
       <SpaceBackground active={unlocking} />
-      <div className="mx-auto grid w-full max-w-7xl items-center gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(420px,0.82fr)]">
-        <section className="alpha-copy mx-auto flex w-full max-w-2xl flex-col items-center text-center lg:items-start lg:text-left">
-          <div className="alpha-logo flex flex-col items-center gap-5 lg:items-start">
-            <LogoMark size={78} className="text-plasma" />
-            <div>
-              <h1 className="text-[clamp(2rem,11vw,2.65rem)] font-semibold leading-none tracking-[0.04em] text-ink sm:text-[clamp(2.7rem,9vw,5rem)] sm:tracking-[0.12em] lg:text-[clamp(2.7rem,7vw,5.6rem)] lg:tracking-[0.13em]">
-                MEMESCOPE
-              </h1>
-              <p className="mt-4 text-sm tracking-[0.12em] text-ink-dim sm:text-lg sm:tracking-[0.22em]">
-                Real-time Pump.fun Intelligence
-              </p>
-            </div>
-          </div>
-
-          <div className="mt-10 w-full max-w-sm">
-            <AlphaAccess onUnlocking={setUnlocking} />
-          </div>
-        </section>
-
-        <section className="alpha-hero relative mx-auto min-h-[420px] w-full max-w-[520px] lg:min-h-[680px]">
-          <HeroMascot active={unlocking} />
-        </section>
+      <div className="alpha-cinematic" aria-hidden>
+        <div className="alpha-cinematic__rim alpha-cinematic__rim--left" />
+        <div className="alpha-cinematic__rim alpha-cinematic__rim--right" />
+        <div className="alpha-cinematic__lens alpha-cinematic__lens--one" />
+        <div className="alpha-cinematic__lens alpha-cinematic__lens--two" />
+        <div className="alpha-cinematic__vignette" />
       </div>
+
+      <section className="alpha-stage">
+        <div className="alpha-stage__depth alpha-stage__depth--back" aria-hidden />
+        <div className="alpha-stage__mascot">
+          <HeroMascot active={unlocking} />
+        </div>
+        <div className="alpha-stage__depth alpha-stage__depth--front" aria-hidden />
+
+        <div className="alpha-copy">
+          <div className="alpha-logo">
+            <LogoMark size={72} className="text-plasma" />
+            <p className="alpha-kicker">Private Alpha</p>
+          </div>
+          <h1>MEMESCOPE</h1>
+          <p className="alpha-subtitle">Real-time Pump.fun Intelligence</p>
+        </div>
+
+        <div className="alpha-panel">
+          <AlphaAccess onUnlocking={setUnlocking} />
+        </div>
+      </section>
       <div className="alpha-transition" aria-hidden />
     </main>
   );

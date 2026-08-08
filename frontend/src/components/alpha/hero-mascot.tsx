@@ -52,8 +52,10 @@ export function HeroMascot({
     >
       <div className="lm-mascot__drift">
         <div className="lm-mascot__breathe alpha-mascot__frame">
+          <span className="alpha-mascot__shadow" />
+          <span className="alpha-mascot__backlight" />
           <Image
-            src="/mascot/frog-astronaut.png"
+            src="/mascot/frog-astronaut-cutout.png"
             alt=""
             width={1024}
             height={1536}
@@ -61,6 +63,7 @@ export function HeroMascot({
             sizes={compact ? "120px" : "(max-width: 900px) 68vw, 42vw"}
             className="alpha-mascot__image"
           />
+          <span className="alpha-mascot__atmosphere" />
           <span className="alpha-mascot__reflection lm-mascot__shimmer" />
           <span className="alpha-mascot__blink alpha-mascot__blink--left" />
           <span className="alpha-mascot__blink alpha-mascot__blink--right" />
