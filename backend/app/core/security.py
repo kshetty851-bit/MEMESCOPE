@@ -23,7 +23,7 @@ import jwt
 from app.core.config import settings
 from app.core.exceptions import AuthenticationError
 
-TokenType = Literal["access", "refresh"]
+TokenType = Literal["access", "refresh", "alpha"]
 
 # bcrypt truncates at 72 bytes; hash long inputs first so entropy is preserved.
 _BCRYPT_MAX_BYTES = 72
@@ -135,6 +135,48 @@ def decode_access_token(token: str) -> TokenPayload:
     return TokenPayload(
         subject=claims["sub"],
         token_type="access",
+        jti=claims["jti"],
+        issued_at=datetime.fromtimestamp(claims["iat"], tz=UTC),
+        expires_at=datetime.fromtimestamp(claims["exp"], tz=UTC),
+        scopes=tuple(claims.get("scopes", ())),
+    )
+
+
+def create_alpha_access_token() -> tuple[str, TokenPayload]:
+    """Issue a temporary private-alpha session token."""
+    return _create_token(
+        "alpha",
+        token_type="alpha",
+        expires_delta=timedelta(days=settings.ALPHA_ACCESS_SESSION_DAYS),
+        scopes=["alpha"],
+    )
+
+
+def decode_alpha_access_token(token: str) -> TokenPayload:
+    """Decode and validate an alpha-access token."""
+    try:
+        claims = jwt.decode(
+            token,
+            settings.SECRET_KEY,
+            algorithms=[settings.JWT_ALGORITHM],
+            issuer=settings.PROJECT_NAME,
+            options={"require": ["exp", "iat", "sub", "jti"]},
+        )
+    except jwt.ExpiredSignatureError as exc:
+        raise AuthenticationError(
+            "Alpha access has expired.", code="alpha_access_expired"
+        ) from exc
+    except jwt.InvalidTokenError as exc:
+        raise AuthenticationError(
+            "Alpha access is invalid.", code="alpha_access_invalid"
+        ) from exc
+
+    if claims.get("type") != "alpha" or claims.get("sub") != "alpha":
+        raise AuthenticationError("Alpha access is invalid.", code="alpha_access_invalid")
+
+    return TokenPayload(
+        subject=claims["sub"],
+        token_type="alpha",
         jti=claims["jti"],
         issued_at=datetime.fromtimestamp(claims["iat"], tz=UTC),
         expires_at=datetime.fromtimestamp(claims["exp"], tz=UTC),

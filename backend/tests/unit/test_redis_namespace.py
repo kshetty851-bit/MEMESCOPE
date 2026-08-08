@@ -29,6 +29,8 @@ def _settings(environment: str) -> Settings:
         ALLOWED_HOSTS=["example.com"],
         CORS_ORIGINS=["https://example.com"],
         REFRESH_COOKIE_SECURE=environment == "production",
+        ALPHA_ACCESS_REQUIRED=environment == "production",
+        ALPHA_ACCESS_COOKIE_SECURE=environment == "production",
         DEBUG=False,
         DEVELOPMENT_BYPASS_AUTH=False,
     )

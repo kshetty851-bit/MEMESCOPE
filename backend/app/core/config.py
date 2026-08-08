@@ -64,6 +64,19 @@ class Settings(BaseSettings):
     REFRESH_COOKIE_SECURE: bool = True
     REFRESH_COOKIE_SAMESITE: Literal["lax", "strict", "none"] = "lax"
 
+    # --- Temporary private-alpha access gate --------------------------------
+    # This is not user authentication. It is a server-side deployment gate used
+    # while the product is private: a shared code creates an httpOnly cookie,
+    # and the frontend/dashboard checks that cookie through the API.
+    ALPHA_ACCESS_CODE: SecretStr = SecretStr("619554")
+    ALPHA_ACCESS_REQUIRED: bool = False
+    ALPHA_ACCESS_COOKIE_NAME: str = "memescope_alpha"
+    ALPHA_ACCESS_COOKIE_PATH: str = "/"
+    ALPHA_ACCESS_COOKIE_DOMAIN: str | None = None
+    ALPHA_ACCESS_COOKIE_SECURE: bool = False
+    ALPHA_ACCESS_COOKIE_SAMESITE: Literal["lax", "strict", "none"] = "lax"
+    ALPHA_ACCESS_SESSION_DAYS: int = 30
+
     # --- CORS ----------------------------------------------------------------
     CORS_ORIGINS: CsvList = Field(default_factory=lambda: ["http://localhost:3000"])
     ALLOWED_HOSTS: CsvList = Field(default_factory=lambda: ["*"])
@@ -725,6 +738,12 @@ class Settings(BaseSettings):
                 raise ValueError("ALLOWED_HOSTS must be explicit in production")
             if not self.REFRESH_COOKIE_SECURE:
                 raise ValueError("REFRESH_COOKIE_SECURE must be true in production")
+            if not self.ALPHA_ACCESS_REQUIRED:
+                raise ValueError("ALPHA_ACCESS_REQUIRED must be true in production")
+            if len(self.ALPHA_ACCESS_CODE.get_secret_value()) < 1:
+                raise ValueError("ALPHA_ACCESS_CODE is required in production")
+            if not self.ALPHA_ACCESS_COOKIE_SECURE:
+                raise ValueError("ALPHA_ACCESS_COOKIE_SECURE must be true in production")
         # Required only when Helius is the configured provider. Demanding a
         # vendor key to run the scanner against a public endpoint was the
         # hard dependency this sprint removed.

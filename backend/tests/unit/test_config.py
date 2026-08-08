@@ -27,6 +27,8 @@ def _settings(**overrides: object) -> Settings:
         "SECRET_KEY": "x" * 48,
         "ALLOWED_HOSTS": "*",
         "REFRESH_COOKIE_SECURE": True,
+        "ALPHA_ACCESS_REQUIRED": False,
+        "ALPHA_ACCESS_COOKIE_SECURE": False,
         "CORS_ORIGINS": "http://localhost:3000",
         "POSTGRES_HOST": "db",
         "POSTGRES_USER": "memescope",
@@ -64,6 +66,8 @@ def test_production_config_passes_when_hardened() -> None:
         ENVIRONMENT="production",
         ALLOWED_HOSTS="api.memescope.ai",
         REFRESH_COOKIE_SECURE=True,
+        ALPHA_ACCESS_REQUIRED=True,
+        ALPHA_ACCESS_COOKIE_SECURE=True,
     )
     assert settings.is_production
 

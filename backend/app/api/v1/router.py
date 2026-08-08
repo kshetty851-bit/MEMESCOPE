@@ -7,6 +7,7 @@ New feature areas (scanner, tokens, alerts, watchlists) get their own module in
 from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
+    alpha,
     analysts,
     auth,
     events,
@@ -30,6 +31,7 @@ api_router.include_router(health.router)
 # liveness and readiness probes above. Those report this process; this reports
 # whether the platform is still producing anything.
 api_router.include_router(pipeline_health.router)
+api_router.include_router(alpha.router)
 api_router.include_router(auth.router)
 api_router.include_router(users.router)
 api_router.include_router(tokens.router)

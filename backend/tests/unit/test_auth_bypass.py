@@ -37,6 +37,8 @@ def test_production_refuses_to_boot_with_the_bypass_set() -> None:
             DEBUG=False,
             ALLOWED_HOSTS=["memescope.ai"],
             REFRESH_COOKIE_SECURE=True,
+            ALPHA_ACCESS_REQUIRED=True,
+            ALPHA_ACCESS_COOKIE_SECURE=True,
         )
 
 
@@ -46,6 +48,8 @@ def test_production_boots_normally_without_it() -> None:
         DEBUG=False,
         ALLOWED_HOSTS=["memescope.ai"],
         REFRESH_COOKIE_SECURE=True,
+        ALPHA_ACCESS_REQUIRED=True,
+        ALPHA_ACCESS_COOKIE_SECURE=True,
     )
     assert config.auth_bypass_active is False
 

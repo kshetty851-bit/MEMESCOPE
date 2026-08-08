@@ -57,6 +57,9 @@ set -a
 . ./.env.production
 set +a
 
+log "Validating production Compose configuration"
+"${COMPOSE[@]}" config -q
+
 PREVIOUS_SHA="$(git rev-parse HEAD)"
 log "Current release: ${PREVIOUS_SHA:0:12}"
 

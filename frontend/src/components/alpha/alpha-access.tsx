@@ -5,6 +5,8 @@ import type { FormEvent } from "react";
 import { useEffect, useState } from "react";
 
 import { ALPHA_ACCESS, BUILD } from "@/lib/env";
+import { api } from "@/lib/api-client";
+import type { AlphaSessionStatus } from "@/types/api";
 
 export function AlphaAccess({ onUnlocking }: { onUnlocking: (active: boolean) => void }) {
   const router = useRouter();
@@ -13,26 +15,43 @@ export function AlphaAccess({ onUnlocking }: { onUnlocking: (active: boolean) =>
   const [unlocking, setUnlocking] = useState(false);
 
   useEffect(() => {
-    if (window.localStorage.getItem(ALPHA_ACCESS.storageKey) === "granted") {
-      router.replace(ALPHA_ACCESS.dashboardPath);
-    }
+    let cancelled = false;
+
+    void api
+      .get<AlphaSessionStatus>("/alpha/session", { skipAuthRetry: true })
+      .then((session) => {
+        if (!cancelled && session.authenticated) router.replace(ALPHA_ACCESS.dashboardPath);
+      })
+      .catch(() => {
+        // The launch screen is the safe fallback. Do not surface network errors
+        // as password failures before the visitor submits anything.
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [router]);
 
-  function submit(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (unlocking) return;
-
-    if (code.trim() !== ALPHA_ACCESS.code) {
-      setError("Access code not recognised.");
-      return;
-    }
 
     setError(null);
     setUnlocking(true);
     onUnlocking(true);
-    window.localStorage.setItem(ALPHA_ACCESS.storageKey, "granted");
-    window.sessionStorage.setItem(ALPHA_ACCESS.transitionKey, "true");
-    window.setTimeout(() => router.push(ALPHA_ACCESS.dashboardPath), 1700);
+    try {
+      await api.post<AlphaSessionStatus>(
+        "/alpha/unlock",
+        { code },
+        { skipAuthRetry: true },
+      );
+      window.sessionStorage.setItem(ALPHA_ACCESS.transitionKey, "true");
+      window.setTimeout(() => router.push(ALPHA_ACCESS.dashboardPath), 1700);
+    } catch {
+      setError("Access code not recognised.");
+      setUnlocking(false);
+      onUnlocking(false);
+    }
   }
 
   return (

@@ -24,6 +24,11 @@ export interface MessageResponse {
   message: string;
 }
 
+export interface AlphaSessionStatus {
+  authenticated: boolean;
+  expires_at: string | null;
+}
+
 export interface ApiErrorBody {
   error: {
     code: string;

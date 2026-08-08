@@ -6,7 +6,9 @@ import { usePathname, useRouter } from "next/navigation";
 import { FeedbackWidget } from "@/components/alpha/feedback-widget";
 import { SiteNav } from "@/components/layout/site-nav";
 import { ALPHA_ACCESS } from "@/lib/env";
+import { api } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
+import type { AlphaSessionStatus } from "@/types/api";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -15,17 +17,31 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [enteredFromAlpha, setEnteredFromAlpha] = useState(false);
 
   useEffect(() => {
-    if (window.localStorage.getItem(ALPHA_ACCESS.storageKey) !== "granted") {
-      router.replace("/");
-      return;
-    }
+    let cancelled = false;
 
-    setAlphaReady(true);
-    const justUnlocked = window.sessionStorage.getItem(ALPHA_ACCESS.transitionKey) === "true";
-    if (justUnlocked) {
-      window.sessionStorage.removeItem(ALPHA_ACCESS.transitionKey);
-      setEnteredFromAlpha(true);
-    }
+    void api
+      .get<AlphaSessionStatus>("/alpha/session", { skipAuthRetry: true })
+      .then((session) => {
+        if (cancelled) return;
+        if (!session.authenticated) {
+          router.replace("/");
+          return;
+        }
+
+        setAlphaReady(true);
+        const justUnlocked = window.sessionStorage.getItem(ALPHA_ACCESS.transitionKey) === "true";
+        if (justUnlocked) {
+          window.sessionStorage.removeItem(ALPHA_ACCESS.transitionKey);
+          setEnteredFromAlpha(true);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) router.replace("/");
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [pathname, router]);
 
   // Alpha Access is the only temporary private gate. Hold the shell until the

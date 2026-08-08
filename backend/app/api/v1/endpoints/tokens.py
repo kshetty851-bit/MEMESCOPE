@@ -7,11 +7,14 @@ import contextlib
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Path, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, Path, Query, WebSocket, WebSocketDisconnect, status
 
 from app.api.deps import DbSession
+from app.core.config import settings
 from app.core.events import broadcaster
+from app.core.exceptions import AuthenticationError
 from app.core.logging import get_logger
+from app.core.security import decode_alpha_access_token
 from app.models.token import MetadataStatus
 from app.schemas.token import SortOrder, TokenPage, TokenRead, TokenSortField
 from app.services.token_service import TokenService
@@ -26,6 +29,7 @@ MINT_PATTERN = r"^[1-9A-HJ-NP-Za-km-z]{32,44}$"
 # How long to wait for an event before sending a keepalive frame. Without this,
 # an idle proxy will silently close a quiet connection.
 WS_IDLE_PING_SECONDS = 25.0
+ALPHA_WS_POLICY_VIOLATION_CODE = status.WS_1008_POLICY_VIOLATION
 
 
 def get_token_service(session: DbSession) -> TokenService:
@@ -117,8 +121,22 @@ async def token_stream(websocket: WebSocket) -> None:
     values. Clients refetch server-owned read models after an event, so no
     browser-side score, ranking, or paper-wallet calculation can drift.
     """
-    await websocket.accept()
     client = websocket.client.host if websocket.client else "unknown"
+    if settings.ALPHA_ACCESS_REQUIRED:
+        token = websocket.cookies.get(settings.ALPHA_ACCESS_COOKIE_NAME)
+        try:
+            if not token:
+                raise AuthenticationError(
+                    "Alpha access is required.",
+                    code="alpha_access_required",
+                )
+            decode_alpha_access_token(token)
+        except AuthenticationError:
+            logger.warning("ws_alpha_access_denied", client=client)
+            await websocket.close(code=ALPHA_WS_POLICY_VIOLATION_CODE)
+            return
+
+    await websocket.accept()
 
     async with broadcaster.subscribe() as queue:
         logger.info(

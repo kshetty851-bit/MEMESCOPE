@@ -21,6 +21,7 @@ from app.core.logging import configure_logging, get_logger
 from app.core.observability import init_sentry
 from app.core.redis import close_redis, init_redis
 from app.db.session import dispose_engine
+from app.middleware.alpha_access import AlphaAccessMiddleware
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.middleware.request_context import RequestContextMiddleware
 from app.middleware.security_headers import SecurityHeadersMiddleware
@@ -102,6 +103,7 @@ def create_app() -> FastAPI:
     )
     if settings.ALLOWED_HOSTS != ["*"]:
         app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.ALLOWED_HOSTS)
+    app.add_middleware(AlphaAccessMiddleware)
     app.add_middleware(RequestContextMiddleware)
 
     # Added last, so it is the outermost layer and runs *first* on the way in.

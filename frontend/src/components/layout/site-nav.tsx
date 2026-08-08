@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 
 import { Logo } from "@/components/brand/logo";
+import { api } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 
 /**
@@ -36,9 +37,15 @@ const NAV: NavItem[] = [
 
 export function SiteNav() {
   const pathname = usePathname();
+  const router = useRouter();
 
   // The Radar is the root, so a prefix match would mark it active everywhere.
   const isActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
+
+  async function handleExitAlpha() {
+    await api.post("/alpha/logout", undefined, { skipAuthRetry: true });
+    router.replace("/");
+  }
 
   return (
     <>
@@ -70,7 +77,15 @@ export function SiteNav() {
             </ul>
           </nav>
 
-          <div className="ml-auto" />
+          <div className="ml-auto flex items-center">
+            <button
+              type="button"
+              onClick={handleExitAlpha}
+              className="text-sm text-ink-faint transition-colors hover:text-ink"
+            >
+              Exit alpha
+            </button>
+          </div>
         </div>
       </header>
 

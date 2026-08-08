@@ -28,12 +28,19 @@ services:
   redis:
     restart: unless-stopped
     ports: !reset []
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required in production}
     command: >
       redis-server
       --appendonly yes
       --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is required in production}
       --maxmemory 512mb
       --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD}\" ping | grep PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
     deploy:
       resources:
         limits: { cpus: "1", memory: 768M }
@@ -65,6 +72,9 @@ services:
       RUN_MIGRATIONS: "false"
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:?ALLOWED_HOSTS must be explicit in production}
       CORS_ORIGINS: ${CORS_ORIGINS:?CORS_ORIGINS must be explicit in production}
+      ALPHA_ACCESS_CODE: ${ALPHA_ACCESS_CODE:?ALPHA_ACCESS_CODE is required in production}
+      ALPHA_ACCESS_REQUIRED: "true"
+      ALPHA_ACCESS_COOKIE_SECURE: "true"
       # Without this the rate limiter keys every user onto Caddy's address and
       # they share one allowance. Compose gives services a private network, so
       # the whole bridge subnet is the trust boundary.
@@ -93,6 +103,9 @@ services:
       ENVIRONMENT: production
       LOG_FORMAT: json
       RUN_MIGRATIONS: "false"
+      ALPHA_ACCESS_CODE: ${ALPHA_ACCESS_CODE:?ALPHA_ACCESS_CODE is required in production}
+      ALPHA_ACCESS_REQUIRED: "true"
+      ALPHA_ACCESS_COOKIE_SECURE: "true"
       SENTRY_DSN: ${SENTRY_DSN:-}
       BUILD_SHA: ${BUILD_SHA:-unknown}
     volumes: !reset []
@@ -110,6 +123,9 @@ services:
       ENVIRONMENT: production
       LOG_FORMAT: json
       RUN_MIGRATIONS: "false"
+      ALPHA_ACCESS_CODE: ${ALPHA_ACCESS_CODE:?ALPHA_ACCESS_CODE is required in production}
+      ALPHA_ACCESS_REQUIRED: "true"
+      ALPHA_ACCESS_COOKIE_SECURE: "true"
       SENTRY_DSN: ${SENTRY_DSN:-}
       BUILD_SHA: ${BUILD_SHA:-unknown}
     volumes: !reset
@@ -121,10 +137,42 @@ services:
   # fills the logs with a loop that looks like a crash. `on-failure` restarts a
   # genuine crash and respects a deliberate no-op.
   scanner:
+    build:
+      context: ./backend
+      target: production
+    environment:
+      ENVIRONMENT: production
+      LOG_FORMAT: json
+      RUN_MIGRATIONS: "false"
+      ALPHA_ACCESS_CODE: ${ALPHA_ACCESS_CODE:?ALPHA_ACCESS_CODE is required in production}
+      ALPHA_ACCESS_REQUIRED: "true"
+      ALPHA_ACCESS_COOKIE_SECURE: "true"
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      BUILD_SHA: ${BUILD_SHA:-unknown}
+    volumes: !reset []
     restart: on-failure
+    deploy:
+      resources:
+        limits: { cpus: "1", memory: 768M }
 
   enrichment:
+    build:
+      context: ./backend
+      target: production
+    environment:
+      ENVIRONMENT: production
+      LOG_FORMAT: json
+      RUN_MIGRATIONS: "false"
+      ALPHA_ACCESS_CODE: ${ALPHA_ACCESS_CODE:?ALPHA_ACCESS_CODE is required in production}
+      ALPHA_ACCESS_REQUIRED: "true"
+      ALPHA_ACCESS_COOKIE_SECURE: "true"
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      BUILD_SHA: ${BUILD_SHA:-unknown}
+    volumes: !reset []
     restart: on-failure
+    deploy:
+      resources:
+        limits: { cpus: "1", memory: 768M }
 
   frontend:
     build:
