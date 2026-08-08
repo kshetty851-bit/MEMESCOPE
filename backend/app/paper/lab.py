@@ -1,166 +1,172 @@
-"""The Strategy Lab: one replay engine, many exit rules.
+"""Generation-2 Strategy Lab replay engine.
 
-Every strategy sees **the same entries over the same market history**. The only
-thing that varies is when a position closes. That is what makes the comparison a
-comparison — if entries differed, a strategy could win by having been offered
-better tokens.
+This module is research-only. It never opens, closes, mutates, allocates, or
+changes a paper-wallet position. Its input is the already-written Generation 2
+paper trade record plus immutable market snapshots; its output is descriptive
+evidence about exit rules and entry-time patterns.
 
-## The distinction that has to stay visible
-
-The live wallet answers *"what would $1,000 have done?"*, and there cash is a
-binding constraint: with $100 trades only ten positions fit at once, so a rule
-that exits sooner frees capital sooner and **enters different tokens**.
-
-The lab answers a different question — *"which exit rule handles these
-detections best?"* — and to hold entries fixed it replays with **unconstrained
-capital**: every detection gets one $100 position, whatever else is open. Return
-is therefore an equal-weight per-trade figure, directly comparable to the
-"buy every Radar token" benchmark, which is unconstrained in exactly the same
-way.
-
-The two numbers are not interchangeable and the API says so on every response.
-Reporting a lab return as though it were the wallet's balance would be the
-quietest lie available here.
-
-Pure. No I/O, no clock, no randomness — `now` is a parameter. Running the same
-rows twice must produce byte-identical results, and a test asserts it.
+Generation 1 is intentionally excluded from optimisation metrics. It remains
+historical archive data, but the Sprint 30 relaunch made Generation 2
+(`trailing_stop_25_v1`) the only comparable production baseline.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from dataclasses import dataclass, field
+from collections import Counter
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from decimal import Decimal
+from uuid import UUID
 
-from app.paper import costs, exits
-from app.paper.models import ExitReason, Quote
+from app.paper import costs
 
 _ZERO = Decimal(0)
 _HUNDRED = Decimal(100)
+_TRADE_SIZE = Decimal(100)
 
-#: Notional per position. Equal weight, and the same for every strategy, so a
-#: difference in result is a difference in the exit rule and nothing else.
-TRADE_SIZE = Decimal(100)
-
-#: Below this span, an annualised figure is extrapolation rather than
-#: measurement — a four-day window scaled to a year magnifies noise by ninety.
-#: Published rather than buried: the bar is part of the claim.
-MIN_DAYS_TO_ANNUALISE = 90
+BASELINE_ID = "trailing_25_baseline"
+GENERATION = 2
+STRATEGY_ID = "trailing_stop_25_v1"
 
 
 @dataclass(frozen=True, slots=True)
-class Detection:
-    """One Radar detection, and the prices observed since.
-
-    The lab's entire input. Built once and handed to every strategy unchanged —
-    that sharing is what guarantees identical entries.
-    """
-
-    mint_address: str
-    symbol: str | None
-    detected_at: datetime
-    quotes: tuple[Quote, ...]
+class QuotePoint:
+    at: datetime
+    price: Decimal
+    market_cap: Decimal | None = None
+    liquidity_usd: Decimal | None = None
+    volume_24h: Decimal | None = None
 
 
 @dataclass(frozen=True, slots=True)
-class Trade:
-    """What one rule did with one detection."""
-
+class TradeInput:
+    position_id: UUID
     mint_address: str
     symbol: str | None
     opened_at: datetime
     entry_price: Decimal
-    #: `None` while the position never closed inside the observed history.
+    size_usd: Decimal
+    quantity: Decimal
+    entry_market_cap: Decimal | None
+    entry_liquidity_usd: Decimal | None
+    entry_rank: int
+    status: str
+    actual_closed_at: datetime | None
+    actual_exit_reason: str | None
+    manual: bool
+    peak_price: Decimal
+    first_detected_at: datetime | None = None
+    radar_score: Decimal | None = None
+    confidence: Decimal | None = None
+    category: str | None = None
+    entry_volume_24h: Decimal | None = None
+    quotes: tuple[QuotePoint, ...] = field(default_factory=tuple)
+
+    @property
+    def age_hours_at_entry(self) -> Decimal | None:
+        if self.first_detected_at is None:
+            return None
+        return Decimal((self.opened_at - self.first_detected_at).total_seconds()) / Decimal(
+            3600
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class StrategySpec:
+    id: str
+    name: str
+    description: str
+    rules: tuple[tuple[str, str], ...]
+    is_baseline: bool = False
+    trailing_pct: Decimal | None = None
+    time_exit: timedelta | None = None
+    break_even_at_pct: Decimal | None = None
+    adaptive: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class ReplayTrade:
+    mint_address: str
+    symbol: str | None
+    opened_at: datetime
+    entry_price: Decimal
     closed_at: datetime | None
     exit_price: Decimal | None
-    reason: ExitReason | None
-    #: Highest price observed while the position was open, up to its exit.
+    exit_reason: str | None
     peak_price: Decimal
-    #: Latest observed price, for a position still running.
     mark_price: Decimal | None
-    #: Pool depth at entry and at settlement. `None` on bonding-curve pairs,
-    #: which report no liquidity — such a trade is excluded from net entirely
-    #: rather than costed against a depth nobody observed.
-    entry_liquidity: Decimal | None = None
-    settle_liquidity: Decimal | None = None
+    entry_liquidity_usd: Decimal | None
+    exit_liquidity_usd: Decimal | None
 
     @property
-    def is_open(self) -> bool:
-        return self.closed_at is None
-
-    @property
-    def settle_price(self) -> Decimal | None:
-        """What the position is worth: its exit, or its latest mark."""
+    def settled_price(self) -> Decimal | None:
         return self.exit_price if self.exit_price is not None else self.mark_price
 
     @property
-    def return_pct(self) -> Decimal | None:
-        price = self.settle_price
+    def gross_return_pct(self) -> Decimal | None:
+        price = self.settled_price
         if price is None or self.entry_price <= 0:
             return None
         return (price - self.entry_price) / self.entry_price * _HUNDRED
 
     @property
-    def pnl(self) -> Decimal | None:
-        pct = self.return_pct
-        return None if pct is None else TRADE_SIZE * pct / _HUNDRED
-
-    @property
-    def peak_pct(self) -> Decimal | None:
-        """How high it got before it exited, as a percent of entry."""
-        if self.entry_price <= 0:
-            return None
-        return (self.peak_price - self.entry_price) / self.entry_price * _HUNDRED
-
-    @property
-    def giveback_pct(self) -> Decimal | None:
-        """How much of the peak was handed back at the exit.
-
-        The figure that actually explains a rule: a strategy with a high average
-        peak and a high giveback is one that was right and did not collect.
-        """
-        price = self.settle_price
-        if price is None or self.peak_price <= 0:
-            return None
-        return (self.peak_price - price) / self.peak_price * _HUNDRED
-
-    @property
-    def execution_costs(self) -> costs.RoundTrip | None:
-        """What the venue would have taken, or `None` if depth is unknown."""
-        settle = self.settle_price
-        if settle is None or self.entry_price <= 0:
-            return None
-        exit_notional = TRADE_SIZE * settle / self.entry_price
-        return costs.round_trip(
-            entry_notional=TRADE_SIZE,
-            entry_liquidity=self.entry_liquidity,
-            exit_notional=exit_notional,
-            exit_liquidity=self.settle_liquidity,
-        )
-
-    @property
-    def net_pnl(self) -> Decimal | None:
-        """Profit after fee and price impact on both sides.
-
-        `None` when the trade cannot be costed. The caller excludes it from the
-        net aggregate rather than reporting it as costless, which would flatter
-        exactly the thin-pool trades most likely to be expensive.
-        """
-        found = self.execution_costs
-        settle = self.settle_price
-        if found is None or settle is None or self.entry_price <= 0:
-            return None
-        exit_notional = TRADE_SIZE * settle / self.entry_price
-        return costs.net_proceeds(
-            entry_notional=TRADE_SIZE, exit_notional=exit_notional, costs=found
-        )
+    def gross_return_usd(self) -> Decimal | None:
+        pct = self.gross_return_pct
+        return None if pct is None else _TRADE_SIZE * pct / _HUNDRED
 
     @property
     def hold_hours(self) -> Decimal | None:
         if self.closed_at is None:
             return None
         return Decimal((self.closed_at - self.opened_at).total_seconds()) / Decimal(3600)
+
+    @property
+    def peak_pct(self) -> Decimal | None:
+        if self.entry_price <= 0:
+            return None
+        return (self.peak_price - self.entry_price) / self.entry_price * _HUNDRED
+
+    @property
+    def capture_pct(self) -> Decimal | None:
+        peak = self.peak_pct
+        gross = self.gross_return_pct
+        if peak is None or peak <= 0 or gross is None:
+            return None
+        return gross / peak * _HUNDRED
+
+    @property
+    def giveback_pct(self) -> Decimal | None:
+        price = self.settled_price
+        if price is None or self.peak_price <= 0:
+            return None
+        return (self.peak_price - price) / self.peak_price * _HUNDRED
+
+    @property
+    def round_trip_cost(self) -> costs.RoundTrip | None:
+        price = self.settled_price
+        if price is None or self.entry_price <= 0:
+            return None
+        exit_notional = _TRADE_SIZE * price / self.entry_price
+        return costs.round_trip(
+            entry_notional=_TRADE_SIZE,
+            entry_liquidity=self.entry_liquidity_usd,
+            exit_notional=exit_notional,
+            exit_liquidity=self.exit_liquidity_usd,
+        )
+
+    @property
+    def net_return_usd(self) -> Decimal | None:
+        price = self.settled_price
+        round_trip = self.round_trip_cost
+        if price is None or self.entry_price <= 0 or round_trip is None:
+            return None
+        exit_notional = _TRADE_SIZE * price / self.entry_price
+        return costs.net_proceeds(
+            entry_notional=_TRADE_SIZE,
+            exit_notional=exit_notional,
+            costs=round_trip,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -171,398 +177,789 @@ class EquityPoint:
 
 
 @dataclass(frozen=True, slots=True)
-class LabResult:
-    """One strategy's measured performance. Nothing here is estimated."""
-
-    strategy_id: str
-    trades: tuple[Trade, ...]
-
+class StrategyResult:
+    id: str
+    name: str
+    description: str
+    rules: tuple[tuple[str, str], ...]
+    is_baseline: bool
+    rank: int
+    trades: tuple[ReplayTrade, ...]
     invested: Decimal
-    #: Every trade, with open positions marked at the latest observed price.
     total_return_pct: Decimal | None
-    #: **Closed trades only.** Reported beside the total because win rate and
-    #: profit factor are also closed-only: a rule whose headline return comes
-    #: mostly from open marks would otherwise read as though it had earned it.
     realised_return_pct: Decimal | None
-    #: Share of trades still open. The number that tells a reader how much of
-    #: the total return is a mark rather than a result.
-    open_share_pct: Decimal | None
-    #: `None` unless the observed history is long enough to annualise honestly.
-    annualised_return_pct: Decimal | None
-    annualised_unavailable_reason: str | None
-
+    net_return_pct: Decimal | None
+    cost_drag_pct: Decimal | None
     closed_count: int
     open_count: int
+    costed_trades: int
+    uncosted_trades: int
     win_rate_pct: Decimal | None
     profit_factor: Decimal | None
-    average_win: Decimal | None
-    average_loss: Decimal | None
+    expectancy: Decimal | None
+    average_winner: Decimal | None
+    average_loser: Decimal | None
     largest_winner: Decimal | None
     largest_loser: Decimal | None
     max_drawdown_pct: Decimal | None
     average_hold_hours: Decimal | None
     average_peak_pct: Decimal | None
+    average_capture_pct: Decimal | None
     average_giveback_pct: Decimal | None
+    fees_usd: Decimal | None
+    slippage_usd: Decimal | None
+    average_slippage_usd: Decimal | None
+    capital_utilization_pct: Decimal | None
     exits_by_reason: dict[str, int]
-    #: Return after the venue's fee and the order's price impact, over the
-    #: trades that could be costed. `None` when none could.
-    net_return_pct: Decimal | None = None
-    #: What execution took, in percentage points of the gross figure.
-    cost_drag_pct: Decimal | None = None
-    #: How many trades the net figure covers, and how many were excluded for
-    #: reporting no pool depth. Published so the coverage is checkable.
-    costed_trades: int = 0
-    uncosted_trades: int = 0
-    equity_curve: tuple[EquityPoint, ...] = field(default=())
-    #: Per-trade returns, for the distribution chart. Closed trades only.
-    return_distribution: tuple[Decimal, ...] = field(default=())
-    hold_distribution: tuple[Decimal, ...] = field(default=())
+    equity_curve: tuple[EquityPoint, ...]
 
 
-def _quantize(value: Decimal | None, places: str = "0.01") -> Decimal | None:
-    return None if value is None else value.quantize(Decimal(places))
+@dataclass(frozen=True, slots=True)
+class SegmentRow:
+    name: str
+    n: int
+    net_return_pct: Decimal | None
+    win_rate_pct: Decimal | None
+    profit_factor: Decimal | None
+    average_return_pct: Decimal | None
+    slippage_drag_pct: Decimal | None
 
 
-def _liquidity_at(quotes: Sequence[Quote], moment: datetime) -> Decimal | None:
-    """Pool depth at a given observation, or `None` if that reading had none.
+@dataclass(frozen=True, slots=True)
+class TradeCard:
+    mint_address: str
+    symbol: str | None
+    net_return_pct: Decimal | None
+    gross_return_pct: Decimal | None
+    entry_market_cap: Decimal | None
+    entry_liquidity_usd: Decimal | None
+    radar_score: Decimal | None
+    confidence: Decimal | None
+    category: str | None
+    age_hours_at_entry: Decimal | None
+    hold_hours: Decimal | None
+    exit_reason: str | None
 
-    The exit is costed against the depth observed *when it closed*, not against
-    the latest reading — a pool that drained afterwards did not affect a trade
-    that had already left it, and one that filled up afterwards did not help it.
-    """
-    for quote in quotes:
-        if quote.captured_at == moment:
-            return quote.liquidity_usd
-    return None
+
+@dataclass(frozen=True, slots=True)
+class DataIntegrity:
+    scoped_generation: int
+    scoped_strategy_id: str
+    positions: int
+    open_positions: int
+    closed_positions: int
+    audited_closed_positions: int
+    missing_audit_rows: int
+    manual_overrides: int
+    archived_generation_positions: int
+    archived_missing_audit_rows: int
+    verdict: str
 
 
-def replay(detections: Sequence[Detection], strategy: exits.LabStrategy) -> LabResult:
-    """Apply one rule set to every detection, in one pass each.
+@dataclass(frozen=True, slots=True)
+class Recommendation:
+    title: str
+    confidence: str
+    sample_size: int
+    expected_improvement: str
+    trade_offs: str
 
-    Deterministic by construction: the only inputs are the stored series and the
-    rule, and neither the clock nor the iteration order of anything unordered is
-    consulted. Detections are processed in the order given, and the caller sorts
-    them, so two runs over the same input produce identical output.
-    """
-    trades: list[Trade] = []
 
-    for detection in detections:
-        if not detection.quotes:
-            # Never priced, so never entered. Skipped rather than entered at a
-            # price nobody observed.
-            continue
+@dataclass(frozen=True, slots=True)
+class RejectedIdea:
+    strategy_id: str
+    reason: str
+    sample_size: int
 
-        first = detection.quotes[0]
-        if first.price_usd <= 0:
-            continue
 
-        found, peak = exits.resolve(
-            strategy.rules,
-            entry_price=first.price_usd,
-            opened_at=first.captured_at,
-            quotes=detection.quotes[1:],
+@dataclass(frozen=True, slots=True)
+class TokenComparison:
+    mint_address: str
+    symbol: str | None
+    peak_pct: Decimal | None
+    returns: dict[str, Decimal | None]
+    best_strategy_id: str | None
+    best_capture_pct: Decimal | None
+
+
+STRATEGIES: tuple[StrategySpec, ...] = (
+    StrategySpec(
+        id=BASELINE_ID,
+        name="Trailing Stop 25% — production baseline",
+        description="Generation 2 baseline replayed from immutable market snapshots.",
+        rules=(("Exit", "Trail 25% from the observed high"),),
+        is_baseline=True,
+        trailing_pct=Decimal("25"),
+    ),
+    StrategySpec(
+        id="trailing_15",
+        name="Trailing Stop 15%",
+        description="Tighter trailing stop. Tests faster profit protection.",
+        rules=(("Exit", "Trail 15% from the observed high"),),
+        trailing_pct=Decimal("15"),
+    ),
+    StrategySpec(
+        id="trailing_20",
+        name="Trailing Stop 20%",
+        description="Moderately tighter trailing stop.",
+        rules=(("Exit", "Trail 20% from the observed high"),),
+        trailing_pct=Decimal("20"),
+    ),
+    StrategySpec(
+        id="trailing_30",
+        name="Trailing Stop 30%",
+        description="Looser than production, allowing wider pullbacks.",
+        rules=(("Exit", "Trail 30% from the observed high"),),
+        trailing_pct=Decimal("30"),
+    ),
+    StrategySpec(
+        id="trailing_35",
+        name="Trailing Stop 35%",
+        description="Looser trailing stop for high-volatility moves.",
+        rules=(("Exit", "Trail 35% from the observed high"),),
+        trailing_pct=Decimal("35"),
+    ),
+    StrategySpec(
+        id="trailing_40",
+        name="Trailing Stop 40%",
+        description="Wide trailing stop; tests whether winners need room.",
+        rules=(("Exit", "Trail 40% from the observed high"),),
+        trailing_pct=Decimal("40"),
+    ),
+    StrategySpec(
+        id="breakeven_25_trailing_25",
+        name="Break-even at +25%, then Trailing 25%",
+        description="Once price reaches +25%, the stop cannot fall below entry.",
+        rules=(("Protection", "At +25%, stop is at least entry"), ("Exit", "Then trail 25%")),
+        trailing_pct=Decimal("25"),
+        break_even_at_pct=Decimal("25"),
+    ),
+    StrategySpec(
+        id="adaptive_trailing",
+        name="Adaptive trailing schedule",
+        description="Pre-declared tightening schedule for large winners.",
+        rules=(
+            ("+25%", "Stop cannot fall below entry"),
+            ("+100%", "25% trailing"),
+            ("+300%", "20% trailing"),
+            ("+700%", "15% trailing"),
+            ("+1500%", "10% trailing"),
+        ),
+        adaptive=True,
+    ),
+    StrategySpec(
+        id="time_exit_24h",
+        name="Time Exit 24h",
+        description="Exit at the first observed quote after 24 hours.",
+        rules=(("Exit", "First quote at or after 24h"),),
+        time_exit=timedelta(hours=24),
+    ),
+    StrategySpec(
+        id="time_exit_48h",
+        name="Time Exit 48h",
+        description="Exit at the first observed quote after 48 hours.",
+        rules=(("Exit", "First quote at or after 48h"),),
+        time_exit=timedelta(hours=48),
+    ),
+    StrategySpec(
+        id="time_exit_72h",
+        name="Time Exit 72h",
+        description="Exit at the first observed quote after 72 hours.",
+        rules=(("Exit", "First quote at or after 72h"),),
+        time_exit=timedelta(hours=72),
+    ),
+    StrategySpec(
+        id="hybrid_25_trail_48h",
+        name="Hybrid: Trailing 25% or 48h",
+        description="Production trail, with a 48-hour max holding period.",
+        rules=(("Exit", "First of 25% trailing stop or 48h time exit"),),
+        trailing_pct=Decimal("25"),
+        time_exit=timedelta(hours=48),
+    ),
+    StrategySpec(
+        id="hold_until_latest",
+        name="Hold until latest observation",
+        description="No stop. Mark at latest stored market quote.",
+        rules=(("Exit", "No rule inside observed history"),),
+    ),
+)
+
+
+def replay_all(entries: Sequence[TradeInput]) -> tuple[StrategyResult, ...]:
+    raw = [_summarise(strategy, _replay(entries, strategy), rank=0) for strategy in STRATEGIES]
+    ordered_ids = rank({item.id: item for item in raw})
+    by_id = {item.id: item for item in raw}
+    return tuple(
+        _replace_rank(by_id[strategy_id], index + 1)
+        for index, strategy_id in enumerate(ordered_ids)
+    )
+
+
+def replay_tokens(
+    results: Sequence[StrategyResult], *, limit: int
+) -> tuple[TokenComparison, ...]:
+    by_mint: dict[str, dict[str, ReplayTrade]] = {}
+    for result in results:
+        for trade in result.trades:
+            by_mint.setdefault(trade.mint_address, {})[result.id] = trade
+
+    rows: list[TokenComparison] = []
+    for mint, per_strategy in by_mint.items():
+        any_trade = next(iter(per_strategy.values()))
+        peak = max(
+            (trade.peak_pct for trade in per_strategy.values() if trade.peak_pct is not None),
+            default=None,
         )
-
-        trades.append(
-            Trade(
-                mint_address=detection.mint_address,
-                symbol=detection.symbol,
-                opened_at=first.captured_at,
-                entry_price=first.price_usd,
-                closed_at=None if found is None else found.at,
-                exit_price=None if found is None else found.price_usd,
-                reason=None if found is None else found.reason,
-                peak_price=peak,
-                mark_price=detection.quotes[-1].price_usd if found is None else None,
-                entry_liquidity=first.liquidity_usd,
-                settle_liquidity=_liquidity_at(detection.quotes, found.at)
-                if found is not None
-                else detection.quotes[-1].liquidity_usd,
+        returns = {
+            strategy_id: _q(trade.gross_return_pct)
+            for strategy_id, trade in per_strategy.items()
+        }
+        best_id: str | None = None
+        best_capture: Decimal | None = None
+        if peak is not None and peak > 0:
+            for strategy_id, trade in per_strategy.items():
+                capture = trade.capture_pct
+                if capture is not None and (best_capture is None or capture > best_capture):
+                    best_capture = capture
+                    best_id = strategy_id
+        rows.append(
+            TokenComparison(
+                mint_address=mint,
+                symbol=any_trade.symbol,
+                peak_pct=_q(peak),
+                returns=returns,
+                best_strategy_id=best_id,
+                best_capture_pct=_q(best_capture),
             )
         )
+    rows.sort(key=lambda item: (-(item.peak_pct or _ZERO), item.mint_address))
+    return tuple(rows[:limit])
 
-    return _summarise(strategy.id, tuple(trades))
+
+def segment(
+    entries: Sequence[TradeInput], key: Callable[[TradeInput], str]
+) -> tuple[SegmentRow, ...]:
+    rows: dict[str, list[ReplayTrade]] = {}
+    entry_by_mint = {entry.mint_address: entry for entry in entries}
+    baseline = next(result for result in replay_all(entries) if result.id == BASELINE_ID)
+    for trade in baseline.trades:
+        source = entry_by_mint[trade.mint_address]
+        rows.setdefault(key(source), []).append(trade)
+    return tuple(_segment_row(name, trades) for name, trades in sorted(rows.items()))
 
 
-def _summarise(strategy_id: str, trades: tuple[Trade, ...]) -> LabResult:
-    closed = [trade for trade in trades if not trade.is_open]
-    still_open = [trade for trade in trades if trade.is_open]
-    invested = TRADE_SIZE * len(trades)
+def segment_baseline_trades(
+    entries: Sequence[TradeInput], key: Callable[[ReplayTrade], str]
+) -> tuple[SegmentRow, ...]:
+    rows: dict[str, list[ReplayTrade]] = {}
+    baseline = next(result for result in replay_all(entries) if result.id == BASELINE_ID)
+    for trade in baseline.trades:
+        rows.setdefault(key(trade), []).append(trade)
+    return tuple(_segment_row(name, trades) for name, trades in sorted(rows.items()))
 
-    pnls = [trade.pnl for trade in trades if trade.pnl is not None]
-    total_pnl = sum(pnls, _ZERO)
-    total_return = None if invested <= 0 else total_pnl / invested * _HUNDRED
 
-    closed_pnls = [trade.pnl for trade in closed if trade.pnl is not None]
-    closed_invested = TRADE_SIZE * len(closed)
-    realised_return = (
-        None if closed_invested <= 0 else sum(closed_pnls, _ZERO) / closed_invested * _HUNDRED
+def market_cap_band(entry: TradeInput) -> str:
+    value = entry.entry_market_cap
+    if value is None:
+        return "Unknown"
+    bands = (
+        (Decimal("25000"), "< $25K"),
+        (Decimal("50000"), "$25K-$50K"),
+        (Decimal("100000"), "$50K-$100K"),
+        (Decimal("250000"), "$100K-$250K"),
+        (Decimal("500000"), "$250K-$500K"),
+        (Decimal("1000000"), "$500K-$1M"),
+        (Decimal("5000000"), "$1M-$5M"),
     )
-    wins = [value for value in closed_pnls if value > 0]
-    losses = [value for value in closed_pnls if value < 0]
+    for limit, label in bands:
+        if value < limit:
+            return label
+    return "> $5M"
+
+
+def liquidity_band(entry: TradeInput) -> str:
+    value = entry.entry_liquidity_usd
+    if value is None:
+        return "Unknown"
+    if value < Decimal("1000"):
+        return "< $1K"
+    if value < Decimal("5000"):
+        return "$1K-$5K"
+    if value < Decimal("10000"):
+        return "$5K-$10K"
+    if value < Decimal("25000"):
+        return "$10K-$25K"
+    return "> $25K"
+
+
+def score_band(entry: TradeInput) -> str:
+    value = entry.radar_score
+    if value is None:
+        return "Unknown"
+    if value < Decimal("60"):
+        return "< 60"
+    if value < Decimal("70"):
+        return "60-69"
+    if value < Decimal("80"):
+        return "70-79"
+    if value < Decimal("90"):
+        return "80-89"
+    return "90+"
+
+
+def age_band(entry: TradeInput) -> str:
+    value = entry.age_hours_at_entry
+    if value is None:
+        return "Unknown"
+    if value < Decimal("1"):
+        return "<1h"
+    if value < Decimal("6"):
+        return "1-6h"
+    if value < Decimal("12"):
+        return "6-12h"
+    if value < Decimal("24"):
+        return "12-24h"
+    if value < Decimal("48"):
+        return "24-48h"
+    return "48h+"
+
+
+def holding_band(trade: ReplayTrade) -> str:
+    value = trade.hold_hours
+    if value is None:
+        return "Open/marked"
+    if value < Decimal("1"):
+        return "<1h"
+    if value < Decimal("6"):
+        return "1-6h"
+    if value < Decimal("12"):
+        return "6-12h"
+    if value < Decimal("24"):
+        return "12-24h"
+    if value < Decimal("48"):
+        return "24-48h"
+    return "48h+"
+
+
+def largest_cards(
+    entries: Sequence[TradeInput], *, winners: bool, limit: int = 8
+) -> tuple[TradeCard, ...]:
+    entry_by_mint = {entry.mint_address: entry for entry in entries}
+    baseline = next(result for result in replay_all(entries) if result.id == BASELINE_ID)
+    trades = [
+        trade
+        for trade in baseline.trades
+        if trade.net_return_usd is not None and (trade.net_return_usd > 0) is winners
+    ]
+    trades.sort(key=lambda trade: trade.net_return_usd or _ZERO, reverse=winners)
+    return tuple(_card(entry_by_mint[trade.mint_address], trade) for trade in trades[:limit])
+
+
+def rejected_ideas(results: Sequence[StrategyResult]) -> tuple[RejectedIdea, ...]:
+    baseline = next(item for item in results if item.id == BASELINE_ID)
+    rejected: list[RejectedIdea] = []
+    for item in results:
+        if item.id == BASELINE_ID:
+            continue
+        if item.net_return_pct is None or baseline.net_return_pct is None:
+            rejected.append(
+                RejectedIdea(
+                    item.id,
+                    "Net return could not be costed for comparison.",
+                    item.closed_count,
+                )
+            )
+        elif item.net_return_pct < baseline.net_return_pct:
+            reason = (
+                f"Net return {item.net_return_pct}% did not beat baseline "
+                f"{baseline.net_return_pct}%."
+            )
+            rejected.append(
+                RejectedIdea(
+                    item.id,
+                    reason,
+                    item.closed_count,
+                )
+            )
+        elif (
+            item.max_drawdown_pct is not None
+            and baseline.max_drawdown_pct is not None
+            and item.max_drawdown_pct > baseline.max_drawdown_pct + Decimal("10")
+        ):
+            rejected.append(
+                RejectedIdea(
+                    item.id,
+                    "Higher net came with materially worse realised drawdown.",
+                    item.closed_count,
+                )
+            )
+    return tuple(rejected)
+
+
+def recommendations(results: Sequence[StrategyResult]) -> tuple[Recommendation, ...]:
+    baseline = next(item for item in results if item.id == BASELINE_ID)
+    winner = results[0] if results else baseline
+    if (
+        winner.id == baseline.id
+        or winner.net_return_pct is None
+        or baseline.net_return_pct is None
+        or winner.closed_count < 30
+        or winner.net_return_pct <= 0
+        or winner.net_return_pct <= baseline.net_return_pct
+    ):
+        return (
+            Recommendation(
+                title="Keep V1 as production baseline",
+                confidence="medium",
+                sample_size=baseline.closed_count,
+                expected_improvement=(
+                    "No production improvement is proven by the Generation 2 record."
+                ),
+                trade_offs=(
+                    "Small sample and short market regime; avoid fitting exits "
+                    "to a few extreme tokens."
+                ),
+            ),
+        )
+    improvement = winner.net_return_pct - baseline.net_return_pct
+    return (
+        Recommendation(
+            title=f"Research {winner.name} as a V2 candidate",
+            confidence="low" if winner.closed_count < 50 else "medium",
+            sample_size=winner.closed_count,
+            expected_improvement=(
+                f"+{improvement.quantize(Decimal('0.01'))} net points versus "
+                "V1 in scoped replay."
+            ),
+            trade_offs=(
+                "Promising only as research; must run in parallel before replacing production."
+            ),
+        ),
+    )
+
+
+def final_decision(results: Sequence[StrategyResult]) -> tuple[str, str]:
+    baseline = next(item for item in results if item.id == BASELINE_ID)
+    winner = results[0] if results else baseline
+    if winner.id == baseline.id:
+        return (
+            "A",
+            "KEEP V1 — the production baseline ranks first under the published ranking.",
+        )
+    if winner.net_return_pct is None or winner.net_return_pct <= 0:
+        return (
+            "A",
+            "KEEP V1 — the best replay reduces losses but does not prove "
+            "positive net expectancy.",
+        )
+    if winner.closed_count < 30:
+        return (
+            "A",
+            "KEEP V1 — the best replay has too few closed trades to justify "
+            "a production change.",
+        )
+    return (
+        "C",
+        "BUILD V2 — evidence is research-promising, but production execution "
+        "remains unchanged.",
+    )
+
+
+def rank(results: dict[str, StrategyResult]) -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            results,
+            key=lambda key: (
+                -(results[key].net_return_pct or Decimal("-999999")),
+                -(results[key].profit_factor or Decimal("-999999")),
+                results[key].max_drawdown_pct or Decimal("999999"),
+                -(results[key].expectancy or Decimal("-999999")),
+                key,
+            ),
+        )
+    )
+
+
+def _replay(entries: Sequence[TradeInput], strategy: StrategySpec) -> tuple[ReplayTrade, ...]:
+    return tuple(_replay_one(entry, strategy) for entry in entries if entry.entry_price > 0)
+
+
+def _replay_one(entry: TradeInput, strategy: StrategySpec) -> ReplayTrade:
+    peak = entry.entry_price
+    latest: QuotePoint | None = None
+    close: QuotePoint | None = None
+    reason: str | None = None
+    deadline = entry.opened_at + strategy.time_exit if strategy.time_exit is not None else None
+
+    for quote in entry.quotes:
+        if quote.price <= 0 or quote.at < entry.opened_at:
+            continue
+        latest = quote
+        if quote.price > peak:
+            peak = quote.price
+
+        stop_price = _stop_price(strategy, entry.entry_price, peak)
+        if deadline is not None and quote.at >= deadline:
+            close, reason = quote, "expiry"
+            break
+        if stop_price is not None and quote.at > entry.opened_at and quote.price <= stop_price:
+            close, reason = quote, "stop"
+            break
+
+    if close is not None:
+        return ReplayTrade(
+            mint_address=entry.mint_address,
+            symbol=entry.symbol,
+            opened_at=entry.opened_at,
+            entry_price=entry.entry_price,
+            closed_at=close.at,
+            exit_price=close.price,
+            exit_reason=reason,
+            peak_price=peak,
+            mark_price=None,
+            entry_liquidity_usd=entry.entry_liquidity_usd,
+            exit_liquidity_usd=close.liquidity_usd,
+        )
+    mark = latest.price if latest is not None else None
+    return ReplayTrade(
+        mint_address=entry.mint_address,
+        symbol=entry.symbol,
+        opened_at=entry.opened_at,
+        entry_price=entry.entry_price,
+        closed_at=None,
+        exit_price=None,
+        exit_reason=None,
+        peak_price=max(peak, mark or peak),
+        mark_price=mark,
+        entry_liquidity_usd=entry.entry_liquidity_usd,
+        exit_liquidity_usd=None if latest is None else latest.liquidity_usd,
+    )
+
+
+def _stop_price(strategy: StrategySpec, entry_price: Decimal, peak: Decimal) -> Decimal | None:
+    gain_pct = (peak - entry_price) / entry_price * _HUNDRED if entry_price > 0 else _ZERO
+    trailing = strategy.trailing_pct
+    floor: Decimal | None = None
+    if strategy.break_even_at_pct is not None and gain_pct >= strategy.break_even_at_pct:
+        floor = entry_price
+    if strategy.adaptive:
+        if gain_pct >= Decimal("1500"):
+            trailing = Decimal("10")
+        elif gain_pct >= Decimal("700"):
+            trailing = Decimal("15")
+        elif gain_pct >= Decimal("300"):
+            trailing = Decimal("20")
+        elif gain_pct >= Decimal("100"):
+            trailing = Decimal("25")
+        elif gain_pct >= Decimal("25"):
+            trailing = Decimal("25")
+            floor = entry_price
+        else:
+            trailing = Decimal("25")
+    if trailing is None:
+        return None
+    stop = peak * (Decimal(1) - trailing / _HUNDRED)
+    return max(stop, floor) if floor is not None else stop
+
+
+def _summarise(
+    strategy: StrategySpec, trades: tuple[ReplayTrade, ...], *, rank: int
+) -> StrategyResult:
+    closed = [trade for trade in trades if trade.closed_at is not None]
+    opened = [trade for trade in trades if trade.closed_at is None]
+    invested = _TRADE_SIZE * len(trades)
+    gross = [trade.gross_return_usd for trade in trades if trade.gross_return_usd is not None]
+    closed_gross = [
+        trade.gross_return_usd for trade in closed if trade.gross_return_usd is not None
+    ]
+    net = [trade.net_return_usd for trade in trades if trade.net_return_usd is not None]
+    closed_net = [trade.net_return_usd for trade in closed if trade.net_return_usd is not None]
+    wins = [value for value in closed_net if value > 0]
+    losses = [value for value in closed_net if value < 0]
     gross_profit = sum(wins, _ZERO)
     gross_loss = sum((-value for value in losses), _ZERO)
-
-    holds = [trade.hold_hours for trade in closed if trade.hold_hours is not None]
-    peaks = [trade.peak_pct for trade in trades if trade.peak_pct is not None]
-    givebacks = [trade.giveback_pct for trade in trades if trade.giveback_pct is not None]
-
-    curve = _equity_curve(invested, closed)
-
-    # Net is computed only over trades whose depth was reported. Bonding-curve
-    # pairs report none, so they are excluded and counted rather than costed
-    # against a depth nobody observed.
-    costed = [trade for trade in trades if trade.net_pnl is not None]
-    net_invested = TRADE_SIZE * len(costed)
-    net_return = (
-        None
-        if net_invested <= 0
-        else sum((trade.net_pnl or _ZERO for trade in costed), _ZERO) / net_invested * _HUNDRED
+    total_fee = sum(
+        (
+            trade.round_trip_cost.entry.fee + trade.round_trip_cost.exit.fee
+            for trade in trades
+            if trade.round_trip_cost is not None
+        ),
+        _ZERO,
     )
-    # Gross measured over the *same* subset, so the drag compares like with
-    # like — differencing net against the all-trades gross would attribute the
-    # excluded trades' performance to execution cost.
-    gross_on_costed = (
-        None
-        if net_invested <= 0
-        else sum((trade.pnl or _ZERO for trade in costed), _ZERO) / net_invested * _HUNDRED
+    total_slippage = sum(
+        (
+            trade.round_trip_cost.entry.impact + trade.round_trip_cost.exit.impact
+            for trade in trades
+            if trade.round_trip_cost is not None
+        ),
+        _ZERO,
     )
-
-    return LabResult(
-        strategy_id=strategy_id,
+    curve = _equity_curve(closed)
+    realised_invested = _TRADE_SIZE * len(closed)
+    net_invested = _TRADE_SIZE * len(net)
+    gross_costed = [
+        trade.gross_return_usd
+        for trade in trades
+        if trade.net_return_usd is not None and trade.gross_return_usd is not None
+    ]
+    gross_costed_return = _return_pct(gross_costed, net_invested)
+    net_return = _return_pct(net, net_invested)
+    return StrategyResult(
+        id=strategy.id,
+        name=strategy.name,
+        description=strategy.description,
+        rules=strategy.rules,
+        is_baseline=strategy.is_baseline,
+        rank=rank,
         trades=trades,
         invested=invested,
-        total_return_pct=_quantize(total_return),
-        realised_return_pct=_quantize(realised_return),
-        open_share_pct=(
-            None
-            if not trades
-            else _quantize(Decimal(len(still_open)) / Decimal(len(trades)) * _HUNDRED)
-        ),
-        net_return_pct=_quantize(net_return),
+        total_return_pct=_return_pct(gross, invested),
+        realised_return_pct=_return_pct(closed_gross, realised_invested),
+        net_return_pct=net_return,
         cost_drag_pct=(
             None
-            if net_return is None or gross_on_costed is None
-            else _quantize(net_return - gross_on_costed)
+            if net_return is None or gross_costed_return is None
+            else _q(net_return - gross_costed_return)
         ),
-        costed_trades=len(costed),
-        uncosted_trades=len(trades) - len(costed),
-        annualised_return_pct=_annualised(total_return, trades),
-        annualised_unavailable_reason=_annualise_reason(trades),
         closed_count=len(closed),
-        open_count=len(still_open),
-        win_rate_pct=(
-            None
-            if not closed_pnls
-            else _quantize(Decimal(len(wins)) / Decimal(len(closed_pnls)) * _HUNDRED)
-        ),
-        # Undefined rather than infinite while nothing has lost: a rule with
-        # three wins and no losses has not proven a ratio.
-        profit_factor=(None if gross_loss <= 0 else _quantize(gross_profit / gross_loss)),
-        average_win=(None if not wins else _quantize(gross_profit / Decimal(len(wins)))),
-        average_loss=(None if not losses else _quantize(gross_loss / Decimal(len(losses)))),
-        largest_winner=(None if not wins else _quantize(max(wins))),
-        largest_loser=(None if not losses else _quantize(min(losses))),
-        max_drawdown_pct=(
-            None if not curve else _quantize(max(point.drawdown_pct for point in curve))
-        ),
-        average_hold_hours=(
-            None if not holds else _quantize(sum(holds, _ZERO) / Decimal(len(holds)))
-        ),
-        average_peak_pct=(
-            None if not peaks else _quantize(sum(peaks, _ZERO) / Decimal(len(peaks)))
-        ),
-        average_giveback_pct=(
-            None
-            if not givebacks
-            else _quantize(sum(givebacks, _ZERO) / Decimal(len(givebacks)))
-        ),
-        exits_by_reason={
-            reason.value: sum(1 for trade in closed if trade.reason is reason)
-            for reason in ExitReason
-        },
+        open_count=len(opened),
+        costed_trades=len(net),
+        uncosted_trades=len(trades) - len(net),
+        win_rate_pct=None
+        if not closed_net
+        else _q(Decimal(len(wins)) / Decimal(len(closed_net)) * _HUNDRED),
+        profit_factor=None if gross_loss <= 0 else _q(gross_profit / gross_loss),
+        expectancy=None
+        if not closed_net
+        else _q(sum(closed_net, _ZERO) / Decimal(len(closed_net))),
+        average_winner=None if not wins else _q(gross_profit / Decimal(len(wins))),
+        average_loser=None if not losses else _q(sum(losses, _ZERO) / Decimal(len(losses))),
+        largest_winner=None if not wins else _q(max(wins)),
+        largest_loser=None if not losses else _q(min(losses)),
+        max_drawdown_pct=None if not curve else _q(max(point.drawdown_pct for point in curve)),
+        average_hold_hours=_avg([trade.hold_hours for trade in closed]),
+        average_peak_pct=_avg([trade.peak_pct for trade in trades]),
+        average_capture_pct=_avg([trade.capture_pct for trade in trades]),
+        average_giveback_pct=_avg([trade.giveback_pct for trade in trades]),
+        fees_usd=None if not net else _q(total_fee),
+        slippage_usd=None if not net else _q(total_slippage),
+        average_slippage_usd=None if not net else _q(total_slippage / Decimal(len(net))),
+        capital_utilization_pct=_capital_utilization(trades),
+        exits_by_reason=dict(Counter(trade.exit_reason or "open" for trade in trades)),
         equity_curve=curve,
-        return_distribution=tuple(
-            value
-            for value in (
-                _quantize(trade.return_pct) for trade in closed if trade.return_pct is not None
-            )
-            if value is not None
-        ),
-        hold_distribution=tuple(
-            value for value in (_quantize(hold) for hold in holds) if value is not None
-        ),
     )
 
 
-def _equity_curve(invested: Decimal, closed: Sequence[Trade]) -> tuple[EquityPoint, ...]:
-    """Equity after each close, and the drawdown from its running high.
+def _replace_rank(result: StrategyResult, rank: int) -> StrategyResult:
+    return replace(result, rank=rank)
 
-    Realised only. The platform stores no equity series, so the path *between*
-    closes is not reconstructed and the drawdown here is a floor on the true
-    figure rather than the intraday number. Every surface says so.
 
-    Ordered by close time with a mint tiebreak, so two runs over the same trades
-    produce the same curve whatever order they arrived in.
-    """
-    if invested <= 0 or not closed:
-        return ()
+def _segment_row(name: str, trades: Sequence[ReplayTrade]) -> SegmentRow:
+    net = [trade.net_return_usd for trade in trades if trade.net_return_usd is not None]
+    returns = [
+        trade.gross_return_pct for trade in trades if trade.gross_return_pct is not None
+    ]
+    wins = [value for value in net if value > 0]
+    losses = [value for value in net if value < 0]
+    loss_abs = sum((-value for value in losses), _ZERO)
+    slippage = sum(
+        (trade.round_trip_cost.entry.impact + trade.round_trip_cost.exit.impact)
+        for trade in trades
+        if trade.round_trip_cost is not None
+    )
+    return SegmentRow(
+        name=name,
+        n=len(trades),
+        net_return_pct=_return_pct(net, _TRADE_SIZE * len(net)),
+        win_rate_pct=None
+        if not net
+        else _q(Decimal(len(wins)) / Decimal(len(net)) * _HUNDRED),
+        profit_factor=None if loss_abs <= 0 else _q(sum(wins, _ZERO) / loss_abs),
+        average_return_pct=_avg(returns),
+        slippage_drag_pct=None
+        if not trades
+        else _q(slippage / (_TRADE_SIZE * len(trades)) * _HUNDRED),
+    )
 
-    equity = invested
-    peak = invested
+
+def _card(entry: TradeInput, trade: ReplayTrade) -> TradeCard:
+    return TradeCard(
+        mint_address=entry.mint_address,
+        symbol=entry.symbol,
+        net_return_pct=None
+        if trade.net_return_usd is None
+        else _q(trade.net_return_usd / _TRADE_SIZE * _HUNDRED),
+        gross_return_pct=_q(trade.gross_return_pct),
+        entry_market_cap=entry.entry_market_cap,
+        entry_liquidity_usd=entry.entry_liquidity_usd,
+        radar_score=entry.radar_score,
+        confidence=entry.confidence,
+        category=entry.category,
+        age_hours_at_entry=_q(entry.age_hours_at_entry),
+        hold_hours=_q(trade.hold_hours),
+        exit_reason=trade.exit_reason,
+    )
+
+
+def _equity_curve(closed: Sequence[ReplayTrade]) -> tuple[EquityPoint, ...]:
+    equity = Decimal(1000)
+    peak = equity
     points: list[EquityPoint] = []
     for trade in sorted(
         closed, key=lambda item: (item.closed_at or datetime.min, item.mint_address)
     ):
-        if trade.pnl is None or trade.closed_at is None:
+        net = trade.net_return_usd
+        if net is None or trade.closed_at is None:
             continue
-        equity += trade.pnl
-        if equity > peak:
-            peak = equity
-        fall = _ZERO if peak <= 0 else (peak - equity) / peak * _HUNDRED
+        equity += net
+        peak = max(peak, equity)
+        drawdown = _ZERO if peak <= 0 else (peak - equity) / peak * _HUNDRED
         points.append(
             EquityPoint(
-                at=trade.closed_at,
-                equity=equity.quantize(Decimal("0.01")),
-                drawdown_pct=fall.quantize(Decimal("0.01")),
+                trade.closed_at,
+                equity.quantize(Decimal("0.01")),
+                drawdown.quantize(Decimal("0.01")),
             )
         )
     return tuple(points)
 
 
-def observed_span(trades: Sequence[Trade]) -> timedelta | None:
-    """How much wall time the replay actually covers."""
-    stamps = [trade.opened_at for trade in trades]
-    stamps += [trade.closed_at for trade in trades if trade.closed_at is not None]
-    if len(stamps) < 2:
+def _capital_utilization(trades: Sequence[ReplayTrade]) -> Decimal | None:
+    events: list[tuple[datetime, int]] = []
+    for trade in trades:
+        events.append((trade.opened_at, 1))
+        if trade.closed_at is not None:
+            events.append((trade.closed_at, -1))
+    if len(events) < 2:
         return None
-    return max(stamps) - min(stamps)
-
-
-def _annualise_reason(trades: Sequence[Trade]) -> str | None:
-    span = observed_span(trades)
-    if span is None:
-        return "Not enough history to measure a span."
-    days = span.total_seconds() / 86_400
-    if days < MIN_DAYS_TO_ANNUALISE:
-        return (
-            f"Not shown. The replay covers {days:.1f} days, below the "
-            f"{MIN_DAYS_TO_ANNUALISE} needed to annualise without extrapolating — "
-            "scaling a window this short to a year magnifies noise rather than "
-            "measuring a rate."
-        )
-    return None
-
-
-def _annualised(total_return: Decimal | None, trades: Sequence[Trade]) -> Decimal | None:
-    """Annualised return, or nothing.
-
-    Refuses far more often than it answers, and that is correct. Annualising a
-    four-day window is the single most misleading figure a backtest can print.
-    """
-    if total_return is None or _annualise_reason(trades) is not None:
+    events.sort()
+    weighted = Decimal(0)
+    active = 0
+    start = events[0][0]
+    last = start
+    for at, change in events:
+        if at > last:
+            weighted += Decimal(active) * Decimal((at - last).total_seconds())
+        active += change
+        last = at
+    span = Decimal((events[-1][0] - start).total_seconds())
+    if span <= 0:
         return None
-    span = observed_span(trades)
-    if span is None:  # pragma: no cover - guarded by the reason above
+    avg_positions = weighted / span
+    return _q(avg_positions * _TRADE_SIZE / Decimal(1000) * _HUNDRED)
+
+
+def _return_pct(values: Sequence[Decimal | None], invested: Decimal) -> Decimal | None:
+    clean = [value for value in values if value is not None]
+    if invested <= 0 or not clean:
         return None
-    years = Decimal(span.total_seconds()) / Decimal(365 * 86_400)
-    if years <= 0:  # pragma: no cover
-        return None
-    return (total_return / years).quantize(Decimal("0.01"))
+    return _q(sum(clean, _ZERO) / invested * _HUNDRED)
 
 
-# --- Comparison ----------------------------------------------------------------
+def _avg(values: Sequence[Decimal | None]) -> Decimal | None:
+    clean = [value for value in values if value is not None]
+    return None if not clean else _q(sum(clean, _ZERO) / Decimal(len(clean)))
 
 
-@dataclass(frozen=True, slots=True)
-class TokenComparison:
-    """How every rule handled one token, and which captured most of the peak."""
-
-    mint_address: str
-    symbol: str | None
-    peak_pct: Decimal | None
-    #: strategy id -> return percent for this token.
-    returns: dict[str, Decimal | None]
-    #: The rule that captured the largest share of this token's peak move.
-    #: `None` when the token never rose, so there was no peak to capture.
-    best_strategy_id: str | None
-    best_capture_pct: Decimal | None
-
-
-def compare_by_token(
-    results: dict[str, LabResult], *, limit: int | None = None
-) -> tuple[TokenComparison, ...]:
-    """Per-token, per-strategy returns, and who captured most of the move.
-
-    "Captured" is measured against the peak the token actually reached while the
-    position was open — a rule that returned 40% on a token that peaked at 50%
-    captured more of the available move than one that returned 60% on a token
-    that peaked at 300%.
-
-    A token that never rose above its entry has no peak to capture, and reports
-    `None` rather than crowning whichever rule lost least.
-    """
-    by_mint: dict[str, dict[str, Trade]] = {}
-    for strategy_id, result in results.items():
-        for trade in result.trades:
-            by_mint.setdefault(trade.mint_address, {})[strategy_id] = trade
-
-    comparisons: list[TokenComparison] = []
-    for mint, per_strategy in by_mint.items():
-        any_trade = next(iter(per_strategy.values()))
-        # The peak is a property of the token over the window, so it is the same
-        # for every rule that held it; take the largest observed.
-        peak = max(
-            (trade.peak_pct for trade in per_strategy.values() if trade.peak_pct is not None),
-            default=None,
-        )
-
-        returns = {
-            strategy_id: _quantize(trade.return_pct)
-            for strategy_id, trade in per_strategy.items()
-        }
-
-        best_id: str | None = None
-        best_capture: Decimal | None = None
-        if peak is not None and peak > 0:
-            for strategy_id, value in sorted(returns.items()):
-                if value is None:
-                    continue
-                capture = value / peak * _HUNDRED
-                if best_capture is None or capture > best_capture:
-                    best_capture = capture
-                    best_id = strategy_id
-
-        comparisons.append(
-            TokenComparison(
-                mint_address=mint,
-                symbol=any_trade.symbol,
-                peak_pct=_quantize(peak),
-                returns=returns,
-                best_strategy_id=best_id,
-                best_capture_pct=_quantize(best_capture),
-            )
-        )
-
-    # Largest peak first, mint as tiebreak — deterministic, and it puts the
-    # tokens where the choice of rule mattered most at the top.
-    comparisons.sort(key=lambda item: (-(item.peak_pct or _ZERO), item.mint_address))
-    return tuple(comparisons if limit is None else comparisons[:limit])
-
-
-def rank(results: dict[str, LabResult]) -> tuple[str, ...]:
-    """Strategy ids ordered by total return, best first.
-
-    Ties broken by id so the order is stable across runs. Ranking on return
-    alone is deliberate and stated: it is the one figure every rule reports,
-    and a composite score would be an opinion wearing a measurement's clothes.
-    """
-    return tuple(
-        sorted(
-            results,
-            key=lambda key: (
-                -(results[key].total_return_pct or Decimal("-999999")),
-                key,
-            ),
-        )
-    )
+def _q(value: Decimal | None, places: str = "0.01") -> Decimal | None:
+    return None if value is None else value.quantize(Decimal(places))

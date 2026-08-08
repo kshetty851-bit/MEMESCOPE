@@ -412,43 +412,24 @@ class EquityPointOut(BaseSchema):
 
 
 class LabStrategyOut(BaseSchema):
-    """One published rule set, replayed over the shared dataset.
-
-    Every figure is measured. `None` means no trade supports it — never zero.
-    """
+    """One research rule replayed over the Generation 2 paper entries."""
 
     id: str
     name: str
     description: str
     rules: list[LabRuleOut]
-    #: True for Equal Weight v1, the permanent benchmark. Never more than one.
     is_baseline: bool
+    rank: int
 
     invested: Decimal
-    #: Every trade, with open positions marked at the latest observed price.
     total_return_pct: Decimal | None = None
-    #: **Closed trades only.** Served beside the total because win rate and
-    #: profit factor are also closed-only: a rule whose headline return comes
-    #: mostly from open marks would otherwise read as though it had earned it.
     realised_return_pct: Decimal | None = None
-    #: Share of trades still open — how much of the total is a mark, not a result.
     open_share_pct: Decimal | None = None
-    #: Return after the venue's published fee and the order's price impact,
-    #: over the trades whose pool depth was reported. Gross stays the headline;
-    #: this sits beside it.
     net_return_pct: Decimal | None = None
-    #: What execution took, in percentage points, measured over the same subset
-    #: as `net_return_pct` so the two compare like with like.
     cost_drag_pct: Decimal | None = None
-    #: Coverage of the net figure. Bonding-curve pairs report no liquidity and
-    #: are excluded rather than costed against an invented depth.
     costed_trades: int = 0
     uncosted_trades: int = 0
-    #: Difference against the baseline, in percentage points. Null for the
-    #: baseline itself — a benchmark does not differ from itself.
     baseline_difference_pct: Decimal | None = None
-    #: Refused unless the observed history is long enough to annualise without
-    #: extrapolating. The reason is served beside it.
     annualised_return_pct: Decimal | None = None
     annualised_unavailable_reason: str | None = None
 
@@ -456,19 +437,24 @@ class LabStrategyOut(BaseSchema):
     open_count: int
     win_rate_pct: Decimal | None = None
     profit_factor: Decimal | None = None
+    expectancy: Decimal | None = None
     average_win: Decimal | None = None
     average_loss: Decimal | None = None
+    average_winner: Decimal | None = None
+    average_loser: Decimal | None = None
     largest_winner: Decimal | None = None
     largest_loser: Decimal | None = None
     max_drawdown_pct: Decimal | None = None
     average_hold_hours: Decimal | None = None
-    #: How high positions got before exiting, and how much of that was handed
-    #: back. Together these explain *why* a rule wins or loses.
     average_peak_pct: Decimal | None = None
+    average_capture_pct: Decimal | None = None
     average_giveback_pct: Decimal | None = None
+    fees_usd: Decimal | None = None
+    slippage_usd: Decimal | None = None
+    average_slippage_usd: Decimal | None = None
+    capital_utilization_pct: Decimal | None = None
     exits_by_reason: dict[str, int] = Field(default_factory=dict)
 
-    rank: int
     equity_curve: list[EquityPointOut] = Field(default_factory=list)
     return_distribution: list[Decimal] = Field(default_factory=list)
     hold_distribution: list[Decimal] = Field(default_factory=list)
@@ -495,21 +481,75 @@ class LabFindingOut(BaseSchema):
 
 
 class EntryDivergenceOut(BaseSchema):
-    """Why the lab's benchmark row and the wallet's ROI are different numbers.
+    """Deprecated compatibility shell for older clients."""
 
-    Measured, not asserted: the gap moves with the market, so a figure written
-    into product copy would go stale the day it shipped.
-    """
-
-    positions: int
-    #: Median wallet entry / lab entry. Above 1 means the wallet paid more.
+    positions: int = 0
     median_ratio: Decimal | None = None
     worst_ratio: Decimal | None = None
     wallet_paid_more: int = 0
     median_lag_hours: Decimal | None = None
-    #: Stated in full, including why the lab cannot simply replay the wallet's
-    #: entry rule.
-    explanation: str
+    explanation: str = ""
+
+
+class LabDataIntegrityOut(BaseSchema):
+    scoped_generation: int
+    scoped_strategy_id: str
+    positions: int
+    open_positions: int
+    closed_positions: int
+    audited_closed_positions: int
+    missing_audit_rows: int
+    manual_overrides: int
+    archived_generation_positions: int
+    archived_missing_audit_rows: int
+    verdict: str
+
+
+class SegmentRowOut(BaseSchema):
+    name: str
+    n: int
+    net_return_pct: Decimal | None = None
+    win_rate_pct: Decimal | None = None
+    profit_factor: Decimal | None = None
+    average_return_pct: Decimal | None = None
+    slippage_drag_pct: Decimal | None = None
+
+
+class PatternAnalysisOut(BaseSchema):
+    entry_market_cap: list[SegmentRowOut] = Field(default_factory=list)
+    liquidity: list[SegmentRowOut] = Field(default_factory=list)
+    radar_score: list[SegmentRowOut] = Field(default_factory=list)
+    age: list[SegmentRowOut] = Field(default_factory=list)
+    holding_time: list[SegmentRowOut] = Field(default_factory=list)
+
+
+class TradeCardOut(BaseSchema):
+    mint_address: str
+    symbol: str | None = None
+    net_return_pct: Decimal | None = None
+    gross_return_pct: Decimal | None = None
+    entry_market_cap: Decimal | None = None
+    entry_liquidity_usd: Decimal | None = None
+    radar_score: Decimal | None = None
+    confidence: Decimal | None = None
+    category: str | None = None
+    age_hours_at_entry: Decimal | None = None
+    hold_hours: Decimal | None = None
+    exit_reason: str | None = None
+
+
+class RecommendationOut(BaseSchema):
+    title: str
+    confidence: str
+    sample_size: int
+    expected_improvement: str
+    trade_offs: str
+
+
+class RejectedIdeaOut(BaseSchema):
+    strategy_id: str
+    reason: str
+    sample_size: int
 
 
 class LabOut(BaseSchema):
@@ -517,17 +557,24 @@ class LabOut(BaseSchema):
     unavailable: list[UnavailableStrategyOut]
     findings: list[LabFindingOut]
     baseline_id: str
+    data_integrity: LabDataIntegrityOut
+    production_summary: LabStrategyOut
+    pattern_analysis: PatternAnalysisOut
+    largest_winners: list[TradeCardOut] = Field(default_factory=list)
+    largest_losers: list[TradeCardOut] = Field(default_factory=list)
+    suggestions: list[RecommendationOut] = Field(default_factory=list)
+    rejected_ideas: list[RejectedIdeaOut] = Field(default_factory=list)
+    final_decision_code: str
+    final_decision: str
     #: Detections replayed, and how many were never priced so never entered.
-    detections: int
-    unpriced_detections: int
+    detections: int = 0
+    unpriced_detections: int = 0
     observed_days: Decimal | None = None
     #: Why a lab return is not a wallet balance. Served on every response.
     methodology: str
     #: What the net figures charge, and the three things they refuse to model.
     cost_disclosure: str
-    #: The entry-price gap against the live wallet. Served so the two numbers
-    #: are never compared naively.
-    entry_divergence: EntryDivergenceOut
+    entry_divergence: EntryDivergenceOut = Field(default_factory=EntryDivergenceOut)
     #: The published rates the net figures apply, so a reader can check them.
     cost_rules: list[LabRuleOut] = Field(default_factory=list)
     observed_at: datetime

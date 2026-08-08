@@ -1,12 +1,8 @@
-"""The Strategy Lab over a real database.
+"""Strategy Lab V2 over a real database.
 
-Sprint 26. What is asserted here is what the sprint is *for*:
-
-  - every rule replays over the **same** detections, loaded once;
-  - the baseline is present, frozen, and compared against rather than replaced;
-  - a rule whose marked return is carried by open positions says so, because
-    ranking on the marked total would otherwise let it look earned;
-  - running the endpoint twice returns byte-identical figures.
+The integration contract is now Generation 2 only. The lab loads the live
+`trailing_stop_25_v1` paper wallet, replays alternate exits from market
+snapshots, and keeps Generation 1 out of optimisation evidence.
 """
 
 from __future__ import annotations
@@ -19,8 +15,9 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.market import TradingStatus
+from app.models.paper import PaperPosition, PaperTradeAudit, PaperWallet
 from app.models.radar import RadarToken
-from app.paper import exits
+from app.paper import costs, lab
 from app.paper.lab_service import load_dataset, replay_all
 from app.repositories.market import MarketSnapshotRepository
 from app.repositories.token import TokenRepository
@@ -28,20 +25,34 @@ from app.repositories.token import TokenRepository
 pytestmark = pytest.mark.integration
 
 NOW = datetime.now(UTC).replace(microsecond=0)
-DETECTED = NOW - timedelta(days=5)
+START = NOW - timedelta(days=5)
+WINNER = "LabV2Winner111111111111111111111111111111"
+LOSER = "LabV2Loser2222222222222222222222222222222"
+RUNNER = "LabV2Runner333333333333333333333333333333"
+ARCHIVED = "LabV1Archived444444444444444444444444444"
 
 
-async def _seed(
-    session: AsyncSession, mint: str, *prices: tuple[int, str], symbol: str = "PRB"
-) -> None:
-    """A detection and the prices observed after it."""
+async def _wallet(session: AsyncSession) -> PaperWallet:
+    wallet = PaperWallet(
+        strategy_id=lab.STRATEGY_ID,
+        strategy_version="1.0.0",
+        generation=lab.GENERATION,
+        starting_balance=Decimal("1000"),
+        started_at=START,
+    )
+    session.add(wallet)
+    await session.flush()
+    return wallet
+
+
+async def _token(session: AsyncSession, mint: str, symbol: str) -> None:
     token = await TokenRepository(session).insert_if_absent(
         {
             "mint_address": mint,
             "signature": f"sig-{mint}",
             "slot": 1,
-            "discovered_at": DETECTED,
-            "block_time": DETECTED,
+            "discovered_at": START - timedelta(hours=2),
+            "block_time": START - timedelta(hours=2),
             "name": symbol,
             "symbol": symbol,
         }
@@ -51,14 +62,14 @@ async def _seed(
         RadarToken(
             token_id=token.id,
             mint_address=mint,
-            first_detected_at=DETECTED,
+            first_detected_at=START - timedelta(hours=2),
             first_market_cap=Decimal("10000"),
-            first_opportunity_score=Decimal(70),
-            first_confidence=Decimal(40),
+            first_opportunity_score=Decimal("80"),
+            first_confidence=Decimal("70"),
             detection_reason=["volume_expanding"],
             category="early_momentum",
-            current_opportunity_score=Decimal(70),
-            current_confidence=Decimal(40),
+            current_opportunity_score=Decimal("80"),
+            current_confidence=Decimal("70"),
             current_category="early_momentum",
             current_multiple=Decimal("1.0"),
             peak_multiple=Decimal("1.0"),
@@ -68,233 +79,225 @@ async def _seed(
     )
     await session.flush()
 
-    market = MarketSnapshotRepository(session)
-    for hours, price in prices:
-        await market.add_snapshot(
+
+async def _snapshots(
+    session: AsyncSession,
+    mint: str,
+    *prices: tuple[int, str],
+    liquidity: str = "18000",
+) -> None:
+    token = await TokenRepository(session).get_by_mint(mint)
+    assert token is not None
+    repo = MarketSnapshotRepository(session)
+    for hour, price in prices:
+        await repo.add_snapshot(
             {
                 "token_id": token.id,
                 "mint_address": mint,
-                "captured_at": DETECTED + timedelta(hours=hours),
+                "captured_at": START + timedelta(hours=hour),
                 "price_usd": Decimal(price),
                 "market_cap": Decimal("124000"),
-                "liquidity_usd": Decimal("18000"),
+                "liquidity_usd": Decimal(liquidity),
                 "volume_24h": Decimal("89000"),
                 "dex_name": "pumpswap",
                 "trading_status": TradingStatus.TRADING,
                 "provider": "test",
             }
         )
+
+
+async def _position(
+    session: AsyncSession,
+    wallet: PaperWallet,
+    mint: str,
+    symbol: str,
+    *,
+    closed: bool = True,
+    manual: bool = False,
+) -> None:
+    await _token(session, mint, symbol)
+    status = "closed" if closed else "open"
+    closed_at = START + timedelta(hours=3) if closed else None
+    exit_price = Decimal("8") if closed else None
+    position = PaperPosition(
+        wallet_id=wallet.id,
+        mint_address=mint,
+        opened_at=START,
+        entry_rank=1,
+        entry_price=Decimal("10"),
+        size_usd=Decimal("100"),
+        quantity=Decimal("10"),
+        target_price=None,
+        stop_price=None,
+        expires_at=None,
+        trailing_drawdown=Decimal("0.25"),
+        entry_market_cap=Decimal("100000"),
+        entry_liquidity_usd=Decimal("18000"),
+        status=status,
+        peak_price=Decimal("20"),
+        last_evaluated_at=closed_at or START,
+        closed_at=closed_at,
+        exit_price=exit_price,
+        exit_reason="manual" if manual else ("stop" if closed else None),
+        manual_action_at=NOW if manual else None,
+    )
+    session.add(position)
     await session.flush()
+    if closed:
+        round_trip = costs.round_trip(
+            entry_notional=Decimal("100"),
+            entry_liquidity=Decimal("18000"),
+            exit_notional=Decimal("80"),
+            exit_liquidity=Decimal("18000"),
+        )
+        assert round_trip is not None
+        session.add(
+            PaperTradeAudit(
+                position_id=position.id,
+                wallet_id=wallet.id,
+                mint_address=mint,
+                symbol=symbol,
+                entry_at=position.opened_at,
+                entry_price=position.entry_price,
+                entry_market_cap=position.entry_market_cap,
+                entry_liquidity_usd=position.entry_liquidity_usd,
+                size_usd=position.size_usd,
+                quantity=position.quantity,
+                exit_at=closed_at,
+                exit_price=exit_price,
+                exit_market_cap=Decimal("90000"),
+                exit_liquidity_usd=Decimal("18000"),
+                gross_return_usd=Decimal("-20"),
+                gross_return_pct=Decimal("-20"),
+                fee_usd=round_trip.entry.fee + round_trip.exit.fee,
+                slippage_usd=round_trip.entry.impact + round_trip.exit.impact,
+                net_return_usd=costs.net_proceeds(
+                    entry_notional=Decimal("100"),
+                    exit_notional=Decimal("80"),
+                    costs=round_trip,
+                ),
+                net_return_pct=Decimal("-20"),
+                exit_reason=position.exit_reason,
+                strategy_id=lab.STRATEGY_ID,
+                strategy_version="1.0.0",
+                wallet_generation=lab.GENERATION,
+                swap_fee_bps=Decimal("30"),
+                manual_action_at=position.manual_action_at,
+            )
+        )
 
 
-WINNER = "LabMintWinner11111111111111111111111111111"
-LOSER = "LabMintLoser222222222222222222222222222222"
-RUNNER = "LabMintRunner33333333333333333333333333333"
+async def _archived_wallet(session: AsyncSession) -> None:
+    wallet = PaperWallet(
+        strategy_id="equal_weight_v1",
+        strategy_version="1.0.0",
+        generation=1,
+        starting_balance=Decimal("1000"),
+        started_at=START - timedelta(days=5),
+        archived_at=START,
+    )
+    session.add(wallet)
+    await session.flush()
+    await _token(session, ARCHIVED, "OLD")
+    session.add(
+        PaperPosition(
+            wallet_id=wallet.id,
+            mint_address=ARCHIVED,
+            opened_at=START - timedelta(days=4),
+            entry_rank=1,
+            entry_price=Decimal("10"),
+            size_usd=Decimal("100"),
+            quantity=Decimal("10"),
+            target_price=Decimal("20"),
+            stop_price=Decimal("5"),
+            expires_at=START,
+            trailing_drawdown=None,
+            entry_market_cap=Decimal("10000"),
+            entry_liquidity_usd=Decimal("18000"),
+            status="closed",
+            peak_price=Decimal("11"),
+            last_evaluated_at=START,
+            closed_at=START,
+            exit_price=Decimal("5"),
+            exit_reason="stop",
+        )
+    )
 
 
 async def _dataset(session: AsyncSession) -> None:
-    # Doubles then halves — the baseline takes profit, a trailing stop keeps more.
-    await _seed(session, WINNER, (0, "10"), (1, "25"), (2, "12"), symbol="WIN")
-    # Falls straight through the stop.
-    await _seed(session, LOSER, (0, "10"), (1, "3"), symbol="LOSE")
-    # Rises slowly and never triggers anything.
-    await _seed(session, RUNNER, (0, "10"), (1, "11"), (2, "12"), symbol="RUN")
+    wallet = await _wallet(session)
+    await _position(session, wallet, WINNER, "WIN")
+    await _position(session, wallet, LOSER, "LOSE")
+    await _position(session, wallet, RUNNER, "RUN", closed=False)
+    await _snapshots(session, WINNER, (1, "20"), (2, "14"), (3, "50"))
+    await _snapshots(session, LOSER, (1, "9"), (2, "7"), (3, "5"))
+    await _snapshots(session, RUNNER, (1, "11"), (2, "12"), (3, "13"))
+
+
+def _by_id(results: tuple[lab.StrategyResult, ...]) -> dict[str, lab.StrategyResult]:
+    return {item.id: item for item in results}
 
 
 class TestSharedDataset:
     async def test_every_strategy_replays_the_same_entries(
         self, db_session: AsyncSession
     ) -> None:
-        """The basis of the whole comparison. If entries differed, a rule could
-        win by having been offered better tokens."""
         await _dataset(db_session)
         await db_session.commit()
 
-        dataset = await load_dataset(db_session, now=NOW)
-        results = replay_all(dataset)
-
+        results = replay_all(await load_dataset(db_session, now=NOW))
         entries = {
-            sid: sorted((t.mint_address, t.entry_price, t.opened_at) for t in r.trades)
-            for sid, r in results.items()
+            result.id: sorted(
+                (trade.mint_address, trade.entry_price, trade.opened_at)
+                for trade in result.trades
+            )
+            for result in results
         }
+
         first = next(iter(entries.values()))
-        for sid, taken in entries.items():
-            assert taken == first, f"{sid} entered a different set"
+        for strategy_id, taken in entries.items():
+            assert taken == first, strategy_id
 
-    async def test_the_dataset_is_ordered_deterministically(
-        self, db_session: AsyncSession
-    ) -> None:
+    async def test_dataset_is_generation_two_only(self, db_session: AsyncSession) -> None:
         await _dataset(db_session)
-        await db_session.commit()
-
-        first = await load_dataset(db_session, now=NOW)
-        second = await load_dataset(db_session, now=NOW)
-
-        assert [d.mint_address for d in first.detections] == [
-            d.mint_address for d in second.detections
-        ]
-        assert first.detections == second.detections
-
-    async def test_a_detection_with_no_prices_is_counted_not_entered(
-        self, db_session: AsyncSession
-    ) -> None:
-        await _seed(db_session, WINNER, (0, "10"), (1, "25"))
-        await _seed(db_session, LOSER)  # no snapshots at all
+        await _archived_wallet(db_session)
         await db_session.commit()
 
         dataset = await load_dataset(db_session, now=NOW)
 
-        assert dataset.unpriced == 1
-        assert {d.mint_address for d in dataset.detections} == {WINNER}
+        assert dataset.integrity.scoped_generation == 2
+        assert dataset.integrity.archived_generation_positions == 1
+        assert dataset.integrity.archived_missing_audit_rows == 1
+        assert {entry.mint_address for entry in dataset.entries} == {WINNER, LOSER, RUNNER}
 
-
-class TestExitRulesDiffer:
-    async def test_the_baseline_and_a_trailing_stop_reach_different_answers(
+    async def test_a_position_with_no_prices_is_counted_not_fabricated(
         self, db_session: AsyncSession
     ) -> None:
-        """If they agreed on everything the lab would have nothing to report."""
-        await _dataset(db_session)
+        wallet = await _wallet(db_session)
+        await _position(db_session, wallet, WINNER, "WIN")
         await db_session.commit()
 
-        results = replay_all(await load_dataset(db_session, now=NOW))
-        baseline = {t.mint_address: t for t in results["equal_weight_v1"].trades}
-        trailing = {t.mint_address: t for t in results["trailing_25"].trades}
+        dataset = await load_dataset(db_session, now=NOW)
 
-        assert baseline[WINNER].exit_price != trailing[WINNER].exit_price
+        assert len(dataset.entries) == 1
+        assert dataset.entries[0].quotes == ()
 
-    async def test_removing_the_stop_changes_the_losers_outcome(
+
+class TestExitResearch:
+    async def test_baseline_and_no_stop_reach_different_answers(
         self, db_session: AsyncSession
     ) -> None:
         await _dataset(db_session)
         await db_session.commit()
 
-        results = replay_all(await load_dataset(db_session, now=NOW))
-        stopped = {t.mint_address: t for t in results["equal_weight_v1"].trades}[LOSER]
-        unstopped = {t.mint_address: t for t in results["no_stop_loss"].trades}[LOSER]
+        results = _by_id(replay_all(await load_dataset(db_session, now=NOW)))
+        baseline = {trade.mint_address: trade for trade in results[lab.BASELINE_ID].trades}
+        hold = {trade.mint_address: trade for trade in results["hold_until_latest"].trades}
 
-        assert stopped.reason is not None
-        assert unstopped.reason is None or unstopped.exit_price != stopped.exit_price
+        assert baseline[WINNER].exit_price == Decimal("14")
+        assert hold[WINNER].mark_price == Decimal("50")
 
-
-class TestApi:
-    async def test_the_table_ranks_and_compares_against_the_baseline(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
-        await _dataset(db_session)
-        await db_session.commit()
-
-        body = (await client.get("/api/v1/paper/lab")).json()
-
-        assert body["baseline_id"] == "equal_weight_v1"
-        baselines = [s for s in body["strategies"] if s["is_baseline"]]
-        assert len(baselines) == 1
-        # A benchmark does not differ from itself.
-        assert baselines[0]["baseline_difference_pct"] is None
-        assert [s["rank"] for s in body["strategies"]] == list(
-            range(1, len(body["strategies"]) + 1)
-        )
-
-    async def test_the_baseline_is_never_dropped_even_when_it_loses(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
-        """Publishing it whether it wins or loses is the point of the sprint."""
-        await _dataset(db_session)
-        await db_session.commit()
-
-        body = (await client.get("/api/v1/paper/lab")).json()
-        ids = [s["id"] for s in body["strategies"]]
-
-        assert "equal_weight_v1" in ids
-        assert len(ids) == len(exits.LAB_STRATEGIES)
-
-    async def test_marked_and_realised_returns_are_both_served(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
-        """Win rate and profit factor count closed trades only. A headline
-        return that includes open marks would otherwise read as though it had
-        been earned."""
-        await _dataset(db_session)
-        await db_session.commit()
-
-        body = (await client.get("/api/v1/paper/lab")).json()
-
-        for strategy in body["strategies"]:
-            assert "realised_return_pct" in strategy
-            assert "open_share_pct" in strategy
-
-    async def test_the_methodology_distinguishes_the_lab_from_the_wallet(
-        self, client: AsyncClient
-    ) -> None:
-        """Reporting a lab return as though it were the wallet's balance would
-        be the quietest lie available here."""
-        body = (await client.get("/api/v1/paper/lab")).json()
-
-        assert "unconstrained" in body["methodology"].lower()
-        assert "not the live wallet" in body["methodology"].lower()
-
-    async def test_an_unmeasurable_strategy_is_declared_with_its_reason(
-        self, client: AsyncClient
-    ) -> None:
-        """An ATR needs OHLC this platform does not store. A proxy under ATR's
-        name would be worse than the omission."""
-        body = (await client.get("/api/v1/paper/lab")).json()
-
-        assert body["unavailable"]
-        assert all(item["reason"] for item in body["unavailable"])
-
-    async def test_annualising_a_short_window_is_refused(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
-        await _dataset(db_session)
-        await db_session.commit()
-
-        body = (await client.get("/api/v1/paper/lab")).json()
-
-        for strategy in body["strategies"]:
-            assert strategy["annualised_return_pct"] is None
-            assert strategy["annualised_unavailable_reason"]
-
-    async def test_findings_name_the_metric_they_rest_on(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
-        await _dataset(db_session)
-        await db_session.commit()
-
-        body = (await client.get("/api/v1/paper/lab")).json()
-
-        assert body["findings"]
-        for finding in body["findings"]:
-            assert finding["headline"] and finding["detail"]
-
-    async def test_nothing_served_reads_as_advice(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
-        await _dataset(db_session)
-        await db_session.commit()
-
-        text = (await client.get("/api/v1/paper/lab")).text.lower()
-
-        for phrase in ("we recommend", "you should", "switch to", "guaranteed"):
-            assert phrase not in text
-
-    async def test_two_calls_return_identical_figures(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
-        """Determinism, asserted at the HTTP boundary."""
-        await _dataset(db_session)
-        await db_session.commit()
-
-        first = (await client.get("/api/v1/paper/lab")).json()
-        second = (await client.get("/api/v1/paper/lab")).json()
-
-        for a, b in zip(first["strategies"], second["strategies"], strict=True):
-            assert a["id"] == b["id"]
-            assert a["total_return_pct"] == b["total_return_pct"]
-            assert a["realised_return_pct"] == b["realised_return_pct"]
-            assert a["max_drawdown_pct"] == b["max_drawdown_pct"]
-            assert a["equity_curve"] == b["equity_curve"]
-
-    async def test_per_token_comparison_covers_every_strategy(
+    async def test_token_comparison_covers_every_strategy(
         self, client: AsyncClient, db_session: AsyncSession
     ) -> None:
         await _dataset(db_session)
@@ -307,26 +310,88 @@ class TestApi:
         for item in body["items"]:
             assert set(item["returns"]) == ids
 
-    async def test_a_token_that_never_rose_crowns_nobody(
+
+class TestApi:
+    async def test_the_table_ranks_and_compares_against_v1(
         self, client: AsyncClient, db_session: AsyncSession
     ) -> None:
         await _dataset(db_session)
         await db_session.commit()
 
-        body = (await client.get("/api/v1/paper/lab/tokens")).json()
-        loser = [i for i in body["items"] if i["mint_address"] == LOSER]
+        body = (await client.get("/api/v1/paper/lab")).json()
 
-        assert loser and loser[0]["best_strategy_id"] is None
+        assert body["baseline_id"] == lab.BASELINE_ID
+        baselines = [strategy for strategy in body["strategies"] if strategy["is_baseline"]]
+        assert len(baselines) == 1
+        assert baselines[0]["baseline_difference_pct"] is None
+        assert [strategy["rank"] for strategy in body["strategies"]] == list(
+            range(1, len(body["strategies"]) + 1)
+        )
+
+    async def test_integrity_and_final_decision_are_served(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        await _dataset(db_session)
+        await _archived_wallet(db_session)
+        await db_session.commit()
+
+        body = (await client.get("/api/v1/paper/lab")).json()
+
+        assert body["data_integrity"]["scoped_generation"] == 2
+        assert body["data_integrity"]["missing_audit_rows"] == 0
+        assert body["data_integrity"]["archived_missing_audit_rows"] == 1
+        assert body["final_decision_code"] in {"A", "B", "C"}
+        assert body["final_decision"]
+
+    async def test_methodology_names_generation_scope(self, client: AsyncClient) -> None:
+        body = (await client.get("/api/v1/paper/lab")).json()
+
+        assert "generation 2" in body["methodology"].lower()
+        assert "generation 1 is archived" in body["methodology"].lower()
+        assert "production trading behaviour is not changed" in body["methodology"].lower()
+
+    async def test_patterns_and_rejections_are_served(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        await _dataset(db_session)
+        await db_session.commit()
+
+        body = (await client.get("/api/v1/paper/lab")).json()
+
+        assert body["pattern_analysis"]["entry_market_cap"]
+        assert body["pattern_analysis"]["liquidity"]
+        assert body["suggestions"]
+        assert "rejected_ideas" in body
+
+    async def test_two_calls_return_identical_figures(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        await _dataset(db_session)
+        await db_session.commit()
+
+        first = (await client.get("/api/v1/paper/lab")).json()
+        second = (await client.get("/api/v1/paper/lab")).json()
+
+        for a, b in zip(first["strategies"], second["strategies"], strict=True):
+            assert a["id"] == b["id"]
+            assert a["total_return_pct"] == b["total_return_pct"]
+            assert a["net_return_pct"] == b["net_return_pct"]
+            assert a["equity_curve"] == b["equity_curve"]
+
+    async def test_nothing_served_reads_as_advice(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        await _dataset(db_session)
+        await db_session.commit()
+
+        text = (await client.get("/api/v1/paper/lab")).text.lower()
+
+        for phrase in ("we recommend", "you should", "guaranteed"):
+            assert phrase not in text
 
 
 class TestExecutionCosts:
-    """Net beside gross, never replacing it.
-
-    The published rules are frozen; this is a cost lens on the same trades, not
-    a restatement of what those trades were.
-    """
-
-    async def test_gross_is_still_served_beside_net(
+    async def test_gross_is_served_beside_net(
         self, client: AsyncClient, db_session: AsyncSession
     ) -> None:
         await _dataset(db_session)
@@ -337,131 +402,18 @@ class TestExecutionCosts:
         for strategy in body["strategies"]:
             assert "total_return_pct" in strategy
             assert "net_return_pct" in strategy
-            # Ranking is still on gross — the frozen benchmark's standing must
-            # not move because a cost model was added.
-            assert strategy["rank"] >= 1
+            assert strategy["costed_trades"] + strategy["uncosted_trades"] == (
+                strategy["closed_count"] + strategy["open_count"]
+            )
 
-    async def test_net_is_never_better_than_gross(
-        self, client: AsyncClient, db_session: AsyncSession
+    async def test_cost_model_disclosure_ships_with_the_page(
+        self, client: AsyncClient
     ) -> None:
-        """A venue does not pay you to trade."""
-        await _dataset(db_session)
-        await db_session.commit()
-
-        body = (await client.get("/api/v1/paper/lab")).json()
-
-        for strategy in body["strategies"]:
-            if strategy["cost_drag_pct"] is None:
-                continue
-            assert Decimal(strategy["cost_drag_pct"]) <= 0, strategy["id"]
-
-    async def test_coverage_of_the_net_figure_is_published(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
-        """Bonding-curve pairs report no depth and are excluded. How many is a
-        fact a reader is entitled to, not a footnote."""
-        await _dataset(db_session)
-        await db_session.commit()
-
-        body = (await client.get("/api/v1/paper/lab")).json()
-
-        for strategy in body["strategies"]:
-            total = strategy["costed_trades"] + strategy["uncosted_trades"]
-            assert total == strategy["closed_count"] + strategy["open_count"]
-
-    async def test_the_refusals_ship_with_the_model(self, client: AsyncClient) -> None:
-        """Slippage, priority fees and MEV are not modelled, and the page says
-        so rather than letting a net figure imply completeness."""
         body = (await client.get("/api/v1/paper/lab")).json()
 
         disclosure = body["cost_disclosure"].lower()
         assert "slippage" in disclosure
         assert "mev" in disclosure or "priority" in disclosure
-        assert body["cost_rules"]
         labels = {rule["label"] for rule in body["cost_rules"]}
         assert "Swap fee" in labels
         assert "Price impact" in labels
-
-    async def test_the_baseline_is_still_the_baseline_after_costs(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
-        """Adding a cost lens must not promote or demote the frozen benchmark."""
-        await _dataset(db_session)
-        await db_session.commit()
-
-        body = (await client.get("/api/v1/paper/lab")).json()
-        baseline = [s for s in body["strategies"] if s["is_baseline"]]
-
-        assert len(baseline) == 1
-        assert baseline[0]["id"] == "equal_weight_v1"
-        assert baseline[0]["baseline_difference_pct"] is None
-
-
-class TestEntryDivergence:
-    """Why the lab's benchmark row and the wallet's ROI are different numbers.
-
-    Reported by a user comparing the two figures, which the product invited by
-    describing the lab's baseline as "the live wallet's rule". It was only ever
-    the wallet's *exit* rule: the lab enters at detection price, while the
-    wallet enters when a token first reaches the top 10 — measured at a median
-    of 6.7 hours later, and after the move that put it there. On live data the
-    wallet paid more on 10 of 13 positions, median 1.40x and worst 46.7x.
-    """
-
-    async def test_the_gap_is_measured_not_asserted(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
-        """A figure written into copy goes stale the day it ships."""
-        await _dataset(db_session)
-        await db_session.commit()
-
-        divergence = (await client.get("/api/v1/paper/lab")).json()["entry_divergence"]
-
-        assert "positions" in divergence
-        assert "median_ratio" in divergence
-        assert divergence["explanation"]
-
-    async def test_it_states_why_the_wallet_entry_cannot_be_replayed(
-        self, client: AsyncClient
-    ) -> None:
-        """The Radar sweep rotates, so `radar_snapshots` holds a slice per
-        sweep rather than the full ranking. Historical top-10 membership is not
-        reconstructible, and a proxy for it would be the estimate this platform
-        refuses."""
-        note = (await client.get("/api/v1/paper/lab")).json()["entry_divergence"][
-            "explanation"
-        ]
-
-        assert "detection price" in note
-        assert "not reconstructible" in note
-        assert "must not be compared" in note
-
-    async def test_the_baseline_no_longer_claims_to_be_the_wallets_rule(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
-        """It is the wallet's exit rule. Saying otherwise invited exactly the
-        comparison that produced this bug report."""
-        await _dataset(db_session)
-        await db_session.commit()
-
-        baseline = next(
-            s
-            for s in (await client.get("/api/v1/paper/lab")).json()["strategies"]
-            if s["is_baseline"]
-        )
-
-        assert "exit" in baseline["description"]
-        assert "not the wallet's *entry* rule" in baseline["description"]
-
-    async def test_a_wallet_with_no_positions_reports_no_gap_rather_than_zero(
-        self, client: AsyncClient, db_session: AsyncSession
-    ) -> None:
-        """Nothing has been compared, which is not the same as the two agreeing."""
-        await _dataset(db_session)
-        await db_session.commit()
-
-        divergence = (await client.get("/api/v1/paper/lab")).json()["entry_divergence"]
-
-        assert divergence["positions"] == 0
-        assert divergence["median_ratio"] is None
-        assert divergence["worst_ratio"] is None

@@ -1,190 +1,184 @@
-"""Loading the lab's dataset, once, and replaying every rule over it.
+"""I/O for the Generation-2 Strategy Lab.
 
-The dataset is built **once per request and shared by every strategy** — that
-sharing is not an optimisation, it is the guarantee. Two strategies given two
-separately-loaded datasets could differ because a snapshot landed between the
-loads, and the comparison would silently be measuring a race.
-
-I/O only. Every decision lives in `lab.py` and `exits.py`, which are pure.
+Loads one scoped, immutable research dataset. The live paper-wallet evaluator is
+not imported here and no write path exists.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
-from decimal import Decimal
+from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.paper import PaperPosition
+from app.models.paper import PaperPosition, PaperTradeAudit, PaperWallet
 from app.models.radar import RadarToken
-from app.paper import exits, lab
-from app.paper.models import PositionStatus, Quote
-from app.radar.repository import RadarRepository
+from app.paper import lab
+from app.paper.models import PositionStatus
 from app.repositories.market import MarketSnapshotRepository
-
-#: How far before a detection to look for its entry price. A detection recorded
-#: at 12:00 was scored from a snapshot taken moments earlier, so the entry is the
-#: first reading at or after that moment — not one an hour later.
-_ENTRY_LOOKBACK = timedelta(seconds=1)
 
 
 @dataclass(frozen=True, slots=True)
 class LabDataset:
-    """Every detection and its price history, as replayed."""
-
-    detections: tuple[lab.Detection, ...]
-    #: Detections that were never priced, so never entered by any rule.
-    unpriced: int
+    entries: tuple[lab.TradeInput, ...]
+    integrity: lab.DataIntegrity
     loaded_at: datetime
 
 
 async def load_dataset(session: AsyncSession, *, now: datetime) -> LabDataset:
-    """Every Radar detection with its observed prices, in two queries.
-
-    Ordered by detection time with a mint tiebreak so the replay input — and
-    therefore its output — is identical across runs.
-    """
-    entries = list(
+    """Load Generation 2 (`trailing_stop_25_v1`) only."""
+    wallets = list(
         (
             await session.scalars(
-                select(RadarToken).order_by(
-                    RadarToken.first_detected_at.asc(), RadarToken.mint_address.asc()
+                select(PaperWallet).where(
+                    PaperWallet.generation == lab.GENERATION,
+                    PaperWallet.strategy_id == lab.STRATEGY_ID,
                 )
             )
         ).all()
     )
-    if not entries:
-        return LabDataset(detections=(), unpriced=0, loaded_at=now)
-
-    oldest = min(entry.first_detected_at for entry in entries) - _ENTRY_LOOKBACK
-    series = await MarketSnapshotRepository(session).series_for_mints(
-        [entry.mint_address for entry in entries], since=oldest
-    )
-    names = await RadarRepository(session).names_for([entry.mint_address for entry in entries])
-
-    detections: list[lab.Detection] = []
-    unpriced = 0
-    for entry in entries:
-        cutoff = entry.first_detected_at - _ENTRY_LOOKBACK
-        quotes = tuple(
-            Quote(
-                captured_at=row.captured_at,
-                price_usd=row.price_usd,
-                liquidity_usd=row.liquidity_usd,
-            )
-            for row in series.get(entry.mint_address, [])
-            if row.price_usd is not None and row.price_usd > 0 and row.captured_at >= cutoff
+    if not wallets:
+        return LabDataset(
+            entries=(),
+            integrity=lab.DataIntegrity(
+                scoped_generation=lab.GENERATION,
+                scoped_strategy_id=lab.STRATEGY_ID,
+                positions=0,
+                open_positions=0,
+                closed_positions=0,
+                audited_closed_positions=0,
+                missing_audit_rows=0,
+                manual_overrides=0,
+                archived_generation_positions=0,
+                archived_missing_audit_rows=0,
+                verdict="No Generation 2 wallet exists in this database.",
+            ),
+            loaded_at=now,
         )
-        if not quotes:
-            unpriced += 1
-            continue
-        _, symbol = names.get(entry.mint_address, (None, None))
-        detections.append(
-            lab.Detection(
-                mint_address=entry.mint_address,
-                symbol=symbol,
-                detected_at=entry.first_detected_at,
+
+    wallet_ids = [wallet.id for wallet in wallets]
+    positions = list(
+        (
+            await session.scalars(
+                select(PaperPosition)
+                .where(PaperPosition.wallet_id.in_(wallet_ids))
+                .order_by(PaperPosition.opened_at.asc(), PaperPosition.mint_address.asc())
+            )
+        ).all()
+    )
+    audits = list(
+        (
+            await session.scalars(
+                select(PaperTradeAudit).where(PaperTradeAudit.wallet_id.in_(wallet_ids))
+            )
+        ).all()
+    )
+    audits_by_position = {row.position_id: row for row in audits}
+    mints = [row.mint_address for row in positions]
+    radar = {
+        row.mint_address: row
+        for row in (
+            await session.scalars(select(RadarToken).where(RadarToken.mint_address.in_(mints)))
+        ).all()
+    }
+    oldest = min((row.opened_at for row in positions), default=now)
+    series = await MarketSnapshotRepository(session).series_for_mints(mints, since=oldest)
+
+    entries: list[lab.TradeInput] = []
+    for row in positions:
+        score = radar.get(row.mint_address)
+        quotes = tuple(
+            lab.QuotePoint(
+                at=snapshot.captured_at,
+                price=snapshot.price_usd,
+                market_cap=snapshot.market_cap,
+                liquidity_usd=snapshot.liquidity_usd,
+                volume_24h=snapshot.volume_24h,
+            )
+            for snapshot in series.get(row.mint_address, [])
+            if snapshot.price_usd is not None and snapshot.price_usd > 0
+        )
+        entry_volume = next(
+            (quote.volume_24h for quote in quotes if quote.at >= row.opened_at), None
+        )
+        entries.append(
+            lab.TradeInput(
+                position_id=row.id,
+                mint_address=row.mint_address,
+                symbol=None
+                if audits_by_position.get(row.id) is None
+                else audits_by_position[row.id].symbol,
+                opened_at=row.opened_at,
+                entry_price=row.entry_price,
+                size_usd=row.size_usd,
+                quantity=row.quantity,
+                entry_market_cap=row.entry_market_cap,
+                entry_liquidity_usd=row.entry_liquidity_usd,
+                entry_rank=row.entry_rank,
+                status=row.status,
+                actual_closed_at=row.closed_at,
+                actual_exit_reason=row.exit_reason,
+                manual=row.exit_reason == "manual",
+                peak_price=row.peak_price,
+                first_detected_at=None if score is None else score.first_detected_at,
+                radar_score=None if score is None else score.first_opportunity_score,
+                confidence=None if score is None else score.first_confidence,
+                category=None if score is None else score.category,
+                entry_volume_24h=entry_volume,
                 quotes=quotes,
             )
         )
 
-    return LabDataset(detections=tuple(detections), unpriced=unpriced, loaded_at=now)
-
-
-def replay_all(dataset: LabDataset) -> dict[str, lab.LabResult]:
-    """Every published rule over the one dataset.
-
-    Keyed by strategy id and built in declaration order, so iteration is stable.
-    """
-    return {
-        strategy.id: lab.replay(dataset.detections, strategy)
-        for strategy in exits.LAB_STRATEGIES
-    }
-
-
-@dataclass(frozen=True, slots=True)
-class EntryDivergence:
-    """How far the lab's entry price sits from the live wallet's, measured.
-
-    The lab enters every detection at its **detection price**. The wallet
-    enters when a token first reaches the Radar's Top N — typically hours
-    later, and *after the run-up that put it there*. That makes the lab's
-    entries systematically cheaper, in one direction, so its returns are
-    optimistic relative to anything the wallet could have achieved.
-
-    This is measured rather than asserted because the gap moves with the
-    market, and a hardcoded figure in product copy goes stale the day it ships.
-
-    **Why the lab does not simply replay the wallet's entry:** it cannot. The
-    Radar sweep rotates through buckets, so `radar_snapshots` holds a slice of
-    the universe per sweep (6-16 rows of 108), never the full ranking. Historical
-    Top-N membership is therefore not reconstructible from stored data, and
-    inventing a proxy for it would be exactly the estimate this platform
-    refuses. The honest move is to publish the divergence, not to model it away.
-    """
-
-    positions: int
-    #: Median wallet entry / lab entry. Above 1 means the wallet paid more.
-    median_ratio: Decimal | None
-    worst_ratio: Decimal | None
-    #: How many positions the wallet entered at a higher price than the lab.
-    wallet_paid_more: int
-    #: Median hours between detection and the wallet's entry.
-    median_lag_hours: Decimal | None
-
-
-async def measure_entry_divergence(
-    session: AsyncSession, dataset: LabDataset
-) -> EntryDivergence:
-    """Compare every live wallet entry against the lab's for the same token."""
-    positions = (
-        await session.scalars(
-            select(PaperPosition).where(PaperPosition.status == PositionStatus.OPEN.value)
+    closed = [row for row in positions if row.status == PositionStatus.CLOSED.value]
+    missing = [row for row in closed if row.id not in audits_by_position]
+    archived_positions = int(
+        await session.scalar(
+            select(func.count())
+            .select_from(PaperPosition)
+            .join(PaperWallet, PaperWallet.id == PaperPosition.wallet_id)
+            .where(PaperWallet.generation != lab.GENERATION)
         )
-    ).all()
-    closed = (
-        await session.scalars(
-            select(PaperPosition).where(PaperPosition.status == PositionStatus.CLOSED.value)
-        )
-    ).all()
-
-    lab_entry = {
-        detection.mint_address: detection.quotes[0]
-        for detection in dataset.detections
-        if detection.quotes
-    }
-
-    ratios: list[Decimal] = []
-    lags: list[Decimal] = []
-    paid_more = 0
-
-    for position in [*positions, *closed]:
-        quote = lab_entry.get(position.mint_address)
-        if quote is None or quote.price_usd <= 0:
-            continue
-        ratio = position.entry_price / quote.price_usd
-        ratios.append(ratio)
-        if ratio > 1:
-            paid_more += 1
-        lags.append(
-            Decimal((position.opened_at - quote.captured_at).total_seconds()) / Decimal(3600)
-        )
-
-    def _median(values: list[Decimal]) -> Decimal | None:
-        if not values:
-            return None
-        ordered = sorted(values)
-        middle = len(ordered) // 2
-        if len(ordered) % 2 == 1:
-            return ordered[middle].quantize(Decimal("0.01"))
-        return ((ordered[middle - 1] + ordered[middle]) / 2).quantize(Decimal("0.01"))
-
-    return EntryDivergence(
-        positions=len(ratios),
-        median_ratio=_median(ratios),
-        worst_ratio=(max(ratios).quantize(Decimal("0.1")) if ratios else None),
-        wallet_paid_more=paid_more,
-        median_lag_hours=_median(lags),
+        or 0
     )
+    archived_missing = int(
+        await session.scalar(
+            select(func.count())
+            .select_from(PaperPosition)
+            .join(PaperWallet, PaperWallet.id == PaperPosition.wallet_id)
+            .outerjoin(PaperTradeAudit, PaperTradeAudit.position_id == PaperPosition.id)
+            .where(
+                PaperWallet.generation != lab.GENERATION,
+                PaperPosition.status == PositionStatus.CLOSED.value,
+                PaperTradeAudit.id.is_(None),
+            )
+        )
+        or 0
+    )
+    return LabDataset(
+        entries=tuple(entries),
+        integrity=lab.DataIntegrity(
+            scoped_generation=lab.GENERATION,
+            scoped_strategy_id=lab.STRATEGY_ID,
+            positions=len(positions),
+            open_positions=sum(
+                1 for row in positions if row.status == PositionStatus.OPEN.value
+            ),
+            closed_positions=len(closed),
+            audited_closed_positions=len(closed) - len(missing),
+            missing_audit_rows=len(missing),
+            manual_overrides=sum(1 for row in positions if row.exit_reason == "manual"),
+            archived_generation_positions=archived_positions,
+            archived_missing_audit_rows=archived_missing,
+            verdict=(
+                "Generation 2 is complete enough for scoped research."
+                if not missing
+                else "Generation 2 has missing audit rows; optimisation should stop."
+            ),
+        ),
+        loaded_at=now,
+    )
+
+
+def replay_all(dataset: LabDataset) -> tuple[lab.StrategyResult, ...]:
+    return lab.replay_all(dataset.entries)

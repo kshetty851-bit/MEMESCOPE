@@ -284,22 +284,15 @@ export interface LabStrategy {
   name: string;
   description: string;
   rules: LabRule[];
-  /** True for Equal Weight v1, the permanent benchmark. Never more than one. */
   is_baseline: boolean;
+  rank: number;
 
   invested: string;
-  /** Every trade, with open positions marked at the latest observed price. */
   total_return_pct: string | null;
-  /** Closed trades only. Win rate and profit factor are closed-only too. */
   realised_return_pct: string | null;
-  /** How much of the total is a mark rather than a result. */
   open_share_pct: string | null;
-  /** Return after the venue's fee and the order's price impact. Gross stays
-   *  the headline; this sits beside it. */
   net_return_pct: string | null;
-  /** What execution took, in points, over the same subset as net. */
   cost_drag_pct: string | null;
-  /** Coverage: bonding-curve pairs report no depth and are excluded. */
   costed_trades: number;
   uncosted_trades: number;
   baseline_difference_pct: string | null;
@@ -310,18 +303,24 @@ export interface LabStrategy {
   open_count: number;
   win_rate_pct: string | null;
   profit_factor: string | null;
+  expectancy: string | null;
   average_win: string | null;
   average_loss: string | null;
+  average_winner: string | null;
+  average_loser: string | null;
   largest_winner: string | null;
   largest_loser: string | null;
   max_drawdown_pct: string | null;
   average_hold_hours: string | null;
-  /** How high positions got, and how much of it was handed back. */
   average_peak_pct: string | null;
+  average_capture_pct: string | null;
   average_giveback_pct: string | null;
+  fees_usd: string | null;
+  slippage_usd: string | null;
+  average_slippage_usd: string | null;
+  capital_utilization_pct: string | null;
   exits_by_reason: Record<string, number>;
 
-  rank: number;
   equity_curve: EquityPoint[];
   return_distribution: string[];
   hold_distribution: string[];
@@ -339,11 +338,81 @@ export interface LabFinding {
   strategy_id: string | null;
 }
 
+export interface LabDataIntegrity {
+  scoped_generation: number;
+  scoped_strategy_id: string;
+  positions: number;
+  open_positions: number;
+  closed_positions: number;
+  audited_closed_positions: number;
+  missing_audit_rows: number;
+  manual_overrides: number;
+  archived_generation_positions: number;
+  archived_missing_audit_rows: number;
+  verdict: string;
+}
+
+export interface SegmentRow {
+  name: string;
+  n: number;
+  net_return_pct: string | null;
+  win_rate_pct: string | null;
+  profit_factor: string | null;
+  average_return_pct: string | null;
+  slippage_drag_pct: string | null;
+}
+
+export interface PatternAnalysis {
+  entry_market_cap: SegmentRow[];
+  liquidity: SegmentRow[];
+  radar_score: SegmentRow[];
+  age: SegmentRow[];
+  holding_time: SegmentRow[];
+}
+
+export interface TradeCard {
+  mint_address: string;
+  symbol: string | null;
+  net_return_pct: string | null;
+  gross_return_pct: string | null;
+  entry_market_cap: string | null;
+  entry_liquidity_usd: string | null;
+  radar_score: string | null;
+  confidence: string | null;
+  category: string | null;
+  age_hours_at_entry: string | null;
+  hold_hours: string | null;
+  exit_reason: string | null;
+}
+
+export interface Recommendation {
+  title: string;
+  confidence: string;
+  sample_size: number;
+  expected_improvement: string;
+  trade_offs: string;
+}
+
+export interface RejectedIdea {
+  strategy_id: string;
+  reason: string;
+  sample_size: number;
+}
+
 export interface Lab {
   strategies: LabStrategy[];
   unavailable: UnavailableStrategy[];
   findings: LabFinding[];
   baseline_id: string;
+  data_integrity: LabDataIntegrity;
+  production_summary: LabStrategy;
+  pattern_analysis: PatternAnalysis;
+  largest_winners: TradeCard[];
+  largest_losers: TradeCard[];
+  suggestions: Recommendation[];
+  rejected_ideas: RejectedIdea[];
+  final_decision_code: string;
+  final_decision: string;
   detections: number;
   unpriced_detections: number;
   observed_days: string | null;
