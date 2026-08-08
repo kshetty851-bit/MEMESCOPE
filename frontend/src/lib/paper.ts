@@ -10,6 +10,7 @@ import type {
   PaperPositions,
   PaperStrategies,
   PaperWallet,
+  StrategyIntelligence,
 } from "@/types/paper";
 
 /**
@@ -155,6 +156,10 @@ export function fetchLab(): Promise<Lab> {
 
 export function fetchLabTokens(limit = 100): Promise<LabTokens> {
   return api.get<LabTokens>(`/paper/lab/tokens?limit=${limit}`);
+}
+
+export function fetchStrategyIntelligence(): Promise<StrategyIntelligence> {
+  return api.get<StrategyIntelligence>("/paper/strategy-intelligence");
 }
 
 /**

@@ -12,7 +12,11 @@ import { TokenActions } from "@/components/token/token-actions";
 import { FreshnessLabel, LiveStatus, NoMarketData } from "@/components/ui/freshness";
 import { usePaperPositions } from "@/hooks/use-paper";
 import { byMint, exitLabel, usd } from "@/lib/paper";
-import { useRadar, useRadarBenchmark, useRadarPerformance } from "@/hooks/use-radar";
+import {
+  useAllRadarDetections,
+  useRadarBenchmark,
+  useRadarPerformance,
+} from "@/hooks/use-radar";
 import { formatMultiple } from "@/lib/radar";
 import { cn } from "@/lib/utils";
 import type { PaperPosition } from "@/types/paper";
@@ -203,7 +207,8 @@ export default function TrackRecordPage() {
   const benchmark = useRadarBenchmark();
   // The whole record, not a page of it: this table's entire purpose is that
   // nothing is left out, and `include_inactive` is what keeps dead entries in.
-  const record = useRadar({ pageSize: 100, includeInactive: true, sort: "detected" });
+  // The API still serves bounded pages; this page stitches them together.
+  const record = useAllRadarDetections({ includeInactive: true, sort: "detected" });
   // "Was this token traded?" answered from the wallet's own rows. One request
   // for the page, indexed by mint — the paper slice stays independent of the
   // Radar, and the Radar's hot path takes no extra query.

@@ -36,6 +36,7 @@ from app.core.events import publish_live_update
 from app.core.logging import get_logger
 from app.db.session import SessionFactory
 from app.paper.service import PaperWalletService, utcnow
+from app.paper.shadow import ShadowPaperService
 from app.workers.celery_app import celery_app
 from app.workers.runtime import run_async
 
@@ -57,7 +58,9 @@ async def _paper_review() -> dict[str, Any]:
         return {"skipped": "wallet_disabled"}
 
     async with SessionFactory() as session:
-        outcome = await PaperWalletService(session).review(now=utcnow())
+        now = utcnow()
+        outcome = await PaperWalletService(session).review(now=now)
+        shadow_outcome = await ShadowPaperService(session).review(now=now)
         # The worker owns its session and commits explicitly; the service only
         # flushes, so the same code can run inside another transaction.
         await session.commit()
@@ -66,8 +69,8 @@ async def _paper_review() -> dict[str, Any]:
     # completed review is relevant even when it opened or closed no position.
     await publish_live_update("paper.changed")
 
-    logger.info("paper_review", **outcome.as_dict())
-    return outcome.as_dict()
+    logger.info("paper_review", **outcome.as_dict(), shadow=shadow_outcome.as_dict())
+    return {**outcome.as_dict(), "shadow": shadow_outcome.as_dict()}
 
 
 def request_review(*, trigger: str) -> None:

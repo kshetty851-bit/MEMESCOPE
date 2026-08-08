@@ -10,6 +10,7 @@ import {
   fetchPaperPositions,
   fetchPaperStrategies,
   fetchPaperWallet,
+  fetchStrategyIntelligence,
   previewManualSell,
   sellPaperPosition,
 } from "@/lib/paper";
@@ -117,5 +118,15 @@ export function useLabTokens(limit = 60) {
     queryKey: ["paper", "lab", "tokens", limit],
     queryFn: () => fetchLabTokens(limit),
     staleTime: PAPER_POLL_MS,
+  });
+}
+
+export function useStrategyIntelligence() {
+  const { status } = useLiveUpdates();
+  return useQuery({
+    queryKey: ["paper", "strategy-intelligence"],
+    queryFn: fetchStrategyIntelligence,
+    refetchInterval: status === "live" ? false : PAPER_POLL_MS,
+    staleTime: PAPER_POLL_MS / 2,
   });
 }

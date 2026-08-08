@@ -1,13 +1,102 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   CATEGORY_LABEL,
   CATEGORY_TONE,
+  fetchAllRadarDetections,
   formatAgo,
   formatDays,
   formatMultiple,
   multipleTone,
 } from "@/lib/radar";
+import type { RadarEntry, RadarPage } from "@/types/radar";
+
+function entry(mint: string): RadarEntry {
+  return {
+    mint_address: mint,
+    name: `Token ${mint}`,
+    symbol: "TKN",
+    category: "early_momentum",
+    original_category: "early_momentum",
+    opportunity_score: "60",
+    confidence: "60",
+    first_detected_at: "2026-08-08T12:00:00Z",
+    first_price: "1",
+    first_market_cap: "100000",
+    first_liquidity: "10000",
+    first_opportunity_score: "60",
+    current_price: "1",
+    current_market_cap: "100000",
+    current_liquidity: "10000",
+    current_multiple: "1",
+    peak_multiple: "1",
+    peak_price: "1",
+    peak_market_cap: "100000",
+    peak_at: "2026-08-08T12:00:00Z",
+    days_since_detection: "0",
+    is_active: true,
+    detection_reason: [],
+    achieved_tiers: [],
+    liveness: "alive",
+    model_version: "radar-v1",
+    last_evaluated_at: "2026-08-08T12:00:00Z",
+    base_rate: null,
+    market: null,
+    age_seconds: null,
+    risk_score: null,
+    risk_band: null,
+    risk_reasons: [],
+    evidence: null,
+    signal: null,
+    why_now: null,
+  };
+}
+
+function page(items: RadarEntry[], total: number, pageNumber: number): RadarPage {
+  return {
+    items,
+    total,
+    page: pageNumber,
+    page_size: 100,
+    applied_filters: {},
+  };
+}
+
+function response(body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
+
+describe("fetchAllRadarDetections", () => {
+  it("stitches every bounded Radar page into the permanent record", async () => {
+    const first = Array.from({ length: 100 }, (_, index) => entry(`Mint${index}`));
+    const second = Array.from({ length: 5 }, (_, index) => entry(`Mint${index + 100}`));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(response(page(first, 105, 1)))
+      .mockResolvedValueOnce(response(page(second, 105, 2)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await fetchAllRadarDetections({
+      includeInactive: true,
+      sort: "detected",
+    });
+
+    expect(result.items).toHaveLength(105);
+    expect(result.items.at(-1)?.mint_address).toBe("Mint104");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(String(fetchMock.mock.calls[0]![0])).toContain("page=1");
+    expect(String(fetchMock.mock.calls[0]![0])).toContain("page_size=100");
+    expect(String(fetchMock.mock.calls[1]![0])).toContain("page=2");
+  });
+});
 
 describe("formatMultiple", () => {
   it("renders a gain as a multiple", () => {

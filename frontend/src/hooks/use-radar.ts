@@ -5,6 +5,7 @@ import { useLiveUpdates } from "@/hooks/use-live-updates";
 
 import {
   fetchRadar,
+  fetchAllRadarDetections,
   fetchRadarEntry,
   fetchRadarHistory,
   fetchRadarModel,
@@ -36,6 +37,20 @@ export function useRadar(params: {
   return useQuery({
     queryKey: ["radar", "list", params],
     queryFn: () => fetchRadar(params),
+    refetchInterval: status === "live" ? false : RADAR_POLL_MS,
+    staleTime: RADAR_POLL_MS / 2,
+  });
+}
+
+export function useAllRadarDetections(params: {
+  category?: RadarCategory | null;
+  sort?: "score" | "detected" | "peak" | "current";
+  includeInactive?: boolean;
+}) {
+  const { status } = useLiveUpdates();
+  return useQuery({
+    queryKey: ["radar", "all-detections", params],
+    queryFn: () => fetchAllRadarDetections(params),
     refetchInterval: status === "live" ? false : RADAR_POLL_MS,
     staleTime: RADAR_POLL_MS / 2,
   });

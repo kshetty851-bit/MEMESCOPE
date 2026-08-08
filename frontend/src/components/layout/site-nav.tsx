@@ -32,6 +32,7 @@ const NAV: NavItem[] = [
   // wallet raises: the wallet runs one rule, the lab shows how every published
   // rule handled the same detections.
   { href: "/lab", label: "Strategy lab" },
+  { href: "/strategy-intelligence", label: "Intelligence" },
   { href: "/settings", label: "Settings" },
 ];
 

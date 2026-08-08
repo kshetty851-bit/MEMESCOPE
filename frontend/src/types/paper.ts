@@ -505,3 +505,98 @@ export interface LabTokens {
   strategy_ids: string[];
   observed_at: string;
 }
+
+export interface ShadowTradeCard {
+  mint_address: string;
+  opened_at: string;
+  closed_at: string;
+  pnl_usd: string;
+  return_pct: string | null;
+  exit_reason: string | null;
+}
+
+export interface ShadowDecision {
+  mint_address: string;
+  wallet_code: string;
+  decision: "accepted" | "rejected";
+  reason_codes: string[];
+  radar_rank: number;
+  radar_score: string | null;
+  market_cap: string | null;
+  liquidity_usd: string | null;
+  entry_impact_pct: string | null;
+  execution_quality: string | null;
+  decided_at: string;
+}
+
+export interface ShadowWallet {
+  code: string;
+  name: string;
+  strategy_id: string;
+  strategy_version: string;
+  summary: string;
+  started_at: string;
+  current_equity: string | null;
+  cash: string;
+  gross_return: string;
+  net_return: string;
+  profit_factor: string | null;
+  expectancy: string | null;
+  win_rate_pct: string | null;
+  max_drawdown_pct: string | null;
+  capital_utilization_pct: string | null;
+  accepted_opportunities: number;
+  rejected_opportunities: number;
+  acceptance_rate_pct: string | null;
+  top_rejection_reasons: Record<string, number>;
+  average_radar_score: string | null;
+  average_market_cap: string | null;
+  average_liquidity_usd: string | null;
+  average_entry_impact_pct: string | null;
+  average_token_age_hours: string | null;
+  average_hold_hours: string | null;
+  average_winner: string | null;
+  average_loser: string | null;
+  best_trade: ShadowTradeCard | null;
+  worst_trade: ShadowTradeCard | null;
+  open_positions: number;
+  closed_positions: number;
+  promotion_score: string;
+  promotion_eligible: boolean;
+  promotion_blockers: string[];
+  decisions: ShadowDecision[];
+  observed_at: string;
+}
+
+export interface MissedOpportunity {
+  wallet_code: string;
+  mint_address: string;
+  reason_codes: string[];
+  accepted_elsewhere: string[];
+  outcome?: "missed_winner" | "good_rejection" | "pending" | string | null;
+  pnl_usd?: string | null;
+}
+
+export interface FilterPerformance {
+  reason_code: string;
+  times_triggered: number;
+  winning_trades_prevented: number;
+  losing_trades_prevented: number;
+  net_pl_saved: string | null;
+  net_pl_missed: string | null;
+  average_opportunity_cost: string | null;
+}
+
+export interface StrategyIntelligence {
+  enabled: boolean;
+  observed_at: string;
+  promotion_rules: {
+    minimum_completed_trades: number;
+    minimum_profit_factor: string;
+    requires_positive_net_return: boolean;
+    requires_positive_expectancy: boolean;
+  };
+  wallets: ShadowWallet[];
+  missed_opportunities: MissedOpportunity[];
+  filter_performance: FilterPerformance[];
+}

@@ -20,6 +20,8 @@ import type {
  * Categories, scores and confidence all arrive already decided.
  */
 
+export const RADAR_PAGE_CAP = 100;
+
 export function fetchRadar(params: {
   category?: RadarCategory | null;
   includeInactive?: boolean;
@@ -35,6 +37,37 @@ export function fetchRadar(params: {
   if (params.category) query.set("category", params.category);
   if (params.includeInactive) query.set("include_inactive", "true");
   return api.get<RadarPage>(`/radar?${query.toString()}`);
+}
+
+export async function fetchAllRadarDetections(params: {
+  category?: RadarCategory | null;
+  includeInactive?: boolean;
+  sort?: "score" | "detected" | "peak" | "current";
+}): Promise<RadarPage> {
+  const first = await fetchRadar({
+    ...params,
+    page: 1,
+    pageSize: RADAR_PAGE_CAP,
+  });
+  const pages = Math.ceil(first.total / RADAR_PAGE_CAP);
+  if (pages <= 1) return first;
+
+  const items = [...first.items];
+  for (let page = 2; page <= pages; page += 1) {
+    const next = await fetchRadar({
+      ...params,
+      page,
+      pageSize: RADAR_PAGE_CAP,
+    });
+    items.push(...next.items);
+  }
+
+  return {
+    ...first,
+    items,
+    page: 1,
+    page_size: RADAR_PAGE_CAP,
+  };
 }
 
 export function fetchRadarEntry(mint: string): Promise<RadarDetail> {

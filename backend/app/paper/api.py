@@ -72,6 +72,7 @@ from app.paper.service import (
     PaperWalletService,
     WalletRead,
 )
+from app.paper.shadow import ShadowPaperService
 from app.paper.strategy import AnyStrategy, registry
 
 router = APIRouter(prefix="/paper", tags=["paper"])
@@ -221,6 +222,27 @@ async def get_archive(session: DbSession) -> ArchiveOut:
         )
 
     return ArchiveOut(items=items, note=ARCHIVE_NOTE, observed_at=now)
+
+
+@router.get("/strategy-intelligence", summary="Shadow wallet strategy intelligence")
+async def get_strategy_intelligence(session: DbSession) -> dict[str, object]:
+    """V2-V5 live shadow candidates, isolated from the published V1 wallet."""
+    now = datetime.now(UTC)
+    if not settings.FEATURE_PAPER_WALLET_ENABLED:
+        return {
+            "enabled": False,
+            "observed_at": now,
+            "promotion_rules": {
+                "minimum_completed_trades": 100,
+                "minimum_profit_factor": "1.20",
+                "requires_positive_net_return": True,
+                "requires_positive_expectancy": True,
+            },
+            "wallets": [],
+            "missed_opportunities": [],
+            "filter_performance": [],
+        }
+    return await ShadowPaperService(session).intelligence(now=now)
 
 
 @router.get("", response_model=WalletOut, summary="The paper wallet")

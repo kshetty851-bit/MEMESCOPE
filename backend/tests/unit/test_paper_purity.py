@@ -46,6 +46,7 @@ IO_MODULES = {
     "repository.py",
     "service.py",
     "lab_service.py",
+    "shadow.py",
     "scheduler.py",
     "api.py",
     "schemas.py",

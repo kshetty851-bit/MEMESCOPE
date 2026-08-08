@@ -12,7 +12,15 @@ from app.models.market import (
     TokenMarketSnapshot,
     TradingStatus,
 )
-from app.models.paper import PaperPosition, PaperTradeAudit, PaperWallet
+from app.models.paper import (
+    PaperPosition,
+    PaperShadowDecision,
+    PaperShadowPosition,
+    PaperShadowTradeAudit,
+    PaperShadowWallet,
+    PaperTradeAudit,
+    PaperWallet,
+)
 from app.models.radar import RadarAchievement, RadarSnapshot, RadarToken
 from app.models.refresh_token import RefreshToken
 from app.models.score import (
@@ -30,6 +38,10 @@ __all__ = [
     "EnrichmentStatus",
     "MetadataStatus",
     "PaperPosition",
+    "PaperShadowDecision",
+    "PaperShadowPosition",
+    "PaperShadowTradeAudit",
+    "PaperShadowWallet",
     "PaperTradeAudit",
     "PaperWallet",
     "RadarAchievement",
