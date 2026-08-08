@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { LogoMark } from "@/components/brand/logo";
 import { AlphaAccess } from "@/components/alpha/alpha-access";
@@ -10,12 +10,18 @@ import { cn } from "@/lib/utils";
 
 export function LandingPage() {
   const [unlocking, setUnlocking] = useState(false);
+  const [sceneOnly, setSceneOnly] = useState(false);
+
+  useEffect(() => {
+    setSceneOnly(new URLSearchParams(window.location.search).get("scene") === "1");
+  }, []);
 
   return (
     <main
       className={cn(
         "alpha-landing relative isolate min-h-screen overflow-hidden text-ink",
         unlocking && "alpha-landing--unlock",
+        sceneOnly && "alpha-landing--scene-only",
       )}
     >
       <SpaceBackground active={unlocking} />

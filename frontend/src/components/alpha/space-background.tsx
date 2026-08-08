@@ -17,6 +17,17 @@ export function SpaceBackground({
       <div className="alpha-space__stars alpha-space__stars--near" />
       <div className="alpha-space__debris alpha-space__debris--one" />
       <div className="alpha-space__debris alpha-space__debris--two" />
+      <div className="alpha-space__galaxy" />
+      <div className="alpha-space__dust alpha-space__dust--back" />
+      <div className="alpha-space__dust alpha-space__dust--front" />
+      <div className="alpha-space__asteroid alpha-space__asteroid--one" />
+      <div className="alpha-space__asteroid alpha-space__asteroid--two" />
+      <div className="alpha-space__meteor alpha-space__meteor--one" />
+      <div className="alpha-space__meteor alpha-space__meteor--two" />
+      <div className="alpha-space__comet" />
+      <div className="alpha-space__satellite" />
+      <div className="alpha-space__probe" />
+      <div className="alpha-space__ship" />
       <div className="alpha-space__scan" />
     </div>
   );
