@@ -1,7 +1,10 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { createElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useTokenStream } from "@/hooks/use-token-stream";
+import { LiveUpdatesProvider } from "@/hooks/use-live-updates";
 import type { DiscoveredToken } from "@/types/api";
 
 /** Minimal WebSocket stand-in that lets tests drive the socket lifecycle. */
@@ -46,6 +49,17 @@ function token(mint: string, symbol = "TEST"): DiscoveredToken {
   };
 }
 
+function wrapper({ children }: { children: ReactNode }) {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: 0 } },
+  });
+  return createElement(
+    QueryClientProvider,
+    { client },
+    createElement(LiveUpdatesProvider, null, children),
+  );
+}
+
 beforeEach(() => {
   FakeWebSocket.instances = [];
   vi.stubGlobal("WebSocket", FakeWebSocket);
@@ -58,13 +72,13 @@ afterEach(() => {
 
 describe("useTokenStream", () => {
   it("derives a ws:// URL from the http API origin", () => {
-    renderHook(() => useTokenStream());
+    renderHook(() => useTokenStream(), { wrapper });
     expect(FakeWebSocket.instances[0]!.url).toMatch(/^ws:\/\//);
     expect(FakeWebSocket.instances[0]!.url).toContain("/api/v1/tokens/stream");
   });
 
   it("reports live status once the socket opens", async () => {
-    const { result } = renderHook(() => useTokenStream());
+    const { result } = renderHook(() => useTokenStream(), { wrapper });
     expect(result.current.status).toBe("connecting");
 
     act(() => FakeWebSocket.instances[0]!.onopen?.());
@@ -72,7 +86,7 @@ describe("useTokenStream", () => {
   });
 
   it("prepends discovered tokens so the newest is first", async () => {
-    const { result } = renderHook(() => useTokenStream());
+    const { result } = renderHook(() => useTokenStream(), { wrapper });
     const socket = FakeWebSocket.instances[0]!;
     act(() => socket.onopen?.());
 
@@ -84,7 +98,7 @@ describe("useTokenStream", () => {
   });
 
   it("ignores a duplicate mint replayed after a reconnect", async () => {
-    const { result } = renderHook(() => useTokenStream());
+    const { result } = renderHook(() => useTokenStream(), { wrapper });
     const socket = FakeWebSocket.instances[0]!;
     act(() => socket.onopen?.());
 
@@ -95,7 +109,7 @@ describe("useTokenStream", () => {
   });
 
   it("ignores ping and ready frames", async () => {
-    const { result } = renderHook(() => useTokenStream());
+    const { result } = renderHook(() => useTokenStream(), { wrapper });
     const socket = FakeWebSocket.instances[0]!;
     act(() => socket.onopen?.());
 
@@ -106,7 +120,7 @@ describe("useTokenStream", () => {
   });
 
   it("survives a malformed frame", async () => {
-    const { result } = renderHook(() => useTokenStream());
+    const { result } = renderHook(() => useTokenStream(), { wrapper });
     const socket = FakeWebSocket.instances[0]!;
     act(() => socket.onopen?.());
 
@@ -119,7 +133,7 @@ describe("useTokenStream", () => {
   it("schedules a reconnect when the socket drops", async () => {
     vi.useFakeTimers();
     try {
-      const { result } = renderHook(() => useTokenStream());
+      const { result } = renderHook(() => useTokenStream(), { wrapper });
       const socket = FakeWebSocket.instances[0]!;
       act(() => socket.onopen?.());
       act(() => socket.onclose?.());
@@ -136,7 +150,7 @@ describe("useTokenStream", () => {
   });
 
   it("seeds from the initial REST payload", () => {
-    const { result } = renderHook(() => useTokenStream([token("Seeded")]));
+    const { result } = renderHook(() => useTokenStream([token("Seeded")]), { wrapper });
     expect(result.current.tokens[0]!.mint_address).toBe("Seeded");
   });
 });

@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { useLiveUpdates } from "@/hooks/use-live-updates";
 
 import {
   fetchRadar,
@@ -31,20 +32,22 @@ export function useRadar(params: {
   page?: number;
   pageSize?: number;
 }) {
+  const { status } = useLiveUpdates();
   return useQuery({
     queryKey: ["radar", "list", params],
     queryFn: () => fetchRadar(params),
-    refetchInterval: RADAR_POLL_MS,
+    refetchInterval: status === "live" ? false : RADAR_POLL_MS,
     staleTime: RADAR_POLL_MS / 2,
   });
 }
 
 export function useRadarEntry(mint: string | undefined) {
+  const { status } = useLiveUpdates();
   return useQuery({
     queryKey: ["radar", "entry", mint],
     queryFn: () => fetchRadarEntry(mint!),
     enabled: Boolean(mint),
-    refetchInterval: RADAR_POLL_MS,
+    refetchInterval: status === "live" ? false : RADAR_POLL_MS,
   });
 }
 
@@ -58,10 +61,11 @@ export function useRadarHistory(mint: string | undefined, limit = 100) {
 }
 
 export function useRadarPerformance() {
+  const { status } = useLiveUpdates();
   return useQuery({
     queryKey: ["radar", "performance"],
     queryFn: fetchRadarPerformance,
-    refetchInterval: RADAR_POLL_MS,
+    refetchInterval: status === "live" ? false : RADAR_POLL_MS,
     staleTime: RADAR_POLL_MS / 2,
   });
 }

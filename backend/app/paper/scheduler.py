@@ -32,6 +32,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.core.config import settings
+from app.core.events import publish_live_update
 from app.core.logging import get_logger
 from app.db.session import SessionFactory
 from app.paper.service import PaperWalletService, utcnow
@@ -60,6 +61,10 @@ async def _paper_review() -> dict[str, Any]:
         # The worker owns its session and commits explicitly; the service only
         # flushes, so the same code can run inside another transaction.
         await session.commit()
+
+    # The read model includes current marks and the idle explanation, so a
+    # completed review is relevant even when it opened or closed no position.
+    await publish_live_update("paper.changed")
 
     logger.info("paper_review", **outcome.as_dict())
     return outcome.as_dict()

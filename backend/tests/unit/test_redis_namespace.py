@@ -49,6 +49,13 @@ class TestIsolation:
     def test_environments_never_share_a_score_channel(self, left: str, right: str) -> None:
         assert _settings(left).score_channel != _settings(right).score_channel
 
+    @pytest.mark.parametrize(
+        ("left", "right"),
+        [("local", "test"), ("local", "production"), ("test", "production")],
+    )
+    def test_environments_never_share_a_live_channel(self, left: str, right: str) -> None:
+        assert _settings(left).live_channel != _settings(right).live_channel
+
     def test_environments_never_share_the_scanner_state_key(self) -> None:
         """Otherwise a test run would report the development scanner as down."""
         assert _settings("test").scanner_state_key != _settings("local").scanner_state_key
@@ -70,6 +77,7 @@ class TestNaming:
         config = _settings("local")
         assert config.token_channel.endswith(config.TOKEN_EVENT_CHANNEL)
         assert config.score_channel.endswith(config.SCORE_EVENT_CHANNEL)
+        assert config.live_channel.endswith(config.LIVE_EVENT_CHANNEL)
 
     def test_a_custom_base_name_is_still_namespaced(self) -> None:
         """An operator overriding the channel must not lose isolation."""

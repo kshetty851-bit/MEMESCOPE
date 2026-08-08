@@ -627,6 +627,17 @@ class RadarRepository:
         )
         return (await self._session.scalars(statement.offset(offset).limit(limit))).all()
 
+    async def top_mints(self, *, limit: int = 10) -> tuple[str, ...]:
+        """The homepage ordering, using the Radar's one canonical ranking query.
+
+        This is deliberately a narrow projection of ``list_entries`` rather
+        than a second implementation of score ordering.  Callers compare two
+        snapshots around a targeted evaluation to decide whether the visible
+        ranking actually moved.
+        """
+        entries = await self.list_entries(limit=limit, offset=0)
+        return tuple(entry.mint_address for entry in entries)
+
     async def count_entries(
         self, *, category: str | None = None, active_only: bool = True
     ) -> int:

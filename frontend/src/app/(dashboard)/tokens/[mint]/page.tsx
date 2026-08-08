@@ -25,6 +25,7 @@ import { buildHealth } from "@/lib/health";
 import { buildThesis } from "@/lib/thesis";
 import { SentinelRead } from "@/components/sentinel/sentinel-read";
 import { useTokenScore } from "@/hooks/use-scores";
+import { useLiveUpdates } from "@/hooks/use-live-updates";
 import { ApiError, api } from "@/lib/api-client";
 import {
   formatCount,
@@ -41,6 +42,7 @@ export default function TokenDetailPage() {
   const params = useParams<{ mint: string }>();
   const mint = params.mint;
   const [page, setPage] = useState(1);
+  const { status: liveStatus } = useLiveUpdates();
 
   const token = useQuery({
     queryKey: ["tokens", mint],
@@ -50,7 +52,7 @@ export default function TokenDetailPage() {
   const market = useQuery({
     queryKey: ["tokens", mint, "market"],
     queryFn: () => api.get<TokenMarket>(`/tokens/${mint}/market`),
-    refetchInterval: 30_000,
+    refetchInterval: liveStatus === "live" ? false : 30_000,
   });
 
   // The scoring engine's verdict for this token, with the component breakdown

@@ -232,7 +232,51 @@ class PaperWalletService:
             refusals=refusals,
         )
 
-    async def _settle_exits(self, wallet: PaperWallet, *, now: datetime) -> tuple[int, int]:
+    async def review_observed_mints(
+        self, mint_addresses: Sequence[str], *, now: datetime
+    ) -> ReviewOutcome | None:
+        """Advance held positions touched by a newly committed observation.
+
+        This is an acceleration path, not a different strategy evaluator. It
+        reuses the normal replay-based exit resolver, and only opens a
+        replacement after this focused pass actually closes a position. The
+        scheduled full review remains responsible for missed events and quiet
+        holdings.
+        """
+        mints = list(dict.fromkeys(mint_addresses))
+        if not mints:
+            return None
+
+        wallet = await self._repository.live_wallet()
+        if wallet is None:
+            return None
+
+        evaluated, closed = await self._settle_exits(wallet, now=now, mints=mints)
+        if evaluated == 0:
+            return None
+
+        audited = await self._record_audits(wallet)
+        if closed:
+            opened, candidates, truncated, refusals = await self._open_entries(wallet, now=now)
+        else:
+            opened, candidates, truncated, refusals = 0, 0, False, {}
+        return ReviewOutcome(
+            evaluated=evaluated,
+            closed=closed,
+            opened=opened,
+            audited=audited,
+            candidates=candidates,
+            candidates_truncated=truncated,
+            refusals=refusals,
+        )
+
+    async def _settle_exits(
+        self,
+        wallet: PaperWallet,
+        *,
+        now: datetime,
+        mints: Sequence[str] | None = None,
+    ) -> tuple[int, int]:
         """Walk each open position's unseen observations and close the breaches.
 
         The whole reproducibility guarantee lives in these few lines. Each
@@ -245,7 +289,7 @@ class PaperWalletService:
         off the position's own row.
         """
         positions = await self._repository.open_positions(
-            wallet.id, limit=settings.PAPER_WALLET_REVIEW_BATCH_LIMIT
+            wallet.id, limit=settings.PAPER_WALLET_REVIEW_BATCH_LIMIT, mints=mints
         )
         if not positions:
             return 0, 0
@@ -283,7 +327,7 @@ class PaperWalletService:
                 )
                 continue
 
-            await self._repository.close(
+            closed_now = await self._repository.close(
                 position.id,
                 exit_price=found.price_usd,
                 closed_at=found.at,
@@ -294,7 +338,7 @@ class PaperWalletService:
                 # position's — it sold before it.
                 peak_price=running_peak,
             )
-            closed += 1
+            closed += int(closed_now)
 
         return len(positions), closed
 

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { memo } from "react";
 
 import { TokenAvatar } from "@/components/brand/token-avatar";
 import { LiveValue } from "@/components/ui/live-value";
@@ -205,13 +206,7 @@ function RowActions({
   );
 }
 
-export function RadarRow({
-  entry,
-  rank,
-  paperState = "not-held",
-  rankDelta = 0,
-  nodeRef,
-}: {
+type RadarRowProps = {
   entry: RadarEntry;
   rank: number;
   /** Whether the paper wallet holds or has traded this token. */
@@ -220,7 +215,15 @@ export function RadarRow({
   rankDelta?: number;
   /** FLIP target. The list measures this node to animate a reorder. */
   nodeRef?: (node: HTMLElement | null) => void;
-}) {
+};
+
+function RadarRowComponent({
+  entry,
+  rank,
+  paperState = "not-held",
+  rankDelta = 0,
+  nodeRef,
+}: RadarRowProps) {
   const risk = riskLabel(entry.risk_band);
   const rate = baseRateSummary(entry.base_rate);
   const change = entry.market?.change_24h_pct ?? null;
@@ -424,3 +427,19 @@ export function RadarRow({
     </article>
   );
 }
+
+/**
+ * Query structural sharing preserves an unchanged entry's reference after a
+ * live refetch. Keep those rows out of React's work; a new ref is precisely
+ * the signal that one of its server-derived values changed. `nodeRef` is
+ * intentionally excluded because the FLIP registrar is recreated by its
+ * parent but closes over stable refs.
+ */
+export const RadarRow = memo(
+  RadarRowComponent,
+  (previous, next) =>
+    previous.entry === next.entry &&
+    previous.rank === next.rank &&
+    previous.paperState === next.paperState &&
+    previous.rankDelta === next.rankDelta,
+);

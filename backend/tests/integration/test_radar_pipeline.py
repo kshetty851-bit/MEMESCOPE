@@ -138,6 +138,23 @@ class TestFirstDetectionIsImmutable:
         assert refreshed.current_price == Decimal("0.5")
 
 
+class TestEventDrivenRefresh:
+    async def test_refresh_evaluates_only_the_changed_mint(
+        self, db_session: AsyncSession
+    ) -> None:
+        first = await _seed_token(db_session, "RadarEventMint00000000000000000000000001")
+        second = await _seed_token(db_session, "RadarEventMint00000000000000000000000002")
+        await _seed_series(db_session, first)
+        await _seed_series(db_session, second)
+
+        outcome = await RadarService(db_session).refresh_mints([first.mint_address], now=NOW)
+
+        assert outcome.evaluated == 1
+        assert outcome.tracked == 1
+        assert outcome.updated_mints == (first.mint_address,)
+        assert await RadarRepository(db_session).get(second.mint_address) is None
+
+
 class TestPeakIsMonotonic:
     async def test_peak_rises_and_never_falls_back(self, db_session: AsyncSession) -> None:
         token = await _seed_token(db_session, "RadarMintPeak000000000000000000000000001")

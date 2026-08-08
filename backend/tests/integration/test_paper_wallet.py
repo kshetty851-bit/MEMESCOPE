@@ -352,6 +352,58 @@ class TestExits:
         assert position.exit_price == Decimal(15)
         assert position.peak_price == Decimal(20)
 
+    async def test_an_observed_holding_is_settled_immediately_and_only_once(
+        self, db_session: AsyncSession
+    ) -> None:
+        token = await self._open_one(db_session)
+        service = PaperWalletService(db_session)
+        await _price(db_session, token, MINT_A, at=NOW + timedelta(hours=1), price="20")
+        await db_session.commit()
+
+        raised = await service.review_observed_mints([MINT_A], now=NOW + timedelta(hours=1))
+        await db_session.commit()
+        assert raised is not None
+        assert raised.evaluated == 1
+        assert raised.closed == 0
+
+        await _price(db_session, token, MINT_A, at=NOW + timedelta(hours=2), price="14")
+        await db_session.commit()
+        stopped = await service.review_observed_mints([MINT_A], now=NOW + timedelta(hours=2))
+        await db_session.commit()
+        assert stopped is not None
+        assert stopped.closed == 1
+        assert stopped.audited == 1
+
+        # A duplicated delivery cannot close the same durable position twice.
+        assert (
+            await service.review_observed_mints([MINT_A], now=NOW + timedelta(hours=3)) is None
+        )
+        audit_rows = (await db_session.scalars(select(PaperTradeAudit))).all()
+        assert len(audit_rows) == 1
+
+    async def test_an_out_of_order_advance_cannot_rewind_the_watermark_or_peak(
+        self, db_session: AsyncSession
+    ) -> None:
+        await self._open_one(db_session)
+        position = (await db_session.scalars(select(PaperPosition))).one()
+        repository = PaperRepository(db_session)
+        newer = NOW + timedelta(hours=2)
+        older = NOW + timedelta(hours=1)
+
+        await repository.advance(
+            position.id, peak_price=Decimal("20"), last_evaluated_at=newer
+        )
+        await db_session.commit()
+        await repository.advance(
+            position.id, peak_price=Decimal("12"), last_evaluated_at=older
+        )
+        await db_session.commit()
+
+        db_session.expire_all()
+        current = (await db_session.scalars(select(PaperPosition))).one()
+        assert current.peak_price == Decimal("20")
+        assert current.last_evaluated_at == newer
+
     async def test_a_rise_alone_never_closes_a_position(
         self, db_session: AsyncSession
     ) -> None:

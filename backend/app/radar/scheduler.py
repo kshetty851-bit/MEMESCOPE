@@ -15,6 +15,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.core.config import settings
+from app.core.events import publish_live_update
 from app.core.logging import get_logger
 from app.db.session import SessionFactory
 from app.paper.scheduler import request_review
@@ -45,6 +46,11 @@ async def _radar_sweep(limit: int | None = None) -> dict[str, Any]:
     batch = limit or settings.RADAR_SWEEP_BATCH_LIMIT
     async with SessionFactory() as session:
         result = await RadarService(session).sweep(limit=batch)
+
+    # The service committed before its session closed. Notify browsers only
+    # after that durable state exists for their follow-up read.
+    if result["evaluated"]:
+        await publish_live_update("radar.changed")
 
     # The ranking just moved, so the wallet evaluates against the ranking that
     # exists now rather than waiting for its own beat (Sprint 30 §8). Enqueued

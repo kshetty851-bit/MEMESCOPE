@@ -24,11 +24,13 @@ from datetime import UTC, datetime
 from typing import Any
 
 from app.core.config import settings
-from app.core.events import publish_score_events
+from app.core.events import publish_live_update, publish_score_events
 from app.core.logging import get_logger
 from app.core.redis import get_redis
 from app.db.session import SessionFactory
 from app.opportunities.engine import OpportunityEngine
+from app.paper.service import PaperWalletService
+from app.radar.service import RadarService
 from app.services.curve.collector import BondingCurveCollector
 from app.services.market.providers.base import MarketDataProvider
 from app.services.market.providers.registry import get_provider
@@ -319,6 +321,7 @@ class MarketEnrichmentWorker:
             # Provider batch limit is smaller than our claim size, so chunk.
             chunk_size = max(1, self._provider.batch_size)
             total = 0
+            refreshed_mints: list[str] = []
             for start in range(0, len(states), chunk_size):
                 chunk = states[start : start + chunk_size]
                 outcome = await service.enrich(chunk)
@@ -329,6 +332,7 @@ class MarketEnrichmentWorker:
                 self.stats.failures += outcome.failed
                 self.stats.deferred += outcome.deferred
                 self.stats.dead_lettered += outcome.dead_lettered
+                refreshed_mints.extend(outcome.refreshed_mints)
                 if outcome.degraded:
                     self.stats.degraded_cycles += 1
                 total += outcome.requested
@@ -339,7 +343,15 @@ class MarketEnrichmentWorker:
             await session.commit()
             self.stats.cycles += 1
 
+        # A browser never receives a market value from the worker. It receives
+        # only the mints whose snapshots committed, then refetches active
+        # server-owned views. One batch event prevents one publish per token.
+        if refreshed_mints:
+            await publish_live_update("market.changed", mints=refreshed_mints)
+
         await self._score_batch(mints)
+        await self._refresh_radar(refreshed_mints)
+        await self._review_held_positions(refreshed_mints)
         await self._collect_curves(mints)
         await self._detect_opportunities(mints)
         return total
@@ -381,7 +393,60 @@ class MarketEnrichmentWorker:
             await publish_score_events(outcome.events)
             self.stats.score_events_published += len(outcome.events)
 
-    # --- Bonding curve collection (TX-3) ------------------------------------
+    # --- Radar and paper acceleration (TX-3 / TX-4) -------------------------
+
+    async def _refresh_radar(self, mints: Sequence[str]) -> None:
+        """Advance the Radar from committed market observations only.
+
+        The periodic Radar sweep still owns full-universe rotation and recovery.
+        This fast path deliberately evaluates just the mints in this enrichment
+        batch, using the same service and ranking query as the sweep.
+        """
+        if not settings.FEATURE_RADAR_ENABLED or not mints:
+            return
+
+        try:
+            async with SessionFactory() as session:
+                outcome = await RadarService(session).refresh_mints(
+                    mints, now=datetime.now(UTC)
+                )
+                await session.commit()
+        except Exception:
+            logger.exception("radar_event_refresh_failed", tokens=len(mints))
+            return
+
+        if outcome.updated_mints:
+            await publish_live_update("radar.score_updated", mints=outcome.updated_mints)
+        if outcome.ranking_changed:
+            await publish_live_update("radar.ranking_changed")
+        logger.info(
+            "radar_event_refresh_completed",
+            evaluated=outcome.evaluated,
+            tracked=outcome.tracked,
+            ranking_changed=outcome.ranking_changed,
+        )
+
+    async def _review_held_positions(self, mints: Sequence[str]) -> None:
+        """Settle holdings touched by this committed observation immediately."""
+        if not settings.FEATURE_PAPER_WALLET_ENABLED or not mints:
+            return
+
+        try:
+            async with SessionFactory() as session:
+                outcome = await PaperWalletService(session).review_observed_mints(
+                    mints, now=datetime.now(UTC)
+                )
+                await session.commit()
+        except Exception:
+            logger.exception("paper_event_review_failed", tokens=len(mints))
+            return
+
+        if outcome is None:
+            return
+        await publish_live_update("paper.changed", mints=mints)
+        logger.info("paper_event_review_completed", **outcome.as_dict())
+
+    # --- Bonding curve collection (TX-5) ------------------------------------
 
     async def _collect_curves(self, mints: Sequence[str]) -> None:
         """Read the bonding curve for the batch that was just enriched.
@@ -415,7 +480,7 @@ class MarketEnrichmentWorker:
         self.stats.curve_snapshots += outcome.written
         self.stats.curve_unparsable += outcome.unparsable
 
-    # --- Opportunity detection (TX-4) ---------------------------------------
+    # --- Opportunity detection (TX-6) ---------------------------------------
 
     async def _detect_opportunities(self, mints: Sequence[str]) -> None:
         """Run signal detection over the batch that was just enriched.

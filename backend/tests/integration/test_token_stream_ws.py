@@ -83,3 +83,25 @@ def test_malformed_event_does_not_kill_the_stream(app: Any) -> None:
                 return
         publisher.close()
         raise AssertionError("stream did not recover after a malformed event")
+
+
+def test_committed_live_update_is_broadcast_to_connected_client(app: Any) -> None:
+    """The existing WebSocket multiplexes invalidations without a second layer."""
+    import redis as sync_redis
+
+    payload = {"type": "paper.changed", "mints": []}
+    with TestClient(app) as test_client, test_client.websocket_connect(WS_PATH) as websocket:
+        assert websocket.receive_json()["type"] == "connection.ready"
+
+        publisher = sync_redis.Redis(
+            host=settings.REDIS_HOST, port=settings.REDIS_PORT, db=settings.REDIS_DB
+        )
+        for _ in range(40):
+            publisher.publish(settings.live_channel, json.dumps(payload))
+            message = websocket.receive_json()
+            if message["type"] == "paper.changed":
+                assert message == payload
+                publisher.close()
+                return
+        publisher.close()
+        raise AssertionError("live update was never delivered to the WebSocket client")

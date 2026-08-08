@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import { ApiError } from "@/lib/api-client";
+import { LiveUpdatesProvider } from "@/hooks/use-live-updates";
 import { useAuthStore } from "@/stores/auth-store";
 
 function makeQueryClient(): QueryClient {
@@ -32,5 +33,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
     void bootstrap();
   }, [bootstrap]);
 
-  return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
+  return (
+    <QueryClientProvider client={queryClient}>
+      <LiveUpdatesProvider>{children}</LiveUpdatesProvider>
+    </QueryClientProvider>
+  );
 }

@@ -1,4 +1,4 @@
-"""Cross-process event fan-out for token discoveries.
+"""Cross-process event fan-out for committed live updates.
 
 The scanner runs as its own process and the API runs as N gunicorn workers, so
 an in-memory callback list would only ever reach clients that happened to be
@@ -81,15 +81,43 @@ async def publish_score_events(
     return delivered
 
 
-class TokenEventBroadcaster:
-    """Per-process fan-out hub bridging Redis pub/sub to local WebSockets.
+async def publish_live_update(
+    event_type: str,
+    *,
+    mints: Sequence[str] = (),
+    redis: Redis | None = None,
+) -> int:
+    """Publish a committed UI invalidation through the existing Redis bus.
+
+    The browser receives identifiers, not another copy of market/business
+    values. It refetches the affected server-owned read model, which keeps one
+    API response as the authority for every rendered value.
+    """
+    payload = {"type": event_type, "mints": list(dict.fromkeys(mints))}
+    client = redis or get_redis()
+    try:
+        receivers = await client.publish(settings.live_channel, json.dumps(payload))
+    except Exception as exc:
+        # The database is already committed. A dropped browser wake-up must not
+        # fail enrichment or turn a Redis outage into lost market evidence.
+        logger.warning("live_event_publish_failed", event_type=event_type, error=str(exc))
+        return 0
+    return int(receivers)
+
+
+class LiveEventBroadcaster:
+    """Per-process bridge from Redis topics to one multiplexed WebSocket stream.
 
     One Redis subscription per process regardless of client count; connecting a
     thousand WebSockets does not open a thousand Redis connections.
     """
 
-    def __init__(self, channel: str | None = None) -> None:
-        self._channel = channel or settings.token_channel
+    def __init__(self) -> None:
+        self._channels = {
+            settings.token_channel: "token.discovered",
+            settings.score_channel: "score.changed",
+            settings.live_channel: None,
+        }
         self._subscribers: set[asyncio.Queue[dict[str, Any]]] = set()
         self._task: asyncio.Task[None] | None = None
         self._lock = asyncio.Lock()
@@ -102,7 +130,7 @@ class TokenEventBroadcaster:
         async with self._lock:
             if self._task is None or self._task.done():
                 self._task = asyncio.create_task(self._listen(), name="token-event-listener")
-                logger.info("token_broadcaster_started", channel=self._channel)
+                logger.info("live_broadcaster_started", channels=list(self._channels))
 
     async def stop(self) -> None:
         async with self._lock:
@@ -112,7 +140,7 @@ class TokenEventBroadcaster:
                     await self._task
                 self._task = None
         self._subscribers.clear()
-        logger.info("token_broadcaster_stopped")
+        logger.info("live_broadcaster_stopped")
 
     async def _listen(self) -> None:
         """Consume the Redis channel forever, reconnecting on failure."""
@@ -121,9 +149,9 @@ class TokenEventBroadcaster:
             pubsub = None
             try:
                 pubsub = get_redis().pubsub()
-                await pubsub.subscribe(self._channel)
+                await pubsub.subscribe(*self._channels)
                 attempt = 0
-                logger.info("token_broadcaster_subscribed", channel=self._channel)
+                logger.info("live_broadcaster_subscribed", channels=list(self._channels))
 
                 async for message in pubsub.listen():
                     if message.get("type") != "message":
@@ -132,10 +160,29 @@ class TokenEventBroadcaster:
                         payload = json.loads(message["data"])
                     except (ValueError, TypeError):
                         logger.warning(
-                            "token_event_malformed", raw=str(message.get("data"))[:200]
+                            "live_event_malformed", raw=str(message.get("data"))[:200]
                         )
                         continue
-                    self._fan_out(payload)
+                    channel = message.get("channel")
+                    if isinstance(channel, bytes):
+                        channel = channel.decode()
+                    kind = self._channels.get(channel)
+                    if kind is None and channel != settings.live_channel:
+                        logger.warning("live_event_unknown_channel", channel=str(channel))
+                        continue
+                    if kind is None:
+                        valid_event = isinstance(payload, dict) and isinstance(
+                            payload.get("type"), str
+                        )
+                        if not valid_event:
+                            logger.warning(
+                                "live_event_malformed", raw=str(message.get("data"))[:200]
+                            )
+                            continue
+                        event = payload
+                    else:
+                        event = {"type": kind, "data": payload}
+                    self._fan_out(event)
 
             except asyncio.CancelledError:
                 raise
@@ -143,7 +190,7 @@ class TokenEventBroadcaster:
                 attempt += 1
                 delay = min(2.0**attempt, 30.0)
                 logger.warning(
-                    "token_broadcaster_reconnect",
+                    "live_broadcaster_reconnect",
                     error=str(exc),
                     attempt=attempt,
                     delay_seconds=delay,
@@ -176,4 +223,4 @@ class TokenEventBroadcaster:
             self._subscribers.discard(queue)
 
 
-broadcaster = TokenEventBroadcaster()
+broadcaster = LiveEventBroadcaster()

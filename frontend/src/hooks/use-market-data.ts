@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
+import { useLiveUpdates } from "@/hooks/use-live-updates";
 
 import { api } from "@/lib/api-client";
 import type { MarketSnapshot, TrendingPage } from "@/types/api";
@@ -18,11 +19,12 @@ import type { MarketSnapshot, TrendingPage } from "@/types/api";
  * are the ones the feed exists to display.
  */
 export function useMarketByMint(pollMs = 15_000) {
+  const { status } = useLiveUpdates();
   const { data, isPending } = useQuery({
     queryKey: ["market", "recent"],
     queryFn: () =>
       api.get<TrendingPage>("/market/trending?sort_by=captured_at&page_size=100"),
-    refetchInterval: pollMs,
+    refetchInterval: status === "live" ? false : pollMs,
     staleTime: pollMs / 2,
   });
 

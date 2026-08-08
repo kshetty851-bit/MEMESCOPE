@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
+import { useLiveUpdates } from "@/hooks/use-live-updates";
 
 import {
   fetchScoreHistory,
@@ -26,11 +27,12 @@ import type { TokenScore } from "@/types/score";
  * among the most important things it can tell a user.
  */
 export function useScoresByMint(pollMs = 20_000) {
+  const { status } = useLiveUpdates();
   const { data, isPending, isError } = useQuery({
     queryKey: ["scores", "window"],
     queryFn: () =>
       fetchTopScores({ pageSize: 100, sort: "evaluated_at", includeVetoed: true }),
-    refetchInterval: pollMs,
+    refetchInterval: status === "live" ? false : pollMs,
     staleTime: pollMs / 2,
   });
 
@@ -72,10 +74,11 @@ export function useScoresByMint(pollMs = 20_000) {
  * the endpoint's default.
  */
 export function useTopScores(pageSize = 6, pollMs = 30_000) {
+  const { status } = useLiveUpdates();
   return useQuery({
     queryKey: ["scores", "top", pageSize],
     queryFn: () => fetchTopScores({ pageSize, sort: "score", order: "desc" }),
-    refetchInterval: pollMs,
+    refetchInterval: status === "live" ? false : pollMs,
     staleTime: pollMs / 2,
   });
 }
@@ -87,11 +90,12 @@ export function useTopScores(pageSize = 6, pollMs = 30_000) {
  * and a list is scanned rather than read; the detail view fetches it here.
  */
 export function useTokenScore(mint: string | undefined, pollMs = 20_000) {
+  const { status } = useLiveUpdates();
   return useQuery({
     queryKey: ["scores", "token", mint],
     queryFn: () => fetchTokenScore(mint!),
     enabled: Boolean(mint),
-    refetchInterval: pollMs,
+    refetchInterval: status === "live" ? false : pollMs,
   });
 }
 

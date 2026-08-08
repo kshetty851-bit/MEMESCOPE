@@ -160,7 +160,11 @@ class PaperRepository:
         return result.scalar_one_or_none()
 
     async def open_positions(
-        self, wallet_id: uuid.UUID, *, limit: int | None = None
+        self,
+        wallet_id: uuid.UUID,
+        *,
+        limit: int | None = None,
+        mints: Sequence[str] | None = None,
     ) -> Sequence[PaperPosition]:
         """Running positions, oldest watermark first.
 
@@ -174,6 +178,11 @@ class PaperRepository:
             .where(PaperPosition.status == PositionStatus.OPEN.value)
             .order_by(PaperPosition.last_evaluated_at.asc(), PaperPosition.mint_address.asc())
         )
+        if mints is not None:
+            unique = list(dict.fromkeys(mints))
+            if not unique:
+                return []
+            statement = statement.where(PaperPosition.mint_address.in_(unique))
         if limit is not None:
             statement = statement.limit(limit)
         return (await self._session.scalars(statement)).all()
@@ -255,8 +264,18 @@ class PaperRepository:
         """
         await self._session.execute(
             update(PaperPosition)
-            .where(PaperPosition.id == position_id)
-            .values(peak_price=peak_price, last_evaluated_at=last_evaluated_at)
+            .where(
+                PaperPosition.id == position_id,
+                PaperPosition.status == PositionStatus.OPEN.value,
+                PaperPosition.last_evaluated_at <= last_evaluated_at,
+            )
+            .values(
+                # A delayed duplicate may only preserve or raise the running
+                # high. It can never rewind a trailing stop after a newer pass
+                # already observed a higher price.
+                peak_price=func.greatest(PaperPosition.peak_price, peak_price),
+                last_evaluated_at=last_evaluated_at,
+            )
         )
 
     async def close(
@@ -267,14 +286,14 @@ class PaperRepository:
         closed_at: datetime,
         exit_reason: str,
         peak_price: Decimal,
-    ) -> None:
+    ) -> bool:
         """Record a close, once.
 
         Guarded on `status = 'open'` rather than on the id alone, so a duplicate
         pass over the same position cannot rewrite an exit that already
         happened. A closed trade is part of the permanent record.
         """
-        await self._session.execute(
+        result = await self._session.execute(
             update(PaperPosition)
             .where(
                 PaperPosition.id == position_id,
@@ -288,7 +307,9 @@ class PaperRepository:
                 peak_price=peak_price,
                 last_evaluated_at=closed_at,
             )
+            .returning(PaperPosition.id)
         )
+        return result.scalar_one_or_none() is not None
 
     # --- The permanent record ------------------------------------------------
 

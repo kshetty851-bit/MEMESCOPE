@@ -1,4 +1,4 @@
-"""Discovered-token routes: REST queries plus the live WebSocket feed."""
+"""Discovered-token routes: REST queries plus the multiplexed live feed."""
 
 from __future__ import annotations
 
@@ -111,11 +111,11 @@ async def get_token(
 
 @router.websocket("/stream")
 async def token_stream(websocket: WebSocket) -> None:
-    """Push every newly discovered token to the client as it is found.
+    """Push committed discovery and read-model invalidations to the client.
 
-    Read-only and unauthenticated, matching the REST endpoints — discoveries are
-    public chain data. The receive loop exists solely to notice disconnects;
-    anything a client sends is ignored.
+    The stream carries identifiers and event kinds, not independently computed
+    values. Clients refetch server-owned read models after an event, so no
+    browser-side score, ranking, or paper-wallet calculation can drift.
     """
     await websocket.accept()
     client = websocket.client.host if websocket.client else "unknown"
@@ -125,7 +125,7 @@ async def token_stream(websocket: WebSocket) -> None:
             "ws_client_connected", client=client, subscribers=broadcaster.subscriber_count
         )
         await websocket.send_json(
-            {"type": "connection.ready", "message": "Streaming discoveries."}
+            {"type": "connection.ready", "message": "Streaming committed updates."}
         )
 
         # Drains client frames so a disconnect surfaces promptly rather than
@@ -149,9 +149,7 @@ async def token_stream(websocket: WebSocket) -> None:
                     break
 
                 if get_event in done:
-                    await websocket.send_json(
-                        {"type": "token.discovered", "data": get_event.result()}
-                    )
+                    await websocket.send_json(get_event.result())
                 else:
                     get_event.cancel()
                     await websocket.send_json({"type": "ping"})

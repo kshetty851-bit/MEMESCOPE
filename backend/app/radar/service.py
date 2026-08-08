@@ -18,6 +18,8 @@ rather than *judging*:
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 
@@ -38,6 +40,16 @@ MATERIAL_SCORE_DELTA = Decimal("2.0")
 #: …or this long must have passed, so a flat token still leaves a heartbeat and
 #: the timeline does not develop unexplained gaps.
 HEARTBEAT_SECONDS = 6 * 60 * 60
+
+
+@dataclass(frozen=True, slots=True)
+class RadarRefreshOutcome:
+    """The committed result of evaluating changed observations only."""
+
+    evaluated: int
+    tracked: int
+    updated_mints: tuple[str, ...]
+    ranking_changed: bool
 
 
 class RadarService:
@@ -77,6 +89,36 @@ class RadarService:
 
         await self._update_existing(existing, series, result, category, moment)
         return True
+
+    async def refresh_mints(
+        self, mint_addresses: Sequence[str], *, now: datetime | None = None
+    ) -> RadarRefreshOutcome:
+        """Re-evaluate only mints whose market observations just committed.
+
+        The Radar model is pure per mint over that mint's stored series, so a
+        market update never requires rescoring the universe.  The before/after
+        comparison uses the existing canonical top-ten query; it catches both
+        membership changes and a move such as #4 to #3 without inventing a
+        parallel ranking implementation.
+        """
+        mints = list(dict.fromkeys(mint_addresses))
+        if not mints:
+            return RadarRefreshOutcome(0, 0, (), False)
+
+        moment = now or datetime.now(UTC)
+        before = await self._repository.top_mints()
+        tracked: list[str] = []
+        for mint in mints:
+            if await self.evaluate_mint(mint, now=moment):
+                tracked.append(mint)
+        after = await self._repository.top_mints()
+
+        return RadarRefreshOutcome(
+            evaluated=len(mints),
+            tracked=len(tracked),
+            updated_mints=tuple(tracked),
+            ranking_changed=before != after,
+        )
 
     # --- Detection -----------------------------------------------------------
 

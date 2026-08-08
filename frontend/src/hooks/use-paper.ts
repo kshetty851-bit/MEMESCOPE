@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { useLiveUpdates } from "@/hooks/use-live-updates";
 
 import {
   fetchLab,
@@ -25,19 +26,21 @@ import {
 const PAPER_POLL_MS = 120_000;
 
 export function usePaperWallet() {
+  const { status } = useLiveUpdates();
   return useQuery({
     queryKey: ["paper", "wallet"],
     queryFn: fetchPaperWallet,
-    refetchInterval: PAPER_POLL_MS,
+    refetchInterval: status === "live" ? false : PAPER_POLL_MS,
     staleTime: PAPER_POLL_MS / 2,
   });
 }
 
 export function usePaperPositions() {
+  const { status } = useLiveUpdates();
   return useQuery({
     queryKey: ["paper", "positions"],
     queryFn: fetchPaperPositions,
-    refetchInterval: PAPER_POLL_MS,
+    refetchInterval: status === "live" ? false : PAPER_POLL_MS,
     staleTime: PAPER_POLL_MS / 2,
   });
 }
@@ -51,10 +54,11 @@ export function usePaperPositions() {
  * trade, only a shorter list.
  */
 export function usePaperAudit(limit = 100) {
+  const { status } = useLiveUpdates();
   return useQuery({
     queryKey: ["paper", "audit", limit],
     queryFn: () => fetchPaperAudit(limit),
-    refetchInterval: PAPER_POLL_MS,
+    refetchInterval: status === "live" ? false : PAPER_POLL_MS,
     staleTime: PAPER_POLL_MS / 2,
   });
 }
@@ -81,6 +85,8 @@ export function useLab() {
   return useQuery({
     queryKey: ["paper", "lab"],
     queryFn: fetchLab,
+    // Lab has no committed invalidation event: it is a broad historical replay,
+    // not a live wallet read model. Keep its deliberately slow poll.
     refetchInterval: PAPER_POLL_MS,
     staleTime: PAPER_POLL_MS / 2,
   });

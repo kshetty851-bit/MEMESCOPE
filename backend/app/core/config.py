@@ -507,6 +507,10 @@ class Settings(BaseSettings):
     # Separate from the discovery channel: a score event is not a discovery, and
     # conflating them would force every consumer to discriminate on payload shape.
     SCORE_EVENT_CHANNEL: str = "memescope:scores:changed"
+    # A narrow invalidation topic for committed market, Radar and paper-wallet
+    # changes. This is another Redis Pub/Sub topic on the existing event bus,
+    # not a second transport or queue.
+    LIVE_EVENT_CHANNEL: str = "memescope:live:changed"
 
     # --- Development conveniences --------------------------------------------
     # Treat every request as an authenticated developer, skipping token checks
@@ -653,6 +657,12 @@ class Settings(BaseSettings):
     def score_channel(self) -> str:
         """The score-change channel actually published to and subscribed from."""
         return f"{self.redis_namespace}:{self.SCORE_EVENT_CHANNEL}"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def live_channel(self) -> str:
+        """The committed UI-invalidation channel, namespaced by environment."""
+        return f"{self.redis_namespace}:{self.LIVE_EVENT_CHANNEL}"
 
     @computed_field  # type: ignore[prop-decorator]
     @property

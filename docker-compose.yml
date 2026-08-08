@@ -21,6 +21,7 @@ x-backend-env: &backend-env
   # the live pipeline, broken in production and working in development. Third
   # occurrence of the trap this anchor's comment below describes.
   REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+  LIVE_EVENT_CHANNEL: ${LIVE_EVENT_CHANNEL:-memescope:live:changed}
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
   LOG_FORMAT: ${LOG_FORMAT:-console}
   CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}

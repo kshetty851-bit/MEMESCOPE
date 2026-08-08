@@ -168,10 +168,10 @@ async def test_one_cycle_enriches_then_scores(
     assert score.coverage == Decimal("65.00")
 
 
-async def test_the_event_is_published_on_the_score_channel(
+async def test_committed_changes_publish_to_their_existing_redis_topics(
     sessions: Any, scoring_enabled: None, captured_redis: CapturingRedis
 ) -> None:
-    """Its own channel: a score change is not a discovery."""
+    """Market invalidation and score evidence keep their distinct topic semantics."""
     mint = f"{PREFIX}Event"
     async with sessions() as session:
         await _register(session, mint)
@@ -180,17 +180,22 @@ async def test_the_event_is_published_on_the_score_channel(
     await worker._run_cycle()
 
     channels = {channel for channel, _ in captured_redis.published}
-    assert channels == {settings.score_channel}
+    assert channels == {settings.score_channel, settings.live_channel}
     assert settings.token_channel not in channels
 
-    payload = json.loads(captured_redis.published[0][1])
-    assert payload["type"] == "score_changed"
-    assert payload["mint_address"] == mint
-    assert payload["model_version"] == "v1"
+    payloads = {channel: json.loads(payload) for channel, payload in captured_redis.published}
+    score = payloads[settings.score_channel]
+    assert score["type"] == "score_changed"
+    assert score["mint_address"] == mint
+    assert score["model_version"] == "v1"
     # Evidence, not confidence: a replayed event must not assert a freshness
     # that has since expired.
-    assert "evidence" in payload
-    assert "confidence" not in payload
+    assert "evidence" in score
+    assert "confidence" not in score
+    assert payloads[settings.live_channel] == {
+        "type": "market.changed",
+        "mints": [mint],
+    }
     assert worker.stats.score_events_published == 1
 
 
@@ -220,7 +225,9 @@ async def test_the_event_describes_a_score_that_is_already_committed(
     worker = MarketEnrichmentWorker(provider=FakeProvider({mint: _market(mint)}))
     await worker._run_cycle()
 
-    assert visible == [True]
+    # The market invalidation is published after TX-1, before the separate
+    # scoring transaction exists; the score event follows its own commit.
+    assert visible == [False, True]
 
 
 # --- Isolation ----------------------------------------------------------------
@@ -262,7 +269,12 @@ async def test_a_scoring_failure_leaves_the_snapshot_committed(
         )
     assert len(snapshots) == 1
     assert await _score_of(sessions, mint) is None
-    assert captured_redis.published == []
+    assert captured_redis.published == [
+        (
+            settings.live_channel,
+            json.dumps({"type": "market.changed", "mints": [mint]}),
+        )
+    ]
 
 
 async def test_a_redis_outage_does_not_fail_the_cycle(
@@ -300,7 +312,12 @@ async def test_scoring_is_skipped_when_the_flag_is_off(
 
     assert worker.stats.snapshots_written == 1
     assert worker.stats.tokens_scored == 0
-    assert captured_redis.published == []
+    assert captured_redis.published == [
+        (
+            settings.live_channel,
+            json.dumps({"type": "market.changed", "mints": [mint]}),
+        )
+    ]
     assert await _score_of(sessions, mint) is None
 
 
@@ -384,4 +401,8 @@ async def test_a_batch_of_tokens_is_scored_together(
 
     assert processed == 4
     assert worker.stats.tokens_scored == 4
-    assert len(captured_redis.published) == 4
+    assert len(captured_redis.published) == 5
+    channel, payload = captured_redis.published[0]
+    assert channel == settings.live_channel
+    assert json.loads(payload)["type"] == "market.changed"
+    assert set(json.loads(payload)["mints"]) == set(mints)

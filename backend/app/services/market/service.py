@@ -45,6 +45,8 @@ class EnrichmentOutcome:
     #: Counted apart from `failed` on purpose — these carry no blame and no
     #: consequence for the token, and merging them would hide the difference.
     deferred: int = 0
+    #: Mints that gained a committed market snapshot in this batch.
+    refreshed_mints: tuple[str, ...] = ()
 
 
 class MarketEnrichmentService:
@@ -159,6 +161,7 @@ class MarketEnrichmentService:
         without_market = 0
         failed = 0
         dead_lettered = 0
+        refreshed_mints: list[str] = []
 
         # One query for the whole batch; the tier depends on each token's age.
         tokens = await self.tokens.get_many_by_mints(mints)
@@ -174,6 +177,7 @@ class MarketEnrichmentService:
             if succeeded and had_data and data is not None:
                 snapshot_rows.append(self._to_snapshot_row(state, data, latency_ms=latency_ms))
                 written += 1
+                refreshed_mints.append(state.mint_address)
             elif succeeded:
                 without_market += 1
             else:
@@ -253,6 +257,7 @@ class MarketEnrichmentService:
             dead_lettered=dead_lettered,
             provider_latency_ms=latency_ms,
             degraded=degraded,
+            refreshed_mints=tuple(refreshed_mints),
         )
 
     async def _defer(
