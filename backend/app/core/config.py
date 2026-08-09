@@ -434,6 +434,27 @@ class Settings(BaseSettings):
         default_factory=lambda: ["18", "19"]
     )
 
+    # --- Dedicated execution wallet (disabled by default) -----------------
+    # This is deliberately separate from the safety gate.  It is only the
+    # public-address, signer-boundary and limit configuration for a future,
+    # low-balance execution wallet.  There is no transaction submission path
+    # in this release.
+    REAL_WALLET_EXECUTION_MODE: Literal["disabled", "dry_run"] = "disabled"
+    REAL_WALLET_EXECUTION_ENABLED: bool = False
+    REAL_WALLET_AUTOTRADE_ENABLED: bool = False
+    #: Public only. Its matching signer is loaded from a mounted runtime secret
+    #: file only when a future live implementation explicitly needs it.
+    REAL_WALLET_PUBLIC_KEY: str = ""
+    REAL_WALLET_EXECUTION_SECRET_FILE: str = ""
+    REAL_WALLET_MAX_TRADE_USD: Decimal = Field(default=Decimal("5"), gt=0)
+    REAL_WALLET_MAX_OPEN_POSITIONS: int = Field(default=1, ge=1)
+    REAL_WALLET_MAX_TOTAL_EXPOSURE_USD: Decimal = Field(default=Decimal("10"), gt=0)
+    REAL_WALLET_MAX_DAILY_NOTIONAL_USD: Decimal = Field(default=Decimal("20"), gt=0)
+    REAL_WALLET_MAX_DAILY_LOSS_USD: Decimal = Field(default=Decimal("10"), gt=0)
+    REAL_WALLET_MIN_SOL_FEE_RESERVE: Decimal = Field(default=Decimal("0.01"), ge=0)
+    REAL_WALLET_AUTOTRADE_COOLDOWN_SECONDS: int = Field(default=300, ge=0)
+    REAL_WALLET_MAX_CONSECUTIVE_EXECUTION_FAILURES: int = Field(default=3, ge=1)
+
     # --- Breakout provider ----------------------------------------------------
     # Every threshold measured against the stored history on 2026-08-03 (1.37 M
     # evaluable observations). At these values the provider fires on 0.03 % of

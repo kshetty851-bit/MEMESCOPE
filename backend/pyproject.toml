@@ -26,6 +26,9 @@ dependencies = [
     "celery[redis]>=5.4.0",
     "tenacity>=9.0.0",
     "sentry-sdk[fastapi]>=2.18.0",
+    # Solana's documented Python SDK. It is isolated to the future execution
+    # wallet boundary; Paper Wallet remains quote-only and deterministic.
+    "solders>=0.26.0",
 ]
 
 [project.optional-dependencies]
@@ -115,9 +118,9 @@ exclude = ["alembic/versions/"]
 module = ["tests.*"]
 disallow_untyped_defs = false
 
-# Celery ships no py.typed marker.
+# Celery and solders ship without complete py.typed coverage in this runtime.
 [[tool.mypy.overrides]]
-module = ["celery.*"]
+module = ["celery.*", "solders.*"]
 ignore_missing_imports = true
 
 # --- pytest ------------------------------------------------------------------
