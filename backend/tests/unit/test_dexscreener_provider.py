@@ -118,6 +118,17 @@ async def test_batches_several_mints_in_one_request() -> None:
     assert set(result) == {MINT, OTHER}
 
 
+async def test_ignores_pair_when_requested_mint_is_not_the_base_token() -> None:
+    """Pair-level info must never be treated as metadata for the wrong mint side."""
+    pair = _pair(OTHER)
+    pair["quoteToken"] = {"address": MINT, "name": "Requested Token", "symbol": "REQ"}
+    pair["info"] = {"imageUrl": "https://cdn.test/pair-or-base-token.png"}
+
+    result = await _provider(_respond({"pairs": [pair]})).fetch_many([MINT])
+
+    assert result == {}
+
+
 async def test_deduplicates_requested_mints() -> None:
     seen: list[str] = []
 

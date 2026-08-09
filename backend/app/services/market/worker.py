@@ -45,6 +45,7 @@ logger = get_logger(__name__)
 class WorkerStats:
     cycles: int = 0
     tokens_registered: int = 0
+    token_images_resolved: int = 0
     #: Discovery messages consumed, and those that failed on their own. A
     #: failed message is now a counter rather than a dropped subscription, so
     #: it needs somewhere to be counted.
@@ -92,6 +93,7 @@ class WorkerStats:
         return {
             "cycles": self.cycles,
             "tokens_registered": self.tokens_registered,
+            "token_images_resolved": self.token_images_resolved,
             "discovery_messages": self.discovery_messages,
             "discovery_messages_failed": self.discovery_messages_failed,
             "listener_reconnects": self.listener_reconnects,
@@ -264,7 +266,7 @@ class MarketEnrichmentWorker:
             )
 
     async def _backfill_missing_state(self) -> None:
-        """Enrol any discovered token that has no scheduling row yet."""
+        """Enrol unscheduled tokens and resolve missing token-owned images."""
         total = 0
         while True:
             async with SessionFactory() as session:
@@ -278,6 +280,16 @@ class MarketEnrichmentWorker:
                 break
         if total:
             logger.info("enrichment_backfill_completed", tokens=total)
+
+        async with SessionFactory() as session:
+            service = MarketEnrichmentService(
+                session, self._provider, scheduler=self._scheduler
+            )
+            images = await service.backfill_missing_images(limit=25)
+            await session.commit()
+        if images:
+            self.stats.token_images_resolved += images
+            logger.info("token_image_backfill_completed", tokens=images)
 
     # --- Refresh loop -------------------------------------------------------
 

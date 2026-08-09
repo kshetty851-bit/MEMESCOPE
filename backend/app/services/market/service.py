@@ -28,6 +28,7 @@ from app.services.market.providers.base import (
     ProviderUnavailableError,
 )
 from app.services.market.scheduler import RefreshScheduler
+from app.services.token_images import TokenImageResolver
 
 logger = get_logger(__name__)
 
@@ -82,6 +83,8 @@ class MarketEnrichmentService:
         )
         if created is not None:
             logger.info("enrichment_token_registered", mint=mint_address)
+        if token.image_url is None and token.metadata_uri:
+            await self._refresh_token_image(token)
         return created is not None
 
     async def backfill_registrations(self, *, limit: int = 500) -> int:
@@ -92,10 +95,33 @@ class MarketEnrichmentService:
         """
         return await self.states.backfill_missing(limit=limit)
 
+    async def backfill_missing_images(self, *, limit: int = 50) -> int:
+        """Resolve token images for existing rows, idempotently and by exact mint row."""
+        tokens = await self.tokens.list_missing_images(limit=limit)
+        resolved = 0
+        for token in tokens:
+            if await self._refresh_token_image(token):
+                resolved += 1
+        return resolved
+
     async def claim_batch(self, *, limit: int | None = None) -> Sequence[TokenEnrichmentState]:
         return await self.states.claim_due(
             now=datetime.now(UTC), limit=limit or settings.ENRICHMENT_BATCH_LIMIT
         )
+
+    async def _refresh_token_image(self, token: Any) -> bool:
+        async with TokenImageResolver() as resolver:
+            resolution = await resolver.resolve(token.metadata_uri)
+        if resolution is None:
+            return False
+        await self.tokens.update_image_url(token, image_url=resolution.image_url)
+        logger.info(
+            "token_image_resolved",
+            mint=token.mint_address,
+            source=resolution.source,
+            image_url=resolution.image_url,
+        )
+        return True
 
     async def enrich(self, states: Sequence[TokenEnrichmentState]) -> EnrichmentOutcome:
         """Refresh one batch of tokens and persist the results.

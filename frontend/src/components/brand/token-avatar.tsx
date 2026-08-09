@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -37,6 +37,11 @@ export function TokenAvatar({
   className?: string;
 }) {
   const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [imageUrl, mint]);
+
   if (imageUrl && !failed) {
     return (
       // eslint-disable-next-line @next/next/no-img-element

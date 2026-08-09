@@ -143,6 +143,26 @@ class TokenRepository(BaseRepository[DiscoveredToken]):
         await self.session.refresh(token)
         return token
 
+    async def update_image_url(
+        self, token: DiscoveredToken, *, image_url: str
+    ) -> DiscoveredToken:
+        """Persist a mint-owned token image without rewriting identity metadata."""
+        token.image_url = image_url
+        await self.session.flush()
+        await self.session.refresh(token)
+        return token
+
+    async def list_missing_images(self, *, limit: int = 50) -> Sequence[DiscoveredToken]:
+        """Tokens with metadata JSON available but no resolved token image."""
+        stmt = (
+            select(DiscoveredToken)
+            .where(DiscoveredToken.metadata_uri.is_not(None))
+            .where(DiscoveredToken.image_url.is_(None))
+            .order_by(DiscoveredToken.discovered_at.desc(), DiscoveredToken.id.desc())
+            .limit(limit)
+        )
+        return (await self.session.execute(stmt)).scalars().all()
+
     async def list_pending_metadata(self, *, limit: int = 50) -> Sequence[DiscoveredToken]:
         """Tokens whose metadata has not resolved yet, oldest first."""
         stmt = (

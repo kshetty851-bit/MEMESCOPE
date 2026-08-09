@@ -96,6 +96,47 @@ async def test_list_pending_metadata_only_returns_pending(db_session: AsyncSessi
     assert [token.mint_address for token in pending] == ["MintPending"]
 
 
+async def test_list_missing_images_requires_metadata_uri_and_no_image(
+    db_session: AsyncSession,
+) -> None:
+    repo = TokenRepository(db_session)
+    await repo.insert_if_absent(
+        _values("NeedsImage", metadata_uri="https://metadata.test/needs.json")
+    )
+    await repo.insert_if_absent(_values("NoMetadata"))
+    await repo.insert_if_absent(
+        _values(
+            "AlreadyHasImage",
+            metadata_uri="https://metadata.test/has.json",
+            image_url="https://cdn.test/has.png",
+        )
+    )
+
+    missing = await repo.list_missing_images(limit=10)
+
+    assert [token.mint_address for token in missing] == ["NeedsImage"]
+
+
+async def test_update_image_url_only_changes_the_image(db_session: AsyncSession) -> None:
+    repo = TokenRepository(db_session)
+    token = await repo.insert_if_absent(
+        _values(
+            "ImageOnly",
+            name="Original Name",
+            symbol="ORIG",
+            metadata_uri="https://metadata.test/image.json",
+        )
+    )
+    assert token is not None
+
+    updated = await repo.update_image_url(token, image_url="https://cdn.test/image.png")
+
+    assert updated.image_url == "https://cdn.test/image.png"
+    assert updated.name == "Original Name"
+    assert updated.symbol == "ORIG"
+    assert updated.metadata_uri == "https://metadata.test/image.json"
+
+
 async def test_latest_is_newest_first(db_session: AsyncSession) -> None:
     repo = TokenRepository(db_session)
     now = datetime.now(UTC)
