@@ -10,10 +10,12 @@ from __future__ import annotations
 import json
 import os
 import stat
+from base64 import b64decode, b64encode
 from pathlib import Path
 from typing import Protocol
 
 from solders.keypair import Keypair
+from solders.transaction import VersionedTransaction
 
 
 class ExecutionSignerUnavailableError(RuntimeError):
@@ -22,6 +24,10 @@ class ExecutionSignerUnavailableError(RuntimeError):
 
 class ExecutionWalletPublicKeyMismatchError(RuntimeError):
     """The mounted secret does not belong to the configured public address."""
+
+
+class ExecutionTransactionValidationError(RuntimeError):
+    """A Jupiter assembled transaction is not safe to sign."""
 
 
 class ExecutionSigner(Protocol):
@@ -80,6 +86,29 @@ class FileExecutionSigner:
     def sign_message(self, message: bytes) -> bytes:
         """Unit-testable primitive only; no transaction is built or submitted here."""
         return bytes(self._keypair.sign_message(message))
+
+    def sign_jupiter_transaction(self, encoded_transaction: str) -> str:
+        """Sign one assembled V0 transaction after structural wallet checks.
+
+        This verifies the required signer set and payer/taker identity.  Route
+        instructions are compiled and may use lookup tables, so mint/amount
+        semantics remain authoritative only in the separately persisted order
+        evidence and must be rechecked upstream before this boundary.
+        """
+        try:
+            transaction = VersionedTransaction.from_bytes(b64decode(encoded_transaction))
+            message = transaction.message
+            if message.header.num_required_signatures != 1:
+                raise ExecutionTransactionValidationError("unexpected_signer_requirement")
+            if str(message.account_keys[0]) != self.public_key:
+                raise ExecutionTransactionValidationError("transaction_taker_mismatch")
+            signature = self._keypair.sign_message(bytes(message))
+            signed = VersionedTransaction.populate(message, [signature])
+            return b64encode(bytes(signed)).decode("ascii")
+        except ExecutionTransactionValidationError:
+            raise
+        except Exception as exc:
+            raise ExecutionTransactionValidationError("malformed_jupiter_transaction") from exc
 
 
 class UnavailableExecutionSigner:

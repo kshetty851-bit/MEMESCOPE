@@ -43,6 +43,24 @@ type WalletStatus = {
     unresolved_intents: Array<{ id: string; mint_address: string; state: string }>;
     kill_switches: Array<{ kind: string; reason: string | null }>;
   };
+  confirmed_lifecycle: {
+    consecutive_execution_failures: number;
+    last_failure_reason: string | null;
+    positions: Array<{
+      id: string;
+      mint_address: string;
+      status: string;
+      quantity: string;
+      entry_actual_input_amount: string | null;
+      entry_actual_output_amount: string | null;
+      exit_actual_input_amount: string | null;
+      exit_actual_output_amount: string | null;
+      realised_gross_pnl_usd: string | null;
+      realised_net_pnl_usd: string | null;
+      opened_at: string;
+      closed_at: string | null;
+    }>;
+  };
 };
 
 function StatusCard({ label, value }: { label: string; value: string }) {
@@ -100,58 +118,167 @@ export default function RealWalletPage() {
             </a>
           </div>
         ) : (
-          <p className="mt-2 text-sm text-ink-faint">Not configured. Generate it locally first.</p>
+          <p className="mt-2 text-sm text-ink-faint">
+            Not configured. Generate it locally first.
+          </p>
         )}
       </section>
       <section className="mt-6 overflow-x-auto rounded-panel border border-line">
         <div className="p-4">
           <p className="text-label text-ink-faint">Dry-run decisions</p>
           <p className="mt-1 text-sm text-ink-faint">
-            {data?.dry_run.feature_enabled ? "Recording enabled" : "Recording disabled"}. No order is signed or submitted.
+            {data?.dry_run.feature_enabled ? "Recording enabled" : "Recording disabled"}. No
+            order is signed or submitted.
           </p>
         </div>
         <table className="w-full text-left text-sm">
-          <thead className="border-y border-line text-ink-faint"><tr><th className="p-3">Token</th><th>Rank</th><th>Safety</th><th>Impact</th><th>Decision</th><th className="p-3">Reason</th></tr></thead>
-          <tbody>{data?.dry_run.decisions.map((row) => (
-            <tr key={`${row.mint_address}-${row.radar_rank}`} className="border-b border-line/60 last:border-0">
-              <td className="p-3"><span className="text-ink">{row.symbol ?? "—"}</span><code className="ml-2 text-xs text-ink-faint">{row.mint_address.slice(0, 8)}</code></td>
-              <td>{row.radar_rank}</td><td>{row.safety ?? "—"}</td>
-              <td>{row.buy_impact_pct ?? "—"} / {row.sell_impact_pct ?? "—"}</td>
-              <td className={row.status === "WOULD_BUY" ? "text-safe" : "text-warning"}>{row.status}</td>
-              <td className="p-3 text-xs text-ink-faint">{row.reason_codes.join(", ") || "—"}</td>
+          <thead className="border-y border-line text-ink-faint">
+            <tr>
+              <th className="p-3">Token</th>
+              <th>Rank</th>
+              <th>Safety</th>
+              <th>Impact</th>
+              <th>Decision</th>
+              <th className="p-3">Reason</th>
             </tr>
-          ))}</tbody>
+          </thead>
+          <tbody>
+            {data?.dry_run.decisions.map((row) => (
+              <tr
+                key={`${row.mint_address}-${row.radar_rank}`}
+                className="border-b border-line/60 last:border-0"
+              >
+                <td className="p-3">
+                  <span className="text-ink">{row.symbol ?? "—"}</span>
+                  <code className="ml-2 text-xs text-ink-faint">
+                    {row.mint_address.slice(0, 8)}
+                  </code>
+                </td>
+                <td>{row.radar_rank}</td>
+                <td>{row.safety ?? "—"}</td>
+                <td>
+                  {row.buy_impact_pct ?? "—"} / {row.sell_impact_pct ?? "—"}
+                </td>
+                <td className={row.status === "WOULD_BUY" ? "text-safe" : "text-warning"}>
+                  {row.status}
+                </td>
+                <td className="p-3 text-xs text-ink-faint">
+                  {row.reason_codes.join(", ") || "—"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
         </table>
       </section>
       <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <StatusCard label="SOL balance" value={data?.sol_balance?.toFixed(6) ?? "—"} />
-        <StatusCard label="Funding" value={(data?.funding_status ?? "unknown").toUpperCase()} />
+        <StatusCard
+          label="Funding"
+          value={(data?.funding_status ?? "unknown").toUpperCase()}
+        />
         <StatusCard label="Trading mode" value={(data?.mode ?? "disabled").toUpperCase()} />
         <StatusCard label="Safety gate" value={data?.safety_gate ?? "—"} />
       </div>
       <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        <StatusCard label="Execution" value={data?.execution_enabled ? "ENABLED" : "DISABLED"} />
-        <StatusCard label="Autotrade" value={data?.autotrade_enabled ? "ENABLED" : "DISABLED"} />
+        <StatusCard
+          label="Execution"
+          value={data?.execution_enabled ? "ENABLED" : "DISABLED"}
+        />
+        <StatusCard
+          label="Autotrade"
+          value={data?.autotrade_enabled ? "ENABLED" : "DISABLED"}
+        />
         <StatusCard label="Signer" value={data?.signer_ready ? "READY" : "NOT READY"} />
-        <StatusCard label="SOL fee reserve" value={`${data?.limits.min_sol_fee_reserve ?? "—"} SOL`} />
+        <StatusCard
+          label="SOL fee reserve"
+          value={`${data?.limits.min_sol_fee_reserve ?? "—"} SOL`}
+        />
       </div>
       <section className="mt-6 rounded-panel border border-line p-4">
         <p className="text-label text-ink-faint">Live readiness</p>
         <p className="mt-1 text-sm text-ink-faint">
-          Submission transport: {data?.live_submission_transport ?? "not installed"}. New entries remain fail-closed.
+          Submission transport: {data?.live_submission_transport ?? "not installed"}. New
+          entries remain fail-closed.
         </p>
         <p className="mt-2 text-sm text-ink-faint">
-          Open real positions: {data?.live_readiness.open_real_positions ?? 0}. Unresolved intents: {data?.live_readiness.unresolved_intents.length ?? 0}. Active kill switches: {data?.live_readiness.kill_switches.length ?? 0}.
+          Open real positions: {data?.live_readiness.open_real_positions ?? 0}. Unresolved
+          intents: {data?.live_readiness.unresolved_intents.length ?? 0}. Active kill
+          switches: {data?.live_readiness.kill_switches.length ?? 0}.
         </p>
+      </section>
+      <section className="mt-6 overflow-x-auto rounded-panel border border-line">
+        <div className="p-4">
+          <p className="text-label text-ink-faint">Confirmed lifecycle ledger</p>
+          <p className="mt-1 text-sm text-ink-faint">
+            Test-only settlement evidence. Consecutive execution failures:{" "}
+            {data?.confirmed_lifecycle.consecutive_execution_failures ?? 0}
+            {data?.confirmed_lifecycle.last_failure_reason
+              ? ` (${data.confirmed_lifecycle.last_failure_reason})`
+              : ""}
+            .
+          </p>
+        </div>
+        <table className="w-full text-left text-sm">
+          <thead className="border-y border-line text-ink-faint">
+            <tr>
+              <th className="p-3">Token</th>
+              <th>State</th>
+              <th>Confirmed quantity</th>
+              <th>Entry / exit USDC</th>
+              <th className="p-3">Realised P&amp;L</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data?.confirmed_lifecycle.positions.map((position) => (
+              <tr key={position.id} className="border-b border-line/60 last:border-0">
+                <td className="p-3">
+                  <code className="text-xs text-ink">
+                    {position.mint_address.slice(0, 12)}
+                  </code>
+                </td>
+                <td
+                  className={position.status === "CLOSED" ? "text-ink-faint" : "text-safe"}
+                >
+                  {position.status}
+                </td>
+                <td>{position.quantity}</td>
+                <td>
+                  {position.entry_actual_input_amount ?? "—"} /{" "}
+                  {position.exit_actual_output_amount ?? "—"}
+                </td>
+                <td className="p-3">
+                  {position.realised_net_pnl_usd === null
+                    ? "—"
+                    : `$${position.realised_net_pnl_usd}`}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </section>
       <section className="mt-6 rounded-panel border border-line p-4">
         <p className="text-label text-ink-faint">Hard limits</p>
         <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
-          <div><dt className="text-ink-faint">Max trade</dt><dd className="text-ink">${data?.limits.max_trade_usd ?? "—"}</dd></div>
-          <div><dt className="text-ink-faint">Max positions</dt><dd className="text-ink">{data?.limits.max_open_positions ?? "—"}</dd></div>
-          <div><dt className="text-ink-faint">Max exposure</dt><dd className="text-ink">${data?.limits.max_total_exposure_usd ?? "—"}</dd></div>
-          <div><dt className="text-ink-faint">Daily notional</dt><dd className="text-ink">${data?.limits.max_daily_notional_usd ?? "—"}</dd></div>
-          <div><dt className="text-ink-faint">Daily loss</dt><dd className="text-ink">${data?.limits.max_daily_loss_usd ?? "—"}</dd></div>
+          <div>
+            <dt className="text-ink-faint">Max trade</dt>
+            <dd className="text-ink">${data?.limits.max_trade_usd ?? "—"}</dd>
+          </div>
+          <div>
+            <dt className="text-ink-faint">Max positions</dt>
+            <dd className="text-ink">{data?.limits.max_open_positions ?? "—"}</dd>
+          </div>
+          <div>
+            <dt className="text-ink-faint">Max exposure</dt>
+            <dd className="text-ink">${data?.limits.max_total_exposure_usd ?? "—"}</dd>
+          </div>
+          <div>
+            <dt className="text-ink-faint">Daily notional</dt>
+            <dd className="text-ink">${data?.limits.max_daily_notional_usd ?? "—"}</dd>
+          </div>
+          <div>
+            <dt className="text-ink-faint">Daily loss</dt>
+            <dd className="text-ink">${data?.limits.max_daily_loss_usd ?? "—"}</dd>
+          </div>
         </dl>
       </section>
     </main>

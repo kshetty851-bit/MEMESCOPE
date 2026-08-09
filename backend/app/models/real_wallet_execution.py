@@ -7,7 +7,18 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import DateTime, ForeignKey, Index, Numeric, String, UniqueConstraint, func
+from sqlalchemy import (
+    BigInteger,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    UniqueConstraint,
+    func,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -54,14 +65,21 @@ class RealWalletExecutionIntent(Base, UUIDPrimaryKeyMixin):
 
 
 class RealWalletPosition(Base, UUIDPrimaryKeyMixin):
-    """Reserved real-position ledger. Dry-run never creates one of these rows."""
+    """Confirmed-only real-position ledger, isolated from every Paper table."""
 
     __tablename__ = "real_wallet_positions"
 
-    mint_address: Mapped[str] = mapped_column(String(44), nullable=False, unique=True)
+    mint_address: Mapped[str] = mapped_column(String(44), nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False)
-    opened_intent_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("real_wallet_execution_intents.id"), nullable=False
+    # This nullable legacy link is retained only so an already-migrated dry-run
+    # database remains readable. New confirmed positions must use
+    # ``opened_live_intent_id``; dry-run code never writes this table.
+    opened_intent_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("real_wallet_execution_intents.id")
+    )
+    opened_live_intent_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("real_wallet_live_intents.id"),
     )
     quantity: Mapped[Decimal] = mapped_column(Numeric(38, 18), nullable=False)
     entry_price_usd: Mapped[Decimal] = mapped_column(Numeric(38, 18), nullable=False)
@@ -76,20 +94,30 @@ class RealWalletPosition(Base, UUIDPrimaryKeyMixin):
     entry_transaction_signature: Mapped[str | None] = mapped_column(String(128))
     entry_actual_input_amount: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
     entry_actual_output_amount: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
+    entry_network_fee_lamports: Mapped[int | None] = mapped_column(BigInteger)
     exit_intent_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("real_wallet_live_intents.id")
     )
     exit_transaction_signature: Mapped[str | None] = mapped_column(String(128))
+    exit_actual_input_amount: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
     exit_actual_output_amount: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
+    exit_network_fee_lamports: Mapped[int | None] = mapped_column(BigInteger)
     exit_reason: Mapped[str | None] = mapped_column(String(64))
-    realised_gross_pnl_usd: Mapped[Decimal | None] = mapped_column(Numeric(24, 4))
-    realised_net_pnl_usd: Mapped[Decimal | None] = mapped_column(Numeric(24, 4))
+    realised_gross_pnl_usd: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
+    realised_net_pnl_usd: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
 
     __table_args__ = (
+        UniqueConstraint("opened_live_intent_id", name="uq_real_position_opened_live_intent"),
         UniqueConstraint(
             "entry_transaction_signature", name="uq_real_position_entry_signature"
         ),
         UniqueConstraint("exit_transaction_signature", name="uq_real_position_exit_signature"),
+        Index(
+            "uq_real_wallet_open_position_mint",
+            "mint_address",
+            unique=True,
+            postgresql_where=text("status = 'OPEN'"),
+        ),
     )
 
 
@@ -114,12 +142,19 @@ class RealWalletLiveIntent(Base, UUIDPrimaryKeyMixin):
     )
     requested_usd: Mapped[Decimal | None] = mapped_column(Numeric(24, 4))
     requested_token_quantity: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
+    input_mint: Mapped[str | None] = mapped_column(String(44))
+    output_mint: Mapped[str | None] = mapped_column(String(44))
     jupiter_request_id: Mapped[str | None] = mapped_column(String(128), unique=True)
     order_evidence: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     order_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     transaction_signature: Mapped[str | None] = mapped_column(String(128), unique=True)
+    actual_input_amount_raw: Mapped[Decimal | None] = mapped_column(Numeric(38, 0))
+    actual_input_decimals: Mapped[int | None] = mapped_column(Integer)
+    actual_output_amount_raw: Mapped[Decimal | None] = mapped_column(Numeric(38, 0))
+    actual_output_decimals: Mapped[int | None] = mapped_column(Integer)
+    network_fee_lamports: Mapped[int | None] = mapped_column(BigInteger)
     failure_reason: Mapped[str | None] = mapped_column(String(128))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
@@ -157,6 +192,20 @@ class RealWalletKillSwitch(Base, UUIDPrimaryKeyMixin):
     active: Mapped[bool] = mapped_column(nullable=False, default=False, server_default="false")
     reason: Mapped[str | None] = mapped_column(String(256))
     activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class RealWalletExecutionHealth(Base, UUIDPrimaryKeyMixin):
+    """One durable, secret-free execution-health counter per execution scope."""
+
+    __tablename__ = "real_wallet_execution_health"
+
+    scope: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    consecutive_failures: Mapped[int] = mapped_column(nullable=False, default=0)
+    last_failure_reason: Mapped[str | None] = mapped_column(String(128))
+    last_failure_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )

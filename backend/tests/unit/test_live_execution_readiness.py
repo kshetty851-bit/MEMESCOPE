@@ -176,5 +176,12 @@ async def test_unknown_submission_requires_reconciliation_without_resubmission()
 
     assert outcome is ChainOutcome.UNKNOWN
     assert repository.transitions == [
-        (ExecutionState.RECONCILIATION_REQUIRED, {"reconciled": True, "outcome": "unknown"})
+        (
+            ExecutionState.RECONCILIATION_REQUIRED,
+            {
+                "reconciled": True,
+                "outcome": "unknown",
+                "confirmed_evidence_complete": False,
+            },
+        )
     ]

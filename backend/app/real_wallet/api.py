@@ -41,6 +41,8 @@ async def status(_admin: AdminUser, session: DbSession) -> dict[str, object]:
     unresolved = await live.unresolved()
     kill_switches = await live.active_kill_switches()
     open_positions = await live.open_positions_count()
+    health = await live.health()
+    positions = await live.positions(limit=30)
     signer_ready = False
     if public_key and settings.REAL_WALLET_EXECUTION_SECRET_FILE:
         # Readiness is intentionally a boolean. The secret and its bytes never
@@ -117,6 +119,53 @@ async def status(_admin: AdminUser, session: DbSession) -> dict[str, object]:
             ],
             "kill_switches": [
                 {"kind": switch.kind, "reason": switch.reason} for switch in kill_switches
+            ],
+        },
+        "confirmed_lifecycle": {
+            "consecutive_execution_failures": (
+                0 if health is None else health.consecutive_failures
+            ),
+            "last_failure_reason": None if health is None else health.last_failure_reason,
+            "positions": [
+                {
+                    "id": str(position.id),
+                    "mint_address": position.mint_address,
+                    "status": position.status,
+                    "quantity": _decimal(position.quantity),
+                    "entry_actual_input_amount": (
+                        None
+                        if position.entry_actual_input_amount is None
+                        else _decimal(position.entry_actual_input_amount)
+                    ),
+                    "entry_actual_output_amount": (
+                        None
+                        if position.entry_actual_output_amount is None
+                        else _decimal(position.entry_actual_output_amount)
+                    ),
+                    "exit_actual_input_amount": (
+                        None
+                        if position.exit_actual_input_amount is None
+                        else _decimal(position.exit_actual_input_amount)
+                    ),
+                    "exit_actual_output_amount": (
+                        None
+                        if position.exit_actual_output_amount is None
+                        else _decimal(position.exit_actual_output_amount)
+                    ),
+                    "realised_gross_pnl_usd": (
+                        None
+                        if position.realised_gross_pnl_usd is None
+                        else _decimal(position.realised_gross_pnl_usd)
+                    ),
+                    "realised_net_pnl_usd": (
+                        None
+                        if position.realised_net_pnl_usd is None
+                        else _decimal(position.realised_net_pnl_usd)
+                    ),
+                    "opened_at": position.opened_at,
+                    "closed_at": position.closed_at,
+                }
+                for position in positions
             ],
         },
     }

@@ -25,6 +25,7 @@ from app.models.paper import (
 from app.models.radar import RadarAchievement, RadarSnapshot, RadarToken
 from app.models.real_wallet_execution import (
     RealWalletExecutionEvent,
+    RealWalletExecutionHealth,
     RealWalletExecutionIntent,
     RealWalletKillSwitch,
     RealWalletLiveIntent,
@@ -58,6 +59,7 @@ __all__ = [
     "RadarSnapshot",
     "RadarToken",
     "RealWalletExecutionEvent",
+    "RealWalletExecutionHealth",
     "RealWalletExecutionIntent",
     "RealWalletKillSwitch",
     "RealWalletLiveIntent",
