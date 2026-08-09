@@ -24,6 +24,7 @@ from app.real_wallet.live_readiness import ExecutionState
 from app.real_wallet.live_repository import LiveIntentRepository
 from app.real_wallet.live_transport import JupiterExecuteOutcome, JupiterExecutionResult
 from app.real_wallet.reconciliation import ChainOutcome, ChainReceipt, TransactionReconciler
+from app.real_wallet.sol_price import SolUsdPrice
 
 pytestmark = pytest.mark.integration
 
@@ -75,6 +76,22 @@ class _Receipts(TransactionReconciler):
         )
 
 
+class _SolPrice:
+    """A fixed SOL/USD reading, so fee arithmetic in this test is exact.
+
+    Injected rather than defaulted: a settlement must also be recordable when
+    no price is available, and the test below asserts both paths.
+    """
+
+    def __init__(self, usd: Decimal | None) -> None:
+        self._usd = usd
+
+    async def current(self, *, now: datetime) -> SolUsdPrice | None:
+        if self._usd is None:
+            return None
+        return SolUsdPrice(usd=self._usd, observed_at=now, source="test")
+
+
 def _success(signature: str) -> JupiterExecutionResult:
     return JupiterExecutionResult(
         outcome=JupiterExecuteOutcome.SUCCESS,
@@ -111,6 +128,7 @@ async def test_mocked_buy_confirm_position_sell_confirm_close_is_exactly_once(
         order_factory=orders,
         signer=_Signer(),
         transport=transport,
+        sol_price_source=_SolPrice(Decimal(200)),
         reconciler=_Receipts(
             {
                 "buy-signature": ChainReceipt(
@@ -174,7 +192,16 @@ async def test_mocked_buy_confirm_position_sell_confirm_close_is_exactly_once(
     assert closed.exit_actual_input_amount == closed.quantity == Decimal("2.5")
     assert closed.exit_actual_output_amount == Decimal("5.123456")
     assert closed.realised_gross_pnl_usd == Decimal("0.123456")
-    assert closed.realised_net_pnl_usd == Decimal("0.123456")
+    # Net is gross less both legs' network fees, priced at the recorded SOL/USD
+    # reading. 5,000 lamports is 0.000005 SOL; at $200 that is $0.001 a side.
+    # Before this sprint this field was assigned the gross figure — a column
+    # named `net` holding gross reads as measured, and was not.
+    assert closed.entry_network_fee_usd == Decimal("0.001000")
+    assert closed.exit_network_fee_usd == Decimal("0.001000")
+    assert closed.realised_net_pnl_usd == Decimal("0.121456")
+    assert closed.net_pnl_unavailable_reason is None
+    assert closed.entry_sol_price_usd == Decimal(200)
+    assert closed.sol_price_source == "test"
     assert await db_session.scalar(select(func.count()).select_from(PaperPosition)) == 0
 
     events = await db_session.scalar(
@@ -316,3 +343,59 @@ async def test_two_terminal_execution_failures_activate_kill_switch_and_block_ne
     assert await lifecycle.advance(blocked.id, at=NOW) == ExecutionState.BLOCKED
     assert len(transport.calls) == 2
     assert len(orders.calls) == 2
+
+
+async def test_settlement_without_a_sol_price_keeps_gross_and_claims_no_net(
+    db_session: AsyncSession,
+) -> None:
+    """The defect this sprint removed, asserted as a regression.
+
+    A confirmed on-chain trade must still settle when SOL/USD is unavailable —
+    refusing would leave a real position invisible to the ledger. What it must
+    not do is fill `realised_net_pnl_usd` with the gross figure, which is what
+    happened before and which reads to any consumer as a measured net result.
+    """
+    orders = _Orders()
+    transport = _Transport([_success("buy-signature")])
+    lifecycle = TestOnlyRealWalletLifecycle(
+        db_session,
+        order_factory=orders,
+        signer=_Signer(),
+        transport=transport,
+        # No price available at settlement time.
+        sol_price_source=_SolPrice(None),
+        reconciler=_Receipts(
+            {
+                "buy-signature": ChainReceipt(
+                    outcome=ChainOutcome.CONFIRMED,
+                    signature="buy-signature",
+                    actual_input_amount="5000000",
+                    actual_input_decimals=6,
+                    actual_output_amount="2500000",
+                    actual_output_decimals=6,
+                    network_fee_lamports=5000,
+                ),
+            }
+        ),
+    )
+
+    buy = await lifecycle.create_buy(
+        idempotency_key="unpriced:buy",
+        mint_address=MINT,
+        strategy_id="test_strategy",
+        strategy_version="v1",
+        wallet_public_key=WALLET,
+        requested_usd=Decimal("5"),
+    )
+    await lifecycle.advance(buy.id, at=NOW)
+    await lifecycle.advance(buy.id, at=NOW)
+    await lifecycle.recover(at=NOW)
+
+    position = await db_session.scalar(select(RealWalletPosition))
+    assert position is not None
+    # The position opened: the trade happened and the ledger reflects it.
+    assert position.status == "OPEN"
+    assert position.entry_actual_output_amount == Decimal("2.5")
+    # But nothing about its cost in USD is claimed.
+    assert position.entry_network_fee_usd is None
+    assert position.entry_sol_price_usd is None

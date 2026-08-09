@@ -463,6 +463,31 @@ class Settings(BaseSettings):
     JUPITER_API_KEY: SecretStr = SecretStr("")
     JUPITER_V2_ORDER_TIMEOUT_SECONDS: float = Field(default=8.0, gt=0, le=30)
 
+    # --- Execution fee accounting (SOL/USD) --------------------------------
+    # Network fees are paid in SOL and every limit in this system is written in
+    # USD. Without a dated SOL/USD reading the two cannot be reconciled, so
+    # `realised_net_pnl_usd` used to be set to the gross figure — a field that
+    # said "net" and held gross. These settings exist so that stops.
+    #: Which read-only provider supplies SOL/USD. `jupiter` reuses the quote
+    #: API the paper wallet already depends on rather than adding a vendor.
+    EXECUTION_SOL_PRICE_PROVIDER: Literal["jupiter"] = "jupiter"
+    #: A price older than this cannot gate an entry. Fees are still converted
+    #: from an older reading when settling history, but the reading's age and
+    #: source are stored with the figure so nobody has to assume.
+    EXECUTION_SOL_PRICE_MAX_AGE_SECONDS: int = Field(default=120, ge=1, le=3600)
+    #: Wrapped SOL. The unit the network charges its fees in.
+    EXECUTION_SOL_MINT: str = "So11111111111111111111111111111111111111112"
+    #: Assumed priority fee per transaction, in SOL. Configuration, not a
+    #: measurement — it is used only to make the reserve conservative, never to
+    #: report a cost that was actually paid.
+    EXECUTION_PRIORITY_FEE_SOL: Decimal = Field(
+        default=Decimal("0.0005"), ge=Decimal("0"), le=Decimal("1")
+    )
+    #: How many transaction-costs of headroom the wallet must retain beyond the
+    #: entry. At least 2: a position that cannot afford its own exit is a
+    #: position that cannot be closed, which is worse than never opening it.
+    EXECUTION_EXIT_FEE_RESERVE_MULTIPLIER: int = Field(default=2, ge=2, le=10)
+
     # --- Breakout provider ----------------------------------------------------
     # Every threshold measured against the stored history on 2026-08-03 (1.37 M
     # evaluable observations). At these values the provider fires on 0.03 % of
@@ -678,6 +703,14 @@ class Settings(BaseSettings):
         "SCANNER_WATCH_PROGRAMS",
         "OPPORTUNITY_BONDING_CURVE_VENUES",
         "OPPORTUNITY_GRADUATED_VENUES",
+        # Both were `CsvList` from the day the safety gate landed but were never
+        # registered here, because neither had ever appeared in a compose file —
+        # so the omission was invisible. Putting the execution contract in the
+        # shared anchor made the backend refuse to boot on `pumpfun,pumpswap`.
+        # These two are the venue and Token-2022 extension allowlists, i.e. the
+        # settings an operator is most likely to want to narrow by hand.
+        "REAL_WALLET_SAFETY_SUPPORTED_VENUES",
+        "REAL_WALLET_SAFETY_SUPPORTED_TOKEN_2022_EXTENSIONS",
         mode="before",
     )
     @classmethod

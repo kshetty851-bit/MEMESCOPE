@@ -27,6 +27,7 @@ from app.real_wallet.reconciliation import (
     RealWalletReconciliationService,
     TransactionReconciler,
 )
+from app.real_wallet.sol_price import SolUsdPriceSource
 
 logger = get_logger(__name__)
 
@@ -77,6 +78,7 @@ class TestOnlyRealWalletLifecycle:
         signer: TestTransactionSigner,
         transport: TestSubmissionTransport,
         reconciler: TransactionReconciler,
+        sol_price_source: SolUsdPriceSource | None = None,
     ) -> None:
         self._require_test_environment()
         self._session = session
@@ -85,6 +87,7 @@ class TestOnlyRealWalletLifecycle:
         self._signer = signer
         self._transport = transport
         self._reconciler = reconciler
+        self._sol_price_source = sol_price_source
 
     @staticmethod
     def _require_test_environment() -> None:
@@ -206,7 +209,9 @@ class TestOnlyRealWalletLifecycle:
             failed += 1
         unresolved = await self._repository.unresolved()
         reconciled = 0
-        service = RealWalletReconciliationService(self._repository, self._reconciler)
+        service = RealWalletReconciliationService(
+            self._repository, self._reconciler, sol_price_source=self._sol_price_source
+        )
         for intent in unresolved:
             await service.reconcile(intent=intent, at=now)
             reconciled += 1

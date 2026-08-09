@@ -1,9 +1,14 @@
 """Guarded Jupiter V2 transport for a future real-wallet release.
 
-The HTTP boundary is intentionally isolated here.  Callers must supply a
-fresh ``SubmissionDecision`` from ``LiveSubmissionGuard``; this transport owns
-no strategy, safety, sizing, or enablement decision.  Tests inject an HTTPX
-mock and must never use the production endpoint.
+The HTTP boundary is intentionally isolated here. Callers must supply a fresh
+``SubmissionDecision`` from ``LiveSubmissionGuard``; this transport owns no
+strategy, safety, sizing, or enablement decision.
+
+**It no longer owns the submission barrier either.** That decision moved to
+``app.real_wallet.transport_policy``, which is the one place that knows what
+test/disabled/dry_run/armed/live mean. This module asks it and obeys. Keeping
+the barrier here made it a private detail of one class; there must be exactly
+one such decision, and it must be findable.
 """
 
 from __future__ import annotations
@@ -11,12 +16,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, cast
-from urllib.parse import urlparse
 
 import httpx
 
 from app.core.config import settings
 from app.real_wallet.live_readiness import SubmissionDecision
+from app.real_wallet.transport_policy import (
+    ExecuteNotPermittedError,
+    ExecutionTransportPolicy,
+    TransportEnvelope,
+)
 
 
 class JupiterExecuteOutcome(StrEnum):
@@ -33,8 +42,14 @@ class JupiterExecuteTransportError(RuntimeError):
     """The execute response was unavailable or malformed."""
 
 
-class TestOnlyExternalExecuteBlockedError(RuntimeError):
-    """A test tried to point the execute path at a real Jupiter endpoint."""
+class TestOnlyExternalExecuteBlockedError(ExecuteNotPermittedError):
+    """A test tried to reach `/execute` at all.
+
+    Retained under the name the suite already asserts on, and now a subclass of
+    the central refusal so either name catches the same guarantee. Raised for
+    every attempt made while `ENVIRONMENT == "test"` — including a correctly
+    mocked one, because in the sandbox envelope no attempt is ever permitted.
+    """
 
     __test__ = False
 
@@ -73,7 +88,7 @@ class JupiterLiveExecutionTransport:
             raise LiveTransportBlockedError("live_submission_guard_blocked")
         if not signed_transaction or not request_id:
             raise LiveTransportBlockedError("missing_signed_order_evidence")
-        self._assert_test_only_endpoint()
+        self._authorise(guard)
         api_key = settings.JUPITER_API_KEY.get_secret_value()
         headers = {"x-api-key": api_key} if api_key else {}
         try:
@@ -120,18 +135,22 @@ class JupiterLiveExecutionTransport:
             error_code=str(body["errorCode"]) if body.get("errorCode") else None,
         )
 
-    def _assert_test_only_endpoint(self) -> None:
-        """Make an accidental external `/execute` impossible during this sprint.
+    def _authorise(self, guard: SubmissionDecision) -> None:
+        """Ask the one policy whether this attempt may touch the network.
 
-        The only allowed route is a reserved test hostname with an injected
-        HTTPX client (normally ``MockTransport``). Production configured URLs,
-        localhost, and a client created internally are all rejected before any
-        HTTP request is constructed.
+        Refused before any HTTP request is constructed. In the test sandbox the
+        refusal keeps its historical name so the guarantee stays greppable under
+        the term the suite has always asserted on.
         """
-        host = (urlparse(self._base_url).hostname or "").lower()
-        if (
-            settings.ENVIRONMENT != "test"
-            or self._client is None
-            or not (host.endswith(".test") or host.endswith(".invalid"))
-        ):
-            raise TestOnlyExternalExecuteBlockedError("external_jupiter_execute_blocked")
+        authorisation = ExecutionTransportPolicy().authorise(
+            guard=guard,
+            base_url=self._base_url,
+            client_injected=self._client is not None,
+        )
+        if authorisation.permitted:
+            return
+        if authorisation.envelope is TransportEnvelope.TEST_SANDBOX:
+            raise TestOnlyExternalExecuteBlockedError(
+                ("external_jupiter_execute_blocked", *authorisation.reasons)
+            )
+        authorisation.require()

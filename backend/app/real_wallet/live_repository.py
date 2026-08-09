@@ -21,6 +21,12 @@ from app.models.real_wallet_execution import (
     RealWalletPosition,
 )
 from app.real_wallet.live_readiness import ExecutionState, assert_transition
+from app.real_wallet.sol_price import (
+    NET_UNAVAILABLE_NO_FEE,
+    NET_UNAVAILABLE_NO_PRICE,
+    SolUsdPrice,
+    fee_usd,
+)
 
 
 class ConcurrentIntentTransitionError(RuntimeError):
@@ -320,8 +326,14 @@ class LiveIntentRepository:
         actual_output_decimals: int,
         network_fee_lamports: int | None,
         at: datetime,
+        sol_price: SolUsdPrice | None = None,
     ) -> RealWalletPosition:
-        """Atomically persist one confirmed settlement and its ledger effect."""
+        """Atomically persist one confirmed settlement and its ledger effect.
+
+        `sol_price` is optional and its absence is recorded rather than assumed:
+        a settlement whose fee cannot be priced keeps its measured gross figure
+        and carries no net figure at all.
+        """
         if intent.state not in {
             ExecutionState.SUBMITTED,
             ExecutionState.RECONCILIATION_REQUIRED,
@@ -348,6 +360,7 @@ class LiveIntentRepository:
                 actual_output_decimals=actual_output_decimals,
                 network_fee_lamports=network_fee_lamports,
                 at=at,
+                sol_price=sol_price,
             )
         elif intent.side == "SELL":
             position = await self._close_confirmed_position(
@@ -359,6 +372,7 @@ class LiveIntentRepository:
                 actual_output_decimals=actual_output_decimals,
                 network_fee_lamports=network_fee_lamports,
                 at=at,
+                sol_price=sol_price,
             )
         else:
             raise SettlementEvidenceError("unsupported_execution_side")
@@ -410,6 +424,7 @@ class LiveIntentRepository:
         actual_output_decimals: int,
         network_fee_lamports: int | None,
         at: datetime,
+        sol_price: SolUsdPrice | None = None,
     ) -> RealWalletPosition:
         if (
             intent.input_mint != settings.JUPITER_USDC_MINT
@@ -434,6 +449,12 @@ class LiveIntentRepository:
             entry_actual_input_amount=input_amount,
             entry_actual_output_amount=output_amount,
             entry_network_fee_lamports=network_fee_lamports,
+            # The reading is stored with the figure it produced, so a later
+            # price cannot silently restate a settled entry cost.
+            entry_network_fee_usd=fee_usd(lamports=network_fee_lamports, price=sol_price),
+            entry_sol_price_usd=(None if sol_price is None else sol_price.usd),
+            entry_sol_price_at=(None if sol_price is None else sol_price.observed_at),
+            sol_price_source=(None if sol_price is None else sol_price.source),
         )
         self._session.add(position)
         await self._session.flush()
@@ -459,6 +480,7 @@ class LiveIntentRepository:
         actual_output_decimals: int,
         network_fee_lamports: int | None,
         at: datetime,
+        sol_price: SolUsdPrice | None = None,
     ) -> RealWalletPosition:
         if intent.position_id is None:
             raise SettlementEvidenceError("sell_missing_position")
@@ -492,9 +514,31 @@ class LiveIntentRepository:
         position.exit_actual_output_amount = output_amount
         position.exit_network_fee_lamports = network_fee_lamports
         position.realised_gross_pnl_usd = realised_gross
-        # Network fees are in SOL. Without a transaction-time SOL/USD price,
-        # treating them as a USD value would fabricate a net result.
-        position.realised_net_pnl_usd = realised_gross
+
+        # Net is the gross result less every fee this trade demonstrably paid.
+        # Both legs count: an entry fee is as real as an exit fee, and charging
+        # only the one in front of us would understate the cost of every trade.
+        exit_fee = fee_usd(lamports=network_fee_lamports, price=sol_price)
+        if sol_price is not None:
+            position.exit_network_fee_usd = exit_fee
+            position.exit_sol_price_usd = sol_price.usd
+            position.exit_sol_price_at = sol_price.observed_at
+            position.sol_price_source = sol_price.source
+
+        entry_fee = position.entry_network_fee_usd
+        if exit_fee is None or entry_fee is None:
+            # Refused rather than approximated. This field previously held the
+            # gross figure under a `net` name, which reads as measured; a null
+            # with a reason is the honest shape when a fee could not be priced.
+            position.realised_net_pnl_usd = None
+            position.net_pnl_unavailable_reason = (
+                NET_UNAVAILABLE_NO_PRICE
+                if sol_price is None or position.entry_sol_price_usd is None
+                else NET_UNAVAILABLE_NO_FEE
+            )
+        else:
+            position.realised_net_pnl_usd = realised_gross - entry_fee - exit_fee
+            position.net_pnl_unavailable_reason = None
         return position
 
     async def _event(

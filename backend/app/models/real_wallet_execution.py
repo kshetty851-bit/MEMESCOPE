@@ -15,6 +15,7 @@ from sqlalchemy import (
     Integer,
     Numeric,
     String,
+    Text,
     UniqueConstraint,
     func,
     text,
@@ -104,7 +105,25 @@ class RealWalletPosition(Base, UUIDPrimaryKeyMixin):
     exit_network_fee_lamports: Mapped[int | None] = mapped_column(BigInteger)
     exit_reason: Mapped[str | None] = mapped_column(String(64))
     realised_gross_pnl_usd: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
+    #: **Net only when it is actually net.** Until this sprint this field was
+    #: assigned the gross figure, because network fees are paid in SOL and no
+    #: SOL/USD reading existed to convert them. A column named `net` holding
+    #: gross is worse than a null: it reads as measured. It is now `None`
+    #: whenever the fees could not be priced, with the reason beside it.
     realised_net_pnl_usd: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
+    net_pnl_unavailable_reason: Mapped[str | None] = mapped_column(Text)
+
+    # --- Fee accounting, from a dated SOL/USD reading ------------------------
+    # The price is stored with the figure it produced. A later price change must
+    # not silently restate a settled result, and a reader must be able to see
+    # which reading was used and how old it was.
+    entry_network_fee_usd: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
+    exit_network_fee_usd: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
+    entry_sol_price_usd: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
+    exit_sol_price_usd: Mapped[Decimal | None] = mapped_column(Numeric(38, 18))
+    entry_sol_price_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    exit_sol_price_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sol_price_source: Mapped[str | None] = mapped_column(String(32))
 
     __table_args__ = (
         UniqueConstraint("opened_live_intent_id", name="uq_real_position_opened_live_intent"),
@@ -156,6 +175,26 @@ class RealWalletLiveIntent(Base, UUIDPrimaryKeyMixin):
     actual_output_decimals: Mapped[int | None] = mapped_column(Integer)
     network_fee_lamports: Mapped[int | None] = mapped_column(BigInteger)
     failure_reason: Mapped[str | None] = mapped_column(String(128))
+
+    # --- Authorised order shape, written at intent creation -----------------
+    # The exact base units this order is permitted to spend, decided server-side
+    # before Jupiter is asked for anything. `order_evidence.verify` compares the
+    # returned order against these, which is the check the signer cannot make:
+    # a compiled transaction does not reveal its mints or amounts.
+    authorized_input_amount_raw: Mapped[Decimal | None] = mapped_column(Numeric(38, 0))
+    authorized_input_decimals: Mapped[int | None] = mapped_column(Integer)
+    #: `pending` | `approved` | `rejected`. An intent may only be signed while
+    #: this reads `approved`.
+    order_validation_status: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="pending"
+    )
+    #: Every reason the order failed its re-check, kept for the audit record.
+    order_validation_reasons: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default="[]"
+    )
+    #: What the order actually said, beside why it was accepted or refused.
+    order_validation_observed: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    order_validated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

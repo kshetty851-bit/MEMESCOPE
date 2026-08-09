@@ -14,6 +14,7 @@ from enum import StrEnum
 from app.models.real_wallet_execution import RealWalletLiveIntent
 from app.real_wallet.live_readiness import ExecutionState
 from app.real_wallet.live_repository import LiveIntentRepository, SettlementEvidenceError
+from app.real_wallet.sol_price import SolUsdPriceSource
 from app.services.rpc.base import RpcError, SolanaRPC
 
 
@@ -167,16 +168,31 @@ class SolanaRpcTransactionReconciler(TransactionReconciler):
 
 class RealWalletReconciliationService:
     def __init__(
-        self, repository: LiveIntentRepository, reconciler: TransactionReconciler
+        self,
+        repository: LiveIntentRepository,
+        reconciler: TransactionReconciler,
+        *,
+        sol_price_source: SolUsdPriceSource | None = None,
     ) -> None:
         self._repository = repository
         self._reconciler = reconciler
+        # Optional on purpose. A settlement must still be recorded when SOL/USD
+        # is unavailable — it keeps its measured gross figure and claims no net
+        # figure — because refusing to settle a confirmed on-chain trade would
+        # leave a real position invisible to the ledger.
+        self._sol_price_source = sol_price_source
 
     async def reconcile(self, *, intent: RealWalletLiveIntent, at: datetime) -> ChainOutcome:
         receipt = await self._reconciler.inspect(intent)
         if receipt.outcome is ChainOutcome.CONFIRMED and receipt.has_settlement_evidence:
+            sol_price = (
+                None
+                if self._sol_price_source is None
+                else await self._sol_price_source.current(now=at)
+            )
             try:
                 await self._repository.confirm_settlement(
+                    sol_price=sol_price,
                     intent=intent,
                     signature=receipt.signature or "",
                     actual_input_amount_raw=int(receipt.actual_input_amount or "0"),

@@ -142,6 +142,65 @@ x-backend-env: &backend-env
   JUPITER_QUOTE_TIMEOUT_SECONDS: ${JUPITER_QUOTE_TIMEOUT_SECONDS:-6}
   JUPITER_QUOTE_SLIPPAGE_BPS: ${JUPITER_QUOTE_SLIPPAGE_BPS:-50}
   JUPITER_USDC_MINT: ${JUPITER_USDC_MINT:-EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v}
+
+  # --- Real-wallet execution contract --------------------------------------
+  # EVERY setting below is in the shared anchor on purpose, and this is the one
+  # block where a per-service override would be a safety incident rather than a
+  # bug. The API serves the readiness dashboard, the Celery worker is where an
+  # execution would actually run, and the beat scheduler decides when it runs.
+  # If those three disagree about the mode, a limit, or a safety threshold, the
+  # dashboard can report "disabled" while the worker executes — which is the
+  # exact drift `test_compose_env_contract.py` records as having happened three
+  # times already on less dangerous settings.
+  #
+  # The three controls stay disabled here. Enabling execution is a deliberate,
+  # separately reviewed act, not a side effect of editing this file.
+  REAL_WALLET_EXECUTION_MODE: ${REAL_WALLET_EXECUTION_MODE:-disabled}
+  REAL_WALLET_EXECUTION_ENABLED: ${REAL_WALLET_EXECUTION_ENABLED:-false}
+  REAL_WALLET_AUTOTRADE_ENABLED: ${REAL_WALLET_AUTOTRADE_ENABLED:-false}
+  # Public address only. The signer secret is a mounted file path, never a value.
+  REAL_WALLET_PUBLIC_KEY: ${REAL_WALLET_PUBLIC_KEY:-}
+  REAL_WALLET_EXECUTION_SECRET_FILE: ${REAL_WALLET_EXECUTION_SECRET_FILE:-}
+  # Canary exposure limits. A worker with a larger limit than the API reports is
+  # how a "$5 canary" silently becomes something else.
+  REAL_WALLET_MAX_TRADE_USD: ${REAL_WALLET_MAX_TRADE_USD:-5}
+  REAL_WALLET_MAX_OPEN_POSITIONS: ${REAL_WALLET_MAX_OPEN_POSITIONS:-1}
+  REAL_WALLET_MAX_TOTAL_EXPOSURE_USD: ${REAL_WALLET_MAX_TOTAL_EXPOSURE_USD:-10}
+  REAL_WALLET_MAX_DAILY_NOTIONAL_USD: ${REAL_WALLET_MAX_DAILY_NOTIONAL_USD:-20}
+  REAL_WALLET_MAX_DAILY_LOSS_USD: ${REAL_WALLET_MAX_DAILY_LOSS_USD:-10}
+  REAL_WALLET_MIN_SOL_FEE_RESERVE: ${REAL_WALLET_MIN_SOL_FEE_RESERVE:-0.01}
+  REAL_WALLET_AUTOTRADE_COOLDOWN_SECONDS: ${REAL_WALLET_AUTOTRADE_COOLDOWN_SECONDS:-300}
+  # Kill-switch accounting. The worker records failures and the API reports the
+  # switch; a divergent threshold means one of them is wrong about the state.
+  REAL_WALLET_MAX_CONSECUTIVE_EXECUTION_FAILURES: ${REAL_WALLET_MAX_CONSECUTIVE_EXECUTION_FAILURES:-2}
+  REAL_WALLET_DRY_RUN_CANDIDATE_LIMIT: ${REAL_WALLET_DRY_RUN_CANDIDATE_LIMIT:-10}
+  FEATURE_REAL_WALLET_DRY_RUN_ENABLED: ${FEATURE_REAL_WALLET_DRY_RUN_ENABLED:-false}
+  # Safety-gate thresholds. The gate runs wherever an intent is evaluated, so a
+  # looser threshold on one service admits trades another would have refused.
+  REAL_WALLET_SAFETY_POLICY_VERSION: ${REAL_WALLET_SAFETY_POLICY_VERSION:-real_wallet_safety_v1}
+  REAL_WALLET_SAFETY_MAX_MARKET_AGE_SECONDS: ${REAL_WALLET_SAFETY_MAX_MARKET_AGE_SECONDS:-90}
+  REAL_WALLET_SAFETY_MAX_QUOTE_AGE_SECONDS: ${REAL_WALLET_SAFETY_MAX_QUOTE_AGE_SECONDS:-15}
+  REAL_WALLET_SAFETY_MAX_BUY_PRICE_IMPACT_PCT: ${REAL_WALLET_SAFETY_MAX_BUY_PRICE_IMPACT_PCT:-5}
+  REAL_WALLET_SAFETY_MAX_SELL_PRICE_IMPACT_PCT: ${REAL_WALLET_SAFETY_MAX_SELL_PRICE_IMPACT_PCT:-5}
+  REAL_WALLET_SAFETY_MAX_ROUND_TRIP_LOSS_PCT: ${REAL_WALLET_SAFETY_MAX_ROUND_TRIP_LOSS_PCT:-10}
+  REAL_WALLET_SAFETY_MAX_POSITION_LIQUIDITY_RATIO: ${REAL_WALLET_SAFETY_MAX_POSITION_LIQUIDITY_RATIO:-0.01}
+  REAL_WALLET_SAFETY_MAX_PRICE_DEVIATION_PCT: ${REAL_WALLET_SAFETY_MAX_PRICE_DEVIATION_PCT:-5}
+  REAL_WALLET_SAFETY_SUPPORTED_VENUES: ${REAL_WALLET_SAFETY_SUPPORTED_VENUES:-pumpfun,pumpswap}
+  REAL_WALLET_SAFETY_SUPPORTED_TOKEN_2022_EXTENSIONS: ${REAL_WALLET_SAFETY_SUPPORTED_TOKEN_2022_EXTENSIONS:-18,19}
+  # The real-execution Jupiter endpoint, kept apart from the paper quote API.
+  # A divergent base URL across services would mean one of them talks to an
+  # endpoint nobody reviewed.
+  JUPITER_V2_BASE_URL: ${JUPITER_V2_BASE_URL:-https://api.jup.ag/swap/v2}
+  JUPITER_V2_ORDER_TIMEOUT_SECONDS: ${JUPITER_V2_ORDER_TIMEOUT_SECONDS:-8}
+  # SOL/USD for fee accounting and the fee reserve. Without one shared source
+  # and freshness bound, two services would disagree about whether the wallet
+  # can afford its own exit transaction.
+  EXECUTION_SOL_PRICE_PROVIDER: ${EXECUTION_SOL_PRICE_PROVIDER:-jupiter}
+  EXECUTION_SOL_PRICE_MAX_AGE_SECONDS: ${EXECUTION_SOL_PRICE_MAX_AGE_SECONDS:-120}
+  EXECUTION_SOL_MINT: ${EXECUTION_SOL_MINT:-So11111111111111111111111111111111111111112}
+  EXECUTION_PRIORITY_FEE_SOL: ${EXECUTION_PRIORITY_FEE_SOL:-0.0005}
+  EXECUTION_EXIT_FEE_RESERVE_MULTIPLIER: ${EXECUTION_EXIT_FEE_RESERVE_MULTIPLIER:-2}
+
   OPPORTUNITY_BONDING_CURVE_VENUES: ${OPPORTUNITY_BONDING_CURVE_VENUES:-pumpfun}
   OPPORTUNITY_GRADUATED_VENUES: ${OPPORTUNITY_GRADUATED_VENUES:-pumpswap}
   OPPORTUNITY_REQUIRED_CONFIRMATIONS: ${OPPORTUNITY_REQUIRED_CONFIRMATIONS:-2}
