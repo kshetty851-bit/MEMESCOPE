@@ -22,6 +22,7 @@ celery_app = Celery(
         "app.events.scheduler",
         "app.opportunities.scheduler",
         "app.paper.scheduler",
+        "app.real_wallet.scheduler",
         "app.workers.priority_tasks",
         "app.workers.enrichment_tasks",
     ],
@@ -98,6 +99,10 @@ celery_app.conf.beat_schedule = {
     # close it was or at what price.
     "paper-review": {
         "task": "app.paper.scheduler.paper_review",
+        "schedule": crontab(minute="*/5"),
+    },
+    "real-wallet-dry-run-reconciliation": {
+        "task": "app.real_wallet.scheduler.real_wallet_dry_run",
         "schedule": crontab(minute="*/5"),
     },
     # Membership of the priority enrichment lane is derived from what the

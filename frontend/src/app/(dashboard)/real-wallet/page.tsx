@@ -21,6 +21,21 @@ type WalletStatus = {
     max_daily_loss_usd: string;
     min_sol_fee_reserve: string;
   };
+  dry_run: {
+    feature_enabled: boolean;
+    decisions: Array<{
+      mint_address: string;
+      symbol: string | null;
+      radar_rank: number;
+      status: string;
+      safety: string | null;
+      reason_codes: string[];
+      buy_impact_pct: string | null;
+      sell_impact_pct: string | null;
+      round_trip_loss_pct: string | null;
+      liquidity_usd: string | null;
+    }>;
+  };
 };
 
 function StatusCard({ label, value }: { label: string; value: string }) {
@@ -80,6 +95,26 @@ export default function RealWalletPage() {
         ) : (
           <p className="mt-2 text-sm text-ink-faint">Not configured. Generate it locally first.</p>
         )}
+      </section>
+      <section className="mt-6 overflow-x-auto rounded-panel border border-line">
+        <div className="p-4">
+          <p className="text-label text-ink-faint">Dry-run decisions</p>
+          <p className="mt-1 text-sm text-ink-faint">
+            {data?.dry_run.feature_enabled ? "Recording enabled" : "Recording disabled"}. No order is signed or submitted.
+          </p>
+        </div>
+        <table className="w-full text-left text-sm">
+          <thead className="border-y border-line text-ink-faint"><tr><th className="p-3">Token</th><th>Rank</th><th>Safety</th><th>Impact</th><th>Decision</th><th className="p-3">Reason</th></tr></thead>
+          <tbody>{data?.dry_run.decisions.map((row) => (
+            <tr key={`${row.mint_address}-${row.radar_rank}`} className="border-b border-line/60 last:border-0">
+              <td className="p-3"><span className="text-ink">{row.symbol ?? "—"}</span><code className="ml-2 text-xs text-ink-faint">{row.mint_address.slice(0, 8)}</code></td>
+              <td>{row.radar_rank}</td><td>{row.safety ?? "—"}</td>
+              <td>{row.buy_impact_pct ?? "—"} / {row.sell_impact_pct ?? "—"}</td>
+              <td className={row.status === "WOULD_BUY" ? "text-safe" : "text-warning"}>{row.status}</td>
+              <td className="p-3 text-xs text-ink-faint">{row.reason_codes.join(", ") || "—"}</td>
+            </tr>
+          ))}</tbody>
+        </table>
       </section>
       <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <StatusCard label="SOL balance" value={data?.sol_balance?.toFixed(6) ?? "—"} />

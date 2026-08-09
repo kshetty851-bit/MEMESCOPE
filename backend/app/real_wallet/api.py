@@ -6,9 +6,10 @@ from decimal import Decimal
 
 from fastapi import APIRouter
 
-from app.api.deps import AdminUser
+from app.api.deps import AdminUser, DbSession
 from app.core.config import settings
 from app.real_wallet.balance import ExecutionWalletBalanceService
+from app.real_wallet.repository import RealWalletExecutionRepository
 from app.services.rpc.registry import get_rpc
 
 router = APIRouter(prefix="/real-wallet", tags=["real-wallet"])
@@ -19,7 +20,7 @@ def _decimal(value: Decimal) -> str:
 
 
 @router.get("/status", summary="Read dedicated execution-wallet status")
-async def status(_admin: AdminUser) -> dict[str, object]:
+async def status(_admin: AdminUser, session: DbSession) -> dict[str, object]:
     """Public-address data only. This endpoint cannot load, create, or use a signer."""
     public_key = settings.REAL_WALLET_PUBLIC_KEY.strip()
     balance_sol: float | None = None
@@ -32,6 +33,7 @@ async def status(_admin: AdminUser) -> dict[str, object]:
                 balance_sol = balance.sol
         except Exception:
             balance_error = "unavailable"
+    decisions = await RealWalletExecutionRepository(session).latest(limit=30)
     return {
         "public_key": public_key or None,
         "sol_balance": balance_sol,
@@ -50,5 +52,36 @@ async def status(_admin: AdminUser) -> dict[str, object]:
             "max_daily_notional_usd": _decimal(settings.REAL_WALLET_MAX_DAILY_NOTIONAL_USD),
             "max_daily_loss_usd": _decimal(settings.REAL_WALLET_MAX_DAILY_LOSS_USD),
             "min_sol_fee_reserve": _decimal(settings.REAL_WALLET_MIN_SOL_FEE_RESERVE),
+        },
+        "dry_run": {
+            "feature_enabled": settings.FEATURE_REAL_WALLET_DRY_RUN_ENABLED,
+            "decisions": [
+                {
+                    "mint_address": row.mint_address,
+                    "symbol": row.symbol,
+                    "radar_rank": row.radar_rank,
+                    "status": row.status,
+                    "safety": row.safety_decision,
+                    "reason_codes": row.reason_codes,
+                    "buy_impact_pct": (
+                        None if row.buy_impact_pct is None else str(row.buy_impact_pct)
+                    ),
+                    "sell_impact_pct": (
+                        None if row.sell_impact_pct is None else str(row.sell_impact_pct)
+                    ),
+                    "round_trip_loss_pct": (
+                        None
+                        if row.round_trip_loss_pct is None
+                        else str(row.round_trip_loss_pct)
+                    ),
+                    "liquidity_usd": (
+                        None if row.liquidity_usd is None else str(row.liquidity_usd)
+                    ),
+                    "buy_order": row.buy_order,
+                    "sell_order": row.sell_order,
+                    "evaluated_at": row.evaluated_at,
+                }
+                for row in decisions
+            ],
         },
     }

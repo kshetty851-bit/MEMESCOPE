@@ -8,7 +8,8 @@ sign a transaction, or access wallet credentials.
 from __future__ import annotations
 
 import base64
-from dataclasses import dataclass
+import uuid
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -93,6 +94,8 @@ class SafetyDecision:
     buy_quote: dict[str, object] | None
     sell_quote: dict[str, object] | None
     token_configuration: dict[str, object] | None
+    evaluation_id: uuid.UUID | None = None
+    token_decimals: int | None = None
 
 
 def _decimal(value: object) -> Decimal | None:
@@ -287,6 +290,7 @@ class RealWalletSafetyGate:
             buy_quote=buy,
             sell_quote=sell,
             token_configuration=(inspection.raw if inspection else None),
+            token_decimals=(inspection.decimals if inspection else None),
         )
         return await self._persist(decision)
 
@@ -413,32 +417,31 @@ class RealWalletSafetyGate:
             )
 
     async def _persist(self, decision: SafetyDecision) -> SafetyDecision:
-        self._session.add(
-            RealWalletSafetyEvaluation(
-                mint_address=decision.mint_address,
-                decision=decision.decision,
-                evaluated_at=decision.evaluated_at,
-                trade_size_usd=decision.trade_size_usd,
-                policy_version=decision.policy_version,
-                reason_codes=list(decision.reason_codes),
-                market_snapshot_at=decision.market_snapshot_at,
-                market_age_seconds=decision.market_age_seconds,
-                market_price_usd=decision.market_price_usd,
-                liquidity_usd=decision.liquidity_usd,
-                buy_price_impact_pct=decision.buy_price_impact_pct,
-                sell_price_impact_pct=decision.sell_price_impact_pct,
-                round_trip_loss_usd=decision.round_trip_loss_usd,
-                round_trip_loss_pct=decision.round_trip_loss_pct,
-                position_liquidity_ratio=decision.position_liquidity_ratio,
-                token_program=decision.token_program,
-                mint_authority_active=decision.mint_authority_active,
-                freeze_authority_active=decision.freeze_authority_active,
-                token_extensions=list(decision.token_extensions),
-                provenance=decision.provenance,
-                buy_quote=decision.buy_quote,
-                sell_quote=decision.sell_quote,
-                token_configuration=decision.token_configuration,
-            )
+        row = RealWalletSafetyEvaluation(
+            mint_address=decision.mint_address,
+            decision=decision.decision,
+            evaluated_at=decision.evaluated_at,
+            trade_size_usd=decision.trade_size_usd,
+            policy_version=decision.policy_version,
+            reason_codes=list(decision.reason_codes),
+            market_snapshot_at=decision.market_snapshot_at,
+            market_age_seconds=decision.market_age_seconds,
+            market_price_usd=decision.market_price_usd,
+            liquidity_usd=decision.liquidity_usd,
+            buy_price_impact_pct=decision.buy_price_impact_pct,
+            sell_price_impact_pct=decision.sell_price_impact_pct,
+            round_trip_loss_usd=decision.round_trip_loss_usd,
+            round_trip_loss_pct=decision.round_trip_loss_pct,
+            position_liquidity_ratio=decision.position_liquidity_ratio,
+            token_program=decision.token_program,
+            mint_authority_active=decision.mint_authority_active,
+            freeze_authority_active=decision.freeze_authority_active,
+            token_extensions=list(decision.token_extensions),
+            provenance=decision.provenance,
+            buy_quote=decision.buy_quote,
+            sell_quote=decision.sell_quote,
+            token_configuration=decision.token_configuration,
         )
+        self._session.add(row)
         await self._session.flush()
-        return decision
+        return replace(decision, evaluation_id=row.id)

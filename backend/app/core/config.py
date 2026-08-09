@@ -454,6 +454,11 @@ class Settings(BaseSettings):
     REAL_WALLET_MIN_SOL_FEE_RESERVE: Decimal = Field(default=Decimal("0.01"), ge=0)
     REAL_WALLET_AUTOTRADE_COOLDOWN_SECONDS: int = Field(default=300, ge=0)
     REAL_WALLET_MAX_CONSECUTIVE_EXECUTION_FAILURES: int = Field(default=3, ge=1)
+    REAL_WALLET_DRY_RUN_CANDIDATE_LIMIT: int = Field(default=10, ge=1, le=100)
+    FEATURE_REAL_WALLET_DRY_RUN_ENABLED: bool = False
+    JUPITER_V2_BASE_URL: str = "https://api.jup.ag/swap/v2"
+    JUPITER_API_KEY: SecretStr = SecretStr("")
+    JUPITER_V2_ORDER_TIMEOUT_SECONDS: float = Field(default=8.0, gt=0, le=30)
 
     # --- Breakout provider ----------------------------------------------------
     # Every threshold measured against the stored history on 2026-08-03 (1.37 M

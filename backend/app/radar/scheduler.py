@@ -20,6 +20,7 @@ from app.core.logging import get_logger
 from app.db.session import SessionFactory
 from app.paper.scheduler import request_review
 from app.radar.service import RadarService
+from app.real_wallet.scheduler import request_dry_run
 from app.services.pumpfun_radar import PumpfunRadarScanner
 from app.workers.celery_app import celery_app
 from app.workers.runtime import run_async
@@ -57,6 +58,7 @@ async def _radar_sweep(limit: int | None = None) -> dict[str, Any]:
     # after the session closes: the pass reads the sweep's committed rows, and a
     # wallet failure cannot roll back a completed sweep.
     request_review(trigger="radar_sweep")
+    request_dry_run(trigger="radar_sweep")
     return result
 
 
@@ -76,4 +78,5 @@ async def _pumpfun_radar_scan(limit: int | None = None) -> dict[str, Any]:
     # Admission can add a token at the top of the ranking, which is a new
     # eligible entry the wallet should see immediately rather than at :05.
     request_review(trigger="pumpfun_radar_scan")
+    request_dry_run(trigger="pumpfun_radar_scan")
     return result

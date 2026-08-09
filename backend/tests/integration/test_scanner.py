@@ -44,9 +44,9 @@ def _notification(signature: str = SIG, *, subscription: int | None = None) -> s
                             "Program log: Instruction: InitializeMint2",
                         ],
                     },
-                }
+                },
+                **({"subscription": subscription} if subscription is not None else {}),
             },
-            **({"subscription": subscription} if subscription is not None else {}),
         }
     )
 
@@ -269,6 +269,10 @@ async def test_notification_uses_its_own_subscription_program(client: Any) -> No
 
     class FakeSocket:
         async def recv(self) -> str:
+            # A real websocket yields control while awaiting network I/O. Without
+            # this, the synchronous mock can starve the test task before it is
+            # cancelled after the queued event is asserted.
+            await asyncio.sleep(0)
             return _notification(subscription=12)
 
     task = asyncio.create_task(scanner._consume(FakeSocket()))
