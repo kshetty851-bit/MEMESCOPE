@@ -24,6 +24,7 @@ from app.health import api as pipeline_health
 from app.opportunities import api as opportunities
 from app.paper import api as paper
 from app.radar import api as radar
+from app.real_wallet_safety import api as real_wallet_safety
 
 api_router = APIRouter()
 api_router.include_router(health.router)
@@ -70,3 +71,6 @@ api_router.include_router(opportunities.router)
 # Additive: no existing route changes, and the wallet reports itself as not
 # running while its feature flag is off rather than serving an empty book.
 api_router.include_router(paper.router)
+# Safety decisions are an audit/read surface only. They cannot request a
+# wallet, build a transaction, or invoke an execution engine.
+api_router.include_router(real_wallet_safety.router)

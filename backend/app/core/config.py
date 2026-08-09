@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import secrets
+from decimal import Decimal
 from functools import lru_cache
 from typing import Annotated, Any, Literal
 
@@ -397,6 +398,37 @@ class Settings(BaseSettings):
     JUPITER_QUOTE_TIMEOUT_SECONDS: float = Field(default=6.0, gt=0, le=30)
     JUPITER_QUOTE_SLIPPAGE_BPS: int = Field(default=50, ge=0, le=10_000)
     JUPITER_USDC_MINT: str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+
+    # --- Future real-wallet safety gate ------------------------------------
+    # This policy only produces an auditable ALLOW/REJECT decision. It is not
+    # connected to a signer, transaction builder, or execution engine.
+    REAL_WALLET_SAFETY_POLICY_VERSION: str = "real_wallet_safety_v1"
+    REAL_WALLET_SAFETY_MAX_MARKET_AGE_SECONDS: int = Field(default=90, ge=1, le=3600)
+    REAL_WALLET_SAFETY_MAX_QUOTE_AGE_SECONDS: int = Field(default=15, ge=1, le=300)
+    REAL_WALLET_SAFETY_MAX_BUY_PRICE_IMPACT_PCT: Decimal = Field(
+        default=Decimal("5"), ge=Decimal("0"), le=Decimal("100")
+    )
+    REAL_WALLET_SAFETY_MAX_SELL_PRICE_IMPACT_PCT: Decimal = Field(
+        default=Decimal("5"), ge=Decimal("0"), le=Decimal("100")
+    )
+    REAL_WALLET_SAFETY_MAX_ROUND_TRIP_LOSS_PCT: Decimal = Field(
+        default=Decimal("10"), ge=Decimal("0"), le=Decimal("100")
+    )
+    REAL_WALLET_SAFETY_MAX_POSITION_LIQUIDITY_RATIO: Decimal = Field(
+        default=Decimal("0.01"), gt=Decimal("0"), le=Decimal("1")
+    )
+    REAL_WALLET_SAFETY_MAX_PRICE_DEVIATION_PCT: Decimal = Field(
+        default=Decimal("5"), ge=Decimal("0"), le=Decimal("100")
+    )
+    REAL_WALLET_SAFETY_SUPPORTED_VENUES: CsvList = Field(
+        default_factory=lambda: ["pumpfun", "pumpswap"]
+    )
+    # Token-2022 extension discriminants, deliberately an explicit allowlist.
+    # 18=MetadataPointer and 19=TokenMetadata are the two observed in the
+    # audit; an unknown extension is not presumed safe.
+    REAL_WALLET_SAFETY_SUPPORTED_TOKEN_2022_EXTENSIONS: CsvList = Field(
+        default_factory=lambda: ["18", "19"]
+    )
 
     # --- Breakout provider ----------------------------------------------------
     # Every threshold measured against the stored history on 2026-08-03 (1.37 M

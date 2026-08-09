@@ -27,7 +27,7 @@ SIG = (
 )
 
 
-def _notification(signature: str = SIG) -> str:
+def _notification(signature: str = SIG, *, subscription: int | None = None) -> str:
     return json.dumps(
         {
             "jsonrpc": "2.0",
@@ -46,6 +46,7 @@ def _notification(signature: str = SIG) -> str:
                     },
                 }
             },
+            **({"subscription": subscription} if subscription is not None else {}),
         }
     )
 
@@ -243,10 +244,11 @@ async def test_queue_overflow_drops_instead_of_blocking(client: Any) -> None:
     """Under a launch burst the scanner sheds load rather than stalling the socket."""
     scanner = TokenScanner(rpc=FakeHelius(), ws_url="ws://fake", programs=["prog"])
     scanner._queue = asyncio.Queue(maxsize=2)
+    scanner._subscription_programs[9] = "prog"
 
     class FakeSocket:
         def __init__(self, count: int) -> None:
-            self._messages = [_notification(f"sig{i}") for i in range(count)]
+            self._messages = [_notification(f"sig{i}", subscription=9) for i in range(count)]
 
         async def recv(self) -> str:
             if not self._messages:
@@ -258,6 +260,23 @@ async def test_queue_overflow_drops_instead_of_blocking(client: Any) -> None:
 
     assert scanner.stats.events_queued == 2
     assert scanner.stats.events_dropped == 4
+
+
+async def test_notification_uses_its_own_subscription_program(client: Any) -> None:
+    """Multiple subscriptions must never stamp every token with programs[0]."""
+    scanner = TokenScanner(rpc=FakeHelius(), ws_url="ws://fake", programs=["pump", "other"])
+    scanner._subscription_programs = {11: "pump", 12: "other"}
+
+    class FakeSocket:
+        async def recv(self) -> str:
+            return _notification(subscription=12)
+
+    task = asyncio.create_task(scanner._consume(FakeSocket()))
+    event = await scanner._queue.get()
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+
+    assert event.source_program == "other"
 
 
 async def test_non_creation_logs_are_filtered_out(client: Any) -> None:

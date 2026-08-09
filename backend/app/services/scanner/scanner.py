@@ -107,6 +107,10 @@ class TokenScanner:
         self._rpc = rpc or get_rpc()
         self._ws_url = ws_url or settings.rpc_ws_url
         self._programs = programs or list(settings.SCANNER_WATCH_PROGRAMS)
+        # RPC subscription ids are allocated by the node.  They are the only
+        # authoritative way to associate a notification with the program that
+        # requested it when more than one launchpad is watched.
+        self._subscription_programs: dict[int, str] = {}
         self._queue: asyncio.Queue[LogEvent] = asyncio.Queue(
             maxsize=settings.SCANNER_QUEUE_SIZE
         )
@@ -250,6 +254,12 @@ class TokenScanner:
                     }
                 )
             )
+            raw = await ws.recv()
+            response = json.loads(raw)
+            subscription = response.get("result") if isinstance(response, dict) else None
+            if not isinstance(subscription, int):
+                raise RuntimeError(f"logsSubscribe failed for watched program {program}")
+            self._subscription_programs[subscription] = program
         logger.info("scanner_subscribed", programs=self._programs)
 
     async def _consume(self, ws: ClientConnection) -> None:
@@ -267,6 +277,23 @@ class TokenScanner:
             event = parse_log_notification(message)
             if event is None or not is_token_creation_log(event.logs):
                 continue
+
+            subscription = (message.get("params") or {}).get("subscription")
+            if not isinstance(subscription, int):
+                logger.warning("scanner_unknown_subscription", subscription=subscription)
+                continue
+            program = self._subscription_programs.get(subscription)
+            # A notification without a known subscription cannot be assigned a
+            # provenance program honestly. Do not make it look like Pump.fun.
+            if program is None:
+                logger.warning("scanner_unknown_subscription", subscription=subscription)
+                continue
+            event = LogEvent(
+                signature=event.signature,
+                slot=event.slot,
+                logs=event.logs,
+                source_program=program,
+            )
 
             self.stats.events_filtered += 1
             try:
@@ -316,7 +343,7 @@ class TokenScanner:
             creator_address=decoded.creator_address,
             decimals=None,
             block_time=decoded.block_time,
-            source_program=self._programs[0] if self._programs else None,
+            source_program=event.source_program,
         )
         metadata = TokenMetadata(
             name=decoded.name,
@@ -345,7 +372,7 @@ class TokenScanner:
             transaction,
             signature=event.signature,
             fallback_slot=event.slot,
-            source_program=self._programs[0] if self._programs else None,
+            source_program=event.source_program,
         )
         if creation is None:
             return None
