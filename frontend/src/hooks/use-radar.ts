@@ -6,6 +6,7 @@ import { useLiveUpdates } from "@/hooks/use-live-updates";
 import {
   fetchRadar,
   fetchAllRadarDetections,
+  fetchFreshDetectedTokens,
   fetchRadarEntry,
   fetchRadarHistory,
   fetchRadarModel,
@@ -63,6 +64,16 @@ export function useRadarEntry(mint: string | undefined) {
     queryFn: () => fetchRadarEntry(mint!),
     enabled: Boolean(mint),
     refetchInterval: status === "live" ? false : RADAR_POLL_MS,
+  });
+}
+
+export function useFreshDetectedTokens(limit = 30) {
+  const { status } = useLiveUpdates();
+  return useQuery({
+    queryKey: ["tokens", "fresh", limit],
+    queryFn: () => fetchFreshDetectedTokens(limit),
+    refetchInterval: status === "live" ? false : 30_000,
+    staleTime: 10_000,
   });
 }
 

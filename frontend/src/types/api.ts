@@ -65,6 +65,7 @@ export interface DiscoveredToken {
   symbol: string | null;
   decimals: number | null;
   metadata_uri: string | null;
+  image_url?: string | null;
   creator_address: string | null;
   signature: string;
   slot: number;

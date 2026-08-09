@@ -1,7 +1,6 @@
 "use client";
 
-import Link from "next/link";
-
+import { TokenIdentity } from "@/components/brand/token-identity";
 import { Skeleton } from "@/components/ui/skeleton";
 import { exitLabel, hours, pct, usd } from "@/lib/paper";
 import { formatPrice } from "@/lib/format";
@@ -129,12 +128,13 @@ export function AuditLog({
                 className="border-b border-line/50 transition-colors hover:bg-elevated/40"
               >
                 <td className="py-2.5 pr-4">
-                  <Link
-                    href={`/tokens/${row.mint_address}`}
-                    className="text-ink hover:underline"
-                  >
-                    {row.symbol ?? `${row.mint_address.slice(0, 4)}…`}
-                  </Link>
+                  <TokenIdentity
+                    mint={row.mint_address}
+                    symbol={row.symbol}
+                    imageUrl={row.image_url}
+                    size="xs"
+                    compact
+                  />
                   <span className="ml-2 text-xs text-ink-faint">
                     v{row.strategy_version}
                   </span>

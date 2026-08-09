@@ -18,7 +18,7 @@ testable without a database.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from decimal import Decimal
 
@@ -47,13 +47,17 @@ class TokenContext:
     markets: dict[str, TokenMarketSnapshot]
     prior_prices: dict[str, Decimal]
     ages: dict[str, datetime]
+    images: dict[str, str | None] = field(default_factory=dict)
 
     @classmethod
     def empty(cls) -> TokenContext:
-        return cls(names={}, markets={}, prior_prices={}, ages={})
+        return cls(names={}, images={}, markets={}, prior_prices={}, ages={})
 
     def name_for(self, mint: str) -> tuple[str | None, str | None]:
         return self.names.get(mint, (None, None))
+
+    def image_for(self, mint: str) -> str | None:
+        return self.images.get(mint)
 
     def strip_for(self, mint: str) -> MarketStripOut | None:
         return market_strip(self.markets.get(mint), prior_price=self.prior_prices.get(mint))
@@ -86,6 +90,7 @@ async def resolve_token_context(
     )
     return TokenContext(
         names={mint: (token.name, token.symbol) for mint, token in tokens.items()},
+        images={mint: token.image_url for mint, token in tokens.items()},
         markets=markets,
         prior_prices=prior_prices,
         # `block_time` is when the mint existed; `discovered_at` is when we

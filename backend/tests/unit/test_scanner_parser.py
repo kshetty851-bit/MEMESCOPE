@@ -193,6 +193,7 @@ def test_parse_asset_metadata_reads_all_fields() -> None:
             "content": {
                 "json_uri": "https://ipfs.io/ipfs/abc",
                 "metadata": {"name": "Indian Batman", "symbol": "JEETMAN"},
+                "links": {"image": "https://cdn.example/token.png"},
             },
             "token_info": {"decimals": 6},
         }
@@ -200,6 +201,7 @@ def test_parse_asset_metadata_reads_all_fields() -> None:
     assert metadata.name == "Indian Batman"
     assert metadata.symbol == "JEETMAN"
     assert metadata.metadata_uri == "https://ipfs.io/ipfs/abc"
+    assert metadata.image_url == "https://cdn.example/token.png"
     assert metadata.decimals == 6
 
 

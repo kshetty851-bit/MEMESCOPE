@@ -81,11 +81,14 @@ export function LiveUpdatesProvider({ children }: { children: ReactNode }) {
     const marketMints = new Set<string>();
     const scoreMints = new Set<string>();
     const radarMints = new Set<string>();
+    let freshDetectionsChanged = false;
     let radarChanged = false;
     let paperChanged = false;
 
     for (const event of events) {
-      if (event.type === "market.changed") {
+      if (event.type === "token.discovered") {
+        freshDetectionsChanged = true;
+      } else if (event.type === "market.changed") {
         for (const mint of event.mints ?? []) marketMints.add(mint);
       } else if (event.type === "score.changed" && event.data?.mint_address) {
         scoreMints.add(event.data.mint_address);
@@ -110,6 +113,10 @@ export function LiveUpdatesProvider({ children }: { children: ReactNode }) {
     }
     if (marketMints.size) {
       void queryClient.invalidateQueries({ queryKey: ["market", "recent"], refetchType: "active" });
+      void queryClient.invalidateQueries({ queryKey: ["tokens", "fresh"], refetchType: "active" });
+    }
+    if (freshDetectionsChanged) {
+      void queryClient.invalidateQueries({ queryKey: ["tokens", "fresh"], refetchType: "active" });
     }
     if (marketMints.size && radarContainsMint(queryClient, marketMints)) {
       void queryClient.invalidateQueries({ queryKey: ["radar", "list"], refetchType: "active" });
@@ -156,6 +163,7 @@ export function LiveUpdatesProvider({ children }: { children: ReactNode }) {
       for (const listener of listenersRef.current) listener(event);
       if (
         event.type !== "market.changed" &&
+        event.type !== "token.discovered" &&
         event.type !== "score.changed" &&
         event.type !== "radar.score_updated" &&
         event.type !== "radar.changed" &&

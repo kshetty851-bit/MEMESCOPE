@@ -74,6 +74,7 @@ class OpportunityOut(BaseSchema):
     mint_address: str
     name: str | None = None
     symbol: str | None = None
+    image_url: str | None = None
     #: Null when the token has never been priced. Not an error, and not zero.
     market: MarketOut | None = None
     #: Seconds since the token was first seen on-chain. The card shows age

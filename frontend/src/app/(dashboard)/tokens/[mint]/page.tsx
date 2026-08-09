@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useMemo, useState } from "react";
 
-import { TokenAvatar } from "@/components/brand/token-avatar";
+import { TokenIdentity } from "@/components/brand/token-identity";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Metric } from "@/components/ui/metric";
@@ -117,20 +117,20 @@ export default function TokenDetailPage() {
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex min-w-0 items-start gap-4">
-          <TokenAvatar mint={mint} size={56} />
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2.5">
               {token.isPending ? (
                 <Skeleton className="h-7 w-48" />
               ) : (
-                <h1 className="text-title font-semibold text-ink">
-                  {token.data?.name ?? "Unnamed token"}
-                </h1>
-              )}
-              {token.data?.symbol && (
-                <span className="rounded-chip bg-elevated px-2 py-0.5 text-sm font-medium text-ink-dim">
-                  {token.data.symbol}
-                </span>
+                <TokenIdentity
+                  mint={mint}
+                  name={token.data?.name}
+                  symbol={token.data?.symbol}
+                  imageUrl={token.data?.image_url}
+                  size="lg"
+                  link="none"
+                  showMint={false}
+                />
               )}
               {score?.is_elite && <Badge tone="apex">Elite Gem</Badge>}
             </div>

@@ -90,6 +90,7 @@ export interface RadarEntry {
   mint_address: string;
   name: string | null;
   symbol: string | null;
+  image_url?: string | null;
 
   category: RadarCategory;
   /** The category at first detection, kept beside the current one. */
@@ -247,10 +248,28 @@ export interface RadarTimelineEvent {
   mint_address: string;
   name: string | null;
   symbol: string | null;
+  image_url?: string | null;
   occurred_at: string;
   tier: string | null;
   market_cap: string | null;
   value: string | null;
+}
+
+export interface FreshDetectedToken {
+  mint_address: string;
+  name: string | null;
+  symbol: string | null;
+  image_url?: string | null;
+  discovered_at: string;
+  block_time: string | null;
+  metadata_status: string;
+  current_market_cap: string | null;
+  current_liquidity: string | null;
+  current_price: string | null;
+  market_observed_at: string | null;
+  radar_score: string | null;
+  radar_category: string | null;
+  radar_status: string | null;
 }
 
 export interface RadarBenchmark {

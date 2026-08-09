@@ -216,6 +216,7 @@ class TokenMetadata:
     name: str | None
     symbol: str | None
     metadata_uri: str | None
+    image_url: str | None
     decimals: int | None
 
 
@@ -404,6 +405,7 @@ def parse_asset_metadata(asset: dict[str, Any]) -> TokenMetadata:
     """
     content = _as_dict(asset.get("content"))
     metadata = _as_dict(content.get("metadata"))
+    links = _as_dict(content.get("links"))
     token_info = _as_dict(asset.get("token_info"))
 
     decimals = token_info.get("decimals")
@@ -412,5 +414,6 @@ def parse_asset_metadata(asset: dict[str, Any]) -> TokenMetadata:
         name=_clean(metadata.get("name"), 200),
         symbol=_clean(metadata.get("symbol"), 64),
         metadata_uri=_clean(content.get("json_uri"), 2048),
+        image_url=_clean(links.get("image"), 2048),
         decimals=decimals if isinstance(decimals, int) else None,
     )

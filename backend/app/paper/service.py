@@ -101,6 +101,7 @@ class ManualSellPreview:
     position: PaperPosition
     symbol: str | None
     name: str | None
+    image_url: str | None
     quote: TokenMarketSnapshot
     quote_age_seconds: Decimal
     is_stale: bool
@@ -312,6 +313,7 @@ class PaperWalletService:
             quote=quote,
             name=token.name if token is not None else None,
             symbol=token.symbol if token is not None else None,
+            image_url=token.image_url if token is not None else None,
             now=now,
         )
 
@@ -378,6 +380,7 @@ class PaperWalletService:
         quote: TokenMarketSnapshot,
         name: str | None,
         symbol: str | None,
+        image_url: str | None,
         now: datetime,
     ) -> ManualSellPreview:
         exit_price = quote.price_usd
@@ -442,6 +445,7 @@ class PaperWalletService:
             position=position,
             symbol=symbol,
             name=name,
+            image_url=image_url,
             quote=quote,
             quote_age_seconds=age,
             is_stale=is_stale,
@@ -1047,6 +1051,7 @@ class PaperWalletService:
             prices=prices,
             price_times=price_times,
             names={mint: (token.name, token.symbol) for mint, token in names.items()},
+            images={mint: token.image_url for mint, token in names.items()},
             benchmarks=await self.benchmarks(wallet),
             waiting_for=await self._waiting_for(wallet, cash=summary.cash),
             audit_log=await self._repository.audit_log(wallet.id, limit=200),
@@ -1222,6 +1227,7 @@ class WalletRead:
     #: When each mark was observed, so a surface can say how old it is.
     price_times: dict[str, datetime | None]
     names: dict[str, tuple[str | None, str | None]]
+    images: dict[str, str | None]
     benchmarks: list[benchmark.BenchmarkResult]
     #: `None` unless the wallet is holding fundable cash with nothing eligible.
     waiting_for: WaitingState | None

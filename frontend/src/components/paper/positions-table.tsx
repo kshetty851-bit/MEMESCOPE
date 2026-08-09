@@ -1,8 +1,8 @@
 "use client";
 
-import Link from "next/link";
 import { Fragment, useState } from "react";
 
+import { TokenIdentity } from "@/components/brand/token-identity";
 import { FreshnessLabel, NoMarketData } from "@/components/ui/freshness";
 import { Skeleton } from "@/components/ui/skeleton";
 import { exitLabel, pct, usd } from "@/lib/paper";
@@ -159,14 +159,14 @@ export function PositionsTable({
                   className="border-b border-line/50 transition-colors hover:bg-elevated/40"
                 >
                   <td className="py-2.5 pr-4">
-                    <Link
-                      href={`/tokens/${position.mint_address}`}
-                      className="text-ink hover:underline"
-                    >
-                      {position.symbol ??
-                        position.name ??
-                        `${position.mint_address.slice(0, 4)}...`}
-                    </Link>
+                    <TokenIdentity
+                      mint={position.mint_address}
+                      name={position.name}
+                      symbol={position.symbol}
+                      imageUrl={position.image_url}
+                      size="xs"
+                      showMint={false}
+                    />
                     <span className="ml-2 text-xs text-ink-faint">
                       #{position.entry_rank} at entry
                     </span>

@@ -22,6 +22,7 @@ class TokenRead(BaseSchema):
     symbol: str | None
     decimals: int | None
     metadata_uri: str | None
+    image_url: str | None = None
     creator_address: str | None
     signature: str
     slot: int

@@ -57,6 +57,7 @@ class PositionOut(BaseSchema):
     mint_address: str
     name: str | None = None
     symbol: str | None = None
+    image_url: str | None = None
 
     status: str
     opened_at: datetime
@@ -132,6 +133,7 @@ class ManualSellPreviewOut(BaseSchema):
     mint_address: str
     name: str | None = None
     symbol: str | None = None
+    image_url: str | None = None
     short_mint: str
     entry_price: Decimal
     entry_observed_price: Decimal | None = None
@@ -280,6 +282,7 @@ class LastTradeOut(BaseSchema):
     action: str
     mint_address: str
     symbol: str | None = None
+    image_url: str | None = None
     at: datetime
     price_usd: Decimal | None = None
     exit_reason: str | None = None
@@ -296,6 +299,7 @@ class AuditEntryOut(BaseSchema):
 
     mint_address: str
     symbol: str | None = None
+    image_url: str | None = None
 
     entry_at: datetime
     entry_price: Decimal
@@ -580,6 +584,7 @@ class PatternAnalysisOut(BaseSchema):
 class TradeCardOut(BaseSchema):
     mint_address: str
     symbol: str | None = None
+    image_url: str | None = None
     net_return_pct: Decimal | None = None
     gross_return_pct: Decimal | None = None
     entry_market_cap: Decimal | None = None
@@ -638,6 +643,7 @@ class LabOut(BaseSchema):
 class TokenComparisonOut(BaseSchema):
     mint_address: str
     symbol: str | None = None
+    image_url: str | None = None
     #: The highest the token reached while held, as a percent of entry.
     peak_pct: Decimal | None = None
     #: strategy id -> return percent.

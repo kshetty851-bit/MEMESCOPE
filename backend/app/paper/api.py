@@ -74,6 +74,7 @@ from app.paper.service import (
 )
 from app.paper.shadow import ShadowPaperService
 from app.paper.strategy import AnyStrategy, registry
+from app.repositories.token import TokenRepository
 
 router = APIRouter(prefix="/paper", tags=["paper"])
 
@@ -179,8 +180,19 @@ async def get_audit(
         )
 
     rows = await repository.audit_log(wallet.id, limit=limit, offset=offset)
+    tokens = await TokenRepository(session).get_many_by_mints(
+        [row.mint_address for row in rows]
+    )
     return AuditOut(
-        items=[_to_audit_entry(row) for row in rows],
+        items=[
+            _to_audit_entry(
+                row,
+                image_url=(
+                    tokens[row.mint_address].image_url if row.mint_address in tokens else None
+                ),
+            )
+            for row in rows
+        ],
         total=await repository.audit_count(wallet.id),
         enabled=True,
         disclosure=audit.DISCLOSURE,
@@ -406,6 +418,7 @@ def _to_position(row: PaperPosition, read: WalletRead) -> PositionOut:
         mint_address=row.mint_address,
         name=name,
         symbol=symbol,
+        image_url=read.images.get(row.mint_address),
         status=row.status,
         opened_at=row.opened_at,
         entry_rank=row.entry_rank,
@@ -459,6 +472,7 @@ def _to_manual_preview(preview: ManualSellPreview) -> ManualSellPreviewOut:
         mint_address=preview.position.mint_address,
         name=preview.name,
         symbol=preview.symbol,
+        image_url=preview.image_url,
         short_mint=_short_mint(preview.position.mint_address),
         entry_price=preview.position.entry_price,
         entry_observed_price=preview.position.entry_observed_price,
@@ -598,6 +612,7 @@ def _last_trade(read: WalletRead) -> LastTradeOut | None:
                 action="closed",
                 mint_address=row.mint_address,
                 symbol=symbol,
+                image_url=read.images.get(row.mint_address),
                 at=row.closed_at,
                 price_usd=row.exit_price,
                 exit_reason=row.exit_reason,
@@ -615,6 +630,7 @@ def _last_trade(read: WalletRead) -> LastTradeOut | None:
                 action="opened",
                 mint_address=row.mint_address,
                 symbol=symbol,
+                image_url=read.images.get(row.mint_address),
                 at=row.opened_at,
                 price_usd=row.entry_price,
             )
@@ -622,11 +638,12 @@ def _last_trade(read: WalletRead) -> LastTradeOut | None:
     return latest
 
 
-def _to_audit_entry(row: PaperTradeAudit) -> AuditEntryOut:
+def _to_audit_entry(row: PaperTradeAudit, *, image_url: str | None = None) -> AuditEntryOut:
     hold = (row.exit_at - row.entry_at).total_seconds() / 3600
     return AuditEntryOut(
         mint_address=row.mint_address,
         symbol=row.symbol,
+        image_url=image_url,
         entry_at=row.entry_at,
         entry_price=row.entry_price,
         entry_observed_price=row.entry_observed_price,

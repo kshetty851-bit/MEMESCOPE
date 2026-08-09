@@ -73,11 +73,13 @@ async def test_update_metadata_resolves_and_counts_attempts(db_session: AsyncSes
         name="Indian Batman",
         symbol="JEETMAN",
         metadata_uri="https://ipfs.io/ipfs/abc",
+        image_url="https://cdn.example/token.png",
         decimals=9,
         status=MetadataStatus.RESOLVED,
     )
     assert updated.name == "Indian Batman"
     assert updated.decimals == 9
+    assert updated.image_url == "https://cdn.example/token.png"
     assert updated.metadata_status is MetadataStatus.RESOLVED
     assert updated.metadata_attempts == 1
 

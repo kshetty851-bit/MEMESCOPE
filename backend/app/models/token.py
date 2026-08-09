@@ -50,6 +50,7 @@ class DiscoveredToken(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     symbol: Mapped[str | None] = mapped_column(String(64), nullable=True)
     decimals: Mapped[int | None] = mapped_column(Integer, nullable=True)
     metadata_uri: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    image_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
 
     creator_address: Mapped[str | None] = mapped_column(
         String(PUBKEY_MAX_LENGTH), index=True, nullable=True

@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 
+import { TokenIdentity } from "@/components/brand/token-identity";
 import { Label, Panel } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/states";
@@ -140,8 +141,12 @@ function TradeList({ title, items }: { title: string; items: TradeCard[] }) {
         {items.map((item) => (
           <div key={item.mint_address} className="grid gap-2 py-3 sm:grid-cols-5">
             <div className="sm:col-span-2">
-              <p className="font-medium text-ink">{item.symbol ?? item.mint_address.slice(0, 6)}</p>
-              <p className="text-xs text-ink-faint">{item.mint_address.slice(0, 6)}…{item.mint_address.slice(-4)}</p>
+              <TokenIdentity
+                mint={item.mint_address}
+                symbol={item.symbol}
+                imageUrl={item.image_url}
+                size="xs"
+              />
             </div>
             <SignedPct value={item.net_return_pct} />
             <span className="text-sm text-ink-dim">{usd(item.entry_liquidity_usd) ?? "No liquidity"}</span>

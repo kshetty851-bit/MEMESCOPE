@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef } from "react";
 
+import { TokenIdentity } from "@/components/brand/token-identity";
 import { WhyNow } from "@/components/opportunity/why-now";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -101,15 +102,15 @@ export function OpportunityDrawer({
         <header className="flex items-start justify-between gap-4 border-b border-line/60 p-6">
           <div className="min-w-0">
             <Label>Opportunity</Label>
-            <h2 className="mt-1 truncate text-title font-semibold text-ink">{identity}</h2>
-            {opportunity.name && opportunity.symbol && (
-              <p className="mt-1 truncate text-sm text-ink-dim">{opportunity.name}</p>
-            )}
-            <p
-              data-numeric
-              className="mt-2 truncate font-mono text-xs text-ink-faint"
-              title={opportunity.mint_address}
-            >
+            <TokenIdentity
+              mint={opportunity.mint_address}
+              name={opportunity.name}
+              symbol={opportunity.symbol}
+              imageUrl={opportunity.image_url}
+              size="md"
+              className="mt-2 max-w-full"
+            />
+            <p className="mt-2 break-all font-mono text-xs text-ink-faint">
               {opportunity.mint_address}
             </p>
           </div>

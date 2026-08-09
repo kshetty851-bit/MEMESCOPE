@@ -118,6 +118,7 @@ class RadarEntryOut(BaseSchema):
     mint_address: str
     name: str | None = None
     symbol: str | None = None
+    image_url: str | None = None
 
     category: str
     #: The category assigned at first detection. Kept beside the current one so
@@ -234,6 +235,25 @@ class RadarDiscoveredPage(BaseSchema):
     page_size: int
 
 
+class FreshDetectedTokenOut(BaseSchema):
+    """A newly discovered token joined to whatever enrichment exists so far."""
+
+    mint_address: str
+    name: str | None = None
+    symbol: str | None = None
+    image_url: str | None = None
+    discovered_at: datetime
+    block_time: datetime | None = None
+    metadata_status: str
+    current_market_cap: Decimal | None = None
+    current_liquidity: Decimal | None = None
+    current_price: Decimal | None = None
+    market_observed_at: datetime | None = None
+    radar_score: Decimal | None = None
+    radar_category: str | None = None
+    radar_status: str | None = None
+
+
 class RadarSnapshotOut(BaseSchema):
     captured_at: datetime
     price: Decimal | None
@@ -311,6 +331,7 @@ class TimelineEventOut(BaseSchema):
     mint_address: str
     name: str | None = None
     symbol: str | None = None
+    image_url: str | None = None
     occurred_at: datetime
     tier: str | None = None
     market_cap: Decimal | None = None

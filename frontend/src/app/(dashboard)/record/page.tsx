@@ -1,8 +1,8 @@
 "use client";
 
-import Link from "next/link";
 import { useMemo, useState } from "react";
 
+import { TokenIdentity } from "@/components/brand/token-identity";
 import { Label } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/states";
@@ -480,15 +480,14 @@ export default function TrackRecordPage() {
                             {index + 1}
                           </td>
                           <td className="px-3 py-2">
-                            <Link
-                              href={`/tokens/${entry.mint_address}`}
-                              className="text-ink hover:text-plasma"
-                            >
-                              {entry.symbol ?? entry.mint_address.slice(0, 6)}
-                              {entry.name ? (
-                                <span className="ml-2 text-ink-faint">{entry.name}</span>
-                              ) : null}
-                            </Link>
+                            <TokenIdentity
+                              mint={entry.mint_address}
+                              name={entry.name}
+                              symbol={entry.symbol}
+                              imageUrl={entry.image_url}
+                              size="xs"
+                              compact
+                            />
                           </td>
                           <td className="px-3 py-2 text-right tabular-nums text-ink-dim">
                             {money(entry.first_market_cap) ?? "—"}

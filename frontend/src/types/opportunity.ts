@@ -71,6 +71,7 @@ export interface Opportunity {
   mint_address: string;
   name: string | null;
   symbol: string | null;
+  image_url?: string | null;
   generation: number;
   status: OpportunityStatus;
   stage: OpportunityStage;

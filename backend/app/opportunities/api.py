@@ -198,6 +198,7 @@ def _to_card(
         mint_address=opportunity.mint_address,
         name=name,
         symbol=symbol,
+        image_url=context.image_for(mint),
         market=context.strip_for(mint),
         age_seconds=context.age_seconds(mint, now=now),
         generation=opportunity.generation,

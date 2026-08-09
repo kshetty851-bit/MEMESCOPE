@@ -127,12 +127,14 @@ class TokenRepository(BaseRepository[DiscoveredToken]):
         name: str | None,
         symbol: str | None,
         metadata_uri: str | None,
+        image_url: str | None = None,
         decimals: int | None,
         status: MetadataStatus,
     ) -> DiscoveredToken:
         token.name = name or token.name
         token.symbol = symbol or token.symbol
         token.metadata_uri = metadata_uri or token.metadata_uri
+        token.image_url = image_url or token.image_url
         if decimals is not None:
             token.decimals = decimals
         token.metadata_status = status

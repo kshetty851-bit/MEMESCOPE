@@ -1,3 +1,7 @@
+"use client";
+
+import { useState } from "react";
+
 import { cn } from "@/lib/utils";
 
 /**
@@ -23,13 +27,36 @@ function hash(input: string): number {
 
 export function TokenAvatar({
   mint,
+  imageUrl,
   size = 40,
   className,
 }: {
   mint: string;
+  imageUrl?: string | null;
   size?: number;
   className?: string;
 }) {
+  const [failed, setFailed] = useState(false);
+  if (imageUrl && !failed) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={imageUrl}
+        alt=""
+        width={size}
+        height={size}
+        loading="lazy"
+        decoding="async"
+        onError={() => setFailed(true)}
+        className={cn(
+          "shrink-0 rounded-full border border-line/60 bg-elevated object-cover",
+          className,
+        )}
+        style={{ width: size, height: size }}
+      />
+    );
+  }
+
   const h = hash(mint);
   // Steer away from gold (85°) — that hue belongs to APEX alone.
   const hue = (h % 300) + 190;

@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 
+import { TokenIdentity } from "@/components/brand/token-identity";
 import { Label, Panel } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/states";
@@ -262,7 +263,13 @@ export default function StrategyIntelligencePage() {
                   <div>
                     <span className="font-medium text-ink">{item.wallet_code}</span>{" "}
                     <span className="text-ink-faint">rejected</span>{" "}
-                    <span className="font-mono text-xs text-ink">{item.mint_address.slice(0, 8)}…</span>
+                    <TokenIdentity
+                      mint={item.mint_address}
+                      imageUrl={item.image_url}
+                      size="xs"
+                      compact
+                      className="ml-1 inline-flex align-middle"
+                    />
                   </div>
                   {item.outcome === "missed_winner" ? (
                     <span className="rounded bg-danger/20 px-2 py-0.5 text-xs text-danger">Missed Winner {item.pnl_usd ? `(${usd(item.pnl_usd)})` : ""}</span>

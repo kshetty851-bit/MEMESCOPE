@@ -15,6 +15,7 @@ from decimal import Decimal
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Query
+from sqlalchemy import select
 
 from app.api.deps import DbSession
 from app.core.config import settings
@@ -32,6 +33,7 @@ from app.radar.schemas import (
     BenchmarkOut,
     CategoryOut,
     DimensionOut,
+    FreshDetectedTokenOut,
     ModelOut,
     PerformanceOut,
     RadarDetailOut,
@@ -47,6 +49,8 @@ from app.radar.schemas import (
     TimelineEventOut,
     WhyNowOut,
 )
+from app.repositories.market import MarketSnapshotRepository
+from app.repositories.token import TokenRepository
 from app.services.market_context import TokenContext, resolve_token_context
 from app.services.pumpfun_radar import PumpfunRadarScanner
 
@@ -255,6 +259,7 @@ def _to_entry(
         mint_address=entry.mint_address,
         name=name,
         symbol=symbol,
+        image_url=resolved.image_for(mint),
         market=resolved.strip_for(mint),
         age_seconds=resolved.age_seconds(mint, now=now),
         risk_score=risk_score,
@@ -517,6 +522,61 @@ async def list_radar(
 
 
 @router.get(
+    "/fresh-detections",
+    response_model=list[FreshDetectedTokenOut],
+    summary="Newest tokens MEMESCOPE has detected",
+)
+async def fresh_detections(
+    session: DbSession,
+    limit: Annotated[int, Query(ge=1, le=50)] = 30,
+) -> list[FreshDetectedTokenOut]:
+    """Newest discoveries, whether or not scoring has caught up.
+
+    Detection belongs to `discovered_tokens`; Radar scoring and market
+    enrichment are later stages. This surface joins whatever exists today while
+    leaving missing values blank, so a just-seen token can appear as "Detected"
+    without fabricating a score or market cap.
+    """
+    tokens = list(await TokenRepository(session).latest(limit=limit))
+    mints = [token.mint_address for token in tokens]
+    markets = await MarketSnapshotRepository(session).latest_for_mints(mints)
+    radar_rows = {
+        row.mint_address: row
+        for row in (
+            await session.scalars(select(RadarToken).where(RadarToken.mint_address.in_(mints)))
+        ).all()
+    }
+
+    rows: list[FreshDetectedTokenOut] = []
+    for token in tokens:
+        market = markets.get(token.mint_address)
+        radar = radar_rows.get(token.mint_address)
+        rows.append(
+            FreshDetectedTokenOut(
+                mint_address=token.mint_address,
+                name=token.name,
+                symbol=token.symbol,
+                image_url=token.image_url,
+                discovered_at=token.discovered_at,
+                block_time=token.block_time,
+                metadata_status=str(token.metadata_status),
+                current_market_cap=market.market_cap if market is not None else None,
+                current_liquidity=market.liquidity_usd if market is not None else None,
+                current_price=market.price_usd if market is not None else None,
+                market_observed_at=market.captured_at if market is not None else None,
+                radar_score=(radar.current_opportunity_score if radar is not None else None),
+                radar_category=radar.current_category if radar is not None else None,
+                radar_status=(
+                    "radar"
+                    if radar is not None and radar.is_active
+                    else ("scored" if radar is not None else None)
+                ),
+            )
+        )
+    return rows
+
+
+@router.get(
     "/discovered",
     response_model=RadarDiscoveredPage,
     summary="Eligible Pump.fun discovery candidates",
@@ -579,14 +639,16 @@ async def get_timeline(
     """
     repository = RadarRepository(session)
     events = await repository.timeline(limit=limit)
-    names = await repository.names_for([str(event["mint_address"]) for event in events])
+    mints = [str(event["mint_address"]) for event in events]
+    context = await resolve_token_context(session, mints, now=datetime.now(UTC))
 
     return [
         TimelineEventOut(
             kind=str(event["kind"]),
             mint_address=str(event["mint_address"]),
-            name=names.get(str(event["mint_address"]), (None, None))[0],
-            symbol=names.get(str(event["mint_address"]), (None, None))[1],
+            name=context.name_for(str(event["mint_address"]))[0],
+            symbol=context.name_for(str(event["mint_address"]))[1],
+            image_url=context.image_for(str(event["mint_address"])),
             occurred_at=event["occurred_at"],
             tier=event["tier"],
             market_cap=event["market_cap"],

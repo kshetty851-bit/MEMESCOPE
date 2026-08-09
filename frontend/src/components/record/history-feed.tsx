@@ -1,7 +1,6 @@
 "use client";
 
-import Link from "next/link";
-
+import { TokenIdentity } from "@/components/brand/token-identity";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useRadarTimeline } from "@/hooks/use-radar";
 import type { RadarTimelineEvent } from "@/types/radar";
@@ -95,12 +94,17 @@ export function HistoryFeed() {
             <span className="w-6 shrink-0 text-center" aria-hidden>
               {icon}
             </span>
-            <Link
-              href={`/tokens/${event.mint_address}`}
-              className="flex-1 truncate text-sm text-ink-dim transition-colors hover:text-ink"
-            >
-              {text}
-            </Link>
+            <div className="min-w-0 flex-1">
+              <TokenIdentity
+                mint={event.mint_address}
+                name={event.name}
+                symbol={event.symbol}
+                imageUrl={event.image_url}
+                size="xs"
+                compact
+              />
+              <p className="mt-0.5 truncate text-xs text-ink-faint">{text}</p>
+            </div>
             <time
               dateTime={event.occurred_at}
               className="shrink-0 text-xs tabular-nums text-ink-faint"

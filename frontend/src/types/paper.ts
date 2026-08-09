@@ -33,6 +33,7 @@ export interface PaperPosition {
   mint_address: string;
   name: string | null;
   symbol: string | null;
+  image_url?: string | null;
 
   status: string;
   opened_at: string;
@@ -94,6 +95,7 @@ export interface ManualSellPreview {
   mint_address: string;
   name: string | null;
   symbol: string | null;
+  image_url?: string | null;
   short_mint: string;
   entry_price: string;
   entry_observed_price: string | null;
@@ -178,6 +180,7 @@ export interface PaperLastTrade {
   action: string;
   mint_address: string;
   symbol: string | null;
+  image_url?: string | null;
   at: string;
   price_usd: string | null;
   exit_reason: string | null;
@@ -188,6 +191,7 @@ export interface PaperLastTrade {
 export interface PaperAuditEntry {
   mint_address: string;
   symbol: string | null;
+  image_url?: string | null;
 
   entry_at: string;
   entry_price: string;
@@ -427,6 +431,7 @@ export interface PatternAnalysis {
 export interface TradeCard {
   mint_address: string;
   symbol: string | null;
+  image_url?: string | null;
   net_return_pct: string | null;
   gross_return_pct: string | null;
   entry_market_cap: string | null;
@@ -494,6 +499,7 @@ export interface EntryDivergence {
 export interface TokenComparison {
   mint_address: string;
   symbol: string | null;
+  image_url?: string | null;
   peak_pct: string | null;
   returns: Record<string, string | null>;
   best_strategy_id: string | null;
@@ -508,6 +514,7 @@ export interface LabTokens {
 
 export interface ShadowTradeCard {
   mint_address: string;
+  image_url?: string | null;
   opened_at: string;
   closed_at: string;
   pnl_usd: string;
@@ -517,6 +524,7 @@ export interface ShadowTradeCard {
 
 export interface ShadowDecision {
   mint_address: string;
+  image_url?: string | null;
   wallet_code: string;
   decision: "accepted" | "rejected";
   reason_codes: string[];
@@ -571,6 +579,7 @@ export interface ShadowWallet {
 export interface MissedOpportunity {
   wallet_code: string;
   mint_address: string;
+  image_url?: string | null;
   reason_codes: string[];
   accepted_elsewhere: string[];
   outcome?: "missed_winner" | "good_rejection" | "pending" | string | null;

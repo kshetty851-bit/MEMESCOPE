@@ -3,6 +3,7 @@ import { num } from "@/lib/scores";
 import type {
   RadarCategory,
   RadarDetail,
+  FreshDetectedToken,
   RadarHistory,
   RadarModel,
   RadarPage,
@@ -72,6 +73,10 @@ export async function fetchAllRadarDetections(params: {
 
 export function fetchRadarEntry(mint: string): Promise<RadarDetail> {
   return api.get<RadarDetail>(`/radar/${mint}`);
+}
+
+export function fetchFreshDetectedTokens(limit = 30): Promise<FreshDetectedToken[]> {
+  return api.get<FreshDetectedToken[]>(`/radar/fresh-detections?limit=${limit}`);
 }
 
 export function fetchRadarHistory(mint: string, limit = 100): Promise<RadarHistory> {

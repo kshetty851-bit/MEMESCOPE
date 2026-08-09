@@ -3,10 +3,9 @@
 import Link from "next/link";
 import { memo } from "react";
 
-import { TokenAvatar } from "@/components/brand/token-avatar";
+import { TokenIdentity } from "@/components/brand/token-identity";
 import { LiveValue } from "@/components/ui/live-value";
 import { FreshnessLabel, NoMarketData } from "@/components/ui/freshness";
-import { shortMint } from "@/lib/freshness";
 import { describeMove } from "@/lib/motion";
 import { formatMultiple, multipleTone } from "@/lib/radar";
 import {
@@ -18,7 +17,6 @@ import {
   expiresIn,
   riskLabel,
   signedPct,
-  tokenNaming,
 } from "@/lib/radar-row";
 import type { PaperTokenState } from "@/lib/paper";
 import { cn } from "@/lib/utils";
@@ -227,7 +225,6 @@ function RadarRowComponent({
   const risk = riskLabel(entry.risk_band);
   const rate = baseRateSummary(entry.base_rate);
   const change = entry.market?.change_24h_pct ?? null;
-  const { primary, secondary } = tokenNaming(entry);
   // When the sentence is *about* the signal it already names it, and adds the
   // timing on top: "Recently graduated from Pump.fun" beside "Graduated from
   // Pump.fun 1 hour ago." is one fact printed twice. Keyed on the code the
@@ -263,29 +260,14 @@ function RadarRowComponent({
           {rankDelta !== 0 ? (
             <span className="sr-only">{describeMove(rankDelta)}</span>
           ) : null}
-          <TokenAvatar mint={entry.mint_address} size={28} />
-          <div className="flex min-w-0 flex-wrap items-baseline gap-x-2">
-            <Link
-              href={`/tokens/${entry.mint_address}`}
-              className="truncate text-sm font-medium text-ink hover:underline"
-            >
-              {primary}
-            </Link>
-            {secondary ? (
-              <span className="truncate text-xs text-ink-faint">{secondary}</span>
-            ) : null}
-            {/* Always shown, never conditionally. The audit found nine distinct
-                mints named TNOS and five named SAOF — all genuine pump.fun
-                tokens. A symbol cannot identify a token here, so the mint is
-                part of the identity rather than a disambiguator that appears
-                only when we happen to notice a clash. */}
-            <span
-              className="font-mono text-xs text-ink-faint/70"
-              title={entry.mint_address}
-            >
-              {shortMint(entry.mint_address)}
-            </span>
-          </div>
+          <TokenIdentity
+            mint={entry.mint_address}
+            name={entry.name}
+            symbol={entry.symbol}
+            imageUrl={entry.image_url}
+            size="sm"
+            className="max-w-[min(48vw,24rem)]"
+          />
         </div>
 
         <div className="flex shrink-0 items-center gap-4">

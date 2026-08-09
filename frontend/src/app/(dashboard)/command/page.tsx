@@ -5,6 +5,7 @@ import Link from "next/link";
 
 import { MascotState } from "@/components/alpha/mascot-state";
 import { PaperWalletWidget } from "@/components/paper/wallet-widget";
+import { FreshDetectedTokens } from "@/components/radar/fresh-detected-tokens";
 import { RadarRow } from "@/components/radar/radar-row";
 import { LiveStatus } from "@/components/ui/freshness";
 import { Label, Panel } from "@/components/ui/panel";
@@ -95,6 +96,8 @@ export default function RadarPage() {
           adjacency is deliberate: a Radar shown beside a losing wallet is a
           more honest product than a Radar shown alone. */}
       <PaperWalletWidget />
+
+      <FreshDetectedTokens />
 
       {isError ? (
         <ErrorState

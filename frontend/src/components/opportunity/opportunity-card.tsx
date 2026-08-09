@@ -1,6 +1,7 @@
 "use client";
 
 import { WhyNow } from "@/components/opportunity/why-now";
+import { TokenIdentity } from "@/components/brand/token-identity";
 import { Badge } from "@/components/ui/badge";
 import { Meter } from "@/components/ui/metric";
 import { Label, Panel } from "@/components/ui/panel";
@@ -60,12 +61,15 @@ export function OpportunityCard({
       >
         {/* --- Identity + stage -------------------------------------------- */}
         <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="truncate text-sm font-medium text-ink">{identity}</p>
-            {opportunity.name && opportunity.symbol && (
-              <p className="mt-0.5 truncate text-xs text-ink-faint">{opportunity.name}</p>
-            )}
-          </div>
+          <TokenIdentity
+            mint={opportunity.mint_address}
+            name={opportunity.name}
+            symbol={opportunity.symbol}
+            imageUrl={opportunity.image_url}
+            size="sm"
+            link="none"
+            className="max-w-[75%]"
+          />
           <span
             className="shrink-0 rounded-chip border px-1.5 py-0.5 text-[0.625rem] font-semibold uppercase tracking-[0.1em]"
             style={{

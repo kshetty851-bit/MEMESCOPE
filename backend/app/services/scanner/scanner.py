@@ -322,6 +322,7 @@ class TokenScanner:
             name=decoded.name,
             symbol=decoded.symbol,
             metadata_uri=decoded.metadata_uri,
+            image_url=None,
             decimals=None,
         )
         return creation, metadata
@@ -402,6 +403,7 @@ class TokenScanner:
                 name=metadata.name,
                 symbol=metadata.symbol,
                 metadata_uri=metadata.metadata_uri,
+                image_url=metadata.image_url,
                 decimals=creation.decimals
                 if creation.decimals is not None
                 else metadata.decimals,
@@ -468,6 +470,7 @@ def _to_payload(token: Any) -> dict[str, Any]:
         "symbol": token.symbol,
         "decimals": token.decimals,
         "metadata_uri": token.metadata_uri,
+        "image_url": token.image_url,
         "creator_address": token.creator_address,
         "signature": token.signature,
         "slot": token.slot,
