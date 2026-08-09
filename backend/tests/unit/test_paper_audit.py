@@ -75,6 +75,19 @@ class TestGross:
         assert result.gross_return_usd == Decimal("-60.0000")
         assert result.gross_return_pct == Decimal("-60.0000")
 
+    def test_gross_uses_the_recorded_exit_price_not_the_breach_observation(self) -> None:
+        """A trailing stop can be triggered by a later, lower quote.
+
+        The observed breach is kept as provenance, but the permanent P/L uses
+        the recorded exit price basis rather than silently switching to the
+        breach snapshot.
+        """
+        result = record(exit_observed_price=Decimal(14))
+
+        assert result.exit_price == Decimal(15)
+        assert result.exit_observed_price == Decimal(14)
+        assert result.gross_return_usd == Decimal("50.0000")
+
 
 class TestNet:
     def test_the_fee_and_the_impact_are_charged_at_each_end(self) -> None:
@@ -131,7 +144,7 @@ class TestNet:
         assert record().swap_fee_bps == Decimal(30)
 
     async def test_jupiter_execution_uses_stored_usdc_out_for_future_net(self) -> None:
-        """Gross stays the observed market move; net is the captured quote."""
+        """Gross uses the recorded execution price; net is the captured quote."""
         entry_execution = jupiter_quote_from_raw(
             {
                 "inputMint": "usdc",
@@ -192,10 +205,31 @@ class TestNet:
         )
 
         assert result.execution_model_version == JUPITER_MODEL_VERSION
-        assert result.gross_return_usd == Decimal("50.0000")
+        assert result.gross_return_usd == Decimal("20.0000")
         assert result.net_return_usd == Decimal("20.0000")
-        assert result.slippage_usd == Decimal("30.0000")
+        assert result.slippage_usd == Decimal("0.0000")
         assert result.exit_execution_route == "Pump.fun Amm"
+
+
+class TestMarketCapBasis:
+    def test_market_cap_is_projected_to_the_execution_price_basis(self) -> None:
+        result = audit.market_cap_at_price(
+            observed_market_cap=Decimal(1400),
+            observed_price=Decimal(14),
+            execution_price=Decimal(15),
+        )
+
+        assert result == Decimal("1500.0000")
+
+    def test_market_cap_projection_refuses_missing_or_unpriced_inputs(self) -> None:
+        assert (
+            audit.market_cap_at_price(
+                observed_market_cap=Decimal(1400),
+                observed_price=Decimal(0),
+                execution_price=Decimal(15),
+            )
+            is None
+        )
 
 
 class TestWhatTheRecordCarries:

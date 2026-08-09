@@ -414,7 +414,11 @@ class PaperWalletService:
             symbol=symbol,
             entry_market_cap=position.entry_market_cap,
             entry_liquidity_usd=position.entry_liquidity_usd,
-            exit_market_cap=quote.market_cap,
+            exit_market_cap=audit.market_cap_at_price(
+                observed_market_cap=quote.market_cap,
+                observed_price=quote.price_usd,
+                execution_price=execution_price,
+            ),
             exit_liquidity_usd=quote.liquidity_usd,
             strategy_id=wallet.strategy_id,
             strategy_version=wallet.strategy_version,
@@ -746,6 +750,9 @@ class PaperWalletService:
                 (quote for quote in quotes if quote.captured_at == found.at),
                 None,
             )
+            observed_exit_price = (
+                decision_quote.price_usd if decision_quote is not None else found.price_usd
+            )
             exit_execution = await self._exit_execution_for(
                 position=position,
                 decision_price=found.price_usd,
@@ -768,7 +775,7 @@ class PaperWalletService:
                 # to the token. A high printed after the exit is not this
                 # position's — it sold before it.
                 peak_price=running_peak,
-                exit_observed_price=found.price_usd,
+                exit_observed_price=observed_exit_price,
                 **self._execution_close_values(exit_execution),
             )
             closed += int(closed_now)
@@ -817,7 +824,11 @@ class PaperWalletService:
                 symbol=token.symbol if token is not None else None,
                 entry_market_cap=row.entry_market_cap,
                 entry_liquidity_usd=row.entry_liquidity_usd,
-                exit_market_cap=exit_reading.market_cap if exit_reading else None,
+                exit_market_cap=audit.market_cap_at_price(
+                    observed_market_cap=exit_reading.market_cap if exit_reading else None,
+                    observed_price=exit_reading.price_usd if exit_reading else None,
+                    execution_price=row.exit_price,
+                ),
                 exit_liquidity_usd=exit_reading.liquidity_usd if exit_reading else None,
                 strategy_id=wallet.strategy_id,
                 strategy_version=wallet.strategy_version,
@@ -925,7 +936,11 @@ class PaperWalletService:
                 stop_price=instruction.stop_price,
                 expires_at=instruction.expires_at,
                 trailing_drawdown=instruction.trailing_drawdown,
-                entry_market_cap=instruction.market_cap,
+                entry_market_cap=audit.market_cap_at_price(
+                    observed_market_cap=instruction.market_cap,
+                    observed_price=instruction.price_usd,
+                    execution_price=execution_price,
+                ),
                 entry_liquidity_usd=instruction.liquidity_usd,
                 status=PositionStatus.OPEN.value,
                 peak_price=execution_price,

@@ -562,7 +562,11 @@ class ShadowPaperService:
                 size_usd=_TRADE_SIZE,
                 quantity=quantity,
                 trailing_drawdown=_TRAILING,
-                entry_market_cap=opportunity.market_cap,
+                entry_market_cap=audit.market_cap_at_price(
+                    observed_market_cap=opportunity.market_cap,
+                    observed_price=opportunity.price_usd,
+                    execution_price=execution_price,
+                ),
                 entry_liquidity_usd=opportunity.liquidity_usd,
                 entry_radar_score=opportunity.radar.current_opportunity_score,
                 entry_confidence=opportunity.radar.current_confidence,
@@ -687,6 +691,13 @@ class ShadowPaperService:
                     last_evaluated_at=quotes[-1].captured_at if quotes else now,
                 )
                 continue
+            decision_quote = next(
+                (quote for quote in quotes if quote.captured_at == found.at),
+                None,
+            )
+            observed_exit_price = (
+                decision_quote.price_usd if decision_quote is not None else found.price_usd
+            )
             exit_execution = await self._exit_execution(position, now=now)
             exit_price = (
                 exit_execution.estimated_price_usd
@@ -699,7 +710,7 @@ class ShadowPaperService:
                 closed_at=now if isinstance(exit_execution, ExecutionQuote) else found.at,
                 exit_reason=found.reason.value,
                 peak_price=peak,
-                exit_observed_price=found.price_usd,
+                exit_observed_price=observed_exit_price,
                 exit_execution=exit_execution,
             ):
                 closed += 1
@@ -734,7 +745,15 @@ class ShadowPaperService:
                 symbol=token.symbol if token is not None else None,
                 entry_market_cap=row.entry_market_cap,
                 entry_liquidity_usd=row.entry_liquidity_usd,
-                exit_market_cap=exit_reading.market_cap if exit_reading is not None else None,
+                exit_market_cap=audit.market_cap_at_price(
+                    observed_market_cap=(
+                        exit_reading.market_cap if exit_reading is not None else None
+                    ),
+                    observed_price=(
+                        exit_reading.price_usd if exit_reading is not None else None
+                    ),
+                    execution_price=row.exit_price,
+                ),
                 exit_liquidity_usd=(
                     exit_reading.liquidity_usd if exit_reading is not None else None
                 ),

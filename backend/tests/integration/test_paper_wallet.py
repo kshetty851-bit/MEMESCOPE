@@ -97,6 +97,7 @@ async def _price(
     *,
     at: datetime,
     price: str,
+    market_cap: str = "124000",
     liquidity: str | None = "18000",
     status: TradingStatus = TradingStatus.TRADING,
 ) -> None:
@@ -106,7 +107,7 @@ async def _price(
             "mint_address": mint,
             "captured_at": at,
             "price_usd": Decimal(price),
-            "market_cap": Decimal("124000"),
+            "market_cap": Decimal(market_cap),
             "liquidity_usd": None if liquidity is None else Decimal(liquidity),
             "volume_24h": Decimal("89000"),
             "dex_name": "pumpswap",
@@ -565,8 +566,22 @@ class TestTheAuditLog:
         service = PaperWalletService(db_session)
         await service.review(now=NOW)
         await db_session.commit()
-        await _price(db_session, token, MINT_A, at=NOW + timedelta(hours=1), price="20")
-        await _price(db_session, token, MINT_A, at=NOW + timedelta(hours=2), price="14")
+        await _price(
+            db_session,
+            token,
+            MINT_A,
+            at=NOW + timedelta(hours=1),
+            price="20",
+            market_cap="2000",
+        )
+        await _price(
+            db_session,
+            token,
+            MINT_A,
+            at=NOW + timedelta(hours=2),
+            price="14",
+            market_cap="1400",
+        )
         await db_session.commit()
         await service.review(now=NOW + timedelta(hours=3))
         await db_session.commit()
@@ -584,7 +599,8 @@ class TestTheAuditLog:
         assert row.entry_price == Decimal(10)
         assert row.exit_price == Decimal(15)
         assert row.entry_market_cap == Decimal("124000")
-        assert row.exit_market_cap == Decimal("124000")
+        assert row.exit_observed_price == Decimal(14)
+        assert row.exit_market_cap == Decimal("1500.0000")
         assert row.exit_reason == "stop"
         assert row.strategy_id == "trailing_stop_25_v1"
         assert row.strategy_version == "1.0.0"

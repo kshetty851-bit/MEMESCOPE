@@ -310,6 +310,9 @@ class TestShadowPaperServiceExecution:
             )
         ).all()
         assert len(audits) == closed.audited
+        assert audits[0].exit_observed_price == Decimal("0.03")
+        assert audits[0].exit_price == Decimal("0.037500000000000000")
+        assert audits[0].exit_market_cap == Decimal("31250.0000")
         assert PaperShadowTradeAudit.__table__.columns.get("manual_action_at") is None
 
     async def test_transaction_scoped_paper_review_lock_coalesces_overlap(

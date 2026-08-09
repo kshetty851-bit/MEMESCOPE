@@ -56,6 +56,39 @@ NO_DEPTH_REASON = (
 )
 
 
+def market_cap_at_price(
+    *,
+    observed_market_cap: Decimal | None,
+    observed_price: Decimal | None,
+    execution_price: Decimal | None,
+) -> Decimal | None:
+    """Project an observed market cap onto the same price basis as execution.
+
+    Market snapshots carry both a price and a market cap. Paper positions may
+    execute at a different price basis: a trailing stop trigger, or a Jupiter
+    route estimate. Storing the raw snapshot market cap beside that execution
+    price mixes two economic facts and can make the permanent record say, for
+    example, that a token exited above entry while its exit market cap collapsed
+    to a few thousand dollars.
+
+    We do not invent supply. We only reuse the snapshot's implied supply:
+
+        market_cap / observed_price
+
+    and apply it to the execution price that the trade actually recorded.
+    """
+    if (
+        observed_market_cap is None
+        or observed_price is None
+        or execution_price is None
+        or observed_market_cap <= 0
+        or observed_price <= 0
+        or execution_price <= 0
+    ):
+        return None
+    return (observed_market_cap * execution_price / observed_price).quantize(_MONEY)
+
+
 @dataclass(frozen=True, slots=True)
 class TradeAudit:
     """One completed trade, as it is written down and never rewritten.
@@ -191,8 +224,7 @@ def record(
     precisely the winners — the finding Sprint 27 recorded as cost being
     progressive rather than flat.
     """
-    gross_exit_price = exit_observed_price or trade.exit_price
-    proceeds = trade.quantity * gross_exit_price
+    proceeds = trade.quantity * trade.exit_price
     gross_usd = proceeds - trade.size_usd
     gross_pct = _ZERO if trade.size_usd <= 0 else (gross_usd / trade.size_usd * _HUNDRED)
 
