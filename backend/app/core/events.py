@@ -95,8 +95,8 @@ async def publish_live_update(
     API response as the authority for every rendered value.
     """
     payload = {"type": event_type, "mints": list(dict.fromkeys(mints))}
-    client = redis or get_redis()
     try:
+        client = redis or get_redis()
         receivers = await client.publish(settings.live_channel, json.dumps(payload))
     except Exception as exc:
         # The database is already committed. A dropped browser wake-up must not

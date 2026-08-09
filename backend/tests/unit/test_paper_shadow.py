@@ -1,7 +1,7 @@
 """Unit tests for Parallel Shadow Wallets (V2-V5) and Strategy Intelligence.
 
 Verifies:
-- Exact candidate rules and boundary conditions (mcap $25K/$50K/$100K, Radar 65/70, impact 1%/2%).
+- Exact candidate rules and boundary conditions.
 - Rejection reasons persistence and machine-readable codes.
 - Financial independence of shadow wallets.
 - Decision, position exit, and audit idempotency.
@@ -13,25 +13,17 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from decimal import Decimal
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
 from app.models.market import TokenMarketSnapshot
-from app.models.paper import (
-    PaperShadowDecision,
-    PaperShadowPosition,
-    PaperShadowTradeAudit,
-    PaperShadowWallet,
-)
 from app.models.radar import RadarToken
-from app.paper import shadow
 from app.paper.execution import ExecutionQuote, LegacyExecution
 from app.paper.shadow import (
     SHADOW_SPECS,
     Opportunity,
     ShadowReason,
-    ShadowSpec,
     _filter_performance,
     _missed_opportunities,
     _promotion_blockers,
@@ -119,8 +111,16 @@ def make_opportunity(
     require_quote: bool = True,
 ) -> Opportunity:
     radar = make_radar(mint=mint, score=score)
-    snapshot = make_snapshot(market_cap=mcap, liquidity_usd=liquidity, trading_status=trading_status) if has_snapshot else None
-    quote = make_quote(impact_pct=impact) if (impact is not None and require_quote) else (LegacyExecution("No quote") if not require_quote else None)
+    snapshot = (
+        make_snapshot(market_cap=mcap, liquidity_usd=liquidity, trading_status=trading_status)
+        if has_snapshot
+        else None
+    )
+    quote = (
+        make_quote(impact_pct=impact)
+        if (impact is not None and require_quote)
+        else (LegacyExecution("No quote") if not require_quote else None)
+    )
     return Opportunity(
         radar=radar,
         rank=1,
@@ -170,41 +170,63 @@ class TestV2CandidateRulesAndBoundaries:
     def test_v2_boundary_mcap_25k(self) -> None:
         spec = _spec_for("v2")
         # $25,000 is inclusive lower bound -> accepted
-        opp_exact = make_opportunity(score=Decimal(65), mcap=Decimal(25_000), impact=Decimal("1.5"))
+        opp_exact = make_opportunity(
+            score=Decimal(65), mcap=Decimal(25_000), impact=Decimal("1.5")
+        )
         assert _reasons_for(spec, opp_exact, held=EMPTY_SET, open_now=EMPTY_SET) == []
 
         # Below $25,000 -> rejected
-        opp_below = make_opportunity(score=Decimal(65), mcap=Decimal(24_999), impact=Decimal("1.5"))
-        assert _reasons_for(spec, opp_below, held=EMPTY_SET, open_now=EMPTY_SET) == [ShadowReason.MARKET_CAP_TOO_LOW]
+        opp_below = make_opportunity(
+            score=Decimal(65), mcap=Decimal(24_999), impact=Decimal("1.5")
+        )
+        assert _reasons_for(spec, opp_below, held=EMPTY_SET, open_now=EMPTY_SET) == [
+            ShadowReason.MARKET_CAP_TOO_LOW
+        ]
 
     def test_v2_boundary_mcap_50k(self) -> None:
         spec = _spec_for("v2")
         # $50,000 is inclusive upper bound -> accepted
-        opp_exact = make_opportunity(score=Decimal(65), mcap=Decimal(50_000), impact=Decimal("1.5"))
+        opp_exact = make_opportunity(
+            score=Decimal(65), mcap=Decimal(50_000), impact=Decimal("1.5")
+        )
         assert _reasons_for(spec, opp_exact, held=EMPTY_SET, open_now=EMPTY_SET) == []
 
         # Above $50,000 -> rejected
-        opp_above = make_opportunity(score=Decimal(65), mcap=Decimal(50_001), impact=Decimal("1.5"))
-        assert _reasons_for(spec, opp_above, held=EMPTY_SET, open_now=EMPTY_SET) == [ShadowReason.MARKET_CAP_TOO_HIGH]
+        opp_above = make_opportunity(
+            score=Decimal(65), mcap=Decimal(50_001), impact=Decimal("1.5")
+        )
+        assert _reasons_for(spec, opp_above, held=EMPTY_SET, open_now=EMPTY_SET) == [
+            ShadowReason.MARKET_CAP_TOO_HIGH
+        ]
 
     def test_v2_boundary_radar_score_65(self) -> None:
         spec = _spec_for("v2")
         # Radar 65 is inclusive lower bound -> accepted
-        opp_exact = make_opportunity(score=Decimal(65), mcap=Decimal(35_000), impact=Decimal("1.5"))
+        opp_exact = make_opportunity(
+            score=Decimal(65), mcap=Decimal(35_000), impact=Decimal("1.5")
+        )
         assert _reasons_for(spec, opp_exact, held=EMPTY_SET, open_now=EMPTY_SET) == []
 
         # Radar 64.99 -> rejected
-        opp_below = make_opportunity(score=Decimal("64.99"), mcap=Decimal(35_000), impact=Decimal("1.5"))
-        assert _reasons_for(spec, opp_below, held=EMPTY_SET, open_now=EMPTY_SET) == [ShadowReason.RADAR_BELOW_THRESHOLD]
+        opp_below = make_opportunity(
+            score=Decimal("64.99"), mcap=Decimal(35_000), impact=Decimal("1.5")
+        )
+        assert _reasons_for(spec, opp_below, held=EMPTY_SET, open_now=EMPTY_SET) == [
+            ShadowReason.RADAR_BELOW_THRESHOLD
+        ]
 
     def test_v2_boundary_impact_2_percent(self) -> None:
         spec = _spec_for("v2")
         # Impact 1.99% -> accepted
-        opp_below = make_opportunity(score=Decimal(65), mcap=Decimal(35_000), impact=Decimal("1.99"))
+        opp_below = make_opportunity(
+            score=Decimal(65), mcap=Decimal(35_000), impact=Decimal("1.99")
+        )
         assert _reasons_for(spec, opp_below, held=EMPTY_SET, open_now=EMPTY_SET) == []
 
         # Impact 2.0% is strict inequality <2% -> rejected
-        opp_exact = make_opportunity(score=Decimal(65), mcap=Decimal(35_000), impact=Decimal("2.0"))
+        opp_exact = make_opportunity(
+            score=Decimal(65), mcap=Decimal(35_000), impact=Decimal("2.0")
+        )
         reasons = _reasons_for(spec, opp_exact, held=EMPTY_SET, open_now=EMPTY_SET)
         assert ShadowReason.PRICE_IMPACT_TOO_HIGH in reasons
 
@@ -214,22 +236,34 @@ class TestV3CandidateRulesAndBoundaries:
 
     def test_v3_accepted_opportunity(self) -> None:
         spec = _spec_for("v3")
-        opp = make_opportunity(score=Decimal(70), mcap=Decimal(1_000_000), impact=Decimal("0.8"))
+        opp = make_opportunity(
+            score=Decimal(70), mcap=Decimal(1_000_000), impact=Decimal("0.8")
+        )
         assert _reasons_for(spec, opp, held=EMPTY_SET, open_now=EMPTY_SET) == []
 
     def test_v3_boundary_radar_score_70(self) -> None:
         spec = _spec_for("v3")
-        opp_exact = make_opportunity(score=Decimal(70), mcap=Decimal(100_000), impact=Decimal("0.5"))
+        opp_exact = make_opportunity(
+            score=Decimal(70), mcap=Decimal(100_000), impact=Decimal("0.5")
+        )
         assert _reasons_for(spec, opp_exact, held=EMPTY_SET, open_now=EMPTY_SET) == []
 
-        opp_below = make_opportunity(score=Decimal("69.9"), mcap=Decimal(100_000), impact=Decimal("0.5"))
-        assert _reasons_for(spec, opp_below, held=EMPTY_SET, open_now=EMPTY_SET) == [ShadowReason.RADAR_BELOW_THRESHOLD]
+        opp_below = make_opportunity(
+            score=Decimal("69.9"), mcap=Decimal(100_000), impact=Decimal("0.5")
+        )
+        assert _reasons_for(spec, opp_below, held=EMPTY_SET, open_now=EMPTY_SET) == [
+            ShadowReason.RADAR_BELOW_THRESHOLD
+        ]
 
     def test_v3_quality_a_only(self) -> None:
         spec = _spec_for("v3")
         # Impact 1.5% is Quality B+ -> rejected
-        opp_b_plus = make_opportunity(score=Decimal(75), mcap=Decimal(100_000), impact=Decimal("1.5"))
-        assert _reasons_for(spec, opp_b_plus, held=EMPTY_SET, open_now=EMPTY_SET) == [ShadowReason.EXECUTION_QUALITY_BELOW_THRESHOLD]
+        opp_b_plus = make_opportunity(
+            score=Decimal(75), mcap=Decimal(100_000), impact=Decimal("1.5")
+        )
+        assert _reasons_for(spec, opp_b_plus, held=EMPTY_SET, open_now=EMPTY_SET) == [
+            ShadowReason.EXECUTION_QUALITY_BELOW_THRESHOLD
+        ]
 
 
 class TestV4CandidateRulesAndBoundaries:
@@ -238,20 +272,32 @@ class TestV4CandidateRulesAndBoundaries:
     def test_v4_boundary_mcap_50k_and_100k(self) -> None:
         spec = _spec_for("v4")
         # Mcap $50,000 -> accepted
-        opp_50k = make_opportunity(score=Decimal(50), mcap=Decimal(50_000), impact=Decimal("1.0"))
+        opp_50k = make_opportunity(
+            score=Decimal(50), mcap=Decimal(50_000), impact=Decimal("1.0")
+        )
         assert _reasons_for(spec, opp_50k, held=EMPTY_SET, open_now=EMPTY_SET) == []
 
         # Mcap $100,000 -> accepted
-        opp_100k = make_opportunity(score=Decimal(50), mcap=Decimal(100_000), impact=Decimal("1.0"))
+        opp_100k = make_opportunity(
+            score=Decimal(50), mcap=Decimal(100_000), impact=Decimal("1.0")
+        )
         assert _reasons_for(spec, opp_100k, held=EMPTY_SET, open_now=EMPTY_SET) == []
 
         # Mcap $49,999 -> rejected low
-        opp_low = make_opportunity(score=Decimal(50), mcap=Decimal(49_999), impact=Decimal("1.0"))
-        assert _reasons_for(spec, opp_low, held=EMPTY_SET, open_now=EMPTY_SET) == [ShadowReason.MARKET_CAP_TOO_LOW]
+        opp_low = make_opportunity(
+            score=Decimal(50), mcap=Decimal(49_999), impact=Decimal("1.0")
+        )
+        assert _reasons_for(spec, opp_low, held=EMPTY_SET, open_now=EMPTY_SET) == [
+            ShadowReason.MARKET_CAP_TOO_LOW
+        ]
 
         # Mcap $100,001 -> rejected high
-        opp_high = make_opportunity(score=Decimal(50), mcap=Decimal(100_001), impact=Decimal("1.0"))
-        assert _reasons_for(spec, opp_high, held=EMPTY_SET, open_now=EMPTY_SET) == [ShadowReason.MARKET_CAP_TOO_HIGH]
+        opp_high = make_opportunity(
+            score=Decimal(50), mcap=Decimal(100_001), impact=Decimal("1.0")
+        )
+        assert _reasons_for(spec, opp_high, held=EMPTY_SET, open_now=EMPTY_SET) == [
+            ShadowReason.MARKET_CAP_TOO_HIGH
+        ]
 
 
 class TestV5CandidateRulesAndBoundaries:
@@ -265,17 +311,23 @@ class TestV5CandidateRulesAndBoundaries:
     def test_v5_boundary_impact_1_percent(self) -> None:
         spec = _spec_for("v5")
         # Impact 0.99% -> accepted
-        opp_099 = make_opportunity(score=Decimal(50), mcap=Decimal(200_000), impact=Decimal("0.99"))
+        opp_099 = make_opportunity(
+            score=Decimal(50), mcap=Decimal(200_000), impact=Decimal("0.99")
+        )
         assert _reasons_for(spec, opp_099, held=EMPTY_SET, open_now=EMPTY_SET) == []
 
         # Impact 1.0% is strict inequality <1% -> rejected
-        opp_10 = make_opportunity(score=Decimal(50), mcap=Decimal(200_000), impact=Decimal("1.0"))
+        opp_10 = make_opportunity(
+            score=Decimal(50), mcap=Decimal(200_000), impact=Decimal("1.0")
+        )
         reasons = _reasons_for(spec, opp_10, held=EMPTY_SET, open_now=EMPTY_SET)
         assert ShadowReason.PRICE_IMPACT_TOO_HIGH in reasons
 
     def test_v5_missing_jupiter_quote(self) -> None:
         spec = _spec_for("v5")
-        opp_no_jupiter = make_opportunity(score=Decimal(50), mcap=Decimal(200_000), impact=None, require_quote=False)
+        opp_no_jupiter = make_opportunity(
+            score=Decimal(50), mcap=Decimal(200_000), impact=None, require_quote=False
+        )
         reasons = _reasons_for(spec, opp_no_jupiter, held=EMPTY_SET, open_now=EMPTY_SET)
         assert ShadowReason.JUPITER_QUOTE_UNAVAILABLE in reasons
 
@@ -286,15 +338,21 @@ class TestRejectionReasonCodesAndStateConstraints:
         opp = make_opportunity(score=Decimal(70), mcap=Decimal(35_000), impact=Decimal("1.0"))
 
         # Mint in open positions -> ALREADY_HELD
-        assert _reasons_for(spec, opp, held={"probe_mint"}, open_now={"probe_mint"}) == [ShadowReason.ALREADY_HELD]
+        assert _reasons_for(spec, opp, held={"probe_mint"}, open_now={"probe_mint"}) == [
+            ShadowReason.ALREADY_HELD
+        ]
 
         # Mint in previously traded -> ALREADY_TRADED
-        assert _reasons_for(spec, opp, held={"probe_mint"}, open_now=EMPTY_SET) == [ShadowReason.ALREADY_TRADED]
+        assert _reasons_for(spec, opp, held={"probe_mint"}, open_now=EMPTY_SET) == [
+            ShadowReason.ALREADY_TRADED
+        ]
 
     def test_missing_market_data_and_non_tradeable_reasons(self) -> None:
         spec = _spec_for("v2")
         opp_no_snapshot = make_opportunity(has_snapshot=False)
-        assert _reasons_for(spec, opp_no_snapshot, held=EMPTY_SET, open_now=EMPTY_SET) == [ShadowReason.NO_MARKET_DATA]
+        assert _reasons_for(spec, opp_no_snapshot, held=EMPTY_SET, open_now=EMPTY_SET) == [
+            ShadowReason.NO_MARKET_DATA
+        ]
 
         opp_inactive = make_opportunity(trading_status="halted")
         reasons = _reasons_for(spec, opp_inactive, held=EMPTY_SET, open_now=EMPTY_SET)
@@ -306,7 +364,10 @@ class TestCrossWalletAnalytics:
         # Construct wallet data with decisions and positions PnL
         wallet_v2 = {
             "code": "v2",
-            "position_pnl_by_mint": {"mint_winner": Decimal("25.00"), "mint_loser": Decimal("-15.00")},
+            "position_pnl_by_mint": {
+                "mint_winner": Decimal("25.00"),
+                "mint_loser": Decimal("-15.00"),
+            },
             "decisions": [
                 {"mint_address": "mint_winner", "decision": "accepted", "reason_codes": []},
                 {"mint_address": "mint_loser", "decision": "accepted", "reason_codes": []},
@@ -317,8 +378,16 @@ class TestCrossWalletAnalytics:
             "code": "v3",
             "position_pnl_by_mint": {},
             "decisions": [
-                {"mint_address": "mint_winner", "decision": "rejected", "reason_codes": ["radar_below_threshold"]},
-                {"mint_address": "mint_loser", "decision": "rejected", "reason_codes": ["execution_quality_below_threshold"]},
+                {
+                    "mint_address": "mint_winner",
+                    "decision": "rejected",
+                    "reason_codes": ["radar_below_threshold"],
+                },
+                {
+                    "mint_address": "mint_loser",
+                    "decision": "rejected",
+                    "reason_codes": ["execution_quality_below_threshold"],
+                },
             ],
         }
 
@@ -340,7 +409,10 @@ class TestCrossWalletAnalytics:
     def test_filter_performance_aggregation(self) -> None:
         wallet_v2 = {
             "code": "v2",
-            "position_pnl_by_mint": {"mint_win": Decimal("50.00"), "mint_loss": Decimal("-20.00")},
+            "position_pnl_by_mint": {
+                "mint_win": Decimal("50.00"),
+                "mint_loss": Decimal("-20.00"),
+            },
             "decisions": [
                 {"mint_address": "mint_win", "decision": "accepted", "reason_codes": []},
                 {"mint_address": "mint_loss", "decision": "accepted", "reason_codes": []},
@@ -350,8 +422,16 @@ class TestCrossWalletAnalytics:
             "code": "v4",
             "position_pnl_by_mint": {},
             "decisions": [
-                {"mint_address": "mint_win", "decision": "rejected", "reason_codes": ["market_cap_too_low"]},
-                {"mint_address": "mint_loss", "decision": "rejected", "reason_codes": ["market_cap_too_low"]},
+                {
+                    "mint_address": "mint_win",
+                    "decision": "rejected",
+                    "reason_codes": ["market_cap_too_low"],
+                },
+                {
+                    "mint_address": "mint_loss",
+                    "decision": "rejected",
+                    "reason_codes": ["market_cap_too_low"],
+                },
             ],
         }
 
@@ -391,12 +471,15 @@ class TestPromotionRules:
             expectancy=Decimal("10"),
             closed_count=100,
         )
-        assert _promotion_blockers(
-            net_return=Decimal("100"),
-            profit_factor=Decimal("1.50"),
-            expectancy=Decimal("10"),
-            closed_count=100,
-        ) == []
+        assert (
+            _promotion_blockers(
+                net_return=Decimal("100"),
+                profit_factor=Decimal("1.50"),
+                expectancy=Decimal("10"),
+                closed_count=100,
+            )
+            == []
+        )
 
         score = _promotion_score(
             net_return=Decimal("100"),

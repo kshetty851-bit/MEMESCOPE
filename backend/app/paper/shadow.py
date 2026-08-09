@@ -495,6 +495,9 @@ class ShadowPaperService:
         refusals: Counter[str] = Counter()
 
         for opportunity in opportunities:
+            if await self._decision_exists(wallet, opportunity):
+                continue
+
             reasons = _reasons_for(spec, opportunity, held=held, open_now=open_now)
             if not reasons and cash < _TRADE_SIZE:
                 reasons = [ShadowReason.INSUFFICIENT_CASH]
@@ -522,6 +525,8 @@ class ShadowPaperService:
                 position_id=position_id,
                 now=now,
             )
+            if decision == "accepted" and not inserted:
+                raise RuntimeError("shadow paper position opened without an accepted decision")
             decisions += int(inserted)
             refusals.update(reasons)
 
@@ -638,6 +643,20 @@ class ShadowPaperService:
             .returning(PaperShadowDecision.id)
         )
         return result.scalar_one_or_none() is not None
+
+    async def _decision_exists(
+        self, wallet: PaperShadowWallet, opportunity: Opportunity
+    ) -> bool:
+        found = await self._session.scalar(
+            select(PaperShadowDecision.id)
+            .where(
+                PaperShadowDecision.wallet_code == wallet.wallet_code,
+                PaperShadowDecision.mint_address == opportunity.mint_address,
+                PaperShadowDecision.radar_evaluated_at == opportunity.radar.last_evaluated_at,
+            )
+            .limit(1)
+        )
+        return found is not None
 
     async def _settle_exits(self, wallet: PaperShadowWallet, *, now: datetime) -> int:
         positions = await self._open_positions(wallet.id)
@@ -914,8 +933,7 @@ def _reasons_for(
         and opportunity.price_usd > 0
     ):
         execution_price_deviation = (
-            abs(found.estimated_price_usd - opportunity.price_usd)
-            / opportunity.price_usd
+            abs(found.estimated_price_usd - opportunity.price_usd) / opportunity.price_usd
         )
         if execution_price_deviation > Decimal("0.50"):
             reasons.append(ShadowReason.EXECUTION_PRICE_MISMATCH)

@@ -17,11 +17,11 @@ running it more often changes only when a decision is *recorded*: exits resolve
 against the stored observation series, so the trade that comes out is the same
 one whatever the schedule did.
 
-No lock, matching `score_sweep`, `event_cycle` and `opportunity_review`. The
-overlap that can now happen — a beat pass and a Radar-triggered pass at once —
-costs nothing: exits are resolved against a stored watermark, and entries insert
-with `ON CONFLICT DO NOTHING` against a unique index. A second pass over the same
-rows resolves the same exits, opens no second position, and writes nothing new.
+The complete paper review is serialized with a transaction-scoped PostgreSQL
+advisory lock. A scheduled beat pass and a Radar-triggered pass may still be
+enqueued at the same time, but the second pass coalesces and exits quickly while
+the first transaction owns the review. This preserves the five-minute safety
+review without building a backlog of stale duplicate wallet evaluations.
 
 The batch is bounded and ordered oldest-watermark-first, which keeps a growing
 book from starving its own tail — the failure that livelocked the score sweep.
@@ -30,6 +30,9 @@ book from starving its own tail — the failure that livelocked the score sweep.
 from __future__ import annotations
 
 from typing import Any
+
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.events import publish_live_update
@@ -41,6 +44,12 @@ from app.workers.celery_app import celery_app
 from app.workers.runtime import run_async
 
 logger = get_logger(__name__)
+
+# Deterministic two-int advisory-lock key for the complete paper-review
+# transaction. These are ASCII-derived constants ("MEME", "PAPR") expressed as
+# signed 32-bit integers, not Python's process-randomised hash().
+PAPER_REVIEW_LOCK_NAMESPACE = 0x4D454D45
+PAPER_REVIEW_LOCK_KEY = 0x50415052
 
 
 @celery_app.task(name="app.paper.scheduler.paper_review")
@@ -58,6 +67,11 @@ async def _paper_review() -> dict[str, Any]:
         return {"skipped": "wallet_disabled"}
 
     async with SessionFactory() as session:
+        if not await acquire_paper_review_lock(session):
+            await session.rollback()
+            logger.info("paper_review_skipped", reason="review_already_running")
+            return {"skipped": "review_already_running"}
+
         now = utcnow()
         outcome = await PaperWalletService(session).review(now=now)
         shadow_outcome = await ShadowPaperService(session).review(now=now)
@@ -71,6 +85,25 @@ async def _paper_review() -> dict[str, Any]:
 
     logger.info("paper_review", **outcome.as_dict(), shadow=shadow_outcome.as_dict())
     return {**outcome.as_dict(), "shadow": shadow_outcome.as_dict()}
+
+
+async def acquire_paper_review_lock(session: AsyncSession) -> bool:
+    """Try to serialize the whole paper review transaction.
+
+    Paper reviews are coalescible: every pass reads the current database state,
+    and both the scheduled beat and Radar-triggered pass will run again. So this
+    uses the non-blocking transaction-scoped variant. If another review already
+    holds the lock, the stale duplicate exits quickly instead of sitting in a
+    Celery backlog and replaying old intent later. PostgreSQL releases the lock
+    automatically at commit/rollback.
+    """
+
+    acquired = await session.scalar(
+        select(
+            func.pg_try_advisory_xact_lock(PAPER_REVIEW_LOCK_NAMESPACE, PAPER_REVIEW_LOCK_KEY)
+        )
+    )
+    return bool(acquired)
 
 
 def request_review(*, trigger: str) -> None:

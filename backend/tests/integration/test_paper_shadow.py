@@ -10,6 +10,7 @@ Verifies:
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from unittest.mock import AsyncMock
@@ -25,12 +26,12 @@ from app.models.paper import (
     PaperPosition,
     PaperShadowDecision,
     PaperShadowPosition,
-    PaperShadowTradeAudit,
     PaperShadowWallet,
-    PaperWallet,
 )
 from app.models.radar import RadarToken
+from app.paper import scheduler as paper_scheduler
 from app.paper.execution import ExecutionQuote
+from app.paper.scheduler import acquire_paper_review_lock
 from app.paper.service import PaperWalletService
 from app.paper.shadow import ShadowPaperService
 from app.repositories.market import MarketSnapshotRepository
@@ -168,9 +169,7 @@ class TestShadowPaperServiceExecution:
         monkeypatch.setattr(settings, "PAPER_EXECUTION_MODEL", "jupiter")
 
         service = ShadowPaperService(db_session)
-        service._execution.buy_quote = AsyncMock(
-            return_value=_make_execution_quote(mint)
-        )
+        service._execution.buy_quote = AsyncMock(return_value=_make_execution_quote(mint))
 
         outcome = await service.review(now=NOW)
         await db_session.commit()
@@ -179,7 +178,9 @@ class TestShadowPaperServiceExecution:
         assert outcome.candidates >= 1
 
         wallets = (
-            await db_session.scalars(select(PaperShadowWallet).order_by(PaperShadowWallet.wallet_code))
+            await db_session.scalars(
+                select(PaperShadowWallet).order_by(PaperShadowWallet.wallet_code)
+            )
         ).all()
         assert len(wallets) == 4
 
@@ -193,17 +194,25 @@ class TestShadowPaperServiceExecution:
         # V2 accepts mcap 35k, score 75
         v2_decision = next(d for d in decisions if d.wallet_code == "v2")
         assert v2_decision.decision == "accepted"
+        assert v2_decision.position_id is not None
+        v2_position = await db_session.get(PaperShadowPosition, v2_decision.position_id)
+        assert v2_position is not None
+        assert v2_position.mint_address == mint
 
         # V4 rejects mcap 35k (requires $50k-$100k)
         v4_decision = next(d for d in decisions if d.wallet_code == "v4")
         assert v4_decision.decision == "rejected"
         assert "market_cap_too_low" in v4_decision.reason_codes
 
-    async def test_review_idempotency_and_duplicate_prevention(self, db_session: AsyncSession) -> None:
+    async def test_review_idempotency_and_duplicate_prevention(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         mint = "probe_idempotent_mint"
         await _seed_token_and_radar(db_session, mint, score=Decimal(80), mcap=Decimal(30_000))
+        monkeypatch.setattr(settings, "PAPER_EXECUTION_MODEL", "jupiter")
 
         service = ShadowPaperService(db_session)
+        service._execution.buy_quote = AsyncMock(return_value=_make_execution_quote(mint))
 
         # First review run
         outcome_1 = await service.review(now=NOW)
@@ -223,6 +232,16 @@ class TestShadowPaperServiceExecution:
             )
         ).all()
         assert len(decisions) == 4
+        accepted = [decision for decision in decisions if decision.decision == "accepted"]
+        assert accepted
+        assert all(decision.position_id is not None for decision in accepted)
+
+        positions = (
+            await db_session.scalars(
+                select(PaperShadowPosition).where(PaperShadowPosition.mint_address == mint)
+            )
+        ).all()
+        assert len(positions) == len(accepted)
 
     async def test_v1_isolation(self, db_session: AsyncSession) -> None:
         """Executing ShadowPaperService review must never write to V1 tables."""
@@ -243,3 +262,83 @@ class TestShadowPaperServiceExecution:
 
         v1_positions_after = (await db_session.scalars(select(PaperPosition))).all()
         assert len(v1_positions_before) == len(v1_positions_after)
+
+    async def test_transaction_scoped_paper_review_lock_coalesces_overlap(
+        self, test_session_factory
+    ) -> None:
+        """Only one complete paper review may run at a time."""
+        async with test_session_factory() as first:
+            assert await acquire_paper_review_lock(first) is True
+
+            async with test_session_factory() as second:
+                assert await acquire_paper_review_lock(second) is False
+                await second.rollback()
+
+            await first.rollback()
+
+        async with test_session_factory() as after_release:
+            assert await acquire_paper_review_lock(after_release) is True
+            await after_release.rollback()
+
+    async def test_scheduler_coalesces_overlapping_paper_reviews(
+        self, test_session_factory, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A concurrent scheduler pass skips instead of entering review logic."""
+
+        class _Outcome:
+            def as_dict(self) -> dict[str, int]:
+                return {"opened": 0, "closed": 0}
+
+        first_review_entered = asyncio.Event()
+        release_first_review = asyncio.Event()
+        paper_reviews = 0
+        shadow_reviews = 0
+
+        class _PaperWalletService:
+            def __init__(self, session: AsyncSession) -> None:
+                self._session = session
+
+            async def review(self, *, now: datetime) -> _Outcome:
+                nonlocal paper_reviews
+                paper_reviews += 1
+                first_review_entered.set()
+                await release_first_review.wait()
+                return _Outcome()
+
+        class _ShadowPaperService:
+            def __init__(self, session: AsyncSession) -> None:
+                self._session = session
+
+            async def review(self, *, now: datetime) -> _Outcome:
+                nonlocal shadow_reviews
+                shadow_reviews += 1
+                return _Outcome()
+
+        async def _publish_live_update(event_type: str, **kwargs: object) -> int:
+            assert event_type == "paper.changed"
+            return 0
+
+        monkeypatch.setattr(settings, "FEATURE_PAPER_WALLET_ENABLED", True)
+        monkeypatch.setattr(paper_scheduler, "SessionFactory", test_session_factory)
+        monkeypatch.setattr(paper_scheduler, "PaperWalletService", _PaperWalletService)
+        monkeypatch.setattr(paper_scheduler, "ShadowPaperService", _ShadowPaperService)
+        monkeypatch.setattr(paper_scheduler, "publish_live_update", _publish_live_update)
+
+        first = asyncio.create_task(paper_scheduler._paper_review())
+        await first_review_entered.wait()
+
+        second = await paper_scheduler._paper_review()
+        assert second == {"skipped": "review_already_running"}
+        assert paper_reviews == 1
+        assert shadow_reviews == 0
+
+        release_first_review.set()
+        first_result = await first
+
+        assert first_result == {
+            "opened": 0,
+            "closed": 0,
+            "shadow": {"opened": 0, "closed": 0},
+        }
+        assert paper_reviews == 1
+        assert shadow_reviews == 1
