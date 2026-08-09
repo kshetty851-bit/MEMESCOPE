@@ -755,7 +755,7 @@ class ShadowPaperService:
                     position_id=row.id,
                     shadow_wallet_id=wallet.id,
                     wallet_code=wallet.wallet_code,
-                    **record.as_row(),
+                    **_shadow_audit_row(record),
                 )
                 .on_conflict_do_nothing(index_elements=[PaperShadowTradeAudit.position_id])
                 .returning(PaperShadowTradeAudit.id)
@@ -1167,6 +1167,20 @@ def _net_or_gross(row: PaperShadowPosition) -> Decimal:
     if row.exit_price is None:
         return _ZERO
     return (row.quantity * row.exit_price) - row.size_usd
+
+
+def _shadow_audit_row(record: audit.TradeAudit) -> dict[str, object]:
+    """Project the shared audit record onto the shadow audit table.
+
+    Manual exits are V1-only today. `audit.record()` includes
+    `manual_action_at` because it writes V1 manual-sell audits, but shadow
+    wallets have no manual close path and their audit table intentionally has no
+    such column. SQLAlchemy treats unknown INSERT keys as a compile-time error,
+    so the projection has to happen before the shadow audit insert.
+    """
+
+    allowed = set(PaperShadowTradeAudit.__table__.columns.keys())
+    return {key: value for key, value in record.as_row().items() if key in allowed}
 
 
 def _pct(part: int, total: int) -> Decimal | None:

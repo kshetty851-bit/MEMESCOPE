@@ -26,6 +26,7 @@ from app.models.paper import (
     PaperPosition,
     PaperShadowDecision,
     PaperShadowPosition,
+    PaperShadowTradeAudit,
     PaperShadowWallet,
 )
 from app.models.radar import RadarToken
@@ -262,6 +263,54 @@ class TestShadowPaperServiceExecution:
 
         v1_positions_after = (await db_session.scalars(select(PaperPosition))).all()
         assert len(v1_positions_before) == len(v1_positions_after)
+
+    async def test_shadow_close_audit_ignores_v1_manual_audit_fields(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Shadow audits must not receive V1-only manual-sell columns."""
+        mint = "probe_shadow_audit_close"
+        await _seed_token_and_radar(db_session, mint, score=Decimal(75), mcap=Decimal(35_000))
+        monkeypatch.setattr(settings, "PAPER_EXECUTION_MODEL", "jupiter")
+
+        service = ShadowPaperService(db_session)
+        service._execution.buy_quote = AsyncMock(return_value=_make_execution_quote(mint))
+        service._execution.sell_quote = AsyncMock(return_value=_make_execution_quote(mint))
+
+        opened = await service.review(now=NOW)
+        await db_session.commit()
+        assert opened.opened >= 1
+
+        token = (
+            await db_session.scalars(
+                select(RadarToken).where(RadarToken.mint_address == mint).limit(1)
+            )
+        ).one()
+        await MarketSnapshotRepository(db_session).add_snapshot(
+            {
+                "token_id": token.token_id,
+                "mint_address": mint,
+                "captured_at": NOW + timedelta(minutes=1),
+                "price_usd": Decimal("0.03"),
+                "market_cap": Decimal(25_000),
+                "liquidity_usd": Decimal(8_000),
+                "volume_24h": Decimal(50_000),
+                "trading_status": TradingStatus.TRADING,
+                "provider": "dexscreener",
+            }
+        )
+
+        closed = await service.review(now=NOW + timedelta(minutes=2))
+        await db_session.commit()
+
+        assert closed.closed >= 1
+        assert closed.audited >= 1
+        audits = (
+            await db_session.scalars(
+                select(PaperShadowTradeAudit).where(PaperShadowTradeAudit.mint_address == mint)
+            )
+        ).all()
+        assert len(audits) == closed.audited
+        assert PaperShadowTradeAudit.__table__.columns.get("manual_action_at") is None
 
     async def test_transaction_scoped_paper_review_lock_coalesces_overlap(
         self, test_session_factory
