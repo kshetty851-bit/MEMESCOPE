@@ -23,7 +23,7 @@ from app.real_wallet.signer import (
 pytestmark = pytest.mark.unit
 
 
-def test_execution_modes_remain_non_live_and_disabled_by_default() -> None:
+def test_execution_modes_are_explicit_and_disabled_by_default() -> None:
     default = Settings()
     dry_run = Settings(REAL_WALLET_EXECUTION_MODE="dry_run")
 
@@ -32,7 +32,7 @@ def test_execution_modes_remain_non_live_and_disabled_by_default() -> None:
     assert default.REAL_WALLET_AUTOTRADE_ENABLED is False
     assert dry_run.REAL_WALLET_EXECUTION_MODE == "dry_run"
     mode_annotation = Settings.model_fields["REAL_WALLET_EXECUTION_MODE"].annotation
-    assert "live" not in mode_annotation.__args__
+    assert set(mode_annotation.__args__) == {"disabled", "dry_run", "armed", "live"}
 
 
 def test_generator_writes_owner_only_secret_and_returns_public_address(tmp_path) -> None:

@@ -438,8 +438,11 @@ class Settings(BaseSettings):
     # This is deliberately separate from the safety gate.  It is only the
     # public-address, signer-boundary and limit configuration for a future,
     # low-balance execution wallet.  There is no transaction submission path
-    # in this release.
-    REAL_WALLET_EXECUTION_MODE: Literal["disabled", "dry_run"] = "disabled"
+    # in this release. `armed` can prepare and audit an order but still has no
+    # submission transport. `live` exists only so the central guard can reject
+    # incomplete production configuration; this codebase does not install a
+    # live submission transport.
+    REAL_WALLET_EXECUTION_MODE: Literal["disabled", "dry_run", "armed", "live"] = "disabled"
     REAL_WALLET_EXECUTION_ENABLED: bool = False
     REAL_WALLET_AUTOTRADE_ENABLED: bool = False
     #: Public only. Its matching signer is loaded from a mounted runtime secret
@@ -453,7 +456,7 @@ class Settings(BaseSettings):
     REAL_WALLET_MAX_DAILY_LOSS_USD: Decimal = Field(default=Decimal("10"), gt=0)
     REAL_WALLET_MIN_SOL_FEE_RESERVE: Decimal = Field(default=Decimal("0.01"), ge=0)
     REAL_WALLET_AUTOTRADE_COOLDOWN_SECONDS: int = Field(default=300, ge=0)
-    REAL_WALLET_MAX_CONSECUTIVE_EXECUTION_FAILURES: int = Field(default=3, ge=1)
+    REAL_WALLET_MAX_CONSECUTIVE_EXECUTION_FAILURES: int = Field(default=2, ge=1)
     REAL_WALLET_DRY_RUN_CANDIDATE_LIMIT: int = Field(default=10, ge=1, le=100)
     FEATURE_REAL_WALLET_DRY_RUN_ENABLED: bool = False
     JUPITER_V2_BASE_URL: str = "https://api.jup.ag/swap/v2"

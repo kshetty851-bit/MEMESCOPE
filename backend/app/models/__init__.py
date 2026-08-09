@@ -23,7 +23,13 @@ from app.models.paper import (
     PaperWallet,
 )
 from app.models.radar import RadarAchievement, RadarSnapshot, RadarToken
-from app.models.real_wallet_execution import RealWalletExecutionIntent, RealWalletPosition
+from app.models.real_wallet_execution import (
+    RealWalletExecutionEvent,
+    RealWalletExecutionIntent,
+    RealWalletKillSwitch,
+    RealWalletLiveIntent,
+    RealWalletPosition,
+)
 from app.models.real_wallet_safety import RealWalletSafetyEvaluation
 from app.models.refresh_token import RefreshToken
 from app.models.score import (
@@ -51,7 +57,10 @@ __all__ = [
     "RadarAchievement",
     "RadarSnapshot",
     "RadarToken",
+    "RealWalletExecutionEvent",
     "RealWalletExecutionIntent",
+    "RealWalletKillSwitch",
+    "RealWalletLiveIntent",
     "RealWalletPosition",
     "RealWalletSafetyEvaluation",
     "RefreshToken",

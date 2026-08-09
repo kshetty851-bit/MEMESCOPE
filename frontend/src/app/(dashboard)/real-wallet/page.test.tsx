@@ -35,12 +35,15 @@ describe("RealWalletPage", () => {
       mode: "disabled",
       execution_enabled: false,
       autotrade_enabled: false,
+      signer_ready: false,
+      live_submission_transport: "not_installed",
       safety_gate: "read_only_safety_gate_available",
       limits: {
         max_trade_usd: "5", max_open_positions: 1, max_total_exposure_usd: "10",
         max_daily_notional_usd: "20", max_daily_loss_usd: "10", min_sol_fee_reserve: "0.01",
       },
       dry_run: { feature_enabled: false, decisions: [] },
+      live_readiness: { open_real_positions: 0, unresolved_intents: [], kill_switches: [] },
     });
     render(<RealWalletPage />, { wrapper });
     await waitFor(() => expect(screen.getByText("PublicExecutionWalletAddress")).toBeInTheDocument());

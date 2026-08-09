@@ -9,9 +9,11 @@ type WalletStatus = {
   sol_balance: number | null;
   balance_error: string | null;
   funding_status: "unfunded" | "funded" | "unknown";
-  mode: "disabled" | "dry_run";
+  mode: "disabled" | "dry_run" | "armed" | "live";
   execution_enabled: boolean;
   autotrade_enabled: boolean;
+  signer_ready: boolean;
+  live_submission_transport: string;
   safety_gate: string;
   limits: {
     max_trade_usd: string;
@@ -35,6 +37,11 @@ type WalletStatus = {
       round_trip_loss_pct: string | null;
       liquidity_usd: string | null;
     }>;
+  };
+  live_readiness: {
+    open_real_positions: number;
+    unresolved_intents: Array<{ id: string; mint_address: string; state: string }>;
+    kill_switches: Array<{ kind: string; reason: string | null }>;
   };
 };
 
@@ -125,8 +132,18 @@ export default function RealWalletPage() {
       <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <StatusCard label="Execution" value={data?.execution_enabled ? "ENABLED" : "DISABLED"} />
         <StatusCard label="Autotrade" value={data?.autotrade_enabled ? "ENABLED" : "DISABLED"} />
+        <StatusCard label="Signer" value={data?.signer_ready ? "READY" : "NOT READY"} />
         <StatusCard label="SOL fee reserve" value={`${data?.limits.min_sol_fee_reserve ?? "—"} SOL`} />
       </div>
+      <section className="mt-6 rounded-panel border border-line p-4">
+        <p className="text-label text-ink-faint">Live readiness</p>
+        <p className="mt-1 text-sm text-ink-faint">
+          Submission transport: {data?.live_submission_transport ?? "not installed"}. New entries remain fail-closed.
+        </p>
+        <p className="mt-2 text-sm text-ink-faint">
+          Open real positions: {data?.live_readiness.open_real_positions ?? 0}. Unresolved intents: {data?.live_readiness.unresolved_intents.length ?? 0}. Active kill switches: {data?.live_readiness.kill_switches.length ?? 0}.
+        </p>
+      </section>
       <section className="mt-6 rounded-panel border border-line p-4">
         <p className="text-label text-ink-faint">Hard limits</p>
         <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3">

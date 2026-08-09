@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from pathlib import Path
 
 from fastapi import APIRouter
 
 from app.api.deps import AdminUser, DbSession
 from app.core.config import settings
 from app.real_wallet.balance import ExecutionWalletBalanceService
+from app.real_wallet.live_repository import LiveIntentRepository
 from app.real_wallet.repository import RealWalletExecutionRepository
+from app.real_wallet.signer import FileExecutionSigner
 from app.services.rpc.registry import get_rpc
 
 router = APIRouter(prefix="/real-wallet", tags=["real-wallet"])
@@ -21,7 +24,7 @@ def _decimal(value: Decimal) -> str:
 
 @router.get("/status", summary="Read dedicated execution-wallet status")
 async def status(_admin: AdminUser, session: DbSession) -> dict[str, object]:
-    """Public-address data only. This endpoint cannot load, create, or use a signer."""
+    """Return public and readiness metadata only; never signer material."""
     public_key = settings.REAL_WALLET_PUBLIC_KEY.strip()
     balance_sol: float | None = None
     balance_error: str | None = None
@@ -34,6 +37,22 @@ async def status(_admin: AdminUser, session: DbSession) -> dict[str, object]:
         except Exception:
             balance_error = "unavailable"
     decisions = await RealWalletExecutionRepository(session).latest(limit=30)
+    live = LiveIntentRepository(session)
+    unresolved = await live.unresolved()
+    kill_switches = await live.active_kill_switches()
+    open_positions = await live.open_positions_count()
+    signer_ready = False
+    if public_key and settings.REAL_WALLET_EXECUTION_SECRET_FILE:
+        # Readiness is intentionally a boolean. The secret and its bytes never
+        # escape this backend-only check.
+        try:
+            FileExecutionSigner.load(
+                secret_file=Path(settings.REAL_WALLET_EXECUTION_SECRET_FILE),
+                expected_public_key=public_key,
+            )
+            signer_ready = True
+        except Exception:
+            signer_ready = False
     return {
         "public_key": public_key or None,
         "sol_balance": balance_sol,
@@ -44,6 +63,8 @@ async def status(_admin: AdminUser, session: DbSession) -> dict[str, object]:
         "mode": settings.REAL_WALLET_EXECUTION_MODE,
         "execution_enabled": settings.REAL_WALLET_EXECUTION_ENABLED,
         "autotrade_enabled": settings.REAL_WALLET_AUTOTRADE_ENABLED,
+        "signer_ready": signer_ready,
+        "live_submission_transport": "not_installed",
         "safety_gate": "read_only_safety_gate_available",
         "limits": {
             "max_trade_usd": _decimal(settings.REAL_WALLET_MAX_TRADE_USD),
@@ -82,6 +103,20 @@ async def status(_admin: AdminUser, session: DbSession) -> dict[str, object]:
                     "evaluated_at": row.evaluated_at,
                 }
                 for row in decisions
+            ],
+        },
+        "live_readiness": {
+            "open_real_positions": open_positions,
+            "unresolved_intents": [
+                {
+                    "id": str(intent.id),
+                    "mint_address": intent.mint_address,
+                    "state": intent.state,
+                }
+                for intent in unresolved
+            ],
+            "kill_switches": [
+                {"kind": switch.kind, "reason": switch.reason} for switch in kill_switches
             ],
         },
     }
