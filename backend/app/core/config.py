@@ -77,6 +77,10 @@ class Settings(BaseSettings):
     ALPHA_ACCESS_COOKIE_SECURE: bool = False
     ALPHA_ACCESS_COOKIE_SAMESITE: Literal["lax", "strict", "none"] = "lax"
     ALPHA_ACCESS_SESSION_DAYS: int = 30
+    ALPHA_ACTIVITY_HEARTBEAT_SECONDS: int = 25
+    ALPHA_ACTIVITY_ACTIVE_SECONDS: int = 60
+    ALPHA_ACTIVITY_IDLE_SECONDS: int = 600
+    ALPHA_ACTIVITY_RETENTION_DAYS: int = 60
 
     # --- CORS ----------------------------------------------------------------
     CORS_ORIGINS: CsvList = Field(default_factory=lambda: ["http://localhost:3000"])

@@ -8,14 +8,22 @@ real authentication product decision replaces it.
 from __future__ import annotations
 
 import secrets
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Request, Response, status
 
+from app.api.deps import AdminUser, DbSession
 from app.core.config import settings
 from app.core.exceptions import AuthenticationError
 from app.core.security import create_alpha_access_token, decode_alpha_access_token
-from app.schemas.alpha import AlphaSessionStatus, AlphaUnlockRequest
+from app.schemas.alpha import (
+    AlphaActivityOverview,
+    AlphaActivityRequest,
+    AlphaSessionStatus,
+    AlphaUnlockRequest,
+)
 from app.schemas.auth import MessageResponse
+from app.services.alpha_activity import AlphaActivityService
 
 router = APIRouter(prefix="/alpha", tags=["alpha"])
 
@@ -57,6 +65,18 @@ def _read_alpha_session(request: Request) -> AlphaSessionStatus:
     return AlphaSessionStatus(authenticated=True, expires_at=payload.expires_at)
 
 
+def _alpha_jti(request: Request) -> str:
+    token = request.cookies.get(settings.ALPHA_ACCESS_COOKIE_NAME)
+    if not token:
+        raise AuthenticationError("Alpha access is required.", code="alpha_access_required")
+    return decode_alpha_access_token(token).jti
+
+
+def _safe_path(path: str) -> str:
+    # Route only: query/hash must never become session telemetry.
+    return "/" + path.split("?", 1)[0].split("#", 1)[0].lstrip("/")
+
+
 @router.get(
     "/session",
     response_model=AlphaSessionStatus,
@@ -72,7 +92,9 @@ async def session(request: Request) -> AlphaSessionStatus:
     status_code=status.HTTP_201_CREATED,
     summary="Validate the private-alpha access code",
 )
-async def unlock(payload: AlphaUnlockRequest, response: Response) -> AlphaSessionStatus:
+async def unlock(
+    payload: AlphaUnlockRequest, response: Response, session: DbSession
+) -> AlphaSessionStatus:
     expected = settings.ALPHA_ACCESS_CODE.get_secret_value()
     if not secrets.compare_digest(payload.code.strip(), expected):
         raise AuthenticationError(
@@ -82,7 +104,30 @@ async def unlock(payload: AlphaUnlockRequest, response: Response) -> AlphaSessio
 
     token, claims = create_alpha_access_token()
     _set_alpha_cookie(response, token)
+    now = datetime.now(UTC)
+    await AlphaActivityService(session).unlock(claims.jti, now=now)
     return AlphaSessionStatus(authenticated=True, expires_at=claims.expires_at)
+
+
+@router.post(
+    "/activity",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Record minimal alpha activity",
+)
+async def activity(
+    payload: AlphaActivityRequest, request: Request, session: DbSession
+) -> Response:
+    await AlphaActivityService(session).heartbeat(
+        _alpha_jti(request), _safe_path(payload.path), now=datetime.now(UTC)
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get(
+    "/activity", response_model=AlphaActivityOverview, summary="Read private-alpha activity"
+)
+async def activity_overview(_admin: AdminUser, session: DbSession) -> AlphaActivityOverview:
+    return await AlphaActivityService(session).overview(now=datetime.now(UTC))
 
 
 @router.post(

@@ -143,6 +143,10 @@ markers = [
 ]
 env = [
     "ENVIRONMENT=test",
+    # The local Cloudflare tunnel may deliberately enable Alpha Access in .env.
+    # General API integration tests run in an isolated test environment and do
+    # not carry an alpha cookie; dedicated Alpha tests cover that gate over HTTPS.
+    "ALPHA_ACCESS_REQUIRED=false",
     "SECRET_KEY=test-secret-key-not-for-production-use-only-0000",
     "REFRESH_COOKIE_SECURE=false",
     "RATE_LIMIT_ENABLED=false",

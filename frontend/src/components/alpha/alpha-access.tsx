@@ -45,6 +45,10 @@ export function AlphaAccess({ onUnlocking }: { onUnlocking: (active: boolean) =>
         { code },
         { skipAuthRetry: true },
       );
+      // The secure cookie from the accepted unlock is now attached to this
+      // first-party request. Failure is non-blocking: telemetry must never
+      // prevent a successful alpha entrant from reaching the dashboard.
+      void api.post("/alpha/activity", { path: "/" }, { skipAuthRetry: true });
       window.sessionStorage.setItem(ALPHA_ACCESS.transitionKey, "true");
       window.setTimeout(() => router.push(ALPHA_ACCESS.dashboardPath), 1700);
     } catch {
@@ -93,6 +97,9 @@ export function AlphaAccess({ onUnlocking }: { onUnlocking: (active: boolean) =>
 
       <p className="mt-4 text-center text-xs text-ink-faint">
         Version {BUILD.version.replace(/^v/i, "")} Alpha
+      </p>
+      <p className="mt-2 text-center text-[0.6875rem] leading-5 text-ink-faint">
+        During alpha testing, MEMESCOPE records basic session activity and page usage to improve the product.
       </p>
     </form>
   );

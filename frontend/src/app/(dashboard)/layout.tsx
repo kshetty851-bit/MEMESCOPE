@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 
 import { FeedbackWidget } from "@/components/alpha/feedback-widget";
+import { ActivityHeartbeat } from "@/components/alpha/activity-heartbeat";
 import { SiteNav } from "@/components/layout/site-nav";
 import { ALPHA_ACCESS } from "@/lib/env";
 import { api } from "@/lib/api-client";
@@ -58,6 +59,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className={cn("min-h-screen", enteredFromAlpha && "alpha-dashboard-enter")}>
       <SiteNav />
+      <ActivityHeartbeat />
       {/* Bottom padding clears the mobile tab bar, which is fixed. */}
       <main className="mx-auto max-w-[1120px] px-6 pb-24 pt-6 md:pb-12">
         {children}

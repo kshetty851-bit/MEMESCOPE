@@ -90,7 +90,19 @@ async def app(db_session: AsyncSession):
     application = create_app()
 
     async def _override_get_db() -> AsyncGenerator[AsyncSession]:
-        yield db_session
+        # Preserve the production request lifecycle inside the test's outer
+        # transaction.  A route that returns cleanly commits its request unit
+        # of work, which flushes writes before the next HTTP request and before
+        # assertions.  Because ``db_session`` is bound to the fixture's outer
+        # transaction, this never commits test data to the database: the
+        # fixture rolls that transaction back during teardown.
+        try:
+            yield db_session
+        except Exception:
+            await db_session.rollback()
+            raise
+        else:
+            await db_session.commit()
 
     application.dependency_overrides[get_db] = _override_get_db
     yield application
@@ -109,7 +121,12 @@ async def client(app) -> AsyncGenerator[AsyncClient]:
     await init_redis()
     transport = ASGITransport(app=app)
     async with AsyncClient(
-        transport=transport, base_url="http://test", follow_redirects=True
+        # Alpha Access uses a Secure HTTP-only cookie in public-alpha mode.
+        # The in-process client must use HTTPS so its cookie jar exercises the
+        # same browser policy as the Cloudflare HTTPS tunnel.
+        transport=transport,
+        base_url="https://test",
+        follow_redirects=True,
     ) as async_client:
         yield async_client
     await close_redis()
