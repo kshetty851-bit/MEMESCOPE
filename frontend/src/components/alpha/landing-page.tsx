@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { LogoMark } from "@/components/brand/logo";
 import { AlphaAccess } from "@/components/alpha/alpha-access";
 import { HeroMascot } from "@/components/alpha/hero-mascot";
+import { HomepageIntelligence } from "@/components/alpha/homepage-intelligence";
 import { SpaceBackground } from "@/components/alpha/space-background";
 import { cn } from "@/lib/utils";
 
@@ -19,7 +20,7 @@ export function LandingPage() {
   return (
     <main
       className={cn(
-        "alpha-landing relative isolate min-h-screen overflow-hidden text-ink",
+        "alpha-landing relative isolate min-h-screen overflow-x-hidden text-ink",
         unlocking && "alpha-landing--unlock",
         sceneOnly && "alpha-landing--scene-only",
       )}
@@ -46,6 +47,7 @@ export function LandingPage() {
             <p className="alpha-kicker">Private Alpha</p>
           </div>
           <h1>MEMESCOPE</h1>
+          <p className="alpha-positioning">See the Signal Before the Crowd.</p>
           <p className="alpha-subtitle">Real-time Pump.fun Intelligence</p>
         </div>
 
@@ -54,6 +56,7 @@ export function LandingPage() {
         </div>
       </section>
       <div className="alpha-transition" aria-hidden />
+      <HomepageIntelligence />
     </main>
   );
 }

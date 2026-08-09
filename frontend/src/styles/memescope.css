@@ -527,6 +527,14 @@
     0 0 82px oklch(0.58 0.18 196 / 0.24);
 }
 
+.alpha-positioning {
+  margin-top: clamp(0.9rem, 2vh, 1.35rem);
+  font-size: clamp(1.05rem, 1.5vw, 1.35rem);
+  font-weight: 500;
+  letter-spacing: -0.025em;
+  color: var(--color-ink);
+}
+
 .alpha-subtitle {
   margin-top: clamp(0.8rem, 1.8vh, 1.2rem);
   max-width: 42rem;
@@ -1099,6 +1107,8 @@
 
 .alpha-transition {
   inset: 0;
+  bottom: auto;
+  height: 100svh;
   z-index: 8;
   pointer-events: none;
   background:
