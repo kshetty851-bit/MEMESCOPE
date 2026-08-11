@@ -1,60 +1,143 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useState } from "react";
 
-import { LogoMark } from "@/components/brand/logo";
+import { LogoMark, Wordmark } from "@/components/brand/logo";
 import { AlphaAccess } from "@/components/alpha/alpha-access";
-import { HeroMascot } from "@/components/alpha/hero-mascot";
+import { HeroMascot, type MascotState } from "@/components/alpha/hero-mascot";
 import { HomepageIntelligence } from "@/components/alpha/homepage-intelligence";
-import { SpaceBackground } from "@/components/alpha/space-background";
+import { LaunchOverlay, useLaunchSequence } from "@/components/alpha/launch-sequence";
+import { HomeUniverse } from "@/components/space/home-universe";
+import { useReducedMotion } from "@/hooks/use-reduced-motion";
+import { ALPHA_ACCESS } from "@/lib/env";
+import { atOrAfter, type GatePhase, type ScenePhase } from "@/lib/launch";
 import { cn } from "@/lib/utils";
 
+/**
+ * THE ALPHA GATE — now a launch.
+ *
+ * The layout is unchanged and stays unchanged: a two-column grid whose copy
+ * and access panel are siblings that cannot collide at any width, with the
+ * scene behind both rather than beside them. That was the fix for a set of
+ * real contrast failures and none of this touches it.
+ *
+ * What is new is that the page owns a sequence. An accepted code no longer
+ * means "wait 1.7 seconds, then navigate" — it starts a timeline that the
+ * mascot, the universe and the overlay all read from, and navigation happens
+ * when that timeline reaches its last step.
+ *
+ * Three pieces of state, and no more:
+ *
+ *   gate      what the form last reported: idle, validating, or denied
+ *   approved  a latch. Once set it never clears, so nothing can re-enter the
+ *             sequence or resubmit a code while the rocket is in the air.
+ *   phase     where the timeline is, once approved
+ *
+ * A returning visitor never sees any of it: `AlphaAccess` asks the server
+ * whether the session is already live and redirects before the form paints.
+ * That behaviour predates this and is exactly why no new persistence was
+ * added for "have they seen the cinematic" — an authenticated visitor is not
+ * on this page long enough to have the question asked.
+ */
 export function LandingPage() {
-  const [unlocking, setUnlocking] = useState(false);
+  const router = useRouter();
+  const reduced = useReducedMotion();
+
+  const [gate, setGate] = useState<GatePhase>("idle");
+  const [approved, setApproved] = useState(false);
   const [sceneOnly, setSceneOnly] = useState(false);
+
+  const enter = useCallback(() => {
+    router.push(ALPHA_ACCESS.dashboardPath);
+  }, [router]);
+
+  const { phase: launch, count } = useLaunchSequence(approved, reduced, enter);
 
   useEffect(() => {
     setSceneOnly(new URLSearchParams(window.location.search).get("scene") === "1");
   }, []);
 
+  // A refusal is a moment, not a mode: the mascot's shake and the form's error
+  // are different lifetimes, and only the error should persist until the next
+  // keystroke.
+  useEffect(() => {
+    if (gate !== "denied") return;
+    const timer = window.setTimeout(() => setGate("idle"), 700);
+    return () => window.clearTimeout(timer);
+  }, [gate]);
+
+  const phase: ScenePhase = approved ? launch : gate;
+
+  const mascot: MascotState = atOrAfter(phase, "ignition")
+    ? "watching"
+    : atOrAfter(phase, "approved")
+      ? "approved"
+      : phase === "denied"
+        ? "denied"
+        : "idle";
+
   return (
     <main
+      data-phase={phase}
+      // Latched, like the scene's own flags: once the code is accepted the
+      // interface stands down and cannot come back mid-flight.
+      data-sequence={atOrAfter(phase, "approved") ? "" : undefined}
       className={cn(
-        "alpha-landing relative isolate min-h-screen overflow-x-hidden text-ink",
-        unlocking && "alpha-landing--unlock",
+        "alpha-landing relative isolate min-h-dvh overflow-x-hidden text-ink",
+        (phase === "unlock" || phase === "enter" || (reduced && approved)) &&
+          "alpha-landing--unlock",
         sceneOnly && "alpha-landing--scene-only",
       )}
     >
-      <SpaceBackground active={unlocking} />
-      <div className="alpha-cinematic" aria-hidden>
-        <div className="alpha-cinematic__rim alpha-cinematic__rim--left" />
-        <div className="alpha-cinematic__rim alpha-cinematic__rim--right" />
-        <div className="alpha-cinematic__lens alpha-cinematic__lens--one" />
-        <div className="alpha-cinematic__lens alpha-cinematic__lens--two" />
-        <div className="alpha-cinematic__vignette" />
-      </div>
+      <HomeUniverse phase={phase} />
 
-      <section className="alpha-stage">
-        <div className="alpha-stage__depth alpha-stage__depth--back" aria-hidden />
-        <div className="alpha-stage__mascot">
-          <HeroMascot active={unlocking} />
+      <section className="relative mx-auto flex min-h-dvh w-full max-w-[80rem] flex-col px-6 py-8 lg:px-10">
+        {/* `data-alpha-content` marks what `?scene=1` hides — a capture mode for
+            brand shots that shows the scene without the interface. It is also
+            what fades out under the countdown, so the mission has the frame. */}
+        <header data-alpha-content className="relative z-10 flex items-center gap-3">
+          <LogoMark size={22} className="text-accent" />
+          <Wordmark className="text-xs tracking-[0.18em]" />
+          <span className="ml-3 rounded-sm border border-line-control px-1.5 py-0.5 text-label font-medium uppercase text-ink-3">
+            Private alpha
+          </span>
+        </header>
+
+        {/* The mascot lives behind the grid, not beside it. Below `lg` it is out
+            of the idle composition — a figure behind a login form on a 375px
+            screen is a contrast problem, not a brand moment — and the scene CSS
+            brings it back, repositioned, the moment it has something to react
+            to. */}
+        <div className="alpha-mascot-mount pointer-events-none absolute" aria-hidden>
+          <HeroMascot state={mascot} />
         </div>
-        <div className="alpha-stage__depth alpha-stage__depth--front" aria-hidden />
 
-        <div className="alpha-copy">
-          <div className="alpha-logo">
-            <LogoMark size={72} className="text-plasma" />
-            <p className="alpha-kicker">Private Alpha</p>
+        <div
+          data-alpha-content
+          className="relative z-10 grid flex-1 items-center gap-10 py-10 lg:grid-cols-[minmax(0,1fr)_23rem] lg:gap-16"
+        >
+          <div className="max-w-xl">
+            <h1 className="text-[clamp(2.5rem,6.5vw,4.5rem)] font-semibold leading-[0.95] tracking-[-0.035em] text-ink">
+              MEMESCOPE
+            </h1>
+            <p className="mt-5 text-[clamp(1.125rem,2vw,1.5rem)] font-medium leading-snug tracking-tight text-ink">
+              See the signal before the crowd.
+            </p>
+            <p className="mt-3 max-w-md text-sm leading-relaxed text-ink-2">
+              Real-time Pump.fun intelligence. Every launch tracked, scored
+              deterministically, and published — winners and losers alike.
+            </p>
           </div>
-          <h1>MEMESCOPE</h1>
-          <p className="alpha-positioning">See the Signal Before the Crowd.</p>
-          <p className="alpha-subtitle">Real-time Pump.fun Intelligence</p>
-        </div>
 
-        <div className="alpha-panel">
-          <AlphaAccess onUnlocking={setUnlocking} />
+          <AlphaAccess
+            onPhase={(next) => (next === "approved" ? setApproved(true) : setGate(next))}
+          />
         </div>
       </section>
+
+      <LaunchOverlay phase={phase} count={count} />
+
       <div className="alpha-transition" aria-hidden />
       <HomepageIntelligence />
     </main>

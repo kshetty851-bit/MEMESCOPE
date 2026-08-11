@@ -6,6 +6,7 @@ import { AuditLog } from "@/components/paper/audit-log";
 import { PositionsTable } from "@/components/paper/positions-table";
 import { StrategyCard } from "@/components/paper/strategy-card";
 import { Label, Panel } from "@/components/ui/panel";
+import { Stat as SharedStat } from "@/components/ui/stat";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/states";
 import {
@@ -42,6 +43,15 @@ import { cn } from "@/lib/utils";
 
 type Tab = "open" | "closed";
 
+/**
+ * Local name, shared implementation.
+ *
+ * The visual used to be declared here, in `record` and in
+ * `strategy-intelligence` — three near-identical blocks that disagreed about
+ * value size, border treatment and dash handling. This keeps the call sites
+ * (there are ~25 in this file) and delegates the rendering, so there is now
+ * exactly one implementation of a label-over-value in the product.
+ */
 function Stat({
   label,
   value,
@@ -56,22 +66,17 @@ function Stat({
   valueTone?: "positive" | "negative" | "neutral";
 }) {
   return (
-    <div className="rounded-card border border-line bg-surface/40 px-4 py-3">
-      <p className="text-label uppercase tracking-wide text-ink-faint">{label}</p>
-      <p
-        className={cn(
-          "mt-1 tabular-nums",
-          emphasis ? "text-2xl font-semibold" : "text-lg",
-          value === null && "text-ink-faint",
-          valueTone === "positive" && "text-safe",
-          valueTone === "negative" && "text-danger",
-          !valueTone && value !== null && "text-ink",
-        )}
-      >
-        {value ?? "—"}
-      </p>
-      {hint ? <p className="mt-1 text-xs text-ink-faint">{hint}</p> : null}
-    </div>
+    <SharedStat
+      label={label}
+      // Display-only: `usd()`/`pct()` already formatted this, and the raw
+      // Decimal is not kept. `Num` takes presence from `display`.
+      display={value}
+      hint={hint}
+      size={emphasis ? "lg" : "md"}
+      tone={
+        valueTone === "positive" ? "up" : valueTone === "negative" ? "down" : "default"
+      }
+    />
   );
 }
 
@@ -101,10 +106,10 @@ export default function WalletPage() {
   if (wallet.isPending) {
     return (
       <div className="flex flex-col gap-4">
-        <Skeleton className="h-24 rounded-card" />
+        <Skeleton className="h-24 rounded-md" />
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {Array.from({ length: 8 }, (_, index) => (
-            <Skeleton key={index} className="h-20 rounded-card" />
+            <Skeleton key={index} className="h-20 rounded-md" />
           ))}
         </div>
       </div>
@@ -118,10 +123,10 @@ export default function WalletPage() {
       <div className="flex flex-col gap-6">
         <header>
           <Label>Paper wallet</Label>
-          <h1 className="mt-2 text-title font-semibold text-ink">Not running here</h1>
+          <h1 className="mt-2 text-lg font-semibold text-ink">Not running here</h1>
         </header>
         <Panel density="compact" className="border-warn/20 bg-warn/[0.03]">
-          <p className="text-sm leading-relaxed text-ink-dim">
+          <p className="text-sm leading-relaxed text-ink-2">
             The paper wallet is not switched on in this environment, so no position
             has been opened. This is a configuration state, not a result — a
             strategy that traded nothing and a strategy that was never run are
@@ -140,16 +145,16 @@ export default function WalletPage() {
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <Label>Paper wallet</Label>
-          <h1 className="mt-2 text-title font-semibold text-ink">
+          <h1 className="mt-2 text-lg font-semibold text-ink">
             One published rule, applied without exception
           </h1>
-          <p className="mt-2 max-w-2xl text-sm text-ink-dim">{disclosure}</p>
+          <p className="mt-2 max-w-2xl text-sm text-ink-2">{disclosure}</p>
         </div>
         {/* When the wallet started is not decoration: every benchmark below is
             measured from this exact instant, so a reader can check that the
             comparison covers the same period the strategy traded. */}
         {wallet.data.started_at ? (
-          <p className="text-xs text-ink-faint">
+          <p className="text-xs text-ink-3">
             Running since {new Date(wallet.data.started_at).toLocaleString()} · wallet
             v{wallet.data.generation}
           </p>
@@ -162,10 +167,10 @@ export default function WalletPage() {
           message comes from the server off a stable `reason` code; nothing here
           composes prose from a slug. */}
       {waiting ? (
-        <Panel density="compact" className="border-line-bright bg-elevated/40">
+        <Panel density="compact" className="border-line-strong bg-raised/40">
           <p className="text-sm text-ink">{waiting.message}</p>
           {waiting.reason === "cash_below_trade_size" ? (
-            <p className="mt-1 text-xs text-ink-faint">
+            <p className="mt-1 text-xs text-ink-3">
               {usd(waiting.idle_cash)} uninvested against a {usd(waiting.trade_size)}{" "}
               position — {usd(waiting.shortfall)} short.{" "}
               {waiting.eligible > 0
@@ -174,13 +179,13 @@ export default function WalletPage() {
             </p>
           ) : (
             <>
-              <p className="mt-1 text-xs text-ink-faint">
+              <p className="mt-1 text-xs text-ink-3">
                 {usd(waiting.idle_cash)} uninvested. {waiting.considered} Radar token
                 {waiting.considered === 1 ? "" : "s"} considered on the last pass.
               </p>
               <ul className="mt-2 flex flex-col gap-1">
                 {Object.entries(waiting.refusals).map(([code, count]) => (
-                  <li key={code} className="text-xs text-ink-faint">
+                  <li key={code} className="text-xs text-ink-3">
                     {count} · {waiting.labels[code] ?? code}
                   </li>
                 ))}
@@ -237,7 +242,7 @@ export default function WalletPage() {
 
       {/* The drawdown figure states its own limit rather than implying it is
           the intraday number. */}
-      <p className="text-xs leading-relaxed text-ink-faint">{m.max_drawdown_note}</p>
+      <p className="text-xs leading-relaxed text-ink-3">{m.max_drawdown_note}</p>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <Stat
@@ -269,19 +274,19 @@ export default function WalletPage() {
       </div>
 
       <section className="flex flex-col gap-3">
-        <h2 className="text-heading font-medium text-ink">Measured against</h2>
+        <h2 className="text-md font-medium text-ink">Measured against</h2>
         {/* Both comparisons start with the same capital at the same instant as
             the wallet. A benchmark drawn over a period the strategy did not
             trade would credit or punish it for free. */}
         {wallet.data.benchmark_note ? (
-          <p className="text-xs leading-relaxed text-ink-faint">
+          <p className="text-xs leading-relaxed text-ink-3">
             {wallet.data.benchmark_note}
           </p>
         ) : null}
         <div className="overflow-x-auto">
           <table className="w-full min-w-[640px] text-sm">
             <thead>
-              <tr className="border-b border-line text-label uppercase tracking-wide text-ink-faint">
+              <tr className="border-b border-line text-label uppercase tracking-wide text-ink-3">
                 <th className="py-2 text-left font-medium">Benchmark</th>
                 <th className="py-2 text-right font-medium">Held</th>
                 <th className="py-2 text-right font-medium">Benchmark return</th>
@@ -294,9 +299,9 @@ export default function WalletPage() {
                 <tr key={benchmark.id} className="border-b border-line/50 align-top">
                   <td className="py-3 pr-4">
                     <p className="text-ink">{benchmark.label}</p>
-                    <p className="mt-0.5 text-xs text-ink-faint">{benchmark.description}</p>
+                    <p className="mt-0.5 text-xs text-ink-3">{benchmark.description}</p>
                     {benchmark.unavailable_reason ? (
-                      <p className="mt-1 text-xs text-ink-faint">
+                      <p className="mt-1 text-xs text-ink-3">
                         {benchmark.unavailable_reason}
                       </p>
                     ) : null}
@@ -304,23 +309,23 @@ export default function WalletPage() {
                   {/* Unpriceable constituents are shown rather than dropped:
                       excluding them would hand the benchmark a survivorship
                       advantage the wallet never had. */}
-                  <td className="py-3 text-right tabular-nums text-ink-faint">
+                  <td className="py-3 text-right tabular-nums text-ink-3">
                     {benchmark.positions > 0 || benchmark.unpriced > 0
                       ? `${benchmark.positions}${benchmark.unpriced > 0 ? ` (+${benchmark.unpriced} unpriced)` : ""}`
                       : "—"}
                   </td>
-                  <td className="py-3 text-right tabular-nums text-ink-dim">
+                  <td className="py-3 text-right tabular-nums text-ink-2">
                     {pct(benchmark.return_pct) ?? "—"}
                   </td>
-                  <td className="py-3 text-right tabular-nums text-ink-dim">
+                  <td className="py-3 text-right tabular-nums text-ink-2">
                     {pct(m.roi_pct) ?? "—"}
                   </td>
                   <td
                     className={cn(
                       "py-3 text-right tabular-nums",
-                      tone(benchmark.difference_pct) === "positive" && "text-safe",
-                      tone(benchmark.difference_pct) === "negative" && "text-danger",
-                      tone(benchmark.difference_pct) === "neutral" && "text-ink-faint",
+                      tone(benchmark.difference_pct) === "positive" && "text-up",
+                      tone(benchmark.difference_pct) === "negative" && "text-down",
+                      tone(benchmark.difference_pct) === "neutral" && "text-ink-3",
                     )}
                   >
                     {pct(benchmark.difference_pct) ?? "—"}
@@ -343,10 +348,10 @@ export default function WalletPage() {
               onClick={() => setTab(key)}
               aria-pressed={tab === key}
               className={cn(
-                "rounded-chip border px-2.5 py-1 text-xs capitalize transition-colors",
+                "rounded-sm border px-2.5 py-1 text-xs capitalize transition-colors",
                 tab === key
-                  ? "border-line-bright bg-elevated text-ink"
-                  : "border-line text-ink-faint hover:border-line-bright hover:text-ink",
+                  ? "border-line-strong bg-raised text-ink"
+                  : "border-line text-ink-3 hover:border-line-strong hover:text-ink",
               )}
             >
               {key} ({key === "open" ? m.open_positions : m.closed_positions})
@@ -368,8 +373,8 @@ export default function WalletPage() {
 
       <section className="flex flex-col gap-3">
         <div>
-          <h2 className="text-heading font-medium text-ink">Permanent record</h2>
-          <p className="mt-1 text-sm text-ink-dim">
+          <h2 className="text-md font-medium text-ink">Permanent record</h2>
+          <p className="mt-1 text-sm text-ink-2">
             {wallet.data.audited_trades} completed trade
             {wallet.data.audited_trades === 1 ? "" : "s"}, each written once at the
             moment it closed. Nothing in this record is ever rewritten.

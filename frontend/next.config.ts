@@ -22,6 +22,17 @@ const nextConfig: NextConfig = {
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },
+  async rewrites() {
+    // The browser always speaks to its own origin. In local Docker this keeps
+    // the backend private to the compose network while allowing a temporary
+    // HTTPS tunnel to expose one web entry point, including WebSocket upgrades.
+    return [
+      {
+        source: "/api/:path*",
+        destination: "http://backend:8000/api/:path*",
+      },
+    ];
+  },
 };
 
 export default nextConfig;

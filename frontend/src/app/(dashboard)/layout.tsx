@@ -5,7 +5,8 @@ import { usePathname, useRouter } from "next/navigation";
 
 import { FeedbackWidget } from "@/components/alpha/feedback-widget";
 import { ActivityHeartbeat } from "@/components/alpha/activity-heartbeat";
-import { SiteNav } from "@/components/layout/site-nav";
+import { AppShell } from "@/components/layout/app-shell";
+import { LiveUpdatesProvider } from "@/hooks/use-live-updates";
 import { ALPHA_ACCESS } from "@/lib/env";
 import { api } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
@@ -50,23 +51,26 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   // before redirecting back to the launch screen.
   if (!alphaReady) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
-        <p className="text-sm text-ink-faint">Loading…</p>
+      <div className="flex min-h-dvh items-center justify-center bg-canvas">
+        <p className="text-sm text-ink-3">Loading…</p>
       </div>
     );
   }
 
   return (
-    <div className={cn("min-h-screen", enteredFromAlpha && "alpha-dashboard-enter")}>
-      <SiteNav />
-      <ActivityHeartbeat />
-      {/* Bottom padding clears the mobile tab bar, which is fixed. */}
-      <main className="mx-auto max-w-[1120px] px-6 pb-24 pt-6 md:pb-12">
-        {children}
-      </main>
-      {/* Every page, because the moment a tester notices something is the only
-          moment they will report it. */}
-      <FeedbackWidget />
-    </div>
+    // The live-update socket is mounted here rather than at the document root,
+    // and only once alpha access is confirmed. The API refuses the stream
+    // without an alpha cookie and closes with 1008, so opening it any earlier
+    // guaranteed a refusal — which is exactly what the public landing page was
+    // doing on a reconnect backoff before this moved.
+    <LiveUpdatesProvider>
+      <div className={cn(enteredFromAlpha && "alpha-dashboard-enter")}>
+        <AppShell>{children}</AppShell>
+        <ActivityHeartbeat />
+        {/* Every page, because the moment a tester notices something is the
+            only moment they will report it. */}
+        <FeedbackWidget />
+      </div>
+    </LiveUpdatesProvider>
   );
 }

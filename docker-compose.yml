@@ -241,6 +241,9 @@ services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    # Market snapshot reads can use PostgreSQL dynamic shared memory; Docker's
+    # 64 MiB default exhausts under the live paper-wallet benchmark query.
+    shm_size: 256m
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-memescope}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-memescope}
@@ -248,7 +251,7 @@ services:
       # Deterministic collation keeps index behaviour identical across machines.
       POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
@@ -268,7 +271,7 @@ services:
       --maxmemory 256mb
       --maxmemory-policy allkeys-lru
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     volumes:
       - redis-data:/data
     healthcheck:
@@ -292,7 +295,7 @@ services:
       - --reload
     environment: *backend-env
     ports:
-      - "${BACKEND_PORT:-8000}:8000"
+      - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
     volumes:
       # Bind-mount source for hot reload; keep the image's venv out of the way.
       - ./backend:/app
@@ -393,14 +396,17 @@ services:
       target: development
     restart: unless-stopped
     environment:
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      # Empty intentionally means browser same-origin `/api/v1`; unlike `:-`,
+      # the `-` form preserves an explicitly blank local setting instead of
+      # injecting localhost into a remote browser bundle.
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL-}
       NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME:-MemeScope AI}
       NEXT_PUBLIC_ENVIRONMENT: ${NEXT_PUBLIC_ENVIRONMENT:-local}
       # Local development only; ignored in a production build.
       NEXT_PUBLIC_DEVELOPMENT_BYPASS_AUTH: ${NEXT_PUBLIC_DEVELOPMENT_BYPASS_AUTH:-false}
       WATCHPACK_POLLING: "true"
     ports:
-      - "${FRONTEND_PORT:-3000}:3000"
+      - "127.0.0.1:${FRONTEND_PORT:-3000}:3000"
     volumes:
       - ./frontend:/app
       # Anonymous volumes so container-built artifacts are not shadowed by the host.

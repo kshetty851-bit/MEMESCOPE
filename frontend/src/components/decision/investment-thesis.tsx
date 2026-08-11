@@ -34,7 +34,7 @@ export function InvestmentThesis({ thesis }: { thesis: Thesis }) {
         <Section title="Why it appeared">
           <ul className="flex flex-col gap-1.5">
             {thesis.appeared.map((reason) => (
-              <li key={reason} className="text-sm leading-relaxed text-ink-dim">
+              <li key={reason} className="text-sm leading-relaxed text-ink-2">
                 {reason}
               </li>
             ))}
@@ -42,14 +42,14 @@ export function InvestmentThesis({ thesis }: { thesis: Thesis }) {
         </Section>
       ) : null}
 
-      <PointList title="Supporting evidence" points={thesis.strengths} tone="var(--color-safe)" />
-      <PointList title="Weaknesses" points={thesis.weaknesses} tone="var(--color-ink-dim)" />
-      <PointList title="Current risks" points={thesis.risks} tone="var(--color-danger)" />
-      <PointList title="Context" points={thesis.context} tone="var(--color-ink-faint)" />
+      <PointList title="Supporting evidence" points={thesis.strengths} tone="var(--color-up)" />
+      <PointList title="Weaknesses" points={thesis.weaknesses} tone="var(--color-ink-2)" />
+      <PointList title="Current risks" points={thesis.risks} tone="var(--color-down)" />
+      <PointList title="Context" points={thesis.context} tone="var(--color-ink-3)" />
 
       {thesis.unavailable.length > 0 ? (
         <Section title="Not collected">
-          <p className="text-sm leading-relaxed text-ink-dim">
+          <p className="text-sm leading-relaxed text-ink-2">
             MEMESCOPE cannot see {joinNaturally(thesis.unavailable)} for any token
             yet. These are declared in the model and counted against confidence
             rather than assumed to be fine, so a low confidence figure here
@@ -64,7 +64,7 @@ export function InvestmentThesis({ thesis }: { thesis: Thesis }) {
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="flex flex-col gap-2">
-      <h3 className="text-[0.6875rem] font-semibold uppercase tracking-[0.12em] text-ink-faint">
+      <h3 className="text-label font-medium uppercase text-ink-3">
         {title}
       </h3>
       {children}
@@ -87,7 +87,7 @@ function PointList({
     <Section title={title}>
       <ul className="flex flex-col gap-2">
         {points.map((point) => (
-          <li key={point.code} className="flex gap-2.5 text-sm leading-relaxed text-ink-dim">
+          <li key={point.code} className="flex gap-2.5 text-sm leading-relaxed text-ink-2">
             <span
               aria-hidden
               className="mt-[0.4375rem] h-1 w-1 shrink-0 rounded-full"
@@ -96,7 +96,7 @@ function PointList({
             <span>
               {point.message}
               {point.agent ? (
-                <span className="ml-2 text-[0.6875rem] uppercase tracking-[0.08em] text-ink-faint">
+                <span className="ml-2 text-label uppercase text-ink-3">
                   {point.agent}
                 </span>
               ) : null}

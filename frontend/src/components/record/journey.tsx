@@ -77,14 +77,14 @@ export function Journey({
     <div className="flex flex-wrap items-center gap-x-1 gap-y-0.5 text-xs tabular-nums">
       {stops.map((stop, index) => (
         <span key={`${stop.text}-${index}`} className="flex items-center gap-1">
-          {index > 0 ? <span className="text-ink-faint">→</span> : null}
+          {index > 0 ? <span className="text-ink-3">→</span> : null}
           <span
             className={cn(
-              stop.tone === "start" && "text-ink-faint",
-              stop.tone === "tier" && "text-ink-dim",
+              stop.tone === "start" && "text-ink-3",
+              stop.tone === "tier" && "text-ink-2",
               stop.tone === "peak" && "font-medium text-ink",
-              stop.tone === "up" && "font-medium text-safe",
-              stop.tone === "down" && "font-medium text-danger",
+              stop.tone === "up" && "font-medium text-up",
+              stop.tone === "down" && "font-medium text-down",
             )}
           >
             {stop.text}

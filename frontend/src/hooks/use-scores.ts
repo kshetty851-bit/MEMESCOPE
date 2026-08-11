@@ -11,6 +11,7 @@ import {
   fetchTopScores,
 } from "@/lib/scores";
 import type { TokenScore } from "@/types/score";
+import { livePoll } from "@/lib/query";
 
 /**
  * AI scores for the live window, keyed by mint.
@@ -32,7 +33,7 @@ export function useScoresByMint(pollMs = 20_000) {
     queryKey: ["scores", "window"],
     queryFn: () =>
       fetchTopScores({ pageSize: 100, sort: "evaluated_at", includeVetoed: true }),
-    refetchInterval: status === "live" ? false : pollMs,
+    refetchInterval: livePoll(status, pollMs),
     staleTime: pollMs / 2,
   });
 
@@ -78,7 +79,7 @@ export function useTopScores(pageSize = 6, pollMs = 30_000) {
   return useQuery({
     queryKey: ["scores", "top", pageSize],
     queryFn: () => fetchTopScores({ pageSize, sort: "score", order: "desc" }),
-    refetchInterval: status === "live" ? false : pollMs,
+    refetchInterval: livePoll(status, pollMs),
     staleTime: pollMs / 2,
   });
 }
@@ -95,7 +96,7 @@ export function useTokenScore(mint: string | undefined, pollMs = 20_000) {
     queryKey: ["scores", "token", mint],
     queryFn: () => fetchTokenScore(mint!),
     enabled: Boolean(mint),
-    refetchInterval: status === "live" ? false : pollMs,
+    refetchInterval: livePoll(status, pollMs),
   });
 }
 

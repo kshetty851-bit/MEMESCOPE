@@ -37,10 +37,10 @@ function Cell({
     <td
       className={cn(
         "py-2.5 text-right tabular-nums",
-        value === null && "text-ink-faint",
-        tone === "positive" && "text-safe",
-        tone === "negative" && "text-danger",
-        (!tone || tone === "neutral") && value !== null && "text-ink-dim",
+        value === null && "text-ink-3",
+        tone === "positive" && "text-up",
+        tone === "negative" && "text-down",
+        (!tone || tone === "neutral") && value !== null && "text-ink-2",
       )}
       title={hint ?? undefined}
     >
@@ -94,7 +94,7 @@ export function AuditLog({
 
   if (items.length === 0) {
     return (
-      <p className="text-sm text-ink-faint">
+      <p className="text-sm text-ink-3">
         Nothing has closed yet. A trade enters this record the moment its
         trailing stop triggers, and never leaves it.
       </p>
@@ -106,7 +106,7 @@ export function AuditLog({
       <div className="overflow-x-auto">
         <table className="w-full min-w-[1080px] text-sm">
           <thead>
-            <tr className="border-b border-line text-label uppercase tracking-wide text-ink-faint">
+            <tr className="border-b border-line text-label uppercase tracking-wide text-ink-3">
               <th className="py-2 text-left font-medium">Token</th>
               <th className="py-2 text-right font-medium">Entry</th>
               <th className="py-2 text-right font-medium">Entry mcap</th>
@@ -125,7 +125,7 @@ export function AuditLog({
             {items.map((row) => (
               <tr
                 key={`${row.mint_address}-${row.exit_at}`}
-                className="border-b border-line/50 transition-colors hover:bg-elevated/40"
+                className="border-b border-line/50 transition-colors hover:bg-raised/40"
               >
                 <td className="py-2.5 pr-4">
                   <TokenIdentity
@@ -135,7 +135,7 @@ export function AuditLog({
                     size="xs"
                     compact
                   />
-                  <span className="ml-2 text-xs text-ink-faint">
+                  <span className="ml-2 text-xs text-ink-3">
                     v{row.strategy_version}
                   </span>
                 </td>
@@ -159,7 +159,7 @@ export function AuditLog({
                   hint={row.cost_unavailable_reason}
                 />
                 <td
-                  className="py-2.5 text-right text-xs text-ink-faint"
+                  className="py-2.5 text-right text-xs text-ink-3"
                   title={
                     row.execution_fallback_reason ??
                     row.exit_execution_route ??
@@ -169,7 +169,7 @@ export function AuditLog({
                 >
                   {modelLabel(row.execution_model_version)}
                 </td>
-                <td className="py-2.5 text-right text-xs text-ink-faint">
+                <td className="py-2.5 text-right text-xs text-ink-3">
                   {exitLabel(row.exit_reason) ?? row.exit_reason}
                 </td>
               </tr>
@@ -178,11 +178,11 @@ export function AuditLog({
         </table>
       </div>
       {items.length < total ? (
-        <p className="text-xs text-ink-faint">
+        <p className="text-xs text-ink-3">
           Showing {items.length} of {total} recorded trades.
         </p>
       ) : null}
-      <p className="text-xs leading-relaxed text-ink-faint">{disclosure}</p>
+      <p className="text-xs leading-relaxed text-ink-3">{disclosure}</p>
     </div>
   );
 }

@@ -8,7 +8,10 @@ import { z } from "zod";
  * Parsing here means a missing variable fails the build, not a user's session.
  */
 const publicEnvSchema = z.object({
-  NEXT_PUBLIC_API_URL: z.string().url().default("http://localhost:8000"),
+  // An empty value means same-origin `/api/v1`. This is the safe setting for
+  // reverse proxies and temporary HTTPS tunnels: a remote browser must never
+  // be told that `localhost` means the developer's backend.
+  NEXT_PUBLIC_API_URL: z.string().url().or(z.literal("")).default(""),
   NEXT_PUBLIC_APP_NAME: z.string().default("MEMESCOPE"),
   NEXT_PUBLIC_ENVIRONMENT: z.enum(["local", "staging", "production"]).default("local"),
   // Development only. Read through `AUTH_BYPASS`, never directly.

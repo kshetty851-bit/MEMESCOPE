@@ -58,11 +58,11 @@ export const HEALTH_STATUS_LABEL: Record<HealthStatus, string> = {
 };
 
 export const HEALTH_STATUS_TONE: Record<HealthStatus, string> = {
-  improving: "var(--color-safe)",
-  steady: "var(--color-oracle)",
-  watch: "var(--color-warn, var(--color-ink-dim))",
-  concern: "var(--color-danger)",
-  not_collected: "var(--color-ink-faint)",
+  improving: "var(--color-up)",
+  steady: "var(--color-accent)",
+  watch: "var(--color-warn)",
+  concern: "var(--color-down)",
+  not_collected: "var(--color-ink-3)",
 };
 
 /** Which engine component backs each readout. */

@@ -13,10 +13,12 @@ import { MOTION } from "@/lib/motion";
  * flashing on mount, and flashing on a change too small to render.
  */
 
+// Reads the semantic tokens, not the deprecated `safe`/`danger` aliases the
+// component used before the Phase 7 migration.
 const wash = (el: HTMLElement) =>
-  /bg-safe\//.test(el.className)
+  /bg-up\//.test(el.className)
     ? "up"
-    : /bg-danger\//.test(el.className)
+    : /bg-down\//.test(el.className)
       ? "down"
       : "none";
 

@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLiveUpdates } from "@/hooks/use-live-updates";
+import { livePoll } from "@/lib/query";
 
 import {
   fetchLab,
@@ -33,7 +34,7 @@ export function usePaperWallet() {
   return useQuery({
     queryKey: ["paper", "wallet"],
     queryFn: fetchPaperWallet,
-    refetchInterval: status === "live" ? false : PAPER_POLL_MS,
+    refetchInterval: livePoll(status, PAPER_POLL_MS),
     staleTime: PAPER_POLL_MS / 2,
   });
 }
@@ -43,7 +44,7 @@ export function usePaperPositions() {
   return useQuery({
     queryKey: ["paper", "positions"],
     queryFn: fetchPaperPositions,
-    refetchInterval: status === "live" ? false : PAPER_POLL_MS,
+    refetchInterval: livePoll(status, PAPER_POLL_MS),
     staleTime: PAPER_POLL_MS / 2,
   });
 }
@@ -61,7 +62,7 @@ export function usePaperAudit(limit = 100) {
   return useQuery({
     queryKey: ["paper", "audit", limit],
     queryFn: () => fetchPaperAudit(limit),
-    refetchInterval: status === "live" ? false : PAPER_POLL_MS,
+    refetchInterval: livePoll(status, PAPER_POLL_MS),
     staleTime: PAPER_POLL_MS / 2,
   });
 }
@@ -126,7 +127,7 @@ export function useStrategyIntelligence() {
   return useQuery({
     queryKey: ["paper", "strategy-intelligence"],
     queryFn: fetchStrategyIntelligence,
-    refetchInterval: status === "live" ? false : PAPER_POLL_MS,
+    refetchInterval: livePoll(status, PAPER_POLL_MS),
     staleTime: PAPER_POLL_MS / 2,
   });
 }

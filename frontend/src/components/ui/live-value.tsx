@@ -31,9 +31,9 @@ export function LiveValue({
   return (
     <span
       className={cn(
-        "-mx-1 rounded px-1 transition-colors duration-[180ms] ease-[var(--ease-instrument)]",
-        flash === "up" && "bg-safe/20",
-        flash === "down" && "bg-danger/20",
+        "-mx-1 rounded px-1 transition-colors duration-[180ms] ease-[var(--ease-standard)]",
+        flash === "up" && "bg-up/20",
+        flash === "down" && "bg-down/20",
         flash === "none" && "bg-transparent",
         className,
       )}

@@ -1,45 +1,410 @@
 /* ============================================================================
-   LETZMOON — mascot, deep-space field and micro-interactions
+   MEMESCOPE — the alpha gate
    ----------------------------------------------------------------------------
-   Every animation in this file moves `transform` or `opacity` and nothing else.
-   Both are composited, so none of this touches layout, paint or the main
-   thread, and the scene costs zero JavaScript per frame — the same discipline
-   the ambient scene already holds.
+   This file is scoped to ONE screen: the public alpha landing page. It is the
+   only place the MEMESCOPE character and the space setting survive. Everything
+   past the gate is the terminal, and none of these rules reach it.
 
-   Durations are deliberately co-prime (5s, 7s, 11s, 13s, 19s, 23s). Loops on
-   round numbers resynchronise every few cycles and the eye catches the beat;
-   co-prime periods take minutes to realign, which is what makes drifting read
-   as drifting rather than as a loop.
+   It used to be 1,625 lines. What was removed, and why:
 
-   `prefers-reduced-motion` stops motion outright rather than slowing it. For a
-   vestibular trigger a slow drift is the problem, not a gentler version of it.
+     - `.lm-space*` (a second, unused starfield), `.lm-lift`, `.lm-enter` —
+       referenced by nothing after the shell rebuild.
+     - `.alpha-cinematic*`, `.alpha-stage*`, `.alpha-copy`, `.alpha-panel`,
+       `.alpha-logo/kicker/positioning/subtitle`, `.alpha-access` — the
+       absolute-positioning layout that put the access panel on top of the
+       mascot. The page is a grid now, laid out in the component.
+     - The planet, galaxy, two debris fields, two dust fields, two asteroids,
+       two meteors, the comet, the satellite, the probe, the spaceship, the
+       scanline and the horizon — seventeen infinite animations behind a form.
+
+   What is left: two nebulae, one starfield, a vignette, the mascot, and the
+   single unlock transition. Every remaining loop moves only `transform` or
+   `opacity`, so all of it stays on the compositor.
    ========================================================================== */
 
-/* --- Mascot -------------------------------------------------------------- */
+.alpha-landing {
+  background: var(--color-canvas);
+}
 
-.lm-mascot {
-  /* Its own layer, so the drift never invalidates anything behind it. */
+/* --- Atmosphere ----------------------------------------------------------- */
+
+.alpha-space {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 25% 12%, oklch(0.30 0.10 285 / 0.22), transparent 46%),
+    radial-gradient(circle at 78% 8%, oklch(0.34 0.09 215 / 0.18), transparent 42%),
+    var(--color-canvas);
+  transition:
+    filter 1200ms var(--ease-standard),
+    transform 1200ms var(--ease-standard);
+}
+
+/* The one motion tied to a real state change: the scene lifts as the code is
+   accepted. Everything else here holds still. */
+.alpha-space--unlock {
+  filter: brightness(1.22) saturate(1.12);
+  transform: scale(1.04);
+}
+
+.alpha-space__nebula {
+  position: absolute;
+  border-radius: 999px;
+  filter: blur(70px);
+  opacity: 0.42;
   will-change: transform;
 }
 
-.lm-mascot__drift {
-  animation: lm-drift 19s ease-in-out infinite;
+.alpha-space__nebula--violet {
+  left: -12%;
+  top: 2%;
+  width: min(760px, 68vw);
+  height: min(760px, 68vw);
+  background: radial-gradient(circle, oklch(0.48 0.18 290 / 0.34), transparent 70%);
+  animation: alpha-nebula-a 86s ease-in-out infinite;
 }
 
-.lm-mascot__breathe {
+.alpha-space__nebula--cyan {
+  right: -16%;
+  bottom: -20%;
+  width: min(840px, 70vw);
+  height: min(840px, 70vw);
+  background: radial-gradient(circle, oklch(0.48 0.13 205 / 0.30), transparent 72%);
+  animation: alpha-nebula-b 101s ease-in-out infinite;
+}
+
+.alpha-space__stars {
+  position: absolute;
+  inset: -30% 0 0;
+  height: 160%;
+  background-repeat: repeat;
+  will-change: transform;
+}
+
+/* One plane, not three. Three parallax star layers on a page with a single
+   fold is depth nobody scrolls far enough to perceive. */
+.alpha-space__stars--far {
+  background-image:
+    radial-gradient(1px 1px at 20% 30%, oklch(0.94 0.02 270 / 0.36), transparent),
+    radial-gradient(1px 1px at 70% 60%, oklch(0.94 0.02 210 / 0.28), transparent),
+    radial-gradient(1px 1px at 45% 85%, oklch(0.94 0.02 270 / 0.32), transparent);
+  background-size: 240px 240px;
+  animation: alpha-stars 240s linear infinite;
+}
+
+/* Seats the content. Without it the headline sits on open nebula and the
+   left column loses its footing at wide viewports. */
+.alpha-space__vignette {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 80% 70% at 50% 45%, transparent 30%, rgb(0 0 0 / 0.38) 80%),
+    linear-gradient(180deg, rgb(0 0 0 / 0.30), transparent 22%, rgb(0 0 0 / 0.42));
+}
+
+@keyframes alpha-nebula-a {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(3vw, -2vh, 0) scale(1.09);
+  }
+}
+
+@keyframes alpha-nebula-b {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1.05);
+  }
+  50% {
+    transform: translate3d(-4vw, 2vh, 0) scale(1);
+  }
+}
+
+@keyframes alpha-stars {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(0, 30%, 0);
+  }
+}
+
+/* ============================================================================
+   MASCOT
+   ----------------------------------------------------------------------------
+   The figure is flat 2D cartoon art now, not a render, and that deleted more
+   of this section than it added. The previous mascot was a photograph held
+   back with saturation, contrast and brightness filters so it would not fight
+   the headline, plus a set of overlays — painted eyelids, a rim reflection, an
+   atmosphere wash, a helmet lamp — positioned to the tenth of a percent
+   against that one image. None of it transfers to a different drawing and none
+   of it was worth re-deriving: flat art needs no grading, and eyelids guessed
+   onto drawn eyes look exactly like eyelids guessed onto drawn eyes.
+
+   What is left is what made the figure feel alive rather than pasted on —
+   drift, breath, a gaze that follows the pointer — plus the four reactions the
+   launch sequence needs, driven by `data-state` on the root.
+   ========================================================================== */
+
+/*
+   Placement, measured off the running page rather than guessed: at 1440 the
+   copy column ends at x691 and the access panel begins at x947, and the pad
+   stands at x458–730. The figure goes in the corridor between them and low, so
+   it floats beside its own rocket — and, more to the point, so that both hands
+   are in clear air. The whole reaction is a pair of thumbs; a thumbs-up behind
+   an opaque panel is no reaction at all.
+
+   It is deliberately smaller than the mascot it replaces. That one was a
+   background wash at 85% opacity; this one is a character that acts, and a
+   character that acts has to stay out of the way when it is not acting.
+*/
+.alpha-mascot-mount {
+  top: auto;
+  right: auto;
+  bottom: 2%;
+  left: 46%;
+  width: clamp(180px, 23%, 300px);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.alpha-mascot {
+  position: relative;
+  width: 100%;
+  transform: translateZ(0);
+  /* Held just off full strength while idle. It comes up to full when it has
+     something to say — see the reaction states. */
+  opacity: 0.94;
+  transition: opacity 400ms var(--ease-standard);
+}
+
+.alpha-mascot:not([data-state="idle"]) {
+  opacity: 1;
+}
+
+.alpha-mascot--compact {
+  width: 92px;
+}
+
+.alpha-mascot__drift {
+  animation: lm-drift 19s ease-in-out infinite;
+  will-change: transform;
+}
+
+.alpha-mascot__breathe {
   animation: lm-breathe 7s ease-in-out infinite;
 }
 
-.lm-mascot__shimmer {
-  animation: lm-shimmer 13s ease-in-out infinite;
-  transform-origin: center;
+.alpha-mascot__frame {
+  position: relative;
+  will-change: transform;
 }
 
-.lm-mascot__blink {
-  /* 11s between blinks, and the closure itself is 4% of the cycle — roughly
-     440ms, which is about how long a real blink reads on screen. Any longer
-     and the mascot looks like it is falling asleep. */
-  animation: lm-blink 11s steps(1, end) infinite;
+.alpha-mascot__image {
+  position: relative;
+  z-index: 2;
+  display: block;
+  width: 100%;
+  height: auto;
+  user-select: none;
+  filter: drop-shadow(10px 28px 48px rgb(0 0 0 / 0.55));
+  transform: translate3d(var(--gaze-x), var(--gaze-y), 0);
+}
+
+.alpha-mascot__shadow,
+.alpha-mascot__backlight {
+  position: absolute;
+  pointer-events: none;
+  /* Soft radial gradients rather than `filter: blur()`, which is the same rule
+     the universe follows and for the same reason: a blurred layer has to be
+     re-rasterised every frame it moves, and this one moves constantly. */
+}
+
+.alpha-mascot__shadow {
+  z-index: 1;
+  left: 18%;
+  right: 10%;
+  bottom: 1%;
+  height: 15%;
+  border-radius: 999px;
+  background: radial-gradient(ellipse at center, rgb(0 0 0 / 0.55), transparent 70%);
+}
+
+.alpha-mascot__backlight {
+  z-index: 0;
+  /* Tightened and dimmed: at 0.20 across a 62% radius it read as a grey disc
+     behind the helmet rather than as rim light. */
+  inset: 12% 8% 16%;
+  border-radius: 999px;
+  background: radial-gradient(circle at 54% 36%, oklch(0.86 0.13 200 / 0.13), transparent 55%);
+}
+
+/* --- Reactions ------------------------------------------------------------ */
+
+/* Two thumbs up, placed on the drawn hands so the reaction reads as the mascot
+   doing something rather than a badge floating beside it. */
+.alpha-mascot__thumb {
+  position: absolute;
+  z-index: 3;
+  width: 26%;
+  height: auto;
+  opacity: 0;
+  transform: translate(-50%, -50%) rotate(var(--tilt, 0deg)) scale(0.2);
+  transition: opacity 300ms var(--ease-standard);
+  pointer-events: none;
+}
+
+/*
+   Centred on the drawn hands, measured off the artwork itself: the raised hand
+   sits at 86%/22% of the figure, the low one at 10.5%/69.5%.
+
+   The previous values were a few percent out in both axes, and at this size a
+   few percent is the difference between the glyph replacing the hand and the
+   glyph sitting next to it. On screen the mascot appeared to be holding two
+   green objects while still splaying both hands — which is precisely the
+   "pasted on" read the figure is supposed to avoid.
+*/
+.alpha-mascot__thumb--raised {
+  left: 86%;
+  top: 22%;
+  --tilt: -14deg;
+}
+
+.alpha-mascot__thumb--low {
+  left: 10.5%;
+  top: 69.5%;
+  width: 23%;
+  --tilt: 18deg;
+}
+
+.alpha-mascot[data-state="approved"] .alpha-mascot__thumb {
+  animation: alpha-thumb-pop 520ms var(--ease-standard) forwards;
+}
+
+/* The raised hand answers first; the low one follows. Simultaneous reads as a
+   sprite swap rather than a gesture. */
+.alpha-mascot[data-state="approved"] .alpha-mascot__thumb--low {
+  animation-delay: 120ms;
+}
+
+.alpha-mascot[data-state="approved"] .alpha-mascot__frame {
+  animation: alpha-mascot-cheer 900ms var(--ease-standard);
+}
+
+/* Refused. One shake, over before the error text has been read — a mascot that
+   keeps reacting to a typo is a mascot the user starts resenting. */
+.alpha-mascot[data-state="denied"] .alpha-mascot__frame {
+  animation: alpha-mascot-confused 460ms var(--ease-standard);
+}
+
+/* Watching it go: leans back after the ship, then clears the frame for the
+   camera. */
+.alpha-mascot[data-state="watching"] .alpha-mascot__frame {
+  animation: alpha-mascot-watch 2600ms var(--ease-standard) forwards;
+}
+
+@keyframes alpha-thumb-pop {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) rotate(var(--tilt, 0deg)) scale(0.2);
+  }
+  60% {
+    opacity: 1;
+    transform: translate(-50%, -50%) rotate(var(--tilt, 0deg)) scale(1.16);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(-50%, -50%) rotate(var(--tilt, 0deg)) scale(1);
+  }
+}
+
+@keyframes alpha-mascot-cheer {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  35% {
+    transform: translate3d(0, -4%, 0) scale(1.05);
+  }
+  62% {
+    transform: translate3d(0, 0.6%, 0) scale(0.99);
+  }
+}
+
+@keyframes alpha-mascot-confused {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) rotate(0deg);
+  }
+  20% {
+    transform: translate3d(-1.6%, 0, 0) rotate(-2.5deg);
+  }
+  45% {
+    transform: translate3d(1.6%, 0, 0) rotate(2.5deg);
+  }
+  72% {
+    transform: translate3d(-0.9%, 0, 0) rotate(-1.4deg);
+  }
+}
+
+@keyframes alpha-mascot-watch {
+  0% {
+    transform: translate3d(0, 0, 0) rotate(0deg) scale(1);
+    opacity: 1;
+  }
+  30% {
+    transform: translate3d(-2%, -3%, 0) rotate(-5deg) scale(1.02);
+    opacity: 1;
+  }
+  100% {
+    transform: translate3d(-6%, 26%, 0) rotate(-7deg) scale(0.78);
+    opacity: 0;
+  }
+}
+
+/*
+   Below `lg` the page is one column and the figure would sit behind the access
+   form, which is the contrast problem this composition was rebuilt to fix. So
+   it stays out of the idle scene and arrives, smaller and lower, only when it
+   has something to say — a refusal, or a launch.
+*/
+@media (max-width: 1023px) {
+  /*
+     Pulled back inside the frame. At `right: -4%` and 56% wide the raised hand
+     and its thumbs-up were clipped by the viewport edge on a 375px screen —
+     the gesture the whole beat exists for was the part hanging off the screen.
+     Narrower also fixes the scale: at 56% the figure dwarfed the rocket it is
+     supposed to be cheering on.
+  */
+  .alpha-mascot-mount {
+    left: auto;
+    /* 3%, not 1%: at 1% the raised thumb finished 4px from the viewport edge
+       on both 375 and 430, which survives a flat screenshot but not a rounded
+       display corner. */
+    right: 3%;
+    bottom: 2%;
+    width: min(52%, 250px);
+    opacity: 0;
+    transition: opacity 450ms var(--ease-standard);
+  }
+
+  /*
+     Launch states only. A refusal deliberately does not summon the figure
+     here: the mascot's slot at this width overlaps the access panel, and the
+     one thing a visitor needs after a rejected code is the error message it
+     would be sitting on top of. The shake is a bonus on a wide screen, not the
+     feedback — the text is the feedback, and it is the same on every screen.
+  */
+  .alpha-landing[data-phase="approved"] .alpha-mascot-mount,
+  .alpha-landing[data-phase="countdown"] .alpha-mascot-mount,
+  .alpha-landing[data-phase="ignition"] .alpha-mascot-mount {
+    opacity: 1;
+  }
 }
 
 @keyframes lm-drift {
@@ -48,13 +413,13 @@
     transform: translate3d(0, 0, 0) rotate(0deg);
   }
   25% {
-    transform: translate3d(6px, -10px, 0) rotate(1.2deg);
+    transform: translate3d(5px, -8px, 0) rotate(1deg);
   }
   50% {
-    transform: translate3d(0, -16px, 0) rotate(0deg);
+    transform: translate3d(0, -13px, 0) rotate(0deg);
   }
   75% {
-    transform: translate3d(-6px, -8px, 0) rotate(-1.2deg);
+    transform: translate3d(-5px, -6px, 0) rotate(-1deg);
   }
 }
 
@@ -68,1389 +433,206 @@
   }
 }
 
-@keyframes lm-shimmer {
-  0%,
-  62%,
-  100% {
-    opacity: 0.25;
-    transform: translate3d(0, 0, 0);
-  }
-  70% {
-    opacity: 0.85;
-    transform: translate3d(10px, 5px, 0);
-  }
-  78% {
-    opacity: 0.25;
-    transform: translate3d(20px, 10px, 0);
-  }
-}
+/* ============================================================================
+   THE MISSION CARD
+   ----------------------------------------------------------------------------
+   Everything the sequence says in words. It sits above the scene and below
+   nothing, and it is `pointer-events: none` throughout — the form beneath it
+   is already locked by the sequence, and an overlay that can swallow a click
+   is a bug waiting for a slow network.
 
-@keyframes lm-blink {
-  0%,
-  96% {
-    transform: scaleY(1);
-  }
-  97%,
-  99% {
-    transform: scaleY(0.08);
-  }
-  100% {
-    transform: scaleY(1);
-  }
-}
+   The type is the product's, not a space poster's: the same uppercase tracked
+   label and the same tabular mono the terminal uses for every number. The only
+   thing borrowed from the setting is scale.
+   ========================================================================== */
 
-/* --- Deep space field ----------------------------------------------------- */
+/*
+   z-20, not z-9. The section that holds the copy and the access panel is
+   `position: relative` with `z-index: auto`, so it creates no stacking context
+   of its own — which means its `z-10` header and grid are competing directly
+   with this overlay inside `.alpha-landing`, and z-9 lost to them. The
+   countdown rendered *behind* the access panel, which is only invisible on a
+   desktop where the digit happens to miss the card.
 
-.lm-space {
+   The scale for this screen, in one place: content 10, mission card 20, the
+   flash that carries you into the terminal 30.
+*/
+.launch-card {
   position: fixed;
   inset: 0;
-  z-index: -1;
-  overflow: hidden;
-  background:
-    radial-gradient(
-      ellipse 80% 55% at 15% 0%,
-      color-mix(in oklch, var(--color-brand) 12%, transparent),
-      transparent 60%
-    ),
-    radial-gradient(
-      ellipse 70% 50% at 85% 20%,
-      color-mix(in oklch, var(--color-brand-accent) 9%, transparent),
-      transparent 65%
-    ),
-    radial-gradient(
-      ellipse 90% 60% at 50% 100%,
-      color-mix(in oklch, var(--color-brand-secondary) 6%, transparent),
-      transparent 70%
-    ),
-    var(--color-void);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  /*
+     Tight, so the kicker and the digit read as one object rather than two
+     stranded lines.
+  */
+  gap: 0.35rem;
+  /*
+     Biased above centre. The scene's action — pad, ship, mascot — occupies the
+     bottom third, and a countdown centred in the viewport put the digit's
+     baseline straight through the mascot's helmet while the top third sat
+     empty. Lifting it uses the dead space and clears the figure.
+  */
+  padding: 0 1.5rem clamp(5rem, 16vh, 11rem);
+  text-align: center;
+  pointer-events: none;
 }
 
-/* Nebulae. Two counter-rotating fields at different speeds read as volume;
-   one field alone reads as a texture. */
-.lm-space__nebula {
-  position: absolute;
-  border-radius: 50%;
-  filter: blur(60px);
-  opacity: 0.5;
-  will-change: transform;
+.launch-card__kicker {
+  /* A step up from the label size: at 11px it read as a stray caption floating
+     above a 208px numeral rather than as its label. */
+  font-size: 0.8125rem;
+  font-weight: 500;
+  letter-spacing: 0.34em;
+  /* The tracking adds a trailing space; pull it back so the line optically
+     centres under the digit. */
+  text-indent: 0.34em;
+  text-transform: uppercase;
+  color: var(--color-ink-2);
+  animation: launch-in 280ms var(--ease-standard) both;
 }
 
-.lm-space__nebula--a {
-  top: -12%;
-  left: -8%;
-  width: 46vw;
-  height: 46vw;
-  background: radial-gradient(
-    circle,
-    color-mix(in oklch, var(--color-brand) 34%, transparent),
-    transparent 68%
-  );
-  animation: lm-nebula-a 71s ease-in-out infinite;
+.launch-card__banner {
+  font-size: clamp(1.5rem, 5.5vw, 3.25rem);
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-accent);
+  text-shadow: 0 0 40px oklch(0.78 0.13 200 / 0.45);
+  animation: launch-banner 520ms var(--ease-standard) both;
 }
 
-.lm-space__nebula--b {
-  right: -10%;
-  bottom: -14%;
-  width: 52vw;
-  height: 52vw;
-  background: radial-gradient(
-    circle,
-    color-mix(in oklch, var(--color-brand-accent) 26%, transparent),
-    transparent 70%
-  );
-  animation: lm-nebula-b 89s ease-in-out infinite;
+/* This one lands on the lit face of a planet rather than on open sky, so it
+   carries its own contrast: a dark halo first, the glow over it. Near-white on
+   a pale surface with only a cyan bloom behind it was not readable. */
+.launch-card__banner--unlock {
+  color: oklch(0.99 0.01 200);
+  text-shadow:
+    0 2px 18px oklch(0.16 0.04 250 / 0.85),
+    0 0 6px oklch(0.16 0.04 250 / 0.7),
+    0 0 60px oklch(0.86 0.13 200 / 0.6);
 }
 
-@keyframes lm-nebula-a {
-  0%,
-  100% {
-    transform: translate3d(0, 0, 0) scale(1);
-  }
-  50% {
-    transform: translate3d(4vw, 3vh, 0) scale(1.1);
-  }
+/*
+   The digit is timed off `--launch-tick`, which the component sets from the
+   same constant React counts on. A countdown whose numbers fade a beat after
+   they are replaced is the one failure this cannot have.
+*/
+.launch-card__count {
+  font-size: clamp(5rem, 20vw, 13rem);
+  font-weight: 600;
+  line-height: 0.9;
+  color: var(--color-ink);
+  text-shadow: 0 0 60px oklch(0.78 0.13 200 / 0.35);
+  animation: launch-count var(--launch-tick, 700ms) var(--ease-standard) both;
 }
 
-@keyframes lm-nebula-b {
-  0%,
-  100% {
-    transform: translate3d(0, 0, 0) scale(1.06);
-  }
-  50% {
-    transform: translate3d(-5vw, -3vh, 0) scale(1);
-  }
-}
-
-/* Starfield. Three parallax planes, each one element with a repeating
-   box-shadow pattern rather than hundreds of nodes — 3 DOM nodes instead of
-   ~300, and the whole plane animates as one composited layer. */
-.lm-space__stars {
-  position: absolute;
-  inset: -50% 0 0 0;
-  height: 200%;
-  background-repeat: repeat;
-  will-change: transform;
-}
-
-.lm-space__stars--far {
-  background-image: radial-gradient(1px 1px at 20% 30%, oklch(0.9 0.02 268 / 0.55), transparent),
-    radial-gradient(1px 1px at 70% 60%, oklch(0.9 0.02 268 / 0.4), transparent),
-    radial-gradient(1px 1px at 45% 85%, oklch(0.9 0.02 268 / 0.5), transparent);
-  background-size: 220px 220px;
-  animation: lm-stars 240s linear infinite;
-}
-
-.lm-space__stars--mid {
-  background-image: radial-gradient(1.5px 1.5px at 35% 15%, oklch(0.95 0.03 196 / 0.5), transparent),
-    radial-gradient(1.5px 1.5px at 80% 70%, oklch(0.95 0.02 268 / 0.45), transparent);
-  background-size: 380px 380px;
-  animation: lm-stars 160s linear infinite;
-}
-
-.lm-space__stars--near {
-  background-image: radial-gradient(2px 2px at 60% 40%, oklch(0.98 0.04 295 / 0.55), transparent);
-  background-size: 620px 620px;
-  animation: lm-stars 100s linear infinite;
-}
-
-@keyframes lm-stars {
-  from {
-    transform: translate3d(0, 0, 0);
-  }
-  to {
-    transform: translate3d(0, 50%, 0);
-  }
-}
-
-/* Asteroids — three, slow, low contrast. Any more and they become confetti. */
-.lm-space__rock {
-  position: absolute;
-  border-radius: 42% 58% 51% 49% / 47% 42% 58% 53%;
-  background: oklch(0.3 0.02 268);
-  opacity: 0.35;
-  will-change: transform;
-}
-
-.lm-space__rock--1 {
-  top: 22%;
-  left: -60px;
-  width: 22px;
-  height: 18px;
-  animation: lm-rock-across 127s linear infinite;
-}
-
-.lm-space__rock--2 {
-  top: 64%;
-  left: -80px;
-  width: 34px;
-  height: 28px;
-  opacity: 0.22;
-  animation: lm-rock-across 181s linear infinite;
-  animation-delay: -60s;
-}
-
-.lm-space__rock--3 {
-  top: 41%;
-  left: -40px;
-  width: 12px;
-  height: 11px;
-  animation: lm-rock-across 97s linear infinite;
-  animation-delay: -30s;
-}
-
-@keyframes lm-rock-across {
-  from {
-    transform: translate3d(0, 0, 0) rotate(0deg);
-  }
-  to {
-    transform: translate3d(calc(100vw + 120px), -6vh, 0) rotate(220deg);
-  }
-}
-
-/* Shooting stars. 23s and 37s cycles with most of each cycle spent invisible,
-   so they read as occasional rather than scheduled. */
-.lm-space__shoot {
-  position: absolute;
-  height: 1px;
-  width: 90px;
-  background: linear-gradient(90deg, transparent, oklch(0.98 0.04 196 / 0.9), transparent);
-  opacity: 0;
-  will-change: transform, opacity;
-}
-
-.lm-space__shoot--1 {
-  top: 18%;
-  left: 8%;
-  animation: lm-shoot 23s ease-in infinite;
-}
-
-.lm-space__shoot--2 {
-  top: 55%;
-  left: 40%;
-  animation: lm-shoot 37s ease-in infinite;
-  animation-delay: -14s;
-}
-
-@keyframes lm-shoot {
-  0%,
-  92% {
-    opacity: 0;
-    transform: translate3d(0, 0, 0) rotate(18deg);
-  }
-  94% {
-    opacity: 1;
-  }
-  99%,
-  100% {
-    opacity: 0;
-    transform: translate3d(46vw, 15vh, 0) rotate(18deg);
-  }
-}
-
-/* The rocket flyby. 163 seconds, and visible for ~7% of that — roughly once
-   every three minutes. Rare enough to be a small event when it happens and
-   never enough to compete with the data. */
-.lm-space__rocket {
-  position: absolute;
-  top: 30%;
-  left: -140px;
-  opacity: 0;
-  will-change: transform, opacity;
-  animation: lm-rocket 163s linear infinite;
-}
-
-@keyframes lm-rocket {
-  0%,
-  93% {
-    opacity: 0;
-    transform: translate3d(0, 0, 0);
-  }
-  94% {
-    opacity: 0.85;
-  }
-  99% {
-    opacity: 0.85;
-  }
-  100% {
-    opacity: 0;
-    transform: translate3d(calc(100vw + 200px), -12vh, 0);
-  }
-}
-
-/* --- Micro-interactions --------------------------------------------------- */
-
-.lm-lift {
-  transition:
-    transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    border-color 220ms ease,
-    box-shadow 220ms ease;
-}
-
-.lm-lift:hover {
-  transform: translate3d(0, -3px, 0);
-  border-color: color-mix(in oklch, var(--color-brand) 45%, var(--color-line));
-  box-shadow:
-    0 0 0 1px color-mix(in oklch, var(--color-brand) 18%, transparent),
-    0 18px 40px -20px color-mix(in oklch, var(--color-brand) 55%, transparent);
-}
-
-/* Page transition. Applied once on mount; there is no exit animation because
-   an exit delays the next screen for no informational gain. */
-.lm-enter {
-  animation: lm-enter 420ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
-}
-
-@keyframes lm-enter {
+@keyframes launch-in {
   from {
     opacity: 0;
-    transform: translate3d(0, 10px, 0);
+    transform: translate3d(0, 6px, 0);
   }
   to {
     opacity: 1;
-    transform: translate3d(0, 0, 0);
-  }
-}
-
-/* --- Reduced motion ------------------------------------------------------- */
-
-@media (prefers-reduced-motion: reduce) {
-  .lm-mascot__drift,
-  .lm-mascot__breathe,
-  .lm-mascot__shimmer,
-  .lm-mascot__blink,
-  .lm-space__nebula,
-  .lm-space__stars,
-  .lm-space__rock,
-  .lm-space__shoot,
-  .lm-space__rocket,
-  .lm-enter {
-    animation: none !important;
-  }
-
-  /* Held mid-pose rather than at frame zero: the composed position is the one
-     the figure was drawn for. */
-  .lm-mascot__drift {
-    transform: translate3d(0, -8px, 0);
-  }
-
-  /* The shooting stars and the rocket are events, not scenery. With motion off
-     there is no event to show, so they are removed rather than parked. */
-  .lm-space__shoot,
-  .lm-space__rocket {
-    display: none;
-  }
-
-  .lm-lift:hover {
     transform: none;
   }
 }
 
-/* ============================================================================
-   ALPHA ACCESS — cinematic launch screen
-   ----------------------------------------------------------------------------
-   The access-code behavior stays intentionally small. Everything below is the
-   stagecraft: layered atmosphere, parallax depth, composited mascot lighting,
-   and a glass HUD that feels embedded in the scene rather than laid on top.
-   ========================================================================== */
-
-.alpha-landing {
-  background: #02030a;
-  perspective: 1200px;
+@keyframes launch-banner {
+  0% {
+    opacity: 0;
+    transform: scale(0.88);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(1.02);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
-.alpha-stage {
-  position: relative;
-  min-height: 100svh;
-  isolation: isolate;
-  display: grid;
-  place-items: center;
-  padding: clamp(1.25rem, 3vw, 3rem);
+/* Scale in, hold, then leave by growing rather than shrinking — a number that
+   recedes reads as a mistake being undone. */
+/*
+   Arrive fast, hold, leave late.
+
+   The first version spent its last 28% fading out to scale 1.35, and because
+   each digit is keyed it remounts at opacity 0 — so between two numbers there
+   was a window with no digit on screen at all. At a 700ms beat that read as a
+   flicker rather than a count. The hold now runs to 88% and the exit is a
+   small lift, so the countdown is legible for almost the whole beat and the
+   handover is a cut rather than a gap.
+*/
+@keyframes launch-count {
+  0% {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  14% {
+    opacity: 1;
+    transform: scale(1.06);
+  }
+  26% {
+    transform: scale(1);
+  }
+  88% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.12);
+  }
 }
 
-.alpha-cinematic,
-.alpha-stage__depth,
-.alpha-stage__mascot,
-.alpha-copy,
-.alpha-panel,
+/*
+   The interface stands down for the mission. `data-sequence` is latched on the
+   landing root from the moment the code is accepted, so this is one rule
+   rather than one per phase, and it cannot come back on mid-flight.
+*/
+[data-alpha-content] {
+  transition: opacity 600ms var(--ease-standard);
+}
+
+.alpha-landing[data-sequence] [data-alpha-content] {
+  opacity: 0;
+}
+
+/* --- Unlock transition ---------------------------------------------------- */
+
 .alpha-transition {
   position: absolute;
-}
-
-.alpha-cinematic {
-  inset: 0;
-  z-index: -1;
-  overflow: hidden;
-  pointer-events: none;
-}
-
-.alpha-cinematic__rim {
-  position: absolute;
-  inset-block: -16%;
-  width: 28%;
-  opacity: 0.58;
-  filter: blur(42px);
-  transform: translateZ(0);
-}
-
-.alpha-cinematic__rim--left {
-  left: -18%;
-  background: linear-gradient(90deg, oklch(0.42 0.18 286 / 0.48), transparent);
-}
-
-.alpha-cinematic__rim--right {
-  right: -14%;
-  background: linear-gradient(270deg, oklch(0.52 0.16 196 / 0.42), transparent);
-}
-
-.alpha-cinematic__lens {
-  position: absolute;
-  height: 1px;
-  border-radius: 999px;
-  background: linear-gradient(90deg, transparent, oklch(0.86 0.12 196 / 0.42), transparent);
-  opacity: 0.32;
-  transform: translate3d(0, 0, 0) rotate(-9deg);
-}
-
-.alpha-cinematic__lens--one {
-  left: 16%;
-  top: 25%;
-  width: 44%;
-}
-
-.alpha-cinematic__lens--two {
-  right: 12%;
-  top: 58%;
-  width: 34%;
-  opacity: 0.2;
-}
-
-.alpha-cinematic__vignette {
-  position: absolute;
-  inset: 0;
-  background:
-    radial-gradient(ellipse at center, transparent 32%, rgb(0 0 0 / 0.42) 76%),
-    linear-gradient(180deg, rgb(0 0 0 / 0.36), transparent 24%, rgb(0 0 0 / 0.5));
-}
-
-.alpha-copy {
-  z-index: 4;
-  left: clamp(1.5rem, 5vw, 5rem);
-  top: clamp(1.75rem, 6vh, 4.75rem);
-  max-width: min(92vw, 760px);
-  animation: alpha-rise 900ms var(--ease-instrument) both;
-}
-
-.alpha-logo {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  color: var(--color-plasma);
-}
-
-.alpha-kicker {
-  color: var(--color-ink-faint);
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.36em;
-  text-transform: uppercase;
-}
-
-.alpha-copy h1 {
-  margin-top: clamp(0.75rem, 1.8vh, 1.25rem);
-  color: var(--color-ink);
-  font-size: clamp(3rem, 9.6vw, 9.5rem);
-  font-weight: 650;
-  letter-spacing: clamp(-0.06em, -0.5vw, -0.015em);
-  line-height: 0.82;
-  text-shadow:
-    0 0 32px rgb(255 255 255 / 0.14),
-    0 0 82px oklch(0.58 0.18 196 / 0.24);
-}
-
-.alpha-positioning {
-  margin-top: clamp(0.9rem, 2vh, 1.35rem);
-  font-size: clamp(1.05rem, 1.5vw, 1.35rem);
-  font-weight: 500;
-  letter-spacing: -0.025em;
-  color: var(--color-ink);
-}
-
-.alpha-subtitle {
-  margin-top: clamp(0.8rem, 1.8vh, 1.2rem);
-  max-width: 42rem;
-  color: var(--color-ink-dim);
-  font-size: clamp(0.85rem, 1.45vw, 1.28rem);
-  letter-spacing: clamp(0.08em, 0.8vw, 0.28em);
-}
-
-.alpha-panel {
-  z-index: 5;
-  right: clamp(1.25rem, 5vw, 5rem);
-  bottom: clamp(1.25rem, 6vh, 4.75rem);
-  width: min(25rem, calc(100vw - 2.5rem));
-  animation: alpha-panel-in 980ms var(--ease-instrument) 180ms both;
-}
-
-.alpha-access {
-  position: relative;
-  overflow: hidden;
-  border-radius: 1.65rem;
-  border: 1px solid rgb(255 255 255 / 0.14);
-  background:
-    linear-gradient(145deg, rgb(255 255 255 / 0.12), rgb(255 255 255 / 0.035)),
-    rgb(4 8 18 / 0.54);
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.16),
-    0 24px 80px rgb(0 0 0 / 0.46),
-    0 0 70px oklch(0.55 0.16 196 / 0.12);
-  backdrop-filter: blur(28px) saturate(150%);
-}
-
-.alpha-access::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background:
-    linear-gradient(110deg, transparent 0 30%, rgb(255 255 255 / 0.16), transparent 58%),
-    radial-gradient(circle at 20% 0%, oklch(0.9 0.1 196 / 0.14), transparent 36%);
-  opacity: 0.6;
-  pointer-events: none;
-}
-
-.alpha-access > * {
-  position: relative;
-  z-index: 1;
-}
-
-.alpha-unlock:active {
-  transform: scale(0.985);
-}
-
-.alpha-stage__depth {
-  inset: 0;
-  pointer-events: none;
-}
-
-.alpha-stage__depth--back {
-  z-index: 1;
-  background:
-    radial-gradient(circle at 58% 45%, oklch(0.65 0.18 168 / 0.18), transparent 0 10%, transparent 34%),
-    radial-gradient(circle at 54% 50%, oklch(0.78 0.08 210 / 0.14), transparent 0 21%, transparent 42%);
-  animation: alpha-depth-back 18s ease-in-out infinite;
-}
-
-.alpha-stage__depth--front {
-  z-index: 3;
-  background:
-    radial-gradient(circle at 55% 58%, transparent 0 14%, rgb(1 3 10 / 0.2) 34%, transparent 54%),
-    linear-gradient(70deg, transparent 0 42%, rgb(255 255 255 / 0.035) 44%, transparent 49%);
-  mix-blend-mode: screen;
-  animation: alpha-depth-front 13s ease-in-out infinite;
-}
-
-.alpha-stage__mascot {
-  inset: 0;
-  z-index: 2;
-  pointer-events: none;
-}
-
-.alpha-space {
-  position: absolute;
-  inset: 0;
-  z-index: -3;
-  overflow: hidden;
-  background:
-    radial-gradient(circle at 50% 116%, oklch(0.3 0.09 258 / 0.4), transparent 44%),
-    radial-gradient(circle at 25% 18%, oklch(0.34 0.16 292 / 0.2), transparent 40%),
-    linear-gradient(145deg, oklch(0.045 0.018 260), var(--color-void) 45%, #01030a);
-  transition:
-    filter 1700ms var(--ease-instrument),
-    transform 1700ms var(--ease-instrument);
-}
-
-.alpha-space--unlock {
-  filter: brightness(1.34) saturate(1.2);
-  transform: scale(1.08);
-}
-
-.alpha-space__horizon,
-.alpha-space__nebula,
-.alpha-space__planet,
-.alpha-space__stars,
-.alpha-space__debris,
-.alpha-space__galaxy,
-.alpha-space__dust,
-.alpha-space__asteroid,
-.alpha-space__meteor,
-.alpha-space__comet,
-.alpha-space__satellite,
-.alpha-space__probe,
-.alpha-space__ship,
-.alpha-space__scan {
-  position: absolute;
-  will-change: transform, opacity;
-}
-
-.alpha-space__horizon {
-  left: 50%;
-  bottom: -18%;
-  width: 120vw;
-  height: 36vh;
-  border-radius: 999px 999px 0 0;
-  background:
-    radial-gradient(ellipse at center, oklch(0.7 0.16 196 / 0.2), transparent 58%),
-    linear-gradient(180deg, oklch(0.42 0.16 206 / 0.28), transparent 68%);
-  filter: blur(24px);
-  transform: translate3d(-50%, 0, 0);
-}
-
-.alpha-space__nebula {
-  border-radius: 999px;
-  filter: blur(62px);
-  opacity: 0.5;
-}
-
-.alpha-space__nebula--violet {
-  left: -10%;
-  top: 6%;
-  width: min(820px, 72vw);
-  height: min(820px, 72vw);
-  background: radial-gradient(circle, oklch(0.5 0.2 292 / 0.42), transparent 70%);
-  animation: alpha-nebula-a 86s ease-in-out infinite;
-}
-
-.alpha-space__nebula--cyan {
-  right: -18%;
-  bottom: -18%;
-  width: min(920px, 74vw);
-  height: min(920px, 74vw);
-  background: radial-gradient(circle, oklch(0.5 0.14 205 / 0.38), transparent 72%);
-  animation: alpha-nebula-b 101s ease-in-out infinite;
-}
-
-.alpha-space__planet {
-  right: clamp(-180px, -7vw, -40px);
-  top: clamp(30px, 8vh, 110px);
-  width: clamp(260px, 36vw, 620px);
-  aspect-ratio: 1;
-  border-radius: 999px;
-  background:
-    radial-gradient(circle at 35% 28%, oklch(0.94 0.026 235 / 0.9), transparent 0 10%, transparent 32%),
-    radial-gradient(circle at 34% 30%, oklch(0.68 0.08 220), oklch(0.34 0.12 245) 42%, oklch(0.1 0.05 255) 72%),
-    oklch(0.12 0.04 250);
-  box-shadow:
-    inset -64px -52px 90px oklch(0.015 0.01 250 / 0.9),
-    0 0 56px oklch(0.7 0.12 220 / 0.5);
-  opacity: 0.72;
-  animation: alpha-planet 62s linear infinite;
-}
-
-.alpha-space__planet::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background:
-    linear-gradient(82deg, transparent 0 42%, rgb(255 255 255 / 0.16) 45%, transparent 48%),
-    repeating-linear-gradient(16deg, transparent 0 16px, rgb(255 255 255 / 0.028) 17px 20px);
-  opacity: 0.48;
-  animation: alpha-planet-clouds 38s linear infinite;
-}
-
-.alpha-space__stars {
-  inset: -30% 0 0;
-  height: 160%;
-  background-repeat: repeat;
-}
-
-.alpha-space__stars--far {
-  background-image:
-    radial-gradient(1px 1px at 20% 30%, oklch(0.94 0.02 270 / 0.42), transparent),
-    radial-gradient(1px 1px at 70% 60%, oklch(0.94 0.02 210 / 0.32), transparent),
-    radial-gradient(1px 1px at 45% 85%, oklch(0.94 0.02 270 / 0.38), transparent);
-  background-size: 220px 220px;
-  animation: alpha-stars 210s linear infinite;
-}
-
-.alpha-space__stars--near {
-  background-image:
-    radial-gradient(1.8px 1.8px at 22% 12%, oklch(0.98 0.04 200 / 0.56), transparent),
-    radial-gradient(1.6px 1.6px at 82% 74%, oklch(0.98 0.04 295 / 0.48), transparent);
-  background-size: 520px 520px;
-  animation: alpha-stars 128s linear infinite;
-}
-
-.alpha-space__debris {
-  inset: -20%;
-  opacity: 0.28;
-  background-image:
-    radial-gradient(2px 2px at 12% 42%, rgb(255 255 255 / 0.28), transparent),
-    radial-gradient(1px 1px at 64% 26%, oklch(0.8 0.12 196 / 0.3), transparent),
-    radial-gradient(2px 2px at 88% 78%, rgb(255 255 255 / 0.22), transparent);
-  background-size: 420px 420px;
-}
-
-.alpha-space__debris--one {
-  animation: alpha-debris 74s linear infinite;
-}
-
-.alpha-space__debris--two {
-  opacity: 0.18;
-  transform: scale(1.24);
-  animation: alpha-debris 96s linear infinite reverse;
-}
-
-.alpha-space__galaxy {
-  left: 8%;
-  top: 16%;
-  width: min(560px, 58vw);
-  height: min(240px, 24vw);
-  border-radius: 999px;
-  background:
-    radial-gradient(ellipse at 48% 50%, rgb(255 255 255 / 0.22), transparent 0 8%, transparent 68%),
-    radial-gradient(ellipse at 50% 50%, oklch(0.66 0.18 288 / 0.26), transparent 70%);
-  filter: blur(10px);
-  opacity: 0.38;
-  transform: rotate(-18deg);
-  animation: alpha-galaxy 132s ease-in-out infinite;
-}
-
-.alpha-space__dust {
-  inset: -18%;
-  background-image:
-    radial-gradient(1px 1px at 11% 22%, rgb(255 255 255 / 0.18), transparent),
-    radial-gradient(1px 1px at 38% 72%, oklch(0.86 0.1 196 / 0.16), transparent),
-    radial-gradient(1.5px 1.5px at 67% 41%, rgb(255 255 255 / 0.14), transparent),
-    radial-gradient(1px 1px at 91% 63%, oklch(0.86 0.14 286 / 0.16), transparent);
-  background-size: 340px 340px;
-}
-
-.alpha-space__dust--back {
-  opacity: 0.22;
-  animation: alpha-dust-back 176s linear infinite;
-}
-
-.alpha-space__dust--front {
-  opacity: 0.28;
-  background-size: 220px 220px;
-  animation: alpha-dust-front 118s linear infinite;
-}
-
-.alpha-space__asteroid {
-  width: clamp(12px, 1.8vw, 28px);
-  aspect-ratio: 1.25;
-  border-radius: 44% 56% 38% 62% / 48% 34% 66% 52%;
-  background:
-    radial-gradient(circle at 30% 28%, rgb(255 255 255 / 0.14), transparent 22%),
-    linear-gradient(135deg, oklch(0.42 0.02 265), oklch(0.18 0.02 265));
-  box-shadow: 0 0 18px rgb(0 0 0 / 0.38);
-  opacity: 0.42;
-}
-
-.alpha-space__asteroid--one {
-  left: -5%;
-  top: 62%;
-  animation: alpha-asteroid-one 151s linear infinite;
-}
-
-.alpha-space__asteroid--two {
-  right: -4%;
-  top: 24%;
-  width: clamp(8px, 1vw, 18px);
-  opacity: 0.3;
-  animation: alpha-asteroid-two 203s linear infinite;
-}
-
-.alpha-space__meteor,
-.alpha-space__comet {
-  height: 1px;
-  border-radius: 999px;
-  opacity: 0;
-  transform-origin: 100% 50%;
-}
-
-.alpha-space__meteor {
-  width: clamp(90px, 12vw, 190px);
-  background: linear-gradient(90deg, transparent, oklch(0.98 0.05 196 / 0.95));
-  box-shadow: 0 0 22px oklch(0.82 0.12 196 / 0.32);
-}
-
-.alpha-space__meteor--one {
-  left: 4%;
-  top: 21%;
-  animation: alpha-meteor-one 29s ease-in infinite;
-}
-
-.alpha-space__meteor--two {
-  right: 18%;
-  top: 46%;
-  width: clamp(70px, 9vw, 140px);
-  animation: alpha-meteor-two 41s ease-in infinite;
-  animation-delay: -17s;
-}
-
-.alpha-space__comet {
-  left: 74%;
-  top: 14%;
-  width: clamp(120px, 16vw, 240px);
-  background: linear-gradient(90deg, transparent, oklch(0.88 0.14 288 / 0.7));
-  filter: blur(0.4px);
-  animation: alpha-comet 67s ease-in-out infinite;
-  animation-delay: -31s;
-}
-
-.alpha-space__satellite,
-.alpha-space__probe,
-.alpha-space__ship {
-  opacity: 0;
-  filter: drop-shadow(0 0 10px rgb(163 220 255 / 0.18));
-}
-
-.alpha-space__satellite {
-  left: -80px;
-  top: 32%;
-  width: 46px;
-  height: 12px;
-  border-radius: 999px;
-  background: linear-gradient(90deg, oklch(0.78 0.03 240 / 0.7), oklch(0.36 0.05 250 / 0.5));
-  animation: alpha-satellite 88s linear infinite;
-  animation-delay: -22s;
-}
-
-.alpha-space__satellite::before,
-.alpha-space__satellite::after {
-  content: "";
-  position: absolute;
-  top: -7px;
-  width: 22px;
-  height: 8px;
-  border: 1px solid oklch(0.8 0.08 210 / 0.42);
-  background: oklch(0.22 0.08 240 / 0.5);
-}
-
-.alpha-space__satellite::before {
-  left: -24px;
-}
-
-.alpha-space__satellite::after {
-  right: -24px;
-}
-
-.alpha-space__probe {
-  right: -90px;
-  top: 68%;
-  width: 34px;
-  height: 34px;
-  border: 1px solid oklch(0.8 0.06 220 / 0.38);
-  border-radius: 999px;
-  background: radial-gradient(circle, oklch(0.82 0.06 220 / 0.56), oklch(0.12 0.04 250 / 0.22));
-  animation: alpha-probe 121s linear infinite;
-  animation-delay: -54s;
-}
-
-.alpha-space__probe::before {
-  content: "";
-  position: absolute;
-  left: -22px;
-  top: 50%;
-  width: 76px;
-  height: 1px;
-  background: oklch(0.78 0.08 220 / 0.38);
-}
-
-.alpha-space__ship {
-  left: -110px;
-  top: 74%;
-  width: 72px;
-  height: 18px;
-  clip-path: polygon(0 58%, 70% 0, 100% 50%, 70% 100%);
-  background: linear-gradient(90deg, oklch(0.3 0.04 250 / 0.58), oklch(0.78 0.05 220 / 0.52));
-  animation: alpha-ship 173s linear infinite;
-  animation-delay: -83s;
-}
-
-.alpha-space__scan {
-  inset: 0;
-  background:
-    linear-gradient(115deg, transparent 30%, oklch(0.9 0.09 196 / 0.07), transparent 52%),
-    repeating-linear-gradient(180deg, transparent 0 13px, rgb(255 255 255 / 0.018) 14px 15px);
-  opacity: 0.24;
-  transform: translate3d(-26%, -12%, 0);
-  animation: alpha-scan 18s ease-in-out infinite;
-}
-
-.alpha-mascot {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  pointer-events: none;
-  transform: translateZ(0);
-}
-
-.alpha-mascot--hero {
-  transform:
-    translate3d(clamp(1rem, 13vw, 12rem), clamp(0.5rem, 4vh, 3rem), 0)
-    rotateX(4deg)
-    rotateY(-8deg);
-}
-
-.alpha-mascot__frame {
-  position: relative;
-  width: min(64vw, 690px);
-  transform-origin: 54% 46%;
-  transition:
-    transform 1700ms var(--ease-instrument),
-    filter 1700ms var(--ease-instrument);
-}
-
-.alpha-mascot__frame::before {
-  content: "";
-  position: absolute;
-  inset: 4% 6% 7%;
-  border-radius: 46% 48% 42% 44%;
-  background: radial-gradient(circle at 55% 36%, transparent 0 28%, rgb(0 0 0 / 0.42) 68%);
-  filter: blur(26px);
-  transform: translate3d(18px, 36px, -1px) scale(0.92);
-}
-
-.alpha-mascot--unlock .alpha-mascot__frame {
-  filter:
-    drop-shadow(0 36px 90px rgb(0 0 0 / 0.42))
-    drop-shadow(0 0 44px oklch(0.84 0.16 158 / 0.48));
-  transform: scale(1.06);
-}
-
-.alpha-mascot__image {
-  position: relative;
-  z-index: 2;
-  height: auto;
-  width: 100%;
-  user-select: none;
-  filter:
-    saturate(1.06)
-    contrast(1.05)
-    drop-shadow(0 42px 78px rgb(0 0 0 / 0.54))
-    drop-shadow(-22px -18px 32px oklch(0.76 0.12 196 / 0.16));
-  mix-blend-mode: normal;
-  opacity: 1;
-  transform: translate3d(var(--gaze-x), var(--gaze-y), 0) scale(1.015);
-}
-
-.alpha-mascot__shadow,
-.alpha-mascot__backlight,
-.alpha-mascot__atmosphere,
-.alpha-mascot__reflection,
-.alpha-mascot__blink,
-.alpha-mascot__hand,
-.alpha-mascot__helmet-light {
-  position: absolute;
-  pointer-events: none;
-}
-
-.alpha-mascot__shadow {
-  z-index: 1;
-  left: 20%;
-  right: 7%;
-  bottom: 3%;
-  height: 18%;
-  border-radius: 999px;
-  background: radial-gradient(ellipse at center, rgb(0 0 0 / 0.72), transparent 70%);
-  filter: blur(22px);
-  transform: rotate(-9deg);
-}
-
-.alpha-mascot__backlight {
-  z-index: 1;
-  inset: 6% 4% 12%;
-  border-radius: 999px;
-  background: radial-gradient(circle at 68% 31%, oklch(0.9 0.12 196 / 0.28), transparent 42%);
-  filter: blur(18px);
-  mix-blend-mode: screen;
-}
-
-.alpha-mascot__atmosphere {
-  z-index: 4;
-  inset: 0;
-  background:
-    radial-gradient(circle at 42% 23%, rgb(255 255 255 / 0.22), transparent 8%),
-    radial-gradient(circle at 62% 42%, oklch(0.8 0.12 196 / 0.14), transparent 24%),
-    linear-gradient(112deg, transparent 0 38%, rgb(255 255 255 / 0.12), transparent 53%);
-  mix-blend-mode: screen;
-  opacity: 0.74;
-  animation: alpha-atmosphere 9.5s ease-in-out infinite;
-}
-
-.alpha-mascot__reflection {
-  z-index: 5;
-  left: 20%;
-  top: 16%;
-  width: 36%;
-  height: 18%;
-  border-radius: 999px;
-  background: linear-gradient(110deg, transparent, rgb(255 255 255 / 0.4), transparent);
-  mix-blend-mode: screen;
-  transform: rotate(-18deg);
-}
-
-.alpha-mascot__blink {
-  z-index: 6;
-  width: 9.5%;
-  height: 3.2%;
-  border-radius: 999px;
-  background: oklch(0.08 0.02 80 / 0.82);
-  opacity: 0;
-  transform: translate3d(var(--gaze-x), var(--gaze-y), 0) scaleY(0);
-  animation: alpha-blink 9.5s steps(1, end) infinite;
-}
-
-.alpha-mascot__blink--left {
-  left: 35.5%;
-  top: 26.1%;
-}
-
-.alpha-mascot__blink--right {
-  left: 56.8%;
-  top: 25.6%;
-  animation-delay: 80ms;
-}
-
-.alpha-mascot__hand {
-  z-index: 6;
-  right: 10.4%;
-  top: 49%;
-  width: 16%;
-  height: 9%;
-  border-radius: 999px;
-  background: radial-gradient(circle at 75% 30%, oklch(0.82 0.16 158 / 0.24), transparent 58%);
-  opacity: 0.6;
-  animation: alpha-hand 6.7s ease-in-out infinite;
-}
-
-.alpha-mascot__helmet-light {
-  z-index: 6;
-  left: 23%;
-  top: 18%;
-  width: 8%;
-  aspect-ratio: 1;
-  border-radius: 999px;
-  background: radial-gradient(circle, white, oklch(0.82 0.14 196 / 0.58), transparent 68%);
-  opacity: 0.42;
-  mix-blend-mode: screen;
-  transition: opacity 900ms var(--ease-instrument), transform 900ms var(--ease-instrument);
-}
-
-.alpha-mascot--unlock .alpha-mascot__helmet-light {
-  opacity: 1;
-  transform: scale(1.75);
-}
-
-.alpha-transition {
   inset: 0;
   bottom: auto;
-  height: 100svh;
-  z-index: 8;
+  height: 100dvh;
+  /* Above the mission card and above the content — see the note on
+     `.launch-card`. At z-8 this flash was painting under the `z-10` grid. */
+  z-index: 30;
   pointer-events: none;
   background:
-    radial-gradient(circle at 58% 42%, oklch(0.96 0.08 196 / 0.72), transparent 8%, transparent 64%),
-    radial-gradient(circle at 50% 50%, rgb(255 255 255 / 0.28), transparent 28%);
+    radial-gradient(circle at 50% 45%, oklch(0.94 0.08 200 / 0.6), transparent 10%, transparent 62%),
+    radial-gradient(circle at 50% 50%, rgb(255 255 255 / 0.22), transparent 28%);
   opacity: 0;
   transform: scale(0.7);
 }
 
 .alpha-landing--unlock .alpha-transition {
-  animation: alpha-unlock 1700ms var(--ease-instrument) forwards;
+  animation: alpha-unlock 1500ms var(--ease-standard) forwards;
 }
 
-.alpha-landing--unlock .alpha-copy,
-.alpha-landing--unlock .alpha-panel {
-  animation: alpha-copy-unlock 1700ms var(--ease-instrument) forwards;
-}
+/* The flash that carries the visitor into the terminal. Kept exactly as it
+   was, and simply triggered later: the sequence reaches `unlock`, the planet
+   is filling the frame, and this opens over the top of it. */
 
-.alpha-dashboard-enter main > * {
-  animation: alpha-dashboard-card 620ms var(--ease-instrument) both;
-}
 
-.alpha-dashboard-enter main > *:nth-child(2) {
-  animation-delay: 80ms;
-}
-
-.alpha-dashboard-enter main > *:nth-child(3) {
-  animation-delay: 150ms;
-}
-
-.alpha-dashboard-enter main > *:nth-child(4) {
-  animation-delay: 220ms;
-}
-
-.alpha-landing--scene-only .alpha-copy,
-.alpha-landing--scene-only .alpha-panel {
+.alpha-landing--scene-only [data-alpha-content] {
   opacity: 0;
   pointer-events: none;
-}
-
-.alpha-mascot--compact {
-  position: relative;
-  width: 92px;
-  height: 118px;
-}
-
-.alpha-mascot--compact .alpha-mascot__frame {
-  width: 92px;
-}
-
-@keyframes alpha-rise {
-  from {
-    opacity: 0;
-    transform: translate3d(0, 16px, 0);
-  }
-  to {
-    opacity: 1;
-    transform: translate3d(0, 0, 0);
-  }
-}
-
-@keyframes alpha-panel-in {
-  from {
-    opacity: 0;
-    transform: translate3d(0, 20px, 0) scale(0.985);
-  }
-  to {
-    opacity: 1;
-    transform: translate3d(0, 0, 0) scale(1);
-  }
-}
-
-@keyframes alpha-nebula-a {
-  0%,
-  100% {
-    transform: translate3d(0, 0, 0) scale(1);
-  }
-  50% {
-    transform: translate3d(4vw, -2vh, 0) scale(1.12);
-  }
-}
-
-@keyframes alpha-nebula-b {
-  0%,
-  100% {
-    transform: translate3d(0, 0, 0) scale(1.06);
-  }
-  50% {
-    transform: translate3d(-5vw, 3vh, 0) scale(1);
-  }
-}
-
-@keyframes alpha-planet {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@keyframes alpha-planet-clouds {
-  from {
-    transform: rotate(0deg) translate3d(0, 0, 0);
-  }
-  to {
-    transform: rotate(-360deg) translate3d(0, 0, 0);
-  }
-}
-
-@keyframes alpha-stars {
-  from {
-    transform: translate3d(0, 0, 0);
-  }
-  to {
-    transform: translate3d(0, 30%, 0);
-  }
-}
-
-@keyframes alpha-debris {
-  from {
-    transform: translate3d(-2%, -1%, 0) rotate(0deg);
-  }
-  to {
-    transform: translate3d(4%, 3%, 0) rotate(12deg);
-  }
-}
-
-@keyframes alpha-galaxy {
-  0%,
-  100% {
-    opacity: 0.3;
-    transform: translate3d(0, 0, 0) rotate(-18deg) scale(1);
-  }
-  50% {
-    opacity: 0.46;
-    transform: translate3d(3vw, -1.6vh, 0) rotate(-15deg) scale(1.08);
-  }
-}
-
-@keyframes alpha-dust-back {
-  from {
-    transform: translate3d(0, 0, 0);
-  }
-  to {
-    transform: translate3d(7%, 5%, 0);
-  }
-}
-
-@keyframes alpha-dust-front {
-  from {
-    transform: translate3d(-2%, -1%, 0) scale(1.04);
-  }
-  to {
-    transform: translate3d(6%, 7%, 0) scale(1.04);
-  }
-}
-
-@keyframes alpha-asteroid-one {
-  from {
-    transform: translate3d(0, 0, 0) rotate(0deg);
-  }
-  to {
-    transform: translate3d(calc(100vw + 180px), -19vh, 0) rotate(260deg);
-  }
-}
-
-@keyframes alpha-asteroid-two {
-  from {
-    transform: translate3d(0, 0, 0) rotate(0deg);
-  }
-  to {
-    transform: translate3d(calc(-100vw - 160px), 24vh, 0) rotate(-310deg);
-  }
-}
-
-@keyframes alpha-meteor-one {
-  0%,
-  90% {
-    opacity: 0;
-    transform: translate3d(-14vw, -10vh, 0) rotate(18deg);
-  }
-  92% {
-    opacity: 0.78;
-  }
-  97%,
-  100% {
-    opacity: 0;
-    transform: translate3d(48vw, 16vh, 0) rotate(18deg);
-  }
-}
-
-@keyframes alpha-meteor-two {
-  0%,
-  86% {
-    opacity: 0;
-    transform: translate3d(22vw, -8vh, 0) rotate(154deg);
-  }
-  88% {
-    opacity: 0.62;
-  }
-  94%,
-  100% {
-    opacity: 0;
-    transform: translate3d(-42vw, 13vh, 0) rotate(154deg);
-  }
-}
-
-@keyframes alpha-comet {
-  0%,
-  82% {
-    opacity: 0;
-    transform: translate3d(18vw, -12vh, 0) rotate(150deg) scaleX(0.7);
-  }
-  86%,
-  91% {
-    opacity: 0.38;
-  }
-  100% {
-    opacity: 0;
-    transform: translate3d(-62vw, 24vh, 0) rotate(150deg) scaleX(1);
-  }
-}
-
-@keyframes alpha-satellite {
-  0%,
-  64% {
-    opacity: 0;
-    transform: translate3d(0, 0, 0) rotate(-8deg);
-  }
-  67%,
-  84% {
-    opacity: 0.58;
-  }
-  100% {
-    opacity: 0;
-    transform: translate3d(calc(100vw + 180px), -16vh, 0) rotate(-8deg);
-  }
-}
-
-@keyframes alpha-probe {
-  0%,
-  58% {
-    opacity: 0;
-    transform: translate3d(0, 0, 0) rotate(0deg);
-  }
-  61%,
-  78% {
-    opacity: 0.4;
-  }
-  100% {
-    opacity: 0;
-    transform: translate3d(calc(-100vw - 180px), -12vh, 0) rotate(180deg);
-  }
-}
-
-@keyframes alpha-ship {
-  0%,
-  76% {
-    opacity: 0;
-    transform: translate3d(0, 0, 0) rotate(-5deg);
-  }
-  78%,
-  87% {
-    opacity: 0.42;
-  }
-  100% {
-    opacity: 0;
-    transform: translate3d(calc(100vw + 220px), -28vh, 0) rotate(-5deg);
-  }
-}
-
-@keyframes alpha-scan {
-  0%,
-  100% {
-    opacity: 0.16;
-    transform: translate3d(-28%, -14%, 0);
-  }
-  50% {
-    opacity: 0.34;
-    transform: translate3d(16%, 10%, 0);
-  }
-}
-
-@keyframes alpha-depth-back {
-  0%,
-  100% {
-    opacity: 0.72;
-    transform: translate3d(0, 0, 0) scale(1);
-  }
-  50% {
-    opacity: 0.96;
-    transform: translate3d(-1.4vw, 0.8vh, 0) scale(1.04);
-  }
-}
-
-@keyframes alpha-depth-front {
-  0%,
-  100% {
-    opacity: 0.42;
-    transform: translate3d(0, 0, 0);
-  }
-  50% {
-    opacity: 0.62;
-    transform: translate3d(1.2vw, -0.6vh, 0);
-  }
-}
-
-@keyframes alpha-atmosphere {
-  0%,
-  100% {
-    opacity: 0.58;
-    transform: translate3d(-1%, 0, 0);
-  }
-  50% {
-    opacity: 0.82;
-    transform: translate3d(1%, -0.6%, 0);
-  }
-}
-
-@keyframes alpha-blink {
-  0%,
-  94%,
-  100% {
-    opacity: 0;
-    transform: translate3d(var(--gaze-x), var(--gaze-y), 0) scaleY(0);
-  }
-  95%,
-  97% {
-    opacity: 0.7;
-    transform: translate3d(var(--gaze-x), var(--gaze-y), 0) scaleY(1);
-  }
-}
-
-@keyframes alpha-hand {
-  0%,
-  100% {
-    transform: translate3d(0, 0, 0) rotate(0deg);
-  }
-  50% {
-    transform: translate3d(5px, -6px, 0) rotate(2deg);
-  }
 }
 
 @keyframes alpha-unlock {
@@ -1467,134 +649,71 @@
   }
 }
 
-@keyframes alpha-copy-unlock {
-  0% {
-    opacity: 1;
-    transform: translate3d(0, 0, 0) scale(1);
-  }
-  100% {
-    opacity: 0;
-    transform: translate3d(0, -18px, 0) scale(1.035);
-  }
+/* Entry stagger for the dashboard, immediately after an accepted code. */
+.alpha-dashboard-enter main > * {
+  animation: alpha-dashboard-card 420ms var(--ease-standard) both;
 }
 
 @keyframes alpha-dashboard-card {
   from {
     opacity: 0;
-    transform: translate3d(0, 16px, 0);
+    transform: translate3d(0, 10px, 0);
   }
   to {
     opacity: 1;
-    transform: translate3d(0, 0, 0);
+    transform: none;
   }
 }
 
-@media (max-width: 900px) {
-  .alpha-copy {
-    left: 4vw;
-    right: 4vw;
-    top: clamp(1.25rem, 4vh, 2rem);
-    width: auto;
-    max-width: none;
-    text-align: center;
-  }
+/* --- Reduced motion ------------------------------------------------------- */
 
-  .alpha-logo {
-    justify-content: center;
-  }
+/*
+   The sequence never reaches the phases these rules would animate — the
+   timeline in `lib/launch.ts` goes straight from `approved` to `enter`, so
+   there is no countdown and no flight to suppress. This is the second lock on
+   the same door, because a camera push is exactly the motion this preference
+   exists to refuse and it should not depend on one module getting it right.
 
-  .alpha-panel {
-    left: max(4vw, calc(50% - 12.5rem));
-    right: auto;
-    bottom: clamp(1rem, 3vh, 2rem);
-    width: min(92vw, 25rem);
-    max-width: 25rem;
-    justify-self: center;
-  }
-
-  .alpha-mascot--hero {
-    transform: translate3d(0, 5vh, 0) rotateX(3deg);
-  }
-
-  .alpha-mascot__frame {
-    width: min(86vw, 520px);
-  }
-
-  .alpha-space__planet {
-    opacity: 0.5;
-  }
-}
-
-@media (max-width: 640px) {
-  .alpha-stage {
-    align-items: stretch;
-    padding: 1rem;
-  }
-
-  .alpha-copy {
-    left: 1rem;
-    right: 1rem;
-  }
-
-  .alpha-copy h1 {
-    font-size: clamp(2rem, 10.8vw, 2.7rem);
-    letter-spacing: -0.055em;
-  }
-
-  .alpha-subtitle {
-    max-width: 20rem;
-    margin-inline: auto;
-    letter-spacing: 0.1em;
-  }
-
-  .alpha-panel {
-    left: 1rem;
-    right: 1rem;
-    width: auto;
-    max-width: none;
-  }
-
-  .alpha-access {
-    padding: 1.1rem;
-  }
-
-  .alpha-mascot--hero {
-    transform: translate3d(0, 8vh, 0) scale(0.96);
-  }
-
-  .alpha-mascot__frame {
-    width: min(96vw, 430px);
-  }
-}
-
+   What a reduced-motion visitor gets: the mascot, still; ACCESS APPROVED; a
+   flat cross-fade; the terminal.
+*/
 @media (prefers-reduced-motion: reduce) {
-  .alpha-copy,
-  .alpha-panel,
-  .alpha-access,
-  .alpha-stage__depth,
+  .alpha-mascot__drift,
+  .alpha-mascot__breathe,
+  .alpha-mascot__frame,
   .alpha-space__nebula,
-  .alpha-space__planet,
-  .alpha-space__planet::before,
   .alpha-space__stars,
-  .alpha-space__debris,
-  .alpha-space__galaxy,
-  .alpha-space__dust,
-  .alpha-space__asteroid,
-  .alpha-space__meteor,
-  .alpha-space__comet,
-  .alpha-space__satellite,
-  .alpha-space__probe,
-  .alpha-space__ship,
-  .alpha-space__scan,
-  .alpha-mascot__atmosphere,
-  .alpha-mascot__hand,
-  .alpha-mascot__blink,
-  .alpha-dashboard-enter main > * {
+  .alpha-dashboard-enter main > *,
+  .launch-card__kicker,
+  .launch-card__banner,
+  .launch-card__count {
     animation: none !important;
   }
 
-  .alpha-space--unlock,
-  .alpha-mascot--unlock .alpha-mascot__frame {
+  .alpha-space--unlock {
     transform: none;
+  }
+
+  /* Held mid-pose rather than at frame zero: the composed position is the one
+     the figure was drawn for. */
+  .alpha-mascot__drift {
+    transform: translate3d(0, -6px, 0);
+  }
+
+  /* A flat fade to white instead of a rush into the frame. */
+  .alpha-landing--unlock .alpha-transition {
+    animation: none;
+    opacity: 1;
+    transform: none;
+    background: var(--color-canvas);
+    transition: opacity 500ms var(--ease-standard);
+  }
+
+  /* The thumbs still arrive — a still figure that never acknowledges the code
+     is a worse experience than a moving one, and appearing is not motion. */
+  .alpha-mascot[data-state="approved"] .alpha-mascot__thumb {
+    animation: none !important;
+    opacity: 1;
+    transform: translate(-50%, -50%) rotate(var(--tilt, 0deg)) scale(1);
   }
 }

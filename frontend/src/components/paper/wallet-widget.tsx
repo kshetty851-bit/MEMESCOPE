@@ -34,23 +34,23 @@ export function PaperWalletWidget() {
   return (
     <Link
       href="/wallet"
-      className="group flex flex-wrap items-center gap-x-6 gap-y-3 rounded-card border border-line bg-surface/40 px-4 py-3 transition-colors hover:border-line-bright"
+      className="group flex flex-wrap items-center gap-x-6 gap-y-3 rounded-md border border-line bg-surface/40 px-4 py-3 transition-colors hover:border-line-strong"
     >
-      <span className="text-label uppercase tracking-wide text-ink-faint">
+      <span className="text-label uppercase tracking-wide text-ink-3">
         Paper wallet
       </span>
 
       {figures.map((figure) => (
         <span key={figure.label} className="flex items-baseline gap-1.5">
-          <span className="text-label uppercase tracking-wide text-ink-faint">
+          <span className="text-label uppercase tracking-wide text-ink-3">
             {figure.label}
           </span>
           <span
             className={cn(
               "text-sm tabular-nums",
-              figure.value === null && "text-ink-faint",
-              figure.tone === "positive" && "text-safe",
-              figure.tone === "negative" && "text-danger",
+              figure.value === null && "text-ink-3",
+              figure.tone === "positive" && "text-up",
+              figure.tone === "negative" && "text-down",
               (!figure.tone || figure.tone === "neutral") &&
                 figure.value !== null &&
                 "text-ink",
@@ -61,7 +61,7 @@ export function PaperWalletWidget() {
         </span>
       ))}
 
-      <span className="ml-auto text-xs text-ink-faint transition-colors group-hover:text-ink">
+      <span className="ml-auto text-xs text-ink-3 transition-colors group-hover:text-ink">
         View wallet →
       </span>
     </Link>

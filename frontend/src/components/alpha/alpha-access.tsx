@@ -5,10 +5,27 @@ import type { FormEvent } from "react";
 import { useEffect, useState } from "react";
 
 import { ALPHA_ACCESS, BUILD } from "@/lib/env";
-import { api } from "@/lib/api-client";
+import { ApiError, api } from "@/lib/api-client";
+import type { GatePhase } from "@/lib/launch";
+import { cn } from "@/lib/utils";
 import type { AlphaSessionStatus } from "@/types/api";
 
-export function AlphaAccess({ onUnlocking }: { onUnlocking: (active: boolean) => void }) {
+/**
+ * The access gate.
+ *
+ * It owns the credential and nothing else. It reports what happened through
+ * `onPhase` and the landing page decides what the sky does about it — which is
+ * why the launch sequence could be added without a line of authentication
+ * changing: the unlock request, the server-set cookie and the redirect for an
+ * already-authenticated visitor are exactly what they were.
+ *
+ * Navigation into the terminal moved out of this component with the sequence.
+ * It used to fire on a fixed 1.7s timer here; the cinematic that replaced that
+ * timer is owned by the page, so the page is what pushes the route when the
+ * mission ends. The session is written the moment the server accepts, before
+ * any of it plays, so a visitor who reloads mid-countdown is already in.
+ */
+export function AlphaAccess({ onPhase }: { onPhase: (phase: GatePhase | "approved") => void }) {
   const router = useRouter();
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -38,7 +55,7 @@ export function AlphaAccess({ onUnlocking }: { onUnlocking: (active: boolean) =>
 
     setError(null);
     setUnlocking(true);
-    onUnlocking(true);
+    onPhase("validating");
     try {
       await api.post<AlphaSessionStatus>(
         "/alpha/unlock",
@@ -50,23 +67,41 @@ export function AlphaAccess({ onUnlocking }: { onUnlocking: (active: boolean) =>
       // prevent a successful alpha entrant from reaching the dashboard.
       void api.post("/alpha/activity", { path: "/" }, { skipAuthRetry: true });
       window.sessionStorage.setItem(ALPHA_ACCESS.transitionKey, "true");
-      window.setTimeout(() => router.push(ALPHA_ACCESS.dashboardPath), 1700);
-    } catch {
-      setError("Access code not recognised.");
+      // The form stays locked from here. There is no path back to `idle` after
+      // an accepted code, which is what makes a second submission impossible
+      // while the sequence plays.
+      onPhase("approved");
+    } catch (error) {
+      setError(
+        error instanceof ApiError && error.status !== 401
+          ? "Access service is temporarily unavailable. Please retry."
+          : "Access code not recognised.",
+      );
       setUnlocking(false);
-      onUnlocking(false);
+      onPhase("denied");
     }
   }
 
   return (
+    // Opaque. The panel used to be `bg-abyss/55` with a backdrop blur, floating
+    // over the mascot photograph — which meant its own labels, version string
+    // and disclosure were read against whatever pixels happened to be behind
+    // them. A gate that collects input is the last surface in a product that
+    // should be translucent.
     <form
       onSubmit={submit}
-      className="alpha-access rounded-panel border border-white/12 bg-abyss/55 p-5 shadow-2xl shadow-black/30 backdrop-blur-2xl"
+      aria-labelledby="alpha-access-heading"
+      className="w-full rounded-lg border border-line bg-surface p-5 shadow-e3"
     >
-      <div className="text-center">
-        <p className="text-label uppercase tracking-[0.24em] text-plasma">Alpha Access</p>
-        <p className="mt-2 text-sm text-ink-faint">Private Alpha</p>
-      </div>
+      <h2
+        id="alpha-access-heading"
+        className="text-label font-medium uppercase tracking-[0.16em] text-accent"
+      >
+        Alpha access
+      </h2>
+      <p className="mt-1.5 text-sm text-ink-2">
+        Enter the code you were issued to open the terminal.
+      </p>
 
       <label htmlFor="alpha-code" className="sr-only">
         Enter access code
@@ -82,25 +117,47 @@ export function AlphaAccess({ onUnlocking }: { onUnlocking: (active: boolean) =>
         autoComplete="one-time-code"
         placeholder="Access code"
         disabled={unlocking}
-        className="mt-5 h-12 w-full rounded-card border border-line bg-void/70 px-4 text-center font-mono text-lg tracking-[0.28em] text-ink outline-none transition-colors placeholder:text-ink-faint/50 focus:border-plasma disabled:opacity-70"
+        aria-invalid={error ? true : undefined}
+        aria-describedby={error ? "alpha-code-error" : undefined}
+        className={cn(
+          "mt-4 h-11 w-full rounded-md border bg-sunken px-4 text-center",
+          "font-mono text-md tracking-[0.24em] text-ink",
+          "transition-colors duration-[var(--duration-instant)]",
+          "placeholder:tracking-normal placeholder:text-ink-4",
+          "disabled:opacity-70",
+          error ? "border-down" : "border-line-control hover:border-line-strong",
+        )}
       />
 
-      {error ? <p className="mt-2 text-center text-xs text-danger">{error}</p> : null}
+      {error ? (
+        <p id="alpha-code-error" role="alert" className="mt-2 text-xs text-down">
+          {error}
+        </p>
+      ) : null}
 
       <button
         type="submit"
         disabled={unlocking}
-        className="alpha-unlock mt-4 h-11 w-full rounded-card border border-plasma/30 bg-plasma/12 text-sm font-medium uppercase tracking-[0.18em] text-ink transition-all duration-300 hover:border-plasma/70 hover:bg-plasma/18 disabled:cursor-wait disabled:border-brand-secondary/60 disabled:bg-brand-secondary/15"
+        className={cn(
+          "mt-3 h-10 w-full rounded-md border border-accent/40 bg-accent/10",
+          "text-sm font-medium tracking-[0.08em] text-accent",
+          "transition-colors duration-[var(--duration-instant)]",
+          "hover:border-accent/70 hover:bg-accent/16",
+          "disabled:cursor-wait disabled:opacity-70",
+        )}
       >
-        {unlocking ? "Unlocking" : "Unlock"}
+        {unlocking ? "Unlocking…" : "Unlock"}
       </button>
 
-      <p className="mt-4 text-center text-xs text-ink-faint">
-        Version {BUILD.version.replace(/^v/i, "")} Alpha
-      </p>
-      <p className="mt-2 text-center text-[0.6875rem] leading-5 text-ink-faint">
-        During alpha testing, MEMESCOPE records basic session activity and page usage to improve the product.
-      </p>
+      <div className="mt-4 border-t border-line-subtle pt-3">
+        <p data-numeric className="text-xs text-ink-3">
+          Version {BUILD.version.replace(/^v/i, "")} · alpha
+        </p>
+        <p className="mt-1.5 text-xs leading-relaxed text-ink-3">
+          During alpha testing, MEMESCOPE records basic session activity and page
+          usage to improve the product.
+        </p>
+      </div>
     </form>
   );
 }

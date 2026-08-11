@@ -1,154 +1,102 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
-import { TokenIdentity } from "@/components/brand/token-identity";
-import { Label } from "@/components/ui/panel";
-import { Skeleton } from "@/components/ui/skeleton";
+import { TokenCell } from "@/components/scanner/token-cell";
+import { DataTable, useTableSort, type Column } from "@/components/ui/data-table";
+import { FilterBar, SegmentedControl } from "@/components/ui/filters";
+import { FreshnessLabel, LiveStatus, NoMarketData } from "@/components/ui/freshness";
+import { Num } from "@/components/ui/num";
+import { Panel } from "@/components/ui/panel";
+import { Stat, StatRow } from "@/components/ui/stat";
+import { Toolbar } from "@/components/ui/toolbar";
+import { InfoTip } from "@/components/ui/tooltip";
 import { EmptyState, ErrorState } from "@/components/ui/states";
 import { HistoryFeed } from "@/components/record/history-feed";
 import { Journey } from "@/components/record/journey";
-import { TokenActions } from "@/components/token/token-actions";
-import { FreshnessLabel, LiveStatus, NoMarketData } from "@/components/ui/freshness";
 import { usePaperPositions } from "@/hooks/use-paper";
 import { byMint, exitLabel, usd } from "@/lib/paper";
+import { num } from "@/lib/design/bands";
 import {
   useAllRadarDetections,
   useRadarBenchmark,
   useRadarPerformance,
 } from "@/hooks/use-radar";
+import { compactUsd } from "@/lib/radar-row";
 import { formatMultiple } from "@/lib/radar";
 import { cn } from "@/lib/utils";
 import type { PaperPosition } from "@/types/paper";
-import type { RadarEntry, RadarPerformance } from "@/types/radar";
+import type { RadarEntry } from "@/types/radar";
 
 /**
- * TRACK RECORD
+ * TRACK RECORD — the permanent record of every Radar detection, losers
+ * included. This page is the argument for trusting anything else in the
+ * product, and it only works if it is complete.
  *
- * The permanent record of every Radar detection, including the ones that went
- * to zero. This page is the argument for trusting anything else in the product,
- * and it only works if it is complete.
+ * Three rules are unchanged and still enforced rather than intended:
  *
- * Three rules govern everything below, and each is enforced rather than
- * intended:
+ *  - **Nothing is hidden.** No filter removes losing outcomes, and the default
+ *    order is newest-first, not best-first. Sorting by performance by default
+ *    is a Hall of Fame wearing a track record's name.
+ *  - **Peak and current always appear together.** A call that reached 18× and
+ *    fell to 0.30× is not an 18× call.
+ *  - **Nothing is estimated.** Every absent figure renders a dash, never zero.
  *
- *  - **Nothing is hidden.** There is no filter that removes losers, and the
- *    default sort is newest-first, not best-first. Sorting by performance by
- *    default is a Hall of Fame wearing a track record's name.
- *  - **Peak and current are always shown together.** A call that reached 18x
- *    and fell to 0.30x is not an 18x call, and showing only the peak would say
- *    it was.
- *  - **Nothing is estimated.** Every figure is an aggregate over stored rows.
- *    Where no row supports a number it renders "—", never zero: "we have not
- *    measured this" and "this is zero" are different claims.
+ * What changed in Phase 7 is presentation only. The tier badges were emoji —
+ * ⭐ ⭐⭐ ⭐⭐⭐ 🏆 🚀 👑 — which render as full-colour illustrations that ignore
+ * the palette, change shape per platform, and turn an evidence table into a
+ * scoreboard. They are now a typographic chip carrying the same stored tiers.
+ * The hand-rolled 17-column table became a `DataTable` with a sticky header,
+ * so the column names survive past row twelve.
  */
-
-/** Tier -> badge. Ordered ascending so the highest earned reads last. */
-const TIER_BADGE: Record<string, string> = {
-  "2x": "⭐",
-  "5x": "⭐⭐",
-  "10x": "⭐⭐⭐",
-  "25x": "🏆",
-  "50x": "🚀",
-  "100x": "👑",
-};
 
 const TIER_ORDER = ["2x", "5x", "10x", "25x", "50x", "100x", "250x", "500x", "1000x"];
 
 type ReachedFilter = "all" | "2x" | "5x" | "10x";
-type SortKey = "newest" | "peak" | "current";
-
-function n(value: string | null | undefined): number | null {
-  if (value === null || value === undefined) return null;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-/** Money, compact. Returns null so callers can render "—" themselves. */
-function money(value: string | null | undefined): string | null {
-  const parsed = n(value);
-  if (parsed === null) return null;
-  if (parsed >= 1_000_000) return `$${(parsed / 1_000_000).toFixed(1)}M`;
-  if (parsed >= 1_000) return `$${(parsed / 1_000).toFixed(0)}K`;
-  return `$${parsed.toFixed(0)}`;
-}
-
-function pct(value: string | null | undefined): string | null {
-  const parsed = n(value);
-  return parsed === null ? null : `${(parsed * 100).toFixed(0)}%`;
-}
 
 function days(value: string | null | undefined): string | null {
-  const parsed = n(value);
+  const parsed = num(value);
   return parsed === null ? null : `${parsed.toFixed(1)}d`;
 }
 
-/** A measured figure, or an explicit dash. Never a zero standing in for absent. */
-function Stat({
-  label,
-  value,
-  tone,
-  note,
-}: {
-  label: string;
-  value: string | null;
-  tone?: "good" | "bad";
-  note?: string;
-}) {
-  return (
-    <div className="rounded-card border border-line bg-surface/40 px-4 py-3">
-      <p className="text-label uppercase tracking-wide text-ink-faint">{label}</p>
-      <p
-        className={cn(
-          "mt-1 text-xl font-semibold tabular-nums",
-          value === null && "text-ink-faint",
-          tone === "good" && "text-safe",
-          tone === "bad" && "text-danger",
-          !tone && value !== null && "text-ink",
-        )}
-      >
-        {value ?? "—"}
-      </p>
-      {note ? <p className="mt-1 text-xs text-ink-faint">{note}</p> : null}
-    </div>
-  );
+function pct(value: string | null | undefined): string | null {
+  const parsed = num(value);
+  return parsed === null ? null : `${(parsed * 100).toFixed(0)}%`;
 }
 
-/** Horizontal distribution bar. Width is a share of the total detected. */
-function DistributionRow({
-  label,
-  count,
-  total,
-}: {
-  label: string;
-  count: number;
-  total: number;
-}) {
-  const share = total > 0 ? (count / total) * 100 : 0;
-  return (
-    <div className="flex items-center gap-3">
-      <span className="w-16 shrink-0 text-xs tabular-nums text-ink-dim">{label}</span>
-      <div className="h-2 flex-1 overflow-hidden rounded-full bg-elevated">
-        <div
-          className="h-full rounded-full bg-plasma/70"
-          style={{ width: `${Math.max(share, count > 0 ? 1.5 : 0)}%` }}
-        />
-      </div>
-      <span className="w-20 shrink-0 text-right text-xs tabular-nums text-ink-dim">
-        {count} · {share.toFixed(0)}%
-      </span>
-    </div>
-  );
-}
+/**
+ * The highest tier a detection ever reached, as type rather than as an emoji.
+ *
+ * Read from `achieved_tiers`, never from the current multiple: tiers are
+ * permanent once earned, because a later fall cannot erase a high that
+ * happened. No tier is a real and common state and renders as a dash.
+ */
+function BestTier({ tiers }: { tiers: string[] }) {
+  if (tiers.length === 0) {
+    return <Num value={null} absentLabel="no tier reached" />;
+  }
 
-function Badges({ tiers }: { tiers: string[] }) {
-  if (tiers.length === 0) return <span className="text-ink-faint">—</span>;
-  const ordered = [...tiers].sort(
-    (a, b) => TIER_ORDER.indexOf(a) - TIER_ORDER.indexOf(b),
-  );
+  const best = [...tiers]
+    .sort((a, b) => TIER_ORDER.indexOf(a) - TIER_ORDER.indexOf(b))
+    .at(-1)!;
+  const magnitude = Number(best.replace("x", "")) || 0;
+
   return (
-    <span title={ordered.join(" · ")}>
-      {ordered.map((tier) => TIER_BADGE[tier] ?? "").join("")}
+    <span
+      data-numeric
+      className={cn(
+        "inline-flex items-center rounded-sm border px-1.5 py-0.5 text-xs font-medium tabular-nums",
+        // One scarce colour at the very top, ink everywhere else. A ladder of
+        // six hues would make every row shout.
+        magnitude >= 100
+          ? "border-score-elite/40 bg-score-elite/10 text-score-elite"
+          : magnitude >= 10
+            ? "border-up/30 bg-up/10 text-up"
+            : "border-line text-ink-2",
+      )}
+      title={`Tiers reached: ${tiers.join(", ")}`}
+    >
+      {best.replace("x", "×")}
     </span>
   );
 }
@@ -158,46 +106,31 @@ function Badges({ tiers }: { tiers: string[] }) {
  *
  * Deliberately never offers an action. The strategy enters on its own published
  * rule with no manual step, so a token the wallet has not taken reads "—",
- * never "buy" — implying a button here would be the discretion the whole design
- * excludes.
+ * never "buy".
  */
 function PaperCell({ position }: { position: PaperPosition | undefined }) {
-  if (!position) return <span className="text-ink-faint">—</span>;
+  if (!position) return <Num value={null} absentLabel="not traded" />;
 
-  const pnl = usd(position.pnl_usd);
   const closed = position.status === "closed";
-  const value = n(position.pnl_usd);
 
   return (
     <span
-      className="whitespace-nowrap tabular-nums"
+      className="whitespace-nowrap"
       title={
         closed
           ? `${exitLabel(position.exit_reason) ?? "Closed"} · entered at rank #${position.entry_rank}`
           : `Open · entered at rank #${position.entry_rank}`
       }
     >
-      <span
-        className={cn(
-          value === null && "text-ink-faint",
-          value !== null && value > 0 && "text-safe",
-          value !== null && value < 0 && "text-danger",
-          value === 0 && "text-ink-dim",
-        )}
-      >
-        {pnl ?? "—"}
-      </span>
-      <span className="ml-1.5 text-xs text-ink-faint">
+      <Num
+        value={position.pnl_usd}
+        display={usd(position.pnl_usd)}
+        signed
+        className="text-sm"
+      />
+      <span className="ml-1.5 text-xs text-ink-3">
         {closed ? (exitLabel(position.exit_reason) ?? "closed") : "open"}
       </span>
-    </span>
-  );
-}
-
-function Reached({ ok }: { ok: boolean }) {
-  return (
-    <span className={ok ? "text-safe" : "text-ink-faint"} aria-label={ok ? "yes" : "no"}>
-      {ok ? "✓" : "·"}
     </span>
   );
 }
@@ -206,453 +139,430 @@ export default function TrackRecordPage() {
   const performance = useRadarPerformance();
   const benchmark = useRadarBenchmark();
   // The whole record, not a page of it: this table's entire purpose is that
-  // nothing is left out, and `include_inactive` is what keeps dead entries in.
-  // The API still serves bounded pages; this page stitches them together.
+  // nothing is left out, and `includeInactive` keeps dead entries in.
   const record = useAllRadarDetections({ includeInactive: true, sort: "detected" });
-  // "Was this token traded?" answered from the wallet's own rows. One request
-  // for the page, indexed by mint — the paper slice stays independent of the
-  // Radar, and the Radar's hot path takes no extra query.
   const paper = usePaperPositions();
 
   const [reached, setReached] = useState<ReachedFilter>("all");
-  const [sort, setSort] = useState<SortKey>("newest");
 
   const traded = useMemo(() => byMint(paper.data?.items ?? []), [paper.data]);
 
   const rows = useMemo(() => {
     const items: RadarEntry[] = record.data?.items ?? [];
-    const threshold = reached === "all" ? 0 : Number(reached.replace("x", ""));
-    const filtered =
-      threshold === 0
-        ? items
-        : items.filter((item) => (n(item.peak_multiple) ?? 0) >= threshold);
+    if (reached === "all") return items;
+    const threshold = Number(reached.replace("x", ""));
+    return items.filter((item) => (num(item.peak_multiple) ?? 0) >= threshold);
+  }, [record.data, reached]);
 
-    const sorted = [...filtered];
-    if (sort === "peak") {
-      sorted.sort((a, b) => (n(b.peak_multiple) ?? 0) - (n(a.peak_multiple) ?? 0));
-    } else if (sort === "current") {
-      sorted.sort((a, b) => (n(b.current_multiple) ?? 0) - (n(a.current_multiple) ?? 0));
-    }
-    return sorted;
-  }, [record.data, reached, sort]);
+  const selectValue = useCallback(
+    (row: RadarEntry, key: string) => {
+      switch (key) {
+        case "detected":
+          return num(row.first_market_cap);
+        case "now":
+          return num(row.current_market_cap);
+        case "peakCap":
+          return num(row.peak_market_cap);
+        case "current":
+          return num(row.current_multiple);
+        case "peak":
+          return num(row.peak_multiple);
+        case "age":
+          return num(row.days_since_detection);
+        case "paper":
+          return num(traded.get(row.mint_address)?.pnl_usd);
+        default:
+          return null;
+      }
+    },
+    [traded],
+  );
+
+  // `null` initial sort: the server already returned newest-first, and leaving
+  // it unsorted preserves that without the table asserting an opinion.
+  const { sort, setSort, sorted } = useTableSort<RadarEntry>(rows, selectValue, null);
+
+  const columns = useMemo<Column<RadarEntry>[]>(
+    () => [
+      {
+        key: "index",
+        header: "#",
+        align: "right",
+        width: "44px",
+        cell: (_row, index) => (
+          <span data-numeric className="text-xs text-ink-3">
+            {index + 1}
+          </span>
+        ),
+      },
+      {
+        key: "token",
+        header: "Token",
+        pinned: true,
+        width: "200px",
+        cell: (row) => (
+          <TokenCell
+            mint={row.mint_address}
+            name={row.name}
+            symbol={row.symbol}
+            imageUrl={row.image_url}
+          />
+        ),
+      },
+      {
+        key: "detected",
+        header: "Detected",
+        align: "right",
+        width: "84px",
+        sortable: true,
+        srHeader: "Market cap at detection",
+        cell: (row) => (
+          <Num
+            value={row.first_market_cap}
+            display={compactUsd(row.first_market_cap)}
+            tone="flat"
+            className="text-sm"
+          />
+        ),
+      },
+      {
+        key: "now",
+        header: "Now",
+        align: "right",
+        width: "96px",
+        sortable: true,
+        srHeader: "Current market cap",
+        cell: (row) => (
+          <span className="flex flex-col items-end">
+            <Num
+              value={row.current_market_cap}
+              display={compactUsd(row.current_market_cap)}
+              className="text-sm"
+            />
+            {/* "Now" is live and carries its reading's age. Detected and Peak
+                are historical: a recorded past cannot go stale. */}
+            {row.market?.captured_at ? (
+              <FreshnessLabel
+                capturedAt={row.market.captured_at}
+                className="text-[0.625rem]"
+              />
+            ) : (
+              <NoMarketData className="text-[0.625rem]" />
+            )}
+          </span>
+        ),
+      },
+      {
+        key: "peakCap",
+        header: "Peak",
+        align: "right",
+        width: "84px",
+        sortable: true,
+        srHeader: "Peak market cap",
+        headerClassName: "hidden xl:table-cell",
+        cellClassName: "hidden xl:table-cell",
+        cell: (row) => (
+          <Num
+            value={row.peak_market_cap}
+            display={compactUsd(row.peak_market_cap)}
+            tone="flat"
+            className="text-sm"
+          />
+        ),
+      },
+      {
+        key: "current",
+        header: "Now ×",
+        align: "right",
+        width: "72px",
+        sortable: true,
+        cell: (row) => (
+          <Num
+            value={row.current_multiple}
+            display={formatMultiple(row.current_multiple)}
+            signed
+            pivot={1}
+            className="text-sm"
+          />
+        ),
+      },
+      {
+        // Immediately beside Now ×, always.
+        key: "peak",
+        header: "Peak ×",
+        align: "right",
+        width: "72px",
+        sortable: true,
+        cell: (row) => (
+          <Num
+            value={row.peak_multiple}
+            display={formatMultiple(row.peak_multiple)}
+            tone="muted"
+            className="text-sm"
+          />
+        ),
+      },
+      {
+        key: "tier",
+        header: "Best tier",
+        align: "center",
+        width: "84px",
+        cell: (row) => <BestTier tiers={row.achieved_tiers ?? []} />,
+      },
+      {
+        key: "journey",
+        header: "Journey",
+        width: "230px",
+        headerClassName: "hidden 2xl:table-cell",
+        cellClassName: "hidden 2xl:table-cell",
+        cell: (row) => (
+          <Journey
+            tiers={row.achieved_tiers ?? []}
+            peakMultiple={row.peak_multiple}
+            currentMultiple={row.current_multiple}
+          />
+        ),
+      },
+      {
+        key: "age",
+        header: "Tracked",
+        align: "right",
+        width: "76px",
+        sortable: true,
+        headerClassName: "hidden lg:table-cell",
+        cellClassName: "hidden lg:table-cell",
+        cell: (row) => (
+          <Num
+            value={row.days_since_detection}
+            display={days(row.days_since_detection)}
+            tone="muted"
+            className="text-xs"
+          />
+        ),
+      },
+      {
+        key: "status",
+        header: "Status",
+        width: "80px",
+        headerClassName: "hidden lg:table-cell",
+        cellClassName: "hidden lg:table-cell",
+        cell: (row) => (
+          <span
+            className={cn(
+              "text-xs",
+              row.liveness === "alive" ? "text-ink-2" : "text-ink-3",
+            )}
+            title={
+              row.liveness === "alive"
+                ? "A market was observed in the last 24 hours"
+                : "No market observed recently — this is not a claim that it died"
+            }
+          >
+            {row.liveness === "alive" ? "Alive" : "Unknown"}
+          </span>
+        ),
+      },
+      {
+        key: "paper",
+        header: "Paper",
+        align: "right",
+        width: "120px",
+        sortable: true,
+        srHeader: "Paper wallet outcome",
+        headerClassName: "hidden xl:table-cell",
+        cellClassName: "hidden xl:table-cell",
+        cell: (row) => <PaperCell position={traded.get(row.mint_address)} />,
+      },
+    ],
+    [traded],
+  );
 
   if (performance.isError || record.isError) {
     return (
-      <div className="mx-auto max-w-6xl pb-8">
-        <ErrorState
-          body="The track record is not responding. The record itself is append-only and intact — this is a read failure."
-          onRetry={() => window.location.reload()}
-        />
-      </div>
+      <ErrorState
+        body="The track record is not responding. The record itself is append-only and intact — this is a read failure."
+        onRetry={() => void record.refetch()}
+      />
     );
   }
 
-  const data: RadarPerformance | undefined = performance.data;
+  const data = performance.data;
   const total = data?.total_opportunities ?? 0;
   const tierCount = (tier: string) =>
     data?.tiers.find((entry) => entry.tier === tier)?.count ?? 0;
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-8 pb-16">
-      <header>
-        <Label>Track record</Label>
-        <h1 className="mt-2 text-title font-semibold text-ink">
-          Every Radar detection. Every outcome. Nothing hidden.
-        </h1>
-        {/* Current values are marked to the newest reading on the page.
-            Detection and peak figures are historical and carry no freshness —
-            a recorded past does not go stale. */}
-        <div className="mt-2">
+    <div className="flex flex-col gap-5 pb-8">
+      <Toolbar
+        eyebrow="Track record"
+        title="Every detection. Every outcome. Nothing hidden."
+        description="Measured from the moment each project was detected — never from launch. Losses are counted in the same denominator as wins, and nothing is removed once recorded."
+        actions={
           <LiveStatus
-            timestamps={(record.data?.items ?? []).map(
-              (item) => item.market?.captured_at,
-            )}
+            timestamps={(record.data?.items ?? []).map((item) => item.market?.captured_at)}
             pending={record.isPending}
           />
-        </div>
-        <p className="mt-2 max-w-2xl text-sm text-ink-dim">
-          Measured from the moment each project was detected — never from launch.
-          Losses are counted in the same denominator as wins, and nothing is removed
-          once recorded.
-        </p>
-      </header>
+        }
+      />
 
-      {performance.isPending ? (
-        <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-4">
-          {Array.from({ length: 8 }, (_, index) => (
-            <Skeleton key={index} className="h-20" />
-          ))}
-        </div>
-      ) : total === 0 ? (
+      {total === 0 && !performance.isPending ? (
         <EmptyState
-          agent="oracle"
           title="No detections recorded yet"
           body="The Radar has not detected anything yet. Once it does, every detection appears here permanently — including the ones that do not work out."
         />
       ) : (
         <>
-          {/* Summary ------------------------------------------------------ */}
-          <section className="grid gap-3 sm:grid-cols-3 lg:grid-cols-4">
-            <Stat label="Total detected" value={String(total)} />
+          <StatRow className="grid-cols-2 sm:grid-cols-3 lg:grid-cols-6">
+            <Stat label="Total detected" value={total} size="lg" />
             <Stat
               label="Reached 2×"
-              value={`${tierCount("2x")} · ${((tierCount("2x") / total) * 100).toFixed(0)}%`}
-              tone={tierCount("2x") > 0 ? "good" : undefined}
-            />
-            <Stat label="Reached 5×" value={String(tierCount("5x"))} />
-            <Stat label="Reached 10×" value={String(tierCount("10x"))} />
-            <Stat label="Reached 100×" value={String(tierCount("100x"))} />
-            <Stat label="Still active" value={String(data?.active_opportunities ?? 0)} />
-            <Stat
-              label="Expired"
-              value={String(data?.expired_opportunities ?? 0)}
-              note="Nothing marks an entry inactive yet"
-            />
-            <Stat
-              label="Median peak"
-              value={formatMultiple(data?.median_peak_multiple)}
-            />
-            <Stat
-              label="Best ever"
-              value={formatMultiple(data?.best_peak_multiple)}
-              tone="good"
-            />
-            <Stat label="Avg time to 2×" value={days(data?.average_days_to_2x)} />
-            <Stat
-              label="Avg drawdown"
-              value={pct(data?.average_drawdown)}
-              tone="bad"
-              note="From peak"
-            />
-            <Stat
-              label="Last updated"
-              value={
-                data?.observed_at
-                  ? new Date(data.observed_at).toLocaleTimeString()
+              value={tierCount("2x")}
+              display={
+                total > 0
+                  ? `${tierCount("2x")} · ${((tierCount("2x") / total) * 100).toFixed(0)}%`
                   : null
               }
+              size="lg"
             />
-          </section>
+            <Stat label="Reached 10×" value={tierCount("10x")} size="lg" />
+            <Stat
+              label="Median peak"
+              value={data?.median_peak_multiple}
+              display={formatMultiple(data?.median_peak_multiple)}
+              size="lg"
+            />
+            <Stat
+              label="Median now"
+              value={data?.median_current_multiple}
+              display={formatMultiple(data?.median_current_multiple)}
+              signed
+              pivot={1}
+              size="lg"
+            />
+            <Stat
+              label="Avg drawdown"
+              value={data?.average_drawdown}
+              display={pct(data?.average_drawdown)}
+              tone="down"
+              size="lg"
+              hint="From peak"
+            />
+          </StatRow>
 
-          {/* Distribution ------------------------------------------------- */}
-          <section className="rounded-card border border-line bg-surface/40 p-5">
-            <h2 className="text-sm font-semibold text-ink">Distribution</h2>
-            <p className="mt-1 text-xs text-ink-faint">
-              How far detections actually ran, as a share of everything detected.
-            </p>
-            <div className="mt-4 flex flex-col gap-2">
-              <DistributionRow label="Detected" count={total} total={total} />
-              {["2x", "5x", "10x", "25x", "50x", "100x"].map((tier) => (
-                <DistributionRow
-                  key={tier}
-                  label={tier}
-                  count={tierCount(tier)}
-                  total={total}
-                />
-              ))}
-            </div>
-          </section>
-
-          {/* Portfolio-style statistics ----------------------------------- */}
-          <section>
-            <h2 className="text-sm font-semibold text-ink">Performance</h2>
-            <div className="mt-3 grid gap-3 sm:grid-cols-3 lg:grid-cols-4">
-              <Stat label="Total calls" value={String(total)} />
-              <Stat label="2× rate" value={pct(data?.success_rate)} />
-              <Stat
-                label="Median current"
-                value={formatMultiple(data?.median_current_multiple)}
-                tone="bad"
-              />
-              <Stat
-                label="Average peak"
-                value={formatMultiple(data?.average_peak_multiple)}
-              />
-              <Stat
-                label="Worst call"
-                value={formatMultiple(data?.worst_current_multiple)}
-                tone="bad"
-              />
-              <Stat label="Avg days tracked" value={days(data?.average_days_tracked)} />
-              <Stat
-                label="Avg detection mcap"
-                value={money(data?.average_detection_market_cap)}
-              />
-              <Stat
-                label="Largest peak mcap"
-                value={money(data?.largest_peak_market_cap)}
-              />
-            </div>
-          </section>
-
-          {/* The record ---------------------------------------------------- */}
-          <section>
+          <section className="flex flex-col gap-2.5">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <h2 className="text-sm font-semibold text-ink">
+              <h2 className="flex items-center gap-1.5 text-sm font-medium text-ink">
                 Every detection{" "}
-                <span className="font-normal text-ink-faint">({rows.length})</span>
+                <span data-numeric className="font-normal text-ink-3">
+                  ({sorted.length})
+                </span>
+                <InfoTip
+                  label="this table"
+                  content="Every Radar detection ever recorded, inactive ones included. There is no filter that removes losing outcomes, and the default order is newest first."
+                />
               </h2>
-              <div className="flex flex-wrap items-center gap-4 text-xs">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-ink-faint">Reached</span>
-                  {(["all", "2x", "5x", "10x"] as ReachedFilter[]).map((option) => (
-                    <button
-                      key={option}
-                      type="button"
-                      onClick={() => setReached(option)}
-                      className={cn(
-                        "rounded px-2 py-1 transition-colors",
-                        reached === option
-                          ? "bg-plasma/15 text-plasma"
-                          : "text-ink-faint hover:text-ink",
-                      )}
-                    >
-                      {option === "all" ? "All" : option}
-                    </button>
-                  ))}
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-ink-faint">Sort</span>
-                  {(
-                    [
-                      ["newest", "Newest"],
-                      ["peak", "Peak"],
-                      ["current", "Current"],
-                    ] as [SortKey, string][]
-                  ).map(([key, label]) => (
-                    <button
-                      key={key}
-                      type="button"
-                      onClick={() => setSort(key)}
-                      className={cn(
-                        "rounded px-2 py-1 transition-colors",
-                        sort === key
-                          ? "bg-plasma/15 text-plasma"
-                          : "text-ink-faint hover:text-ink",
-                      )}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
+
+              <FilterBar>
+                <SegmentedControl
+                  label="Reached at least"
+                  options={[
+                    { value: "all", label: "All" },
+                    { value: "2x", label: "2×" },
+                    { value: "5x", label: "5×" },
+                    { value: "10x", label: "10×" },
+                  ]}
+                  value={reached}
+                  onChange={(value) => setReached(value as ReachedFilter)}
+                />
+              </FilterBar>
             </div>
 
-            {record.isPending ? (
-              <div className="mt-3 flex flex-col gap-2">
-                {Array.from({ length: 8 }, (_, index) => (
-                  <Skeleton key={index} className="h-12" />
-                ))}
-              </div>
-            ) : (
-              <div className="mt-3 overflow-x-auto rounded-card border border-line">
-                <table className="w-full min-w-[1320px] text-sm">
-                  <thead>
-                    <tr className="border-b border-line text-label uppercase tracking-wide text-ink-faint">
-                      <th className="px-3 py-2 text-left font-normal">#</th>
-                      <th className="px-3 py-2 text-left font-normal">Token</th>
-                      <th className="px-3 py-2 text-right font-normal">Detected</th>
-                      <th className="px-3 py-2 text-right font-normal">Now</th>
-                      <th className="px-3 py-2 text-right font-normal">Peak</th>
-                      <th className="px-3 py-2 text-right font-normal">Current ×</th>
-                      <th className="px-3 py-2 text-right font-normal">Peak ×</th>
-                      <th className="px-3 py-2 text-center font-normal">2×</th>
-                      <th className="px-3 py-2 text-center font-normal">5×</th>
-                      <th className="px-3 py-2 text-center font-normal">10×</th>
-                      <th className="px-3 py-2 text-center font-normal">100×</th>
-                      <th className="px-3 py-2 text-right font-normal">Age</th>
-                      <th className="px-3 py-2 text-left font-normal">Journey</th>
-                      <th className="px-3 py-2 text-center font-normal">Badges</th>
-                      <th className="px-3 py-2 text-left font-normal">Status</th>
-                      <th className="px-3 py-2 text-right font-normal">Paper trade</th>
-                      <th className="px-3 py-2 text-right font-normal">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows.map((entry, index) => {
-                      const peak = n(entry.peak_multiple) ?? 0;
-                      return (
-                        <tr
-                          key={entry.mint_address}
-                          className="border-b border-line/60 last:border-0 hover:bg-elevated/40"
-                        >
-                          <td className="px-3 py-2 tabular-nums text-ink-faint">
-                            {index + 1}
-                          </td>
-                          <td className="px-3 py-2">
-                            <TokenIdentity
-                              mint={entry.mint_address}
-                              name={entry.name}
-                              symbol={entry.symbol}
-                              imageUrl={entry.image_url}
-                              size="xs"
-                              compact
-                            />
-                          </td>
-                          <td className="px-3 py-2 text-right tabular-nums text-ink-dim">
-                            {money(entry.first_market_cap) ?? "—"}
-                          </td>
-                          {/* "Now" is a live value and carries its reading's
-                              age. "Detected" above and "Peak" below are
-                              historical: a recorded past cannot go stale, and
-                              labelling it would imply it could. */}
-                          <td className="px-3 py-2 text-right tabular-nums text-ink-dim">
-                            <div>{money(entry.current_market_cap) ?? "—"}</div>
-                            <div className="mt-0.5">
-                              {entry.market ? (
-                                <FreshnessLabel
-                                  capturedAt={entry.market.captured_at}
-                                  className="justify-end text-[0.6875rem]"
-                                />
-                              ) : (
-                                <NoMarketData className="text-[0.6875rem]" />
-                              )}
-                            </div>
-                          </td>
-                          <td className="px-3 py-2 text-right tabular-nums text-ink-dim">
-                            {money(entry.peak_market_cap) ?? "—"}
-                          </td>
-                          {/* Peak and current always side by side — never one
-                              standing in for the other. */}
-                          <td
-                            className={cn(
-                              "px-3 py-2 text-right tabular-nums",
-                              (n(entry.current_multiple) ?? 0) >= 1
-                                ? "text-safe"
-                                : "text-danger",
-                            )}
-                          >
-                            <div>{formatMultiple(entry.current_multiple)}</div>
-                            <div className="mt-0.5">
-                              {entry.market ? (
-                                <FreshnessLabel
-                                  capturedAt={entry.market.captured_at}
-                                  className="justify-end text-[0.6875rem] font-normal"
-                                />
-                              ) : null}
-                            </div>
-                          </td>
-                          <td className="px-3 py-2 text-right tabular-nums text-ink">
-                            {formatMultiple(entry.peak_multiple)}
-                          </td>
-                          <td className="px-3 py-2 text-center">
-                            <Reached ok={peak >= 2} />
-                          </td>
-                          <td className="px-3 py-2 text-center">
-                            <Reached ok={peak >= 5} />
-                          </td>
-                          <td className="px-3 py-2 text-center">
-                            <Reached ok={peak >= 10} />
-                          </td>
-                          <td className="px-3 py-2 text-center">
-                            <Reached ok={peak >= 100} />
-                          </td>
-                          <td className="px-3 py-2 text-right tabular-nums text-ink-faint">
-                            {days(entry.days_since_detection) ?? "—"}
-                          </td>
-                          <td className="px-3 py-2">
-                            <Journey
-                              tiers={entry.achieved_tiers ?? []}
-                              peakMultiple={entry.peak_multiple}
-                              currentMultiple={entry.current_multiple}
-                            />
-                          </td>
-                          <td className="px-3 py-2 text-center">
-                            <Badges tiers={entry.achieved_tiers ?? []} />
-                          </td>
-                          <td
-                            className={cn(
-                              "px-3 py-2",
-                              entry.liveness === "alive" ? "text-ink-dim" : "text-ink-faint",
-                            )}
-                            title={
-                              entry.liveness === "alive"
-                                ? "A market was observed in the last 24 hours"
-                                : "No market observed recently — this is not a claim that it died"
-                            }
-                          >
-                            {entry.liveness === "alive" ? "Alive" : "Unknown"}
-                          </td>
-                          <td className="px-3 py-2 text-right">
-                            <PaperCell position={traded.get(entry.mint_address)} />
-                          </td>
-                          <td className="px-3 py-2 text-right">
-                            <TokenActions mint={entry.mint_address} />
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
+            <DataTable
+              columns={columns}
+              rows={sorted}
+              getRowId={(row) => row.mint_address}
+              caption="Every Radar detection and its outcome, newest first"
+              sort={sort}
+              onSortChange={setSort}
+              density="compact"
+              stickyHeader
+              maxHeight="calc(100dvh - 24rem)"
+              minWidth="880px"
+              isPending={record.isPending}
+              pendingRows={12}
+              empty={
+                <p className="px-3 py-10 text-center text-sm text-ink-3">
+                  No detection reached that tier yet.
+                </p>
+              }
+            />
 
-            <p className="mt-3 text-xs text-ink-faint">
-              Peak and current are always shown together. A call that reached 18× and
-              gave it back is not an 18× call.
+            <p className="text-xs text-ink-3">
+              Peak and current are always shown together. A call that reached 18×
+              and gave it back is not an 18× call.
             </p>
           </section>
 
-          {/* Benchmark ----------------------------------------------------- */}
-          <section className="rounded-card border border-line bg-surface/40 p-5">
-            <h2 className="text-sm font-semibold text-ink">Benchmark</h2>
-            <p className="mt-1 text-xs text-ink-faint">
-              What buying every detection in equal size would have returned. Measured
-              from the record, not simulated.
-            </p>
-            {benchmark.data ? (
-              <>
-                <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                  <Stat
-                    label="Buy every detection"
-                    value={formatMultiple(benchmark.data.average_current_multiple)}
-                    tone={
-                      Number(benchmark.data.average_current_multiple ?? 0) >= 1
-                        ? "good"
-                        : "bad"
-                    }
-                    note="Mean current multiple"
-                  />
-                  <Stat
-                    label="Median outcome"
-                    value={formatMultiple(benchmark.data.median_current_multiple)}
-                    tone="bad"
-                    note="The typical call"
-                  />
-                  <Stat
-                    label="Above entry"
-                    value={`${benchmark.data.above_entry} of ${benchmark.data.entries}`}
-                  />
-                  <Stat
-                    label="Below entry"
-                    value={`${benchmark.data.below_entry} of ${benchmark.data.entries}`}
-                    tone="bad"
-                  />
-                </div>
-                <div className="mt-4 flex flex-col gap-1 text-xs text-ink-faint">
-                  <p>Hold SOL — {benchmark.data.sol_note}</p>
-                  <p>Paper wallet — {benchmark.data.paper_wallet_note}</p>
-                </div>
-              </>
-            ) : (
-              <div className="mt-4 grid gap-3 sm:grid-cols-4">
-                {Array.from({ length: 4 }, (_, index) => (
-                  <Skeleton key={index} className="h-20" />
-                ))}
+          <section className="grid gap-4 xl:grid-cols-2">
+            <Panel density="comfortable" className="flex flex-col gap-3">
+              <div>
+                <h2 className="text-sm font-medium text-ink">Benchmark</h2>
+                <p className="mt-1 text-xs leading-relaxed text-ink-3">
+                  What buying every detection in equal size would have returned.
+                  Measured from the record, not simulated.
+                </p>
               </div>
-            )}
-          </section>
+              {benchmark.data ? (
+                <>
+                  <StatRow className="grid-cols-2">
+                    <Stat
+                      label="Buy every detection"
+                      value={benchmark.data.average_current_multiple}
+                      display={formatMultiple(benchmark.data.average_current_multiple)}
+                      signed
+                      pivot={1}
+                      hint="Mean current multiple"
+                    />
+                    <Stat
+                      label="Median outcome"
+                      value={benchmark.data.median_current_multiple}
+                      display={formatMultiple(benchmark.data.median_current_multiple)}
+                      signed
+                      pivot={1}
+                      hint="The typical call"
+                    />
+                    <Stat
+                      label="Above entry"
+                      value={benchmark.data.above_entry}
+                      display={`${benchmark.data.above_entry} of ${benchmark.data.entries}`}
+                    />
+                    <Stat
+                      label="Below entry"
+                      value={benchmark.data.below_entry}
+                      display={`${benchmark.data.below_entry} of ${benchmark.data.entries}`}
+                      tone="down"
+                    />
+                  </StatRow>
+                  <div className="flex flex-col gap-1 text-xs leading-relaxed text-ink-3">
+                    <p>Hold SOL — {benchmark.data.sol_note}</p>
+                    <p>Paper wallet — {benchmark.data.paper_wallet_note}</p>
+                  </div>
+                </>
+              ) : (
+                <p className="text-xs text-ink-3">Loading benchmark…</p>
+              )}
+            </Panel>
 
-          {/* Hall of history ------------------------------------------------ */}
-          <section>
-            <h2 className="text-sm font-semibold text-ink">History</h2>
-            <p className="mt-1 text-xs text-ink-faint">
-              Every detection and every milestone, newest first. Each line is a stored
-              row — nothing is written for this feed.
-            </p>
-            <div className="mt-3 rounded-card border border-line px-4">
+            <Panel density="comfortable" className="flex flex-col gap-3">
+              <div>
+                <h2 className="text-sm font-medium text-ink">History</h2>
+                <p className="mt-1 text-xs leading-relaxed text-ink-3">
+                  Every detection and every milestone, newest first. Each line is
+                  a stored row — nothing is written for this feed.
+                </p>
+              </div>
               <HistoryFeed />
-            </div>
+            </Panel>
           </section>
         </>
       )}

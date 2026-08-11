@@ -27,12 +27,12 @@ export function ProjectHealth({ dimensions }: { dimensions: HealthDimension[] })
     <Panel density="comfortable" className="flex flex-col gap-4">
       <header className="flex items-baseline justify-between gap-3">
         <h2 className="text-sm font-medium tracking-tight text-ink">Project health</h2>
-        <span className="text-xs text-ink-faint">
+        <span className="text-xs text-ink-3">
           {collected} of {dimensions.length} signals available
         </span>
       </header>
 
-      <ul className="flex flex-col divide-y divide-line/50">
+      <ul className="flex flex-col divide-y divide-line-subtle">
         {dimensions.map((dimension) => (
           <li key={dimension.id} className="flex flex-col gap-1.5 py-3 first:pt-0 last:pb-0">
             <div className="flex items-center justify-between gap-3">
@@ -44,7 +44,7 @@ export function ProjectHealth({ dimensions }: { dimensions: HealthDimension[] })
                 {HEALTH_STATUS_LABEL[dimension.status]}
               </span>
             </div>
-            <p className="max-w-prose text-xs leading-relaxed text-ink-dim">
+            <p className="max-w-prose text-xs leading-relaxed text-ink-2">
               {dimension.detail}
             </p>
             {dimension.evidence.length > 1 ? (

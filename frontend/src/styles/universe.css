@@ -1,0 +1,820 @@
+/* ============================================================================
+   THE MEMESCOPE UNIVERSE
+   ----------------------------------------------------------------------------
+   A cinematic space environment that lives *behind* the terminal. The rule that
+   governs every line in this file:
+
+       BACKGROUND = cinematic.  FOREGROUND = professional.
+
+   Nothing here may reduce the readability of a number. Every element is
+   `position: fixed`, `pointer-events: none`, `aria-hidden`, and sits below the
+   application layer, so no object can ever pass over a table row, an input or a
+   dialog.
+
+   PERFORMANCE CONTRACT
+   This runs behind a real-time scanner, so the whole scene costs zero
+   JavaScript per frame and never triggers layout or paint:
+
+     - Every animation moves ONLY `transform` and `opacity`. Both are
+       composited; neither invalidates layout.
+     - **No `filter: blur()` anywhere.** The old implementation blurred four
+       full-viewport layers at 60-70px, which is the single most expensive
+       effect available and had to be re-rasterised on every frame it moved.
+       Soft radial-gradients look the same and cost nothing.
+     - Starfields are ONE element per plane carrying a repeating
+       `background-image`, not hundreds of nodes. Three planes = 3 DOM nodes.
+     - The whole scene is ~20 elements.
+
+   HOW "OCCASIONAL" IS DONE
+   Not with timers. Each event object has a long `animation-duration` and is
+   invisible for almost all of it — a rocket on a 190s cycle visible for 6% of
+   it crosses about once every three minutes. Co-prime periods (23, 29, 37, 61,
+   89, 127, 163, 190…) mean two events almost never coincide, so the sky reads
+   as "something is always happening somewhere" rather than "everything is
+   flying at me at once".
+   ========================================================================== */
+
+.universe {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  /* Its own compositing context, so nothing in the scene can invalidate the
+     application layer above it. */
+  isolation: isolate;
+  contain: strict;
+}
+
+/* --- Layer 0 — deep space canvas ----------------------------------------- */
+
+.universe__canvas {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 90% 70% at 18% 8%, oklch(0.26 0.09 288 / 0.30), transparent 55%),
+    radial-gradient(ellipse 80% 60% at 85% 12%, oklch(0.28 0.07 214 / 0.24), transparent 52%),
+    radial-gradient(ellipse 100% 70% at 50% 108%, oklch(0.24 0.07 258 / 0.28), transparent 60%),
+    var(--color-canvas);
+}
+
+/* --- Layer 1 — nebulae and a distant galaxy ------------------------------ */
+
+.universe__nebula {
+  position: absolute;
+  border-radius: 999px;
+  opacity: 0.68;
+  will-change: transform;
+}
+
+/* No blur filter. The gradient's own falloff is the softness. */
+.universe__nebula--violet {
+  left: -14%;
+  top: -8%;
+  width: min(900px, 72vw);
+  height: min(900px, 72vw);
+  background: radial-gradient(
+    circle,
+    oklch(0.46 0.17 292 / 0.34) 0%,
+    oklch(0.40 0.15 292 / 0.16) 32%,
+    transparent 68%
+  );
+  animation: uv-nebula-a 137s ease-in-out infinite;
+}
+
+.universe__nebula--cyan {
+  right: -18%;
+  bottom: -22%;
+  width: min(1000px, 76vw);
+  height: min(1000px, 76vw);
+  background: radial-gradient(
+    circle,
+    oklch(0.46 0.13 206 / 0.30) 0%,
+    oklch(0.40 0.11 206 / 0.14) 34%,
+    transparent 70%
+  );
+  animation: uv-nebula-b 179s ease-in-out infinite;
+}
+
+.universe__nebula--ember {
+  left: 44%;
+  top: 52%;
+  width: min(620px, 50vw);
+  height: min(620px, 50vw);
+  opacity: 0.32;
+  background: radial-gradient(
+    circle,
+    oklch(0.44 0.12 28 / 0.22) 0%,
+    transparent 64%
+  );
+  animation: uv-nebula-a 211s ease-in-out infinite reverse;
+}
+
+.universe__galaxy {
+  position: absolute;
+  left: 6%;
+  top: 14%;
+  width: min(560px, 46vw);
+  height: min(190px, 16vw);
+  border-radius: 999px;
+  background:
+    radial-gradient(ellipse at 50% 50%, rgb(255 255 255 / 0.16), transparent 0 6%, transparent 62%),
+    radial-gradient(ellipse at 50% 50%, oklch(0.62 0.16 290 / 0.20), transparent 68%);
+  opacity: 0.46;
+  transform: rotate(-19deg);
+  animation: uv-galaxy 233s ease-in-out infinite;
+  will-change: transform;
+}
+
+/* --- Layer 2 — starfields and cosmic dust -------------------------------- */
+
+/*
+   One element per plane. Each carries a repeating radial-gradient pattern, so a
+   plane of ~2000 visible stars costs a single composited node.
+*/
+.universe__stars {
+  position: absolute;
+  inset: -60% 0 0 0;
+  height: 220%;
+  background-repeat: repeat;
+  will-change: transform;
+}
+
+.universe__stars--far {
+  background-image:
+    radial-gradient(1px 1px at 12% 22%, oklch(0.95 0.02 268 / 0.78), transparent),
+    radial-gradient(1px 1px at 63% 47%, oklch(0.95 0.02 214 / 0.62), transparent),
+    radial-gradient(1px 1px at 38% 78%, oklch(0.95 0.02 268 / 0.70), transparent),
+    radial-gradient(1px 1px at 86% 15%, oklch(0.95 0.02 300 / 0.56), transparent);
+  background-size: 190px 190px;
+  animation: uv-drift-slow 320s linear infinite;
+}
+
+.universe__stars--mid {
+  background-image:
+    radial-gradient(1.4px 1.4px at 28% 12%, oklch(0.97 0.03 200 / 0.74), transparent),
+    radial-gradient(1.4px 1.4px at 74% 66%, oklch(0.97 0.02 268 / 0.66), transparent),
+    radial-gradient(1.2px 1.2px at 50% 88%, oklch(0.97 0.03 292 / 0.58), transparent);
+  background-size: 340px 340px;
+  animation: uv-drift-slow 210s linear infinite;
+}
+
+/* The nearest plane also twinkles. Twinkle is an opacity animation on ONE
+   element, not per-star — the whole plane breathes very slightly, which at this
+   density reads as individual stars flickering. */
+.universe__stars--near {
+  background-image:
+    radial-gradient(1.9px 1.9px at 57% 38%, oklch(0.99 0.04 292 / 0.85), transparent),
+    radial-gradient(1.7px 1.7px at 19% 71%, oklch(0.99 0.04 200 / 0.76), transparent);
+  background-size: 560px 560px;
+  animation:
+    uv-drift-slow 140s linear infinite,
+    uv-twinkle 7s ease-in-out infinite;
+}
+
+.universe__dust {
+  position: absolute;
+  inset: -20%;
+  opacity: 0.34;
+  background-image:
+    radial-gradient(1px 1px at 11% 22%, rgb(255 255 255 / 0.20), transparent),
+    radial-gradient(1px 1px at 38% 72%, oklch(0.86 0.10 200 / 0.18), transparent),
+    radial-gradient(1.4px 1.4px at 67% 41%, rgb(255 255 255 / 0.16), transparent),
+    radial-gradient(1px 1px at 91% 63%, oklch(0.86 0.13 288 / 0.18), transparent);
+  background-size: 300px 300px;
+  animation: uv-dust 190s linear infinite;
+  will-change: transform;
+}
+
+/* --- Parallax depth groups ----------------------------------------------
+   Pointer offset is applied to THREE containers, not to twenty objects, so the
+   whole effect costs three composited transforms. `--uv-px/--uv-py` are written
+   by `PointerParallax` (one listener, one rAF); absent them the calc collapses
+   to zero and nothing moves, which is exactly the touch/reduced-motion state.
+
+   No CSS transition here on purpose — the easing already happens in the frame
+   loop, and a transition on top would fight it.
+   ------------------------------------------------------------------------ */
+
+.universe__depth {
+  position: absolute;
+  inset: 0;
+  will-change: transform;
+}
+
+.universe__depth--far {
+  transform: translate3d(calc(var(--uv-px, 0) * -5px), calc(var(--uv-py, 0) * -3px), 0);
+}
+
+.universe__depth--mid {
+  transform: translate3d(calc(var(--uv-px, 0) * -13px), calc(var(--uv-py, 0) * -8px), 0);
+}
+
+.universe__depth--near {
+  transform: translate3d(calc(var(--uv-px, 0) * -24px), calc(var(--uv-py, 0) * -15px), 0);
+}
+
+/* --- Layer 1b — planetary bodies -----------------------------------------
+   Each is a positioned box holding an SVG. The CSS sizes and moves it; the art
+   is in `components/space/objects.tsx`. Placed toward the edges, in the margins
+   a wide table leaves alone.
+   ------------------------------------------------------------------------ */
+
+.universe__body {
+  position: absolute;
+  will-change: transform;
+}
+
+.universe__body svg,
+.universe__asteroid svg,
+.universe__rocket svg,
+.universe__satellite svg,
+.universe__probe svg,
+.universe__comet svg,
+.universe__meteor svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* Large, far right, mostly off-screen — a world you are passing. */
+.universe__body--red {
+  right: -8%;
+  top: 6%;
+  width: clamp(200px, 24vw, 440px);
+  opacity: 0.38;
+  animation: uv-body-drift-a 380s ease-in-out infinite;
+}
+
+/* The ringed planet, small and low-left. */
+.universe__body--ringed {
+  left: 4%;
+  bottom: 8%;
+  width: clamp(150px, 17vw, 300px);
+  opacity: 0.30;
+  animation: uv-body-drift-b 470s ease-in-out infinite;
+}
+
+.universe__body--blue {
+  right: 22%;
+  bottom: 14%;
+  width: clamp(54px, 6vw, 104px);
+  opacity: 0.34;
+  animation: uv-body-drift-a 260s ease-in-out infinite reverse;
+}
+
+.universe__body--moon {
+  left: 26%;
+  top: 10%;
+  width: clamp(38px, 4vw, 72px);
+  opacity: 0.30;
+  animation: uv-body-drift-b 320s ease-in-out infinite;
+}
+
+/* --- Layer 3 — asteroids and orbital elements ---------------------------- */
+
+.universe__orbit {
+  position: absolute;
+  right: -14%;
+  top: -6%;
+  width: clamp(420px, 44vw, 780px);
+  aspect-ratio: 1;
+  border: 1px solid oklch(0.70 0.06 220 / 0.16);
+  border-radius: 999px;
+  transform: rotate(-14deg);
+  animation: uv-orbit 420s linear infinite;
+  will-change: transform;
+}
+
+.universe__orbit::after {
+  content: "";
+  position: absolute;
+  top: 12%;
+  left: 8%;
+  width: 3px;
+  height: 3px;
+  border-radius: 999px;
+  background: oklch(0.86 0.09 210 / 0.5);
+}
+
+.universe__asteroid {
+  position: absolute;
+  opacity: 0.38;
+  will-change: transform;
+}
+
+.universe__asteroid--one {
+  top: 64%;
+  left: -5%;
+  width: clamp(14px, 1.8vw, 30px);
+  animation: uv-asteroid-r 173s linear infinite;
+}
+
+.universe__asteroid--two {
+  top: 22%;
+  right: -5%;
+  width: clamp(10px, 1.2vw, 20px);
+  opacity: 0.28;
+  animation: uv-asteroid-l 241s linear infinite;
+  animation-delay: -80s;
+}
+
+/* --- Layer 4 — events ----------------------------------------------------
+   Each is invisible for most of its cycle. The percentages in the keyframes
+   are the design: they decide how often a thing happens. Co-prime periods mean
+   two events almost never coincide.
+   ------------------------------------------------------------------------ */
+
+.universe__meteor {
+  position: absolute;
+  width: clamp(70px, 9vw, 150px);
+  opacity: 0;
+  transform-origin: 100% 50%;
+  will-change: transform, opacity;
+}
+
+.universe__meteor--a {
+  top: 14%;
+  left: 6%;
+  animation: uv-meteor-a 23s ease-in infinite;
+}
+
+.universe__meteor--b {
+  top: 42%;
+  right: 14%;
+  width: clamp(56px, 7vw, 118px);
+  animation: uv-meteor-b 37s ease-in infinite;
+  animation-delay: -11s;
+}
+
+.universe__meteor--c {
+  top: 68%;
+  left: 28%;
+  width: clamp(48px, 6vw, 98px);
+  animation: uv-meteor-a 61s ease-in infinite;
+  animation-delay: -29s;
+}
+
+.universe__shower {
+  position: absolute;
+  inset: 0;
+}
+
+.universe__shower .universe__meteor {
+  animation: uv-shower 313s ease-in infinite;
+}
+
+.universe__shower .universe__meteor:nth-child(1) {
+  top: 6%;
+  left: 18%;
+}
+.universe__shower .universe__meteor:nth-child(2) {
+  top: 12%;
+  left: 34%;
+  width: clamp(50px, 6vw, 104px);
+  animation-delay: 0.5s;
+}
+.universe__shower .universe__meteor:nth-child(3) {
+  top: 3%;
+  left: 52%;
+  width: clamp(74px, 9vw, 150px);
+  animation-delay: 1.1s;
+}
+
+/* The rocket: small, distant and rare — 190s with a ~6% visible window, so it
+   crosses roughly once every three minutes. Illustrated, but the size of a
+   thumbnail: this is the terminal, not the hero. */
+.universe__rocket {
+  position: absolute;
+  top: 34%;
+  left: -70px;
+  width: clamp(16px, 1.8vw, 28px);
+  opacity: 0;
+  will-change: transform, opacity;
+  animation: uv-rocket 190s linear infinite;
+}
+
+/* Satellites move an order of magnitude slower than meteors. */
+.universe__satellite {
+  position: absolute;
+  top: 20%;
+  left: -90px;
+  width: clamp(44px, 5vw, 88px);
+  opacity: 0;
+  will-change: transform, opacity;
+  animation: uv-satellite 137s linear infinite;
+  animation-delay: -40s;
+}
+
+.universe__probe {
+  position: absolute;
+  top: 74%;
+  right: -90px;
+  width: clamp(34px, 4vw, 68px);
+  opacity: 0;
+  will-change: transform, opacity;
+  animation: uv-probe 271s linear infinite;
+  animation-delay: -120s;
+}
+
+/* The rarest object in the sky: 421s — once every seven minutes. */
+.universe__comet {
+  position: absolute;
+  top: 10%;
+  left: 74%;
+  width: clamp(150px, 18vw, 300px);
+  opacity: 0;
+  transform-origin: 100% 50%;
+  will-change: transform, opacity;
+  animation: uv-comet 421s ease-in-out infinite;
+  animation-delay: -60s;
+}
+
+/* --- Layer 5 — readability treatment ------------------------------------- */
+
+/*
+   The contract that lets a cinematic background sit under a data terminal. A
+   vignette seats the content, and a flat scrim holds the contrast floor so the
+   universe can never lift the effective background lightness under text.
+*/
+.universe__scrim {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 92% 78% at 50% 46%, transparent 34%, oklch(0.135 0.008 255 / 0.34) 88%),
+    linear-gradient(180deg, oklch(0.135 0.008 255 / 0.26), transparent 22%, oklch(0.135 0.008 255 / 0.30));
+}
+
+/* ============================================================================
+   KEYFRAMES
+   Transform and opacity only.
+   ========================================================================== */
+
+@keyframes uv-drift-slow {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(0, 25%, 0);
+  }
+}
+
+@keyframes uv-twinkle {
+  0%,
+  100% {
+    opacity: 0.68;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes uv-dust {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(5%, 4%, 0);
+  }
+}
+
+@keyframes uv-nebula-a {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(3vw, -2vh, 0) scale(1.1);
+  }
+}
+
+@keyframes uv-nebula-b {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1.06);
+  }
+  50% {
+    transform: translate3d(-4vw, 2vh, 0) scale(1);
+  }
+}
+
+@keyframes uv-galaxy {
+  0%,
+  100% {
+    opacity: 0.28;
+    transform: translate3d(0, 0, 0) rotate(-19deg) scale(1);
+  }
+  50% {
+    opacity: 0.4;
+    transform: translate3d(2vw, -1vh, 0) rotate(-16deg) scale(1.06);
+  }
+}
+
+@keyframes uv-orbit {
+  from {
+    transform: rotate(-14deg);
+  }
+  to {
+    transform: rotate(346deg);
+  }
+}
+
+@keyframes uv-asteroid-r {
+  from {
+    transform: translate3d(0, 0, 0) rotate(0deg);
+  }
+  to {
+    transform: translate3d(calc(100vw + 160px), -16vh, 0) rotate(250deg);
+  }
+}
+
+@keyframes uv-asteroid-l {
+  from {
+    transform: translate3d(0, 0, 0) rotate(0deg);
+  }
+  to {
+    transform: translate3d(calc(-100vw - 160px), 20vh, 0) rotate(-290deg);
+  }
+}
+
+/* Visible for ~4% of 23s. */
+@keyframes uv-meteor-a {
+  0%,
+  95% {
+    opacity: 0;
+    transform: translate3d(-12vw, -10vh, 0) rotate(20deg);
+  }
+  96% {
+    opacity: 0.85;
+  }
+  99%,
+  100% {
+    opacity: 0;
+    transform: translate3d(44vw, 16vh, 0) rotate(20deg);
+  }
+}
+
+@keyframes uv-meteor-b {
+  0%,
+  93% {
+    opacity: 0;
+    transform: translate3d(18vw, -8vh, 0) rotate(156deg);
+  }
+  94% {
+    opacity: 0.7;
+  }
+  98%,
+  100% {
+    opacity: 0;
+    transform: translate3d(-38vw, 12vh, 0) rotate(156deg);
+  }
+}
+
+/* Visible for ~1.5% of 313s. */
+@keyframes uv-shower {
+  0%,
+  98.4% {
+    opacity: 0;
+    transform: translate3d(-8vw, -8vh, 0) rotate(24deg);
+  }
+  98.7% {
+    opacity: 0.8;
+  }
+  99.8%,
+  100% {
+    opacity: 0;
+    transform: translate3d(30vw, 18vh, 0) rotate(24deg);
+  }
+}
+
+/* Visible for ~6% of 190s. */
+@keyframes uv-rocket {
+  0%,
+  92% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0);
+  }
+  93% {
+    opacity: 0.6;
+  }
+  99% {
+    opacity: 0.6;
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(calc(100vw + 160px), -10vh, 0);
+  }
+}
+
+/* Visible for ~20% of 137s — a satellite is a slow pass, not a streak. */
+@keyframes uv-satellite {
+  0%,
+  62% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0) rotate(-7deg);
+  }
+  66%,
+  92% {
+    opacity: 0.5;
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(calc(100vw + 150px), -13vh, 0) rotate(-7deg);
+  }
+}
+
+@keyframes uv-probe {
+  0%,
+  70% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0) rotate(0deg);
+  }
+  74%,
+  93% {
+    opacity: 0.38;
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(calc(-100vw - 150px), -8vh, 0) rotate(200deg);
+  }
+}
+
+/* Visible for ~5% of 421s. */
+@keyframes uv-comet {
+  0%,
+  93% {
+    opacity: 0;
+    transform: translate3d(14vw, -10vh, 0) rotate(148deg) scaleX(0.7);
+  }
+  95%,
+  98% {
+    opacity: 0.45;
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(-58vw, 22vh, 0) rotate(148deg) scaleX(1);
+  }
+}
+
+/* ============================================================================
+   RESPONSIVE — the sky thins as the screen narrows
+   ========================================================================== */
+
+/* 1024 and below: drop the rarest large objects and one star plane. */
+@media (max-width: 1279px) {
+  .universe__probe,
+  .universe__comet,
+  .universe__stars--mid,
+  .universe__nebula--ember {
+    display: none;
+  }
+}
+
+/* Tablet: no large crossing objects at all. */
+@media (max-width: 1023px) {
+  .universe__rocket,
+  .universe__satellite,
+  .universe__asteroid,
+  .universe__orbit,
+  .universe__galaxy,
+  .universe__shower,
+  .universe__body--blue,
+  .universe__body--moon {
+    display: none;
+  }
+
+  /* The remaining bodies shrink and recede rather than dominating a tablet. */
+  .universe__body--red,
+  .universe__body--ringed {
+    opacity: 0.24;
+  }
+}
+
+/* Phone: stars, one nebula, and a single occasional meteor. Nothing else — a
+   busy sky on a 375px screen is noise, not personality. */
+@media (max-width: 767px) {
+  .universe__dust,
+  .universe__nebula--cyan,
+  .universe__meteor--b,
+  .universe__meteor--c,
+  .universe__body--ringed {
+    display: none;
+  }
+
+  /* One distant planet edge survives — enough to say "space", not enough to
+     compete with a 375px column of data. */
+  .universe__body--red {
+    opacity: 0.20;
+  }
+
+  .universe__nebula--violet {
+    opacity: 0.36;
+  }
+}
+
+/* ============================================================================
+   INTENSITY PREFERENCE
+   Set on <html> as `data-space`. Shares the boot-script pattern already used by
+   `data-mode` and `data-rail` rather than inventing a second mechanism.
+   ========================================================================== */
+
+/* Minimal: the sky, none of the traffic. */
+[data-space="minimal"] .universe__rocket,
+[data-space="minimal"] .universe__satellite,
+[data-space="minimal"] .universe__probe,
+[data-space="minimal"] .universe__comet,
+[data-space="minimal"] .universe__meteor,
+[data-space="minimal"] .universe__shower,
+[data-space="minimal"] .universe__asteroid,
+[data-space="minimal"] .universe__orbit {
+  display: none;
+}
+
+[data-space="minimal"] .universe__nebula,
+[data-space="minimal"] .universe__galaxy,
+[data-space="minimal"] .universe__body {
+  animation: none;
+}
+
+/* Parallax is part of the "full" experience only. `PointerParallax` already
+   refuses to write the variables outside it; this makes the CSS agree rather
+   than relying on the JS alone. */
+[data-space="minimal"] .universe__depth,
+[data-space="off"] .universe__depth {
+  transform: none;
+}
+
+/* Off: a flat canvas. Not `display: none` on the root — the canvas layer still
+   paints the background colour the app expects. */
+[data-space="off"] .universe > *:not(.universe__canvas) {
+  display: none;
+}
+
+/* Command mode already means "strip decoration". It thins the sky to match
+   rather than introducing a competing preference. */
+[data-mode="compact"] .universe__shower,
+[data-mode="compact"] .universe__comet,
+[data-mode="compact"] .universe__probe,
+[data-mode="compact"] .universe__galaxy,
+[data-mode="compact"] .universe__orbit {
+  display: none;
+}
+
+/* ============================================================================
+   REDUCED MOTION
+   Every crossing object stops and is removed; the sky itself stays, static.
+   MEMESCOPE keeps its identity without a single moving pixel.
+   ========================================================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  .universe__stars,
+  .universe__dust,
+  .universe__nebula,
+  .universe__galaxy,
+  .universe__orbit,
+  .universe__asteroid,
+  .universe__body {
+    animation: none !important;
+  }
+
+  /* Pointer parallax is vestibular motion coupled to the user's own hand,
+     which makes it among the most provoking kinds. It stops outright. */
+  .universe__depth {
+    transform: none !important;
+  }
+
+  /* Events are events. With motion off there is no event to show, so they are
+     removed rather than parked mid-flight where they would read as debris. */
+  .universe__meteor,
+  .universe__shower,
+  .universe__rocket,
+  .universe__satellite,
+  .universe__probe,
+  .universe__comet {
+    display: none !important;
+  }
+}
+
+/* --- Planetary drift ------------------------------------------------------
+   Orbital drift, not floating stickers: a few viewport-percent over minutes.
+   -------------------------------------------------------------------------- */
+
+@keyframes uv-body-drift-a {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    transform: translate3d(-1.6vw, 1.1vh, 0);
+  }
+}
+
+@keyframes uv-body-drift-b {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    transform: translate3d(1.3vw, -0.9vh, 0);
+  }
+}

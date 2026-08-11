@@ -33,7 +33,7 @@ function IconLink({
       rel="noopener noreferrer"
       title={title}
       aria-label={title}
-      className="rounded px-1.5 py-1 text-ink-faint transition-colors hover:bg-elevated hover:text-ink"
+      className="rounded px-1.5 py-1 text-ink-3 transition-colors hover:bg-raised hover:text-ink"
       onClick={(event) => event.stopPropagation()}
     >
       {children}
@@ -64,7 +64,7 @@ export function TokenActions({ mint }: { mint: string }) {
         onClick={copy}
         title={copied ? "Copied" : "Copy mint address"}
         aria-label="Copy mint address"
-        className="rounded px-1.5 py-1 text-ink-faint transition-colors hover:bg-elevated hover:text-ink"
+        className="rounded px-1.5 py-1 text-ink-3 transition-colors hover:bg-raised hover:text-ink"
       >
         {copied ? "✓" : "⧉"}
       </button>
@@ -81,7 +81,7 @@ export function TokenActions({ mint }: { mint: string }) {
         href={`/tokens/${mint}`}
         title="Open token page"
         aria-label="Open token page"
-        className="rounded px-1.5 py-1 text-ink-faint transition-colors hover:bg-elevated hover:text-ink"
+        className="rounded px-1.5 py-1 text-ink-3 transition-colors hover:bg-raised hover:text-ink"
         onClick={(event) => event.stopPropagation()}
       >
         →

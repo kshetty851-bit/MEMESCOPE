@@ -15,12 +15,12 @@ type Size = "sm" | "md" | "lg";
 
 const VARIANTS: Record<Variant, string> = {
   primary:
-    "bg-plasma text-void font-medium shadow-[0_0_0_1px_color-mix(in_oklch,var(--color-plasma)_60%,transparent),0_8px_32px_-8px_color-mix(in_oklch,var(--color-plasma)_70%,transparent)] hover:brightness-110 active:brightness-95",
+    "bg-accent text-void font-medium shadow-[0_0_0_1px_color-mix(in_oklch,var(--color-accent)_60%,transparent),0_8px_32px_-8px_color-mix(in_oklch,var(--color-accent)_70%,transparent)] hover:brightness-110 active:brightness-95",
   surface:
-    "bg-elevated/80 text-ink border border-line hover:border-line-bright hover:bg-raised/80",
-  ghost: "text-ink-dim hover:text-ink hover:bg-elevated/60",
-  outline: "border border-plasma/40 text-plasma hover:bg-plasma/10 hover:border-plasma/70",
-  danger: "bg-danger/15 text-danger border border-danger/35 hover:bg-danger/25",
+    "bg-raised/80 text-ink border border-line hover:border-line-strong hover:bg-raised/80",
+  ghost: "text-ink-2 hover:text-ink hover:bg-raised/60",
+  outline: "border border-accent/40 text-accent hover:bg-accent/10 hover:border-accent/70",
+  danger: "bg-down/15 text-down border border-down/35 hover:bg-down/25",
 };
 
 const SIZES: Record<Size, string> = {
@@ -49,8 +49,8 @@ export function Button({
       aria-busy={loading}
       disabled={disabled || loading}
       className={cn(
-        "inline-flex items-center justify-center rounded-chip whitespace-nowrap",
-        "transition-[transform,filter,background-color,border-color,color] duration-150 ease-[var(--ease-instrument)]",
+        "inline-flex items-center justify-center rounded-sm whitespace-nowrap",
+        "transition-[transform,filter,background-color,border-color,color] duration-150 ease-[var(--ease-standard)]",
         "active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50",
         VARIANTS[variant],
         SIZES[size],

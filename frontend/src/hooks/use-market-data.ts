@@ -6,6 +6,7 @@ import { useLiveUpdates } from "@/hooks/use-live-updates";
 
 import { api } from "@/lib/api-client";
 import type { MarketSnapshot, TrendingPage } from "@/types/api";
+import { livePoll } from "@/lib/query";
 
 /**
  * Market data for the live feed, keyed by mint.
@@ -24,7 +25,7 @@ export function useMarketByMint(pollMs = 15_000) {
     queryKey: ["market", "recent"],
     queryFn: () =>
       api.get<TrendingPage>("/market/trending?sort_by=captured_at&page_size=100"),
-    refetchInterval: status === "live" ? false : pollMs,
+    refetchInterval: livePoll(status, pollMs),
     staleTime: pollMs / 2,
   });
 

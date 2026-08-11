@@ -31,19 +31,28 @@ export function Panel({
 }: PanelProps) {
   return (
     <div
-      // `data-panel` lets Command mode strip translucency and blur from every
-      // surface with one selector, rather than threading a prop through the tree.
+      // Retained so screens can still target every surface with one selector.
       data-panel=""
       className={cn(
-        "relative overflow-hidden rounded-panel border border-line/80 bg-surface/55 backdrop-blur-2xl",
-        // Two shadows: a tight contact shadow to seat the panel, and a wide
-        // soft one for depth. A single mid shadow reads as a sticker.
-        "shadow-[0_1px_0_0_color-mix(in_oklch,var(--color-ink)_6%,transparent)_inset,0_18px_50px_-28px_rgb(0_0_0/0.9)]",
+        // Opaque, and no blur.
+        //
+        // The translucency and the `backdrop-blur-2xl` existed to separate a
+        // panel from the two coloured radial gradients that used to sit on
+        // `<body>`. Phase 2 removed those gradients, so the blur was sampling a
+        // flat surface and producing the same flat surface — the most expensive
+        // effect available, on every panel on screen, for no visible result.
+        //
+        // Hierarchy now comes from the tonal ramp: canvas 0.135 → surface 0.165
+        // is a step the eye reads without help.
+        "relative overflow-hidden rounded-lg border border-line bg-surface",
+        // One contact shadow to seat the panel. The second, wide shadow read as
+        // a drop shadow on a card rather than as a machined edge.
+        "shadow-e1",
         rim && "rimlight",
-        density === "comfortable" && "p-6",
-        density === "compact" && "p-4",
+        density === "comfortable" && "p-4",
+        density === "compact" && "p-3",
         interactive &&
-          "transition-[transform,border-color,background-color] duration-200 ease-[var(--ease-instrument)] hover:-translate-y-0.5 hover:border-line-bright hover:bg-elevated/70",
+          "transition-colors duration-[var(--duration-instant)] hover:border-line-strong hover:bg-raised",
         className,
       )}
       style={
@@ -77,7 +86,7 @@ export function PanelHeader({ className, ...props }: HTMLAttributes<HTMLDivEleme
 export function PanelTitle({ className, ...props }: HTMLAttributes<HTMLHeadingElement>) {
   return (
     <h2
-      className={cn("text-heading font-medium tracking-tight text-ink", className)}
+      className={cn("text-md font-medium tracking-tight text-ink", className)}
       {...props}
     />
   );
@@ -87,7 +96,7 @@ export function PanelTitle({ className, ...props }: HTMLAttributes<HTMLHeadingEl
 export function Label({ className, ...props }: HTMLAttributes<HTMLSpanElement>) {
   return (
     <span
-      className={cn("text-label font-medium uppercase text-ink-faint", className)}
+      className={cn("text-label font-medium uppercase text-ink-3", className)}
       {...props}
     />
   );

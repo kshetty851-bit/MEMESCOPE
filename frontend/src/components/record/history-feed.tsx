@@ -53,7 +53,7 @@ export function HistoryFeed() {
 
   if (isError) {
     return (
-      <p className="text-sm text-ink-faint">
+      <p className="text-sm text-ink-3">
         The history feed is not responding. The record itself is intact — this is a
         read failure.
       </p>
@@ -72,7 +72,7 @@ export function HistoryFeed() {
 
   if (data.length === 0) {
     return (
-      <p className="text-sm text-ink-faint">
+      <p className="text-sm text-ink-3">
         Nothing recorded yet. Every detection and every milestone will appear here
         permanently.
       </p>
@@ -103,11 +103,11 @@ export function HistoryFeed() {
                 size="xs"
                 compact
               />
-              <p className="mt-0.5 truncate text-xs text-ink-faint">{text}</p>
+              <p className="mt-0.5 truncate text-xs text-ink-3">{text}</p>
             </div>
             <time
               dateTime={event.occurred_at}
-              className="shrink-0 text-xs tabular-nums text-ink-faint"
+              className="shrink-0 text-xs tabular-nums text-ink-3"
             >
               {ago(event.occurred_at)}
             </time>

@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
-
+import { useSharedClock } from "@/hooks/use-shared-clock";
 import { freshnessOf, newestOf, type FreshnessBand } from "@/lib/freshness";
 import { cn } from "@/lib/utils";
 
@@ -20,36 +19,40 @@ import { cn } from "@/lib/utils";
  */
 
 const TONE: Record<FreshnessBand, string> = {
-  fresh: "text-safe",
-  normal: "text-ink-faint",
+  fresh: "text-up",
+  normal: "text-ink-3",
   ageing: "text-warn",
-  stale: "text-danger",
-  unknown: "text-ink-faint",
+  stale: "text-down",
+  unknown: "text-ink-3",
 };
 
 const DOT: Record<FreshnessBand, string> = {
-  fresh: "bg-safe",
-  normal: "bg-ink-faint",
+  fresh: "bg-up",
+  normal: "bg-ink-3",
   ageing: "bg-warn",
-  stale: "bg-danger",
+  stale: "bg-down",
   unknown: "bg-line",
 };
 
 /**
  * Re-render on a timer so an age does not freeze at whatever it was when the
- * page rendered. One interval per mounted indicator, at the coarsest cadence
- * the label can change on: below a minute the label counts seconds, above it
- * only minutes.
+ * page rendered.
+ *
+ * The cadence is the coarsest the label can change on: below a minute it counts
+ * seconds, above it only minutes. What changed for the scanner is *where the
+ * timer lives* — this used to open one `setInterval` per mounted indicator,
+ * which is fifty one-second timers on a fifty-row table. `useSharedClock` runs
+ * one timer for the document and wakes every subscriber in the same commit.
+ *
+ * The shared clock is used purely as a *re-render trigger*; the time itself is
+ * still read at render, exactly as before. Returning the store's cached
+ * timestamp instead looked equivalent and was not: that value is only refreshed
+ * when a tick fires, so the first paint — and any test that moves a mocked
+ * clock — would render an age measured from whenever the module was loaded.
  */
 function useTick(ageSeconds: number | null): number {
-  const [, setTick] = useState(0);
   const cadence = ageSeconds !== null && ageSeconds < 60 ? 1_000 : 30_000;
-
-  useEffect(() => {
-    const id = window.setInterval(() => setTick((value) => value + 1), cadence);
-    return () => window.clearInterval(id);
-  }, [cadence]);
-
+  useSharedClock(cadence);
   return Date.now();
 }
 
@@ -150,7 +153,7 @@ export function LiveStatus({
       />
       <span className={cn("font-medium", TONE[freshness.band])}>{headline}</span>
       {freshness.ageSeconds !== null ? (
-        <span className="text-ink-faint">· {freshness.label.toLowerCase()}</span>
+        <span className="text-ink-3">· {freshness.label.toLowerCase()}</span>
       ) : null}
     </span>
   );
@@ -168,7 +171,7 @@ export function LiveStatus({
 export function NoMarketData({ className }: { className?: string }) {
   return (
     <span
-      className={cn("text-xs text-ink-faint", className)}
+      className={cn("text-xs text-ink-3", className)}
       title="No pool has been indexed for this token, so no price is available. It is still being polled."
     >
       Waiting for liquidity

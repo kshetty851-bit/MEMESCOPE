@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
  * which makes the same latency feel shorter.
  */
 export function Skeleton({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn("skeleton rounded-chip", className)} aria-hidden {...props} />;
+  return <div className={cn("skeleton rounded-sm", className)} aria-hidden {...props} />;
 }
 
 export function SkeletonText({
@@ -32,7 +32,7 @@ export function SkeletonText({
 /** Placeholder shaped like a token card on the Radar. */
 export function SkeletonTokenCard() {
   return (
-    <div className="rounded-panel border border-line bg-surface/60 p-5">
+    <div className="rounded-lg border border-line bg-surface/60 p-5">
       <div className="flex items-center gap-3">
         <Skeleton className="size-10 rounded-full" />
         <div className="flex-1 space-y-2">

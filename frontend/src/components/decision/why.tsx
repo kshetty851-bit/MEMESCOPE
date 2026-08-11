@@ -36,11 +36,11 @@ export function Why({
         aria-controls={id}
         onClick={() => setOpen((value) => !value)}
         className={cn(
-          "rounded-chip border border-line/70 px-1.5 py-0.5 text-[0.625rem] font-medium",
-          "uppercase tracking-[0.08em] text-ink-faint transition-colors",
-          "hover:border-line hover:text-ink-dim",
+          "rounded-sm border border-line px-1.5 py-0.5 text-label font-medium",
+          "uppercase tracking-[0.08em] text-ink-3 transition-colors",
+          "hover:border-line hover:text-ink-2",
           "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2",
-          "focus-visible:outline-oracle",
+          "focus-visible:outline-accent",
         )}
       >
         {label}
@@ -48,7 +48,7 @@ export function Why({
       {open ? (
         <span
           id={id}
-          className="block max-w-prose text-xs leading-relaxed text-ink-dim"
+          className="block max-w-prose text-xs leading-relaxed text-ink-2"
         >
           {children}
         </span>

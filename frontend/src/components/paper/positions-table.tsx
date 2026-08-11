@@ -42,10 +42,10 @@ function Cell({
     <td
       className={cn(
         "py-2.5 text-right tabular-nums",
-        value === null && "text-ink-faint",
-        tone === "positive" && "text-safe",
-        tone === "negative" && "text-danger",
-        (!tone || tone === "neutral") && value !== null && "text-ink-dim",
+        value === null && "text-ink-3",
+        tone === "positive" && "text-up",
+        tone === "negative" && "text-down",
+        (!tone || tone === "neutral") && value !== null && "text-ink-2",
         className,
       )}
     >
@@ -96,7 +96,7 @@ export function PositionsTable({
   }
 
   if (positions.length === 0) {
-    return <p className="text-sm text-ink-faint">{emptyLabel}</p>;
+    return <p className="text-sm text-ink-3">{emptyLabel}</p>;
   }
 
   const loadPreview = async (mint: string) => {
@@ -131,7 +131,7 @@ export function PositionsTable({
     <div className="overflow-x-auto">
       <table className="w-full min-w-[1040px] text-sm">
         <thead>
-          <tr className="border-b border-line text-label uppercase tracking-wide text-ink-faint">
+          <tr className="border-b border-line text-label uppercase tracking-wide text-ink-3">
             <th className="py-2 text-left font-medium">Token</th>
             <th className="py-2 text-right font-medium">Entry</th>
             <th className="py-2 text-right font-medium">Trailing stop</th>
@@ -156,7 +156,7 @@ export function PositionsTable({
             return (
               <Fragment key={position.mint_address}>
                 <tr
-                  className="border-b border-line/50 transition-colors hover:bg-elevated/40"
+                  className="border-b border-line/50 transition-colors hover:bg-raised/40"
                 >
                   <td className="py-2.5 pr-4">
                     <TokenIdentity
@@ -167,7 +167,7 @@ export function PositionsTable({
                       size="xs"
                       showMint={false}
                     />
-                    <span className="ml-2 text-xs text-ink-faint">
+                    <span className="ml-2 text-xs text-ink-3">
                       #{position.entry_rank} at entry
                     </span>
                   </td>
@@ -181,7 +181,7 @@ export function PositionsTable({
                   <Cell value={pct(position.peak_pct)} tone="neutral" />
                   <Cell value={usd(position.pnl_usd)} tone={signTone(position.pnl_usd)} />
                   <td
-                    className="py-2.5 text-right text-xs text-ink-faint"
+                    className="py-2.5 text-right text-xs text-ink-3"
                     title={
                       position.exit_execution_fallback_reason ??
                       position.entry_execution_fallback_reason ??
@@ -199,10 +199,10 @@ export function PositionsTable({
                   <td className="py-2.5 text-right">
                     <span
                       className={cn(
-                        "rounded-chip border px-1.5 py-0.5 text-label uppercase tracking-wide",
+                        "rounded-sm border px-1.5 py-0.5 text-label uppercase tracking-wide",
                         closed
-                          ? "border-line bg-elevated text-ink-faint"
-                          : "border-plasma/25 bg-plasma/[0.07] text-plasma",
+                          ? "border-line bg-raised text-ink-3"
+                          : "border-accent/25 bg-accent/[0.07] text-accent",
                       )}
                     >
                       {closed ? (exitLabel(position.exit_reason) ?? "Closed") : "Open"}
@@ -215,7 +215,7 @@ export function PositionsTable({
                       stale. */}
                   <td className="py-2.5 text-right">
                     {closed ? (
-                      <span className="text-xs text-ink-faint">settled</span>
+                      <span className="text-xs text-ink-3">settled</span>
                     ) : position.current_price_at ? (
                       <FreshnessLabel capturedAt={position.current_price_at} />
                     ) : (
@@ -229,7 +229,7 @@ export function PositionsTable({
                           type="button"
                           onClick={() => void loadPreview(position.mint_address)}
                           disabled={previewing === position.mint_address}
-                          className="rounded-chip border border-line px-2 py-1 text-xs text-ink-dim transition-colors hover:border-line-bright hover:text-ink disabled:cursor-wait disabled:opacity-60"
+                          className="rounded-sm border border-line px-2 py-1 text-xs text-ink-2 transition-colors hover:border-line-strong hover:text-ink disabled:cursor-wait disabled:opacity-60"
                         >
                           {previewing === position.mint_address ? "Loading" : "Sell"}
                         </button>
@@ -238,7 +238,7 @@ export function PositionsTable({
                   ) : null}
                 </tr>
                 {selected ? (
-                  <tr className="border-b border-line bg-elevated/40">
+                  <tr className="border-b border-line bg-raised/40">
                     <td colSpan={onPreviewManualSell ? 11 : 10} className="py-3">
                       <ManualSellPreviewPanel
                         preview={preview}
@@ -259,7 +259,7 @@ export function PositionsTable({
         </tbody>
       </table>
       {error && preview === null ? (
-        <p className="mt-2 text-sm text-danger">{error}</p>
+        <p className="mt-2 text-sm text-down">{error}</p>
       ) : null}
     </div>
   );
@@ -301,39 +301,39 @@ function ManualSellPreviewPanel({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <p className="text-sm font-medium text-ink">Confirm paper sell</p>
-          <p className="mt-0.5 text-xs text-ink-faint">
+          <p className="mt-0.5 text-xs text-ink-3">
             Uses the latest observed market snapshot. No real order will be placed.
           </p>
         </div>
         <FreshnessLabel capturedAt={preview.quote_observed_at} />
       </div>
       {preview.warning ? (
-        <p className="mt-2 rounded-md border border-danger/30 bg-danger/[0.06] px-2 py-1 text-xs text-danger">
+        <p className="mt-2 rounded-md border border-down/30 bg-down/[0.06] px-2 py-1 text-xs text-down">
           {preview.warning}
         </p>
       ) : null}
       <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 md:grid-cols-4">
         {fields.map(([label, value]) => (
           <div key={label}>
-            <dt className="text-label uppercase tracking-wide text-ink-faint">{label}</dt>
+            <dt className="text-label uppercase tracking-wide text-ink-3">{label}</dt>
             <dd className="mt-0.5 text-sm tabular-nums text-ink">{value ?? "—"}</dd>
           </div>
         ))}
       </dl>
       {preview.cost_unavailable_reason ? (
-        <p className="mt-2 text-xs text-ink-faint">{preview.cost_unavailable_reason}</p>
+        <p className="mt-2 text-xs text-ink-3">{preview.cost_unavailable_reason}</p>
       ) : null}
       {preview.execution_fallback_reason ? (
-        <p className="mt-2 text-xs text-ink-faint">
+        <p className="mt-2 text-xs text-ink-3">
           Fallback: {preview.execution_fallback_reason}
         </p>
       ) : null}
-      {error ? <p className="mt-2 text-sm text-danger">{error}</p> : null}
+      {error ? <p className="mt-2 text-sm text-down">{error}</p> : null}
       <div className="mt-3 flex justify-end gap-2">
         <button
           type="button"
           onClick={onCancel}
-          className="rounded-chip border border-line px-2.5 py-1 text-xs text-ink-dim transition-colors hover:border-line-bright hover:text-ink"
+          className="rounded-sm border border-line px-2.5 py-1 text-xs text-ink-2 transition-colors hover:border-line-strong hover:text-ink"
         >
           Cancel
         </button>
@@ -341,7 +341,7 @@ function ManualSellPreviewPanel({
           type="button"
           onClick={onConfirm}
           disabled={isSelling}
-          className="rounded-chip border border-danger/35 bg-danger/[0.08] px-2.5 py-1 text-xs text-danger transition-colors hover:border-danger disabled:cursor-wait disabled:opacity-60"
+          className="rounded-sm border border-down/35 bg-down/[0.08] px-2.5 py-1 text-xs text-down transition-colors hover:border-down disabled:cursor-wait disabled:opacity-60"
         >
           {isSelling ? "Selling" : "Confirm sell"}
         </button>

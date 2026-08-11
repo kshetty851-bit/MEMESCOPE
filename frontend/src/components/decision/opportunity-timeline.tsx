@@ -39,7 +39,7 @@ export function OpportunityTimeline({ entry }: { entry: RadarEntry }) {
         `First observed at ${formatUsd(first)}. Every return below is measured ` +
         `from this moment — never from the token's launch, which MEMESCOPE did ` +
         `not call.`,
-      tone: "var(--color-oracle)",
+      tone: "var(--color-accent)",
     },
   ];
 
@@ -48,7 +48,7 @@ export function OpportunityTimeline({ entry }: { entry: RadarEntry }) {
       key: "why",
       title: "Why it qualified",
       detail: `${entry.detection_reason.length} conditions were met at detection.`,
-      tone: "var(--color-ink-faint)",
+      tone: "var(--color-ink-3)",
     });
   }
 
@@ -59,7 +59,7 @@ export function OpportunityTimeline({ entry }: { entry: RadarEntry }) {
       detail:
         `The highest point observed since detection. The peak only ever rises: ` +
         `a later fall cannot erase a high that happened.`,
-      tone: "var(--color-safe)",
+      tone: "var(--color-up)",
     });
   }
 
@@ -71,7 +71,7 @@ export function OpportunityTimeline({ entry }: { entry: RadarEntry }) {
         `round-tripped can show the same figure here, which is why the peak is ` +
         `on this timeline.`
       : "At or above its highest observed point since detection.",
-    tone: pastPeak ? "var(--color-danger)" : "var(--color-safe)",
+    tone: pastPeak ? "var(--color-down)" : "var(--color-up)",
   });
 
   return (
@@ -95,12 +95,12 @@ export function OpportunityTimeline({ entry }: { entry: RadarEntry }) {
                 style={{ background: event.tone }}
               />
               {index < events.length - 1 ? (
-                <span aria-hidden className="my-1 w-px flex-1 bg-line/70" />
+                <span aria-hidden className="my-1 w-px flex-1 bg-line" />
               ) : null}
             </div>
             <div className="flex flex-col gap-1 pb-5 last:pb-0">
               <p className="text-sm font-medium text-ink">{event.title}</p>
-              <p className="max-w-prose text-xs leading-relaxed text-ink-dim">
+              <p className="max-w-prose text-xs leading-relaxed text-ink-2">
                 {event.detail}
               </p>
             </div>

@@ -13,18 +13,18 @@ export function Badge({
   children: React.ReactNode;
 }) {
   const tones = {
-    neutral: "border-line bg-elevated/60 text-ink-dim",
-    safe: "border-safe/30 bg-safe/10 text-safe",
+    neutral: "border-line bg-raised/60 text-ink-2",
+    safe: "border-up/30 bg-up/10 text-up",
     warn: "border-warn/30 bg-warn/10 text-warn",
-    danger: "border-danger/35 bg-danger/10 text-danger",
-    plasma: "border-plasma/30 bg-plasma/10 text-plasma",
+    danger: "border-down/35 bg-down/10 text-down",
+    plasma: "border-accent/30 bg-accent/10 text-accent",
     apex: "border-apex/40 bg-apex/10 text-apex",
   } as const;
 
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-chip border px-2 py-0.5 text-label font-medium",
+        "inline-flex items-center gap-1.5 rounded-sm border px-2 py-0.5 text-label font-medium",
         tones[tone],
         className,
       )}
@@ -48,7 +48,7 @@ export function AgentBadge({
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-chip border px-2 py-0.5 text-label font-medium",
+        "inline-flex items-center gap-1.5 rounded-sm border px-2 py-0.5 text-label font-medium",
         className,
       )}
       style={{
@@ -69,7 +69,7 @@ export function AgentBadge({
  */
 export function StatusDot({
   live = true,
-  tone = "var(--color-safe)",
+  tone = "var(--color-up)",
   className,
 }: {
   live?: boolean;
@@ -86,7 +86,7 @@ export function StatusDot({
       )}
       <span
         className="relative size-2 rounded-full"
-        style={{ background: live ? tone : "var(--color-ink-faint)" }}
+        style={{ background: live ? tone : "var(--color-ink-3)" }}
       />
     </span>
   );

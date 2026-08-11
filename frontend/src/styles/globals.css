@@ -1,138 +1,225 @@
 @import "tailwindcss";
 
 /* ============================================================================
-   LETZMOON DESIGN SYSTEM
+   MEMESCOPE DESIGN SYSTEM
    ----------------------------------------------------------------------------
-   Concept: "Signal in the void."
+   Concept: "Instrument, not spaceship."
 
-   MEMESCOPE is dense and dark, like a terminal. The canvas is deep,
-   dimensional dark — never flat black. Intelligence arrives as light. Data has
-   mass, temperature and glow. Everything is seen through an instrument.
+   MEMESCOPE is a crypto intelligence terminal. The canvas is machined
+   graphite — dark, tonal, neutral. Depth comes from luminance steps and
+   hairlines, never from glow, blur or coloured light.
 
-   Three rules give the brand its fingerprint:
-     1. Every numeral is monospace. Every sentence is sans. No exceptions.
-        Precision reads as precision.
-     2. Gold is reserved exclusively for APEX / Elite Gem. Scarcity in the
-        palette mirrors scarcity in the product. Using gold anywhere else
-        devalues the one thing that should feel rare.
-     3. Nothing bounces. Motion is instrument response — fast, damped, exact.
+   Four rules give the product its fingerprint:
+
+     1. Every numeral is mono and tabular. Every sentence is sans. The <Num>
+        primitive enforces this so it cannot drift.
+     2. ONE interactive accent — cyan. Semantic colour is reserved for
+        up/down/warn/danger. Anything else that wants a hue gets ink instead.
+     3. Gold is spent on exactly one thing: the top MEMESCOPE score band.
+        Scarcity in the palette mirrors scarcity in the product.
+     4. Nothing loops. Motion is state change — fast, damped, exact. The only
+        permitted repeating animation is a 1.5px live dot.
+
+   COMPATIBILITY NOTE
+   The legacy token names (void/abyss/elevated/plasma/safe/scout/… ) are kept
+   as aliases onto the new ramp so that every existing screen keeps compiling
+   and simply re-grades. They are marked DEPRECATED and are removed as each
+   screen migrates in later phases. Do not use them in new code.
    ========================================================================== */
 
 @theme {
-  /* --- Substrate ---------------------------------------------------------
-     Five luminance steps on a single desaturated blue-violet. Depth comes
-     from stacking these, never from drop shadows on a flat background.
+  /* ==========================================================================
+     1. SURFACES — six luminance steps on one neutral graphite hue.
+     Adjacent steps differ by ~0.03 L, which is enough to separate a section
+     without a border and not enough to read as a different colour.
+     ====================================================================== */
+  --color-canvas: oklch(0.135 0.008 255);   /* app background            */
+  --color-sunken: oklch(0.115 0.008 255);   /* wells, toolbars, nav      */
+  --color-surface: oklch(0.165 0.008 255);  /* panels, cards, table body */
+  --color-raised: oklch(0.195 0.009 255);   /* hover, inputs, controls   */
+  --color-overlay: oklch(0.225 0.010 255);  /* menus, sheets, popovers   */
+  --color-inverse: oklch(0.93 0.004 255);   /* rare: inverted chips      */
 
-     Retuned for LETZMOON: the floor drops to deep space (#070B18) and cards
-     sit at #0E1528. The ramp stays five steps and keeps its spacing, so every
-     surface that stacked correctly before still does — this is a re-grade of
-     the same system, not a new one. */
-  --color-void: oklch(0.088 0.022 268);      /* ≈ #070B18 */
-  --color-abyss: oklch(0.122 0.026 268);
-  --color-surface: oklch(0.155 0.03 268);    /* ≈ #0E1528 */
-  --color-elevated: oklch(0.2 0.032 268);
-  --color-raised: oklch(0.245 0.034 268);
+  /* ==========================================================================
+     2. BORDERS — three weights. Hairlines do the work that shadows used to.
+     ====================================================================== */
+  --color-line-subtle: oklch(0.235 0.008 255); /* table rules, dividers */
+  --color-line: oklch(0.285 0.009 255);        /* default border        */
+  --color-line-strong: oklch(0.380 0.011 255); /* hover, active         */
 
-  --color-line: oklch(0.28 0.024 265);
-  --color-line-bright: oklch(0.4 0.03 265);
+  /* The boundary of an interactive control.
+     WCAG 1.4.11 requires 3:1 for the visual boundary of a control that needs
+     one to be perceived — an input, a select, an outlined button. It does NOT
+     apply to decorative rules, so raising `--color-line` to clear it would put
+     a 3:1 hairline between every pair of table rows and make a dense table
+     look like a spreadsheet grid.
+     Two tokens instead: quiet dividers, legible controls. */
+  /* 0.515, not 0.48. Measured rather than derived: L 0.48 cleared 3:1 against
+     canvas and sunken but landed at 2.94 on surface and 2.80 on raised — and a
+     control sitting on a hover row is exactly where the boundary matters most.
+     0.515 clears it on all four surfaces with margin. */
+  --color-line-control: oklch(0.515 0.010 255);
 
-  /* --- Ink ---------------------------------------------------------------
-     Three weights only. A fourth tier is always a hierarchy problem. */
-  --color-ink: oklch(0.97 0.004 265);
-  --color-ink-dim: oklch(0.76 0.015 265);
-  --color-ink-faint: oklch(0.56 0.02 265);
+  /* ==========================================================================
+     3. INK — four weights.
+     ink-3 is the critical one: it carries 241 usages across the app and at
+     the previous L 0.56 it measured 4.13:1 on surface, i.e. below AA. At
+     L 0.635 it measures ~5.2:1 and passes.
+     ====================================================================== */
+  --color-ink: oklch(0.960 0.003 255);       /* primary      ~13.2:1 */
+  --color-ink-2: oklch(0.780 0.006 255);     /* secondary     ~8.1:1 */
+  --color-ink-3: oklch(0.635 0.008 255);     /* tertiary      ~5.2:1 */
+  --color-ink-4: oklch(0.500 0.008 255);     /* disabled only — never body text */
 
-  /* --- Brand -------------------------------------------------------------
-     Plasma is the house colour: the light the instrument itself emits. */
-  --color-plasma: oklch(0.82 0.15 196);
-  --color-plasma-deep: oklch(0.64 0.16 210);
+  /* ==========================================================================
+     4. ACCENT — cyan, and only cyan. Interactive, focus, live, selected.
+     ====================================================================== */
+  --color-accent: oklch(0.780 0.130 200);        /* ~8.1:1 on surface */
+  --color-accent-strong: oklch(0.860 0.120 200); /* hover             */
+  --color-accent-deep: oklch(0.560 0.130 205);   /* fills under text  */
 
-  /* --- LETZMOON accents ---------------------------------------------------
-     Three, and only three, in a fixed hierarchy:
+  /* ==========================================================================
+     5. SEMANTIC — direction and status. Never decorative.
+     Every one of these is paired with a glyph or word in the primitives, so
+     meaning never rests on hue alone.
+     ====================================================================== */
+  --color-up: oklch(0.760 0.150 155);    /* bullish, gain, pass  ~7.6:1 */
+  --color-down: oklch(0.680 0.190 25);   /* bearish, loss, fail  ~6.0:1 */
+  --color-warn: oklch(0.800 0.130 78);   /* caution              ~8.6:1 */
+  --color-neutral: oklch(0.635 0.008 255); /* zero / unknown / flat     */
 
-       primary   purple   — the brand's own voice: wordmark, primary action
-       secondary emerald  — confirmation and gain
-       accent    cyan     — instrumentation, edges, live state
+  /* ==========================================================================
+     6. RISK — four bands, ordered. Rendered with a letter beside the colour.
+     ====================================================================== */
+  --color-risk-low: oklch(0.760 0.150 155);
+  --color-risk-medium: oklch(0.800 0.130 78);
+  --color-risk-high: oklch(0.740 0.165 45);
+  --color-risk-extreme: oklch(0.680 0.190 25);
 
-     They are aliases over hues the system already carries (Oracle, Scout,
-     plasma) rather than new pigments. That matters: every agent colour, grade
-     tone and status hue was tuned against this substrate, and introducing a
-     fourth family would put two greens and two blues on the same screen with
-     no rule for choosing between them.
+  /* ==========================================================================
+     7. SCORE — five bands, mapped 1:1 onto the backend ScoreGrade enum
+     (critical | weak | watch | strong | high_conviction). The signature
+     component of the product. Gold appears here and nowhere else.
+     ====================================================================== */
+  --color-score-critical: oklch(0.680 0.190 25);
+  --color-score-weak: oklch(0.740 0.150 55);
+  --color-score-watch: oklch(0.700 0.008 255);
+  --color-score-strong: oklch(0.780 0.130 200);
+  --color-score-elite: oklch(0.840 0.130 88);   /* the one scarce colour */
 
-     Gold is still absent here on purpose. It belongs to APEX / Elite alone,
-     and a brand accent that borrowed it would spend the one scarce colour the
-     product has. */
-  --color-brand: oklch(0.72 0.18 295);        /* purple  — primary */
-  --color-brand-bright: oklch(0.8 0.17 295);
-  --color-brand-secondary: oklch(0.78 0.17 158); /* emerald — secondary */
-  --color-brand-accent: oklch(0.83 0.14 196);    /* cyan    — accent */
-
-  /* --- The AI Squad ------------------------------------------------------
-     Each specialist owns one hue. These are identity, not decoration: a
-     glow, a border or a single dot is enough to say which agent is speaking. */
-  --color-scout: oklch(0.8 0.19 155);
-  --color-oracle: oklch(0.72 0.18 295);
-  --color-titan: oklch(0.7 0.16 245);
-  --color-pulse: oklch(0.72 0.21 355);
-  --color-sentinel: oklch(0.73 0.19 35);
-  --color-echo: oklch(0.78 0.16 65);
-  --color-apex: oklch(0.85 0.14 88);
-
-  /* --- Semantic ----------------------------------------------------------
-     Deliberately quieter than the agent hues so status never shouts over
-     identity. */
-  --color-safe: oklch(0.76 0.16 155);
-  --color-warn: oklch(0.8 0.15 75);
-  --color-danger: oklch(0.68 0.2 22);
-
-  /* --- Type --------------------------------------------------------------
-     Geist Sans for language, Geist Mono for every figure on screen. */
+  /* ==========================================================================
+     8. TYPOGRAPHY
+     Base drops to 13px. In a terminal that is not "small" — it is the
+     difference between eleven columns and thirteen.
+     ====================================================================== */
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, "SF Mono", monospace;
 
-  --text-display: 4.5rem;
-  --text-display--line-height: 0.95;
-  --text-display--letter-spacing: -0.04em;
-  --text-title: 2rem;
-  --text-title--line-height: 1.1;
-  --text-title--letter-spacing: -0.025em;
-  --text-heading: 1.125rem;
-  --text-heading--line-height: 1.3;
-  --text-heading--letter-spacing: -0.015em;
-  /* Small caps label — the instrument's voice for field names. */
-  --text-label: 0.6875rem;
-  --text-label--line-height: 1.2;
-  --text-label--letter-spacing: 0.14em;
+  --text-micro: 0.625rem;            /* 10px — dense table sublabels */
+  --text-micro--line-height: 0.875rem;
+  --text-label: 0.6875rem;           /* 11px — field names, caps     */
+  --text-label--line-height: 1rem;
+  --text-label--letter-spacing: 0.08em;
+  --text-xs: 0.75rem;                /* 12px */
+  --text-xs--line-height: 1rem;
+  --text-sm: 0.8125rem;              /* 13px — TABLE + BODY BASELINE */
+  --text-sm--line-height: 1.125rem;
+  --text-base: 0.875rem;             /* 14px */
+  --text-base--line-height: 1.25rem;
+  --text-md: 1rem;                   /* 16px */
+  --text-md--line-height: 1.375rem;
+  --text-lg: 1.25rem;                /* 20px */
+  --text-lg--line-height: 1.625rem;
+  --text-lg--letter-spacing: -0.01em;
+  --text-xl: 1.75rem;                /* 28px */
+  --text-xl--line-height: 2rem;
+  --text-xl--letter-spacing: -0.02em;
+  --text-2xl: 2.5rem;                /* 40px */
+  --text-2xl--line-height: 2.75rem;
+  --text-2xl--letter-spacing: -0.03em;
 
-  /* --- Form --------------------------------------------------------------
-     Panels are architecture; chips are components. Different radii keep the
-     hierarchy legible at a glance. */
-  --radius-chip: 6px;
-  --radius-card: 12px;
-  --radius-panel: 16px;
+  /* ==========================================================================
+     9. RADIUS — down from 6/12/16. Smaller radii read as instrument panels.
+     ====================================================================== */
+  --radius-sm: 4px;   /* chips, inputs, cells   */
+  --radius-md: 6px;   /* buttons, cards         */
+  --radius-lg: 10px;  /* panels, sheets, modals */
 
-  /* --- Motion ------------------------------------------------------------
-     One expressive curve, one utility curve. `instrument` is a damped
-     exponential — it arrives fast then settles without ever overshooting,
-     which is what separates "precision hardware" from "toy". */
-  --ease-instrument: cubic-bezier(0.16, 1, 0.3, 1);
-  --ease-precise: cubic-bezier(0.4, 0, 0.2, 1);
+  /* ==========================================================================
+     10. ELEVATION — three levels, all near-black. No coloured shadow.
+     ====================================================================== */
+  --shadow-e1: 0 1px 2px rgb(0 0 0 / 0.30);
+  --shadow-e2: 0 4px 12px -2px rgb(0 0 0 / 0.45);
+  --shadow-e3: 0 16px 40px -12px rgb(0 0 0 / 0.60);
 
-  --duration-instant: 120ms;
-  --duration-quick: 200ms;
-  --duration-considered: 340ms;
+  /* ==========================================================================
+     11. MOTION — three durations, one curve. State change only.
+     ====================================================================== */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --duration-instant: 100ms;  /* hover, press           */
+  --duration-quick: 160ms;    /* panels, filters, tabs  */
+  --duration-settle: 240ms;   /* row reorder, expansion */
+
+  /* ==========================================================================
+     LEGACY ALIASES — DEPRECATED.
+     Every one of these is referenced by screens not yet migrated. They exist
+     so Phase 2 re-grades the whole app without touching a single component,
+     and they are deleted screen by screen as migration lands.
+     ====================================================================== */
+  --color-void: var(--color-canvas);
+  --color-abyss: var(--color-sunken);
+  --color-elevated: var(--color-raised);
+  --color-line-bright: var(--color-line-strong);
+  --color-ink-dim: var(--color-ink-2);
+  --color-ink-faint: var(--color-ink-3);
+
+  --color-plasma: var(--color-accent);
+  --color-plasma-deep: var(--color-accent-deep);
+  --color-brand: var(--color-accent);
+  --color-brand-bright: var(--color-accent-strong);
+  --color-brand-secondary: var(--color-up);
+  --color-brand-accent: var(--color-accent);
+
+  --color-safe: var(--color-up);
+  --color-danger: var(--color-down);
+
+  /* The seven agent hues collapse to three roles. Discovery reads as gain,
+     Risk reads as danger, everything analytical reads as instrumentation.
+     Six neons become one accent, and Elite keeps the gold. */
+  --color-scout: var(--color-up);
+  --color-titan: var(--color-accent);
+  --color-pulse: var(--color-accent);
+  --color-echo: var(--color-ink-3);
+  --color-oracle: var(--color-accent);
+  --color-sentinel: var(--color-down);
+  --color-apex: var(--color-score-elite);
+
+  --radius-chip: var(--radius-sm);
+  --radius-card: var(--radius-md);
+  --radius-panel: var(--radius-lg);
+
+  --text-display: 2.5rem;
+  --text-display--line-height: 2.75rem;
+  --text-display--letter-spacing: -0.03em;
+  --text-title: 1.75rem;
+  --text-title--line-height: 2rem;
+  --text-title--letter-spacing: -0.02em;
+  --text-heading: 1rem;
+  --text-heading--line-height: 1.375rem;
+  --text-heading--letter-spacing: -0.01em;
+
+  --ease-instrument: var(--ease-standard);
+  --ease-precise: var(--ease-standard);
+  --duration-considered: var(--duration-settle);
   --duration-cinematic: 900ms;
-  /* Longer than cinematic on purpose: the camera carries the whole sky, and at
-     900ms a full-field move reads as a jolt rather than a turn. */
   --duration-camera: 1400ms;
 
-  --animate-drift: drift 24s var(--ease-precise) infinite;
+  --animate-drift: drift 24s var(--ease-standard) infinite;
   --animate-breathe: breathe 6s ease-in-out infinite;
   --animate-orbit: orbit 40s linear infinite;
-  --animate-scan: scan 3.6s var(--ease-precise) infinite;
+  --animate-scan: scan 3.6s var(--ease-standard) infinite;
   --animate-core: core 8s ease-in-out infinite;
-  --animate-rise: rise var(--duration-considered) var(--ease-instrument) both;
+  --animate-rise: rise var(--duration-settle) var(--ease-standard) both;
 }
 
 /* ============================================================================
@@ -240,28 +327,6 @@
   100% {
     transform: scale(2.6);
     opacity: 0;
-  }
-}
-
-@keyframes ripple-once {
-  0% {
-    transform: scale(0.85);
-    opacity: 0.7;
-  }
-  100% {
-    transform: scale(1.9);
-    opacity: 0;
-  }
-}
-
-@keyframes flare {
-  0%,
-  100% {
-    opacity: 0;
-  }
-  20%,
-  60% {
-    opacity: 1;
   }
 }
 
@@ -410,15 +475,6 @@
   }
 }
 
-@keyframes ticker {
-  from {
-    transform: translateX(0);
-  }
-  to {
-    transform: translateX(-50%);
-  }
-}
-
 @keyframes shimmer {
   from {
     transform: translateX(-100%);
@@ -440,42 +496,43 @@
   }
 
   body {
-    background-color: var(--color-void);
+    background-color: var(--color-canvas);
     color: var(--color-ink);
     font-family: var(--font-sans);
-    /* The void is never flat: two vast, barely-there light sources give the
-       page depth before a single element is drawn. */
-    background-image:
-      radial-gradient(
-        ellipse 80% 50% at 50% -10%,
-        color-mix(in oklch, var(--color-plasma) 9%, transparent),
-        transparent 70%
-      ),
-      radial-gradient(
-        ellipse 60% 50% at 90% 10%,
-        color-mix(in oklch, var(--color-oracle) 7%, transparent),
-        transparent 65%
-      );
-    background-attachment: fixed;
+    /* Flat. The two coloured light sources that used to sit here were the
+       loudest "spaceship" tell inside the product: every panel floated on a
+       cyan and violet wash, which is why panels needed blur to separate from
+       it. The surface ramp does that job now, at no render cost.
+
+       The landing page keeps its atmosphere — that lives in memescope.css
+       under .alpha-* / .lm-space and is deliberately untouched. */
+    font-size: var(--text-sm);
   }
 
-  /* Every numeral on screen is mono and tabular. This single rule is the
-     most recognisable thing about the interface. */
+  /* Every numeral on screen is mono and tabular. The <Num> primitive is the
+     enforced path; this rule catches the legacy `data-numeric` call sites
+     until they migrate.
+
+     `slashed-zero` is new and matters more than it looks: mint addresses and
+     hashes are everywhere in this product, and 0/O is the one confusion a
+     reader cannot resolve from context. */
   [data-numeric],
   .numeric {
     font-family: var(--font-mono);
-    font-variant-numeric: tabular-nums;
-    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums slashed-zero;
+    letter-spacing: -0.01em;
   }
 
+  /* One focus treatment for the whole app. Two-tone so it is visible against
+     both a dark panel and an accent-filled button. */
   :focus-visible {
-    outline: 2px solid var(--color-plasma);
+    outline: 2px solid var(--color-accent);
     outline-offset: 2px;
     border-radius: 2px;
   }
 
   ::selection {
-    background: color-mix(in oklch, var(--color-plasma) 30%, transparent);
+    background: color-mix(in oklch, var(--color-accent) 30%, transparent);
     color: var(--color-ink);
   }
 
@@ -613,10 +670,20 @@
    single style recalculation rather than a React re-render of the tree.
    ========================================================================== */
 
-/* Two distinct classes, because "animated" and "decorative" are not the same
-   thing. `.ambient` is pure atmosphere and disappears. `.motion-loop` marks
-   elements that animate continuously but carry meaning — the Core body, the
-   specialist nodes — so Command mode stills them rather than removing them. */
+/* WHAT IS LEFT OF COMMAND MODE
+   ----------------------------------------------------------------------------
+   Most of what this mode used to do, the product now does by default.
+
+   Removed here, because the thing being switched off no longer exists:
+     - `background-image: none` on body — the body gradients are gone.
+     - `--blur-panel: 0` and the `[data-panel]` blur/translucency override —
+       Panel is opaque with no backdrop-filter in both modes.
+     - `.grid-field` — not rendered by any shell surface.
+
+   What remains is a genuine user preference rather than a workaround: stop the
+   ambient decoration, and tighten density. `.ambient` is pure atmosphere and
+   disappears; `.motion-loop` marks elements that animate continuously but carry
+   meaning, so they are stilled rather than removed. */
 [data-mode="compact"] .ambient {
   display: none !important;
 }
@@ -627,27 +694,6 @@
 
 [data-mode="compact"] .full-only {
   display: none !important;
-}
-
-[data-mode="compact"] body {
-  /* The void goes flat: no light sources, no depth. */
-  background-image: none;
-}
-
-[data-mode="compact"] {
-  /* Backdrop blur is the single most expensive effect on screen and buys
-     nothing when information density is the goal. */
-  --blur-panel: 0px;
-}
-
-[data-mode="compact"] .grid-field {
-  display: none;
-}
-
-/* Panels tighten and lose their translucency so rows read as a dense table. */
-[data-mode="compact"] [data-panel] {
-  backdrop-filter: none;
-  background-color: var(--color-abyss);
 }
 
 /* ============================================================================

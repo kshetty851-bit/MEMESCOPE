@@ -18,7 +18,7 @@ export function Input({ label, error, hint, className, id, ...props }: InputProp
 
   return (
     <div className="flex flex-col gap-2">
-      <label htmlFor={inputId} className="text-label font-medium uppercase text-ink-faint">
+      <label htmlFor={inputId} className="text-label font-medium uppercase text-ink-3">
         {label}
       </label>
       <input
@@ -26,22 +26,29 @@ export function Input({ label, error, hint, className, id, ...props }: InputProp
         aria-invalid={error ? true : undefined}
         aria-describedby={describedBy}
         className={cn(
-          "h-11 rounded-card border bg-abyss/70 px-3.5 text-sm text-ink",
-          "transition-colors duration-150 ease-[var(--ease-precise)]",
-          "placeholder:text-ink-faint/60 focus:outline-none",
+          "h-9 rounded-md border bg-sunken px-3 text-sm text-ink",
+          "transition-colors duration-[var(--duration-instant)]",
+          // `focus:outline-none` is deliberately absent. The global
+          // `:focus-visible` ring is the only focus treatment in the product,
+          // and removing it here left a border colour change as the sole
+          // indicator — which is a 3:1 non-text contrast requirement met by
+          // accident rather than a focus indicator.
+          "placeholder:text-ink-4",
+          // A control boundary, not a divider: `line-control` clears 3:1
+          // against every surface an input can sit on.
           error
-            ? "border-danger focus:border-danger"
-            : "border-line hover:border-line-bright focus:border-plasma",
+            ? "border-down"
+            : "border-line-control hover:border-line-strong",
           className,
         )}
         {...props}
       />
       {error ? (
-        <p id={`${inputId}-error`} role="alert" className="text-xs text-danger">
+        <p id={`${inputId}-error`} role="alert" className="text-xs text-down">
           {error}
         </p>
       ) : hint ? (
-        <p id={`${inputId}-hint`} className="text-xs text-ink-faint">
+        <p id={`${inputId}-hint`} className="text-xs text-ink-3">
           {hint}
         </p>
       ) : null}

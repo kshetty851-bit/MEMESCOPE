@@ -4,6 +4,8 @@ import { useMemo, useState } from "react";
 
 import { TokenIdentity } from "@/components/brand/token-identity";
 import { Label, Panel } from "@/components/ui/panel";
+import { Stat as SharedStat } from "@/components/ui/stat";
+import { Toolbar } from "@/components/ui/toolbar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/states";
 import { useLab } from "@/hooks/use-paper";
@@ -21,6 +23,7 @@ const COLUMNS: { key: LabSortKey; label: string }[] = [
   { key: "trades", label: "Closed" },
 ];
 
+/** Local name, shared implementation — see the note in `wallet/page.tsx`. */
 function Metric({
   label,
   value,
@@ -30,21 +33,18 @@ function Metric({
   value: string | number | null | undefined;
   signed?: boolean;
 }) {
-  const text = typeof value === "string" && signed ? pct(value) : value;
+  const display = typeof value === "string" && signed ? pct(value) : value;
   const flavour = typeof value === "string" && signed ? tone(value) : "neutral";
   return (
-    <div className="rounded-card border border-line bg-surface/40 p-4">
-      <p className="text-xs uppercase tracking-wide text-ink-faint">{label}</p>
-      <p
-        className={cn(
-          "mt-2 text-2xl font-semibold tabular-nums text-ink",
-          flavour === "positive" && "text-safe",
-          flavour === "negative" && "text-danger",
-        )}
-      >
-        {text ?? "—"}
-      </p>
-    </div>
+    <SharedStat
+      label={label}
+      // Display-only. `value` here is either a raw count or a Decimal string
+      // that `pct()` has already turned into "12.5%" — passing the formatted
+      // form as `value` as well is what blanked these figures.
+      display={display === null || display === undefined ? null : String(display)}
+      size="lg"
+      tone={flavour === "positive" ? "up" : flavour === "negative" ? "down" : "default"}
+    />
   );
 }
 
@@ -54,9 +54,9 @@ function SignedPct({ value }: { value: string | null }) {
     <span
       className={cn(
         "tabular-nums",
-        flavour === "positive" && "text-safe",
-        flavour === "negative" && "text-danger",
-        flavour === "neutral" && "text-ink-dim",
+        flavour === "positive" && "text-up",
+        flavour === "negative" && "text-down",
+        flavour === "neutral" && "text-ink-2",
       )}
     >
       {pct(value) ?? "—"}
@@ -66,14 +66,14 @@ function SignedPct({ value }: { value: string | null }) {
 
 function StrategyDetail({ strategy }: { strategy: LabStrategy }) {
   return (
-    <Panel className="border-plasma/20">
+    <Panel className="border-accent/20">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <Label>Selected rule</Label>
-          <h2 className="mt-2 text-heading font-semibold text-ink">{strategy.name}</h2>
-          <p className="mt-1 max-w-3xl text-sm text-ink-dim">{strategy.description}</p>
+          <h2 className="mt-2 text-md font-semibold text-ink">{strategy.name}</h2>
+          <p className="mt-1 max-w-3xl text-sm text-ink-2">{strategy.description}</p>
         </div>
-        <div className="rounded-full border border-line px-3 py-1 text-xs text-ink-dim">
+        <div className="rounded-full border border-line px-3 py-1 text-xs text-ink-2">
           Rank #{strategy.rank}
         </div>
       </div>
@@ -90,8 +90,8 @@ function StrategyDetail({ strategy }: { strategy: LabStrategy }) {
       <dl className="mt-5 grid gap-x-6 gap-y-2 sm:grid-cols-2">
         {strategy.rules.map((rule) => (
           <div key={rule.label} className="flex items-baseline justify-between gap-4">
-            <dt className="text-xs text-ink-faint">{rule.label}</dt>
-            <dd className="text-right text-sm text-ink-dim">{rule.value}</dd>
+            <dt className="text-xs text-ink-3">{rule.label}</dt>
+            <dd className="text-right text-sm text-ink-2">{rule.value}</dd>
           </div>
         ))}
       </dl>
@@ -105,7 +105,7 @@ function SegmentTable({ title, rows }: { title: string; rows: SegmentRow[] }) {
       <h3 className="text-sm font-medium text-ink">{title}</h3>
       <div className="mt-3 overflow-x-auto">
         <table className="w-full min-w-[480px] text-sm">
-          <thead className="text-label uppercase tracking-wide text-ink-faint">
+          <thead className="text-label uppercase tracking-wide text-ink-3">
             <tr>
               <th className="py-2 text-left font-normal">Group</th>
               <th className="py-2 text-right font-normal">n</th>
@@ -117,12 +117,12 @@ function SegmentTable({ title, rows }: { title: string; rows: SegmentRow[] }) {
           </thead>
           <tbody>
             {rows.map((row) => (
-              <tr key={row.name} className="border-t border-line/60">
+              <tr key={row.name} className="border-t border-line-subtle">
                 <td className="py-2 text-ink">{row.name}</td>
-                <td className="py-2 text-right tabular-nums text-ink-dim">{row.n}</td>
+                <td className="py-2 text-right tabular-nums text-ink-2">{row.n}</td>
                 <td className="py-2 text-right"><SignedPct value={row.net_return_pct} /></td>
                 <td className="py-2 text-right"><SignedPct value={row.win_rate_pct} /></td>
-                <td className="py-2 text-right tabular-nums text-ink-dim">{row.profit_factor ?? "—"}</td>
+                <td className="py-2 text-right tabular-nums text-ink-2">{row.profit_factor ?? "—"}</td>
                 <td className="py-2 text-right"><SignedPct value={row.slippage_drag_pct} /></td>
               </tr>
             ))}
@@ -137,7 +137,7 @@ function TradeList({ title, items }: { title: string; items: TradeCard[] }) {
   return (
     <Panel density="compact">
       <h3 className="text-sm font-medium text-ink">{title}</h3>
-      <div className="mt-3 flex flex-col divide-y divide-line/60">
+      <div className="mt-3 flex flex-col divide-y divide-line-subtle">
         {items.map((item) => (
           <div key={item.mint_address} className="grid gap-2 py-3 sm:grid-cols-5">
             <div className="sm:col-span-2">
@@ -149,11 +149,11 @@ function TradeList({ title, items }: { title: string; items: TradeCard[] }) {
               />
             </div>
             <SignedPct value={item.net_return_pct} />
-            <span className="text-sm text-ink-dim">{usd(item.entry_liquidity_usd) ?? "No liquidity"}</span>
-            <span className="text-sm text-ink-dim">{item.category ?? "Unknown"}</span>
+            <span className="text-sm text-ink-2">{usd(item.entry_liquidity_usd) ?? "No liquidity"}</span>
+            <span className="text-sm text-ink-2">{item.category ?? "Unknown"}</span>
           </div>
         ))}
-        {items.length === 0 ? <p className="py-4 text-sm text-ink-faint">No trades in this slice.</p> : null}
+        {items.length === 0 ? <p className="py-4 text-sm text-ink-3">No trades in this slice.</p> : null}
       </div>
     </Panel>
   );
@@ -182,8 +182,8 @@ export default function StrategyLabPage() {
   if (lab.isPending || !lab.data) {
     return (
       <div className="flex flex-col gap-4">
-        <Skeleton className="h-28 rounded-card" />
-        <Skeleton className="h-80 rounded-card" />
+        <Skeleton className="h-28 rounded-md" />
+        <Skeleton className="h-80 rounded-md" />
       </div>
     );
   }
@@ -192,26 +192,22 @@ export default function StrategyLabPage() {
   const production = lab.data.production_summary;
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-8 pb-16">
-      <header>
-        <Label>Strategy Lab V2</Label>
-        <h1 className="mt-2 text-title font-semibold text-ink">
-          Evidence from Generation 2 paper trades
-        </h1>
-        <p className="mt-2 max-w-3xl text-sm leading-relaxed text-ink-dim">
-          {lab.data.methodology}
-        </p>
-      </header>
+    <div className="flex flex-col gap-8 pb-8">
+      <Toolbar
+        eyebrow="Strategy lab"
+        title="Evidence from Generation 2 paper trades"
+        description={lab.data.methodology}
+      />
 
-      <Panel className="border-plasma/20 bg-plasma/[0.03]">
+      <Panel className="border-accent/20 bg-accent/[0.03]">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <Label>Final research decision</Label>
-            <h2 className="mt-2 text-heading font-semibold text-ink">
+            <h2 className="mt-2 text-md font-semibold text-ink">
               {lab.data.final_decision_code}. {lab.data.final_decision}
             </h2>
           </div>
-          <p className="max-w-xl text-sm leading-relaxed text-ink-dim">
+          <p className="max-w-xl text-sm leading-relaxed text-ink-2">
             {integrity.verdict} Gen 1 remains archived/historical and is excluded from optimisation.
           </p>
         </div>
@@ -232,13 +228,13 @@ export default function StrategyLabPage() {
 
       <Panel>
         <Label>Execution model performance</Label>
-        <p className="mt-2 text-sm text-ink-dim">
+        <p className="mt-2 text-sm text-ink-2">
           Closed audit rows are grouped by the execution model that produced their stored net result.
           Historical legacy rows and future Jupiter rows are not blended.
         </p>
         <div className="mt-4 overflow-x-auto">
           <table className="w-full min-w-[760px] text-left text-sm">
-            <thead className="text-xs uppercase tracking-wide text-ink-faint">
+            <thead className="text-xs uppercase tracking-wide text-ink-3">
               <tr>
                 <th className="py-2">Model</th>
                 <th className="py-2 text-right">Trades</th>
@@ -252,15 +248,15 @@ export default function StrategyLabPage() {
             </thead>
             <tbody>
               {lab.data.execution_models.map((row) => (
-                <tr key={row.model_version} className="border-t border-line/70">
+                <tr key={row.model_version} className="border-t border-line-subtle">
                   <td className="py-3 font-medium text-ink">{row.label}</td>
-                  <td className="py-3 text-right tabular-nums text-ink-dim">{row.trades}</td>
-                  <td className="py-3 text-right tabular-nums text-ink-dim">{usd(row.gross_return_usd)}</td>
-                  <td className="py-3 text-right tabular-nums"><span className={tone(row.net_return_usd) === "positive" ? "text-safe" : tone(row.net_return_usd) === "negative" ? "text-danger" : "text-ink-dim"}>{usd(row.net_return_usd)}</span></td>
+                  <td className="py-3 text-right tabular-nums text-ink-2">{row.trades}</td>
+                  <td className="py-3 text-right tabular-nums text-ink-2">{usd(row.gross_return_usd)}</td>
+                  <td className="py-3 text-right tabular-nums"><span className={tone(row.net_return_usd) === "positive" ? "text-up" : tone(row.net_return_usd) === "negative" ? "text-down" : "text-ink-2"}>{usd(row.net_return_usd)}</span></td>
                   <td className="py-3 text-right"><SignedPct value={row.win_rate_pct} /></td>
-                  <td className="py-3 text-right tabular-nums text-ink-dim">{row.profit_factor ?? "—"}</td>
-                  <td className="py-3 text-right tabular-nums text-ink-dim">{usd(row.fees_usd)}</td>
-                  <td className="py-3 text-right tabular-nums text-ink-dim">{usd(row.slippage_usd)}</td>
+                  <td className="py-3 text-right tabular-nums text-ink-2">{row.profit_factor ?? "—"}</td>
+                  <td className="py-3 text-right tabular-nums text-ink-2">{usd(row.fees_usd)}</td>
+                  <td className="py-3 text-right tabular-nums text-ink-2">{usd(row.slippage_usd)}</td>
                 </tr>
               ))}
             </tbody>
@@ -283,18 +279,18 @@ export default function StrategyLabPage() {
       </section>
 
       <section className="flex flex-col gap-3">
-        <h2 className="text-heading font-medium text-ink">Strategy Leaderboard</h2>
-        <div className="overflow-x-auto rounded-card border border-line">
+        <h2 className="text-md font-medium text-ink">Strategy Leaderboard</h2>
+        <div className="overflow-x-auto rounded-md border border-line">
           <table className="w-full min-w-[900px] text-sm">
             <thead>
-              <tr className="border-b border-line text-label uppercase tracking-wide text-ink-faint">
+              <tr className="border-b border-line text-label uppercase tracking-wide text-ink-3">
                 <th className="px-3 py-2 text-left font-normal">Strategy</th>
                 {COLUMNS.filter((column) => column.key !== "rank").map((column) => (
                   <th key={column.key} className="px-3 py-2 text-right font-normal">
                     <button
                       type="button"
                       onClick={() => setSort(column.key)}
-                      className={cn("hover:text-ink", sort === column.key && "text-plasma")}
+                      className={cn("hover:text-ink", sort === column.key && "text-accent")}
                     >
                       {column.label}
                     </button>
@@ -309,27 +305,27 @@ export default function StrategyLabPage() {
                   key={row.id}
                   onClick={() => setSelectedId(row.id)}
                   className={cn(
-                    "cursor-pointer border-b border-line/60 transition-colors hover:bg-surface/60",
-                    row.id === selected?.id && "bg-plasma/[0.05]",
+                    "cursor-pointer border-b border-line-subtle transition-colors hover:bg-surface/60",
+                    row.id === selected?.id && "bg-accent/[0.05]",
                   )}
                 >
                   <td className="px-3 py-3">
                     <div className="flex items-center gap-2">
-                      <span className="text-xs tabular-nums text-ink-faint">#{row.rank}</span>
+                      <span className="text-xs tabular-nums text-ink-3">#{row.rank}</span>
                       <span className="font-medium text-ink">{row.name}</span>
                       {row.is_baseline ? (
-                        <span className="rounded-full border border-plasma/30 px-2 py-0.5 text-[10px] uppercase text-plasma">
+                        <span className="rounded-full border border-accent/30 px-2 py-0.5 text-micro uppercase text-accent">
                           V1
                         </span>
                       ) : null}
                     </div>
                   </td>
                   <td className="px-3 py-3 text-right"><SignedPct value={row.net_return_pct} /></td>
-                  <td className="px-3 py-3 text-right tabular-nums text-ink-dim">{row.profit_factor ?? "—"}</td>
+                  <td className="px-3 py-3 text-right tabular-nums text-ink-2">{row.profit_factor ?? "—"}</td>
                   <td className="px-3 py-3 text-right"><SignedPct value={row.max_drawdown_pct} /></td>
                   <td className="px-3 py-3 text-right"><SignedPct value={row.total_return_pct} /></td>
                   <td className="px-3 py-3 text-right"><SignedPct value={row.win_rate_pct} /></td>
-                  <td className="px-3 py-3 text-right tabular-nums text-ink-dim">{row.closed_count}</td>
+                  <td className="px-3 py-3 text-right tabular-nums text-ink-2">{row.closed_count}</td>
                   <td className="px-3 py-3 text-right"><SignedPct value={row.baseline_difference_pct} /></td>
                 </tr>
               ))}
@@ -344,7 +340,7 @@ export default function StrategyLabPage() {
         {lab.data.findings.map((finding) => (
           <Panel key={finding.headline} density="compact">
             <h3 className="text-sm font-medium text-ink">{finding.headline}</h3>
-            <p className="mt-2 text-xs leading-relaxed text-ink-dim">{finding.detail}</p>
+            <p className="mt-2 text-xs leading-relaxed text-ink-2">{finding.detail}</p>
           </Panel>
         ))}
       </section>
@@ -367,13 +363,13 @@ export default function StrategyLabPage() {
           <Label>Suggested improvements</Label>
           <div className="mt-3 flex flex-col gap-3">
             {lab.data.suggestions.map((item) => (
-              <div key={item.title} className="rounded-card border border-line p-3">
+              <div key={item.title} className="rounded-md border border-line p-3">
                 <p className="font-medium text-ink">{item.title}</p>
-                <p className="mt-1 text-xs text-ink-faint">
+                <p className="mt-1 text-xs text-ink-3">
                   Confidence: {item.confidence} · n={item.sample_size}
                 </p>
-                <p className="mt-2 text-sm text-ink-dim">{item.expected_improvement}</p>
-                <p className="mt-1 text-xs text-ink-faint">{item.trade_offs}</p>
+                <p className="mt-2 text-sm text-ink-2">{item.expected_improvement}</p>
+                <p className="mt-1 text-xs text-ink-3">{item.trade_offs}</p>
               </div>
             ))}
           </div>
@@ -382,9 +378,9 @@ export default function StrategyLabPage() {
           <Label>Rejected ideas</Label>
           <div className="mt-3 flex flex-col gap-2">
             {lab.data.rejected_ideas.slice(0, 8).map((item) => (
-              <div key={item.strategy_id} className="rounded-card border border-line p-3">
+              <div key={item.strategy_id} className="rounded-md border border-line p-3">
                 <p className="font-medium text-ink">{item.strategy_id}</p>
-                <p className="mt-1 text-xs text-ink-dim">{item.reason}</p>
+                <p className="mt-1 text-xs text-ink-2">{item.reason}</p>
               </div>
             ))}
           </div>
@@ -392,7 +388,7 @@ export default function StrategyLabPage() {
       </section>
 
       <Panel density="compact">
-        <p className="text-xs leading-relaxed text-ink-dim">{lab.data.cost_disclosure}</p>
+        <p className="text-xs leading-relaxed text-ink-2">{lab.data.cost_disclosure}</p>
       </Panel>
     </div>
   );

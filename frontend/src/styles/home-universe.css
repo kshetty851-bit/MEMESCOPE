@@ -1,0 +1,1184 @@
+/* ============================================================================
+   THE HOMEPAGE UNIVERSE — the cinematic version
+   ----------------------------------------------------------------------------
+   Scoped entirely to `.home-universe`, so nothing in here can reach the
+   terminal. It reuses the terminal's star, dust and depth-group rules from
+   `universe.css` and adds what only the gate is allowed: a lunar foreground,
+   astronauts, a rover, and a hero rocket that launches once.
+
+   The performance contract is unchanged: transform and opacity only, no blur
+   filters, no per-object JavaScript. The launch is a class flip that starts a
+   CSS chain — React sets the phase three times in thirteen seconds and then
+   never touches it again.
+   ========================================================================== */
+
+.home-universe {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  isolation: isolate;
+  contain: strict;
+
+  /* One anchor for the pad and the ship. They are DOM siblings so the camera
+     can push one and not the other, which means their coordinates would
+     otherwise be two numbers free to drift apart at every breakpoint. */
+  /*
+     26%, not 37%. At 37% the pad's deck ran to x≈730 on a 1440 viewport while
+     the mascot began at x≈664 — the frog's lower hand and its thumbs-up landed
+     on top of the platform and the ship stood partly behind the figure. Two
+     hero objects occupying the same 70px is the thing that made the scene read
+     as assembled rather than composed.
+
+     Moving the station left rather than the mascot right is what fits: the
+     space to the right is spoken for by the access panel, and a longer
+     up-and-right run also gives the flight a clearer line toward the
+     destination.
+  */
+  --station-x: 26%;
+  --station-y: 16%;
+  --station-w: clamp(90px, 9vw, 150px);
+
+  /* Where the destination rests before the flight, measured from the centre of
+     the viewport. Resting *relative to centre* is what lets the approach end
+     exactly centred at any screen size without a second set of numbers. */
+  --dest-x: 22vw;
+  --dest-y: -34vh;
+}
+
+.home-universe__canvas {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 80% 60% at 20% 4%, oklch(0.30 0.11 288 / 0.40), transparent 56%),
+    radial-gradient(ellipse 70% 55% at 84% 10%, oklch(0.30 0.08 214 / 0.32), transparent 54%),
+    radial-gradient(ellipse 120% 60% at 50% 104%, oklch(0.22 0.06 258 / 0.45), transparent 62%),
+    #070a16;
+}
+
+/* --- Sky ------------------------------------------------------------------ */
+
+.home-universe__nebula {
+  position: absolute;
+  border-radius: 999px;
+  opacity: 0.7;
+  will-change: transform;
+}
+
+.home-universe__nebula--violet {
+  left: -16%;
+  top: -12%;
+  width: min(1000px, 78vw);
+  height: min(1000px, 78vw);
+  background: radial-gradient(
+    circle,
+    oklch(0.48 0.19 292 / 0.40) 0%,
+    oklch(0.42 0.16 292 / 0.18) 32%,
+    transparent 68%
+  );
+  animation: uv-nebula-a 173s ease-in-out infinite;
+}
+
+.home-universe__nebula--cyan {
+  right: -20%;
+  top: 18%;
+  width: min(1100px, 80vw);
+  height: min(1100px, 80vw);
+  background: radial-gradient(
+    circle,
+    oklch(0.48 0.14 206 / 0.34) 0%,
+    oklch(0.42 0.12 206 / 0.16) 34%,
+    transparent 70%
+  );
+  animation: uv-nebula-b 211s ease-in-out infinite;
+}
+
+.home-universe__galaxy {
+  position: absolute;
+  left: 10%;
+  top: 8%;
+  width: min(620px, 48vw);
+  height: min(210px, 17vw);
+  border-radius: 999px;
+  background:
+    radial-gradient(ellipse at 50% 50%, rgb(255 255 255 / 0.20), transparent 0 6%, transparent 62%),
+    radial-gradient(ellipse at 50% 50%, oklch(0.64 0.17 290 / 0.24), transparent 68%);
+  opacity: 0.5;
+  transform: rotate(-17deg);
+  animation: uv-galaxy 289s ease-in-out infinite;
+  will-change: transform;
+}
+
+/* --- Planetary system ----------------------------------------------------- */
+
+.home-universe__body {
+  position: absolute;
+  will-change: transform;
+}
+
+.home-universe__body svg,
+.home-universe__satellite svg,
+.home-universe__meteor svg,
+.home-universe__comet svg,
+.home-universe__astronaut svg,
+.home-universe__module svg,
+.home-universe__rover svg,
+.home-universe__pad svg,
+.home-universe__destination svg,
+.home-universe__rocket svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* Big, top-right, partly out of frame — the reference's red world. */
+.home-universe__body--red {
+  right: -6%;
+  top: -4%;
+  width: clamp(240px, 27vw, 520px);
+  opacity: 0.72;
+  animation: uv-body-drift-a 420s ease-in-out infinite;
+}
+
+.home-universe__body--ringed {
+  left: 6%;
+  top: 26%;
+  width: clamp(180px, 20vw, 380px);
+  opacity: 0.6;
+  animation: uv-body-drift-b 510s ease-in-out infinite;
+}
+
+.home-universe__body--blue {
+  right: 26%;
+  top: 46%;
+  width: clamp(70px, 8vw, 150px);
+  opacity: 0.55;
+  animation: uv-body-drift-a 300s ease-in-out infinite reverse;
+}
+
+/* Real orbital traffic: 96 seconds to cross, visible for most of it. */
+.home-universe__satellite {
+  position: absolute;
+  top: 14%;
+  left: -140px;
+  width: clamp(70px, 8vw, 130px);
+  opacity: 0;
+  will-change: transform, opacity;
+  animation: hu-satellite 96s linear infinite;
+  animation-delay: -20s;
+}
+
+/* --- Events --------------------------------------------------------------- */
+
+.home-universe__meteor {
+  position: absolute;
+  width: clamp(90px, 11vw, 190px);
+  opacity: 0;
+  transform-origin: 100% 50%;
+  will-change: transform, opacity;
+}
+
+.home-universe__meteor--a {
+  top: 10%;
+  left: 12%;
+  animation: uv-meteor-a 19s ease-in infinite;
+}
+
+.home-universe__meteor--b {
+  top: 34%;
+  right: 10%;
+  width: clamp(70px, 8vw, 140px);
+  animation: uv-meteor-b 31s ease-in infinite;
+  animation-delay: -13s;
+}
+
+.home-universe__comet {
+  position: absolute;
+  top: 8%;
+  left: 72%;
+  width: clamp(200px, 22vw, 380px);
+  opacity: 0;
+  transform-origin: 100% 50%;
+  will-change: transform, opacity;
+  animation: uv-comet 227s ease-in-out infinite;
+  animation-delay: -40s;
+}
+
+/* --- Astronauts ----------------------------------------------------------- */
+
+/*
+   Slow float, tiny rotation, long lateral drift. Two instances on co-prime
+   cycles (37s / 43s tumble against 61s / 71s drift) so they never move in
+   sympathy — synchronised figures read as a screensaver.
+*/
+.home-universe__astronaut {
+  position: absolute;
+  will-change: transform;
+  filter: drop-shadow(0 12px 28px rgb(0 0 0 / 0.45));
+}
+
+.home-universe__astronaut--one {
+  left: 5%;
+  bottom: 26%;
+  width: clamp(72px, 7.5vw, 128px);
+  opacity: 0.78;
+  animation:
+    hu-float-a 61s ease-in-out infinite,
+    hu-tumble-a 37s ease-in-out infinite;
+}
+
+.home-universe__astronaut--two {
+  right: 12%;
+  top: 34%;
+  width: clamp(74px, 8vw, 140px);
+  opacity: 0.8;
+  animation:
+    hu-float-b 71s ease-in-out infinite,
+    hu-tumble-b 43s ease-in-out infinite;
+}
+
+/* ============================================================================
+   THE LAUNCH STATION
+   ----------------------------------------------------------------------------
+   The whole sequence is CSS. React writes four attributes onto the scene root
+   and never touches it again:
+
+     data-launch="…"   the exact phase, for the beats that are instants
+     data-sequence     latched from `approved`   — the mission is underway
+     data-lit          latched from `ignition`   — the engine is burning
+     data-flying       latched from `launching`  — ship and camera are moving
+
+   The latched flags exist because a selector cannot say "this state or any
+   state after it", and an engine that went dark between two phases would be a
+   very expensive-looking bug.
+
+   Every duration below comes from `--hu-*`, which `lib/launch.ts` writes onto
+   the root from the same table React is stepping through. Nothing here
+   restates a number, so the pad lights cannot finish after the digits do.
+   ========================================================================== */
+
+.home-universe__station,
+.home-universe__rocket {
+  position: absolute;
+  /* Left of the mascot and below the headline: the one vertical corridor in
+     this composition that is clear all the way to the top of the frame. */
+  left: var(--station-x);
+  bottom: var(--station-y);
+  width: var(--station-w);
+  will-change: transform;
+}
+
+.home-universe__pad {
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  width: 210%;
+  /* Lifted by a quarter of its own height so the deck line meets the ship's
+     skirt rather than floating below it. */
+  transform: translate(-50%, -27%);
+  filter: drop-shadow(0 10px 22px rgb(0 0 0 / 0.55));
+}
+
+/* Beat 5 — the station activates. */
+.home-universe__pad::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 22%;
+  width: 96%;
+  height: 74%;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: radial-gradient(ellipse at 50% 50%, oklch(0.86 0.13 200 / 0.42), transparent 68%);
+  opacity: 0;
+}
+
+.home-universe__pad-lamp {
+  opacity: 0.22;
+}
+
+.home-universe__rocket {
+  /* Parked leaning toward the destination, so the ship is aimed at where it is
+     going before anything moves. */
+  rotate: 8deg;
+  transform-origin: 50% 92%;
+}
+
+.home-universe__rocket-ship {
+  position: relative;
+  will-change: transform;
+  filter: drop-shadow(0 16px 34px rgb(0 0 0 / 0.5));
+}
+
+/* Beat 4 — the ship's own lights come online, over the porthole. */
+.home-universe__lights {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  width: 44%;
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  border-radius: 999px;
+  background: radial-gradient(
+    circle,
+    oklch(0.94 0.12 200 / 0.85),
+    oklch(0.78 0.14 200 / 0.35) 46%,
+    transparent 72%
+  );
+  mix-blend-mode: screen;
+  opacity: 0;
+}
+
+.home-universe__flame {
+  position: absolute;
+  left: 50%;
+  top: 96%;
+  width: 46%;
+  transform: translateX(-50%) scaleY(0);
+  transform-origin: top center;
+  opacity: 0;
+  will-change: transform, opacity;
+}
+
+/* Ground plume: beat 3 brings it in as smoke, ignition turns it into a blast. */
+.home-universe__plume {
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  width: 260%;
+  height: 200px;
+  transform: translateX(-50%) scale(0.2);
+  transform-origin: top center;
+  opacity: 0;
+  border-radius: 999px;
+  background: radial-gradient(
+    ellipse at 50% 0%,
+    rgb(255 255 255 / 0.55),
+    rgb(210 220 235 / 0.22) 42%,
+    transparent 72%
+  );
+  will-change: transform, opacity;
+}
+
+/* --- Countdown ------------------------------------------------------------
+   Five beats, one animation per element, all of them exactly as long as the
+   countdown itself. Keyframe stops at 0/20/40/60/80% are beats 5/4/3/2/1, so
+   the scene and the digits cannot drift apart no matter what the timeline is
+   retuned to.
+   ------------------------------------------------------------------------ */
+
+.home-universe[data-launch="countdown"] .home-universe__pad::after {
+  animation: hu-pad-wake var(--hu-countdown) linear forwards;
+}
+
+.home-universe[data-launch="countdown"] .home-universe__pad-lamp {
+  animation: hu-lamps var(--hu-countdown) linear forwards;
+}
+
+.home-universe[data-launch="countdown"] .home-universe__lights {
+  animation: hu-lights var(--hu-countdown) linear forwards;
+}
+
+.home-universe[data-launch="countdown"] .home-universe__plume {
+  animation: hu-smoke var(--hu-countdown) linear forwards;
+}
+
+.home-universe[data-launch="countdown"] .home-universe__flame {
+  animation: hu-preglow var(--hu-countdown) linear forwards;
+}
+
+/* Beat 2 — the ship starts to shake. A delayed infinite animation says "from
+   60% of the countdown onward" in two lines, where keyframes would need twenty. */
+.home-universe[data-launch="countdown"] .home-universe__rocket-ship {
+  animation: hu-shudder 0.16s linear infinite;
+  animation-delay: calc(var(--hu-countdown) * 0.6);
+}
+
+/* --- Ignition ------------------------------------------------------------- */
+
+.home-universe[data-lit] .home-universe__pad::after {
+  opacity: 0.95;
+}
+
+.home-universe[data-lit] .home-universe__pad-lamp {
+  opacity: 1;
+}
+
+.home-universe[data-lit] .home-universe__lights {
+  opacity: 0.9;
+}
+
+.home-universe[data-lit] .home-universe__flame {
+  opacity: 1;
+  transform: translateX(-50%) scaleY(1);
+  animation: hu-flame-flicker 0.22s ease-in-out infinite;
+}
+
+.home-universe[data-launch="ignition"] .home-universe__rocket-ship {
+  animation: hu-shudder 0.1s linear infinite;
+}
+
+.home-universe[data-launch="ignition"] .home-universe__plume {
+  animation: hu-plume var(--hu-ignition) ease-out forwards;
+}
+
+/* The kick. Only the near and mid groups move — shaking the scene root would
+   drag its own edges into frame. */
+.home-universe[data-launch="ignition"] .universe__depth--near,
+.home-universe[data-launch="ignition"] .universe__depth--mid {
+  animation: hu-quake var(--hu-ignition) linear;
+}
+
+/* --- Flight --------------------------------------------------------------- */
+
+/*
+   Slow off the pad, then genuinely fast, then easing back as the planet fills
+   the frame. The timing function is `linear` on purpose: the acceleration is
+   in the spacing of the keyframes, where it can be read and tuned, rather than
+   hidden inside a bezier.
+*/
+.home-universe[data-flying] .home-universe__rocket {
+  animation:
+    hu-launch var(--hu-flight) linear forwards,
+    hu-bank var(--hu-flight) ease-in-out forwards;
+}
+
+.home-universe[data-flying] .home-universe__plume {
+  animation: hu-plume-fade 2.4s ease-out forwards;
+}
+
+/* The camera. Everything the viewer is leaving falls away at a rate set by its
+   depth, which is the whole of the parallax: the ground rushes past, the
+   nebulae barely move. */
+.home-universe[data-flying] .universe__depth--far {
+  animation: hu-cam-far var(--hu-flight) cubic-bezier(0.4, 0, 0.6, 1) forwards;
+}
+
+.home-universe[data-flying] .universe__depth--mid {
+  animation: hu-cam-mid var(--hu-flight) cubic-bezier(0.4, 0, 0.6, 1) forwards;
+}
+
+.home-universe[data-flying] .universe__depth--near {
+  animation: hu-cam-near var(--hu-flight) cubic-bezier(0.4, 0, 0.6, 1) forwards;
+}
+
+.home-universe[data-flying] .home-universe__surface,
+.home-universe[data-flying] .home-universe__station {
+  animation: hu-cam-ground var(--hu-flight) cubic-bezier(0.35, 0, 0.6, 1) forwards;
+}
+
+/* Stars stretch into streaks rather than being replaced by a particle system.
+   The plane is already one element carrying a repeating background; scaling it
+   vertically costs nothing and reads as speed. */
+.home-universe[data-flying] .universe__stars {
+  animation: hu-star-rush var(--hu-flight) ease-in forwards;
+}
+
+.home-universe[data-flying] .universe__dust {
+  animation: hu-dust-rush var(--hu-flight) ease-in forwards;
+}
+
+/* The scrim exists to seat the headline. Once the copy has faded there is
+   nothing left to protect, so the sky opens up. */
+.home-universe__scrim {
+  transition: opacity 900ms var(--ease-standard);
+}
+
+.home-universe[data-sequence] .home-universe__scrim {
+  opacity: 0;
+}
+
+/* --- The destination ------------------------------------------------------ */
+
+.home-universe__destination {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: clamp(56px, 6vw, 110px);
+  transform: translate(-50%, -50%) translate(var(--dest-x), var(--dest-y));
+  opacity: 0.7;
+  will-change: transform, opacity;
+}
+
+.home-universe[data-flying] .home-universe__destination {
+  animation: hu-destination var(--hu-flight) cubic-bezier(0.45, 0, 0.55, 1) forwards;
+}
+
+/*
+   The atmosphere the destination acquires as it arrives. It is a vignette
+   rather than anything attached to the planet, which is what makes it work:
+   the moon is being scaled twenty-six times, so a glow drawn inside it would
+   be scaled twenty-six times too.
+*/
+.home-universe__atmosphere {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(
+      circle at 50% 44%,
+      transparent 0 26%,
+      oklch(0.42 0.09 218 / 0.42) 62%,
+      oklch(0.14 0.05 252 / 0.92) 100%
+    );
+  opacity: 0;
+  will-change: opacity;
+}
+
+.home-universe[data-flying] .home-universe__atmosphere {
+  animation: hu-atmosphere var(--hu-flight) ease-in forwards;
+}
+
+/* The unlock: a ring of energy closing on the planet, then bursting through
+   it. One element, one border, two animations — no second renderer. */
+.home-universe__portal {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: min(72vw, 72vh);
+  aspect-ratio: 1;
+  border-radius: 999px;
+  border: 3px solid oklch(0.88 0.14 200 / 0.85);
+  box-shadow:
+    0 0 70px oklch(0.86 0.13 200 / 0.45),
+    inset 0 0 90px oklch(0.86 0.13 200 / 0.30);
+  transform: translate(-50%, -50%) scale(0.15);
+  opacity: 0;
+  will-change: transform, opacity;
+}
+
+.home-universe[data-launch="approach"] .home-universe__portal {
+  animation: hu-portal-ring var(--hu-approach) ease-out forwards;
+}
+
+.home-universe[data-launch="unlock"] .home-universe__portal,
+.home-universe[data-launch="enter"] .home-universe__portal {
+  animation: hu-portal-burst var(--hu-unlock) ease-in forwards;
+}
+
+/* --- Lunar foreground ----------------------------------------------------- */
+
+.home-universe__surface {
+  position: absolute;
+  inset: auto 0 0 0;
+  /* A horizon the scene sits on. At 32vh it read as fog across the lower
+     third and swallowed the astronaut, the rover and the module in it. */
+  height: 21vh;
+  min-height: 140px;
+}
+
+.home-universe__ground {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 60% 90% at 18% 100%, #2a2d34 0 40%, transparent 72%),
+    radial-gradient(ellipse 70% 100% at 78% 100%, #24272d 0 44%, transparent 74%),
+    linear-gradient(180deg, transparent, #1d1f25 52%, #16181d);
+  border-radius: 50% 50% 0 0 / 22% 22% 0 0;
+}
+
+.home-universe__module {
+  position: absolute;
+  right: 14%;
+  bottom: 34%;
+  width: clamp(90px, 10vw, 170px);
+  filter: drop-shadow(0 10px 22px rgb(0 0 0 / 0.55));
+}
+
+/*
+   The rover drives a short distance, waits a long time, then continues. 83
+   seconds of cycle for ~14 seconds of movement — background activity, not a
+   vehicle crossing the screen.
+*/
+.home-universe__rover {
+  position: absolute;
+  left: 8%;
+  bottom: 30%;
+  width: clamp(78px, 9vw, 150px);
+  filter: drop-shadow(0 8px 18px rgb(0 0 0 / 0.5));
+  will-change: transform;
+  animation: hu-rover 83s ease-in-out infinite;
+}
+
+/* --- Readability ---------------------------------------------------------- */
+
+/*
+   Stronger than the terminal's scrim. The gate has a large headline and an
+   input over a busy scene, and the access panel is opaque — but the headline
+   sits directly on the sky, so the sky is darkened where the copy lives.
+*/
+.home-universe__scrim {
+  position: absolute;
+  inset: 0;
+  background:
+    /* A soft pool behind the headline column only — the copy needs contrast,
+       the rest of the scene does not. The first draft ran a near-opaque wash
+       across the whole left half and buried the ringed planet, the astronaut
+       and the entire lunar surface in it. */
+    radial-gradient(ellipse 46% 52% at 22% 52%, rgb(7 10 22 / 0.68), transparent 70%),
+    linear-gradient(180deg, rgb(7 10 22 / 0.30), transparent 26%, rgb(7 10 22 / 0.34));
+}
+
+/* ============================================================================
+   KEYFRAMES
+   ========================================================================== */
+
+@keyframes hu-satellite {
+  0%,
+  4% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0) rotate(-6deg);
+  }
+  10%,
+  88% {
+    opacity: 0.75;
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(calc(100vw + 220px), -9vh, 0) rotate(-6deg);
+  }
+}
+
+@keyframes hu-float-a {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    transform: translate3d(2.6vw, -3.4vh, 0);
+  }
+}
+
+@keyframes hu-float-b {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    transform: translate3d(-2.2vw, 3vh, 0);
+  }
+}
+
+@keyframes hu-tumble-a {
+  0%,
+  100% {
+    rotate: -5deg;
+  }
+  50% {
+    rotate: 6deg;
+  }
+}
+
+@keyframes hu-tumble-b {
+  0%,
+  100% {
+    rotate: 7deg;
+  }
+  50% {
+    rotate: -4deg;
+  }
+}
+
+/* --- Countdown beats: 0% = five, 20% = four, 40% = three, 60% = two, 80% = one */
+
+@keyframes hu-pad-wake {
+  0% {
+    opacity: 0;
+  }
+  10% {
+    opacity: 0.8;
+  }
+  22% {
+    opacity: 0.45;
+  }
+  100% {
+    opacity: 0.95;
+  }
+}
+
+@keyframes hu-lamps {
+  0%,
+  6% {
+    opacity: 0.22;
+  }
+  9% {
+    opacity: 1;
+  }
+  14% {
+    opacity: 0.3;
+  }
+  20%,
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes hu-lights {
+  0%,
+  20% {
+    opacity: 0;
+  }
+  26% {
+    opacity: 1;
+  }
+  32% {
+    opacity: 0.5;
+  }
+  40%,
+  100% {
+    opacity: 0.9;
+  }
+}
+
+@keyframes hu-smoke {
+  0%,
+  40% {
+    opacity: 0;
+    transform: translateX(-50%) scale(0.18);
+  }
+  62% {
+    opacity: 0.24;
+    transform: translateX(-50%) scale(0.42);
+  }
+  100% {
+    opacity: 0.42;
+    transform: translateX(-50%) scale(0.66);
+  }
+}
+
+@keyframes hu-preglow {
+  0%,
+  80% {
+    opacity: 0;
+    transform: translateX(-50%) scaleY(0);
+  }
+  100% {
+    opacity: 0.85;
+    transform: translateX(-50%) scaleY(0.42);
+  }
+}
+
+@keyframes hu-flame-flicker {
+  0%,
+  100% {
+    transform: translateX(-50%) scaleY(1);
+  }
+  50% {
+    transform: translateX(-50%) scaleY(0.88);
+  }
+}
+
+/* A held breath before release: sub-pixel shudder, nothing more. */
+@keyframes hu-shudder {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+  20% {
+    transform: translate3d(-1px, 0, 0);
+  }
+  40% {
+    transform: translate3d(1px, 1px, 0);
+  }
+  60% {
+    transform: translate3d(-1px, 0, 0);
+  }
+  80% {
+    transform: translate3d(1px, -1px, 0);
+  }
+}
+
+@keyframes hu-plume {
+  0% {
+    opacity: 0;
+    transform: translateX(-50%) scale(0.2);
+  }
+  100% {
+    opacity: 0.85;
+    transform: translateX(-50%) scale(1);
+  }
+}
+
+@keyframes hu-plume-fade {
+  0% {
+    opacity: 0.85;
+    transform: translateX(-50%) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(-50%) scale(1.7);
+  }
+}
+
+/*
+   The flight. Slow off the pad, then genuinely fast, then easing off as the
+   planet fills the frame — the scale is what sells distance rather than a
+   straight slide. Read the gaps between stops, not the numbers: 5vh in the
+   first tenth, 40vh in the middle quarter, 20vh in the last fifth.
+*/
+@keyframes hu-launch {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  10% {
+    transform: translate3d(0.3vw, -5vh, 0) scale(0.99);
+  }
+  30% {
+    transform: translate3d(2vw, -26vh, 0) scale(0.86);
+  }
+  55% {
+    transform: translate3d(6vw, -66vh, 0) scale(0.56);
+  }
+  80% {
+    transform: translate3d(9vw, -102vh, 0) scale(0.26);
+    opacity: 1;
+  }
+  100% {
+    transform: translate3d(11vw, -122vh, 0) scale(0.1);
+    opacity: 0;
+  }
+}
+
+/* Banked separately from the translation, on the independent `rotate`
+   property, so the parked lean survives without being restated in every
+   keyframe of the flight. */
+@keyframes hu-bank {
+  0% {
+    rotate: 8deg;
+  }
+  30% {
+    rotate: 11deg;
+  }
+  100% {
+    rotate: 17deg;
+  }
+}
+
+/* --- The camera ---------------------------------------------------------- */
+
+@keyframes hu-cam-far {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  100% {
+    transform: translate3d(0, 14vh, 0) scale(1.12);
+  }
+}
+
+@keyframes hu-cam-mid {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  100% {
+    transform: translate3d(0, 40vh, 0) scale(1.5);
+  }
+}
+
+@keyframes hu-cam-near {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+    opacity: 1;
+  }
+  72% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate3d(0, 96vh, 0) scale(2.2);
+    opacity: 0;
+  }
+}
+
+@keyframes hu-cam-ground {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+    opacity: 1;
+  }
+  45% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate3d(0, 74vh, 0) scale(1.9);
+    opacity: 0;
+  }
+}
+
+@keyframes hu-star-rush {
+  0% {
+    transform: translate3d(0, 0, 0) scaleY(1);
+  }
+  100% {
+    transform: translate3d(0, 44vh, 0) scaleY(1.55);
+  }
+}
+
+@keyframes hu-dust-rush {
+  0% {
+    transform: translate3d(0, 0, 0);
+    opacity: 0.34;
+  }
+  100% {
+    transform: translate3d(0, 90vh, 0);
+    opacity: 0;
+  }
+}
+
+@keyframes hu-quake {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+  15% {
+    transform: translate3d(-3px, 2px, 0);
+  }
+  32% {
+    transform: translate3d(3px, -2px, 0);
+  }
+  52% {
+    transform: translate3d(-2px, -1px, 0);
+  }
+  74% {
+    transform: translate3d(2px, 1px, 0);
+  }
+}
+
+/* --- Arrival ------------------------------------------------------------- */
+
+/*
+   The planet is what the camera is flying toward, so it holds the centre of
+   the frame and grows into it. Ending on a plain `translate(-50%, -50%)` — no
+   offset at all — is what makes it land exactly centred on a 375px phone and a
+   1920px desktop without a breakpoint.
+*/
+@keyframes hu-destination {
+  0% {
+    transform: translate(-50%, -50%) translate(var(--dest-x), var(--dest-y)) scale(1);
+    opacity: 0.7;
+  }
+  30% {
+    transform: translate(-50%, -50%)
+      translate(calc(var(--dest-x) * 0.72), calc(var(--dest-y) * 0.72)) scale(2.3);
+    opacity: 0.88;
+  }
+  72% {
+    transform: translate(-50%, -50%)
+      translate(calc(var(--dest-x) * 0.24), calc(var(--dest-y) * 0.24)) scale(8);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(26);
+    opacity: 1;
+  }
+}
+
+@keyframes hu-atmosphere {
+  0%,
+  30% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes hu-portal-ring {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.15);
+  }
+  55% {
+    opacity: 0.9;
+  }
+  100% {
+    opacity: 0.75;
+    transform: translate(-50%, -50%) scale(0.62);
+  }
+}
+
+@keyframes hu-portal-burst {
+  0% {
+    opacity: 0.75;
+    transform: translate(-50%, -50%) scale(0.62);
+  }
+  40% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(2.8);
+  }
+}
+
+/* Drive, stop, wait, drive again. Movement occupies ~17% of the cycle. */
+@keyframes hu-rover {
+  0%,
+  6% {
+    transform: translate3d(0, 0, 0);
+  }
+  16% {
+    transform: translate3d(5vw, 0, 0);
+  }
+  58% {
+    transform: translate3d(5vw, 0, 0);
+  }
+  70% {
+    transform: translate3d(9vw, 0, 0);
+  }
+  100% {
+    transform: translate3d(9vw, 0, 0);
+  }
+}
+
+/* ============================================================================
+   RESPONSIVE — the gate simplifies hard on small screens
+   ========================================================================== */
+
+@media (max-width: 1279px) {
+  .home-universe__comet {
+    display: none;
+  }
+}
+
+/*
+   Below `lg` the page is a single column, so the access form occupies the
+   middle of the frame — which is exactly where the pad stands. Rather than
+   shrinking the desktop composition into a collision, the station moves out of
+   the left corridor and stays out of the idle scene entirely; it arrives with
+   the mission, by which point the copy and the form are already fading. The
+   trajectory and the destination stay in frame throughout.
+*/
+@media (max-width: 1023px) {
+  .home-universe {
+    --station-x: 26%;
+    --station-y: 15%;
+    --station-w: clamp(64px, 9vw, 110px);
+  }
+
+  .home-universe__astronaut--two,
+  .home-universe__rover,
+  .home-universe__module,
+  .home-universe__body--blue,
+  .home-universe__galaxy {
+    display: none;
+  }
+
+  .home-universe__surface {
+    height: 22vh;
+  }
+
+  .home-universe__station,
+  .home-universe__rocket {
+    transition: opacity 500ms var(--ease-standard);
+  }
+
+  .home-universe:not([data-sequence]) .home-universe__station,
+  .home-universe:not([data-sequence]) .home-universe__rocket {
+    opacity: 0;
+  }
+}
+
+/* Phone: stars, one nebula, one planet edge, one meteor — and the mission. */
+@media (max-width: 767px) {
+  .home-universe {
+    --station-x: 24%;
+    --station-y: 13%;
+    --station-w: clamp(54px, 16vw, 82px);
+    /*
+       Parked in the one clear band this layout has.
+
+       Measured at 375×812: the red planet ends at y208, the copy block at
+       y284, and the access panel starts at y387. At -30vh the destination sat
+       inside the red planet's disc and read as one of its craters; at -19vh it
+       landed on the body copy. -9vh puts it in the 100px gap between the two,
+       clear of both.
+    */
+    --dest-x: 25vw;
+    --dest-y: -9vh;
+  }
+
+  .home-universe__astronaut,
+  .home-universe__surface,
+  .home-universe__meteor--b,
+  .home-universe__nebula--cyan,
+  .home-universe__body--ringed,
+  .home-universe__satellite {
+    display: none;
+  }
+
+  .home-universe__body--red {
+    opacity: 0.4;
+  }
+
+  .home-universe__scrim {
+    background:
+      linear-gradient(180deg, rgb(7 10 22 / 0.55), rgb(7 10 22 / 0.3) 40%, rgb(7 10 22 / 0.72));
+  }
+}
+
+/* ============================================================================
+   INTENSITY PREFERENCE
+   ========================================================================== */
+
+/* The station and the destination survive `minimal`: they are the subject of
+   this screen now, not traffic passing behind it. */
+[data-space="minimal"] .home-universe__astronaut,
+[data-space="minimal"] .home-universe__rover,
+[data-space="minimal"] .home-universe__module,
+[data-space="minimal"] .home-universe__satellite,
+[data-space="minimal"] .home-universe__meteor,
+[data-space="minimal"] .home-universe__comet {
+  display: none;
+}
+
+[data-space="minimal"] .home-universe__nebula,
+[data-space="minimal"] .home-universe__galaxy,
+[data-space="minimal"] .home-universe__body {
+  animation: none;
+}
+
+[data-space="off"] .home-universe > *:not(.home-universe__canvas):not(.home-universe__scrim) {
+  display: none;
+}
+
+/* ============================================================================
+   REDUCED MOTION
+   The scene stays — the traffic stops. A visitor who cannot take motion still
+   gets the MEMESCOPE sky, the planets, the astronauts, the lunar surface and a
+   rocket standing on its pad. All of it still.
+
+   The sequence never reaches these states under reduced motion — the timeline
+   in `lib/launch.ts` goes straight from `approved` to `enter` — so this block
+   is a second lock on the same door rather than the only one. A camera push
+   and a countdown are exactly the vestibular motion the preference is asking
+   about, and neither belongs behind a single point of failure.
+   ========================================================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  .home-universe__nebula,
+  .home-universe__galaxy,
+  .home-universe__body,
+  .home-universe__astronaut,
+  .home-universe__rover,
+  .home-universe__rocket,
+  .home-universe__rocket-ship,
+  .home-universe__station,
+  .home-universe__destination,
+  .home-universe__pad::after,
+  .home-universe__pad-lamp,
+  .home-universe__lights,
+  .home-universe__flame,
+  .home-universe__plume,
+  .home-universe__atmosphere,
+  .home-universe__portal,
+  .home-universe .universe__depth,
+  .home-universe .universe__stars,
+  .home-universe .universe__dust {
+    animation: none !important;
+  }
+
+  /* Events have nothing to show when nothing may move. */
+  .home-universe__meteor,
+  .home-universe__comet,
+  .home-universe__satellite {
+    display: none !important;
+  }
+}

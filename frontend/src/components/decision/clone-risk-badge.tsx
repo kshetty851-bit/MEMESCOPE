@@ -25,10 +25,10 @@ const RISK_LABEL: Record<CloneRisk, string> = {
 };
 
 const RISK_TONE: Record<CloneRisk, string> = {
-  none: "var(--color-safe)",
-  low: "var(--color-oracle)",
-  moderate: "var(--color-warn, var(--color-ink-dim))",
-  high: "var(--color-danger)",
+  none: "var(--color-up)",
+  low: "var(--color-accent)",
+  moderate: "var(--color-warn)",
+  high: "var(--color-down)",
 };
 
 export function CloneRiskBadge({
@@ -50,7 +50,7 @@ export function CloneRiskBadge({
       >
         {RISK_LABEL[identity.clone_risk]}
         {identity.sharing_name > 1 ? (
-          <span className="ml-1.5 font-mono tabular-nums text-ink-faint" data-numeric>
+          <span className="ml-1.5 font-mono tabular-nums text-ink-3" data-numeric>
             {identity.sharing_name}
           </span>
         ) : null}

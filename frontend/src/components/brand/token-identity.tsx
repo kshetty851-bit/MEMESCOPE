@@ -73,10 +73,10 @@ export function TokenIdentity({
         {!compact ? (
           <span className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
             {secondary ? (
-              <span className="truncate text-xs text-ink-faint">{secondary}</span>
+              <span className="truncate text-xs text-ink-3">{secondary}</span>
             ) : null}
             {showMint ? (
-              <span className="font-mono text-xs text-ink-faint/70" title={mint}>
+              <span className="font-mono text-xs text-ink-3/70" title={mint}>
                 {shortenAddress(mint, 4, 4)}
               </span>
             ) : null}
@@ -88,7 +88,7 @@ export function TokenIdentity({
 
   const shared = cn(
     "inline-flex min-w-0 items-center gap-2.5 text-left",
-    href && "transition-colors hover:text-plasma",
+    href && "transition-colors hover:text-accent",
     className,
   );
 

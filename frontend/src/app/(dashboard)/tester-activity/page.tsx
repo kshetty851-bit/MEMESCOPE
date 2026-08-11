@@ -31,7 +31,7 @@ export default function TesterActivityPage() {
   if (query.isError)
     return (
       <main>
-        <p className="text-label text-plasma">Restricted</p>
+        <p className="text-label text-accent">Restricted</p>
         <h1 className="mt-2 text-2xl font-medium text-ink">
           Tester activity is available only to an account-level administrator.
         </h1>
@@ -40,24 +40,24 @@ export default function TesterActivityPage() {
   const data = query.data;
   return (
     <main>
-      <p className="text-label text-plasma">Private alpha</p>
+      <p className="text-label text-accent">Private alpha</p>
       <h1 className="mt-2 text-3xl font-medium text-ink">Tester activity</h1>
-      <p className="mt-2 text-sm text-ink-faint">
+      <p className="mt-2 text-sm text-ink-3">
         Anonymous session state only. Updates every 15 seconds.
       </p>
       <div className="mt-6 grid grid-cols-2 gap-3">
-        <div className="rounded-panel border border-line p-4">
-          <p className="text-label text-ink-faint">Active now</p>
+        <div className="rounded-lg border border-line p-4">
+          <p className="text-label text-ink-3">Active now</p>
           <p className="mt-2 text-3xl text-ink">{data?.active_now ?? "—"}</p>
         </div>
-        <div className="rounded-panel border border-line p-4">
-          <p className="text-label text-ink-faint">Today</p>
+        <div className="rounded-lg border border-line p-4">
+          <p className="text-label text-ink-3">Today</p>
           <p className="mt-2 text-3xl text-ink">{data?.seen_today ?? "—"}</p>
         </div>
       </div>
-      <div className="mt-6 overflow-x-auto rounded-panel border border-line">
+      <div className="mt-6 overflow-x-auto rounded-lg border border-line">
         <table className="w-full text-left text-sm">
-          <thead className="border-b border-line text-ink-faint">
+          <thead className="border-b border-line text-ink-3">
             <tr>
               <th className="p-3">Session</th>
               <th>First login</th>
@@ -69,7 +69,7 @@ export default function TesterActivityPage() {
           </thead>
           <tbody>
             {data?.sessions.map((row) => (
-              <tr key={row.session_id} className="border-b border-line/60 last:border-0">
+              <tr key={row.session_id} className="border-b border-line-subtle last:border-0">
                 <td className="p-3 font-mono text-xs text-ink">
                   {row.session_id.slice(0, 8)}
                 </td>
@@ -81,10 +81,10 @@ export default function TesterActivityPage() {
                   <span
                     className={
                       row.status === "active"
-                        ? "text-safe"
+                        ? "text-up"
                         : row.status === "idle"
                           ? "text-warning"
-                          : "text-ink-faint"
+                          : "text-ink-3"
                     }
                   >
                     ● {row.status}

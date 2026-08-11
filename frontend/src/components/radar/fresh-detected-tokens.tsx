@@ -28,7 +28,7 @@ function FreshTokenRow({ token }: { token: FreshDetectedToken }) {
   const status = statusFor(token);
   const exact = new Date(token.discovered_at).toLocaleString();
   return (
-    <li className="rounded-card border border-line/60 bg-surface/35 p-3 transition-colors hover:border-line-bright">
+    <li className="rounded-md border border-line-subtle bg-surface/35 p-3 transition-colors hover:border-line-strong">
       <div className="flex items-start justify-between gap-3">
         <TokenIdentity
           mint={token.mint_address}
@@ -40,17 +40,17 @@ function FreshTokenRow({ token }: { token: FreshDetectedToken }) {
         />
         <span
           className={cn(
-            "shrink-0 rounded-chip border px-2 py-0.5 text-[0.625rem] uppercase tracking-wide",
+            "shrink-0 rounded-sm border px-2 py-0.5 text-[0.625rem] uppercase tracking-wide",
             status === "Radar"
-              ? "border-plasma/25 bg-plasma/[0.07] text-plasma"
-              : "border-line bg-elevated text-ink-faint",
+              ? "border-accent/25 bg-accent/[0.07] text-accent"
+              : "border-line bg-raised text-ink-3",
           )}
         >
           {status}
         </span>
       </div>
 
-      <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-faint">
+      <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-3">
         <span title={exact}>Detected {formatAge(token.discovered_at)} ago</span>
         {token.current_market_cap ? (
           <span>{formatUsd(token.current_market_cap)} MCAP</span>
@@ -61,7 +61,7 @@ function FreshTokenRow({ token }: { token: FreshDetectedToken }) {
       </div>
 
       <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs">
-        <span className="text-ink-dim">
+        <span className="text-ink-2">
           {token.radar_score !== null
             ? `Radar ${Number(token.radar_score).toFixed(1)}`
             : "Radar pending"}
@@ -72,7 +72,7 @@ function FreshTokenRow({ token }: { token: FreshDetectedToken }) {
         {token.market_observed_at ? (
           <FreshnessLabel capturedAt={token.market_observed_at} />
         ) : (
-          <span className="text-ink-faint">No market quote yet</span>
+          <span className="text-ink-3">No market quote yet</span>
         )}
       </div>
     </li>
@@ -83,37 +83,37 @@ export function FreshDetectedTokens() {
   const query = useFreshDetectedTokens(30);
 
   return (
-    <section className="rounded-card border border-line bg-surface/30 p-4">
+    <section className="rounded-md border border-line bg-surface/30 p-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <p className="text-label uppercase tracking-wide text-plasma">
+          <p className="text-label uppercase tracking-wide text-accent">
             Fresh detected tokens
           </p>
           <h2 className="mt-1 text-lg font-semibold text-ink">
             Newest discoveries, before the crowd catches up
           </h2>
-          <p className="mt-1 text-xs text-ink-faint">
+          <p className="mt-1 text-xs text-ink-3">
             Ordered by MEMESCOPE discovery time. Scoring and market enrichment appear
             only when those rows exist.
           </p>
         </div>
         {query.data?.length ? (
-          <span className="text-xs text-ink-faint">{query.data.length} latest</span>
+          <span className="text-xs text-ink-3">{query.data.length} latest</span>
         ) : null}
       </div>
 
       {query.isPending ? (
         <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {Array.from({ length: 6 }, (_, index) => (
-            <Skeleton key={index} className="h-28 rounded-card" />
+            <Skeleton key={index} className="h-28 rounded-md" />
           ))}
         </div>
       ) : query.isError ? (
-        <p className="mt-4 text-sm text-ink-faint">
+        <p className="mt-4 text-sm text-ink-3">
           Fresh detections are not responding. The main Radar remains independent.
         </p>
       ) : query.data.length === 0 ? (
-        <p className="mt-4 text-sm text-ink-faint">
+        <p className="mt-4 text-sm text-ink-3">
           No discoveries recorded yet. New scanner detections will appear here
           automatically.
         </p>

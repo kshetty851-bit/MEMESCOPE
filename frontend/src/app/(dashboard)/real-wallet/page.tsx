@@ -106,8 +106,8 @@ type WalletStatus = {
 
 function StatusCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-panel border border-line p-4">
-      <p className="text-label text-ink-faint">{label}</p>
+    <div className="rounded-lg border border-line p-4">
+      <p className="text-label text-ink-3">{label}</p>
       <p className="mt-2 text-lg font-medium text-ink">{value}</p>
     </div>
   );
@@ -123,7 +123,7 @@ export default function RealWalletPage() {
   if (query.isError) {
     return (
       <main>
-        <p className="text-label text-plasma">Restricted</p>
+        <p className="text-label text-accent">Restricted</p>
         <h1 className="mt-2 text-2xl font-medium text-ink">
           Execution wallet status is available only to an account-level administrator.
         </h1>
@@ -136,22 +136,22 @@ export default function RealWalletPage() {
   const copyAddress = () => address && void navigator.clipboard.writeText(address);
   return (
     <main>
-      <p className="text-label text-plasma">Operator only</p>
+      <p className="text-label text-accent">Operator only</p>
       <h1 className="mt-2 text-3xl font-medium text-ink">MEMESCOPE execution wallet</h1>
-      <p className="mt-2 max-w-2xl text-sm text-ink-faint">
+      <p className="mt-2 max-w-2xl text-sm text-ink-3">
         Dedicated low-balance wallet. This page is read-only: no signing, funding, swaps, or
         autotrade controls exist here.
       </p>
-      <section className="mt-6 rounded-panel border border-line p-4">
-        <p className="text-label text-ink-faint">Public address</p>
+      <section className="mt-6 rounded-lg border border-line p-4">
+        <p className="text-label text-ink-3">Public address</p>
         {address ? (
           <div className="mt-2 flex flex-wrap items-center gap-3">
             <code className="break-all text-sm text-ink">{address}</code>
-            <button className="text-sm text-plasma" onClick={copyAddress} type="button">
+            <button className="text-sm text-accent" onClick={copyAddress} type="button">
               Copy address
             </button>
             <a
-              className="text-sm text-plasma"
+              className="text-sm text-accent"
               href={`https://solscan.io/account/${address}`}
               rel="noreferrer"
               target="_blank"
@@ -160,21 +160,21 @@ export default function RealWalletPage() {
             </a>
           </div>
         ) : (
-          <p className="mt-2 text-sm text-ink-faint">
+          <p className="mt-2 text-sm text-ink-3">
             Not configured. Generate it locally first.
           </p>
         )}
       </section>
-      <section className="mt-6 overflow-x-auto rounded-panel border border-line">
+      <section className="mt-6 overflow-x-auto rounded-lg border border-line">
         <div className="p-4">
-          <p className="text-label text-ink-faint">Dry-run decisions</p>
-          <p className="mt-1 text-sm text-ink-faint">
+          <p className="text-label text-ink-3">Dry-run decisions</p>
+          <p className="mt-1 text-sm text-ink-3">
             {data?.dry_run.feature_enabled ? "Recording enabled" : "Recording disabled"}. No
             order is signed or submitted.
           </p>
         </div>
         <table className="w-full text-left text-sm">
-          <thead className="border-y border-line text-ink-faint">
+          <thead className="border-y border-line text-ink-3">
             <tr>
               <th className="p-3">Token</th>
               <th>Rank</th>
@@ -188,11 +188,11 @@ export default function RealWalletPage() {
             {data?.dry_run.decisions.map((row) => (
               <tr
                 key={`${row.mint_address}-${row.radar_rank}`}
-                className="border-b border-line/60 last:border-0"
+                className="border-b border-line-subtle last:border-0"
               >
                 <td className="p-3">
                   <span className="text-ink">{row.symbol ?? "—"}</span>
-                  <code className="ml-2 text-xs text-ink-faint">
+                  <code className="ml-2 text-xs text-ink-3">
                     {row.mint_address.slice(0, 8)}
                   </code>
                 </td>
@@ -201,10 +201,10 @@ export default function RealWalletPage() {
                 <td>
                   {row.buy_impact_pct ?? "—"} / {row.sell_impact_pct ?? "—"}
                 </td>
-                <td className={row.status === "WOULD_BUY" ? "text-safe" : "text-warning"}>
+                <td className={row.status === "WOULD_BUY" ? "text-up" : "text-warning"}>
                   {row.status}
                 </td>
-                <td className="p-3 text-xs text-ink-faint">
+                <td className="p-3 text-xs text-ink-3">
                   {row.reason_codes.join(", ") || "—"}
                 </td>
               </tr>
@@ -241,14 +241,14 @@ export default function RealWalletPage() {
           submitted. Keeping those separate is the point: "architecturally
           ready" and "live enabled" are different claims, and conflating them is
           how a dashboard ends up implying a system is armed when it is not. */}
-      <section className="mt-6 rounded-panel border border-line p-4">
+      <section className="mt-6 rounded-lg border border-line p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="text-label text-ink-faint">Pre-mainnet readiness</p>
+          <p className="text-label text-ink-3">Pre-mainnet readiness</p>
           <span
             className={
               readiness?.transport.submission_permitted
-                ? "rounded-chip border border-danger/30 bg-danger/[0.08] px-2 py-0.5 text-label uppercase text-danger"
-                : "rounded-chip border border-line bg-elevated px-2 py-0.5 text-label uppercase text-ink-faint"
+                ? "rounded-sm border border-down/30 bg-down/[0.08] px-2 py-0.5 text-label uppercase text-down"
+                : "rounded-sm border border-line bg-raised px-2 py-0.5 text-label uppercase text-ink-3"
             }
           >
             {readiness?.transport.submission_permitted
@@ -256,7 +256,7 @@ export default function RealWalletPage() {
               : "SUBMISSION BLOCKED"}
           </span>
         </div>
-        <p className="mt-1 text-sm text-ink-faint">
+        <p className="mt-1 text-sm text-ink-3">
           Architecturally ready is not live enabled. There is no enable control on this
           page, and none anywhere in the product.
         </p>
@@ -286,20 +286,20 @@ export default function RealWalletPage() {
             {readiness.transport.reasons.map((reason) => (
               <li
                 key={reason}
-                className="rounded-chip border border-line px-2 py-0.5 text-xs text-ink-faint"
+                className="rounded-sm border border-line px-2 py-0.5 text-xs text-ink-3"
               >
                 {reason}
               </li>
             ))}
           </ul>
         ) : null}
-        <p className="mt-3 text-xs text-ink-faint">
+        <p className="mt-3 text-xs text-ink-3">
           Release approved: {readiness?.transport.release_approved ? "yes" : "no"} · Production
           transport:{" "}
           {readiness?.transport.production_transport_installed ? "installed" : "not installed"} ·
           Allowed hosts: {readiness?.transport.allowed_hosts.join(", ") ?? "—"}
         </p>
-        <p className="mt-1 text-xs text-ink-faint">
+        <p className="mt-1 text-xs text-ink-3">
           SOL/USD:{" "}
           {readiness?.fee_accounting.sol_price_usd
             ? `$${readiness.fee_accounting.sol_price_usd} via ${readiness.fee_accounting.sol_price_source} (${readiness.fee_accounting.sol_price_age_seconds}s old, ${readiness.fee_accounting.sol_price_fresh ? "fresh" : "stale"})`
@@ -311,22 +311,22 @@ export default function RealWalletPage() {
             : ""}
         </p>
       </section>
-      <section className="mt-6 rounded-panel border border-line p-4">
-        <p className="text-label text-ink-faint">Live readiness</p>
-        <p className="mt-1 text-sm text-ink-faint">
+      <section className="mt-6 rounded-lg border border-line p-4">
+        <p className="text-label text-ink-3">Live readiness</p>
+        <p className="mt-1 text-sm text-ink-3">
           Submission transport: {data?.live_submission_transport ?? "not installed"}. New
           entries remain fail-closed.
         </p>
-        <p className="mt-2 text-sm text-ink-faint">
+        <p className="mt-2 text-sm text-ink-3">
           Open real positions: {data?.live_readiness.open_real_positions ?? 0}. Unresolved
           intents: {data?.live_readiness.unresolved_intents.length ?? 0}. Active kill
           switches: {data?.live_readiness.kill_switches.length ?? 0}.
         </p>
       </section>
-      <section className="mt-6 overflow-x-auto rounded-panel border border-line">
+      <section className="mt-6 overflow-x-auto rounded-lg border border-line">
         <div className="p-4">
-          <p className="text-label text-ink-faint">Confirmed lifecycle ledger</p>
-          <p className="mt-1 text-sm text-ink-faint">
+          <p className="text-label text-ink-3">Confirmed lifecycle ledger</p>
+          <p className="mt-1 text-sm text-ink-3">
             Test-only settlement evidence. Consecutive execution failures:{" "}
             {data?.confirmed_lifecycle.consecutive_execution_failures ?? 0}
             {data?.confirmed_lifecycle.last_failure_reason
@@ -336,7 +336,7 @@ export default function RealWalletPage() {
           </p>
         </div>
         <table className="w-full text-left text-sm">
-          <thead className="border-y border-line text-ink-faint">
+          <thead className="border-y border-line text-ink-3">
             <tr>
               <th className="p-3">Token</th>
               <th>State</th>
@@ -347,14 +347,14 @@ export default function RealWalletPage() {
           </thead>
           <tbody>
             {data?.confirmed_lifecycle.positions.map((position) => (
-              <tr key={position.id} className="border-b border-line/60 last:border-0">
+              <tr key={position.id} className="border-b border-line-subtle last:border-0">
                 <td className="p-3">
                   <code className="text-xs text-ink">
                     {position.mint_address.slice(0, 12)}
                   </code>
                 </td>
                 <td
-                  className={position.status === "CLOSED" ? "text-ink-faint" : "text-safe"}
+                  className={position.status === "CLOSED" ? "text-ink-3" : "text-up"}
                 >
                   {position.status}
                 </td>
@@ -373,27 +373,27 @@ export default function RealWalletPage() {
           </tbody>
         </table>
       </section>
-      <section className="mt-6 rounded-panel border border-line p-4">
-        <p className="text-label text-ink-faint">Hard limits</p>
+      <section className="mt-6 rounded-lg border border-line p-4">
+        <p className="text-label text-ink-3">Hard limits</p>
         <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
           <div>
-            <dt className="text-ink-faint">Max trade</dt>
+            <dt className="text-ink-3">Max trade</dt>
             <dd className="text-ink">${data?.limits.max_trade_usd ?? "—"}</dd>
           </div>
           <div>
-            <dt className="text-ink-faint">Max positions</dt>
+            <dt className="text-ink-3">Max positions</dt>
             <dd className="text-ink">{data?.limits.max_open_positions ?? "—"}</dd>
           </div>
           <div>
-            <dt className="text-ink-faint">Max exposure</dt>
+            <dt className="text-ink-3">Max exposure</dt>
             <dd className="text-ink">${data?.limits.max_total_exposure_usd ?? "—"}</dd>
           </div>
           <div>
-            <dt className="text-ink-faint">Daily notional</dt>
+            <dt className="text-ink-3">Daily notional</dt>
             <dd className="text-ink">${data?.limits.max_daily_notional_usd ?? "—"}</dd>
           </div>
           <div>
-            <dt className="text-ink-faint">Daily loss</dt>
+            <dt className="text-ink-3">Daily loss</dt>
             <dd className="text-ink">${data?.limits.max_daily_loss_usd ?? "—"}</dd>
           </div>
         </dl>

@@ -15,6 +15,7 @@ import {
   fetchRadarTimeline,
 } from "@/lib/radar";
 import type { RadarCategory } from "@/types/radar";
+import { livePoll } from "@/lib/query";
 
 /**
  * Radar queries.
@@ -38,7 +39,7 @@ export function useRadar(params: {
   return useQuery({
     queryKey: ["radar", "list", params],
     queryFn: () => fetchRadar(params),
-    refetchInterval: status === "live" ? false : RADAR_POLL_MS,
+    refetchInterval: livePoll(status, RADAR_POLL_MS),
     staleTime: RADAR_POLL_MS / 2,
   });
 }
@@ -52,7 +53,7 @@ export function useAllRadarDetections(params: {
   return useQuery({
     queryKey: ["radar", "all-detections", params],
     queryFn: () => fetchAllRadarDetections(params),
-    refetchInterval: status === "live" ? false : RADAR_POLL_MS,
+    refetchInterval: livePoll(status, RADAR_POLL_MS),
     staleTime: RADAR_POLL_MS / 2,
   });
 }
@@ -63,7 +64,7 @@ export function useRadarEntry(mint: string | undefined) {
     queryKey: ["radar", "entry", mint],
     queryFn: () => fetchRadarEntry(mint!),
     enabled: Boolean(mint),
-    refetchInterval: status === "live" ? false : RADAR_POLL_MS,
+    refetchInterval: livePoll(status, RADAR_POLL_MS),
   });
 }
 
@@ -72,7 +73,7 @@ export function useFreshDetectedTokens(limit = 30) {
   return useQuery({
     queryKey: ["tokens", "fresh", limit],
     queryFn: () => fetchFreshDetectedTokens(limit),
-    refetchInterval: status === "live" ? false : 30_000,
+    refetchInterval: livePoll(status, 30_000),
     staleTime: 10_000,
   });
 }
@@ -91,7 +92,7 @@ export function useRadarPerformance() {
   return useQuery({
     queryKey: ["radar", "performance"],
     queryFn: fetchRadarPerformance,
-    refetchInterval: status === "live" ? false : RADAR_POLL_MS,
+    refetchInterval: livePoll(status, RADAR_POLL_MS),
     staleTime: RADAR_POLL_MS / 2,
   });
 }

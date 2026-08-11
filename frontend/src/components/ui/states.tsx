@@ -44,8 +44,8 @@ export function EmptyState({
         <AgentSigil agent={agent} size={26} />
       </div>
       <div className="max-w-sm space-y-1.5">
-        <p className="text-heading font-medium text-ink">{title}</p>
-        <p className="text-sm text-ink-faint">{body}</p>
+        <p className="text-md font-medium text-ink">{title}</p>
+        <p className="text-sm text-ink-3">{body}</p>
       </div>
       {action}
     </div>
@@ -77,10 +77,10 @@ export function ErrorState({
         <AgentSigil agent="sentinel" size={26} />
       </div>
       <div className="max-w-sm space-y-1.5">
-        <p className="text-heading font-medium text-ink">{title}</p>
-        <p className="text-sm text-ink-faint">{body}</p>
+        <p className="text-md font-medium text-ink">{title}</p>
+        <p className="text-sm text-ink-3">{body}</p>
         {reference && (
-          <p data-numeric className="text-xs text-ink-faint/70">
+          <p data-numeric className="text-xs text-ink-3/70">
             REF {reference}
           </p>
         )}
