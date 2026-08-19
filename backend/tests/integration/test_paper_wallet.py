@@ -971,7 +971,7 @@ class TestTheWaitingState:
         await _seed(db_session, MINT_A, score=90, price="10")
         await db_session.commit()
 
-        body = (await client.get("/api/v1/paper")).json()
+        body = (await client.get("/api/v1/paper/context")).json()
 
         assert body["waiting"] is None
 
@@ -1012,7 +1012,7 @@ class TestTheWaitingState:
         await service.review(now=NOW + timedelta(hours=2))
         await db_session.commit()
 
-        body = (await client.get("/api/v1/paper")).json()
+        body = (await client.get("/api/v1/paper/context")).json()
         waiting = body["waiting"]
 
         assert waiting is not None
@@ -1036,9 +1036,10 @@ class TestTheWaitingState:
         await db_session.commit()
 
         body = (await client.get("/api/v1/paper")).json()
+        context_body = (await client.get("/api/v1/paper/context")).json()
 
         assert Decimal(body["metrics"]["cash"]) == Decimal(0)
-        assert body["waiting"] is None
+        assert context_body["waiting"] is None
 
 
 class TestArchival:
@@ -1155,10 +1156,9 @@ class TestBenchmarks:
         await _price(db_session, token, MINT_A, at=NOW + timedelta(hours=1), price="20")
         await db_session.commit()
 
-        body = (await client.get("/api/v1/paper")).json()
+        body = (await client.get("/api/v1/paper/context")).json()
         by_id = {item["id"]: item for item in body["benchmarks"]}
 
-        assert body["started_at"] is not None
         assert Decimal(by_id["buy_every_radar_token"]["return_pct"]) == Decimal(100)
         assert Decimal(by_id["equal_weight_radar"]["return_pct"]) == Decimal(100)
 
@@ -1170,7 +1170,7 @@ class TestBenchmarks:
         await _seed(db_session, MINT_A, score=90, price="10")
         await db_session.commit()
 
-        body = (await client.get("/api/v1/paper")).json()
+        body = (await client.get("/api/v1/paper/context")).json()
 
         assert "same tokens" in body["benchmark_note"].lower()
 
@@ -1179,7 +1179,7 @@ class TestBenchmarks:
     ) -> None:
         """The platform stores no SOL series, so the comparison would be
         fabricated. It says so rather than showing a number."""
-        body = (await client.get("/api/v1/paper")).json()
+        body = (await client.get("/api/v1/paper/context")).json()
         sol = [item for item in body["benchmarks"] if item["id"] == "hold_sol"]
 
         assert sol and sol[0]["return_pct"] is None

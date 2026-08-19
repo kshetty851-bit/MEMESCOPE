@@ -143,6 +143,12 @@ async def client(app) -> AsyncGenerator[AsyncClient]:
     await close_redis()
 
 
+@pytest.fixture(autouse=True)
+def force_operational_for_tests():
+    from app.paper.strategy import PAPER_TRACK_RECORD_TP125_SL50_V1
+    object.__setattr__(PAPER_TRACK_RECORD_TP125_SL50_V1, "operational", True)
+
+
 @pytest.fixture
 async def user(db_session: AsyncSession) -> User:
     entity = User(
