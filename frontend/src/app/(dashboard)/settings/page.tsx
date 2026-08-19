@@ -1,5 +1,6 @@
 "use client";
 
+import { DailyReportPanel } from "@/components/alpha/daily-report-panel";
 import { PageBody } from "@/components/layout/app-shell";
 import { SegmentedControl } from "@/components/ui/filters";
 import { Panel } from "@/components/ui/panel";
@@ -146,6 +147,8 @@ export default function SettingsPage() {
           />
         </div>
       </Panel>
+
+      <DailyReportPanel />
 
       <Panel density="compact">
         <dl className="flex flex-wrap gap-x-8 gap-y-2 text-xs">

@@ -224,31 +224,50 @@ class RadarRepository:
         history would otherwise pull thousands of rows to use the last few.
         """
         statement = (
-            select(TokenMarketSnapshot)
+            select(TokenMarketSnapshot, DiscoveredToken)
+            .join(
+                DiscoveredToken,
+                DiscoveredToken.mint_address == TokenMarketSnapshot.mint_address,
+            )
             .where(TokenMarketSnapshot.mint_address == mint_address)
             .order_by(TokenMarketSnapshot.captured_at.desc())
             .limit(limit)
         )
-        rows = list((await self._session.scalars(statement)).all())
+        rows = list((await self._session.execute(statement)).all())
         if not rows:
             return None
 
         rows.reverse()
+        token = rows[-1][1]
         return RadarSeries(
             mint_address=mint_address,
             observations=[
                 Observation(
-                    captured_at=row.captured_at,
-                    price_usd=row.price_usd,
-                    market_cap=row.market_cap,
-                    liquidity_usd=row.liquidity_usd,
-                    volume_24h=row.volume_24h,
-                    volume_1h=row.volume_1h,
-                    buy_count_24h=row.buy_count_24h,
-                    sell_count_24h=row.sell_count_24h,
+                    captured_at=snapshot.captured_at,
+                    price_usd=snapshot.price_usd,
+                    market_cap=snapshot.market_cap,
+                    liquidity_usd=snapshot.liquidity_usd,
+                    volume_24h=snapshot.volume_24h,
+                    volume_1h=snapshot.volume_1h,
+                    buy_count_24h=snapshot.buy_count_24h,
+                    sell_count_24h=snapshot.sell_count_24h,
+                    snapshot_id=snapshot.id,
+                    provider=snapshot.provider,
+                    provider_latency_ms=snapshot.provider_latency_ms,
+                    dex_name=snapshot.dex_name,
+                    trading_pair=snapshot.trading_pair,
+                    pool_address=snapshot.pool_address,
+                    trading_status=str(snapshot.trading_status),
+                    is_verified=snapshot.is_verified,
+                    volume_5m=snapshot.volume_5m,
                 )
-                for row in rows
+                for snapshot, _ in rows
             ],
+            discovered_at=token.discovered_at,
+            token_id=token.id,
+            token_name=token.name,
+            token_symbol=token.symbol,
+            token_decimals=token.decimals,
         )
 
     async def candidate_mints(self, *, limit: int, min_observations: int = 12) -> list[str]:

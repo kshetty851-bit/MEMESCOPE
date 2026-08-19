@@ -155,6 +155,18 @@ class TestProductionEnvelopes:
         assert not decision.permitted
         assert TransportReason.SUBMISSION_GUARD_BLOCKED in decision.reasons
 
+    def test_mainnet_execution_stays_blocked_even_with_every_other_gate_open(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _production(monkeypatch, mode="live")
+        monkeypatch.setattr(settings, "REAL_WALLET_NETWORK", "mainnet")
+        monkeypatch.setattr(transport_policy, "LIVE_TRANSPORT_RELEASE_APPROVED", True)
+
+        decision = _authorise()
+
+        assert not decision.permitted
+        assert TransportReason.MAINNET_EXECUTION_DISABLED in decision.reasons
+
     @pytest.mark.parametrize(
         ("flag", "reason"),
         [

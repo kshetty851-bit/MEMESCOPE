@@ -78,6 +78,55 @@ class Settings(BaseSettings):
     ALPHA_ACCESS_COOKIE_SAMESITE: Literal["lax", "strict", "none"] = "lax"
     ALPHA_ACCESS_SESSION_DAYS: int = 30
     ALPHA_ACTIVITY_HEARTBEAT_SECONDS: int = 25
+
+    # --- Daily paper-wallet report ------------------------------------------
+    #
+    # Reporting only. Nothing here can open, close or reprice a position; the
+    # report reads `PaperWalletService.read` and renders it.
+    #
+    # Off by default and it stays off without SMTP credentials, so a deploy that
+    # has not been configured sends nothing rather than failing on a schedule.
+    DAILY_REPORT_ENABLED: bool = False
+    #: Comma-separated. `CsvList` is the same coercion `CORS_ORIGINS` uses.
+    DAILY_REPORT_RECIPIENTS: CsvList = Field(
+        default_factory=lambda: ["Kshetty851@gmail.com"]
+    )
+    #: Local hour the report is for, in `DAILY_REPORT_TIMEZONE`.
+    DAILY_REPORT_HOUR: int = Field(default=9, ge=0, le=23)
+    DAILY_REPORT_MINUTE: int = Field(default=0, ge=0, le=59)
+    #: An IANA name, never a fixed offset. The whole application stores and
+    #: schedules in UTC (`celery_app.conf.timezone`), so "09:00" is meaningless
+    #: without saying 09:00 *where* — and a fixed offset would silently drift
+    #: through a DST change.
+    DAILY_REPORT_TIMEZONE: str = "Asia/Dubai"
+
+    # --- Outbound email -----------------------------------------------------
+    #
+    # There was no email infrastructure before this feature. Credentials are
+    # environment-only and never defaulted to anything that could send.
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USERNAME: str = ""
+    SMTP_PASSWORD: SecretStr = SecretStr("")
+    SMTP_USE_TLS: bool = True
+    SMTP_TIMEOUT_SECONDS: float = 20.0
+    #: Envelope sender. Falls back to `SMTP_USERNAME`, which is what most
+    #: providers require the From address to match anyway.
+    SMTP_FROM_EMAIL: str = ""
+    SMTP_FROM_NAME: str = "MEMESCOPE"
+
+    @property
+    def email_configured(self) -> bool:
+        """Whether a real send is possible.
+
+        Checked before every scheduled attempt so an unconfigured deploy logs a
+        skip rather than a failure — a report nobody set up is not an incident.
+        """
+        return bool(self.SMTP_HOST and self.SMTP_USERNAME)
+
+    @property
+    def email_sender(self) -> str:
+        return self.SMTP_FROM_EMAIL or self.SMTP_USERNAME
     ALPHA_ACTIVITY_ACTIVE_SECONDS: int = 60
     ALPHA_ACTIVITY_IDLE_SECONDS: int = 600
     ALPHA_ACTIVITY_RETENTION_DAYS: int = 60
@@ -203,6 +252,18 @@ class Settings(BaseSettings):
     # the *base* name; `token_channel` below is what is actually used.
     TOKEN_EVENT_CHANNEL: str = "memescope:tokens:discovered"
 
+    # --- Yellowstone gRPC shadow discovery ----------------------------------
+    # It is deliberately off by default and cannot become canonical in Phase 1.
+    YELLOWSTONE_ENABLED: bool = False
+    YELLOWSTONE_SHADOW_MODE: bool = True
+    YELLOWSTONE_GRPC_URL: str = ""
+    YELLOWSTONE_X_TOKEN: SecretStr = SecretStr("")
+    YELLOWSTONE_PROGRAM_IDS: CsvList = Field(
+        default_factory=lambda: ["6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"]
+    )
+    YELLOWSTONE_REPLAY_OVERLAP_SLOTS: int = Field(default=2, ge=0, le=100)
+    YELLOWSTONE_MAX_RECEIVE_BYTES: int = Field(default=16 * 1024 * 1024, ge=1_048_576)
+
     # --- Market data provider ------------------------------------------------
     # Which implementation of MarketDataProvider to construct. Swapping this is
     # the only change needed to move to a different vendor.
@@ -298,6 +359,14 @@ class Settings(BaseSettings):
     #: Raise it to spread load, lower it to shorten the guaranteed interval.
     RADAR_ROTATION_BUCKETS: int = 48
 
+    # --- Forward Radar-quality research ------------------------------------
+    # This observes the committed Radar after the fact.  It never changes a
+    # score, rank, candidate universe, or selection decision; a persistence
+    # failure is logged and discarded rather than entering the Radar path.
+    FEATURE_RADAR_QUALITY_DATASET: bool = True
+    RADAR_QUALITY_CONTROL_SAMPLE_MODULUS: int = Field(default=20, ge=2, le=1_000)
+    RADAR_QUALITY_OUTCOME_BATCH_LIMIT: int = Field(default=100, ge=1, le=2_000)
+
     # --- Pump.fun Radar discovery ------------------------------------------
     # This is an admission stage, deliberately separate from the Opportunity
     # Radar. It identifies a bounded-age Pump.fun universe from data already
@@ -384,6 +453,9 @@ class Settings(BaseSettings):
     #: Which published strategy trades. Sprint 30 made this one value rather
     #: than a choice: the registry holds exactly one operational strategy, so a
     #: different id here does not switch modes, it falls back with a warning.
+    # One forward-only paper experiment.  Replacing this id does not reset a
+    # wallet implicitly: the explicit paper-wallet reset migration archives the
+    # old generation before this strategy is allowed to run.
     PAPER_WALLET_STRATEGY_ID: str = "trailing_stop_25_v1"
     #: How many positions the evaluator advances per pass. Bounded and ordered
     #: oldest-watermark-first, which is what keeps a growing book from starving
@@ -445,10 +517,25 @@ class Settings(BaseSettings):
     REAL_WALLET_EXECUTION_MODE: Literal["disabled", "dry_run", "armed", "live"] = "disabled"
     REAL_WALLET_EXECUTION_ENABLED: bool = False
     REAL_WALLET_AUTOTRADE_ENABLED: bool = False
-    #: Public only. Its matching signer is loaded from a mounted runtime secret
-    #: file only when a future live implementation explicitly needs it.
+    # This is deliberately separate from the scanner's mainnet RPC settings.
+    # Wallet observation starts on devnet, and a wallet RPC can never silently
+    # inherit the scanner's production endpoint.
+    REAL_WALLET_NETWORK: Literal["devnet", "mainnet"] = "devnet"
+    REAL_WALLET_RPC_URL: str = "https://api.devnet.solana.com"
+    #: Public only. The paired secret is never loaded by an application process
+    #: during Phase 1; a later isolated signer service needs separate review.
     REAL_WALLET_PUBLIC_KEY: str = ""
     REAL_WALLET_EXECUTION_SECRET_FILE: str = ""
+    # Phase 2 is a separate, deliberately tiny manual-devnet workflow. These
+    # values are used by the API and signer to enforce the same small envelope;
+    # the signer-file *path* is intentionally not a Settings field because the
+    # API, worker, and web processes must never receive it.
+    PHASE2_DEVNET_SIGNER_SOCKET: str = ""
+    PHASE2_DEVNET_QUOTE_TTL_SECONDS: int = Field(default=60, ge=10, le=600)
+    PHASE2_DEVNET_APPROVAL_TTL_SECONDS: int = Field(default=120, ge=10, le=900)
+    PHASE2_DEVNET_MAX_TRANSFER_LAMPORTS: int = Field(default=1_000_000, ge=1, le=10_000_000)
+    PHASE2_DEVNET_CONFIRM_RETRIES: int = Field(default=6, ge=1, le=20)
+    PHASE2_DEVNET_CONFIRM_RETRY_SECONDS: float = Field(default=1.0, ge=0.1, le=10)
     REAL_WALLET_MAX_TRADE_USD: Decimal = Field(default=Decimal("5"), gt=0)
     REAL_WALLET_MAX_OPEN_POSITIONS: int = Field(default=1, ge=1)
     REAL_WALLET_MAX_TOTAL_EXPOSURE_USD: Decimal = Field(default=Decimal("10"), gt=0)
@@ -701,6 +788,7 @@ class Settings(BaseSettings):
         "ALLOWED_HOSTS",
         "TRUSTED_PROXY_IPS",
         "SCANNER_WATCH_PROGRAMS",
+        "YELLOWSTONE_PROGRAM_IDS",
         "OPPORTUNITY_BONDING_CURVE_VENUES",
         "OPPORTUNITY_GRADUATED_VENUES",
         # Both were `CsvList` from the day the safety gate landed but were never
@@ -711,6 +799,11 @@ class Settings(BaseSettings):
         # settings an operator is most likely to want to narrow by hand.
         "REAL_WALLET_SAFETY_SUPPORTED_VENUES",
         "REAL_WALLET_SAFETY_SUPPORTED_TOKEN_2022_EXTENSIONS",
+        # Third occurrence of the trap above, and caught the same way: the
+        # recipient list was `CsvList` from the day the report landed but was
+        # invisible until it reached a compose file, at which point
+        # `DAILY_REPORT_RECIPIENTS=one@example.com` stopped the backend booting.
+        "DAILY_REPORT_RECIPIENTS",
         mode="before",
     )
     @classmethod
@@ -880,6 +973,22 @@ class Settings(BaseSettings):
                 )
         if self.SCANNER_RECONNECT_ERROR_ATTEMPTS < 1:
             raise ValueError("SCANNER_RECONNECT_ERROR_ATTEMPTS must be at least 1")
+        if self.YELLOWSTONE_ENABLED and not self.YELLOWSTONE_SHADOW_MODE:
+            raise ValueError("Phase 1 Yellowstone may run only with YELLOWSTONE_SHADOW_MODE=true")
+        if self.YELLOWSTONE_ENABLED and (
+            not self.YELLOWSTONE_GRPC_URL or not self.YELLOWSTONE_X_TOKEN.get_secret_value()
+        ):
+            raise ValueError("YELLOWSTONE_GRPC_URL and YELLOWSTONE_X_TOKEN are required when enabled")
+        # Phase 1 has no isolated signing service. Accepting a key-file path in
+        # an API, worker, scanner, or scheduler process would recreate the
+        # audit's custody weakness even though no execution is currently wired.
+        # The only supported use of FileExecutionSigner is the explicit local
+        # operator CLI; deployment-side signing is a later reviewed boundary.
+        if self.REAL_WALLET_EXECUTION_SECRET_FILE:
+            raise ValueError(
+                "REAL_WALLET_EXECUTION_SECRET_FILE is not permitted in application "
+                "processes during the read-only wallet phase"
+            )
         return self
 
 

@@ -19,6 +19,7 @@ from app.core.events import publish_live_update
 from app.core.logging import get_logger
 from app.db.session import SessionFactory
 from app.paper.scheduler import request_review
+from app.radar.quality import RadarQualityRecorder
 from app.radar.service import RadarService
 from app.real_wallet.scheduler import request_dry_run
 from app.services.pumpfun_radar import PumpfunRadarScanner
@@ -60,6 +61,35 @@ async def _radar_sweep(limit: int | None = None) -> dict[str, Any]:
     request_review(trigger="radar_sweep")
     request_dry_run(trigger="radar_sweep")
     return result
+
+
+@celery_app.task(name="app.radar.scheduler.radar_quality_outcomes")
+def radar_quality_outcomes(limit: int | None = None) -> dict[str, Any]:
+    """Append future outcome labels without participating in Radar evaluation."""
+
+    return run_async(_radar_quality_outcomes(limit))
+
+
+async def _radar_quality_outcomes(limit: int | None = None) -> dict[str, Any]:
+    if not settings.FEATURE_RADAR_QUALITY_DATASET:
+        return {"skipped": "radar_quality_dataset_disabled"}
+
+    from datetime import UTC, datetime
+
+    try:
+        async with SessionFactory() as session:
+            result = await RadarQualityRecorder(session).capture_outcomes(
+                now=datetime.now(UTC),
+                limit=limit or settings.RADAR_QUALITY_OUTCOME_BATCH_LIMIT,
+            )
+            await session.commit()
+        logger.info("radar_quality_outcomes_completed", **result)
+        return result
+    except Exception:
+        # Outcome collection is research-only. A failure never escalates into a
+        # Radar sweep, scanner, or selection retry.
+        logger.exception("radar_quality_outcomes_failed")
+        return {"failed": True}
 
 
 @celery_app.task(name="app.radar.scheduler.pumpfun_radar_scan")

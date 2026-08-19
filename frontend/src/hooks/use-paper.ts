@@ -5,13 +5,11 @@ import { useLiveUpdates } from "@/hooks/use-live-updates";
 import { livePoll } from "@/lib/query";
 
 import {
-  fetchLab,
-  fetchLabTokens,
   fetchPaperAudit,
+  fetchPaperPerformance,
   fetchPaperPositions,
   fetchPaperStrategies,
   fetchPaperWallet,
-  fetchStrategyIntelligence,
   previewManualSell,
   sellPaperPosition,
 } from "@/lib/paper";
@@ -67,6 +65,17 @@ export function usePaperAudit(limit = 100) {
   });
 }
 
+/** The date-by-date returns category, sourced from the immutable trade log. */
+export function usePaperPerformance() {
+  const { status } = useLiveUpdates();
+  return useQuery({
+    queryKey: ["paper", "performance"],
+    queryFn: fetchPaperPerformance,
+    refetchInterval: livePoll(status, PAPER_POLL_MS),
+    staleTime: PAPER_POLL_MS / 2,
+  });
+}
+
 export function usePaperStrategies() {
   return useQuery({
     queryKey: ["paper", "strategies"],
@@ -88,46 +97,14 @@ export function useManualSell() {
   return useMutation({
     mutationFn: sellPaperPosition,
     onSuccess: () => {
-      for (const key of [["paper", "wallet"], ["paper", "positions"], ["paper", "audit"]]) {
+      for (const key of [
+        ["paper", "wallet"],
+        ["paper", "positions"],
+        ["paper", "audit"],
+        ["paper", "performance"],
+      ]) {
         void queryClient.invalidateQueries({ queryKey: key });
       }
     },
-  });
-}
-
-/**
- * The Strategy Lab.
- *
- * Replayed server-side over stored history, so the answer only changes when new
- * snapshots land. Polled on the same cadence as the wallet rather than more
- * often — the replay is deterministic, and refetching it faster would issue
- * requests to observe a figure that did not move.
- */
-export function useLab() {
-  return useQuery({
-    queryKey: ["paper", "lab"],
-    queryFn: fetchLab,
-    // Lab has no committed invalidation event: it is a broad historical replay,
-    // not a live wallet read model. Keep its deliberately slow poll.
-    refetchInterval: PAPER_POLL_MS,
-    staleTime: PAPER_POLL_MS / 2,
-  });
-}
-
-export function useLabTokens(limit = 60) {
-  return useQuery({
-    queryKey: ["paper", "lab", "tokens", limit],
-    queryFn: () => fetchLabTokens(limit),
-    staleTime: PAPER_POLL_MS,
-  });
-}
-
-export function useStrategyIntelligence() {
-  const { status } = useLiveUpdates();
-  return useQuery({
-    queryKey: ["paper", "strategy-intelligence"],
-    queryFn: fetchStrategyIntelligence,
-    refetchInterval: livePoll(status, PAPER_POLL_MS),
-    staleTime: PAPER_POLL_MS / 2,
   });
 }

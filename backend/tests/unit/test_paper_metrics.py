@@ -89,7 +89,11 @@ class TestRefusals:
         )
         assert result.equity is None
         assert result.roi_pct is None
+        assert result.return_usd is None
         assert result.unpriced_positions == 1
+        assert result.priced_positions == 0
+        # The partial display remains useful without pretending it is equity.
+        assert result.known_partial_equity == Decimal("900.00")
         # Cash is still exact — it does not depend on any price.
         assert result.cash == Decimal(900)
 
@@ -139,8 +143,22 @@ class TestMeasured:
         assert result.open_value == Decimal("150.00")
         assert result.equity == Decimal("1100.00")
         assert result.roi_pct == Decimal("10.00")
+        assert result.return_usd == Decimal("100.00")
         assert result.open_positions == 1
         assert result.closed_positions == 2
+
+    def test_partial_equity_includes_only_currently_priced_holdings(self) -> None:
+        result = summarise(
+            starting_balance=START,
+            open_positions=[open_position("priced"), open_position("unpriced")],
+            prices={"priced": Decimal(15), "unpriced": None},
+            closed=[],
+        )
+        # Full equity stays unknown; the partial display is cash (800) + 150.
+        assert result.equity is None
+        assert result.known_partial_equity == Decimal("950.00")
+        assert result.priced_positions == 1
+        assert result.unpriced_positions == 1
 
     def test_every_exit_reason_is_counted_even_at_zero(self) -> None:
         """A reason that has never fired is a measured zero, not an absence."""
@@ -152,6 +170,8 @@ class TestMeasured:
             "stop": 0,
             "expiry": 0,
             "manual": 0,
+            "trailing_stop": 0,
+            "terminal": 0,
         }
 
     def test_hold_time_averages_the_closed_trades(self) -> None:

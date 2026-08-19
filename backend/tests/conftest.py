@@ -43,6 +43,17 @@ async def engine() -> AsyncGenerator:
     eng = create_async_engine(TEST_DATABASE_URI, poolclass=None, future=True)
     async with eng.begin() as conn:
         await conn.exec_driver_sql("CREATE EXTENSION IF NOT EXISTS pgcrypto")
+        # The retired experimental tables predate this metadata.  A developer
+        # may still have them in the reusable test database, so remove them
+        # before metadata-driven setup rather than letting hidden legacy
+        # foreign keys contaminate the primary Paper Wallet test schema.
+        for table in (
+            "paper_shadow_decisions",
+            "paper_shadow_trade_audit",
+            "paper_shadow_positions",
+            "paper_shadow_wallets",
+        ):
+            await conn.exec_driver_sql(f"DROP TABLE IF EXISTS {table} CASCADE")
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
     yield eng

@@ -30,6 +30,7 @@ from app.core.logging import get_logger
 from app.models.radar import RadarToken
 from app.radar import achievements, detector, scorer
 from app.radar.models import OpportunityResult, RadarSeries
+from app.radar.quality import PendingDecision, build_pending, capture_pending
 from app.radar.repository import PeakObservation, RadarRepository
 
 logger = get_logger(__name__)
@@ -58,6 +59,10 @@ class RadarService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
         self._repository = RadarRepository(session)
+        # Held in memory until the *normal* Radar transaction commits.  Research
+        # persistence is then a separate best-effort transaction, so no capture
+        # exception can alter ranking, detection, or scanner behaviour.
+        self._pending_quality: list[PendingDecision] = []
 
     async def evaluate_mint(self, mint_address: str, *, now: datetime | None = None) -> bool:
         """Score one token and persist whatever changed. Returns whether it is on the Radar.
@@ -81,14 +86,52 @@ class RadarService:
 
         if existing is None:
             if category is None:
-                # Not interesting enough to enter the record. Nothing is written:
-                # the Radar tracks what it detected, and it has not detected this.
+                self._queue_quality(series, result, category, selected=False, moment=moment)
+                # Not interesting enough to enter the existing Radar record.
                 return False
-            await self._record_first_detection(series, result, category, moment)
+            entry = await self._record_first_detection(series, result, category, moment)
+            # A concurrent Radar worker can win the immutable insertion race;
+            # its canonical entry, not this capture, remains authoritative.
+            selected = (
+                entry is not None or await self._repository.get(mint_address) is not None
+            )
+            self._queue_quality(series, result, category, selected=selected, moment=moment)
             return True
 
         await self._update_existing(existing, series, result, category, moment)
+        self._queue_quality(series, result, category, selected=True, moment=moment)
         return True
+
+    def _queue_quality(
+        self,
+        series: RadarSeries,
+        result: OpportunityResult,
+        category: str | None,
+        *,
+        selected: bool,
+        moment: datetime,
+    ) -> None:
+        pending = build_pending(
+            series=series,
+            result=result,
+            category=category,
+            selected=selected,
+            evaluated_at=moment,
+        )
+        if pending is not None:
+            self._pending_quality.append(pending)
+
+    async def capture_forward_quality(self) -> None:
+        """Persist queued research rows after a successful Radar commit only."""
+
+        pending, self._pending_quality = self._pending_quality, []
+        try:
+            await capture_pending(pending)
+        except Exception:
+            # ``capture_pending`` already protects its own I/O, but retain a
+            # second boundary here so an accidental future replacement cannot
+            # turn research instrumentation into a Radar failure.
+            logger.exception("radar_quality_capture_boundary_failed", candidates=len(pending))
 
     async def refresh_mints(
         self, mint_addresses: Sequence[str], *, now: datetime | None = None
@@ -128,12 +171,12 @@ class RadarService:
         result: OpportunityResult,
         category: str,
         moment: datetime,
-    ) -> None:
-        token_id = await self._repository.token_id_for(series.mint_address)
+    ) -> RadarToken | None:
+        token_id = series.token_id or await self._repository.token_id_for(series.mint_address)
         if token_id is None:
             # The Radar only tracks tokens the scanner discovered; a mint with
             # market data but no discovery row would break the foreign key.
-            return
+            return None
 
         latest = series.latest
         entry = await self._repository.record_detection(
@@ -165,7 +208,7 @@ class RadarService:
 
         if entry is None:
             # Another worker detected it first. Its numbers stand.
-            return
+            return None
 
         await self._write_snapshot(entry.id, series, result, str(category), moment)
         logger.info(
@@ -175,6 +218,7 @@ class RadarService:
             score=str(result.score),
             confidence=str(result.confidence),
         )
+        return entry
 
     # --- Maintenance ---------------------------------------------------------
 
@@ -396,6 +440,9 @@ class RadarService:
                 tracked += 1
 
         await self._session.commit()
+        # The research writer opens a fresh transaction and swallows all of its
+        # own failures.  It cannot roll back the just-committed Radar result.
+        await self.capture_forward_quality()
         logger.info(
             "radar_sweep_completed",
             evaluated=evaluated,

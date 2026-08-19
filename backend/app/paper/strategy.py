@@ -342,16 +342,203 @@ class TrailingStopStrategy:
         )
 
 
-#: **The published MEMESCOPE strategy.** One rule, chosen before the relaunch,
-#: applied without exception and never tuned in response to a result. $100 equal
-#: weight into the highest-ranked eligible Radar token; out at 25% back from the
-#: high; nothing else closes a position.
+@dataclass(frozen=True, slots=True)
+class ActivatedTrailingStrategy:
+    """$10 paper entries with a 2x activation gate and a 25% trailing exit.
+
+    This deliberately has no price stop or time exit.  Before an observed 2x
+    print, a position remains open regardless of drawdown.  At that first 2x
+    print the trail becomes active; subsequent observations can only raise its
+    high-water mark.  A gap below the theoretical trail closes at the observed
+    price, never at an unobserved stop level.
+    """
+
+    id: str
+    name: str
+    version: str
+    trade_size_usd: Decimal
+    activation_multiple: Decimal
+    trailing_drawdown: Decimal
+    top_n: int | None = None
+    operational: bool = True
+    unavailable_reason: str | None = None
+
+    @property
+    def spec(self) -> StrategySpec:
+        return self.describe()
+
+    @property
+    def exit_rules(self) -> ExitRules:
+        # Activation is stateful and is evaluated by the paper service from
+        # position fields; no ordinary bracket/expiry rule exists here.
+        return ExitRules()
+
+    def describe(self) -> StrategySpec:
+        return StrategySpec(
+            id=self.id,
+            name=self.name,
+            version=self.version,
+            summary=(
+                f"Buys ${self.trade_size_usd:,.0f} of every existing paper-qualified "
+                "Radar token while cash permits. It has no price stop before an "
+                f"observed {self.activation_multiple:g}x gain; after activation it sells "
+                f"only after a {self.trailing_drawdown * 100:g}% giveback from the "
+                "running observed high."
+            ),
+            rules=(
+                Rule("Allocation", f"${self.trade_size_usd:,.0f} per qualified token"),
+                Rule(
+                    "Entry",
+                    "Existing paper-qualified Radar tokens; scanner qualification unchanged",
+                ),
+                Rule("Cash rule", "Skip and record INSUFFICIENT_PAPER_CASH below $10"),
+                Rule("Re-entry", "Never. One position per token, ever."),
+                Rule("Price stop before 2x", "None"),
+                Rule(
+                    "Trail activation",
+                    f"First observed price at or above {self.activation_multiple:g}x entry",
+                ),
+                Rule(
+                    "Trailing stop",
+                    f"{self.trailing_drawdown * 100:g}% below the running high "
+                    "after activation",
+                ),
+                Rule(
+                    "Gap execution",
+                    "Observed trigger price; never an unobserved theoretical stop",
+                ),
+                Rule(
+                    "Maximum hold", "None; terminal/non-trade exits require provider evidence"
+                ),
+                Rule("Discretion", "None. No rule is applied by hand."),
+            ),
+            operational=self.operational,
+            unavailable_reason=self.unavailable_reason,
+        )
+
+    def entry_for(
+        self, candidate: Candidate, *, cash_available: Decimal, now: datetime
+    ) -> Entry | None:
+        if (
+            not self.operational
+            or (self.top_n is not None and candidate.rank > self.top_n)
+            or candidate.price_usd <= 0
+            or cash_available < self.trade_size_usd
+        ):
+            return None
+        return Entry(
+            mint_address=candidate.mint_address,
+            price_usd=candidate.price_usd,
+            size_usd=self.trade_size_usd,
+            quantity=self.trade_size_usd / candidate.price_usd,
+            opened_at=now,
+            trailing_drawdown=self.trailing_drawdown,
+            trailing_activation_multiple=self.activation_multiple,
+            market_cap=candidate.market_cap,
+            liquidity_usd=candidate.liquidity_usd,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class TrackRecordBracketStrategy:
+    """Forward-only $10 experiment over immutable Track Record admissions.
+
+    The service supplies canonical ``radar_tokens`` rows admitted after the
+    wallet watermark.  It does not reproduce or reinterpret Radar's admission
+    gates; it only fixes the position size and exit bracket.
+    """
+
+    id: str
+    name: str
+    version: str
+    trade_size_usd: Decimal
+    take_profit_multiple: Decimal
+    stop_loss_multiple: Decimal
+    top_n: int | None = None
+    operational: bool = True
+    unavailable_reason: str | None = None
+
+    @property
+    def spec(self) -> StrategySpec:
+        return self.describe()
+
+    @property
+    def exit_rules(self) -> ExitRules:
+        return ExitRules(
+            take_profit_multiple=self.take_profit_multiple,
+            stop_loss_multiple=self.stop_loss_multiple,
+        )
+
+    def describe(self) -> StrategySpec:
+        return StrategySpec(
+            id=self.id,
+            name=self.name,
+            version=self.version,
+            summary=(
+                "Buys $10 of every token admitted to MEMESCOPE Track Record after "
+                "this experiment started, subject only to a usable post-admission "
+                "observed price and cash. "
+                "It takes profit at 1.25x or stops at 0.50x; it has no trailing "
+                "or time-based exit."
+            ),
+            rules=(
+                Rule(
+                    "Universe", "Every new Track Record admission after the entry watermark"
+                ),
+                Rule("Allocation", "$10 per token"),
+                Rule(
+                    "Admission source",
+                    "Canonical immutable MEMESCOPE Track Record admission",
+                ),
+                Rule("Re-entry", "Never. One position or terminal cash decision per token."),
+                Rule("Take profit", "1.25x (+25%) from actual entry reference price"),
+                Rule("Stop loss", "0.50x (-50%) from actual entry reference price"),
+                Rule("Trailing stop", "None"),
+                Rule(
+                    "Maximum hold",
+                    "None; provider terminal handling requires an observed price",
+                ),
+                Rule(
+                    "Gap execution",
+                    "Observed triggering price through the paper execution model",
+                ),
+                Rule("Discretion", "None. No rule is applied by hand."),
+            ),
+            operational=self.operational,
+            unavailable_reason=self.unavailable_reason,
+        )
+
+    def entry_for(
+        self, candidate: Candidate, *, cash_available: Decimal, now: datetime
+    ) -> Entry | None:
+        if (
+            not self.operational
+            or candidate.price_usd <= 0
+            or cash_available < self.trade_size_usd
+        ):
+            return None
+        return Entry(
+            mint_address=candidate.mint_address,
+            price_usd=candidate.price_usd,
+            size_usd=self.trade_size_usd,
+            quantity=self.trade_size_usd / candidate.price_usd,
+            opened_at=candidate.observed_at,
+            target_price=candidate.price_usd * self.take_profit_multiple,
+            stop_price=candidate.price_usd * self.stop_loss_multiple,
+            market_cap=candidate.market_cap,
+            liquidity_usd=candidate.liquidity_usd,
+        )
+
+
+#: Restored from its persisted Generation 2 state on 2026-08-16.  The rules and
+#: $100 entry size are the original V1 rules; no position is reconstructed.
 TRAILING_STOP_25_V1 = TrailingStopStrategy(
     id="trailing_stop_25_v1",
     name="Trailing Stop 25%",
     version="1.0.0",
     trade_size_usd=Decimal(100),
     trailing_drawdown=Decimal("0.25"),
+    operational=True,
 )
 
 #: **Retired at the Sprint 30 relaunch, and kept because its wallet still
@@ -377,10 +564,50 @@ EQUAL_WEIGHT_V1 = FixedSizeStrategy(
     ),
 )
 
+PAPER_2X_TRAIL25_V1 = ActivatedTrailingStrategy(
+    id="paper_2x_trail25_v1",
+    name="Paper 2x Trail 25%",
+    version="1.0.0-forward",
+    trade_size_usd=Decimal(10),
+    activation_multiple=Decimal(2),
+    trailing_drawdown=Decimal("0.25"),
+    operational=False,
+    unavailable_reason="Retired for the all-scanned forward experiment.",
+)
+
+PAPER_ALL_SCANNED_TP125_SL50_V1 = TrackRecordBracketStrategy(
+    id="paper_all_scanned_tp125_sl50_v1",
+    name="All Scanned Tokens TP 1.25x / SL 0.50x",
+    version="1.0.0-forward",
+    trade_size_usd=Decimal(10),
+    take_profit_multiple=Decimal("1.25"),
+    stop_loss_multiple=Decimal("0.50"),
+    operational=False,
+    unavailable_reason="Archived with Generation 5; retained for its immutable record.",
+)
+
+PAPER_TRACK_RECORD_TP125_SL50_V1 = TrackRecordBracketStrategy(
+    id="paper_track_record_tp125_sl50_v1",
+    name="Track Record TP 1.25x / SL 0.50x",
+    version="1.0.0-forward",
+    trade_size_usd=Decimal(10),
+    take_profit_multiple=Decimal("1.25"),
+    stop_loss_multiple=Decimal("0.50"),
+    operational=False,
+    unavailable_reason=(
+        "Archived with Generation 6; Generation 2 is the active resumed record."
+    ),
+)
+
 #: What a wallet may follow. Kept as a Protocol union rather than one class so
 #: the archived bracket and the live trailing stop can both be described without
 #: one pretending to be the other.
-AnyStrategy = FixedSizeStrategy | TrailingStopStrategy
+AnyStrategy = (
+    FixedSizeStrategy
+    | TrailingStopStrategy
+    | ActivatedTrailingStrategy
+    | TrackRecordBracketStrategy
+)
 
 
 class StrategyRegistry:
@@ -421,6 +648,12 @@ class StrategyRegistry:
 
 
 registry = StrategyRegistry(
-    (TRAILING_STOP_25_V1, EQUAL_WEIGHT_V1),
+    (
+        PAPER_TRACK_RECORD_TP125_SL50_V1,
+        PAPER_ALL_SCANNED_TP125_SL50_V1,
+        PAPER_2X_TRAIL25_V1,
+        TRAILING_STOP_25_V1,
+        EQUAL_WEIGHT_V1,
+    ),
     default=TRAILING_STOP_25_V1.id,
 )

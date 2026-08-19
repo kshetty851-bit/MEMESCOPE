@@ -83,6 +83,10 @@ class MarketEnrichmentService:
         )
         if created is not None:
             logger.info("enrichment_token_registered", mint=mint_address)
+        # A raw scanner event only enrols normal enrichment.  Generation 6
+        # quote acceleration is tied to the canonical Track Record admission,
+        # never to raw discovery.
+        await self.states.prioritize_unquoted_track_record_candidates(now=datetime.now(UTC))
         if token.image_url is None and token.metadata_uri:
             await self._refresh_token_image(token)
         return created is not None
@@ -93,7 +97,9 @@ class MarketEnrichmentService:
         Without this, a worker restart would silently orphan everything the
         scanner found in the meantime.
         """
-        return await self.states.backfill_missing(limit=limit)
+        created = await self.states.backfill_missing(limit=limit)
+        await self.states.prioritize_unquoted_track_record_candidates(now=datetime.now(UTC))
+        return created
 
     async def backfill_missing_images(self, *, limit: int = 50) -> int:
         """Resolve token images for existing rows, idempotently and by exact mint row."""

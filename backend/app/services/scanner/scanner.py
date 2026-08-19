@@ -37,6 +37,8 @@ from app.db.session import SessionFactory
 from app.health.service import publish_scanner_state
 from app.models.token import MetadataStatus
 from app.repositories.token import TokenRepository
+from app.services.discovery.events import DiscoveryEvent
+from app.services.discovery.ledger import record_rpc_observation
 from app.services.rpc.base import SolanaRPC
 from app.services.rpc.registry import get_rpc
 from app.services.scanner.parser import (
@@ -293,6 +295,7 @@ class TokenScanner:
                 slot=event.slot,
                 logs=event.logs,
                 source_program=program,
+                observed_at=datetime.now(UTC),
             )
 
             self.stats.events_filtered += 1
@@ -457,6 +460,28 @@ class TokenScanner:
             await session.commit()
 
         self.stats.tokens_discovered += 1
+        # Telemetry is intentionally after the canonical commit and isolated:
+        # a research ledger failure must never undo or delay production discovery.
+        try:
+            await record_rpc_observation(
+                DiscoveryEvent(
+                    mint_address=creation.mint_address,
+                    observed_at=event.observed_at or datetime.now(UTC),
+                    slot=creation.slot,
+                    signature=creation.signature,
+                    source="rpc_ws",
+                    program=creation.source_program,
+                    event_type=(
+                        "pumpfun_create_event"
+                        if metadata is not None
+                        else "mint_initialization"
+                    ),
+                    provider_timestamp=creation.block_time,
+                    ingest_timestamp=datetime.now(UTC),
+                )
+            )
+        except Exception:
+            logger.exception("rpc_discovery_observation_failed", mint=creation.mint_address)
         logger.info(
             "token_saved",
             mint=payload["mint_address"],

@@ -14,6 +14,7 @@ from sqlalchemy import (
     Index,
     Integer,
     Numeric,
+    Sequence,
     String,
     Text,
     UniqueConstraint,
@@ -247,4 +248,116 @@ class RealWalletExecutionHealth(Base, UUIDPrimaryKeyMixin):
     last_failure_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class RealWalletDevnetQuote(Base, UUIDPrimaryKeyMixin):
+    """Append-only evidence from a read-only devnet quote request."""
+
+    __tablename__ = "real_wallet_devnet_quotes"
+
+    network: Mapped[str] = mapped_column(String(16), nullable=False, server_default="devnet")
+    wallet_public_key: Mapped[str] = mapped_column(String(44), nullable=False)
+    input_mint: Mapped[str] = mapped_column(String(44), nullable=False)
+    output_mint: Mapped[str] = mapped_column(String(44), nullable=False)
+    input_amount_raw: Mapped[Decimal] = mapped_column(Numeric(38, 0), nullable=False)
+    expected_output_raw: Mapped[Decimal] = mapped_column(Numeric(38, 0), nullable=False)
+    minimum_output_raw: Mapped[Decimal] = mapped_column(Numeric(38, 0), nullable=False)
+    slippage_bps: Mapped[int] = mapped_column(Integer, nullable=False)
+    price_impact_pct: Mapped[Decimal | None] = mapped_column(Numeric(20, 8))
+    estimated_fee_lamports: Mapped[int | None] = mapped_column(BigInteger)
+    provider: Mapped[str] = mapped_column(String(64), nullable=False)
+    provider_reference: Mapped[str | None] = mapped_column(String(256))
+    route: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    quoted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    provider_payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class RealWalletDevnetIntent(Base, UUIDPrimaryKeyMixin):
+    """Manual devnet-only transaction intent; never a Paper Wallet record."""
+
+    __tablename__ = "real_wallet_devnet_intents"
+
+    idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False, unique=True)
+    wallet_public_key: Mapped[str] = mapped_column(String(44), nullable=False)
+    network: Mapped[str] = mapped_column(String(16), nullable=False, server_default="devnet")
+    action_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    input_mint: Mapped[str] = mapped_column(String(44), nullable=False)
+    output_mint: Mapped[str | None] = mapped_column(String(44))
+    destination_public_key: Mapped[str | None] = mapped_column(String(44))
+    input_amount_raw: Mapped[Decimal] = mapped_column(Numeric(38, 0), nullable=False)
+    quote_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("real_wallet_devnet_quotes.id")
+    )
+    state: Mapped[str] = mapped_column(String(32), nullable=False, server_default="DRAFT")
+    simulation_status: Mapped[str | None] = mapped_column(String(32))
+    approval_status: Mapped[str | None] = mapped_column(String(32))
+    signing_status: Mapped[str | None] = mapped_column(String(32))
+    submission_status: Mapped[str | None] = mapped_column(String(32))
+    quote_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    approval_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    approved_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    transaction_base64: Mapped[str | None] = mapped_column(Text)
+    transaction_fingerprint: Mapped[str | None] = mapped_column(String(64))
+    transaction_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    simulation_result: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    simulation_logs: Mapped[list[str] | None] = mapped_column(JSONB)
+    simulation_units_consumed: Mapped[int | None] = mapped_column(BigInteger)
+    simulation_context_slot: Mapped[int | None] = mapped_column(BigInteger)
+    simulation_blockhash: Mapped[str | None] = mapped_column(String(64))
+    simulated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    signer_validation: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    signed_transaction_base64: Mapped[str | None] = mapped_column(Text)
+    signed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    transaction_signature: Mapped[str | None] = mapped_column(String(128), unique=True)
+    rpc_endpoint: Mapped[str | None] = mapped_column(String(512))
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    submission_retry_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    submission_error: Mapped[str | None] = mapped_column(Text)
+    confirmation_status: Mapped[str | None] = mapped_column(String(32))
+    confirmation_slot: Mapped[int | None] = mapped_column(BigInteger)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reconciliation: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    reconciled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    failure_reason: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (Index("ix_real_wallet_devnet_intent_state", "state"),)
+
+
+class RealWalletDevnetEvent(Base, UUIDPrimaryKeyMixin):
+    """Immutable, secret-free lifecycle evidence for a devnet manual intent."""
+
+    __tablename__ = "real_wallet_devnet_events"
+
+    intent_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("real_wallet_devnet_intents.id"), nullable=False
+    )
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    event_order: Mapped[int] = mapped_column(
+        BigInteger,
+        Sequence("real_wallet_devnet_event_order_seq"),
+        nullable=False,
+        server_default=Sequence("real_wallet_devnet_event_order_seq").next_value(),
+    )
+    detail: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("ix_real_wallet_devnet_event_intent", "intent_id"),
+        Index("ix_real_wallet_devnet_event_intent_order", "intent_id", "event_order"),
     )

@@ -35,11 +35,18 @@ FORBIDDEN_ROOTS = {
     "time",
 }
 
-#: The Radar's deliberate I/O seams. `repository.py` owns database access,
-#: `service.py` orchestrates, `scheduler.py` is the Celery entry point and
-#: `api.py` is HTTP. Everything else stays pure. Adding a fifth name here would
-#: mean the boundary had eroded.
-IO_MODULES = {"repository.py", "service.py", "scheduler.py", "api.py", "schemas.py"}
+#: The Radar's deliberate I/O seams. `repository.py` owns canonical database
+#: access, `quality.py` owns isolated research-ledger I/O, `service.py`
+#: orchestrates, `scheduler.py` is the Celery entry point, and `api.py` is HTTP.
+#: Everything else stays pure.
+IO_MODULES = {
+    "repository.py",
+    "quality.py",
+    "service.py",
+    "scheduler.py",
+    "api.py",
+    "schemas.py",
+}
 
 #: Modules outside the package the pure engine may reach for.
 ALLOWED_APP_MODULES = {"app.radar"}

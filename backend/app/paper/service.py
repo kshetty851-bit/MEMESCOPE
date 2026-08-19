@@ -34,7 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
 from app.core.logging import get_logger
-from app.models.market import TokenMarketSnapshot
+from app.models.market import TokenMarketSnapshot, TradingStatus
 from app.models.paper import PaperPosition, PaperTradeAudit, PaperWallet
 from app.models.radar import RadarToken
 from app.paper import audit, benchmark, eligibility, execution, exits, metrics
@@ -52,7 +52,7 @@ from app.paper.models import (
     Quote,
 )
 from app.paper.repository import PaperRepository
-from app.paper.strategy import AnyStrategy, registry
+from app.paper.strategy import AnyStrategy, TrackRecordBracketStrategy, registry
 from app.radar.repository import RadarRepository
 from app.repositories.market import MarketSnapshotRepository
 from app.repositories.token import TokenRepository
@@ -136,9 +136,8 @@ def _rules_for(position: PaperPosition) -> ExitRules:
     of entry, while the row stores them as absolute prices, so a bracket
     position's rules are reconstructed by division and multiplied back. That
     round trip is exact to Decimal's working precision but not bit-identical.
-    It never runs in production — the live strategy has no target and no fixed
-    stop, and archived generations are frozen and never re-evaluated — and if a
-    bracket strategy is ever relaunched, this is the line to revisit first.
+    Generation 5 settles its stored barriers on the dedicated observed-bracket
+    path; archived generations are frozen and never re-evaluated.
     """
     hold_for: timedelta | None = None
     if position.expires_at is not None:
@@ -719,18 +718,44 @@ class PaperWalletService:
 
         # One query for the batch, from the oldest watermark in it; each row is
         # then trimmed to its own. `window_for_mints` documents the same shape.
-        oldest = min(position.last_evaluated_at for position in positions)
+        # A resumed historical wallet must never replay its archived interval.
+        # The resume watermark is independent of (and may be newer than) each
+        # preserved position watermark, which remains an immutable historical
+        # fact until a genuinely new quote advances it.
+        resume_watermark = wallet.resume_watermark_at
+        effective_watermarks = {
+            position.id: max(
+                position.last_evaluated_at,
+                resume_watermark or position.last_evaluated_at,
+            )
+            for position in positions
+        }
+        oldest = min(effective_watermarks.values())
         series = await self._market.series_for_mints(
             [position.mint_address for position in positions], since=oldest
         )
 
         closed = 0
         for position in positions:
-            quotes = [
-                quote
-                for quote in (_quote(row) for row in series.get(position.mint_address, []))
-                if quote is not None and quote.captured_at > position.last_evaluated_at
+            rows = [
+                row
+                for row in series.get(position.mint_address, [])
+                if row.captured_at > effective_watermarks[position.id]
             ]
+            if position.trailing_activation_multiple is not None:
+                closed += int(
+                    await self._settle_activated_trail(position, rows=rows, now=now)
+                )
+                continue
+
+            if wallet.strategy_id in {
+                "paper_all_scanned_tp125_sl50_v1",
+                "paper_track_record_tp125_sl50_v1",
+            }:
+                closed += int(await self._settle_observed_bracket(position, rows=rows))
+                continue
+
+            quotes = [quote for quote in (_quote(row) for row in rows) if quote is not None]
             found, running_peak = exits.resolve(
                 _rules_for(position),
                 entry_price=position.entry_price,
@@ -743,11 +768,15 @@ class PaperWalletService:
                 # Nothing breached. Carry the peak and the watermark forward so
                 # the same readings are never replayed — and so the peak
                 # survives snapshot pruning.
-                await self._repository.advance(
-                    position.id,
-                    peak_price=running_peak,
-                    last_evaluated_at=quotes[-1].captured_at if quotes else now,
-                )
+                # A review without a quote is not an observation.  In
+                # particular, it must not overwrite the archived watermark on
+                # a resumed wallet merely because the scheduler ran.
+                if quotes:
+                    await self._repository.advance(
+                        position.id,
+                        peak_price=running_peak,
+                        last_evaluated_at=quotes[-1].captured_at,
+                    )
                 continue
 
             decision_quote = next(
@@ -785,6 +814,152 @@ class PaperWalletService:
             closed += int(closed_now)
 
         return len(positions), closed
+
+    async def _settle_observed_bracket(
+        self, position: PaperPosition, *, rows: Sequence[TokenMarketSnapshot]
+    ) -> bool:
+        """First observed TP/SL barrier wins; gap fills retain the observed quote."""
+        for row in rows:
+            price = row.price_usd
+            if price is None or price <= 0:
+                continue
+            if position.stop_price is not None and price <= position.stop_price:
+                return await self._close_observed_bracket(
+                    position, row=row, reason=ExitReason.STOP
+                )
+            if position.target_price is not None and price >= position.target_price:
+                return await self._close_observed_bracket(
+                    position, row=row, reason=ExitReason.TARGET
+                )
+            if row.trading_status == TradingStatus.INACTIVE:
+                return await self._close_terminal(position, row=row, peak=position.peak_price)
+        prices = [row.price_usd for row in rows if row.price_usd is not None]
+        await self._repository.advance(
+            position.id,
+            peak_price=max([position.peak_price, *prices]),
+            last_evaluated_at=rows[-1].captured_at if rows else position.last_evaluated_at,
+        )
+        return False
+
+    async def _close_observed_bracket(
+        self, position: PaperPosition, *, row: TokenMarketSnapshot, reason: ExitReason
+    ) -> bool:
+        assert row.price_usd is not None
+        exit_execution = await self._exit_execution_for(
+            position=position,
+            decision_price=row.price_usd,
+            decision_liquidity=row.liquidity_usd,
+            now=row.captured_at,
+        )
+        return await self._repository.close(
+            position.id,
+            exit_price=(
+                exit_execution.estimated_price_usd
+                if isinstance(exit_execution, ExecutionQuote)
+                else row.price_usd
+            ),
+            exit_observed_price=row.price_usd,
+            closed_at=row.captured_at,
+            exit_reason=reason.value,
+            peak_price=max(position.peak_price, row.price_usd),
+            **self._execution_close_values(exit_execution),
+        )
+
+    async def _settle_activated_trail(
+        self,
+        position: PaperPosition,
+        *,
+        rows: Sequence[TokenMarketSnapshot],
+        now: datetime,
+    ) -> bool:
+        """Apply the 2x activation and observed-price 25% trailing exit.
+
+        The source has point samples, not candles.  Therefore the sample that
+        crosses 2x may arm a trail but cannot also trigger one, and a later gap
+        through the trail settles at its observed price rather than the
+        theoretical level.
+        """
+        activation_multiple = position.trailing_activation_multiple
+        drawdown = position.trailing_drawdown
+        if activation_multiple is None or drawdown is None:  # pragma: no cover
+            return False
+
+        activated_at = position.trailing_activated_at
+        activation_price = position.trailing_activation_observed_price
+        peak = position.peak_price
+        theoretical_stop = position.trailing_stop_price
+        last_at = position.last_evaluated_at
+        for row in rows:
+            last_at = row.captured_at
+            price = row.price_usd
+            terminal = row.trading_status == TradingStatus.INACTIVE
+            if price is None or price <= 0:
+                # No price means no executable terminal or trailing exit.
+                continue
+            if activated_at is None:
+                if price >= position.entry_price * activation_multiple:
+                    activated_at = row.captured_at
+                    activation_price = price
+                    peak = max(peak, price)
+                    theoretical_stop = peak * (Decimal(1) - drawdown)
+                    continue
+                if terminal:
+                    return await self._close_terminal(position, row=row, peak=peak)
+                continue
+
+            # The stop is evaluated from the high before this point sample.  A
+            # single sample cannot establish an unseen high-then-low sequence.
+            if theoretical_stop is not None and price <= theoretical_stop:
+                return await self._repository.close(
+                    position.id,
+                    exit_price=price,
+                    exit_observed_price=price,
+                    closed_at=row.captured_at,
+                    exit_reason=ExitReason.TRAILING_STOP.value,
+                    peak_price=peak,
+                    trailing_trigger_price=theoretical_stop,
+                    trailing_trigger_observed_price=price,
+                    exit_execution_model_version="observed_trigger_v1",
+                    exit_execution_confidence="observed_gap_conservative",
+                    exit_execution_fallback_reason=(
+                        "Settled at the observed triggering price; the theoretical "
+                        "trailing stop was not assumed as a fill."
+                    ),
+                )
+            if terminal:
+                return await self._close_terminal(position, row=row, peak=peak)
+            if price > peak:
+                peak = price
+                theoretical_stop = peak * (Decimal(1) - drawdown)
+
+        await self._repository.advance_activated_trail(
+            position.id,
+            peak_price=peak,
+            trailing_stop_price=theoretical_stop,
+            last_evaluated_at=last_at if rows else now,
+            activated_at=activated_at,
+            activation_observed_price=activation_price,
+        )
+        return False
+
+    async def _close_terminal(
+        self, position: PaperPosition, *, row: TokenMarketSnapshot, peak: Decimal
+    ) -> bool:
+        """Use only a provider's explicit inactive state plus an observed price."""
+        assert row.price_usd is not None and row.price_usd > 0
+        return await self._repository.close(
+            position.id,
+            exit_price=row.price_usd,
+            exit_observed_price=row.price_usd,
+            closed_at=row.captured_at,
+            exit_reason=ExitReason.TERMINAL.value,
+            peak_price=peak,
+            exit_execution_model_version="observed_terminal_v1",
+            exit_execution_confidence="provider_terminal_observation",
+            exit_execution_fallback_reason=(
+                "Provider reported inactive with a contemporaneous usable observed price."
+            ),
+        )
 
     async def _record_audits(self, wallet: PaperWallet) -> int:
         """Write the permanent record for any closed trade that lacks one.
@@ -869,6 +1044,8 @@ class PaperWalletService:
         reads exactly like an exhaustive one that found nothing.
         """
         strategy = self.strategy
+        if isinstance(strategy, TrackRecordBracketStrategy):
+            return await self._open_track_record_entries(wallet, strategy=strategy, now=now)
         limit = strategy.top_n or settings.PAPER_WALLET_CANDIDATE_LIMIT
         entries = await self._radar.list_entries(
             category=None, active_only=True, sort="score", limit=limit, offset=0
@@ -940,6 +1117,7 @@ class PaperWalletService:
                 stop_price=instruction.stop_price,
                 expires_at=instruction.expires_at,
                 trailing_drawdown=instruction.trailing_drawdown,
+                trailing_activation_multiple=instruction.trailing_activation_multiple,
                 entry_market_cap=audit.market_cap_at_price(
                     observed_market_cap=instruction.market_cap,
                     observed_price=instruction.price_usd,
@@ -961,6 +1139,120 @@ class PaperWalletService:
             opened += 1
 
         return opened, len(entries), len(entries) >= limit, dict(refusals)
+
+    async def _open_track_record_entries(
+        self,
+        wallet: PaperWallet,
+        *,
+        strategy: TrackRecordBracketStrategy,
+        now: datetime,
+    ) -> tuple[int, int, bool, dict[str, int]]:
+        """Open canonical Track Record admissions without re-scoring them."""
+        await self._repository.lock_wallet(wallet.id)
+        token_repository = TokenRepository(self._session)
+        limit = settings.PAPER_WALLET_CANDIDATE_LIMIT
+        admissions = await self._repository.track_record_admissions_after(
+            watermark=wallet.started_at, limit=limit, as_of=now
+        )
+        if not admissions:
+            return 0, 0, False, {}
+
+        snapshots = await self._market.first_priced_for_mints_since(
+            {
+                admission.mint_address: admission.first_detected_at
+                for admission in admissions
+            },
+            as_of=now,
+        )
+        tokens = await token_repository.get_many_by_mints(
+            [admission.mint_address for admission in admissions]
+        )
+        cash = await self._cash_for(wallet)
+        opened = 0
+        refusals: dict[str, int] = {}
+        for rank, admission in enumerate(admissions, start=1):
+            snapshot = snapshots.get(admission.mint_address)
+            if snapshot is None:
+                continue
+            token = tokens.get(admission.mint_address)
+            candidate = Candidate(
+                mint_address=admission.mint_address,
+                rank=rank,
+                price_usd=snapshot.price_usd,
+                observed_at=snapshot.captured_at,
+                liquidity_usd=snapshot.liquidity_usd,
+                market_cap=snapshot.market_cap,
+                volume_24h=snapshot.volume_24h,
+            )
+            if cash < strategy.trade_size_usd:
+                claimed = await self._repository.claim_track_record_entry_decision(
+                    wallet=wallet,
+                    admission=admission,
+                    decision="declined",
+                    reason=eligibility.Refusal.INSUFFICIENT_CASH.value,
+                )
+                if claimed:
+                    refusals[eligibility.Refusal.INSUFFICIENT_CASH] = (
+                        refusals.get(eligibility.Refusal.INSUFFICIENT_CASH, 0) + 1
+                    )
+                continue
+
+            claimed = await self._repository.claim_track_record_entry_decision(
+                wallet=wallet,
+                admission=admission,
+                decision="entered",
+            )
+            if not claimed:
+                continue
+            instruction = strategy.entry_for(candidate, cash_available=cash, now=now)
+            if instruction is None:  # guarded above
+                continue
+            entry_execution = await self._entry_execution_for(
+                candidate=candidate,
+                input_usd=instruction.size_usd,
+                decimals=token.decimals if token is not None else None,
+                now=now,
+            )
+            entry_price = (
+                entry_execution.estimated_price_usd
+                if isinstance(entry_execution, ExecutionQuote)
+                else instruction.price_usd
+            )
+            quantity = (
+                entry_execution.output_amount
+                if isinstance(entry_execution, ExecutionQuote)
+                else instruction.quantity
+            )
+            created = await self._repository.open_position(
+                wallet_id=wallet.id,
+                mint_address=admission.mint_address,
+                token_id=admission.token_id,
+                opened_at=instruction.opened_at,
+                entry_rank=rank,
+                entry_price=entry_price,
+                entry_observed_price=instruction.price_usd,
+                size_usd=instruction.size_usd,
+                quantity=quantity,
+                **self._execution_open_values(entry_execution),
+                target_price=entry_price * strategy.take_profit_multiple,
+                stop_price=entry_price * strategy.stop_loss_multiple,
+                expires_at=None,
+                trailing_drawdown=None,
+                trailing_activation_multiple=None,
+                entry_market_cap=audit.market_cap_at_price(
+                    observed_market_cap=instruction.market_cap,
+                    observed_price=instruction.price_usd,
+                    execution_price=entry_price,
+                ),
+                entry_liquidity_usd=instruction.liquidity_usd,
+                status=PositionStatus.OPEN.value,
+                peak_price=entry_price,
+                last_evaluated_at=instruction.opened_at,
+            )
+            if created is not None:
+                cash -= instruction.size_usd
+                opened += 1
+        return opened, len(admissions), len(admissions) >= limit, refusals
 
     async def _screen(
         self, wallet: PaperWallet, entries: Sequence[RadarToken]
@@ -988,6 +1280,7 @@ class PaperWalletService:
                     price_usd=snapshot.price_usd if snapshot else None,
                     liquidity_usd=snapshot.liquidity_usd if snapshot else None,
                     market_cap=snapshot.market_cap if snapshot else None,
+                    volume_24h=snapshot.volume_24h if snapshot else None,
                     trading_status=(str(snapshot.trading_status.value) if snapshot else None),
                 )
             )
@@ -1014,7 +1307,7 @@ class PaperWalletService:
         closed = [trade for trade in (_to_closed(row) for row in closed_rows) if trade]
 
         snapshots = await self._market.latest_for_mints(
-            [row.mint_address for row in open_rows]
+            [row.mint_address for row in open_rows], since=wallet.resume_watermark_at
         )
         prices: dict[str, Decimal | None] = {
             row.mint_address: (
@@ -1032,11 +1325,14 @@ class PaperWalletService:
             )
             for row in open_rows
         }
+
+        all_mints = [row.mint_address for row in positions]
+
         names = await TokenRepository(self._session).get_many_by_mints(
-            [row.mint_address for row in positions]
+            list(set(all_mints))
         )
 
-        summary = metrics.summarise(
+        m = metrics.summarise(
             starting_balance=wallet.starting_balance,
             open_positions=[_to_open(row) for row in open_rows],
             prices=prices,
@@ -1046,14 +1342,14 @@ class PaperWalletService:
         return WalletRead(
             wallet=wallet,
             strategy=self.strategy,
-            metrics=summary,
+            metrics=m,
             positions=list(positions),
             prices=prices,
             price_times=price_times,
             names={mint: (token.name, token.symbol) for mint, token in names.items()},
             images={mint: token.image_url for mint, token in names.items()},
             benchmarks=await self.benchmarks(wallet),
-            waiting_for=await self._waiting_for(wallet, cash=summary.cash),
+            waiting_for=await self._waiting_for(wallet, cash=m.cash),
             audit_log=await self._repository.audit_log(wallet.id, limit=200),
             audit_count=await self._repository.audit_count(wallet.id),
             pnl_today=metrics.pnl_since(

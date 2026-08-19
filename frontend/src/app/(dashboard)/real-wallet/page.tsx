@@ -1,18 +1,38 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 
 import { api } from "@/lib/api-client";
 
 type WalletStatus = {
   public_key: string | null;
+  address_valid: boolean;
+  network: "devnet" | "mainnet";
+  rpc: {
+    network: "devnet" | "mainnet";
+    verified: boolean;
+    observed_genesis_hash: string | null;
+    error: string | null;
+  };
   sol_balance: number | null;
+  token_balances: Array<{
+    token_account: string;
+    mint_address: string;
+    raw_amount: string;
+    quantity: string;
+    decimals: number;
+    program_id: string;
+    symbol: string | null;
+    name: string | null;
+    image_url: string | null;
+  }>;
   balance_error: string | null;
   funding_status: "unfunded" | "funded" | "unknown";
   mode: "disabled" | "dry_run" | "armed" | "live";
   execution_enabled: boolean;
   autotrade_enabled: boolean;
-  signer_ready: boolean;
+  signer_status: string;
   live_submission_transport: string;
   safety_gate: string;
   limits: {
@@ -104,6 +124,65 @@ type WalletStatus = {
   };
 };
 
+type DevnetIntent = {
+  id: string;
+  state: string;
+  action_type: string;
+  wallet_public_key: string;
+  destination_public_key: string | null;
+  input_mint: string;
+  output_mint: string | null;
+  input_amount_raw: string;
+  quote_id: string | null;
+  quote_expires_at: string | null;
+  simulation_status: string | null;
+  approval_status: string | null;
+  approval_expires_at: string | null;
+  signing_status: string | null;
+  transaction_signature: string | null;
+  submission_status: string | null;
+  submission_retry_count: number;
+  confirmation_status: string | null;
+  confirmation_slot: number | null;
+  failure_reason: string | null;
+  reconciliation: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type DevnetQuote = {
+  id: string;
+  input_amount_raw: string;
+  expected_output_raw: string;
+  minimum_output_raw: string;
+  slippage_bps: number;
+  price_impact_pct: string | null;
+  estimated_fee_lamports: number | null;
+  provider: string;
+  route: Record<string, unknown> | null;
+  quoted_at: string;
+  expires_at: string;
+};
+
+type DevnetIntentDetail = {
+  intent: DevnetIntent;
+  quote: DevnetQuote | null;
+  simulation: {
+    status: string | null;
+    logs: string[];
+    units_consumed: number | null;
+    context_slot: number | null;
+    blockhash: string | null;
+    simulated_at: string | null;
+  };
+  events: Array<{
+    id: string;
+    type: string;
+    detail: Record<string, unknown>;
+    created_at: string;
+  }>;
+};
+
 function StatusCard({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg border border-line p-4">
@@ -114,12 +193,95 @@ function StatusCard({ label, value }: { label: string; value: string }) {
 }
 
 export default function RealWalletPage() {
+  const queryClient = useQueryClient();
+  const [destination, setDestination] = useState("");
+  const [lamports, setLamports] = useState("100000");
+  const [selectedIntentId, setSelectedIntentId] = useState<string | null>(null);
+  const [approvalChecked, setApprovalChecked] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
   const query = useQuery({
     queryKey: ["real-wallet-status"],
     queryFn: () => api.get<WalletStatus>("/real-wallet/status"),
     retry: false,
     refetchInterval: 30_000,
   });
+  const intentsQuery = useQuery({
+    queryKey: ["real-wallet-devnet-intents"],
+    queryFn: () => api.get<DevnetIntent[]>("/real-wallet/devnet/intents"),
+    retry: false,
+    refetchInterval: 10_000,
+  });
+  const detailQuery = useQuery({
+    queryKey: ["real-wallet-devnet-intent", selectedIntentId],
+    queryFn: () =>
+      api.get<DevnetIntentDetail>(`/real-wallet/devnet/intents/${selectedIntentId}`),
+    enabled: selectedIntentId !== null,
+    retry: false,
+  });
+  const refreshDevnet = async () => {
+    await queryClient.invalidateQueries({ queryKey: ["real-wallet-devnet-intents"] });
+    if (selectedIntentId) {
+      await queryClient.invalidateQueries({
+        queryKey: ["real-wallet-devnet-intent", selectedIntentId],
+      });
+    }
+  };
+  const createIntent = useMutation({
+    mutationFn: async () => {
+      const quote = await api.post<DevnetQuote>(
+        "/real-wallet/devnet/quotes/native-transfer",
+        {
+          destination_public_key: destination.trim(),
+          lamports: Number(lamports),
+        },
+      );
+      return api.post<DevnetIntent>("/real-wallet/devnet/intents", {
+        quote_id: quote.id,
+        idempotency_key: crypto.randomUUID(),
+      });
+    },
+    onSuccess: async (intent) => {
+      setActionError(null);
+      setSelectedIntentId(intent.id);
+      await refreshDevnet();
+    },
+    onError: () =>
+      setActionError(
+        "Quote or intent creation was rejected. Check the devnet destination and tiny amount.",
+      ),
+  });
+  const action = useMutation({
+    mutationFn: async ({
+      intentId,
+      actionName,
+    }: {
+      intentId: string;
+      actionName: string;
+    }) => {
+      const body =
+        actionName === "approve"
+          ? { confirmation_phrase: "APPROVE_DEVNET_TRANSFER" }
+          : undefined;
+      return api.post<DevnetIntent>(
+        `/real-wallet/devnet/intents/${intentId}/${actionName}`,
+        body,
+      );
+    },
+    onSuccess: async () => {
+      setActionError(null);
+      setApprovalChecked(false);
+      await refreshDevnet();
+    },
+    onError: () =>
+      setActionError(
+        "The requested manual step was rejected or the isolated signer is unavailable.",
+      ),
+  });
+  const intents = Array.isArray(intentsQuery.data) ? intentsQuery.data : [];
+  const detail = detailQuery.data;
+  const selected =
+    detail?.intent ?? intents.find((intent) => intent.id === selectedIntentId) ?? null;
+  const quote = detail?.quote;
   if (query.isError) {
     return (
       <main>
@@ -134,14 +296,269 @@ export default function RealWalletPage() {
   const readiness = data?.readiness;
   const address = data?.public_key;
   const copyAddress = () => address && void navigator.clipboard.writeText(address);
+  const explorerUrl = address
+    ? `https://solscan.io/account/${address}${data?.network === "devnet" ? "?cluster=devnet" : ""}`
+    : undefined;
   return (
     <main>
-      <p className="text-label text-accent">Operator only</p>
+      <p className="text-label text-accent">Operator only · DEVNET ONLY</p>
       <h1 className="mt-2 text-3xl font-medium text-ink">MEMESCOPE execution wallet</h1>
       <p className="mt-2 max-w-2xl text-sm text-ink-3">
-        Dedicated low-balance wallet. This page is read-only: no signing, funding, swaps, or
-        autotrade controls exist here.
+        Dedicated low-balance wallet. Phase 2 supports one explicit, manual native-SOL
+        devnet transfer flow for custody verification; it is not a trading surface.
       </p>
+      <section className="mt-6 rounded-lg border border-warning/40 bg-warning/[0.08] p-4">
+        <p className="text-label text-warning">
+          DEVNET ONLY · MAINNET BLOCKED · AUTOTRADE DISABLED
+        </p>
+        <p className="mt-1 text-sm text-ink-3">
+          Every transfer requires a fresh quote, successful simulation, explicit manual
+          approval, and an isolated signer. Paper Wallet and Generation 2 cannot reach this
+          workflow.
+        </p>
+      </section>
+      <section className="mt-6 rounded-lg border border-line p-4">
+        <p className="text-label text-ink-3">Manual devnet verification</p>
+        <p className="mt-1 text-sm text-ink-3">
+          Creates a quote and DRAFT intent only. Simulation, approval, signing, submission,
+          and confirmation each remain separate operator actions.
+        </p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_180px_auto]">
+          <label className="text-sm text-ink-3">
+            Recipient public address
+            <input
+              className="mt-1 w-full rounded border border-line bg-raised px-3 py-2 text-ink"
+              onChange={(event) => setDestination(event.target.value)}
+              placeholder="Devnet recipient"
+              value={destination}
+            />
+          </label>
+          <label className="text-sm text-ink-3">
+            Lamports (max 1,000,000)
+            <input
+              className="mt-1 w-full rounded border border-line bg-raised px-3 py-2 text-ink"
+              inputMode="numeric"
+              min="1"
+              onChange={(event) => setLamports(event.target.value)}
+              type="number"
+              value={lamports}
+            />
+          </label>
+          <button
+            className="self-end rounded bg-accent px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+            disabled={
+              createIntent.isPending || !destination.trim() || Number(lamports) <= 0
+            }
+            onClick={() => createIntent.mutate()}
+            type="button"
+          >
+            {createIntent.isPending ? "Creating…" : "Create quote & intent"}
+          </button>
+        </div>
+        {actionError ? <p className="mt-3 text-sm text-down">{actionError}</p> : null}
+      </section>
+      <section className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
+        <div className="overflow-hidden rounded-lg border border-line">
+          <div className="border-b border-line p-4">
+            <p className="text-label text-ink-3">Manual devnet intent ledger</p>
+            <p className="mt-1 text-sm text-ink-3">
+              Quote → simulate → approve → sign → submit → confirm → reconcile.
+            </p>
+          </div>
+          <div className="divide-y divide-line-subtle">
+            {intents.length ? (
+              intents.map((intent) => (
+                <button
+                  className={`block w-full p-4 text-left text-sm ${selectedIntentId === intent.id ? "bg-raised" : ""}`}
+                  key={intent.id}
+                  onClick={() => setSelectedIntentId(intent.id)}
+                  type="button"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="font-medium text-ink">{intent.state}</span>
+                    <span className="text-xs text-ink-3">
+                      {new Date(intent.created_at).toLocaleString()}
+                    </span>
+                  </div>
+                  <code className="mt-1 block truncate text-xs text-ink-3">
+                    {intent.destination_public_key ?? "—"}
+                  </code>
+                  <p className="mt-1 text-ink-3">
+                    {intent.input_amount_raw} lamports ·{" "}
+                    {intent.simulation_status ?? "not simulated"}
+                  </p>
+                </button>
+              ))
+            ) : (
+              <p className="p-4 text-sm text-ink-3">No manual devnet intents yet.</p>
+            )}
+          </div>
+        </div>
+        <div className="rounded-lg border border-line p-4">
+          <p className="text-label text-ink-3">Selected intent</p>
+          {selected ? (
+            <>
+              <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
+                <div>
+                  <dt className="text-ink-3">State</dt>
+                  <dd className="text-ink">{selected.state}</dd>
+                </div>
+                <div>
+                  <dt className="text-ink-3">Approval</dt>
+                  <dd className="text-ink">{selected.approval_status ?? "not approved"}</dd>
+                </div>
+                <div>
+                  <dt className="text-ink-3">Wallet</dt>
+                  <dd className="break-all text-ink">{selected.wallet_public_key}</dd>
+                </div>
+                <div>
+                  <dt className="text-ink-3">Recipient</dt>
+                  <dd className="break-all text-ink">
+                    {selected.destination_public_key ?? "—"}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-ink-3">Amount</dt>
+                  <dd className="text-ink">{selected.input_amount_raw} lamports</dd>
+                </div>
+                <div>
+                  <dt className="text-ink-3">Quote expiry</dt>
+                  <dd className="text-ink">
+                    {selected.quote_expires_at
+                      ? new Date(selected.quote_expires_at).toLocaleString()
+                      : "—"}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-ink-3">Simulation</dt>
+                  <dd className="text-ink">
+                    {selected.simulation_status ?? "not run"}
+                    {detail?.simulation.units_consumed
+                      ? ` · ${detail.simulation.units_consumed} CU`
+                      : ""}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-ink-3">Signature / confirmation</dt>
+                  <dd className="break-all text-ink">
+                    {selected.transaction_signature ?? "—"}
+                    {selected.confirmation_status
+                      ? ` · ${selected.confirmation_status}`
+                      : ""}
+                  </dd>
+                </div>
+              </dl>
+              {quote ? (
+                <p className="mt-4 rounded border border-line-subtle bg-raised p-3 text-sm text-ink-3">
+                  Quote: expected {quote.expected_output_raw} lamports · minimum{" "}
+                  {quote.minimum_output_raw} · slippage {quote.slippage_bps} bps · price
+                  impact {quote.price_impact_pct ?? "0"}% · estimated fee{" "}
+                  {quote.estimated_fee_lamports ?? "—"} lamports · {quote.provider}.
+                </p>
+              ) : null}
+              <div className="mt-4 flex flex-wrap gap-2">
+                {selected.state === "QUOTED" ? (
+                  <button
+                    className="rounded border border-line px-3 py-2 text-sm text-ink"
+                    disabled={action.isPending}
+                    onClick={() =>
+                      action.mutate({ intentId: selected.id, actionName: "simulate" })
+                    }
+                    type="button"
+                  >
+                    Simulate
+                  </button>
+                ) : null}
+                {selected.state === "AWAITING_APPROVAL" ? (
+                  <>
+                    <label className="flex items-center gap-2 text-sm text-ink-3">
+                      <input
+                        checked={approvalChecked}
+                        onChange={(event) => setApprovalChecked(event.target.checked)}
+                        type="checkbox"
+                      />{" "}
+                      I reviewed the simulation and authorize this DEVNET transfer.
+                    </label>
+                    <button
+                      className="rounded bg-warning px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+                      disabled={!approvalChecked || action.isPending}
+                      onClick={() =>
+                        action.mutate({ intentId: selected.id, actionName: "approve" })
+                      }
+                      type="button"
+                    >
+                      Explicitly approve
+                    </button>
+                  </>
+                ) : null}
+                {selected.state === "APPROVED" ? (
+                  <button
+                    className="rounded border border-line px-3 py-2 text-sm text-ink disabled:opacity-50"
+                    disabled={action.isPending}
+                    onClick={() =>
+                      action.mutate({ intentId: selected.id, actionName: "sign" })
+                    }
+                    type="button"
+                  >
+                    Ask isolated signer
+                  </button>
+                ) : null}
+                {selected.state === "SIGNED" ? (
+                  <button
+                    className="rounded border border-line px-3 py-2 text-sm text-ink disabled:opacity-50"
+                    disabled={action.isPending}
+                    onClick={() =>
+                      action.mutate({ intentId: selected.id, actionName: "submit" })
+                    }
+                    type="button"
+                  >
+                    Submit to devnet
+                  </button>
+                ) : null}
+                {selected.state === "SUBMITTED" ? (
+                  <button
+                    className="rounded border border-line px-3 py-2 text-sm text-ink disabled:opacity-50"
+                    disabled={action.isPending}
+                    onClick={() =>
+                      action.mutate({ intentId: selected.id, actionName: "confirm" })
+                    }
+                    type="button"
+                  >
+                    Confirm & reconcile
+                  </button>
+                ) : null}
+                {["DRAFT", "QUOTED", "AWAITING_APPROVAL"].includes(selected.state) ? (
+                  <button
+                    className="rounded border border-down/40 px-3 py-2 text-sm text-down disabled:opacity-50"
+                    disabled={action.isPending}
+                    onClick={() =>
+                      action.mutate({ intentId: selected.id, actionName: "cancel" })
+                    }
+                    type="button"
+                  >
+                    Cancel
+                  </button>
+                ) : null}
+              </div>
+              {selected.reconciliation ? (
+                <pre className="mt-4 overflow-x-auto rounded bg-raised p-3 text-xs text-ink-3">
+                  {JSON.stringify(selected.reconciliation, null, 2)}
+                </pre>
+              ) : null}
+              {detail?.simulation.logs.length ? (
+                <pre className="mt-4 max-h-40 overflow-auto rounded bg-raised p-3 text-xs text-ink-3">
+                  {detail.simulation.logs.join("\n")}
+                </pre>
+              ) : null}
+            </>
+          ) : (
+            <p className="mt-2 text-sm text-ink-3">
+              Select an intent to inspect its quote, simulation, approval, signature, and
+              reconciliation evidence.
+            </p>
+          )}
+        </div>
+      </section>
       <section className="mt-6 rounded-lg border border-line p-4">
         <p className="text-label text-ink-3">Public address</p>
         {address ? (
@@ -152,7 +569,7 @@ export default function RealWalletPage() {
             </button>
             <a
               className="text-sm text-accent"
-              href={`https://solscan.io/account/${address}`}
+              href={explorerUrl}
               rel="noreferrer"
               target="_blank"
             >
@@ -164,6 +581,11 @@ export default function RealWalletPage() {
             Not configured. Generate it locally first.
           </p>
         )}
+        <p className="mt-3 text-xs text-ink-3">
+          Receive URI: {address ? `solana:${address}` : "—"}. A QR image is intentionally
+          not rendered through a third-party service, so the address is never disclosed to
+          one.
+        </p>
       </section>
       <section className="mt-6 overflow-x-auto rounded-lg border border-line">
         <div className="p-4">
@@ -213,6 +635,7 @@ export default function RealWalletPage() {
         </table>
       </section>
       <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <StatusCard label="Network" value={(data?.network ?? "devnet").toUpperCase()} />
         <StatusCard label="SOL balance" value={data?.sol_balance?.toFixed(6) ?? "—"} />
         <StatusCard
           label="Funding"
@@ -230,12 +653,57 @@ export default function RealWalletPage() {
           label="Autotrade"
           value={data?.autotrade_enabled ? "ENABLED" : "DISABLED"}
         />
-        <StatusCard label="Signer" value={data?.signer_ready ? "READY" : "NOT READY"} />
+        <StatusCard label="Custody boundary" value="API HAS NO SIGNER" />
+        <StatusCard label="RPC" value={data?.rpc.verified ? "VERIFIED" : "UNVERIFIED"} />
         <StatusCard
           label="SOL fee reserve"
           value={`${data?.limits.min_sol_fee_reserve ?? "—"} SOL`}
         />
       </div>
+      <section className="mt-6 overflow-x-auto rounded-lg border border-line">
+        <div className="p-4">
+          <p className="text-label text-ink-3">On-chain SPL balances</p>
+          <p className="mt-1 text-sm text-ink-3">
+            Standard SPL and Token-2022 accounts, read from the verified wallet RPC. Token
+            labels are shown only when MEMESCOPE already has metadata for the mint.
+          </p>
+        </div>
+        <table className="w-full text-left text-sm">
+          <thead className="border-y border-line text-ink-3">
+            <tr>
+              <th className="p-3">Token</th>
+              <th>Quantity</th>
+              <th>Decimals</th>
+              <th className="p-3">Mint</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data?.token_balances.length ? (
+              data.token_balances.map((token) => (
+                <tr
+                  key={token.token_account}
+                  className="border-b border-line-subtle last:border-0"
+                >
+                  <td className="p-3 text-ink">
+                    {token.symbol ?? token.name ?? "Unknown SPL"}
+                  </td>
+                  <td>{token.quantity}</td>
+                  <td>{token.decimals}</td>
+                  <td className="p-3">
+                    <code className="text-xs text-ink-3">{token.mint_address}</code>
+                  </td>
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td className="p-3 text-ink-3" colSpan={4}>
+                  No token accounts available.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </section>
       {/* Pre-mainnet readiness. Four blocks that each say whether a *capability*
           exists, above one line that says whether anything could actually be
           submitted. Keeping those separate is the point: "architecturally
@@ -263,7 +731,9 @@ export default function RealWalletPage() {
         <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <StatusCard
             label="Config contract"
-            value={readiness?.config_contract.execution_settings_shared ? "SHARED" : "DRIFT"}
+            value={
+              readiness?.config_contract.execution_settings_shared ? "SHARED" : "DRIFT"
+            }
           />
           <StatusCard
             label="Transport envelope"
@@ -271,7 +741,9 @@ export default function RealWalletPage() {
           />
           <StatusCard
             label="Order evidence"
-            value={readiness?.order_validation.evidence_recheck_installed ? "RE-CHECKED" : "OFF"}
+            value={
+              readiness?.order_validation.evidence_recheck_installed ? "RE-CHECKED" : "OFF"
+            }
           />
           <StatusCard
             label="Fee accounting"
@@ -294,10 +766,12 @@ export default function RealWalletPage() {
           </ul>
         ) : null}
         <p className="mt-3 text-xs text-ink-3">
-          Release approved: {readiness?.transport.release_approved ? "yes" : "no"} · Production
-          transport:{" "}
-          {readiness?.transport.production_transport_installed ? "installed" : "not installed"} ·
-          Allowed hosts: {readiness?.transport.allowed_hosts.join(", ") ?? "—"}
+          Release approved: {readiness?.transport.release_approved ? "yes" : "no"} ·
+          Production transport:{" "}
+          {readiness?.transport.production_transport_installed
+            ? "installed"
+            : "not installed"}{" "}
+          · Allowed hosts: {readiness?.transport.allowed_hosts.join(", ") ?? "—"}
         </p>
         <p className="mt-1 text-xs text-ink-3">
           SOL/USD:{" "}
@@ -353,9 +827,7 @@ export default function RealWalletPage() {
                     {position.mint_address.slice(0, 12)}
                   </code>
                 </td>
-                <td
-                  className={position.status === "CLOSED" ? "text-ink-3" : "text-up"}
-                >
+                <td className={position.status === "CLOSED" ? "text-ink-3" : "text-up"}>
                   {position.status}
                 </td>
                 <td>{position.quantity}</td>

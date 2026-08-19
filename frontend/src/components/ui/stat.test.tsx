@@ -7,7 +7,7 @@ import { Stat } from "@/components/ui/stat";
 /**
  * Regression cover for the Phase 7 paper-wallet blackout.
  *
- * `/wallet`, `/lab` and `/strategy-intelligence` format their figures before
+ * `/wallet` formats its figures before
  * rendering — `usd()` returns "$1,234.56", `pct()` returns "12.5%". When their
  * local `Stat` was pointed at the shared one, it passed that formatted string
  * as BOTH `value` and `display`. `Num` parses `value` to decide whether a

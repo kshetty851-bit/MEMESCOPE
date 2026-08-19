@@ -39,6 +39,7 @@ class LogEvent:
     slot: int
     logs: tuple[str, ...]
     source_program: str | None = None
+    observed_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)

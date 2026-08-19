@@ -1,16 +1,13 @@
 import { api } from "@/lib/api-client";
 import type {
-  Lab,
-  LabStrategy,
-  LabTokens,
   ManualSellPreview,
   ManualSellResult,
   PaperAudit,
+  PaperPerformance,
   PaperPosition,
   PaperPositions,
   PaperStrategies,
   PaperWallet,
-  StrategyIntelligence,
 } from "@/types/paper";
 
 /**
@@ -46,6 +43,11 @@ export function fetchPaperStrategies(): Promise<PaperStrategies> {
  */
 export function fetchPaperAudit(limit = 100): Promise<PaperAudit> {
   return api.get<PaperAudit>(`/paper/audit?limit=${limit}`);
+}
+
+/** Immutable completed-trade returns grouped by UTC exit date. */
+export function fetchPaperPerformance(): Promise<PaperPerformance> {
+  return api.get<PaperPerformance>("/paper/performance");
 }
 
 export function previewManualSell(mint: string): Promise<ManualSellPreview> {
@@ -130,9 +132,7 @@ export function exitLabel(reason: string | null | undefined): string | null {
  */
 export type PaperTokenState = "open" | "closed" | "not-held";
 
-export function paperStateFor(
-  position: PaperPosition | undefined,
-): PaperTokenState {
+export function paperStateFor(position: PaperPosition | undefined): PaperTokenState {
   if (!position) return "not-held";
   return position.status === "closed" ? "closed" : "open";
 }
@@ -147,62 +147,3 @@ export const PAPER_STATE_LABEL: Record<PaperTokenState, string> = {
 export function byMint(items: PaperPosition[]): Map<string, PaperPosition> {
   return new Map(items.map((item) => [item.mint_address, item]));
 }
-
-// --- Strategy Lab -------------------------------------------------------------
-
-export function fetchLab(): Promise<Lab> {
-  return api.get<Lab>("/paper/lab");
-}
-
-export function fetchLabTokens(limit = 100): Promise<LabTokens> {
-  return api.get<LabTokens>(`/paper/lab/tokens?limit=${limit}`);
-}
-
-export function fetchStrategyIntelligence(): Promise<StrategyIntelligence> {
-  return api.get<StrategyIntelligence>("/paper/strategy-intelligence");
-}
-
-/**
- * Sorting the comparison table.
- *
- * Formats and orders; it never re-scores. The rank the backend assigned is the
- * published one, and a second ranking computed here could disagree with the
- * findings served beside it.
- */
-export type LabSortKey =
-  | "rank"
-  | "total"
-  | "realised"
-  | "net"
-  | "win"
-  | "drawdown"
-  | "profit"
-  | "trades";
-
-export function sortLab(items: LabStrategy[], key: LabSortKey): LabStrategy[] {
-  const value = (item: LabStrategy): number => {
-    switch (key) {
-      case "total":
-        return n(item.total_return_pct) ?? -Infinity;
-      case "realised":
-        return n(item.realised_return_pct) ?? -Infinity;
-      case "net":
-        return n(item.net_return_pct) ?? -Infinity;
-      case "win":
-        return n(item.win_rate_pct) ?? -Infinity;
-      case "drawdown":
-        // Least drawdown first — a smaller fall is the better outcome.
-        return -(n(item.max_drawdown_pct) ?? Infinity);
-      case "profit":
-        return n(item.profit_factor) ?? -Infinity;
-      case "trades":
-        return item.closed_count;
-      default:
-        return -item.rank;
-    }
-  };
-  return [...items].sort((a, b) => value(b) - value(a) || a.rank - b.rank);
-}
-
-/** Exit reasons in the order they are always displayed, so columns line up. */
-export const EXIT_ORDER = ["target", "stop", "expiry", "manual"] as const;

@@ -17,6 +17,17 @@ async def test_normal_alpha_or_account_user_cannot_read_execution_wallet(
     assert response.status_code == 401
 
 
+async def test_phase_two_manual_devnet_endpoints_require_admin(client: AsyncClient) -> None:
+    response = await client.get(f"{API}/real-wallet/devnet/intents")
+    assert response.status_code == 401
+
+    response = await client.post(
+        f"{API}/real-wallet/devnet/quotes/native-transfer",
+        json={"destination_public_key": "11111111111111111111111111111111", "lamports": 1},
+    )
+    assert response.status_code == 401
+
+
 async def test_admin_can_read_status_without_secret(
     client: AsyncClient, user: User, db_session
 ) -> None:
@@ -37,6 +48,9 @@ async def test_admin_can_read_status_without_secret(
     assert body["mode"] in {"disabled", "dry_run"}
     assert body["execution_enabled"] is False
     assert body["autotrade_enabled"] is False
+    assert body["network"] == "devnet"
+    assert body["rpc"]["verified"] is False
     encoded = str(body).lower()
     assert "secret_file" not in encoded
     assert "private_key" not in encoded
+    assert "keypair" not in encoded

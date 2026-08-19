@@ -99,6 +99,25 @@ class TokenRepository(BaseRepository[DiscoveredToken]):
         rows = (await self.session.execute(stmt)).scalars().all()
         return {row.mint_address: row for row in rows}
 
+    async def discovered_after(
+        self, *, watermark: datetime, limit: int, as_of: datetime | None = None
+    ) -> Sequence[DiscoveredToken]:
+        """Raw scanner discoveries after an experiment watermark, oldest first.
+
+        This intentionally does not join Radar/scoring state.  It is the raw
+        scanner stream used by the all-scanned paper experiment.
+        """
+        predicates = [DiscoveredToken.discovered_at > watermark]
+        if as_of is not None:
+            predicates.append(DiscoveredToken.discovered_at <= as_of)
+        stmt = (
+            select(DiscoveredToken)
+            .where(*predicates)
+            .order_by(DiscoveredToken.discovered_at.asc(), DiscoveredToken.mint_address.asc())
+            .limit(limit)
+        )
+        return (await self.session.execute(stmt)).scalars().all()
+
     async def insert_if_absent(self, values: dict[str, Any]) -> DiscoveredToken | None:
         """Insert a token, ignoring it if the mint is already known.
 

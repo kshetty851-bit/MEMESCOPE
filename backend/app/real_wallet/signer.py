@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Protocol
 
 from solders.keypair import Keypair
-from solders.transaction import VersionedTransaction
+from solders.transaction import Transaction, VersionedTransaction
 
 
 class ExecutionSignerUnavailableError(RuntimeError):
@@ -109,6 +109,25 @@ class FileExecutionSigner:
             raise
         except Exception as exc:
             raise ExecutionTransactionValidationError("malformed_jupiter_transaction") from exc
+
+    def sign_native_transaction(self, encoded_transaction: str) -> tuple[str, str]:
+        """Sign an already-inspected legacy transaction without exposing the key.
+
+        The Phase 2 isolated signer calls this only after its own independent
+        native-transfer inspection.  This small primitive repeats the payer
+        check here so a future caller cannot accidentally bypass both layers.
+        """
+        try:
+            transaction = Transaction.from_bytes(b64decode(encoded_transaction))
+            if str(transaction.message.account_keys[0]) != self.public_key:
+                raise ExecutionTransactionValidationError("transaction_taker_mismatch")
+            transaction.partial_sign([self._keypair], transaction.message.recent_blockhash)
+            signature = str(transaction.signatures[0])
+            return b64encode(bytes(transaction)).decode("ascii"), signature
+        except ExecutionTransactionValidationError:
+            raise
+        except Exception as exc:
+            raise ExecutionTransactionValidationError("malformed_native_transaction") from exc
 
 
 class UnavailableExecutionSigner:

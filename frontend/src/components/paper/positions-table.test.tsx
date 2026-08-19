@@ -39,6 +39,7 @@ function position(overrides: Partial<PaperPosition> = {}): PaperPosition {
     stop_price: null,
     expires_at: null,
     trailing_drawdown: "0.2500",
+    trailing_activated_at: "2026-08-01T11:55:00Z",
     trailing_stop_price: "10.125",
     current_price: "12",
     current_pct: "20.00",
@@ -57,6 +58,11 @@ function position(overrides: Partial<PaperPosition> = {}): PaperPosition {
     exit_reason: null,
     manual_action_at: null,
     pnl_usd: "20.00",
+    gross_pnl_usd: null,
+    fee_usd: null,
+    slippage_usd: null,
+    net_pnl_usd: null,
+    cost_unavailable_reason: null,
     ...overrides,
   };
 }
@@ -103,7 +109,7 @@ describe("PositionsTable", () => {
     // be checked against the rule that will produce it.
     render(<PositionsTable positions={[position()]} isPending={false} emptyLabel="none" />);
 
-    expect(screen.getByText("Trailing stop")).toBeInTheDocument();
+    expect(screen.getByText("Exit rule")).toBeInTheDocument();
     expect(screen.getByText("$10.1250")).toBeInTheDocument();
     expect(screen.getByText("$12.0000")).toBeInTheDocument();
   });
@@ -142,6 +148,40 @@ describe("PositionsTable", () => {
     expect(screen.getByText("Trailing stop", { selector: "span" })).toBeInTheDocument();
     expect(screen.getByText("-$50.00")).toBeInTheDocument();
     expect(screen.getByText("-50.00%")).toBeInTheDocument();
+  });
+
+  it("shows the settled gross, fee, slippage, and net figures for closed trades", () => {
+    render(
+      <PositionsTable
+        positions={[
+          position({
+            status: "closed",
+            exit_reason: "stop",
+            exit_price: "15",
+            current_price: "15",
+            current_pct: "50.00",
+            pnl_usd: "50.00",
+            gross_pnl_usd: "50.00",
+            fee_usd: "0.75",
+            slippage_usd: "3.61",
+            net_pnl_usd: "45.64",
+            closed_at: "2026-08-02T12:00:00Z",
+            trailing_stop_price: null,
+          }),
+        ]}
+        isPending={false}
+        emptyLabel="none"
+      />,
+    );
+
+    expect(screen.getByText("Gross P/L")).toBeInTheDocument();
+    expect(screen.getByText("Fees")).toBeInTheDocument();
+    expect(screen.getByText("Slippage")).toBeInTheDocument();
+    expect(screen.getByText("Net P/L")).toBeInTheDocument();
+    expect(screen.getByText("$50.00")).toBeInTheDocument();
+    expect(screen.getByText("$0.75")).toBeInTheDocument();
+    expect(screen.getByText("$3.61")).toBeInTheDocument();
+    expect(screen.getByText("$45.64")).toBeInTheDocument();
   });
 
   it("never prints a raw exit code", () => {

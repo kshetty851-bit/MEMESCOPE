@@ -1,9 +1,7 @@
 """Exit rules, as data rather than as code.
 
-Sprint 26. The Strategy Lab replays many rules over one set of entries, so the
-part that varies has to be a *value* that can be enumerated, not a function that
-has to be written nine times. One implementation, nine configurations — which is
-what "no duplicated replay engine" requires.
+Exit rules are data rather than duplicated control flow. The varying rule is
+a value that can be enumerated, not a function that has to be written repeatedly.
 
 **Equal Weight v1's behaviour is frozen.** It is the permanent benchmark, and a
 benchmark that moved when the code was refactored would silently restate every

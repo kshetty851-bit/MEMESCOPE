@@ -35,6 +35,8 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.paper import PaperPosition, PaperTradeAudit, PaperWallet
+from app.models.paper_research import PaperDecisionSnapshot
+from app.models.radar import RadarToken
 from app.paper.models import PositionStatus
 
 
@@ -135,6 +137,168 @@ class PaperRepository:
         """
         highest = await self._session.scalar(select(func.max(PaperWallet.generation)))
         return int(highest or 0) + 1
+
+    async def restore_generation_two(
+        self, *, resumed_at: datetime, archive_live_reason: str
+    ) -> PaperWallet:
+        """Atomically archive the current live experiment and resume Gen 2.
+
+        This intentionally names no position or audit column: restoring a
+        record may switch its wallet state, never rewrite its trades.
+        """
+        target = await self._session.scalar(
+            select(PaperWallet)
+            .where(
+                PaperWallet.generation == 2,
+                PaperWallet.strategy_id == "trailing_stop_25_v1",
+                PaperWallet.strategy_version == "1.0.0",
+            )
+            .with_for_update()
+        )
+        if target is None or target.archived_at is None:
+            raise RuntimeError("Generation 2 trailing-stop wallet is not archived")
+
+        live = await self._session.scalar(
+            select(PaperWallet).where(PaperWallet.archived_at.is_(None)).with_for_update()
+        )
+        if live is not None and live.id != target.id:
+            if live.generation not in {5, 6}:
+                raise RuntimeError("refusing to archive an unexpected live paper wallet")
+            await self._session.execute(
+                update(PaperWallet)
+                .where(PaperWallet.id == live.id, PaperWallet.archived_at.is_(None))
+                .values(archived_at=resumed_at, archive_reason=archive_live_reason)
+            )
+
+        previous_archive_at = target.archived_at
+        previous_archive_reason = target.archive_reason
+        await self._session.execute(
+            update(PaperWallet)
+            .where(PaperWallet.id == target.id, PaperWallet.archived_at.is_not(None))
+            .values(
+                archived_at=None,
+                archive_reason=None,
+                resumed_at=resumed_at,
+                resume_watermark_at=resumed_at,
+                restored_archive_at=previous_archive_at,
+                restored_archive_reason=previous_archive_reason,
+            )
+        )
+        await self._session.flush()
+        restored = await self.live_wallet()
+        if restored is None or restored.id != target.id:  # pragma: no cover
+            raise RuntimeError("Generation 2 restoration did not produce the live wallet")
+        return restored
+
+    async def lock_wallet(self, wallet_id: uuid.UUID) -> None:
+        """Serialize allocation so concurrent review workers cannot overspend."""
+        await self._session.execute(
+            select(PaperWallet.id).where(PaperWallet.id == wallet_id).with_for_update()
+        )
+
+    async def claim_all_scanned_entry_decision(
+        self,
+        *,
+        wallet: PaperWallet,
+        mint_address: str,
+        token_id: uuid.UUID,
+        detected_at: datetime,
+        decision: str,
+        reason: str | None = None,
+    ) -> bool:
+        """Claim one irreversible entry decision per raw scanner discovery.
+
+        A cash refusal is terminal for this generation, rather than a deferred
+        order that could silently buy an old token after a later exit.
+        """
+        source_key = f"paper-all-scanned:{wallet.id}:{mint_address}"
+        result = await self._session.execute(
+            insert(PaperDecisionSnapshot)
+            .values(
+                decision_source="paper",
+                source_decision_key=source_key,
+                wallet_code=f"generation-{wallet.generation}",
+                strategy_id=wallet.strategy_id,
+                strategy_version=wallet.strategy_version,
+                mint_address=mint_address,
+                token_id=token_id,
+                decided_at=detected_at,
+                decision=decision,
+                reason_codes=[] if reason is None else [reason],
+                market_features={},
+                radar_state={},
+                observation_history={},
+                availability={},
+            )
+            .on_conflict_do_nothing(
+                index_elements=[
+                    PaperDecisionSnapshot.decision_source,
+                    PaperDecisionSnapshot.source_decision_key,
+                ]
+            )
+            .returning(PaperDecisionSnapshot.id)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def track_record_admissions_after(
+        self, *, watermark: datetime, limit: int, as_of: datetime | None = None
+    ) -> Sequence[RadarToken]:
+        """Canonical Track Record additions after a forward-wallet watermark.
+
+        ``RadarToken.first_detected_at`` is written only by the successful
+        Track Record admission insert and never updated afterwards.  Reading it
+        directly keeps the paper universe identical to the product record,
+        without duplicating score, rank, or category gates here.
+        """
+        predicates = [RadarToken.first_detected_at > watermark]
+        if as_of is not None:
+            predicates.append(RadarToken.first_detected_at <= as_of)
+        return (
+            await self._session.scalars(
+                select(RadarToken)
+                .where(*predicates)
+                .order_by(RadarToken.first_detected_at.asc(), RadarToken.mint_address.asc())
+                .limit(limit)
+            )
+        ).all()
+
+    async def claim_track_record_entry_decision(
+        self,
+        *,
+        wallet: PaperWallet,
+        admission: RadarToken,
+        decision: str,
+        reason: str | None = None,
+    ) -> bool:
+        """Claim one irreversible Generation 6 decision per Track Record mint."""
+        source_key = f"paper-track-record:{wallet.id}:{admission.mint_address}"
+        result = await self._session.execute(
+            insert(PaperDecisionSnapshot)
+            .values(
+                decision_source="paper",
+                source_decision_key=source_key,
+                wallet_code=f"generation-{wallet.generation}",
+                strategy_id=wallet.strategy_id,
+                strategy_version=wallet.strategy_version,
+                mint_address=admission.mint_address,
+                token_id=admission.token_id,
+                decided_at=admission.first_detected_at,
+                decision=decision,
+                reason_codes=[] if reason is None else [reason],
+                market_features={},
+                radar_state={},
+                observation_history={},
+                availability={},
+            )
+            .on_conflict_do_nothing(
+                index_elements=[
+                    PaperDecisionSnapshot.decision_source,
+                    PaperDecisionSnapshot.source_decision_key,
+                ]
+            )
+            .returning(PaperDecisionSnapshot.id)
+        )
+        return result.scalar_one_or_none() is not None
 
     # --- Positions -----------------------------------------------------------
 
@@ -278,6 +442,43 @@ class PaperRepository:
             )
         )
 
+    async def advance_activated_trail(
+        self,
+        position_id: uuid.UUID,
+        *,
+        peak_price: Decimal,
+        trailing_stop_price: Decimal | None,
+        last_evaluated_at: datetime,
+        activated_at: datetime | None = None,
+        activation_observed_price: Decimal | None = None,
+    ) -> None:
+        """Advance activation/trail state without allowing it to move backwards."""
+        values: dict[str, Any] = {
+            "peak_price": func.greatest(PaperPosition.peak_price, peak_price),
+            "last_evaluated_at": last_evaluated_at,
+        }
+        if trailing_stop_price is not None:
+            values["trailing_stop_price"] = func.greatest(
+                func.coalesce(PaperPosition.trailing_stop_price, Decimal(0)),
+                trailing_stop_price,
+            )
+        if activated_at is not None:
+            values["trailing_activated_at"] = func.coalesce(
+                PaperPosition.trailing_activated_at, activated_at
+            )
+            values["trailing_activation_observed_price"] = func.coalesce(
+                PaperPosition.trailing_activation_observed_price, activation_observed_price
+            )
+        await self._session.execute(
+            update(PaperPosition)
+            .where(
+                PaperPosition.id == position_id,
+                PaperPosition.status == PositionStatus.OPEN.value,
+                PaperPosition.last_evaluated_at <= last_evaluated_at,
+            )
+            .values(**values)
+        )
+
     async def close(
         self,
         position_id: uuid.UUID,
@@ -297,6 +498,8 @@ class PaperRepository:
         exit_execution_route: str | None = None,
         exit_execution_confidence: str | None = None,
         exit_execution_fallback_reason: str | None = None,
+        trailing_trigger_price: Decimal | None = None,
+        trailing_trigger_observed_price: Decimal | None = None,
     ) -> bool:
         """Record a close, once.
 
@@ -326,6 +529,8 @@ class PaperRepository:
                 exit_execution_route=exit_execution_route,
                 exit_execution_confidence=exit_execution_confidence,
                 exit_execution_fallback_reason=exit_execution_fallback_reason,
+                trailing_trigger_price=trailing_trigger_price,
+                trailing_trigger_observed_price=trailing_trigger_observed_price,
                 peak_price=peak_price,
                 last_evaluated_at=closed_at,
             )
@@ -367,18 +572,36 @@ class PaperRepository:
         return {str(row) for row in rows.all()}
 
     async def audit_log(
-        self, wallet_id: uuid.UUID, *, limit: int = 100, offset: int = 0
+        self, wallet_id: uuid.UUID, *, limit: int | None = 100, offset: int = 0
     ) -> Sequence[PaperTradeAudit]:
         """The log, newest exit first. Losers are never filtered out."""
-        return (
-            await self._session.scalars(
-                select(PaperTradeAudit)
-                .where(PaperTradeAudit.wallet_id == wallet_id)
-                .order_by(PaperTradeAudit.exit_at.desc(), PaperTradeAudit.mint_address.asc())
-                .offset(offset)
-                .limit(limit)
-            )
-        ).all()
+        statement = (
+            select(PaperTradeAudit)
+            .where(PaperTradeAudit.wallet_id == wallet_id)
+            .order_by(PaperTradeAudit.exit_at.desc(), PaperTradeAudit.mint_address.asc())
+            .offset(offset)
+        )
+        if limit is not None:
+            statement = statement.limit(limit)
+        return (await self._session.scalars(statement)).all()
+
+    async def audits_for_position_ids(
+        self, position_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, PaperTradeAudit]:
+        """Return the immutable close record for each requested position.
+
+        The closed-positions table must show the same settled costs as the
+        permanent record, rather than rebuilding fees or price impact from a
+        later market snapshot. A position has at most one audit row by the
+        database constraint, so the map is an unambiguous read model.
+        """
+        unique_ids = list(dict.fromkeys(position_ids))
+        if not unique_ids:
+            return {}
+        rows = await self._session.scalars(
+            select(PaperTradeAudit).where(PaperTradeAudit.position_id.in_(unique_ids))
+        )
+        return {row.position_id: row for row in rows.all()}
 
     async def audit_count(self, wallet_id: uuid.UUID) -> int:
         return (

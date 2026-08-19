@@ -110,7 +110,6 @@ class PaperWallet(Base):
         ),
         Index("ix_paper_wallets_created_at", "created_at"),
     )
-
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
     )
@@ -141,6 +140,17 @@ class PaperWallet(Base):
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     #: Why it was archived, in the words the internal comparison view prints.
     archive_reason: Mapped[str | None] = mapped_column(Text)
+    #: An explicit, one-way boundary used when a historical generation is
+    #: deliberately resumed.  Evaluators must ignore every observation before
+    #: this instant, even if the position's legacy watermark is older.
+    resume_watermark_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    #: The time the historical record was made live again.  It is published so
+    #: readers do not mistake a resumed record for one continuous experiment.
+    resumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    #: Preserve the former archive record instead of overwriting history when
+    #: `archived_at` is cleared for the explicit, authorised resume.
+    restored_archive_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    restored_archive_reason: Mapped[str | None] = mapped_column(Text)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
@@ -239,6 +249,9 @@ class PaperPosition(Base):
     #: here for the same reason a target was: a trailing distance that could be
     #: re-read from configuration after the fact could be re-read favourably.
     trailing_drawdown: Mapped[Decimal | None] = mapped_column(_FRACTION)
+    #: Fixed 2x activation gate for the forward experiment.  Null on older
+    #: archived strategies which never used activation.
+    trailing_activation_multiple: Mapped[Decimal | None] = mapped_column(_FRACTION)
     #: The market observed at the moment of entry. Perishable — the snapshot
     #: carrying them is prunable — and both are required by the audit record, so
     #: they are captured here rather than looked up again at close.
@@ -252,6 +265,18 @@ class PaperPosition(Base):
     #: rather than recomputed, so it survives snapshot pruning — a peak that was
     #: observed once is a fact and must not shrink when its row ages out.
     peak_price: Mapped[Decimal] = mapped_column(_PRICE, nullable=False)
+    #: Persisted when (and only when) an observed quote first activates the
+    #: trailing rule.  This makes a restart replay neither forget nor invent
+    #: activation state.
+    trailing_activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    trailing_activation_observed_price: Mapped[Decimal | None] = mapped_column(_PRICE)
+    #: The current theoretical 25%-below-high threshold.  Stored for the audit
+    #: surface and monotonic update checks; it is never an assumed fill price.
+    trailing_stop_price: Mapped[Decimal | None] = mapped_column(_PRICE)
+    #: Written only on an automated trailing close: the theoretical threshold
+    #: that was breached and the actual observed quote that breached it.
+    trailing_trigger_price: Mapped[Decimal | None] = mapped_column(_PRICE)
+    trailing_trigger_observed_price: Mapped[Decimal | None] = mapped_column(_PRICE)
     #: How far the observation series has been walked. Exits are resolved from
     #: every reading after this point, in order, which is what makes the result
     #: independent of when the evaluator ran.
@@ -404,269 +429,6 @@ class PaperTradeAudit(Base):
     #: Set only for paper-only overrides. `exit_at` remains the observed quote's
     #: timestamp; this records when the action was confirmed.
     manual_action_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
-
-
-class PaperShadowWallet(Base):
-    """One live, experimental paper wallet candidate.
-
-    Shadow wallets are not a replacement for the published wallet. They receive
-    the same Radar opportunities, maintain their own cash/positions/audit rows,
-    and exist solely to collect future live evidence for V2+ candidates without
-    changing the production V1 track record.
-    """
-
-    __tablename__ = "paper_shadow_wallets"
-    __table_args__ = (
-        UniqueConstraint("wallet_code", name="uq_paper_shadow_wallets_code"),
-        Index("ix_paper_shadow_wallets_created_at", "created_at"),
-    )
-
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
-    )
-    wallet_code: Mapped[str] = mapped_column(String(16), nullable=False)
-    strategy_id: Mapped[str] = mapped_column(String(64), nullable=False)
-    strategy_version: Mapped[str] = mapped_column(String(32), nullable=False)
-    display_name: Mapped[str] = mapped_column(String(64), nullable=False)
-    starting_balance: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
-    started_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
-    )
-
-
-class PaperShadowPosition(Base):
-    """A candidate-wallet trade, isolated from the published paper wallet."""
-
-    __tablename__ = "paper_shadow_positions"
-    __table_args__ = (
-        UniqueConstraint(
-            "shadow_wallet_id",
-            "mint_address",
-            name="uq_paper_shadow_positions_wallet_mint",
-        ),
-        Index(
-            "ix_paper_shadow_positions_open_watermark",
-            "shadow_wallet_id",
-            "last_evaluated_at",
-            postgresql_where="status = 'open'",
-        ),
-        Index("ix_paper_shadow_positions_closed_at", "shadow_wallet_id", "closed_at"),
-        Index("ix_paper_shadow_positions_mint", "mint_address"),
-        Index("ix_paper_shadow_positions_created_at", "created_at"),
-    )
-
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
-    )
-    shadow_wallet_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("paper_shadow_wallets.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    mint_address: Mapped[str] = mapped_column(String(44), nullable=False)
-    token_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("discovered_tokens.id", ondelete="SET NULL")
-    )
-
-    opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    entry_rank: Mapped[int] = mapped_column(nullable=False)
-    entry_price: Mapped[Decimal] = mapped_column(_PRICE, nullable=False)
-    entry_observed_price: Mapped[Decimal | None] = mapped_column(_PRICE)
-    size_usd: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
-    quantity: Mapped[Decimal] = mapped_column(_QUANTITY, nullable=False)
-    trailing_drawdown: Mapped[Decimal] = mapped_column(_FRACTION, nullable=False)
-    entry_market_cap: Mapped[Decimal | None] = mapped_column(_MONEY)
-    entry_liquidity_usd: Mapped[Decimal | None] = mapped_column(_MONEY)
-    entry_radar_score: Mapped[Decimal | None] = mapped_column(_PCT)
-    entry_confidence: Mapped[Decimal | None] = mapped_column(_PCT)
-    entry_token_age_seconds: Mapped[int | None] = mapped_column(Integer)
-    entry_volume_24h: Mapped[Decimal | None] = mapped_column(_MONEY)
-    entry_execution_quality: Mapped[str | None] = mapped_column(String(8))
-    entry_execution_model_version: Mapped[str | None] = mapped_column(String(64))
-    entry_execution_quote: Mapped[dict[str, object] | None] = mapped_column(_JSON)
-    entry_execution_quoted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    entry_execution_context_slot: Mapped[int | None] = mapped_column(Integer)
-    entry_execution_price_impact_pct: Mapped[Decimal | None] = mapped_column(_PCT)
-    entry_execution_fee_usd: Mapped[Decimal | None] = mapped_column(_MONEY)
-    entry_execution_route: Mapped[str | None] = mapped_column(Text)
-    entry_execution_confidence: Mapped[str | None] = mapped_column(String(32))
-    entry_execution_fallback_reason: Mapped[str | None] = mapped_column(Text)
-
-    status: Mapped[str] = mapped_column(String(16), nullable=False, default="open")
-    peak_price: Mapped[Decimal] = mapped_column(_PRICE, nullable=False)
-    last_evaluated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-
-    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    exit_price: Mapped[Decimal | None] = mapped_column(_PRICE)
-    exit_observed_price: Mapped[Decimal | None] = mapped_column(_PRICE)
-    exit_reason: Mapped[str | None] = mapped_column(String(16))
-    exit_execution_model_version: Mapped[str | None] = mapped_column(String(64))
-    exit_execution_quote: Mapped[dict[str, object] | None] = mapped_column(_JSON)
-    exit_execution_quoted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    exit_execution_context_slot: Mapped[int | None] = mapped_column(Integer)
-    exit_execution_price_impact_pct: Mapped[Decimal | None] = mapped_column(_PCT)
-    exit_execution_fee_usd: Mapped[Decimal | None] = mapped_column(_MONEY)
-    exit_execution_route: Mapped[str | None] = mapped_column(Text)
-    exit_execution_confidence: Mapped[str | None] = mapped_column(String(32))
-    exit_execution_fallback_reason: Mapped[str | None] = mapped_column(Text)
-
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
-    )
-
-
-class PaperShadowTradeAudit(Base):
-    """Append-only close record for a shadow wallet candidate."""
-
-    __tablename__ = "paper_shadow_trade_audit"
-    __table_args__ = (
-        UniqueConstraint("position_id", name="uq_paper_shadow_trade_audit_position"),
-        Index("ix_paper_shadow_trade_audit_wallet_exit", "shadow_wallet_id", "exit_at"),
-        Index("ix_paper_shadow_trade_audit_mint", "mint_address"),
-        Index("ix_paper_shadow_trade_audit_created_at", "created_at"),
-    )
-
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
-    )
-    position_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("paper_shadow_positions.id", ondelete="RESTRICT"),
-        nullable=False,
-    )
-    shadow_wallet_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("paper_shadow_wallets.id", ondelete="RESTRICT"),
-        nullable=False,
-    )
-    wallet_code: Mapped[str] = mapped_column(String(16), nullable=False)
-    mint_address: Mapped[str] = mapped_column(String(44), nullable=False)
-    symbol: Mapped[str | None] = mapped_column(String(32))
-
-    entry_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    entry_price: Mapped[Decimal] = mapped_column(_PRICE, nullable=False)
-    entry_observed_price: Mapped[Decimal | None] = mapped_column(_PRICE)
-    entry_market_cap: Mapped[Decimal | None] = mapped_column(_MONEY)
-    entry_liquidity_usd: Mapped[Decimal | None] = mapped_column(_MONEY)
-    size_usd: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
-    quantity: Mapped[Decimal] = mapped_column(_QUANTITY, nullable=False)
-
-    exit_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    exit_price: Mapped[Decimal] = mapped_column(_PRICE, nullable=False)
-    exit_observed_price: Mapped[Decimal | None] = mapped_column(_PRICE)
-    exit_market_cap: Mapped[Decimal | None] = mapped_column(_MONEY)
-    exit_liquidity_usd: Mapped[Decimal | None] = mapped_column(_MONEY)
-
-    gross_return_usd: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
-    gross_return_pct: Mapped[Decimal] = mapped_column(_PCT, nullable=False)
-    fee_usd: Mapped[Decimal | None] = mapped_column(_MONEY)
-    slippage_usd: Mapped[Decimal | None] = mapped_column(_MONEY)
-    net_return_usd: Mapped[Decimal | None] = mapped_column(_MONEY)
-    net_return_pct: Mapped[Decimal | None] = mapped_column(_PCT)
-    cost_unavailable_reason: Mapped[str | None] = mapped_column(Text)
-
-    exit_reason: Mapped[str] = mapped_column(String(16), nullable=False)
-    strategy_id: Mapped[str] = mapped_column(String(64), nullable=False)
-    strategy_version: Mapped[str] = mapped_column(String(32), nullable=False)
-    wallet_generation: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    swap_fee_bps: Mapped[Decimal | None] = mapped_column(_BPS)
-    execution_model_version: Mapped[str | None] = mapped_column(String(64))
-    entry_execution_model_version: Mapped[str | None] = mapped_column(String(64))
-    exit_execution_model_version: Mapped[str | None] = mapped_column(String(64))
-    entry_execution_quote: Mapped[dict[str, object] | None] = mapped_column(_JSON)
-    exit_execution_quote: Mapped[dict[str, object] | None] = mapped_column(_JSON)
-    entry_execution_quoted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    exit_execution_quoted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    entry_execution_context_slot: Mapped[int | None] = mapped_column(Integer)
-    exit_execution_context_slot: Mapped[int | None] = mapped_column(Integer)
-    entry_execution_price_impact_pct: Mapped[Decimal | None] = mapped_column(_PCT)
-    exit_execution_price_impact_pct: Mapped[Decimal | None] = mapped_column(_PCT)
-    entry_execution_fee_usd: Mapped[Decimal | None] = mapped_column(_MONEY)
-    exit_execution_fee_usd: Mapped[Decimal | None] = mapped_column(_MONEY)
-    entry_execution_route: Mapped[str | None] = mapped_column(Text)
-    exit_execution_route: Mapped[str | None] = mapped_column(Text)
-    execution_confidence: Mapped[str | None] = mapped_column(String(32))
-    execution_fallback_reason: Mapped[str | None] = mapped_column(Text)
-
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
-
-
-class PaperShadowDecision(Base):
-    """One candidate-wallet decision for one Radar opportunity.
-
-    Decisions are immutable measurements. A repeated evaluator pass for the same
-    wallet/mint/Radar evaluation conflicts on the natural key and becomes a
-    no-op, so shadow mode can run from both scheduled and Radar-triggered paths
-    without double-counting accepted or rejected opportunities.
-    """
-
-    __tablename__ = "paper_shadow_decisions"
-    __table_args__ = (
-        UniqueConstraint(
-            "wallet_code",
-            "mint_address",
-            "radar_evaluated_at",
-            name="uq_paper_shadow_decisions_wallet_mint_eval",
-        ),
-        Index("ix_paper_shadow_decisions_wallet_at", "wallet_code", "decided_at"),
-        Index("ix_paper_shadow_decisions_mint", "mint_address"),
-        Index("ix_paper_shadow_decisions_created_at", "created_at"),
-    )
-
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
-    )
-    shadow_wallet_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("paper_shadow_wallets.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    wallet_code: Mapped[str] = mapped_column(String(16), nullable=False)
-    strategy_id: Mapped[str] = mapped_column(String(64), nullable=False)
-    strategy_version: Mapped[str] = mapped_column(String(32), nullable=False)
-    mint_address: Mapped[str] = mapped_column(String(44), nullable=False)
-    token_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("discovered_tokens.id", ondelete="SET NULL")
-    )
-    radar_rank: Mapped[int] = mapped_column(Integer, nullable=False)
-    radar_evaluated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    decided_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    decision: Mapped[str] = mapped_column(String(16), nullable=False)
-    reason_codes: Mapped[list[str]] = mapped_column(_JSON, nullable=False, default=list)
-
-    radar_score: Mapped[Decimal | None] = mapped_column(_PCT)
-    radar_confidence: Mapped[Decimal | None] = mapped_column(_PCT)
-    market_cap: Mapped[Decimal | None] = mapped_column(_MONEY)
-    liquidity_usd: Mapped[Decimal | None] = mapped_column(_MONEY)
-    volume_24h: Mapped[Decimal | None] = mapped_column(_MONEY)
-    token_age_seconds: Mapped[int | None] = mapped_column(Integer)
-    entry_impact_pct: Mapped[Decimal | None] = mapped_column(_PCT)
-    execution_quality: Mapped[str | None] = mapped_column(String(8))
-    execution_model_version: Mapped[str | None] = mapped_column(String(64))
-    execution_confidence: Mapped[str | None] = mapped_column(String(32))
-    execution_fallback_reason: Mapped[str | None] = mapped_column(Text)
-    position_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("paper_shadow_positions.id", ondelete="SET NULL")
-    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

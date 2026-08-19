@@ -34,10 +34,6 @@ describe("HomepageIntelligence", () => {
       "href",
       "/wallet",
     );
-    expect(screen.getByRole("link", { name: /Strategy intelligence/i })).toHaveAttribute(
-      "href",
-      "/strategy-intelligence",
-    );
   });
 
   it("distinguishes declared signals from active readouts", () => {

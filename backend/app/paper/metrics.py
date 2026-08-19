@@ -44,11 +44,15 @@ class WalletMetrics:
     roi_pct: Decimal | None
     #: Value of open holdings, and how many could not be priced.
     open_value: Decimal | None
+    #: Cash plus only the holdings with a current admissible mark.  This is a
+    #: lower-bound display aid, never a substitute for full equity.
+    known_partial_equity: Decimal
     #: What the open holdings **cost** — the sum of what was committed at entry.
     #: Never `None`: an unpriced holding has an unknown value but a known cost,
     #: and conflating the two would make "invested" disappear when a price does.
     invested_usd: Decimal
     unpriced_positions: int
+    priced_positions: int
 
     open_positions: int
     closed_positions: int
@@ -65,6 +69,9 @@ class WalletMetrics:
     max_drawdown_pct: Decimal | None
     average_hold_hours: Decimal | None
     exits_by_reason: dict[str, int]
+    #: Equity less starting capital. `None` follows full equity: an unpriced
+    #: holding makes the current return unknown, not flat.
+    return_usd: Decimal | None = None
 
 
 def cash_for(
@@ -121,6 +128,7 @@ def summarise(
     cash = cash_for(starting_balance, open_positions, closed)
 
     open_value: Decimal | None = _ZERO
+    known_open_value = _ZERO
     unpriced = 0
     for position in open_positions:
         price = prices.get(position.mint_address)
@@ -128,6 +136,7 @@ def summarise(
             unpriced += 1
             open_value = None
             continue
+        known_open_value += position.quantity * price
         if open_value is not None:
             open_value += position.quantity * price
 
@@ -153,11 +162,18 @@ def summarise(
         cash=cash.quantize(Decimal("0.01")),
         equity=None if equity is None else equity.quantize(Decimal("0.01")),
         roi_pct=roi,
+        return_usd=(
+            None
+            if equity is None
+            else (equity - starting_balance).quantize(Decimal("0.01"))
+        ),
         open_value=None if open_value is None else open_value.quantize(Decimal("0.01")),
+        known_partial_equity=(cash + known_open_value).quantize(Decimal("0.01")),
         invested_usd=sum((position.size_usd for position in open_positions), _ZERO).quantize(
             Decimal("0.01")
         ),
         unpriced_positions=unpriced,
+        priced_positions=len(open_positions) - unpriced,
         open_positions=len(open_positions),
         closed_positions=len(closed),
         realised_pnl=sum((trade.pnl for trade in closed), _ZERO).quantize(Decimal("0.01")),

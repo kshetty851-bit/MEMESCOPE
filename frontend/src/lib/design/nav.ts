@@ -1,9 +1,7 @@
 import type { ComponentType, SVGProps } from "react";
 
 import {
-  IconBeaker,
   IconBookmark,
-  IconGauge,
   IconLedger,
   IconScanner,
   IconSettings,
@@ -93,13 +91,6 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "Strategy",
     items: [
       { href: "/wallet", label: "Paper wallet", icon: IconWallet, status: "ready" },
-      { href: "/lab", label: "Strategy lab", icon: IconBeaker, status: "ready" },
-      {
-        href: "/strategy-intelligence",
-        label: "Shadow wallets",
-        icon: IconGauge,
-        status: "ready",
-      },
     ],
   },
 ];

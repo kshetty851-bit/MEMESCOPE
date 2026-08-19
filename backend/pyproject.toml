@@ -19,6 +19,8 @@ dependencies = [
     "psycopg[binary]>=3.2.0",
     "redis[hiredis]>=5.2.0",
     "websockets>=13.1",
+    "grpcio>=1.76.0",
+    "protobuf>=6.31.1",
     "pyjwt>=2.10.0",
     "bcrypt>=4.2.0",
     "structlog>=24.4.0",
@@ -57,6 +59,7 @@ packages = ["app"]
 target-version = "py312"
 line-length = 95
 src = ["app", "tests"]
+extend-exclude = ["app/services/discovery/generated"]
 
 [tool.ruff.lint]
 select = [
@@ -92,6 +95,9 @@ ignore = [
 # hardcoded-password heuristic; neither is a secret.
 "app/core/security.py" = ["S106"]
 "app/schemas/auth.py" = ["S105"]
+# Generated from the pinned upstream Yellowstone protobuf. Linting generated
+# transport boilerplate would add noise without reviewing MEMESCOPE logic.
+"app/services/discovery/generated/*" = ["ALL"]
 # N802: computed_field properties mirror env var casing.
 # S105: POSTGRES_PASSWORD's local-development default is not a real secret.
 "app/core/config.py" = ["N802", "S105"]

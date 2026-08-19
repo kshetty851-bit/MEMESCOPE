@@ -15,12 +15,15 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.models.market import (
     EnrichmentStatus,
     TokenEnrichmentState,
     TokenMarketSnapshot,
     TradingStatus,
 )
+from app.models.radar import RadarToken
+from app.paper.service import PaperWalletService
 from app.repositories.market import EnrichmentStateRepository
 from app.repositories.token import TokenRepository
 from app.services.market.providers.base import (
@@ -133,6 +136,67 @@ async def test_enrichment_writes_a_snapshot(db_session: AsyncSession) -> None:
     assert rows[0].dex_name == "pumpfun"
     assert rows[0].trading_status is TradingStatus.TRADING
     assert rows[0].provider == "fake"
+
+
+async def test_track_record_admission_gets_one_prompt_post_admission_quote_attempt(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Raw discovery alone is normal priority; canonical admission is expedited."""
+    mint = "MintGenerationSixTrackRecordQuote"
+    now = datetime.now(UTC)
+    monkeypatch.setattr(
+        settings, "PAPER_WALLET_STRATEGY_ID", "paper_track_record_tp125_sl50_v1"
+    )
+    await PaperWalletService(db_session).wallet(now=now - timedelta(minutes=1))
+    token = await TokenRepository(db_session).insert_if_absent(
+        {
+            "mint_address": mint,
+            "signature": f"sig-{mint}",
+            "slot": 1,
+            "discovered_at": now,
+        }
+    )
+    assert token is not None
+    service = MarketEnrichmentService(db_session, FakeProvider(data={mint: _market(mint)}))
+
+    assert await service.register_token(mint)
+    state = await db_session.scalar(
+        select(TokenEnrichmentState).where(TokenEnrichmentState.mint_address == mint)
+    )
+    assert state is not None
+    assert state.priority == 0
+    db_session.add(
+        RadarToken(
+            token_id=token.id,
+            mint_address=mint,
+            first_detected_at=now,
+            first_opportunity_score=Decimal("75"),
+            first_confidence=Decimal("40"),
+            detection_reason=["test"],
+            category="early_momentum",
+            current_opportunity_score=Decimal("75"),
+            current_confidence=Decimal("40"),
+            current_category="early_momentum",
+            current_multiple=Decimal("1"),
+            peak_multiple=Decimal("1"),
+            model_version="test",
+            last_evaluated_at=now,
+        )
+    )
+    await db_session.flush()
+    await service.states.prioritize_unquoted_track_record_candidates(now=now)
+    assert state.priority == 2
+
+    outcome = await service.enrich([state])
+
+    assert outcome.snapshots_written == 1
+    assert state.total_refreshes == 1
+    assert state.priority == 0
+    snapshots = await _snapshots(db_session, mint)
+    assert len(snapshots) == 1
+    snapshot = snapshots[0]
+    assert snapshot.captured_at >= token.discovered_at
+    assert snapshot.price_usd > 0
 
 
 async def test_repeated_enrichment_accumulates_history(db_session: AsyncSession) -> None:

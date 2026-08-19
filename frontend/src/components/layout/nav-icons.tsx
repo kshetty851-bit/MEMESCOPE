@@ -94,27 +94,6 @@ export function IconWallet(props: SVGProps<SVGSVGElement>) {
   );
 }
 
-/** Strategy lab. */
-export function IconBeaker(props: SVGProps<SVGSVGElement>) {
-  return (
-    <Base {...props}>
-      <path d="M9.5 3v6.2L4.8 17.4A2 2 0 006.5 20.5h11a2 2 0 001.7-3.1L14.5 9.2V3" />
-      <path d="M8.5 3h7M6.9 14h10.2" />
-    </Base>
-  );
-}
-
-/** Shadow wallets — parallel measurement. */
-export function IconGauge(props: SVGProps<SVGSVGElement>) {
-  return (
-    <Base {...props}>
-      <path d="M4 18a8 8 0 1116 0" />
-      <path d="M12 18l4.5-5" />
-      <path d="M4 18h16" />
-    </Base>
-  );
-}
-
 export function IconSettings(props: SVGProps<SVGSVGElement>) {
   return (
     <Base {...props}>

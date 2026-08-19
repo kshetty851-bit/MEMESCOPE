@@ -14,6 +14,7 @@ Time enters as an explicit `now`.
 from __future__ import annotations
 
 import enum
+import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -108,6 +109,19 @@ class Observation:
     volume_1h: Decimal | None
     buy_count_24h: int | None
     sell_count_24h: int | None
+    # These are provenance fields, not scoring inputs.  Keeping them alongside
+    # the reduced market observation lets the forward-quality ledger reference
+    # the exact immutable market row the Radar evaluated without teaching the
+    # pure scorer about persistence.
+    snapshot_id: uuid.UUID | None = None
+    provider: str | None = None
+    provider_latency_ms: int | None = None
+    dex_name: str | None = None
+    trading_pair: str | None = None
+    pool_address: str | None = None
+    trading_status: str | None = None
+    is_verified: bool | None = None
+    volume_5m: Decimal | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,6 +139,10 @@ class RadarSeries:
     #: When the token was first discovered on-chain. Distinct from Radar
     #: detection, which is when *this* engine first found it interesting.
     discovered_at: datetime | None = None
+    token_id: uuid.UUID | None = None
+    token_name: str | None = None
+    token_symbol: str | None = None
+    token_decimals: int | None = None
 
     @property
     def latest(self) -> Observation | None:

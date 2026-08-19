@@ -7,8 +7,7 @@ import { cn } from "@/lib/utils";
  * STAT — label over value.
  *
  * This shape existed four times before this file: `record`, `wallet` and
- * `strategy-intelligence` each declared a local `Stat`, `lab` declared a local
- * `Metric`, and `real-wallet` declared a `StatusCard`. They agreed on the idea
+ * `real-wallet` declared a `StatusCard`. They agreed on the idea
  * and disagreed on the details — three different value sizes, two different
  * border treatments, and two of them had no dash handling at all.
  *

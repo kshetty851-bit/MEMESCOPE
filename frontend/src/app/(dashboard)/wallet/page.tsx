@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 
 import { AuditLog } from "@/components/paper/audit-log";
+import { DailyReturns } from "@/components/paper/daily-returns";
 import { PositionsTable } from "@/components/paper/positions-table";
 import { StrategyCard } from "@/components/paper/strategy-card";
 import { Label, Panel } from "@/components/ui/panel";
@@ -13,6 +14,7 @@ import {
   useManualSell,
   useManualSellPreview,
   usePaperAudit,
+  usePaperPerformance,
   usePaperPositions,
   usePaperWallet,
 } from "@/hooks/use-paper";
@@ -47,7 +49,7 @@ type Tab = "open" | "closed";
  * Local name, shared implementation.
  *
  * The visual used to be declared here, in `record` and in
- * `strategy-intelligence` — three near-identical blocks that disagreed about
+ * `record` — near-identical blocks that disagreed about
  * value size, border treatment and dash handling. This keeps the call sites
  * (there are ~25 in this file) and delegates the rendering, so there is now
  * exactly one implementation of a label-over-value in the product.
@@ -73,9 +75,7 @@ function Stat({
       display={value}
       hint={hint}
       size={emphasis ? "lg" : "md"}
-      tone={
-        valueTone === "positive" ? "up" : valueTone === "negative" ? "down" : "default"
-      }
+      tone={valueTone === "positive" ? "up" : valueTone === "negative" ? "down" : "default"}
     />
   );
 }
@@ -84,13 +84,21 @@ export default function WalletPage() {
   const wallet = usePaperWallet();
   const positions = usePaperPositions();
   const auditQuery = usePaperAudit();
+  const performanceQuery = usePaperPerformance();
   const manualPreview = useManualSellPreview();
   const manualSell = useManualSell();
   const [tab, setTab] = useState<Tab>("open");
 
-  const items = useMemo(() => positions.data?.items ?? [], [positions.data]);
+  const items = useMemo(() => {
+    if (!positions.data) return [];
+    return positions.data.items ?? [];
+  }, [positions.data]);
+
   const visible = useMemo(
-    () => items.filter((item) => (tab === "open" ? item.status === "open" : item.status === "closed")),
+    () =>
+      items.filter((item) =>
+        tab === "open" ? item.status === "open" : item.status === "closed",
+      ),
     [items, tab],
   );
 
@@ -116,7 +124,8 @@ export default function WalletPage() {
     );
   }
 
-  const { metrics: m, strategy, benchmarks, disclosure, waiting, last_trade: last } = wallet.data;
+  const { strategy, benchmarks, disclosure, waiting, last_trade: last } = wallet.data;
+  const m = wallet.data.metrics;
 
   if (!wallet.data.enabled) {
     return (
@@ -127,10 +136,10 @@ export default function WalletPage() {
         </header>
         <Panel density="compact" className="border-warn/20 bg-warn/[0.03]">
           <p className="text-sm leading-relaxed text-ink-2">
-            The paper wallet is not switched on in this environment, so no position
-            has been opened. This is a configuration state, not a result — a
-            strategy that traded nothing and a strategy that was never run are
-            different things, and this is the second.
+            The paper wallet is not switched on in this environment, so no position has been
+            opened. This is a configuration state, not a result — a strategy that traded
+            nothing and a strategy that was never run are different things, and this is the
+            second.
           </p>
         </Panel>
         <StrategyCard strategy={strategy} />
@@ -138,15 +147,14 @@ export default function WalletPage() {
     );
   }
 
-  const roiTone = tone(m.roi_pct);
-
   return (
     <div className="flex flex-col gap-6">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <Label>Paper wallet</Label>
           <h1 className="mt-2 text-lg font-semibold text-ink">
-            One published rule, applied without exception
+            {strategy.name} —{" "}
+            {wallet.data.resumed_at ? "resumed paper strategy" : "forward paper strategy"}
           </h1>
           <p className="mt-2 max-w-2xl text-sm text-ink-2">{disclosure}</p>
         </div>
@@ -155,11 +163,19 @@ export default function WalletPage() {
             comparison covers the same period the strategy traded. */}
         {wallet.data.started_at ? (
           <p className="text-xs text-ink-3">
-            Running since {new Date(wallet.data.started_at).toLocaleString()} · wallet
-            v{wallet.data.generation}
+            Running since {new Date(wallet.data.started_at).toLocaleString()} · wallet v
+            {wallet.data.generation}
           </p>
         ) : null}
       </header>
+
+      {wallet.data.resumed_at ? (
+        <Panel density="compact" className="border-line-strong bg-raised/40">
+          <p className="text-sm text-ink">
+            Generation 2 resumed on {new Date(wallet.data.resumed_at).toLocaleString()}
+          </p>
+        </Panel>
+      ) : null}
 
       {/* Why the wallet is idle, whenever it is. Two different states and the
           page names which — a wallet sitting on cash with no explanation reads
@@ -195,31 +211,77 @@ export default function WalletPage() {
         </Panel>
       ) : null}
 
-      {/* The headline four. ROI is given the same prominence whether it is
-          positive or negative — a wallet that only reported wins would be
-          marketing rather than evidence. */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      {/* Full equity stays strict: a missing quote never becomes a fabricated
+          zero. The partial figure makes the known portion visible alongside it. */}
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
         <Stat
-          label="Equity"
-          value={usd(m.equity)}
+          label="Current return"
+          value={
+            m.return_usd === null || m.roi_pct === null
+              ? "Pending fresh quotes"
+              : `${usd(m.return_usd) ?? "—"} (${pct(m.roi_pct) ?? "—"})`
+          }
           emphasis
+          valueTone={tone(m.return_usd)}
           hint={
-            m.unpriced_positions > 0
-              ? `${m.unpriced_positions} holding${m.unpriced_positions === 1 ? "" : "s"} unpriced`
+            m.return_usd === null
+              ? "Full return appears once every open holding has a fresh stored price."
+              : `Marked against ${usd(m.starting_balance)} starting capital`
+          }
+        />
+        <Stat
+          label="Available cash"
+          value={usd(m.cash)}
+          emphasis
+          hint="Available for the next allocation"
+        />
+        <Stat
+          label="Known partial equity"
+          value={usd(m.known_partial_equity)}
+          emphasis
+          hint={`Cash + ${m.priced_positions} currently priced holding${m.priced_positions === 1 ? "" : "s"}`}
+        />
+        <Stat
+          label="Full equity"
+          value={m.equity === null ? "Pending fresh quotes" : usd(m.equity)}
+          hint={
+            m.equity === null
+              ? "Full equity will appear once all resumed holdings receive fresh post-resume market quotes."
               : `from ${usd(m.starting_balance)} start`
           }
         />
-        <Stat label="Return" value={pct(m.roi_pct)} emphasis valueTone={roiTone} />
-        <Stat label="Cash" value={usd(m.cash)} hint={`${usd(m.open_value)} at market`} />
-        {/* Invested is what the open positions **cost**, not what they are
-            worth. It survives a token going unpriced, where the market value
-            does not. */}
         <Stat
-          label="Invested"
+          label="Unpriced positions"
+          value={`${m.unpriced_positions} of ${m.open_positions}`}
+          hint={`${m.priced_positions} priced position${m.priced_positions === 1 ? "" : "s"}`}
+        />
+        <Stat
+          label="Committed capital"
           value={usd(m.invested_usd)}
-          hint={`${m.open_positions} open · ${m.closed_positions} closed`}
+          hint="Allocation basis, not current market value"
         />
       </div>
+
+      <Panel density="compact" className="border-line-strong bg-raised/40">
+        <p className="text-sm text-ink">Next entry requires $100 available cash</p>
+        <p className="mt-1 text-xs text-ink-3">Current available: {usd(m.cash)}</p>
+      </Panel>
+
+      <section className="flex flex-col gap-3">
+        <div>
+          <h2 className="text-md font-medium text-ink">Strategy returns</h2>
+          <p className="mt-1 text-sm text-ink-2">
+            Current return includes every fully priced open holding. Daily rows show
+            completed trades by their recorded UTC exit date.
+          </p>
+        </div>
+        <DailyReturns
+          daily={performanceQuery.data?.daily ?? []}
+          disclosure={performanceQuery.data?.disclosure ?? ""}
+          isPending={performanceQuery.isPending}
+          isError={performanceQuery.isError}
+        />
+      </section>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="Win rate" value={pct(m.win_rate_pct)} />
@@ -279,9 +341,7 @@ export default function WalletPage() {
             the wallet. A benchmark drawn over a period the strategy did not
             trade would credit or punish it for free. */}
         {wallet.data.benchmark_note ? (
-          <p className="text-xs leading-relaxed text-ink-3">
-            {wallet.data.benchmark_note}
-          </p>
+          <p className="text-xs leading-relaxed text-ink-3">{wallet.data.benchmark_note}</p>
         ) : null}
         <div className="overflow-x-auto">
           <table className="w-full min-w-[640px] text-sm">
@@ -369,6 +429,12 @@ export default function WalletPage() {
               : "Nothing has closed yet. A position closes only when the price gives back a quarter of its highest level."
           }
         />
+        {tab === "closed" ? (
+          <p className="text-xs leading-relaxed text-ink-3">
+            Gross P/L is the price result before costs. Net P/L deducts the recorded fees
+            and slippage; a dash means the historic trade could not be costed completely.
+          </p>
+        ) : null}
       </section>
 
       <section className="flex flex-col gap-3">
@@ -376,8 +442,8 @@ export default function WalletPage() {
           <h2 className="text-md font-medium text-ink">Permanent record</h2>
           <p className="mt-1 text-sm text-ink-2">
             {wallet.data.audited_trades} completed trade
-            {wallet.data.audited_trades === 1 ? "" : "s"}, each written once at the
-            moment it closed. Nothing in this record is ever rewritten.
+            {wallet.data.audited_trades === 1 ? "" : "s"}, each written once at the moment
+            it closed. Nothing in this record is ever rewritten.
           </p>
         </div>
         <AuditLog

@@ -134,3 +134,11 @@ tmp/
 *.dump
 *.sql.gz
 *.bak
+
+# Temporary logs and scripts
+pytest_out.txt
+patch_service.py
+test_err.log
+unit_test.log
+backend/scratch_send_report.py
+.pnpm-store/

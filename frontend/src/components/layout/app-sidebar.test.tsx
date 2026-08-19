@@ -33,7 +33,6 @@ describe("navigation map", () => {
   it("marks the item that owns the current route", () => {
     expect(activeItem("/command")?.label).toBe("Scanner");
     expect(activeItem("/record")?.label).toBe("Track record");
-    expect(activeItem("/strategy-intelligence")?.label).toBe("Shadow wallets");
   });
 
   it("resolves nested routes to their owning item", () => {
@@ -86,8 +85,6 @@ describe("SidebarContent", () => {
       "Scanner",
       "Track record",
       "Paper wallet",
-      "Strategy lab",
-      "Shadow wallets",
     ]) {
       expect(within(nav).getByRole("link", { name: label })).toBeInTheDocument();
     }

@@ -58,7 +58,7 @@ class Refusal(enum.StrEnum):
     #: The provider does not report the token as trading.
     NOT_TRADEABLE = "not_tradeable"
     #: Everything passed, but the cash left is below one position.
-    INSUFFICIENT_CASH = "insufficient_cash"
+    INSUFFICIENT_CASH = "insufficient_paper_cash"
 
 
 #: The sentence each refusal renders as. Server-side, from a stable code — the
@@ -72,7 +72,9 @@ REFUSAL_LABELS: dict[str, str] = {
         "The venue reports no pool depth, so the trade could not be costed or audited."
     ),
     Refusal.NOT_TRADEABLE: "The market provider does not report this token as trading.",
-    Refusal.INSUFFICIENT_CASH: "Not enough cash left for a full position.",
+    Refusal.INSUFFICIENT_CASH: (
+        "INSUFFICIENT_PAPER_CASH: not enough cash left for a full $10 position."
+    ),
 }
 
 
@@ -93,6 +95,7 @@ class Observation:
     price_usd: Decimal | None = None
     liquidity_usd: Decimal | None = None
     market_cap: Decimal | None = None
+    volume_24h: Decimal | None = None
     trading_status: str | None = None
 
 
@@ -150,6 +153,7 @@ def judge(
             observed_at=observation.observed_at,
             liquidity_usd=observation.liquidity_usd,
             market_cap=observation.market_cap,
+            volume_24h=observation.volume_24h,
         ),
     )
 

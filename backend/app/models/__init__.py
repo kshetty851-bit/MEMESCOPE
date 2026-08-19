@@ -7,6 +7,11 @@ model that is never imported is invisible to it.
 from app.db.base import Base
 from app.models.alpha_session import AlphaSession
 from app.models.curve import TokenCurveSnapshot  # noqa: F401
+from app.models.discovery import (
+    DiscoveryObservationSource,
+    DiscoverySourceObservation,
+    YellowstoneStreamCheckpoint,
+)
 from app.models.market import (
     EnrichmentStatus,
     TokenEnrichmentState,
@@ -15,15 +20,24 @@ from app.models.market import (
 )
 from app.models.paper import (
     PaperPosition,
-    PaperShadowDecision,
-    PaperShadowPosition,
-    PaperShadowTradeAudit,
-    PaperShadowWallet,
     PaperTradeAudit,
     PaperWallet,
 )
+from app.models.paper_research import (
+    PaperDecisionEnrichment,
+    PaperDecisionOutcome,
+    PaperDecisionSnapshot,
+)
 from app.models.radar import RadarAchievement, RadarSnapshot, RadarToken
+from app.models.radar_quality import (
+    RadarDecisionOutcome,
+    RadarDecisionSnapshot,
+    RadarRankEvent,
+)
 from app.models.real_wallet_execution import (
+    RealWalletDevnetEvent,
+    RealWalletDevnetIntent,
+    RealWalletDevnetQuote,
     RealWalletExecutionEvent,
     RealWalletExecutionHealth,
     RealWalletExecutionIntent,
@@ -33,6 +47,11 @@ from app.models.real_wallet_execution import (
 )
 from app.models.real_wallet_safety import RealWalletSafetyEvaluation
 from app.models.refresh_token import RefreshToken
+from app.models.report_delivery import (  # noqa: F401
+    DeliveryStatus,
+    ReportDelivery,
+    ReportKind,
+)
 from app.models.score import (
     ScoreGrade,
     ScoreTrigger,
@@ -46,18 +65,25 @@ __all__ = [
     "AlphaSession",
     "Base",
     "DiscoveredToken",
+    "DiscoveryObservationSource",
+    "DiscoverySourceObservation",
     "EnrichmentStatus",
     "MetadataStatus",
+    "PaperDecisionEnrichment",
+    "PaperDecisionOutcome",
+    "PaperDecisionSnapshot",
     "PaperPosition",
-    "PaperShadowDecision",
-    "PaperShadowPosition",
-    "PaperShadowTradeAudit",
-    "PaperShadowWallet",
     "PaperTradeAudit",
     "PaperWallet",
     "RadarAchievement",
+    "RadarDecisionOutcome",
+    "RadarDecisionSnapshot",
+    "RadarRankEvent",
     "RadarSnapshot",
     "RadarToken",
+    "RealWalletDevnetEvent",
+    "RealWalletDevnetIntent",
+    "RealWalletDevnetQuote",
     "RealWalletExecutionEvent",
     "RealWalletExecutionHealth",
     "RealWalletExecutionIntent",
@@ -75,6 +101,7 @@ __all__ = [
     "TradingStatus",
     "User",
     "UserRole",
+    "YellowstoneStreamCheckpoint",
 ]
 from app.models.intelligence import (  # noqa: F401
     AnalystReadingCache,

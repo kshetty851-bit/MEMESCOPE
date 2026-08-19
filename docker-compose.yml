@@ -24,6 +24,13 @@ x-backend-env: &backend-env
   LIVE_EVENT_CHANNEL: ${LIVE_EVENT_CHANNEL:-memescope:live:changed}
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
   LOG_FORMAT: ${LOG_FORMAT:-console}
+  SMTP_HOST: ${SMTP_HOST:-}
+  SMTP_PORT: ${SMTP_PORT:-587}
+  SMTP_USERNAME: ${SMTP_USERNAME:-}
+  SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+  SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
+  SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
+  SMTP_FROM_NAME: ${SMTP_FROM_NAME:-}
   CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
   # Every setting the production validators demand must live in this anchor, not
   # on one service. `ENVIRONMENT` reaches all of these containers from here, so
@@ -61,6 +68,15 @@ x-backend-env: &backend-env
   SCANNER_RECONNECT_ERROR_ATTEMPTS: ${SCANNER_RECONNECT_ERROR_ATTEMPTS:-5}
   SCANNER_RECONNECT_ERROR_EVERY: ${SCANNER_RECONNECT_ERROR_EVERY:-20}
   SCANNER_STATE_TTL_SECONDS: ${SCANNER_STATE_TTL_SECONDS:-300}
+  # Yellowstone is an isolated, non-authoritative shadow stream. Keeping the
+  # flag off is mandatory until an operator supplies a provider endpoint/token.
+  YELLOWSTONE_ENABLED: ${YELLOWSTONE_ENABLED:-false}
+  YELLOWSTONE_SHADOW_MODE: ${YELLOWSTONE_SHADOW_MODE:-true}
+  YELLOWSTONE_GRPC_URL: ${YELLOWSTONE_GRPC_URL:-}
+  YELLOWSTONE_X_TOKEN: ${YELLOWSTONE_X_TOKEN:-}
+  YELLOWSTONE_PROGRAM_IDS: ${YELLOWSTONE_PROGRAM_IDS:-6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P}
+  YELLOWSTONE_REPLAY_OVERLAP_SLOTS: ${YELLOWSTONE_REPLAY_OVERLAP_SLOTS:-2}
+  YELLOWSTONE_MAX_RECEIVE_BYTES: ${YELLOWSTONE_MAX_RECEIVE_BYTES:-16777216}
   # Pipeline health thresholds. Read by the API (the endpoint) and by the
   # scanner (its container healthcheck), so a value set on one service only
   # would let the two disagree about whether discovery is down.
@@ -104,6 +120,11 @@ x-backend-env: &backend-env
   # twice before.
   FEATURE_RADAR_ENABLED: ${FEATURE_RADAR_ENABLED:-false}
   RADAR_SWEEP_BATCH_LIMIT: ${RADAR_SWEEP_BATCH_LIMIT:-500}
+  # Append-only research capture. It observes a committed Radar result and
+  # never alters a score, rank, scanner decision, or wallet action.
+  FEATURE_RADAR_QUALITY_DATASET: ${FEATURE_RADAR_QUALITY_DATASET:-true}
+  RADAR_QUALITY_CONTROL_SAMPLE_MODULUS: ${RADAR_QUALITY_CONTROL_SAMPLE_MODULUS:-20}
+  RADAR_QUALITY_OUTCOME_BATCH_LIMIT: ${RADAR_QUALITY_OUTCOME_BATCH_LIMIT:-100}
   FEATURE_PUMPFUN_RADAR_ENABLED: ${FEATURE_PUMPFUN_RADAR_ENABLED:-false}
   PUMPFUN_PROGRAM_ID: ${PUMPFUN_PROGRAM_ID:-6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P}
   PUMPFUN_RADAR_MIN_AGE_DAYS: ${PUMPFUN_RADAR_MIN_AGE_DAYS:-6}
@@ -158,9 +179,21 @@ x-backend-env: &backend-env
   REAL_WALLET_EXECUTION_MODE: ${REAL_WALLET_EXECUTION_MODE:-disabled}
   REAL_WALLET_EXECUTION_ENABLED: ${REAL_WALLET_EXECUTION_ENABLED:-false}
   REAL_WALLET_AUTOTRADE_ENABLED: ${REAL_WALLET_AUTOTRADE_ENABLED:-false}
-  # Public address only. The signer secret is a mounted file path, never a value.
+  REAL_WALLET_NETWORK: ${REAL_WALLET_NETWORK:-devnet}
+  REAL_WALLET_RPC_URL: ${REAL_WALLET_RPC_URL:-https://api.devnet.solana.com}
+  # Public address only. Phase 1 rejects a signer path in every application
+  # container; a later isolated signer service will own its own secret mount.
   REAL_WALLET_PUBLIC_KEY: ${REAL_WALLET_PUBLIC_KEY:-}
   REAL_WALLET_EXECUTION_SECRET_FILE: ${REAL_WALLET_EXECUTION_SECRET_FILE:-}
+  # API/workers receive a socket path only. The actual signer-file path is
+  # deliberately absent from this shared environment and mounted only into the
+  # opt-in `devnet-signer` profile below.
+  PHASE2_DEVNET_SIGNER_SOCKET: ${PHASE2_DEVNET_SIGNER_SOCKET:-}
+  PHASE2_DEVNET_QUOTE_TTL_SECONDS: ${PHASE2_DEVNET_QUOTE_TTL_SECONDS:-60}
+  PHASE2_DEVNET_APPROVAL_TTL_SECONDS: ${PHASE2_DEVNET_APPROVAL_TTL_SECONDS:-120}
+  PHASE2_DEVNET_MAX_TRANSFER_LAMPORTS: ${PHASE2_DEVNET_MAX_TRANSFER_LAMPORTS:-1000000}
+  PHASE2_DEVNET_CONFIRM_RETRIES: ${PHASE2_DEVNET_CONFIRM_RETRIES:-6}
+  PHASE2_DEVNET_CONFIRM_RETRY_SECONDS: ${PHASE2_DEVNET_CONFIRM_RETRY_SECONDS:-1}
   # Canary exposure limits. A worker with a larger limit than the API reports is
   # how a "$5 canary" silently becomes something else.
   REAL_WALLET_MAX_TRADE_USD: ${REAL_WALLET_MAX_TRADE_USD:-5}
@@ -299,6 +332,8 @@ services:
     volumes:
       # Bind-mount source for hot reload; keep the image's venv out of the way.
       - ./backend:/app
+      # API gets only the signer IPC endpoint, never the signer-file mount.
+      - devnet-signer-socket:/run/memescope-devnet-signer
     depends_on:
       postgres:
         condition: service_healthy
@@ -310,6 +345,42 @@ services:
       timeout: 5s
       retries: 5
       start_period: 40s
+
+  # Opt-in only. This process is outside FastAPI/web and mounts the signer file
+  # while every API/worker service receives only a Unix socket path. It accepts
+  # an approved intent ID, reloads it from Postgres, independently verifies
+  # devnet and transaction semantics, and signs once. Do not enable this
+  # profile without a funded *devnet-only* wallet and a 0600 keypair file.
+  devnet-signer:
+    profiles: ["devnet-signer"]
+    build:
+      context: ./backend
+      target: development
+    restart: on-failure
+    command:
+      - python
+      - -m
+      - app.real_wallet.devnet_signer
+      - --serve
+      - --socket
+      - /run/memescope-devnet-signer/signer.sock
+    environment:
+      <<: *backend-env
+      RUN_MIGRATIONS: "false"
+      PHASE2_DEVNET_SIGNER_SOCKET: /run/memescope-devnet-signer/signer.sock
+      PHASE2_DEVNET_SIGNER_FILE: /run/secrets/phase2-devnet-signer.json
+    volumes:
+      - ./backend:/app
+      - devnet-signer-socket:/run/memescope-devnet-signer
+      # The profile remains inert until selected; when selected, this default
+      # deliberately points nowhere useful so the signer fails closed rather
+      # than accepting an accidental key location.
+      - ${PHASE2_DEVNET_SIGNER_FILE_HOST:-/run/memescope-devnet-signer-missing}:/run/secrets/phase2-devnet-signer.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   worker:
     build:
@@ -373,6 +444,24 @@ services:
       retries: 3
       start_period: 300s
 
+  # Isolated Yellowstone gRPC observer. Phase 1 never writes discovered_tokens
+  # and cannot block or replace the primary RPC scanner.
+  yellowstone:
+    profiles: ["yellowstone"]
+    build:
+      context: ./backend
+      target: development
+    restart: on-failure
+    command: python -m app.yellowstone_main
+    environment:
+      <<: *backend-env
+      RUN_MIGRATIONS: "false"
+    volumes:
+      - ./backend:/app
+    depends_on:
+      backend:
+        condition: service_healthy
+
   # Market Enrichment Worker. Independent of the scanner: stopping this service
   # must never affect token discovery.
   enrichment:
@@ -386,6 +475,8 @@ services:
       RUN_MIGRATIONS: "false"
     volumes:
       - ./backend:/app
+    healthcheck:
+      disable: true
     depends_on:
       backend:
         condition: service_healthy
@@ -418,3 +509,4 @@ services:
 volumes:
   postgres-data:
   redis-data:
+  devnet-signer-socket:

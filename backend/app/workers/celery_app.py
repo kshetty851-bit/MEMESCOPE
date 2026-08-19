@@ -23,6 +23,7 @@ celery_app = Celery(
         "app.opportunities.scheduler",
         "app.paper.scheduler",
         "app.real_wallet.scheduler",
+        "app.reports.scheduler",
         "app.workers.priority_tasks",
         "app.workers.enrichment_tasks",
     ],
@@ -67,6 +68,12 @@ celery_app.conf.beat_schedule = {
     "radar-sweep": {
         "task": "app.radar.scheduler.radar_sweep",
         "schedule": crontab(minute="*/15"),
+    },
+    # Label-only forward research.  It reads committed decision snapshots and
+    # immutable market history; it never enters the Radar's ranking path.
+    "radar-quality-outcomes": {
+        "task": "app.radar.scheduler.radar_quality_outcomes",
+        "schedule": crontab(minute="*/5"),
     },
     # Admission only: reuses persisted discovery and market data without
     # invoking the existing opportunity-scoring sweep above.
@@ -122,5 +129,19 @@ celery_app.conf.beat_schedule = {
     "enrichment-requeue-dead-letters": {
         "task": "app.workers.enrichment_tasks.requeue_dead_letters",
         "schedule": crontab(minute="*/5"),
+    },
+    # The daily paper-wallet email. Every fifteen minutes rather than once at
+    # 09:00, and the beat here is UTC while the report time is local — the task
+    # itself decides whether the wall clock in `DAILY_REPORT_TIMEZONE` has
+    # reached the configured hour.
+    #
+    # That indirection buys three things a `crontab(hour=...)` cannot: it
+    # survives a worker being down at the exact minute, it retries a failed
+    # send without waiting a day, and it does not silently shift when the
+    # report timezone observes DST while Celery does not. Sending twice is
+    # prevented by a partial unique index, not by the schedule.
+    "daily-paper-report": {
+        "task": "app.reports.scheduler.daily_paper_report",
+        "schedule": crontab(minute="*/15"),
     },
 }

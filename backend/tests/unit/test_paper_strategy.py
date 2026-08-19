@@ -5,9 +5,8 @@ claim is worth nothing if the published description and the executed code can
 drift, so the central test here reads the numbers out of `describe()` and
 asserts the trades match them.
 
-Sprint 30 made the live strategy **Trailing Stop 25%** and retired the Equal
-Weight bracket. The retired one is still tested: its wallet is archived rather
-than deleted, so it still has to be able to describe the trades it took.
+Generation 2's trailing-stop strategy is live. Retired strategies remain
+readable because their archived wallets must still describe the trades they took.
 """
 
 from __future__ import annotations
@@ -20,8 +19,10 @@ import pytest
 from app.paper.models import Candidate
 from app.paper.strategy import (
     EQUAL_WEIGHT_V1,
+    PAPER_TRACK_RECORD_TP125_SL50_V1,
     TRAILING_STOP_25_V1,
     FixedSizeStrategy,
+    TrackRecordBracketStrategy,
     TrailingStopStrategy,
     registry,
 )
@@ -29,6 +30,17 @@ from app.paper.strategy import (
 pytestmark = pytest.mark.unit
 
 NOW = datetime(2026, 8, 5, 12, 0, tzinfo=UTC)
+
+# The bracket tests verify its immutable rule semantics without pretending the
+# archived Generation 6 strategy is allowed to open new positions.
+BRACKET_FOR_RULE_TEST = TrackRecordBracketStrategy(
+    id="test_bracket",
+    name="Test bracket",
+    version="test",
+    trade_size_usd=Decimal(10),
+    take_profit_multiple=Decimal("1.25"),
+    stop_loss_multiple=Decimal("0.50"),
+)
 
 
 def candidate(**overrides: object) -> Candidate:
@@ -45,62 +57,64 @@ def candidate(**overrides: object) -> Candidate:
 class TestThePublishedRuleIsTheExecutedRule:
     def test_the_summary_numbers_match_the_trade(self) -> None:
         """If these drift, every figure the wallet reports is described wrongly."""
-        spec = TRAILING_STOP_25_V1.describe()
+        spec = PAPER_TRACK_RECORD_TP125_SL50_V1.describe()
         rules = {rule.label: rule.value for rule in spec.rules}
-        entry = TRAILING_STOP_25_V1.entry_for(
+        entry = BRACKET_FOR_RULE_TEST.entry_for(
             candidate(), cash_available=Decimal(1000), now=NOW
         )
 
         assert entry is not None
-        assert rules["Trade size"] == f"${entry.size_usd:,.0f}"
-        assert rules["Trailing stop"] == "-25% from the highest price observed"
-        assert entry.trailing_drawdown == Decimal("0.25")
-        assert TRAILING_STOP_25_V1.exit_rules.trailing_drawdown == entry.trailing_drawdown
+        assert rules["Allocation"] == f"${entry.size_usd:,.0f} per token"
+        assert rules["Take profit"] == "1.25x (+25%) from actual entry reference price"
+        assert rules["Stop loss"] == "0.50x (-50%) from actual entry reference price"
+        assert entry.target_price == Decimal("0.0125")
+        assert entry.stop_price == Decimal("0.005")
 
     def test_the_rules_it_does_not_have_are_published_as_absent(self) -> None:
         """ "None" rather than a number out of reach.
 
-        The retired strategy expressed "no take profit" as a 1,000,000x target.
-        That reads as a rule sitting at an absurd level; this one says there is
-        no such rule, and the position row carries NULL to match.
+        The forward strategy expresses absent exits as absent values, not
+        thresholds at an unreachable value.
         """
-        rules = {rule.label: rule.value for rule in TRAILING_STOP_25_V1.describe().rules}
-        assert rules["Take profit"] == "None"
-        assert rules["Fixed stop"] == "None"
+        rules = {
+            rule.label: rule.value
+            for rule in PAPER_TRACK_RECORD_TP125_SL50_V1.describe().rules
+        }
+        assert rules["Trailing stop"] == "None"
         assert rules["Maximum hold"].startswith("None")
 
-        entry = TRAILING_STOP_25_V1.entry_for(
+        entry = BRACKET_FOR_RULE_TEST.entry_for(
             candidate(), cash_available=Decimal(1000), now=NOW
         )
         assert entry is not None
-        assert entry.target_price is None
-        assert entry.stop_price is None
+        assert entry.target_price is not None
+        assert entry.stop_price is not None
         assert entry.expires_at is None
 
-        exits = TRAILING_STOP_25_V1.exit_rules
-        assert exits.take_profit_multiple is None
-        assert exits.stop_loss_multiple is None
+        exits = BRACKET_FOR_RULE_TEST.exit_rules
+        assert exits.take_profit_multiple == Decimal("1.25")
+        assert exits.stop_loss_multiple == Decimal("0.50")
         assert exits.hold_for is None
 
-    def test_the_optimistic_fill_assumption_is_published(self) -> None:
-        """The exit books at the trigger, not at the reading that breached it.
+    def test_the_observed_gap_fill_assumption_is_published(self) -> None:
+        """A gap exits at the quote actually observed, not a theoretical stop."""
+        rules = {
+            rule.label: rule.value
+            for rule in PAPER_TRACK_RECORD_TP125_SL50_V1.describe().rules
+        }
+        assert "observed triggering price" in rules["Gap execution"].lower()
+        assert "paper execution model" in rules["Gap execution"].lower()
 
-        That is optimistic on a fast fall, and a reader comparing this record
-        against a real fill has to be told so on the card itself rather than
-        finding it in a docstring.
-        """
-        rules = {rule.label: rule.value for rule in TRAILING_STOP_25_V1.describe().rules}
-        assert "trigger" in rules["Fill assumption"].lower()
-        assert "optimistic" in rules["Fill assumption"].lower()
-
-    def test_the_entry_rule_states_that_it_reads_the_whole_radar(self) -> None:
-        """Not a top-ten cut. §4 buys the highest-ranked *eligible* token, and a
-        wallet that only looked at ten rows would idle once those ten were
-        traded once each."""
-        rules = {rule.label: rule.value for rule in TRAILING_STOP_25_V1.describe().rules}
-        assert TRAILING_STOP_25_V1.top_n is None
-        assert "Radar" in rules["Entry"]
-        assert "top" not in rules["Entry"].lower()
+    def test_the_entry_rule_states_that_it_reads_raw_discoveries(self) -> None:
+        """The active forward experiment accepts each new Track Record admission,
+        without a ranking cut."""
+        rules = {
+            rule.label: rule.value
+            for rule in PAPER_TRACK_RECORD_TP125_SL50_V1.describe().rules
+        }
+        assert PAPER_TRACK_RECORD_TP125_SL50_V1.top_n is None
+        assert "track record admission" in rules["Universe"].lower()
+        assert "track record" in rules["Admission source"].lower()
 
     def test_the_retired_bracket_still_describes_itself(self) -> None:
         """Its wallet is archived, not deleted, so its rules must stay readable."""
@@ -129,7 +143,7 @@ class TestEligibility:
     def test_rank_never_declines_a_candidate(self) -> None:
         """The whole Radar is in scope, so the hundredth row is as buyable as
         the first when everything above it has already been traded."""
-        entry = TRAILING_STOP_25_V1.entry_for(
+        entry = BRACKET_FOR_RULE_TEST.entry_for(
             candidate(rank=137), cash_available=Decimal(1000), now=NOW
         )
         assert entry is not None
@@ -139,20 +153,24 @@ class TestEligibility:
         published rule did not produce. Running out of money is a real outcome
         and the equity curve should show it."""
         assert (
-            TRAILING_STOP_25_V1.entry_for(candidate(), cash_available=Decimal(99), now=NOW)
+            BRACKET_FOR_RULE_TEST.entry_for(
+                candidate(), cash_available=Decimal("9.99"), now=NOW
+            )
             is None
         )
 
     def test_exactly_enough_cash_fills(self) -> None:
         assert (
-            TRAILING_STOP_25_V1.entry_for(candidate(), cash_available=Decimal(100), now=NOW)
+            BRACKET_FOR_RULE_TEST.entry_for(
+                candidate(), cash_available=Decimal(10), now=NOW
+            )
             is not None
         )
 
     def test_an_unpriced_token_is_not_a_free_one(self) -> None:
         for price in (Decimal(0), Decimal("-1")):
             assert (
-                TRAILING_STOP_25_V1.entry_for(
+                BRACKET_FOR_RULE_TEST.entry_for(
                     candidate(price_usd=price), cash_available=Decimal(1000), now=NOW
                 )
                 is None
@@ -173,7 +191,7 @@ class TestSizing:
         """Prices here run to 4.8e-10. Rounding the quantity would misreport the
         exit value of every position."""
         price = Decimal("0.000000000487")
-        entry = TRAILING_STOP_25_V1.entry_for(
+        entry = BRACKET_FOR_RULE_TEST.entry_for(
             candidate(price_usd=price), cash_available=Decimal(1000), now=NOW
         )
         assert entry is not None
@@ -182,10 +200,10 @@ class TestSizing:
     def test_equal_weight_ignores_rank(self) -> None:
         """Any size that varied with the Radar's own opinion would mix a second
         model into a result presented as a test of the first."""
-        first = TRAILING_STOP_25_V1.entry_for(
+        first = BRACKET_FOR_RULE_TEST.entry_for(
             candidate(rank=1), cash_available=Decimal(1000), now=NOW
         )
-        hundredth = TRAILING_STOP_25_V1.entry_for(
+        hundredth = BRACKET_FOR_RULE_TEST.entry_for(
             candidate(rank=100), cash_available=Decimal(1000), now=NOW
         )
         assert first is not None and hundredth is not None
@@ -195,12 +213,12 @@ class TestSizing:
         """Liquidity gates entry and lands in the audit record. It must never
         change how much is bought — that would be confidence weighting under
         another name."""
-        thin = TRAILING_STOP_25_V1.entry_for(
+        thin = BRACKET_FOR_RULE_TEST.entry_for(
             candidate(liquidity_usd=Decimal(500), market_cap=Decimal(1_000)),
             cash_available=Decimal(1000),
             now=NOW,
         )
-        deep = TRAILING_STOP_25_V1.entry_for(
+        deep = BRACKET_FOR_RULE_TEST.entry_for(
             candidate(liquidity_usd=Decimal(500_000), market_cap=Decimal(9_000_000)),
             cash_available=Decimal(1000),
             now=NOW,
@@ -212,12 +230,14 @@ class TestSizing:
 
 
 class TestRegistry:
-    def test_the_default_is_the_trailing_stop_and_it_is_operational(self) -> None:
+    def test_the_default_is_the_resumed_generation_two_strategy(
+        self,
+    ) -> None:
         assert registry.default.id == TRAILING_STOP_25_V1.id
         assert registry.default.operational
 
     def test_exactly_one_strategy_trades(self) -> None:
-        """The wallet measures the Radar, not a comparison between rules."""
+        """The wallet runs one published forward strategy at a time."""
         assert sum(1 for item in registry.all() if item.operational) == 1
 
     def test_a_second_operational_strategy_is_rejected_at_construction(self) -> None:

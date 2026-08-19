@@ -64,7 +64,6 @@ const PRODUCT_LINKS = [
   { href: "/command", title: "Open Radar", body: "Review ranked Radar candidates and fresh detections." },
   { href: "/record", title: "View track record", body: "Inspect every recorded detection, including outcomes that did not work." },
   { href: "/wallet", title: "Open Paper Wallet", body: "Follow the simulated strategy and its immutable trade record." },
-  { href: "/strategy-intelligence", title: "Strategy intelligence", body: "Compare the paper-wallet evidence collected by each published wallet." },
 ] as const;
 
 export function HomepageIntelligence() {

@@ -107,10 +107,17 @@ RESOLVED_ASSET = {
 
 
 @pytest.fixture(autouse=True)
-async def _clear_dedupe(client: Any) -> Any:
+async def _clear_dedupe(client: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
     """Redis dedupe keys are global; clear them so tests do not leak into each other."""
     from app.core.redis import get_redis
 
+    async def _discard_rpc_telemetry(*_: Any, **__: Any) -> bool:
+        """The legacy scanner fixture uses the development DB directly."""
+        return False
+
+    monkeypatch.setattr(
+        "app.services.scanner.scanner.record_rpc_observation", _discard_rpc_telemetry
+    )
     await get_redis().flushdb()
     yield
     await get_redis().flushdb()

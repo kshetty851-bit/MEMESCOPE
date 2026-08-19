@@ -35,18 +35,16 @@ FORBIDDEN_ROOTS = {
 }
 
 #: The package's deliberate I/O seams. `repository.py` owns database access,
-#: `service.py` and `lab_service.py` orchestrate, `scheduler.py` is the Celery
+#: `service.py` orchestrates and `scheduler.py` is the Celery
 #: entry point and `api.py` is HTTP. Everything else stays pure.
 #:
 #: This set is meant to grow only when a genuinely new seam is added — Sprint 26
-#: added `lab_service.py`, which loads the replay dataset and does nothing else.
 #: A name appearing here because a *decision* moved into an I/O module would be
 #: the boundary eroding, and is the thing to refuse.
 IO_MODULES = {
     "repository.py",
+    "research_ledger.py",
     "service.py",
-    "lab_service.py",
-    "shadow.py",
     "scheduler.py",
     "api.py",
     "schemas.py",

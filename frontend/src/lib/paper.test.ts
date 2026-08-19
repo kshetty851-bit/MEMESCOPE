@@ -63,6 +63,11 @@ function position(overrides: Partial<PaperPosition> = {}): PaperPosition {
     exit_reason: null,
     manual_action_at: null,
     pnl_usd: "20.00",
+    gross_pnl_usd: null,
+    fee_usd: null,
+    slippage_usd: null,
+    net_pnl_usd: null,
+    cost_unavailable_reason: null,
     ...overrides,
   };
 }
@@ -152,7 +157,10 @@ describe("paperStateFor", () => {
 
 describe("byMint", () => {
   it("indexes positions so a page can ask about many tokens at once", () => {
-    const index = byMint([position({ mint_address: "a" }), position({ mint_address: "b" })]);
+    const index = byMint([
+      position({ mint_address: "a" }),
+      position({ mint_address: "b" }),
+    ]);
     expect(index.get("a")?.mint_address).toBe("a");
     expect(index.get("missing")).toBeUndefined();
   });

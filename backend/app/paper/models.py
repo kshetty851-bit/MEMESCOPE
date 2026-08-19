@@ -47,6 +47,11 @@ class ExitReason(enum.StrEnum):
     TARGET = "target"
     #: Price reached the stop fixed at entry.
     STOP = "stop"
+    #: A 2x-activated trailing stop was breached at an observed market price.
+    TRAILING_STOP = "trailing_stop"
+    #: The market provider explicitly reported the token as inactive and a
+    #: contemporaneous usable quote supported a paper close.
+    TERMINAL = "terminal"
     #: The holding period published by the strategy elapsed.
     EXPIRY = "expiry"
     #: A paper-only human override closed the position at an observed quote.
@@ -94,6 +99,7 @@ class Candidate:
     observed_at: datetime
     liquidity_usd: Decimal | None = None
     market_cap: Decimal | None = None
+    volume_24h: Decimal | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,6 +125,8 @@ class Entry:
     stop_price: Decimal | None = None
     expires_at: datetime | None = None
     trailing_drawdown: Decimal | None = None
+    #: The trail is inactive until an observed price reaches this entry multiple.
+    trailing_activation_multiple: Decimal | None = None
     #: The market observed at entry, recorded rather than used. Perishable, and
     #: required by the permanent audit record at close.
     market_cap: Decimal | None = None

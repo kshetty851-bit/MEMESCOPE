@@ -19,7 +19,6 @@ over stored history; none of it recommends an entry, an exit or a stop.
 
 from __future__ import annotations
 
-from dataclasses import asdict
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Annotated
@@ -29,10 +28,10 @@ from fastapi import APIRouter, Query
 from app.api.deps import DbSession
 from app.core.config import settings
 from app.models.paper import PaperPosition, PaperTradeAudit
-from app.paper import audit, benchmark, cadence, costs, eligibility, lab
-from app.paper.lab_service import load_dataset, replay_all
+from app.paper import audit, benchmark, cadence, eligibility
 from app.paper.metrics import WalletMetrics
 from app.paper.models import PositionStatus
+from app.paper.performance import daily_returns
 from app.paper.repository import PaperRepository
 from app.paper.schemas import (
     ArchivedWalletOut,
@@ -40,29 +39,17 @@ from app.paper.schemas import (
     AuditEntryOut,
     AuditOut,
     BenchmarkOut,
-    EquityPointOut,
-    ExecutionModelPerformanceOut,
-    LabDataIntegrityOut,
-    LabFindingOut,
-    LabOut,
-    LabRuleOut,
-    LabStrategyOut,
-    LabTokensOut,
+    DailyReturnOut,
     LastTradeOut,
     ManualSellOut,
     ManualSellPreviewOut,
     MetricsOut,
-    PatternAnalysisOut,
+    PerformanceOut,
     PositionOut,
     PositionsOut,
-    RecommendationOut,
-    RejectedIdeaOut,
     RuleOut,
-    SegmentRowOut,
     StrategiesOut,
     StrategyOut,
-    TokenComparisonOut,
-    TradeCardOut,
     WaitingOut,
     WalletOut,
 )
@@ -72,7 +59,6 @@ from app.paper.service import (
     PaperWalletService,
     WalletRead,
 )
-from app.paper.shadow import ShadowPaperService
 from app.paper.strategy import AnyStrategy, registry
 from app.repositories.token import TokenRepository
 
@@ -100,13 +86,13 @@ async def list_strategies() -> StrategiesOut:
     Declared before `/{...}`-shaped routes for the same reason `radar/api.py`
     orders its literals first.
 
-    Publishing the non-operational ones is deliberate: a reader can see that the
-    architecture holds four rule sets and that exactly one is running, rather
-    than inferring that one is all there is.
+    Retired strategies remain resolvable for archived-wallet records but are
+    deliberately not surfaced as selectable/current paper strategies.  The
+    product has one active forward experiment, not a menu of stale variants.
     """
     active = _active_strategy()
     return StrategiesOut(
-        items=[_to_strategy(item, active_id=active.id) for item in registry.all()],
+        items=[_to_strategy(active, active_id=active.id)],
         active_id=active.id,
     )
 
@@ -119,8 +105,18 @@ async def list_positions(session: DbSession) -> PositionsOut:
         return PositionsOut(items=[], enabled=False, observed_at=now)
 
     read = await PaperWalletService(session).read(now=now)
+    audits_by_position_id = await PaperRepository(session).audits_for_position_ids(
+        [
+            row.id
+            for row in read.positions
+            if row.status == PositionStatus.CLOSED.value
+        ]
+    )
     return PositionsOut(
-        items=[_to_position(row, read) for row in read.positions],
+        items=[
+            _to_position(row, read, audit_row=audits_by_position_id.get(row.id))
+            for row in read.positions
+        ],
         enabled=True,
         observed_at=now,
     )
@@ -200,6 +196,57 @@ async def get_audit(
     )
 
 
+@router.get(
+    "/performance",
+    response_model=PerformanceOut,
+    summary="Completed-trade returns by day",
+)
+async def get_performance(session: DbSession) -> PerformanceOut:
+    """Date-by-date returns from the append-only completed-trade record.
+
+    This intentionally does not group open-position marks into a day. Current
+    portfolio return belongs to the wallet summary and remains unknown whenever
+    a holding has no fresh price; a historical day is a closed-trade record.
+    """
+    now = datetime.now(UTC)
+    if not settings.FEATURE_PAPER_WALLET_ENABLED:
+        return PerformanceOut(
+            enabled=False,
+            daily=[],
+            disclosure=audit.DISCLOSURE,
+            observed_at=now,
+        )
+
+    repository = PaperRepository(session)
+    wallet = await repository.live_wallet()
+    if wallet is None:
+        return PerformanceOut(
+            enabled=True,
+            daily=[],
+            disclosure=audit.DISCLOSURE,
+            observed_at=now,
+        )
+
+    rows = await repository.audit_log(wallet.id, limit=None)
+    return PerformanceOut(
+        enabled=True,
+        daily=[
+            DailyReturnOut(
+                date=row.date,
+                completed_trades=row.completed_trades,
+                gross_pnl_usd=row.gross_pnl_usd,
+                gross_return_pct=row.gross_return_pct,
+                net_pnl_usd=row.net_pnl_usd,
+                net_return_pct=row.net_return_pct,
+                cost_unavailable_trades=row.cost_unavailable_trades,
+            )
+            for row in daily_returns(rows, starting_balance=wallet.starting_balance)
+        ],
+        disclosure=audit.DISCLOSURE,
+        observed_at=now,
+    )
+
+
 @router.get("/archive", response_model=ArchiveOut, summary="Retired wallets (internal)")
 async def get_archive(session: DbSession) -> ArchiveOut:
     """Retired generations, for internal historical comparison.
@@ -236,27 +283,6 @@ async def get_archive(session: DbSession) -> ArchiveOut:
     return ArchiveOut(items=items, note=ARCHIVE_NOTE, observed_at=now)
 
 
-@router.get("/strategy-intelligence", summary="Shadow wallet strategy intelligence")
-async def get_strategy_intelligence(session: DbSession) -> dict[str, object]:
-    """V2-V5 live shadow candidates, isolated from the published V1 wallet."""
-    now = datetime.now(UTC)
-    if not settings.FEATURE_PAPER_WALLET_ENABLED:
-        return {
-            "enabled": False,
-            "observed_at": now,
-            "promotion_rules": {
-                "minimum_completed_trades": 100,
-                "minimum_profit_factor": "1.20",
-                "requires_positive_net_return": True,
-                "requires_positive_expectancy": True,
-            },
-            "wallets": [],
-            "missed_opportunities": [],
-            "filter_performance": [],
-        }
-    return await ShadowPaperService(session).intelligence(now=now)
-
-
 @router.get("", response_model=WalletOut, summary="The paper wallet")
 async def get_wallet(session: DbSession) -> WalletOut:
     """Balance, equity, every metric, and the benchmarks it is measured against."""
@@ -277,6 +303,7 @@ async def get_wallet(session: DbSession) -> WalletOut:
 
     read = await PaperWalletService(session).read(now=now)
     benchmarks = _benchmarks(read)
+
     return WalletOut(
         enabled=True,
         strategy=_to_strategy(read.strategy, active_id=read.strategy.id),
@@ -284,6 +311,7 @@ async def get_wallet(session: DbSession) -> WalletOut:
         benchmarks=benchmarks,
         generation=read.wallet.generation,
         started_at=read.wallet.started_at,
+        resumed_at=read.wallet.resumed_at,
         benchmark_note=_benchmark_note(read),
         waiting=_to_waiting(read),
         last_trade=_last_trade(read),
@@ -353,7 +381,9 @@ def _empty_metrics(starting: Decimal) -> MetricsOut:
         cash=starting,
         equity=starting,
         roi_pct=Decimal(0),
+        return_usd=Decimal(0),
         open_value=Decimal(0),
+        known_partial_equity=starting,
         invested_usd=Decimal(0),
         realised_pnl=Decimal(0),
         max_drawdown_note=MAX_DRAWDOWN_NOTE,
@@ -366,9 +396,12 @@ def _to_metrics(summary: WalletMetrics) -> MetricsOut:
         cash=summary.cash,
         equity=summary.equity,
         roi_pct=summary.roi_pct,
+        return_usd=summary.return_usd,
         open_value=summary.open_value,
         invested_usd=summary.invested_usd,
         unpriced_positions=summary.unpriced_positions,
+        known_partial_equity=summary.known_partial_equity,
+        priced_positions=summary.priced_positions,
         open_positions=summary.open_positions,
         closed_positions=summary.closed_positions,
         realised_pnl=summary.realised_pnl,
@@ -391,7 +424,12 @@ def _pct_from(entry: Decimal, price: Decimal | None) -> Decimal | None:
     return ((price - entry) / entry * 100).quantize(Decimal("0.01"))
 
 
-def _to_position(row: PaperPosition, read: WalletRead) -> PositionOut:
+def _to_position(
+    row: PaperPosition,
+    read: WalletRead,
+    *,
+    audit_row: PaperTradeAudit | None = None,
+) -> PositionOut:
     name, symbol = read.names.get(row.mint_address, (None, None))
     closed = row.status == PositionStatus.CLOSED.value
 
@@ -412,7 +450,9 @@ def _to_position(row: PaperPosition, read: WalletRead) -> PositionOut:
     # a second source of truth for the only rule this strategy has.
     trailing_stop: Decimal | None = None
     if row.trailing_drawdown is not None and not closed:
-        trailing_stop = row.peak_price * (Decimal(1) - row.trailing_drawdown)
+        trailing_stop = getattr(row, "trailing_stop_price", None)
+        if trailing_stop is None and getattr(row, "trailing_activated_at", None) is not None:
+            trailing_stop = row.peak_price * (Decimal(1) - row.trailing_drawdown)
 
     return PositionOut(
         mint_address=row.mint_address,
@@ -435,11 +475,21 @@ def _to_position(row: PaperPosition, read: WalletRead) -> PositionOut:
         entry_execution_fallback_reason=row.entry_execution_fallback_reason,
         entry_market_cap=row.entry_market_cap,
         entry_liquidity_usd=row.entry_liquidity_usd,
-        target_price=row.target_price,
-        stop_price=row.stop_price,
-        expires_at=row.expires_at,
+        target_price=getattr(row, "target_price", None),
+        stop_price=getattr(row, "stop_price", None),
+        expires_at=getattr(row, "expires_at", None),
         trailing_drawdown=row.trailing_drawdown,
+        trailing_activation_multiple=getattr(row, "trailing_activation_multiple", None),
+        trailing_activated_at=getattr(row, "trailing_activated_at", None),
+        trailing_activation_observed_price=getattr(
+            row, "trailing_activation_observed_price", None
+        ),
+        trailing_high_price=(
+            row.peak_price if getattr(row, "trailing_activated_at", None) else None
+        ),
         trailing_stop_price=trailing_stop,
+        trailing_trigger_price=getattr(row, "trailing_trigger_price", None),
+        trailing_trigger_observed_price=getattr(row, "trailing_trigger_observed_price", None),
         current_price=current,
         current_pct=_pct_from(row.entry_price, current),
         current_price_at=observed_at,
@@ -455,8 +505,15 @@ def _to_position(row: PaperPosition, read: WalletRead) -> PositionOut:
         exit_execution_confidence=row.exit_execution_confidence,
         exit_execution_fallback_reason=row.exit_execution_fallback_reason,
         exit_reason=row.exit_reason,
-        manual_action_at=row.manual_action_at,
+        manual_action_at=getattr(row, "manual_action_at", None),
         pnl_usd=pnl,
+        gross_pnl_usd=None if audit_row is None else audit_row.gross_return_usd,
+        fee_usd=None if audit_row is None else audit_row.fee_usd,
+        slippage_usd=None if audit_row is None else audit_row.slippage_usd,
+        net_pnl_usd=None if audit_row is None else audit_row.net_return_usd,
+        cost_unavailable_reason=(
+            None if audit_row is None else audit_row.cost_unavailable_reason
+        ),
     )
 
 
@@ -683,258 +740,3 @@ def _to_audit_entry(row: PaperTradeAudit, *, image_url: str | None = None) -> Au
         execution_confidence=row.execution_confidence,
         execution_fallback_reason=row.execution_fallback_reason,
     )
-
-
-# --- Strategy Lab -------------------------------------------------------------
-
-METHODOLOGY = (
-    "Strategy Lab V2 is scoped to Generation 2 only: the live "
-    "`trailing_stop_25_v1` paper-wallet entries. Generation 1 is archived and "
-    "excluded from optimisation metrics. Alternate exits are reconstructed from "
-    "chronological market snapshots rather than stored trigger-level exit "
-    "prices. Production trading behaviour is not changed by this page."
-)
-
-
-@router.get("/lab", response_model=LabOut, summary="Strategy Lab")
-async def get_lab(session: DbSession) -> LabOut:
-    now = datetime.now(UTC)
-    dataset = await load_dataset(session, now=now)
-    results = replay_all(dataset)
-    baseline = next(item for item in results if item.id == lab.BASELINE_ID)
-    baseline_net = baseline.net_return_pct
-    first_open = min((entry.opened_at for entry in dataset.entries), default=None)
-    last_quote = max(
-        (quote.at for entry in dataset.entries for quote in entry.quotes),
-        default=None,
-    )
-    decision_code, decision = lab.final_decision(results)
-
-    return LabOut(
-        strategies=[_to_lab_strategy(item, baseline_net=baseline_net) for item in results],
-        unavailable=[],
-        findings=_findings(results),
-        baseline_id=lab.BASELINE_ID,
-        data_integrity=LabDataIntegrityOut(**asdict(dataset.integrity)),
-        execution_models=[
-            ExecutionModelPerformanceOut(**asdict(row)) for row in dataset.execution_models
-        ],
-        production_summary=_to_lab_strategy(baseline, baseline_net=baseline_net),
-        pattern_analysis=PatternAnalysisOut(
-            entry_market_cap=[
-                SegmentRowOut(**asdict(row))
-                for row in lab.segment(dataset.entries, lab.market_cap_band)
-            ],
-            liquidity=[
-                SegmentRowOut(**asdict(row))
-                for row in lab.segment(dataset.entries, lab.liquidity_band)
-            ],
-            radar_score=[
-                SegmentRowOut(**asdict(row))
-                for row in lab.segment(dataset.entries, lab.score_band)
-            ],
-            age=[
-                SegmentRowOut(**asdict(row))
-                for row in lab.segment(dataset.entries, lab.age_band)
-            ],
-            holding_time=[
-                SegmentRowOut(**asdict(row))
-                for row in lab.segment_baseline_trades(dataset.entries, lab.holding_band)
-            ],
-        ),
-        largest_winners=[
-            TradeCardOut(**asdict(row))
-            for row in lab.largest_cards(dataset.entries, winners=True)
-        ],
-        largest_losers=[
-            TradeCardOut(**asdict(row))
-            for row in lab.largest_cards(dataset.entries, winners=False)
-        ],
-        suggestions=[RecommendationOut(**asdict(row)) for row in lab.recommendations(results)],
-        rejected_ideas=[RejectedIdeaOut(**asdict(row)) for row in lab.rejected_ideas(results)],
-        final_decision_code=decision_code,
-        final_decision=decision,
-        detections=len(dataset.entries),
-        unpriced_detections=sum(1 for entry in dataset.entries if not entry.quotes),
-        observed_days=(
-            None
-            if first_open is None or last_quote is None
-            else (
-                Decimal((last_quote - first_open).total_seconds()) / Decimal(86_400)
-            ).quantize(Decimal("0.1"))
-        ),
-        methodology=METHODOLOGY,
-        cost_disclosure=costs.DISCLOSURE,
-        cost_rules=[
-            LabRuleOut(
-                label="Swap fee",
-                value=f"{costs.DEFAULT.swap_fee_bps} bps per side on legacy rows",
-            ),
-            LabRuleOut(
-                label="Price impact",
-                value="Constant product against the pool depth observed at each end",
-            ),
-            LabRuleOut(
-                label="Jupiter execution",
-                value=(
-                    "Future rows store the quote route, impact and estimated "
-                    "USDC received at decision time; historical rows are not re-quoted"
-                ),
-            ),
-            LabRuleOut(label="Slippage from competing flow", value="Not modelled"),
-            LabRuleOut(label="Priority fees and MEV", value="Not modelled"),
-            LabRuleOut(
-                label="Bonding-curve pairs",
-                value="Excluded — the venue reports no liquidity",
-            ),
-        ],
-        observed_at=now,
-    )
-
-
-@router.get("/lab/tokens", response_model=LabTokensOut, summary="Per-token rule comparison")
-async def get_lab_tokens(
-    session: DbSession,
-    limit: Annotated[int, Query(ge=1, le=500)] = 100,
-) -> LabTokensOut:
-    """How every rule handled each token, and which captured most of its peak."""
-    now = datetime.now(UTC)
-    dataset = await load_dataset(session, now=now)
-    results = replay_all(dataset)
-
-    return LabTokensOut(
-        items=[
-            TokenComparisonOut(
-                mint_address=item.mint_address,
-                symbol=item.symbol,
-                peak_pct=item.peak_pct,
-                returns=item.returns,
-                best_strategy_id=item.best_strategy_id,
-                best_capture_pct=item.best_capture_pct,
-            )
-            for item in lab.replay_tokens(results, limit=limit)
-        ],
-        strategy_ids=[strategy.id for strategy in lab.STRATEGIES],
-        observed_at=now,
-    )
-
-
-def _to_lab_strategy(
-    result: lab.StrategyResult,
-    *,
-    baseline_net: Decimal | None,
-) -> LabStrategyOut:
-    difference: Decimal | None = None
-    if (
-        not result.is_baseline
-        and baseline_net is not None
-        and result.net_return_pct is not None
-    ):
-        difference = (result.net_return_pct - baseline_net).quantize(Decimal("0.01"))
-
-    return LabStrategyOut(
-        id=result.id,
-        name=result.name,
-        description=result.description,
-        rules=[LabRuleOut(label=label, value=value) for label, value in result.rules],
-        is_baseline=result.is_baseline,
-        invested=result.invested,
-        total_return_pct=result.total_return_pct,
-        realised_return_pct=result.realised_return_pct,
-        open_share_pct=(
-            None
-            if result.closed_count + result.open_count == 0
-            else (
-                Decimal(result.open_count)
-                / Decimal(result.closed_count + result.open_count)
-                * Decimal(100)
-            ).quantize(Decimal("0.01"))
-        ),
-        net_return_pct=result.net_return_pct,
-        cost_drag_pct=result.cost_drag_pct,
-        costed_trades=result.costed_trades,
-        uncosted_trades=result.uncosted_trades,
-        baseline_difference_pct=difference,
-        annualised_return_pct=None,
-        annualised_unavailable_reason=(
-            "Not shown: the Generation 2 dataset is too short to annualise honestly."
-        ),
-        closed_count=result.closed_count,
-        open_count=result.open_count,
-        win_rate_pct=result.win_rate_pct,
-        profit_factor=result.profit_factor,
-        expectancy=result.expectancy,
-        average_win=result.average_winner,
-        average_loss=result.average_loser,
-        average_winner=result.average_winner,
-        average_loser=result.average_loser,
-        largest_winner=result.largest_winner,
-        largest_loser=result.largest_loser,
-        max_drawdown_pct=result.max_drawdown_pct,
-        average_hold_hours=result.average_hold_hours,
-        average_peak_pct=result.average_peak_pct,
-        average_capture_pct=result.average_capture_pct,
-        average_giveback_pct=result.average_giveback_pct,
-        fees_usd=result.fees_usd,
-        slippage_usd=result.slippage_usd,
-        average_slippage_usd=result.average_slippage_usd,
-        capital_utilization_pct=result.capital_utilization_pct,
-        exits_by_reason=result.exits_by_reason,
-        rank=result.rank,
-        equity_curve=[
-            EquityPointOut(at=point.at, equity=point.equity, drawdown_pct=point.drawdown_pct)
-            for point in result.equity_curve
-        ],
-        return_distribution=[
-            value
-            for value in (trade.gross_return_pct for trade in result.trades)
-            if value is not None
-        ],
-        hold_distribution=[
-            value
-            for value in (trade.hold_hours for trade in result.trades)
-            if value is not None
-        ],
-    )
-
-
-def _findings(results: tuple[lab.StrategyResult, ...]) -> list[LabFindingOut]:
-    findings: list[LabFindingOut] = []
-    if not results:
-        return findings
-    best = results[0]
-    baseline = next(item for item in results if item.id == lab.BASELINE_ID)
-    findings.append(
-        LabFindingOut(
-            headline=f"Best net replay: {best.name}",
-            detail=(
-                f"Ranked by net return, profit factor, drawdown, and expectancy. "
-                f"Net return {best.net_return_pct}%, profit factor {best.profit_factor}, "
-                f"drawdown {best.max_drawdown_pct}% over {best.closed_count} closed exits."
-            ),
-            strategy_id=best.id,
-        )
-    )
-    findings.append(
-        LabFindingOut(
-            headline=f"Production baseline rank: {baseline.rank} of {len(results)}",
-            detail=(
-                f"Trailing Stop 25% V1 nets {baseline.net_return_pct}% with "
-                f"{baseline.win_rate_pct}% win rate and {baseline.expectancy} expectancy. "
-                "Manual exits are permanently distinguishable and Generation 1 is excluded."
-            ),
-            strategy_id=baseline.id,
-        )
-    )
-    costly = max(results, key=lambda item: abs(item.cost_drag_pct or Decimal(0)))
-    findings.append(
-        LabFindingOut(
-            headline="Execution cost remains part of the result",
-            detail=(
-                f"The largest measured cost drag is {costly.cost_drag_pct}% on "
-                f"{costly.name}. Net figures use the existing fee and AMM impact model."
-            ),
-            strategy_id=costly.id,
-        )
-    )
-    return findings

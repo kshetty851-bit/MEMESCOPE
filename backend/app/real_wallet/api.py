@@ -2,23 +2,84 @@
 
 from __future__ import annotations
 
+import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
-from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter
+from pydantic import BaseModel, Field
 
 from app.api.deps import AdminUser, DbSession
 from app.core.config import settings
+from app.core.exceptions import ConflictError, NotFoundError, ServiceUnavailableError
+from app.models.real_wallet_execution import RealWalletDevnetIntent, RealWalletDevnetQuote
 from app.real_wallet.balance import ExecutionWalletBalanceService
+from app.real_wallet.devnet_intent import DevnetIntentState, DevnetIntentTransitionError
+from app.real_wallet.devnet_repository import DevnetIntentExpiredError, DevnetIntentRepository
+from app.real_wallet.devnet_signer_client import (
+    DevnetSignerRejectedError,
+    DevnetSignerUnavailableError,
+    UnixDevnetSignerClient,
+)
+from app.real_wallet.devnet_workflow import (
+    DevnetApprovalRequiredError,
+    DevnetManualWorkflow,
+    DevnetManualWorkflowError,
+)
 from app.real_wallet.live_repository import LiveIntentRepository
+from app.real_wallet.network import (
+    DevnetExecutionBlockedError,
+    is_valid_wallet_address,
+    verify_wallet_network,
+)
 from app.real_wallet.repository import RealWalletExecutionRepository
-from app.real_wallet.signer import FileExecutionSigner
 from app.real_wallet.sol_price import JupiterSolUsdPriceSource, SolUsdPrice
 from app.real_wallet.transport_policy import readiness as transport_readiness
-from app.services.rpc.registry import get_rpc
+from app.repositories.token import TokenRepository
+from app.services.rpc.standard import StandardSolanaRPC
 
 router = APIRouter(prefix="/real-wallet", tags=["real-wallet"])
+
+
+class NativeTransferQuoteIn(BaseModel):
+    destination_public_key: str = Field(min_length=32, max_length=44)
+    lamports: int = Field(gt=0)
+
+
+class DevnetIntentIn(BaseModel):
+    quote_id: uuid.UUID
+    idempotency_key: str = Field(min_length=8, max_length=160)
+
+
+class ManualApprovalIn(BaseModel):
+    confirmation_phrase: Literal["APPROVE_DEVNET_TRANSFER"]
+
+
+class DevnetIntentSummary(BaseModel):
+    id: uuid.UUID
+    state: str
+    action_type: str
+    wallet_public_key: str
+    destination_public_key: str | None
+    input_mint: str
+    output_mint: str | None
+    input_amount_raw: str
+    quote_id: uuid.UUID | None
+    quote_expires_at: datetime | None
+    simulation_status: str | None
+    approval_status: str | None
+    approval_expires_at: datetime | None
+    signing_status: str | None
+    transaction_signature: str | None
+    submission_status: str | None
+    submission_retry_count: int
+    confirmation_status: str | None
+    confirmation_slot: int | None
+    failure_reason: str | None
+    reconciliation: dict[str, object] | None
+    created_at: datetime
+    updated_at: datetime
 
 
 def _decimal(value: Decimal) -> str:
@@ -69,14 +130,58 @@ async def status(_admin: AdminUser, session: DbSession) -> dict[str, object]:
     except Exception:  # pragma: no cover - the source already fails closed
         sol_price = None
     public_key = settings.REAL_WALLET_PUBLIC_KEY.strip()
+    address_valid = bool(public_key) and is_valid_wallet_address(public_key)
     balance_sol: float | None = None
+    token_balances: list[dict[str, object]] = []
     balance_error: str | None = None
-    if public_key:
-        rpc = get_rpc()
+    rpc_status: dict[str, object] = {
+        "network": settings.REAL_WALLET_NETWORK,
+        "verified": False,
+        "observed_genesis_hash": None,
+        "error": "wallet_not_configured" if not public_key else "invalid_address",
+    }
+    if address_valid:
+        # Never inherit the scanner RPC. The wallet reader verifies this exact
+        # endpoint's genesis hash before it displays chain state.
+        rpc = StandardSolanaRPC(rpc_url=settings.REAL_WALLET_RPC_URL)
         try:
             async with rpc:
-                balance = await ExecutionWalletBalanceService(rpc).get_sol_balance(public_key)
-                balance_sol = balance.sol
+                network = await verify_wallet_network(
+                    rpc, network=settings.REAL_WALLET_NETWORK
+                )
+                rpc_status = {
+                    "network": network.network,
+                    "verified": network.verified,
+                    "observed_genesis_hash": network.observed_genesis_hash,
+                    "error": network.error,
+                }
+                if not network.verified:
+                    balance_error = "network_unverified"
+                else:
+                    balances = ExecutionWalletBalanceService(rpc)
+                    sol_balance = await balances.get_sol_balance(public_key)
+                    balance_sol = sol_balance.sol
+                    spl_balances = await balances.get_spl_balances(public_key)
+                    known_tokens = await TokenRepository(session).get_many_by_mints(
+                        [row.mint_address for row in spl_balances]
+                    )
+                    # Repeat the read-free RPC result after the DB lookup so no
+                    # token metadata can be mistaken for on-chain balance data.
+                    for row in spl_balances:
+                        token = known_tokens.get(row.mint_address)
+                        token_balances.append(
+                            {
+                                "token_account": row.token_account,
+                                "mint_address": row.mint_address,
+                                "raw_amount": row.raw_amount,
+                                "quantity": row.quantity,
+                                "decimals": row.decimals,
+                                "program_id": row.program_id,
+                                "symbol": None if token is None else token.symbol,
+                                "name": None if token is None else token.name,
+                                "image_url": None if token is None else token.image_url,
+                            }
+                        )
         except Exception:
             balance_error = "unavailable"
     decisions = await RealWalletExecutionRepository(session).latest(limit=30)
@@ -86,21 +191,13 @@ async def status(_admin: AdminUser, session: DbSession) -> dict[str, object]:
     open_positions = await live.open_positions_count()
     health = await live.health()
     positions = await live.positions(limit=30)
-    signer_ready = False
-    if public_key and settings.REAL_WALLET_EXECUTION_SECRET_FILE:
-        # Readiness is intentionally a boolean. The secret and its bytes never
-        # escape this backend-only check.
-        try:
-            FileExecutionSigner.load(
-                secret_file=Path(settings.REAL_WALLET_EXECUTION_SECRET_FILE),
-                expected_public_key=public_key,
-            )
-            signer_ready = True
-        except Exception:
-            signer_ready = False
     return {
         "public_key": public_key or None,
+        "address_valid": address_valid,
+        "network": settings.REAL_WALLET_NETWORK,
+        "rpc": rpc_status,
         "sol_balance": balance_sol,
+        "token_balances": token_balances,
         "balance_error": balance_error,
         "funding_status": (
             "unknown" if balance_sol is None else "unfunded" if balance_sol == 0 else "funded"
@@ -108,7 +205,10 @@ async def status(_admin: AdminUser, session: DbSession) -> dict[str, object]:
         "mode": settings.REAL_WALLET_EXECUTION_MODE,
         "execution_enabled": settings.REAL_WALLET_EXECUTION_ENABLED,
         "autotrade_enabled": settings.REAL_WALLET_AUTOTRADE_ENABLED,
-        "signer_ready": signer_ready,
+        # An API process must never read a keypair merely to light a dashboard
+        # badge. A future isolated signer will report health through a narrow
+        # authenticated channel; until then this is intentionally unavailable.
+        "signer_status": "not_available_to_api",
         "live_submission_transport": (
             "installed" if transport.production_transport_installed else "not_installed"
         ),
@@ -260,3 +360,305 @@ async def status(_admin: AdminUser, session: DbSession) -> dict[str, object]:
             ],
         },
     }
+
+
+def _intent_summary(intent: RealWalletDevnetIntent) -> DevnetIntentSummary:
+    """Public operator projection: never return unsigned or signed wire bytes."""
+    return DevnetIntentSummary(
+        id=intent.id,
+        state=intent.state,
+        action_type=intent.action_type,
+        wallet_public_key=intent.wallet_public_key,
+        destination_public_key=intent.destination_public_key,
+        input_mint=intent.input_mint,
+        output_mint=intent.output_mint,
+        input_amount_raw=_decimal(intent.input_amount_raw),
+        quote_id=intent.quote_id,
+        quote_expires_at=intent.quote_expires_at,
+        simulation_status=intent.simulation_status,
+        approval_status=intent.approval_status,
+        approval_expires_at=intent.approval_expires_at,
+        signing_status=intent.signing_status,
+        transaction_signature=intent.transaction_signature,
+        submission_status=intent.submission_status,
+        submission_retry_count=intent.submission_retry_count,
+        confirmation_status=intent.confirmation_status,
+        confirmation_slot=intent.confirmation_slot,
+        failure_reason=intent.failure_reason,
+        reconciliation=intent.reconciliation,
+        created_at=intent.created_at,
+        updated_at=intent.updated_at,
+    )
+
+
+def _quote_out(quote: RealWalletDevnetQuote) -> dict[str, object]:
+    return {
+        "id": quote.id,
+        "network": quote.network,
+        "wallet_public_key": quote.wallet_public_key,
+        "input_mint": quote.input_mint,
+        "output_mint": quote.output_mint,
+        "input_amount_raw": _decimal(quote.input_amount_raw),
+        "expected_output_raw": _decimal(quote.expected_output_raw),
+        "minimum_output_raw": _decimal(quote.minimum_output_raw),
+        "slippage_bps": quote.slippage_bps,
+        "price_impact_pct": None
+        if quote.price_impact_pct is None
+        else _decimal(quote.price_impact_pct),
+        "estimated_fee_lamports": quote.estimated_fee_lamports,
+        "provider": quote.provider,
+        "provider_reference": quote.provider_reference,
+        "route": quote.route,
+        "quoted_at": quote.quoted_at,
+        "expires_at": quote.expires_at,
+        "jupiter_devnet_limitation": "Jupiter devnet swap routing is not used or implied.",
+    }
+
+
+def _workflow_error(exc: Exception) -> None:
+    if isinstance(exc, DevnetIntentExpiredError):
+        raise ConflictError(
+            "The devnet quote or approval has expired.",
+            code="devnet_intent_expired",
+        ) from exc
+    if isinstance(exc, DevnetApprovalRequiredError):
+        raise ConflictError(str(exc), code="devnet_manual_approval_required") from exc
+    if isinstance(exc, DevnetExecutionBlockedError):
+        raise ConflictError(
+            "Phase 2 is verified-devnet only.",
+            code="phase2_devnet_only",
+        ) from exc
+    if isinstance(exc, DevnetManualWorkflowError):
+        raise ConflictError(str(exc), code="devnet_manual_workflow_rejected") from exc
+    if isinstance(exc, DevnetIntentTransitionError):
+        raise ConflictError(
+            "That lifecycle transition is not permitted.",
+            code="devnet_transition_rejected",
+        ) from exc
+    raise exc
+
+
+def _manual_workflow(session: DbSession) -> DevnetManualWorkflow:
+    """A no-I/O workflow used by quote, intent, and approval handlers."""
+    return DevnetManualWorkflow(
+        session,
+        StandardSolanaRPC(rpc_url=settings.REAL_WALLET_RPC_URL),
+    )
+
+
+@router.post(
+    "/devnet/quotes/native-transfer",
+    summary="Create a read-only devnet transfer quote",
+)
+async def create_native_transfer_quote(
+    payload: NativeTransferQuoteIn, _admin: AdminUser, session: DbSession
+) -> dict[str, object]:
+    """The only Phase 2 quote. No signer, transaction, or submission is involved."""
+    workflow = _manual_workflow(session)
+    try:
+        quote = await workflow.quote_native_transfer(
+            destination_public_key=payload.destination_public_key, lamports=payload.lamports
+        )
+    except Exception as exc:
+        _workflow_error(exc)
+        raise  # pragma: no cover - `_workflow_error` always raises
+    return _quote_out(quote)
+
+
+@router.post(
+    "/devnet/intents",
+    response_model=DevnetIntentSummary,
+    summary="Create a devnet intent",
+)
+async def create_devnet_intent(
+    payload: DevnetIntentIn, _admin: AdminUser, session: DbSession
+) -> DevnetIntentSummary:
+    workflow = _manual_workflow(session)
+    try:
+        intent = await workflow.create_intent(
+            quote_id=payload.quote_id, idempotency_key=payload.idempotency_key
+        )
+    except Exception as exc:
+        _workflow_error(exc)
+        raise  # pragma: no cover
+    return _intent_summary(intent)
+
+
+@router.get(
+    "/devnet/intents",
+    response_model=list[DevnetIntentSummary],
+    summary="List manual devnet intents",
+)
+async def list_devnet_intents(
+    _admin: AdminUser, session: DbSession
+) -> list[DevnetIntentSummary]:
+    intents = await DevnetIntentRepository(session).intents()
+    return [_intent_summary(intent) for intent in intents]
+
+
+@router.get(
+    "/devnet/intents/{intent_id}", summary="Read one manual devnet intent and audit chain"
+)
+async def read_devnet_intent(
+    intent_id: uuid.UUID, _admin: AdminUser, session: DbSession
+) -> dict[str, object]:
+    repository = DevnetIntentRepository(session)
+    intent = await repository.intent_by_id(intent_id)
+    if intent is None:
+        raise NotFoundError("Devnet intent not found.", code="devnet_intent_not_found")
+    quote = await repository.quote_by_id(intent.quote_id) if intent.quote_id else None
+    return {
+        "intent": _intent_summary(intent).model_dump(mode="json"),
+        "quote": None if quote is None else _quote_out(quote),
+        "simulation": {
+            "status": intent.simulation_status,
+            "logs": intent.simulation_logs or [],
+            "units_consumed": intent.simulation_units_consumed,
+            "context_slot": intent.simulation_context_slot,
+            "blockhash": intent.simulation_blockhash,
+            "simulated_at": intent.simulated_at,
+        },
+        "events": [
+            {
+                "id": event.id,
+                "type": event.event_type,
+                "detail": event.detail,
+                "created_at": event.created_at,
+            }
+            for event in await repository.events(intent.id)
+        ],
+    }
+
+
+@router.post(
+    "/devnet/intents/{intent_id}/simulate",
+    response_model=DevnetIntentSummary,
+    summary="Build, inspect, and simulate an unsigned devnet transfer",
+)
+async def simulate_devnet_intent(
+    intent_id: uuid.UUID, _admin: AdminUser, session: DbSession
+) -> DevnetIntentSummary:
+    rpc = StandardSolanaRPC(rpc_url=settings.REAL_WALLET_RPC_URL)
+    try:
+        async with rpc:
+            intent = await DevnetManualWorkflow(session, rpc).simulate(intent_id=intent_id)
+    except Exception as exc:
+        _workflow_error(exc)
+        raise  # pragma: no cover
+    return _intent_summary(intent)
+
+
+@router.post(
+    "/devnet/intents/{intent_id}/approve",
+    response_model=DevnetIntentSummary,
+    summary="Explicitly approve one successfully simulated devnet intent",
+)
+async def approve_devnet_intent(
+    intent_id: uuid.UUID,
+    payload: ManualApprovalIn,
+    admin: AdminUser,
+    session: DbSession,
+) -> DevnetIntentSummary:
+    workflow = _manual_workflow(session)
+    try:
+        intent = await workflow.approve(
+            intent_id=intent_id,
+            approved_by_user_id=admin.id,
+            confirmation_phrase=payload.confirmation_phrase,
+        )
+    except Exception as exc:
+        _workflow_error(exc)
+        raise  # pragma: no cover
+    return _intent_summary(intent)
+
+
+@router.post(
+    "/devnet/intents/{intent_id}/sign",
+    response_model=DevnetIntentSummary,
+    summary="Ask the isolated signer to sign one approved devnet intent",
+)
+async def sign_devnet_intent(
+    intent_id: uuid.UUID, _admin: AdminUser, session: DbSession
+) -> DevnetIntentSummary:
+    try:
+        await UnixDevnetSignerClient().sign(intent_id)
+    except DevnetSignerUnavailableError as exc:
+        raise ServiceUnavailableError(
+            "The isolated devnet signer is unavailable.",
+            code="devnet_signer_unavailable",
+        ) from exc
+    except DevnetSignerRejectedError as exc:
+        raise ConflictError(
+            "The isolated signer rejected this intent.",
+            code="devnet_signer_rejected",
+        ) from exc
+    intent = await DevnetIntentRepository(session).intent_by_id(intent_id)
+    if intent is None:  # pragma: no cover - signer accepted an impossible missing intent
+        raise NotFoundError("Devnet intent not found.", code="devnet_intent_not_found")
+    return _intent_summary(intent)
+
+
+@router.post(
+    "/devnet/intents/{intent_id}/submit",
+    response_model=DevnetIntentSummary,
+    summary="Submit one signed devnet transfer exactly once",
+)
+async def submit_devnet_intent(
+    intent_id: uuid.UUID, _admin: AdminUser, session: DbSession
+) -> DevnetIntentSummary:
+    rpc = StandardSolanaRPC(rpc_url=settings.REAL_WALLET_RPC_URL)
+    try:
+        async with rpc:
+            intent = await DevnetManualWorkflow(session, rpc).submit(intent_id=intent_id)
+    except Exception as exc:
+        _workflow_error(exc)
+        raise  # pragma: no cover
+    return _intent_summary(intent)
+
+
+@router.post(
+    "/devnet/intents/{intent_id}/confirm",
+    response_model=DevnetIntentSummary,
+    summary="Confirm and reconcile one submitted devnet transfer",
+)
+async def confirm_devnet_intent(
+    intent_id: uuid.UUID, _admin: AdminUser, session: DbSession
+) -> DevnetIntentSummary:
+    rpc = StandardSolanaRPC(rpc_url=settings.REAL_WALLET_RPC_URL)
+    try:
+        async with rpc:
+            intent = await DevnetManualWorkflow(session, rpc).confirm_and_reconcile(
+                intent_id=intent_id
+            )
+    except Exception as exc:
+        _workflow_error(exc)
+        raise  # pragma: no cover
+    return _intent_summary(intent)
+
+
+@router.post(
+    "/devnet/intents/{intent_id}/cancel",
+    response_model=DevnetIntentSummary,
+    summary="Cancel an unsigned manual devnet intent",
+)
+async def cancel_devnet_intent(
+    intent_id: uuid.UUID, _admin: AdminUser, session: DbSession
+) -> DevnetIntentSummary:
+    repository = DevnetIntentRepository(session)
+    intent = await repository.intent_by_id(intent_id)
+    if intent is None:
+        raise NotFoundError("Devnet intent not found.", code="devnet_intent_not_found")
+    if intent.state == DevnetIntentState.CANCELLED:
+        return _intent_summary(intent)
+    try:
+        await repository.transition(
+            intent=intent,
+            next_state=DevnetIntentState.CANCELLED,
+            at=datetime.now(UTC),
+            event_type="cancelled_by_admin",
+            detail={},
+        )
+    except Exception as exc:
+        _workflow_error(exc)
+        raise  # pragma: no cover
+    return _intent_summary(intent)

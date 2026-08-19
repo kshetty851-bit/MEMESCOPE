@@ -31,6 +31,7 @@ from app.db.session import SessionFactory
 from app.opportunities.engine import OpportunityEngine
 from app.paper.service import PaperWalletService
 from app.radar.service import RadarService
+from app.repositories.market import EnrichmentStateRepository
 from app.services.curve.collector import BondingCurveCollector
 from app.services.market.providers.base import MarketDataProvider
 from app.services.market.providers.registry import get_provider
@@ -426,15 +427,29 @@ class MarketEnrichmentWorker:
         started_at = datetime.now(UTC)
         try:
             async with SessionFactory() as session:
-                outcome = await RadarService(session).refresh_mints(
-                    mints, now=datetime.now(UTC)
-                )
+                radar = RadarService(session)
+                outcome = await radar.refresh_mints(mints, now=datetime.now(UTC))
                 await session.commit()
+                # Forward-quality capture is deliberately after the canonical
+                # commit and catches its own failures.  It cannot change this
+                # outcome, ranking notification, or scanner/enrichment cycle.
+                await radar.capture_forward_quality()
         except Exception:
             logger.exception("radar_event_refresh_failed", tokens=len(mints))
             return
 
         persisted_at = datetime.now(UTC)
+
+        # Track Record admission commits above.  Give a newly admitted token a
+        # prompt chance to obtain its *next* quote, in a separate transaction:
+        # quote scheduling must never change Radar admission or roll it back.
+        try:
+            async with SessionFactory() as session:
+                states = EnrichmentStateRepository(session)
+                await states.prioritize_unquoted_track_record_candidates(now=persisted_at)
+                await session.commit()
+        except Exception:
+            logger.exception("track_record_quote_priority_failed", tokens=len(mints))
 
         if outcome.updated_mints:
             await publish_live_update("radar.score_updated", mints=outcome.updated_mints)

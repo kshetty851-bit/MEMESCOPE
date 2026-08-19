@@ -10,10 +10,12 @@ from app.api.v1.endpoints import (
     alpha,
     analysts,
     auth,
+    discovery,
     events,
     health,
     identity,
     market,
+    reports,
     scores,
     tokens,
     users,
@@ -34,7 +36,9 @@ api_router.include_router(health.router)
 # whether the platform is still producing anything.
 api_router.include_router(pipeline_health.router)
 api_router.include_router(alpha.router)
+api_router.include_router(reports.router)
 api_router.include_router(auth.router)
+api_router.include_router(discovery.router)
 api_router.include_router(users.router)
 api_router.include_router(tokens.router)
 # Registered after tokens.router so the literal `/tokens/latest` route still

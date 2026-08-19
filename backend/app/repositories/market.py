@@ -21,6 +21,8 @@ from app.models.market import (
     TokenEnrichmentState,
     TokenMarketSnapshot,
 )
+from app.models.paper import PaperWallet
+from app.models.radar import RadarToken
 from app.models.token import DiscoveredToken
 from app.repositories.base import BaseRepository
 
@@ -74,7 +76,45 @@ class MarketSnapshotRepository(BaseRepository[TokenMarketSnapshot]):
         )
         return (await self.session.execute(stmt)).scalars().first()
 
-    async def latest_for_mints(self, mints: Sequence[str]) -> dict[str, TokenMarketSnapshot]:
+    async def first_priced_for_mints_since(
+        self, discovered_at: dict[str, datetime], *, as_of: datetime | None = None
+    ) -> dict[str, TokenMarketSnapshot]:
+        """First usable observation at or after each scanner discovery.
+
+        It makes an all-scanned entry reproducible: a later review cannot use a
+        newer quote merely because the evaluator was delayed.
+        """
+        if not discovered_at:
+            return {}
+        predicates = [
+            TokenMarketSnapshot.mint_address.in_(list(discovered_at)),
+            TokenMarketSnapshot.price_usd.is_not(None),
+            TokenMarketSnapshot.price_usd > 0,
+        ]
+        if as_of is not None:
+            predicates.append(TokenMarketSnapshot.captured_at <= as_of)
+        rows = (
+            await self.session.execute(
+                select(TokenMarketSnapshot)
+                .where(*predicates)
+                .order_by(
+                    TokenMarketSnapshot.mint_address.asc(),
+                    TokenMarketSnapshot.captured_at.asc(),
+                )
+            )
+        ).scalars().all()
+        first: dict[str, TokenMarketSnapshot] = {}
+        for row in rows:
+            if row.mint_address in first:
+                continue
+            detected = discovered_at[row.mint_address]
+            if row.captured_at >= detected:
+                first[row.mint_address] = row
+        return first
+
+    async def latest_for_mints(
+        self, mints: Sequence[str], *, since: datetime | None = None
+    ) -> dict[str, TokenMarketSnapshot]:
         """Newest snapshot per mint, for a batch, in one query.
 
         The board renders market data for a whole page of cards, and a query per
@@ -90,10 +130,13 @@ class MarketSnapshotRepository(BaseRepository[TokenMarketSnapshot]):
         if not unique:
             return {}
 
+        predicates = [TokenMarketSnapshot.mint_address.in_(unique)]
+        if since is not None:
+            predicates.append(TokenMarketSnapshot.captured_at >= since)
         stmt = (
             select(TokenMarketSnapshot)
             .distinct(TokenMarketSnapshot.mint_address)
-            .where(TokenMarketSnapshot.mint_address.in_(unique))
+            .where(*predicates)
             .order_by(
                 TokenMarketSnapshot.mint_address,
                 TokenMarketSnapshot.captured_at.desc(),
@@ -344,7 +387,12 @@ class EnrichmentStateRepository(BaseRepository[TokenEnrichmentState]):
         return (await self.session.execute(stmt)).scalars().first()
 
     async def ensure_state(
-        self, *, token_id: uuid.UUID, mint_address: str, next_refresh_at: datetime
+        self,
+        *,
+        token_id: uuid.UUID,
+        mint_address: str,
+        next_refresh_at: datetime,
+        priority: int = 0,
     ) -> TokenEnrichmentState | None:
         """Create the scheduling row for a token if it has none.
 
@@ -358,6 +406,7 @@ class EnrichmentStateRepository(BaseRepository[TokenEnrichmentState]):
                 mint_address=mint_address,
                 next_refresh_at=next_refresh_at,
                 status=EnrichmentStatus.ACTIVE,
+                priority=priority,
             )
             .on_conflict_do_nothing(index_elements=[TokenEnrichmentState.mint_address])
             .returning(TokenEnrichmentState)
@@ -397,6 +446,45 @@ class EnrichmentStateRepository(BaseRepository[TokenEnrichmentState]):
             .on_conflict_do_nothing(index_elements=[TokenEnrichmentState.mint_address])
         )
         return len(rows)
+
+    async def prioritize_unquoted_track_record_candidates(self, *, now: datetime) -> int:
+        """Promptly seek the first quote after a Generation 6 Track Record admission.
+
+        Priority ``2`` is above the derived Radar/display lane (``1``), but
+        only applies to a canonical admission with no usable post-admission
+        quote.  It is cleared after each provider attempt.  Raw scanner rows
+        are deliberately absent from this query.
+        """
+        wallet = await self.session.scalar(
+            select(PaperWallet).where(PaperWallet.archived_at.is_(None))
+        )
+        if wallet is None or wallet.strategy_id != "paper_track_record_tp125_sl50_v1":
+            return 0
+        post_admission_quote = (
+            select(TokenMarketSnapshot.id)
+            .where(
+                TokenMarketSnapshot.token_id == TokenEnrichmentState.token_id,
+                TokenMarketSnapshot.price_usd.is_not(None),
+                TokenMarketSnapshot.price_usd > 0,
+                TokenMarketSnapshot.captured_at >= RadarToken.first_detected_at,
+            )
+            .exists()
+        )
+        result = await self.session.execute(
+            update(TokenEnrichmentState)
+            .where(
+                TokenEnrichmentState.token_id == RadarToken.token_id,
+                RadarToken.first_detected_at > wallet.started_at,
+                TokenEnrichmentState.status == EnrichmentStatus.ACTIVE,
+                TokenEnrichmentState.priority < 2,
+                ~post_admission_quote,
+            )
+            .values(
+                priority=2,
+                next_refresh_at=func.least(TokenEnrichmentState.next_refresh_at, now),
+            )
+        )
+        return int(result.rowcount or 0)
 
     async def claim_due(
         self, *, now: datetime, limit: int, lease_seconds: int = 120
@@ -457,6 +545,11 @@ class EnrichmentStateRepository(BaseRepository[TokenEnrichmentState]):
         dead_letter: bool = False,
     ) -> TokenEnrichmentState:
         state.total_refreshes += 1
+        # Track Record quote priority is for acquisition only.  A real quote,
+        # an empty response, or a provider failure has now been observed, so
+        # leave the bounded lane for ordinary scheduling.
+        if state.priority >= 2:
+            state.priority = 0
         state.next_refresh_at = next_refresh_at
         state.tier = tier
         state.last_attempt_at = now

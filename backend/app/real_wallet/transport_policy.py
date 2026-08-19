@@ -86,6 +86,7 @@ class TransportReason(StrEnum):
     MODE_NOT_LIVE = "MODE_NOT_LIVE"
     EXECUTION_DISABLED = "EXECUTION_DISABLED"
     AUTOTRADE_DISABLED = "AUTOTRADE_DISABLED"
+    MAINNET_EXECUTION_DISABLED = "MAINNET_EXECUTION_DISABLED"
     SUBMISSION_GUARD_BLOCKED = "SUBMISSION_GUARD_BLOCKED"
     ENDPOINT_NOT_ALLOWED = "ENDPOINT_NOT_ALLOWED"
     TEST_CLIENT_REQUIRED = "TEST_CLIENT_REQUIRED"
@@ -161,6 +162,11 @@ class ExecutionTransportPolicy:
             reasons.append(TransportReason.EXECUTION_DISABLED)
         if not settings.REAL_WALLET_AUTOTRADE_ENABLED:
             reasons.append(TransportReason.AUTOTRADE_DISABLED)
+        # Phase 1 is observation-only on mainnet. Keeping this in the central
+        # execute policy means even a future caller cannot bypass it by merely
+        # choosing a different code path or setting the normal enable flags.
+        if settings.REAL_WALLET_NETWORK == "mainnet":
+            reasons.append(TransportReason.MAINNET_EXECUTION_DISABLED)
         if not guard.allowed:
             reasons.append(TransportReason.SUBMISSION_GUARD_BLOCKED)
         if host not in ALLOWED_EXECUTE_HOSTS:

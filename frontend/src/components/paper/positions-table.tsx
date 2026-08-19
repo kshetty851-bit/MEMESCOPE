@@ -33,10 +33,12 @@ function Cell({
   value,
   tone,
   className,
+  hint,
 }: {
   value: string | null;
   tone?: "positive" | "negative" | "neutral";
   className?: string;
+  hint?: string | null;
 }) {
   return (
     <td
@@ -48,6 +50,7 @@ function Cell({
         (!tone || tone === "neutral") && value !== null && "text-ink-2",
         className,
       )}
+      title={hint ?? undefined}
     >
       {value ?? "—"}
     </td>
@@ -84,6 +87,7 @@ export function PositionsTable({
   const [previewing, setPreviewing] = useState<string | null>(null);
   const [selling, setSelling] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const showingClosedTrades = positions[0]?.status === "closed";
 
   if (isPending) {
     return (
@@ -129,18 +133,29 @@ export function PositionsTable({
 
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[1040px] text-sm">
+      <table className="w-full min-w-[1280px] text-sm">
         <thead>
           <tr className="border-b border-line text-label uppercase tracking-wide text-ink-3">
             <th className="py-2 text-left font-medium">Token</th>
             <th className="py-2 text-right font-medium">Entry</th>
-            <th className="py-2 text-right font-medium">Trailing stop</th>
+            <th className="py-2 text-right font-medium">Exit rule</th>
             <th className="py-2 text-right font-medium">
-              {positions[0]?.status === "closed" ? "Exit" : "Current"}
+              {showingClosedTrades ? "Exit" : "Current"}
             </th>
-            <th className="py-2 text-right font-medium">Result</th>
+            <th className="py-2 text-right font-medium">
+              {showingClosedTrades ? "Gross return" : "Result"}
+            </th>
             <th className="py-2 text-right font-medium">Peak</th>
-            <th className="py-2 text-right font-medium">P/L</th>
+            <th className="py-2 text-right font-medium">
+              {showingClosedTrades ? "Gross P/L" : "P/L"}
+            </th>
+            {showingClosedTrades ? (
+              <>
+                <th className="py-2 text-right font-medium">Fees</th>
+                <th className="py-2 text-right font-medium">Slippage</th>
+                <th className="py-2 text-right font-medium">Net P/L</th>
+              </>
+            ) : null}
             <th className="py-2 text-right font-medium">Execution</th>
             <th className="py-2 text-right font-medium">Status</th>
             <th className="py-2 text-right font-medium">Quote</th>
@@ -155,9 +170,7 @@ export function PositionsTable({
             const selected = preview?.mint_address === position.mint_address;
             return (
               <Fragment key={position.mint_address}>
-                <tr
-                  className="border-b border-line/50 transition-colors hover:bg-raised/40"
-                >
+                <tr className="border-b border-line/50 transition-colors hover:bg-raised/40">
                   <td className="py-2.5 pr-4">
                     <TokenIdentity
                       mint={position.mint_address}
@@ -172,14 +185,52 @@ export function PositionsTable({
                     </span>
                   </td>
                   <Cell value={formatPrice(position.entry_price)} />
-                  <Cell value={formatPrice(position.trailing_stop_price)} />
+                  <Cell
+                    value={
+                      position.target_price && position.stop_price
+                        ? `TP ${formatPrice(position.target_price)} / SL ${formatPrice(position.stop_price)}`
+                        : position.trailing_activated_at
+                          ? formatPrice(position.trailing_stop_price)
+                          : position.trailing_activation_multiple
+                            ? `Pending ${position.trailing_activation_multiple}x`
+                            : null
+                    }
+                  />
                   <Cell value={formatPrice(position.current_price)} />
                   <Cell
                     value={pct(position.current_pct)}
                     tone={signTone(position.current_pct)}
                   />
                   <Cell value={pct(position.peak_pct)} tone="neutral" />
-                  <Cell value={usd(position.pnl_usd)} tone={signTone(position.pnl_usd)} />
+                  <Cell
+                    value={usd(
+                      closed
+                        ? (position.gross_pnl_usd ?? position.pnl_usd)
+                        : position.pnl_usd,
+                    )}
+                    tone={signTone(
+                      closed
+                        ? (position.gross_pnl_usd ?? position.pnl_usd)
+                        : position.pnl_usd,
+                    )}
+                  />
+                  {showingClosedTrades ? (
+                    <>
+                      <Cell
+                        value={usd(position.fee_usd)}
+                        hint={position.cost_unavailable_reason}
+                      />
+                      <Cell
+                        value={usd(position.slippage_usd)}
+                        hint={position.cost_unavailable_reason}
+                      />
+                      <Cell
+                        value={usd(position.net_pnl_usd)}
+                        tone={signTone(position.net_pnl_usd)}
+                        hint={position.cost_unavailable_reason}
+                      />
+                    </>
+                  ) : null}
                   <td
                     className="py-2.5 text-right text-xs text-ink-3"
                     title={
@@ -258,9 +309,7 @@ export function PositionsTable({
           })}
         </tbody>
       </table>
-      {error && preview === null ? (
-        <p className="mt-2 text-sm text-down">{error}</p>
-      ) : null}
+      {error && preview === null ? <p className="mt-2 text-sm text-down">{error}</p> : null}
     </div>
   );
 }
