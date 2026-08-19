@@ -752,7 +752,7 @@ class PaperWalletService:
                 "paper_all_scanned_tp125_sl50_v1",
                 "paper_track_record_tp125_sl50_v1",
             }:
-                closed += int(await self._settle_observed_bracket(position, rows=rows))
+                closed += int(await self._settle_observed_bracket(position, rows=rows, now=now))
                 continue
 
             quotes = [quote for quote in (_quote(row) for row in rows) if quote is not None]
@@ -816,7 +816,7 @@ class PaperWalletService:
         return len(positions), closed
 
     async def _settle_observed_bracket(
-        self, position: PaperPosition, *, rows: Sequence[TokenMarketSnapshot]
+        self, position: PaperPosition, *, rows: Sequence[TokenMarketSnapshot], now: datetime
     ) -> bool:
         """First observed TP/SL barrier wins; gap fills retain the observed quote."""
         for row in rows:
@@ -831,13 +831,12 @@ class PaperWalletService:
                 return await self._close_observed_bracket(
                     position, row=row, reason=ExitReason.TARGET
                 )
-            if row.trading_status == TradingStatus.INACTIVE:
-                return await self._close_terminal(position, row=row, peak=position.peak_price)
+        
         prices = [row.price_usd for row in rows if row.price_usd is not None]
         await self._repository.advance(
             position.id,
-            peak_price=max([position.peak_price, *prices]),
-            last_evaluated_at=rows[-1].captured_at if rows else position.last_evaluated_at,
+            peak_price=max([position.peak_price, *prices]) if prices else position.peak_price,
+            last_evaluated_at=rows[-1].captured_at if rows else max(now, position.last_evaluated_at),
         )
         return False
 
@@ -892,7 +891,6 @@ class PaperWalletService:
         for row in rows:
             last_at = row.captured_at
             price = row.price_usd
-            terminal = row.trading_status == TradingStatus.INACTIVE
             if price is None or price <= 0:
                 # No price means no executable terminal or trailing exit.
                 continue
@@ -902,9 +900,6 @@ class PaperWalletService:
                     activation_price = price
                     peak = max(peak, price)
                     theoretical_stop = peak * (Decimal(1) - drawdown)
-                    continue
-                if terminal:
-                    return await self._close_terminal(position, row=row, peak=peak)
                 continue
 
             # The stop is evaluated from the high before this point sample.  A
@@ -926,8 +921,6 @@ class PaperWalletService:
                         "trailing stop was not assumed as a fill."
                     ),
                 )
-            if terminal:
-                return await self._close_terminal(position, row=row, peak=peak)
             if price > peak:
                 peak = price
                 theoretical_stop = peak * (Decimal(1) - drawdown)

@@ -130,20 +130,27 @@ class MarketSnapshotRepository(BaseRepository[TokenMarketSnapshot]):
         if not unique:
             return {}
 
-        predicates = [TokenMarketSnapshot.mint_address.in_(unique)]
-        if since is not None:
-            predicates.append(TokenMarketSnapshot.captured_at >= since)
-        stmt = (
-            select(TokenMarketSnapshot)
-            .distinct(TokenMarketSnapshot.mint_address)
-            .where(*predicates)
-            .order_by(
-                TokenMarketSnapshot.mint_address,
-                TokenMarketSnapshot.captured_at.desc(),
+        results: dict[str, TokenMarketSnapshot] = {}
+        batch_size = 100
+        for i in range(0, len(unique), batch_size):
+            chunk = unique[i : i + batch_size]
+            predicates = [TokenMarketSnapshot.mint_address.in_(chunk)]
+            if since is not None:
+                predicates.append(TokenMarketSnapshot.captured_at >= since)
+            stmt = (
+                select(TokenMarketSnapshot)
+                .distinct(TokenMarketSnapshot.mint_address)
+                .where(*predicates)
+                .order_by(
+                    TokenMarketSnapshot.mint_address,
+                    TokenMarketSnapshot.captured_at.desc(),
+                )
             )
-        )
-        rows = (await self.session.execute(stmt)).scalars().all()
-        return {row.mint_address: row for row in rows}
+            rows = (await self.session.execute(stmt)).scalars().all()
+            for row in rows:
+                results[row.mint_address] = row
+                
+        return results
 
     async def price_as_of_for_mints(
         self, mints: Sequence[str], *, as_of: datetime
@@ -164,25 +171,29 @@ class MarketSnapshotRepository(BaseRepository[TokenMarketSnapshot]):
         if not unique:
             return {}
 
-        stmt = (
-            select(TokenMarketSnapshot)
-            .distinct(TokenMarketSnapshot.mint_address)
-            .where(
-                TokenMarketSnapshot.mint_address.in_(unique),
-                TokenMarketSnapshot.captured_at <= as_of,
-                TokenMarketSnapshot.price_usd.is_not(None),
+        results: dict[str, Decimal] = {}
+        batch_size = 100
+        for i in range(0, len(unique), batch_size):
+            chunk = unique[i : i + batch_size]
+            stmt = (
+                select(TokenMarketSnapshot)
+                .distinct(TokenMarketSnapshot.mint_address)
+                .where(
+                    TokenMarketSnapshot.mint_address.in_(chunk),
+                    TokenMarketSnapshot.captured_at <= as_of,
+                    TokenMarketSnapshot.price_usd.is_not(None),
+                )
+                .order_by(
+                    TokenMarketSnapshot.mint_address,
+                    TokenMarketSnapshot.captured_at.desc(),
+                )
             )
-            .order_by(
-                TokenMarketSnapshot.mint_address,
-                TokenMarketSnapshot.captured_at.desc(),
-            )
-        )
-        rows = (await self.session.execute(stmt)).scalars().all()
-        return {
-            row.mint_address: row.price_usd
-            for row in rows
-            if row.price_usd is not None and row.price_usd > 0
-        }
+            rows = (await self.session.execute(stmt)).scalars().all()
+            for row in rows:
+                if row.price_usd is not None and row.price_usd > 0:
+                    results[row.mint_address] = row.price_usd
+                    
+        return results
 
     async def series_for_mints(
         self, mints: Sequence[str], *, since: datetime
@@ -207,21 +218,25 @@ class MarketSnapshotRepository(BaseRepository[TokenMarketSnapshot]):
         if not unique:
             return {}
 
-        stmt = (
-            select(TokenMarketSnapshot)
-            .where(
-                TokenMarketSnapshot.mint_address.in_(unique),
-                TokenMarketSnapshot.captured_at > since,
-                TokenMarketSnapshot.price_usd.is_not(None),
-            )
-            .order_by(
-                TokenMarketSnapshot.mint_address,
-                TokenMarketSnapshot.captured_at.asc(),
-            )
-        )
         series: dict[str, list[TokenMarketSnapshot]] = {}
-        for snapshot in (await self.session.execute(stmt)).scalars().all():
-            series.setdefault(snapshot.mint_address, []).append(snapshot)
+        batch_size = 100
+        for i in range(0, len(unique), batch_size):
+            chunk = unique[i : i + batch_size]
+            stmt = (
+                select(TokenMarketSnapshot)
+                .where(
+                    TokenMarketSnapshot.mint_address.in_(chunk),
+                    TokenMarketSnapshot.captured_at > since,
+                    TokenMarketSnapshot.price_usd.is_not(None),
+                )
+                .order_by(
+                    TokenMarketSnapshot.mint_address,
+                    TokenMarketSnapshot.captured_at.asc(),
+                )
+            )
+            for snapshot in (await self.session.execute(stmt)).scalars().all():
+                series.setdefault(snapshot.mint_address, []).append(snapshot)
+                
         return series
 
     async def history_for_mint(
