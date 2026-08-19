@@ -401,6 +401,19 @@ class EnrichmentStateRepository(BaseRepository[TokenEnrichmentState]):
         )
         return (await self.session.execute(stmt)).scalars().first()
 
+    async def get_many_by_mints(self, mints: Sequence[str]) -> dict[str, TokenEnrichmentState]:
+        if not mints:
+            return {}
+        unique = list(set(mints))
+        results: dict[str, TokenEnrichmentState] = {}
+        batch_size = 500
+        for i in range(0, len(unique), batch_size):
+            chunk = unique[i : i + batch_size]
+            stmt = select(TokenEnrichmentState).where(TokenEnrichmentState.mint_address.in_(chunk))
+            for row in (await self.session.execute(stmt)).scalars().all():
+                results[row.mint_address] = row
+        return results
+
     async def ensure_state(
         self,
         *,

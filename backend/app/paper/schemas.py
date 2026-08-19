@@ -109,6 +109,9 @@ class PositionOut(BaseSchema):
     #: priced in hours. For a closed trade this is the exit time — a settled
     #: result does not go stale.
     current_price_at: datetime | None = None
+    #: The last time the system attempted to check the market for this token.
+    #: Helpful for tokens where DexScreener returns no usable market (so no quote is saved).
+    last_market_check_at: datetime | None = None
     #: Percent from entry at the highest price observed while open. For a closed
     #: trade this stops at the exit: a high printed after the position closed
     #: belongs to the token, not to the trade.

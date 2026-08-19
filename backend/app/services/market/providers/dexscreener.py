@@ -207,10 +207,18 @@ class DexScreenerProvider(MarketDataProvider):
             if not isinstance(pair, dict):
                 continue
             base = pair.get("baseToken")
-            if not isinstance(base, dict):
+            quote = pair.get("quoteToken")
+            if not isinstance(base, dict) or not isinstance(quote, dict):
                 continue
-            mint = base.get("address")
-            if not isinstance(mint, str) or mint not in requested:
+                
+            base_address = base.get("address")
+            quote_address = quote.get("address")
+            
+            if isinstance(base_address, str) and base_address in requested:
+                mint = base_address
+            elif isinstance(quote_address, str) and quote_address in requested:
+                mint = quote_address
+            else:
                 continue
 
             incumbent = best.get(mint)

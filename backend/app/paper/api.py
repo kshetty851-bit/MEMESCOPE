@@ -493,6 +493,7 @@ def _to_position(
         current_price=current,
         current_pct=_pct_from(row.entry_price, current),
         current_price_at=observed_at,
+        last_market_check_at=read.check_times.get(row.mint_address) if not closed else None,
         peak_pct=_pct_from(row.entry_price, row.peak_price),
         closed_at=row.closed_at,
         exit_price=row.exit_price,

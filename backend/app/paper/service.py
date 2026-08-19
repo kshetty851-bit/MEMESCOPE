@@ -54,7 +54,7 @@ from app.paper.models import (
 from app.paper.repository import PaperRepository
 from app.paper.strategy import AnyStrategy, TrackRecordBracketStrategy, registry
 from app.radar.repository import RadarRepository
-from app.repositories.market import MarketSnapshotRepository
+from app.repositories.market import MarketSnapshotRepository, EnrichmentStateRepository
 from app.repositories.token import TokenRepository
 from app.services.jupiter import JupiterExecutionClient
 
@@ -771,12 +771,19 @@ class PaperWalletService:
                 # A review without a quote is not an observation.  In
                 # particular, it must not overwrite the archived watermark on
                 # a resumed wallet merely because the scheduler ran.
+                new_evaluated_at = position.last_evaluated_at
                 if quotes:
-                    await self._repository.advance(
-                        position.id,
-                        peak_price=running_peak,
-                        last_evaluated_at=quotes[-1].captured_at,
-                    )
+                    new_evaluated_at = quotes[-1].captured_at
+                elif rows:
+                    new_evaluated_at = rows[-1].captured_at
+                else:
+                    new_evaluated_at = max(now, position.last_evaluated_at)
+                
+                await self._repository.advance(
+                    position.id,
+                    peak_price=running_peak,
+                    last_evaluated_at=new_evaluated_at,
+                )
                 continue
 
             decision_quote = next(
@@ -1320,6 +1327,18 @@ class PaperWalletService:
         }
 
         all_mints = [row.mint_address for row in positions]
+        
+        enrichment_states = await EnrichmentStateRepository(self._session).get_many_by_mints(
+            [row.mint_address for row in open_rows]
+        )
+        check_times: dict[str, datetime | None] = {
+            row.mint_address: (
+                enrichment_states[row.mint_address].last_attempt_at
+                if row.mint_address in enrichment_states
+                else None
+            )
+            for row in open_rows
+        }
 
         names = await TokenRepository(self._session).get_many_by_mints(
             list(set(all_mints))
@@ -1339,6 +1358,7 @@ class PaperWalletService:
             positions=list(positions),
             prices=prices,
             price_times=price_times,
+            check_times=check_times,
             names={mint: (token.name, token.symbol) for mint, token in names.items()},
             images={mint: token.image_url for mint, token in names.items()},
             benchmarks=await self.benchmarks(wallet),
@@ -1515,6 +1535,8 @@ class WalletRead:
     prices: dict[str, Decimal | None]
     #: When each mark was observed, so a surface can say how old it is.
     price_times: dict[str, datetime | None]
+    #: The most recent market check attempt for each open position.
+    check_times: dict[str, datetime | None]
     names: dict[str, tuple[str | None, str | None]]
     images: dict[str, str | None]
     benchmarks: list[benchmark.BenchmarkResult]
