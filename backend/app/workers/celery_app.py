@@ -100,13 +100,21 @@ celery_app.conf.beat_schedule = {
     },
     # The paper wallet advances on its own beat because nothing else can move
     # it: a position whose token stopped being enriched is exactly the one most
-    # likely to be sitting through its stop. Every five minutes, matching the
-    # opportunity review — exits are resolved from the stored observation
-    # series, so a missed pass changes when a close is *recorded*, never which
-    # close it was or at what price.
+    # likely to be sitting through its stop. Exits are resolved from the stored
+    # observation series, so a missed pass changes when a close is *recorded*,
+    # never which close it was or at what price.
+    #
+    # Every minute, not every five. The cadence used to match the opportunity
+    # review, which was defensible while an open position's quote was itself
+    # minutes old — the pass had nothing new to read. Open positions now sit in
+    # the priority lane at fifteen seconds, so this beat became the slowest link
+    # in the chain, and `last_evaluated_at` is a timestamp the wallet *shows*:
+    # a five-minute-old evaluation reads as a stalled wallet whatever the price
+    # behind it says. Measured at 2.5s per pass against 13 open positions on
+    # 2026-08-19, and a shorter window means each pass replays less, not more.
     "paper-review": {
         "task": "app.paper.scheduler.paper_review",
-        "schedule": crontab(minute="*/5"),
+        "schedule": crontab(minute="*"),
     },
     "real-wallet-dry-run-reconciliation": {
         "task": "app.real_wallet.scheduler.real_wallet_dry_run",
