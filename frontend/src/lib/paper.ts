@@ -8,6 +8,7 @@ import type {
   PaperPositions,
   PaperStrategies,
   PaperWallet,
+  PaperWalletContext,
 } from "@/types/paper";
 
 /**
@@ -24,6 +25,11 @@ import type {
 
 export function fetchPaperWallet(): Promise<PaperWallet> {
   return api.get<PaperWallet>("/paper");
+}
+
+export function fetchPaperWalletContext(roiPct?: string | null): Promise<PaperWalletContext> {
+  const url = roiPct ? `/paper/context?roi_pct=${encodeURIComponent(roiPct)}` : "/paper/context";
+  return api.get<PaperWalletContext>(url);
 }
 
 export function fetchPaperPositions(): Promise<PaperPositions> {

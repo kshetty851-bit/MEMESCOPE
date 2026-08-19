@@ -17,6 +17,7 @@ import {
   usePaperPerformance,
   usePaperPositions,
   usePaperWallet,
+  usePaperWalletContext,
 } from "@/hooks/use-paper";
 import { formatAge } from "@/lib/format";
 import { hours, pct, tone, usd } from "@/lib/paper";
@@ -82,6 +83,7 @@ function Stat({
 
 export default function WalletPage() {
   const wallet = usePaperWallet();
+  const context = usePaperWalletContext(wallet.data?.metrics?.roi_pct);
   const positions = usePaperPositions();
   const auditQuery = usePaperAudit();
   const performanceQuery = usePaperPerformance();
@@ -124,8 +126,10 @@ export default function WalletPage() {
     );
   }
 
-  const { strategy, benchmarks, disclosure, waiting, last_trade: last } = wallet.data;
+  const { strategy, disclosure, last_trade: last } = wallet.data;
   const m = wallet.data.metrics;
+  const waiting = context.data?.waiting;
+  const benchmarks = context.data?.benchmarks;
 
   if (!wallet.data.enabled) {
     return (
@@ -182,7 +186,9 @@ export default function WalletPage() {
           as broken, which is exactly how it read before this existed. The
           message comes from the server off a stable `reason` code; nothing here
           composes prose from a slug. */}
-      {waiting ? (
+      {context.isPending ? (
+        <Skeleton className="h-24 w-full rounded-md" />
+      ) : waiting ? (
         <Panel density="compact" className="border-line-strong bg-raised/40">
           <p className="text-sm text-ink">{waiting.message}</p>
           {waiting.reason === "cash_below_trade_size" ? (
@@ -337,25 +343,29 @@ export default function WalletPage() {
 
       <section className="flex flex-col gap-3">
         <h2 className="text-md font-medium text-ink">Measured against</h2>
-        {/* Both comparisons start with the same capital at the same instant as
-            the wallet. A benchmark drawn over a period the strategy did not
-            trade would credit or punish it for free. */}
-        {wallet.data.benchmark_note ? (
-          <p className="text-xs leading-relaxed text-ink-3">{wallet.data.benchmark_note}</p>
-        ) : null}
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[640px] text-sm">
-            <thead>
-              <tr className="border-b border-line text-label uppercase tracking-wide text-ink-3">
-                <th className="py-2 text-left font-medium">Benchmark</th>
-                <th className="py-2 text-right font-medium">Held</th>
-                <th className="py-2 text-right font-medium">Benchmark return</th>
-                <th className="py-2 text-right font-medium">This strategy</th>
-                <th className="py-2 text-right font-medium">Difference</th>
-              </tr>
-            </thead>
-            <tbody>
-              {benchmarks.map((benchmark) => (
+        {context.isPending ? (
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <Skeleton className="h-24 w-full rounded-md sm:w-1/2" />
+            <Skeleton className="h-24 w-full rounded-md sm:w-1/2" />
+          </div>
+        ) : benchmarks ? (
+          <>
+            {context.data?.benchmark_note ? (
+              <p className="text-xs leading-relaxed text-ink-3">{context.data.benchmark_note}</p>
+            ) : null}
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[640px] text-sm">
+                <thead>
+                  <tr className="border-b border-line text-label uppercase tracking-wide text-ink-3">
+                    <th className="py-2 text-left font-medium">Benchmark</th>
+                    <th className="py-2 text-right font-medium">Held</th>
+                    <th className="py-2 text-right font-medium">Benchmark return</th>
+                    <th className="py-2 text-right font-medium">This strategy</th>
+                    <th className="py-2 text-right font-medium">Difference</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {benchmarks.map((benchmark) => (
                 <tr key={benchmark.id} className="border-b border-line/50 align-top">
                   <td className="py-3 pr-4">
                     <p className="text-ink">{benchmark.label}</p>
@@ -393,8 +403,10 @@ export default function WalletPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
-        </div>
+              </table>
+            </div>
+          </>
+        ) : null}
       </section>
 
       <StrategyCard strategy={strategy} />

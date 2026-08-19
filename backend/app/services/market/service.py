@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.models.market import TokenEnrichmentState
+from app.models.market import TokenEnrichmentState, TradingStatus
 from app.repositories.market import EnrichmentStateRepository, MarketSnapshotRepository
 from app.repositories.token import TokenRepository
 from app.services.market.providers.base import (
@@ -212,6 +212,23 @@ class MarketEnrichmentService:
                 refreshed_mints.append(state.mint_address)
             elif succeeded:
                 without_market += 1
+                
+                # If a token has persistently lost its market (dead-lettered), or is
+                # ALREADY dead-lettered but held by an active subsystem (priority > 0),
+                # we write a single INACTIVE snapshot to explicitly notify dependents
+                # rather than silently dropping it from the feed forever.
+                empty_count = state.consecutive_empty + 1
+                if empty_count == settings.ENRICHMENT_DEAD_LETTER_THRESHOLD or (
+                    empty_count > settings.ENRICHMENT_DEAD_LETTER_THRESHOLD and state.priority > 0
+                ):
+                    dead_data = MarketData(
+                        mint_address=state.mint_address,
+                        trading_status=TradingStatus.INACTIVE,
+                        observed_at=now,
+                        provider=self.provider.name,
+                    )
+                    snapshot_rows.append(self._to_snapshot_row(state, dead_data, latency_ms=latency_ms))
+                    written += 1
             else:
                 failed += 1
 

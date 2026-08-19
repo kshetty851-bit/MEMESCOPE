@@ -51,6 +51,7 @@ from app.paper.schemas import (
     StrategiesOut,
     StrategyOut,
     WaitingOut,
+    WalletContextOut,
     WalletOut,
 )
 from app.paper.service import (
@@ -295,30 +296,53 @@ async def get_wallet(session: DbSession) -> WalletOut:
             enabled=False,
             strategy=_to_strategy(active, active_id=active.id),
             metrics=_empty_metrics(starting),
-            benchmarks=[],
             pnl_today=Decimal(0),
             disclosure=DISCLOSURE,
             observed_at=now,
         )
 
     read = await PaperWalletService(session).read(now=now)
-    benchmarks = _benchmarks(read)
 
     return WalletOut(
         enabled=True,
         strategy=_to_strategy(read.strategy, active_id=read.strategy.id),
         metrics=_to_metrics(read.metrics),
-        benchmarks=benchmarks,
         generation=read.wallet.generation,
         started_at=read.wallet.started_at,
         resumed_at=read.wallet.resumed_at,
-        benchmark_note=_benchmark_note(read),
-        waiting=_to_waiting(read),
         last_trade=_last_trade(read),
         next_radar_evaluation_at=cadence.next_evaluation(now),
         audited_trades=read.audit_count,
         pnl_today=read.pnl_today,
         disclosure=DISCLOSURE,
+        observed_at=now,
+    )
+
+
+@router.get("/context", response_model=WalletContextOut, summary="Wallet expensive context")
+async def get_wallet_context(
+    session: DbSession,
+    roi_pct: Decimal | None = Query(None, description="Wallet ROI for benchmark comparison"),
+) -> WalletContextOut:
+    """The expensive background context for the wallet, loaded separately."""
+    now = datetime.now(UTC)
+
+    if not settings.FEATURE_PAPER_WALLET_ENABLED:
+        return WalletContextOut(
+            benchmarks=[],
+            benchmark_note=None,
+            waiting=None,
+            observed_at=now,
+        )
+
+    # We only need the context portion. We will refactor PaperWalletService
+    # to only calculate what's needed for the context.
+    read = await PaperWalletService(session).read_context(now=now)
+
+    return WalletContextOut(
+        benchmarks=_benchmarks(read, roi=roi_pct),
+        benchmark_note=_benchmark_note(read),
+        waiting=_to_waiting(read),
         observed_at=now,
     )
 
@@ -571,7 +595,7 @@ def _to_manual_sell(outcome: ManualSellOutcome) -> ManualSellOut:
     )
 
 
-def _benchmarks(read: WalletRead) -> list[BenchmarkOut]:
+def _benchmarks(read: WalletRead | WalletContextRead, roi: Decimal | None = None) -> list[BenchmarkOut]:
     """What the strategy is measured against, over its own period.
 
     Both comparisons start with the wallet's capital at the wallet's own start
@@ -586,7 +610,8 @@ def _benchmarks(read: WalletRead) -> list[BenchmarkOut]:
     price history, and a comparison against a series it never stored would be
     fabricated.
     """
-    roi = read.metrics.roi_pct
+    if roi is None and isinstance(read, WalletRead):
+        roi = read.metrics.roi_pct
 
     out = [
         BenchmarkOut(
@@ -618,7 +643,7 @@ def _benchmarks(read: WalletRead) -> list[BenchmarkOut]:
     return out
 
 
-def _benchmark_note(read: WalletRead) -> str | None:
+def _benchmark_note(read: WalletRead | WalletContextRead) -> str | None:
     """Set only while both benchmarks hold the same set of tokens."""
     if len(read.benchmarks) < 2:
         return None
@@ -628,8 +653,8 @@ def _benchmark_note(read: WalletRead) -> str | None:
     return benchmark.COINCIDENCE_NOTE
 
 
-def _to_waiting(read: WalletRead) -> WaitingOut | None:
-    """The empty state, published only when it is true."""
+def _to_waiting(read: WalletRead | WalletContextRead) -> WaitingOut | None:
+    """The reason the wallet is doing nothing, when it is doing nothing."""
     state = read.waiting_for
     if state is None:
         return None

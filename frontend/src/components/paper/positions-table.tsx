@@ -4,6 +4,8 @@ import { Fragment, useState } from "react";
 
 import { TokenIdentity } from "@/components/brand/token-identity";
 import { FreshnessLabel, NoMarketData } from "@/components/ui/freshness";
+import { ageLabel } from "@/lib/freshness";
+import { useTick } from "@/hooks/use-tick";
 import { Skeleton } from "@/components/ui/skeleton";
 import { exitLabel, pct, usd } from "@/lib/paper";
 import { formatPrice } from "@/lib/format";
@@ -268,7 +270,12 @@ export function PositionsTable({
                     {closed ? (
                       <span className="text-xs text-ink-3">settled</span>
                     ) : position.current_price_at ? (
-                      <FreshnessLabel capturedAt={position.current_price_at} />
+                      <div className="flex flex-col items-end gap-0.5">
+                        <FreshnessLabel capturedAt={position.current_price_at} />
+                        {position.last_market_check_at && (
+                          <LastCheckLabel checkedAt={position.last_market_check_at} />
+                        )}
+                      </div>
                     ) : (
                       <NoMarketData />
                     )}
@@ -396,5 +403,18 @@ function ManualSellPreviewPanel({
         </button>
       </div>
     </div>
+  );
+}
+
+function LastCheckLabel({ checkedAt }: { checkedAt: string }) {
+  const now = useTick();
+  const observed = new Date(checkedAt).getTime();
+  if (!Number.isFinite(observed)) return null;
+  const seconds = Math.max(0, (now - observed) / 1000);
+  
+  return (
+    <span className="text-[10px] tabular-nums text-ink-3">
+      Checked {ageLabel(seconds)}
+    </span>
   );
 }

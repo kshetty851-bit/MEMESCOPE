@@ -224,3 +224,26 @@ class TokenEnrichmentState(Base, UUIDPrimaryKeyMixin, TimestampMixin):
             "next_refresh_at",
         ),
     )
+
+class TokenMarketCandle1h(Base):
+    """Hourly downsampled OHLCV candles for long-term charting."""
+
+    __tablename__ = "token_market_candles_1h"
+
+    mint_address: Mapped[str] = mapped_column(String(44), primary_key=True, nullable=False)
+    # The start of the hourly bucket
+    bucket: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True, nullable=False)
+
+    open_price: Mapped[Decimal | None] = mapped_column(PRICE_PRECISION, nullable=True)
+    high_price: Mapped[Decimal | None] = mapped_column(PRICE_PRECISION, nullable=True)
+    low_price: Mapped[Decimal | None] = mapped_column(PRICE_PRECISION, nullable=True)
+    close_price: Mapped[Decimal | None] = mapped_column(PRICE_PRECISION, nullable=True)
+    
+    close_market_cap: Mapped[Decimal | None] = mapped_column(MONEY_PRECISION, nullable=True)
+    close_liquidity_usd: Mapped[Decimal | None] = mapped_column(MONEY_PRECISION, nullable=True)
+
+    volume: Mapped[Decimal | None] = mapped_column(MONEY_PRECISION, nullable=True)
+
+    __table_args__ = (
+        Index("ix_candles_1h_mint_bucket_desc", "mint_address", bucket.desc()),
+    )

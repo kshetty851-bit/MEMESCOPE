@@ -42,32 +42,13 @@
 
 	# --- API ---------------------------------------------------------------
 	#
-	# Matched before the frontend catch-all. `/api/*`, the probes and the
-	# WebSocket all belong to the backend.
-	#
 	# WebSockets need no special directive in Caddy v2 - reverse_proxy upgrades
 	# the connection automatically - but the long-lived stream needs its read
 	# timeout lifted, or the token feed is severed every 30 seconds.
-	@api {
-		path /api/* /live /ready /docs /redoc /openapi.json
-	}
-	reverse_proxy @api backend:8000 {
+	reverse_proxy backend:8000 {
 		header_up X-Real-IP {remote_host}
 		transport http {
 			read_timeout 3600s
 		}
 	}
-
-	# --- Static assets -----------------------------------------------------
-	#
-	# Next.js fingerprints everything under /_next/static, so those URLs are
-	# immutable by construction and can be cached hard. Anything else must not
-	# be, or a deploy leaves users on stale HTML pointing at deleted chunks.
-	@immutable {
-		path /_next/static/* /fonts/*
-	}
-	header @immutable Cache-Control "public, max-age=31536000, immutable"
-
-	# --- Frontend ----------------------------------------------------------
-	reverse_proxy frontend:3000
 }

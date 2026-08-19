@@ -10,6 +10,7 @@ import {
   fetchPaperPositions,
   fetchPaperStrategies,
   fetchPaperWallet,
+  fetchPaperWalletContext,
   previewManualSell,
   sellPaperPosition,
 } from "@/lib/paper";
@@ -32,6 +33,16 @@ export function usePaperWallet() {
   return useQuery({
     queryKey: ["paper", "wallet"],
     queryFn: fetchPaperWallet,
+    refetchInterval: livePoll(status, PAPER_POLL_MS),
+    staleTime: PAPER_POLL_MS / 2,
+  });
+}
+
+export function usePaperWalletContext(roiPct?: string | null) {
+  const { status } = useLiveUpdates();
+  return useQuery({
+    queryKey: ["paper", "wallet-context", roiPct],
+    queryFn: () => fetchPaperWalletContext(roiPct),
     refetchInterval: livePoll(status, PAPER_POLL_MS),
     staleTime: PAPER_POLL_MS / 2,
   });

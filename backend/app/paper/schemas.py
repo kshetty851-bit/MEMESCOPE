@@ -447,20 +447,11 @@ class WalletOut(BaseSchema):
     enabled: bool
     strategy: StrategyOut
     metrics: MetricsOut
-    benchmarks: list[BenchmarkOut]
-    #: Which launch this is, and when it began. The benchmarks above start from
-    #: the same instant — that is the point of publishing it.
+    #: Which launch this is, and when it began.
     generation: int = 1
     started_at: datetime | None = None
     #: Explicitly labels a resumed historical generation; it is not a reset.
     resumed_at: datetime | None = None
-    #: Set when both benchmarks currently hold the same tokens. They are
-    #: distinct measurements that happen to coincide, and saying so beats hiding
-    #: one or implying two independent checks.
-    benchmark_note: str | None = None
-    #: Present only while the wallet is holding fundable cash with nothing
-    #: eligible in front of it.
-    waiting: WaitingOut | None = None
     last_trade: LastTradeOut | None = None
     #: The next moment the Radar's ranking can change, from the sweep's own
     #: cadence. Exits do not wait for it — they resolve from stored readings.
@@ -475,6 +466,13 @@ class WalletOut(BaseSchema):
     disclosure: str
     observed_at: datetime
 
+
+class WalletContextOut(BaseSchema):
+    """The expensive background context for the wallet, loaded separately."""
+    benchmarks: list[BenchmarkOut]
+    benchmark_note: str | None = None
+    waiting: WaitingOut | None = None
+    observed_at: datetime
 
 class PositionsOut(BaseSchema):
     """Every position, open and closed.

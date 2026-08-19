@@ -424,7 +424,7 @@ class Settings(BaseSettings):
     # query sorts on `priority` before `next_refresh_at`, so a displayed token
     # jumps a backlog that reached 36,154 rows. Measured before this, a tracked
     # token's p95 refresh gap was 106 minutes.
-    FEATURE_PRIORITY_ENRICHMENT_ENABLED: bool = False
+    FEATURE_PRIORITY_ENRICHMENT_ENABLED: bool = True
     #: What a displayed token gets regardless of age. Published because the
     #: freshness indicator on every surface is measured against it.
     ENRICHMENT_PRIORITY_INTERVAL_SECONDS: int = Field(default=15, ge=5, le=600)
@@ -460,7 +460,7 @@ class Settings(BaseSettings):
     #: How many positions the evaluator advances per pass. Bounded and ordered
     #: oldest-watermark-first, which is what keeps a growing book from starving
     #: its own tail — the failure that livelocked the score sweep.
-    PAPER_WALLET_REVIEW_BATCH_LIMIT: int = Field(default=200, ge=1, le=2000)
+    PAPER_WALLET_REVIEW_BATCH_LIMIT: int = Field(default=2000, ge=1, le=2000)
     #: How far down the ranked Radar the evaluator looks for the next entry.
     #: Not a rule — the rule is "the highest-ranked eligible token" — but a scan
     #: has to stop somewhere, and a bound that is hit is *reported* rather than

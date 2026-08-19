@@ -78,6 +78,8 @@ export interface PaperPosition {
   current_pct: string | null;
   /** When the mark was observed. Exit time for a closed trade. */
   current_price_at: string | null;
+  /** When the market was last checked, even if no observation was found. */
+  last_market_check_at?: string | null;
   /** For a closed trade this stops at the exit, not at the token's later high. */
   peak_pct: string | null;
 
@@ -319,15 +321,11 @@ export interface PaperWallet {
   enabled: boolean;
   strategy: PaperStrategy;
   metrics: PaperMetrics;
-  benchmarks: PaperBenchmark[];
   /** Which launch this is, and when it began. The benchmarks start there too. */
   generation: number;
   started_at: string | null;
   /** Present when this is a preserved historical generation resumed forward. */
   resumed_at: string | null;
-  /** Set while both benchmarks hold the same tokens. */
-  benchmark_note: string | null;
-  waiting: PaperWaiting | null;
   last_trade: PaperLastTrade | null;
   /** The next moment the ranking can change. Exits do not wait for it. */
   next_radar_evaluation_at: string | null;
@@ -336,6 +334,14 @@ export interface PaperWallet {
   pnl_today: string;
   /** Rendered on every surface that shows the numbers. */
   disclosure: string;
+  observed_at: string;
+}
+
+export interface PaperWalletContext {
+  benchmarks: PaperBenchmark[];
+  /** Set while both benchmarks hold the same tokens. */
+  benchmark_note: string | null;
+  waiting: PaperWaiting | null;
   observed_at: string;
 }
 

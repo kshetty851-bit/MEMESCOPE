@@ -283,6 +283,10 @@ class PaperPosition(Base):
     last_evaluated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
+    #: Separate from `last_evaluated_at` because `last_evaluated_at` implies a
+    #: successful observation was processed. `last_market_check_at` stores when
+    #: we last tried to get a market quote, even if no usable market was returned.
+    last_market_check_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     exit_price: Mapped[Decimal | None] = mapped_column(_PRICE)

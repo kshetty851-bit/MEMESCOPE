@@ -420,12 +420,16 @@ class PaperRepository:
         *,
         peak_price: Decimal,
         last_evaluated_at: datetime,
+        last_market_check_at: datetime | None = None,
     ) -> None:
-        """Move a still-open position's watermark and running peak.
-
-        Touches nothing else. The entry block is immutable by construction: no
-        statement in this file names those columns in an UPDATE.
-        """
+        """Move the high-water marks forward without closing."""
+        values: dict[str, Any] = {
+            "peak_price": func.greatest(PaperPosition.peak_price, peak_price),
+            "last_evaluated_at": last_evaluated_at,
+        }
+        if last_market_check_at is not None:
+            values["last_market_check_at"] = last_market_check_at
+            
         await self._session.execute(
             update(PaperPosition)
             .where(
@@ -433,13 +437,7 @@ class PaperRepository:
                 PaperPosition.status == PositionStatus.OPEN.value,
                 PaperPosition.last_evaluated_at <= last_evaluated_at,
             )
-            .values(
-                # A delayed duplicate may only preserve or raise the running
-                # high. It can never rewind a trailing stop after a newer pass
-                # already observed a higher price.
-                peak_price=func.greatest(PaperPosition.peak_price, peak_price),
-                last_evaluated_at=last_evaluated_at,
-            )
+            .values(**values)
         )
 
     async def advance_activated_trail(
@@ -451,12 +449,16 @@ class PaperRepository:
         last_evaluated_at: datetime,
         activated_at: datetime | None = None,
         activation_observed_price: Decimal | None = None,
+        last_market_check_at: datetime | None = None,
     ) -> None:
         """Advance activation/trail state without allowing it to move backwards."""
         values: dict[str, Any] = {
             "peak_price": func.greatest(PaperPosition.peak_price, peak_price),
             "last_evaluated_at": last_evaluated_at,
         }
+        if last_market_check_at is not None:
+            values["last_market_check_at"] = last_market_check_at
+            
         if trailing_stop_price is not None:
             values["trailing_stop_price"] = func.greatest(
                 func.coalesce(PaperPosition.trailing_stop_price, Decimal(0)),

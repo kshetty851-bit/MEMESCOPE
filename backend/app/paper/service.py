@@ -734,9 +734,22 @@ class PaperWalletService:
         series = await self._market.series_for_mints(
             [position.mint_address for position in positions], since=oldest
         )
+        
+        # Look up when enrichment last checked these tokens, so we can record 
+        # that we tried even if no market was found.
+        from app.models.market import TokenEnrichmentState
+        from sqlalchemy import select
+        enrichment_states = await self._session.scalars(
+            select(TokenEnrichmentState).where(
+                TokenEnrichmentState.mint_address.in_([p.mint_address for p in positions])
+            )
+        )
+        last_checks = {state.mint_address: state.last_attempt_at for state in enrichment_states if state.last_attempt_at}
 
         closed = 0
         for position in positions:
+            last_check_at = last_checks.get(position.mint_address)
+            
             rows = [
                 row
                 for row in series.get(position.mint_address, [])
@@ -744,7 +757,7 @@ class PaperWalletService:
             ]
             if position.trailing_activation_multiple is not None:
                 closed += int(
-                    await self._settle_activated_trail(position, rows=rows, now=now)
+                    await self._settle_activated_trail(position, rows=rows, now=now, last_check_at=last_check_at)
                 )
                 continue
 
@@ -752,7 +765,7 @@ class PaperWalletService:
                 "paper_all_scanned_tp125_sl50_v1",
                 "paper_track_record_tp125_sl50_v1",
             }:
-                closed += int(await self._settle_observed_bracket(position, rows=rows, now=now))
+                closed += int(await self._settle_observed_bracket(position, rows=rows, now=now, last_check_at=last_check_at))
                 continue
 
             quotes = [quote for quote in (_quote(row) for row in rows) if quote is not None]
@@ -776,13 +789,12 @@ class PaperWalletService:
                     new_evaluated_at = quotes[-1].captured_at
                 elif rows:
                     new_evaluated_at = rows[-1].captured_at
-                else:
-                    new_evaluated_at = max(now, position.last_evaluated_at)
                 
                 await self._repository.advance(
                     position.id,
                     peak_price=running_peak,
                     last_evaluated_at=new_evaluated_at,
+                    last_market_check_at=last_check_at,
                 )
                 continue
 
@@ -823,7 +835,7 @@ class PaperWalletService:
         return len(positions), closed
 
     async def _settle_observed_bracket(
-        self, position: PaperPosition, *, rows: Sequence[TokenMarketSnapshot], now: datetime
+        self, position: PaperPosition, *, rows: Sequence[TokenMarketSnapshot], now: datetime, last_check_at: datetime | None = None
     ) -> bool:
         """First observed TP/SL barrier wins; gap fills retain the observed quote."""
         for row in rows:
@@ -843,7 +855,8 @@ class PaperWalletService:
         await self._repository.advance(
             position.id,
             peak_price=max([position.peak_price, *prices]) if prices else position.peak_price,
-            last_evaluated_at=rows[-1].captured_at if rows else max(now, position.last_evaluated_at),
+            last_evaluated_at=rows[-1].captured_at if rows else position.last_evaluated_at,
+            last_market_check_at=last_check_at,
         )
         return False
 
@@ -877,6 +890,7 @@ class PaperWalletService:
         *,
         rows: Sequence[TokenMarketSnapshot],
         now: datetime,
+        last_check_at: datetime | None = None,
     ) -> bool:
         """Apply the 2x activation and observed-price 25% trailing exit.
 
@@ -936,9 +950,10 @@ class PaperWalletService:
             position.id,
             peak_price=peak,
             trailing_stop_price=theoretical_stop,
-            last_evaluated_at=last_at if rows else now,
+            last_evaluated_at=last_at,
             activated_at=activated_at,
             activation_observed_price=activation_price,
+            last_market_check_at=last_check_at,
         )
         return False
 
@@ -1361,13 +1376,23 @@ class PaperWalletService:
             check_times=check_times,
             names={mint: (token.name, token.symbol) for mint, token in names.items()},
             images={mint: token.image_url for mint, token in names.items()},
-            benchmarks=await self.benchmarks(wallet),
-            waiting_for=await self._waiting_for(wallet, cash=m.cash),
             audit_log=await self._repository.audit_log(wallet.id, limit=200),
             audit_count=await self._repository.audit_count(wallet.id),
             pnl_today=metrics.pnl_since(
                 closed, since=now.replace(hour=0, minute=0, second=0, microsecond=0)
             ),
+            observed_at=now,
+        )
+
+    async def read_context(self, *, now: datetime) -> WalletContextRead:
+        """The expensive benchmarks and waiting context."""
+        wallet = await self.wallet(now=now)
+        cash = await self._cash_for(wallet)
+        
+        return WalletContextRead(
+            wallet=wallet,
+            benchmarks=await self.benchmarks(wallet),
+            waiting_for=await self._waiting_for(wallet, cash=cash),
             observed_at=now,
         )
 
@@ -1539,12 +1564,19 @@ class WalletRead:
     check_times: dict[str, datetime | None]
     names: dict[str, tuple[str | None, str | None]]
     images: dict[str, str | None]
-    benchmarks: list[benchmark.BenchmarkResult]
-    #: `None` unless the wallet is holding fundable cash with nothing eligible.
-    waiting_for: WaitingState | None
     audit_log: Sequence[PaperTradeAudit]
     audit_count: int
     pnl_today: Decimal
+    observed_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class WalletContextRead:
+    """The expensive background context for the wallet, loaded separately."""
+    wallet: PaperWallet
+    benchmarks: list[benchmark.BenchmarkResult]
+    #: `None` unless the wallet is holding fundable cash with nothing eligible.
+    waiting_for: WaitingState | None
     observed_at: datetime
 
 
@@ -1558,5 +1590,6 @@ __all__ = [
     "ReviewOutcome",
     "WaitingState",
     "WalletRead",
+    "WalletContextRead",
     "utcnow",
 ]

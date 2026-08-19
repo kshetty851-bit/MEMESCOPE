@@ -18,14 +18,17 @@ from collections.abc import Coroutine
 from typing import Any, TypeVar
 
 from app.db.session import dispose_engine
+from app.core.redis import init_redis, close_redis
 
 T = TypeVar("T")
 
 
 async def _with_disposal(coro: Coroutine[Any, Any, T]) -> T:
     try:
+        await init_redis()
         return await coro
     finally:
+        await close_redis()
         # Runs while the loop is still open, which is the entire point.
         await dispose_engine()
 
