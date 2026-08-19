@@ -12,7 +12,18 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any, cast
 
-from sqlalchemy import CursorResult, Select, and_, func, select, true, update
+from sqlalchemy import (
+    ARRAY,
+    CursorResult,
+    Select,
+    String,
+    and_,
+    func,
+    literal,
+    select,
+    true,
+    update,
+)
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import aliased
 
@@ -112,6 +123,53 @@ class MarketSnapshotRepository(BaseRepository[TokenMarketSnapshot]):
                 first[row.mint_address] = row
         return first
 
+    async def _newest_per_mint(
+        self,
+        mints: Sequence[str],
+        predicates: Sequence[Any],
+    ) -> Sequence[TokenMarketSnapshot]:
+        """The newest snapshot per mint, one index seek each.
+
+        `DISTINCT ON (mint_address) ... WHERE mint_address IN (...)` reads
+        *every* snapshot for every mint and sorts the lot to keep one row per
+        group. On 2026-08-19 that was 223,851 rows and a 54 MB external merge
+        for 100 mints — 4.5 s a chunk, 52 s of the paper wallet's 75 s
+        response, and it grows with history rather than with the answer.
+
+        A LATERAL with `LIMIT 1` asks the question the
+        `(mint_address, captured_at DESC)` index already answers: seek, take the
+        first row, stop. Same plan measured at 40 ms for the same 100 mints, and
+        the cost no longer depends on how much history a mint has.
+
+        Chunked because the mint list rides in as one array parameter, and a
+        single statement over tens of thousands of mints is its own problem.
+        """
+        unique = list(dict.fromkeys(mints))
+        if not unique:
+            return []
+
+        results: list[TokenMarketSnapshot] = []
+        batch_size = 500
+        for i in range(0, len(unique), batch_size):
+            chunk = unique[i : i + batch_size]
+            wanted = select(
+                func.unnest(literal(chunk, ARRAY(String))).label("mint_address")
+            ).subquery("wanted")
+            newest = (
+                select(TokenMarketSnapshot)
+                .where(
+                    TokenMarketSnapshot.mint_address == wanted.c.mint_address,
+                    *predicates,
+                )
+                .order_by(TokenMarketSnapshot.captured_at.desc())
+                .limit(1)
+                .lateral("newest")
+            )
+            entity = aliased(TokenMarketSnapshot, newest)
+            stmt = select(entity).select_from(wanted).join(newest, true())
+            results.extend((await self.session.execute(stmt)).scalars().all())
+        return results
+
     async def latest_for_mints(
         self, mints: Sequence[str], *, since: datetime | None = None
     ) -> dict[str, TokenMarketSnapshot]:
@@ -130,27 +188,11 @@ class MarketSnapshotRepository(BaseRepository[TokenMarketSnapshot]):
         if not unique:
             return {}
 
-        results: dict[str, TokenMarketSnapshot] = {}
-        batch_size = 100
-        for i in range(0, len(unique), batch_size):
-            chunk = unique[i : i + batch_size]
-            predicates = [TokenMarketSnapshot.mint_address.in_(chunk)]
-            if since is not None:
-                predicates.append(TokenMarketSnapshot.captured_at >= since)
-            stmt = (
-                select(TokenMarketSnapshot)
-                .distinct(TokenMarketSnapshot.mint_address)
-                .where(*predicates)
-                .order_by(
-                    TokenMarketSnapshot.mint_address,
-                    TokenMarketSnapshot.captured_at.desc(),
-                )
-            )
-            rows = (await self.session.execute(stmt)).scalars().all()
-            for row in rows:
-                results[row.mint_address] = row
-                
-        return results
+        predicates = []
+        if since is not None:
+            predicates.append(TokenMarketSnapshot.captured_at >= since)
+        rows = await self._newest_per_mint(unique, predicates)
+        return {row.mint_address: row for row in rows}
 
     async def price_as_of_for_mints(
         self, mints: Sequence[str], *, as_of: datetime
@@ -171,29 +213,18 @@ class MarketSnapshotRepository(BaseRepository[TokenMarketSnapshot]):
         if not unique:
             return {}
 
-        results: dict[str, Decimal] = {}
-        batch_size = 100
-        for i in range(0, len(unique), batch_size):
-            chunk = unique[i : i + batch_size]
-            stmt = (
-                select(TokenMarketSnapshot)
-                .distinct(TokenMarketSnapshot.mint_address)
-                .where(
-                    TokenMarketSnapshot.mint_address.in_(chunk),
-                    TokenMarketSnapshot.captured_at <= as_of,
-                    TokenMarketSnapshot.price_usd.is_not(None),
-                )
-                .order_by(
-                    TokenMarketSnapshot.mint_address,
-                    TokenMarketSnapshot.captured_at.desc(),
-                )
-            )
-            rows = (await self.session.execute(stmt)).scalars().all()
-            for row in rows:
-                if row.price_usd is not None and row.price_usd > 0:
-                    results[row.mint_address] = row.price_usd
-                    
-        return results
+        rows = await self._newest_per_mint(
+            unique,
+            [
+                TokenMarketSnapshot.captured_at <= as_of,
+                TokenMarketSnapshot.price_usd.is_not(None),
+            ],
+        )
+        return {
+            row.mint_address: row.price_usd
+            for row in rows
+            if row.price_usd is not None and row.price_usd > 0
+        }
 
     async def series_for_mints(
         self, mints: Sequence[str], *, since: datetime

@@ -145,7 +145,7 @@ x-backend-env: &backend-env
   # Priority enrichment lane. In the anchor because the scheduler beat marks
   # the lane and the enrichment worker reads it — a cadence set on one service
   # only would let them disagree about what "displayed" means.
-  FEATURE_PRIORITY_ENRICHMENT_ENABLED: ${FEATURE_PRIORITY_ENRICHMENT_ENABLED:-false}
+  FEATURE_PRIORITY_ENRICHMENT_ENABLED: ${FEATURE_PRIORITY_ENRICHMENT_ENABLED:-true}
   ENRICHMENT_PRIORITY_INTERVAL_SECONDS: ${ENRICHMENT_PRIORITY_INTERVAL_SECONDS:-15}
   ENRICHMENT_PRIORITY_RADAR_RANKS: ${ENRICHMENT_PRIORITY_RADAR_RANKS:-25}
   ENRICHMENT_PRIORITY_MAX_TOKENS: ${ENRICHMENT_PRIORITY_MAX_TOKENS:-200}

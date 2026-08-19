@@ -332,3 +332,50 @@ async def test_counts_by_status(db_session: AsyncSession) -> None:
         token_id=token.id, mint_address=token.mint_address, next_refresh_at=NOW
     )
     assert (await repo.counts_by_status()).get("active") == 1
+
+
+async def test_newest_per_mint_ignores_older_rows_and_honours_predicates(
+    db_session: AsyncSession,
+) -> None:
+    """The batched readers return one row per mint — the newest that qualifies.
+
+    Pinned because the query shape changed. `DISTINCT ON (mint_address)` over an
+    `IN (...)` list read every snapshot a mint had ever had and sorted the lot to
+    keep one row per group: 223,851 rows and a 54 MB external merge for 100 mints
+    on 2026-08-19, which was 52 s of the paper wallet's 75 s response. The LATERAL
+    `LIMIT 1` that replaced it is measured in tens of milliseconds because it
+    stops at the first index entry — but only if it still answers the same
+    question, which is what this asserts.
+    """
+    repo = MarketSnapshotRepository(db_session)
+    held = await _token(db_session, "mint-newest-held")
+    stale = await _token(db_session, "mint-newest-stale")
+    await _token(db_session, "mint-newest-unpriced")
+
+    await repo.add_snapshot(
+        _snapshot(held, captured_at=NOW - timedelta(hours=2), price_usd=Decimal("1"))
+    )
+    await repo.add_snapshot(_snapshot(held, captured_at=NOW, price_usd=Decimal("2")))
+    await repo.add_snapshot(
+        _snapshot(stale, captured_at=NOW - timedelta(days=2), price_usd=Decimal("3"))
+    )
+
+    mints = ["mint-newest-held", "mint-newest-stale", "mint-newest-unpriced"]
+
+    latest = await repo.latest_for_mints(mints)
+    assert latest["mint-newest-held"].price_usd == Decimal("2")
+    assert latest["mint-newest-stale"].price_usd == Decimal("3")
+    # A mint nobody has priced is absent, never a zero.
+    assert "mint-newest-unpriced" not in latest
+
+    since = await repo.latest_for_mints(mints, since=NOW - timedelta(hours=1))
+    assert set(since) == {"mint-newest-held"}
+
+    as_of = await repo.price_as_of_for_mints(mints, as_of=NOW - timedelta(hours=1))
+    assert as_of == {
+        "mint-newest-held": Decimal("1"),
+        "mint-newest-stale": Decimal("3"),
+    }
+
+    assert await repo.latest_for_mints([]) == {}
+    assert await repo.price_as_of_for_mints([], as_of=NOW) == {}
