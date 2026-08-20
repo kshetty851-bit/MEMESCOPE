@@ -628,6 +628,15 @@ function walkHome(tiles: Tile[]): AmbientFrame[] {
   ];
 }
 
+/** Column 9 southbound: the same clear line, walked the other way. */
+const SPINE_DOWN: Tile[] = [
+  { col: 9, row: 2 },
+  { col: 9, row: 3 },
+  { col: 9, row: 4 },
+  { col: 9, row: 5 },
+  { col: 9, row: 6 },
+];
+
 /** Column 9, the one clear north–south line through the trading floor. */
 const SPINE_UP: Tile[] = [
   { col: 9, row: 5 },
@@ -1059,7 +1068,237 @@ export const EXPANSION_ROUTINES: AmbientRoutine[] = [
   },
 ];
 
-AMBIENT_ROUTINES.push(...EXPANSION_ROUTINES, ...MEETING_ROUTINES);
+/* ---------------------------------------------------------------------- */
+
+/**
+ * THE CEO'S OWN ROUTINES.
+ *
+ * Nova already walked the floor. What she did not do is behave differently
+ * from the nine people she runs, and the brief asks for that difference to be
+ * visible without inventing authority the platform does not have.
+ *
+ * So the difference is *shape*, never content. Nova is the only one who
+ * crosses the room to somebody else's desk unprompted; the only one whose
+ * micro-interactions are two-sided by default; the only one who reads the
+ * Mission Board rather than a monitor. Those are the observable habits of
+ * somebody running the place.
+ *
+ * ── "ASSIGNING A TASK" IS A DRAWING ─────────────────────────────────────
+ *
+ * `nova-assign-*` shows Nova speaking to a specialist and the specialist
+ * acknowledging. Nothing is scheduled, nothing is queued and no backend hears
+ * about it — the exchange is two poses and two bubbles. The brief is explicit
+ * that the CEO must not become an autonomous task system, and the guarantee
+ * here is structural: this file exports frames. It has no client, no writer
+ * and no reachable side effect, exactly like every other routine beside it.
+ *
+ * The lines are deliberately about *attention*, not instruction. "Take a look
+ * when you can" is a manager talking. "Buy this" would be a trading decision
+ * rendered as a cartoon, which is the one thing HQ may never draw.
+ */
+function novaAssign(
+  id: string,
+  target: EmployeeId,
+  approach: Tile[],
+  novaLine: string,
+  reply: string,
+): AmbientRoutine {
+  const at = approach.at(-1)!;
+  return {
+    id,
+    employee: "nova",
+    // Light on purpose. Nova owns three of the four ambient meetings, so every
+    // point of weight added here is meeting frequency taken away.
+    weight: 0.8,
+    suppressOnAlert: true,
+    nightFactor: 0.2,
+    frames: [
+      ...walk(approach),
+      { pose: "talking_briefly", tile: at, hold: 4_200, detail: "Speaking with the desk.", speech: novaLine },
+      { pose: "standing", tile: at, hold: 2_600, detail: "Listening." },
+      ...walkHome(approach),
+    ],
+    cast: [
+      {
+        employee: target,
+        frames: [
+          { pose: "standing", hold: STEP_MS * approach.length },
+          { pose: "looking_at_screen", hold: 4_200, detail: "Being asked to take a look." },
+          { pose: "talking_briefly", hold: 2_600, detail: "Acknowledging.", speech: reply },
+          { pose: "seated_working", hold: 1_200 },
+        ],
+      },
+    ],
+  };
+}
+
+export const CEO_ROUTINES: AmbientRoutine[] = [
+  novaAssign(
+    "nova-assign-atlas",
+    "atlas",
+    // Along the row-1 corridor and down the west edge. (5,4) and (2,4) are
+    // Atlas's own desk furniture; she stands beside it, not in it.
+    [
+      { col: 7, row: 1 },
+      { col: 6, row: 1 },
+      { col: 5, row: 1 },
+      { col: 4, row: 1 },
+      { col: 3, row: 1 },
+      { col: 2, row: 1 },
+      { col: 2, row: 2 },
+      { col: 2, row: 3 },
+    ],
+    "Atlas, when you can.",
+    "On it.",
+  ),
+  novaAssign(
+    "nova-assign-sage",
+    "sage",
+    [
+      { col: 9, row: 1 },
+      ...SPINE_DOWN,
+      { col: 10, row: 6 },
+      { col: 11, row: 6 },
+      { col: 12, row: 6 },
+      { col: 13, row: 6 },
+      { col: 13, row: 7 },
+    ],
+    "Sage, walk me through it.",
+    "Give me a moment.",
+  ),
+  novaAssign(
+    "nova-assign-rex",
+    "rex",
+    [
+      { col: 9, row: 1 },
+      { col: 10, row: 1 },
+      { col: 11, row: 1 },
+      { col: 12, row: 1 },
+      { col: 12, row: 2 },
+      { col: 12, row: 3 },
+    ],
+    "Rex, anything I should know?",
+    "Standing by.",
+  ),
+  {
+    // The CEO's version of reading the room: a slow lap of the Mission Board
+    // and back. Longer holds than anybody else's idle — she is looking, not
+    // working, and the difference should read at a glance.
+    id: "nova-inspect",
+    employee: "nova",
+    weight: 1.2,
+    nightFactor: 0.3,
+    frames: [
+      ...walk([
+        { col: 9, row: 1 },
+        { col: 10, row: 1 },
+        { col: 11, row: 1 },
+      ]),
+      { pose: "standing", tile: { col: 11, row: 1 }, hold: 7_800, detail: "Reading the Mission Board." },
+      { pose: "holding_tablet", tile: { col: 11, row: 1 }, hold: 5_400, detail: "Making a note from the board." },
+      ...walkHome([
+        { col: 9, row: 1 },
+        { col: 10, row: 1 },
+        { col: 11, row: 1 },
+      ]),
+    ],
+  },
+];
+
+/**
+ * THE OUTDOOR DECK, PROPERLY USED.
+ *
+ * Two kinds of break, both on the deck and nowhere else, and both written to
+ * be unremarkable. The smoking one is adult staff on a break: they stand at
+ * the railing, they finish, they come back. It is occasional (`weight` 0.6 —
+ * the lowest in the file), suppressed at alert and rare at night, and it is
+ * the only routine anywhere that carries `detail` mentioning it at all.
+ *
+ * Nothing about it is celebrated and nothing about it is hidden.
+ */
+/**
+ * The deck's standing spots.
+ *
+ * (19,6) is blocked — the airlock frame stands there — so the rail positions
+ * are (18,6), which `rex-deck` already uses, and (20,6) reached around it via
+ * row 5. Both were guessed wrong first and caught by the furniture test, which
+ * is the entire reason that test walks every frame of every routine.
+ */
+const DECK_EAST: Tile[] = [
+  { col: 18, row: 5 },
+  { col: 19, row: 5 },
+  { col: 20, row: 5 },
+  { col: 20, row: 6 },
+];
+
+/** Walkway row 6 from a column east to the deck. */
+function walkwayToDeck(fromCol: number, toCol: number): Tile[] {
+  const tiles: Tile[] = [];
+  for (let col = fromCol; col <= toCol; col += 1) tiles.push({ col, row: 6 });
+  return tiles;
+}
+
+function deckBreak(
+  id: string,
+  employee: EmployeeId,
+  approach: Tile[],
+  detail: string,
+  weight: number,
+): AmbientRoutine {
+  const at = approach.at(-1)!;
+  return {
+    id,
+    employee,
+    weight,
+    suppressOnAlert: true,
+    nightFactor: 0.35,
+    frames: [
+      ...walk(approach),
+      { pose: "standing", tile: at, hold: 8_400, detail },
+      { pose: "stretching", tile: at, hold: 3_200, detail },
+      { pose: "standing", tile: at, hold: 5_600, detail },
+      ...walkHome(approach),
+    ],
+  };
+}
+
+export const BREAK_ROUTINES: AmbientRoutine[] = [
+  deckBreak(
+    "dex-smoke",
+    "dex",
+    [{ col: 10, row: 4 }, { col: 10, row: 5 }, ...walkwayToDeck(10, 18)],
+    "On a smoking break at the deck railing.",
+    0.6,
+  ),
+  deckBreak(
+    "byte-smoke",
+    "byte",
+    [{ col: 9, row: 7 }, ...walkwayToDeck(9, 18), ...DECK_EAST],
+    "On a smoking break at the deck railing.",
+    0.6,
+  ),
+  deckBreak(
+    "luna-air",
+    "luna",
+    [{ col: 8, row: 2 }, { col: 9, row: 2 }, ...SPINE_DOWN.slice(1), ...walkwayToDeck(10, 17)],
+    "Out on the deck for some air.",
+    1,
+  ),
+  deckBreak(
+    "milo-air",
+    "milo",
+    [{ col: 2, row: 7 }, { col: 2, row: 6 }, ...walkwayEast(3), ...walkwayToDeck(10, 16)],
+    "Out on the deck for some air.",
+    1,
+  ),
+];
+
+AMBIENT_ROUTINES.push(
+  ...EXPANSION_ROUTINES,
+  ...MEETING_ROUTINES,
+  ...CEO_ROUTINES,
+  ...BREAK_ROUTINES,
+);
 
 export const ROUTINES_BY_EMPLOYEE = new Map<EmployeeId, AmbientRoutine[]>(
   EMPLOYEES.map((employee) => [

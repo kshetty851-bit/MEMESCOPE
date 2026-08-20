@@ -304,6 +304,28 @@ describe("support and cat routes", () => {
 /* ── the scheduler's new behaviours ─────────────────────────────────────── */
 
 describe("meetings", () => {
+  /**
+   * Run until a meeting starts, trying successive seeds.
+   *
+   * The bound used to be a single seed and 600 ticks, tuned to the routine set
+   * that existed when it was written — so adding eight ambient routines broke
+   * two tests that were about HIGH_ALERT and had nothing to do with routine
+   * counts. What the tests actually mean is "meetings happen"; searching seeds
+   * says that without re-tuning a magic number every time the roster grows.
+   */
+  function schedulerWithMeeting(): ReturnType<typeof runScheduler> {
+    for (let seed = 1; seed <= 12; seed += 1) {
+      const harness = runScheduler(seed);
+      harness.scheduler.start();
+      for (let i = 0; i < 900 && !harness.scheduler.meetingActive; i += 1) {
+        vi.advanceTimersByTime(1_000);
+      }
+      if (harness.scheduler.meetingActive) return harness;
+      harness.scheduler.destroy();
+    }
+    throw new Error("no seed produced a meeting");
+  }
+
   function runScheduler(seed: number) {
     const frames = new Map<ActorId, ActorFrame | null>();
     const scheduler = createAmbientScheduler((actor, frame) => {
@@ -332,13 +354,7 @@ describe("meetings", () => {
     vi.useFakeTimers();
     setReducedMotion(false);
     Object.defineProperty(document, "hidden", { configurable: true, get: () => false });
-    const { frames, scheduler } = runScheduler(3);
-    scheduler.start();
-
-    // Run until a meeting actually starts.
-    for (let i = 0; i < 600 && !scheduler.meetingActive; i += 1) {
-      vi.advanceTimersByTime(1_000);
-    }
+    const { frames, scheduler } = schedulerWithMeeting();
     expect(scheduler.meetingActive).toBe(true);
 
     const participants = [...scheduler.animating];
@@ -402,16 +418,24 @@ describe("meetings", () => {
     vi.useFakeTimers();
     setReducedMotion(false);
     Object.defineProperty(document, "hidden", { configurable: true, get: () => false });
-    const { frames, scheduler } = runScheduler(3);
-    scheduler.start();
-    for (let i = 0; i < 600 && !scheduler.meetingActive; i += 1) {
-      vi.advanceTimersByTime(1_000);
-    }
+    const { frames, scheduler } = schedulerWithMeeting();
     expect(scheduler.meetingActive).toBe(true);
     const inMeeting = scheduler.animating.filter((id) =>
       EMPLOYEES.some((employee) => employee.id === id),
     ) as EmployeeId[];
     expect(inMeeting.length).toBeGreaterThanOrEqual(3);
+
+    // Watch releases rather than the final frame. The meeting cast must all
+    // walk home and be freed — but the scheduler keeps running, so any of them
+    // may legitimately start something new before the five minutes are up.
+    // Asserting the *final* frame was null only ever passed because one seed
+    // happened not to do that, which is the sibling test's whole comment.
+    const released = new Set<ActorId>();
+    const originalSet = frames.set.bind(frames);
+    frames.set = (actor, frame) => {
+      if (frame === null) released.add(actor);
+      return originalSet(actor, frame);
+    };
 
     // One participant's subsystem starts doing real work.
     scheduler.setOperational([inMeeting[0]!]);
@@ -419,7 +443,7 @@ describe("meetings", () => {
     vi.advanceTimersByTime(5 * 60 * 1000);
     expect(scheduler.meetingActive).toBe(false);
     for (const id of inMeeting) {
-      expect(frames.get(id), `${id} never released`).toBeNull();
+      expect(released.has(id), `${id} never released`).toBe(true);
     }
     scheduler.destroy();
     vi.useRealTimers();
