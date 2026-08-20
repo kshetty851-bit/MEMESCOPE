@@ -746,6 +746,30 @@
    layout than as a string of bracket utilities. */
 
 .crew {
+  /*
+    POSITIONED, AND THAT IS NOT COSMETIC — IT IS WHY THE SECTION IS VISIBLE.
+
+    `.home-universe` is `position: fixed; inset: 0; z-index: 0` with an opaque
+    `#070a16` canvas inside it. A positioned element with `z-index: 0` paints
+    ABOVE an in-flow static block, and because it is fixed it re-covers the
+    viewport at every scroll offset. So this section — correct markup, correct
+    data, ten cards — was painted over at every scroll position and could never
+    be scrolled out from under it.
+
+    It is also `pointer-events: none`, which is what made the bug so hard to
+    see: `elementFromPoint` reports `.crew-title` as the topmost element
+    because hit-testing passes straight through the overlay. Every DOM check
+    passed while the pixels were solid black. It took a minimal reproduction —
+    a static child and a z-10 child under a fixed z-0 layer — to prove which
+    one paints.
+
+    Every other content child of `main` already carries a positive z-index:
+    the hero is `relative`, HomepageIntelligence is `relative z-10`,
+    `.alpha-transition` is z-30. `.crew` and `.crew-cta` were the only
+    unpositioned ones, which is exactly the set that was invisible.
+  */
+  position: relative;
+  z-index: 10;
   max-width: 80rem;
   margin: 0 auto;
   padding: clamp(4rem, 9vw, 7rem) 1.5rem 0;
@@ -918,6 +942,10 @@
 /* ── the door ─────────────────────────────────────────────────────────── */
 
 .crew-cta {
+  /* Same fixed overlay, same fix. The door was invisible for the same reason
+     the crew was. */
+  position: relative;
+  z-index: 10;
   max-width: 80rem;
   margin: 0 auto;
   padding: clamp(2.5rem, 5vw, 4rem) 1.5rem clamp(4rem, 8vw, 6rem);
