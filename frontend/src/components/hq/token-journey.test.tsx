@@ -9,7 +9,7 @@ import { CaseFilePanel } from "@/components/hq/case-file-panel";
 import { deriveCaseFile, type CaseStageStatus, type TokenCaseFile } from "@/lib/hq/case-file";
 import { UNKNOWN_HQ_STATE } from "@/lib/hq/adapter";
 import { GRID_COLS, GRID_ROWS } from "@/lib/hq/geometry";
-import { ZONE_BY_ID } from "@/lib/hq/zones";
+import { ZONES, ZONE_BY_ID } from "@/lib/hq/zones";
 import { EMPLOYEE_BY_ID } from "@/lib/hq/employees";
 import type { RadarDetail } from "@/types/radar";
 import type { PaperPositions } from "@/types/paper";
@@ -133,14 +133,40 @@ describe("the physical room stays frozen", () => {
     expect(GRID_ROWS).toBe(14);
   });
 
-  it("keeps every department's rectangle exactly where the world expansion put it", () => {
+  it("keeps every working department's rectangle where it was", () => {
+    // The composition pass was authorised to reflow the room, and did — but
+    // only at the two edges that were empty. Every department somebody works
+    // in is byte-identical, so no desk, route or prop moved under anyone.
     expect(ZONE_BY_ID.get("mission")!.rect).toEqual({ col: 0, row: 0, cols: 16, rows: 2 });
     expect(ZONE_BY_ID.get("conference")!.rect).toEqual({ col: 16, row: 0, cols: 6, rows: 4 });
-    expect(ZONE_BY_ID.get("deck")!.rect).toEqual({ col: 16, row: 4, cols: 6, rows: 4 });
     expect(ZONE_BY_ID.get("pantry")!.rect).toEqual({ col: 0, row: 10, cols: 8, rows: 2 });
     expect(ZONE_BY_ID.get("lounge")!.rect).toEqual({ col: 8, row: 10, cols: 8, rows: 2 });
-    expect(ZONE_BY_ID.get("reception")!.rect).toEqual({ col: 6, row: 12, cols: 10, rows: 2 });
     expect(ZONE_BY_ID.get("facilities")!.rect).toEqual({ col: 0, row: 12, cols: 3, rows: 2 });
+  });
+
+  it("leaves no tile of the building belonging to no department", () => {
+    // The composition fix, pinned. cols 16-22 x rows 8-14 — 42 tiles, a sixth
+    // of the floor — used to belong to nothing and rendered as a hole in the
+    // south-east corner. The deck now runs to row 12 and reception spans the
+    // full south wall, so the footprint is a complete rectangle.
+    expect(ZONE_BY_ID.get("deck")!.rect).toEqual({ col: 16, row: 4, cols: 6, rows: 8 });
+    expect(ZONE_BY_ID.get("reception")!.rect).toEqual({ col: 6, row: 12, cols: 16, rows: 2 });
+
+    const covered = new Set<string>();
+    for (const zone of ZONES) {
+      for (let c = zone.rect.col; c < zone.rect.col + zone.rect.cols; c += 1) {
+        for (let r = zone.rect.row; r < zone.rect.row + zone.rect.rows; r += 1) {
+          covered.add(`${c},${r}`);
+        }
+      }
+    }
+    const orphans: string[] = [];
+    for (let c = 0; c < GRID_COLS; c += 1) {
+      for (let r = 0; r < GRID_ROWS; r += 1) {
+        if (!covered.has(`${c},${r}`)) orphans.push(`${c},${r}`);
+      }
+    }
+    expect(orphans).toEqual([]);
   });
 
   it("keeps every employee desk exactly where it already was", () => {

@@ -37,7 +37,13 @@ export interface Placement {
 export const FURNITURE: Placement[] = [
   /* ---- Mission Control ------------------------------------------------ */
   { kind: "plant-large", tile: { col: 1, row: 1 } },
-  { kind: "plant-large", tile: { col: 14, row: 0 } },
+  // Col 4 row 0, not col 14. The Mission Board grew west-to-east across cols
+  // ~9.6-14.7 in the composition pass, and this plant stood directly in front
+  // of it — a shrub obscuring the one surface that speaks for the whole
+  // office. Moved to the board's west, against the north wall: clear of the
+  // board, clear of Nova at col 8, and off Radar's telescope route, which is
+  // what col 5 row 1 turned out to be.
+  { kind: "plant-large", tile: { col: 4, row: 0 } },
 
   /* ---- Risk Room ------------------------------------------------------ */
   { kind: "cabinet", tile: { col: 1, row: 2 } },
@@ -66,10 +72,25 @@ export const FURNITURE: Placement[] = [
   { kind: "plant-small", tile: { col: 21, row: 0 } },
 
   /* ---- Outdoor Break Deck ---------------------------------------------
-     Exterior: benches and a standing table, nothing that needs air. */
+     Exterior: benches, tables and planters — nothing that needs air.
+
+     The deck now runs rows 4-11 rather than 4-7, because it absorbed the
+     42-tile void that used to sit south-east of the building. Three props
+     across eight rows read as an empty platform, so the southern half gets
+     its own seating cluster: a second bench pair by the lounge door and a
+     low table between them. Spread deliberately wide — this is the one
+     space in HQ that is *supposed* to feel open, and filling it evenly
+     would turn a terrace into a waiting room. */
   { kind: "bench", tile: { col: 18, row: 5 }, sittable: true },
   { kind: "bench", tile: { col: 20, row: 5 }, sittable: true },
   { kind: "standing-table", tile: { col: 19, row: 6 } },
+  { kind: "plant-large", tile: { col: 21, row: 4 } },
+  { kind: "lounge-chair", tile: { col: 17, row: 9 }, sittable: true },
+  { kind: "lounge-chair", tile: { col: 19, row: 9 }, sittable: true },
+  { kind: "low-table", tile: { col: 18, row: 10 } },
+  { kind: "plant-large", tile: { col: 21, row: 8 } },
+  { kind: "plant-small", tile: { col: 17, row: 11 } },
+  { kind: "standing-table", tile: { col: 20, row: 11 } },
 
   /* ---- Portfolio ------------------------------------------------------ */
   { kind: "bookshelf", tile: { col: 0, row: 7 } },

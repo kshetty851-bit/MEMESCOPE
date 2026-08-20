@@ -559,16 +559,36 @@
   fill: var(--hq-ink);
   font-size: 11px;
   font-weight: 600;
-  text-anchor: middle;
+  /* Left-aligned now, because the dot sits to its left inside one pill. A
+     centred name beside a fixed dot drifts as names change length. */
+  text-anchor: start;
   pointer-events: none;
 }
 
-.hq-anchor-state {
-  fill: var(--hq-ink-soft);
-  font-size: 9px;
-  text-anchor: middle;
-  pointer-events: none;
+/* The state, as a dot rather than a word.
+
+   COLOUR IS NEVER THE ONLY CHANNEL. Each class of state also has its own
+   *shape*, so the distinctions survive without hue:
+
+     operational (working/busy/reviewing/success) — solid disc
+     idle                                        — hollow ring
+     unknown / offline                           — dashed ring
+     alert / error                               — solid disc *plus* the lamp
+                                                   ring under the figure
+
+   And the state word itself is still text in two places a reader can reach:
+   the anchor's `aria-label`, and the employee panel one click away. The dot
+   is a glance aid, never the record. */
+.hq-anchor-dot {
+  fill: none;
+  stroke: var(--hq-ink-soft);
+  stroke-width: 1.4;
   opacity: 0.8;
+}
+
+/* Support staff have no dot, so their name centres in the pill instead. */
+.hq-anchor-name--centred {
+  text-anchor: middle;
 }
 
 /* An unmeasured employee is drawn as unmeasured.
@@ -576,9 +596,12 @@
    point of a recognisable cast — but their *state chip* is dashed and muted,
    and their desk instruments dim. `unknown` must never be able to read as a
    healthy working state at a glance. */
-.hq-anchor[data-state="unknown"] .hq-anchor-state,
-.hq-anchor[data-state="offline"] .hq-anchor-state {
-  fill: var(--hq-ink-soft);
+.hq-anchor[data-state="unknown"] .hq-anchor-dot,
+.hq-anchor[data-state="offline"] .hq-anchor-dot {
+  fill: none;
+  stroke: var(--hq-ink-soft);
+  stroke-width: 1.2;
+  stroke-dasharray: 1.6 1.4;
   opacity: 0.95;
 }
 
@@ -591,28 +614,30 @@
    The word is the fact and it is always present — these rules only make the
    room scannable at a glance. Nothing here is the sole carrier of anything: a
    reader who cannot distinguish these hues loses speed, never information. */
-.hq-anchor[data-state="working"] .hq-anchor-state,
-.hq-anchor[data-state="busy"] .hq-anchor-state,
-.hq-anchor[data-state="reviewing"] .hq-anchor-state {
+.hq-anchor[data-state="working"] .hq-anchor-dot,
+.hq-anchor[data-state="busy"] .hq-anchor-dot,
+.hq-anchor[data-state="reviewing"] .hq-anchor-dot {
   fill: var(--hq-status-work);
+  stroke: none;
   opacity: 1;
 }
 
-.hq-anchor[data-state="success"] .hq-anchor-state {
+.hq-anchor[data-state="success"] .hq-anchor-dot {
   fill: var(--hq-status-good);
+  stroke: none;
   opacity: 1;
 }
 
-.hq-anchor[data-state="alert"] .hq-anchor-state {
+.hq-anchor[data-state="alert"] .hq-anchor-dot {
   fill: var(--hq-status-warn);
+  stroke: none;
   opacity: 1;
-  font-weight: 600;
 }
 
-.hq-anchor[data-state="error"] .hq-anchor-state {
+.hq-anchor[data-state="error"] .hq-anchor-dot {
   fill: var(--hq-status-bad);
+  stroke: none;
   opacity: 1;
-  font-weight: 600;
 }
 
 /* The alert lamp. A ring under the figure rather than a recolour of the
@@ -631,15 +656,29 @@
 
 /* ---------- zone labels -------------------------------------------------- */
 
+/* Department signage.
+   Was faint grey text lying directly on the floor plate, which is what made
+   the room read as a plan rather than a place. A plate behind the word turns
+   it into a sign somebody hung. */
+.hq-zone-sign {
+  pointer-events: none;
+}
+
+.hq-zone-sign-plate {
+  fill: var(--hq-sign-plate, oklch(0.30 0.020 265 / 0.55));
+  stroke: var(--hq-sign-edge, oklch(0.70 0.030 265 / 0.30));
+  stroke-width: 0.8;
+}
+
 .hq-zone-label {
-  fill: var(--hq-ink-soft);
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
+  fill: var(--hq-sign-ink, oklch(0.94 0.010 90));
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.10em;
   text-anchor: middle;
   text-transform: uppercase;
   pointer-events: none;
-  opacity: 0.85;
+  opacity: 0.95;
 }
 
 /* ---------- motion ------------------------------------------------------- */
@@ -1404,7 +1443,7 @@
 
 .hq-board-title {
   fill: var(--hq-screen-glow);
-  font-size: 13px;
+  font-size: 17px;
   font-weight: 700;
   letter-spacing: 0.12em;
   text-anchor: middle;
@@ -1413,7 +1452,7 @@
 
 .hq-board-value {
   fill: oklch(0.90 0.010 250);
-  font-size: 12px;
+  font-size: 15px;
   font-weight: 600;
   letter-spacing: 0.06em;
   text-anchor: middle;
@@ -1801,9 +1840,49 @@
 
 .hq-board-cases {
   fill: oklch(0.80 0.010 250);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 500;
   letter-spacing: 0.04em;
   text-anchor: middle;
   pointer-events: none;
+}
+
+/* ---------- the Execution Vault's shell ---------------------------------- */
+
+/* Cold metal against the office's warm wood. The contrast is the point: a
+   reader should be able to tell at a glance which part of this company
+   handles simulated money and which part would handle real money. */
+.hq-vault-wall {
+  fill: var(--hq-vault-wall, oklch(0.42 0.012 255));
+  stroke: oklch(0.28 0.012 255 / 0.9);
+  stroke-width: 1;
+}
+
+.hq-vault-wall--south {
+  fill: var(--hq-vault-wall-south, oklch(0.36 0.012 255));
+}
+
+.hq-vault-post {
+  fill: var(--hq-vault-post, oklch(0.52 0.014 255));
+}
+
+/* The hazard stripe. Decoration, but decoration that says "sealed". */
+.hq-vault-stripe {
+  fill: var(--hq-status-warn);
+  opacity: 0.5;
+}
+
+/* ---------- the circulation spine ---------------------------------------- */
+
+/* A runner, not a wall. Warm and low-contrast: it should guide the eye along
+   the room's one full-width lane without competing with the departments it
+   runs between. */
+.hq-spine-runner {
+  fill: var(--hq-spine, oklch(0.66 0.036 62 / 0.30));
+  stroke: var(--hq-spine-edge, oklch(0.74 0.040 62 / 0.30));
+  stroke-width: 1;
+}
+
+.hq-spine-runner--entry {
+  opacity: 0.72;
 }

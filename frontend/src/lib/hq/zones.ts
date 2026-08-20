@@ -108,7 +108,15 @@ export const ZONES: Zone[] = [
     id: "deck",
     label: "Outdoor Break Deck",
     summary: "Exterior observation deck behind an airlock.",
-    rect: { col: 16, row: 4, cols: 6, rows: 4 },
+    // Runs the full depth of the east side, rows 4-12.
+    //
+    // It used to stop at row 8, which left cols 16-22 x rows 8-14 — 42 tiles,
+    // a sixth of the whole floor — belonging to no zone at all. That void was
+    // the largest single thing wrong with the composition: the office read as
+    // a plan with a corner missing rather than as a building. Running the deck
+    // down to row 12 fills it and, as a bonus, finally puts the deck against
+    // the Lounge's east edge, which is where an outdoor break space belongs.
+    rect: { col: 16, row: 4, cols: 6, rows: 8 },
     surface: "deck",
   },
   {
@@ -175,7 +183,7 @@ export const ZONES: Zone[] = [
     id: "reception",
     label: "Reception",
     summary: "The front desk and the way in.",
-    rect: { col: 6, row: 12, cols: 10, rows: 2 },
+    rect: { col: 6, row: 12, cols: 16, rows: 2 },
     surface: "plate",
   },
 ];

@@ -441,12 +441,18 @@ function renderProp(kind: FloorProp, x: number, y: number) {
       // The conference chair pre-exists at the seat, so a meeting participant
       // sits on furniture that is already there — the rig draws no chair of
       // its own in the lounge stance.
+      //
+      // Drawn 1.3x its original geometry. It was built against a 1.0-scale
+      // cast; the composition pass took the figures to 1.36, which left six
+      // stools around a three-tile table and made the room read as a banquet
+      // slab with doll furniture. Scaling the chair rather than shrinking the
+      // table keeps the seats on their tiles.
       return (
         <g>
-          <Grounded x={x} y={y} w={12} />
-          <path className="hq-chair-back" d={`M-12 -4 L12 -4 L11 -26 Q11 -31 6 -31 L-6 -31 Q-11 -31 -11 -26 Z`} transform={`translate(${x} ${y})`} />
-          <path className="hq-chair" d={`M-14 7 L14 7 L13 -4 L-13 -4 Z`} transform={`translate(${x} ${y})`} />
-          <path className="hq-chair-stem" d={`M-2 7 L2 7 L3 13 L-3 13 Z`} transform={`translate(${x} ${y})`} />
+          <Grounded x={x} y={y} w={16} />
+          <path className="hq-chair-back" d={`M-12 -4 L12 -4 L11 -26 Q11 -31 6 -31 L-6 -31 Q-11 -31 -11 -26 Z`} transform={`translate(${x} ${y}) scale(1.3)`} />
+          <path className="hq-chair" d={`M-14 7 L14 7 L13 -4 L-13 -4 Z`} transform={`translate(${x} ${y}) scale(1.3)`} />
+          <path className="hq-chair-stem" d={`M-2 7 L2 7 L3 13 L-3 13 Z`} transform={`translate(${x} ${y}) scale(1.3)`} />
         </g>
       );
 

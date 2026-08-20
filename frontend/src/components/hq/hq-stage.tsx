@@ -25,7 +25,7 @@ import type { CatPose } from "@/lib/hq/cats";
 import { SUPPORT_STAFF } from "@/lib/hq/support";
 import { PacketOverflowBadge, TokenPacket, packetDockTile } from "@/components/hq/token-packet";
 import type { TokenCaseFile } from "@/lib/hq/case-file";
-import { ZONES, type ZoneId } from "@/lib/hq/zones";
+import { ZONES, ZONE_BY_ID, type ZoneId } from "@/lib/hq/zones";
 import type { ActorId } from "@/lib/hq/ambient-scheduler";
 import type { ActorFrame } from "@/lib/hq/ambient";
 import { UNKNOWN_HQ_STATE, type HqState, type OfficeActivity } from "@/lib/hq/adapter";
@@ -162,7 +162,11 @@ export function HqStage({
           aria-label={roomDescription(state)}
           preserveAspectRatio="xMidYMid meet"
         >
-          <title>MEMESCOPE HQ floor plan</title>
+          {/* No <title>. It is the SVG equivalent of a tooltip and the browser
+              rendered it as a grey "MEMESCOPE HQ floor plan" badge floating
+              over the room whenever a pointer crossed the scene. The
+              accessible name is already carried by `role="img"` +
+              `aria-label` above, which is both richer and silent. */}
           <RigDefs />
 
           {/* The planet in the void beyond the deck. Behind everything,
@@ -204,8 +208,17 @@ export function HqStage({
               to the depth-sorted contents. */}
           <DeckRailing />
           <ConferenceGlass />
+          <VaultShell />
+          <CirculationSpine />
 
-          {/* Department labels sit on the floor, under the furniture. */}
+          {/* Department signage, on the floor and under the furniture.
+
+              Under, deliberately: a sign painted on the floor *should* be
+              occluded by a desk standing on it, and lifting these above the
+              cast would put ten labels through the middle of the people. What
+              changed is that they now read as signs — a plate behind the word,
+              at full contrast — rather than as the faint grey captions of a
+              debug floor plan. */}
           {ZONES.filter((zone) => zone.id !== "walkway").map((zone) => {
             // The south corner, not the centre and not the north one. A
             // department's centre is exactly where its staff stand, and its
@@ -222,15 +235,24 @@ export function HqStage({
               col: zone.rect.col + zone.rect.cols * (fullWidth ? 0.25 : 0.5),
               row: zone.rect.row + zone.rect.rows,
             });
+            // Sized from the string rather than measured: this is a cartoon
+            // sign, and an approximation that is always slightly generous
+            // reads better than a box that occasionally clips a descender.
+            const width = zone.label.length * 7.2 + 22;
             return (
-              <text
-                key={`label-${zone.id}`}
-                className="hq-zone-label"
-                x={corner.x}
-                y={corner.y - 6}
-              >
-                {zone.label}
-              </text>
+              <g key={`label-${zone.id}`} className="hq-zone-sign">
+                <rect
+                  className="hq-zone-sign-plate"
+                  x={corner.x - width / 2}
+                  y={corner.y - 20}
+                  width={width}
+                  height={18}
+                  rx={9}
+                />
+                <text className="hq-zone-label" x={corner.x} y={corner.y - 7.5}>
+                  {zone.label}
+                </text>
+              </g>
             );
           })}
 
@@ -389,12 +411,18 @@ function buildCast(
 }
 
 /**
- * Figures are drawn 16% larger than their HQ-2 geometry. The floor grew from
+ * Figures are drawn 36% larger than their HQ-2 geometry. The floor grew from
  * 16×12 to 22×14 tiles and the fit-scale shrank with it; the cast must not
  * shrink into decorations, so they take some of that space back. One constant
  * on a wrapper group — the rig's own geometry is untouched.
+ *
+ * Raised from 1.16 in the composition pass. At 1.16 the people were smaller
+ * than the desks they stood at, which is the single clearest way to make a
+ * workplace read as furniture with figurines placed on it rather than as a
+ * room with staff in it. Chunky proportions are the house style; the cast
+ * should be the first thing the eye lands on.
  */
-const FIGURE_SCALE = 1.16;
+const FIGURE_SCALE = 1.36;
 
 function keySelect(onSelect: (id: ActorId) => void, id: ActorId) {
   return (event: React.KeyboardEvent) => {
@@ -473,14 +501,20 @@ function EmployeeAnchor({
         </g>
         {frame?.carry === "trolley" ? <Trolley /> : null}
         {frame?.carry === "box" ? <CarriedBox /> : null}
-        {/* Nameplate above the head — the only band in this scene that is
-            reliably empty. */}
-        <rect className="hq-nameplate" x={-27} y={-130} width={54} height={22} rx={4} />
-        <text className="hq-anchor-name" x={0} y={-120}>
+        {/* Name and a state dot, above the head — the only band in this scene
+            that is reliably empty.
+
+            It used to be a two-line plate carrying the state as a word, and
+            ten of those floating over the room was the single loudest reason
+            the office read as SVG objects on a plan rather than a place: the
+            labels competed with the people wearing them. The dot keeps the
+            state legible at a glance and the full sentence still lives one
+            click away in the employee panel, where there is room to say it
+            properly. */}
+        <rect className="hq-nameplate" x={-30} y={-126} width={60} height={15} rx={7.5} />
+        <circle className="hq-anchor-dot" cx={-20} cy={-118.5} r={3.2} />
+        <text className="hq-anchor-name" x={4} y={-115}>
           {employee.name}
-        </text>
-        <text className="hq-anchor-state" x={0} y={-111}>
-          {STATE_LABEL[reading.state]}
         </text>
       </g>
     </g>
@@ -529,12 +563,13 @@ function SupportAnchor({
         </g>
         {frame?.carry === "trolley" ? <Trolley /> : null}
         {frame?.carry === "box" ? <CarriedBox /> : null}
-        <rect className="hq-nameplate" x={-27} y={-130} width={54} height={22} rx={4} />
-        <text className="hq-anchor-name" x={0} y={-120}>
+        {/* Support staff carry the same pill as the cast, minus the state
+            dot: they have no operational state to report, and inventing a
+            neutral one for them would put a status light on somebody who is
+            not a subsystem. Their role stays on the click panel. */}
+        <rect className="hq-nameplate" x={-30} y={-126} width={60} height={15} rx={7.5} />
+        <text className="hq-anchor-name hq-anchor-name--centred" x={0} y={-115}>
           {npc.name}
-        </text>
-        <text className="hq-anchor-state" x={0} y={-111}>
-          {npc.role}
         </text>
       </g>
     </g>
@@ -720,7 +755,10 @@ function buildScene(
   // between simulated and real money. A tablet may lose the starfield and the
   // grid; it may not lose either of these.
   {
-    const board = toScreen({ col: 9.3, row: 0 });
+    // Col 9.6 rather than 9.3: the board grew east as it got wider, and this
+    // keeps its west edge clear of Nova, who stands at col 8 row 1 and paints
+    // in front of anything on the wall behind her.
+    const board = toScreen({ col: 9.6, row: 0 });
     items.push({
       depth: depthOf({ col: 9, row: 0 }, LAYER.rug),
       node: (
@@ -822,19 +860,146 @@ function ConferenceGlass() {
 }
 
 /**
+ * The office's circulation spine.
+ *
+ * A runner down the middle of the walkway, and a matching entry strip at
+ * reception, so the route a visitor takes — in at the south door, along the
+ * spine, up to Mission Control — is something the eye can follow rather than
+ * something you have to work out from the floor plan.
+ *
+ * Painted on the floor and under everything else, which is what a runner is.
+ * It moves nothing: the walkway was always the room's only full-width lane,
+ * and every authored walk route already uses it. This just makes that legible.
+ *
+ * A true unobstructed corridor from reception straight up to Mission Control
+ * does not exist and could not be added without relocating desks — of the
+ * sixteen columns, only col 4 is anywhere near clear, and it runs up the far
+ * west wall rather than through the middle of the building.
+ */
+function CirculationSpine() {
+  const walkway = ZONE_BY_ID.get("walkway")!.rect;
+  const reception = ZONE_BY_ID.get("reception")!.rect;
+
+  // The walkway runner, inset half a tile from each edge so the floor still
+  // shows at the department boundaries.
+  const wNorth = walkway.row + 0.28;
+  const wSouth = walkway.row + walkway.rows - 0.28;
+  const a = toScreen({ col: walkway.col, row: wNorth });
+  const b = toScreen({ col: walkway.col + walkway.cols, row: wNorth });
+  const c = toScreen({ col: walkway.col + walkway.cols, row: wSouth });
+  const d = toScreen({ col: walkway.col, row: wSouth });
+
+  // The entry strip: from the reception doors north to the spine's south edge,
+  // over the columns the reception furniture already frames.
+  const eWest = reception.col + 3.4;
+  const eEast = reception.col + 5.6;
+  const e1 = toScreen({ col: eWest, row: walkway.row + walkway.rows });
+  const e2 = toScreen({ col: eEast, row: walkway.row + walkway.rows });
+  const e3 = toScreen({ col: eEast, row: reception.row + 0.6 });
+  const e4 = toScreen({ col: eWest, row: reception.row + 0.6 });
+
+  return (
+    <g className="hq-spine" aria-hidden="true">
+      <polygon
+        className="hq-spine-runner"
+        points={`${a.x},${a.y} ${b.x},${b.y} ${c.x},${c.y} ${d.x},${d.y}`}
+      />
+      <polygon
+        className="hq-spine-runner hq-spine-runner--entry"
+        points={`${e1.x},${e1.y} ${e2.x},${e2.y} ${e3.x},${e3.y} ${e4.x},${e4.y}`}
+      />
+    </g>
+  );
+}
+
+/**
+ * The Execution Vault's shell.
+ *
+ * The vault used to be a floor plate with a bank door standing on it, which
+ * read as a safe someone had left in the middle of the office rather than as
+ * a room you cannot get into. It is the one department that has to look shut,
+ * so it gets actual walls: solid panels down the west and south faces — the
+ * two that front the working floor — in cold metal against the warm wood
+ * everywhere else.
+ *
+ * The south wall breaks at the door's bay so the door reads as the way in
+ * rather than as decoration bolted to a blank wall.
+ *
+ * Drawing only. There is no control here and nothing clickable: the Vault is
+ * read-only visualisation, and walls do not change that.
+ */
+function VaultShell() {
+  const rect = ZONE_BY_ID.get("vault")!.rect;
+  const west = rect.col;
+  const east = rect.col + rect.cols;
+  const north = rect.row;
+  const south = rect.row + rect.rows;
+  const height = 82;
+
+  const westTop = toScreen({ col: west, row: north });
+  const westBottom = toScreen({ col: west, row: south });
+  // The door bay: the southern-most tile of the west face, left open.
+  const doorFrom = toScreen({ col: west, row: south - 1 });
+
+  const southWest = toScreen({ col: west, row: south });
+  const southEast = toScreen({ col: east, row: south });
+
+  return (
+    <g className="hq-vault-shell" aria-hidden="true">
+      {/* West wall, stopping short of the door bay. */}
+      <polygon
+        className="hq-vault-wall"
+        points={`${westTop.x},${westTop.y} ${doorFrom.x},${doorFrom.y} ${doorFrom.x},${doorFrom.y - height} ${westTop.x},${westTop.y - height}`}
+      />
+      {/* South wall, full width. */}
+      <polygon
+        className="hq-vault-wall hq-vault-wall--south"
+        points={`${southWest.x},${southWest.y} ${southEast.x},${southEast.y} ${southEast.x},${southEast.y - height} ${southWest.x},${southWest.y - height}`}
+      />
+      {/* Corner posts, so the two faces read as one box rather than two flats. */}
+      {[westTop, southWest, southEast, westBottom].map((post, index) => (
+        <rect
+          key={index}
+          className="hq-vault-post"
+          x={post.x - 2}
+          y={post.y - height}
+          width={4}
+          height={height}
+        />
+      ))}
+      {/* A warning stripe along the top edge of the south wall. */}
+      <polygon
+        className="hq-vault-stripe"
+        points={`${southWest.x},${southWest.y - height} ${southEast.x},${southEast.y - height} ${southEast.x},${southEast.y - height + 5} ${southWest.x},${southWest.y - height + 5}`}
+      />
+    </g>
+  );
+}
+
+/**
  * The deck's edge. A hull-coloured lip and railing posts along the east and
  * south sides — the two that face open space — and the airlock frame at the
  * west end where the walkway enters. Glass panels between posts, because a
  * railing you cannot see space through defeats the deck.
  */
 function DeckRailing() {
-  const posts: Array<ReturnType<typeof toScreen>> = [];
-  for (let row = 4; row <= 8; row += 1) posts.push(toScreen({ col: 22, row }));
-  for (let col = 16; col <= 21; col += 1) posts.push(toScreen({ col, row: 8 }));
+  // Derived from the deck's own rect rather than written out again. The
+  // railing used to hardcode rows 4-8, so extending the deck south left its
+  // handrail floating across the middle of the floor — the kind of drift that
+  // is invisible in a test and obvious in a screenshot.
+  const deck = ZONE_BY_ID.get("deck")!.rect;
+  const north = deck.row;
+  const south = deck.row + deck.rows;
+  const west = deck.col;
+  const east = deck.col + deck.cols;
 
-  const railTopEast = toScreen({ col: 22, row: 4 });
-  const railBottom = toScreen({ col: 22, row: 8 });
-  const railWest = toScreen({ col: 16, row: 8 });
+  const posts: Array<ReturnType<typeof toScreen>> = [];
+  for (let row = north; row <= south; row += 1) posts.push(toScreen({ col: east, row }));
+  for (let col = west; col <= east - 1; col += 1) posts.push(toScreen({ col, row: south }));
+
+  const railTopEast = toScreen({ col: east, row: north });
+  const railBottom = toScreen({ col: east, row: south });
+  const railWest = toScreen({ col: west, row: south });
   const height = 26;
 
   const air = toScreen({ col: 16, row: 6 });
@@ -953,11 +1118,16 @@ function MissionBoardShell({
       never a per-subsystem verdict. HQ-5's one addition to this board. */
   caseCount: number;
 }) {
-  const span = 3.6;
+  // Enlarged in the composition pass. At span 3.6 / height 66 the board was
+  // the same visual weight as a desk monitor, which made the room's focal
+  // point compete with its furniture instead of anchoring it. It is the one
+  // surface here that speaks for the whole office, so it is allowed to be the
+  // biggest thing on the wall.
+  const span = 5.1;
   const ax = 64 * span;
   const ay = 32 * span;
-  const base = y - 22;
-  const height = 66;
+  const base = y - 30;
+  const height = 96;
   const frame = `${x},${base} ${x + ax},${base + ay} ${x + ax},${base + ay - height} ${x},${base - height}`;
   const t = 0.045;
   const ix = x + ax * t;
@@ -974,7 +1144,7 @@ function MissionBoardShell({
     <g className="hq-mission-board">
       <polygon className="hq-board-frame" points={frame} />
       <polygon className="hq-board-screen" points={screen} />
-      <text className="hq-board-title" x={midX} y={midY - 4}>
+      <text className="hq-board-title" x={midX} y={midY - 10}>
         MEMESCOPE MISSION BOARD
       </text>
       {/* The office's own roll-up, and nothing else. Still no per-subsystem
@@ -985,7 +1155,7 @@ function MissionBoardShell({
         Office activity {activity}
       </text>
       {caseCount > 0 ? (
-        <text className="hq-board-cases" x={midX} y={midY + 28}>
+        <text className="hq-board-cases" x={midX} y={midY + 34}>
           {caseCount} case{caseCount === 1 ? "" : "s"} in view
         </text>
       ) : null}

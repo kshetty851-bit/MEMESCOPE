@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { render, screen, within } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { HqCards } from "@/components/hq/hq-cards";
@@ -278,10 +278,16 @@ describe("reduced motion", () => {
     const { container } = render(
       <HqStage focusedZone={null} onFocusZone={noop} onSelectEmployee={noop} density="full" />,
     );
-    // The state text is in the DOM, not conveyed by an animation or a colour.
+    // The state is in the DOM as text, not conveyed by an animation or a
+    // colour. It moved from a visible plate to the accessible name when the
+    // composition pass replaced ten floating status boxes with a name and a
+    // dot; the requirement — reachable without motion and without hue — is
+    // unchanged, and `unknown` in particular must never be able to read as a
+    // healthy state.
     for (const employee of EMPLOYEES) {
       const node = container.querySelector(`[data-employee="${employee.id}"]`)!;
-      expect(within(node as HTMLElement).getByText(STATE_LABEL.unknown)).toBeTruthy();
+      expect(node.getAttribute("data-state"), employee.id).toBe("unknown");
+      expect(node.getAttribute("aria-label"), employee.id).toContain(STATE_LABEL.unknown);
     }
   });
 
@@ -825,10 +831,19 @@ describe("real state on the stage", () => {
         state.employees[employee.id].state,
       );
     }
-    // Radar's scanner found something a moment ago, so he is working — and the
-    // room says so in text rather than only in a colour.
+    // Radar's scanner found something a moment ago, so he is working — and
+    // the room says so in a channel that is not colour.
+    //
+    // The stage carries the state as a dot now rather than as a word: ten
+    // two-line status plates floating over the cast was the loudest reason
+    // the office read as objects on a plan. The rule they protected is
+    // intact — `data-state` above, the state word in `aria-label` below, a
+    // shape difference per class in CSS, and the full sentence in the
+    // employee panel one click away.
     expect(state.employees.radar.state).toBe("working");
-    expect(container.textContent).toContain(STATE_LABEL.working);
+    const radar = container.querySelector('[data-employee="radar"]')!;
+    expect(radar.getAttribute("aria-label")).toContain(STATE_LABEL.working);
+    expect(radar.querySelector(".hq-anchor-dot")).toBeTruthy();
   });
 
   it("shows the office roll-up on the mission board", () => {
@@ -860,8 +875,11 @@ describe("real state on the stage", () => {
     );
     const dex = container.querySelector('[data-employee="dex"]')!;
     expect(dex.getAttribute("data-state")).toBe("alert");
-    expect(within(dex as HTMLElement).getByText(STATE_LABEL.alert)).toBeTruthy();
+    // Three non-colour channels, any one of which carries the alert:
+    // the attribute, the accessible name, and the state word inside it.
+    expect(dex.getAttribute("aria-label")).toContain(STATE_LABEL.alert);
     expect(dex.getAttribute("aria-label")).toContain("stale market data");
+    expect(dex.querySelector(".hq-anchor-dot")).toBeTruthy();
   });
 
   it("still renders no numeric value in the room once state is live", () => {
@@ -896,9 +914,11 @@ describe("real state on the stage", () => {
     expect(container.querySelector(".hq")!.getAttribute("data-hq-motion")).toBe("off");
     for (const employee of EMPLOYEES) {
       const node = container.querySelector(`[data-employee="${employee.id}"]`)!;
-      expect(
-        within(node as HTMLElement).getByText(STATE_LABEL[state.employees[employee.id].state]),
-      ).toBeTruthy();
+      // Reachable as text without motion and without hue. The stage shows a
+      // dot; the word lives in the accessible name and in the panel.
+      expect(node.getAttribute("aria-label"), employee.id).toContain(
+        STATE_LABEL[state.employees[employee.id].state],
+      );
     }
   });
 });
