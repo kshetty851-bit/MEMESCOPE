@@ -203,6 +203,16 @@ export function PositionsTable({
                     <span className="ml-2 text-xs text-ink-3">
                       #{position.entry_rank} at entry
                     </span>
+                    {/* Whose rules this row trades under. The open book is
+                        pooled across the capital lineage, so a Gen 2 position
+                        with no time limit sits beside a Gen 9 one with a
+                        six-hour cutoff — unlabelled, the older rows read as
+                        the current strategy ignoring its own rules. */}
+                    {position.generation != null ? (
+                      <span className="ml-2 rounded-sm border border-line px-1 py-0.5 text-[10px] text-ink-3">
+                        Gen {position.generation}
+                      </span>
+                    ) : null}
                   </td>
                   <Cell value={usd(position.entry_market_cap)} />
                   <Cell value={usd(position.current_market_cap)} />
@@ -280,9 +290,23 @@ export function PositionsTable({
                             ? formatPrice(position.trailing_stop_price)
                             : position.trailing_activation_multiple
                               ? `Pending ${position.trailing_activation_multiple}x`
-                              : "—"
+                              : position.trailing_stop_price
+                                ? `Trail ${formatPrice(position.trailing_stop_price)}`
+                                : "—"
                       }
                       </span>
+                      {/* The holding rule, stated per row rather than assumed
+                          from the live strategy: only positions opened under
+                          HOLD-6H carry a cutoff, and the older ones must say
+                          so instead of looking like the rule is being
+                          ignored. */}
+                      {!closed ? (
+                        <span className="text-[10px]">
+                          {position.expires_at
+                            ? `Max hold until ${new Date(position.expires_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+                            : `No max hold (Gen ${position.generation ?? "?"} rules)`}
+                        </span>
+                      ) : null}
                       <span className="text-[10px]">
                       {modelLabel(
                         closed

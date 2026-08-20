@@ -23,6 +23,8 @@ says so rather than letting a reader assume they were closed at a fair price.
 
 from __future__ import annotations
 
+import uuid
+
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -1763,7 +1765,7 @@ class PaperWalletService:
         `CAPITAL_LINEAGES` for why summing those produces -$1,934 rather than
         a balance.
         """
-        pool, open_rows, closed_trades = await self._lineage_book(wallet)
+        pool, open_rows, _closed_rows, closed_trades = await self._lineage_book(wallet)
         return metrics.cash_for(
             # The oldest generation in the lineage is the one that funded it.
             pool[0].starting_balance,
@@ -1773,7 +1775,12 @@ class PaperWalletService:
 
     async def _lineage_book(
         self, wallet: PaperWallet
-    ) -> tuple[Sequence[PaperWallet], list[PaperPosition], list[ClosedTrade]]:
+    ) -> tuple[
+        Sequence[PaperWallet],
+        list[PaperPosition],
+        list[PaperPosition],
+        list[ClosedTrade],
+    ]:
         """The pool, and every position it has open or closed. Oldest first.
 
         One gather, used by both the authority that decides what the wallet can
@@ -1787,57 +1794,82 @@ class PaperWalletService:
             pool = [wallet]
 
         open_rows: list[PaperPosition] = []
-        closed_trades: list[ClosedTrade] = []
+        closed_rows: list[PaperPosition] = []
         for member in pool:
             open_rows.extend(await self._repository.open_positions(member.id))
-            closed_trades.extend(
-                trade
-                for trade in (
-                    _to_closed(row)
-                    for row in await self._repository.closed_positions(member.id)
-                )
-                if trade
-            )
-        return pool, open_rows, closed_trades
+            closed_rows.extend(await self._repository.closed_positions(member.id))
+        closed_trades = [
+            trade for trade in (_to_closed(row) for row in closed_rows) if trade
+        ]
+        return pool, open_rows, closed_rows, closed_trades
 
     # --- Reading it back -----------------------------------------------------
 
     async def read(self, *, now: datetime) -> WalletRead:
         """Everything the API serves."""
         wallet = await self.wallet(now=now)
-        positions = await self._repository.all_positions(wallet.id)
 
-        open_rows = [row for row in positions if row.status == PositionStatus.OPEN.value]
-        closed_rows = [row for row in positions if row.status == PositionStatus.CLOSED.value]
-        closed = [trade for trade in (_to_closed(row) for row in closed_rows) if trade]
-
-        snapshots = await self._market.latest_for_mints(
-            [row.mint_address for row in open_rows], since=wallet.resume_watermark_at
+        # ── THE OPEN BOOK IS THE POOL'S, AND THE PAGE SHOWS THE POOL'S ──────
+        #
+        # Closed trades stay this generation's own: a record belongs to the
+        # policy that produced it. But an *open* position is not a record yet —
+        # it is capital currently held down, and the capital is shared across
+        # the lineage. Listing only the live generation's open rows put the
+        # page in an impossible state the day after a cutover: metrics said
+        # "$1,400 deployed across 14 positions" while the holdings table below
+        # them was empty, because Generation 9 had not opened anything of its
+        # own. A reader had no way to see what was held, for how long, or under
+        # which rules — which is exactly the question "why is this token still
+        # held after six hours" needs answered on the page.
+        #
+        # Each row still carries its own rules and its own generation, and the
+        # serializer labels both, so a Gen 2 position visibly says "no maximum
+        # hold" beside a Gen 9 position's cutoff.
+        # Closed rows are pooled for the same reason: the page's metrics count
+        # the lineage's 170 finished trades, and a "Closed (170)" tab over an
+        # empty list is the exact metrics-say-14-table-says-nothing mismatch
+        # this rewrite exists to end. The *attribution* survives on every row —
+        # each carries its generation — and the permanent audit endpoints stay
+        # generation-scoped; only what this one page displays is pooled.
+        (
+            lineage_pool_early,
+            lineage_open_rows,
+            lineage_closed_rows,
+            lineage_closed_early,
+        ) = await self._lineage_book(wallet)
+        open_rows = sorted(
+            lineage_open_rows, key=lambda row: row.opened_at, reverse=True
         )
-        prices: dict[str, Decimal | None] = {
-            row.mint_address: (
-                snapshots[row.mint_address].price_usd
-                if row.mint_address in snapshots
-                else None
+        closed_rows = sorted(
+            lineage_closed_rows,
+            key=lambda row: (row.closed_at is None, row.closed_at),
+            reverse=True,
+        )
+        closed = lineage_closed_early
+        positions = [*open_rows, *closed_rows]
+
+        # Marks are fetched per lineage member, against that member's own
+        # resume watermark — a restored generation must never be priced from
+        # the interval it was archived through. One member, one query.
+        prices: dict[str, Decimal | None] = {}
+        market_caps: dict[str, Decimal | None] = {}
+        price_times: dict[str, datetime | None] = {}
+        rows_by_wallet: dict[uuid.UUID, list[PaperPosition]] = {}
+        for row in open_rows:
+            rows_by_wallet.setdefault(row.wallet_id, []).append(row)
+        for member in lineage_pool_early:
+            member_rows = rows_by_wallet.get(member.id, [])
+            if not member_rows:
+                continue
+            snapshots = await self._market.latest_for_mints(
+                [row.mint_address for row in member_rows],
+                since=member.resume_watermark_at,
             )
-            for row in open_rows
-        }
-        market_caps: dict[str, Decimal | None] = {
-            row.mint_address: (
-                snapshots[row.mint_address].market_cap
-                if row.mint_address in snapshots
-                else None
-            )
-            for row in open_rows
-        }
-        price_times: dict[str, datetime | None] = {
-            row.mint_address: (
-                snapshots[row.mint_address].captured_at
-                if row.mint_address in snapshots
-                else None
-            )
-            for row in open_rows
-        }
+            for row in member_rows:
+                found = snapshots.get(row.mint_address)
+                prices[row.mint_address] = found.price_usd if found else None
+                market_caps[row.mint_address] = found.market_cap if found else None
+                price_times[row.mint_address] = found.captured_at if found else None
 
         all_mints = [row.mint_address for row in positions]
 
@@ -1873,45 +1905,29 @@ class PaperWalletService:
         # generation's single starting balance, and every open position in the
         # pool holds it down whoever opened it.
         #
-        # The **record** stays generation-specific. `positions`, the audit log
-        # and Track Record are still this wallet's own, because a generation's
-        # trades belong to the policy that took them.
-        lineage_pool, lineage_open, lineage_closed = await self._lineage_book(wallet)
-        lineage_prices = dict(prices)
-        for member in lineage_pool:
-            if member.id == wallet.id:
-                continue
-            # Each member is priced against **its own** resume watermark: a
-            # restored generation must not be marked from the interval it was
-            # archived through.
-            member_mints = [
-                row.mint_address for row in lineage_open if row.wallet_id == member.id
-            ]
-            if not member_mints:
-                continue
-            member_snapshots = await self._market.latest_for_mints(
-                member_mints, since=member.resume_watermark_at
-            )
-            for mint in member_mints:
-                found = member_snapshots.get(mint)
-                lineage_prices.setdefault(mint, found.price_usd if found else None)
-
+        # The **attribution** stays generation-specific — every displayed row
+        # names the generation whose published rules it trades under, and the
+        # audit endpoints remain scoped — but the figures and the lists on this
+        # page describe the same pooled book, so they can never disagree again.
         m = metrics.summarise(
-            starting_balance=lineage_pool[0].starting_balance,
-            open_positions=[_to_open(row) for row in lineage_open],
-            prices=lineage_prices,
-            closed=lineage_closed,
+            starting_balance=lineage_pool_early[0].starting_balance,
+            open_positions=[_to_open(row) for row in open_rows],
+            prices=prices,
+            closed=closed,
         )
 
         return WalletRead(
             wallet=wallet,
             strategy=self.strategy,
             metrics=m,
+            generation_by_wallet={
+                member.id: member.generation for member in lineage_pool_early
+            },
             lineage=LineageRead(
-                generations=tuple(member.generation for member in lineage_pool),
-                strategy_ids=tuple(member.strategy_id for member in lineage_pool),
-                base_generation=lineage_pool[0].generation,
-                base_capital=lineage_pool[0].starting_balance,
+                generations=tuple(member.generation for member in lineage_pool_early),
+                strategy_ids=tuple(member.strategy_id for member in lineage_pool_early),
+                base_generation=lineage_pool_early[0].generation,
+                base_capital=lineage_pool_early[0].starting_balance,
             ),
             positions=list(positions),
             prices=prices,
@@ -2119,6 +2135,9 @@ class WalletRead:
     strategy: AnyStrategy
     metrics: metrics.WalletMetrics
     lineage: LineageRead
+    #: Which generation each wallet id in the lineage is — so a row can say
+    #: whose rules it trades under without a second query.
+    generation_by_wallet: dict[uuid.UUID, int]
     positions: list[PaperPosition]
     prices: dict[str, Decimal | None]
     market_caps: dict[str, Decimal | None]

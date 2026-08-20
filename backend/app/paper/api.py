@@ -487,6 +487,13 @@ def _to_position(
         trailing_stop = getattr(row, "trailing_stop_price", None)
         if trailing_stop is None and getattr(row, "trailing_activated_at", None) is not None:
             trailing_stop = row.peak_price * (Decimal(1) - row.trailing_drawdown)
+        # A plain trailing stop — no activation gate — is armed from entry, so
+        # its trigger always exists: the running high less the published
+        # fraction. Without this branch every Generation 2 row rendered "—"
+        # in the exit-rule column, which read as "no rule" on positions whose
+        # one rule has been live the whole time.
+        if trailing_stop is None and getattr(row, "trailing_activation_multiple", None) is None:
+            trailing_stop = row.peak_price * (Decimal(1) - row.trailing_drawdown)
 
     from app.paper.schemas import PricingStatus
     pricing_status = PricingStatus.PRICED
@@ -502,6 +509,12 @@ def _to_position(
         symbol=symbol,
         image_url=read.images.get(row.mint_address),
         status=row.status,
+        # Whose rules this row trades under. The open book is pooled across
+        # the capital lineage, so a Gen 2 trailing stop with no time limit
+        # sits beside a Gen 9 position with a six-hour cutoff — and the row
+        # has to say which is which, or "why is this still held" has no
+        # answer on the page.
+        generation=read.generation_by_wallet.get(row.wallet_id),
         pricing_status=pricing_status,
         opened_at=row.opened_at,
         entry_rank=row.entry_rank,

@@ -67,6 +67,10 @@ class PositionOut(BaseSchema):
     image_url: str | None = None
 
     status: str
+    #: Which generation opened this position — whose published rules it trades
+    #: under. Present on every row now that the open book is pooled across the
+    #: capital lineage; `None` only for rows outside any known lineage.
+    generation: int | None = None
     pricing_status: PricingStatus = PricingStatus.PRICED
     opened_at: datetime
     #: The Radar place the token held when it was bought. The entry rule is

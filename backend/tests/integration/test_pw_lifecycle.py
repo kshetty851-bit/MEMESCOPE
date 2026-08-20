@@ -480,20 +480,41 @@ class TestTheWalletSummaryIsTheLineage:
         read = await service.read(now=NOW)
         assert read.metrics.cash == await service._cash_for(live)
 
-    async def test_the_record_stays_generation_specific(
+    async def test_the_page_shows_the_pool_and_attributes_every_row(
         self, db_session: AsyncSession
     ) -> None:
-        """Money is shared; trades are not.
+        """Money is shared; attribution is not.
 
-        Generation 9 took none of Generation 2's trades, and its Track Record
-        must not claim them — only its capital summary reflects the pool.
+        The first cut of this rule kept `positions` generation-scoped, and the
+        day after the cutover the page said "$1,400 deployed across 14
+        positions" over an empty holdings table — the reader could not see
+        what was held, for how long, or under whose rules, which is exactly
+        the question "why is this token still held past six hours" needs the
+        page to answer. So the *lists* are pooled like the figures, and every
+        row carries the generation whose published rules it trades under. The
+        permanent audit endpoints stay generation-scoped; Generation 9 still
+        claims none of Generation 2's trades as its own record.
         """
-        await self._lineage(db_session)
+        old, live = await self._lineage(db_session)
         read = await PaperWalletService(db_session).read(now=NOW)
-        assert read.positions == []
+
+        opens = [row for row in read.positions if row.status == "open"]
+        closeds = [row for row in read.positions if row.status == "closed"]
+        # The lists agree with the figures — the mismatch this fixes.
+        assert len(opens) == read.metrics.open_positions == 3
+        assert len(closeds) == read.metrics.closed_positions == 1
+        # Every displayed row can name its generation.
+        for row in read.positions:
+            assert read.generation_by_wallet.get(row.wallet_id) in {
+                old.generation,
+                live.generation,
+            }
+        # The old book's rows are the old generation's, visibly.
+        assert all(
+            read.generation_by_wallet[row.wallet_id] == old.generation for row in opens
+        )
+        # And the live wallet's own permanent audit is untouched by pooling.
         assert read.audit_count == 0
-        # ...while the pooled summary still sees the lineage's whole book.
-        assert read.metrics.open_positions == 3
 
     async def test_a_wallet_alone_in_its_lineage_is_unchanged(
         self, db_session: AsyncSession
