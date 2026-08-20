@@ -258,9 +258,15 @@ def replay(
     if observed_price is None:
         observed_price = exit_.price_usd
 
+    # The legacy model is the *trigger*, which `resolve` now reports separately
+    # from the fill. It used to be `exit_.price_usd`, because the engine and
+    # this replay agreed that a breach filled at its level; the engine has
+    # since been corrected to fill at the observed price, so the legacy model
+    # reads the trigger explicitly. Falls back to the fill for exits that
+    # carry no level, which keeps expiry and terminal closes comparable.
     legacy = _fill(
         model=FillModel.LEGACY_TRIGGER,
-        price=exit_.price_usd,
+        price=exit_.trigger_price if exit_.trigger_price is not None else exit_.price_usd,
         entry_price=entry_price,
         size_usd=size_usd,
         entry_liquidity=entry_liquidity,
@@ -273,10 +279,13 @@ def replay(
         entry_liquidity=entry_liquidity,
     )
 
+    trigger_price = (
+        exit_.trigger_price if exit_.trigger_price is not None else exit_.price_usd
+    )
     advantage = (
         None
         if observed_price <= 0
-        else (exit_.price_usd / observed_price - Decimal(1)) * Decimal(100)
+        else (trigger_price / observed_price - Decimal(1)) * Decimal(100)
     )
 
     return (

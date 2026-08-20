@@ -107,8 +107,18 @@ def resolve(
             )
 
         if stop is not None and quote.price_usd <= stop:
+            # Fills at the observed price, not at the stop. `quote.price_usd`
+            # is at or below `stop` by the condition above, so this is never
+            # better than the market and is usually identical — it only
+            # diverges when the price gapped through, which is exactly the
+            # case that used to book a fill nobody could have got.
             return (
-                Exit(price_usd=stop, at=quote.captured_at, reason=ExitReason.STOP),
+                Exit(
+                    price_usd=quote.price_usd,
+                    at=quote.captured_at,
+                    reason=ExitReason.STOP,
+                    trigger_price=stop,
+                ),
                 running,
             )
 
@@ -118,18 +128,31 @@ def resolve(
             # as though it could would book an exit at a level never observed.
             trigger = running * (Decimal(1) - rules.trailing_drawdown)
             if quote.price_usd <= trigger:
+                # Same rule as the fixed stop: the trigger says *when*, the
+                # observation says *what*. This is the line that produced the
+                # gap-through overstatement.
                 return (
                     Exit(
-                        price_usd=trigger,
+                        price_usd=quote.price_usd,
                         at=quote.captured_at,
                         reason=ExitReason.STOP,
+                        trigger_price=trigger,
                     ),
                     running,
                 )
 
         if target is not None and quote.price_usd >= target:
+            # The target is correct here and deliberately unchanged. A
+            # take-profit limit fills at the level it asked for; booking the
+            # observed price would claim the *upside* of a gap, which is the
+            # same error in the opposite direction.
             return (
-                Exit(price_usd=target, at=quote.captured_at, reason=ExitReason.TARGET),
+                Exit(
+                    price_usd=target,
+                    at=quote.captured_at,
+                    reason=ExitReason.TARGET,
+                    trigger_price=target,
+                ),
                 running,
             )
 

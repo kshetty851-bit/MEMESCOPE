@@ -60,16 +60,23 @@ def resolve_exit(
                 reason=ExitReason.EXPIRY,
             )
         if position.stop_price is not None and quote.price_usd <= position.stop_price:
+            # Fills at the observed price, not at the stop. A stop says when
+            # to sell; it does not find a buyer at the level. Mirrors
+            # `exits.resolve`, which this function is held equivalent to.
             return Exit(
-                price_usd=position.stop_price,
+                price_usd=quote.price_usd,
                 at=quote.captured_at,
                 reason=ExitReason.STOP,
+                trigger_price=position.stop_price,
             )
         if position.target_price is not None and quote.price_usd >= position.target_price:
+            # The target is the fill: a take-profit limit does not pay more
+            # than it asked, even when price gapped through it.
             return Exit(
                 price_usd=position.target_price,
                 at=quote.captured_at,
                 reason=ExitReason.TARGET,
+                trigger_price=position.target_price,
             )
     return None
 

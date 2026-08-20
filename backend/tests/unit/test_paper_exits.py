@@ -141,8 +141,12 @@ class TestTrailingStop:
         )
         assert found is not None
         assert found.reason is ExitReason.STOP
-        # 25% below the 200 high, not below the 140 reading.
-        assert found.price_usd == Decimal(150)
+        # The trigger is 25% below the 200 high, not below the 140 reading...
+        assert found.trigger_price == Decimal(150)
+        # ...and the fill is the observation that breached it. The trigger says
+        # when to sell; it does not find a buyer at 150 when the market printed
+        # 140. This is the distinction that used to be collapsed into one field.
+        assert found.price_usd == Decimal(140)
         assert peak == Decimal(200)
 
     def test_it_does_not_fire_inside_the_band(self) -> None:
@@ -176,7 +180,8 @@ class TestTrailingStop:
             self.RULES, entry_price=ENTRY, opened_at=OPENED, quotes=quotes((1, "70"))
         )
         assert found is not None
-        assert found.price_usd == Decimal(75)
+        assert found.trigger_price == Decimal(75)
+        assert found.price_usd == Decimal(70)
 
 
 class TestPriority:

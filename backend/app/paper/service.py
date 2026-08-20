@@ -29,6 +29,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any, cast
 
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -37,6 +38,7 @@ from app.core.logging import get_logger
 from app.models.market import TokenMarketSnapshot
 from app.models.paper import PaperPosition, PaperTradeAudit, PaperWallet
 from app.models.radar import RadarToken
+from app.models.token import DiscoveredToken
 from app.paper import audit, benchmark, eligibility, execution, exits, metrics
 from app.paper.execution import (
     ExecutionQuote,
@@ -64,8 +66,10 @@ from app.radar.repository import RadarRepository
 from app.repositories.market import EnrichmentStateRepository, MarketSnapshotRepository
 from app.repositories.token import TokenRepository
 from app.security import entry_policy
+from app.security.mint import decode_mint_account
 from app.security.service import TokenSecurityService, capture_candidate_security
 from app.services.jupiter import JupiterExecutionClient
+from app.services.rpc.registry import get_rpc
 
 logger = get_logger(__name__)
 
@@ -450,7 +454,29 @@ class PaperWalletService:
             if isinstance(exit_execution, ExecutionQuote)
             else exit_price
         )
+        # An exit can never predate the position it closes.
+        #
+        # On the Jupiter path this is `now` and is always sound. On the
+        # fallback it is the last stored observation's timestamp, which for a
+        # token nobody has priced since before the position opened is *older
+        # than the position*. Seven production trades closed that way, one of
+        # them 250 hours before it was opened, and their negative durations
+        # silently corrupted every hold-time and capital-hours figure computed
+        # over the book.
+        #
+        # Clamped rather than rejected: the sell itself is a real instruction
+        # from a real operator and refusing it would strand the position. What
+        # is not real is the timestamp, so it falls back to the moment the
+        # instruction was given.
         exit_at = now if isinstance(exit_execution, ExecutionQuote) else quote.captured_at
+        if exit_at < position.opened_at:
+            logger.warning(
+                "paper_manual_exit_timestamp_clamped",
+                mint_address=position.mint_address,
+                observation_at=quote.captured_at.isoformat(),
+                opened_at=position.opened_at.isoformat(),
+            )
+            exit_at = now
         observed_trade = ClosedTrade(
             mint_address=position.mint_address,
             opened_at=position.opened_at,
@@ -537,6 +563,46 @@ class PaperWalletService:
             )
             return execution.LegacyExecution(str(exc))
 
+    async def _mint_decimals(self, mint: str) -> int | None:
+        """Decimals from the mint account, cached back onto the token row.
+
+        Read-only against the chain and best-effort: any failure returns
+        `None` and the caller falls back exactly as before. The write is to
+        `discovered_tokens.decimals`, which is a property of the token rather
+        than of any trade — no position, wallet or audit row is touched.
+        """
+        try:
+            rpc = get_rpc()
+            await rpc.start()
+            try:
+                result = await rpc.call(
+                    "getAccountInfo",
+                    [mint, {"encoding": "base64", "commitment": "confirmed"}],
+                )
+            finally:
+                await rpc.close()
+            value = (result or {}).get("value") if isinstance(result, dict) else None
+            if not isinstance(value, dict):
+                return None
+            decimals = decode_mint_account(value).decimals
+        except Exception:
+            logger.warning("paper_exit_decimals_unavailable", mint_address=mint)
+            return None
+
+        if decimals is not None:
+            try:
+                await self._session.execute(
+                    update(DiscoveredToken)
+                    .where(
+                        DiscoveredToken.mint_address == mint,
+                        DiscoveredToken.decimals.is_(None),
+                    )
+                    .values(decimals=decimals)
+                )
+            except Exception:
+                logger.warning("paper_exit_decimals_cache_failed", mint_address=mint)
+        return decimals
+
     async def _exit_execution_for(
         self,
         *,
@@ -554,6 +620,21 @@ class PaperWalletService:
                 await TokenRepository(self._session).get_many_by_mints([position.mint_address])
             ).get(position.mint_address)
             decimals = token.decimals if token is not None else None
+        if decimals is None:
+            # Last resort: read them off the mint account.
+            #
+            # This is the line that decided almost every exit price in the
+            # wallet's history. Only 11 of 182 traded mints had `decimals`
+            # recorded, so 114 of 169 exits fell straight through to the
+            # legacy path — and the legacy path booked the stop trigger. The
+            # realistic quote was configured the whole time and effectively
+            # never ran.
+            #
+            # Decimals are not guessed here: they are a field of the mint
+            # account, read with the same decoder the security evaluator uses.
+            # A failed read still returns LegacyExecution, so the fallback is
+            # narrowed rather than removed.
+            decimals = await self._mint_decimals(position.mint_address)
         if decimals is None:
             return execution.LegacyExecution(
                 "Token decimals unavailable for Jupiter exit quote."

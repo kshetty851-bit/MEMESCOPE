@@ -62,11 +62,30 @@ class TestFirstBreachWins:
         assert found.reason is ExitReason.TARGET
         assert found.price_usd == Decimal(200)
 
-    def test_the_stop_closes_at_the_stop_not_at_the_gap(self) -> None:
+    def test_the_stop_closes_at_the_gap_not_at_the_stop(self) -> None:
+        """The mirror of the target rule, and deliberately *not* symmetric.
+
+        A coarse reading is resolved against the wallet in both directions.
+        For the target that means booking the level (200) rather than the
+        overshoot (240): you may not claim upside the data does not support.
+        For the stop the same principle points the other way — booking the
+        level (50) rather than the gap (10) claims a fill nobody could have
+        got, which is the identical error wearing the opposite sign.
+
+        This test asserted 50 until the exit-realism audit. On real trades that
+        cost the wallet its honesty: 28 production exits booked the trailing
+        trigger while the observed market was up to 10,258x lower, turning
+        -$2,632 of losses into +$20 of recorded profit.
+
+        The file's own next test already says it: "the honest reading of an
+        ambiguous bar is the adverse one; the alternative books a win the data
+        does not support."
+        """
         found = resolve_exit(position(), quotes((1, "10")))
         assert found is not None
         assert found.reason is ExitReason.STOP
-        assert found.price_usd == Decimal(50)
+        assert found.price_usd == Decimal(10)
+        assert found.trigger_price == Decimal(50)
 
     def test_the_earliest_breach_wins_not_the_best_one(self) -> None:
         """A token that hit its stop on Tuesday and its target on Wednesday is a

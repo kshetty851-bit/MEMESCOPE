@@ -142,9 +142,22 @@ class Exit:
     same exit as one that was not.
     """
 
+    #: The price this exit fills at. For a stop or a trailing stop this is the
+    #: **observed** market price that breached the level — never the level
+    #: itself. A stop decides *when* to sell; it does not conjure a buyer at
+    #: the trigger. For a target it is the target: a take-profit limit does
+    #: not pay more than it asked, even when price gapped through.
     price_usd: Decimal
     at: datetime
     reason: ExitReason
+    #: The level whose breach caused this exit, when a level was involved.
+    #:
+    #: Kept beside the fill rather than instead of it. Before this existed the
+    #: two were the same field, so a token that collapsed 99.99% between two
+    #: observations still booked a fill at its trailing trigger — in the worst
+    #: production case a price 10,258x above where the market actually was.
+    #: Recording both makes the gap visible instead of invisible.
+    trigger_price: Decimal | None = None
 
 
 @dataclass(frozen=True, slots=True)
