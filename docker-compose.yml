@@ -402,7 +402,13 @@ services:
       context: ./backend
       target: development
     restart: unless-stopped
-    command: celery -A app.workers.celery_app beat --loglevel=info
+    # --schedule outside /app: the source tree is bind-mounted here, so the
+    # default CWD shelve persisted a beat entry that had been deleted from
+    # celery_app.py and kept firing it for 18h at a worker that never
+    # registered it. /tmp is ephemeral, which is the point.
+    command: >
+      celery -A app.workers.celery_app beat --loglevel=info
+      --schedule=/tmp/celerybeat-schedule
     environment:
       <<: *backend-env
       RUN_MIGRATIONS: "false"
