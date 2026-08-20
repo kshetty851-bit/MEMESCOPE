@@ -461,6 +461,7 @@ def _to_position(
     # Using the live price for a closed trade would restate a finished result
     # every time the token moved, which is the opposite of a permanent record.
     current = row.exit_price if closed else read.prices.get(row.mint_address)
+    current_mcap = getattr(row, "exit_market_cap", None) if closed else read.market_caps.get(row.mint_address)
     # The mark's own timestamp: the exit for a finished trade, the observation
     # for a running one.
     observed_at = row.closed_at if closed else read.price_times.get(row.mint_address)
@@ -478,12 +479,21 @@ def _to_position(
         if trailing_stop is None and getattr(row, "trailing_activated_at", None) is not None:
             trailing_stop = row.peak_price * (Decimal(1) - row.trailing_drawdown)
 
+    from app.paper.schemas import PricingStatus
+    pricing_status = PricingStatus.PRICED
+    if not closed:
+        if observed_at is None:
+            pricing_status = PricingStatus.NO_DATA
+        elif current is None:
+            pricing_status = PricingStatus.UNPRICED
+
     return PositionOut(
         mint_address=row.mint_address,
         name=name,
         symbol=symbol,
         image_url=read.images.get(row.mint_address),
         status=row.status,
+        pricing_status=pricing_status,
         opened_at=row.opened_at,
         entry_rank=row.entry_rank,
         entry_price=row.entry_price,
@@ -515,6 +525,7 @@ def _to_position(
         trailing_trigger_price=getattr(row, "trailing_trigger_price", None),
         trailing_trigger_observed_price=getattr(row, "trailing_trigger_observed_price", None),
         current_price=current,
+        current_market_cap=current_mcap,
         current_pct=_pct_from(row.entry_price, current),
         current_price_at=observed_at,
         last_market_check_at=read.check_times.get(row.mint_address) if not closed else None,

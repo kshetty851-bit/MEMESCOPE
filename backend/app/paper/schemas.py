@@ -12,10 +12,17 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from decimal import Decimal
+from enum import Enum
 
 from pydantic import Field
 
 from app.schemas.common import BaseSchema
+
+
+class PricingStatus(str, Enum):
+    PRICED = "priced"
+    UNPRICED = "unpriced"
+    NO_DATA = "no_data"
 
 
 class RuleOut(BaseSchema):
@@ -60,6 +67,7 @@ class PositionOut(BaseSchema):
     image_url: str | None = None
 
     status: str
+    pricing_status: PricingStatus = PricingStatus.PRICED
     opened_at: datetime
     #: The Radar place the token held when it was bought. The entry rule is
     #: stated in terms of it, so a reader can check the trade against the rule.
@@ -102,6 +110,7 @@ class PositionOut(BaseSchema):
     #: Latest observed price. `None` for a token nobody has priced since — the
     #: holding is unmeasured, not worthless.
     current_price: Decimal | None = None
+    current_market_cap: Decimal | None = None
     #: Percent from entry, on the current price. `None` follows `current_price`.
     current_pct: Decimal | None = None
     #: When the price above was observed. Sprint 28.1: without it the wallet

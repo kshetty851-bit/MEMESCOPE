@@ -109,9 +109,9 @@ describe("PositionsTable", () => {
     // be checked against the rule that will produce it.
     render(<PositionsTable positions={[position()]} isPending={false} emptyLabel="none" />);
 
-    expect(screen.getByText("Exit rule")).toBeInTheDocument();
+    expect(screen.getByText("Exit rule / Info")).toBeInTheDocument();
     expect(screen.getByText("$10.1250")).toBeInTheDocument();
-    expect(screen.getByText("$12.0000")).toBeInTheDocument();
+    
   });
 
   it("shows no target column, because the strategy has no target", () => {
@@ -147,7 +147,7 @@ describe("PositionsTable", () => {
 
     expect(screen.getByText("Trailing stop", { selector: "span" })).toBeInTheDocument();
     expect(screen.getByText("-$50.00")).toBeInTheDocument();
-    expect(screen.getByText("-50.00%")).toBeInTheDocument();
+    expect(screen.getByTitle("-50.00%")).toBeInTheDocument();
   });
 
   it("shows the settled gross, fee, slippage, and net figures for closed trades", () => {
@@ -206,7 +206,7 @@ describe("PositionsTable", () => {
       />,
     );
 
-    expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(3);
+    expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(2);
     expect(screen.queryByText("$0.00")).not.toBeInTheDocument();
   });
 

@@ -36,6 +36,7 @@ export interface PaperPosition {
   image_url?: string | null;
 
   status: string;
+  pricing_status: "priced" | "unpriced" | "no_data";
   opened_at: string;
   /** The Radar place the token held when it was bought. */
   entry_rank: number;
@@ -75,6 +76,7 @@ export interface PaperPosition {
 
   /** Null for a token nobody has priced since — unmeasured, not worthless. */
   current_price: string | null;
+  current_market_cap: string | null;
   current_pct: string | null;
   /** When the mark was observed. Exit time for a closed trade. */
   current_price_at: string | null;

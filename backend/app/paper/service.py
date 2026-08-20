@@ -52,6 +52,7 @@ from app.paper.models import (
     Quote,
 )
 from app.paper.repository import PaperRepository
+from app.paper.security import verify_liquidity_security
 from app.paper.strategy import AnyStrategy, TrackRecordBracketStrategy, registry
 from app.radar.repository import RadarRepository
 from app.repositories.market import MarketSnapshotRepository, EnrichmentStateRepository
@@ -1286,6 +1287,11 @@ class PaperWalletService:
         observations = []
         for rank, row in enumerate(rows, start=1):
             snapshot = prices.get(row.mint_address)
+            security_status = await verify_liquidity_security(
+                dex_name=snapshot.dex_name if snapshot else None,
+                pool_address=snapshot.pool_address if snapshot else None,
+                mint_address=row.mint_address,
+            )
             observations.append(
                 eligibility.Observation(
                     mint_address=row.mint_address,
@@ -1297,6 +1303,7 @@ class PaperWalletService:
                     market_cap=snapshot.market_cap if snapshot else None,
                     volume_24h=snapshot.volume_24h if snapshot else None,
                     trading_status=(str(snapshot.trading_status.value) if snapshot else None),
+                    liquidity_security_status=security_status.value,
                 )
             )
 
@@ -1327,6 +1334,14 @@ class PaperWalletService:
         prices: dict[str, Decimal | None] = {
             row.mint_address: (
                 snapshots[row.mint_address].price_usd
+                if row.mint_address in snapshots
+                else None
+            )
+            for row in open_rows
+        }
+        market_caps: dict[str, Decimal | None] = {
+            row.mint_address: (
+                snapshots[row.mint_address].market_cap
                 if row.mint_address in snapshots
                 else None
             )
@@ -1372,6 +1387,7 @@ class PaperWalletService:
             metrics=m,
             positions=list(positions),
             prices=prices,
+            market_caps=market_caps,
             price_times=price_times,
             check_times=check_times,
             names={mint: (token.name, token.symbol) for mint, token in names.items()},
@@ -1558,6 +1574,7 @@ class WalletRead:
     metrics: metrics.WalletMetrics
     positions: list[PaperPosition]
     prices: dict[str, Decimal | None]
+    market_caps: dict[str, Decimal | None]
     #: When each mark was observed, so a surface can say how old it is.
     price_times: dict[str, datetime | None]
     #: The most recent market check attempt for each open position.
