@@ -708,7 +708,46 @@ const TO_CONFERENCE: Partial<Record<EmployeeId, Tile[]>> = {
     ...ROW1_TO_DOOR,
   ],
   byte: [{ col: 9, row: 7 }, { col: 9, row: 6 }, ...SPINE_UP, ...ROW2_EAST, ...ROW1_TO_DOOR],
+  // Atlas and Rex were the two nobody ever invited: the ambient syncs are
+  // three- and four-person, and neither was ever cast. The report meeting is
+  // the whole company, so both need a route, authored to the same rule as the
+  // rest — join the walkway, take the spine, then the row-1 corridor.
+  atlas: [
+    { col: 2, row: 5 },
+    { col: 2, row: 6 },
+    ...walkwayEast(3),
+    ...SPINE_UP,
+    ...ROW2_EAST,
+    ...ROW1_TO_DOOR,
+  ],
+  rex: [
+    { col: 12, row: 5 },
+    { col: 12, row: 6 },
+    { col: 11, row: 6 },
+    { col: 10, row: 6 },
+    { col: 9, row: 6 },
+    ...SPINE_UP,
+    ...ROW2_EAST,
+    ...ROW1_TO_DOOR,
+  ],
 };
+
+/**
+ * Desk-to-conference routes, exported for the report meeting.
+ *
+ * The report meeting composes its own timelines rather than reusing `attend`
+ * — it has a dialogue order, overflow standing positions and an open-ended
+ * hold that the ambient syncs do not — but it must walk people along the
+ * *same* authored tiles, because those are the ones the route-collision tests
+ * cover. A second set of routes would be a second set of ways to walk
+ * somebody through a desk.
+ */
+export const CONFERENCE_ROUTES: Readonly<Partial<Record<EmployeeId, Tile[]>>> = TO_CONFERENCE;
+
+/** Doorway-to-seat approach, exported for the same reason. */
+export function conferenceApproach(seat: Tile): Tile[] {
+  return doorToSeat(seat);
+}
 
 /** From the doorway-adjacent tile (17,1) to a seat. */
 function doorToSeat(seat: Tile): Tile[] {

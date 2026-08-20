@@ -6,6 +6,7 @@ import {
   THRESHOLDS,
   deriveHqState,
   fresh,
+  isSecurityGated,
   react,
   witness,
   type HqSources,
@@ -803,5 +804,29 @@ describe("panels", () => {
     for (const employee of EMPLOYEES) {
       expect(state.employees[employee.id].detail.length, employee.id).toBeGreaterThan(10);
     }
+  });
+});
+
+describe("the entry security gate survives a generation cutover", () => {
+  /**
+   * This was a single id compared with `===`, and the HOLD-6H cutover made it
+   * stale on the day it landed: the backend gate was strict and enforcing, and
+   * the Portfolio board read NOT ENFORCED because the successor's id was not
+   * the one string it knew. A board that reports a live security gate as off
+   * is a false claim about safety, which is the one thing HQ may never make.
+   */
+  it("recognises every gated generation, not just the newest", () => {
+    expect(isSecurityGated("trailing_stop_25_secured_hold6h_v3")).toBe(true);
+    expect(isSecurityGated("trailing_stop_25_secured_v2")).toBe(true);
+  });
+
+  it("still reports an ungated strategy as ungated", () => {
+    expect(isSecurityGated("trailing_stop_25_v1")).toBe(false);
+    expect(isSecurityGated("equal_weight_v1")).toBe(false);
+  });
+
+  it("says nothing when the backend has not said anything", () => {
+    expect(isSecurityGated(null)).toBe(false);
+    expect(isSecurityGated(undefined)).toBe(false);
   });
 });

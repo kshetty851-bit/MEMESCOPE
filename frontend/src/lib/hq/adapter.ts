@@ -199,13 +199,32 @@ export interface HqState {
 }
 
 /**
- * The strategy id whose entries require a passing security evaluation.
+ * The strategy ids whose entries require a passing security evaluation.
  *
  * Compared against what `GET /paper` reports rather than assumed, so HQ says
  * "not enforced" on a deployment that has not cut over instead of describing
  * a gate that is not running.
+ *
+ * **A set, not one id, because the gate outlives any single generation.** This
+ * was a lone string, and the HOLD-6H cutover made it stale the moment it
+ * landed: the gate was strict and enforcing, and HQ reported "NOT ENFORCED"
+ * because the id beside it had moved on. A gate that reports itself off while
+ * it is on is worse than no board at all, and the failure repeats at every
+ * cutover unless the successor can be added here.
+ *
+ * Mirrors the backend's `SECURITY_GATED_STRATEGY_IDS`. A retired generation
+ * stays listed: it is still gated, and its wallet must not read as looser
+ * after retirement than it was while live.
  */
-export const SECURED_STRATEGY_ID = "trailing_stop_25_secured_v2";
+export const SECURED_STRATEGY_IDS: ReadonlySet<string> = new Set([
+  "trailing_stop_25_secured_v2",
+  "trailing_stop_25_secured_hold6h_v3",
+]);
+
+/** Whether the strategy the backend reports enforces the entry gate. */
+export function isSecurityGated(strategyId: string | null | undefined): boolean {
+  return strategyId != null && SECURED_STRATEGY_IDS.has(strategyId);
+}
 
 /* ── thresholds ──────────────────────────────────────────────────────── */
 
@@ -771,7 +790,7 @@ function miloMetrics(
       // trading, including on a deployment that has not cut over.
       label: "Entry security gate",
       value: wallet
-        ? wallet.strategy?.id === SECURED_STRATEGY_ID
+        ? isSecurityGated(wallet.strategy?.id)
           ? "Strict"
           : "Not enforced"
         : null,

@@ -1,7 +1,7 @@
 "use client";
 
 import type { HqState, Source } from "@/lib/hq/adapter";
-import { SECURED_STRATEGY_ID, STALE_AFTER_MS, fresh } from "@/lib/hq/adapter";
+import { STALE_AFTER_MS, fresh, isSecurityGated } from "@/lib/hq/adapter";
 import type { ExecutionPosture, TokenSecuritySummary, VaultState } from "@/lib/hq/pipeline";
 import type { PaperWallet } from "@/types/paper";
 import { Panel } from "@/components/ui/panel";
@@ -286,11 +286,11 @@ export function PerformanceLab({
       <Row
         label="Security gate"
         value={
-          paper ? (paper.strategy?.id === SECURED_STRATEGY_ID ? "STRICT" : "NOT ENFORCED") : null
+          paper ? (isSecurityGated(paper.strategy?.id) ? "STRICT" : "NOT ENFORCED") : null
         }
-        tone={paper?.strategy?.id === SECURED_STRATEGY_ID ? "good" : "warn"}
+        tone={isSecurityGated(paper?.strategy?.id) ? "good" : "warn"}
         note={
-          paper?.strategy?.id === SECURED_STRATEGY_ID
+          isSecurityGated(paper?.strategy?.id)
             ? "Every new entry requires mint authority, freeze authority, token program, venue and liquidity security to pass."
             : "This generation takes entries without a security precondition."
         }
