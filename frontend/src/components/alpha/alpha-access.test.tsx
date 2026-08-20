@@ -119,6 +119,16 @@ describe("AlphaAccess", () => {
   });
 
   it("skips the form when the server reports an alpha session", async () => {
+    /**
+     * This asserted `replace("/command")` — the auto-redirect. It was correct
+     * while the homepage was only a gate, and it is the reason nobody could
+     * see the crew section: a returning visitor was navigated off the page
+     * before it finished painting.
+     *
+     * The *intent* survives and is what is asserted now: somebody already in
+     * does not get asked for a code again. What changed is that they are no
+     * longer thrown off the front page of the product to prove it.
+     */
     vi.mocked(api.get).mockResolvedValue({
       authenticated: true,
       expires_at: "2026-09-07T00:00:00Z",
@@ -126,6 +136,53 @@ describe("AlphaAccess", () => {
 
     render(<AlphaAccess onPhase={vi.fn()} />);
 
-    await waitFor(() => expect(replace).toHaveBeenCalledWith("/command"));
+    await waitFor(() =>
+      expect(screen.queryByPlaceholderText("Access code")).not.toBeInTheDocument(),
+    );
+    expect(replace).not.toHaveBeenCalled();
+  });
+});
+
+describe("a visitor who is already in", () => {
+  /**
+   * The bug this covers: the card used to `router.replace` to the dashboard
+   * the instant the session check said authenticated, so a returning visitor
+   * never saw the homepage — they typed the address and arrived in the
+   * Scanner. The team section could not be seen no matter where it sat.
+   */
+  it("stays on the homepage and offers a door instead of redirecting", async () => {
+    vi.mocked(api.get).mockResolvedValue({
+      authenticated: true,
+      expires_at: "2099-01-01T00:00:00Z",
+    });
+
+    render(<AlphaAccess onPhase={() => {}} />);
+
+    const enter = await screen.findByTestId("alpha-enter-terminal");
+    expect(enter).toHaveAttribute("href", ALPHA_ACCESS.dashboardPath);
+    // Nothing navigated on its own. That is the whole fix.
+    expect(replace).not.toHaveBeenCalled();
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it("still shows the code form to a visitor who is not signed in", async () => {
+    vi.mocked(api.get).mockResolvedValue({ authenticated: false, expires_at: null });
+
+    render(<AlphaAccess onPhase={() => {}} />);
+
+    // The gate is untouched: no session means the code form, every time.
+    expect(await screen.findByPlaceholderText("Access code")).toBeInTheDocument();
+    expect(screen.queryByTestId("alpha-enter-terminal")).not.toBeInTheDocument();
+  });
+
+  it("shows the form rather than a door when the session check fails", async () => {
+    vi.mocked(api.get).mockRejectedValue(new Error("offline"));
+
+    render(<AlphaAccess onPhase={() => {}} />);
+
+    // Fail closed. An unreachable session endpoint must never be read as
+    // "already in" — that would hand the terminal link to a stranger.
+    expect(await screen.findByPlaceholderText("Access code")).toBeInTheDocument();
+    expect(screen.queryByTestId("alpha-enter-terminal")).not.toBeInTheDocument();
   });
 });

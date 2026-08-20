@@ -147,11 +147,23 @@ export function LandingPage() {
       <LaunchOverlay phase={phase} count={count} />
 
       <div className="alpha-transition" aria-hidden />
-      <HomepageIntelligence />
-      {/* The crew, then the door they work behind. The order is the story the
-          product tells: meet them, then go and watch them work. */}
+
+      {/*
+        THE CREW COMES FIRST, AND THAT ORDERING IS THE FIX.
+
+        This sat *after* `HomepageIntelligence`, which is 4,753px tall on a
+        1440x900 desktop — so the team section began at y=5,653 on a 6,600px
+        page. It was rendered, it was correct, and no one was ever going to
+        scroll to it. "Deployed" and "visible" turned out to be different
+        claims, and only the first one had been checked.
+
+        The order now tells the product's story in the order it happens: this
+        is who we are, this is the door they work behind, and *then* the live
+        intelligence for anyone who wants the detail.
+      */}
       <Crew />
       <EnterHq />
+      <HomepageIntelligence />
     </main>
   );
 }

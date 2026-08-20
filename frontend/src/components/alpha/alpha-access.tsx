@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import type { FormEvent } from "react";
 import { useEffect, useState } from "react";
 
@@ -26,10 +25,17 @@ import type { AlphaSessionStatus } from "@/types/api";
  * any of it plays, so a visitor who reloads mid-countdown is already in.
  */
 export function AlphaAccess({ onPhase }: { onPhase: (phase: GatePhase | "approved") => void }) {
-  const router = useRouter();
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [unlocking, setUnlocking] = useState(false);
+  /**
+   * Whether this visitor already holds a live alpha session.
+   *
+   * `null` while unknown, which is not the same as `false` — the card must not
+   * flash the code form at somebody who is already in, nor flash the
+   * already-in state at somebody who is not.
+   */
+  const [returning, setReturning] = useState<boolean | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -37,17 +43,18 @@ export function AlphaAccess({ onPhase }: { onPhase: (phase: GatePhase | "approve
     void api
       .get<AlphaSessionStatus>("/alpha/session", { skipAuthRetry: true })
       .then((session) => {
-        if (!cancelled && session.authenticated) router.replace(ALPHA_ACCESS.dashboardPath);
+        if (!cancelled) setReturning(session.authenticated);
       })
       .catch(() => {
         // The launch screen is the safe fallback. Do not surface network errors
         // as password failures before the visitor submits anything.
+        if (!cancelled) setReturning(false);
       });
 
     return () => {
       cancelled = true;
     };
-  }, [router]);
+  }, []);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -80,6 +87,60 @@ export function AlphaAccess({ onPhase }: { onPhase: (phase: GatePhase | "approve
       setUnlocking(false);
       onPhase("denied");
     }
+  }
+
+  /**
+   * A visitor who is already in gets a door, not a form — and stays on the page.
+   *
+   * This used to `router.replace` to the dashboard the moment the session check
+   * came back authenticated, which meant a returning visitor never saw the
+   * homepage at all: they typed the address and arrived in the Scanner. That
+   * was defensible while the homepage was only a gate. It stopped being
+   * defensible the moment the homepage acquired the crew, the wordmark and the
+   * route into HQ — the page now has a reason to exist, and force-navigating
+   * away from a page somebody explicitly asked for is not routing, it is a
+   * redirect loop with better manners.
+   *
+   * **The gate itself is untouched.** A visitor without a session still sees
+   * the code form and still cannot pass without a valid code; nothing here
+   * grants access. All that changed is that being *already* authenticated no
+   * longer forbids you from reading the front page of the product you use.
+   */
+  if (returning) {
+    return (
+      <div
+        aria-labelledby="alpha-access-heading"
+        className="w-full rounded-lg border border-line bg-surface p-5 shadow-e3"
+      >
+        <h2
+          id="alpha-access-heading"
+          className="text-label font-medium uppercase tracking-[0.16em] text-accent"
+        >
+          Alpha access
+        </h2>
+        <p className="mt-1.5 text-sm text-ink-2">
+          You are signed in to the private alpha.
+        </p>
+        <a
+          href={ALPHA_ACCESS.dashboardPath}
+          data-testid="alpha-enter-terminal"
+          className={cn(
+            "mt-4 flex h-10 w-full items-center justify-center rounded-md",
+            "border border-accent/40 bg-accent/10",
+            "text-sm font-medium tracking-[0.08em] text-accent",
+            "transition-colors duration-[var(--duration-instant)]",
+            "hover:border-accent/70 hover:bg-accent/16",
+          )}
+        >
+          Enter the terminal
+        </a>
+        <div className="mt-4 border-t border-line-subtle pt-3">
+          <p data-numeric className="text-xs text-ink-3">
+            Version {BUILD.version.replace(/^v/i, "")} · alpha
+          </p>
+        </div>
+      </div>
+    );
   }
 
   return (
