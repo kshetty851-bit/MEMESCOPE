@@ -34,7 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
 from app.core.logging import get_logger
-from app.models.market import TokenMarketSnapshot, TradingStatus
+from app.models.market import TokenMarketSnapshot
 from app.models.paper import PaperPosition, PaperTradeAudit, PaperWallet
 from app.models.radar import RadarToken
 from app.paper import audit, benchmark, eligibility, execution, exits, metrics
@@ -52,10 +52,19 @@ from app.paper.models import (
     Quote,
 )
 from app.paper.repository import PaperRepository
-from app.paper.strategy import AnyStrategy, TrackRecordBracketStrategy, registry
+from app.paper.research_ledger import capture_decision
+from app.paper.strategy import (
+    SECURITY_GATED_STRATEGY_IDS,
+    AnyStrategy,
+    TrackRecordBracketStrategy,
+    lineage_for,
+    registry,
+)
 from app.radar.repository import RadarRepository
-from app.repositories.market import MarketSnapshotRepository, EnrichmentStateRepository
+from app.repositories.market import EnrichmentStateRepository, MarketSnapshotRepository
 from app.repositories.token import TokenRepository
+from app.security import entry_policy
+from app.security.service import TokenSecurityService, capture_candidate_security
 from app.services.jupiter import JupiterExecutionClient
 
 logger = get_logger(__name__)
@@ -255,10 +264,51 @@ class PaperWalletService:
     # --- Advancing the simulation -------------------------------------------
 
     async def review(self, *, now: datetime) -> ReviewOutcome:
-        """One pass: settle exits, record them, then open what cash allows."""
+        """One pass: settle exits everywhere, record them, then open on the live book.
+
+        ── TWO DIFFERENT SCOPES, ON PURPOSE ────────────────────────────────
+
+        **Exits run across every wallet that still holds something**, archived
+        generations included. **Entries run on the live wallet only.** That
+        asymmetry is the whole of this module's generation contract: archiving
+        retires a policy, and a retired policy still owes an exit on every
+        trade it opened.
+
+        Before this, both halves were scoped to the live wallet, so archiving
+        a generation abandoned its open book — 105 positions across
+        generations 1, 5 and 6 stopped being evaluated the moment their wallet
+        was archived. Several had already passed the barrier or expiry that
+        should have closed them, so their recorded state is not merely stale
+        but wrong.
+
+        Each position still settles under **its own** stored rules
+        (`_rules_for` reads them off the row), so an archived generation's
+        book closes on the policy it was opened under and never on today's.
+        """
         wallet = await self.wallet(now=now)
-        evaluated, closed = await self._settle_exits(wallet, now=now)
-        audited = await self._record_audits(wallet)
+
+        evaluated = closed = audited = 0
+        books = (
+            await self._repository.wallets_with_open_positions()
+            if settings.PAPER_WALLET_MANAGE_ARCHIVED_GENERATIONS
+            # Off by default. The live wallet is always managed; archived
+            # books wait for the deliberate switch, because settling them
+            # changes 105 recorded outcomes. See the setting's own note.
+            else [wallet]
+        )
+        for book in books:
+            book_evaluated, book_closed = await self._settle_exits(
+                book,
+                now=now,
+                # Archived books are *eligible* for retrospective pricing.
+                # Whether any given exit actually uses it is decided per
+                # breach, by how old the breaching observation is.
+                retrospective=book.archived_at is not None,
+            )
+            evaluated += book_evaluated
+            closed += book_closed
+            audited += await self._record_audits(book)
+
         opened, candidates, truncated, refusals = await self._open_entries(wallet, now=now)
         return ReviewOutcome(
             evaluated=evaluated,
@@ -627,6 +677,34 @@ class PaperWalletService:
             "entry_execution_fallback_reason": found.reason,
         }
 
+    @staticmethod
+    def _retrospective_close_values() -> dict[str, Any]:
+        """Mark a close as a retrospective recovery, and say so on the row.
+
+        Requirement 6: generation attribution is already permanent (the
+        position keeps its wallet), but the *fact* that this exit was
+        recovered after the wallet had been abandoned has to be legible on
+        the trade itself rather than inferred from timestamps.
+
+        No execution quote is recorded because none was taken — the fields
+        are null rather than filled with a plausible-looking number.
+        """
+        return {
+            "exit_execution_model_version": "observed_retrospective_v1",
+            "exit_execution_quote": None,
+            "exit_execution_quoted_at": None,
+            "exit_execution_context_slot": None,
+            "exit_execution_price_impact_pct": None,
+            "exit_execution_fee_usd": None,
+            "exit_execution_route": None,
+            "exit_execution_confidence": "observed_historical_recovery",
+            "exit_execution_fallback_reason": (
+                "Settled retrospectively from the stored observation that breached "
+                "the position's own exit rule. No live quote was used and no "
+                "current price was applied."
+            ),
+        }
+
     def _execution_close_values(
         self, found: ExecutionQuote | execution.LegacyExecution
     ) -> dict[str, Any]:
@@ -698,6 +776,7 @@ class PaperWalletService:
         *,
         now: datetime,
         mints: Sequence[str] | None = None,
+        retrospective: bool = False,
     ) -> tuple[int, int]:
         """Walk each open position's unseen observations and close the breaches.
 
@@ -734,11 +813,12 @@ class PaperWalletService:
         series = await self._market.series_for_mints(
             [position.mint_address for position in positions], since=oldest
         )
-        
-        # Look up when enrichment last checked these tokens, so we can record 
+
+        # Look up when enrichment last checked these tokens, so we can record
         # that we tried even if no market was found.
-        from app.models.market import TokenEnrichmentState
         from sqlalchemy import select
+
+        from app.models.market import TokenEnrichmentState
         enrichment_states = await self._session.scalars(
             select(TokenEnrichmentState).where(
                 TokenEnrichmentState.mint_address.in_([p.mint_address for p in positions])
@@ -749,7 +829,7 @@ class PaperWalletService:
         closed = 0
         for position in positions:
             last_check_at = last_checks.get(position.mint_address)
-            
+
             rows = [
                 row
                 for row in series.get(position.mint_address, [])
@@ -789,7 +869,7 @@ class PaperWalletService:
                     new_evaluated_at = quotes[-1].captured_at
                 elif rows:
                     new_evaluated_at = rows[-1].captured_at
-                
+
                 await self._repository.advance(
                     position.id,
                     peak_price=running_peak,
@@ -805,14 +885,43 @@ class PaperWalletService:
             observed_exit_price = (
                 decision_quote.price_usd if decision_quote is not None else found.price_usd
             )
-            exit_execution = await self._exit_execution_for(
-                position=position,
-                decision_price=found.price_usd,
-                decision_liquidity=(
-                    decision_quote.liquidity_usd if decision_quote is not None else None
-                ),
-                now=now,
-            )
+            # A live breach is priced with a live execution quote, because the
+            # sell would happen now and its slippage is real. A **retrospective**
+            # breach must not be: the exit happened at a known past instant, and
+            # asking Jupiter what the token is worth today would reconstruct an
+            # old trade at a price that did not exist when it closed.
+            #
+            # This is the whole of PW-LIFECYCLE-1's recovery contract. Archived
+            # generations settle on the observation that actually breached —
+            # its price and its timestamp — or they do not settle at all.
+            # Whether *this breach* is historical, rather than whether the
+            # wallet happens to be archived.
+            #
+            # Keying on the wallet was right while "archived" meant "abandoned
+            # days ago", and wrong the moment a generation is archived by a
+            # cutover: Generation 2's book is archived from the instant SEC-2
+            # goes live, but its positions are still trading on current data
+            # and their breaches happen now. Pricing those from a stored
+            # snapshot instead of a live quote would quietly change their
+            # execution model — the opposite of "continue under their original
+            # rules".
+            #
+            # So the test is the age of the breaching observation. A fresh
+            # breach is priced live wherever it happened; a stale one is
+            # priced from the observation that caused it.
+            breach_age = (now - found.at).total_seconds()
+            historical = retrospective and breach_age > settings.HEALTH_TRACKED_STALE_SECONDS
+
+            exit_execution: ExecutionQuote | execution.LegacyExecution | None = None
+            if not historical:
+                exit_execution = await self._exit_execution_for(
+                    position=position,
+                    decision_price=found.price_usd,
+                    decision_liquidity=(
+                        decision_quote.liquidity_usd if decision_quote is not None else None
+                    ),
+                    now=now,
+                )
             closed_now = await self._repository.close(
                 position.id,
                 exit_price=(
@@ -828,7 +937,11 @@ class PaperWalletService:
                 # position's — it sold before it.
                 peak_price=running_peak,
                 exit_observed_price=observed_exit_price,
-                **self._execution_close_values(exit_execution),
+                **(
+                    self._retrospective_close_values()
+                    if historical
+                    else self._execution_close_values(exit_execution)
+                ),
             )
             closed += int(closed_now)
 
@@ -850,7 +963,7 @@ class PaperWalletService:
                 return await self._close_observed_bracket(
                     position, row=row, reason=ExitReason.TARGET
                 )
-        
+
         prices = [row.price_usd for row in rows if row.price_usd is not None]
         await self._repository.advance(
             position.id,
@@ -1071,6 +1184,8 @@ class PaperWalletService:
         verdicts = await self._screen(wallet, entries)
 
         mints = [verdict.mint_address for verdict in verdicts if verdict.eligible]
+
+
         tokens = await TokenRepository(self._session).get_many_by_mints(mints)
         token_ids = {mint: token.id for mint, token in tokens.items()}
 
@@ -1081,6 +1196,8 @@ class PaperWalletService:
 
         opened = 0
         refusals = eligibility.refusal_counts(verdicts)
+        cash_refused: set[str] = set()
+        security_refused: dict[str, entry_policy.EntryDecision] = {}
         for verdict in verdicts:
             candidate = verdict.candidate
             if candidate is None:
@@ -1094,6 +1211,29 @@ class PaperWalletService:
                 refusals[eligibility.Refusal.INSUFFICIENT_CASH] = (
                     refusals.get(eligibility.Refusal.INSUFFICIENT_CASH, 0) + 1
                 )
+                # Named as well as counted, so the per-mint evidence written
+                # below can say *which* token the wallet could not afford.
+                cash_refused.add(candidate.mint_address)
+                continue
+
+            # --- SEC-2 SECURITY ENTRY GATE ---------------------------------
+            # Placed here on purpose: after eligibility and sizing have both
+            # said yes, and before any capital is committed or any execution
+            # quote is requested. Evaluating earlier would spend an RPC on
+            # every screened row; evaluating later would mean a refusal had
+            # already moved money.
+            #
+            # It is an ENTRY gate and nothing else. No exit path calls this,
+            # and a security outage must never stop a position reaching its
+            # trailing stop (§43, §44).
+            security = await self._security_for_entry(
+                strategy, candidate.mint_address, now=now
+            )
+            if security is not None and not security.allowed:
+                refusals[entry_policy.SECURITY_GATE_REFUSAL] = (
+                    refusals.get(entry_policy.SECURITY_GATE_REFUSAL, 0) + 1
+                )
+                security_refused[candidate.mint_address] = security
                 continue
 
             entry_execution = await self._entry_execution_for(
@@ -1118,6 +1258,9 @@ class PaperWalletService:
             )
 
             created = await self._repository.open_position(
+                # The exact decision that authorised this buy. The repository
+                # re-checks it rather than trusting this call site.
+                security=security,
                 wallet_id=wallet.id,
                 mint_address=candidate.mint_address,
                 token_id=token_ids.get(candidate.mint_address),
@@ -1152,6 +1295,26 @@ class PaperWalletService:
 
             cash -= instruction.size_usd
             opened += 1
+
+        # --- HQ-6 evidence capture. READ-ONLY, AND LAST. --------------------
+        # Deliberately after every position is opened and the cash arithmetic
+        # is closed. Both calls are pure observation — neither reads back into
+        # `verdicts`, `refusals`, the strategy or `cash` — and running them
+        # here means that even a slow RPC or a database hiccup inside them
+        # cannot delay or interfere with a trade that has already happened.
+        #
+        # The security verdict is *not* consulted before the loop above. A
+        # token this evaluator would call FAILED is still bought exactly as it
+        # was before HQ-6. That is the phase's whole design: measure the cost
+        # of enforcement before anyone decides to enforce.
+        await capture_candidate_security(self._session, mints, now=now)
+        await self._capture_candidate_decisions(
+            wallet,
+            verdicts,
+            cash_refused=cash_refused,
+            security_refused=security_refused,
+            now=now,
+        )
 
         return opened, len(entries), len(entries) >= limit, dict(refusals)
 
@@ -1269,6 +1432,139 @@ class PaperWalletService:
                 opened += 1
         return opened, len(admissions), len(admissions) >= limit, refusals
 
+    async def _security_for_entry(
+        self, strategy: AnyStrategy, mint: str, *, now: datetime
+    ) -> entry_policy.EntryDecision | None:
+        """The authoritative security decision for one prospective entry.
+
+        Returns `None` for an ungated strategy, which is what keeps Generation
+        2 trading exactly as it did before SEC-2.
+
+        ── TIME-OF-CHECK / TIME-OF-USE ────────────────────────────────────
+
+        The evidence is re-read here, immediately before the buy, rather than
+        reusing whatever the observation pass happened to write earlier in
+        this same call. `TokenSecurityService.evaluate_candidates` reuses a
+        cached row only while it is inside its own freshness window and
+        re-runs the RPC otherwise, so this costs nothing in the steady state
+        and cannot hand back an expired PASS.
+
+        `entry_policy.decide` then checks the age *again* against
+        `MAX_EVIDENCE_AGE` and against each check's own window. That second
+        check is not redundant: the cache's notion of fresh and the gate's
+        notion of fresh-enough-to-spend-money are allowed to differ, and the
+        stricter one has to win.
+
+        Any failure is an availability refusal, never a finding about the
+        token — a security service that is down must stop new entries without
+        labelling anything unsafe (§6, §43).
+        """
+        if strategy.id not in SECURITY_GATED_STRATEGY_IDS:
+            return None
+        try:
+            service = TokenSecurityService(self._session)
+            evaluations = await service.evaluate_candidates([mint], now=now)
+            evaluation = evaluations[0] if evaluations else None
+        except Exception:
+            logger.warning("security_gate_unavailable", mint_address=mint)
+            evaluation = None
+        return entry_policy.decide(evaluation, now=now)
+
+    async def _capture_candidate_decisions(
+        self,
+        wallet: PaperWallet,
+        verdicts: Sequence[eligibility.Verdict],
+        *,
+        cash_refused: set[str],
+        security_refused: dict[str, entry_policy.EntryDecision] | None = None,
+        now: datetime,
+    ) -> None:
+        """Persist the per-mint verdict the engine already reached.
+
+        HQ-5 found that `judge()`'s refusals are counted but never attributed
+        to a mint, so nothing downstream could say *why this token* was not
+        bought. This closes that observability gap without re-implementing or
+        re-running a single condition: the verdicts written here are the same
+        objects the loop below acts on, captured after the fact.
+
+        Two deliberate bounds, because this runs every minute over a page of
+        up to 250 rows:
+
+        * ownership refusals are skipped. `ALREADY_TRADED` and `ALREADY_HELD`
+          dominate the page by construction and are already fully derivable
+          from `GET /paper/positions`, which HQ reads anyway. Writing them
+          would be a few hundred rows a minute restating a fact another
+          endpoint already answers.
+        * the key is `(wallet, mint, decision, reason)`, so each distinct
+          outcome for a mint is written **once, ever**. A steady state costs
+          zero rows; a mint whose refusal reason changes records the change.
+
+        Best-effort throughout: `capture_decision` swallows and logs, and this
+        never raises into the review pass.
+        """
+        skip = {
+            eligibility.Refusal.ALREADY_TRADED.value,
+            eligibility.Refusal.ALREADY_HELD.value,
+        }
+        wallet_code = f"generation-{wallet.generation}"
+        strategy = self.strategy
+        for verdict in verdicts:
+            reason = verdict.refused_for
+            if reason in skip:
+                continue
+            refused_for_security = (security_refused or {}).get(verdict.mint_address)
+            if refused_for_security is not None:
+                # The security gate is the reason, and both halves are kept:
+                # one canonical aggregate code so refusals can be counted, and
+                # the evaluator's own detailed codes so the reason survives
+                # (§8, §18). The evaluation reference travels with it, which
+                # is what lets Track Record analysis later answer "which
+                # security evaluation decided this" (§17).
+                await capture_decision(
+                    self._session,
+                    source="paper_candidate",
+                    source_key=(
+                        f"{wallet_code}:{verdict.mint_address}:security:"
+                        f"{'|'.join(refused_for_security.reason_codes) or 'none'}"
+                    ),
+                    wallet_code=wallet_code,
+                    strategy_id=strategy.id,
+                    strategy_version=strategy.version,
+                    mint=verdict.mint_address,
+                    decided_at=now,
+                    decision="declined",
+                    reason_codes=[
+                        entry_policy.SECURITY_GATE_REFUSAL,
+                        *refused_for_security.reason_codes,
+                    ],
+                    market_features={"rank": verdict.rank},
+                    availability=refused_for_security.as_json(),
+                )
+                continue
+            if verdict.mint_address in cash_refused:
+                # `judge()` passed it and the strategy then declined for
+                # cash. Recording it as merely "eligible" would lose the only
+                # part a reader cares about: the wallet wanted this token and
+                # could not afford it.
+                reason = eligibility.Refusal.INSUFFICIENT_CASH.value
+                decision = "declined"
+            else:
+                decision = "eligible" if verdict.eligible else "declined"
+            await capture_decision(
+                self._session,
+                source="paper_candidate",
+                source_key=f"{wallet_code}:{verdict.mint_address}:{decision}:{reason or ''}",
+                wallet_code=wallet_code,
+                strategy_id=strategy.id,
+                strategy_version=strategy.version,
+                mint=verdict.mint_address,
+                decided_at=now,
+                decision=decision,
+                reason_codes=[reason] if reason else [],
+                market_features={"rank": verdict.rank},
+                availability={"screened_at": now.isoformat()},
+            )
+
     async def _screen(
         self, wallet: PaperWallet, entries: Sequence[RadarToken]
     ) -> list[eligibility.Verdict]:
@@ -1303,11 +1599,48 @@ class PaperWalletService:
         return eligibility.screen(observations, held_ever=held, open_now=open_now)
 
     async def _cash_for(self, wallet: PaperWallet) -> Decimal:
-        open_rows = await self._repository.open_positions(wallet.id)
-        closed_rows = await self._repository.closed_positions(wallet.id)
-        closed = [trade for trade in (_to_closed(row) for row in closed_rows) if trade]
+        """Uninvested cash in this wallet's **shared capital pool**.
+
+        The pool is the wallet's lineage — every generation that inherited the
+        same money (see `strategy.CAPITAL_LINEAGES`). Its base balance is the
+        earliest member's starting balance, counted **once**: a new generation
+        succeeding an old one inherits capital rather than creating it, so a
+        cutover cannot mint a second $1,000.
+
+        Every open position in the pool holds capital down, whichever
+        generation opened it. That is what stops a freshly cut-over generation
+        from allocating a full balance while its predecessor's book is still
+        running.
+
+        Today the live wallet's lineage contains exactly one wallet, so this
+        returns precisely what the per-wallet computation returned before —
+        the change is inert until a cutover actually happens. It is *not*
+        retroactive across the platform's independent past experiments; see
+        `CAPITAL_LINEAGES` for why summing those produces -$1,934 rather than
+        a balance.
+        """
+        pool = await self._repository.lineage_wallets(lineage_for(wallet.strategy_id))
+        if not pool:
+            pool = [wallet]
+
+        open_rows: list[PaperPosition] = []
+        closed_trades: list[ClosedTrade] = []
+        for member in pool:
+            open_rows.extend(await self._repository.open_positions(member.id))
+            closed_trades.extend(
+                trade
+                for trade in (
+                    _to_closed(row)
+                    for row in await self._repository.closed_positions(member.id)
+                )
+                if trade
+            )
+
         return metrics.cash_for(
-            wallet.starting_balance, [_to_open(row) for row in open_rows], closed
+            # The oldest generation in the lineage is the one that funded it.
+            pool[0].starting_balance,
+            [_to_open(row) for row in open_rows],
+            closed_trades,
         )
 
     # --- Reading it back -----------------------------------------------------
@@ -1350,7 +1683,7 @@ class PaperWalletService:
         }
 
         all_mints = [row.mint_address for row in positions]
-        
+
         enrichment_states = await EnrichmentStateRepository(self._session).get_many_by_mints(
             [row.mint_address for row in open_rows]
         )
@@ -1397,7 +1730,7 @@ class PaperWalletService:
         """The expensive benchmarks and waiting context."""
         wallet = await self.wallet(now=now)
         cash = await self._cash_for(wallet)
-        
+
         return WalletContextRead(
             wallet=wallet,
             benchmarks=await self.benchmarks(wallet),
@@ -1599,7 +1932,7 @@ __all__ = [
     "PaperWalletService",
     "ReviewOutcome",
     "WaitingState",
-    "WalletRead",
     "WalletContextRead",
+    "WalletRead",
     "utcnow",
 ]

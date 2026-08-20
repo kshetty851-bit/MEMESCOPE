@@ -145,8 +145,23 @@ async def client(app) -> AsyncGenerator[AsyncClient]:
 
 @pytest.fixture(autouse=True)
 def force_operational_for_tests():
+    """Make the archived Track Record strategy runnable for the suite.
+
+    Restores afterwards. It previously did not, and because it is autouse the
+    mutation leaked into every subsequent test in the session — so the runtime
+    invariant "exactly one strategy is operational" was untestable from inside
+    pytest, and read as two. Restoring keeps the behaviour every existing test
+    depends on (the flag is still True *during* the test) without leaving a
+    module-level singleton rewritten for the rest of the run.
+    """
     from app.paper.strategy import PAPER_TRACK_RECORD_TP125_SL50_V1
+
+    previous = PAPER_TRACK_RECORD_TP125_SL50_V1.operational
     object.__setattr__(PAPER_TRACK_RECORD_TP125_SL50_V1, "operational", True)
+    try:
+        yield
+    finally:
+        object.__setattr__(PAPER_TRACK_RECORD_TP125_SL50_V1, "operational", previous)
 
 
 @pytest.fixture

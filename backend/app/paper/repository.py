@@ -38,6 +38,15 @@ from app.models.paper import PaperPosition, PaperTradeAudit, PaperWallet
 from app.models.paper_research import PaperDecisionSnapshot
 from app.models.radar import RadarToken
 from app.paper.models import PositionStatus
+from app.security.entry_policy import EntryDecision
+
+
+class SecurityGateViolationError(RuntimeError):
+    """A gated wallet was asked to open a position without an ALLOW.
+
+    A programming error, never a market condition, so it raises. Distinct
+    from the ordinary `None` return, which means another worker won the race.
+    """
 
 
 class PaperRepository:
@@ -71,6 +80,56 @@ class PaperRepository:
                 select(PaperWallet)
                 .where(PaperWallet.archived_at.is_not(None))
                 .order_by(PaperWallet.generation.desc())
+            )
+        ).all()
+
+    async def wallets_with_open_positions(self) -> Sequence[PaperWallet]:
+        """Every wallet still holding something, archived or not.
+
+        The exit engine's scope, and deliberately wider than the entry
+        engine's. A position that is open is a position the platform still
+        owes an exit, whatever happened to the generation that opened it —
+        archiving retires a *policy*, and a policy cannot retire a trade that
+        is still running.
+
+        Before this existed, `review` walked only the live wallet, so
+        archiving a generation silently abandoned its book: 105 positions
+        across generations 1, 5 and 6 stopped being evaluated the moment
+        their wallet was archived, and several had already passed the expiry
+        or barrier that should have closed them.
+        """
+        return (
+            await self._session.scalars(
+                select(PaperWallet)
+                .where(
+                    PaperWallet.id.in_(
+                        select(PaperPosition.wallet_id)
+                        .where(PaperPosition.status == PositionStatus.OPEN.value)
+                        .distinct()
+                    )
+                )
+                # Live wallet first so the pass that matters most runs first
+                # under any batch limit; then oldest generation, so a long
+                # archive tail is walked in a stable order.
+                .order_by(
+                    PaperWallet.archived_at.is_not(None),
+                    PaperWallet.generation.asc(),
+                )
+            )
+        ).all()
+
+    async def lineage_wallets(self, strategy_ids: frozenset[str]) -> Sequence[PaperWallet]:
+        """Every wallet funded from one shared pool, oldest generation first.
+
+        The first row is the one that put the money in: capital is inherited
+        along a lineage, so the pool's base balance is that wallet's, counted
+        once however many generations have since succeeded it.
+        """
+        return (
+            await self._session.scalars(
+                select(PaperWallet)
+                .where(PaperWallet.strategy_id.in_(sorted(strategy_ids)))
+                .order_by(PaperWallet.generation.asc())
             )
         ).all()
 
@@ -305,14 +364,36 @@ class PaperRepository:
     def _for_wallet(self, wallet_id: uuid.UUID) -> Select[tuple[PaperPosition]]:
         return select(PaperPosition).where(PaperPosition.wallet_id == wallet_id)
 
-    async def open_position(self, **values: Any) -> PaperPosition | None:
+    async def open_position(
+        self, *, security: EntryDecision | None = None, **values: Any
+    ) -> PaperPosition | None:
         """Insert one position, or return `None` if the token was already taken.
 
         `None` is the ordinary path, not an error: the evaluator offers every
         Top-10 token on every pass, and all but the newest are already held or
         already closed. The database is what decides, which is what makes "the
         first time it enters the Top 10" true rather than merely intended.
+
+        ── THE SEC-2 SECURITY INVARIANT ────────────────────────────────────
+
+        This is the **last** place a Paper position can come into existence,
+        and therefore the right place to make the security gate impossible to
+        route around. Every runtime path — the review pass, a worker, a future
+        admin action, a retry, a reconciliation — ends here, so a check placed
+        in the service layer alone would only cover the paths that exist
+        today (§24, §41).
+
+        For a wallet whose strategy is in `SECURITY_GATED_STRATEGY_IDS`, an
+        `EntryDecision` that ALLOWS is required, and its absence raises rather
+        than returning `None`. The distinction matters: `None` means "somebody
+        else got there first" and is swallowed as ordinary, so a missing gate
+        reported that way would be indistinguishable from a race and would
+        disappear into a refusal counter.
+
+        Ungated wallets are untouched, which is what lets Generation 2 keep
+        trading under its original rules until the cutover.
         """
+        await self._assert_security_authorized(values.get("wallet_id"), security)
         result = await self._session.execute(
             insert(PaperPosition)
             .values(**values)
@@ -322,6 +403,34 @@ class PaperRepository:
             .returning(PaperPosition)
         )
         return result.scalar_one_or_none()
+
+    async def _assert_security_authorized(
+        self, wallet_id: uuid.UUID | None, security: EntryDecision | None
+    ) -> None:
+        """Refuse to create a gated position without a live ALLOW.
+
+        Reads the wallet's own strategy rather than trusting the caller to say
+        whether it is gated: a caller that could declare itself ungated would
+        be the bypass this method exists to prevent.
+        """
+        from app.paper.strategy import SECURITY_GATED_STRATEGY_IDS
+
+        if wallet_id is None:
+            raise SecurityGateViolationError("a position must belong to a wallet")
+        strategy_id = await self._session.scalar(
+            select(PaperWallet.strategy_id).where(PaperWallet.id == wallet_id)
+        )
+        if strategy_id not in SECURITY_GATED_STRATEGY_IDS:
+            return
+        if security is None:
+            raise SecurityGateViolationError(
+                f"strategy {strategy_id!r} requires a security decision to open a position"
+            )
+        if not security.allowed:
+            raise SecurityGateViolationError(
+                f"security refused this entry: {security.outcome} "
+                f"{list(security.reason_codes)}"
+            )
 
     async def open_positions(
         self,
@@ -429,7 +538,7 @@ class PaperRepository:
         }
         if last_market_check_at is not None:
             values["last_market_check_at"] = last_market_check_at
-            
+
         await self._session.execute(
             update(PaperPosition)
             .where(
@@ -458,7 +567,7 @@ class PaperRepository:
         }
         if last_market_check_at is not None:
             values["last_market_check_at"] = last_market_check_at
-            
+
         if trailing_stop_price is not None:
             values["trailing_stop_price"] = func.greatest(
                 func.coalesce(PaperPosition.trailing_stop_price, Decimal(0)),

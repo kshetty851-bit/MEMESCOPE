@@ -24,10 +24,12 @@ from decimal import Decimal
 from typing import Annotated
 
 from fastapi import APIRouter, Query
+from sqlalchemy import select
 
 from app.api.deps import DbSession
 from app.core.config import settings
 from app.models.paper import PaperPosition, PaperTradeAudit
+from app.models.paper_research import PaperDecisionSnapshot
 from app.paper import audit, benchmark, cadence, eligibility
 from app.paper.metrics import WalletMetrics
 from app.paper.models import PositionStatus
@@ -777,3 +779,77 @@ def _to_audit_entry(row: PaperTradeAudit, *, image_url: str | None = None) -> Au
         execution_confidence=row.execution_confidence,
         execution_fallback_reason=row.execution_fallback_reason,
     )
+
+
+@router.get(
+    "/decisions/{mint_address}",
+    summary="Why this mint was, or was not, admitted",
+)
+async def decisions(
+    mint_address: str,
+    session: DbSession,
+    limit: Annotated[int, Query(ge=1, le=50)] = 10,
+) -> dict[str, object]:
+    """The engine's own per-mint verdict, read back — never recomputed.
+
+    HQ-5 could show DECISION PASSED (a position exists) but never FAILED,
+    because `judge()`'s refusals were counted in aggregate and thrown away
+    per mint. This serves the rows the review pass now records at the moment
+    it decides, so the reason shown is the reason the engine used.
+
+    Nothing here re-runs an eligibility condition. A caller that wanted to
+    know "would this mint qualify *now*" is asking a different question, and
+    answering it here would put a second copy of §5 behind an endpoint where
+    it could silently drift from the one that trades.
+
+    Read-only, and it cannot admit anything.
+
+    LIMITS, STATED RATHER THAN IMPLIED
+
+    Ownership refusals (`already_traded`, `already_held`) are deliberately
+    not recorded — see `PaperWalletService._capture_candidate_decisions`.
+    An empty list therefore means "no non-ownership verdict on record",
+    which is not the same as "never considered"; it is reported as
+    UNKNOWN by every consumer rather than as a pass.
+    """
+    rows = (
+        (
+            await session.execute(
+                select(PaperDecisionSnapshot)
+                .where(PaperDecisionSnapshot.mint_address == mint_address)
+                .order_by(PaperDecisionSnapshot.decided_at.desc())
+                .limit(limit)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return {
+        "mint_address": mint_address,
+        "items": [
+            {
+                "decision": row.decision,
+                "decided_at": row.decided_at,
+                "source": row.decision_source,
+                "wallet_code": row.wallet_code,
+                "strategy_id": row.strategy_id,
+                "strategy_version": row.strategy_version,
+                "reason_codes": row.reason_codes,
+                # Server-side prose from a stable code, as every other
+                # refusal string in the platform is rendered.
+                "reason_labels": [
+                    eligibility.REFUSAL_LABELS.get(code, code) for code in row.reason_codes
+                ],
+                # SEC-2 records the entry gate's own classification here, so a
+                # reader can tell "we could not check" from "this token failed"
+                # without re-deriving it from reason codes.
+                "entry_outcome": (row.availability or {}).get("outcome"),
+                "security_status": (row.availability or {}).get("security_status"),
+                "security_evaluated_at": (row.availability or {}).get("evaluated_at"),
+                "security_evaluator_version": (row.availability or {}).get(
+                    "evaluator_version"
+                ),
+            }
+            for row in rows
+        ],
+    }

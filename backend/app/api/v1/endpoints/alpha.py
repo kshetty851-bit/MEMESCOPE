@@ -53,6 +53,21 @@ def _clear_alpha_cookie(response: Response) -> None:
 
 
 def _read_alpha_session(request: Request) -> AlphaSessionStatus:
+    if settings.alpha_gate_open:
+        # No gate is configured, so every visitor already has access — and the
+        # rest of the API already behaves that way, answering every request
+        # without a cookie. Saying `authenticated: false` here made the two
+        # halves disagree about the same setting: the API was wide open while
+        # the dashboard bounced every visitor to the landing page.
+        #
+        # `alpha_gate_open` ands the flag with `ENVIRONMENT == "local"`, so
+        # this cannot fire in production or under test. Production also refuses
+        # to boot with the gate off, so there are two independent reasons this
+        # branch is unreachable where it would matter.
+        #
+        # No expiry is reported: there is no session to expire.
+        return AlphaSessionStatus(authenticated=True)
+
     token = request.cookies.get(settings.ALPHA_ACCESS_COOKIE_NAME)
     if not token:
         return AlphaSessionStatus(authenticated=False)

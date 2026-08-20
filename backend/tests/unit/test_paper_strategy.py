@@ -230,11 +230,18 @@ class TestSizing:
 
 
 class TestRegistry:
-    def test_the_default_is_the_resumed_generation_two_strategy(
-        self,
-    ) -> None:
-        assert registry.default.id == TRAILING_STOP_25_V1.id
+    def test_the_default_is_the_security_gated_strategy(self) -> None:
+        """SEC-2 cutover, 2026-08-20.
+
+        Generation 2's trailing-stop rules are unchanged and still govern its
+        open positions — the rules travel on the position row — but new
+        entries are now taken by the security-gated successor.
+        """
+        from app.paper.strategy import TRAILING_STOP_25_SECURED_V2
+
+        assert registry.default.id == TRAILING_STOP_25_SECURED_V2.id
         assert registry.default.operational
+        assert TRAILING_STOP_25_V1.operational is False
 
     def test_exactly_one_strategy_trades(self) -> None:
         """The wallet runs one published forward strategy at a time."""

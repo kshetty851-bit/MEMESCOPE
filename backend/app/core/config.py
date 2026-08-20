@@ -506,6 +506,44 @@ class Settings(BaseSettings):
         default_factory=lambda: ["18", "19"]
     )
 
+    # --- Multi-generation position management (PW-LIFECYCLE-1) ------------
+    # Whether the review pass settles exits for wallets that have been
+    # archived. The architecture requires this — a retired *policy* still owes
+    # an exit on every trade it opened — but turning it on has a one-off
+    # consequence that must be a decision rather than a side effect.
+    #
+    # 105 positions across generations 1, 5 and 6 were abandoned when their
+    # wallets were archived, and several passed a barrier or expiry while
+    # nobody was evaluating them. Enabling this replays each position over its
+    # own stored observations and closes it at the **historically observed**
+    # price of the first breach — it never closes at today's price and never
+    # invents an exit. That is a correction rather than a rewrite, but it does
+    # change 105 recorded outcomes, so it ships off and is turned on
+    # deliberately after the frozen-position audit has been reviewed.
+    #
+    # It must be ON before any generation cutover, or the outgoing
+    # generation's open book is abandoned exactly as generations 1, 5 and 6
+    # were.
+    PAPER_WALLET_MANAGE_ARCHIVED_GENERATIONS: bool = False
+
+    # --- Shared token security evaluation (read-only, HQ-6) ---------------
+    # Deliberately NOT gated on REAL_WALLET_EXECUTION_MODE. Token security is
+    # a property of the token; tying it to whether a wallet is enabled is the
+    # exact observability hole HQ-5 found, where a disabled wallet meant the
+    # platform could say nothing about any mint.
+    #
+    # This flag governs *evidence capture only*. Nothing in the paper entry
+    # path reads the verdict, so turning it off loses observability and
+    # changes no trading decision.
+    TOKEN_SECURITY_EVALUATION_ENABLED: bool = True
+    #: Hard fan-out cap for one review pass. The evaluator shares a worker
+    #: with market enrichment and the paper review; an unbounded sweep would
+    #: starve both, so the bound is a number rather than a hope.
+    TOKEN_SECURITY_MAX_PER_PASS: int = Field(default=25, ge=0, le=200)
+    #: Largest batch the per-token read model will answer in one request, so
+    #: HQ can fill a Radar page without N+1 and without an unbounded query.
+    TOKEN_SECURITY_MAX_BATCH: int = Field(default=50, ge=1, le=200)
+
     # --- Dedicated execution wallet (disabled by default) -----------------
     # This is deliberately separate from the safety gate.  It is only the
     # public-address, signer-boundary and limit configuration for a future,
@@ -838,6 +876,38 @@ class Settings(BaseSettings):
         that need to exercise the bypass patch this property explicitly.
         """
         return self.DEVELOPMENT_BYPASS_AUTH and self.ENVIRONMENT == "local"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def alpha_gate_open(self) -> bool:
+        """Whether every visitor already has alpha access.
+
+        Modelled on `auth_bypass_active` above and for the same reason: it ands
+        the flag with the environment, so switching the gate off cannot take
+        effect in production by construction. A call site reading
+        `ALPHA_ACCESS_REQUIRED` directly could forget that check, so nothing
+        does.
+
+        This is belt and braces. Production already refuses to *boot* with
+        `ALPHA_ACCESS_REQUIRED` false — see the validator that raises
+        "ALPHA_ACCESS_REQUIRED must be true in production" — so this property
+        is a second, independent reason the gate cannot open there.
+
+        `test` is excluded deliberately, exactly as the auth bypass excludes
+        it: a developer with the flag exported would otherwise run the whole
+        suite with the gate open and every gate test would pass for the wrong
+        reason. The tests that exercise this patch the property explicitly.
+
+        ── WHY THIS EXISTS ──────────────────────────────────────────────────
+
+        Turning the gate off used to open the API while leaving the dashboard
+        unusable: every endpoint answered without a cookie, but
+        `GET /alpha/session` still reported `authenticated: false`, so the
+        dashboard layout bounced every visitor back to the landing page. The
+        two halves disagreed about the same setting. This makes the session
+        read agree with the behaviour the rest of the API already had.
+        """
+        return not self.ALPHA_ACCESS_REQUIRED and self.ENVIRONMENT == "local"
 
     @computed_field  # type: ignore[prop-decorator]
     @property

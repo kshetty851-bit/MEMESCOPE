@@ -155,9 +155,15 @@ x-backend-env: &backend-env
   # measured against. Nothing here connects a wallet or touches a chain.
   FEATURE_PAPER_WALLET_ENABLED: ${FEATURE_PAPER_WALLET_ENABLED:-false}
   PAPER_WALLET_STARTING_BALANCE: ${PAPER_WALLET_STARTING_BALANCE:-1000}
+  # The default must stay the ungated strategy. A generation cutover is a
+  # deliberate act, not something a deployment performs by pulling latest:
+  # production does not pin this value, so changing the default here would
+  # archive its live wallet and open a new generation on the next deploy.
+  # Cutover is opted into per-environment via .env.
   PAPER_WALLET_STRATEGY_ID: ${PAPER_WALLET_STRATEGY_ID:-trailing_stop_25_v1}
   PAPER_WALLET_REVIEW_BATCH_LIMIT: ${PAPER_WALLET_REVIEW_BATCH_LIMIT:-200}
   PAPER_WALLET_CANDIDATE_LIMIT: ${PAPER_WALLET_CANDIDATE_LIMIT:-250}
+  PAPER_WALLET_MANAGE_ARCHIVED_GENERATIONS: ${PAPER_WALLET_MANAGE_ARCHIVED_GENERATIONS:-false}
   PAPER_EXECUTION_MODEL: ${PAPER_EXECUTION_MODEL:-jupiter}
   JUPITER_QUOTE_BASE_URL: ${JUPITER_QUOTE_BASE_URL:-https://lite-api.jup.ag/swap/v1}
   JUPITER_QUOTE_TIMEOUT_SECONDS: ${JUPITER_QUOTE_TIMEOUT_SECONDS:-6}

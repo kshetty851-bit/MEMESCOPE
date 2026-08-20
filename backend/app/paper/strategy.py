@@ -532,13 +532,104 @@ class TrackRecordBracketStrategy:
 
 #: Restored from its persisted Generation 2 state on 2026-08-16.  The rules and
 #: $100 entry size are the original V1 rules; no position is reconstructed.
+#:
+#: **Retired at the SEC-2 cutover**, and only then: until the cutover runs this
+#: is still the operational strategy, and Generation 2 keeps trading under it.
+#: See `SECURITY_GATED_STRATEGY_IDS` below for what changes and what does not.
 TRAILING_STOP_25_V1 = TrailingStopStrategy(
     id="trailing_stop_25_v1",
     name="Trailing Stop 25%",
     version="1.0.0",
     trade_size_usd=Decimal(100),
     trailing_drawdown=Decimal("0.25"),
+    operational=False,
+    unavailable_reason=(
+        "Retired at the SEC-2 cutover on 2026-08-20. Generation 2's open positions "
+        "continue under these exact rules until they close — the rules travel on the "
+        "position row, not on the registry — and its record is kept unchanged."
+    ),
+)
+
+#: SEC-2. **The same strategy, with one added entry precondition.**
+#:
+#: Deliberately identical in every alpha-bearing respect to
+#: `TRAILING_STOP_25_V1`: same $100 equal weight, same 25% trailing stop, same
+#: highest-ranked-eligible entry, same absence of a target or a holding period.
+#: Nothing about how the wallet chooses, sizes or exits a position changed
+#: (§13, §14) — if any of those had moved, a comparison between the two
+#: generations would be measuring two things at once and would be worthless.
+#:
+#: What changed is that a new entry additionally requires every mandatory
+#: security check to positively pass on current evidence. The version is
+#: `2.0.0-security` rather than a patch bump because the entry precondition is
+#: part of the strategy's identity: trades taken under it were drawn from a
+#: strictly smaller candidate set, and describing them with the old version
+#: would silently re-describe what produced them.
+TRAILING_STOP_25_SECURED_V2 = TrailingStopStrategy(
+    id="trailing_stop_25_secured_v2",
+    name="Trailing Stop 25% (security-gated)",
+    version="2.0.0-security",
+    trade_size_usd=Decimal(100),
+    trailing_drawdown=Decimal("0.25"),
     operational=True,
+)
+
+#: Strategies that share one pool of capital.
+#:
+#: ── WHY THIS IS A LINEAGE AND NOT "ALL WALLETS" ──────────────────────────
+#:
+#: A generation is a policy version; a *lineage* is the chain of policy
+#: versions that inherited the same money. Pooling every wallet the platform
+#: has ever run would be wrong, and measurably so: generations 1, 3, 4, 5 and
+#: 6 were independent experiments that each began with their own $1,000, and
+#: Generation 2 has since compounded its own $1,000 through $17,530 of
+#: cumulative entries. Summing them against a single $1,000 base yields
+#: **-$1,934**, which is not a balance but an artefact of adding six
+#: separate experiments together.
+#:
+#: Each of those wallets also says so itself: every `archive_reason` on record
+#: states the wallet is "retained unchanged" and "never mixed into the live
+#: wallet's figures". Retroactively pooling them would contradict the recorded
+#: intent of the archive.
+#:
+#: So capital is inherited forward along a lineage. The SEC-2 generation is a
+#: policy revision of the trailing-stop strategy — same sizing, same exit,
+#: with a security precondition added — so it inherits Generation 2's money
+#: rather than minting more. An unrelated future strategy would form its own
+#: lineage and would be a deliberate decision to fund something new.
+#:
+#: Declared in code rather than derived from `archive_reason` text: lineage is
+#: a fact about the product, and parsing prose to decide where money lives is
+#: the kind of thing that is wrong once and then wrong forever.
+CAPITAL_LINEAGES: tuple[frozenset[str], ...] = (
+    frozenset({"trailing_stop_25_v1", "trailing_stop_25_secured_v2"}),
+)
+
+
+def lineage_for(strategy_id: str) -> frozenset[str]:
+    """Every strategy sharing capital with this one, including itself.
+
+    A strategy in no declared lineage funds itself alone, which is the safe
+    default: capital is only ever shared where somebody wrote it down.
+    """
+    for lineage in CAPITAL_LINEAGES:
+        if strategy_id in lineage:
+            return lineage
+    return frozenset({strategy_id})
+
+
+#: Which strategies enforce the security entry gate.
+#:
+#: A set rather than a flag on the dataclass, because the gate is a property of
+#: the *generation policy* rather than of the trading rules, and because the
+#: repository invariant needs to answer "is this wallet gated" without
+#: importing the strategy registry into the data layer's hot path.
+#:
+#: Membership here is what makes `PaperRepository.open_position` refuse to
+#: create a position without fresh VERIFIED security evidence, so adding a
+#: strategy to this set is the whole of turning enforcement on for it.
+SECURITY_GATED_STRATEGY_IDS: frozenset[str] = frozenset(
+    {TRAILING_STOP_25_SECURED_V2.id}
 )
 
 #: **Retired at the Sprint 30 relaunch, and kept because its wallet still
@@ -649,11 +740,12 @@ class StrategyRegistry:
 
 registry = StrategyRegistry(
     (
+        TRAILING_STOP_25_SECURED_V2,
         PAPER_TRACK_RECORD_TP125_SL50_V1,
         PAPER_ALL_SCANNED_TP125_SL50_V1,
         PAPER_2X_TRAIL25_V1,
         TRAILING_STOP_25_V1,
         EQUAL_WEIGHT_V1,
     ),
-    default=TRAILING_STOP_25_V1.id,
+    default=TRAILING_STOP_25_SECURED_V2.id,
 )
