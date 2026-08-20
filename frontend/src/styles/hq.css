@@ -2103,3 +2103,61 @@
   color: var(--color-ink-3);
   opacity: 0.8;
 }
+
+/* ── today at HQ ────────────────────────────────────────────────────────
+
+   A log, so it reads like one: fixed-width times in the data face, one row
+   per event, no card chrome. Page tokens, not scene tokens — see the report's
+   note on why that distinction is load-bearing. */
+
+.hq-today {
+  border: 1px solid var(--color-line);
+  border-radius: 12px;
+  background: var(--color-surface);
+  padding: 1rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.hq-today-title {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--color-ink-3);
+}
+
+.hq-today-note {
+  font-size: 0.72rem;
+  line-height: 1.5;
+  color: var(--color-ink-3);
+  max-width: 46rem;
+}
+
+.hq-today-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-top: 0.3rem;
+}
+
+.hq-today-row {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  font-size: 0.82rem;
+  color: var(--color-ink);
+}
+
+.hq-today-time {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--color-ink-3);
+  font-variant-numeric: tabular-nums;
+  min-width: 3.4rem;
+}
+
+.hq-today-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}

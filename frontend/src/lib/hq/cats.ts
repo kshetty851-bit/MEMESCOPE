@@ -395,6 +395,93 @@ export const CAT_ROUTINES: CatRoutine[] = [
   },
 ];
 
+/**
+ * THE THREE THINGS THE CATS DID NOT DO YET.
+ *
+ * Getting petted, going to the lounge, and noticing that a stranger is in the
+ * building. All three are the same machinery as everything above — a timeline
+ * of poses at fractional waypoints, optionally with somebody playing along.
+ *
+ * The petting routine is the one worth a note: it casts an *employee*, which
+ * is the only direction that interaction can safely run. A cat cannot make
+ * anybody do anything, and a routine that started from the human's side would
+ * be an ambient routine claiming a person left their desk because of a cat.
+ * Here the cat arrives and the human reacts, which is also how it works.
+ */
+CAT_ROUTINES.push(
+  {
+    id: "mochi-petted",
+    actor: "mochi",
+    weight: 0.9,
+    suppressOnAlert: true,
+    frames: [
+      ...slink([
+        { col: 10.3, row: 10.2 },
+        { col: 10.6, row: 9.3 },
+        { col: 10.2, row: 8.8 },
+        { col: 9.9, row: 8.6 },
+      ]),
+      { pose: "cat_sit", tile: { col: 9.9, row: 8.6 }, hold: 4_200, detail: "Being scratched behind the ears." },
+      { pose: "cat_groom", tile: { col: 9.9, row: 8.6 }, hold: 3_400, detail: "Thoroughly pleased with herself." },
+      ...slinkHome([
+        { col: 10.3, row: 10.2 },
+        { col: 10.6, row: 9.3 },
+        { col: 10.2, row: 8.8 },
+      ]),
+    ],
+    cast: [
+      {
+        actor: "byte",
+        frames: [
+          { pose: "seated_working", hold: CAT_STEP_MS * 3 },
+          { pose: "talking_briefly", hold: 4_200, detail: "Petting Mochi instead of working." },
+          { pose: "seated_working", hold: 3_400 },
+        ],
+      },
+    ],
+  },
+  {
+    id: "cosmo-lounge",
+    actor: "cosmo",
+    weight: 1,
+    frames: [
+      ...slink([
+        { col: 10.7, row: 9.7 },
+        { col: 11.2, row: 10.5 },
+        { col: 11.8, row: 10.9 },
+      ]),
+      { pose: "cat_stretch", tile: { col: 11.8, row: 10.9 }, hold: 3_000, detail: "A full-length stretch on the lounge rug." },
+      { pose: "cat_sleep", tile: { col: 11.8, row: 10.9 }, hold: 11_000, detail: "Asleep on the lounge rug." },
+      ...slinkHome([
+        { col: 10.7, row: 9.7 },
+        { col: 11.2, row: 10.5 },
+      ]),
+    ],
+  },
+  {
+    // The cats notice a stranger before anybody else does. Cosmetic, and
+    // deliberately not coordinated with the visitor system: a cat that only
+    // ever appeared when a guest did would be a tell rather than a cat.
+    id: "cosmo-stranger",
+    actor: "cosmo",
+    weight: 0.7,
+    nightFactor: 0.2,
+    frames: [
+      ...slink([
+        { col: 10.5, row: 9.9 },
+        { col: 10.6, row: 10.9 },
+        { col: 10.4, row: 11.4 },
+      ]),
+      { pose: "cat_watch", tile: { col: 10.4, row: 11.4 }, hold: 6_400, detail: "Watching the front door with deep suspicion." },
+      { pose: "cat_sit", tile: { col: 10.4, row: 11.4 }, hold: 4_000, detail: "Supervising Reception." },
+      ...slinkHome([
+        { col: 10.5, row: 9.9 },
+        { col: 10.6, row: 10.9 },
+      ]),
+    ],
+  },
+);
+
 export const CAT_ROUTINES_BY_ACTOR = new Map<CatId, CatRoutine[]>(
   CAT_IDS.map((id) => [id, CAT_ROUTINES.filter((routine) => routine.actor === id)]),
 );

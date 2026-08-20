@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { HqCards } from "@/components/hq/hq-cards";
 import { Portrait } from "@/components/hq/portrait";
 import { ReportPanel } from "@/components/hq/report-panel";
+import { buildToday } from "@/lib/hq/today";
 import { useAmbient } from "@/components/hq/use-ambient";
 import { useReportMeeting } from "@/components/hq/use-report-meeting";
 import { useDayPhase, useHqMotion } from "@/components/hq/use-hq-env";
@@ -208,6 +209,8 @@ export default function HqPage() {
         </>
       )}
 
+      <TodayAtHq state={state} />
+
       {/* Outside the viewport branch on purpose. Mobile does not render the
           animated meeting — see `useReportMeeting`'s `animate` flag — but it
           absolutely still gets the report, and a button that existed only on
@@ -359,6 +362,46 @@ export default function HqPage() {
  * phase because a button that looks pressable and does nothing reads as broken
  * — "Gathering the team" is what is happening, and it is worth a sentence.
  */
+/**
+ * Today at HQ.
+ *
+ * Rendered only when there is something to show. An empty timeline with a
+ * "nothing yet" placeholder implies the platform was idle; in fact it means
+ * no *trade* completed today, which is a much narrower statement and one the
+ * heading already makes. Absent is more honest than empty here.
+ */
+function TodayAtHq({ state }: { state: HqState }) {
+  const events = buildToday(state);
+  if (events.length === 0) return null;
+  return (
+    <section className="hq-today" aria-label="Today at HQ">
+      <h2 className="hq-today-title">TODAY AT HQ</h2>
+      <p className="hq-today-note">
+        Completed paper trades since 00:00 UTC, from the permanent record. Other
+        desks publish a latest reading rather than an event log, so they are not
+        listed here.
+      </p>
+      <ol className="hq-today-list">
+        {events.map((event) => (
+          <li key={`${event.at}-${event.label}`} className="hq-today-row">
+            <time
+              className="hq-today-time"
+              dateTime={new Date(event.at).toISOString()}
+            >
+              {new Date(event.at).toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </time>
+            <Portrait id={event.who} size={22} />
+            <span className="hq-today-label">{event.label}</span>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
 function ReportControl({ meeting }: { meeting: ReturnType<typeof useReportMeeting> }) {
   const label =
     meeting.phase === "idle"
