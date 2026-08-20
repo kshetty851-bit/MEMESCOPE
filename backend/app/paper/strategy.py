@@ -245,6 +245,13 @@ class TrailingStopStrategy:
     trailing_drawdown: Decimal
     #: `None` means the whole ranked Radar, which is what this strategy uses.
     top_n: int | None = None
+    #: Longest a position may stay open, or `None` for no time limit.
+    #:
+    #: Written into the position row at entry as an absolute `expires_at`, so a
+    #: later change to this number cannot reach back into a trade already
+    #: taken. It is checked **first** by the shared resolver, ahead of every
+    #: price rule: at the cutoff the position sells whatever the price is.
+    hold_for: timedelta | None = None
     operational: bool = True
     unavailable_reason: str | None = None
 
@@ -254,17 +261,22 @@ class TrailingStopStrategy:
 
     @property
     def exit_rules(self) -> ExitRules:
-        """One rule, and deliberately only one.
+        """The trailing stop, and a holding period when one is published.
 
         Every other field on `ExitRules` stays `None` — not zero. `resolve`
         skips a rule that is absent, so "no take profit" is expressed as the
         absence of a take profit rather than as a target nothing can reach.
         """
-        return ExitRules(trailing_drawdown=self.trailing_drawdown)
+        return ExitRules(
+            trailing_drawdown=self.trailing_drawdown, hold_for=self.hold_for
+        )
 
     def describe(self) -> StrategySpec:
         """The rules, in the words the API serves and the page prints."""
         back = self.trailing_drawdown * 100
+        hours = (
+            None if self.hold_for is None else int(self.hold_for.total_seconds() // 3600)
+        )
         return StrategySpec(
             id=self.id,
             name=self.name,
@@ -274,6 +286,14 @@ class TrailingStopStrategy:
                 "token on the Radar, and sells it once the price has given back "
                 f"{back:.0f}% of the highest level seen since the position opened. "
                 "There is no profit target, no fixed stop and no time limit."
+                if hours is None
+                else (
+                    f"Buys ${self.trade_size_usd:,.0f} of the highest-ranked eligible "
+                    "token on the Radar, and sells it once the price has given back "
+                    f"{back:.0f}% of the highest level seen since the position opened "
+                    f"or {hours} hours have elapsed - whichever happens first. There "
+                    "is no profit target and no fixed stop."
+                )
             ),
             rules=(
                 Rule("Allocation", "Equal weight"),
@@ -287,7 +307,13 @@ class TrailingStopStrategy:
                 Rule("Re-entry", "Never. One position per token, ever."),
                 Rule("Take profit", "None"),
                 Rule("Fixed stop", "None"),
-                Rule("Maximum hold", "None. A position runs until the trailing stop."),
+                Rule(
+                    "Maximum hold",
+                    "None. A position runs until the trailing stop."
+                    if hours is None
+                    else f"{hours} hours. The position is sold at the next quote "
+                    "past the cutoff, at whatever price is executable.",
+                ),
                 Rule("Trailing stop", f"-{back:.0f}% from the highest price observed"),
                 Rule(
                     "Trailing reference",
@@ -296,8 +322,8 @@ class TrailingStopStrategy:
                 ),
                 Rule(
                     "Fill assumption",
-                    "At the trigger level. A gap below it is not modelled, which "
-                    "makes this figure optimistic on a fast fall.",
+                    "At an executable quote taken when the rule fires, never at "
+                    "the trigger level. A gap through the trigger fills below it.",
                 ),
                 Rule("Discretion", "None. No rule is applied by hand."),
             ),
@@ -333,9 +359,15 @@ class TrailingStopStrategy:
             size_usd=self.trade_size_usd,
             quantity=self.trade_size_usd / candidate.price_usd,
             opened_at=now,
-            # No target, no stop, no expiry — the three rules this strategy does
-            # not have. Left `None` rather than set out of reach, so the position
-            # row says "there is no such rule" instead of "the rule is 1,000,000x".
+            # No target and no stop — two rules this strategy does not have.
+            # Left `None` rather than set out of reach, so the position row
+            # says "there is no such rule" instead of "the rule is 1,000,000x".
+            # `expires_at` follows the same convention: absolute when a holding
+            # period is published, absent when there is none. It is written
+            # here, at entry, because `_rules_for` reconstructs the rule from
+            # the row — a position with no cutoff on it has no cutoff, whatever
+            # the registry says later.
+            expires_at=None if self.hold_for is None else now + self.hold_for,
             trailing_drawdown=self.trailing_drawdown,
             market_cap=candidate.market_cap,
             liquidity_usd=candidate.liquidity_usd,
@@ -565,12 +597,50 @@ TRAILING_STOP_25_V1 = TrailingStopStrategy(
 #: part of the strategy's identity: trades taken under it were drawn from a
 #: strictly smaller candidate set, and describing them with the old version
 #: would silently re-describe what produced them.
+#:
+#: **Retired at the HOLD-6H cutover**, for the same reason V1 was retired at
+#: this one: its open positions keep its exact rules — no time limit — because
+#: the rules travel on the position row, and its record is kept unchanged.
 TRAILING_STOP_25_SECURED_V2 = TrailingStopStrategy(
     id="trailing_stop_25_secured_v2",
     name="Trailing Stop 25% (security-gated)",
     version="2.0.0-security",
     trade_size_usd=Decimal(100),
     trailing_drawdown=Decimal("0.25"),
+    operational=False,
+    unavailable_reason=(
+        "Retired at the HOLD-6H cutover on 2026-08-20. Its open positions continue "
+        "under these exact rules — including no maximum hold — until they close, "
+        "and its record is kept unchanged."
+    ),
+)
+
+#: HOLD-6H. **The same security-gated strategy, with a maximum holding time.**
+#:
+#: One rule is added and nothing else moves: same $100 equal weight, same 25%
+#: trailing stop, same highest-ranked-eligible entry, same mandatory security
+#: precondition. A position now also closes once it has been open six hours,
+#: whichever of the two comes first, and it closes at whatever price is
+#: executable then — profit or loss, no discretion.
+#:
+#: Why a maximum hold at all is an empirical question the wallet is being run
+#: to answer, not a claim made here. What *is* claimed is the mechanism: an
+#: unbounded trailing stop leaves capital inside a position that has stopped
+#: moving, and the equity curve showed that as idle money rather than as a
+#: decision. The six hours is published as a rule so it can be checked against
+#: every trade taken under it.
+#:
+#: `3.0.0-hold6h` rather than a patch bump for the same reason V2 was not a
+#: patch of V1: the exit contract is part of the strategy's identity, and
+#: describing these trades with V2's version would silently re-describe what
+#: produced them. Capital is inherited along the lineage below, not minted.
+TRAILING_STOP_25_SECURED_HOLD6H_V3 = TrailingStopStrategy(
+    id="trailing_stop_25_secured_hold6h_v3",
+    name="Trailing Stop 25% (security-gated, 6h max hold)",
+    version="3.0.0-hold6h",
+    trade_size_usd=Decimal(100),
+    trailing_drawdown=Decimal("0.25"),
+    hold_for=timedelta(hours=6),
     operational=True,
 )
 
@@ -602,7 +672,13 @@ TRAILING_STOP_25_SECURED_V2 = TrailingStopStrategy(
 #: a fact about the product, and parsing prose to decide where money lives is
 #: the kind of thing that is wrong once and then wrong forever.
 CAPITAL_LINEAGES: tuple[frozenset[str], ...] = (
-    frozenset({"trailing_stop_25_v1", "trailing_stop_25_secured_v2"}),
+    frozenset(
+        {
+            "trailing_stop_25_v1",
+            "trailing_stop_25_secured_v2",
+            "trailing_stop_25_secured_hold6h_v3",
+        }
+    ),
 )
 
 
@@ -628,8 +704,12 @@ def lineage_for(strategy_id: str) -> frozenset[str]:
 #: Membership here is what makes `PaperRepository.open_position` refuse to
 #: create a position without fresh VERIFIED security evidence, so adding a
 #: strategy to this set is the whole of turning enforcement on for it.
+#:
+#: V2 stays in this set after its retirement. Membership is what makes the
+#: repository refuse an unauthorised insert, and a retired wallet must not
+#: become *easier* to open a position on than a live one.
 SECURITY_GATED_STRATEGY_IDS: frozenset[str] = frozenset(
-    {TRAILING_STOP_25_SECURED_V2.id}
+    {TRAILING_STOP_25_SECURED_V2.id, TRAILING_STOP_25_SECURED_HOLD6H_V3.id}
 )
 
 #: **Retired at the Sprint 30 relaunch, and kept because its wallet still
@@ -740,6 +820,7 @@ class StrategyRegistry:
 
 registry = StrategyRegistry(
     (
+        TRAILING_STOP_25_SECURED_HOLD6H_V3,
         TRAILING_STOP_25_SECURED_V2,
         PAPER_TRACK_RECORD_TP125_SL50_V1,
         PAPER_ALL_SCANNED_TP125_SL50_V1,
@@ -747,5 +828,5 @@ registry = StrategyRegistry(
         TRAILING_STOP_25_V1,
         EQUAL_WEIGHT_V1,
     ),
-    default=TRAILING_STOP_25_SECURED_V2.id,
+    default=TRAILING_STOP_25_SECURED_HOLD6H_V3.id,
 )

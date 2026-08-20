@@ -231,17 +231,63 @@ class TestSizing:
 
 class TestRegistry:
     def test_the_default_is_the_security_gated_strategy(self) -> None:
-        """SEC-2 cutover, 2026-08-20.
+        """SEC-2 cutover 2026-08-20, then HOLD-6H the same day.
 
-        Generation 2's trailing-stop rules are unchanged and still govern its
-        open positions — the rules travel on the position row — but new
-        entries are now taken by the security-gated successor.
+        Each cutover retires its predecessor and inherits its capital. The
+        retired rules are unchanged and still govern the positions opened
+        under them — the rules travel on the position row — but new entries
+        are taken by the successor, which is still security-gated.
         """
-        from app.paper.strategy import TRAILING_STOP_25_SECURED_V2
+        from app.paper.strategy import (
+            SECURITY_GATED_STRATEGY_IDS,
+            TRAILING_STOP_25_SECURED_HOLD6H_V3,
+            TRAILING_STOP_25_SECURED_V2,
+        )
 
-        assert registry.default.id == TRAILING_STOP_25_SECURED_V2.id
+        assert registry.default.id == TRAILING_STOP_25_SECURED_HOLD6H_V3.id
         assert registry.default.operational
+        assert registry.default.id in SECURITY_GATED_STRATEGY_IDS
+        assert TRAILING_STOP_25_SECURED_V2.operational is False
         assert TRAILING_STOP_25_V1.operational is False
+
+    def test_the_maximum_hold_is_six_hours_and_nothing_else_moved(self) -> None:
+        """HOLD-6H: one rule added, every alpha-bearing rule identical.
+
+        Same sizing and same trailing stop as the generation before it, so a
+        comparison between the two measures the holding period and not a
+        second change smuggled in beside it.
+        """
+        from app.paper.strategy import (
+            TRAILING_STOP_25_SECURED_HOLD6H_V3,
+            TRAILING_STOP_25_SECURED_V2,
+        )
+
+        assert TRAILING_STOP_25_SECURED_HOLD6H_V3.hold_for == timedelta(hours=6)
+        assert TRAILING_STOP_25_SECURED_HOLD6H_V3.exit_rules.hold_for == timedelta(hours=6)
+        assert TRAILING_STOP_25_SECURED_V2.hold_for is None
+        for field in ("trade_size_usd", "trailing_drawdown", "top_n"):
+            assert getattr(TRAILING_STOP_25_SECURED_HOLD6H_V3, field) == getattr(
+                TRAILING_STOP_25_SECURED_V2, field
+            ), field
+
+        rules = {
+            rule.label: rule.value
+            for rule in TRAILING_STOP_25_SECURED_HOLD6H_V3.describe().rules
+        }
+        assert rules["Maximum hold"].startswith("6 hours")
+
+    def test_the_entry_writes_the_cutoff_onto_the_position(self) -> None:
+        """The rule travels on the row, so a later change cannot reach back."""
+        from app.paper.strategy import TRAILING_STOP_25_SECURED_HOLD6H_V3
+
+        entry = TRAILING_STOP_25_SECURED_HOLD6H_V3.entry_for(
+            candidate(), cash_available=Decimal(1000), now=NOW
+        )
+        assert entry is not None
+        assert entry.expires_at == NOW + timedelta(hours=6)
+        # And the rules it deliberately does not have stay absent.
+        assert entry.target_price is None
+        assert entry.stop_price is None
 
     def test_exactly_one_strategy_trades(self) -> None:
         """The wallet runs one published forward strategy at a time."""

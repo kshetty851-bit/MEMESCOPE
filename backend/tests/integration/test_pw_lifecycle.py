@@ -317,15 +317,25 @@ class TestNothingHistoricalChanges:
         assert "if settings.PAPER_WALLET_MANAGE_ARCHIVED_GENERATIONS" in source
         assert "else [wallet]" in source
 
-    def test_sec2_is_active_and_generation_two_is_retired(self) -> None:
-        """Post-cutover. Retiring the strategy does not retire its positions.
+    def test_each_cutover_retires_its_predecessor_but_not_its_positions(
+        self,
+    ) -> None:
+        """Post-cutover. Retiring a strategy does not retire its positions.
 
-        Generation 2 stops taking entries; its open book keeps closing under
-        the rules stored on each position.
+        A retired generation stops taking entries; its open book keeps closing
+        under the rules stored on each position. True of Generation 2 at the
+        SEC-2 cutover and of Generation 7 at the HOLD-6H cutover, so it is
+        asserted of every retired member of the lineage rather than of one.
         """
-        assert TRAILING_STOP_25_SECURED_V2.operational is True
-        assert registry.default.id == TRAILING_STOP_25_SECURED_V2.id
-        assert TRAILING_STOP_25_V1.operational is False
+        from app.paper.strategy import TRAILING_STOP_25_SECURED_HOLD6H_V3
+
+        assert registry.default.id == TRAILING_STOP_25_SECURED_HOLD6H_V3.id
+        assert registry.default.operational is True
+        for retired in (TRAILING_STOP_25_V1, TRAILING_STOP_25_SECURED_V2):
+            assert retired.operational is False, retired.id
+            assert retired.unavailable_reason, retired.id
+            # Still in the lineage: retired for entries, not for capital.
+            assert retired.id in lineage_for(registry.default.id), retired.id
 
     def test_the_capital_change_is_inert_for_a_single_wallet_lineage(
         self, db_session: AsyncSession

@@ -938,6 +938,10 @@ class PaperWalletService:
                 peak=position.peak_price,
             )
 
+            if found is None and await self._settle_elapsed_hold(position, now=now):
+                closed += 1
+                continue
+
             if found is None:
                 # Nothing breached. Carry the peak and the watermark forward so
                 # the same readings are never replayed — and so the peak
@@ -1027,6 +1031,65 @@ class PaperWalletService:
             closed += int(closed_now)
 
         return len(positions), closed
+
+    async def _settle_elapsed_hold(self, position: PaperPosition, *, now: datetime) -> bool:
+        """Close a position whose published holding period has run out with no
+        observation to close it on. Returns whether it closed.
+
+        ── WHY THE CLOCK AND NOT ONLY THE SERIES ───────────────────────────
+
+        `exits.resolve` walks observations, so an expiry only fires when a
+        reading arrives after it. That is exactly right for every price rule —
+        a stop cannot trigger on a price nobody saw — but it is wrong for a
+        holding period, because a token whose market data stopped would sit
+        past its own cutoff indefinitely. A maximum hold exists to get capital
+        out of precisely that position, so it must not depend on the token
+        still being watched.
+
+        ── WHAT IS AND IS NOT ASSUMED ──────────────────────────────────────
+
+        The clock decides **when**. It does not decide the price, and no
+        stored snapshot is used either: this exit happens now, so it is priced
+        by asking for a route now. `exit_observed_price` is left null because
+        there was no observation — an invented one would be the estimate this
+        platform refuses to make.
+
+        **No route, no exit.** If Jupiter cannot quote the sell, the position
+        stays open and the reason is logged. Booking a fill against a market
+        that would not take the trade is the fiction the realistic execution
+        model was written to stop telling, and it does not become true because
+        a timer went off.
+
+        Inert for every position opened before HOLD-6H: they carry no
+        `expires_at`, so this returns immediately.
+        """
+        if position.expires_at is None or now < position.expires_at:
+            return False
+
+        exit_execution = await self._exit_execution_for(
+            position=position,
+            decision_price=position.entry_price,
+            decision_liquidity=None,
+            now=now,
+        )
+        if not isinstance(exit_execution, ExecutionQuote):
+            logger.warning(
+                "paper_hold_expiry_no_route",
+                mint_address=position.mint_address,
+                expires_at=position.expires_at.isoformat(),
+                reason=exit_execution.reason,
+            )
+            return False
+
+        return await self._repository.close(
+            position.id,
+            exit_price=exit_execution.estimated_price_usd,
+            exit_observed_price=None,
+            closed_at=now,
+            exit_reason=ExitReason.EXPIRY.value,
+            peak_price=max(position.peak_price, exit_execution.estimated_price_usd),
+            **self._execution_close_values(exit_execution),
+        )
 
     async def _settle_observed_bracket(
         self, position: PaperPosition, *, rows: Sequence[TokenMarketSnapshot], now: datetime, last_check_at: datetime | None = None

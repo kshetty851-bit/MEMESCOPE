@@ -210,10 +210,17 @@ class TestGenerationBoundary:
         assert operational == [registry.default.id]
 
     def test_the_operational_strategy_is_the_gated_one(self) -> None:
-        """After the cutover, the only strategy taking entries is gated."""
-        assert TRAILING_STOP_25_SECURED_V2.operational is True
-        assert TRAILING_STOP_25_SECURED_V2.id in SECURITY_GATED_STRATEGY_IDS
+        """After the cutover, the only strategy taking entries is gated.
+
+        Asserted of whichever strategy currently trades rather than of one
+        named id: SEC-2 introduced the gate, and every generation since has
+        inherited it. A successor that quietly dropped it is the regression
+        this guards, and naming V2 here would have stopped noticing at the
+        HOLD-6H cutover.
+        """
+        assert registry.default.operational is True
         assert registry.default.id in SECURITY_GATED_STRATEGY_IDS
+        assert TRAILING_STOP_25_SECURED_V2.id in SECURITY_GATED_STRATEGY_IDS
 
     def test_only_the_new_strategy_is_gated(self) -> None:
         assert TRAILING_STOP_25_SECURED_V2.id in SECURITY_GATED_STRATEGY_IDS
@@ -248,6 +255,7 @@ class TestExitPathIsolation:
         # And in the service, security must appear only on the entry path.
         for name in (
             "_settle_exits",
+            "_settle_elapsed_hold",
             "_settle_observed_bracket",
             "_close_observed_bracket",
             "_settle_activated_trail",
