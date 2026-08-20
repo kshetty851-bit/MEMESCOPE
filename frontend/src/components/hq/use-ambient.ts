@@ -22,13 +22,37 @@ import type { EmployeeId } from "@/lib/hq/employees";
  * passes `false` and the scheduler is never even created — the card stack
  * gets a still office and none of the machinery.
  */
+export interface AmbientHandle {
+  frames: Partial<Record<ActorId, ActorFrame>>;
+  /**
+   * The live scheduler, for the one caller that must take the floor from it.
+   *
+   * Exposed as a ref rather than returned directly because the report meeting
+   * needs to *suspend* the ambient layer, and the alternative — a second
+   * scheduler for meetings — is the thing this module's header refuses. The
+   * ref is null on mobile and under reduced motion, where no scheduler is
+   * created at all, so every caller has to handle its absence anyway.
+   */
+  scheduler: React.MutableRefObject<ReturnType<typeof createAmbientScheduler> | null>;
+  /**
+   * Frames the report meeting is driving. Painted over the ambient ones.
+   *
+   * The raw setter, so callers can pass an updater. That matters: the meeting
+   * repaints one speaker at a time, and a plain assignment replaced the whole
+   * map — which sent the other nine attendees back to their desks the instant
+   * anybody opened their mouth.
+   */
+  setOverride: React.Dispatch<React.SetStateAction<Partial<Record<ActorId, ActorFrame>>>>;
+}
+
 export function useAmbient(
   enabled: boolean,
   operational: EmployeeId[],
   activity: OfficeActivity,
   phase: DayPhase,
-): Partial<Record<ActorId, ActorFrame>> {
+): AmbientHandle {
   const [frames, setFrames] = useState<Partial<Record<ActorId, ActorFrame>>>({});
+  const [override, setOverride] = useState<Partial<Record<ActorId, ActorFrame>>>({});
   const schedulerRef = useRef<ReturnType<typeof createAmbientScheduler> | null>(null);
 
   useEffect(() => {
@@ -61,5 +85,8 @@ export function useAmbient(
     schedulerRef.current?.setPhase(phase);
   }, [phase, enabled]);
 
-  return frames;
+  // The meeting's frames win where they exist. They only exist while the
+  // scheduler is suspended, so this is a hand-off rather than a fight.
+  const merged = Object.keys(override).length > 0 ? { ...frames, ...override } : frames;
+  return { frames: merged, scheduler: schedulerRef, setOverride };
 }

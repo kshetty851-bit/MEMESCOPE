@@ -1,4 +1,4 @@
-import { CONFERENCE_ROUTES, STEP_MS, conferenceApproach, type AmbientFrame } from "./ambient";
+import { CONFERENCE_ROUTES, conferenceApproach, type AmbientFrame } from "./ambient";
 import { CONFERENCE_SEATS } from "./furniture";
 import type { Tile } from "./geometry";
 import type { EmployeeId } from "./employees";
@@ -90,10 +90,20 @@ export const STATION_BY_EMPLOYEE = new Map<EmployeeId, Station>(
   REPORT_STATIONS.map((station) => [station.employee, station]),
 );
 
+/**
+ * The meeting's walking pace, and why it is not the ambient one.
+ *
+ * `STEP_MS` is 2.6s a tile: the pace of somebody wandering to the coffee
+ * machine, which is right for ambient life and wrong here. At that pace the
+ * longest route took fifty seconds and the whole interaction ran past two
+ * minutes — long enough that the button reads as broken. People called into a
+ * meeting walk briskly, so this is a quarter of it.
+ */
+const MEETING_STEP_MS = 620;
 /** Gap between one person setting off and the next. */
-const STAGGER_MS = 900;
+const STAGGER_MS = 340;
 /** Tighter on the way out — the room empties, it does not evacuate. */
-const DEPART_STAGGER_MS = 260;
+const DEPART_STAGGER_MS = 180;
 
 /**
  * When each person leaves their desk.
@@ -105,7 +115,9 @@ export function gatherDelayMs(employee: EmployeeId): number {
   const index = REPORT_STATIONS.findIndex((station) => station.employee === employee);
   if (index < 0) return 0;
   const station = REPORT_STATIONS[index]!;
-  return index * STAGGER_MS + (station.seated ? 0 : 2_600);
+  // The standers' extra beat is the seated six's approach clearing the west
+  // tiles: six staggers plus a step is exactly how long that takes.
+  return index * STAGGER_MS + (station.seated ? 0 : 6 * STAGGER_MS);
 }
 
 /**
@@ -120,7 +132,7 @@ export function departDelayMs(employee: EmployeeId): number {
   if (!station) return 0;
   const group = REPORT_STATIONS.filter((item) => item.seated === station.seated);
   const within = group.findIndex((item) => item.employee === employee);
-  const clearingTheDoor = group.length * DEPART_STAGGER_MS + STEP_MS;
+  const clearingTheDoor = group.length * DEPART_STAGGER_MS + MEETING_STEP_MS;
   return (station.seated ? clearingTheDoor : 0) + within * DEPART_STAGGER_MS;
 }
 
@@ -163,7 +175,7 @@ export interface MeetingLeg {
 }
 
 function walkFrames(tiles: Tile[]): AmbientFrame[] {
-  return tiles.map((tile) => ({ pose: "walking_short" as const, tile, hold: STEP_MS }));
+  return tiles.map((tile) => ({ pose: "walking_short" as const, tile, hold: MEETING_STEP_MS }));
 }
 
 /** The pose someone holds at their station while they are not speaking. */
@@ -188,16 +200,16 @@ export function meetingLeg(employee: EmployeeId): MeetingLeg {
     // frame boundary like any other routine.
     { pose: "looking_at_screen", hold: Math.max(1, wait) },
     ...walkFrames(route),
-    { pose: listeningPose(employee), tile: station.tile, hold: STEP_MS },
+    { pose: listeningPose(employee), tile: station.tile, hold: MEETING_STEP_MS },
   ];
   const depart: AmbientFrame[] = [
     { pose: listeningPose(employee), tile: station.tile, hold: Math.max(1, departDelayMs(employee)) },
     ...[...route].reverse().map((tile) => ({
       pose: "returning_to_desk" as const,
       tile,
-      hold: STEP_MS,
+      hold: MEETING_STEP_MS,
     })),
-    { pose: "returning_to_desk", hold: STEP_MS },
+    { pose: "returning_to_desk", hold: MEETING_STEP_MS },
   ];
 
   return {

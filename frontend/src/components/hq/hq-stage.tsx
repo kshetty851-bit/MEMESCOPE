@@ -424,6 +424,41 @@ function buildCast(
  */
 const FIGURE_SCALE = 1.36;
 
+/**
+ * A short line above someone's head.
+ *
+ * SVG rather than an HTML overlay: the stage is one `<svg>` with its own
+ * fit-scale, and a positioned div would need the tile→screen maths duplicated
+ * outside it and would drift the moment the room resized. Inside the figure's
+ * own group it simply travels with the person.
+ *
+ * Width is measured in characters rather than by the browser, because reading
+ * layout during a paint is what turns ten simultaneous bubbles into a
+ * reflow storm. `report.ts` caps a line at 64 characters and a test enforces
+ * it, so the estimate cannot be badly wrong.
+ *
+ * `aria-hidden`: the words are already in the report panel and the transcript,
+ * as text, in reading order. Announcing them again from a moving graphic would
+ * be the same fact twice, the second time out of order.
+ */
+function SpeechBubble({ text }: { text: string }) {
+  const width = Math.min(230, Math.max(74, text.length * 6.4 + 20));
+  return (
+    <g className="hq-bubble" transform={`translate(${-width / 2} -74)`} aria-hidden="true">
+      <rect
+        width={width}
+        height={30}
+        rx={9}
+        className="hq-bubble-body"
+      />
+      <path d={`M ${width / 2 - 6} 30 L ${width / 2} 39 L ${width / 2 + 6} 30 Z`} className="hq-bubble-body" />
+      <text x={width / 2} y={19.5} textAnchor="middle" className="hq-bubble-text">
+        {text}
+      </text>
+    </g>
+  );
+}
+
 function keySelect(onSelect: (id: ActorId) => void, id: ActorId) {
   return (event: React.KeyboardEvent) => {
     if (event.key === "Enter" || event.key === " ") {
@@ -496,6 +531,7 @@ function EmployeeAnchor({
         className="hq-walker"
         style={away ? { transform: `translate(${away.x}px, ${away.y}px)` } : undefined}
       >
+        {frame?.speech ? <SpeechBubble text={frame.speech} /> : null}
         <g transform={`scale(${FIGURE_SCALE})`}>
           <Character character={character} pose={pose} stance={stance} egg={(frame as { egg?: never } | undefined)?.egg} />
         </g>

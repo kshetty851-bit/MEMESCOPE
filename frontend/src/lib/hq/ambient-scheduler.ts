@@ -172,6 +172,23 @@ export interface AmbientScheduler {
   readonly animating: ActorId[];
   /** Whether a conference meeting is currently in progress. Read by tests. */
   readonly meetingActive: boolean;
+  /**
+   * Stop starting ambient routines and let everyone mid-route finish or yield.
+   *
+   * The report meeting takes over the floor, and the brief is explicit that it
+   * must not do so by teleporting people out of a walk. So this does not halt:
+   * it stops *starting*, walks anyone mid-routine home along their own
+   * authored return leg, and resolves once the floor is clear — which is when
+   * the meeting may begin.
+   *
+   * Idempotent. A second call while suspended returns the same promise, which
+   * is the whole of the double-click protection at this layer.
+   */
+  suspendForReport(): Promise<void>;
+  /** Hand the floor back. No-op if the scheduler was never suspended. */
+  resumeAfterReport(): void;
+  /** True between `suspendForReport` and `resumeAfterReport`. */
+  readonly reportMode: boolean;
 }
 
 export function prefersReducedMotion(): boolean {
@@ -208,6 +225,9 @@ export function createAmbientScheduler(
 
   let wanted = false;
   let running = false;
+  let reportMode = false;
+  let settling: Promise<void> | null = null;
+  let onFloorClear: (() => void) | null = null;
 
   /**
    * How many employees a routine sends into the pantry or lounge. Counted per
@@ -318,6 +338,14 @@ export function createAmbientScheduler(
     active.delete(id);
     emit(id, null);
     run.onDone();
+    // The report meeting waits for an empty floor rather than for a timeout:
+    // a fixed delay would either cut a walk short or make the button feel
+    // broken, depending on who happened to be crossing the room.
+    if (active.size === 0 && onFloorClear) {
+      const notify = onFloorClear;
+      onFloorClear = null;
+      notify();
+    }
   }
 
   /**
@@ -377,6 +405,13 @@ export function createAmbientScheduler(
 
   function tick() {
     if (!running) return;
+    if (reportMode) {
+      // Keep the one timer chain alive but start nothing: the scheduler is
+      // still the only clock, it is simply not spending it. Rebuilding the
+      // chain on resume would be a second place that decides the cadence.
+      tickHandle = setTimeout(tick, GAP_MIN_MS);
+      return;
+    }
 
     // At HIGH_ALERT the ambient layer starts far less: the office should read
     // as focused, not frozen. Two thirds of ticks pass in silence.
@@ -466,6 +501,30 @@ export function createAmbientScheduler(
     },
     setPhase(next) {
       phase = next;
+    },
+    suspendForReport() {
+      if (settling) return settling;
+      reportMode = true;
+      settling = new Promise<void>((resolve) => {
+        // Everyone mid-routine yields along their own return leg. `yieldHome`
+        // takes whole routines, so a meeting in progress leaves together
+        // rather than stranding half a table.
+        for (const id of [...active.keys()]) yieldHome(id);
+        if (active.size === 0) {
+          resolve();
+          return;
+        }
+        onFloorClear = resolve;
+      });
+      return settling;
+    },
+    resumeAfterReport() {
+      reportMode = false;
+      settling = null;
+      onFloorClear = null;
+    },
+    get reportMode() {
+      return reportMode;
     },
     get running() {
       return running;

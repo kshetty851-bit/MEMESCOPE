@@ -5,7 +5,9 @@ import { useEffect, useState } from "react";
 
 import { HqCards } from "@/components/hq/hq-cards";
 import { Portrait } from "@/components/hq/portrait";
+import { ReportPanel } from "@/components/hq/report-panel";
 import { useAmbient } from "@/components/hq/use-ambient";
+import { useReportMeeting } from "@/components/hq/use-report-meeting";
 import { useDayPhase, useHqMotion } from "@/components/hq/use-hq-env";
 import { useHqState } from "@/components/hq/use-hq-state";
 import type { HqState } from "@/lib/hq/adapter";
@@ -127,12 +129,20 @@ export default function HqPage() {
   // The office's staged life. The page owns it so the panels can say what a
   // clicked character is doing; the stage just draws the frames. Mobile never
   // creates the scheduler at all.
-  const frames = useAmbient(
+  const ambient = useAmbient(
     motion && viewport !== "mobile",
     state.operational,
     state.activity,
     phase,
   );
+  const frames = ambient.frames;
+
+  // "Provide updated report". The meeting animates on desktop and tablet with
+  // motion allowed; mobile and reduced motion get the same report without the
+  // walk, because the report is the point and the choreography is decoration.
+  const meeting = useReportMeeting(state, ambient.scheduler, ambient.setOverride, {
+    animate: motion && viewport !== "mobile",
+  });
 
   const employee = selected ? EMPLOYEE_BY_ID.get(selected as EmployeeId) : null;
   const reading = employee && selected ? state.employees[selected as EmployeeId] : null;
@@ -189,6 +199,23 @@ export default function HqPage() {
           <RecentCases onSelectCase={openCase} />
         </>
       )}
+
+      {/* Outside the viewport branch on purpose. Mobile does not render the
+          animated meeting — see `useReportMeeting`'s `animate` flag — but it
+          absolutely still gets the report, and a button that existed only on
+          desktop would make the phone a second-class reader of the same
+          facts. */}
+      <ReportControl meeting={meeting} />
+
+      {meeting.panelOpen && meeting.report ? (
+        <ReportPanel
+          report={meeting.report}
+          transcript={meeting.said}
+          onRefresh={meeting.refresh}
+          onClose={meeting.close}
+          live={meeting.phase === "meeting"}
+        />
+      ) : null}
 
       {selectedMint ? <CaseFilePanel file={caseFile} onClose={() => setSelectedMint(null)} /> : null}
 
@@ -314,6 +341,44 @@ export default function HqPage() {
  * desktop, whereas an isometric room does not work on a phone. Upgrading after
  * mount is the safe direction.
  */
+/**
+ * The report button, centred below the scene.
+ *
+ * Disabled for the whole of a meeting rather than only on the click that
+ * starts one: the guard that actually prevents a second meeting is inside the
+ * hook, and this is the affordance that says so. The label changes with the
+ * phase because a button that looks pressable and does nothing reads as broken
+ * — "Gathering the team" is what is happening, and it is worth a sentence.
+ */
+function ReportControl({ meeting }: { meeting: ReturnType<typeof useReportMeeting> }) {
+  const label =
+    meeting.phase === "idle"
+      ? "PROVIDE UPDATED REPORT"
+      : meeting.phase === "settling"
+        ? "CLEARING THE FLOOR…"
+        : meeting.phase === "gathering"
+          ? "GATHERING THE TEAM…"
+          : meeting.phase === "meeting"
+            ? "MEETING IN PROGRESS…"
+            : meeting.phase === "leaving"
+              ? "RETURNING TO DESKS…"
+              : "REPORT OPEN";
+  return (
+    <div className="flex justify-center">
+      <button
+        type="button"
+        className="hq-report-cta"
+        onClick={meeting.start}
+        disabled={meeting.busy}
+        aria-disabled={meeting.busy}
+        data-testid="hq-report-button"
+      >
+        {label}
+      </button>
+    </div>
+  );
+}
+
 function useViewport(): Viewport {
   const [viewport, setViewport] = useState<Viewport>("mobile");
 

@@ -1886,3 +1886,220 @@
 .hq-spine-runner--entry {
   opacity: 0.72;
 }
+
+/* ── speech bubbles ─────────────────────────────────────────────────────
+
+   Drawn inside the figure's own SVG group, so they travel with the person
+   and inherit the stage's fit-scale. Nothing here animates position: the
+   bubble appears where the speaker is and disappears when the turn ends, and
+   a bubble that eased into place would still be sliding when the next person
+   started talking. */
+
+.hq-bubble {
+  pointer-events: none;
+}
+
+.hq-bubble-body {
+  fill: var(--hq-panel, #f7f9ff);
+  stroke: var(--hq-line-strong, rgba(16, 24, 48, 0.28));
+  stroke-width: 1;
+}
+
+.hq-bubble-text {
+  fill: var(--hq-ink);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  /* One short fade at 180ms. Enough that a bubble does not pop, short enough
+     that it is fully readable for the whole of its turn. */
+  .hq-bubble {
+    animation: hq-bubble-in 180ms ease-out both;
+  }
+}
+
+@keyframes hq-bubble-in {
+  /* Opacity only. The group carries an SVG `transform` attribute that places
+     it above the speaker's head, and a CSS transform here would replace it
+     rather than compose with it — the bubble would fade in over the figure's
+     feet. */
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* ── the report ─────────────────────────────────────────────────────────
+
+   The call-to-action sits centred below the scene, and the panel slides in
+   beneath it.
+
+   THESE USE THE PAGE'S TOKENS, NOT THE SCENE'S. `--hq-ink` is the *room's*
+   ink — dark, because the room is a bright isometric office — and the report
+   sits outside the room on the dark dashboard. Reusing the scene's palette
+   here rendered a white pill with text nobody could read. The rule is the
+   boundary: inside the `<svg>`, scene tokens; outside it, page tokens. */
+
+.hq-report-cta {
+  border: 1px solid var(--color-line);
+  background: var(--color-surface);
+  color: var(--color-ink);
+  border-radius: 999px;
+  padding: 0.7rem 1.6rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  cursor: pointer;
+}
+
+.hq-report-cta:hover:not(:disabled) {
+  border-color: var(--color-ink);
+}
+
+.hq-report-cta:disabled {
+  cursor: default;
+  opacity: 0.62;
+}
+
+.hq-report {
+  border: 1px solid var(--color-line);
+  border-radius: 12px;
+  background: var(--color-surface);
+  padding: 1.1rem 1.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .hq-report {
+    animation: hq-report-in 260ms ease-out both;
+  }
+}
+
+@keyframes hq-report-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.hq-report-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.hq-report-title {
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--color-ink);
+}
+
+.hq-report-stamp,
+.hq-report-source {
+  font-size: 0.68rem;
+  color: var(--color-ink-3);
+  opacity: 0.75;
+}
+
+.hq-report-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.hq-report-button {
+  border: 1px solid var(--color-line);
+  background: transparent;
+  color: var(--color-ink);
+  border-radius: 6px;
+  padding: 0.4rem 0.7rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+
+.hq-report-grid {
+  display: grid;
+  gap: 0.9rem;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+}
+
+.hq-report-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.hq-report-heading {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--color-ink-3);
+}
+
+.hq-report-summary,
+.hq-report-transcript {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.78rem;
+  color: var(--color-ink);
+}
+
+.hq-report-transcript li {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.hq-report-speaker {
+  font-weight: 700;
+  min-width: 3.6rem;
+}
+
+.hq-report-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.hq-report-line dt {
+  font-size: 0.72rem;
+  color: var(--color-ink-3);
+}
+
+.hq-report-line dd {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--color-ink);
+}
+
+/* NOT AVAILABLE is rendered in the same size as a figure, dimmed rather than
+   hidden: a reader must be able to see that a thing was asked and not
+   answered, which is different from it not being asked. */
+.hq-report-unknown {
+  opacity: 0.6;
+  letter-spacing: 0.06em;
+}
+
+.hq-report-attention {
+  color: var(--color-warn, oklch(0.78 0.14 70));
+}
+
+.hq-report-empty {
+  font-size: 0.78rem;
+  color: var(--color-ink-3);
+  opacity: 0.8;
+}

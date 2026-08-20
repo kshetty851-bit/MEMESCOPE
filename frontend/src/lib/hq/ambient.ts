@@ -61,6 +61,15 @@ export interface ActorFrame {
   /** Something visibly carried — Maya's trolley, Sam's box. */
   carry?: "trolley" | "box";
   detail?: string;
+  /**
+   * A short line to show in a speech bubble above this actor.
+   *
+   * Separate from `detail`, which every routine already sets and which feeds
+   * the personality panel. If a bubble were drawn for any frame carrying a
+   * detail, the office would fill with floating text the moment anybody made
+   * coffee. Speaking is a deliberate act, so it needs its own field.
+   */
+  speech?: string;
 }
 
 export interface AmbientFrame extends ActorFrame {
