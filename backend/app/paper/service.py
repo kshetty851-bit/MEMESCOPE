@@ -326,30 +326,57 @@ class PaperWalletService:
             refusals=refusals,
         )
 
-    async def manual_sell_preview(
-        self, mint_address: str, *, now: datetime
-    ) -> ManualSellPreview:
-        """A paper-only close preview priced from the newest observable quote."""
-        wallet = await self._repository.live_wallet()
-        if wallet is None:
+    async def _lineage_position_for(
+        self, mint_address: str
+    ) -> tuple[PaperWallet, PaperPosition]:
+        """The open position for this mint anywhere in the lineage, and its owner.
+
+        The manual override used to look only at the live wallet, which was
+        right while the page showed only the live wallet's book. The page now
+        shows the pool's whole open book, so the Sell button sits on rows the
+        live wallet does not own — a Generation 2 position must be sellable
+        from the page that displays it, and its close must be attributed to
+        Generation 2, whose rules it traded under, not to whoever is live.
+
+        Search order is live wallet first, then the rest of the pool. A closed
+        match anywhere raises the same already-closed conflict as before, so a
+        duplicate request still fails cleanly rather than hunting for another
+        generation's row to close.
+        """
+        live = await self._repository.live_wallet()
+        if live is None:
             raise NotFoundError(
                 "The paper wallet has not been created yet.",
                 code="paper_wallet_not_found",
             )
+        pool = await self._repository.lineage_wallets(lineage_for(live.strategy_id))
+        members = [live, *[m for m in pool if m.id != live.id]]
 
-        position = await self._repository.position_for(wallet.id, mint_address)
-        if position is None:
-            raise NotFoundError(
-                "This token is not in the live paper wallet.",
-                code="paper_position_not_found",
-                details={"mint_address": mint_address},
-            )
-        if position.status != PositionStatus.OPEN.value:
+        closed_match: PaperPosition | None = None
+        for member in members:
+            position = await self._repository.position_for(member.id, mint_address)
+            if position is None:
+                continue
+            if position.status == PositionStatus.OPEN.value:
+                return member, position
+            closed_match = closed_match or position
+        if closed_match is not None:
             raise ConflictError(
                 "This paper position is already closed.",
                 code="paper_position_already_closed",
-                details={"mint_address": mint_address, "status": position.status},
+                details={"mint_address": mint_address, "status": closed_match.status},
             )
+        raise NotFoundError(
+            "This token is not in the paper wallet's capital lineage.",
+            code="paper_position_not_found",
+            details={"mint_address": mint_address},
+        )
+
+    async def manual_sell_preview(
+        self, mint_address: str, *, now: datetime
+    ) -> ManualSellPreview:
+        """A paper-only close preview priced from the newest observable quote."""
+        wallet, position = await self._lineage_position_for(mint_address)
 
         quote = await self._market.latest_priced_for_mint_as_of(mint_address, as_of=now)
         if quote is None:
@@ -379,8 +406,13 @@ class PaperWalletService:
         ones the automated evaluator uses. A duplicate request can therefore
         fail cleanly, but it cannot close, audit, release cash or replace twice.
         """
-        wallet = await self._repository.live_wallet()
-        if wallet is None:
+        # The audit is written against the wallet that OWNS the position — a
+        # Generation 2 close is Generation 2's record. Entries afterwards run
+        # on the live wallet, as always: freed capital is the pool's, and the
+        # pool's entries are taken by the one live policy.
+        owning, _ = await self._lineage_position_for(mint_address)
+        live = await self._repository.live_wallet()
+        if live is None:
             raise NotFoundError(
                 "The paper wallet has not been created yet.",
                 code="paper_wallet_not_found",
@@ -414,10 +446,10 @@ class PaperWalletService:
 
         audited = await self._repository.record_audit(
             position_id=preview.position.id,
-            wallet_id=wallet.id,
+            wallet_id=owning.id,
             **preview.audit.as_row(),
         )
-        opened, candidates, truncated, refusals = await self._open_entries(wallet, now=now)
+        opened, candidates, truncated, refusals = await self._open_entries(live, now=now)
         return ManualSellOutcome(
             preview=preview,
             audited=audited,
