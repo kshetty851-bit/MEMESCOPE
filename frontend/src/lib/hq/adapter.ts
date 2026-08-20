@@ -151,6 +151,8 @@ export interface EmployeeReading {
   state: EmployeeState;
   /** Why it reads that way, in one sentence. Always present. */
   detail: string;
+  /** Present only while a real reaction is live. Drawn as a speech bubble. */
+  speech?: string;
   metrics: Metric[];
   /** Epoch ms of the observation behind this reading. */
   observedAt: number | null;
@@ -170,6 +172,16 @@ export interface Transient {
   detail: string;
   /** Epoch ms after which this reaction is over. */
   until: number;
+  /**
+   * A short line for a speech bubble over this person's head.
+   *
+   * Only a *reaction* carries one, never an ambient routine, and that is the
+   * whole distinction: this fires because the adapter watched a number change,
+   * so the sentence is traceable to an observation. Ambient chatter says
+   * nothing about the system for exactly the opposite reason — see
+   * `chatter.ts`.
+   */
+  speech?: string;
 }
 
 export interface HqState {
@@ -373,7 +385,15 @@ export function deriveHqState(sources: Partial<HqSources> = {}): HqState {
     const base = employees[id];
     if (!base.sourced) continue;
     if (OUTRANKS_REACTION.has(base.state)) continue;
-    employees[id] = { ...base, state: transient.state, detail: transient.detail };
+    employees[id] = {
+      ...base,
+      state: transient.state,
+      detail: transient.detail,
+      // Carried onto the reading so the stage can draw it without reaching
+      // back into `sources.transients` and re-deciding whether it expired.
+      // One place decides what is live; everything downstream renders it.
+      speech: transient.speech,
+    };
   }
 
   employees.nova = deriveNova(employees, pipeline, pipelineGone, pipelineAt);
@@ -1087,17 +1107,39 @@ export interface HqWitness {
   /** Net return of the newest closed trade, as the backend rendered it. */
   lastCloseNet: string | null;
   radarOpportunities: number | null;
+  /* ── the pipeline's own marks of progress ──────────────────────────────
+     Timestamps rather than counters, because that is what the health
+     contract publishes. A changed `last_discovery` is the only evidence
+     HQ has that discovery discovered something; it is exact, and it is
+     the backend's own word rather than an inference from a rate. */
+  lastDiscovery: string | null;
+  lastScore: string | null;
+  lastSnapshot: string | null;
+  /** Cumulative, so a difference means an evaluation actually ran. */
+  securityEvaluations: number | null;
+  /** Moves in both directions; a change either way is the queue working. */
+  queueDepth: number | null;
+  /** The roll-up. A change here is worth Byte noticing and Nova hearing. */
+  pipelineOverall: string | null;
 }
 
 export function witness(sources: Partial<HqSources>): HqWitness {
   const wallet = sources.paperWallet?.data ?? null;
   const audit = sources.paperAudit?.data ?? null;
   const performance = sources.radarPerformance?.data ?? null;
+  const pipeline = sources.pipeline?.data ?? null;
+  const security = sources.tokenSecurity?.data ?? null;
   return {
     auditTotal: audit?.total ?? null,
     openPositions: wallet?.metrics.open_positions ?? null,
     lastCloseNet: audit?.items[0]?.net_return_usd ?? null,
     radarOpportunities: performance?.total_opportunities ?? null,
+    lastDiscovery: pipeline?.scanner.last_discovery ?? null,
+    lastScore: pipeline?.scoring.last_score ?? null,
+    lastSnapshot: pipeline?.market_enrichment.last_snapshot ?? null,
+    securityEvaluations: security?.total_evaluations ?? null,
+    queueDepth: pipeline?.market_enrichment.queue_depth ?? null,
+    pipelineOverall: pipeline?.overall ?? null,
   };
 }
 
@@ -1127,9 +1169,24 @@ export function react(
     const net = Number(next.lastCloseNet);
     const profitable = next.lastCloseNet !== null && Number.isFinite(net) && net > 0;
     out.rex = profitable
-      ? { state: "success", detail: "A paper position closed in profit.", until }
-      : { state: "reviewing", detail: "A paper position closed. Reviewing the result.", until };
-    out.milo = { state: "working", detail: "The portfolio changed — a position closed.", until };
+      ? {
+          state: "success",
+          detail: "A paper position closed in profit.",
+          until,
+          speech: "Position closed.",
+        }
+      : {
+          state: "reviewing",
+          detail: "A paper position closed. Reviewing the result.",
+          until,
+          speech: "Reviewing the exit.",
+        };
+    out.milo = {
+      state: "working",
+      detail: "The portfolio changed — a position closed.",
+      until,
+      speech: "Capital updated.",
+    };
   }
 
   const opened =
@@ -1138,8 +1195,13 @@ export function react(
     next.openPositions > previous.openPositions;
 
   if (opened && !closed) {
-    out.rex = { state: "working", detail: "A paper position opened.", until };
-    out.milo = { state: "working", detail: "The portfolio changed — a position opened.", until };
+    out.rex = { state: "working", detail: "A paper position opened.", until, speech: "Entry filled." };
+    out.milo = {
+      state: "working",
+      detail: "The portfolio changed — a position opened.",
+      until,
+      speech: "Capital updated.",
+    };
   }
 
   const recorded =
@@ -1148,7 +1210,62 @@ export function react(
     next.radarOpportunities !== previous.radarOpportunities;
 
   if (recorded) {
-    out.sage = { state: "working", detail: "The track record changed.", until };
+    out.sage = {
+      state: "working",
+      detail: "The track record changed.",
+      until,
+      speech: "Track record updated.",
+    };
+  }
+
+  /* ── the pipeline's own reactions ─────────────────────────────────────
+     Each is a *changed* value, never a present one. `moved` is the only
+     test any of these apply, so a reaction cannot fire on a source that
+     has merely stayed the same — which is what stops a stale office from
+     announcing news every sixty seconds. */
+  const moved = <K extends keyof HqWitness>(key: K): boolean =>
+    previous[key] !== null && next[key] !== null && previous[key] !== next[key];
+
+  if (moved("lastDiscovery")) {
+    out.radar = { state: "working", detail: "A token was discovered.", until, speech: "New candidate." };
+  }
+  if (moved("lastScore")) {
+    out.luna = { state: "working", detail: "A score was recorded.", until, speech: "Score recorded." };
+  }
+  if (moved("lastSnapshot")) {
+    out.dex = { state: "working", detail: "Market data was refreshed.", until, speech: "Market data in." };
+  }
+  if (moved("securityEvaluations")) {
+    // Says an evaluation *ran*, never that it passed. The verdict is Atlas's
+    // panel to report from evidence; a bubble that said "verified" would be a
+    // safety claim made by a timer.
+    out.atlas = {
+      state: "reviewing",
+      detail: "A security evaluation completed.",
+      until,
+      speech: "Evaluation complete.",
+    };
+  }
+  if (moved("queueDepth")) {
+    out.echo = { state: "working", detail: "The enrichment queue moved.", until, speech: "Queue moved." };
+  }
+  if (moved("pipelineOverall")) {
+    const overall = String(next.pipelineOverall);
+    out.byte = {
+      state: overall === "healthy" ? "working" : "reviewing",
+      detail: `The pipeline roll-up changed to ${overall}.`,
+      until,
+      speech: `Pipeline: ${overall}.`,
+    };
+    // Nova reacts to the roll-up and to nothing else. A director who
+    // commented on every desk's every change would be noise; the overall
+    // state of the platform is the one thing that is hers.
+    out.nova = {
+      state: overall === "healthy" ? "working" : "reviewing",
+      detail: `System status changed to ${overall}.`,
+      until,
+      speech: "I need an update.",
+    };
   }
 
   return out;

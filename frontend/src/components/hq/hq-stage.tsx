@@ -531,7 +531,17 @@ function EmployeeAnchor({
         className="hq-walker"
         style={away ? { transform: `translate(${away.x}px, ${away.y}px)` } : undefined}
       >
-        {frame?.speech ? <SpeechBubble text={frame.speech} /> : null}
+        {/* Three sources, one bubble, and a fixed order of precedence.
+
+            A meeting turn wins: it is the thing the reader just asked for.
+            A real reaction comes next, because it is traceable to an observed
+            change. Ambient chatter is last and says nothing about the system —
+            so a bubble that mentions the work is always the true kind. */}
+        {frame?.speech ? (
+          <SpeechBubble text={frame.speech} />
+        ) : reading.speech ? (
+          <SpeechBubble text={reading.speech} />
+        ) : null}
         <g transform={`scale(${FIGURE_SCALE})`}>
           <Character character={character} pose={pose} stance={stance} egg={(frame as { egg?: never } | undefined)?.egg} />
         </g>

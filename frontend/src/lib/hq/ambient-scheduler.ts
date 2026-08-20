@@ -6,6 +6,7 @@ import {
   type AmbientRoutine,
 } from "./ambient";
 import { CATS, CAT_ROUTINES, type CatId } from "./cats";
+import { CHATTER_BY_ACTOR, CHATTER_EVERY } from "./chatter";
 import { EMPLOYEES, type EmployeeId } from "./employees";
 import { SUPPORT_ROUTINES, SUPPORT_STAFF, type SupportId } from "./support";
 import type { DayPhase } from "./ambient";
@@ -319,11 +320,44 @@ export function createAmbientScheduler(
     run.handle = setTimeout(() => step(id), frame.hold);
   }
 
+  /**
+   * Occasionally give a routine a line.
+   *
+   * ── COUNTED, NOT RANDOM, AND THAT IS THE POINT ────────────────────────
+   *
+   * The obvious implementation rolls `random()` per start. It also breaks
+   * every test that scripts the RNG to force a particular routine, because a
+   * chatter roll shifts the stream underneath the selection that follows it —
+   * which is exactly what happened: two meeting tests started failing the
+   * moment this existed, and neither had anything to do with speech.
+   *
+   * So chatter consumes no randomness at all. Every third qualifying start
+   * speaks, and which line it is rotates. Deterministic, testable, and it
+   * cannot perturb anything else in the scheduler.
+   *
+   * The line lands on the first frame long enough to read it — a bubble on a
+   * 620ms walking step is a flicker. Cats do not speak.
+   */
+  let chatterCount = 0;
+  function withChatter(id: ActorId, frames: ActorFrame[]): ActorFrame[] {
+    if (actorClass(id) === "cat") return frames;
+    const lines = CHATTER_BY_ACTOR.get(id);
+    if (!lines || lines.length === 0) return frames;
+    const index = frames.findIndex((frame) => frame.hold >= 3_000);
+    if (index < 0) return frames;
+    const turn = chatterCount;
+    chatterCount += 1;
+    if (turn % CHATTER_EVERY !== 0) return frames;
+    const next = [...frames];
+    next[index] = { ...next[index]!, speech: lines[(turn / CHATTER_EVERY) % lines.length]! };
+    return next;
+  }
+
   function begin(id: ActorId, routine: Playable, frames: ActorFrame[], onDone: () => void) {
     active.set(id, {
       routineId: routine.id,
       meeting: routine.meeting,
-      frames,
+      frames: routine.meeting ? frames : withChatter(id, frames),
       index: -1,
       handle: null,
       onDone,
