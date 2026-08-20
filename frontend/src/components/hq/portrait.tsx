@@ -23,9 +23,18 @@ import { EMPLOYEE_BY_ID } from "@/lib/hq/employees";
 interface PortraitProps {
   id: EmployeeId;
   size?: number;
+  /**
+   * How much of the person the crop shows.
+   *
+   * `head` is the original chip used beside dense text — the panel, the
+   * mobile cards. `bust` shows head and upper body for surfaces where the
+   * portrait *is* the content, like the homepage crew. Both are viewBox crops
+   * of the identical rig: there is one drawing of each person, framed twice.
+   */
+  frame?: "head" | "bust";
 }
 
-export function Portrait({ id, size = 44 }: PortraitProps) {
+export function Portrait({ id, size = 44, frame = "head" }: PortraitProps) {
   const character = CHARACTERS[id];
   const employee = EMPLOYEE_BY_ID.get(id);
 
@@ -35,9 +44,10 @@ export function Portrait({ id, size = 44 }: PortraitProps) {
   return (
     <svg
       className="hq-portrait"
+      data-frame={frame}
       width={size}
-      height={size}
-      viewBox={portraitViewBox(character)}
+      height={frame === "bust" ? Math.round(size * 1.12) : size}
+      viewBox={portraitViewBox(character, frame)}
       role="img"
       aria-label={employee ? `${employee.name}, ${employee.role}` : id}
     >

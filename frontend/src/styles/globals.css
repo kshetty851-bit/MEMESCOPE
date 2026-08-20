@@ -825,7 +825,6 @@
   border-radius: 14px;
   background: var(--color-surface);
   overflow: hidden;
-  transition: border-color 140ms ease;
 }
 
 .crew-card:hover,
@@ -857,11 +856,52 @@
 .crew-portrait {
   display: grid;
   place-items: center;
-  border-radius: 12px;
-  padding: 0.2rem;
-  background: color-mix(in oklab, var(--crew-tint, var(--color-accent)) 14%, transparent);
-  border: 1px solid color-mix(in oklab, var(--crew-tint, var(--color-accent)) 34%, transparent);
+  border-radius: 14px;
+  padding: 0.3rem 0.3rem 0;
+  overflow: hidden;
+  /* The department colour is the backdrop, not a wash on the figure: a soft
+     vertical falloff so the character sits *in front of* something rather
+     than being printed on a chip. */
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--crew-tint, var(--color-accent)) 30%, transparent),
+    color-mix(in oklab, var(--crew-tint, var(--color-accent)) 10%, transparent)
+  );
+  border: 1px solid color-mix(in oklab, var(--crew-tint, var(--color-accent)) 38%, transparent);
   flex-shrink: 0;
+}
+
+/* Inside the crew card the portrait is the content, not a chip beside text —
+   so the rig's default dark disc treatment comes off and the tinted backdrop
+   above is the frame. The drawing inside is untouched: same rig, same data. */
+.crew-portrait .hq-portrait {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+/* A person, not an icon: the figure leans in a touch when the card is
+   hovered. Transform-only, and only for readers who have not asked for
+   stillness. */
+@media (prefers-reduced-motion: no-preference) {
+  .crew-portrait .hq-character {
+    transition: transform 220ms ease;
+    transform-origin: 50% 80%;
+  }
+
+  .crew-card:hover .crew-portrait .hq-character {
+    transform: translateY(1.5px) scale(1.045);
+  }
+
+  .crew-card {
+    transition:
+      border-color 140ms ease,
+      transform 200ms ease;
+  }
+
+  .crew-card:hover {
+    transform: translateY(-2px);
+  }
 }
 
 .crew-identity {

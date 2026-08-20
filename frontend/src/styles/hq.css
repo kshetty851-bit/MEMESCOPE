@@ -44,10 +44,7 @@
   --hq-wood: oklch(0.63 0.072 64);
   --hq-wood-dark: oklch(0.50 0.068 58);
   --hq-wood-light: oklch(0.72 0.062 70);
-  --hq-metal: oklch(0.60 0.006 250);
-  --hq-metal-dark: oklch(0.48 0.006 250);
-  --hq-chair: oklch(0.46 0.085 268);
-  --hq-chair-light: oklch(0.56 0.080 266);
+  /* --hq-metal, --hq-metal-dark, --hq-chair, --hq-chair-light: characters.css. */
   --hq-chair-dark: oklch(0.36 0.070 268);
   --hq-cabinet: oklch(0.62 0.045 200);
   --hq-cabinet-dark: oklch(0.52 0.045 200);
@@ -60,7 +57,7 @@
   --hq-pot: oklch(0.58 0.105 45);
 
   /* ---- technology ----------------------------------------------------- */
-  --hq-bezel: oklch(0.38 0.008 250);
+  /* --hq-bezel: characters.css — the figures' devices resolve it everywhere. */
   --hq-screen: oklch(0.42 0.075 225);
   --hq-screen-glow: oklch(0.72 0.110 215);
   --hq-glass: oklch(0.72 0.045 210 / 0.30);
@@ -68,38 +65,10 @@
   --hq-sealed: oklch(0.30 0.035 275);
   --hq-vault-metal: oklch(0.44 0.020 265);
 
-  /* Skin tones. Five, spread across the range rather than clustered, because
-     a cast that is one tone in five shades is not a cast. */
-  --hq-skin-s1: oklch(0.86 0.045 62);
-  --hq-skin-s2: oklch(0.78 0.062 55);
-  --hq-skin-s3: oklch(0.67 0.072 50);
-  --hq-skin-s4: oklch(0.55 0.068 45);
-  --hq-skin-s5: oklch(0.43 0.052 40);
-  /* One shade down from the skin, for the shadow under a chin or a sleeve. */
-  --hq-skin-shade: oklch(from var(--hq-skin) calc(l - 0.09) c h);
-
-  /* Hair tones vary independently of skin. */
-  --hq-hair-h1: oklch(0.30 0.020 60);
-  --hq-hair-h2: oklch(0.44 0.058 55);
-  --hq-hair-h3: oklch(0.74 0.090 78);
-  --hq-hair-h4: oklch(0.56 0.032 250);
-  --hq-hair-h5: oklch(0.22 0.012 60);
-
-  /* Employee clothing. Personality, never status — see §27 of the brief.
-     Saturated enough to read at desk size against a warm grey floor. */
-  --hq-indigo: oklch(0.52 0.150 278);
-  --hq-cyan: oklch(0.68 0.130 220);
-  --hq-violet: oklch(0.60 0.150 300);
-  --hq-amber: oklch(0.76 0.135 72);
-  --hq-steel: oklch(0.60 0.055 245);
-  --hq-crimson: oklch(0.56 0.170 25);
-  --hq-forest: oklch(0.54 0.105 152);
-  --hq-orange: oklch(0.68 0.150 52);
-  --hq-lime: oklch(0.70 0.130 128);
-  --hq-teal: oklch(0.62 0.100 195);
-  /* Support staff. Same rules as everyone: clothing colour is personality. */
-  --hq-plum: oklch(0.50 0.110 330);
-  --hq-khaki: oklch(0.58 0.070 100);
+  /* Skin, hair and clothing tokens live in `characters.css`, on `:root`,
+     imported by the rig itself — the homepage portraits render the same cast,
+     and a palette scoped to `.hq` was exactly how they once rendered as ten
+     black silhouettes. Do not re-declare any of them here. */
 
   /* The cats. A dark coat and a cream one, warm-bellied. */
   --hq-cat-black: oklch(0.28 0.015 280);
@@ -1177,149 +1146,13 @@
   }
 }
 
-/* ---------- character rig ------------------------------------------------ */
+/* ---------- character rig ------------------------------------------------
 
-/* Every fill below resolves a custom property set per character on the group,
-   so one stylesheet dresses ten people and adding an eleventh needs no CSS. */
-
-.hq-skin {
-  fill: var(--hq-skin, oklch(0.7 0.05 55));
-}
-
-.hq-hair {
-  fill: var(--hq-hair, oklch(0.3 0.02 60));
-}
-
-/* ---------- faces --------------------------------------------------------
-
-   Five features and a blush. Everything is sized against a ten-unit head, so
-   a proportion change in the rig carries the face with it rather than leaving
-   two eyes floating on a chin.
-
-   Nothing in this block is ever a status surface. A character's expression is
-   ambient personality; the state chip beneath them is the fact. */
-
-.hq-hand {
-  fill: var(--hq-skin, oklch(0.7 0.05 55));
-}
-
-.hq-shoe {
-  fill: oklch(0.30 0.020 60);
-}
-
-.hq-eye {
-  fill: oklch(0.22 0.020 265);
-}
-
-.hq-eye-light {
-  fill: oklch(0.99 0 0);
-  opacity: 0.9;
-}
-
-.hq-eye-line path {
-  fill: none;
-  stroke: oklch(0.22 0.020 265);
-  stroke-width: 1.1;
-  stroke-linecap: round;
-}
-
-.hq-brow path {
-  fill: none;
-  stroke: var(--hq-hair, oklch(0.3 0.02 60));
-  stroke-width: 1.3;
-  stroke-linecap: round;
-}
-
-.hq-nose {
-  fill: none;
-  stroke: var(--hq-skin-shade);
-  stroke-width: 1.1;
-  stroke-linecap: round;
-}
-
-.hq-mouth {
-  fill: none;
-  stroke: oklch(0.35 0.070 30);
-  stroke-width: 1.1;
-  stroke-linecap: round;
-}
-
-.hq-mouth-open {
-  fill: oklch(0.32 0.080 28);
-}
-
-/* A trace of warmth in the cheeks. Low enough that it never competes with a
-   status colour, present enough that the cast reads as friendly. */
-.hq-blush {
-  fill: oklch(0.68 0.130 25);
-  opacity: 0.28;
-}
-
-.hq-garment {
-  fill: var(--hq-garment, var(--color-neutral));
-}
-
-/* Two derived tones rather than two more variables: a garment is one colour
-   with a lit and a shadowed face, and deriving them means a palette change
-   cannot leave the shading behind. */
-.hq-garment-dark {
-  fill: color-mix(in oklab, var(--hq-garment, var(--color-neutral)) 68%, black);
-}
-
-.hq-garment-light {
-  fill: color-mix(in oklab, var(--hq-garment, var(--color-neutral)) 55%, white);
-}
-
-.hq-legs {
-  fill: color-mix(in oklab, var(--hq-garment, var(--color-neutral)) 45%, black);
-}
-
-.hq-legs-shadow {
-  fill: color-mix(in oklab, var(--hq-garment, var(--color-neutral)) 30%, black);
-}
-
-/* Blue office chairs, and chunky enough to see behind a seated figure. In the
-   old rig the chair was the same near-black as the floor, so ten people
-   appeared to be sitting on nothing. */
-.hq-chair {
-  fill: var(--hq-chair);
-}
-
-.hq-chair-back {
-  fill: var(--hq-chair-light);
-}
-
-.hq-chair-stem {
-  fill: var(--hq-metal-dark);
-}
-
-/* Grounds the figure. Without it everyone floats a pixel above the floor
-   plate, which is the single most common tell of a bad isometric scene. */
-.hq-contact-shadow {
-  fill: black;
-  opacity: 0.22;
-}
-
-.hq-device {
-  fill: var(--hq-bezel);
-}
-
-.hq-device-clip {
-  fill: var(--hq-metal);
-}
-
-.hq-device-stroke {
-  fill: none;
-  stroke: var(--hq-bezel);
-  stroke-width: 1.2;
-  stroke-linecap: round;
-}
-
-.hq-visor {
-  fill: oklch(0.70 0.120 215 / 0.75);
-  stroke: var(--hq-bezel);
-  stroke-width: 0.6;
-}
+   The figures' fills, faces, garments, chair and devices live in
+   `characters.css`, imported by `character-rig.tsx` — the rig and its colours
+   travel together, so every surface that draws the cast draws it in colour.
+   Only HQ-specific *behaviour* on those classes belongs here (state overrides
+   on the contact shadow, the breathing animation), never a base colour. */
 
 /* ---------- desk instruments --------------------------------------------- */
 
@@ -1398,15 +1231,6 @@
   letter-spacing: 0.14em;
   text-anchor: middle;
   opacity: 0.85;
-}
-
-/* ---------- portraits ---------------------------------------------------- */
-
-.hq-portrait {
-  display: block;
-  border-radius: 999px;
-  background: color-mix(in oklab, var(--color-sunken) 80%, black);
-  border: 1px solid var(--hq-edge);
 }
 
 .hq-sign-bar {

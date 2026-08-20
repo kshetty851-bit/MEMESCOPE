@@ -107,7 +107,7 @@ function CrewCard({
         data-testid={`crew-${employee.id}`}
       >
         <span className="crew-portrait" style={{ ["--crew-tint" as string]: `var(--hq-${employee.palette})` }}>
-          <Portrait id={employee.id} size={lead ? 92 : 64} />
+          <Portrait id={employee.id} size={lead ? 128 : 92} frame="bust" />
         </span>
         <span className="crew-identity">
           <span className="crew-name">{employee.name}</span>

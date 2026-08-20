@@ -1,5 +1,7 @@
 "use client";
 
+import "@/styles/characters.css";
+
 import { SEATED_AWAY_POSES, STANDING_POSES } from "@/lib/hq/characters";
 import type {
   Accessory,
@@ -237,11 +239,26 @@ const HAND = 2.7;
  * Deriving the crop from the same constants that place the head means the two
  * can never disagree again — a proportion change carries the framing with it.
  */
-export function portraitViewBox(character: CharacterDefinition): string {
+export function portraitViewBox(
+  character: CharacterDefinition,
+  frame: "head" | "bust" = "head",
+): string {
   const standing = STANDING_POSES.has(character.defaultPose);
   const build = BUILD[character.bodyType];
   const hipY = standing ? STANDING_HIP_Y : SEATED_HIP_Y;
   const headY = hipY - build.torsoHeight - build.neck - HEAD.radius;
+  if (frame === "bust") {
+    // Head and upper body: air above the hair, down through most of the
+    // torso, wide enough for the widest shoulders plus a raised arm. Sized
+    // from the same build constants as the figure itself, so a rig proportion
+    // change re-frames every portrait rather than beheading them — the exact
+    // failure the head crop's comment already records.
+    const top = headY - HEAD.radius - 8;
+    const bottom = hipY - build.torsoHeight * 0.15;
+    const height = bottom - top;
+    const width = Math.max(build.shoulder * 2 + 18, height * 0.92);
+    return `${-width / 2} ${top} ${width} ${height}`;
+  }
   // A head-and-shoulders: a little air above the hair, down to the collarbone.
   const top = headY - HEAD.radius - 7;
   const size = HEAD.radius * 2 + 22;
