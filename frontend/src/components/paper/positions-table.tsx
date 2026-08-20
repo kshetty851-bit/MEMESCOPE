@@ -3,8 +3,8 @@
 import { Fragment, useState } from "react";
 
 import { TokenIdentity } from "@/components/brand/token-identity";
-import { FreshnessLabel, UnpricedData, NoRecentData } from "@/components/ui/freshness";
-import { ageLabel } from "@/lib/freshness";
+import { FreshnessLabel, NoMarketData } from "@/components/ui/freshness";
+
 import { useSharedClock } from "@/hooks/use-shared-clock";
 import { Skeleton } from "@/components/ui/skeleton";
 import { exitLabel, pct, usd } from "@/lib/paper";
@@ -258,10 +258,8 @@ export function PositionsTable({
                         <span className="text-[10px] text-ink-3">settled</span>
                       ) : position.current_price_at ? (
                         <FreshnessLabel capturedAt={position.current_price_at} />
-                      ) : position.pricing_status === "unpriced" ? (
-                        <UnpricedData />
                       ) : (
-                        <NoRecentData />
+                        <NoMarketData />
                       )}
                     </div>
                   </td>
@@ -420,18 +418,7 @@ function ManualSellPreviewPanel({
   );
 }
 
-function LastCheckLabel({ checkedAt }: { checkedAt: string }) {
-  const now = useSharedClock(1000);
-  const observed = new Date(checkedAt).getTime();
-  if (!Number.isFinite(observed)) return null;
-  const seconds = Math.max(0, (now - observed) / 1000);
-  
-  return (
-    <span className="text-[10px] tabular-nums text-ink-3">
-      Checked {ageLabel(seconds)}
-    </span>
-  );
-}
+
 
 function DurationLabel({ opened, closed }: { opened: string; closed: string | null }) {
   const now = useSharedClock(60000); // 1-minute shared clock
