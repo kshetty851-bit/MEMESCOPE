@@ -1,0 +1,1139 @@
+import { EMPLOYEES, type EmployeeId, type EmployeeState } from "./employees";
+import { EVENT_WINDOW_MS, emptyActivity, type EventActivity } from "./events";
+import type {
+  ExecutionPosture,
+  PipelineHealth,
+  TokenSecuritySummary,
+} from "./pipeline";
+import type { PaperAudit, PaperPositions, PaperWallet } from "@/types/paper";
+import type { RadarPerformance } from "@/types/radar";
+import type { LiveStreamStatus } from "@/hooks/use-live-updates";
+
+/**
+ * THE HQ STATE ADAPTER.
+ *
+ * One pure function between MEMESCOPE's field names and the office. Everything
+ * a character does, every number on a panel and the room's overall mood comes
+ * out of `deriveHqState`, and nothing else in HQ is allowed to read a backend
+ * field. That rule is the whole architecture: when `tracked_stale_count` gets
+ * renamed, one file changes and one test suite proves the office still tells
+ * the truth.
+ *
+ * ── THE RULE THAT OUTRANKS EVERY OTHER RULE ─────────────────────────────
+ *
+ * Missing, stale, failed and unrecognised all become UNKNOWN. Never idle,
+ * never healthy, never success. There is no optimistic fallback anywhere in
+ * this file and no `?? 0` standing in for a number nobody measured.
+ *
+ * This matters more here than in most places because HQ is *charming*. A room
+ * full of calm cartoon people at their desks is a very persuasive way to say
+ * "everything is fine", and it would say it just as convincingly with the
+ * backend switched off. `fresh()` below is the single gate that stops it: a
+ * source that failed, never arrived, or aged past its window returns `null`,
+ * and every derivation starts by handling `null` first.
+ *
+ * ── WHERE THE THRESHOLDS COME FROM ──────────────────────────────────────
+ *
+ * Where the backend already classifies something, HQ reads its classification
+ * and does no arithmetic — `scanner.status` decides whether Radar is alert or
+ * not, and if the backend changes its mind about what "degraded" means, HQ
+ * follows without an edit.
+ *
+ * Where the backend publishes a number but attaches no verdict — queue depth,
+ * stale counts, event rates — HQ needs a threshold and there is nowhere honest
+ * to get one from. Those live in `THRESHOLDS` below, in one block, labelled as
+ * presentation-side. They decide how *animated* someone looks. They never
+ * decide whether something is broken; that always comes from the backend or
+ * from a count the backend published.
+ *
+ * ── WHAT THIS FUNCTION IS NOT ───────────────────────────────────────────
+ *
+ * It is not a decision-maker. No character here evaluates a token, judges a
+ * position, or forms an opinion about strategy. HQ is an observability layer
+ * wearing a cartoon; the moment a character's state depends on a judgement
+ * MEMESCOPE did not itself publish, HQ is lying about a system people trade
+ * with.
+ */
+
+/* ── sources ─────────────────────────────────────────────────────────── */
+
+/**
+ * One upstream reading, and everything needed to distrust it.
+ *
+ * `failed` and a null `data` are kept apart on purpose. "The request came back
+ * with an error" and "nothing has been asked yet" produce the same UNKNOWN, but
+ * they produce different *sentences*, and a reader deserves to know which.
+ */
+export interface Source<T> {
+  data: T | null;
+  /** Epoch ms the browser received this. `null` when nothing has arrived. */
+  observedAt: number | null;
+  /** The request ran and failed, as opposed to not having run. */
+  failed?: boolean;
+}
+
+export const NO_SOURCE: Source<never> = { data: null, observedAt: null };
+
+/**
+ * How long a reading stays true.
+ *
+ * Each is several times its source's own poll interval, so a single missed
+ * refetch does not blank the office, but a source that has genuinely stopped
+ * arriving turns UNKNOWN rather than staying green forever. That last property
+ * is the requirement; the exact numbers are a comfort setting.
+ */
+export const STALE_AFTER_MS = {
+  /** Polled every 60s by `useHqState`. Three misses. */
+  pipeline: 180_000,
+  /** Paper endpoints poll at 120s. Three misses. */
+  paper: 360_000,
+  /** Radar performance polls at the radar cadence. */
+  radar: 360_000,
+  /**
+   * Token security polls at 120s. Three misses.
+   *
+   * This is the *browser's* window on the summary request and is a separate
+   * question from whether the evidence inside it is fresh — the backend
+   * answers that itself in `source_state`, against each check's own
+   * validity period. A summary that arrived a second ago can still be
+   * reporting evidence hours old, and Atlas has to distinguish them.
+   */
+  tokenSecurity: 360_000,
+  /** Posture polls at 120s. Three misses. */
+  executionPosture: 360_000,
+} as const;
+
+export interface HqSources {
+  pipeline: Source<PipelineHealth>;
+  paperWallet: Source<PaperWallet>;
+  paperPositions: Source<PaperPositions>;
+  paperAudit: Source<PaperAudit>;
+  radarPerformance: Source<RadarPerformance>;
+  /** `GET /token-security/summary`. Atlas's source. */
+  tokenSecurity: Source<TokenSecuritySummary>;
+  /** `GET /real-wallet-safety/execution-posture`. The Execution Vault. */
+  executionPosture: Source<ExecutionPosture>;
+  /** Aggregated stream pressure. Never individual events. */
+  activity: EventActivity;
+  /**
+   * The live stream's own state.
+   *
+   * Emphatically not a system-health signal: a browser that cannot hold a
+   * socket open says nothing about whether MEMESCOPE is running. It is read by
+   * exactly one employee — Byte, whose remit includes the WebSocket — and the
+   * sentence he carries says the API is still answering when it is.
+   */
+  stream: LiveStreamStatus;
+  /** Short-lived reactions to things that actually happened. */
+  transients: Partial<Record<EmployeeId, Transient>>;
+  /** Injected, so every derivation is a pure function of its inputs. */
+  now: number;
+}
+
+/* ── output ──────────────────────────────────────────────────────────── */
+
+export type OfficeActivity = "QUIET" | "NORMAL" | "BUSY" | "HIGH_ALERT" | "UNKNOWN";
+
+/**
+ * One line on an employee panel.
+ *
+ * A `null` value renders NOT AVAILABLE and never a dash that could be read as
+ * zero. `source` names where the figure came from so a reader can go and check
+ * it, which is the difference between a dashboard and a decoration.
+ */
+export interface Metric {
+  label: string;
+  value: string | null;
+  source: string;
+}
+
+export interface EmployeeReading {
+  state: EmployeeState;
+  /** Why it reads that way, in one sentence. Always present. */
+  detail: string;
+  metrics: Metric[];
+  /** Epoch ms of the observation behind this reading. */
+  observedAt: number | null;
+  /**
+   * Whether HQ has a source for this person at all.
+   *
+   * False for Atlas, whose aggregate safety data does not exist in any
+   * endpoint. Both he and a failed Radar read UNKNOWN, but only one of them is
+   * an incident, and Nova must not spend every day reporting a gap that is
+   * already written down as a gap.
+   */
+  sourced: boolean;
+}
+
+export interface Transient {
+  state: EmployeeState;
+  detail: string;
+  /** Epoch ms after which this reaction is over. */
+  until: number;
+}
+
+export interface HqState {
+  employees: Record<EmployeeId, EmployeeReading>;
+  activity: OfficeActivity;
+  /**
+   * Who is doing real work, and therefore whose ambient personality yields.
+   *
+   * The plan's priority order — alert/error, then real activity, then normal,
+   * then ambient — is enforced by this list plus the scheduler that reads it.
+   * Ambient is the only layer that can be interrupted, and it always is.
+   */
+  operational: EmployeeId[];
+  /**
+   * The raw readings, carried through unchanged.
+   *
+   * The boards need them because a board renders a *source* rather than an
+   * employee — the Execution Vault has no desk and the Performance Lab shows
+   * figures no character owns. They get the same `Source` wrapper everything
+   * else does, so `fresh()` is still the single gate deciding what counts as
+   * current, and a board cannot accidentally read past a stale window that
+   * the room respects.
+   */
+  sources: HqSources;
+  /** The clock the derivation used, so boards age their sources identically. */
+  now: number;
+}
+
+/**
+ * The strategy id whose entries require a passing security evaluation.
+ *
+ * Compared against what `GET /paper` reports rather than assumed, so HQ says
+ * "not enforced" on a deployment that has not cut over instead of describing
+ * a gate that is not running.
+ */
+export const SECURED_STRATEGY_ID = "trailing_stop_25_secured_v2";
+
+/* ── thresholds ──────────────────────────────────────────────────────── */
+
+/**
+ * Presentation thresholds. Read the module header before adding one.
+ *
+ * Every value here answers "how animated should this person look", never "is
+ * something wrong". The one exception is documented at its use site: Echo's
+ * priority-lane alert mirrors the backend's own `HEALTH_TRACKED_STALE_SECONDS`
+ * default, because a priority lane that has kept a tracked token waiting longer
+ * than the backend's own staleness limit has failed at the one job the lane
+ * exists to do. That constant is not published to the frontend, so it is
+ * duplicated here and listed as a known gap.
+ */
+export const THRESHOLDS = {
+  /** Arrivals per minute at which a desk reads as saturated rather than busy. */
+  busyDiscovery: 12,
+  busyMarket: 30,
+  busyScore: 20,
+  busyPaper: 6,
+  /**
+   * Distinct mints security-evaluated in the summary window before Atlas
+   * reads as saturated rather than merely working. Presentation only: the
+   * evaluator is capped at `TOKEN_SECURITY_MAX_PER_PASS` (25) per review
+   * pass, so a sustained busy window is genuinely a lot of new candidates.
+   */
+  busyAtlas: 40,
+  /** Unscored tokens that turn a scoring backlog into a busy analyst. */
+  scoringBacklogBusy: 25,
+  /** Seconds the oldest overdue normal-lane item has waited before "busy". */
+  enrichmentWaitBusySeconds: 60,
+  /** Mirrors the backend default for `HEALTH_TRACKED_STALE_SECONDS`. */
+  priorityWaitAlertSeconds: 300,
+  /** How long a reaction to a real event lasts. */
+  reactionMs: 6_000,
+} as const;
+
+/* ── the gate ────────────────────────────────────────────────────────── */
+
+/**
+ * A source's data, or `null` if it cannot be trusted.
+ *
+ * The only way anything in this file reads an upstream value. Four ways to
+ * fail, one return.
+ */
+export function fresh<T>(source: Source<T>, staleAfter: number, now: number): T | null {
+  if (source.failed) return null;
+  if (source.data === null || source.data === undefined) return null;
+  if (source.observedAt === null) return null;
+  if (now - source.observedAt > staleAfter) return null;
+  return source.data;
+}
+
+/** Why a source is not readable, as a sentence. */
+function absence(source: Source<unknown>, staleAfter: number, now: number, what: string): string {
+  if (source.failed) return `${what} could not be read.`;
+  if (source.data === null || source.observedAt === null) return `${what} has not been read yet.`;
+  if (now - source.observedAt > staleAfter) {
+    const age = Math.round((now - source.observedAt) / 1000);
+    return `${what} is ${age}s old and no longer describes now.`;
+  }
+  return `${what} is unavailable.`;
+}
+
+function unknown(detail: string, metrics: Metric[] = [], sourced = true): EmployeeReading {
+  return { state: "unknown", detail, metrics, observedAt: null, sourced };
+}
+
+function reading(
+  state: EmployeeState,
+  detail: string,
+  metrics: Metric[],
+  observedAt: number | null,
+): EmployeeReading {
+  return { state, detail, metrics, observedAt, sourced: true };
+}
+
+/** A metric whose backing data does not exist. Renders NOT AVAILABLE. */
+function missing(label: string, source: string): Metric {
+  return { label, value: null, source };
+}
+
+function num(value: number | null | undefined): string | null {
+  return value === null || value === undefined ? null : String(value);
+}
+
+function seconds(value: number | null | undefined): string | null {
+  return value === null || value === undefined ? null : `${Math.round(value)}s`;
+}
+
+function minutes(value: number | null | undefined): string | null {
+  return value === null || value === undefined ? null : `${value.toFixed(1)} min`;
+}
+
+/** Events observed in the window, or `null` while the meter is still filling. */
+function rate(activity: EventActivity, kind: keyof EventActivity["counts"]): number | null {
+  const count = activity.counts[kind];
+  if (count > 0) return count;
+  return activity.settled ? 0 : null;
+}
+
+/* ── the adapter ─────────────────────────────────────────────────────── */
+
+export function deriveHqState(sources: Partial<HqSources> = {}): HqState {
+  const s: HqSources = {
+    pipeline: NO_SOURCE,
+    paperWallet: NO_SOURCE,
+    paperPositions: NO_SOURCE,
+    paperAudit: NO_SOURCE,
+    radarPerformance: NO_SOURCE,
+    tokenSecurity: NO_SOURCE,
+    executionPosture: NO_SOURCE,
+    activity: emptyActivity(EVENT_WINDOW_MS),
+    stream: "offline",
+    transients: {},
+    now: 0,
+    ...sources,
+  };
+
+  const pipeline = fresh(s.pipeline, STALE_AFTER_MS.pipeline, s.now);
+  const pipelineGone = absence(s.pipeline, STALE_AFTER_MS.pipeline, s.now, "Pipeline health");
+  const pipelineAt = pipeline ? s.pipeline.observedAt : null;
+
+  const employees = {
+    radar: deriveRadar(s, pipeline, pipelineGone, pipelineAt),
+    luna: deriveLuna(s, pipeline, pipelineGone, pipelineAt),
+    dex: deriveDex(s, pipeline, pipelineGone, pipelineAt),
+    atlas: deriveAtlas(s),
+    milo: deriveMilo(s),
+    rex: deriveRex(s),
+    echo: deriveEcho(pipeline, pipelineGone, pipelineAt),
+    byte: deriveByte(s, pipeline, pipelineGone, pipelineAt),
+    sage: deriveSage(s),
+    // Filled in below: Nova reads the others rather than the backend.
+    nova: unknown("Waiting on the rest of the office."),
+  } as Record<EmployeeId, EmployeeReading>;
+
+  // Reactions apply last, and only over a base state that is not already
+  // reporting a problem. A trade closing is not more important than the market
+  // desk being down, and a celebration painted over an alert would be the
+  // exact failure this whole layer exists to prevent.
+  for (const [id, transient] of Object.entries(s.transients) as Array<
+    [EmployeeId, Transient | undefined]
+  >) {
+    if (!transient || s.now >= transient.until) continue;
+    const base = employees[id];
+    if (!base.sourced) continue;
+    if (OUTRANKS_REACTION.has(base.state)) continue;
+    employees[id] = { ...base, state: transient.state, detail: transient.detail };
+  }
+
+  employees.nova = deriveNova(employees, pipeline, pipelineGone, pipelineAt);
+
+  return {
+    employees,
+    activity: deriveActivity(employees, pipeline),
+    operational: EMPLOYEES.map((employee) => employee.id).filter((id) =>
+      OPERATIONAL_STATES.has(employees[id].state),
+    ),
+    sources: s,
+    now: s.now,
+  };
+}
+
+/**
+ * States a transient reaction may not paint over.
+ *
+ * Also the states that are themselves worth interrupting ambient personality
+ * for, minus the transient ones — which is not a coincidence: both lists are
+ * "this is a real problem" and "this is a real event", in that order.
+ */
+const OUTRANKS_REACTION = new Set<EmployeeState>(["alert", "error", "offline", "unknown"]);
+
+/** Real activity. Ambient personality yields to all of it. */
+export const OPERATIONAL_STATES = new Set<EmployeeState>([
+  "working",
+  "busy",
+  "reviewing",
+  "success",
+  "alert",
+  "error",
+  "offline",
+]);
+
+/* ── per-employee ────────────────────────────────────────────────────── */
+
+function deriveRadar(
+  s: HqSources,
+  pipeline: PipelineHealth | null,
+  gone: string,
+  at: number | null,
+): EmployeeReading {
+  if (!pipeline) return unknown(gone, radarMetrics(null, s.activity));
+  const scanner = pipeline.scanner;
+  const metrics = radarMetrics(pipeline, s.activity);
+
+  if (scanner.status === "down") {
+    return reading(
+      "offline",
+      scanner.failure_reason ?? "The scanner has published no state.",
+      metrics,
+      at,
+    );
+  }
+  if (scanner.status === "degraded") {
+    return reading(
+      "alert",
+      scanner.failure_reason ??
+        `Scanner degraded — ${minutes(scanner.minutes_since_last_token) ?? "no token"} since the last discovery.`,
+      metrics,
+      at,
+    );
+  }
+
+  const discoveries = rate(s.activity, "discovery");
+  if (discoveries !== null && discoveries >= THRESHOLDS.busyDiscovery) {
+    return reading("busy", `${discoveries} discoveries in the last minute.`, metrics, at);
+  }
+  // The backend's own "how long since the last token" rather than HQ's event
+  // window: it is true from the first render, where an empty window is not.
+  const since = scanner.minutes_since_last_token;
+  if (since !== null && since < 1) {
+    return reading("working", "A token was discovered in the last minute.", metrics, at);
+  }
+  if (discoveries !== null && discoveries > 0) {
+    return reading("working", `${discoveries} discoveries in the last minute.`, metrics, at);
+  }
+  return reading(
+    "idle",
+    since === null
+      ? "Scanner healthy. No discovery time reported."
+      : `Scanner healthy. Last discovery ${minutes(since)} ago.`,
+    metrics,
+    at,
+  );
+}
+
+function radarMetrics(pipeline: PipelineHealth | null, activity: EventActivity): Metric[] {
+  const scanner = pipeline?.scanner;
+  const discoveries = rate(activity, "discovery");
+  return [
+    { label: "Scanner stage", value: scanner?.status ?? null, source: "health/pipeline.scanner" },
+    {
+      label: "Since last discovery",
+      value: minutes(scanner?.minutes_since_last_token),
+      source: "health/pipeline.scanner",
+    },
+    {
+      label: "Discovered in the last minute",
+      value: num(discoveries),
+      source: "live stream · token.discovered",
+    },
+    {
+      label: "Reconnect attempts",
+      value: num(scanner?.reconnect_attempts),
+      source: "health/pipeline.scanner",
+    },
+  ];
+}
+
+function deriveLuna(
+  s: HqSources,
+  pipeline: PipelineHealth | null,
+  gone: string,
+  at: number | null,
+): EmployeeReading {
+  if (!pipeline) return unknown(gone, lunaMetrics(null, s.activity));
+  const scoring = pipeline.scoring;
+  const metrics = lunaMetrics(pipeline, s.activity);
+
+  if (scoring.status === "down") {
+    return reading("offline", "Scoring has produced nothing for long enough to read as down.", metrics, at);
+  }
+  if (scoring.status === "degraded") {
+    return reading(
+      "alert",
+      `Scoring degraded — last score ${minutes(scoring.minutes_since_last_score) ?? "not reported"} ago.`,
+      metrics,
+      at,
+    );
+  }
+
+  const scores = rate(s.activity, "score");
+  if (
+    (scores !== null && scores >= THRESHOLDS.busyScore) ||
+    scoring.pending >= THRESHOLDS.scoringBacklogBusy
+  ) {
+    return reading(
+      "busy",
+      scores === null
+        ? `${scoring.pending} tokens are awaiting a score.`
+        : `${scoring.pending} tokens awaiting a score; ${scores} rescored in the last minute.`,
+      metrics,
+      at,
+    );
+  }
+  if (scores !== null && scores > 0) {
+    return reading("working", `${scores} scores changed in the last minute.`, metrics, at);
+  }
+  if (scoring.pending > 0) {
+    // Work is queued but nothing has been scored in the window. Reviewing, not
+    // working: something is in front of her that has not produced an answer.
+    return reading("reviewing", `${scoring.pending} tokens are awaiting a score.`, metrics, at);
+  }
+  return reading("idle", "Scoring healthy with nothing queued.", metrics, at);
+}
+
+function lunaMetrics(pipeline: PipelineHealth | null, activity: EventActivity): Metric[] {
+  const scoring = pipeline?.scoring;
+  return [
+    { label: "Scoring stage", value: scoring?.status ?? null, source: "health/pipeline.scoring" },
+    { label: "Awaiting a score", value: num(scoring?.pending), source: "health/pipeline.scoring" },
+    {
+      label: "Since last score",
+      value: minutes(scoring?.minutes_since_last_score),
+      source: "health/pipeline.scoring",
+    },
+    {
+      label: "Scores changed in the last minute",
+      value: num(rate(activity, "score")),
+      source: "live stream · score.changed",
+    },
+  ];
+}
+
+function deriveDex(
+  s: HqSources,
+  pipeline: PipelineHealth | null,
+  gone: string,
+  at: number | null,
+): EmployeeReading {
+  if (!pipeline) return unknown(gone, dexMetrics(null, s.activity));
+  const market = pipeline.market_enrichment;
+  const metrics = dexMetrics(pipeline, s.activity);
+
+  if (market.status === "down") {
+    return reading("offline", "Market enrichment has committed nothing for long enough to read as down.", metrics, at);
+  }
+  if (market.status === "degraded") {
+    return reading(
+      "alert",
+      `Market enrichment degraded — last snapshot ${minutes(market.minutes_since_last_snapshot) ?? "not reported"} ago.`,
+      metrics,
+      at,
+    );
+  }
+  // The stage can report healthy while the tokens on screen carry hour-old
+  // prices: the backend classifies this stage purely on when *anything* last
+  // landed, and publishes the stale count separately without letting it
+  // degrade the status. A stale quote must never look healthy, so HQ reads the
+  // count the backend already measured rather than inventing its own staleness.
+  if (market.tracked_stale_count > 0) {
+    return reading(
+      "alert",
+      `${market.tracked_stale_count} tracked tokens carry stale market data, worst ${seconds(market.tracked_freshness_worst_seconds) ?? "unknown"} old.`,
+      metrics,
+      at,
+    );
+  }
+
+  const updates = rate(s.activity, "market");
+  if (updates !== null && updates >= THRESHOLDS.busyMarket) {
+    return reading("busy", `${updates} market updates in the last minute.`, metrics, at);
+  }
+  if (updates !== null && updates > 0) {
+    return reading("working", `${updates} market updates in the last minute.`, metrics, at);
+  }
+  return reading("idle", "Market data fresh, nothing moving.", metrics, at);
+}
+
+function dexMetrics(pipeline: PipelineHealth | null, activity: EventActivity): Metric[] {
+  const market = pipeline?.market_enrichment;
+  return [
+    {
+      label: "Market stage",
+      value: market?.status ?? null,
+      source: "health/pipeline.market_enrichment",
+    },
+    {
+      label: "Stale tracked tokens",
+      value: num(market?.tracked_stale_count),
+      source: "health/pipeline.market_enrichment",
+    },
+    {
+      label: "Worst tracked freshness",
+      value: seconds(market?.tracked_freshness_worst_seconds),
+      source: "health/pipeline.market_enrichment",
+    },
+    {
+      label: "Market updates in the last minute",
+      value: num(rate(activity, "market")),
+      source: "live stream · market.changed",
+    },
+  ];
+}
+
+/**
+ * ATLAS — sourced, as of HQ-6.
+ *
+ * He was the one member of staff MEMESCOPE could not describe. There was no
+ * aggregate of what had been reviewed, refused, or why, and the only per-mint
+ * safety rows in the platform were written by the Real Wallet's dry-run
+ * preview — so with the wallet disabled, the risk officer's entire department
+ * was invisible. `GET /token-security/summary` is now a real source that does
+ * not care whether any wallet is enabled.
+ *
+ * THE ONE THING THIS FUNCTION MUST NEVER DO
+ *
+ * Read zero failures as good news. `verified=0, failed=0, unknown=0` is the
+ * response of a platform that has evaluated **nothing**, and it is
+ * byte-identical to what a perfectly clean platform would report on the
+ * counts alone. `source_state` is the field that separates them and it is
+ * checked first, before any count is looked at. Atlas is never green because
+ * his endpoint was empty, and never green because it failed.
+ *
+ * WHY UNKNOWN IS NOT AN ALERT
+ *
+ * `unknown_count` is high by construction in this phase — liquidity security
+ * is genuinely unverified for every venue the platform trades (see
+ * `app/security/evaluator.py`). That is a known, written-down gap in
+ * observability, not an incident, so it does not raise him to `alert`. Only
+ * a positively detected dangerous token does.
+ */
+function deriveAtlas(s: HqSources): EmployeeReading {
+  const summary = fresh(s.tokenSecurity, STALE_AFTER_MS.tokenSecurity, s.now);
+  if (!summary) {
+    return unknown(
+      absence(s.tokenSecurity, STALE_AFTER_MS.tokenSecurity, s.now, "Token security"),
+      [
+        missing("Reviewed (24h)", "token-security · summary"),
+        missing("Verified", "token-security · summary"),
+        missing("Rejected", "token-security · summary"),
+        missing("Unknown", "token-security · summary"),
+      ],
+      // The endpoint exists now, so a failure to read it is a real incident
+      // rather than the documented gap it used to be.
+      true,
+    );
+  }
+
+  const topReason = Object.entries(summary.failures_by_reason).sort(
+    (a, b) => b[1] - a[1],
+  )[0];
+  const metrics: Metric[] = [
+    {
+      label: "Reviewed (24h)",
+      value: num(summary.evaluated_recently),
+      source: "token-security · summary",
+    },
+    { label: "Verified", value: num(summary.verified_count), source: "token-security · summary" },
+    { label: "Rejected", value: num(summary.failed_count), source: "token-security · summary" },
+    { label: "Unknown", value: num(summary.unknown_count), source: "token-security · summary" },
+    {
+      label: "Top rejection reason",
+      value: topReason ? `${topReason[0]} (${topReason[1]})` : null,
+      source: "token-security · summary",
+    },
+    {
+      label: "Last evaluation",
+      value: summary.last_evaluation_at,
+      source: "token-security · summary",
+    },
+  ];
+
+  // Checked before any count, and in this order on purpose.
+  if (summary.source_state === "no_evaluations") {
+    return unknown(
+      "No token has been security-evaluated yet. Zero failures here means nothing has been checked, not that nothing is wrong.",
+      metrics,
+    );
+  }
+  if (summary.source_state === "stale") {
+    return unknown(
+      "The newest security evidence is older than its own validity window, so it no longer describes now.",
+      metrics,
+    );
+  }
+
+  const at = s.tokenSecurity.observedAt;
+  if (summary.failed_count > 0) {
+    return reading(
+      "alert",
+      `${summary.failed_count} of ${summary.evaluated_recently} tokens failed a security check${
+        topReason ? ` — most often ${topReason[0]}` : ""
+      }.`,
+      metrics,
+      at,
+    );
+  }
+  if (summary.evaluated_recently >= THRESHOLDS.busyAtlas) {
+    return reading(
+      "busy",
+      `${summary.evaluated_recently} tokens reviewed in the last ${summary.window_hours}h; none positively unsafe.`,
+      metrics,
+      at,
+    );
+  }
+  if (summary.evaluated_recently === 0) {
+    // The source is live and healthy and genuinely has nothing to report.
+    // This is the only path to `idle`, and it requires a working endpoint.
+    return reading("idle", "Nothing new to review in the window.", metrics, at);
+  }
+  return reading(
+    "working",
+    `${summary.evaluated_recently} tokens reviewed; ${summary.unknown_count} could not be fully verified.`,
+    metrics,
+    at,
+  );
+}
+
+function deriveMilo(s: HqSources): EmployeeReading {
+  const wallet = fresh(s.paperWallet, STALE_AFTER_MS.paper, s.now);
+  const positions = fresh(s.paperPositions, STALE_AFTER_MS.paper, s.now);
+  const metrics = miloMetrics(wallet, positions, s.activity);
+  const at = wallet ? s.paperWallet.observedAt : s.paperPositions.observedAt;
+
+  if (!wallet && !positions) {
+    return unknown(absence(s.paperWallet, STALE_AFTER_MS.paper, s.now, "Paper wallet"), metrics);
+  }
+  if (wallet && !wallet.enabled) {
+    return reading("offline", "Paper wallet is disabled.", metrics, at);
+  }
+
+  const open = wallet?.metrics.open_positions ?? positions?.items.length ?? null;
+  if (open === null) return unknown("Open position count unavailable.", metrics);
+
+  const changes = rate(s.activity, "paper");
+  if (changes !== null && changes >= THRESHOLDS.busyPaper) {
+    return reading("busy", `${open} open positions; ${changes} wallet changes in the last minute.`, metrics, at);
+  }
+  if (open > 0) {
+    // Positions exist, so there is a portfolio to watch. Nothing here decides
+    // whether any of them is stagnant — holding-period judgement belongs to the
+    // strategy, and HQ will consume it when it publishes one.
+    return reading("working", `${open} open positions.`, metrics, at);
+  }
+  return reading("idle", "No open positions.", metrics, at);
+}
+
+function miloMetrics(
+  wallet: PaperWallet | null,
+  positions: PaperPositions | null,
+  activity: EventActivity,
+): Metric[] {
+  const m = wallet?.metrics;
+  return [
+    {
+      label: "Open positions",
+      value: num(m?.open_positions ?? positions?.items.length),
+      source: "paper.metrics",
+    },
+    { label: "Invested", value: m?.invested_usd ?? null, source: "paper.metrics" },
+    { label: "Open value", value: m?.open_value ?? null, source: "paper.metrics" },
+    { label: "Unpriced positions", value: num(m?.unpriced_positions), source: "paper.metrics" },
+    {
+      label: "Generation",
+      value: wallet ? `Gen ${wallet.generation}` : null,
+      source: "paper.generation",
+    },
+    {
+      // Read from the strategy the backend says is running, never from a
+      // build-time constant: HQ must report the generation that is actually
+      // trading, including on a deployment that has not cut over.
+      label: "Entry security gate",
+      value: wallet
+        ? wallet.strategy?.id === SECURED_STRATEGY_ID
+          ? "Strict"
+          : "Not enforced"
+        : null,
+      source: "paper.strategy",
+    },
+    {
+      label: "Wallet changes in the last minute",
+      value: num(rate(activity, "paper")),
+      source: "live stream · paper.changed",
+    },
+  ];
+}
+
+/**
+ * REX — paper execution, and only paper.
+ *
+ * His desk is the simulator. `real_wallet.changed` is not read here, is not in
+ * the event table, and has a test of its own: the distance between a simulated
+ * fill and a real one is the most important thing this product communicates,
+ * and a character who moves on both would erase it.
+ *
+ * He is idle by default and reacts only to evidence — a row appearing in the
+ * permanent trade record, or an open position count that went up. Neither is an
+ * event announcement; both are the data itself having changed.
+ */
+function deriveRex(s: HqSources): EmployeeReading {
+  const wallet = fresh(s.paperWallet, STALE_AFTER_MS.paper, s.now);
+  const audit = fresh(s.paperAudit, STALE_AFTER_MS.paper, s.now);
+  const metrics = rexMetrics(wallet, audit);
+  const at = s.paperWallet.observedAt;
+
+  if (!wallet) {
+    return unknown(absence(s.paperWallet, STALE_AFTER_MS.paper, s.now, "Paper wallet"), metrics);
+  }
+  if (!wallet.enabled) return reading("offline", "Paper wallet is disabled.", metrics, at);
+
+  return reading("idle", "No paper execution recorded just now.", metrics, at);
+}
+
+function rexMetrics(wallet: PaperWallet | null, audit: PaperAudit | null): Metric[] {
+  const m = wallet?.metrics;
+  const last = audit?.items[0];
+  return [
+    // Fixed, and first. Everything else on this panel is about a simulator, and
+    // the panel has to say so before it says anything else.
+    { label: "Desk", value: "Paper — simulated execution", source: "HQ" },
+    { label: "Closed positions", value: num(m?.closed_positions), source: "paper.metrics" },
+    { label: "Realised P&L", value: m?.realised_pnl ?? null, source: "paper.metrics" },
+    { label: "Last close", value: last?.exit_reason ?? null, source: "paper/audit" },
+    { label: "Last close net", value: last?.net_return_usd ?? null, source: "paper/audit" },
+  ];
+}
+
+function deriveEcho(
+  pipeline: PipelineHealth | null,
+  gone: string,
+  at: number | null,
+): EmployeeReading {
+  if (!pipeline) return unknown(gone, echoMetrics(null));
+  const market = pipeline.market_enrichment;
+  const metrics = echoMetrics(pipeline);
+
+  if (market.status === "down") {
+    return reading("offline", "The enrichment stage is down; queues cannot be worked.", metrics, at);
+  }
+  if (market.dead_lettered > 0) {
+    return reading("alert", `${market.dead_lettered} tokens are parked in the dead-letter set.`, metrics, at);
+  }
+  const priorityWait = market.oldest_priority_wait_seconds;
+  if (priorityWait !== null && priorityWait >= THRESHOLDS.priorityWaitAlertSeconds) {
+    return reading(
+      "alert",
+      `The priority lane has kept a token waiting ${seconds(priorityWait)}, past the backend's own staleness limit.`,
+      metrics,
+      at,
+    );
+  }
+  if (market.status === "degraded") {
+    return reading("alert", "Enrichment is degraded.", metrics, at);
+  }
+
+  const normalWait = market.oldest_normal_wait_seconds;
+  if (
+    market.queue_depth > 0 &&
+    normalWait !== null &&
+    normalWait >= THRESHOLDS.enrichmentWaitBusySeconds
+  ) {
+    return reading(
+      "busy",
+      `${market.queue_depth} tokens due, oldest waiting ${seconds(normalWait)}.`,
+      metrics,
+      at,
+    );
+  }
+  if (market.queue_depth > 0) {
+    return reading("working", `${market.queue_depth} tokens due for refresh.`, metrics, at);
+  }
+  return reading("idle", "Queues clear.", metrics, at);
+}
+
+function echoMetrics(pipeline: PipelineHealth | null): Metric[] {
+  const market = pipeline?.market_enrichment;
+  return [
+    { label: "Queue depth", value: num(market?.queue_depth), source: "health/pipeline.market_enrichment" },
+    {
+      label: "Priority queue depth",
+      value: num(market?.priority_queue_depth),
+      source: "health/pipeline.market_enrichment",
+    },
+    { label: "Dead-lettered", value: num(market?.dead_lettered), source: "health/pipeline.market_enrichment" },
+    {
+      label: "Oldest priority wait",
+      value: seconds(market?.oldest_priority_wait_seconds),
+      source: "health/pipeline.market_enrichment",
+    },
+    {
+      label: "Oldest normal wait",
+      value: seconds(market?.oldest_normal_wait_seconds),
+      source: "health/pipeline.market_enrichment",
+    },
+    missing("Worker pool", "not available — no worker introspection endpoint"),
+  ];
+}
+
+/**
+ * BYTE — what infrastructure truth actually exists.
+ *
+ * Two facts, both real: the API answered (the pipeline query returned), and
+ * whether this browser is holding the event stream open. Database latency,
+ * cache latency, RPC health and worker liveness are not published by any
+ * endpoint, so they read NOT AVAILABLE rather than being inferred from
+ * something adjacent.
+ *
+ * A dropped socket is Byte's alert and nobody else's, and his sentence says
+ * the API is still answering — because a browser that cannot hold a WebSocket
+ * open is not evidence that MEMESCOPE is down, and an office that treats those
+ * as the same thing will cry wolf on every train tunnel.
+ */
+function deriveByte(
+  s: HqSources,
+  pipeline: PipelineHealth | null,
+  gone: string,
+  at: number | null,
+): EmployeeReading {
+  const metrics = byteMetrics(pipeline, s.stream);
+  if (!pipeline) return unknown(gone, metrics);
+
+  if (s.stream === "offline" || s.stream === "reconnecting") {
+    return reading(
+      "alert",
+      `Live event stream ${s.stream}. The backend API is still answering; screens fall back to polling.`,
+      metrics,
+      at,
+    );
+  }
+  return reading("idle", "API answering and the event stream is live.", metrics, at);
+}
+
+function byteMetrics(pipeline: PipelineHealth | null, stream: LiveStreamStatus): Metric[] {
+  return [
+    { label: "Live event stream", value: stream, source: "browser WebSocket" },
+    {
+      label: "API",
+      value: pipeline ? "Answering" : null,
+      source: "health/pipeline",
+    },
+    { label: "Environment", value: pipeline?.environment ?? null, source: "health/pipeline" },
+    { label: "Version", value: pipeline?.version ?? null, source: "health/pipeline" },
+    missing("Database latency", "not available — not published by /health/pipeline"),
+    missing("Cache latency", "not available — not published by /health/pipeline"),
+    missing("RPC health", "not available — Real Wallet scope"),
+  ];
+}
+
+function deriveSage(s: HqSources): EmployeeReading {
+  const performance = fresh(s.radarPerformance, STALE_AFTER_MS.radar, s.now);
+  const wallet = fresh(s.paperWallet, STALE_AFTER_MS.paper, s.now);
+  const metrics = sageMetrics(performance, wallet);
+  const at = s.radarPerformance.observedAt;
+
+  if (!performance) {
+    return unknown(absence(s.radarPerformance, STALE_AFTER_MS.radar, s.now, "Track record"), metrics);
+  }
+  return reading(
+    "idle",
+    `${performance.total_opportunities} opportunities on the permanent record.`,
+    metrics,
+    at,
+  );
+}
+
+function sageMetrics(performance: RadarPerformance | null, wallet: PaperWallet | null): Metric[] {
+  const m = wallet?.metrics;
+  return [
+    { label: "Opportunities tracked", value: num(performance?.total_opportunities), source: "radar/performance" },
+    { label: "Active opportunities", value: num(performance?.active_opportunities), source: "radar/performance" },
+    { label: "Reached 2x", value: performance?.success_rate ?? null, source: "radar/performance" },
+    { label: "Paper win rate", value: m?.win_rate_pct ?? null, source: "paper.metrics" },
+    { label: "Profit factor", value: m?.profit_factor ?? null, source: "paper.metrics" },
+    { label: "Max drawdown", value: m?.max_drawdown_pct ?? null, source: "paper.metrics" },
+  ];
+}
+
+/**
+ * NOVA — the roll-up, from the office rather than from the API.
+ *
+ * She reads the nine readings above and nothing else. That is a design
+ * requirement rather than an optimisation: a director who queried every
+ * endpoint herself could disagree with her own staff, and a room where the
+ * boss and the department report different things is worse than no room.
+ *
+ * She never reads healthy while something is unread. She also never treats
+ * Atlas's documented absence as an incident — a permanent, written-down gap is
+ * not news, and a Nova who reports it every day is a Nova nobody looks at.
+ */
+function deriveNova(
+  employees: Record<EmployeeId, EmployeeReading>,
+  pipeline: PipelineHealth | null,
+  gone: string,
+  at: number | null,
+): EmployeeReading {
+  const metrics: Metric[] = [
+    { label: "Pipeline roll-up", value: pipeline?.overall ?? null, source: "health/pipeline.overall" },
+  ];
+
+  if (!pipeline) return unknown(gone, metrics);
+
+  const others = (Object.keys(employees) as EmployeeId[]).filter((id) => id !== "nova");
+  const readings = others.map((id) => employees[id]);
+  const faults = readings.filter((r) => r.state === "error" || r.state === "offline").length;
+  const alerts = readings.filter((r) => r.state === "alert").length;
+  const unread = readings.filter((r) => r.sourced && r.state === "unknown").length;
+  const busy = readings.filter((r) => r.state === "busy").length;
+  const active = readings.filter(
+    (r) => r.state === "working" || r.state === "busy" || r.state === "reviewing",
+  ).length;
+
+  metrics.push(
+    { label: "Departments reporting a fault", value: String(faults + alerts), source: "HQ roll-up" },
+    { label: "Departments with no reading", value: String(unread), source: "HQ roll-up" },
+    { label: "Departments busy", value: String(busy), source: "HQ roll-up" },
+  );
+
+  if (faults + alerts >= 2) {
+    return reading("alert", `${faults + alerts} departments are reporting a fault.`, metrics, at);
+  }
+  if (faults + alerts === 1) {
+    return reading("reviewing", "One department is reporting a fault.", metrics, at);
+  }
+  if (unread > 0) {
+    return reading("reviewing", `${unread} departments have no current reading.`, metrics, at);
+  }
+  if (busy >= 2) return reading("working", `${busy} departments are busy.`, metrics, at);
+  if (active > 0) return reading("working", `${active} departments are working.`, metrics, at);
+  return reading("idle", "All reporting departments are quiet.", metrics, at);
+}
+
+function deriveActivity(
+  employees: Record<EmployeeId, EmployeeReading>,
+  pipeline: PipelineHealth | null,
+): OfficeActivity {
+  // The pipeline is the one source without which the room knows almost nothing.
+  // Without it, the honest answer about the office is that nobody has looked.
+  if (!pipeline) return "UNKNOWN";
+
+  const readings = Object.values(employees);
+  const faults = readings.filter((r) => r.state === "error" || r.state === "offline").length;
+  const alerts = readings.filter((r) => r.state === "alert").length;
+  const busy = readings.filter((r) => r.state === "busy").length;
+  const active = readings.filter(
+    (r) => r.state === "working" || r.state === "busy" || r.state === "reviewing",
+  ).length;
+
+  if (faults > 0 || alerts >= 2) return "HIGH_ALERT";
+  if (busy >= 2 || alerts === 1) return "BUSY";
+  if (active > 0) return "NORMAL";
+  return "QUIET";
+}
+
+/* ── reactions ───────────────────────────────────────────────────────── */
+
+/**
+ * The few numbers HQ watches for *change* rather than for value.
+ *
+ * A trade closing is not announced as such by anything: `paper.changed` fires
+ * on every re-mark, fifteen times a minute, and carries no payload saying what
+ * changed. The only honest evidence that a position closed is that the
+ * permanent record grew a row. So HQ remembers these four numbers and reacts
+ * to the difference.
+ */
+export interface HqWitness {
+  auditTotal: number | null;
+  openPositions: number | null;
+  /** Net return of the newest closed trade, as the backend rendered it. */
+  lastCloseNet: string | null;
+  radarOpportunities: number | null;
+}
+
+export function witness(sources: Partial<HqSources>): HqWitness {
+  const wallet = sources.paperWallet?.data ?? null;
+  const audit = sources.paperAudit?.data ?? null;
+  const performance = sources.radarPerformance?.data ?? null;
+  return {
+    auditTotal: audit?.total ?? null,
+    openPositions: wallet?.metrics.open_positions ?? null,
+    lastCloseNet: audit?.items[0]?.net_return_usd ?? null,
+    radarOpportunities: performance?.total_opportunities ?? null,
+  };
+}
+
+/**
+ * What changed, and who should notice.
+ *
+ * Restrained on purpose. A losing trade puts Rex in `reviewing`, not in any
+ * kind of failure state — the simulator closing a position at a loss is the
+ * strategy working, and dramatising it would be editorialising about a system
+ * whose results people are trying to read honestly.
+ */
+export function react(
+  previous: HqWitness | null,
+  next: HqWitness,
+  now: number,
+): Partial<Record<EmployeeId, Transient>> {
+  if (!previous) return {};
+  const until = now + THRESHOLDS.reactionMs;
+  const out: Partial<Record<EmployeeId, Transient>> = {};
+
+  const closed =
+    previous.auditTotal !== null &&
+    next.auditTotal !== null &&
+    next.auditTotal > previous.auditTotal;
+
+  if (closed) {
+    const net = Number(next.lastCloseNet);
+    const profitable = next.lastCloseNet !== null && Number.isFinite(net) && net > 0;
+    out.rex = profitable
+      ? { state: "success", detail: "A paper position closed in profit.", until }
+      : { state: "reviewing", detail: "A paper position closed. Reviewing the result.", until };
+    out.milo = { state: "working", detail: "The portfolio changed — a position closed.", until };
+  }
+
+  const opened =
+    previous.openPositions !== null &&
+    next.openPositions !== null &&
+    next.openPositions > previous.openPositions;
+
+  if (opened && !closed) {
+    out.rex = { state: "working", detail: "A paper position opened.", until };
+    out.milo = { state: "working", detail: "The portfolio changed — a position opened.", until };
+  }
+
+  const recorded =
+    previous.radarOpportunities !== null &&
+    next.radarOpportunities !== null &&
+    next.radarOpportunities !== previous.radarOpportunities;
+
+  if (recorded) {
+    out.sage = { state: "working", detail: "The track record changed.", until };
+  }
+
+  return out;
+}
+
+/** Everything unknown, nothing claimed. The state HQ renders before it knows. */
+export const UNKNOWN_HQ_STATE: HqState = deriveHqState();

@@ -1,0 +1,1809 @@
+.hq {
+  /* =====================================================================
+     THE OFFICE PALETTE — absolute, not derived from the app theme.
+
+     Every other screen in MEMESCOPE is a dark instrument panel and inherits
+     `--color-sunken` and friends. HQ used to as well, and that single decision
+     was what made the room read as an abstract dashboard rather than as a
+     place: a cartoon office lit like a trading terminal is a trading terminal
+     with people drawn on it.
+
+     So the room owns its colours outright. Warm beige walls, grey office
+     carpet, medium wood furniture and blue chairs — the palette of an actual
+     workplace. It does not change with the app's light/dark setting, because a
+     room does not repaint itself when you change your dashboard theme.
+
+     WHAT IS STILL RESERVED
+
+     Green, amber and red are absent from this list on purpose. They belong to
+     operational truth and nothing else, which is only affordable because
+     nothing decorative competes for them. That is the whole reason the plants
+     are the only green in the room and why the bins stopped being green when
+     the reference's were.
+     ===================================================================== */
+
+  /* ---- architecture --------------------------------------------------- */
+  --hq-wall: oklch(0.80 0.030 88);
+  --hq-wall-side: oklch(0.72 0.032 86);
+  --hq-baseboard: oklch(0.94 0.008 90);
+  --hq-edge: oklch(0.58 0.020 85 / 0.55);
+  --hq-edge-strong: oklch(0.48 0.024 82 / 0.7);
+
+  /* ---- floors ---------------------------------------------------------
+     Four surfaces, and they are genuinely different materials rather than one
+     grey at four opacities. A department you can identify by its floor is a
+     department that survives its label being hidden. */
+  --hq-carpet: oklch(0.70 0.010 250);
+  --hq-carpet-warm: oklch(0.73 0.014 90);
+  --hq-walkway: oklch(0.64 0.008 250);
+  --hq-wood-floor: oklch(0.68 0.060 66);
+  --hq-rug: oklch(0.58 0.075 238);
+  --hq-rug-pale: oklch(0.80 0.045 232);
+
+  /* ---- furniture ------------------------------------------------------ */
+  --hq-wood: oklch(0.63 0.072 64);
+  --hq-wood-dark: oklch(0.50 0.068 58);
+  --hq-wood-light: oklch(0.72 0.062 70);
+  --hq-metal: oklch(0.60 0.006 250);
+  --hq-metal-dark: oklch(0.48 0.006 250);
+  --hq-chair: oklch(0.46 0.085 268);
+  --hq-chair-light: oklch(0.56 0.080 266);
+  --hq-chair-dark: oklch(0.36 0.070 268);
+  --hq-cabinet: oklch(0.62 0.045 200);
+  --hq-cabinet-dark: oklch(0.52 0.045 200);
+  --hq-paper: oklch(0.96 0.006 90);
+  --hq-bin: oklch(0.58 0.010 250);
+
+  /* ---- plants. The only green in the room that is not a status. -------- */
+  --hq-leaf: oklch(0.55 0.115 145);
+  --hq-leaf-dark: oklch(0.44 0.105 148);
+  --hq-pot: oklch(0.58 0.105 45);
+
+  /* ---- technology ----------------------------------------------------- */
+  --hq-bezel: oklch(0.38 0.008 250);
+  --hq-screen: oklch(0.42 0.075 225);
+  --hq-screen-glow: oklch(0.72 0.110 215);
+  --hq-glass: oklch(0.72 0.045 210 / 0.30);
+  --hq-glass-floor: oklch(0.74 0.022 210);
+  --hq-sealed: oklch(0.30 0.035 275);
+  --hq-vault-metal: oklch(0.44 0.020 265);
+
+  /* Skin tones. Five, spread across the range rather than clustered, because
+     a cast that is one tone in five shades is not a cast. */
+  --hq-skin-s1: oklch(0.86 0.045 62);
+  --hq-skin-s2: oklch(0.78 0.062 55);
+  --hq-skin-s3: oklch(0.67 0.072 50);
+  --hq-skin-s4: oklch(0.55 0.068 45);
+  --hq-skin-s5: oklch(0.43 0.052 40);
+  /* One shade down from the skin, for the shadow under a chin or a sleeve. */
+  --hq-skin-shade: oklch(from var(--hq-skin) calc(l - 0.09) c h);
+
+  /* Hair tones vary independently of skin. */
+  --hq-hair-h1: oklch(0.30 0.020 60);
+  --hq-hair-h2: oklch(0.44 0.058 55);
+  --hq-hair-h3: oklch(0.74 0.090 78);
+  --hq-hair-h4: oklch(0.56 0.032 250);
+  --hq-hair-h5: oklch(0.22 0.012 60);
+
+  /* Employee clothing. Personality, never status — see §27 of the brief.
+     Saturated enough to read at desk size against a warm grey floor. */
+  --hq-indigo: oklch(0.52 0.150 278);
+  --hq-cyan: oklch(0.68 0.130 220);
+  --hq-violet: oklch(0.60 0.150 300);
+  --hq-amber: oklch(0.76 0.135 72);
+  --hq-steel: oklch(0.60 0.055 245);
+  --hq-crimson: oklch(0.56 0.170 25);
+  --hq-forest: oklch(0.54 0.105 152);
+  --hq-orange: oklch(0.68 0.150 52);
+  --hq-lime: oklch(0.70 0.130 128);
+  --hq-teal: oklch(0.62 0.100 195);
+  /* Support staff. Same rules as everyone: clothing colour is personality. */
+  --hq-plum: oklch(0.50 0.110 330);
+  --hq-khaki: oklch(0.58 0.070 100);
+
+  /* The cats. A dark coat and a cream one, warm-bellied. */
+  --hq-cat-black: oklch(0.28 0.015 280);
+  --hq-cat-black-belly: oklch(0.42 0.015 280);
+  --hq-cat-cream: oklch(0.82 0.060 70);
+  --hq-cat-cream-belly: oklch(0.92 0.030 80);
+
+  /* Soft furniture: the lounge's sofa family, apart from the office chairs. */
+  --hq-sofa: oklch(0.58 0.095 40);
+  --hq-sofa-dark: oklch(0.47 0.090 40);
+  --hq-sofa-light: oklch(0.66 0.085 45);
+
+  /* The deck: exterior plating and hull. */
+  --hq-deck: oklch(0.48 0.018 255);
+  --hq-deck-dark: oklch(0.40 0.018 255);
+
+  /* Cardboard. */
+  --hq-box: oklch(0.70 0.070 80);
+  --hq-box-dark: oklch(0.57 0.065 78);
+
+  /* ---- time of day -----------------------------------------------------
+     Overriding tokens rather than adding a tint overlay means the phase costs
+     zero extra elements and cannot end up painted over a status colour — the
+     failure mode of every "just put a warm layer on top" lighting scheme.
+
+     Crypto runs 24/7 and the room says so: night dims the daylight and turns
+     the instruments up, and the office stays warm and staffed. There is no
+     "closed" state. */
+  --hq-star-alpha: 0.55;
+  --hq-sky: oklch(0.55 0.070 250 / 0.10);
+  --hq-glass-glow: 1.5px;
+  /* ---- text and status on a pale room ---------------------------------
+     The app's ink is light because every other screen is dark. Reusing it
+     here would have printed pale grey names onto a pale grey floor, which is
+     the kind of thing that only shows up in a screenshot.
+
+     The status hues keep the app's meaning but are clamped to a lightness
+     that reads against carpet. Same semantics, legible ground — a status
+     nobody can see is worse than no status at all. */
+  --hq-ink: oklch(0.28 0.020 265);
+  --hq-ink-soft: oklch(0.42 0.018 265);
+  --hq-status-work: oklch(0.48 0.130 235);
+  --hq-status-good: oklch(0.48 0.130 150);
+  --hq-status-warn: oklch(0.52 0.150 70);
+  --hq-status-bad: oklch(0.50 0.180 27);
+
+  /* Multiplied into the wall and floor lightness by each phase below. */
+  --hq-daylight: 1;
+
+  position: relative;
+  isolation: isolate;
+}
+
+/* Day: full daylight through the viewports, stars washed out. */
+.hq[data-hq-phase="day"] {
+  --hq-star-alpha: 0.20;
+  --hq-sky: oklch(0.70 0.060 230 / 0.14);
+}
+
+/* Evening: the interior lighting takes over and warms everything. */
+.hq[data-hq-phase="evening"] {
+  --hq-wall: oklch(0.75 0.045 76);
+  --hq-wall-side: oklch(0.66 0.048 74);
+  --hq-carpet: oklch(0.65 0.018 80);
+  --hq-carpet-warm: oklch(0.68 0.026 80);
+  --hq-glass-floor: oklch(0.68 0.026 205);
+  --hq-walkway: oklch(0.59 0.014 80);
+  --hq-rug: oklch(0.54 0.070 250);
+  --hq-star-alpha: 0.55;
+  --hq-sky: oklch(0.62 0.085 60 / 0.14);
+}
+
+/* Night: dimmer room, brighter instruments. Still unmistakably staffed. */
+.hq[data-hq-phase="night"] {
+  --hq-wall: oklch(0.55 0.030 82);
+  --hq-wall-side: oklch(0.47 0.030 80);
+  --hq-baseboard: oklch(0.72 0.010 88);
+  --hq-carpet: oklch(0.50 0.012 250);
+  --hq-carpet-warm: oklch(0.52 0.016 88);
+  --hq-glass-floor: oklch(0.52 0.024 205);
+  --hq-walkway: oklch(0.44 0.010 250);
+  --hq-wood-floor: oklch(0.50 0.055 66);
+  --hq-rug: oklch(0.42 0.065 250);
+  --hq-rug-pale: oklch(0.58 0.040 245);
+  --hq-wood: oklch(0.50 0.062 64);
+  --hq-wood-light: oklch(0.58 0.055 68);
+  --hq-screen: oklch(0.52 0.110 222);
+  --hq-screen-glow: oklch(0.82 0.140 212);
+  --hq-ink: oklch(0.94 0.010 265);
+  --hq-ink-soft: oklch(0.82 0.012 265);
+  --hq-nameplate: oklch(0.22 0.020 265 / 0.82);
+  --hq-status-work: oklch(0.74 0.130 232);
+  --hq-status-good: oklch(0.74 0.140 150);
+  --hq-status-warn: oklch(0.80 0.150 76);
+  --hq-status-bad: oklch(0.68 0.180 27);
+  --hq-star-alpha: 0.95;
+  --hq-sky: oklch(0.40 0.060 265 / 0.16);
+  --hq-glass-glow: 2.2px;
+}
+
+/* ---------- stage ------------------------------------------------------- */
+
+.hq-stage {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  border: 1px solid var(--hq-edge);
+  border-radius: 0.75rem;
+  background:
+    radial-gradient(120% 90% at 50% 0%, var(--hq-sky), transparent 62%),
+    oklch(0.30 0.020 265);
+}
+
+/* The room scales to fit its container rather than the tiles changing size —
+   a fractional tile leaves hairline seams between floor plates. */
+.hq-room {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* ---------- floor plates ------------------------------------------------ */
+
+.hq-plate {
+  stroke: var(--hq-edge);
+  stroke-width: 1;
+  stroke-linejoin: round;
+}
+
+.hq-plate--plate {
+  fill: var(--hq-carpet);
+}
+.hq-plate--walkway {
+  fill: var(--hq-walkway);
+}
+/* Behind glass, not underwater. The translucent fill was being composited
+   over the dark page background rather than over a floor, so the Risk Room
+   came out as a black pool in the middle of a bright office. It gets an opaque
+   carpet like every other department and carries its glass in the border. */
+.hq-plate--glass {
+  fill: var(--hq-glass-floor);
+  stroke: oklch(0.62 0.075 205);
+  stroke-width: 2.5;
+}
+.hq-plate--sealed {
+  fill: var(--hq-sealed);
+  stroke: var(--hq-vault-metal);
+  stroke-width: 2;
+}
+
+/* Department floor accents. Each work area gets its own carpet so the room
+   reads as rooms rather than as one continuous grey. */
+.hq-plate[data-zone="mission"],
+.hq-plate[data-zone="portfolio"],
+.hq-plate[data-zone="lab"] {
+  fill: var(--hq-carpet-warm);
+}
+
+.hq-plate[data-zone="pantry"],
+.hq-plate[data-zone="lounge"] {
+  fill: var(--hq-wood-floor);
+}
+
+.hq-plate[data-zone="reception"] {
+  fill: var(--hq-carpet-warm);
+}
+
+.hq-plate[data-zone="conference"] {
+  fill: oklch(0.72 0.020 230);
+}
+
+/* The deck: exterior plating, no carpet anywhere near it. */
+.hq-plate--deck {
+  fill: var(--hq-deck);
+  stroke: var(--hq-deck-dark);
+  stroke-width: 2;
+}
+
+.hq-grid-line {
+  stroke: var(--hq-edge);
+  stroke-width: 0.5;
+  opacity: 0.25;
+}
+
+/* ---------- walls and window -------------------------------------------- */
+
+.hq-wall {
+  fill: var(--hq-wall);
+  stroke: var(--hq-edge-strong);
+  stroke-width: 1;
+}
+
+/* The side wall catches less light than the back one. Two flat tones rather
+   than a gradient: it is the cheapest thing that makes a corner read as a
+   corner, and it never fights a status colour. */
+.hq-wall--side {
+  fill: var(--hq-wall-side);
+}
+
+/* The pale strip where wall meets floor. Small, and it does more for "this is
+   a room" than any amount of wall decoration. */
+.hq-baseboard {
+  fill: var(--hq-baseboard);
+  stroke: none;
+}
+
+.hq-window {
+  fill: oklch(0.18 0.045 275);
+  stroke: var(--hq-metal);
+  stroke-width: 2.5;
+}
+
+.hq-star {
+  fill: oklch(0.97 0.010 250);
+  opacity: var(--hq-star-alpha, 0.55);
+}
+
+/* ---------- ambient space traffic ---------------------------------------- */
+
+/* Deliberately the ink colour and never a status hue. Something crossing the
+   window must never be mistakable for an alert. */
+.hq-craft {
+  fill: oklch(0.92 0.020 250);
+  opacity: 0;
+}
+
+.hq-meteor {
+  stroke: oklch(0.95 0.020 250);
+  stroke-width: 1.2;
+  stroke-linecap: round;
+  opacity: 0;
+}
+
+/* ---------- break room ---------------------------------------------------- */
+
+.hq-break-window {
+  stroke-width: var(--hq-glass-glow, 1.5px);
+}
+
+/* ---------- furniture --------------------------------------------------- */
+
+/* Warm wood tops on grey pedestals — the single change that stopped the room
+   looking like a server hall. Wood is the only large warm surface at eye
+   level, so it is doing most of the work of making the office feel inhabited. */
+.hq-desk-top {
+  fill: var(--hq-wood);
+  stroke: var(--hq-wood-dark);
+  stroke-width: 1;
+}
+.hq-desk-edge {
+  fill: var(--hq-wood-light);
+}
+.hq-desk-side {
+  fill: var(--hq-metal);
+  stroke: var(--hq-metal-dark);
+  stroke-width: 1;
+}
+.hq-desk-side--dark {
+  fill: var(--hq-metal-dark);
+}
+.hq-screen {
+  fill: var(--hq-screen);
+  stroke: none;
+}
+.hq-bezel {
+  fill: var(--hq-bezel);
+}
+.hq-prop {
+  fill: var(--hq-metal);
+  stroke: var(--hq-metal-dark);
+  stroke-width: 0.75;
+}
+.hq-prop-wood {
+  fill: var(--hq-wood);
+  stroke: var(--hq-wood-dark);
+  stroke-width: 0.75;
+}
+.hq-prop-wood-dark {
+  fill: var(--hq-wood-dark);
+}
+.hq-prop-light {
+  fill: var(--hq-wood-light);
+}
+.hq-cabinet {
+  fill: var(--hq-cabinet);
+  stroke: var(--hq-cabinet-dark);
+  stroke-width: 0.75;
+}
+.hq-cabinet-dark {
+  fill: var(--hq-cabinet-dark);
+}
+.hq-paper {
+  fill: var(--hq-paper);
+}
+.hq-bin {
+  fill: var(--hq-bin);
+}
+.hq-leaf {
+  fill: var(--hq-leaf);
+}
+.hq-leaf-dark {
+  fill: var(--hq-leaf-dark);
+}
+.hq-pot {
+  fill: var(--hq-pot);
+}
+.hq-white {
+  fill: oklch(0.97 0.004 90);
+}
+
+/* ---------- office props -------------------------------------------------
+
+   The furniture that turns a floor plan into a workplace. Every fill resolves
+   a palette token, so the whole room retones with the time of day and nothing
+   here needs a night variant of its own.
+
+   No status hues appear in this block. Green means "healthy" in this product
+   and red means "stop"; a bin or a server LED wearing either would be a
+   decorative object impersonating a measurement, and it would win, because
+   decoration is bigger than a status chip. */
+
+.hq-prop-shadow {
+  fill: oklch(0.25 0.020 265);
+  opacity: 0.18;
+}
+
+.hq-shelf-back {
+  fill: var(--hq-wood-dark);
+}
+
+/* Book spines. Six hues, none of them a status colour — the reference's
+   shelves are the most colourful thing in its office and they cost nothing. */
+.hq-book--0 { fill: oklch(0.52 0.130 25); }
+.hq-book--1 { fill: oklch(0.55 0.115 250); }
+.hq-book--2 { fill: oklch(0.68 0.115 78); }
+.hq-book--3 { fill: oklch(0.48 0.105 300); }
+.hq-book--4 { fill: oklch(0.60 0.080 200); }
+.hq-book--5 { fill: oklch(0.42 0.070 60); }
+
+.hq-pot-dark {
+  fill: oklch(from var(--hq-pot) calc(l - 0.10) c h);
+}
+
+.hq-bin-rim {
+  fill: oklch(from var(--hq-bin) calc(l + 0.06) c h);
+}
+
+.hq-bin-hole {
+  fill: oklch(0.32 0.010 265);
+}
+
+.hq-server-top {
+  fill: oklch(0.42 0.010 265);
+}
+
+.hq-server-dark {
+  fill: oklch(0.26 0.010 265);
+}
+
+/* Cyan and white. Never green, never red. */
+.hq-led {
+  fill: var(--hq-screen-glow);
+}
+
+.hq-led-dim {
+  fill: oklch(0.86 0.010 250);
+  opacity: 0.55;
+}
+
+.hq-cable {
+  fill: none;
+  stroke: oklch(0.30 0.020 265);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+
+.hq-marker {
+  fill: none;
+  stroke: oklch(0.50 0.100 250);
+  stroke-width: 1.4;
+  stroke-linecap: round;
+}
+
+.hq-water {
+  fill: oklch(0.78 0.070 220);
+  opacity: 0.85;
+}
+
+.hq-water-light {
+  fill: oklch(0.94 0.030 220);
+  opacity: 0.7;
+}
+
+.hq-steam {
+  fill: none;
+  stroke: oklch(0.95 0.005 90);
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  opacity: 0.45;
+}
+
+/* ---------- wall decoration ---------------------------------------------- */
+
+.hq-frame {
+  fill: var(--hq-wood-dark);
+}
+
+.hq-art-space {
+  fill: oklch(0.26 0.070 275);
+}
+
+.hq-art-planet {
+  fill: oklch(0.62 0.120 45);
+}
+
+.hq-art-chart {
+  fill: oklch(0.90 0.010 240);
+}
+
+.hq-art-line {
+  fill: none;
+  stroke: var(--hq-status-work);
+  stroke-width: 1.6;
+  stroke-linejoin: round;
+  opacity: 0.8;
+}
+
+.hq-art-sign {
+  fill: oklch(0.30 0.060 270);
+}
+
+/* ---------- employee anchors -------------------------------------------- */
+
+/* The group that holds one character, their name and their state. The capsule
+   placeholder this replaced is gone; what remains is the interaction surface
+   and the two labels beneath the figure. */
+.hq-anchor {
+  cursor: pointer;
+}
+
+.hq-anchor:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+/* A small plate behind the name, so it stays readable over carpet, over a
+   desk, or over whatever a walking employee happens to be standing in front
+   of. */
+.hq-nameplate {
+  fill: var(--hq-nameplate, oklch(0.97 0.006 90 / 0.82));
+  stroke: oklch(0.55 0.020 265 / 0.35);
+  stroke-width: 0.8;
+}
+
+.hq-anchor-name {
+  fill: var(--hq-ink);
+  font-size: 11px;
+  font-weight: 600;
+  text-anchor: middle;
+  pointer-events: none;
+}
+
+.hq-anchor-state {
+  fill: var(--hq-ink-soft);
+  font-size: 9px;
+  text-anchor: middle;
+  pointer-events: none;
+  opacity: 0.8;
+}
+
+/* An unmeasured employee is drawn as unmeasured.
+   The figure keeps its identity — desaturating people would defeat the whole
+   point of a recognisable cast — but their *state chip* is dashed and muted,
+   and their desk instruments dim. `unknown` must never be able to read as a
+   healthy working state at a glance. */
+.hq-anchor[data-state="unknown"] .hq-anchor-state,
+.hq-anchor[data-state="offline"] .hq-anchor-state {
+  fill: var(--hq-ink-soft);
+  opacity: 0.95;
+}
+
+.hq-anchor[data-state="unknown"] .hq-character,
+.hq-anchor[data-state="offline"] .hq-character {
+  opacity: 0.82;
+}
+
+/* Operational state, coloured *in addition to* being written.
+   The word is the fact and it is always present — these rules only make the
+   room scannable at a glance. Nothing here is the sole carrier of anything: a
+   reader who cannot distinguish these hues loses speed, never information. */
+.hq-anchor[data-state="working"] .hq-anchor-state,
+.hq-anchor[data-state="busy"] .hq-anchor-state,
+.hq-anchor[data-state="reviewing"] .hq-anchor-state {
+  fill: var(--hq-status-work);
+  opacity: 1;
+}
+
+.hq-anchor[data-state="success"] .hq-anchor-state {
+  fill: var(--hq-status-good);
+  opacity: 1;
+}
+
+.hq-anchor[data-state="alert"] .hq-anchor-state {
+  fill: var(--hq-status-warn);
+  opacity: 1;
+  font-weight: 600;
+}
+
+.hq-anchor[data-state="error"] .hq-anchor-state {
+  fill: var(--hq-status-bad);
+  opacity: 1;
+  font-weight: 600;
+}
+
+/* The alert lamp. A ring under the figure rather than a recolour of the
+   figure: the cast has to stay recognisable, and a person who turns amber is a
+   person the reader has to re-identify at the exact moment they need to read
+   fast. */
+.hq-anchor[data-state="alert"] .hq-contact-shadow,
+.hq-anchor[data-state="error"] .hq-contact-shadow {
+  fill: var(--hq-status-warn);
+  opacity: 0.45;
+}
+
+.hq-anchor[data-state="error"] .hq-contact-shadow {
+  fill: var(--hq-status-bad);
+}
+
+/* ---------- zone labels -------------------------------------------------- */
+
+.hq-zone-label {
+  fill: var(--hq-ink-soft);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-anchor: middle;
+  text-transform: uppercase;
+  pointer-events: none;
+  opacity: 0.85;
+}
+
+/* ---------- motion ------------------------------------------------------- */
+
+/* Nothing above animates. Everything below runs only when motion is opted in,
+   and every rule is transform or opacity so none of it can trigger layout. */
+
+@media (prefers-reduced-motion: no-preference) {
+  .hq[data-hq-motion="on"] .hq-screen {
+    animation: hq-screen-flicker 6s ease-in-out infinite;
+  }
+
+  .hq[data-hq-motion="on"] .hq-star {
+    animation: hq-star-drift 9s ease-in-out infinite;
+  }
+
+  /* The one instrument that moves. A radar that does not sweep is a logo, and
+     it is transform-only so it costs nothing. */
+  .hq[data-hq-motion="on"] .hq-sweep {
+    animation: hq-sweep-rotate 4s linear infinite;
+  }
+
+  /* ---- walking ---------------------------------------------------------
+     The entire walk system. The scheduler sets one inline `translate` on
+     `.hq-walker` and the compositor moves the person there; there is no
+     tween loop, no per-frame JavaScript and no requestAnimationFrame in HQ.
+
+     The duration matches `STEP_MS` in `ambient.ts`. If one changes without
+     the other, a walker arrives late or teleports the last few units, so the
+     two are commented in both directions rather than shared through a
+     variable nothing else would ever read. */
+  .hq[data-hq-motion="on"] .hq-walker {
+    transition: transform 2.4s cubic-bezier(0.45, 0, 0.55, 1);
+  }
+
+  /* ---- resting ---------------------------------------------------------
+     One animation per pose, all on the same element. That is deliberate: two
+     animations both writing `transform` would silently drop one, so each pose
+     gets a single keyframe set that carries the breath *and* the posture. */
+  .hq[data-hq-motion="on"] .hq-character {
+    animation: hq-breathe 6.5s ease-in-out infinite;
+    animation-delay: var(--hq-stagger, 0s);
+  }
+
+  .hq[data-hq-motion="on"] .hq-character[data-pose="looking_at_screen"] {
+    animation: hq-lean 5.5s ease-in-out infinite;
+  }
+
+  .hq[data-hq-motion="on"] .hq-character[data-pose="talking_briefly"] {
+    animation: hq-talk 2.4s ease-in-out infinite;
+  }
+
+  .hq[data-hq-motion="on"] .hq-character[data-pose="stretching"] {
+    animation: hq-stretch 3s ease-in-out infinite;
+  }
+
+  .hq[data-hq-motion="on"] .hq-character[data-pose="coffee_idle"] {
+    animation: hq-sip 5.5s ease-in-out infinite;
+  }
+
+  .hq[data-hq-motion="on"] .hq-character[data-pose="walking_short"],
+  .hq[data-hq-motion="on"] .hq-character[data-pose="returning_to_desk"] {
+    animation: hq-stride 0.9s ease-in-out infinite;
+  }
+
+  .hq[data-hq-motion="on"] .hq-character[data-pose="seated_lounge"] {
+    animation: hq-breathe 7.5s ease-in-out infinite;
+  }
+
+  .hq[data-hq-motion="on"] .hq-character[data-pose="seated_talk"] {
+    animation: hq-talk 2.8s ease-in-out infinite;
+  }
+
+  /* The support staff's task lean: a slow rock into the work and back. */
+  .hq[data-hq-motion="on"] .hq-character[data-pose="tidying"] {
+    animation: hq-tidy 2.6s ease-in-out infinite;
+  }
+
+  /* Cats. A tail with a mind of its own, a sleeping flank, a quick pounce.
+     All transform/opacity, all inside the same motion gates as everyone. */
+  .hq[data-hq-motion="on"] .hq-cat .hq-cat-tail {
+    animation: hq-tail 3.4s ease-in-out infinite;
+  }
+
+  .hq[data-hq-motion="on"] .hq-cat[data-pose="cat_sleep"] {
+    animation: hq-cat-sleep 5.5s ease-in-out infinite;
+  }
+
+  .hq[data-hq-motion="on"] .hq-cat[data-pose="cat_walk"] {
+    animation: hq-cat-pad 0.7s ease-in-out infinite;
+  }
+
+  .hq[data-hq-motion="on"] .hq-cat[data-pose="cat_pounce"] {
+    animation: hq-cat-pounce 1.1s ease-in-out infinite;
+  }
+
+  .hq[data-hq-motion="on"] .hq-cat[data-pose="cat_stretch"] {
+    animation: hq-cat-sway 3s ease-in-out infinite;
+  }
+
+  /* Arms are a separate element, so a swing composes with the stride bob
+     instead of fighting it. */
+  .hq[data-hq-motion="on"] .hq-arm--left {
+    animation: hq-swing-back 0.9s ease-in-out infinite;
+  }
+
+  .hq[data-hq-motion="on"] .hq-arm--right {
+    animation: hq-swing-forward 0.9s ease-in-out infinite;
+  }
+
+  .hq[data-hq-motion="on"] .hq-arm--gesture {
+    animation: hq-gesture 2.4s ease-in-out infinite;
+  }
+
+  /* ---- easter eggs -----------------------------------------------------
+     Rare, harmless, and never a claim about anything. Byte nodding off during
+     a quiet cycle is a joke about Byte, not a report that infrastructure is
+     asleep — which is precisely why these had to land before any real state
+     does, and why HQ-4 must be able to out-vote them. */
+  .hq[data-hq-motion="on"] .hq-character[data-egg="doze"] {
+    animation: hq-doze 5s ease-in-out infinite;
+  }
+
+  .hq[data-hq-motion="on"] .hq-telescope {
+    animation: hq-scan 7s ease-in-out infinite;
+  }
+
+  /* ---- space traffic ---------------------------------------------------
+     Long cycles with a short visible window, and deliberately coprime
+     durations so two never cross together. The transform is pinned across the
+     invisible stretch so nothing creeps while it waits. */
+  .hq[data-hq-motion="on"] .hq-traffic-satellite {
+    animation: hq-satellite 78s linear infinite;
+  }
+
+  .hq[data-hq-motion="on"] .hq-meteor {
+    animation: hq-meteor 104s linear infinite;
+  }
+
+  .hq[data-hq-motion="on"] .hq-traffic-craft {
+    animation: hq-craft 187s linear infinite;
+  }
+
+  /* ---- small screens ---------------------------------------------------
+     The card stack gets one thing and one thing only: the portraits breathe.
+     No walking, no scheduler, no isometric room. */
+  [data-hq-motion="on"] .hq-portrait .hq-character {
+    animation: hq-breathe 6.5s ease-in-out infinite;
+    animation-delay: var(--hq-stagger, 0s);
+  }
+}
+
+/* Rotations pivot at the feet rather than at the bounding-box centre, so a
+   lean is a lean and not a tumble. */
+.hq-character,
+.hq-arm,
+.hq-telescope {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+}
+
+.hq-arm--left,
+.hq-arm--right {
+  transform-origin: 50% 0%;
+}
+
+.hq-arm--gesture {
+  transform-origin: 0% 0%;
+}
+
+/* Lounge sitters settle onto the cushion. The rig's origin is the feet on
+   the floor; a sofa or chair seat is a few units up, so the whole figure
+   drops to meet it. The `translate` property composes with the `transform`
+   animations rather than fighting them. */
+.hq-character[data-stance="lounge"] {
+  translate: 0 10px;
+}
+
+.hq-cat,
+.hq-cat-tail {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+}
+
+.hq-cat-tail {
+  transform-origin: 0% 80%;
+}
+
+/* One attribute halts every animation in the subtree when the tab is hidden.
+   One listener per surface, no per-component teardown to forget. Written
+   against the attribute rather than against `.hq` so the mobile card stack
+   gets the same guarantee from the same rule. */
+[data-hq-paused="true"] * {
+  animation-play-state: paused !important;
+}
+
+@keyframes hq-screen-flicker {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  48% {
+    opacity: 0.86;
+  }
+  52% {
+    opacity: 0.94;
+  }
+}
+
+@keyframes hq-sweep-rotate {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes hq-star-drift {
+  0%,
+  100% {
+    opacity: calc(var(--hq-star-alpha, 0.55) * 0.7);
+  }
+  50% {
+    opacity: var(--hq-star-alpha, 0.55);
+  }
+}
+
+/* ---------- ambient keyframes -------------------------------------------
+   Every one of these is transform or opacity. Nothing below can trigger
+   layout, and the amplitudes are small on purpose: the brief asks for an
+   office, not a game loop, and a room where ten people bob visibly is a room
+   nobody can read a status off. */
+
+@keyframes hq-breathe {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-0.7px);
+  }
+}
+
+@keyframes hq-lean {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  45%,
+  70% {
+    transform: translateY(0.4px) rotate(-2deg);
+  }
+}
+
+@keyframes hq-talk {
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  30% {
+    transform: rotate(1.4deg);
+  }
+  65% {
+    transform: rotate(-1deg);
+  }
+}
+
+@keyframes hq-stretch {
+  0%,
+  100% {
+    transform: translateY(0) scaleY(1);
+  }
+  45%,
+  60% {
+    transform: translateY(-1.6px) scaleY(1.02);
+  }
+}
+
+@keyframes hq-sip {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  40%,
+  55% {
+    transform: translateY(-0.6px) rotate(-1.2deg);
+  }
+}
+
+@keyframes hq-stride {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-0.6deg);
+  }
+  50% {
+    transform: translateY(-1.1px) rotate(0.6deg);
+  }
+}
+
+@keyframes hq-swing-forward {
+  0%,
+  100% {
+    transform: rotate(-11deg);
+  }
+  50% {
+    transform: rotate(11deg);
+  }
+}
+
+@keyframes hq-swing-back {
+  0%,
+  100% {
+    transform: rotate(11deg);
+  }
+  50% {
+    transform: rotate(-11deg);
+  }
+}
+
+@keyframes hq-gesture {
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  40% {
+    transform: rotate(-7deg);
+  }
+}
+
+/* Byte, briefly. The head goes down and comes back up; nothing else changes,
+   because the joke is the recovery. */
+@keyframes hq-doze {
+  0%,
+  100% {
+    transform: rotate(0deg) translateY(0);
+  }
+  40%,
+  70% {
+    transform: rotate(4.5deg) translateY(1.2px);
+  }
+}
+
+@keyframes hq-tidy {
+  0%,
+  100% {
+    transform: rotate(0deg) translateY(0);
+  }
+  50% {
+    transform: rotate(5deg) translateY(1.4px);
+  }
+}
+
+@keyframes hq-tail {
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  40% {
+    transform: rotate(-9deg);
+  }
+  70% {
+    transform: rotate(5deg);
+  }
+}
+
+@keyframes hq-cat-sleep {
+  0%,
+  100% {
+    transform: scale(1) translateY(0);
+  }
+  50% {
+    transform: scale(1.03) translateY(-0.4px);
+  }
+}
+
+@keyframes hq-cat-pad {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-1.4px);
+  }
+}
+
+@keyframes hq-cat-pounce {
+  0%,
+  100% {
+    transform: translateY(0) scaleY(1);
+  }
+  30% {
+    transform: translateY(1.5px) scaleY(0.9);
+  }
+  55% {
+    transform: translateY(-4px) scaleY(1.05);
+  }
+}
+
+@keyframes hq-cat-sway {
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  50% {
+    transform: rotate(-3deg);
+  }
+}
+
+@keyframes hq-scan {
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  50% {
+    transform: rotate(-7deg);
+  }
+}
+
+@keyframes hq-satellite {
+  0%,
+  90% {
+    opacity: 0;
+    transform: translateX(0);
+  }
+  91% {
+    opacity: 0.6;
+    transform: translateX(4px);
+  }
+  99% {
+    opacity: 0.6;
+    transform: translateX(138px);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(146px);
+  }
+}
+
+@keyframes hq-meteor {
+  0%,
+  96% {
+    opacity: 0;
+    transform: translate(0, 0);
+  }
+  97% {
+    opacity: 0.75;
+    transform: translate(2px, 1px);
+  }
+  99.4% {
+    opacity: 0;
+    transform: translate(96px, 62px);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(96px, 62px);
+  }
+}
+
+/* The tiny spacecraft. Roughly once every three minutes, and it is the only
+   thing in HQ that exists purely to be noticed once. */
+@keyframes hq-craft {
+  0%,
+  93% {
+    opacity: 0;
+    transform: translate(0, 0);
+  }
+  94% {
+    opacity: 0.55;
+    transform: translate(4px, -1px);
+  }
+  99% {
+    opacity: 0.55;
+    transform: translate(132px, -14px);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(140px, -16px);
+  }
+}
+
+/* Belt and braces. The `data-hq-motion` attribute is the primary control, and
+   the ambient scheduler refuses to start independently of both; this is the
+   third guarantee, and it covers a future component that forgets the other
+   two. Scoped to the attribute so the room and the card stack are both
+   covered by one rule. */
+@media (prefers-reduced-motion: reduce) {
+  .hq *,
+  .hq *::before,
+  .hq *::after,
+  [data-hq-motion] *,
+  [data-hq-motion] *::before,
+  [data-hq-motion] *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* ---------- character rig ------------------------------------------------ */
+
+/* Every fill below resolves a custom property set per character on the group,
+   so one stylesheet dresses ten people and adding an eleventh needs no CSS. */
+
+.hq-skin {
+  fill: var(--hq-skin, oklch(0.7 0.05 55));
+}
+
+.hq-hair {
+  fill: var(--hq-hair, oklch(0.3 0.02 60));
+}
+
+/* ---------- faces --------------------------------------------------------
+
+   Five features and a blush. Everything is sized against a ten-unit head, so
+   a proportion change in the rig carries the face with it rather than leaving
+   two eyes floating on a chin.
+
+   Nothing in this block is ever a status surface. A character's expression is
+   ambient personality; the state chip beneath them is the fact. */
+
+.hq-hand {
+  fill: var(--hq-skin, oklch(0.7 0.05 55));
+}
+
+.hq-shoe {
+  fill: oklch(0.30 0.020 60);
+}
+
+.hq-eye {
+  fill: oklch(0.22 0.020 265);
+}
+
+.hq-eye-light {
+  fill: oklch(0.99 0 0);
+  opacity: 0.9;
+}
+
+.hq-eye-line path {
+  fill: none;
+  stroke: oklch(0.22 0.020 265);
+  stroke-width: 1.1;
+  stroke-linecap: round;
+}
+
+.hq-brow path {
+  fill: none;
+  stroke: var(--hq-hair, oklch(0.3 0.02 60));
+  stroke-width: 1.3;
+  stroke-linecap: round;
+}
+
+.hq-nose {
+  fill: none;
+  stroke: var(--hq-skin-shade);
+  stroke-width: 1.1;
+  stroke-linecap: round;
+}
+
+.hq-mouth {
+  fill: none;
+  stroke: oklch(0.35 0.070 30);
+  stroke-width: 1.1;
+  stroke-linecap: round;
+}
+
+.hq-mouth-open {
+  fill: oklch(0.32 0.080 28);
+}
+
+/* A trace of warmth in the cheeks. Low enough that it never competes with a
+   status colour, present enough that the cast reads as friendly. */
+.hq-blush {
+  fill: oklch(0.68 0.130 25);
+  opacity: 0.28;
+}
+
+.hq-garment {
+  fill: var(--hq-garment, var(--color-neutral));
+}
+
+/* Two derived tones rather than two more variables: a garment is one colour
+   with a lit and a shadowed face, and deriving them means a palette change
+   cannot leave the shading behind. */
+.hq-garment-dark {
+  fill: color-mix(in oklab, var(--hq-garment, var(--color-neutral)) 68%, black);
+}
+
+.hq-garment-light {
+  fill: color-mix(in oklab, var(--hq-garment, var(--color-neutral)) 55%, white);
+}
+
+.hq-legs {
+  fill: color-mix(in oklab, var(--hq-garment, var(--color-neutral)) 45%, black);
+}
+
+.hq-legs-shadow {
+  fill: color-mix(in oklab, var(--hq-garment, var(--color-neutral)) 30%, black);
+}
+
+/* Blue office chairs, and chunky enough to see behind a seated figure. In the
+   old rig the chair was the same near-black as the floor, so ten people
+   appeared to be sitting on nothing. */
+.hq-chair {
+  fill: var(--hq-chair);
+}
+
+.hq-chair-back {
+  fill: var(--hq-chair-light);
+}
+
+.hq-chair-stem {
+  fill: var(--hq-metal-dark);
+}
+
+/* Grounds the figure. Without it everyone floats a pixel above the floor
+   plate, which is the single most common tell of a bad isometric scene. */
+.hq-contact-shadow {
+  fill: black;
+  opacity: 0.22;
+}
+
+.hq-device {
+  fill: var(--hq-bezel);
+}
+
+.hq-device-clip {
+  fill: var(--hq-metal);
+}
+
+.hq-device-stroke {
+  fill: none;
+  stroke: var(--hq-bezel);
+  stroke-width: 1.2;
+  stroke-linecap: round;
+}
+
+.hq-visor {
+  fill: oklch(0.70 0.120 215 / 0.75);
+  stroke: var(--hq-bezel);
+  stroke-width: 0.6;
+}
+
+/* ---------- desk instruments --------------------------------------------- */
+
+/* Abstract shapes only. Nothing here renders a value, and nothing should ever
+   be added that does — a number drawn as decoration is indistinguishable from
+   a measured one. */
+
+.hq-ink {
+  stroke: var(--hq-screen-glow);
+  stroke-width: 1;
+  stroke-linecap: round;
+  fill: none;
+  opacity: 0.75;
+}
+
+.hq-cell {
+  fill: oklch(from var(--hq-screen-glow) l c h / 0.45);
+}
+
+.hq-bar {
+  fill: oklch(from var(--hq-screen-glow) l c h / 0.7);
+}
+
+/* Deliberately the accent, not green. A green action bar on an execution
+   terminal reads as "approved", which is a claim nothing has made. */
+.hq-action {
+  fill: oklch(from var(--hq-screen-glow) l c h / 0.8);
+}
+
+.hq-sweep {
+  stroke: var(--hq-screen-glow);
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  transform-origin: center;
+}
+
+.hq-blip {
+  fill: var(--hq-screen-glow);
+  opacity: 0.85;
+}
+
+.hq-shield {
+  fill: color-mix(in oklab, var(--hq-steel) 70%, transparent);
+  stroke: var(--hq-steel);
+  stroke-width: 0.8;
+}
+
+.hq-server {
+  fill: var(--hq-metal-dark);
+  stroke: var(--hq-bezel);
+  stroke-width: 0.75;
+}
+
+.hq-mug,
+.hq-notebook {
+  fill: var(--hq-paper);
+}
+
+/* The plate that distinguishes Rex's paper terminal from the vault. Present
+   from the first phase on purpose: the simulation/real-money distinction is
+   the one thing in this room that must never be ambiguous. */
+.hq-desk-plate {
+  fill: var(--hq-ink-soft);
+  /* 9px, matching `hq-anchor-state` — the smallest tier of in-world text that
+     is actually meant to be read.
+
+     It was 7px at 0.65 opacity, which measured ~2.95px on screen once the
+     stage's own 0.42 scale was applied: the least legible text anywhere in HQ.
+     These are the PAPER and SEALED plates, and the comment above says the
+     simulation/real-money distinction "must never be ambiguous" — so it was
+     precisely the wrong label to render below the threshold of reading.
+     Raised to the existing tier rather than made large: this is scene
+     signage, not a heading. */
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-anchor: middle;
+  opacity: 0.85;
+}
+
+/* ---------- portraits ---------------------------------------------------- */
+
+.hq-portrait {
+  display: block;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--color-sunken) 80%, black);
+  border: 1px solid var(--hq-edge);
+}
+
+.hq-sign-bar {
+  fill: var(--hq-screen-glow);
+  opacity: 0.9;
+}
+
+.hq-keyboard {
+  fill: oklch(0.88 0.006 250);
+  stroke: oklch(0.70 0.008 250);
+  stroke-width: 0.6;
+}
+
+.hq-mouse {
+  fill: oklch(0.90 0.006 250);
+}
+
+/* The glass in front of the panel. A monitor that is only a lit rectangle
+   reads as a diagram; a dark sheet with the display inside it reads as a
+   screen somebody is looking at. */
+.hq-screen-glass {
+  fill: oklch(0.22 0.030 250);
+}
+
+/* ---------- mission board ------------------------------------------------ */
+
+.hq-board-frame {
+  fill: var(--hq-wood-dark);
+}
+
+.hq-board-screen {
+  fill: oklch(0.20 0.035 258);
+}
+
+.hq-board-title {
+  fill: var(--hq-screen-glow);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-anchor: middle;
+  pointer-events: none;
+}
+
+.hq-board-value {
+  fill: oklch(0.90 0.010 250);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-anchor: middle;
+  pointer-events: none;
+}
+
+/* ---------- the vault ---------------------------------------------------- */
+
+/* Cold metal against a warm office. The contrast is the message: this is the
+   part of the company that would handle real money, and it is shut. */
+.hq-vault-frame {
+  fill: var(--hq-vault-metal);
+}
+
+.hq-vault-face {
+  fill: oklch(0.36 0.018 265);
+}
+
+.hq-vault-wheel {
+  fill: none;
+  stroke: oklch(0.58 0.020 265);
+  stroke-width: 4;
+}
+
+.hq-vault-hub {
+  fill: oklch(0.58 0.020 265);
+}
+
+.hq-vault-spoke {
+  fill: oklch(0.52 0.020 265);
+}
+
+/* ---------- rugs --------------------------------------------------------- */
+
+/* Opaque, not translucent. At 55% over grey carpet the rugs came out as pale
+   slabs that read like a spill rather than a furnishing — the one place in
+   this room where colour is allowed to be generous, spent on nothing. */
+.hq-rug-field {
+  fill: var(--hq-rug);
+}
+
+.hq-rug-inner {
+  fill: var(--hq-rug-pale);
+  opacity: 0.5;
+}
+
+/* On floorboards rather than carpet, so the rug warms instead of cooling. */
+.hq-rug--warm .hq-rug-field {
+  fill: oklch(0.56 0.085 40);
+}
+
+.hq-rug--warm .hq-rug-inner {
+  fill: oklch(0.76 0.055 55);
+  opacity: 0.55;
+}
+
+/* ==========================================================================
+   WORLD EXPANSION — the new rooms, the support staff, the cats.
+   Same disciplines as everything above: transform and opacity only, palette
+   tokens only, and no status hue on anything that is not a status.
+   ========================================================================== */
+
+/* ---- soft furniture ------------------------------------------------------ */
+
+.hq-sofa-seat {
+  fill: var(--hq-sofa);
+}
+
+.hq-sofa-back {
+  fill: var(--hq-sofa-light);
+}
+
+.hq-sofa-side {
+  fill: var(--hq-sofa-dark);
+}
+
+/* ---- pantry --------------------------------------------------------------- */
+
+.hq-sink {
+  fill: oklch(0.78 0.010 250);
+  stroke: var(--hq-metal-dark);
+  stroke-width: 0.8;
+}
+
+.hq-snack--0 { fill: oklch(0.62 0.120 40); }
+.hq-snack--1 { fill: oklch(0.66 0.110 230); }
+.hq-snack--2 { fill: oklch(0.72 0.110 95); }
+.hq-snack--3 { fill: oklch(0.56 0.100 320); }
+
+/* ---- reception & facilities ----------------------------------------------- */
+
+.hq-counter-front {
+  fill: var(--hq-cabinet);
+  stroke: var(--hq-cabinet-dark);
+  stroke-width: 0.75;
+}
+
+.hq-counter-side {
+  fill: var(--hq-cabinet-dark);
+}
+
+.hq-mat {
+  fill: oklch(0.42 0.030 260);
+}
+
+.hq-mat-inner {
+  fill: none;
+  stroke: oklch(0.62 0.045 240);
+  stroke-width: 1.4;
+}
+
+.hq-metal-leg {
+  fill: var(--hq-metal-dark);
+}
+
+.hq-box {
+  fill: var(--hq-box);
+}
+
+.hq-box-dark {
+  fill: var(--hq-box-dark);
+}
+
+.hq-wall-inner {
+  fill: var(--hq-wall-side);
+  stroke: var(--hq-edge-strong);
+  stroke-width: 1;
+}
+
+.hq-door {
+  fill: var(--hq-wood);
+  stroke: var(--hq-wood-dark);
+  stroke-width: 1;
+}
+
+.hq-cloth {
+  fill: oklch(0.75 0.090 230);
+}
+
+.hq-toolbox {
+  fill: oklch(0.60 0.100 60);
+  stroke: var(--hq-metal-dark);
+  stroke-width: 0.8;
+}
+
+/* ---- conference glass & deck ----------------------------------------------
+   Translucent panes over whatever is behind them. Never a status colour: the
+   glass is architecture, and architecture does not report. */
+
+.hq-glass-pane {
+  fill: oklch(0.80 0.030 220 / 0.22);
+  stroke: oklch(0.70 0.040 220 / 0.55);
+  stroke-width: 1;
+}
+
+.hq-glass-post {
+  fill: var(--hq-metal);
+}
+
+.hq-deck-glass {
+  fill: oklch(0.75 0.030 230 / 0.16);
+}
+
+.hq-rail-post {
+  fill: var(--hq-metal-dark);
+}
+
+.hq-rail-top {
+  fill: none;
+  stroke: var(--hq-metal);
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+
+.hq-airlock {
+  fill: var(--hq-vault-metal);
+}
+
+.hq-airlock-inner {
+  fill: oklch(0.30 0.020 265);
+}
+
+/* ---- the planet beyond the hull -------------------------------------------- */
+
+.hq-planet-body {
+  fill: oklch(0.55 0.095 55);
+}
+
+.hq-planet-band {
+  fill: oklch(0.62 0.085 70);
+  opacity: 0.7;
+}
+
+.hq-planet-ring {
+  fill: none;
+  stroke: oklch(0.75 0.045 90 / 0.55);
+  stroke-width: 3;
+}
+
+/* ---- cats ------------------------------------------------------------------ */
+
+.hq-cat-coat {
+  fill: var(--hq-cat, oklch(0.3 0.01 280));
+}
+
+.hq-cat-belly {
+  fill: var(--hq-cat-belly, oklch(0.45 0.01 280));
+}
+
+.hq-cat-eye {
+  fill: oklch(0.75 0.140 130);
+}
+
+.hq-cat-eye-line {
+  fill: none;
+  stroke: oklch(0.16 0.010 280);
+  stroke-width: 0.9;
+  stroke-linecap: round;
+}
+
+/* Cream cat gets dark lines; the dark cat's read against its own coat. */
+.hq-cat[data-cat="cosmo"] .hq-cat-eye-line {
+  stroke: oklch(0.85 0.010 280);
+}
+
+.hq-cat-nose {
+  fill: oklch(0.68 0.130 25);
+}
+
+.hq-cat .hq-contact-shadow {
+  opacity: 0.16;
+}
+
+/* Cat anchors: the whole sprite is the focus target. */
+.hq-anchor--cat {
+  cursor: pointer;
+}
+
+/* ---- walker tuning for the small and the wheeled ---------------------------- */
+
+.hq-walker--cat {
+  /* Cats flow: quicker steps than a person, same compositor-only mechanism. */
+  transition-duration: 1.4s;
+}
+
+/* ==========================================================================
+   HQ-5 — token case packets.
+   Small dossier tags, never a bouncing coin. Status uses the same tokens
+   the employee state chips already use, so a packet and a person read as
+   the same vocabulary rather than a second status language.
+   ========================================================================== */
+
+.hq-packet {
+  cursor: pointer;
+}
+
+.hq-packet:focus-visible {
+  outline: 2px solid var(--color-accent, var(--hq-status-work));
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+/* A CSS transform transition, exactly the `.hq-walker` mechanism the cast
+   already uses — moving a packet from one stage's dock to the next is one
+   compositor-only change, never a hand-authored path. */
+.hq-packet[data-motion="on"] {
+  transition: transform 1.4s ease-in-out;
+}
+
+.hq-packet-body {
+  fill: var(--hq-bezel);
+  stroke: oklch(0.85 0.010 250 / 0.4);
+  stroke-width: 1;
+}
+
+.hq-packet-mark {
+  fill: oklch(0.95 0.006 90);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  pointer-events: none;
+}
+
+.hq-packet-dot {
+  stroke: oklch(0.15 0.010 250);
+  stroke-width: 1;
+}
+
+.hq-packet--passed .hq-packet-dot {
+  fill: var(--hq-status-good);
+}
+
+.hq-packet--failed .hq-packet-dot {
+  fill: var(--hq-status-bad);
+}
+
+.hq-packet--pending .hq-packet-dot {
+  fill: var(--hq-status-work);
+}
+
+/* Evaluated, unresolved: a hollow warn dot. Distinct from both a solid pass
+   and the dashed nothing-was-read case. */
+.hq-packet--unknown .hq-packet-dot {
+  fill: none;
+  stroke: var(--hq-status-warn, var(--hq-status-work));
+  stroke-width: 1.6;
+}
+
+/* Unavailable is dashed, never a solid dot — the same "must not look
+   healthy" rule the employee chips carry for `unknown`/`offline`. */
+.hq-packet--unavailable .hq-packet-body {
+  stroke-dasharray: 3 2;
+}
+
+.hq-packet--unavailable .hq-packet-dot {
+  fill: none;
+  stroke: var(--hq-ink-soft);
+  stroke-width: 1.2;
+}
+
+.hq-packet-body--overflow {
+  fill: oklch(from var(--hq-bezel) l c h / 0.85);
+}
+
+.hq-packet-overflow .hq-packet-mark {
+  font-size: 10px;
+}
+
+/* ==========================================================================
+   HQ-5 — the Token Case File panel.
+   Plain app chrome below the room, so it uses the app's own status tokens
+   (`--color-up/down/warn`) rather than the room's palette — the same
+   convention the employee panel already follows.
+   ========================================================================== */
+
+.hq-case-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 4px;
+  padding: 1px 7px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  border: 1px solid var(--color-line);
+  color: var(--color-ink-3, var(--color-ink));
+}
+
+.hq-case-chip[data-status="PASSED"] {
+  color: var(--color-up);
+  border-color: color-mix(in oklab, var(--color-up) 50%, transparent);
+}
+
+.hq-case-chip[data-status="FAILED"] {
+  color: var(--color-down);
+  border-color: color-mix(in oklab, var(--color-down) 50%, transparent);
+}
+
+.hq-case-chip[data-status="PENDING"] {
+  color: var(--color-accent);
+  border-color: color-mix(in oklab, var(--color-accent) 50%, transparent);
+}
+
+/* Evaluated and unresolved. Warn-coloured and dashed: it carries more weight
+   than "not available" — something looked and could not clear the token — but
+   it must never read as a pass. */
+.hq-case-chip[data-status="UNKNOWN"] {
+  border-style: dashed;
+  color: var(--color-warn);
+  border-color: color-mix(in oklab, var(--color-warn) 50%, transparent);
+}
+
+/* Dashed, never solid — must never read as a healthy pass at a glance. */
+.hq-case-chip[data-status="UNAVAILABLE"] {
+  border-style: dashed;
+  color: var(--color-ink-3, var(--color-ink));
+}
+
+.hq-case-chip[data-stale="true"] {
+  color: var(--color-warn);
+}
+
+.hq-case-row {
+  padding: 2px 0;
+}
+
+.hq-board-cases {
+  fill: oklch(0.80 0.010 250);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-anchor: middle;
+  pointer-events: none;
+}

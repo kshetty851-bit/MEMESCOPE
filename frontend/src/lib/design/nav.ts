@@ -2,6 +2,7 @@ import type { ComponentType, SVGProps } from "react";
 
 import {
   IconBookmark,
+  IconHq,
   IconLedger,
   IconScanner,
   IconSettings,
@@ -91,6 +92,15 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "Strategy",
     items: [
       { href: "/wallet", label: "Paper wallet", icon: IconWallet, status: "ready" },
+    ],
+  },
+  {
+    label: "Operations",
+    items: [
+      // HQ renders system state as an organisation. Its own group rather than
+      // an entry under Strategy: it observes every subsystem, so filing it
+      // beneath one of them would misdescribe what it shows.
+      { href: "/hq", label: "HQ", icon: IconHq, status: "ready" },
     ],
   },
 ];

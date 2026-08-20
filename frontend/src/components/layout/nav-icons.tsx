@@ -149,3 +149,21 @@ export function IconExit(props: SVGProps<SVGSVGElement>) {
     </Base>
   );
 }
+
+/**
+ * HQ.
+ *
+ * A room seen in isometric — the same projection the screen itself uses, so
+ * the glyph previews the thing it links to. Drawn as a floor diamond with two
+ * standing figures rather than a building: HQ is about the people, and a tower
+ * would read as "company info".
+ */
+export function IconHq(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Base {...props}>
+      <path d="M12 4l8 5-8 5-8-5 8-5z" />
+      <path d="M9.5 11.5v3M14.5 11.5v3" />
+      <path d="M4 9v6l8 5 8-5V9" />
+    </Base>
+  );
+}
