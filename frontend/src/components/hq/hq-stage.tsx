@@ -306,6 +306,7 @@ export function HqStage({
           {ZONES.filter((zone) => zone.id !== "walkway").map((zone) => (
             <polygon
               key={`hit-${zone.id}`}
+              className="hq-zone-hit"
               points={rectPolygon(zone.rect)}
               fill="transparent"
               style={{ cursor: "pointer" }}

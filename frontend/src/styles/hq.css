@@ -2161,3 +2161,46 @@
   min-width: 0;
   overflow-wrap: anywhere;
 }
+
+/* ── zone hit areas ─────────────────────────────────────────────────────
+
+   These are focusable polygons the size of a whole department, and the
+   browser's default focus ring drew a large blue rectangle across the room on
+   every *click* — which is the outline that made the scene look like a
+   wireframe editor rather than an office.
+
+   The ring is not removed. `:focus-visible` still marks the focused
+   department, in the product's own accent and at a weight that reads as a
+   selection rather than as a debug overlay; a keyboard user must be able to
+   see where they are, and deleting the indicator to tidy the picture would
+   trade an accessibility basic for a screenshot. What goes away is the ring
+   on pointer clicks, which nobody needed and everybody saw. */
+
+.hq-zone-hit {
+  outline: none;
+}
+
+.hq-zone-hit:focus-visible {
+  stroke: var(--hq-accent, oklch(0.78 0.13 200));
+  stroke-width: 2;
+  stroke-dasharray: 6 4;
+  stroke-linejoin: round;
+}
+
+/* ---------- signage, made readable --------------------------------------
+
+   Department names sat at 11.5px with 95% opacity on a translucent plate over
+   a busy floor. At tablet density the stage scales down and they were the
+   first thing to go illegible. Larger, fully opaque, on a plate with enough
+   contrast to hold the word at any scale. */
+
+.hq-zone-label {
+  font-size: 12.5px;
+  opacity: 1;
+  letter-spacing: 0.12em;
+}
+
+.hq-zone-sign-plate {
+  fill: var(--hq-sign-plate, oklch(0.26 0.020 265 / 0.78));
+  stroke: var(--hq-sign-edge, oklch(0.74 0.030 265 / 0.42));
+}
