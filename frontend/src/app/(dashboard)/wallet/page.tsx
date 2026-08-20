@@ -307,10 +307,18 @@ export default function WalletPage() {
 
       <section className="flex flex-col gap-3">
         <div>
-          <h2 className="text-md font-medium text-ink">Strategy returns</h2>
+          <h2 className="text-md font-medium text-ink">
+            Strategy returns
+            {lineage && lineage.generations.length > 1
+              ? ` — Gen ${wallet.data.generation}`
+              : null}
+          </h2>
           <p className="mt-1 text-sm text-ink-2">
             Current return includes every fully priced open holding. Daily rows show
             completed trades by their recorded UTC exit date.
+            {lineage && lineage.generations.length > 1
+              ? " These rows are this generation's own trades; the capital above and the record below cover the whole lineage."
+              : null}
           </p>
         </div>
         <DailyReturns
@@ -320,6 +328,17 @@ export default function WalletPage() {
           isError={performanceQuery.isError}
         />
       </section>
+
+      {/* Lineage-wide, like the capital above: these describe the money's
+          whole history, not the newest generation's slice of it. Said out loud
+          because the daily rows immediately above are generation-scoped, and a
+          reader has no way to tell two adjacent blocks apart otherwise. */}
+      {lineage && lineage.generations.length > 1 ? (
+        <p className="text-xs text-ink-3">
+          Trade record across the whole lineage — generations{" "}
+          {lineage.generations.join(", ")}.
+        </p>
+      ) : null}
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="Win rate" value={pct(m.win_rate_pct)} />
@@ -360,7 +379,13 @@ export default function WalletPage() {
               ? `${last.action === "closed" ? "Closed" : "Opened"} ${last.symbol ?? `${last.mint_address.slice(0, 4)}…`}`
               : null
           }
-          hint={last ? `${formatAge(last.at)} ago` : "Nothing has traded yet"}
+          hint={
+            last
+              ? `${formatAge(last.at)} ago`
+              : lineage && lineage.generations.length > 1
+                ? `Gen ${wallet.data.generation} has not traded yet`
+                : "Nothing has traded yet"
+          }
         />
         <Stat
           label="Next Radar evaluation"
