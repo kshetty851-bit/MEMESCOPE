@@ -17,6 +17,7 @@ import { RecentCases } from "@/components/hq/recent-cases";
 import { ExecutionVault, MissionBoard, PerformanceLab } from "@/components/hq/hq-boards";
 import { CAT_BY_ID, type CatId } from "@/lib/hq/cats";
 import { SUPPORT_BY_ID, type SupportId } from "@/lib/hq/support";
+import { VISITOR_BY_ID, type VisitorId } from "@/lib/hq/visitors";
 import type { ActorId } from "@/lib/hq/ambient-scheduler";
 import { STATE_LABEL } from "@/lib/hq/employees";
 import { CHARACTERS } from "@/lib/hq/characters";
@@ -148,6 +149,13 @@ export default function HqPage() {
   const reading = employee && selected ? state.employees[selected as EmployeeId] : null;
   const supportNpc = !employee && selected ? SUPPORT_BY_ID.get(selected as SupportId) : null;
   const cat = !employee && !supportNpc && selected ? CAT_BY_ID.get(selected as CatId) : null;
+  // A guest is clickable like everyone else on the floor. Without this the
+  // panel silently showed nothing for them, which reads as a broken figure
+  // rather than as a person who does not work here.
+  const visitor =
+    !employee && !supportNpc && !cat && selected
+      ? VISITOR_BY_ID.get(selected as VisitorId)
+      : null;
   const selectedFrame = selected ? frames[selected] : undefined;
 
   return (
@@ -298,16 +306,16 @@ export default function HqPage() {
           sentence about what the drawing is doing. The one structural rule is
           that "Currently:" reads from the same ambient frames the room draws,
           so the panel can never claim an activity the reader cannot see. */}
-      {supportNpc || cat ? (
+      {supportNpc || cat || visitor ? (
         <Panel>
           <div className="flex flex-col gap-3 p-4" data-testid="hq-life-panel">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h2 className="text-sm font-semibold text-[var(--color-ink)]">
-                  {supportNpc?.name ?? cat?.name}
+                  {supportNpc?.name ?? cat?.name ?? visitor?.name}
                 </h2>
                 <p className="text-xs text-[var(--color-ink-3,var(--color-ink))]">
-                  {supportNpc?.role ?? cat?.title}
+                  {supportNpc?.role ?? cat?.title ?? (visitor ? `Visiting from ${visitor.from}` : null)}
                 </p>
               </div>
               <button
@@ -323,7 +331,8 @@ export default function HqPage() {
               <dd className="text-[var(--color-ink)]">
                 {selectedFrame?.detail ??
                   supportNpc?.restingDetail ??
-                  cat?.restingDetail}
+                  cat?.restingDetail ??
+                  visitor?.restingDetail}
               </dd>
             </dl>
           </div>

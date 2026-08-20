@@ -23,6 +23,7 @@ import { FURNITURE, RUGS, type RugSpec } from "@/lib/hq/furniture";
 import { CATS } from "@/lib/hq/cats";
 import type { CatPose } from "@/lib/hq/cats";
 import { SUPPORT_STAFF } from "@/lib/hq/support";
+import { DOOR, VISITORS } from "@/lib/hq/visitors";
 import { PacketOverflowBadge, TokenPacket, packetDockTile } from "@/components/hq/token-packet";
 import type { TokenCaseFile } from "@/lib/hq/case-file";
 import { ZONES, ZONE_BY_ID, type ZoneId } from "@/lib/hq/zones";
@@ -396,6 +397,28 @@ function buildCast(
     });
   }
 
+  // Visitors are drawn only while they are actually here. Everyone else has a
+  // desk or a home tile and stands in it; a guest who is not visiting is not
+  // in the building, and parking them permanently at Reception would put five
+  // strangers in the lobby forever.
+  for (const visitor of VISITORS) {
+    const frame = ambient[visitor.id];
+    if (!frame) continue;
+    const tile = frame.tile ?? DOOR;
+    items.push({
+      depth: depthOf(tile, LAYER.employee),
+      node: (
+        <VisitorAnchor
+          key={visitor.id}
+          visitor={visitor}
+          frame={frame}
+          dimmed={dimOthers}
+          onSelect={onSelect}
+        />
+      ),
+    });
+  }
+
   for (const cat of CATS) {
     const frame = ambient[cat.id];
     const tile = frame?.tile ?? cat.home;
@@ -618,6 +641,56 @@ function SupportAnchor({
           {npc.name}
         </text>
       </g>
+    </g>
+  );
+}
+
+/**
+ * A guest on the floor.
+ *
+ * Positioned from the frame's own tile rather than from a home anchor, because
+ * a visitor has no home here — that is the entire difference between them and
+ * the staff, and it is why this cannot reuse `SupportAnchor`.
+ *
+ * The nameplate says which department they came from, not their name alone: a
+ * stranger with a first name on their head reads as an eleventh employee,
+ * which is the one thing the roster's design exists to prevent.
+ */
+function VisitorAnchor({
+  visitor,
+  frame,
+  dimmed,
+  onSelect,
+}: {
+  visitor: (typeof VISITORS)[number];
+  frame: ActorFrame;
+  dimmed: boolean;
+  onSelect: (id: ActorId) => void;
+}) {
+  const point = toScreen(frame.tile ?? DOOR);
+  const pose = (frame.pose as Pose) ?? visitor.look.defaultPose;
+
+  return (
+    <g
+      className="hq-anchor hq-anchor--support hq-anchor--visitor"
+      data-visitor={visitor.id}
+      data-pose={pose}
+      transform={`translate(${point.x} ${point.y})`}
+      opacity={dimmed ? 0.4 : 1}
+      role="button"
+      tabIndex={0}
+      aria-label={`${visitor.name}, visiting from ${visitor.from}. ${frame.detail ?? visitor.restingDetail}`}
+      onClick={() => onSelect(visitor.id)}
+      onKeyDown={keySelect(onSelect, visitor.id)}
+    >
+      {frame.speech ? <SpeechBubble text={frame.speech} /> : null}
+      <g transform={`scale(${FIGURE_SCALE})`}>
+        <Character character={visitor.look} pose={pose} />
+      </g>
+      <rect className="hq-nameplate" x={-38} y={-126} width={76} height={15} rx={7.5} />
+      <text className="hq-anchor-name hq-anchor-name--centred" x={0} y={-115}>
+        {visitor.from}
+      </text>
     </g>
   );
 }

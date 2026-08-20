@@ -9,6 +9,7 @@ import { CATS, CAT_ROUTINES, type CatId } from "./cats";
 import { CHATTER_BY_ACTOR, CHATTER_EVERY } from "./chatter";
 import { EMPLOYEES, type EmployeeId } from "./employees";
 import { SUPPORT_ROUTINES, SUPPORT_STAFF, type SupportId } from "./support";
+import { MAX_VISITORS, VISITORS, VISITOR_ROUTINES, type VisitorId } from "./visitors";
 import type { DayPhase } from "./ambient";
 import type { OfficeActivity } from "./adapter";
 
@@ -53,8 +54,8 @@ import type { OfficeActivity } from "./adapter";
  * unchanged in shape, widened in cast.
  */
 
-export type ActorId = EmployeeId | SupportId | CatId;
-export type ActorClass = "core" | "support" | "cat";
+export type ActorId = EmployeeId | SupportId | CatId | VisitorId;
+export type ActorClass = "core" | "support" | "cat" | "visitor";
 
 interface Playable {
   id: string;
@@ -72,6 +73,7 @@ const CLASS_OF = new Map<ActorId, ActorClass>([
   ...EMPLOYEES.map((e) => [e.id, "core"] as const),
   ...SUPPORT_STAFF.map((n) => [n.id, "support"] as const),
   ...CATS.map((c) => [c.id, "cat"] as const),
+  ...VISITORS.map((v) => [v.id, "visitor"] as const),
 ]);
 
 export function actorClass(id: ActorId): ActorClass {
@@ -79,7 +81,13 @@ export function actorClass(id: ActorId): ActorClass {
 }
 
 /** Default night quietness per class, when a routine does not say. */
-const NIGHT_DEFAULT: Record<ActorClass, number> = { core: 0.5, support: 0.4, cat: 0.9 };
+const NIGHT_DEFAULT: Record<ActorClass, number> = {
+  core: 0.5,
+  support: 0.4,
+  cat: 0.9,
+  // Nobody from Finance comes up at three in the morning.
+  visitor: 0,
+};
 
 function normalize(routine: AmbientRoutine): Playable {
   return {
@@ -108,6 +116,20 @@ const PLAYABLES: Playable[] = [
     suppressOnAlert: routine.suppressOnAlert ?? false,
     nightFactor: routine.nightFactor ?? NIGHT_DEFAULT.support,
   })),
+  ...VISITOR_ROUTINES.map((routine) => ({
+    id: routine.id,
+    actor: routine.actor as ActorId,
+    actorClass: "visitor" as const,
+    weight: routine.weight,
+    frames: routine.frames,
+    cast: (routine.cast ?? []).map((member) => ({
+      actor: member.actor as ActorId,
+      frames: member.frames,
+    })),
+    meeting: false,
+    suppressOnAlert: routine.suppressOnAlert ?? true,
+    nightFactor: routine.nightFactor ?? NIGHT_DEFAULT.visitor,
+  })),
   ...CAT_ROUTINES.map((routine) => ({
     id: routine.id,
     actor: routine.actor as ActorId,
@@ -135,6 +157,7 @@ export const ALL_ACTORS: ActorId[] = [
   ...EMPLOYEES.map((e) => e.id),
   ...SUPPORT_STAFF.map((n) => n.id),
   ...CATS.map((c) => c.id),
+  ...VISITORS.map((v) => v.id),
 ];
 
 /* ── caps ──────────────────────────────────────────────────────────────── */
@@ -457,6 +480,9 @@ export function createAmbientScheduler(
         const kind = actorClass(id);
         if (kind === "support" && busyOf("support") >= MAX_SUPPORT) return false;
         if (kind === "cat" && busyOf("cat") >= MAX_CATS) return false;
+        // One guest, ever. Counted rather than hoped for: a lobby that fills
+        // up is a different, worse office.
+        if (kind === "visitor" && busyOf("visitor") >= MAX_VISITORS) return false;
         return true;
       });
       if (pool.length > 0) {
