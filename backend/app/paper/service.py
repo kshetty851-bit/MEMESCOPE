@@ -1763,6 +1763,25 @@ class PaperWalletService:
         `CAPITAL_LINEAGES` for why summing those produces -$1,934 rather than
         a balance.
         """
+        pool, open_rows, closed_trades = await self._lineage_book(wallet)
+        return metrics.cash_for(
+            # The oldest generation in the lineage is the one that funded it.
+            pool[0].starting_balance,
+            [_to_open(row) for row in open_rows],
+            closed_trades,
+        )
+
+    async def _lineage_book(
+        self, wallet: PaperWallet
+    ) -> tuple[Sequence[PaperWallet], list[PaperPosition], list[ClosedTrade]]:
+        """The pool, and every position it has open or closed. Oldest first.
+
+        One gather, used by both the authority that decides what the wallet can
+        afford and the summary that tells a reader what it has. They were
+        computed separately before, and disagreed: sizing pooled the lineage
+        while the page reported the live generation's own nominal balance, so a
+        wallet with $1 of deployable cash displayed $1,000.
+        """
         pool = await self._repository.lineage_wallets(lineage_for(wallet.strategy_id))
         if not pool:
             pool = [wallet]
@@ -1779,13 +1798,7 @@ class PaperWalletService:
                 )
                 if trade
             )
-
-        return metrics.cash_for(
-            # The oldest generation in the lineage is the one that funded it.
-            pool[0].starting_balance,
-            [_to_open(row) for row in open_rows],
-            closed_trades,
-        )
+        return pool, open_rows, closed_trades
 
     # --- Reading it back -----------------------------------------------------
 
@@ -1844,17 +1857,62 @@ class PaperWalletService:
             list(set(all_mints))
         )
 
+        # ── THE CAPITAL SUMMARY IS THE LINEAGE, NOT THIS GENERATION ────────
+        #
+        # `wallet.starting_balance` is a per-row default written at creation and
+        # is **not** this wallet's capital: money is inherited along a lineage
+        # and counted once from its oldest member (`_lineage_book`). Reporting
+        # the row meant a freshly cut-over generation displayed a full $1,000 of
+        # cash while the pool that actually funds it had $1 — the sizing
+        # authority already knew, and refused every entry for insufficient cash
+        # while the page said the wallet was untouched.
+        #
+        # So the figures a reader spends against — cash, equity, what is
+        # committed, what has been realised — are computed over every generation
+        # sharing the money. No capital is created by this: the base is one
+        # generation's single starting balance, and every open position in the
+        # pool holds it down whoever opened it.
+        #
+        # The **record** stays generation-specific. `positions`, the audit log
+        # and Track Record are still this wallet's own, because a generation's
+        # trades belong to the policy that took them.
+        lineage_pool, lineage_open, lineage_closed = await self._lineage_book(wallet)
+        lineage_prices = dict(prices)
+        for member in lineage_pool:
+            if member.id == wallet.id:
+                continue
+            # Each member is priced against **its own** resume watermark: a
+            # restored generation must not be marked from the interval it was
+            # archived through.
+            member_mints = [
+                row.mint_address for row in lineage_open if row.wallet_id == member.id
+            ]
+            if not member_mints:
+                continue
+            member_snapshots = await self._market.latest_for_mints(
+                member_mints, since=member.resume_watermark_at
+            )
+            for mint in member_mints:
+                found = member_snapshots.get(mint)
+                lineage_prices.setdefault(mint, found.price_usd if found else None)
+
         m = metrics.summarise(
-            starting_balance=wallet.starting_balance,
-            open_positions=[_to_open(row) for row in open_rows],
-            prices=prices,
-            closed=closed,
+            starting_balance=lineage_pool[0].starting_balance,
+            open_positions=[_to_open(row) for row in lineage_open],
+            prices=lineage_prices,
+            closed=lineage_closed,
         )
 
         return WalletRead(
             wallet=wallet,
             strategy=self.strategy,
             metrics=m,
+            lineage=LineageRead(
+                generations=tuple(member.generation for member in lineage_pool),
+                strategy_ids=tuple(member.strategy_id for member in lineage_pool),
+                base_generation=lineage_pool[0].generation,
+                base_capital=lineage_pool[0].starting_balance,
+            ),
             positions=list(positions),
             prices=prices,
             market_caps=market_caps,
@@ -2036,12 +2094,31 @@ class WaitingState:
 
 
 @dataclass(frozen=True, slots=True)
+class LineageRead:
+    """Which generations share the capital the wallet's figures describe.
+
+    Published rather than implied. Once the summary stops being about one
+    generation, a reader has to be able to see *which* ones it is about
+    without inferring it from `CAPITAL_LINEAGES` in the source.
+    """
+
+    #: Every generation in the pool, oldest first.
+    generations: tuple[int, ...]
+    strategy_ids: tuple[str, ...]
+    #: The generation that put the money in, and how much. Counted once,
+    #: however many generations have since inherited it.
+    base_generation: int
+    base_capital: Decimal
+
+
+@dataclass(frozen=True, slots=True)
 class WalletRead:
     """The assembled read model. Rendering happens in `api.py`."""
 
     wallet: PaperWallet
     strategy: AnyStrategy
     metrics: metrics.WalletMetrics
+    lineage: LineageRead
     positions: list[PaperPosition]
     prices: dict[str, Decimal | None]
     market_caps: dict[str, Decimal | None]

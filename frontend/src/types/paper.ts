@@ -318,11 +318,29 @@ export interface PaperMetrics {
   exits_by_reason: Record<string, number>;
 }
 
+/** Which generations share the capital `metrics` describes. */
+export interface PaperLineage {
+  /** Every generation in the pool, oldest first. */
+  generations: number[];
+  strategy_ids: string[];
+  /** The generation that put the money in, and how much — counted once. */
+  base_generation: number;
+  base_capital: string;
+}
+
 export interface PaperWallet {
   /** False when the feature flag is off — not the same as "traded nothing". */
   enabled: boolean;
   strategy: PaperStrategy;
+  /**
+   * Pooled across `lineage`, not this generation alone. Capital is inherited
+   * at a cutover rather than minted, so cash, equity and committed capital are
+   * properties of the whole lineage. Positions and the audit log stay
+   * generation-specific.
+   */
   metrics: PaperMetrics;
+  /** Absent only when the wallet is not running. */
+  lineage: PaperLineage | null;
   /** Which launch this is, and when it began. The benchmarks start there too. */
   generation: number;
   started_at: string | null;

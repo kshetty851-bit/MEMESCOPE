@@ -447,6 +447,25 @@ class ArchiveOut(BaseSchema):
     observed_at: datetime
 
 
+class LineageOut(BaseSchema):
+    """Which generations share the capital `metrics` describes.
+
+    The wallet's money is inherited along a lineage, not minted per launch, so
+    the capital figures are pooled across every generation listed here. Served
+    rather than left implicit: a reader looking at "$1 available" on Generation
+    9 has to be able to see that Generation 2 funded it and Generation 7 is
+    still holding some of it.
+    """
+
+    #: Every generation in the pool, oldest first.
+    generations: list[int]
+    strategy_ids: list[str]
+    #: The generation that put the money in, and how much. Counted once,
+    #: however many generations have since inherited it.
+    base_generation: int
+    base_capital: Decimal
+
+
 class WalletOut(BaseSchema):
     """The wallet, its strategy, its metrics and its benchmarks."""
 
@@ -455,7 +474,13 @@ class WalletOut(BaseSchema):
     #: traded nothing.
     enabled: bool
     strategy: StrategyOut
+    #: **Pooled across `lineage`, not this generation alone.** Cash, equity,
+    #: what is committed and what has been realised are properties of the money,
+    #: and the money is shared. `positions` and the audit log stay
+    #: generation-specific, because trades belong to the policy that took them.
     metrics: MetricsOut
+    #: Absent only when the wallet is not running.
+    lineage: LineageOut | None = None
     #: Which launch this is, and when it began.
     generation: int = 1
     started_at: datetime | None = None

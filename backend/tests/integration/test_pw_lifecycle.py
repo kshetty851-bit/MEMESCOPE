@@ -410,3 +410,100 @@ class TestRetrospectiveRecoveryNeverUsesCurrentPrice:
         assert "retrospective=book.archived_at is not None" in source
         # The live wallet has archived_at None, so retrospective is False.
         assert "retrospective=True" not in source
+
+
+class TestTheWalletSummaryIsTheLineage:
+    """What the page reports must be what the wallet can actually spend.
+
+    These disagreed. `_cash_for` pooled the lineage — correctly — while `read`
+    summarised the live generation's own `starting_balance`, a per-row default
+    written at creation and not that generation's capital. So Generation 9
+    displayed $1,000 of cash and 0 positions while the authority that sizes
+    entries saw $1 and refused every one of them for insufficient cash.
+
+    The record stays generation-specific. Only the money is shared.
+    """
+
+    async def _lineage(
+        self, session: AsyncSession
+    ) -> tuple[PaperWallet, PaperWallet]:
+        """An archived funder still holding a book, and a live successor."""
+        from app.paper.strategy import TRAILING_STOP_25_SECURED_HOLD6H_V3
+
+        old = await wallet(session, strategy_id=TRAILING_STOP_25_V1.id, generation=2)
+        live = await wallet(
+            session,
+            strategy_id=TRAILING_STOP_25_SECURED_HOLD6H_V3.id,
+            generation=9,
+            archived=False,
+        )
+        for index in range(3):
+            await position(session, old, chr(ord("m") + index) * 44)
+        closed = await position(session, old, "z" * 44, status="closed")
+        closed.exit_price = Decimal("0.02")
+        closed.closed_at = NOW
+        closed.exit_reason = "stop"
+        await session.flush()
+        return old, live
+
+    async def test_capital_is_pooled_and_never_doubled(
+        self, db_session: AsyncSession
+    ) -> None:
+        old, _ = await self._lineage(db_session)
+        read = await PaperWalletService(db_session).read(now=NOW)
+
+        # $1,000 once — not once per generation. Both rows carry a $1,000
+        # `starting_balance`; only the founder's is capital.
+        assert read.lineage.base_generation == old.generation
+        assert read.lineage.base_capital == Decimal(1000)
+        assert set(read.lineage.generations) == {2, 9}
+        assert read.metrics.starting_balance == Decimal(1000)
+
+        # 1000 - 300 committed - 100 spent on the closed trade + 200 returned.
+        assert read.metrics.cash == Decimal("800.00")
+        assert read.metrics.invested_usd == Decimal("300.00")
+        assert read.metrics.open_positions == 3
+        assert read.metrics.closed_positions == 1
+        assert read.metrics.realised_pnl == Decimal("100.00")
+
+    async def test_the_summary_agrees_with_what_the_wallet_may_spend(
+        self, db_session: AsyncSession
+    ) -> None:
+        """The property that was violated, stated directly.
+
+        A page that reports more cash than the sizing authority will let the
+        wallet commit is not a display bug — it is two different answers to
+        "how much money is there".
+        """
+        _, live = await self._lineage(db_session)
+        service = PaperWalletService(db_session)
+        read = await service.read(now=NOW)
+        assert read.metrics.cash == await service._cash_for(live)
+
+    async def test_the_record_stays_generation_specific(
+        self, db_session: AsyncSession
+    ) -> None:
+        """Money is shared; trades are not.
+
+        Generation 9 took none of Generation 2's trades, and its Track Record
+        must not claim them — only its capital summary reflects the pool.
+        """
+        await self._lineage(db_session)
+        read = await PaperWalletService(db_session).read(now=NOW)
+        assert read.positions == []
+        assert read.audit_count == 0
+        # ...while the pooled summary still sees the lineage's whole book.
+        assert read.metrics.open_positions == 3
+
+    async def test_a_wallet_alone_in_its_lineage_is_unchanged(
+        self, db_session: AsyncSession
+    ) -> None:
+        """The change must be inert for an ungrouped strategy."""
+        solo = await wallet(
+            db_session, strategy_id="solo_v1", generation=70, archived=False
+        )
+        await position(db_session, solo, "s" * 44)
+        read = await PaperWalletService(db_session).read(now=NOW)
+        assert read.lineage.generations == (70,)
+        assert read.metrics.starting_balance == solo.starting_balance
+        assert read.metrics.cash == Decimal("900.00")

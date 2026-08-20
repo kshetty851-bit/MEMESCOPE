@@ -126,7 +126,7 @@ export default function WalletPage() {
     );
   }
 
-  const { strategy, disclosure, last_trade: last } = wallet.data;
+  const { strategy, disclosure, last_trade: last, lineage } = wallet.data;
   const m = wallet.data.metrics;
   const waiting = context.data?.waiting;
   const benchmarks = context.data?.benchmarks;
@@ -177,6 +177,30 @@ export default function WalletPage() {
         <Panel density="compact" className="border-line-strong bg-raised/40">
           <p className="text-sm text-ink">
             Generation 2 resumed on {new Date(wallet.data.resumed_at).toLocaleString()}
+          </p>
+        </Panel>
+      ) : null}
+
+      {/* Which generation is trading, and whose money it is trading with.
+          These are two different facts and the page used to show only the
+          first: capital is inherited at a cutover rather than minted, so the
+          figures below belong to the whole lineage while only the newest
+          generation takes entries. A reader seeing "$1 available" on a
+          generation with no trades has to be able to see where it went. */}
+      {lineage ? (
+        <Panel density="compact" className="border-line-strong bg-raised/40">
+          <p className="text-sm text-ink">
+            Active generation: Gen {wallet.data.generation} ·{" "}
+            <span className="font-mono text-xs">{strategy.id}</span>
+          </p>
+          <p className="mt-1 text-xs text-ink-3">
+            {lineage.generations.length > 1
+              ? `Capital below is the shared lineage — generations ${lineage.generations
+                  .map((generation) => `${generation}`)
+                  .join(", ")} — funded once with ${usd(lineage.base_capital)} by Gen ${
+                  lineage.base_generation
+                }. Positions and the Track Record stay generation-specific.`
+              : `Funded with ${usd(lineage.base_capital)}. This generation shares capital with no other.`}
           </p>
         </Panel>
       ) : null}
@@ -232,14 +256,18 @@ export default function WalletPage() {
           hint={
             m.return_usd === null
               ? "Full return appears once every open holding has a fresh stored price."
-              : `Marked against ${usd(m.starting_balance)} starting capital`
+              : `Marked against ${usd(m.starting_balance)} lineage capital`
           }
         />
         <Stat
           label="Available cash"
           value={usd(m.cash)}
           emphasis
-          hint="Available for the next allocation"
+          hint={
+            lineage && lineage.generations.length > 1
+              ? "Available for the next allocation, across the whole lineage"
+              : "Available for the next allocation"
+          }
         />
         <Stat
           label="Known partial equity"
@@ -253,7 +281,7 @@ export default function WalletPage() {
           hint={
             m.equity === null
               ? "Full equity will appear once all resumed holdings receive fresh post-resume market quotes."
-              : `from ${usd(m.starting_balance)} start`
+              : `from ${usd(m.starting_balance)} lineage base`
           }
         />
         <Stat
@@ -262,9 +290,13 @@ export default function WalletPage() {
           hint={`${m.priced_positions} priced position${m.priced_positions === 1 ? "" : "s"}`}
         />
         <Stat
-          label="Committed capital"
+          label="Capital in open positions"
           value={usd(m.invested_usd)}
-          hint="Allocation basis, not current market value"
+          hint={
+            lineage && lineage.generations.length > 1
+              ? `Allocation basis across ${m.open_positions} position${m.open_positions === 1 ? "" : "s"} in the lineage, not current market value`
+              : "Allocation basis, not current market value"
+          }
         />
       </div>
 
