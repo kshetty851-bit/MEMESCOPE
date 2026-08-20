@@ -3,7 +3,9 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
-import { LogoMark, Wordmark } from "@/components/brand/logo";
+import { LogoMark } from "@/components/brand/logo";
+import { Wordmark, WordmarkSubtitle } from "@/components/brand/wordmark";
+import { Crew, EnterHq } from "@/components/alpha/crew";
 import { AlphaAccess } from "@/components/alpha/alpha-access";
 import { HeroMascot, type MascotState } from "@/components/alpha/hero-mascot";
 import { HomepageIntelligence } from "@/components/alpha/homepage-intelligence";
@@ -118,15 +120,21 @@ export function LandingPage() {
           className="relative z-10 grid flex-1 items-center gap-10 py-10 lg:grid-cols-[minmax(0,1fr)_23rem] lg:gap-16"
         >
           <div className="max-w-xl">
-            <h1 className="text-[clamp(2.5rem,6.5vw,4.5rem)] font-semibold leading-[0.95] tracking-[-0.035em] text-ink">
-              MEMESCOPE
+            {/* The wordmark *is* the headline, at hero scale. It used to be the
+                product name set as an ordinary `<h1>`, which meant the brand
+                appeared twice on the page in two different shapes — once in
+                the header as a lockup and once here as text. One mark. */}
+            <h1 className="hero-mark">
+              <Wordmark title="MEMESCOPE" className="text-[clamp(2.4rem,7vw,4.6rem)]" />
             </h1>
-            <p className="mt-5 text-[clamp(1.125rem,2vw,1.5rem)] font-medium leading-snug tracking-tight text-ink">
-              See the signal before the crowd.
+            <WordmarkSubtitle className="mt-4" />
+            <p className="mt-6 text-[clamp(1.125rem,2vw,1.5rem)] font-medium leading-snug tracking-tight text-ink">
+              Not a scanner. A command centre.
             </p>
             <p className="mt-3 max-w-md text-sm leading-relaxed text-ink-2">
-              Real-time Pump.fun intelligence. Every launch tracked, scored
-              deterministically, and published — winners and losers alike.
+              Real-time Pump.fun intelligence, run by ten specialists who each
+              watch one subsystem. Every launch tracked, scored deterministically,
+              and published — winners and losers alike.
             </p>
           </div>
 
@@ -140,6 +148,10 @@ export function LandingPage() {
 
       <div className="alpha-transition" aria-hidden />
       <HomepageIntelligence />
+      {/* The crew, then the door they work behind. The order is the story the
+          product tells: meet them, then go and watch them work. */}
+      <Crew />
+      <EnterHq />
     </main>
   );
 }

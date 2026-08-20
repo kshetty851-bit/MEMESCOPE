@@ -58,6 +58,19 @@ export interface Employee {
   desk: Tile;
   /** Which subsystem this person is. Shown in the panel; never used as data. */
   systemResponsibility: string;
+  /**
+   * How this person introduces themselves in public, in their own voice.
+   *
+   * Written for the homepage's crew section rather than for the HQ panel:
+   * `systemResponsibility` is a list of subsystems, which is what an operator
+   * needs and what a visitor bounces off. Both describe the same job.
+   *
+   * **Neither may make a claim.** These sentences say what a desk watches, not
+   * how well it is going — the same rule every other string in HQ lives under.
+   */
+  whatIDo: string;
+  /** The colleagues this desk actually hands work to, by id. */
+  worksWith: EmployeeId[];
   /** Idle vocabulary, for HQ-4. Presentation only — never implies system state. */
   personality: string;
   /** Silhouette accessory that makes them recognisable without a label. */
@@ -74,10 +87,13 @@ export const EMPLOYEES: Employee[] = [
   {
     id: "nova",
     name: "Nova",
-    role: "Mission Director",
+    role: "CEO / Commander",
     zone: "mission",
     desk: { col: 8, row: 1 },
     systemResponsibility: "Overall system status, portfolio roll-up, daily brief",
+    whatIDo:
+      "Watches the whole platform, decides what needs attention, and pulls the team together when the picture has to be assembled in one place.",
+    worksWith: ["radar","atlas","milo","sage"],
     personality: "Calm and observant. Patrols the floor, pauses at departments.",
     accessory: "tablet",
     palette: "indigo",
@@ -89,6 +105,9 @@ export const EMPLOYEES: Employee[] = [
     zone: "floor",
     desk: { col: 6, row: 3 },
     systemResponsibility: "Scanner, token discovery, Radar admission",
+    whatIDo:
+      "Watches the scanner for tokens that have just appeared, and keeps an eye on the ones that have started to move.",
+    worksWith: ["luna","dex"],
     personality: "Energetic and fast. Leans into the feed, spins the dish.",
     accessory: "headset",
     palette: "cyan",
@@ -100,6 +119,9 @@ export const EMPLOYEES: Employee[] = [
     zone: "floor",
     desk: { col: 8, row: 3 },
     systemResponsibility: "Scoring, analyst orchestration, candidate evaluation",
+    whatIDo:
+      "Reads the evidence behind every score — signals, components and the reasons a token was ranked where it was.",
+    worksWith: ["radar","dex","sage"],
     personality: "Focused and analytical. Reads, annotates, nods slowly.",
     accessory: "stylus",
     palette: "violet",
@@ -111,6 +133,9 @@ export const EMPLOYEES: Employee[] = [
     zone: "floor",
     desk: { col: 10, row: 3 },
     systemResponsibility: "Market data, price, liquidity, volume, quote freshness",
+    whatIDo:
+      "Follows price, liquidity, volume and how fresh each quote is, so nothing is judged on a stale number.",
+    worksWith: ["luna","rex","echo"],
     personality: "Fast multitasker. Head flicks between monitors. Coffee nearby.",
     accessory: "visor",
     palette: "amber",
@@ -123,6 +148,9 @@ export const EMPLOYEES: Employee[] = [
     desk: { col: 2, row: 4 },
     systemResponsibility:
       "Safety gate, liquidity security, mint and freeze authority, price impact",
+    whatIDo:
+      "Checks mint and freeze authority, the venue and the liquidity behind a token before any entry is allowed.",
+    worksWith: ["rex","nova"],
     personality: "Serious and still. Deliberate scans. Rarely moves.",
     accessory: "shield",
     palette: "steel",
@@ -134,6 +162,9 @@ export const EMPLOYEES: Employee[] = [
     zone: "floor",
     desk: { col: 12, row: 4 },
     systemResponsibility: "Paper Wallet entries and exits; Real Wallet state display",
+    whatIDo:
+      "Watches Paper Wallet entries and exits, the execution quotes behind them and how each position actually closed.",
+    worksWith: ["atlas","milo","dex"],
     personality: "Confident and fast. Drums fingers, rolls the chair back.",
     accessory: "wrist-terminal",
     palette: "crimson",
@@ -145,6 +176,9 @@ export const EMPLOYEES: Employee[] = [
     zone: "portfolio",
     desk: { col: 2, row: 8 },
     systemResponsibility: "Open positions, exposure, holding period, capital efficiency",
+    whatIDo:
+      "Tracks what capital is doing: open positions, exposure, holding periods and which generation is trading.",
+    worksWith: ["rex","sage","nova"],
     personality: "Patient and strategic. Steps back from the wall, arms folded.",
     accessory: "clipboard",
     palette: "forest",
@@ -156,6 +190,9 @@ export const EMPLOYEES: Employee[] = [
     zone: "ops",
     desk: { col: 6, row: 8 },
     systemResponsibility: "Workers, queues, enrichment backlog, priority lane",
+    whatIDo:
+      "Keeps the enrichment queues moving and watches the priority lane for anything waiting longer than it should.",
+    worksWith: ["dex","byte"],
     personality: "Organised and mobile. Walks between terminals, gestures at the board.",
     accessory: "tool-belt",
     palette: "orange",
@@ -167,6 +204,9 @@ export const EMPLOYEES: Employee[] = [
     zone: "ops",
     desk: { col: 9, row: 8 },
     systemResponsibility: "Database, cache, RPC, WebSocket and API health",
+    whatIDo:
+      "Watches the database, cache, RPC, WebSocket and API — the parts that have to be up for anything else to be true.",
+    worksWith: ["echo","nova"],
     personality: "Technical and slouched. Three mugs. Stretches, refills, occasionally naps.",
     accessory: "hoodie",
     palette: "lime",
@@ -178,6 +218,9 @@ export const EMPLOYEES: Employee[] = [
     zone: "lab",
     desk: { col: 13, row: 8 },
     systemResponsibility: "Track record, P&L, win rate, drawdown, strategy comparison",
+    whatIDo:
+      "Measures what the strategy actually did: track record, realised P&L, win rate and drawdown.",
+    worksWith: ["milo","luna","nova"],
     personality: "Calm and patient. Slow scroll, chin on hand.",
     accessory: "glasses",
     palette: "teal",

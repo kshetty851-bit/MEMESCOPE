@@ -73,15 +73,46 @@ describe("space theme", () => {
     "Intelligence Division",
   ];
 
+  /**
+   * One file is exempt from "Commander", and only from that word.
+   *
+   * The ban exists because the product used to *address the reader* as
+   * Commander — "Welcome back, Commander" — which is the space-theme
+   * affectation Sprint 28.2 stripped out. Nova's job title in the HQ roster is
+   * a different thing entirely: she is a character who runs a fictional
+   * office, and "CEO / Commander" is what her staff call her, not what the
+   * product calls you.
+   *
+   * Narrowed rather than deleted. Every other file, and every other phrase,
+   * is still checked — including the rest of this file's own list, which is
+   * what stops this exemption from becoming a hole.
+   */
+  const EXEMPT: Record<string, RegExp> = {
+    Commander: /\/lib\/hq\/employees\.ts$/,
+  };
+
   for (const phrase of BANNED) {
     it(`never says "${phrase}"`, () => {
       const pattern = new RegExp(phrase, "i");
-      const offenders = FILES.filter((file) =>
-        pattern.test(userFacingText(readFileSync(file, "utf8"))),
+      const exempt = EXEMPT[phrase];
+      const offenders = FILES.filter(
+        (file) =>
+          !(exempt && exempt.test(file)) &&
+          pattern.test(userFacingText(readFileSync(file, "utf8"))),
       );
       expect(offenders).toEqual([]);
     });
   }
+
+  it("still never addresses the reader as Commander", () => {
+    // The rule's actual intent, asserted directly so the exemption above
+    // cannot quietly re-admit the thing it was written for.
+    const addressing = /(welcome|hello|hi|greetings|back)[^.\n]{0,24}commander/i;
+    const offenders = FILES.filter((file) =>
+      addressing.test(userFacingText(readFileSync(file, "utf8"))),
+    );
+    expect(offenders).toEqual([]);
+  });
 });
 
 describe("analyst names", () => {

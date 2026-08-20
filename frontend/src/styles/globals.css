@@ -114,6 +114,21 @@
      ====================================================================== */
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, "SF Mono", monospace;
+  /**
+   * The display face: wordmark, hero, section headings, agent names.
+   *
+   * Named `brand`, not `display`: Tailwind derives a `font-display` utility
+   * from a `--font-display` token, and that collides with the CSS
+   * `font-display` descriptor — the class silently does nothing, which is
+   * exactly how the wordmark shipped in system-ui the first time.
+   *
+   * Two primary families and one data face, which is the whole system. The
+   * fallback chain matters more than usual here because the wordmark is set in
+   * it — a missing display font must degrade to a grotesque of similar
+   * proportion, not to Times.
+   */
+  --font-brand: var(--font-display-face), var(--font-geist-sans), ui-sans-serif, system-ui,
+    sans-serif;
 
   --text-micro: 0.625rem;            /* 10px — dense table sublabels */
   --text-micro--line-height: 0.875rem;
@@ -719,4 +734,237 @@
   .motion-loop {
     animation: none !important;
   }
+}
+
+/* ── the crew ───────────────────────────────────────────────────────────
+
+   "Meet the MEMESCOPE team", and the door into HQ underneath it.
+
+   Plain CSS beside the rest of the homepage's own rules rather than utility
+   classes, because the grid has one asymmetric cell (Nova) and a disclosure
+   that changes row height — both of which read far more clearly as a named
+   layout than as a string of bracket utilities. */
+
+.crew {
+  max-width: 80rem;
+  margin: 0 auto;
+  padding: clamp(4rem, 9vw, 7rem) 1.5rem 0;
+}
+
+@media (min-width: 1024px) {
+  .crew {
+    padding-left: 2.5rem;
+    padding-right: 2.5rem;
+  }
+}
+
+.crew-head {
+  max-width: 44rem;
+  margin-bottom: clamp(2rem, 4vw, 3rem);
+}
+
+.crew-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  color: var(--color-ink-3);
+}
+
+.crew-title {
+  font-family: var(--font-brand);
+  font-weight: 700;
+  font-size: clamp(1.9rem, 4.4vw, 3rem);
+  letter-spacing: -0.02em;
+  line-height: 1.02;
+  color: var(--color-ink);
+  margin-top: 0.85rem;
+}
+
+.crew-lede {
+  margin-top: 1rem;
+  max-width: 34rem;
+  font-size: 0.95rem;
+  line-height: 1.65;
+  color: var(--color-ink-2);
+}
+
+.crew-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  align-items: start;
+}
+
+.crew-card {
+  border: 1px solid var(--color-line);
+  border-radius: 14px;
+  background: var(--color-surface);
+  overflow: hidden;
+  transition: border-color 140ms ease;
+}
+
+.crew-card:hover,
+.crew-card-open {
+  border-color: var(--color-line-strong);
+}
+
+/* Nova. Size is the hierarchy — see the component's note on why a badge is
+   not enough. Two columns wherever there is more than one. */
+@media (min-width: 640px) {
+  .crew-card-lead {
+    grid-column: span 2;
+  }
+}
+
+.crew-button {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  width: 100%;
+  padding: 0.95rem 1rem;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+}
+
+.crew-portrait {
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  padding: 0.2rem;
+  background: color-mix(in oklab, var(--crew-tint, var(--color-accent)) 14%, transparent);
+  border: 1px solid color-mix(in oklab, var(--crew-tint, var(--color-accent)) 34%, transparent);
+  flex-shrink: 0;
+}
+
+.crew-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.crew-name {
+  font-family: var(--font-brand);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--color-ink);
+  font-size: 1rem;
+}
+
+.crew-card-lead .crew-name {
+  font-size: 1.45rem;
+}
+
+.crew-role {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-ink-3);
+}
+
+.crew-card-lead .crew-role {
+  color: var(--color-accent);
+}
+
+.crew-chevron {
+  font-family: var(--font-mono);
+  font-size: 1rem;
+  color: var(--color-ink-3);
+  flex-shrink: 0;
+}
+
+.crew-profile {
+  padding: 0 1rem 1.05rem;
+  border-top: 1px solid var(--color-line-subtle);
+  margin-top: -0.2rem;
+  padding-top: 0.9rem;
+}
+
+.crew-profile dl {
+  display: grid;
+  gap: 0.15rem 0.9rem;
+  grid-template-columns: auto 1fr;
+}
+
+.crew-profile dt {
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-ink-3);
+  padding-top: 0.18rem;
+  white-space: nowrap;
+}
+
+.crew-profile dd {
+  font-size: 0.85rem;
+  line-height: 1.55;
+  color: var(--color-ink-2);
+}
+
+.crew-line {
+  margin-top: 0.75rem;
+  font-size: 0.82rem;
+  font-style: italic;
+  color: var(--color-ink-3);
+}
+
+/* ── the door ─────────────────────────────────────────────────────────── */
+
+.crew-cta {
+  max-width: 80rem;
+  margin: 0 auto;
+  padding: clamp(2.5rem, 5vw, 4rem) 1.5rem clamp(4rem, 8vw, 6rem);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.1rem;
+  text-align: center;
+}
+
+.crew-cta-line {
+  font-size: 0.95rem;
+  color: var(--color-ink-2);
+  max-width: 32rem;
+}
+
+.crew-cta-button {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-brand);
+  font-weight: 700;
+  font-size: 0.95rem;
+  letter-spacing: 0.04em;
+  color: var(--color-bg, #0b0e14);
+  background: var(--color-accent);
+  border-radius: 999px;
+  padding: 0.85rem 1.9rem;
+  text-decoration: none;
+}
+
+.crew-cta-button:hover {
+  filter: brightness(1.08);
+}
+
+.hero-mark {
+  display: block;
+}
+
+/* The brand face, declared for real.
+
+   `@theme` tree-shakes tokens it does not see used in a utility class, so
+   `--font-brand` was emitted nowhere and every rule referencing it fell back
+   silently — including the wordmark, which is the one element on the site that
+   must not be set in a default font. The `@theme` entry above still generates
+   the `font-brand` utility; this guarantees the variable itself exists for the
+   plain CSS that uses it. */
+:root {
+  --font-brand: var(--font-display-face), var(--font-geist-sans), ui-sans-serif, system-ui,
+    sans-serif;
 }
