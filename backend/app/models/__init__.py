@@ -46,6 +46,7 @@ from app.models.real_wallet_execution import (
     RealWalletPosition,
 )
 from app.models.real_wallet_safety import RealWalletSafetyEvaluation
+from app.models.token_security import TokenSecurityEvaluationRow
 from app.models.refresh_token import RefreshToken
 from app.models.report_delivery import (  # noqa: F401
     DeliveryStatus,
@@ -91,6 +92,7 @@ __all__ = [
     "RealWalletLiveIntent",
     "RealWalletPosition",
     "RealWalletSafetyEvaluation",
+    "TokenSecurityEvaluationRow",
     "RefreshToken",
     "ScoreGrade",
     "ScoreTrigger",

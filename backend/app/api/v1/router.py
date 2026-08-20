@@ -28,6 +28,7 @@ from app.paper import api as paper
 from app.radar import api as radar
 from app.real_wallet import api as real_wallet
 from app.real_wallet_safety import api as real_wallet_safety
+from app.security import api as token_security
 
 api_router = APIRouter()
 api_router.include_router(health.router)
@@ -82,3 +83,8 @@ api_router.include_router(real_wallet_safety.router)
 # Dedicated execution-wallet visibility is admin-only and read-only. It is
 # intentionally a separate boundary from the safety audit endpoints above.
 api_router.include_router(real_wallet.router)
+# HQ-6: shared token security. Read-only evidence, and deliberately its own
+# namespace rather than an extension of `/real-wallet-safety` — the whole
+# point is that token security is not a real-wallet concern and stays
+# readable when the wallet is disabled.
+api_router.include_router(token_security.router)

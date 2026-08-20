@@ -268,7 +268,7 @@ def test_token_2022_mint_decoder_reads_authorities_and_extensions() -> None:
     raw[85:87] = (2).to_bytes(2, "little")
     raw[87:89] = b"xx"
     encoded = __import__("base64").b64encode(bytes(raw)).decode()
-    inspection = service._decode_mint_account(
+    inspection = service.decode_mint_account(
         {"owner": TOKEN_2022_PROGRAM, "data": [encoded, "base64"]}
     )
     assert inspection.decimals == 6
