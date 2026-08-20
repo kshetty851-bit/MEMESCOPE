@@ -87,6 +87,16 @@ export function useReportMeeting(
   options: { animate: boolean },
 ): ReportMeeting {
   const [phase, setPhase] = useState<MeetingPhase>("idle");
+  /**
+   * The guard that actually holds, because `phase` does not.
+   *
+   * Three synchronous clicks all read the same `phase` from the same closure —
+   * React has not re-rendered between them — so a state check let all three
+   * through and started three meetings on top of each other. A ref is written
+   * immediately, so the second call sees the first. Found by a test; the
+   * browser hid it behind event-loop timing.
+   */
+  const runningRef = useRef(false);
   const [report, setReport] = useState<HqReport | null>(null);
   const [turn, setTurn] = useState(-1);
   const dialogueRef = useRef<DialogueLine[]>([]);
@@ -158,7 +168,8 @@ export function useReportMeeting(
   const start = useCallback(() => {
     // The guard lives here, not on the button: a second entry point must not
     // be able to start a second meeting.
-    if (phase !== "idle") return;
+    if (runningRef.current || phase !== "idle") return;
+    runningRef.current = true;
     const built = buildReport(stateRef.current);
     dialogueRef.current = buildDialogue(built);
     setReport(built);
@@ -183,6 +194,16 @@ export function useReportMeeting(
       });
     });
   }, [phase, options.animate, scheduler, playLeg, seatEveryone]);
+
+  /** Every path back to idle goes through here, so the guard cannot leak. */
+  const toIdle = useCallback(() => {
+    runningRef.current = false;
+    setOverride({});
+    setReport(null);
+    setPhase("idle");
+    setTurn(-1);
+    scheduler.current?.resumeAfterReport();
+  }, [scheduler, setOverride]);
 
   /* One turn at a time, in order. */
   useEffect(() => {
@@ -229,22 +250,12 @@ export function useReportMeeting(
   const close = useCallback(() => {
     clearTimers();
     if (!options.animate || phase === "idle") {
-      setOverride({});
-      setReport(null);
-      setPhase("idle");
-      setTurn(-1);
-      scheduler.current?.resumeAfterReport();
+      toIdle();
       return;
     }
     setPhase("leaving");
-    playLeg("depart", () => {
-      setOverride({});
-      setReport(null);
-      setPhase("idle");
-      setTurn(-1);
-      scheduler.current?.resumeAfterReport();
-    });
-  }, [clearTimers, options.animate, phase, playLeg, scheduler, setOverride]);
+    playLeg("depart", toIdle);
+  }, [clearTimers, options.animate, phase, playLeg, toIdle]);
 
   /** Rebuild the report from the state as it is now. Never re-runs the walk. */
   const refresh = useCallback(() => {
