@@ -19,6 +19,9 @@ class PaperDecisionSnapshot(Base):
         UniqueConstraint("decision_source", "source_decision_key", name="uq_paper_decision_snapshot_source"),
         Index("ix_paper_decision_snapshot_decided", "decided_at"),
         Index("ix_paper_decision_snapshot_mint", "mint_address"),
+        # Indexes the retention prune needs: an unindexed inbound foreign key
+        # makes Postgres re-scan this table for every parent row deleted.
+        Index("ix_paper_decision_snapshots_market_snapshot_id", "market_snapshot_id"),
     )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     decision_source: Mapped[str] = mapped_column(String(16), nullable=False)
@@ -55,7 +58,12 @@ class PaperDecisionEnrichment(Base):
 
 class PaperDecisionOutcome(Base):
     __tablename__ = "paper_decision_outcomes"
-    __table_args__ = (Index("ix_paper_decision_outcome_decision", "decision_id"),)
+    __table_args__ = (
+        Index("ix_paper_decision_outcome_decision", "decision_id"),
+        # Indexes the retention prune needs: an unindexed inbound foreign key
+        # makes Postgres re-scan this table for every parent row deleted.
+        Index("ix_paper_decision_outcomes_market_snapshot_id", "market_snapshot_id"),
+    )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     decision_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("paper_decision_snapshots.id", ondelete="RESTRICT"), nullable=False)
     horizon: Mapped[str] = mapped_column(String(32), nullable=False)

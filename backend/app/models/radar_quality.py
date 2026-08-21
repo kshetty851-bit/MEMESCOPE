@@ -122,6 +122,9 @@ class RadarDecisionSnapshot(Base):
         Index("ix_radar_decision_snapshots_evaluated", "evaluated_at"),
         Index("ix_radar_decision_snapshots_rank", "radar_rank"),
         Index("ix_radar_decision_snapshots_selected", "selected", "evaluated_at"),
+        # Indexes the retention prune needs: an unindexed inbound foreign key
+        # makes Postgres re-scan this table for every parent row deleted.
+        Index("ix_radar_decision_snapshots_market_snapshot_id", "market_snapshot_id"),
     )
 
 
@@ -149,6 +152,9 @@ class RadarRankEvent(Base):
     __table_args__ = (
         Index("ix_radar_rank_events_mint_observed", "mint_address", "observed_at"),
         Index("ix_radar_rank_events_rank_observed", "radar_rank", "observed_at"),
+        # Indexes the retention prune needs: an unindexed inbound foreign key
+        # makes Postgres re-scan this table for every parent row deleted.
+        Index("ix_radar_rank_events_decision_id", "decision_id"),
     )
 
 
@@ -194,4 +200,7 @@ class RadarDecisionOutcome(Base):
         ),
         Index("ix_radar_decision_outcomes_decision", "decision_id"),
         Index("ix_radar_decision_outcomes_due", "due_at"),
+        # Indexes the retention prune needs: an unindexed inbound foreign key
+        # makes Postgres re-scan this table for every parent row deleted.
+        Index("ix_radar_decision_outcomes_market_snapshot_id", "market_snapshot_id"),
     )
