@@ -28,7 +28,13 @@ trap cleanup EXIT
 check() {
 	local name="$1" url="$2" expect="${3:-200}"
 	local code
-	code="$(curl -s -b "$COOKIE_JAR" -o /dev/null -w '%{http_code}' -m "$TIMEOUT" "$url" 2>/dev/null || echo 000)"
+	# `-L` follows redirects, and the apex host issues one: memescope.site is a
+	# 308 to www.memescope.site. Without it every frontend page reported 308
+	# against an expected 200, which failed verification on a perfectly healthy
+	# release, rolled it back, and then failed the rollback too — because the
+	# previous release redirected exactly the same way. A check that cannot
+	# pass on any release is not measuring the release.
+	code="$(curl -sL -b "$COOKIE_JAR" -o /dev/null -w '%{http_code}' -m "$TIMEOUT" "$url" 2>/dev/null || echo 000)"
 	if [ "$code" = "$expect" ]; then
 		printf '  ✓ %-28s %s\n' "$name" "$code"
 		pass=$((pass + 1))
