@@ -90,101 +90,55 @@ async def _prune_market_snapshots(days: int) -> int:
 
     The carve-out is the whole point: these rows are how an entry price, an
     exit price and every trailing-stop decision in between are explained. A
-    token that reached the Radar or the wallet keeps its complete series.
+    token that reached the Radar or the wallet keeps its complete series, and
+    so does any snapshot a paper or radar decision referenced — those foreign
+    keys are ON DELETE SET NULL, so pruning one would not fail, it would
+    silently blank the link from a decision to the observation it acted on.
 
-    **The protected set is materialised once per run, not re-derived per row.**
-    Written the obvious way — two correlated `NOT EXISTS` against the base
-    tables — a single 50,000-row batch ran for over 400 seconds on 8.5M rows
-    and deleted nothing, because the anti-join is evaluated for every candidate
-    the scan touches. Hoisting it into an indexed temp table (~750 mints) turns
-    that into one hash probe, and driving the scan off `ix_snapshots_captured_at`
-    with `ORDER BY captured_at` means each batch walks the oldest rows in index
-    order and stops at the limit instead of scanning the table.
+    **Both protected sets are inline CTEs, not temp tables.** A temp table
+    belongs to one connection, and committing between batches hands the
+    connection back to the pool — so the next batch can land on a different
+    one and fail with `relation "_protected_mints" does not exist`. That is
+    invisible while the pool happens to hand back the same connection, which
+    is exactly how it passed in isolation and failed in a full suite run. The
+    sets are small (~700 mints, ~900 ids), so hashing them per batch is
+    cheaper than the bug.
 
-    One session for the whole prune, committed per batch: the temp table is
-    `ON COMMIT PRESERVE ROWS` (the default) so it survives those commits, and
-    each batch still releases its locks.
+    The scan is driven off `ix_snapshots_captured_at` by `ORDER BY
+    captured_at`, so each batch walks the oldest rows in index order and stops
+    at the limit rather than scanning the table.
     """
-    cutoff = datetime.now(UTC) - timedelta(days=days)
-    removed = 0
-    async with SessionFactory() as session:
-        await session.execute(
-            text(
-                """
-                CREATE TEMP TABLE IF NOT EXISTS _protected_mints AS
-                SELECT mint_address FROM radar_tokens
-                UNION
-                SELECT mint_address FROM paper_positions
-                """
-            )
+    return await _delete_in_batches(
+        """
+        WITH prot_mints AS (
+            SELECT mint_address FROM radar_tokens
+            UNION
+            SELECT mint_address FROM paper_positions
+        ),
+        prot_snaps AS (
+            SELECT market_snapshot_id AS id FROM paper_decision_snapshots
+             WHERE market_snapshot_id IS NOT NULL
+            UNION
+            SELECT market_snapshot_id FROM paper_decision_outcomes
+             WHERE market_snapshot_id IS NOT NULL
+            UNION
+            SELECT market_snapshot_id FROM radar_decision_outcomes
+             WHERE market_snapshot_id IS NOT NULL
+        ),
+        doomed AS (
+            SELECT s.id FROM token_market_snapshots s
+            WHERE s.captured_at < :cutoff
+              AND NOT EXISTS (
+                  SELECT 1 FROM prot_mints p WHERE p.mint_address = s.mint_address
+              )
+              AND NOT EXISTS (SELECT 1 FROM prot_snaps x WHERE x.id = s.id)
+            ORDER BY s.captured_at
+            LIMIT :batch
         )
-        await session.execute(
-            text(
-                "CREATE UNIQUE INDEX IF NOT EXISTS _protected_mints_idx "
-                "ON _protected_mints (mint_address)"
-            )
-        )
-        # Every snapshot a decision was based on is evidence, not telemetry.
-        # These foreign keys are ON DELETE SET NULL, so pruning one of these
-        # rows would not fail — it would silently blank the link from a paper
-        # or radar decision to the exact observation it acted on.
-        await session.execute(
-            text(
-                """
-                CREATE TEMP TABLE IF NOT EXISTS _protected_snapshots AS
-                SELECT market_snapshot_id AS id FROM paper_decision_snapshots
-                 WHERE market_snapshot_id IS NOT NULL
-                UNION
-                SELECT market_snapshot_id FROM paper_decision_outcomes
-                 WHERE market_snapshot_id IS NOT NULL
-                UNION
-                SELECT market_snapshot_id FROM radar_decision_outcomes
-                 WHERE market_snapshot_id IS NOT NULL
-                """
-            )
-        )
-        await session.execute(
-            text(
-                "CREATE UNIQUE INDEX IF NOT EXISTS _protected_snapshots_idx "
-                "ON _protected_snapshots (id)"
-            )
-        )
-        await session.execute(text("ANALYZE _protected_mints"))
-        await session.execute(text("ANALYZE _protected_snapshots"))
-        await session.commit()
-
-        for _ in range(_MAX_BATCHES):
-            result = await session.execute(
-                text(
-                    """
-                    DELETE FROM token_market_snapshots
-                    WHERE ctid IN (
-                        SELECT s.ctid FROM token_market_snapshots s
-                        WHERE s.captured_at < :cutoff
-                          AND NOT EXISTS (
-                              SELECT 1 FROM _protected_mints p
-                              WHERE p.mint_address = s.mint_address
-                          )
-                          AND NOT EXISTS (
-                              SELECT 1 FROM _protected_snapshots x WHERE x.id = s.id
-                          )
-                        ORDER BY s.captured_at
-                        LIMIT :batch
-                    )
-                    """
-                ),
-                {"cutoff": cutoff, "batch": _BATCH},
-            )
-            await session.commit()
-            count = _cast("CursorResult[Any]", result).rowcount or 0
-            removed += count
-            if count < _BATCH:
-                break
-
-        await session.execute(text("DROP TABLE IF EXISTS _protected_mints"))
-        await session.execute(text("DROP TABLE IF EXISTS _protected_snapshots"))
-        await session.commit()
-    return removed
+        DELETE FROM token_market_snapshots t USING doomed d WHERE t.id = d.id
+        """,
+        {"cutoff": datetime.now(UTC) - timedelta(days=days), "batch": _BATCH},
+    )
 
 
 async def _prune_radar_decision_snapshots(days: int) -> int:

@@ -26,6 +26,7 @@ from app.workers.retention_tasks import _prune_market_snapshots, _prune_score_hi
 
 pytestmark = pytest.mark.integration
 
+MINT_PREFIX = "Retention"
 NOW = datetime.now(UTC)
 OLD = NOW - timedelta(days=30)
 
@@ -33,15 +34,33 @@ OLD = NOW - timedelta(days=30)
 @pytest.fixture
 async def session(test_session_factory):
     """A really-committed session: the prune opens its own, so uncommitted
-    fixture data would be invisible to it."""
+    fixture data would be invisible to it.
+
+    Teardown removes **only this module's rows**, by mint prefix and in
+    foreign-key order. A blanket `DELETE FROM discovered_tokens` raises on the
+    references other tables hold, and a failed teardown leaves the connection
+    dirty for whatever runs next — which is how this first showed up, as
+    unrelated failures in the priority-lane suite.
+    """
     async with test_session_factory() as s:
         yield s
-        # Committed data is real; take it back out so runs stay independent.
-        await s.execute(text("DELETE FROM token_market_snapshots"))
-        await s.execute(text("DELETE FROM paper_positions"))
-        await s.execute(text("DELETE FROM paper_wallets"))
-        await s.execute(text("DELETE FROM radar_tokens"))
-        await s.execute(text("DELETE FROM discovered_tokens"))
+        await s.rollback()
+        for table in ("token_market_snapshots", "paper_positions"):
+            await s.execute(
+                text(f"DELETE FROM {table} WHERE mint_address LIKE :p"),  # noqa: S608
+                {"p": f"{MINT_PREFIX}%"},
+            )
+        await s.execute(
+            text("DELETE FROM radar_tokens WHERE mint_address LIKE :p"),
+            {"p": f"{MINT_PREFIX}%"},
+        )
+        await s.execute(
+            text("DELETE FROM paper_wallets WHERE strategy_id = 'retention_test'")
+        )
+        await s.execute(
+            text("DELETE FROM discovered_tokens WHERE mint_address LIKE :p"),
+            {"p": f"{MINT_PREFIX}%"},
+        )
         await s.commit()
 
 
@@ -117,6 +136,10 @@ class TestMarketSnapshotCarveOut:
         wallet = PaperWallet(
             strategy_id="retention_test", strategy_version="v1", generation=1,
             starting_balance=Decimal("1000"), started_at=OLD,
+            # Archived on purpose: `uq_paper_wallets_live` allows exactly one
+            # live wallet, and this fixture only needs a wallet for the
+            # position to hang off. The carve-out reads `paper_positions`.
+            archived_at=OLD,
         )
         session.add(wallet)
         await session.flush()

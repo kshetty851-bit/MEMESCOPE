@@ -377,10 +377,17 @@ class Settings(BaseSettings):
     # the nursery running, against a 38 GB disk.
     SCORING_HISTORY_RETENTION_DAYS: int = 7
     MARKET_SNAPSHOT_RETENTION_DAYS: int = Field(default=7, ge=1, le=365)
-    #: The heaviest table per row (5.4 KB, mostly JSONB) and the fastest
-    #: grower. The distilled `radar_decision_outcomes` is permanent; this is
-    #: only its raw input.
-    RADAR_DECISION_SNAPSHOT_RETENTION_DAYS: int = Field(default=3, ge=1, le=365)
+    #: The heaviest table per row (~8 KB, mostly JSONB) and the fastest grower.
+    #: The distilled `radar_decision_outcomes` is permanent; this is only its
+    #: raw input, and a decision that already has an outcome is excluded from
+    #: pruning entirely.
+    #:
+    #: 3 -> 2 days: measured on production after the 2026-08-21 cleanup, three
+    #: days of this table is ~4.3 GB, and it projects to ~8.4 GB with the
+    #: nursery running — half the steady-state database on a 38 GB disk. Two
+    #: days returns ~2.8 GB of that and lifts projected free space from ~12 GB
+    #: to ~15 GB.
+    RADAR_DECISION_SNAPSHOT_RETENTION_DAYS: int = Field(default=2, ge=1, le=365)
     #: Windows used only by the emergency pass above the critical threshold.
     SCORING_HISTORY_EMERGENCY_DAYS: int = Field(default=3, ge=1, le=365)
     RADAR_DECISION_SNAPSHOT_EMERGENCY_DAYS: int = Field(default=1, ge=1, le=365)

@@ -299,7 +299,7 @@ x-backend-env: &backend-env
   # history at 11 GB, 79% of it older than a week.
   SCORING_HISTORY_RETENTION_DAYS: ${SCORING_HISTORY_RETENTION_DAYS:-7}
   MARKET_SNAPSHOT_RETENTION_DAYS: ${MARKET_SNAPSHOT_RETENTION_DAYS:-7}
-  RADAR_DECISION_SNAPSHOT_RETENTION_DAYS: ${RADAR_DECISION_SNAPSHOT_RETENTION_DAYS:-3}
+  RADAR_DECISION_SNAPSHOT_RETENTION_DAYS: ${RADAR_DECISION_SNAPSHOT_RETENTION_DAYS:-2}
   SCORING_HISTORY_EMERGENCY_DAYS: ${SCORING_HISTORY_EMERGENCY_DAYS:-3}
   RADAR_DECISION_SNAPSHOT_EMERGENCY_DAYS: ${RADAR_DECISION_SNAPSHOT_EMERGENCY_DAYS:-1}
   DISK_WARNING_PERCENT: ${DISK_WARNING_PERCENT:-75}
@@ -431,6 +431,15 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    healthcheck:
+      # The image's HEALTHCHECK curls the API's /live, which does not exist in
+      # this container — so it always failed and the status meant nothing while
+      # a wedged worker consumed nothing for fifty minutes on 2026-08-21.
+      test: ["CMD", "python", "-m", "app.health.worker_probe", "worker"]
+      interval: 60s
+      timeout: 20s
+      retries: 3
+      start_period: 60s
 
   scheduler:
     build:
@@ -452,6 +461,15 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    healthcheck:
+      # Beat only sends, so it cannot answer a ping. Its shelve is the signal:
+      # it is rewritten on every tick, so a file that stops advancing is a
+      # scheduler that has stopped scheduling.
+      test: ["CMD", "python", "-m", "app.health.worker_probe", "beat"]
+      interval: 60s
+      timeout: 20s
+      retries: 3
+      start_period: 90s
 
   # Long-lived Helius WebSocket consumer. Deliberately a single replica: each
   # instance opens its own subscription, so scaling out would duplicate every

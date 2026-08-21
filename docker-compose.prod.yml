@@ -110,6 +110,15 @@ services:
       BUILD_SHA: ${BUILD_SHA:-unknown}
     volumes: !reset []
     restart: unless-stopped
+    healthcheck:
+      # The image's HEALTHCHECK curls the API's /live, which does not exist in
+      # this container — so it always failed and the status meant nothing while
+      # a wedged worker consumed nothing for fifty minutes on 2026-08-21.
+      test: ["CMD", "python", "-m", "app.health.worker_probe", "worker"]
+      interval: 60s
+      timeout: 20s
+      retries: 3
+      start_period: 60s
 
   scheduler:
     build:
@@ -131,6 +140,15 @@ services:
     volumes: !reset
       - celery-beat:/var/lib/celery
     restart: unless-stopped
+    healthcheck:
+      # Beat only sends, so it cannot answer a ping. Its shelve is the signal:
+      # it is rewritten on every tick, so a file that stops advancing is a
+      # scheduler that has stopped scheduling.
+      test: ["CMD", "python", "-m", "app.health.worker_probe", "beat"]
+      interval: 60s
+      timeout: 20s
+      retries: 3
+      start_period: 90s
 
   # A disabled feature exits 0 and must then stay stopped. Under
   # `unless-stopped` a clean exit is restarted forever, which burns CPU and
