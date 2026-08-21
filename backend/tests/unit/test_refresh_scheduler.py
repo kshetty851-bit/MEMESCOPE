@@ -22,6 +22,7 @@ POLICY = SchedulePolicy(
     mature_max_minutes=1440,
     mature_interval_seconds=1800,
     old_interval_seconds=21600,
+    nursery_interval_seconds=60,
 )
 
 # Deterministic backoff so failure paths assert exact numbers.
@@ -65,6 +66,55 @@ def test_fresh_tokens_refresh_far_more_often_than_old_ones() -> None:
     fresh = _scheduler().decide(now=NOW, discovered_at=NOW - timedelta(minutes=1))
     old = _scheduler().decide(now=NOW, discovered_at=NOW - timedelta(days=7))
     assert old.interval_seconds > fresh.interval_seconds * 100
+
+
+class TestTheNurseryTier:
+    def test_a_nursery_token_inside_the_window_gets_the_nursery_interval(self) -> None:
+        decision = _scheduler().decide(
+            now=NOW, discovered_at=NOW - timedelta(minutes=5), nursery=True
+        )
+        assert decision.tier is RefreshTier.NURSERY
+        assert decision.interval_seconds == 60
+
+    def test_a_nursery_row_past_the_window_schedules_by_age(self) -> None:
+        """A lagging membership beat must not keep a stale token on the
+        nursery cadence — the flag is honoured only while the age band holds."""
+        decision = _scheduler().decide(
+            now=NOW, discovered_at=NOW - timedelta(minutes=45), nursery=True
+        )
+        assert decision.tier is RefreshTier.YOUNG
+        assert decision.interval_seconds == 300
+
+    def test_display_priority_outranks_the_nursery_flag(self) -> None:
+        decision = _scheduler().decide(
+            now=NOW,
+            discovered_at=NOW - timedelta(minutes=5),
+            priority=True,
+            nursery=True,
+        )
+        assert decision.tier is RefreshTier.PRIORITY
+
+    def test_nursery_failures_still_back_off(self) -> None:
+        """Rate limiting and retry discipline apply to the nursery exactly as
+        they do to the display lane."""
+        decision = _scheduler().decide(
+            now=NOW,
+            discovered_at=NOW - timedelta(minutes=5),
+            nursery=True,
+            consecutive_failures=4,
+        )
+        assert decision.interval_seconds == 240  # 30 * 2**3, above the 60s base
+
+    def test_nursery_awaiting_listing_eases_off(self) -> None:
+        """A mint the provider has not indexed yet is expected for a token
+        seconds old; the linear ease-off keeps the lane from hammering it."""
+        decision = _scheduler().decide(
+            now=NOW,
+            discovered_at=NOW - timedelta(minutes=5),
+            nursery=True,
+            consecutive_empty=2,
+        )
+        assert decision.interval_seconds == 180  # 60 * (1 + 2)
 
 
 def test_failures_back_off_exponentially() -> None:

@@ -6,6 +6,7 @@ are reproducible without touching the network.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -17,6 +18,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.models.market import (
+    LANE_NORMAL,
+    LANE_NURSERY,
+    LANE_TRACK_RECORD,
     EnrichmentStatus,
     TokenEnrichmentState,
     TokenMarketSnapshot,
@@ -141,7 +145,7 @@ async def test_enrichment_writes_a_snapshot(db_session: AsyncSession) -> None:
 async def test_track_record_admission_gets_one_prompt_post_admission_quote_attempt(
     db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Raw discovery alone is normal priority; canonical admission is expedited."""
+    """Raw discovery earns the nursery lane; canonical admission is expedited above it."""
     mint = "MintGenerationSixTrackRecordQuote"
     now = datetime.now(UTC)
     monkeypatch.setattr(
@@ -164,7 +168,7 @@ async def test_track_record_admission_gets_one_prompt_post_admission_quote_attem
         select(TokenEnrichmentState).where(TokenEnrichmentState.mint_address == mint)
     )
     assert state is not None
-    assert state.priority == 0
+    assert state.priority == LANE_NURSERY
     db_session.add(
         RadarToken(
             token_id=token.id,
@@ -185,13 +189,13 @@ async def test_track_record_admission_gets_one_prompt_post_admission_quote_attem
     )
     await db_session.flush()
     await service.states.prioritize_unquoted_track_record_candidates(now=now)
-    assert state.priority == 2
+    assert state.priority == LANE_TRACK_RECORD
 
     outcome = await service.enrich([state])
 
     assert outcome.snapshots_written == 1
     assert state.total_refreshes == 1
-    assert state.priority == 0
+    assert state.priority == LANE_NORMAL
     snapshots = await _snapshots(db_session, mint)
     assert len(snapshots) == 1
     snapshot = snapshots[0]
@@ -499,6 +503,69 @@ async def test_worker_chunks_to_the_provider_batch_size(
         await service.enrich(states[start : start + provider.batch_size])
 
     assert [len(call) for call in provider.calls] == [2, 2, 1]
+
+
+async def test_worker_fetches_chunks_concurrently_and_persists_them_serially(
+    client: Any, test_session_factory: Any
+) -> None:
+    """Chunk requests overlap; database writes do not.
+
+    Sequential fetching made the cycle latency-bound — four chunks at ~1.5s
+    each — which held the worker to a measured 720 refreshes a minute while the
+    display and nursery lanes alone ask for about 1,400. Concurrency is bounded
+    by `ENRICHMENT_CONCURRENCY`, and persistence must stay one chunk at a time
+    because the session is not concurrency-safe.
+    """
+    sessions = test_session_factory
+    mints = [f"MintConcurrent{n}" for n in range(6)]
+
+    async with sessions() as session:
+        for mint in mints:
+            await _token_with_state(session, mint)
+        await session.commit()
+
+    class SlowProvider(FakeProvider):
+        """Records how many fetches are in flight at once."""
+
+        def __init__(self, **kwargs: Any) -> None:
+            super().__init__(**kwargs)
+            self.in_flight = 0
+            self.peak_in_flight = 0
+
+        async def fetch_many(self, mint_addresses: Sequence[str]) -> dict[str, MarketData]:
+            self.in_flight += 1
+            self.peak_in_flight = max(self.peak_in_flight, self.in_flight)
+            try:
+                await asyncio.sleep(0.05)
+                return await super().fetch_many(mint_addresses)
+            finally:
+                self.in_flight -= 1
+
+    try:
+        provider = SlowProvider(data={mint: _market(mint) for mint in mints})
+        provider.batch_size = 2
+        worker = MarketEnrichmentWorker(provider=provider, batch_limit=6)
+
+        processed = await worker._run_cycle()
+
+        assert processed == 6
+        # Three chunks of two, and more than one was in flight at a time.
+        assert sorted(len(call) for call in provider.calls) == [2, 2, 2]
+        assert provider.peak_in_flight > 1
+        assert provider.peak_in_flight <= settings.ENRICHMENT_CONCURRENCY
+        assert worker.stats.snapshots_written == 6
+    finally:
+        async with sessions() as session:
+            for mint in mints:
+                for row in await _snapshots(session, mint):
+                    await session.delete(row)
+                state_row = await EnrichmentStateRepository(session).get_by_mint(mint)
+                if state_row is not None:
+                    await session.delete(state_row)
+                token = await TokenRepository(session).get_by_mint(mint)
+                if token is not None:
+                    await session.delete(token)
+            await session.commit()
 
 
 async def test_worker_backfills_orphans_periodically(

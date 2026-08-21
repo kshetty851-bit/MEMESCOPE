@@ -42,6 +42,11 @@ class EnrichmentHealth(BaseSchema):
     #: Tokens in the priority lane, and how many of those are already due.
     priority_queue_depth: int = 0
     priority_tokens: int = 0
+    #: The fresh-token nursery: current members, and how many are already due.
+    #: Reported separately from the display lane above — one answers "is what
+    #: the user sees fresh", the other "are new launches being observed at all".
+    nursery_tokens: int = 0
+    nursery_queue_depth: int = 0
     #: How long the oldest waiting item in each lane has been due, in seconds.
     #: `None` when that lane has nothing overdue.
     oldest_priority_wait_seconds: float | None = None

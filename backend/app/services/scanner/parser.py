@@ -30,6 +30,14 @@ CREATE_MARKERS = (
     "Instruction: CreateMetadataAccountV3",
 )
 
+# PumpSwap's pool creation. A *direct* PumpSwap launch initialises no token
+# mint in the launch transaction — the mint already exists — so the mint-init
+# markers above miss it entirely. The only `InitializeMint2` such a transaction
+# carries is the pool's own LP mint, which is exactly why `extract_mint_and_
+# decimals` must never be used on one of these: it would confidently discover
+# the LP token. The `CreatePoolEvent` decoded below is the authoritative source.
+POOL_CREATE_MARKER = "Instruction: CreatePool"
+
 
 @dataclass(frozen=True, slots=True)
 class LogEvent:
@@ -40,6 +48,10 @@ class LogEvent:
     logs: tuple[str, ...]
     source_program: str | None = None
     observed_at: datetime | None = None
+    #: True when this event was reconstructed by gap recovery rather than seen
+    #: live. Carried into the research ledger so latency comparisons never
+    #: mistake a replayed observation for a real-time one.
+    replayed: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,10 +72,11 @@ def is_token_creation_log(logs: list[str] | tuple[str, ...]) -> bool:
 
     The stream carries hundreds of transactions per second; fetching each one
     would be both slow and a good way to get rate limited. Requiring a mint-init
-    marker discards the overwhelming majority for the cost of a substring scan.
+    or pool-creation marker discards the overwhelming majority — PumpSwap's
+    stream is nearly all `Buy`/`Sell` — for the cost of a substring scan.
     """
     blob = "\n".join(logs)
-    return any(marker in blob for marker in MINT_INIT_MARKERS)
+    return POOL_CREATE_MARKER in blob or any(marker in blob for marker in MINT_INIT_MARKERS)
 
 
 def parse_log_notification(message: dict[str, Any]) -> LogEvent | None:
@@ -255,6 +268,9 @@ class CreateEvent:
     symbol: str | None
     metadata_uri: str | None
     block_time: datetime | None
+    #: Only when the event itself carries it (PumpSwap's does; pump.fun's does
+    #: not). Never assumed — an absent value stays None.
+    decimals: int | None = None
 
 
 #: Anchor derives an event discriminator as `sha256("event:<Name>")[:8]`. Pinned
@@ -323,6 +339,18 @@ class _Reader:
         (value,) = struct.unpack_from("<q", self._data, self._offset)
         self._offset += 8
         return int(value)
+
+    def skip(self, count: int) -> None:
+        if self.remaining < count:
+            raise ValueError("truncated skip")
+        self._offset += count
+
+    def u8(self) -> int:
+        if self.remaining < 1:
+            raise ValueError("truncated u8")
+        value = self._data[self._offset]
+        self._offset += 1
+        return value
 
 
 def parse_create_event(logs: Sequence[str]) -> CreateEvent | None:
@@ -396,6 +424,160 @@ def parse_create_event(logs: Sequence[str]) -> CreateEvent | None:
         )
 
     return None
+
+
+#: Anchor event discriminator for PumpSwap's `CreatePoolEvent`:
+#: `sha256("event:CreatePoolEvent")[:8]`. Verified equal to the bytes emitted on
+#: mainnet, 2026-08-20, by decoding two live pool creations and matching the
+#: base mint, quote mint (WSOL) and timestamp (== the transaction's blockTime)
+#: at the offsets read below.
+PUMPSWAP_CREATE_POOL_DISCRIMINATOR = bytes.fromhex("b1310cd2a076a774")
+
+#: Wrapped SOL — one side of essentially every PumpSwap pool, in either
+#: orientation. The launched token is identified as the *other* side, so SOL
+#: itself is never reported as a newly launched token.
+WSOL_MINT = "So11111111111111111111111111111111111111112"
+
+
+def parse_pumpswap_pool_event(logs: Sequence[str]) -> CreateEvent | None:
+    """Decode a PumpSwap `CreatePoolEvent` from log lines, or None if absent.
+
+    Fixed-offset head of the event, verified against mainnet transactions
+    (see the discriminator note above):
+
+        offset  0  discriminator (8 bytes)
+        offset  8  timestamp     (i64, unix seconds — equals blockTime)
+        offset 16  index         (u16)
+        offset 18  creator       (pubkey)
+        offset 50  base_mint     (pubkey — the token)
+        offset 82  quote_mint    (pubkey — WSOL in practice)
+        offset 114 base_mint_decimals  (u8)
+        offset 115 quote_mint_decimals (u8)
+
+    The pool has no token metadata of its own, so `name`/`symbol`/`uri` are
+    None and the token stays `MetadataStatus.PENDING` until the metadata step
+    resolves it — unresolved so far, not nameless.
+
+    Covers both direct launches and pump.fun graduations (`MigrateV2` CPIs into
+    the same instruction); the mint-level dedupe upstream makes a graduation of
+    an already-discovered token a no-op, and a graduation of a *missed* token a
+    legitimate second chance at discovering it.
+    """
+    for line in logs:
+        if not line.startswith(_PROGRAM_DATA_PREFIX):
+            continue
+
+        try:
+            payload = base64.b64decode(line[len(_PROGRAM_DATA_PREFIX) :], validate=True)
+        except (ValueError, binascii.Error):
+            continue
+
+        if not payload.startswith(PUMPSWAP_CREATE_POOL_DISCRIMINATOR):
+            continue
+
+        try:
+            reader = _Reader(payload, offset=len(PUMPSWAP_CREATE_POOL_DISCRIMINATOR))
+            timestamp = reader.i64()
+            reader.skip(2)  # index (u16) — not needed
+            creator = reader.pubkey()
+            base_mint = reader.pubkey()
+            quote_mint = reader.pubkey()
+            base_decimals = reader.u8()
+            quote_decimals = reader.u8()
+        except ValueError:
+            # The layout moved. Refuse the reading rather than report a
+            # plausible-looking wrong mint.
+            return None
+
+        # The timestamp is read before every pubkey that matters; a value
+        # outside plausibility means the offsets are wrong, same discipline as
+        # the pump.fun event above.
+        if not (_MIN_BLOCK_TIME <= timestamp <= _MAX_BLOCK_TIME):
+            return None
+
+        # The launched token is the non-WSOL side. Both orientations occur on
+        # mainnet — token/WSOL and WSOL/token were each observed live on
+        # 2026-08-20 — so the side is decided by inspection, never assumed. A
+        # pool with WSOL on neither side (or both) cannot be attributed to one
+        # launched token; refuse rather than guess, and the scanner's refusal
+        # counter keeps the gap visible.
+        if base_mint != WSOL_MINT and quote_mint == WSOL_MINT:
+            mint, decimals = base_mint, base_decimals
+        elif base_mint == WSOL_MINT and quote_mint != WSOL_MINT:
+            mint, decimals = quote_mint, quote_decimals
+        else:
+            return None
+
+        return CreateEvent(
+            mint_address=mint,
+            creator_address=creator,
+            name=None,
+            symbol=None,
+            metadata_uri=None,
+            block_time=datetime.fromtimestamp(timestamp, tz=UTC),
+            decimals=decimals,
+        )
+
+    return None
+
+
+def creation_events_from_block(
+    block: dict[str, Any],
+    *,
+    slot: int,
+    programs: Sequence[str],
+    observed_at: datetime,
+) -> list[LogEvent]:
+    """Candidate creation events from one `getBlock` result, for gap recovery.
+
+    Applies exactly the live pre-filter (`is_token_creation_log`) to each
+    transaction's log messages, and the same provenance rule as the live
+    subscription: a transaction is attributed to the first watched program its
+    logs show being invoked, and skipped when none is — mirroring what
+    `logsSubscribe(mentions=...)` would have delivered.
+
+    Failed transactions are skipped: a reverted creation never existed.
+    """
+    events: list[LogEvent] = []
+    for entry in block.get("transactions") or []:
+        if not isinstance(entry, dict):
+            continue
+        meta = entry.get("meta") or {}
+        if meta.get("err") is not None:
+            continue
+        logs = meta.get("logMessages")
+        if not isinstance(logs, list) or not logs:
+            continue
+        log_lines = tuple(str(line) for line in logs)
+        if not is_token_creation_log(log_lines):
+            continue
+
+        program = next(
+            (
+                candidate
+                for candidate in programs
+                if any(f"Program {candidate} invoke" in line for line in log_lines)
+            ),
+            None,
+        )
+        if program is None:
+            continue
+
+        signatures = (entry.get("transaction") or {}).get("signatures") or []
+        if not signatures or not isinstance(signatures[0], str):
+            continue
+
+        events.append(
+            LogEvent(
+                signature=signatures[0],
+                slot=slot,
+                logs=log_lines,
+                source_program=program,
+                observed_at=observed_at,
+                replayed=True,
+            )
+        )
+    return events
 
 
 def parse_asset_metadata(asset: dict[str, Any]) -> TokenMetadata:

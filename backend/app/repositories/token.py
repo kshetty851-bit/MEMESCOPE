@@ -118,6 +118,20 @@ class TokenRepository(BaseRepository[DiscoveredToken]):
         )
         return (await self.session.execute(stmt)).scalars().all()
 
+    async def max_recent_slot(self, *, since: datetime) -> int | None:
+        """The highest slot among recent discoveries — the durable gap marker
+        for scanner recovery after a cold start.
+
+        Bounded by `discovered_at` so the scan stays on the timestamp index; a
+        gap older than the bound is past recovering anyway.
+        """
+        value = await self.session.scalar(
+            select(sa_func.max(DiscoveredToken.slot)).where(
+                DiscoveredToken.discovered_at >= since
+            )
+        )
+        return int(value) if value is not None else None
+
     async def insert_if_absent(self, values: dict[str, Any]) -> DiscoveredToken | None:
         """Insert a token, ignoring it if the mint is already known.
 

@@ -30,6 +30,11 @@ class RefreshTier(enum.StrEnum):
     #: cadence the screen implies rather than on the cadence its age implies.
     #: A six-day-old token at Radar rank 3 is OLD by age and PRIORITY by use.
     PRIORITY = "priority"
+    #: The fresh-token nursery lane. Same age band as FRESH, but claimed ahead
+    #: of the backlog: the FRESH tier's 30-second interval was meaningless when
+    #: a due fresh token sorted behind 238,000 overdue rows and waited hours
+    #: for a claim that its whole information value had already decayed past.
+    NURSERY = "nursery"
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +51,12 @@ class SchedulePolicy:
     #: What a displayed token gets, regardless of age. Published because it is
     #: the promise the freshness indicator is measured against.
     priority_interval_seconds: int = 15
+    #: The nursery cadence. Deliberately slower than the display lane's 15s and
+    #: the FRESH tier's nominal 30s: the lane holds up to
+    #: `ENRICHMENT_NURSERY_MAX_TOKENS` tokens and its worst-case claim demand is
+    #: `cap * 60 / interval` per minute, which must fit inside the worker's
+    #: measured throughput (~1,000 claims/min) *after* the display lane is fed.
+    nursery_interval_seconds: int = 60
 
     @classmethod
     def from_settings(cls) -> SchedulePolicy:
@@ -58,6 +69,7 @@ class SchedulePolicy:
             mature_interval_seconds=settings.ENRICHMENT_TIER_MATURE_INTERVAL_SECONDS,
             old_interval_seconds=settings.ENRICHMENT_TIER_OLD_INTERVAL_SECONDS,
             priority_interval_seconds=settings.ENRICHMENT_PRIORITY_INTERVAL_SECONDS,
+            nursery_interval_seconds=settings.ENRICHMENT_NURSERY_INTERVAL_SECONDS,
         )
 
     def tier_for_age(self, age_minutes: float) -> RefreshTier:
@@ -72,6 +84,7 @@ class SchedulePolicy:
     def interval_for_tier(self, tier: RefreshTier) -> int:
         return {
             RefreshTier.PRIORITY: self.priority_interval_seconds,
+            RefreshTier.NURSERY: self.nursery_interval_seconds,
             RefreshTier.FRESH: self.fresh_interval_seconds,
             RefreshTier.YOUNG: self.young_interval_seconds,
             RefreshTier.MATURE: self.mature_interval_seconds,
@@ -111,6 +124,7 @@ class RefreshScheduler:
         consecutive_failures: int = 0,
         consecutive_empty: int = 0,
         priority: bool = False,
+        nursery: bool = False,
     ) -> ScheduleDecision:
         """Compute the next refresh time for one token.
 
@@ -120,9 +134,20 @@ class RefreshScheduler:
         seconds would spend the whole budget on the one token least able to use
         it, and the freshness indicator will show the staleness honestly rather
         than the scheduler hiding it.
+
+        `nursery` is subordinate to `priority` and applies only while the token
+        is still inside the FRESH age window — a nursery row the membership beat
+        has not yet evicted schedules by its true age, so a lagging beat can
+        never keep a stale token on the nursery cadence. Both failure paths
+        still apply to it, for the same reason they apply to `priority`.
         """
         age_minutes = max(0.0, (now - discovered_at).total_seconds() / 60.0)
-        tier = RefreshTier.PRIORITY if priority else self.policy.tier_for_age(age_minutes)
+        if priority:
+            tier = RefreshTier.PRIORITY
+        elif nursery and age_minutes < self.policy.fresh_max_minutes:
+            tier = RefreshTier.NURSERY
+        else:
+            tier = self.policy.tier_for_age(age_minutes)
         base_interval = float(self.policy.interval_for_tier(tier))
 
         if consecutive_failures > 0:

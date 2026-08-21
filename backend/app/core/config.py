@@ -213,10 +213,15 @@ class Settings(BaseSettings):
 
     # --- Token discovery scanner --------------------------------------------
     # Programs whose logs are watched for token-creation instructions. pump.fun
-    # is where the overwhelming majority of Solana meme coins launch; adding a
-    # launchpad is a config change, not a code change.
+    # is where the overwhelming majority of Solana meme coins launch; the
+    # PumpSwap AMM (`pAMM…`) covers direct pool launches that never touch the
+    # bonding curve — its `create_pool` emits a `CreatePoolEvent` (discriminator
+    # b1310cd2a076a774, verified against mainnet) naming the base mint.
     SCANNER_WATCH_PROGRAMS: CsvList = Field(
-        default_factory=lambda: ["6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"]
+        default_factory=lambda: [
+            "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+            "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",
+        ]
     )
     SCANNER_COMMITMENT: Literal["processed", "confirmed", "finalized"] = "confirmed"
     # Bounded queue: under a launch burst we shed load rather than exhaust memory.
@@ -248,6 +253,22 @@ class Settings(BaseSettings):
     # the maximum backoff delay, so a scanner that is merely between retries
     # does not read as absent; short enough that a killed process disappears.
     SCANNER_STATE_TTL_SECONDS: int = Field(default=300, ge=30)
+    # Gap recovery on (re)connect: how far back, in slots, the scanner will
+    # walk `getBlock` to recover creations it missed while disconnected. One
+    # block is one RPC call, so this is also the per-outage request budget;
+    # 900 slots is roughly six minutes of chain. A longer outage recovers only
+    # the newest window — the older tokens' information value has already
+    # decayed — and logs the slots it abandoned rather than hiding them.
+    # Zero disables recovery.
+    SCANNER_RECOVERY_MAX_SLOTS: int = Field(default=900, ge=0, le=20_000)
+    # Pause between block fetches. Recovery shares one RPC allowance with live
+    # transaction resolution AND the enrichment worker's curve collection, so
+    # it must trickle: on 2026-08-20 a 4-blocks/second walk against the public
+    # endpoint helped 429-storm the shared IP for hours and slowed every
+    # enrichment cycle. One block per second walks the full default window
+    # inside the walk's 15-minute wall-clock deadline. Tighten on a paid
+    # endpoint via env.
+    SCANNER_RECOVERY_BLOCK_DELAY_SECONDS: float = Field(default=1.0, ge=0.0, le=10.0)
     # Redis channel the scanner publishes to and the API fans out from. This is
     # the *base* name; `token_channel` below is what is actually used.
     TOKEN_EVENT_CHANNEL: str = "memescope:tokens:discovered"
@@ -300,7 +321,7 @@ class Settings(BaseSettings):
 
     # --- Enrichment worker ---------------------------------------------------
     ENRICHMENT_POLL_INTERVAL_SECONDS: float = 5.0
-    ENRICHMENT_BATCH_LIMIT: int = 60
+    ENRICHMENT_BATCH_LIMIT: int = 120
     ENRICHMENT_CONCURRENCY: int = 4
     # Consecutive failures before a token is parked in the dead-letter state.
     # **Both conditions must hold** — see `RefreshScheduler.should_dead_letter`.
@@ -342,6 +363,33 @@ class Settings(BaseSettings):
     ENRICHMENT_TIER_MATURE_MAX_MINUTES: int = 1440  # 24 hours
     ENRICHMENT_TIER_MATURE_INTERVAL_SECONDS: int = 1800  # 30 minutes
     ENRICHMENT_TIER_OLD_INTERVAL_SECONDS: int = 21600  # 6 hours
+
+    # --- Fresh-token nursery lane -------------------------------------------
+    # Every newly discovered token's first FRESH-window minutes of prioritised
+    # observation, claimed ahead of the backlog but always behind the display
+    # lane (open paper positions included). Exists because the FRESH tier's
+    # interval was a promise the queue could not keep: with 238k overdue rows,
+    # a fresh token's median wait for its *first* snapshot was 4.3 hours.
+    #
+    # Capacity bound. Worst-case claim demand is `cap * 60 / interval` per
+    # minute, which must leave room inside the enrichment worker's measured
+    # throughput for the display lane and the backlog. Zero disables the lane
+    # entirely. Trimming is oldest-first, so a launch storm costs tail
+    # observation minutes, never the first look at the newest token.
+    #
+    # **Sized from the replay, not guessed.** At 600 the lane held a token for
+    # only 18 minutes during the afternoon launch regime measured on
+    # 2026-08-20 (~1,900 launches/hour), yielding ~12 observations — exactly
+    # the Radar's `MIN_OBSERVATIONS` floor, with no margin. 1,000 covers that
+    # regime for the whole 30-minute window (~20 observations). The cost is
+    # ~400 extra claims/minute, or ~13 extra provider requests/minute at 30
+    # mints per request: measured live at 116 requests/minute with zero rate
+    # limiting and zero breaker trips, against a 300/minute allowance.
+    ENRICHMENT_NURSERY_MAX_TOKENS: int = Field(default=1000, ge=0, le=5000)
+    # 60s yields ~25 observations across the 30-minute window — comfortably
+    # past the Radar's 12-observation floor and scoring's depth requirement of
+    # 3, without the display lane's 15s cost per token.
+    ENRICHMENT_NURSERY_INTERVAL_SECONDS: int = Field(default=60, ge=15, le=600)
 
     # --- AI scoring engine ---------------------------------------------------
     # Which weight vector to score with. Resolved through the model registry,
@@ -643,9 +691,13 @@ class Settings(BaseSettings):
     # other pipeline stage, and additionally blocked today by the Helius plan
     # quota — every RPC method returns `429 max usage reached`.
     FEATURE_CURVE_COLLECTION_ENABLED: bool = False
-    #: Tokens per collection pass. `getMultipleAccounts` accepts 100 addresses,
-    #: so this is a multiple of that or a fraction of one call.
-    CURVE_COLLECTION_BATCH_LIMIT: int = Field(default=100, ge=1, le=1000)
+    #: Tokens per collection pass. The collector chunks to whatever
+    #: `getMultipleAccounts` accepts (100 addresses) on its own, so this is a
+    #: work limit rather than an RPC one — and it must not sit *below*
+    #: `ENRICHMENT_BATCH_LIMIT`, or the tail of every full enrichment batch is
+    #: silently truncated away and those tokens get a market snapshot with no
+    #: curve reading beside it. Raised from 100 with the batch limit.
+    CURVE_COLLECTION_BATCH_LIMIT: int = Field(default=120, ge=1, le=1000)
     #: How many curve observations the near-graduation window reads.
     CURVE_WINDOW_SIZE: int = Field(default=12, ge=2, le=200)
 

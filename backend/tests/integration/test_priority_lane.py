@@ -24,12 +24,24 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.models.market import EnrichmentStatus, TokenEnrichmentState
+from app.models.market import (
+    LANE_DISPLAY,
+    LANE_NORMAL,
+    LANE_NURSERY,
+    EnrichmentStatus,
+    TokenEnrichmentState,
+)
 from app.models.radar import RadarToken
 from app.models.token import DiscoveredToken as TokenTable
 from app.repositories.market import EnrichmentStateRepository
 from app.repositories.token import TokenRepository
-from app.services.market.priority import apply_membership, refresh_priority_lane
+from app.services.market.priority import (
+    NurseryMembership,
+    apply_membership,
+    refresh_nursery_lane,
+    refresh_priority_lane,
+)
+from app.workers import priority_tasks
 
 pytestmark = pytest.mark.integration
 
@@ -97,7 +109,9 @@ class TestTheLaneJumpsTheBacklog:
         """The whole point. Ordering by due time alone is what produced a
         106-minute p95 for tokens the product was displaying."""
         await _token_with_state(db_session, BACKLOG, due_in_seconds=-7200)
-        await _token_with_state(db_session, DISPLAYED, due_in_seconds=-1, priority=1)
+        await _token_with_state(
+            db_session, DISPLAYED, due_in_seconds=-1, priority=LANE_DISPLAY
+        )
         await db_session.commit()
 
         claimed = await EnrichmentStateRepository(db_session).claim_due(now=NOW, limit=1)
@@ -120,7 +134,9 @@ class TestTheLaneJumpsTheBacklog:
         self, db_session: AsyncSession
     ) -> None:
         """Priority reorders; it does not bypass the due-time predicate."""
-        await _token_with_state(db_session, DISPLAYED, due_in_seconds=600, priority=1)
+        await _token_with_state(
+            db_session, DISPLAYED, due_in_seconds=600, priority=LANE_DISPLAY
+        )
         await db_session.commit()
 
         claimed = await EnrichmentStateRepository(db_session).claim_due(now=NOW, limit=10)
@@ -142,7 +158,7 @@ class TestPromotionClamp:
         await db_session.commit()
         await db_session.refresh(state)
 
-        assert state.priority == 1
+        assert state.priority == LANE_DISPLAY
         limit = NOW + timedelta(seconds=settings.ENRICHMENT_PRIORITY_INTERVAL_SECONDS)
         assert state.next_refresh_at <= limit
 
@@ -166,7 +182,7 @@ class TestPromotionClamp:
         because the rest were already `priority = 1` and kept six-hour due
         times forever."""
         state = await _token_with_state(
-            db_session, DISPLAYED, due_in_seconds=21_600, priority=1
+            db_session, DISPLAYED, due_in_seconds=21_600, priority=LANE_DISPLAY
         )
         await db_session.commit()
 
@@ -183,7 +199,9 @@ class TestPromotionClamp:
         self, db_session: AsyncSession
     ) -> None:
         """The predicate keeps a steady cycle from producing dead tuples."""
-        await _token_with_state(db_session, DISPLAYED, due_in_seconds=5, priority=1)
+        await _token_with_state(
+            db_session, DISPLAYED, due_in_seconds=5, priority=LANE_DISPLAY
+        )
         await db_session.commit()
 
         promoted, demoted = await apply_membership(db_session, {DISPLAYED}, now=NOW)
@@ -197,7 +215,9 @@ class TestMembershipIsDerivedNotAccumulated:
     ) -> None:
         """Otherwise the lane grows monotonically and becomes the backlog it
         was built to escape."""
-        state = await _token_with_state(db_session, DISPLAYED, due_in_seconds=5, priority=1)
+        state = await _token_with_state(
+            db_session, DISPLAYED, due_in_seconds=5, priority=LANE_DISPLAY
+        )
         await db_session.commit()
 
         _, demoted = await apply_membership(db_session, set(), now=NOW)
@@ -205,7 +225,7 @@ class TestMembershipIsDerivedNotAccumulated:
         await db_session.refresh(state)
 
         assert demoted == 1
-        assert state.priority == 0
+        assert state.priority == LANE_NORMAL
 
     async def test_the_lane_is_capped(self, db_session: AsyncSession) -> None:
         """A bug that marks everything priority must not turn the lane back
@@ -220,3 +240,203 @@ class TestMembershipIsDerivedNotAccumulated:
 
         assert membership.total <= settings.ENRICHMENT_PRIORITY_MAX_TOKENS
         assert membership.radar == 3
+
+
+async def _fresh_token_with_state(
+    session: AsyncSession,
+    mint: str,
+    *,
+    age_minutes: float,
+    priority: int = LANE_NORMAL,
+    due_in_seconds: int = 3600,
+) -> TokenEnrichmentState:
+    token = await TokenRepository(session).insert_if_absent(
+        {
+            "mint_address": mint,
+            "signature": f"sig-{mint}",
+            "slot": 1,
+            "discovered_at": NOW - timedelta(minutes=age_minutes),
+            "block_time": NOW - timedelta(minutes=age_minutes),
+            "symbol": mint[:6],
+        }
+    )
+    assert token is not None
+    state = TokenEnrichmentState(
+        token_id=token.id,
+        mint_address=mint,
+        status=EnrichmentStatus.ACTIVE,
+        next_refresh_at=NOW + timedelta(seconds=due_in_seconds),
+        priority=priority,
+    )
+    session.add(state)
+    await session.flush()
+    return state
+
+
+class TestTheNursery:
+    """The fresh-token nursery: discovery itself qualifies a token for
+    observation priority, which is what breaks the circularity of needing
+    observations to become interesting and needing to be interesting to be
+    observed."""
+
+    async def test_a_fresh_token_is_admitted_and_pulled_due(
+        self, db_session: AsyncSession
+    ) -> None:
+        state = await _fresh_token_with_state(
+            db_session, "NurseryFresh" + "1" * 31, age_minutes=2
+        )
+        await db_session.commit()
+
+        outcome = await refresh_nursery_lane(db_session, now=NOW)
+        await db_session.commit()
+        await db_session.refresh(state)
+
+        assert outcome.promoted == 1
+        assert state.priority == LANE_NURSERY
+        assert state.next_refresh_at <= NOW
+
+    async def test_the_nursery_claims_before_the_backlog_but_after_the_display_lane(
+        self, db_session: AsyncSession
+    ) -> None:
+        """Open positions and the visible board always outrank speculation."""
+        await _token_with_state(db_session, BACKLOG, due_in_seconds=-7200)
+        await _token_with_state(
+            db_session, DISPLAYED, due_in_seconds=-1, priority=LANE_DISPLAY
+        )
+        await _fresh_token_with_state(
+            db_session,
+            "NurseryClaims" + "1" * 30,
+            age_minutes=2,
+            priority=LANE_NURSERY,
+            due_in_seconds=-30,
+        )
+        await db_session.commit()
+
+        repository = EnrichmentStateRepository(db_session)
+        first = await repository.claim_due(now=NOW, limit=1)
+        second = await repository.claim_due(now=NOW, limit=1)
+
+        assert [row.mint_address for row in first] == [DISPLAYED]
+        assert [row.mint_address for row in second] == ["NurseryClaims" + "1" * 30]
+
+    async def test_a_token_past_the_window_is_evicted(self, db_session: AsyncSession) -> None:
+        """Weak tokens return to the age-tier cadence; the lane never
+        accumulates."""
+        state = await _fresh_token_with_state(
+            db_session,
+            "NurseryAged" + "1" * 32,
+            age_minutes=settings.ENRICHMENT_TIER_FRESH_MAX_MINUTES + 5,
+            priority=LANE_NURSERY,
+        )
+        await db_session.commit()
+
+        outcome = await refresh_nursery_lane(db_session, now=NOW)
+        await db_session.commit()
+        await db_session.refresh(state)
+
+        assert outcome.evicted_aged == 1
+        assert state.priority == LANE_NORMAL
+
+    async def test_the_cap_trims_oldest_first_and_is_reported(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """20k launches must never become 20k lane members: a storm costs the
+        oldest fresh tokens their tail minutes, never the newest its first
+        look, and the trim is counted rather than silent."""
+        monkeypatch.setattr(settings, "ENRICHMENT_NURSERY_MAX_TOKENS", 2)
+        states = [
+            await _fresh_token_with_state(
+                db_session,
+                f"NurseryCap{index:033d}",
+                age_minutes=index + 1,
+                priority=LANE_NURSERY,
+            )
+            for index in range(4)
+        ]
+        await db_session.commit()
+
+        outcome = await refresh_nursery_lane(db_session, now=NOW)
+        await db_session.commit()
+        for state in states:
+            await db_session.refresh(state)
+
+        assert outcome.evicted_capacity == 2
+        assert outcome.capped is True
+        assert [state.priority for state in states] == [
+            LANE_NURSERY,
+            LANE_NURSERY,
+            LANE_NORMAL,
+            LANE_NORMAL,
+        ]
+
+    async def test_a_zero_capacity_disables_the_lane_and_drains_it(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Turning the lane off must evict whoever is already inside. Skipping
+        the pass would strand them above the entire normal population
+        indefinitely, long past their window."""
+        monkeypatch.setattr(settings, "ENRICHMENT_NURSERY_MAX_TOKENS", 0)
+        state = await _fresh_token_with_state(
+            db_session, "NurseryOff" + "1" * 33, age_minutes=2, priority=LANE_NURSERY
+        )
+        await db_session.commit()
+
+        outcome = await refresh_nursery_lane(db_session, now=NOW)
+        await db_session.commit()
+        await db_session.refresh(state)
+
+        assert outcome.members == 0
+        assert outcome.promoted == 0
+        assert outcome.evicted_capacity == 1
+        assert state.priority == LANE_NORMAL
+
+    async def test_a_dead_lettered_fresh_token_is_not_admitted(
+        self, db_session: AsyncSession
+    ) -> None:
+        """Readmission is the requeue beat's job; the nursery must not undo a
+        quarantine."""
+        state = await _fresh_token_with_state(
+            db_session, "NurseryDead" + "1" * 32, age_minutes=2
+        )
+        state.status = EnrichmentStatus.DEAD_LETTER
+        await db_session.commit()
+
+        outcome = await refresh_nursery_lane(db_session, now=NOW)
+        await db_session.commit()
+        await db_session.refresh(state)
+
+        assert outcome.promoted == 0
+        assert state.priority == LANE_NORMAL
+
+    async def test_maintenance_runs_even_with_the_display_lane_flag_off(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Admission and enforcement must never sit behind different switches.
+
+        `register_token` admits on `ENRICHMENT_NURSERY_MAX_TOKENS` alone, and
+        the nursery pass is the only code that takes a token back out. Gating
+        that pass on `FEATURE_PRIORITY_ENRICHMENT_ENABLED` — the display lane's
+        incident lever — meant flipping the flag off left admission running
+        with eviction stopped, growing the lane without bound and never
+        expiring it. The pass must also run at capacity zero, because the
+        capacity trim is how the lane is drained.
+        """
+        calls: list[str] = []
+
+        async def _recording_nursery(session: object, *, now: object) -> NurseryMembership:
+            calls.append("nursery")
+            return NurseryMembership(
+                members=0, promoted=0, evicted_aged=0, evicted_capacity=0, capped=False
+            )
+
+        monkeypatch.setattr(priority_tasks, "refresh_nursery_lane", _recording_nursery)
+
+        for flag, capacity in ((False, 600), (True, 0), (False, 0)):
+            calls.clear()
+            monkeypatch.setattr(settings, "FEATURE_PRIORITY_ENRICHMENT_ENABLED", flag)
+            monkeypatch.setattr(settings, "ENRICHMENT_NURSERY_MAX_TOKENS", capacity)
+
+            result = await priority_tasks._refresh()
+
+            assert calls == ["nursery"], f"flag={flag} capacity={capacity}"
+            assert "nursery" in result

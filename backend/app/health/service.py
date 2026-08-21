@@ -32,7 +32,14 @@ from app.health.schemas import (
     ScoringHealth,
     StageStatus,
 )
-from app.models.market import EnrichmentStatus, TokenEnrichmentState, TokenMarketSnapshot
+from app.models.market import (
+    LANE_DISPLAY,
+    LANE_NORMAL,
+    LANE_NURSERY,
+    EnrichmentStatus,
+    TokenEnrichmentState,
+    TokenMarketSnapshot,
+)
 from app.models.radar import RadarToken
 from app.models.score import TokenScore
 from app.models.token import DiscoveredToken
@@ -238,23 +245,32 @@ class PipelineHealthService:
             await self._session.execute(
                 select(
                     func.count()
-                    .filter(TokenEnrichmentState.priority > 0)
+                    .filter(TokenEnrichmentState.priority >= LANE_DISPLAY)
                     .label("priority_total"),
                     func.count()
                     .filter(
-                        TokenEnrichmentState.priority > 0,
+                        TokenEnrichmentState.priority >= LANE_DISPLAY,
                         TokenEnrichmentState.next_refresh_at <= now,
                     )
                     .label("priority_due"),
+                    func.count()
+                    .filter(TokenEnrichmentState.priority == LANE_NURSERY)
+                    .label("nursery_total"),
+                    func.count()
+                    .filter(
+                        TokenEnrichmentState.priority == LANE_NURSERY,
+                        TokenEnrichmentState.next_refresh_at <= now,
+                    )
+                    .label("nursery_due"),
                     func.min(TokenEnrichmentState.next_refresh_at)
                     .filter(
-                        TokenEnrichmentState.priority > 0,
+                        TokenEnrichmentState.priority >= LANE_DISPLAY,
                         TokenEnrichmentState.next_refresh_at <= now,
                     )
                     .label("oldest_priority"),
                     func.min(TokenEnrichmentState.next_refresh_at)
                     .filter(
-                        TokenEnrichmentState.priority == 0,
+                        TokenEnrichmentState.priority == LANE_NORMAL,
                         TokenEnrichmentState.next_refresh_at <= now,
                     )
                     .label("oldest_normal"),
@@ -308,6 +324,8 @@ class PipelineHealthService:
             dead_lettered=int(parked or 0),
             priority_tokens=int(lanes.priority_total or 0),
             priority_queue_depth=int(lanes.priority_due or 0),
+            nursery_tokens=int(lanes.nursery_total or 0),
+            nursery_queue_depth=int(lanes.nursery_due or 0),
             oldest_priority_wait_seconds=_wait(lanes.oldest_priority),
             oldest_normal_wait_seconds=_wait(lanes.oldest_normal),
             tracked_freshness_p50_seconds=(

@@ -58,7 +58,14 @@ x-backend-env: &backend-env
   SOLANA_WS_URL: ${SOLANA_WS_URL:-wss://api.mainnet-beta.solana.com}
   HELIUS_API_KEY: ${HELIUS_API_KEY:-}
   FEATURE_SCANNER_ENABLED: ${FEATURE_SCANNER_ENABLED:-false}
-  SCANNER_WATCH_PROGRAMS: ${SCANNER_WATCH_PROGRAMS:-6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P}
+  # pump.fun bonding-curve launches plus direct PumpSwap pool launches. The
+  # pAMM program's create_pool emits a CreatePoolEvent naming the base mint —
+  # verified on mainnet; see app/services/scanner/parser.py.
+  SCANNER_WATCH_PROGRAMS: ${SCANNER_WATCH_PROGRAMS:-6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P,pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA}
+  # Gap recovery on (re)connect: the slot budget the scanner may walk back with
+  # getBlock, and the pause between block reads. Zero slots disables recovery.
+  SCANNER_RECOVERY_MAX_SLOTS: ${SCANNER_RECOVERY_MAX_SLOTS:-900}
+  SCANNER_RECOVERY_BLOCK_DELAY_SECONDS: ${SCANNER_RECOVERY_BLOCK_DELAY_SECONDS:-1.0}
   SCANNER_COMMITMENT: ${SCANNER_COMMITMENT:-confirmed}
   SCANNER_WORKER_CONCURRENCY: ${SCANNER_WORKER_CONCURRENCY:-4}
   # Reconnect escalation and the state the scanner publishes for the health
@@ -100,8 +107,17 @@ x-backend-env: &backend-env
   MARKET_SECONDARY_NETWORK: ${MARKET_SECONDARY_NETWORK:-solana}
   MARKET_SECONDARY_BATCH_SIZE: ${MARKET_SECONDARY_BATCH_SIZE:-30}
   MARKET_SECONDARY_CALLS_PER_MINUTE: ${MARKET_SECONDARY_CALLS_PER_MINUTE:-25}
-  ENRICHMENT_BATCH_LIMIT: ${ENRICHMENT_BATCH_LIMIT:-60}
+  # 120, up from 60: the worker was saturated at ~1,050 claims/min while lane
+  # demand (display + nursery) alone needs ~800. The provider batches 30 mints
+  # per request, so this is 4 requests per cycle against a 300/min allowance.
+  ENRICHMENT_BATCH_LIMIT: ${ENRICHMENT_BATCH_LIMIT:-120}
   ENRICHMENT_POLL_INTERVAL_SECONDS: ${ENRICHMENT_POLL_INTERVAL_SECONDS:-5}
+  # The fresh-token nursery lane. In the anchor, not on one service: the
+  # scheduler's beat maintains membership and the enrichment worker honours it,
+  # and a value set on one only would let the two disagree about the lane's
+  # size. Capacity 0 disables the lane.
+  ENRICHMENT_NURSERY_MAX_TOKENS: ${ENRICHMENT_NURSERY_MAX_TOKENS:-1000}
+  ENRICHMENT_NURSERY_INTERVAL_SECONDS: ${ENRICHMENT_NURSERY_INTERVAL_SECONDS:-60}
   # Dead-letter policy. In the anchor because two services read it: the
   # enrichment worker decides when to park a token and the scheduler runs the
   # readmission beat, and a threshold set on one only would let them disagree
@@ -269,7 +285,9 @@ x-backend-env: &backend-env
   # worker collects and the API reads what it wrote, so both must agree on
   # whether curve data exists. Blocked today by the Helius plan quota.
   FEATURE_CURVE_COLLECTION_ENABLED: ${FEATURE_CURVE_COLLECTION_ENABLED:-false}
-  CURVE_COLLECTION_BATCH_LIMIT: ${CURVE_COLLECTION_BATCH_LIMIT:-100}
+  # Must stay >= ENRICHMENT_BATCH_LIMIT: the collector chunks for the RPC on
+  # its own, so a lower value here silently drops the tail of every full batch.
+  CURVE_COLLECTION_BATCH_LIMIT: ${CURVE_COLLECTION_BATCH_LIMIT:-120}
   # Local development only. The app refuses to boot if this is set while
   # ENVIRONMENT=production.
   DEVELOPMENT_BYPASS_AUTH: ${DEVELOPMENT_BYPASS_AUTH:-false}

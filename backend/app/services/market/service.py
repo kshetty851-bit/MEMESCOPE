@@ -18,7 +18,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.models.market import TokenEnrichmentState, TradingStatus
+from app.models.market import (
+    LANE_DISPLAY,
+    LANE_NORMAL,
+    LANE_NURSERY,
+    TokenEnrichmentState,
+    TradingStatus,
+)
 from app.repositories.market import EnrichmentStateRepository, MarketSnapshotRepository
 from app.repositories.token import TokenRepository
 from app.services.market.providers.base import (
@@ -31,6 +37,23 @@ from app.services.market.scheduler import RefreshScheduler
 from app.services.token_images import TokenImageResolver
 
 logger = get_logger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class FetchedBatch:
+    """One chunk's provider answer, before anything is written down.
+
+    Carries the outage flag separately from the error text because the two
+    lead to different places: an outage defers the batch untouched, while a
+    provider error is charged to the tokens that were actually asked about.
+    """
+
+    results: dict[str, MarketData]
+    error: str | None
+    degraded: bool
+    unavailable: bool
+    retry_after_seconds: float | None
+    latency_ms: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,6 +103,15 @@ class MarketEnrichmentService:
             mint_address=token.mint_address,
             # Due immediately: a brand-new token is the most interesting one.
             next_refresh_at=datetime.now(UTC),
+            # Straight into the nursery: discovery itself is the qualification,
+            # which is what breaks the needs-observations-to-be-interesting
+            # loop. Deliberately no capacity check here — one count query per
+            # discovery buys nothing, because the membership beat trims any
+            # overshoot to `ENRICHMENT_NURSERY_MAX_TOKENS` within a minute and
+            # the claim query's batch limit bounds a burst's damage meanwhile.
+            priority=(
+                LANE_NURSERY if settings.ENRICHMENT_NURSERY_MAX_TOKENS > 0 else LANE_NORMAL
+            ),
         )
         if created is not None:
             logger.info("enrichment_token_registered", mint=mint_address)
@@ -129,19 +161,17 @@ class MarketEnrichmentService:
         )
         return True
 
-    async def enrich(self, states: Sequence[TokenEnrichmentState]) -> EnrichmentOutcome:
-        """Refresh one batch of tokens and persist the results.
+    async def fetch(self, mints: Sequence[str]) -> FetchedBatch:
+        """Ask the provider about one chunk. **No database access at all.**
 
-        A provider outage degrades rather than fails: every token in the batch
-        is rescheduled with backoff and the worker keeps running. Discovery is
-        never affected — it is a different process entirely.
+        Split out of `enrich` so the worker can issue several chunks'
+        requests concurrently while still persisting them one at a time: the
+        session is not concurrency-safe, but the provider is (one HTTP call per
+        chunk, a pooled client, and a breaker whose counters are updated
+        without awaiting). Sequential fetching made the cycle latency-bound —
+        four chunks at ~1.5s each — which capped the whole worker at ~720
+        refreshes a minute against lane demand of 1,400.
         """
-        if not states:
-            return EnrichmentOutcome(0, 0, 0, 0, 0)
-
-        mints = [state.mint_address for state in states]
-        now = datetime.now(UTC)
-
         logger.info("refresh_started", tokens=len(mints), provider=self.provider.name)
         started = time.perf_counter()
 
@@ -155,7 +185,7 @@ class MarketEnrichmentService:
         retry_after: float | None = None
 
         try:
-            results = await self.provider.fetch_many(mints)
+            results = await self.provider.fetch_many(list(mints))
         except ProviderUnavailableError as exc:
             # Circuit is open. **No call was made on any token's behalf**, so
             # this is not evidence about any token in the batch. It is recorded
@@ -182,6 +212,43 @@ class MarketEnrichmentService:
             requested=len(mints),
             returned=len(results),
         )
+        return FetchedBatch(
+            results=results,
+            error=error,
+            degraded=degraded,
+            unavailable=unavailable,
+            retry_after_seconds=retry_after,
+            latency_ms=latency_ms,
+        )
+
+    async def enrich(
+        self,
+        states: Sequence[TokenEnrichmentState],
+        *,
+        fetched: FetchedBatch | None = None,
+    ) -> EnrichmentOutcome:
+        """Refresh one batch of tokens and persist the results.
+
+        A provider outage degrades rather than fails: every token in the batch
+        is rescheduled with backoff and the worker keeps running. Discovery is
+        never affected — it is a different process entirely.
+
+        `fetched` lets a caller supply a result it already obtained from
+        `fetch`; omitted, the provider is called here exactly as before.
+        """
+        if not states:
+            return EnrichmentOutcome(0, 0, 0, 0, 0)
+
+        mints = [state.mint_address for state in states]
+        now = datetime.now(UTC)
+
+        batch = fetched if fetched is not None else await self.fetch(mints)
+        results = batch.results
+        error = batch.error
+        degraded = batch.degraded
+        unavailable = batch.unavailable
+        retry_after = batch.retry_after_seconds
+        latency_ms = batch.latency_ms
 
         if unavailable:
             return await self._defer(
@@ -212,14 +279,21 @@ class MarketEnrichmentService:
                 refreshed_mints.append(state.mint_address)
             elif succeeded:
                 without_market += 1
-                
+
                 # If a token has persistently lost its market (dead-lettered), or is
-                # ALREADY dead-lettered but held by an active subsystem (priority > 0),
-                # we write a single INACTIVE snapshot to explicitly notify dependents
-                # rather than silently dropping it from the feed forever.
+                # ALREADY dead-lettered but held by an active subsystem, we write a
+                # single INACTIVE snapshot to explicitly notify dependents rather
+                # than silently dropping it from the feed forever.
+                #
+                # `>= LANE_DISPLAY`, not `> 0`: the repeated notification exists for
+                # tokens that *have* dependents — an open paper position, a visible
+                # rank, a live opportunity. A nursery token is speculative and has
+                # none, so including it would append an INACTIVE row every 60
+                # seconds for something nothing is watching.
                 empty_count = state.consecutive_empty + 1
                 if empty_count == settings.ENRICHMENT_DEAD_LETTER_THRESHOLD or (
-                    empty_count > settings.ENRICHMENT_DEAD_LETTER_THRESHOLD and state.priority > 0
+                    empty_count > settings.ENRICHMENT_DEAD_LETTER_THRESHOLD
+                    and state.priority >= LANE_DISPLAY
                 ):
                     dead_data = MarketData(
                         mint_address=state.mint_address,
@@ -227,7 +301,9 @@ class MarketEnrichmentService:
                         observed_at=now,
                         provider=self.provider.name,
                     )
-                    snapshot_rows.append(self._to_snapshot_row(state, dead_data, latency_ms=latency_ms))
+                    snapshot_rows.append(
+                        self._to_snapshot_row(state, dead_data, latency_ms=latency_ms)
+                    )
                     written += 1
             else:
                 failed += 1
@@ -239,10 +315,14 @@ class MarketEnrichmentService:
                 consecutive_empty=(
                     (state.consecutive_empty + 1) if succeeded and not had_data else 0
                 ),
-                # The lane the priority beat placed this token in. Read from the
-                # row rather than recomputed here: membership is decided in one
-                # place, and the worker only honours it.
-                priority=(settings.FEATURE_PRIORITY_ENRICHMENT_ENABLED and state.priority > 0),
+                # The lane the membership beats placed this token in. Read from
+                # the row rather than recomputed here: membership is decided in
+                # one place, and the worker only honours it.
+                priority=(
+                    settings.FEATURE_PRIORITY_ENRICHMENT_ENABLED
+                    and state.priority >= LANE_DISPLAY
+                ),
+                nursery=state.priority == LANE_NURSERY,
             )
 
             should_dead_letter = not succeeded and self.scheduler.should_dead_letter(

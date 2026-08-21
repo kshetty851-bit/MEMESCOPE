@@ -107,12 +107,13 @@ class TestExtraction:
         assert decoded.block_time is None
 
     def test_decimals_are_never_invented(self) -> None:
-        """These mints are conventionally six decimals. The event does not say
-        so, and asserting it would be estimating missing data."""
+        """These mints are conventionally six decimals. The pump.fun event does
+        not say so, and asserting it would be estimating missing data — the
+        field exists only for events that carry it (PumpSwap's does)."""
         decoded = parse_create_event([REAL_EVENT])
 
         assert decoded is not None
-        assert not hasattr(decoded, "decimals")
+        assert decoded.decimals is None
 
 
 class TestRefusals:

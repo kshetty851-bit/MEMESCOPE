@@ -28,10 +28,17 @@ from sqlalchemy import CursorResult, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.models.market import TokenEnrichmentState
+from app.models.market import (
+    LANE_DISPLAY,
+    LANE_NORMAL,
+    LANE_NURSERY,
+    EnrichmentStatus,
+    TokenEnrichmentState,
+)
 from app.models.opportunity import Opportunity
 from app.models.paper import PaperPosition
 from app.models.radar import RadarToken
+from app.models.token import DiscoveredToken
 from app.opportunities.models import LIVE_STATUSES
 from app.paper.models import PositionStatus
 
@@ -163,19 +170,21 @@ async def apply_membership(
                 update(TokenEnrichmentState)
                 .where(
                     TokenEnrichmentState.mint_address.in_(members),
-                    # Either not in the lane yet, or in it with a due time that
-                    # has drifted beyond the lane's promise. The second case
-                    # matters: a token already marked priority whose interval
-                    # was set by an earlier tier would otherwise keep a
-                    # six-hour due time forever and never be refreshed on the
-                    # cadence its membership implies.
+                    # Either below the lane (normal or nursery), or in it with
+                    # a due time that has drifted beyond the lane's promise.
+                    # The second case matters: a token already marked priority
+                    # whose interval was set by an earlier tier would otherwise
+                    # keep a six-hour due time forever and never be refreshed
+                    # on the cadence its membership implies.
                     or_(
-                        TokenEnrichmentState.priority == 0,
+                        TokenEnrichmentState.priority < LANE_DISPLAY,
                         TokenEnrichmentState.next_refresh_at > clamp_to,
                     ),
                 )
                 .values(
-                    priority=1,
+                    # `greatest` so a re-clamp cannot pull a token in the
+                    # one-shot Track Record lane back down before its attempt.
+                    priority=func.greatest(TokenEnrichmentState.priority, LANE_DISPLAY),
                     next_refresh_at=func.least(TokenEnrichmentState.next_refresh_at, clamp_to),
                 )
             ),
@@ -183,10 +192,15 @@ async def apply_membership(
         # Counts rows *touched*, which is promotions plus re-clamps.
         promoted = result.rowcount or 0
 
-    demote = update(TokenEnrichmentState).where(TokenEnrichmentState.priority == 1)
+    demote = update(TokenEnrichmentState).where(TokenEnrichmentState.priority == LANE_DISPLAY)
     if members:
         demote = demote.where(TokenEnrichmentState.mint_address.not_in(members))
-    result = cast(CursorResult[Any], await session.execute(demote.values(priority=0)))
+    # Demotion lands on NORMAL, not NURSERY: if the token is still inside the
+    # fresh window the nursery pass below re-admits it within a minute, and if
+    # it is not, it has no claim to a lane at all.
+    result = cast(
+        CursorResult[Any], await session.execute(demote.values(priority=LANE_NORMAL))
+    )
     demoted = result.rowcount or 0
 
     return promoted, demoted
@@ -204,4 +218,135 @@ async def refresh_priority_lane(session: AsyncSession, *, now: datetime) -> Prio
         promoted=promoted,
         demoted=demoted,
         capped=membership.capped,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class NurseryMembership:
+    """One nursery pass, reported so backpressure is visible, not silent."""
+
+    members: int
+    promoted: int
+    evicted_aged: int
+    #: Members trimmed because the lane was over capacity — the backpressure
+    #: counter. A persistently non-zero value means launches outpace the cap
+    #: and the oldest fresh tokens are losing their nursery time early.
+    evicted_capacity: int
+    capped: bool
+
+    def as_dict(self) -> dict[str, int | bool]:
+        return {
+            "members": self.members,
+            "promoted": self.promoted,
+            "evicted_aged": self.evicted_aged,
+            "evicted_capacity": self.evicted_capacity,
+            "capped": self.capped,
+        }
+
+
+async def refresh_nursery_lane(session: AsyncSession, *, now: datetime) -> NurseryMembership:
+    """Maintain the fresh-token nursery: every newly discovered token's first
+    `ENRICHMENT_TIER_FRESH_MAX_MINUTES` of prioritised observation.
+
+    Discovery itself is the qualification — no score, no observation, no rank.
+    That is deliberate: requiring any of those recreates the circularity this
+    lane exists to break (a token needed observations to become interesting,
+    and needed to be interesting to receive observations).
+
+    Derived, never accumulated, exactly like the display lane above: age
+    eviction and the capacity trim run every pass, so a token can overstay
+    neither its window nor the cap. Registration puts a new token straight into
+    the lane (`register_token`), so this pass is the *guarantee* — it re-admits
+    anything the fast path missed (backfill after a worker outage, a demotion
+    from the display lane) and trims any transient overshoot from concurrent
+    registrations.
+
+    When the cap bites, the *oldest* fresh tokens are trimmed first: they have
+    already had the most nursery time, and a launch storm should cost tail
+    minutes of observation rather than the first look at the newest tokens.
+    """
+    cap = settings.ENRICHMENT_NURSERY_MAX_TOKENS
+    cutoff = now - timedelta(minutes=settings.ENRICHMENT_TIER_FRESH_MAX_MINUTES)
+
+    # 1. Age eviction: the window is over; back to the age-tier cadence.
+    result = cast(
+        CursorResult[Any],
+        await session.execute(
+            update(TokenEnrichmentState)
+            .where(
+                TokenEnrichmentState.priority == LANE_NURSERY,
+                TokenEnrichmentState.token_id == DiscoveredToken.id,
+                DiscoveredToken.discovered_at < cutoff,
+            )
+            .values(priority=LANE_NORMAL)
+        ),
+    )
+    evicted_aged = result.rowcount or 0
+
+    # 2. Capacity trim, oldest first. `cap = 0` disables the lane entirely.
+    overflow = (
+        select(TokenEnrichmentState.id)
+        .join(DiscoveredToken, TokenEnrichmentState.token_id == DiscoveredToken.id)
+        .where(TokenEnrichmentState.priority == LANE_NURSERY)
+        .order_by(DiscoveredToken.discovered_at.desc(), TokenEnrichmentState.id)
+        .offset(cap)
+        .scalar_subquery()
+    )
+    result = cast(
+        CursorResult[Any],
+        await session.execute(
+            update(TokenEnrichmentState)
+            .where(TokenEnrichmentState.id.in_(overflow))
+            .values(priority=LANE_NORMAL)
+        ),
+    )
+    evicted_capacity = result.rowcount or 0
+
+    members = int(
+        await session.scalar(
+            select(func.count())
+            .select_from(TokenEnrichmentState)
+            .where(TokenEnrichmentState.priority == LANE_NURSERY)
+        )
+        or 0
+    )
+
+    # 3. Promotion, newest first, into the remaining room. Only ACTIVE rows: a
+    # dead-lettered fresh token re-enters through the requeue beat, not here.
+    promoted = 0
+    room = cap - members
+    if room > 0:
+        candidates = (
+            select(TokenEnrichmentState.id)
+            .join(DiscoveredToken, TokenEnrichmentState.token_id == DiscoveredToken.id)
+            .where(
+                TokenEnrichmentState.status == EnrichmentStatus.ACTIVE,
+                TokenEnrichmentState.priority == LANE_NORMAL,
+                DiscoveredToken.discovered_at >= cutoff,
+            )
+            .order_by(DiscoveredToken.discovered_at.desc(), TokenEnrichmentState.id)
+            .limit(room)
+            .scalar_subquery()
+        )
+        result = cast(
+            CursorResult[Any],
+            await session.execute(
+                update(TokenEnrichmentState)
+                .where(TokenEnrichmentState.id.in_(candidates))
+                .values(
+                    priority=LANE_NURSERY,
+                    # Due immediately — a promoted token has, by definition,
+                    # been waiting. A clamp, not an assignment.
+                    next_refresh_at=func.least(TokenEnrichmentState.next_refresh_at, now),
+                )
+            ),
+        )
+        promoted = result.rowcount or 0
+
+    return NurseryMembership(
+        members=members + promoted,
+        promoted=promoted,
+        evicted_aged=evicted_aged,
+        evicted_capacity=evicted_capacity,
+        capped=members + promoted >= cap and cap > 0,
     )

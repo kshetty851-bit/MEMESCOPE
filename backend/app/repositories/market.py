@@ -28,6 +28,8 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import aliased
 
 from app.models.market import (
+    LANE_NORMAL,
+    LANE_TRACK_RECORD,
     EnrichmentStatus,
     TokenEnrichmentState,
     TokenMarketSnapshot,
@@ -509,10 +511,10 @@ class EnrichmentStateRepository(BaseRepository[TokenEnrichmentState]):
     async def prioritize_unquoted_track_record_candidates(self, *, now: datetime) -> int:
         """Promptly seek the first quote after a Generation 6 Track Record admission.
 
-        Priority ``2`` is above the derived Radar/display lane (``1``), but
-        only applies to a canonical admission with no usable post-admission
-        quote.  It is cleared after each provider attempt.  Raw scanner rows
-        are deliberately absent from this query.
+        `LANE_TRACK_RECORD` is above the derived Radar/display lane, but only
+        applies to a canonical admission with no usable post-admission quote.
+        It is cleared after each provider attempt.  Raw scanner rows are
+        deliberately absent from this query.
         """
         wallet = await self.session.scalar(
             select(PaperWallet).where(PaperWallet.archived_at.is_(None))
@@ -535,11 +537,11 @@ class EnrichmentStateRepository(BaseRepository[TokenEnrichmentState]):
                 TokenEnrichmentState.token_id == RadarToken.token_id,
                 RadarToken.first_detected_at > wallet.started_at,
                 TokenEnrichmentState.status == EnrichmentStatus.ACTIVE,
-                TokenEnrichmentState.priority < 2,
+                TokenEnrichmentState.priority < LANE_TRACK_RECORD,
                 ~post_admission_quote,
             )
             .values(
-                priority=2,
+                priority=LANE_TRACK_RECORD,
                 next_refresh_at=func.least(TokenEnrichmentState.next_refresh_at, now),
             )
         )
@@ -607,8 +609,8 @@ class EnrichmentStateRepository(BaseRepository[TokenEnrichmentState]):
         # Track Record quote priority is for acquisition only.  A real quote,
         # an empty response, or a provider failure has now been observed, so
         # leave the bounded lane for ordinary scheduling.
-        if state.priority >= 2:
-            state.priority = 0
+        if state.priority >= LANE_TRACK_RECORD:
+            state.priority = LANE_NORMAL
         state.next_refresh_at = next_refresh_at
         state.tier = tier
         state.last_attempt_at = now

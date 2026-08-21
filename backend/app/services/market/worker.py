@@ -333,11 +333,31 @@ class MarketEnrichmentWorker:
 
             # Provider batch limit is smaller than our claim size, so chunk.
             chunk_size = max(1, self._provider.batch_size)
+            chunks = [
+                states[start : start + chunk_size]
+                for start in range(0, len(states), chunk_size)
+            ]
+
+            # Every chunk's request goes out concurrently, bounded by
+            # `ENRICHMENT_CONCURRENCY`; the results are then persisted one
+            # chunk at a time on this session. Fetching serially made the cycle
+            # latency-bound (four chunks at ~1.5s), which held the worker to
+            # ~720 refreshes a minute while the display and nursery lanes alone
+            # ask for ~1,400. The bound is what keeps this from becoming a
+            # burst: at the defaults it is four in flight, roughly 48 provider
+            # requests a minute against a 300/min allowance.
+            gate = asyncio.Semaphore(max(1, settings.ENRICHMENT_CONCURRENCY))
+
+            async def _fetch(chunk: Sequence[Any]) -> Any:
+                async with gate:
+                    return await service.fetch([state.mint_address for state in chunk])
+
+            fetched = await asyncio.gather(*(_fetch(chunk) for chunk in chunks))
+
             total = 0
             refreshed_mints: list[str] = []
-            for start in range(0, len(states), chunk_size):
-                chunk = states[start : start + chunk_size]
-                outcome = await service.enrich(chunk)
+            for chunk, batch in zip(chunks, fetched, strict=True):
+                outcome = await service.enrich(chunk, fetched=batch)
 
                 self.stats.tokens_refreshed += outcome.requested
                 self.stats.snapshots_written += outcome.snapshots_written

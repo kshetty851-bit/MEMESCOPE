@@ -288,14 +288,6 @@ def resolve_status(
     live = tuple(signal for signal in signals if signal.status in LIVE_SIGNAL_STATUSES)
     unexpired = tuple(signal for signal in live if signal.expires_at > now)
 
-    if not unexpired:
-        # Nothing live left. Enter the grace window, and close once it elapses.
-        if current is OpportunityStatus.EXPIRING and expiring_since is not None:
-            if (now - expiring_since).total_seconds() >= policy.grace_seconds:
-                return OpportunityStatus.CLOSED
-            return OpportunityStatus.EXPIRING
-        return OpportunityStatus.EXPIRING
-
     confirmed = tuple(
         signal
         for signal in unexpired
@@ -303,7 +295,39 @@ def resolve_status(
     )
     if confirmed:
         return OpportunityStatus.ACTIVE
-    return OpportunityStatus.PENDING_CONFIRMATION
+
+    if unexpired and current in {
+        OpportunityStatus.NEW,
+        OpportunityStatus.PENDING_CONFIRMATION,
+    }:
+        # Live but under-confirmed evidence, on an opportunity that has never
+        # been active. PENDING_CONFIRMATION is only reachable from here: the
+        # ladder has no way back down, so an ACTIVE or EXPIRING opportunity
+        # whose confirmed signal expired while an unconfirmed one lives on
+        # falls to the grace window below instead — previously this returned
+        # PENDING_CONFIRMATION unconditionally, and the illegal transition
+        # aborted the entire detection cycle for every mint in the batch.
+        return OpportunityStatus.PENDING_CONFIRMATION
+
+    if current is OpportunityStatus.NEW:
+        # NEW may only become PENDING_CONFIRMATION or ACTIVE, both handled
+        # above. A NEW opportunity with no live evidence at all has nowhere
+        # legal to go, so it stays put and the engine's `target is not current`
+        # guard makes the pass a no-op. Returning EXPIRING here — which the
+        # ladder does not allow from NEW — would raise IllegalTransitionError
+        # and abort detection for every mint in the batch, the same way
+        # ACTIVE -> PENDING_CONFIRMATION did. NEW is written and advanced
+        # inside one transaction, so standing still costs nothing.
+        return current
+
+    # No confirmed evidence left. Enter the grace window, and close once it
+    # elapses; a signal that re-confirms during the grace returns the
+    # opportunity to ACTIVE above.
+    if current is OpportunityStatus.EXPIRING and expiring_since is not None:
+        if (now - expiring_since).total_seconds() >= policy.grace_seconds:
+            return OpportunityStatus.CLOSED
+        return OpportunityStatus.EXPIRING
+    return OpportunityStatus.EXPIRING
 
 
 def should_archive(*, closed_at: datetime | None, now: datetime, policy: ExpiryPolicy) -> bool:

@@ -193,6 +193,88 @@ class TestResolveStatus:
                 is terminal
             )
 
+    def test_active_with_only_unconfirmed_evidence_expires_rather_than_demotes(
+        self,
+    ) -> None:
+        """The ladder has no way back down. When an ACTIVE opportunity's
+        confirmed signal expires while an unconfirmed one lives on, the answer
+        must be a legal state — this exact case returned PENDING_CONFIRMATION
+        and aborted the whole detection cycle for every mint in the batch."""
+        status = resolve_status(
+            current=OpportunityStatus.ACTIVE,
+            signals=(
+                _signal(confirmations=3, expires_in=-1),
+                _signal(status=SignalStatus.PENDING, confirmations=1, expires_in=3600),
+            ),
+            now=NOW,
+            policy=POLICY,
+        )
+        assert status is OpportunityStatus.EXPIRING
+        assert can_transition(OpportunityStatus.ACTIVE, status)
+
+    def test_expiring_with_only_unconfirmed_evidence_still_closes_after_grace(
+        self,
+    ) -> None:
+        """An unconfirmed straggler must not hold the grace window open
+        forever."""
+        status = resolve_status(
+            current=OpportunityStatus.EXPIRING,
+            signals=(_signal(status=SignalStatus.PENDING, confirmations=1),),
+            now=NOW,
+            policy=POLICY,
+            expiring_since=NOW - timedelta(seconds=POLICY.grace_seconds),
+        )
+        assert status is OpportunityStatus.CLOSED
+
+    def test_a_new_opportunity_with_no_evidence_stands_still(self) -> None:
+        """NEW may only become PENDING_CONFIRMATION or ACTIVE. With no live
+        signal it has nowhere legal to go, so it must stay put rather than
+        propose EXPIRING and abort the batch."""
+        for signals in ((), (_signal(expires_in=-1),)):
+            assert (
+                resolve_status(
+                    current=OpportunityStatus.NEW,
+                    signals=signals,
+                    now=NOW,
+                    policy=POLICY,
+                )
+                is OpportunityStatus.NEW
+            )
+
+    def test_every_resolved_status_is_reachable_from_its_current(self) -> None:
+        """resolve_status must never propose a move assert_transition rejects,
+        whatever the status and signal mix — the engine applies its answer
+        unconditionally, and an illegal answer raises inside the detection
+        cycle, losing every other mint in the batch with it.
+
+        Exhaustive over both axes on purpose: the two illegal transitions this
+        pins (ACTIVE -> PENDING_CONFIRMATION, NEW -> EXPIRING) were each found
+        in production rather than by a targeted test."""
+        signal_variants = (
+            (),
+            (_signal(confirmations=3),),
+            (_signal(status=SignalStatus.PENDING, confirmations=1),),
+            (_signal(expires_in=-1),),
+            (_signal(status=SignalStatus.EXPIRED, expires_in=3600),),
+            (
+                _signal(confirmations=3, expires_in=-1),
+                _signal(status=SignalStatus.PENDING, confirmations=1),
+            ),
+        )
+        for current in OpportunityStatus:
+            for signals in signal_variants:
+                for expiring_since in (None, NOW - timedelta(seconds=1), NOW):
+                    resolved = resolve_status(
+                        current=current,
+                        signals=signals,
+                        now=NOW,
+                        policy=POLICY,
+                        expiring_since=expiring_since,
+                    )
+                    assert resolved is current or can_transition(current, resolved), (
+                        f"{current} -> {resolved} for {signals!r}"
+                    )
+
     def test_an_expired_signal_status_does_not_count_as_live(self) -> None:
         status = resolve_status(
             current=OpportunityStatus.ACTIVE,

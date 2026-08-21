@@ -45,6 +45,26 @@ PRICE_PRECISION = Numeric(38, 18)
 MONEY_PRECISION = Numeric(24, 4)
 
 
+# Lanes of `TokenEnrichmentState.priority`. The claim query orders on this
+# column descending, so the numbers are the scheduling contract: a higher lane
+# always claims before a lower one. Open paper positions, live opportunities and
+# visible Radar ranks live in DISPLAY — permanently above NURSERY, so a
+# speculative fresh token can never starve committed capital of its next quote.
+LANE_NORMAL = 0
+#: A token in its first minutes of life, prioritised *because it is new* —
+#: discovery itself qualifies it, before any observation exists. This is what
+#: breaks the circularity of "needs observations to be interesting, needs to be
+#: interesting to be observed". Bounded and temporary: membership is trimmed to
+#: `ENRICHMENT_NURSERY_MAX_TOKENS` and evicted after the FRESH age window.
+LANE_NURSERY = 1
+#: What the product is actively displaying (Radar ranks, open opportunities,
+#: open paper positions). Was `1` before the nursery existed.
+LANE_DISPLAY = 2
+#: One-shot post-admission quote acquisition. Cleared after a single attempt.
+#: Was `2` before the nursery existed.
+LANE_TRACK_RECORD = 3
+
+
 class EnrichmentStatus(enum.StrEnum):
     """Scheduling state of a token."""
 
@@ -194,9 +214,9 @@ class TokenEnrichmentState(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     last_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
     # Which adaptive tier produced the current interval; logged for tuning.
     tier: Mapped[str | None] = mapped_column(String(16), nullable=True)
-    #: Lane, not a queue. 0 is the ordinary adaptive population; 1 is a token
-    #: the product is actively displaying — the Radar's visible ranks, an open
-    #: opportunity, or a paper position.
+    #: Lane, not a queue. See the `LANE_*` constants above: 0 is the ordinary
+    #: adaptive population, 1 the fresh-token nursery, 2 what the product is
+    #: actively displaying, 3 one-shot Track Record quote acquisition.
     #:
     #: This exists because the claim query orders by `next_refresh_at` and the
     #: backlog reached 36,154 tokens: a tracked token asking for a 15-second
