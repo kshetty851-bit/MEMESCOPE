@@ -110,7 +110,10 @@ check "landing" "${FRONTEND_URL}/"
 check "command centre" "${FRONTEND_URL}/command"
 check "track record" "${FRONTEND_URL}/record"
 check "paper wallet" "${FRONTEND_URL}/wallet"
-check "strategy lab" "${FRONTEND_URL}/lab"
+# `/lab` was deleted in 2b09263 and this line kept asserting it, so
+# verification could only ever fail. Replaced with a route that exists and is
+# worth watching: the launches feed is what discovery actually produces.
+check "launches" "${FRONTEND_URL}/launches"
 check "settings" "${FRONTEND_URL}/settings"
 
 echo
