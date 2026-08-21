@@ -364,6 +364,33 @@ class Settings(BaseSettings):
     ENRICHMENT_TIER_MATURE_INTERVAL_SECONDS: int = 1800  # 30 minutes
     ENRICHMENT_TIER_OLD_INTERVAL_SECONDS: int = 21600  # 6 hours
 
+    # --- Retention and disk protection --------------------------------------
+    # Raw telemetry is expired; evidence is not. `token_market_snapshots` keeps
+    # a permanent carve-out for every mint in `radar_tokens` or
+    # `paper_positions`, so an admitted or traded token keeps its whole series
+    # regardless of these windows.
+    #
+    # Sized from the 2026-08-21 audit of production: score history was 11 GB
+    # (79% older than 7 days), radar decision snapshots 4.2 GB growing at
+    # ~1 GB/day with no policy at all, and market snapshots 3.7 GB (78% older
+    # than 7 days). At these windows the three settle near 14 GB combined with
+    # the nursery running, against a 38 GB disk.
+    SCORING_HISTORY_RETENTION_DAYS: int = 7
+    MARKET_SNAPSHOT_RETENTION_DAYS: int = Field(default=7, ge=1, le=365)
+    #: The heaviest table per row (5.4 KB, mostly JSONB) and the fastest
+    #: grower. The distilled `radar_decision_outcomes` is permanent; this is
+    #: only its raw input.
+    RADAR_DECISION_SNAPSHOT_RETENTION_DAYS: int = Field(default=3, ge=1, le=365)
+    #: Windows used only by the emergency pass above the critical threshold.
+    SCORING_HISTORY_EMERGENCY_DAYS: int = Field(default=3, ge=1, le=365)
+    RADAR_DECISION_SNAPSHOT_EMERGENCY_DAYS: int = Field(default=1, ge=1, le=365)
+    #: Warn here; act there. At 100% Redis loses RDB persistence, returns
+    #: MISCONF on every write, and Celery beat stops enqueuing — which is how
+    #: a full disk silently stopped every scheduled job on 2026-08-21. 85%
+    #: leaves room for a backup plus a table rewrite.
+    DISK_WARNING_PERCENT: float = Field(default=75.0, ge=1.0, le=99.0)
+    DISK_CRITICAL_PERCENT: float = Field(default=85.0, ge=1.0, le=99.0)
+
     # --- Fresh-token nursery lane -------------------------------------------
     # Every newly discovered token's first FRESH-window minutes of prioritised
     # observation, claimed ahead of the backlog but always behind the display
@@ -790,7 +817,6 @@ class Settings(BaseSettings):
     SCORING_SWEEP_BATCH_LIMIT: int = 200
     SCORING_RESCORE_BATCH_LIMIT: int = 200
     # Full-fidelity retention for score history before thinning.
-    SCORING_HISTORY_RETENTION_DAYS: int = 30
 
     # Separate from the discovery channel: a score event is not a discovery, and
     # conflating them would force every consumer to discriminate on payload shape.

@@ -26,6 +26,7 @@ celery_app = Celery(
         "app.reports.scheduler",
         "app.workers.priority_tasks",
         "app.workers.enrichment_tasks",
+        "app.workers.retention_tasks",
     ],
 )
 
@@ -137,6 +138,24 @@ celery_app.conf.beat_schedule = {
     "enrichment-requeue-dead-letters": {
         "task": "app.workers.enrichment_tasks.requeue_dead_letters",
         "schedule": crontab(minute="*/5"),
+    },
+    # Raw telemetry expiry. This beat did not exist until 2026-08-21, and its
+    # absence is why production reached 100% disk: `retention_tasks` could not
+    # even be imported, so `token_market_snapshots` was never pruned once and
+    # `radar_decision_snapshots` had no policy at all. In the quiet hour beside
+    # the other maintenance, and deliberately delete-only — reclaiming pages to
+    # the filesystem needs VACUUM FULL, which takes an exclusive lock and is an
+    # operator action, not something a beat should do behind your back.
+    "prune-telemetry": {
+        "task": "app.workers.retention_tasks.prune_telemetry",
+        "schedule": crontab(hour="3", minute="45"),
+    },
+    # The guard that would have caught it. Every fifteen minutes, because the
+    # measured fill rate at the time was ~1.4 GB/day against 2.6 GB free — the
+    # window between "fine" and "Redis cannot persist" was under two days.
+    "check-disk-space": {
+        "task": "app.workers.retention_tasks.check_disk_space",
+        "schedule": crontab(minute="*/15"),
     },
     # The daily paper-wallet email. Every fifteen minutes rather than once at
     # 09:00, and the beat here is UTC while the report time is local — the task

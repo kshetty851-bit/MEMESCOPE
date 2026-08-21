@@ -292,7 +292,18 @@ x-backend-env: &backend-env
   # ENVIRONMENT=production.
   DEVELOPMENT_BYPASS_AUTH: ${DEVELOPMENT_BYPASS_AUTH:-false}
   SCORING_SWEEP_BATCH_LIMIT: ${SCORING_SWEEP_BATCH_LIMIT:-200}
-  SCORING_HISTORY_RETENTION_DAYS: ${SCORING_HISTORY_RETENTION_DAYS:-30}
+  # Retention and disk protection. In the anchor, not on one service: the beat
+  # scheduler decides when to prune, the Celery worker runs it, and the API
+  # reports disk health — a window set on one only would let them disagree
+  # about what is being kept. 30 -> 7 after the 2026-08-21 audit found score
+  # history at 11 GB, 79% of it older than a week.
+  SCORING_HISTORY_RETENTION_DAYS: ${SCORING_HISTORY_RETENTION_DAYS:-7}
+  MARKET_SNAPSHOT_RETENTION_DAYS: ${MARKET_SNAPSHOT_RETENTION_DAYS:-7}
+  RADAR_DECISION_SNAPSHOT_RETENTION_DAYS: ${RADAR_DECISION_SNAPSHOT_RETENTION_DAYS:-3}
+  SCORING_HISTORY_EMERGENCY_DAYS: ${SCORING_HISTORY_EMERGENCY_DAYS:-3}
+  RADAR_DECISION_SNAPSHOT_EMERGENCY_DAYS: ${RADAR_DECISION_SNAPSHOT_EMERGENCY_DAYS:-1}
+  DISK_WARNING_PERCENT: ${DISK_WARNING_PERCENT:-75}
+  DISK_CRITICAL_PERCENT: ${DISK_CRITICAL_PERCENT:-85}
 
 services:
   postgres:
