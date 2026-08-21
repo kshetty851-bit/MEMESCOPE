@@ -10,6 +10,15 @@ scans per row, one of them across 769,305 rows, is the whole difference.
 
 Additive and reversible: five indexes, no column, constraint or data change.
 
+**Created `IF NOT EXISTS` on purpose.** These indexes had to be added to
+production by hand during the disk-full recovery — the prune could not run
+without them, and the prune was what freed the disk. A migration that then
+insisted on creating them again would fail on exactly the database it was
+written for, which is what happened on the first deployment attempt:
+`relation "ix_paper_decision_snapshots_market_snapshot_id" already exists`.
+An index is a performance fact, not a semantic one; converging on "it exists"
+is the correct outcome however it got there.
+
 `radar_decision_outcomes.decision_id` was already indexed and is deliberately
 absent here.
 
@@ -37,9 +46,9 @@ _INDEXES = (
 
 def upgrade() -> None:
     for name, table, column in _INDEXES:
-        op.create_index(name, table, [column])
+        op.execute(f"CREATE INDEX IF NOT EXISTS {name} ON {table} ({column})")
 
 
 def downgrade() -> None:
-    for name, table, _column in reversed(_INDEXES):
-        op.drop_index(name, table_name=table)
+    for name, _table, _column in reversed(_INDEXES):
+        op.execute(f"DROP INDEX IF EXISTS {name}")
