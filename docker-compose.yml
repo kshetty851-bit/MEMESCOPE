@@ -112,6 +112,14 @@ x-backend-env: &backend-env
   # per request, so this is 4 requests per cycle against a 300/min allowance.
   ENRICHMENT_BATCH_LIMIT: ${ENRICHMENT_BATCH_LIMIT:-120}
   ENRICHMENT_POLL_INTERVAL_SECONDS: ${ENRICHMENT_POLL_INTERVAL_SECONDS:-5}
+  # How many provider requests a cycle may have in flight. It has to rise with
+  # ENRICHMENT_BATCH_LIMIT to do anything: a cycle splits into
+  # ceil(batch / MARKET_PROVIDER_BATCH_SIZE) chunks, so at batch 120 there are
+  # exactly four and a semaphore of four is never the binding constraint.
+  # Absent from this anchor until 2026-08-21, which meant the setting existed
+  # in config.py and could not be changed by anything — the fourth occurrence
+  # of the trap this anchor exists to prevent.
+  ENRICHMENT_CONCURRENCY: ${ENRICHMENT_CONCURRENCY:-4}
   # The fresh-token nursery lane. In the anchor, not on one service: the
   # scheduler's beat maintains membership and the enrichment worker honours it,
   # and a value set on one only would let the two disagree about the lane's
