@@ -192,6 +192,24 @@ services:
       resources:
         limits: { cpus: "1", memory: 768M }
 
+    # Two replicas, not one. `claim_due` takes its batch with
+    # `FOR UPDATE SKIP LOCKED` precisely so replicas claim disjoint sets, and
+    # the cycle is dominated by per-batch work after the provider call — so
+    # throughput scales by running more cycles at once, not by widening one.
+    #
+    # Measured on production 2026-08-21, matured 30-minute cohorts:
+    # nursery claims rose 335 -> 502/min, tokens reaching the Radar's
+    # 12-observation floor went 10.2% -> 84.4%, and every token with a real
+    # market (liquidity >= $1k) reached it — 13.6% -> 100%. Median time to
+    # twelve observations fell from 23.8 to 18.0 minutes, inside the
+    # 30-minute nursery window it has to fit in.
+    #
+    # Deliberately two and not more: provider load is 44 req/min against a
+    # 300/min allowance, and open-position p95 refresh stayed at 71s. There is
+    # headroom, and no reason to spend it.
+    deploy:
+      replicas: 2
+
   frontend:
     build:
       context: ./frontend
