@@ -19,9 +19,10 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import BigInteger, Select, String, func, literal_column, or_, select
+from sqlalchemy import BigInteger, Select, String, func, literal_column, or_, select, true
 from sqlalchemy.dialects.postgresql import BIT, insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.models.discovery import DiscoverySourceObservation
@@ -117,36 +118,57 @@ class RadarRepository:
         The scanner owns creation facts and the enrichment worker owns market
         facts. Selecting them together at read time preserves that ownership
         and avoids a second mutable copy solely for the Radar admission stage.
+
+        **Driven from the token, not from the snapshot.** The previous shape
+        ranked *every* row of `token_market_snapshots` with a window function
+        and only then applied the age filter, so a query whose answer comes
+        from a two-day slice of `discovered_tokens` first sorted four million
+        snapshots. Measured on production: 141-348 seconds, and the same
+        statement runs from `pumpfun-radar-scan` every fifteen minutes.
+
+        The age window is the selective predicate — about 22k tokens against
+        176k mints with any snapshot at all — so it goes first, on
+        `ix_discovered_tokens_block_time`, and a LATERAL takes one row per
+        surviving token from `ix_snapshots_token_captured_desc`. Same rows,
+        same order; 1.5 seconds warm.
+
+        The LATERAL joins on `token_id` rather than `mint_address`: both are
+        indexed, but the uuid index is 201MB against the mint index's 383MB,
+        and on a host this cache-starved the narrower index is the difference
+        between 11 seconds and 1.5.
+
+        Two details matter for equivalence. The join is a CROSS JOIN LATERAL,
+        which drops tokens with no snapshot exactly as the old inner join did.
+        And `market_cap`/`liquidity_usd` are filtered *outside* the LATERAL —
+        moving them inside would pick the newest snapshot that passes the
+        filter, where the old shape picked the newest snapshot and then tested
+        it. On a token whose latest reading fell below the floor that is the
+        difference between excluding it and admitting a stale row.
         """
-        latest = select(
-            TokenMarketSnapshot.id.label("snapshot_id"),
-            func.row_number()
-            .over(
-                partition_by=TokenMarketSnapshot.mint_address,
-                order_by=TokenMarketSnapshot.captured_at.desc(),
-            )
-            .label("rank"),
-        ).subquery()
         oldest_creation = now - timedelta(days=max_age_days)
         newest_creation = now - timedelta(days=min_age_days)
 
+        latest = (
+            select(TokenMarketSnapshot)
+            .where(TokenMarketSnapshot.token_id == DiscoveredToken.id)
+            .order_by(TokenMarketSnapshot.captured_at.desc())
+            .limit(1)
+            .lateral("latest_snapshot")
+        )
+        snapshot = aliased(TokenMarketSnapshot, latest)
+
         return (
-            select(DiscoveredToken, TokenMarketSnapshot)
-            .join(latest, latest.c.snapshot_id == TokenMarketSnapshot.id)
-            .join(
-                DiscoveredToken,
-                DiscoveredToken.mint_address == TokenMarketSnapshot.mint_address,
-            )
+            select(DiscoveredToken, snapshot)
+            .join(latest, true())
             .where(
-                latest.c.rank == 1,
                 DiscoveredToken.source_program == program_id,
                 DiscoveredToken.block_time.is_not(None),
                 DiscoveredToken.block_time >= oldest_creation,
                 DiscoveredToken.block_time <= newest_creation,
-                TokenMarketSnapshot.market_cap >= min_market_cap,
-                TokenMarketSnapshot.liquidity_usd >= min_liquidity,
+                snapshot.market_cap >= min_market_cap,
+                snapshot.liquidity_usd >= min_liquidity,
             )
-            .order_by(TokenMarketSnapshot.captured_at.desc())
+            .order_by(snapshot.captured_at.desc())
         )
 
     async def pumpfun_candidates(
