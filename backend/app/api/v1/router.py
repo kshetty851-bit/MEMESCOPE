@@ -23,6 +23,7 @@ from app.api.v1.endpoints import (
 )
 from app.exit_signals import api as intelligence
 from app.health import api as pipeline_health
+from app.hq_ops import api as hq_ops
 from app.opportunities import api as opportunities
 from app.paper import api as paper
 from app.radar import api as radar
@@ -88,3 +89,7 @@ api_router.include_router(real_wallet.router)
 # point is that token security is not a real-wallet concern and stays
 # readable when the wallet is disabled.
 api_router.include_router(token_security.router)
+# HQ operations. Its own `/hq` namespace: `/health/pipeline` reports whether
+# the platform is producing anything, this reports whether the machinery
+# underneath it is alive. Read-only, and additive — no existing route changes.
+api_router.include_router(hq_ops.router)

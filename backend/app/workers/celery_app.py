@@ -27,6 +27,7 @@ celery_app = Celery(
         "app.workers.priority_tasks",
         "app.workers.enrichment_tasks",
         "app.workers.retention_tasks",
+        "app.hq_ops.tasks",
     ],
 )
 
@@ -44,9 +45,33 @@ celery_app.conf.update(
     worker_max_tasks_per_child=200,
     broker_connection_retry_on_startup=True,
     result_expires=3600,
+    # Lets `control.broadcast("pool_restart")` actually restart the prefork
+    # pool. Off by default in Celery, which is why the one real remediation
+    # for a wedged worker was unavailable to anything but a human with a
+    # shell. The control channel is reachable only from inside the compose
+    # network; this does not widen who can reach it, only what they can ask.
+    worker_pool_restarts=True,
 )
 
 celery_app.conf.beat_schedule = {
+    # Beat's proof of life, for HQ's production watch. Beat has no control
+    # channel and runs where the API cannot see it, so the only way to know it
+    # is still turning is for it to write that down. Every minute: the point is
+    # to notice a stopped scheduler quickly, and the write is one SET.
+    "hq-beat-heartbeat": {
+        "task": "app.hq_ops.tasks.publish_beat_heartbeat",
+        "schedule": crontab(minute="*"),
+    },
+    # HQ's autonomous pass. Every two minutes: fast enough that a wedged worker
+    # is noticed and restarted inside a paper-review cycle, slow enough that a
+    # component which flaps does not get a restart every sixty seconds. It is
+    # the only scheduled task in MEMESCOPE that is permitted to change the
+    # running system, and what it may change is the allowlist in
+    # `app.hq_ops.remediation` and nothing else.
+    "hq-ops-tick": {
+        "task": "app.hq_ops.tasks.hq_ops_tick",
+        "schedule": crontab(minute="*/2"),
+    },
     "purge-expired-refresh-tokens": {
         "task": "app.workers.tasks.purge_expired_refresh_tokens",
         "schedule": crontab(hour="3", minute="0"),
