@@ -21,6 +21,39 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+# --- 0. One deploy at a time -------------------------------------------------
+#
+# Every step below operates on this one working directory: `git checkout
+# --detach` moves the tree, `compose build` reads it, `compose up` starts what
+# was built. Two deploys at once interleave all three, and the failure is
+# quiet — on 2026-08-22 two runs raced and the images that ended up live had
+# been built from a tree the other run had already moved out from under them.
+# Nothing crashed; production simply ran a commit nobody chose.
+#
+# `flock` on a descriptor held for the life of the script is the whole fix. The
+# second run fails immediately with a message naming the first, rather than
+# waiting: a deploy that queues behind another deploy is usually a mistake
+# somebody wants to know about now, not in six minutes.
+#
+# `200<>` and not `200>`: the redirect opens the file *before* flock runs, so
+# `>` would truncate away the holder's PID and the refusal message would name
+# nobody. `<>` opens read-write without truncating; the winner truncates the
+# file itself, after it has the lock.
+#
+# A high descriptor so nothing else in the script can close it, and the lock
+# releases when the process exits however it exits — including the rollback
+# path, which must never be able to leave it held.
+LOCKFILE="${DEPLOY_LOCKFILE:-/tmp/memescope-deploy.lock}"
+exec 200<>"$LOCKFILE"
+if ! flock -n 200; then
+	holder="$(cat "$LOCKFILE" 2>/dev/null)"
+	echo "✗ Another deploy is already running${holder:+ (PID ${holder})}. Refusing to run two at once." >&2
+	echo "  Wait for it to finish. If that process is gone, remove ${LOCKFILE} and retry." >&2
+	exit 1
+fi
+: >"$LOCKFILE"
+echo "$$" >&200
+
 REF="origin/main"
 ROLLBACK=1
 COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.prod.yml)
