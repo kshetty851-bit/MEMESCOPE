@@ -16,6 +16,7 @@ import {
   type Transient,
 } from "@/lib/hq/adapter";
 import { createEventMeter, emptyActivity, type EventActivity } from "@/lib/hq/events";
+import { fetchHqOperations } from "@/lib/hq/operations";
 import {
   fetchExecutionPosture,
   fetchPipelineHealth,
@@ -81,6 +82,20 @@ const FLUSH_MS = 3_000;
  */
 const TOKEN_SECURITY_POLL_MS = 120_000;
 
+/**
+ * How often the operations surface is re-read.
+ *
+ * The fastest poll in HQ, and the only one that is fast on purpose. This is
+ * the source whose entire job is to notice that something stopped, and the
+ * autonomous tick behind it runs every two minutes — reading slower than the
+ * thing that acts would mean the room routinely shows a repair that already
+ * happened as work still pending.
+ *
+ * Still one request. The endpoint aggregates health, incidents, the audit
+ * trail and the allowlist precisely so this does not become six.
+ */
+const OPERATIONS_POLL_MS = 45_000;
+
 interface QueryLike<T> {
   data: T | undefined;
   dataUpdatedAt: number;
@@ -127,6 +142,12 @@ export function useHqState(): HqState {
     refetchInterval: TOKEN_SECURITY_POLL_MS,
     staleTime: TOKEN_SECURITY_POLL_MS / 2,
   });
+  const operations = useQuery({
+    queryKey: ["hq", "operations"],
+    queryFn: fetchHqOperations,
+    refetchInterval: OPERATIONS_POLL_MS,
+    staleTime: OPERATIONS_POLL_MS / 2,
+  });
   const paperWallet = usePaperWallet();
   const paperPositions = usePaperPositions();
   const paperAudit = usePaperAudit();
@@ -171,6 +192,7 @@ export function useHqState(): HqState {
       radarPerformance: sourceOf(radarPerformance),
       tokenSecurity: sourceOf(tokenSecurity),
       executionPosture: sourceOf(executionPosture),
+      operations: sourceOf(operations),
     }),
     // Identity of the query objects changes on every render; their update
     // stamps do not. Keying on the stamps is what stops this from rebuilding
@@ -192,6 +214,8 @@ export function useHqState(): HqState {
       tokenSecurity.isError,
       executionPosture.dataUpdatedAt,
       executionPosture.isError,
+      operations.dataUpdatedAt,
+      operations.isError,
     ],
   );
 

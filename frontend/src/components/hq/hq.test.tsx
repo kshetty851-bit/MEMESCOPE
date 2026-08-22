@@ -1049,18 +1049,25 @@ describe("adapter isolation", () => {
   });
 
   it("mounts exactly the sources it needs and no more", () => {
-    // A small number of shared queries feeding one adapter, rather than ten
-    // employees each polling for themselves. Four are the app's existing
-    // hooks, so HQ shares their cache entries instead of doubling the request
-    // rate on the slowest endpoints in the API. The three HQ-owned ones —
-    // pipeline health, the token-security summary and the execution posture —
-    // exist because nothing else in the app asks for them.
+    // A small number of shared queries feeding one adapter, rather than
+    // thirteen employees each polling for themselves. Four are the app's
+    // existing hooks, so HQ shares their cache entries instead of doubling the
+    // request rate on the slowest endpoints in the API. The four HQ-owned ones
+    // — pipeline health, the token-security summary, the execution posture and
+    // the operations surface — exist because nothing else in the app asks for
+    // them.
+    //
+    // Raised from seven to eight when the operations surface shipped. That one
+    // request feeds three employees, the Mission Board's infrastructure rows,
+    // the incident panel and the autonomous activity trail, because the
+    // endpoint aggregates all of it server-side — which is the shape this cap
+    // exists to encourage. The next addition should have to argue as well.
     //
     // The cap is the point: it is what stops a future panel from quietly
     // adding a fetch per employee. Raising it should require reading this.
     const source = fs.readFileSync(path.join(root, "components/hq/use-hq-state.ts"), "utf8");
     const queries = source.match(/useQuery\(|usePaper\w+\(|useRadar\w+\(/g) ?? [];
-    expect(queries.length).toBeLessThanOrEqual(7);
+    expect(queries.length).toBeLessThanOrEqual(8);
     expect(source).toContain("usePaperWallet");
     expect(source).toContain("useRadarPerformance");
   });

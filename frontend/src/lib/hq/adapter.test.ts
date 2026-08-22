@@ -160,8 +160,76 @@ function security(overrides: Partial<TokenSecuritySummary> = {}): TokenSecurityS
   };
 }
 
+/**
+ * A healthy operations reading.
+ *
+ * Added to `build` when the operations surface shipped. Before it existed, the
+ * reliability trio read UNKNOWN-and-unsourced and could not affect anything;
+ * now that `GET /hq` is real, an absent operations source means three
+ * departments that stopped reporting, which Nova is *supposed* to notice. So
+ * the default has to be a live one, and the tests that care about absence
+ * override it explicitly.
+ */
+function operations(overrides: Record<string, unknown> = {}) {
+  const component = (name: string) => ({
+    component: name,
+    status: "healthy" as const,
+    detail: "ok",
+    latency_ms: 1,
+    measured: true,
+  });
+  return {
+    health: {
+      disk: {
+        status: "healthy" as const,
+        percent_used: 20,
+        warning_percent: 75,
+        critical_percent: 85,
+        measured: true,
+        detail: "20% used.",
+      },
+      redis: component("redis"),
+      database: component("database"),
+      worker: {
+        status: "healthy" as const,
+        nodes: ["celery@a"],
+        replies: 1,
+        measured: true,
+        detail: "1 worker answered a ping.",
+      },
+      scheduler: {
+        status: "healthy" as const,
+        last_beat: new Date(NOW).toISOString(),
+        seconds_since_beat: 12,
+        expected_within_seconds: 200,
+        measured: true,
+        detail: "Last scheduler beat 12s ago.",
+      },
+      queues: {
+        status: "healthy" as const,
+        depths: { celery: 0 },
+        total: 0,
+        measured: true,
+        detail: "0 messages waiting on the broker.",
+      },
+      overall: "healthy" as const,
+      unmeasured: 0,
+      environment: "test",
+      version: "0.0.0",
+      observed_at: new Date(NOW).toISOString(),
+    },
+    incidents: [],
+    recent: [],
+    activity: [],
+    allowlist: [],
+    invariants: { digest: "abc123", values: {} },
+    ...overrides,
+  };
+}
+
 function build(overrides: Partial<HqSources> = {}) {
   return deriveHqState({
+    operations: at(operations() as never),
     pipeline: at(pipeline()),
     paperWallet: at(wallet()),
     paperPositions: at(positions()),

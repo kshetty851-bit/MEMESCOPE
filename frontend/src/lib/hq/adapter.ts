@@ -5,6 +5,7 @@ import type {
   PipelineHealth,
   TokenSecuritySummary,
 } from "./pipeline";
+import { OPEN_INCIDENT_STATUSES, type HqOperations, type Incident } from "./operations";
 import type { PaperAudit, PaperPositions, PaperWallet } from "@/types/paper";
 import type { RadarPerformance } from "@/types/radar";
 import type { LiveStreamStatus } from "@/hooks/use-live-updates";
@@ -101,6 +102,15 @@ export const STALE_AFTER_MS = {
   tokenSecurity: 360_000,
   /** Posture polls at 120s. Three misses. */
   executionPosture: 360_000,
+  /**
+   * Operations polls at 45s. Four misses.
+   *
+   * Tighter than the rest, and deliberately so: this is the one source whose
+   * whole purpose is to notice that something stopped. A stale infrastructure
+   * reading is exactly the reading that must not be trusted, because the most
+   * likely reason it went stale is the thing it would have reported.
+   */
+  operations: 180_000,
 } as const;
 
 export interface HqSources {
@@ -113,6 +123,8 @@ export interface HqSources {
   tokenSecurity: Source<TokenSecuritySummary>;
   /** `GET /real-wallet-safety/execution-posture`. The Execution Vault. */
   executionPosture: Source<ExecutionPosture>;
+  /** `GET /hq`. Infrastructure, incidents and the autonomous audit trail. */
+  operations: Source<HqOperations>;
   /** Aggregated stream pressure. Never individual events. */
   activity: EventActivity;
   /**
@@ -349,6 +361,7 @@ export function deriveHqState(sources: Partial<HqSources> = {}): HqState {
     radarPerformance: NO_SOURCE,
     tokenSecurity: NO_SOURCE,
     executionPosture: NO_SOURCE,
+    operations: NO_SOURCE,
     activity: emptyActivity(EVENT_WINDOW_MS),
     stream: "offline",
     transients: {},
@@ -360,6 +373,10 @@ export function deriveHqState(sources: Partial<HqSources> = {}): HqState {
   const pipelineGone = absence(s.pipeline, STALE_AFTER_MS.pipeline, s.now, "Pipeline health");
   const pipelineAt = pipeline ? s.pipeline.observedAt : null;
 
+  const operations = fresh(s.operations, STALE_AFTER_MS.operations, s.now);
+  const operationsGone = absence(s.operations, STALE_AFTER_MS.operations, s.now, "Operations");
+  const operationsAt = operations ? s.operations.observedAt : null;
+
   const employees = {
     radar: deriveRadar(s, pipeline, pipelineGone, pipelineAt),
     luna: deriveLuna(s, pipeline, pipelineGone, pipelineAt),
@@ -370,19 +387,9 @@ export function deriveHqState(sources: Partial<HqSources> = {}): HqState {
     echo: deriveEcho(pipeline, pipelineGone, pipelineAt),
     byte: deriveByte(s, pipeline, pipelineGone, pipelineAt),
     sage: deriveSage(s),
-    // The reliability trio read the operations telemetry surface, which does
-    // not exist yet. UNKNOWN with a reason, not idle: three calm figures at
-    // desks would say the machinery is being watched, and right now it is not.
-    //
-    // `sourced: false` is the important half. There is a real difference
-    // between a department that stopped reporting — which should worry Nova —
-    // and a surface nobody has built yet, which should not. Without this flag
-    // the roll-up would read three unbuilt endpoints as three sick subsystems
-    // and the office would sit at permanent concern for a reason that is not
-    // about MEMESCOPE at all.
-    sentinel: unknown("No operations telemetry source.", [], false),
-    patch: unknown("No incident record source.", [], false),
-    quinn: unknown("No verification record source.", [], false),
+    sentinel: deriveSentinel(operations, operationsGone, operationsAt),
+    patch: derivePatch(operations, operationsGone, operationsAt),
+    quinn: deriveQuinn(operations, operationsGone, operationsAt),
     // Filled in below: Nova reads the others rather than the backend.
     nova: unknown("Waiting on the rest of the office."),
   } as Record<EmployeeId, EmployeeReading>;
@@ -996,6 +1003,303 @@ function byteMetrics(pipeline: PipelineHealth | null, stream: LiveStreamStatus):
     missing("Cache latency", "not available — not published by /health/pipeline"),
     missing("RPC health", "not available — Real Wallet scope"),
   ];
+}
+
+/* ── the reliability trio ─────────────────────────────────────────────
+ *
+ * These three read one source between them — `GET /hq` — and each takes the
+ * slice of it their job actually covers. Sentinel reads component health,
+ * Patch reads open incidents, Quinn reads what was verified.
+ *
+ * THE RULE THAT SHAPES ALL THREE
+ *
+ * None of them may look busy without a record behind it. Patch is
+ * INVESTIGATING only while an incident row is open and assigned; Quinn is
+ * VERIFYING only while an action carries a verification. The brief's §27 is
+ * explicit and it is the reason this file exists: an animation implying Patch
+ * repaired something Patch did not repair is the one failure this product
+ * cannot survive.
+ */
+
+/** Open work, in the order a person would want it. */
+function openIncidents(operations: HqOperations | null): Incident[] {
+  if (!operations) return [];
+  return operations.incidents.filter((incident) =>
+    OPEN_INCIDENT_STATUSES.has(incident.status),
+  );
+}
+
+function componentSummary(operations: HqOperations): string {
+  const health = operations.health;
+  const rows: Array<[string, string]> = [
+    ["disk", health.disk.status],
+    ["broker", health.redis.status],
+    ["database", health.database.status],
+    ["worker", health.worker.status],
+    ["scheduler", health.scheduler.status],
+    ["queues", health.queues.status],
+  ];
+  const bad = rows.filter(([, status]) => status === "down" || status === "degraded");
+  if (bad.length === 0) return "All six components answered.";
+  return bad.map(([name, status]) => `${name} ${status}`).join(", ");
+}
+
+function sentinelMetrics(operations: HqOperations | null): Metric[] {
+  if (!operations) {
+    return [
+      missing("Disk", "not available — /hq did not answer"),
+      missing("Broker", "not available — /hq did not answer"),
+      missing("Database", "not available — /hq did not answer"),
+      missing("Worker", "not available — /hq did not answer"),
+      missing("Scheduler", "not available — /hq did not answer"),
+      missing("Queue depth", "not available — /hq did not answer"),
+    ];
+  }
+  const health = operations.health;
+  return [
+    {
+      label: "Disk",
+      value: health.disk.percent_used === null ? null : `${health.disk.percent_used}%`,
+      source: "hq/operations",
+    },
+    {
+      label: "Broker",
+      value: health.redis.measured
+        ? `${health.redis.status}${health.redis.latency_ms === null ? "" : ` · ${health.redis.latency_ms}ms`}`
+        : null,
+      source: "hq/operations",
+    },
+    {
+      label: "Database",
+      value: health.database.measured
+        ? `${health.database.status}${health.database.latency_ms === null ? "" : ` · ${health.database.latency_ms}ms`}`
+        : null,
+      source: "hq/operations",
+    },
+    {
+      label: "Workers answering",
+      value: health.worker.measured ? String(health.worker.replies) : null,
+      source: "hq/operations",
+    },
+    {
+      label: "Last scheduler beat",
+      value:
+        health.scheduler.seconds_since_beat === null
+          ? null
+          : `${Math.round(health.scheduler.seconds_since_beat)}s ago`,
+      source: "hq/operations",
+    },
+    {
+      label: "Queue depth",
+      value: health.queues.total === null ? null : String(health.queues.total),
+      source: "hq/operations",
+    },
+  ];
+}
+
+function deriveSentinel(
+  operations: HqOperations | null,
+  gone: string,
+  at: number | null,
+): EmployeeReading {
+  const metrics = sentinelMetrics(operations);
+  if (!operations) return unknown(gone, metrics);
+
+  const health = operations.health;
+  const open = openIncidents(operations).filter(
+    (incident) => incident.kind === "incident",
+  );
+  const critical = open.filter((incident) => incident.severity === "critical");
+
+  // An open incident and healthy components are not a contradiction: a
+  // component can recover before the pass that closes its incident runs. But
+  // "1 critical incident open: all six components answered" reads as one, so
+  // the sentence names the incident and then says whether the thing it is
+  // about has come back — which is the question a reader actually has.
+  const recovered = (incident: Incident): boolean => {
+    const component = incident.component as keyof typeof operations.health;
+    const row = operations.health[component];
+    return typeof row === "object" && row !== null && "status" in row
+      ? row.status === "healthy"
+      : false;
+  };
+
+  if (critical.length > 0) {
+    const incident = critical[0]!;
+    const tail = recovered(incident)
+      ? `${incident.component} is answering again; awaiting close.`
+      : componentSummary(operations);
+    return reading(
+      "incident",
+      `${critical.length} critical incident${critical.length === 1 ? "" : "s"} open — ${incident.code}, ${incident.component}. ${tail}`,
+      metrics,
+      at,
+    );
+  }
+  if (open.length > 0) {
+    const incident = open[0]!;
+    return reading(
+      "alert",
+      `${incident.code} open on ${incident.component}. ${componentSummary(operations)}`,
+      metrics,
+      at,
+    );
+  }
+  // Nothing open, but that is only reassuring for what was actually measured.
+  // Saying "all clear" while two probes failed is precisely the reassurance
+  // this layer exists to withhold.
+  if (health.unmeasured > 0) {
+    return reading(
+      "alert",
+      `${6 - health.unmeasured} of 6 components measured. ${health.unmeasured} could not be read.`,
+      metrics,
+      at,
+    );
+  }
+  // `idle`, not `working`, and for the same reason Byte is idle when the API
+  // answers: watching is Sentinel's permanent condition, so treating it as
+  // activity would make the office permanently NORMAL and put QUIET out of
+  // reach forever. Idle here means measured and quiet, which is exactly what
+  // six healthy components are.
+  return reading("idle", componentSummary(operations), metrics, at);
+}
+
+function patchMetrics(operations: HqOperations | null): Metric[] {
+  if (!operations) {
+    return [
+      missing("Open incidents", "not available — /hq did not answer"),
+      missing("Repairs attempted", "not available — /hq did not answer"),
+      missing("Permitted actions", "not available — /hq did not answer"),
+    ];
+  }
+  const repairs = operations.activity.filter((action) => action.action !== "diagnostics.reprobe");
+  const succeeded = repairs.filter((action) => action.outcome === "succeeded").length;
+  return [
+    {
+      label: "Open incidents",
+      value: String(openIncidents(operations).filter((i) => i.kind === "incident").length),
+      source: "hq/incidents",
+    },
+    {
+      label: "Repairs in the trail",
+      value: `${succeeded} succeeded of ${repairs.length}`,
+      source: "hq/actions",
+    },
+    {
+      label: "Permitted actions",
+      value: String(operations.allowlist.length),
+      source: "hq/allowlist",
+    },
+    missing("Code changes", "not available — HQ has no repository write access"),
+  ];
+}
+
+function derivePatch(
+  operations: HqOperations | null,
+  gone: string,
+  at: number | null,
+): EmployeeReading {
+  const metrics = patchMetrics(operations);
+  if (!operations) return unknown(gone, metrics);
+
+  const mine = openIncidents(operations).filter((incident) => incident.kind === "incident");
+  const escalated = mine.filter((incident) => incident.status === "awaiting_owner");
+  const repairing = mine.filter((incident) => incident.status === "repairing");
+
+  if (repairing.length > 0) {
+    const incident = repairing[0]!;
+    return reading(
+      "investigating",
+      `Repairing ${incident.code}: ${incident.component}.`,
+      metrics,
+      at,
+    );
+  }
+  if (escalated.length > 0) {
+    const incident = escalated[0]!;
+    return reading(
+      "alert",
+      `${incident.code} escalated. ${incident.owner_rationale ?? "No permitted action remains."}`,
+      metrics,
+      at,
+    );
+  }
+  if (mine.length > 0) {
+    const incident = mine[0]!;
+    return reading("investigating", `Holding ${incident.code}: ${incident.component}.`, metrics, at);
+  }
+  // Idle rather than working, and the distinction is the point: Patch has
+  // nothing to do, which is a measured fact about an empty incident queue and
+  // not a claim that anything is being repaired.
+  return reading("idle", "No open incidents.", metrics, at);
+}
+
+function quinnMetrics(operations: HqOperations | null): Metric[] {
+  if (!operations) {
+    return [
+      missing("Verifications", "not available — /hq did not answer"),
+      missing("Protected rules", "not available — /hq did not answer"),
+    ];
+  }
+  const verified = operations.activity.filter(
+    (action) => Object.keys(action.verification ?? {}).length > 0,
+  );
+  const held = verified.filter((action) => {
+    const invariants = (action.verification as { invariants?: { held?: boolean } }).invariants;
+    return invariants?.held !== false;
+  });
+  return [
+    {
+      label: "Verified actions in the trail",
+      value: String(verified.length),
+      source: "hq/actions",
+    },
+    {
+      label: "Protected rules intact",
+      value: verified.length === 0 ? "No actions to check" : `${held.length} of ${verified.length}`,
+      source: "hq/actions",
+    },
+    {
+      label: "Policy fingerprint",
+      value: operations.invariants.digest?.slice(0, 12) ?? null,
+      source: "hq/invariants",
+    },
+    missing("Regression suite", "not available — HQ cannot run the test suite"),
+  ];
+}
+
+function deriveQuinn(
+  operations: HqOperations | null,
+  gone: string,
+  at: number | null,
+): EmployeeReading {
+  const metrics = quinnMetrics(operations);
+  if (!operations) return unknown(gone, metrics);
+
+  // A protected trading rule that moved outranks everything else Quinn could
+  // be doing, and it is the only condition in this file that can put her into
+  // an incident state.
+  const violation = openIncidents(operations).find(
+    (incident) => incident.signature === "invariants:changed",
+  );
+  if (violation) {
+    return reading(
+      "incident",
+      `${violation.code}: a protected trading rule changed during an autonomous action.`,
+      metrics,
+      at,
+    );
+  }
+
+  const verifying = openIncidents(operations).filter(
+    (incident) => incident.status === "verifying",
+  );
+  if (verifying.length > 0) {
+    const incident = verifying[0]!;
+    return reading("verifying", `Confirming recovery on ${incident.code}.`, metrics, at);
+  }
+
+  return reading("idle", "No repair awaiting verification.", metrics, at);
 }
 
 function deriveSage(s: HqSources): EmployeeReading {
