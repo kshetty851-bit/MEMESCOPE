@@ -6,7 +6,7 @@ import { TILE_H, TILE_W } from "@/lib/hq/geometry";
 /**
  * DESKS THAT SAY WHAT SOMEONE DOES.
  *
- * Ten instrument clusters. A reader should be able to tell the risk desk from
+ * Fourteen instrument clusters. A reader should be able to tell the risk desk from
  * the market desk with the people removed, because in a room this dense the
  * furniture carries as much identity as the figures do.
  *
@@ -353,6 +353,119 @@ function renderTheme(theme: DeskTheme, x: number, y: number) {
             </g>
           ))}
           <rect className="hq-notebook" x={x - 8} y={y + 1} width={16} height={5} rx={1} />
+        </g>
+      );
+
+    /* Karthik — six screens on two rows, plus the wall display behind them.
+       The count *is* the identity: Dex's four is the busiest desk on the
+       trading floor and this is visibly more, which is what a bench built to
+       watch one wallet from six angles should look like from across a room.
+
+       Each panel carries a different abstract mark so the row does not read as
+       wallpaper — a bar block, a ticker rule, a stack, a rising step, a status
+       grid, a page. They correspond to the six screens §4 names, in order, and
+       not one of them draws a figure: the numbers live in the panel, where
+       they are sourced and timestamped. */
+    case "wallet-ops":
+      return (
+        <g>
+          {(
+            [
+              [-33, -30],
+              [-11, -30],
+              [11, -30],
+              [-33, -17],
+              [-11, -17],
+              [11, -17],
+            ] as Array<readonly [number, number]>
+          ).map(([dx, dy], i) => (
+            <g key={i}>
+              <Panel x={x + dx} y={y + dy} w={20} h={11} />
+              {i === 0 ? (
+                /* Screen 1, the wallet: stacked bars. */
+                [0, 1, 2].map((b) => (
+                  <rect
+                    key={b}
+                    className="hq-bar"
+                    x={x + dx + 3 + b * 5}
+                    y={y + dy + 8 - b * 2}
+                    width={3}
+                    height={2 + b * 2}
+                  />
+                ))
+              ) : i === 1 ? (
+                /* Screen 2, the feed: rules scrolling past. */
+                [0, 1, 2].map((b) => (
+                  <line
+                    key={b}
+                    className="hq-ink"
+                    x1={x + dx + 3}
+                    y1={y + dy + 3 + b * 3}
+                    x2={x + dx + 10 + b * 3}
+                    y2={y + dy + 3 + b * 3}
+                  />
+                ))
+              ) : i === 2 ? (
+                /* Screen 3, open positions: a list. */
+                [0, 1, 2].map((b) => (
+                  <line
+                    key={b}
+                    className="hq-ink"
+                    x1={x + dx + 3}
+                    y1={y + dy + 3 + b * 3}
+                    x2={x + dx + 17}
+                    y2={y + dy + 3 + b * 3}
+                  />
+                ))
+              ) : i === 3 ? (
+                /* Screen 4, the target monitor: a rising step to a marker. */
+                <g>
+                  <polyline
+                    className="hq-ink"
+                    fill="none"
+                    points={`${x + dx + 3},${y + dy + 8} ${x + dx + 8},${y + dy + 6} ${x + dx + 12},${y + dy + 4}`}
+                  />
+                  <line
+                    className="hq-ink"
+                    x1={x + dx + 13}
+                    y1={y + dy + 3}
+                    x2={x + dx + 17}
+                    y2={y + dy + 3}
+                  />
+                </g>
+              ) : i === 4 ? (
+                /* Screen 5, system health: a grid of components. */
+                [0, 1].map((r) =>
+                  [0, 1, 2].map((c) => (
+                    <rect
+                      key={`${r}-${c}`}
+                      className="hq-cell"
+                      x={x + dx + 4 + c * 5}
+                      y={y + dy + 3 + r * 4}
+                      width={3}
+                      height={3}
+                    />
+                  )),
+                )
+              ) : (
+                /* Screen 6, reports: a page with a rule under its heading. */
+                <g>
+                  <line className="hq-ink" x1={x + dx + 3} y1={y + dy + 3} x2={x + dx + 11} y2={y + dy + 3} />
+                  {[0, 1, 2].map((b) => (
+                    <line
+                      key={b}
+                      className="hq-ink"
+                      x1={x + dx + 3}
+                      y1={y + dy + 6 + b * 2}
+                      x2={x + dx + 17}
+                      y2={y + dy + 6 + b * 2}
+                    />
+                  ))}
+                </g>
+              )}
+            </g>
+          ))}
+          <rect className="hq-notebook" x={x - 9} y={y + 1} width={18} height={5} rx={1} />
         </g>
       );
   }

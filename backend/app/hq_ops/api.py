@@ -32,6 +32,7 @@ from app.hq_ops.schemas import (
     RemediationInfo,
 )
 from app.hq_ops.service import OPEN_STATUSES
+from app.karthik_ops.service import KARTHIK_KINDS
 from app.models.hq_ops import HqAction, HqIncident
 
 router = APIRouter(prefix="/hq", tags=["hq"])
@@ -121,11 +122,19 @@ async def operations_state(session: DbSession) -> HqOperations:
 
     health = await snapshot(session)
 
+    # Karthik's findings live in the same two tables — they are the same
+    # lifecycle, and a parallel pair would be duplicated schema with no added
+    # truth — but they are not Sentinel's work and must not fill his panel.
+    # The exclusion imports the *same* frozenset the Karthik surface filters
+    # on, so inclusion there and exclusion here cannot drift apart.
     open_rows = (
         (
             await session.execute(
                 select(HqIncident)
-                .where(HqIncident.status.in_(OPEN_STATUSES))
+                .where(
+                    HqIncident.status.in_(OPEN_STATUSES),
+                    HqIncident.kind.notin_(KARTHIK_KINDS),
+                )
                 .order_by(HqIncident.detected_at.desc())
             )
         )
@@ -138,6 +147,7 @@ async def operations_state(session: DbSession) -> HqOperations:
                 select(HqIncident)
                 .where(
                     HqIncident.status.notin_(OPEN_STATUSES),
+                    HqIncident.kind.notin_(KARTHIK_KINDS),
                     HqIncident.detected_at >= since,
                 )
                 .order_by(HqIncident.detected_at.desc())
@@ -150,7 +160,10 @@ async def operations_state(session: DbSession) -> HqOperations:
     activity_rows = (
         (
             await session.execute(
-                select(HqAction).order_by(HqAction.at.desc()).limit(ACTIVITY_LIMIT)
+                select(HqAction)
+                .where(HqAction.agent != "karthik")
+                .order_by(HqAction.at.desc())
+                .limit(ACTIVITY_LIMIT)
             )
         )
         .scalars()

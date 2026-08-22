@@ -65,6 +65,11 @@ export const CHATTER: Chatter[] = [
   { actor: "sentinel", lines: ["Long shift.", "Still here.", "Mm.", "I'll keep watching."] },
   { actor: "patch", lines: ["Give me a minute.", "Almost had it.", "Right then.", "Where'd that go?"] },
   { actor: "quinn", lines: ["Run it again.", "Not convinced.", "Show me.", "Once more."] },
+  // Karthik. Neutral by the same rule as everybody else's: not one of these
+  // mentions a wallet, a target, a position or a figure. "Target hit" is a
+  // real reaction and lives in the event routines, where a reading is behind
+  // it — saying it on a timer would be the exact fabrication §22 forbids.
+  { actor: "karthik", lines: ["One second.", "Bear with me.", "Almost.", "Not mine to change."] },
   { actor: "maya", lines: ["Won't be a minute.", "Nearly finished.", "Mind the floor."] },
   { actor: "sam", lines: ["I'll fix it.", "Spare's in the back.", "That'll do it."] },
 ];

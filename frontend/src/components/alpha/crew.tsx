@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 /**
  * MEET THE MEMESCOPE TEAM.
  *
- * ── THE SAME TEN, NOT A SECOND CAST ─────────────────────────────────────
+ * ── THE SAME CAST, NOT A SECOND ONE ─────────────────────────────────────
  *
  * Every name, role, portrait and department here is read from
  * `lib/hq/employees` and `lib/hq/characters` — the same data the isometric
@@ -37,6 +37,11 @@ import { cn } from "@/lib/utils";
  * No metrics, no counts, no status. This section is a cast list; the numbers
  * live in HQ where they are sourced and timestamped. A profile says what a
  * desk *watches*, never how well it is going.
+ *
+ * The roster grew to fourteen and this file did not have to change to follow
+ * it — the grid maps `EMPLOYEES`, so a new desk appears here the moment it
+ * appears in HQ. Only the lede's count is a literal, and that is the one thing
+ * worth keeping a human in the loop on.
  */
 export function Crew() {
   const [open, setOpen] = useState<EmployeeId | null>(null);
@@ -51,9 +56,10 @@ export function Crew() {
           Meet the MEMESCOPE team
         </h2>
         <p className="crew-lede">
-          Ten specialists, one per subsystem. Each one is a desk you can open in
-          HQ and watch working — the same characters, the same names, reading
-          the same live evidence.
+          Thirteen specialists, one per subsystem, and one operator dedicated
+          to a single experiment. Each is a desk you can open in HQ and watch
+          working — the same characters, the same names, reading the same live
+          evidence.
         </p>
       </div>
 

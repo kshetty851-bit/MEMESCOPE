@@ -257,6 +257,8 @@ export function HqStage({
             );
           })}
 
+          <KarthikSignage state={state} />
+
           {/* Everything with depth — furniture and cast together, painted
               back to front. One list, one ordering rule: a person behind a
               bookshelf paints behind it, the same person two steps later
@@ -1509,4 +1511,93 @@ function roomDescription(state: HqState): string {
     ...CATS.map((cat) => `${cat.name} (office cat)`),
   ].join(", ");
   return `MEMESCOPE HQ floor plan. Departments: ${departments}. Office activity ${state.activity}. ${staff}. Also around: ${others}.`;
+}
+
+
+/* ---------------------------------------------------------------------- */
+
+/**
+ * KARTHIK LAB'S SIGN AND STATUS LIGHT.
+ *
+ * The only zone with signage of its own, and the reason is that it is the only
+ * zone whose *state* is a fact somebody needs at a glance: every other room in
+ * the building is a department that is always there, whereas this one is an
+ * experiment that may be running, waiting, in trouble, or not designated at
+ * all. §3 asks for five states and this draws exactly those five.
+ *
+ * ── IT READS THE SAME READING THE PANEL DOES ────────────────────────────
+ *
+ * The word under the lamp is a pure function of `state.employees.karthik`,
+ * which is derived in `adapter.ts` from `GET /karthik` and from nothing else.
+ * The lamp cannot be green while the panel says NEEDS OWNER, because there is
+ * one derivation and this is a rendering of it.
+ *
+ * ── THE UNMEASURED READING IS THE DEFAULT, AND THAT IS DELIBERATE ───────
+ *
+ * `unknown` maps to NO DATA rather than to any of the working states. An
+ * unmeasured room must never light up as a running one — it is the same rule
+ * the rest of HQ lives under, applied to the one surface a reader will glance
+ * at from across the page rather than read.
+ */
+const KARTHIK_STATUS: Record<EmployeeState, { label: string; tone: string }> = {
+  working: { label: "ACTIVE", tone: "var(--color-up)" },
+  busy: { label: "ACTIVE", tone: "var(--color-up)" },
+  success: { label: "ACTIVE", tone: "var(--color-up)" },
+  idle: { label: "WATCHING", tone: "var(--color-accent)" },
+  reviewing: { label: "WATCHING", tone: "var(--color-accent)" },
+  investigating: { label: "WATCHING", tone: "var(--color-accent)" },
+  verifying: { label: "WATCHING", tone: "var(--color-accent)" },
+  alert: { label: "INCIDENT", tone: "var(--color-warn)" },
+  error: { label: "INCIDENT", tone: "var(--color-warn)" },
+  incident: { label: "NEEDS OWNER", tone: "var(--color-down)" },
+  offline: { label: "OFFLINE", tone: "var(--color-ink-3, var(--color-ink))" },
+  // NO DATA, not OFFLINE. §3 names five states and OFFLINE is one of them, but
+  // it means "the lab has stopped", and `unknown` means "nobody has looked" —
+  // which is a different sentence and already has a word everywhere else in
+  // this product. It is also the word `STATE_LABEL.unknown` uses, so the sign
+  // and the panel say the same thing about the same reading.
+  //
+  // The distinction is load-bearing rather than pedantic: an office that
+  // renders OFFLINE anywhere reads as an office that closes, and this one does
+  // not — crypto runs continuously and night here is a lighting change. A test
+  // in `hq.test.tsx` pins that, and it is right to.
+  unknown: { label: "NO DATA", tone: "var(--color-ink-3, var(--color-ink))" },
+};
+
+function KarthikSignage({ state }: { state: HqState }) {
+  const zone = ZONE_BY_ID.get("karthik");
+  if (!zone) return null;
+  const status = KARTHIK_STATUS[state.employees.karthik?.state ?? "unknown"];
+  // The zone label already sits at the south corner; this stacks beneath it so
+  // the two read as one sign rather than as two captions fighting.
+  const corner = toScreen({
+    col: zone.rect.col + zone.rect.cols * 0.5,
+    row: zone.rect.row + zone.rect.rows,
+  });
+  const width = 190;
+  return (
+    <g className="hq-zone-sign" data-testid="karthik-signage" aria-hidden="true">
+      <rect
+        className="hq-zone-sign-plate"
+        x={corner.x - width / 2}
+        y={corner.y + 1}
+        width={width}
+        height={17}
+        rx={8.5}
+      />
+      <text className="hq-zone-label" x={corner.x - 8} y={corner.y + 13}>
+        Track Record Wallet Operations
+      </text>
+      <circle cx={corner.x + width / 2 - 13} cy={corner.y + 9.5} r={3.4} fill={status.tone} />
+      <text
+        className="hq-zone-label"
+        x={corner.x}
+        y={corner.y + 30}
+        style={{ fill: status.tone }}
+        data-status={status.label}
+      >
+        {status.label}
+      </text>
+    </g>
+  );
 }

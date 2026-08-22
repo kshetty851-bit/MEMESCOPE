@@ -17,6 +17,7 @@ import {
 } from "@/lib/hq/adapter";
 import { createEventMeter, emptyActivity, type EventActivity } from "@/lib/hq/events";
 import { fetchHqOperations } from "@/lib/hq/operations";
+import { fetchKarthik, readLastVisit, writeLastVisit } from "@/lib/hq/karthik";
 import {
   fetchExecutionPosture,
   fetchPipelineHealth,
@@ -96,6 +97,22 @@ const TOKEN_SECURITY_POLL_MS = 120_000;
  */
 const OPERATIONS_POLL_MS = 45_000;
 
+/**
+ * How often Karthik's surface is re-read.
+ *
+ * A minute. Slower than `operations` because nothing here is a liveness watch
+ * — the infrastructure half of Karthik's health screen comes from the same
+ * `hq_ops` probe that surface already polls faster — and faster than the paper
+ * endpoints because the reactions in §18 are derived from *changes* in this
+ * response, and a target hit that reaches the room two minutes late reads as a
+ * celebration for nothing.
+ *
+ * Still one request. The endpoint aggregates six screens, the incident queue,
+ * the action log, the allowlist, three reports and the while-away summary
+ * precisely so this does not become eleven.
+ */
+const KARTHIK_POLL_MS = 60_000;
+
 interface QueryLike<T> {
   data: T | undefined;
   dataUpdatedAt: number;
@@ -148,6 +165,33 @@ export function useHqState(): HqState {
     refetchInterval: OPERATIONS_POLL_MS,
     staleTime: OPERATIONS_POLL_MS / 2,
   });
+  /**
+   * The reader's previous visit, read **once** on mount and then frozen.
+   *
+   * In a ref rather than in state, and deliberately not re-read: §13's summary
+   * answers "what happened since you last looked", and if this were refreshed
+   * on every render the window would collapse to zero within a second of the
+   * page opening and the panel would permanently report that nothing had
+   * happened. It is stamped forward on unmount instead, so the *next* visit
+   * gets a real window.
+   */
+  const sinceRef = useRef<string | null>(null);
+  if (sinceRef.current === null) sinceRef.current = readLastVisit();
+
+  const karthik = useQuery({
+    queryKey: ["karthik", "state"],
+    queryFn: () => fetchKarthik(sinceRef.current),
+    refetchInterval: KARTHIK_POLL_MS,
+    staleTime: KARTHIK_POLL_MS / 2,
+  });
+
+  // Stamped on unmount rather than on arrival: a visit that is still open is
+  // not a previous visit, and writing on arrival would make a reader who keeps
+  // HQ in a background tab permanently unable to see what they missed.
+  useEffect(() => {
+    return () => writeLastVisit(new Date().toISOString());
+  }, []);
+
   const paperWallet = usePaperWallet();
   const paperPositions = usePaperPositions();
   const paperAudit = usePaperAudit();
@@ -193,6 +237,7 @@ export function useHqState(): HqState {
       tokenSecurity: sourceOf(tokenSecurity),
       executionPosture: sourceOf(executionPosture),
       operations: sourceOf(operations),
+      karthik: sourceOf(karthik),
     }),
     // Identity of the query objects changes on every render; their update
     // stamps do not. Keying on the stamps is what stops this from rebuilding
@@ -216,6 +261,8 @@ export function useHqState(): HqState {
       executionPosture.isError,
       operations.dataUpdatedAt,
       operations.isError,
+      karthik.dataUpdatedAt,
+      karthik.isError,
     ],
   );
 

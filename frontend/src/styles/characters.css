@@ -68,6 +68,12 @@
   --hq-ice: oklch(0.74 0.070 230);
   --hq-rust: oklch(0.55 0.120 40);
   --hq-mint: oklch(0.72 0.095 168);
+  /* Karthik, in the last real gap on the wheel. Its three neighbours are
+     crimson (0.56/0.170/25), plum (0.50/0.110/330) and violet
+     (0.60/0.150/300): this is 23 degrees off crimson and lighter, 18 off plum
+     and far more chromatic, and 48 off violet. oklch rather than a hex so it
+     is comparable with the other fifteen at a glance. */
+  --hq-magenta: oklch(0.63 0.175 348);
   /* Support staff. Same rule: clothing colour is personality. */
   --hq-plum: oklch(0.50 0.110 330);
   --hq-khaki: oklch(0.58 0.070 100);

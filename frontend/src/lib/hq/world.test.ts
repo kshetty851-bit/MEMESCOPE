@@ -89,6 +89,7 @@ describe("the expanded floor plan", () => {
       "reception",
       "facilities",
       "restrooms",
+      "karthik",
     ] as const) {
       const zone = ZONE_BY_ID.get(id);
       expect(zone, id).toBeDefined();

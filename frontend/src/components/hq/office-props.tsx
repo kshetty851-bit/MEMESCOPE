@@ -62,7 +62,10 @@ export type FloorProp =
   | "logo-stand"
   | "visitor-chair"
   | "security-gate"
-  | "floor-mat";
+  | "floor-mat"
+  // Karthik Lab.
+  | "wall-display"
+  | "cat-bed";
 
 /** Props that hang on a back wall. Drawn flat, in the wall's plane. */
 export type WallProp = "art-space" | "art-chart" | "clock" | "sign" | "board";
@@ -417,6 +420,48 @@ function renderProp(kind: FloorProp, x: number, y: number) {
           <circle className="hq-star" cx={x - 20} cy={y - 50} r={1.6} />
           <circle className="hq-star" cx={x + 9} cy={y - 39} r={1.3} />
           <circle className="hq-star" cx={x + 23} cy={y - 53} r={1.8} />
+        </g>
+      );
+
+    /* ---- Karthik Lab ------------------------------------------------------- */
+    case "wall-display":
+      // The big surface behind the bench, drawn as a lit panel with three
+      // abstract rules on it. Deliberately no glyphs: this is the largest
+      // screen in the room and a number painted on it would be the most
+      // authoritative-looking figure in HQ with nothing behind it.
+      return (
+        <g>
+          <Grounded x={x} y={y} w={16} />
+          <polygon className="hq-prop" points={`${x - 3},${y} ${x + 3},${y} ${x + 3},${y - 10} ${x - 3},${y - 10}`} />
+          <polygon
+            className="hq-screen"
+            points={`${x - 30},${y - 16} ${x + 30},${y - 30} ${x + 30},${y - 66} ${x - 30},${y - 52}`}
+          />
+          <polygon
+            className="hq-screen-glass"
+            points={`${x - 26},${y - 21} ${x + 26},${y - 33} ${x + 26},${y - 62} ${x - 26},${y - 50}`}
+          />
+          {[0, 1, 2].map((i) => (
+            <line
+              key={i}
+              className="hq-ink"
+              x1={x - 20}
+              y1={y - 42 + i * 7}
+              x2={x + 8 + i * 6}
+              y2={y - 49 + i * 7}
+            />
+          ))}
+        </g>
+      );
+
+    case "cat-bed":
+      // Satoshi's. A shallow oval cushion with a raised rim, low enough that a
+      // sleeping cat still reads as a cat rather than as a bump in a basket.
+      return (
+        <g>
+          <Grounded x={x} y={y} w={14} />
+          <ellipse className="hq-sofa-side" cx={x} cy={y - 3} rx={17} ry={9} />
+          <ellipse className="hq-sofa-back" cx={x} cy={y - 5} rx={13} ry={6.5} />
         </g>
       );
 

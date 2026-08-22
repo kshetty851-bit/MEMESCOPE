@@ -441,6 +441,35 @@ function Garment({
           />
         </g>
       );
+    case "track-jacket":
+      return (
+        <g>
+          {/* Raglan, which is the whole point of it. Every other garment in the
+              cast meets the shoulder at a square corner; this one runs the seam
+              diagonally up to the collar, so the outline has a bevel where the
+              rest have a right angle. That is the cue that survives at 64px —
+              the zip and the cuffs are for the portrait crop. */}
+          <path className="hq-garment" d={body} />
+          <path
+            className="hq-garment-dark"
+            d={`M${-s} ${shoulderY} L${-s + 5} ${shoulderY} L-4 ${shoulderY + 8} L${-h} ${hipY} L${-h} ${hipY} Z`}
+          />
+          <path
+            className="hq-garment-dark"
+            d={`M${s} ${shoulderY} L${s - 5} ${shoulderY} L4 ${shoulderY + 8} L${h} ${hipY} L${h} ${hipY} Z`}
+          />
+          {/* Centre zip, drawn light so it reads as a line rather than a gap. */}
+          <path
+            className="hq-garment-light"
+            d={`M-1 ${shoulderY + 1} L1 ${shoulderY + 1} L1 ${hipY} L-1 ${hipY} Z`}
+          />
+          {/* Stand collar. Two units tall — enough to break the neckline. */}
+          <path
+            className="hq-garment-dark"
+            d={`M-5 ${shoulderY} L5 ${shoulderY} L4 ${shoulderY - 3} L-4 ${shoulderY - 3} Z`}
+          />
+        </g>
+      );
   }
 }
 
@@ -637,6 +666,21 @@ function Hair({ style, shape, y }: { style: HairStyle; shape: HeadShape; y: numb
           {[0, 1, 2].map((i) => (
             <ellipse key={i} className="hq-hair" cx={-r - 1} cy={y + 1 + i * 4} rx={2.6} ry={2.4} />
           ))}
+        </g>
+      );
+    case "undercut":
+      return (
+        <g>
+          {/* Two heights in one crown, which no other style in the cast has.
+              The sides are shaved almost to the skull — a thin band hugging the
+              head — and the top carries real volume above it. At 64px the
+              silhouette therefore steps *inward* at the temples and back out
+              over the crown, and that step is the whole read. */}
+          <path className="hq-hair" d={`M${-r} ${y - 2} Q0 ${top + 2} ${r} ${y - 2} L${r} ${y - 5} Q0 ${top - 1} ${-r} ${y - 5} Z`} />
+          <path
+            className="hq-hair"
+            d={`M${-r + 2.5} ${y - 4} Q${-r + 1} ${top - 7} 1 ${top - 8} Q${r - 1} ${top - 7} ${r - 2.5} ${y - 4} Z`}
+          />
         </g>
       );
   }
@@ -909,6 +953,24 @@ function AccessoryPart({
               fill="none"
             />
           ))}
+        </g>
+      );
+    case "headphones":
+      return (
+        <g className="hq-accessory">
+          {/* Around the neck, not on the head. Radar already wears a headset
+              with the band over the crown and a boom mic, and a second
+              head-worn set would be a second Radar at this size. Slung at the
+              collarbone the cups sit *below* the jaw, which reads as a
+              different object entirely — and as somebody who has just taken
+              them off, which is the posture the job actually has. */}
+          <path
+            className="hq-device-stroke"
+            d={`M-7 ${shoulderY + 1} q7 -5 14 0`}
+            fill="none"
+          />
+          <rect className="hq-device" x={-10.5} y={shoulderY} width={5} height={7} rx={2.2} />
+          <rect className="hq-device" x={5.5} y={shoulderY} width={5} height={7} rx={2.2} />
         </g>
       );
   }

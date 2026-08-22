@@ -24,6 +24,7 @@ from app.api.v1.endpoints import (
 from app.exit_signals import api as intelligence
 from app.health import api as pipeline_health
 from app.hq_ops import api as hq_ops
+from app.karthik_ops import api as karthik_ops
 from app.opportunities import api as opportunities
 from app.paper import api as paper
 from app.radar import api as radar
@@ -93,3 +94,9 @@ api_router.include_router(token_security.router)
 # the platform is producing anything, this reports whether the machinery
 # underneath it is alive. Read-only, and additive — no existing route changes.
 api_router.include_router(hq_ops.router)
+# Karthik's operational layer, on `/karthik-ops`. Deliberately not `/karthik`,
+# which belongs to the wallet itself: one publishes what the experiment did and
+# the other publishes whether it is being run properly, and neither should be
+# able to shadow the other on a route table. Read-only — there is no POST, PUT,
+# PATCH or DELETE on this router — and additive: no existing route changes.
+api_router.include_router(karthik_ops.router)

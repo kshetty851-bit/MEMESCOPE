@@ -81,8 +81,16 @@ export const REPORT_ORDER: EmployeeId[] = [
  * briefing is not; the reliability desk is represented by Patch. This is §15
  * of the brief applied to the standing briefing rather than only to incident
  * meetings — not everybody is relevant to every meeting.
+ *
+ * Karthik is the third, for two reasons that agree. The room's ceiling is
+ * eleven — six chairs and five standing tiles, and the eleven above already
+ * fill it — so seating him means unseating somebody or moving furniture the
+ * floor-plan tests pin. And the standing briefing is about the platform: the
+ * Karthik Paper Wallet is a separate experiment under a separate mandate, and
+ * a report on it is a different meeting with a different attendance. He joins
+ * when the subject is his, which is what the escalation walk to Nova is for.
  */
-export const HOLDS_THE_FLOOR: EmployeeId[] = ["sentinel", "quinn"];
+export const HOLDS_THE_FLOOR: EmployeeId[] = ["sentinel", "quinn", "karthik"];
 
 export interface Station {
   employee: EmployeeId;

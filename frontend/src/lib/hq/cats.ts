@@ -4,8 +4,8 @@ import type { Tile } from "./geometry";
 /**
  * THE OFFICE CATS.
  *
- * Cosmo and Mochi are permanent residents of HQ and the least operational
- * things in it. They do not appear in `deriveHqState`, they cannot influence a
+ * Cosmo, Mochi and Satoshi are permanent residents of HQ and the least
+ * operational things in it. They do not appear in `deriveHqState`, they cannot influence a
  * reading, and nothing they do can ever touch a control — not because the
  * cats are well trained but because there is no code path from a cat to
  * anything: their frames drive SVG transforms and a personality panel, and
@@ -23,7 +23,7 @@ import type { Tile } from "./geometry";
  * waypoints reads as an animal moving rather than a token teleporting.
  */
 
-export type CatId = "cosmo" | "mochi";
+export type CatId = "cosmo" | "mochi" | "satoshi";
 
 export type CatPose =
   | "cat_walk"
@@ -55,7 +55,7 @@ export interface Cat {
   /** The joke title on the personality panel. Never an operational word. */
   title: string;
   /** Coat palette key, resolved in `hq.css`. */
-  coat: "black" | "cream";
+  coat: "black" | "cream" | "tabby";
   home: Tile;
   restingDetail: string;
   /** What they do at home when nothing is scheduled. */
@@ -79,6 +79,20 @@ export const CATS: Cat[] = [
     coat: "cream",
     home: { col: 9.7, row: 10.85 },
     restingDetail: "Occupying the good end of the sofa.",
+    restingPose: "cat_sleep",
+  },
+  {
+    // Karthik's. Lives in the lab and almost never leaves it — the other two
+    // have the run of the building, and a third cat on the same routes would
+    // read as a busier version of the same joke rather than as a third animal.
+    id: "satoshi",
+    name: "Satoshi",
+    title: "Chief Keyboard Officer",
+    coat: "tabby",
+    // The cat bed's tile, offset off-grid so he lies *in* the bed rather than
+    // standing on its centre point.
+    home: { col: 16.4, row: 10.9 },
+    restingDetail: "Asleep in the bed at the end of Karthik Lab.",
     restingPose: "cat_sleep",
   },
 ];
@@ -481,6 +495,164 @@ CAT_ROUTINES.push(
     ],
   },
 );
+
+/* ── Satoshi ────────────────────────────────────────────────────────────
+ *
+ * Six routines, all inside Karthik Lab. Every waypoint keeps at least half a
+ * tile between him and Karthik's desk anchor at (18,9), which is the rule the
+ * cat test enforces for all three cats: a cat standing *on* an operational
+ * anchor would paint over the person at it, and "the cat is on the keyboard"
+ * has to be drawn as the cat on the near edge of the desk rather than as the
+ * cat instead of the desk.
+ *
+ * He never reacts to a business event and cannot. §5 is explicit and the
+ * architecture already guarantees it — no cat appears in `deriveHqState`, and
+ * a `CatFrame` drives an SVG transform and a personality line, which is the
+ * whole of the surface.
+ */
+
+/** Bed → the near edge of Karthik's bench, in cat-sized steps. */
+const SATOSHI_TO_DESK: Tile[] = [
+  { col: 16.9, row: 10.2 },
+  { col: 17.5, row: 9.6 },
+  { col: 18.5, row: 9 },
+];
+
+/** Bed → under the wall display, where the moving rules are. */
+const SATOSHI_TO_DISPLAY: Tile[] = [
+  { col: 17, row: 10.3 },
+  { col: 17.9, row: 9.7 },
+  { col: 18.6, row: 8.6 },
+];
+
+/** A slow circuit of the room, ending back at the bed. */
+const SATOSHI_PATROL: Tile[] = [
+  { col: 17.2, row: 10.6 },
+  { col: 18.4, row: 10.4 },
+  { col: 19.6, row: 10 },
+  { col: 20.4, row: 9.4 },
+];
+
+/** The counter at the west wall, where the food is. */
+const SATOSHI_TO_COUNTER: Tile[] = [
+  { col: 16.5, row: 10 },
+  { col: 16.6, row: 8.9 },
+];
+
+const SATOSHI_ROUTINES: CatRoutine[] = [
+  {
+    id: "satoshi-bed",
+    actor: "satoshi",
+    weight: 5,
+    frames: [{ pose: "cat_sleep", hold: 14_000, detail: "Asleep in the cat bed." }],
+  },
+  {
+    id: "satoshi-keyboard",
+    actor: "satoshi",
+    weight: 4,
+    frames: [
+      ...slink(SATOSHI_TO_DESK),
+      {
+        pose: "cat_sit",
+        tile: { col: 18.5, row: 9 },
+        hold: 11_000,
+        detail: "Sitting on the near end of Karthik's keyboard.",
+      },
+      {
+        pose: "cat_groom",
+        tile: { col: 18.5, row: 9 },
+        hold: 5_000,
+        detail: "Washing, on the keyboard, unhurried.",
+      },
+      ...slinkHome(SATOSHI_TO_DESK),
+    ],
+  },
+  {
+    id: "satoshi-display",
+    actor: "satoshi",
+    weight: 3,
+    frames: [
+      ...slink(SATOSHI_TO_DISPLAY),
+      {
+        pose: "cat_watch",
+        tile: { col: 18.6, row: 8.6 },
+        hold: 9_000,
+        detail: "Watching something move on the wall display.",
+      },
+      ...slinkHome(SATOSHI_TO_DISPLAY),
+    ],
+  },
+  {
+    id: "satoshi-patrol",
+    actor: "satoshi",
+    weight: 3,
+    frames: [
+      ...slink(SATOSHI_PATROL),
+      {
+        pose: "cat_stretch",
+        tile: { col: 20.4, row: 9.4 },
+        hold: 4_200,
+        detail: "Stretching at the far end of the lab.",
+      },
+      ...slinkHome(SATOSHI_PATROL),
+    ],
+  },
+  {
+    id: "satoshi-door",
+    actor: "satoshi",
+    weight: 2,
+    // Nightly rather than constant: a cat staring at a door all day is a
+    // worried cat, and nothing in this room is worried.
+    nightFactor: 1.4,
+    frames: [
+      ...slink(SATOSHI_TO_DISPLAY.slice(0, 2)),
+      {
+        pose: "cat_sit",
+        tile: { col: 17.9, row: 9.7 },
+        hold: 8_000,
+        detail: "Facing the lab door, waiting for somebody.",
+      },
+      ...slinkHome(SATOSHI_TO_DISPLAY.slice(0, 2)),
+    ],
+  },
+  {
+    // The one routine with a person in it. Karthik gets up for food; Satoshi
+    // arrives, as cats do, for reasons of his own.
+    id: "satoshi-supper",
+    actor: "satoshi",
+    weight: 2,
+    suppressOnAlert: true,
+    frames: [
+      ...slink(SATOSHI_TO_COUNTER),
+      {
+        pose: "cat_sit",
+        tile: { col: 16.6, row: 8.9 },
+        hold: 9_600,
+        detail: "Sitting at the counter while Karthik eats.",
+      },
+      ...slinkHome(SATOSHI_TO_COUNTER),
+    ],
+    cast: [
+      {
+        actor: "karthik",
+        frames: [
+          { pose: "walking_short", tile: { col: 17, row: 9 }, hold: CAT_STEP_MS },
+          { pose: "walking_short", tile: { col: 17, row: 8 }, hold: CAT_STEP_MS },
+          {
+            pose: "coffee_idle",
+            tile: { col: 17, row: 8 },
+            hold: 9_600,
+            detail: "Eating at the counter in Karthik Lab.",
+          },
+          { pose: "returning_to_desk", tile: { col: 17, row: 9 }, hold: CAT_STEP_MS },
+          { pose: "returning_to_desk", hold: CAT_STEP_MS },
+        ],
+      },
+    ],
+  },
+];
+
+CAT_ROUTINES.push(...SATOSHI_ROUTINES);
 
 export const CAT_ROUTINES_BY_ACTOR = new Map<CatId, CatRoutine[]>(
   CAT_IDS.map((id) => [id, CAT_ROUTINES.filter((routine) => routine.actor === id)]),

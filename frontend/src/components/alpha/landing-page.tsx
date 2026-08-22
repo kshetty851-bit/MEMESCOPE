@@ -132,9 +132,9 @@ export function LandingPage() {
               Not a scanner. A command centre.
             </p>
             <p className="mt-3 max-w-md text-sm leading-relaxed text-ink-2">
-              Real-time Pump.fun intelligence, run by ten specialists who each
-              watch one subsystem. Every launch tracked, scored deterministically,
-              and published — winners and losers alike.
+              Real-time Pump.fun intelligence, run by a crew who each watch one
+              subsystem. Every launch tracked, scored deterministically, and
+              published — winners and losers alike.
             </p>
           </div>
 

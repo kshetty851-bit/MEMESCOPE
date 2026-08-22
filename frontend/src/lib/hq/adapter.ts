@@ -6,6 +6,7 @@ import type {
   TokenSecuritySummary,
 } from "./pipeline";
 import { OPEN_INCIDENT_STATUSES, type HqOperations, type Incident } from "./operations";
+import type { KarthikState, ScreenReading } from "./karthik";
 import type { PaperAudit, PaperPositions, PaperWallet } from "@/types/paper";
 import type { RadarPerformance } from "@/types/radar";
 import type { LiveStreamStatus } from "@/hooks/use-live-updates";
@@ -111,6 +112,16 @@ export const STALE_AFTER_MS = {
    * likely reason it went stale is the thing it would have reported.
    */
   operations: 180_000,
+  /**
+   * Karthik polls at 60s. Three misses.
+   *
+   * Slower than `operations` because it is not a liveness watch on the
+   * platform — the infrastructure half of Karthik's health screen comes from
+   * the same `hq_ops` probe, which has its own tighter window. What ages out
+   * here is a wallet reading, and a wallet reading is worth the same three
+   * misses every other wallet source gets.
+   */
+  karthik: 180_000,
 } as const;
 
 export interface HqSources {
@@ -125,6 +136,14 @@ export interface HqSources {
   executionPosture: Source<ExecutionPosture>;
   /** `GET /hq`. Infrastructure, incidents and the autonomous audit trail. */
   operations: Source<HqOperations>;
+  /**
+   * `GET /karthik`. The Karthik Paper Wallet, as its own operator reads it.
+   *
+   * A separate source from `paperWallet` and it must stay that way: they are
+   * different wallets under different rules, and one figure crossing between
+   * them would put the Original Paper Wallet's numbers on Karthik's screens.
+   */
+  karthik: Source<KarthikState>;
   /** Aggregated stream pressure. Never individual events. */
   activity: EventActivity;
   /**
@@ -362,6 +381,7 @@ export function deriveHqState(sources: Partial<HqSources> = {}): HqState {
     tokenSecurity: NO_SOURCE,
     executionPosture: NO_SOURCE,
     operations: NO_SOURCE,
+    karthik: NO_SOURCE,
     activity: emptyActivity(EVENT_WINDOW_MS),
     stream: "offline",
     transients: {},
@@ -377,6 +397,10 @@ export function deriveHqState(sources: Partial<HqSources> = {}): HqState {
   const operationsGone = absence(s.operations, STALE_AFTER_MS.operations, s.now, "Operations");
   const operationsAt = operations ? s.operations.observedAt : null;
 
+  const karthik = fresh(s.karthik, STALE_AFTER_MS.karthik, s.now);
+  const karthikGone = absence(s.karthik, STALE_AFTER_MS.karthik, s.now, "Karthik");
+  const karthikAt = karthik ? s.karthik.observedAt : null;
+
   const employees = {
     radar: deriveRadar(s, pipeline, pipelineGone, pipelineAt),
     luna: deriveLuna(s, pipeline, pipelineGone, pipelineAt),
@@ -390,6 +414,7 @@ export function deriveHqState(sources: Partial<HqSources> = {}): HqState {
     sentinel: deriveSentinel(operations, operationsGone, operationsAt),
     patch: derivePatch(operations, operationsGone, operationsAt),
     quinn: deriveQuinn(operations, operationsGone, operationsAt),
+    karthik: deriveKarthik(karthik, karthikGone, karthikAt),
     // Filled in below: Nova reads the others rather than the backend.
     nova: unknown("Waiting on the rest of the office."),
   } as Record<EmployeeId, EmployeeReading>;
@@ -1418,6 +1443,136 @@ function deriveActivity(
  * permanent record grew a row. So HQ remembers these four numbers and reacts
  * to the difference.
  */
+/* ── Karthik ─────────────────────────────────────────────────────────── */
+
+/**
+ * Karthik's metrics, which are almost entirely about *whether the experiment
+ * is readable* rather than about what it earned.
+ *
+ * Every row names its source, like every other panel in HQ. A `null` value
+ * renders NOT AVAILABLE rather than a dash, because a dash reads as zero and
+ * the whole point of this desk is that it never rounds an unmeasured figure
+ * up to a comfortable one.
+ */
+function karthikMetrics(state: KarthikState | null): Metric[] {
+  const wallet = state?.screens.wallet;
+  const positions = state?.screens.positions;
+  const value = (reading: ScreenReading | undefined, key: string): string | null => {
+    if (!reading?.measured) return null;
+    const raw = reading.values[key];
+    return raw === null || raw === undefined ? null : String(raw);
+  };
+  return [
+    {
+      label: "Wallet",
+      value: state ? (state.binding.readable ? state.binding.detail : "NOT DESIGNATED") : null,
+      source: "GET /karthik · binding.state",
+    },
+    {
+      label: "Autonomy",
+      value: state?.autonomy ?? null,
+      source: "GET /karthik · autonomy",
+    },
+    {
+      label: "Experiment integrity",
+      value:
+        state === null
+          ? null
+          : state.integrity.score === null
+            ? state.integrity.band
+            : `${state.integrity.score} / 100 — ${state.integrity.band}`,
+      source: "GET /karthik · integrity.score",
+    },
+    {
+      label: "Equity",
+      value: value(wallet, "cash_usd"),
+      source: "GET /karthik · screens.wallet",
+    },
+    {
+      label: "Open positions",
+      value: value(wallet, "open_positions") ?? (positions?.measured ? String(positions.rows.length) : null),
+      source: "GET /karthik · screens.positions",
+    },
+    {
+      label: "Needs owner",
+      value: state ? String(state.incidents.filter((i) => i.kind === "karthik_approval").length) : null,
+      source: "GET /karthik · incidents",
+    },
+  ];
+}
+
+/**
+ * What Karthik's figure is doing, from what the backend actually published.
+ *
+ * The ordering is the brief's own priority: an owner-attention item outranks
+ * an open incident, which outranks a degraded integrity score, which outranks
+ * ordinary work. The one state deliberately *not* reachable from here is any
+ * kind of success or celebration — that is a reaction to a real event, lives
+ * in `react()`, and cannot be produced by a steady-state reading.
+ *
+ * An unbound wallet reads `unknown` with `sourced: true`. That combination is
+ * exact and it matters: the endpoint answered, so this is not a gap in HQ's
+ * plumbing that Nova should be reporting every day — it is a wallet that does
+ * not exist yet, which is a fact about the deployment, not a fault.
+ */
+function deriveKarthik(
+  state: KarthikState | null,
+  gone: string,
+  at: number | null,
+): EmployeeReading {
+  const metrics = karthikMetrics(state);
+  if (!state) return unknown(gone, metrics);
+
+  if (!state.binding.readable) {
+    // `needs_owner` separates "the owner has not made the wallet yet" from
+    // "the variable names a wallet Karthik is forbidden to read". The first is
+    // waiting; the second is a misconfiguration somebody has to correct.
+    //
+    // `sourced: false` on the waiting case, and it is the important half of
+    // this branch. Nova counts `sourced && unknown` as a department with no
+    // current reading and says so — correctly, when a fetch failed. But an
+    // unbound wallet is a gap that is *already written down*: the endpoint
+    // answered, and its answer was "the owner has not created this wallet".
+    // Reporting that to the CEO every day is exactly what the flag exists to
+    // prevent, and it is the same reason Atlas carried it before he had an
+    // endpoint of his own.
+    return state.binding.needs_owner
+      ? reading("alert", state.binding.detail, metrics, at)
+      : unknown(state.binding.detail, metrics, false);
+  }
+
+  const owner = state.incidents.filter((incident) => incident.kind === "karthik_approval");
+  if (owner.length > 0) {
+    const first = owner[0]!;
+    return reading(
+      "incident",
+      `${owner.length} item${owner.length === 1 ? "" : "s"} need the owner — ${first.code}, ${first.component}.`,
+      metrics,
+      at,
+    );
+  }
+
+  const open = state.incidents.filter((incident) => incident.kind === "karthik_incident");
+  if (open.length > 0) {
+    const first = open[0]!;
+    return reading("alert", `${first.code} open on ${first.component}.`, metrics, at);
+  }
+
+  if (state.integrity.score !== null && state.integrity.band !== "HEALTHY") {
+    return reading("reviewing", state.integrity.headline, metrics, at);
+  }
+
+  const positions = state.screens.positions;
+  return reading(
+    "working",
+    positions.measured
+      ? `${positions.rows.length} open position${positions.rows.length === 1 ? "" : "s"} monitored. ${state.integrity.headline}`
+      : state.integrity.headline,
+    metrics,
+    at,
+  );
+}
+
 export interface HqWitness {
   auditTotal: number | null;
   openPositions: number | null;
@@ -1438,6 +1593,16 @@ export interface HqWitness {
   queueDepth: number | null;
   /** The roll-up. A change here is worth Byte noticing and Nova hearing. */
   pipelineOverall: string | null;
+  /* ── Karthik's wallet, watched for the events §18 reacts to ────────────
+     Cumulative counters, so a *difference* is the evidence something
+     happened. Reacting to a level rather than to a change would make Karthik
+     celebrate continuously for as long as a target hit stayed in the total,
+     which is the difference between an animation and a claim. */
+  karthikTargetHits: number | null;
+  karthikOpenPositions: number | null;
+  karthikDeadPositions: number | null;
+  karthikOpenIncidents: number | null;
+  karthikOwnerItems: number | null;
 }
 
 export function witness(sources: Partial<HqSources>): HqWitness {
@@ -1446,6 +1611,12 @@ export function witness(sources: Partial<HqSources>): HqWitness {
   const performance = sources.radarPerformance?.data ?? null;
   const pipeline = sources.pipeline?.data ?? null;
   const security = sources.tokenSecurity?.data ?? null;
+  const karthik = sources.karthik?.data ?? null;
+  // Read from the lifetime report rather than the daily one: a daily counter
+  // resets at midnight, and a counter that resets is a counter that looks like
+  // it went *down*, which `react` would read as nothing happening and then as
+  // a fresh hit the next time one landed.
+  const lifetime = karthik?.reports?.lifetime ?? null;
   return {
     auditTotal: audit?.total ?? null,
     openPositions: wallet?.metrics.open_positions ?? null,
@@ -1457,6 +1628,13 @@ export function witness(sources: Partial<HqSources>): HqWitness {
     securityEvaluations: security?.total_evaluations ?? null,
     queueDepth: pipeline?.market_enrichment.queue_depth ?? null,
     pipelineOverall: pipeline?.overall ?? null,
+    karthikTargetHits: lifetime?.targets_hit ?? null,
+    karthikOpenPositions: lifetime?.open_positions ?? null,
+    karthikDeadPositions: lifetime?.dead_zero ?? null,
+    karthikOpenIncidents:
+      karthik?.incidents.filter((incident) => incident.kind === "karthik_incident").length ?? null,
+    karthikOwnerItems:
+      karthik?.incidents.filter((incident) => incident.kind === "karthik_approval").length ?? null,
   };
 }
 
@@ -1510,6 +1688,56 @@ export function react(
     previous.openPositions !== null &&
     next.openPositions !== null &&
     next.openPositions > previous.openPositions;
+
+  /* ── Karthik, §18 ───────────────────────────────────────────────────
+     Every branch below fires on a *rise in a counter the backend published*.
+     None of them can fire from a timer, none of them can fire while the
+     wallet is unbound — an unbound wallet reports `null` for all five, and a
+     `null` on either side fails the comparison — and none of them invents the
+     event it reacts to. §6's rule, expressed as the only arithmetic that can
+     reach these lines. */
+  const rose = (a: number | null, b: number | null): boolean =>
+    a !== null && b !== null && b > a;
+
+  if (rose(previous.karthikOwnerItems, next.karthikOwnerItems)) {
+    // Outranks everything else Karthik could be doing: something has been
+    // found that he is explicitly not allowed to fix.
+    out.karthik = {
+      state: "incident",
+      detail: "An item needs the owner. Escalating.",
+      until,
+      speech: "This one needs you.",
+    };
+  } else if (rose(previous.karthikOpenIncidents, next.karthikOpenIncidents)) {
+    out.karthik = {
+      state: "alert",
+      detail: "A new finding opened on the Karthik wallet.",
+      until,
+      speech: "Checking system health.",
+    };
+  } else if (rose(previous.karthikTargetHits, next.karthikTargetHits)) {
+    // The office's only celebration, and the only thing that can produce it
+    // is the lifetime target count going up.
+    out.karthik = {
+      state: "success",
+      detail: "A Karthik position filled its 1.25x target.",
+      until,
+      speech: "Target hit.",
+    };
+  } else if (rose(previous.karthikDeadPositions, next.karthikDeadPositions)) {
+    out.karthik = {
+      state: "reviewing",
+      detail: "A Karthik position went to zero. Reviewing it.",
+      until,
+    };
+  } else if (rose(previous.karthikOpenPositions, next.karthikOpenPositions)) {
+    out.karthik = {
+      state: "working",
+      detail: "A new Karthik position opened.",
+      until,
+      speech: "New entry.",
+    };
+  }
 
   if (opened && !closed) {
     out.rex = { state: "working", detail: "A paper position opened.", until, speech: "Entry filled." };

@@ -147,9 +147,17 @@ describe("the physical room stays frozen", () => {
   it("leaves no tile of the building belonging to no department", () => {
     // The composition fix, pinned. cols 16-22 x rows 8-14 — 42 tiles, a sixth
     // of the floor — used to belong to nothing and rendered as a hole in the
-    // south-east corner. The deck now runs to row 12 and reception spans the
-    // full south wall, so the footprint is a complete rectangle.
-    expect(ZONE_BY_ID.get("deck")!.rect).toEqual({ col: 16, row: 4, cols: 6, rows: 8 });
+    // south-east corner. Reception spans the full south wall, and rows 8-11 of
+    // the east side are a room somebody works in.
+    //
+    // The deck absorbed those rows first and held them with three chairs and a
+    // table nobody ever walked to; Karthik Lab has them now. The coverage
+    // assertion below is the one that matters and it is unchanged — what these
+    // two lines pin is *which* department owns the corner, so a future edit
+    // that shrinks the lab without giving the tiles to somebody else fails
+    // here rather than reopening the hole.
+    expect(ZONE_BY_ID.get("deck")!.rect).toEqual({ col: 16, row: 4, cols: 6, rows: 4 });
+    expect(ZONE_BY_ID.get("karthik")!.rect).toEqual({ col: 16, row: 8, cols: 6, rows: 4 });
     expect(ZONE_BY_ID.get("reception")!.rect).toEqual({ col: 6, row: 12, cols: 16, rows: 2 });
 
     const covered = new Set<string>();

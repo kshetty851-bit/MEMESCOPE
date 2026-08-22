@@ -11,7 +11,7 @@ import type { EmployeeId } from "./employees";
  *
  * DIFFERENTIATION IS THE POINT, AND IT IS CHECKED
  *
- * The brief's requirement is that a reader can tell these ten apart with the
+ * The brief's requirement is that a reader can tell the cast apart with the
  * labels hidden and the status colours off. A palette swap cannot do that:
  * ten identical bodies in ten colours are ten of the same person. So every
  * character varies across several *shape* axes — build, hair, outfit,
@@ -42,7 +42,11 @@ export type HairStyle =
   | "locs"
   | "flat-top"
   | "shaggy"
-  | "braid";
+  | "braid"
+  // Karthik. Short and flat on the sides with volume left on top — the only
+  // two-height crown in the cast, which is what makes it read at 64px beside
+  // twelve silhouettes that are uniform all the way round.
+  | "undercut";
 
 /** Outfit silhouette, drawn as a distinct torso overlay. */
 export type Outfit =
@@ -58,7 +62,11 @@ export type Outfit =
   | "turtleneck"
   | "coveralls"
   | "parka"
-  | "wrap-top";
+  | "wrap-top"
+  // Karthik. A zipped athletic jacket with raglan shoulders: the seam runs to
+  // the collar instead of across the shoulder, so the outline has no square
+  // corner where every tailored garment in the cast has one.
+  | "track-jacket";
 
 export type Accessory =
   | "duster"
@@ -74,7 +82,12 @@ export type Accessory =
   | "mug"
   | "glasses"
   | "pager"
-  | "checklist";
+  | "checklist"
+  // Karthik's, worn *around the neck* rather than on the head. That is the
+  // whole differentiation from Radar's headset: two cups sitting at the
+  // collarbone read nothing like a band over the crown with a boom mic, and at
+  // this size the position is the only cue that survives.
+  | "headphones";
 
 /**
  * Every pose the rig can draw.
@@ -139,7 +152,11 @@ export type DeskTheme =
   | "performance"
   | "sentry"
   | "reliability"
-  | "verification";
+  | "verification"
+  // Karthik's six-monitor wall. The only desk in the office with a screen
+  // count as its identity, because a six-screen bench is what the job looks
+  // like from across a room.
+  | "wallet-ops";
 
 /**
  * The visual half of a character, without the operational identity.
@@ -375,6 +392,29 @@ export const CHARACTERS: Record<EmployeeId, CharacterDefinition> = {
     defaultPose: "seated_reviewing",
     deskTheme: "verification",
     personalityLine: "Takes nobody's word for it, including her own.",
+  },
+  karthik: {
+    id: "karthik",
+    // Compact and oval is an unused pairing — every other compact figure has a
+    // round or square head — so the silhouette is already distinct before the
+    // hair, jacket, headphones and six-screen bench are counted.
+    bodyType: "compact",
+    headShape: "oval",
+    skinTone: "s3",
+    hair: "undercut",
+    hairTone: "h5",
+    outfit: "track-jacket",
+    accessory: "headphones",
+    // Magenta: the one hue with nothing near it in the existing thirteen.
+    // Crimson and rust are the closest and both sit well to the red side of
+    // it, so the two never confuse at a glance.
+    palette: "magenta",
+    // Seated, deliberately. Four people already stand and a fifth would tip
+    // the room from "a working floor" into "a meeting"; the job is also
+    // genuinely a seated one — six screens and a keyboard.
+    defaultPose: "seated_working",
+    deskTheme: "wallet-ops",
+    personalityLine: "Moves quickly inside a small remit, and says where its edge is.",
   },
 };
 

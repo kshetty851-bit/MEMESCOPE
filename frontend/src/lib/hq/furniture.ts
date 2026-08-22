@@ -74,23 +74,33 @@ export const FURNITURE: Placement[] = [
   /* ---- Outdoor Break Deck ---------------------------------------------
      Exterior: benches, tables and planters — nothing that needs air.
 
-     The deck now runs rows 4-11 rather than 4-7, because it absorbed the
-     42-tile void that used to sit south-east of the building. Three props
-     across eight rows read as an empty platform, so the southern half gets
-     its own seating cluster: a second bench pair by the lounge door and a
-     low table between them. Spread deliberately wide — this is the one
-     space in HQ that is *supposed* to feel open, and filling it evenly
-     would turn a terrace into a waiting room. */
+     Back to rows 4-7. The deck briefly ran to row 11 to absorb the 42-tile
+     void south-east of the building, and the six props it grew down there —
+     two chairs, a low table, two planters, a standing table — were furniture
+     filling a space rather than furniture anybody used: no routine in the
+     office, and no cat route, ever walked south of row 6. Karthik Lab has
+     that half now, and what remains here is exactly the part the smoking and
+     air-break routines actually stand at. Nothing was re-authored. */
   { kind: "bench", tile: { col: 18, row: 5 }, sittable: true },
   { kind: "bench", tile: { col: 20, row: 5 }, sittable: true },
   { kind: "standing-table", tile: { col: 19, row: 6 } },
   { kind: "plant-large", tile: { col: 21, row: 4 } },
-  { kind: "lounge-chair", tile: { col: 17, row: 9 }, sittable: true },
-  { kind: "lounge-chair", tile: { col: 19, row: 9 }, sittable: true },
-  { kind: "low-table", tile: { col: 18, row: 10 } },
-  { kind: "plant-large", tile: { col: 21, row: 8 } },
-  { kind: "plant-small", tile: { col: 17, row: 11 } },
-  { kind: "standing-table", tile: { col: 20, row: 11 } },
+
+  /* ---- Karthik Lab ------------------------------------------------------
+     One desk, one wall display, a counter for the food and drink that keeps
+     somebody at a bench all day, and Satoshi's corner.
+
+     The four tiles orthogonally adjacent to the desk at (18,9) are all
+     deliberately empty — north to the deck and the rest of the building, west
+     to the counter, east to the display, south to the cat. Every authored
+     route out of this room starts on one of them, and a prop on any of the
+     four would wall Karthik in at his own bench. */
+  { kind: "wall-display", tile: { col: 19, row: 8 } },
+  { kind: "counter-micro", tile: { col: 16, row: 8 } },
+  { kind: "cabinet", tile: { col: 21, row: 8 } },
+  { kind: "cat-bed", tile: { col: 16, row: 11 } },
+  { kind: "bin", tile: { col: 20, row: 11 } },
+  { kind: "plant-small", tile: { col: 21, row: 11 } },
 
   /* ---- Portfolio ------------------------------------------------------ */
   { kind: "bookshelf", tile: { col: 0, row: 7 } },

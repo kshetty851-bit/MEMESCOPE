@@ -227,9 +227,78 @@ function operations(overrides: Record<string, unknown> = {}) {
   };
 }
 
+/**
+ * Karthik, unbound — which is his real state until the owner creates the
+ * wallet, and therefore the right default for a fixture. `readable: false`
+ * with `needs_owner: false` is the combination that must leave Nova's roll-up
+ * completely alone: the endpoint answered, so this is not a department with no
+ * reading, it is a wallet that does not exist yet.
+ */
+function karthik(overrides: Record<string, unknown> = {}) {
+  const unavailable = { measured: false, detail: "No wallet is designated.", values: {}, rows: [] };
+  return {
+    binding: {
+      state: "unbound",
+      designated_strategy_id: "",
+      detail: "No wallet is designated.",
+      readable: false,
+      needs_owner: false,
+      wallet_id: null,
+      strategy_version: null,
+      generation: null,
+      starting_balance: null,
+      started_at: null,
+      archived_at: null,
+    },
+    autonomy: "OBSERVE_ONLY",
+    screens: {
+      wallet: unavailable,
+      feed: unavailable,
+      positions: unavailable,
+      targets: unavailable,
+      health: unavailable,
+      reports: unavailable,
+    },
+    accounting: unavailable,
+    integrity: {
+      score: null,
+      band: "NOT MEASURED",
+      headline: "No wallet is designated.",
+      deductions: [],
+      unmeasured: 7,
+    },
+    incidents: [],
+    recent: [],
+    actions: [],
+    allowlist: [],
+    checks: [],
+    reports: {},
+    while_away: {
+      since: null,
+      until: new Date(NOW).toISOString(),
+      measured: false,
+      detail: "No wallet is designated.",
+      opportunities: null,
+      new_trades: null,
+      targets_hit: null,
+      dead_positions: null,
+      pnl_usd: null,
+      biggest_winner: null,
+      biggest_loss: null,
+      bugs_found: null,
+      bugs_fixed: null,
+      owner_attention: null,
+      integrity_score: null,
+    },
+    observed_at: new Date(NOW).toISOString(),
+    ...overrides,
+  };
+}
+
 function build(overrides: Partial<HqSources> = {}) {
   return deriveHqState({
     operations: at(operations() as never),
+    karthik: at(karthik() as never),
     pipeline: at(pipeline()),
     paperWallet: at(wallet()),
     paperPositions: at(positions()),

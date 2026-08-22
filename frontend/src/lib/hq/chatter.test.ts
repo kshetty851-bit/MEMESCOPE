@@ -80,6 +80,16 @@ function base(over: Partial<HqWitness> = {}): HqWitness {
     securityEvaluations: 5,
     queueDepth: 20,
     pipelineOverall: "healthy",
+    // Karthik's five counters, all null: the wallet is unbound, which is its
+    // real state. Every reaction in `react` compares two numbers, so a null on
+    // either side means none of them can fire — which is the property worth
+    // having as the default in a fixture about reactions never firing on a
+    // timer.
+    karthikTargetHits: null,
+    karthikOpenPositions: null,
+    karthikDeadPositions: null,
+    karthikOpenIncidents: null,
+    karthikOwnerItems: null,
     ...over,
   };
 }

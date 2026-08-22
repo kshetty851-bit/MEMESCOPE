@@ -1063,11 +1063,18 @@ describe("adapter isolation", () => {
     // endpoint aggregates all of it server-side — which is the shape this cap
     // exists to encourage. The next addition should have to argue as well.
     //
+    // Raised from eight to nine for Karthik. Same argument, and it has to be
+    // made again rather than assumed: one request carries his six screens, the
+    // incident queue, the action log, the allowlist, the defect catalogue,
+    // three reports and the while-away summary, because the endpoint
+    // aggregates all of it server-side. Eleven surfaces, one fetch. A version
+    // that polled per screen would have needed six.
+    //
     // The cap is the point: it is what stops a future panel from quietly
     // adding a fetch per employee. Raising it should require reading this.
     const source = fs.readFileSync(path.join(root, "components/hq/use-hq-state.ts"), "utf8");
     const queries = source.match(/useQuery\(|usePaper\w+\(|useRadar\w+\(/g) ?? [];
-    expect(queries.length).toBeLessThanOrEqual(8);
+    expect(queries.length).toBeLessThanOrEqual(9);
     expect(source).toContain("usePaperWallet");
     expect(source).toContain("useRadarPerformance");
   });

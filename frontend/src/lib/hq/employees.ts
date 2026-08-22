@@ -4,7 +4,8 @@ import type { ZoneId } from "./zones";
 /**
  * THE ROSTER.
  *
- * Ten people, each standing for one MEMESCOPE subsystem. Defined once, as
+ * Fourteen people. Thirteen stand for one MEMESCOPE subsystem each; the
+ * fourteenth, Karthik, stands for one experiment being run properly. Defined once, as
  * data, because the brief's requirement is explicit: employee information must
  * not be spread through UI components. The stage, the tablet zone view, the
  * mobile card list and the accessible description all read this array, so they
@@ -39,7 +40,12 @@ export type EmployeeId =
   // giving them to one person is how a system ends up marking its own homework.
   | "sentinel"
   | "patch"
-  | "quinn";
+  | "quinn"
+  // The Karthik Paper Wallet's dedicated operator. Added because that wallet is
+  // a *separate experiment* with a separate mandate: nobody already on this
+  // roster may touch it, and nobody on it may touch anything else. A desk that
+  // exists precisely to be isolated is a desk, not a second hat on Sentinel.
+  | "karthik";
 
 /**
  * The normalised states from the plan. Declared now so the shell's types are
@@ -82,6 +88,7 @@ export type DepartmentId =
   | "operations"
   | "infrastructure"
   | "research"
+  | "karthik_lab"
   | "qa";
 
 export const DEPARTMENT_LABEL: Record<DepartmentId, string> = {
@@ -94,6 +101,7 @@ export const DEPARTMENT_LABEL: Record<DepartmentId, string> = {
   infrastructure: "Infrastructure",
   research: "Performance & Research",
   qa: "Quality Assurance",
+  karthik_lab: "Karthik Lab",
 };
 
 export interface Employee {
@@ -340,6 +348,43 @@ export const EMPLOYEES: Employee[] = [
     personality: "Sceptical by trade. Asks for the second reading.",
     accessory: "glasses",
     palette: "mint",
+  },
+  {
+    // KARTHIK.
+    //
+    // The one desk on this roster whose *authority* is narrower than its
+    // curiosity. He reads the Karthik Paper Wallet exhaustively — every
+    // opportunity, entry, open position, target, dead token and accounting
+    // event — and he is permitted to change almost none of it. Seven
+    // operational repairs are allowlisted; the wallet's rules, its capital,
+    // its sizing and its history are not among them, and nothing on this floor
+    // can widen that list without a code change.
+    //
+    // He is also the only person here who is *not* a MEMESCOPE subsystem. The
+    // other thirteen stand for something the platform runs; Karthik stands for
+    // one experiment being run *properly*, which is a different job and gets a
+    // different room.
+    id: "karthik",
+    name: "Karthik",
+    role: "Paper Wallet Operator",
+    zone: "karthik",
+    department: "karthik_lab",
+    // Centre of the lab, with all four neighbours clear: north to the deck and
+    // the rest of the building, west to the counter, east to the wall display,
+    // south to Satoshi's corner. Every authored route out of this room starts
+    // on one of those four tiles.
+    desk: { col: 18, row: 9 },
+    systemResponsibility:
+      "Karthik Paper Wallet monitoring, audit, safe auto-repair, reporting and owner escalation",
+    whatIDo:
+      "I watch every Karthik Paper Wallet opportunity, entry, open position, target, dead token and accounting event. I repair the small operational failures that cannot change a result, and I escalate anything that needs the owner's judgement.",
+    // Radar and Atlas because the wallet's universe is theirs; Byte because
+    // the machinery underneath is his; Nova because an owner-attention item
+    // has to reach somebody who can decide.
+    worksWith: ["radar", "atlas", "byte", "nova"],
+    personality: "Fast hands, narrow remit. Reads the evidence, then says what he cannot do.",
+    accessory: "headphones",
+    palette: "magenta",
   },
 ];
 

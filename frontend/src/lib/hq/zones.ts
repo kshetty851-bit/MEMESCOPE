@@ -23,6 +23,7 @@ export type ZoneId =
   | "portfolio"
   | "ops"
   | "lab"
+  | "karthik"
   | "deck"
   | "pantry"
   | "lounge"
@@ -55,14 +56,14 @@ export interface Zone {
  *      4     │              │                  ┌VAULT─┼──────────────┤
  *      6     ├──────────── WALKWAY ────────────┴──────┤ OUTDOOR DECK │
  *      7     ├── PORTFOLIO ─┬──── OPS ────┬─── LAB ───┤  (exterior)  │
- *      8     │              │             │           ├──────────────┘
- *     10     ├──── PANTRY ──────┬──────── LOUNGE ─────┤     (space)
- *     12     ├ FACIL ┬ RESTRMS ┬───── RECEPTION ──────┤
- *     14     └───────┴─────────┴───────────────────────
+ *      8     │              │             │           ├──────────────┤
+ *     10     ├──── PANTRY ──────┬──────── LOUNGE ─────┤ KARTHIK LAB  │
+ *     12     ├ FACIL ┬ RESTRMS ┬───── RECEPTION ──────┴──────────────┤
+ *     14     └───────┴─────────┴───────────────────────────────────────
  *
- * The bottom-right block (cols 16–22, rows 8–14) belongs to no zone: it is
- * open space beyond the hull. The deck's south railing and the lounge's
- * viewport both look onto it.
+ * Every tile of the rectangle now belongs to a zone. The deck keeps rows 4-7,
+ * which is where every routine that has ever visited it actually stands; rows
+ * 8-11 became Karthik Lab.
  */
 export const ZONES: Zone[] = [
   {
@@ -116,8 +117,35 @@ export const ZONES: Zone[] = [
     // a plan with a corner missing rather than as a building. Running the deck
     // down to row 12 fills it and, as a bonus, finally puts the deck against
     // the Lounge's east edge, which is where an outdoor break space belongs.
-    rect: { col: 16, row: 4, cols: 6, rows: 8 },
+    // **Halved, not removed.** The deck used to run rows 4-11; Karthik Lab now
+    // occupies its southern half. What survives is the part that was actually
+    // used: every deck routine in the office — Dex's and Byte's smoking break,
+    // Luna's and Milo's air, Rex's and Echo's coffee — stands at rows 5 and 6,
+    // and the railing they stand at is still here. Nothing was re-authored,
+    // because nothing had ever walked south of row 6.
+    //
+    // The southern half was the 42-tile void the expansion filled with three
+    // chairs and a table. Filling a void with furniture nobody visits and
+    // filling it with a room somebody works in are different answers to the
+    // same problem, and the second one is better.
+    rect: { col: 16, row: 4, cols: 6, rows: 4 },
     surface: "deck",
+  },
+  {
+    // KARTHIK LAB.
+    //
+    // Its own room rather than a desk in Operations, because the thing it
+    // watches is its own thing: one wallet, isolated from every other wallet
+    // on the platform by design. A desk on the trading floor would put the
+    // Karthik experiment's operator among the people running the published
+    // track record, which is the exact adjacency the isolation boundary exists
+    // to prevent. The floor plan should be readable as the org chart, and here
+    // it is: a separate room for a separate mandate.
+    id: "karthik",
+    label: "Karthik Lab",
+    summary: "Track Record Wallet operations: monitoring, audit and reporting.",
+    rect: { col: 16, row: 8, cols: 6, rows: 4 },
+    surface: "plate",
   },
   {
     id: "walkway",
