@@ -24,6 +24,7 @@ from app.api.v1.endpoints import (
 from app.exit_signals import api as intelligence
 from app.health import api as pipeline_health
 from app.hq_ops import api as hq_ops
+from app.karthik import api as karthik
 from app.karthik_ops import api as karthik_ops
 from app.opportunities import api as opportunities
 from app.paper import api as paper
@@ -79,6 +80,11 @@ api_router.include_router(opportunities.router)
 # Additive: no existing route changes, and the wallet reports itself as not
 # running while its feature flag is off rather than serving an empty book.
 api_router.include_router(paper.router)
+# The Karthik paper wallet. Its own namespace over its own tables — it shares
+# no route, no schema and no storage with `/paper`, so a reader cannot confuse
+# the two wallets' figures and a change to one cannot reshape the other.
+# Read-only: activation is an operator command, never an HTTP call.
+api_router.include_router(karthik.router)
 # Safety decisions are an audit/read surface only. They cannot request a
 # wallet, build a transaction, or invoke an execution engine.
 api_router.include_router(real_wallet_safety.router)

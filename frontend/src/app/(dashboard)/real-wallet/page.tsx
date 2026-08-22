@@ -35,12 +35,25 @@ type WalletStatus = {
   signer_status: string;
   live_submission_transport: string;
   safety_gate: string;
+  lock_state: "LOCKED" | "SUBMISSION_PERMITTED";
+  security_gate: {
+    shared_with_paper: boolean;
+    evaluator: string;
+    mandatory_checks: string[];
+    max_evidence_age_seconds: number;
+  };
+  program_allowlist: string[];
   limits: {
+    entry_size_usd: string | null;
+    entry_size_configured: boolean;
     max_trade_usd: string;
     max_open_positions: number;
     max_total_exposure_usd: string;
     max_daily_notional_usd: string;
+    max_daily_trades: number;
     max_daily_loss_usd: string;
+    max_balance_sol: string;
+    max_balance_lamports: number;
     min_sol_fee_reserve: string;
   };
   dry_run: {
@@ -102,7 +115,19 @@ type WalletStatus = {
   live_readiness: {
     open_real_positions: number;
     unresolved_intents: Array<{ id: string; mint_address: string; state: string }>;
-    kill_switches: Array<{ kind: string; reason: string | null }>;
+    kill_switches: Array<{
+      kind: string;
+      reason: string | null;
+      activated_at: string | null;
+      activated_by: string | null;
+    }>;
+    kill_switch_history: Array<{
+      kind: string;
+      action: string;
+      actor: string | null;
+      reason: string;
+      at: string;
+    }>;
   };
   confirmed_lifecycle: {
     consecutive_execution_failures: number;
@@ -309,12 +334,22 @@ export default function RealWalletPage() {
       </p>
       <section className="mt-6 rounded-lg border border-warning/40 bg-warning/[0.08] p-4">
         <p className="text-label text-warning">
-          DEVNET ONLY · MAINNET BLOCKED · AUTOTRADE DISABLED
+          {data?.lock_state === "LOCKED"
+            ? "LOCKED · NO REAL SUBMISSION IS POSSIBLE"
+            : "SUBMISSION PERMITTED — VERIFY THIS IS INTENDED"}
         </p>
         <p className="mt-1 text-sm text-ink-3">
-          Every transfer requires a fresh quote, successful simulation, explicit manual
-          approval, and an isolated signer. Paper Wallet and Generation 2 cannot reach this
-          workflow.
+          Mode {data?.mode ?? "—"} · execution{" "}
+          {data?.execution_enabled ? "ENABLED" : "DISABLED"} · autotrade{" "}
+          {data?.autotrade_enabled ? "ENABLED" : "DISABLED"} · network{" "}
+          {data?.network ?? "—"}. Every transfer requires a fresh quote, successful
+          simulation, explicit manual approval, and an isolated signer. Paper Wallet and
+          Generation 2 cannot reach this workflow.
+        </p>
+        <p className="mt-2 text-sm text-ink-3">
+          This page is read-only with respect to every safety barrier. No control here can
+          change the mode, enable execution, widen a limit, or clear a barrier other than
+          an armed kill switch, which is a separate authenticated and attributed action.
         </p>
       </section>
       <section className="mt-6 rounded-lg border border-line p-4">
@@ -796,6 +831,58 @@ export default function RealWalletPage() {
           intents: {data?.live_readiness.unresolved_intents.length ?? 0}. Active kill
           switches: {data?.live_readiness.kill_switches.length ?? 0}.
         </p>
+        {data?.live_readiness.kill_switches.length ? (
+          <ul className="mt-3 space-y-1 text-sm text-down">
+            {data.live_readiness.kill_switches.map((sw) => (
+              <li key={sw.kind}>
+                <span className="font-medium">{sw.kind}</span> — {sw.reason ?? "no reason"}
+                {sw.activated_by ? ` · armed by ${sw.activated_by}` : " · armed by system"}
+                {sw.activated_at ? ` · ${sw.activated_at}` : ""}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        {data?.live_readiness.kill_switch_history.length ? (
+          <details className="mt-3 text-sm text-ink-3">
+            <summary className="cursor-pointer">Kill-switch history</summary>
+            <ul className="mt-2 space-y-1">
+              {data.live_readiness.kill_switch_history.map((event, index) => (
+                <li key={`${event.kind}-${event.at}-${index}`}>
+                  {event.at} · {event.kind} {event.action} by{" "}
+                  {event.actor ?? "system"} — {event.reason}
+                </li>
+              ))}
+            </ul>
+          </details>
+        ) : null}
+      </section>
+      <section className="mt-6 rounded-lg border border-line p-4">
+        <p className="text-label text-ink-3">Token security gate</p>
+        <p className="mt-1 text-sm text-ink-3">
+          {data?.security_gate.shared_with_paper
+            ? "Real entries use the same SEC-2 evaluator and the same entry policy as Paper. There is no Real-Wallet-only security path."
+            : "Security gate provenance unavailable."}
+        </p>
+        <p className="mt-2 text-sm text-ink-3">
+          Mandatory checks: {data?.security_gate.mandatory_checks.join(", ") ?? "—"}.
+          Evidence older than {data?.security_gate.max_evidence_age_seconds ?? "—"}s
+          cannot authorise a buy. UNKNOWN and unavailable both refuse.
+        </p>
+      </section>
+      <section className="mt-6 rounded-lg border border-line p-4">
+        <p className="text-label text-ink-3">Program allowlist</p>
+        <p className="mt-1 text-sm text-ink-3">
+          Every top-level program in a signed transaction must appear here and must
+          resolve from the transaction&apos;s own static keys. A program supplied through
+          an address lookup table is refused because it cannot be audited offline.
+        </p>
+        <ul className="mt-2 space-y-1">
+          {data?.program_allowlist.map((program) => (
+            <li key={program}>
+              <code className="text-xs text-ink">{program}</code>
+            </li>
+          ))}
+        </ul>
       </section>
       <section className="mt-6 overflow-x-auto rounded-lg border border-line">
         <div className="p-4">
@@ -846,8 +933,19 @@ export default function RealWalletPage() {
         </table>
       </section>
       <section className="mt-6 rounded-lg border border-line p-4">
-        <p className="text-label text-ink-3">Hard limits</p>
+        <p className="text-label text-ink-3">Canary limits</p>
+        <p className="mt-1 text-sm text-ink-3">
+          Server-owned. No control on this page can change or exceed any of them.
+        </p>
         <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
+          <div>
+            <dt className="text-ink-3">Entry size</dt>
+            <dd className={data?.limits.entry_size_configured ? "text-ink" : "text-down"}>
+              {data?.limits.entry_size_configured
+                ? `$${data.limits.entry_size_usd}`
+                : "NOT CONFIGURED — entries refuse"}
+            </dd>
+          </div>
           <div>
             <dt className="text-ink-3">Max trade</dt>
             <dd className="text-ink">${data?.limits.max_trade_usd ?? "—"}</dd>
@@ -865,8 +963,19 @@ export default function RealWalletPage() {
             <dd className="text-ink">${data?.limits.max_daily_notional_usd ?? "—"}</dd>
           </div>
           <div>
+            <dt className="text-ink-3">Daily trades</dt>
+            <dd className="text-ink">{data?.limits.max_daily_trades ?? "—"}</dd>
+          </div>
+          <div>
             <dt className="text-ink-3">Daily loss</dt>
             <dd className="text-ink">${data?.limits.max_daily_loss_usd ?? "—"}</dd>
+          </div>
+          <div>
+            <dt className="text-ink-3">Max wallet balance</dt>
+            <dd className="text-ink">
+              {data?.limits.max_balance_sol ?? "—"} SOL
+              {data ? ` (${data.limits.max_balance_lamports} lamports)` : ""}
+            </dd>
           </div>
         </dl>
       </section>

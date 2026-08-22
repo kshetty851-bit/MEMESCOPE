@@ -193,6 +193,14 @@ x-backend-env: &backend-env
   JUPITER_QUOTE_TIMEOUT_SECONDS: ${JUPITER_QUOTE_TIMEOUT_SECONDS:-6}
   JUPITER_QUOTE_SLIPPAGE_BPS: ${JUPITER_QUOTE_SLIPPAGE_BPS:-50}
   JUPITER_USDC_MINT: ${JUPITER_USDC_MINT:-EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v}
+  # The Karthik paper wallet. In the anchor, not on the worker: the Celery
+  # worker makes the decisions and the API reports them, so a pause set on one
+  # of them would show a paused wallet that was still buying — the exact shape
+  # of the three failures this anchor's comment above records.
+  KARTHIK_ENTRIES_PAUSED: ${KARTHIK_ENTRIES_PAUSED:-false}
+  KARTHIK_CANDIDATE_LIMIT: ${KARTHIK_CANDIDATE_LIMIT:-250}
+  KARTHIK_REVIEW_BATCH_LIMIT: ${KARTHIK_REVIEW_BATCH_LIMIT:-2000}
+  KARTHIK_MAX_MARKET_AGE_SECONDS: ${KARTHIK_MAX_MARKET_AGE_SECONDS:-900}
 
   # --- Real-wallet execution contract --------------------------------------
   # EVERY setting below is in the shared anchor on purpose, and this is the one
@@ -211,6 +219,14 @@ x-backend-env: &backend-env
   REAL_WALLET_AUTOTRADE_ENABLED: ${REAL_WALLET_AUTOTRADE_ENABLED:-false}
   REAL_WALLET_NETWORK: ${REAL_WALLET_NETWORK:-devnet}
   REAL_WALLET_RPC_URL: ${REAL_WALLET_RPC_URL:-https://api.devnet.solana.com}
+  # The endpoint allowlist. A genesis check proves which chain a host *claims*;
+  # this proves we agreed to ask that host. Startup refuses a wallet RPC URL
+  # outside it, so a divergent value here fails loudly instead of quietly.
+  REAL_WALLET_ALLOWED_RPC_HOSTS: ${REAL_WALLET_ALLOWED_RPC_HOSTS:-api.devnet.solana.com}
+  # Extra top-level programs a real swap may invoke, beyond the reviewed
+  # defaults in real_wallet/tx_inspect.py. Divergence here would let one
+  # service sign a program another would refuse.
+  REAL_WALLET_ALLOWED_PROGRAM_IDS: ${REAL_WALLET_ALLOWED_PROGRAM_IDS:-}
   # Public address only. Phase 1 rejects a signer path in every application
   # container; a later isolated signer service will own its own secret mount.
   REAL_WALLET_PUBLIC_KEY: ${REAL_WALLET_PUBLIC_KEY:-}
@@ -226,11 +242,25 @@ x-backend-env: &backend-env
   PHASE2_DEVNET_CONFIRM_RETRY_SECONDS: ${PHASE2_DEVNET_CONFIRM_RETRY_SECONDS:-1}
   # Canary exposure limits. A worker with a larger limit than the API reports is
   # how a "$5 canary" silently becomes something else.
+  #
+  # Entry size is deliberately 0 — unconfigured, and unconfigured refuses. The
+  # final $100/$50/$25 ladder is the Paper position-size evidence work's
+  # decision; defaulting it here would pre-empt that decision in a compose file.
+  REAL_WALLET_ENTRY_SIZE_USD: ${REAL_WALLET_ENTRY_SIZE_USD:-0}
   REAL_WALLET_MAX_TRADE_USD: ${REAL_WALLET_MAX_TRADE_USD:-5}
   REAL_WALLET_MAX_OPEN_POSITIONS: ${REAL_WALLET_MAX_OPEN_POSITIONS:-1}
   REAL_WALLET_MAX_TOTAL_EXPOSURE_USD: ${REAL_WALLET_MAX_TOTAL_EXPOSURE_USD:-10}
   REAL_WALLET_MAX_DAILY_NOTIONAL_USD: ${REAL_WALLET_MAX_DAILY_NOTIONAL_USD:-20}
+  REAL_WALLET_MAX_DAILY_TRADES: ${REAL_WALLET_MAX_DAILY_TRADES:-4}
   REAL_WALLET_MAX_DAILY_LOSS_USD: ${REAL_WALLET_MAX_DAILY_LOSS_USD:-10}
+  # The ceiling that makes the blast radius a number rather than a promise.
+  # Compared in integer lamports; over-funding is refused, not traded.
+  REAL_WALLET_MAX_BALANCE_SOL: ${REAL_WALLET_MAX_BALANCE_SOL:-0.25}
+  # Real exit quote bounds. A fired trigger with no priceable route becomes an
+  # explicit failure state; divergence would let one service call it executable.
+  REAL_WALLET_EXIT_MAX_QUOTE_AGE_SECONDS: ${REAL_WALLET_EXIT_MAX_QUOTE_AGE_SECONDS:-15}
+  REAL_WALLET_EXIT_MAX_PRICE_IMPACT_PCT: ${REAL_WALLET_EXIT_MAX_PRICE_IMPACT_PCT:-5}
+  REAL_WALLET_EXIT_MAX_SLIPPAGE_BPS: ${REAL_WALLET_EXIT_MAX_SLIPPAGE_BPS:-300}
   REAL_WALLET_MIN_SOL_FEE_RESERVE: ${REAL_WALLET_MIN_SOL_FEE_RESERVE:-0.01}
   REAL_WALLET_AUTOTRADE_COOLDOWN_SECONDS: ${REAL_WALLET_AUTOTRADE_COOLDOWN_SECONDS:-300}
   # Kill-switch accounting. The worker records failures and the API reports the

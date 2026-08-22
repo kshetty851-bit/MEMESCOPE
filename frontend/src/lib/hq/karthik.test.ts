@@ -121,12 +121,13 @@ describe("Karthik Lab, and the deck it was carved from", () => {
     // Every authored route out of the lab starts on one of these. A prop on
     // any of them walls him in at his own bench.
     const desk = EMPLOYEE_BY_ID.get("karthik")!.desk;
-    for (const [dc, dr] of [
+    const neighbours: Array<readonly [number, number]> = [
       [0, -1],
       [0, 1],
       [-1, 0],
       [1, 0],
-    ]) {
+    ];
+    for (const [dc, dr] of neighbours) {
       const tile = { col: desk.col + dc, row: desk.row + dr };
       expect(
         isWalkable(tile, "karthik"),
@@ -184,8 +185,9 @@ describe("Karthik's routines, and the ones he is not allowed to pick", () => {
 
   it("routes the escalation to Nova across real floor, and back", () => {
     const escalate = KARTHIK_EVENT_ROUTINES.owner_required;
-    expect(escalate.frames.at(-1)!.tile).toBeUndefined(); // ends at his own desk
-    const talking = escalate.frames.find((frame) => frame.pose === "talking_briefly");
+    expect(escalate, "no owner_required routine").toBeDefined();
+    expect(escalate!.frames.at(-1)!.tile).toBeUndefined(); // ends at his own desk
+    const talking = escalate!.frames.find((frame) => frame.pose === "talking_briefly");
     expect(talking).toBeDefined();
     // Beside Nova, not on her desk.
     const nova = EMPLOYEE_BY_ID.get("nova")!.desk;

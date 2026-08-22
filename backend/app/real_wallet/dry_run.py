@@ -23,6 +23,10 @@ from app.radar.repository import RadarRepository
 from app.real_wallet.jupiter_v2 import RealWalletJupiterV2Client
 from app.real_wallet.policy import AutonomousExecutionPolicy
 from app.real_wallet.repository import RealWalletExecutionRepository
+from app.real_wallet.security_gate import (
+    REAL_SECURITY_GATE_REFUSAL,
+    evaluate_real_entry,
+)
 from app.real_wallet_safety.service import RealWalletSafetyGate, SafetyDecision
 from app.repositories.market import MarketSnapshotRepository
 from app.repositories.token import TokenRepository
@@ -127,6 +131,22 @@ class RealWalletDryRunService:
                 safety=safety,
                 requested=requested,
             )
+            # SEC-2 first, and with the same evaluator Paper uses. The
+            # execution-quality gate below asks whether this trade would fill
+            # well; this asks whether the token may be bought at all, and the
+            # answer has to be the same one the paper track record was built
+            # on or the two records stop being comparable.
+            security = await evaluate_real_entry(
+                self._session, mint_address=candidate.mint_address, now=now
+            )
+            if not security.allowed:
+                await self._record(
+                    base,
+                    status="BLOCKED",
+                    reasons=(REAL_SECURITY_GATE_REFUSAL, *security.reason_codes),
+                )
+                safety_blocked += 1
+                continue
             if safety.decision != "ALLOW":
                 await self._record(base, status="BLOCKED", reasons=safety.reason_codes)
                 safety_blocked += 1

@@ -22,6 +22,7 @@ celery_app = Celery(
         "app.events.scheduler",
         "app.opportunities.scheduler",
         "app.paper.scheduler",
+        "app.karthik.scheduler",
         "app.real_wallet.scheduler",
         "app.reports.scheduler",
         "app.workers.priority_tasks",
@@ -140,6 +141,16 @@ celery_app.conf.beat_schedule = {
     # 2026-08-19, and a shorter window means each pass replays less, not more.
     "paper-review": {
         "task": "app.paper.scheduler.paper_review",
+        "schedule": crontab(minute="*"),
+    },
+    # The Karthik wallet's own beat, beside the paper wallet's rather than
+    # inside it. Every minute for the same reason: Karthik prices both its
+    # entries and its exits from the freshest observation it can see, so the
+    # gap between admission and entry — the number the experiment is measured
+    # on — is bounded by this cadence. Its task takes a different advisory lock
+    # and its own session, so neither wallet can delay or roll back the other.
+    "karthik-review": {
+        "task": "app.karthik.scheduler.karthik_review",
         "schedule": crontab(minute="*"),
     },
     "real-wallet-dry-run-reconciliation": {

@@ -158,9 +158,9 @@ class TestIsolation:
     def test_reaches_exactly_three_tables_and_they_are_all_karthiks(self) -> None:
         """The isolation, at its strongest point.
 
-        The operator does not import the wallet's ORM model; it declares the
-        columns it reads as Core tables. That list is therefore the complete
-        set of rows Karthik can reach, and it is three tables long.
+        Three tables, no relationships, no writes. That list is the complete
+        set of rows Karthik can reach, and the isolation claim is checkable
+        against it rather than against a sentence.
         """
         assert set(tables.declared_tables()) == {
             "karthik_wallets",
@@ -174,7 +174,7 @@ class TestIsolation:
         only one that survives a refactor nobody reviewed."""
         import pathlib
 
-        root = pathlib.Path(__file__).resolve().parents[2] / "app" / "karthik"
+        root = pathlib.Path(__file__).resolve().parents[2] / "app" / "karthik_ops"
         forbidden = ("app.paper_v2", "app.strategy_lab", "app.real_wallet", "app.paper.")
         for path in root.glob("*.py"):
             source = path.read_text()
@@ -187,7 +187,7 @@ class TestIsolation:
         other statement rather than as a promise."""
         import pathlib
 
-        root = pathlib.Path(__file__).resolve().parents[2] / "app" / "karthik"
+        root = pathlib.Path(__file__).resolve().parents[2] / "app" / "karthik_ops"
         for path in root.glob("*.py"):
             source = path.read_text()
             for write in ("session.add(RadarToken", "update(RadarToken", "delete(RadarToken"):
@@ -519,22 +519,18 @@ class TestBoundSurfaces:
     module is written to be correct the moment the wallet's migration lands,
     and code that has only ever run in its empty state is code nobody has run.
 
-    The tables are created here from `tables.py`'s own declarations. That is
-    deliberate and it is the strongest part of this class: if the wallet's
-    branch renames a column the operator reads, these tests keep passing
-    against the operator's stale idea of the schema — so the *other* half of
-    the guarantee is `test_reaches_exactly_three_tables_and_they_are_all_karthiks`
-    plus the integration run against a real merged database. What this proves
-    is that the queries, the arithmetic and the classifications are right.
+    Since the merge these run against the wallet's real model, so a renamed
+    column now fails here rather than passing against the operator's stale idea
+    of the schema. That was the one gap in this class before, and closing it is
+    what importing the model bought.
     """
 
     @pytest.fixture
     async def wallet(self, db_session):
-        from app.karthik_ops.tables import _metadata
-
-        connection = await db_session.connection()
-        await connection.run_sync(_metadata.create_all)
-
+        # The wallet's tables are part of `Base.metadata` now that the branches
+        # have merged, so conftest's `create_all` has already made them. Before
+        # the merge this fixture created them from the operator's own Core
+        # declarations; that scaffolding is gone with the thing it stood in for.
         wallet_id = uuid.uuid4()
         activated = datetime.now(UTC) - timedelta(days=2)
         await db_session.execute(
@@ -552,6 +548,10 @@ class TestBoundSurfaces:
 
     async def _position(self, db_session, wallet, *, n: int = 1, **over):
         opened = over.pop("opened_at", datetime.now(UTC) - timedelta(hours=1))
+        # Every NOT NULL column on the real table, so a fixture row is a row
+        # the wallet itself could have written. The operator reads a subset of
+        # these, but inserting a partial row would be testing against a schema
+        # that does not exist.
         values = {
             "id": uuid.uuid4(),
             "wallet_id": wallet.wallet_id,
@@ -560,9 +560,14 @@ class TestBoundSurfaces:
             "track_record_at": opened,
             "opened_at": opened,
             "entry_price": Decimal(1),
+            "entry_observed_price": Decimal(1),
+            "entry_observed_at": opened,
             "cost_basis": Decimal(10),
             "quantity": Decimal(10),
+            "decimals": 6,
             "target_price": Decimal("1.25"),
+            "peak_price": Decimal(1),
+            "last_evaluated_at": opened,
             "status": "open",
         }
         values.update(over)
@@ -593,26 +598,39 @@ class TestBoundSurfaces:
         # The rules are read to check fills against, never to instruct.
         assert "no stop" in wallet.detail
 
-    async def test_refuses_a_second_wallet_rather_than_picking_one(
+    async def test_the_schema_forbids_a_second_wallet_and_the_resolver_agrees(
         self, db_session, wallet
     ) -> None:
-        """Reading either of two wallets would publish half an experiment as
-        the whole of it. The schema forbids this; the operator does not assume
-        the schema was applied."""
-        await db_session.execute(
-            tables.karthik_wallets.insert().values(
-                id=uuid.uuid4(),
-                name="karthik-2",
-                starting_capital=Decimal(1000),
-                trade_size=Decimal(10),
-                take_profit_multiple=Decimal("1.25"),
-                activated_at=datetime.now(UTC),
-            )
+        """The guard in `resolve()` is a second line, and this says which line.
+
+        `uq_karthik_wallets_singleton` is a unique index on a constant
+        expression — the database saying "at most one of these" — so a second
+        wallet cannot be inserted at all. The resolver still counts, because a
+        `limit(1)` that silently picked one of two would publish half an
+        experiment as the whole of it, and a constraint is a thing a future
+        migration can drop.
+        """
+        from sqlalchemy.exc import IntegrityError
+
+        from app.models.karthik import KarthikWallet
+
+        assert any(
+            index.name == "uq_karthik_wallets_singleton" and index.unique
+            for index in KarthikWallet.__table__.indexes
         )
-        await db_session.flush()
-        binding = await resolve(db_session)
-        assert binding.readable is False
-        assert binding.needs_owner is True
+
+        with pytest.raises(IntegrityError):
+            await db_session.execute(
+                tables.karthik_wallets.insert().values(
+                    id=uuid.uuid4(),
+                    name="karthik-2",
+                    starting_capital=Decimal(1000),
+                    trade_size=Decimal(10),
+                    take_profit_multiple=Decimal("1.25"),
+                    activated_at=datetime.now(UTC),
+                )
+            )
+        await db_session.rollback()
 
     async def test_derives_the_book_from_position_rows(self, db_session, wallet) -> None:
         await self._position(db_session, wallet, n=1)
@@ -642,15 +660,37 @@ class TestBoundSurfaces:
         assert Decimal(str(reading.values["realised_pnl_usd"])) == Decimal(0)
         assert "proceeds" in reading.detail
 
-    async def test_finds_a_duplicate_position_and_refuses_to_fix_it(
-        self, db_session, wallet
-    ) -> None:
+    async def test_the_schema_forbids_a_duplicate_position(self, db_session, wallet) -> None:
+        """`uq_karthik_positions_wallet_mint` makes one-position-per-token a
+        database fact rather than a rule somebody follows.
+
+        The operator's `duplicate_position` check therefore cannot fire today,
+        and that is the correct outcome — it is kept as the second line for the
+        same reason as the wallet singleton above: one indexed GROUP BY per
+        tick is nothing, and a constraint is a thing a migration can drop. What
+        this test pins is *which* mechanism is actually doing the work, so
+        nobody later reads a permanently-empty check as coverage.
+        """
+        from sqlalchemy.exc import IntegrityError
+
+        from app.models.karthik import KarthikPosition
+
+        assert any(
+            constraint.name == "uq_karthik_positions_wallet_mint"
+            for constraint in KarthikPosition.__table__.constraints
+        )
+
         await self._position(db_session, wallet, n=9)
-        await self._position(db_session, wallet, n=9)
-        findings = await detect.run(db_session, wallet)
-        duplicates = [f for f in findings if f.defect == "duplicate_position"]
-        assert len(duplicates) == 1
-        assert duplicates[0].rectification == "OWNER_REQUIRED"
+        with pytest.raises(IntegrityError):
+            await self._position(db_session, wallet, n=9)
+        await db_session.rollback()
+
+    async def test_a_duplicate_would_be_owner_work_if_one_ever_appeared(self) -> None:
+        # Classification, asserted without needing a row the database refuses
+        # to create. A duplicate is about the experiment's record, so §17 puts
+        # it out of reach of any repair.
+        assert detect.DEFECT_BY_KEY["duplicate_position"].rectification == "OWNER_REQUIRED"
+        assert detect.DEFECT_BY_KEY["duplicate_position"].repair is None
 
     async def test_finds_a_wrong_entry_size_against_the_published_rule(
         self, db_session, wallet

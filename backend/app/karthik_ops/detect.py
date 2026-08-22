@@ -416,7 +416,7 @@ async def run(session: AsyncSession, binding: Binding) -> list[Finding]:
                 ).where(opportunities.c.wallet_id == binding.wallet_id)
             )
         ).all():
-            if decision != tables.ENTERED and not decision.startswith(tables.SKIPPED_PREFIX):
+            if decision not in tables.KNOWN_DECISIONS:
                 add(
                     "unknown_decision",
                     f"karthik.unknown_decision:{decision}",

@@ -72,21 +72,45 @@ def assert_transition(*, current: str, next_state: str) -> None:
 
 @dataclass(frozen=True, slots=True)
 class SubmissionFacts:
-    """Server-derived facts required before a future execute call."""
+    """Server-derived facts required before a future execute call.
 
-    signer_ready: bool
-    signer_matches_pinned_key: bool
-    safety_passed: bool
-    safety_fresh: bool
-    policy_passed: bool
-    valid_intent: bool
-    not_previously_submitted: bool
-    order_fresh: bool
-    market_fresh: bool
-    kill_switch_active: bool
-    daily_loss_within_limit: bool
-    open_position_within_limit: bool
-    trade_size_within_limit: bool
+    Every field defaults to the *refusing* value. A caller that forgets one gets
+    a refusal rather than an accidental pass, and a field added later cannot
+    silently authorise anything at an existing call site.
+    """
+
+    signer_ready: bool = False
+    signer_matches_pinned_key: bool = False
+    #: SEC-2's verdict, from the same evaluator Paper uses. `safety_passed`
+    #: means ALLOWED; `safety_fresh` means the evidence was present and current
+    #: rather than an availability refusal. Both are required.
+    safety_passed: bool = False
+    safety_fresh: bool = False
+    policy_passed: bool = False
+    valid_intent: bool = False
+    not_previously_submitted: bool = False
+    order_fresh: bool = False
+    market_fresh: bool = False
+    #: True means armed. This is the one field whose *True* is the refusal, so
+    #: an unset default of False would be permissive — the caller must state it.
+    kill_switch_active: bool = True
+    daily_loss_within_limit: bool = False
+    open_position_within_limit: bool = False
+    trade_size_within_limit: bool = False
+    #: The endpoint's genesis hash matched the configured chain *and* its host
+    #: was on the allowlist, checked for this attempt rather than at startup.
+    mainnet_verified: bool = False
+    #: Every top-level program in the assembled transaction was allowlisted and
+    #: resolved from the static keys, and the intent fingerprint matched.
+    transaction_approved: bool = False
+    #: This exact message has not been signed before.
+    not_previously_signed: bool = False
+    #: The canary count and balance ceilings, evaluated together by
+    #: `AutonomousExecutionPolicy.evaluate_canary_entry`.
+    canary_limits_satisfied: bool = False
+    #: `LIVE_TRANSPORT_RELEASE_APPROVED`. Restated here so one read of the
+    #: guard's reasons explains a refusal without also reading the transport.
+    transport_release_approved: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,6 +144,11 @@ class LiveSubmissionGuard:
             "DAILY_LOSS_LIMIT": facts.daily_loss_within_limit,
             "OPEN_POSITION_LIMIT": facts.open_position_within_limit,
             "TRADE_SIZE_LIMIT": facts.trade_size_within_limit,
+            "NETWORK_NOT_VERIFIED": facts.mainnet_verified,
+            "TRANSACTION_NOT_APPROVED": facts.transaction_approved,
+            "TRANSACTION_ALREADY_SIGNED": facts.not_previously_signed,
+            "CANARY_LIMIT_BREACH": facts.canary_limits_satisfied,
+            "RELEASE_NOT_APPROVED": facts.transport_release_approved,
         }
         reasons.extend(reason for reason, passed in checks.items() if not passed)
         return SubmissionDecision(allowed=not reasons, reasons=tuple(reasons))

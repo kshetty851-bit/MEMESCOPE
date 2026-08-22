@@ -29,6 +29,11 @@ from app.models.paper_research import (
     PaperDecisionSnapshot,
 )
 from app.models.hq_ops import HqAction, HqIncident  # noqa: F401
+from app.models.karthik import (  # noqa: F401
+    KarthikOpportunity,
+    KarthikPosition,
+    KarthikWallet,
+)
 from app.models.radar import RadarAchievement, RadarSnapshot, RadarToken
 from app.models.radar_quality import (
     RadarDecisionOutcome,
@@ -72,6 +77,9 @@ __all__ = [
     "EnrichmentStatus",
     "HqAction",
     "HqIncident",
+    "KarthikOpportunity",
+    "KarthikPosition",
+    "KarthikWallet",
     "MetadataStatus",
     "PaperDecisionEnrichment",
     "PaperDecisionOutcome",

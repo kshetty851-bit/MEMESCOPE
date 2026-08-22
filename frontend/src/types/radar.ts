@@ -98,6 +98,14 @@ export interface RadarEntry {
   opportunity_score: string;
   confidence: string;
 
+  /**
+   * When MEMESCOPE first *discovered* the mint — the earliest stored discovery
+   * record for it. Not `first_detected_at`, which is admission to the Radar and
+   * happens after enrichment. Null when no discovery record survives; render
+   * that as unavailable rather than substituting another timestamp.
+   */
+  discovered_at?: string | null;
+
   /** Written once, never updated. Every return is measured from these. */
   first_detected_at: string;
   first_price: string | null;

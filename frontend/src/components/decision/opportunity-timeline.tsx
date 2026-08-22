@@ -2,6 +2,8 @@
 
 import { Panel } from "@/components/ui/panel";
 import { Why } from "@/components/decision/why";
+import { clock, entryDelaySeconds, exitLabel, formatDelay, stamp } from "@/lib/paper";
+import type { PaperPosition } from "@/types/paper";
 import type { RadarEntry } from "@/types/radar";
 
 /**
@@ -21,8 +23,20 @@ import type { RadarEntry } from "@/types/radar";
  * Every milestone is drawn from `radar_tokens`, whose first-detection block is
  * written once and never updated. That immutability is what makes this a record
  * rather than a story the platform can retell in its own favour.
+ *
+ * The clock at the top is the one exception, and comes from the discovery
+ * record rather than the Radar row: `discovered_at` is when MEMESCOPE first saw
+ * the mint, which is minutes to hours before the Radar admitted it. Showing the
+ * admission time as the detection time would quietly shorten every entry delay
+ * measured against it. A mint with no stored discovery record says so.
  */
-export function OpportunityTimeline({ entry }: { entry: RadarEntry }) {
+export function OpportunityTimeline({
+  entry,
+  position,
+}: {
+  entry: RadarEntry;
+  position?: PaperPosition;
+}) {
   const first = Number(entry.first_price ?? 0);
   const peak = Number(entry.peak_multiple ?? 1);
   const current = Number(entry.current_multiple ?? 1);
@@ -31,17 +45,51 @@ export function OpportunityTimeline({ entry }: { entry: RadarEntry }) {
   const retained = peak > 0 ? current / peak : 1;
   const givenBack = Math.round((1 - retained) * 100);
 
+  const detectedAt = clock(entry.discovered_at);
+  const delay = position
+    ? entryDelaySeconds(entry.discovered_at, position.opened_at)
+    : null;
+
   const events: { key: string; title: string; detail: string; tone: string }[] = [
     {
       key: "detected",
-      title: "Detected by MEMESCOPE",
+      title: detectedAt ? `Detected ${detectedAt}` : "Detected by MEMESCOPE",
       detail:
+        (detectedAt
+          ? `First seen by MEMESCOPE at ${stamp(entry.discovered_at)}. `
+          : "The detection time is not available for this mint — no discovery " +
+            "record survives for it, and none is estimated. ") +
         `First observed at ${formatUsd(first)}. Every return below is measured ` +
         `from this moment — never from the token's launch, which MEMESCOPE did ` +
         `not call.`,
       tone: "var(--color-accent)",
     },
   ];
+
+  if (position) {
+    events.push({
+      key: "entry",
+      title: `Paper entry ${clock(position.opened_at) ?? ""}`.trim(),
+      detail:
+        (delay === null
+          ? "The delay from detection cannot be measured without a stored detection time. "
+          : `${formatDelay(delay)} after detection. `) +
+        `Entered at rank #${position.entry_rank} on the strategy's own rule — ` +
+        `there is no manual entry in this wallet.`,
+      tone: "var(--color-ink-3)",
+    });
+
+    if (position.closed_at) {
+      events.push({
+        key: "exit",
+        title: `Paper exit ${clock(position.closed_at) ?? ""}`.trim(),
+        detail:
+          `${exitLabel(position.exit_reason) ?? "Closed"} at ` +
+          `${stamp(position.closed_at)}.`,
+        tone: "var(--color-ink-3)",
+      });
+    }
+  }
 
   if (entry.detection_reason.length > 0) {
     events.push({

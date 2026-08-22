@@ -24,6 +24,7 @@ from sqlalchemy.dialects.postgresql import BIT, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
+from app.models.discovery import DiscoverySourceObservation
 from app.models.market import TokenMarketSnapshot
 from app.models.radar import RadarAchievement, RadarSnapshot, RadarToken
 from app.models.token import DiscoveredToken
@@ -394,6 +395,65 @@ class RadarRepository:
 
         return {
             row.mint_address: (row.name, row.symbol)
+            for row in (await self._session.execute(statement)).all()
+        }
+
+    async def detection_times_for(self, mint_addresses: Sequence[str]) -> dict[str, datetime]:
+        """The earliest stored discovery moment per mint, for the mints on one page.
+
+        Not `radar_tokens.first_detected_at`: that is *admission to the Radar*,
+        which happens after enrichment and scoring and is minutes to hours later.
+        The question this answers is when MEMESCOPE first saw the mint at all.
+
+        Two tables record that, and the answer is the minimum across both:
+
+          `discovered_tokens.discovered_at`         the canonical scanner's insert
+          `discovery_source_observations.observed_at`  each transport's socket receive
+
+        The observation is always the earlier of the two where it exists —
+        measured on production, by 27ms on average — because it is stamped at
+        receive and the canonical row is stamped at write. Observations are
+        partial by design (the table postdates most of the record, and shadow
+        transports may see a mint the scanner never inserts), so `discovered_at`
+        is the floor and an observation only ever pulls the answer earlier.
+
+        A mint with no discovery row at all is absent from the result; callers
+        render that as unavailable rather than guessing.
+        """
+        if not mint_addresses:
+            return {}
+
+        mints = list(dict.fromkeys(mint_addresses))
+        earliest_observation = (
+            select(
+                DiscoverySourceObservation.mint_address.label("mint_address"),
+                func.min(DiscoverySourceObservation.observed_at).label("observed_at"),
+            )
+            .where(DiscoverySourceObservation.mint_address.in_(mints))
+            .group_by(DiscoverySourceObservation.mint_address)
+            .subquery()
+        )
+
+        statement = (
+            select(
+                DiscoveredToken.mint_address,
+                func.least(
+                    DiscoveredToken.discovered_at,
+                    func.coalesce(
+                        earliest_observation.c.observed_at, DiscoveredToken.discovered_at
+                    ),
+                ).label("detected_at"),
+            )
+            .join(
+                earliest_observation,
+                earliest_observation.c.mint_address == DiscoveredToken.mint_address,
+                isouter=True,
+            )
+            .where(DiscoveredToken.mint_address.in_(mints))
+        )
+
+        return {
+            row.mint_address: row.detected_at
             for row in (await self._session.execute(statement)).all()
         }
 

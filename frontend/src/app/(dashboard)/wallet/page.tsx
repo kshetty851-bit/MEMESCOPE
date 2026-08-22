@@ -6,6 +6,7 @@ import { AuditLog } from "@/components/paper/audit-log";
 import { DailyReturns } from "@/components/paper/daily-returns";
 import { PositionsTable } from "@/components/paper/positions-table";
 import { StrategyCard } from "@/components/paper/strategy-card";
+import { WalletSwitch } from "@/components/paper/wallet-switch";
 import { Label, Panel } from "@/components/ui/panel";
 import { Stat as SharedStat } from "@/components/ui/stat";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -134,9 +135,12 @@ export default function WalletPage() {
   if (!wallet.data.enabled) {
     return (
       <div className="flex flex-col gap-6">
-        <header>
-          <Label>Paper wallet</Label>
-          <h1 className="mt-2 text-lg font-semibold text-ink">Not running here</h1>
+        <header className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <Label>Paper wallet</Label>
+            <h1 className="mt-2 text-lg font-semibold text-ink">Not running here</h1>
+          </div>
+          <WalletSwitch />
         </header>
         <Panel density="compact" className="border-warn/20 bg-warn/[0.03]">
           <p className="text-sm leading-relaxed text-ink-2">
@@ -165,12 +169,20 @@ export default function WalletPage() {
         {/* When the wallet started is not decoration: every benchmark below is
             measured from this exact instant, so a reader can check that the
             comparison covers the same period the strategy traded. */}
-        {wallet.data.started_at ? (
-          <p className="text-xs text-ink-3">
-            Running since {new Date(wallet.data.started_at).toLocaleString()} · wallet v
-            {wallet.data.generation}
-          </p>
-        ) : null}
+        {/* Two paper experiments now run side by side, on separate capital and
+            separate tables. The switch is here rather than in the rail because
+            it chooses *which wallet you are reading*, not which section of the
+            product you are in — and because nothing about this wallet's figures
+            changes when it is used. */}
+        <div className="flex flex-col items-end gap-2">
+          <WalletSwitch />
+          {wallet.data.started_at ? (
+            <p className="text-xs text-ink-3">
+              Running since {new Date(wallet.data.started_at).toLocaleString()} · wallet v
+              {wallet.data.generation}
+            </p>
+          ) : null}
+        </div>
       </header>
 
       {wallet.data.resumed_at ? (
