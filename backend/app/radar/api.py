@@ -222,6 +222,7 @@ def _to_entry(
     tiers: dict[str, list[str]] | None = None,
     alive: set[str] | None = None,
     base_rates: dict[str, dict[str, Any]] | None = None,
+    detections: dict[str, datetime] | None = None,
     *,
     context: TokenContext | None = None,
     snapshots: dict[str, RadarSnapshot] | None = None,
@@ -233,6 +234,11 @@ def _to_entry(
     usable without a lookup, but omitting it renders every entry nameless: the
     schema declares both fields and `RadarToken` stores neither, so they were
     previously always null on every Radar surface.
+
+    `detections` maps mint -> earliest stored discovery time. Optional for the
+    same reason as `names`: a caller that has not resolved it renders the row
+    without a detection time rather than with the Radar's admission time
+    standing in for one.
 
     `context`, `snapshots` and `signals` are the Sprint 23 additions and are
     optional for the same reason: a caller that has not resolved them renders a
@@ -272,6 +278,7 @@ def _to_entry(
         original_category=entry.category,
         opportunity_score=entry.current_opportunity_score,
         confidence=entry.current_confidence,
+        discovered_at=(detections or {}).get(mint),
         first_detected_at=entry.first_detected_at,
         first_price=entry.first_price,
         first_market_cap=entry.first_market_cap,
@@ -422,6 +429,7 @@ async def get_leaderboard(
     context = await resolve_token_context(session, board_mints, now=now)
     snapshots = await repository.latest_snapshots_for(board_mints)
     signals = await _live_signals_for(session, board_mints, now=now)
+    detections = await repository.detection_times_for(board_mints)
     return [
         _to_entry(
             entry,
@@ -430,6 +438,7 @@ async def get_leaderboard(
             tiers,
             alive,
             rates,
+            detections,
             context=context,
             snapshots=snapshots,
             signals=signals,
@@ -494,6 +503,7 @@ async def list_radar(
     context = await resolve_token_context(session, mints, now=now)
     snapshots = await repository.latest_snapshots_for(mints)
     signals = await _live_signals_for(session, mints, now=now)
+    detections = await repository.detection_times_for(mints)
 
     return RadarPage(
         items=[
@@ -504,6 +514,7 @@ async def list_radar(
                 tiers,
                 alive,
                 rates,
+                detections,
                 context=context,
                 snapshots=snapshots,
                 signals=signals,
@@ -738,6 +749,7 @@ async def get_entry(session: DbSession, mint: str) -> RadarDetailOut:
         await repository.tiers_for([entry.mint_address]),
         await repository.observed_within([entry.mint_address], since=now - LIVENESS_WINDOW),
         await repository.base_rates(),
+        await repository.detection_times_for([entry.mint_address]),
         context=await resolve_token_context(session, [entry.mint_address], now=now),
         snapshots=await repository.latest_snapshots_for([entry.mint_address]),
         signals=await _live_signals_for(session, [entry.mint_address], now=now),
