@@ -20,8 +20,11 @@ import { EMPLOYEES, EMPLOYEE_BY_ID } from "./employees";
 const ALL = Object.values(CHARACTERS);
 
 describe("the roster and the cast agree", () => {
-  it("draws exactly the ten people on the roster", () => {
-    expect(ALL).toHaveLength(10);
+  it("draws exactly the people on the roster, and nobody else", () => {
+    // Derived, not a literal. The roster grew once and this line was the only
+    // thing that had to be edited to let it — which is the wrong place for a
+    // change to be required.
+    expect(ALL).toHaveLength(EMPLOYEES.length);
     expect(new Set(ALL.map((c) => c.id))).toEqual(new Set(EMPLOYEES.map((e) => e.id)));
   });
 

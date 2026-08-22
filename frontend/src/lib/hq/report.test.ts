@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { UNKNOWN_HQ_STATE, deriveHqState, type HqSources } from "@/lib/hq/adapter";
-import { EMPLOYEES } from "@/lib/hq/employees";
+import { HOLDS_THE_FLOOR, REPORT_ORDER } from "@/lib/hq/report-meeting";
 import { buildDialogue, buildReport } from "@/lib/hq/report";
 
 const NOW = 1_760_000_000_000;
@@ -86,13 +86,19 @@ describe("the report never recommends", () => {
 });
 
 describe("the meeting says only what the report says", () => {
-  it("gives every one of the ten a turn, with Nova opening and closing", () => {
+  it("gives every attendee a turn, with Nova opening and closing", () => {
     const dialogue = buildDialogue(buildReport(UNKNOWN_HQ_STATE));
     expect(dialogue[0]!.employee).toBe("nova");
     expect(dialogue.at(-1)!.employee).toBe("nova");
     const speakers = new Set(dialogue.map((line) => line.employee));
-    for (const employee of EMPLOYEES) {
-      expect(speakers.has(employee.id), `${employee.id} never speaks`).toBe(true);
+    for (const id of REPORT_ORDER) {
+      expect(speakers.has(id), `${id} never speaks`).toBe(true);
+    }
+    // And the people holding the floor do not speak in a room they are not in.
+    // Their subsystems still reach the reader — through the report's sections,
+    // which are derived from data rather than from who turned up.
+    for (const id of HOLDS_THE_FLOOR) {
+      expect(speakers.has(id), `${id} speaks without attending`).toBe(false);
     }
   });
 

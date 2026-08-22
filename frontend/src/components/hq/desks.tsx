@@ -289,6 +289,72 @@ function renderTheme(theme: DeskTheme, x: number, y: number) {
           <rect className="hq-notebook" x={x - 10} y={y + 1} width={20} height={5} rx={1} />
         </g>
       );
+
+    /* Sentinel — a wall of small identical tiles. One per component watched.
+       Uniform on purpose: a monitoring wall is legible because everything on
+       it is the same size until one of them is not. Nothing here carries a
+       colour, because a green tile drawn by a stylesheet would be a health
+       claim made by furniture. */
+    case "sentry":
+      return (
+        <g>
+          <Panel x={x - 28} y={y - 32} w={56} h={24} />
+          {[0, 1, 2, 3, 4, 5].map((i) => (
+            <rect
+              key={i}
+              className="hq-server"
+              x={x - 24 + (i % 3) * 17}
+              y={y - 28 + Math.floor(i / 3) * 9}
+              width={13}
+              height={6}
+              rx={1}
+            />
+          ))}
+          {/* Pager on the desk, face up. The job is to be reachable. */}
+          <rect className="hq-notebook" x={x + 12} y={y} width={9} height={6} rx={1.5} />
+        </g>
+      );
+
+    /* Patch — one screen of stack trace, and the parts bin. A workbench, not
+       a trading desk: the tell is that the tools are horizontal and out. */
+    case "reliability":
+      return (
+        <g>
+          <Panel x={x - 26} y={y - 30} w={34} h={24} />
+          {[0, 1, 2, 3, 4].map((i) => (
+            <line
+              key={i}
+              className="hq-ink"
+              x1={x - 22}
+              y1={y - 25 + i * 4}
+              x2={x - 22 + [16, 24, 10, 20, 13][i]!}
+              y2={y - 25 + i * 4}
+            />
+          ))}
+          {/* Parts bin, lid off, three compartments. */}
+          <rect className="hq-server" x={x + 12} y={y - 12} width={20} height={13} rx={1} />
+          {[0, 1].map((i) => (
+            <line key={i} className="hq-ink" x1={x + 18 + i * 6} y1={y - 11} x2={x + 18 + i * 6} y2={y - 2} />
+          ))}
+        </g>
+      );
+
+    /* Quinn — a checklist and a split before/after pane. Two panels the same
+       size side by side is the whole idea of the job drawn in furniture. */
+    case "verification":
+      return (
+        <g>
+          <Panel x={x - 28} y={y - 30} w={26} h={24} />
+          <Panel x={x} y={y - 30} w={26} h={24} />
+          {[0, 1, 2, 3].map((i) => (
+            <g key={i}>
+              <line className="hq-ink" x1={x - 24} y1={y - 25 + i * 5} x2={x - 10} y2={y - 25 + i * 5} />
+              <line className="hq-ink" x1={x + 4} y1={y - 25 + i * 5} x2={x + 18} y2={y - 25 + i * 5} />
+            </g>
+          ))}
+          <rect className="hq-notebook" x={x - 8} y={y + 1} width={16} height={5} rx={1} />
+        </g>
+      );
   }
 }
 

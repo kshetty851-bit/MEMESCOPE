@@ -13,20 +13,30 @@ import {
   gatherDelayMs,
   listeningPose,
   speakingPose,
+  HOLDS_THE_FLOOR,
 } from "@/lib/hq/report-meeting";
 
 const key = (tile: { col: number; row: number }) => `${tile.col},${tile.row}`;
 
 describe("who attends", () => {
-  it("is all ten core employees and nobody else", () => {
-    expect([...REPORT_ORDER].sort()).toEqual([...EMPLOYEES.map((e) => e.id)].sort());
+  it("accounts for every employee, in the room or on watch", () => {
+    // The room holds eleven and the roster is thirteen, so this can no longer
+    // be "everyone attends". What it must still be is "nobody is forgotten":
+    // every employee is either walking to the conference room or deliberately
+    // holding the floor, and no one is in both lists.
+    expect([...REPORT_ORDER, ...HOLDS_THE_FLOOR].sort()).toEqual(
+      [...EMPLOYEES.map((e) => e.id)].sort(),
+    );
+    for (const id of HOLDS_THE_FLOOR) {
+      expect(REPORT_ORDER, `${id} is both in the room and on watch`).not.toContain(id);
+    }
   });
 
   it("does not invite the cleaners, the caretaker or the cats", () => {
     // Maya, Sam, Cosmo and Mochi are not employees, and the type system is
     // the guarantee: REPORT_ORDER is EmployeeId[], which they are not members
     // of. This asserts the roster stayed that way.
-    expect(REPORT_ORDER).toHaveLength(10);
+    expect(REPORT_ORDER).toHaveLength(REPORT_STATIONS.length);
     for (const id of REPORT_ORDER) {
       expect(EMPLOYEES.some((employee) => employee.id === id)).toBe(true);
     }
@@ -45,10 +55,10 @@ describe("the room actually holds them", () => {
     expect(new Set(tiles).size).toBe(tiles.length);
   });
 
-  it("seats six and stands four, because the table has six chairs", () => {
+  it("seats six and stands five, because the table has six chairs", () => {
     const seated = REPORT_STATIONS.filter((station) => station.seated);
     expect(seated).toHaveLength(CONFERENCE_SEATS.length);
-    expect(REPORT_STATIONS.filter((station) => !station.seated)).toHaveLength(4);
+    expect(REPORT_STATIONS.filter((station) => !station.seated)).toHaveLength(5);
   });
 
   it("seats people only on real chairs", () => {

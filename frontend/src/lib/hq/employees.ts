@@ -31,7 +31,15 @@ export type EmployeeId =
   | "rex"
   | "echo"
   | "byte"
-  | "sage";
+  | "sage"
+  // The reliability trio. Added when HQ stopped being a window onto MEMESCOPE
+  // and started being able to act on it: somebody has to notice a component
+  // has failed, somebody has to diagnose it, and somebody has to prove the
+  // repair worked before it is believed. Those are three different jobs and
+  // giving them to one person is how a system ends up marking its own homework.
+  | "sentinel"
+  | "patch"
+  | "quinn";
 
 /**
  * The normalised states from the plan. Declared now so the shell's types are
@@ -47,13 +55,54 @@ export type EmployeeState =
   | "reviewing"
   | "success"
   | "alert"
-  | "error";
+  | "error"
+  // Autonomy states. Each requires an open record on the backend to be shown —
+  // `investigating` and `verifying` name a mission id, `incident` names an
+  // incident. There is no path that reaches these three from a timer.
+  | "investigating"
+  | "verifying"
+  | "incident";
+
+/**
+ * The org chart, which is not the floor plan.
+ *
+ * `zone` says which room a desk stands in; `department` says who somebody
+ * belongs to. They agree for ten of the thirteen and disagree for Patch, whose
+ * bench is in the Performance Lab because Operations had one free tile and
+ * Sentinel needed it. Keeping them as separate fields is what stops a seating
+ * accident from silently rewriting the org chart — §19 of the brief groups
+ * people by department, and no amount of furniture should change that.
+ */
+export type DepartmentId =
+  | "command"
+  | "discovery"
+  | "market"
+  | "risk"
+  | "portfolio"
+  | "operations"
+  | "infrastructure"
+  | "research"
+  | "qa";
+
+export const DEPARTMENT_LABEL: Record<DepartmentId, string> = {
+  command: "Command",
+  discovery: "Discovery & Intelligence",
+  market: "Market & Execution",
+  risk: "Risk",
+  portfolio: "Portfolio",
+  operations: "Operations",
+  infrastructure: "Infrastructure",
+  research: "Performance & Research",
+  qa: "Quality Assurance",
+};
 
 export interface Employee {
   id: EmployeeId;
   name: string;
   role: string;
   zone: ZoneId;
+  /** Who they report with. Independent of which room the desk is in. */
+  department: DepartmentId;
   /** Desk anchor, in tile coordinates. The person stands here. */
   desk: Tile;
   /** Which subsystem this person is. Shown in the panel; never used as data. */
@@ -89,6 +138,7 @@ export const EMPLOYEES: Employee[] = [
     name: "Nova",
     role: "CEO / Commander",
     zone: "mission",
+    department: "command",
     desk: { col: 8, row: 1 },
     systemResponsibility: "Overall system status, portfolio roll-up, daily brief",
     whatIDo:
@@ -103,6 +153,7 @@ export const EMPLOYEES: Employee[] = [
     name: "Radar",
     role: "Head of Discovery",
     zone: "floor",
+    department: "discovery",
     desk: { col: 6, row: 3 },
     systemResponsibility: "Scanner, token discovery, Radar admission",
     whatIDo:
@@ -117,6 +168,7 @@ export const EMPLOYEES: Employee[] = [
     name: "Luna",
     role: "Senior Token Analyst",
     zone: "floor",
+    department: "discovery",
     desk: { col: 8, row: 3 },
     systemResponsibility: "Scoring, analyst orchestration, candidate evaluation",
     whatIDo:
@@ -131,6 +183,7 @@ export const EMPLOYEES: Employee[] = [
     name: "Dex",
     role: "Market Analyst",
     zone: "floor",
+    department: "market",
     desk: { col: 10, row: 3 },
     systemResponsibility: "Market data, price, liquidity, volume, quote freshness",
     whatIDo:
@@ -145,6 +198,7 @@ export const EMPLOYEES: Employee[] = [
     name: "Atlas",
     role: "Chief Risk Officer",
     zone: "risk",
+    department: "risk",
     desk: { col: 2, row: 4 },
     systemResponsibility:
       "Safety gate, liquidity security, mint and freeze authority, price impact",
@@ -160,6 +214,7 @@ export const EMPLOYEES: Employee[] = [
     name: "Rex",
     role: "Execution Specialist",
     zone: "floor",
+    department: "market",
     desk: { col: 12, row: 4 },
     systemResponsibility: "Paper Wallet entries and exits; Real Wallet state display",
     whatIDo:
@@ -174,6 +229,7 @@ export const EMPLOYEES: Employee[] = [
     name: "Milo",
     role: "Portfolio Manager",
     zone: "portfolio",
+    department: "portfolio",
     desk: { col: 2, row: 8 },
     systemResponsibility: "Open positions, exposure, holding period, capital efficiency",
     whatIDo:
@@ -188,6 +244,7 @@ export const EMPLOYEES: Employee[] = [
     name: "Echo",
     role: "Operations Manager",
     zone: "ops",
+    department: "operations",
     desk: { col: 6, row: 8 },
     systemResponsibility: "Workers, queues, enrichment backlog, priority lane",
     whatIDo:
@@ -202,6 +259,7 @@ export const EMPLOYEES: Employee[] = [
     name: "Byte",
     role: "Infrastructure Engineer",
     zone: "ops",
+    department: "infrastructure",
     desk: { col: 9, row: 8 },
     systemResponsibility: "Database, cache, RPC, WebSocket and API health",
     whatIDo:
@@ -216,6 +274,7 @@ export const EMPLOYEES: Employee[] = [
     name: "Sage",
     role: "Performance Analyst",
     zone: "lab",
+    department: "research",
     desk: { col: 13, row: 8 },
     systemResponsibility: "Track record, P&L, win rate, drawdown, strategy comparison",
     whatIDo:
@@ -224,6 +283,63 @@ export const EMPLOYEES: Employee[] = [
     personality: "Calm and patient. Slow scroll, chin on hand.",
     accessory: "glasses",
     palette: "teal",
+  },
+  {
+    id: "sentinel",
+    name: "Sentinel",
+    role: "Production / SRE",
+    zone: "ops",
+    department: "infrastructure",
+    // The one tile Operations had left. Everything else in this room is a
+    // desk, a cabinet, the printer Sam services, or an authored walk route.
+    desk: { col: 6, row: 9 },
+    systemResponsibility:
+      "Container, Redis, Postgres, Celery, scheduler, disk and queue health",
+    whatIDo:
+      "Watches the machinery the platform runs on — containers, broker, database, workers and disk — and raises an incident the moment one of them stops answering.",
+    worksWith: ["byte", "patch", "nova"],
+    personality: "Watchful and unhurried. Stands at the wall, scans, sits down again.",
+    accessory: "visor",
+    palette: "ice",
+  },
+  {
+    id: "patch",
+    name: "Patch",
+    role: "Reliability Engineer",
+    // Physically in the Performance Lab, because Operations had exactly one
+    // free tile and Sentinel took it. `department` is what §19 cares about and
+    // it still says infrastructure — real departments span rooms, and the
+    // alternative was wedging a desk onto a walk route.
+    zone: "lab",
+    department: "infrastructure",
+    desk: { col: 12, row: 9 },
+    systemResponsibility:
+      "Incident diagnosis, remediation execution, backend defect investigation",
+    whatIDo:
+      "Takes an open incident, works out which component actually failed, and either applies a permitted repair or writes up what a person needs to decide.",
+    worksWith: ["sentinel", "byte", "quinn"],
+    personality: "Methodical. Reads the evidence before touching anything.",
+    accessory: "toolbox",
+    palette: "rust",
+  },
+  {
+    id: "quinn",
+    name: "Quinn",
+    role: "QA / Verification Engineer",
+    zone: "lab",
+    department: "qa",
+    // The lab's north-east corner. (14,8) was legal but had one exit, south
+    // into the Lounge — a verification desk should not have to walk through
+    // the sofa to reach a meeting.
+    desk: { col: 15, row: 7 },
+    systemResponsibility:
+      "Post-repair verification, protected-invariant checks, recovery confirmation",
+    whatIDo:
+      "Re-checks a component after a repair and confirms the protected trading rules are byte-for-byte what they were before it, so nothing is called fixed on hope.",
+    worksWith: ["patch", "sentinel", "sage"],
+    personality: "Sceptical by trade. Asks for the second reading.",
+    accessory: "glasses",
+    palette: "mint",
   },
 ];
 
@@ -254,6 +370,9 @@ export const STATE_LABEL: Record<EmployeeState, string> = {
   success: "Complete",
   alert: "Alert",
   error: "Error",
+  investigating: "Investigating",
+  verifying: "Verifying",
+  incident: "Incident",
 };
 
 /** States that must never be styled as healthy. Asserted in tests. */
@@ -262,4 +381,5 @@ export const NON_HEALTHY_STATES: EmployeeState[] = [
   "offline",
   "alert",
   "error",
+  "incident",
 ];

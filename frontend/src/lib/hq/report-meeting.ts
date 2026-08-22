@@ -44,7 +44,21 @@ import type { EmployeeId } from "./employees";
  * all ten timelines.
  */
 
-/** Reporting order, and therefore speaking order. §10 of the brief. */
+/**
+ * Reporting order, and therefore speaking order.
+ *
+ * ── WHY SENTINEL IS NOT ON THIS LIST ────────────────────────────────────
+ *
+ * The conference room holds twelve: six chairs and six walkable tiles that are
+ * not the table, the glass or the north wall. The roster is thirteen. Rather
+ * than invent a thirteenth position by moving furniture the floor-plan tests
+ * pin, one person stays at their desk — and the correct person is the one
+ * whose entire job is to be watching while everyone else is in a meeting.
+ * Nobody pulls their production monitor into a briefing.
+ *
+ * Sentinel's readings are not lost: the report's System Health section is
+ * derived from the operations surface she reads, not from her attendance.
+ */
 export const REPORT_ORDER: EmployeeId[] = [
   "nova",
   "radar",
@@ -55,8 +69,20 @@ export const REPORT_ORDER: EmployeeId[] = [
   "rex",
   "echo",
   "byte",
+  "patch",
   "sage",
 ];
+
+/**
+ * Who stays at their desk, and why — not an omission, a rota.
+ *
+ * Sentinel holds the production watch: nobody takes their monitoring into a
+ * meeting. Quinn attends when there is a repair to verify, which a routine
+ * briefing is not; the reliability desk is represented by Patch. This is §15
+ * of the brief applied to the standing briefing rather than only to incident
+ * meetings — not everybody is relevant to every meeting.
+ */
+export const HOLDS_THE_FLOOR: EmployeeId[] = ["sentinel", "quinn"];
 
 export interface Station {
   employee: EmployeeId;
@@ -66,12 +92,14 @@ export interface Station {
 }
 
 /**
- * Where each of the ten is during the meeting.
+ * Where each attendee is during the meeting.
  *
- * The four standing tiles are the only walkable non-seat tiles in the room:
- * (17,1) and (17,3) at the west end, (21,1) and (21,2) at the east. Row 0 is
- * the north wall, (16,2) and (16,3) are the glass, and (18..20, 2) is the
- * table — so this is not a preference, it is the room.
+ * The five standing tiles are the only walkable non-seat tiles in the room
+ * that are not the doorway: (17,1), (17,2) and (17,3) at the west end, (21,1)
+ * and (21,2) at the east. Row 0 is the north wall, (16,2) and (16,3) are the
+ * glass, (18..20, 2) is the table, and (16,1) is the door, which has to stay
+ * clear or nobody can leave. Six chairs plus five tiles is eleven, and that is
+ * the hard ceiling on this room — it is not a preference, it is the geometry.
  */
 export const REPORT_STATIONS: Station[] = [
   { employee: "nova", tile: CONFERENCE_SEATS[1]!, seated: true },
@@ -80,10 +108,14 @@ export const REPORT_STATIONS: Station[] = [
   { employee: "dex", tile: CONFERENCE_SEATS[3]!, seated: true },
   { employee: "atlas", tile: CONFERENCE_SEATS[4]!, seated: true },
   { employee: "milo", tile: CONFERENCE_SEATS[5]!, seated: true },
-  { employee: "rex", tile: { col: 17, row: 1 }, seated: false },
+  // Standers, ordered deepest-first. The east pair are furthest from the door
+  // and must be past the west tiles before anyone stands on them; Quinn, on
+  // the doorway tile itself, is last in and first out.
   { employee: "echo", tile: { col: 21, row: 1 }, seated: false },
   { employee: "byte", tile: { col: 21, row: 2 }, seated: false },
+  { employee: "rex", tile: { col: 17, row: 1 }, seated: false },
   { employee: "sage", tile: { col: 17, row: 3 }, seated: false },
+  { employee: "patch", tile: { col: 17, row: 2 }, seated: false },
 ];
 
 export const STATION_BY_EMPLOYEE = new Map<EmployeeId, Station>(

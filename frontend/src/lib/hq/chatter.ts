@@ -59,6 +59,12 @@ export const CHATTER: Chatter[] = [
   { actor: "echo", lines: ["Two seconds.", "Coming through.", "Almost done.", "On my way."] },
   { actor: "byte", lines: ["Rebooting my brain.", "Coffee first.", "Yep.", "Give it a moment."] },
   { actor: "sage", lines: ["Interesting.", "Let me plot that.", "Later, maybe.", "Hm, alright."] },
+  // The reliability trio. Same rule as everyone else: nothing here may hint
+  // that something is wrong, because these fire on a timer. "All quiet" would
+  // be a claim; "Long shift" is a person.
+  { actor: "sentinel", lines: ["Long shift.", "Still here.", "Mm.", "I'll keep watching."] },
+  { actor: "patch", lines: ["Give me a minute.", "Almost had it.", "Right then.", "Where'd that go?"] },
+  { actor: "quinn", lines: ["Run it again.", "Not convinced.", "Show me.", "Once more."] },
   { actor: "maya", lines: ["Won't be a minute.", "Nearly finished.", "Mind the floor."] },
   { actor: "sam", lines: ["I'll fix it.", "Spare's in the back.", "That'll do it."] },
 ];

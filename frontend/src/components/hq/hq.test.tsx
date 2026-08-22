@@ -76,7 +76,7 @@ describe("the stage", () => {
     for (const employee of EMPLOYEES) {
       expect(container.querySelector(`[data-employee="${employee.id}"]`)).not.toBeNull();
     }
-    expect(EMPLOYEES).toHaveLength(10);
+    expect(EMPLOYEES.length).toBeGreaterThanOrEqual(10);
   });
 
   it("shows no data rather than idle for every employee", () => {

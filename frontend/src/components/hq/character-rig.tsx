@@ -402,6 +402,45 @@ function Garment({
           <rect className="hq-garment-dark" x={-5} y={shoulderY - 5} width={10} height={6} rx={2.5} />
         </g>
       );
+    case "coveralls":
+      return (
+        <g>
+          {/* One piece, belted at the waist, with a bib seam up the centre.
+              The waist band is what separates it from a shirt at desk size. */}
+          <path className="hq-garment" d={body} />
+          <rect className="hq-garment-dark" x={-h - 1} y={hipY - 9} width={h * 2 + 2} height={3} />
+          <path
+            className="hq-garment-light"
+            d={`M-5 ${shoulderY + 2} L5 ${shoulderY + 2} L5 ${hipY - 10} L-5 ${hipY - 10} Z`}
+          />
+          <rect className="hq-garment-dark" x={-4} y={shoulderY + 4} width={8} height={4} rx={0.5} />
+        </g>
+      );
+    case "parka":
+      return (
+        <g>
+          {/* Bulkier than the body: shoulders sit proud and the hem flares.
+              Reads as somebody dressed for a cold room full of machines. */}
+          <path
+            className="hq-garment"
+            d={`M${-s - 2} ${shoulderY} L${s + 2} ${shoulderY} L${h + 2} ${hipY + 3} L${-h - 2} ${hipY + 3} Z`}
+          />
+          <path className="hq-garment-dark" d={`M-6 ${shoulderY - 4} L6 ${shoulderY - 4} L5 ${shoulderY + 3} L-5 ${shoulderY + 3} Z`} />
+          <path className="hq-garment-light" d={`M-1 ${shoulderY + 3} L1 ${shoulderY + 3} L1 ${hipY + 2} L-1 ${hipY + 2} Z`} />
+        </g>
+      );
+    case "wrap-top":
+      return (
+        <g>
+          {/* A diagonal closure. The only asymmetric garment in the cast, which
+              is the whole reason it is legible at 64px. */}
+          <path className="hq-garment" d={body} />
+          <path
+            className="hq-garment-dark"
+            d={`M${-s} ${shoulderY} L${s - 2} ${shoulderY + 11} L${h} ${hipY} L${-h} ${hipY} Z`}
+          />
+        </g>
+      );
   }
 }
 
@@ -575,6 +614,31 @@ function Hair({ style, shape, y }: { style: HairStyle; shape: HeadShape; y: numb
       );
     case "swept":
       return <path className="hq-hair" d={`M${-r - 1} ${y - 1} Q${-2} ${top - 6} ${r + 2} ${y - 5} L${r} ${y - 1} Q0 ${top - 2} ${-r} ${y + 1} Z`} />;
+    case "flat-top":
+      // Squared off across the top. The only flat crown in the cast, which is
+      // what makes it read at 64px against nine rounded ones.
+      return <path className="hq-hair" d={`M${-r} ${y - 1} L${-r} ${top - 4} L${r} ${top - 4} L${r} ${y - 1} L${r} ${y - 4} L${-r} ${y - 4} Z`} />;
+    case "shaggy":
+      return (
+        <g>
+          <path className="hq-hair" d={`M${-r - 1} ${y + 1} Q0 ${top - 5} ${r + 1} ${y + 1} Z`} />
+          {/* Points falling over the brow. Untidy on purpose. */}
+          {[-6, -2, 2, 6].map((dx, i) => (
+            <path key={i} className="hq-hair" d={`M${dx - 2.4} ${y - 4} L${dx} ${y + 2 + (i % 2) * 2} L${dx + 2.4} ${y - 4} Z`} />
+          ))}
+        </g>
+      );
+    case "braid":
+      return (
+        <g>
+          <path className="hq-hair" d={`M${-r} ${y - 1} Q0 ${top - 3} ${r} ${y - 1} L${r} ${y - 5} Q0 ${top - 5} ${-r} ${y - 5} Z`} />
+          {/* A single plait down one side, drawn as stacked segments — the
+              read that separates it from the ponytail's smooth sweep. */}
+          {[0, 1, 2].map((i) => (
+            <ellipse key={i} className="hq-hair" cx={-r - 1} cy={y + 1 + i * 4} rx={2.6} ry={2.4} />
+          ))}
+        </g>
+      );
   }
 }
 
@@ -821,6 +885,30 @@ function AccessoryPart({
           <circle className="hq-device-stroke" cx={-4} cy={headY} r={3.6} fill="none" />
           <circle className="hq-device-stroke" cx={4} cy={headY} r={3.6} fill="none" />
           <path className="hq-device-stroke" d={`M-0.4 ${headY} h0.8`} />
+        </g>
+      );
+    case "pager":
+      // Clipped at the hip, screen out. Reads as "can be reached", which is
+      // the entire job description.
+      return (
+        <g className="hq-accessory">
+          <rect className="hq-device" x={-14} y={shoulderY + 14} width={6} height={8} rx={1} />
+          <rect className="hq-device-clip" x={-12.5} y={shoulderY + 16} width={3} height={2} rx={0.5} />
+        </g>
+      );
+    case "checklist":
+      return (
+        <g className="hq-accessory">
+          <rect className="hq-device" x={5} y={shoulderY + 6} width={10} height={13} rx={1} />
+          {/* Ticked rows. Three marks, not text — a legible number of them. */}
+          {[0, 1, 2].map((i) => (
+            <path
+              key={i}
+              className="hq-device-stroke"
+              d={`M7 ${shoulderY + 10 + i * 3.4} l1.4 1.4 l2.6 -2.8`}
+              fill="none"
+            />
+          ))}
         </g>
       );
   }

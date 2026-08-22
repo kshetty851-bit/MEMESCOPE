@@ -748,6 +748,43 @@ const TO_CONFERENCE: Partial<Record<EmployeeId, Tile[]>> = {
     ...ROW2_EAST,
     ...ROW1_TO_DOOR,
   ],
+  // The reliability trio. Sentinel's route exists even though she does not
+  // attend the briefing — see REPORT_STATIONS — because incident handling
+  // walks her to Nova, and that walk has to use covered tiles like every
+  // other. Her corner has exactly one exit, west into the Portfolio aisle.
+  sentinel: [
+    { col: 7, row: 9 },
+    { col: 7, row: 8 },
+    { col: 7, row: 7 },
+    { col: 7, row: 6 },
+    ...walkwayEast(8),
+    ...SPINE_UP,
+    ...ROW2_EAST,
+    ...ROW1_TO_DOOR,
+  ],
+  patch: [
+    { col: 12, row: 8 },
+    { col: 12, row: 7 },
+    { col: 12, row: 6 },
+    { col: 11, row: 6 },
+    { col: 10, row: 6 },
+    { col: 9, row: 6 },
+    ...SPINE_UP,
+    ...ROW2_EAST,
+    ...ROW1_TO_DOOR,
+  ],
+  quinn: [
+    { col: 15, row: 6 },
+    { col: 14, row: 6 },
+    { col: 13, row: 6 },
+    { col: 12, row: 6 },
+    { col: 11, row: 6 },
+    { col: 10, row: 6 },
+    { col: 9, row: 6 },
+    ...SPINE_UP,
+    ...ROW2_EAST,
+    ...ROW1_TO_DOOR,
+  ],
 };
 
 /**
@@ -1293,7 +1330,115 @@ export const BREAK_ROUTINES: AmbientRoutine[] = [
   ),
 ];
 
+/* ---- the reliability trio ----------------------------------------------
+ *
+ * Written after the other ten, and constrained by a floor that was already
+ * full: Sentinel's corner has one walkable neighbour and Patch's desk has two.
+ * That is why these routines are shorter than Nova's tour of the building.
+ * They are also, deliberately, the quietest idle vocabulary in the office —
+ * two of these three people are only interesting when something is wrong, and
+ * an idle animation that looks like work would be the exact lie HQ refuses.
+ */
+const RELIABILITY_ROUTINES: AmbientRoutine[] = [
+  {
+    // Standing, reading the wall, standing again. The pose sequence is the
+    // distinctive one: nobody else in the cast stands *between* two readings.
+    id: "sentinel-scan",
+    employee: "sentinel",
+    weight: 5,
+    frames: [
+      { pose: "standing", hold: 6000 },
+      { pose: "looking_at_screen", hold: 7000 },
+      { pose: "standing", hold: 4000 },
+    ],
+  },
+  {
+    id: "sentinel-stretch",
+    employee: "sentinel",
+    weight: 2,
+    frames: [
+      { pose: "stretching", hold: 2600 },
+      { pose: "standing", hold: 5000 },
+    ],
+  },
+  {
+    // The one walk her corner allows: east past the printer and up to the
+    // Operations bench.
+    id: "sentinel-walk",
+    employee: "sentinel",
+    weight: 2,
+    frames: trip(
+      [
+        { col: 7, row: 9 },
+        { col: 7, row: 8 },
+      ],
+      { pose: "talking_briefly", hold: 4200 },
+    ),
+  },
+  {
+    id: "patch-work",
+    employee: "patch",
+    weight: 5,
+    frames: [
+      { pose: "seated_working", hold: 8000 },
+      { pose: "seated_reviewing", hold: 5000 },
+    ],
+  },
+  {
+    id: "patch-think",
+    employee: "patch",
+    weight: 3,
+    frames: [
+      { pose: "seated_reviewing", hold: 6000 },
+      { pose: "looking_at_screen", hold: 6500 },
+      { pose: "seated_working", hold: 4000 },
+    ],
+  },
+  {
+    // North out of the lab, a word with whoever is on the walkway, and back.
+    id: "patch-bench",
+    employee: "patch",
+    weight: 2,
+    frames: trip(
+      [
+        { col: 12, row: 8 },
+        { col: 12, row: 7 },
+      ],
+      { pose: "talking_briefly", hold: 4600 },
+    ),
+  },
+  {
+    id: "quinn-review",
+    employee: "quinn",
+    weight: 5,
+    frames: [
+      { pose: "seated_reviewing", hold: 9000 },
+      { pose: "looking_at_screen", hold: 5500 },
+    ],
+  },
+  {
+    id: "quinn-recheck",
+    employee: "quinn",
+    weight: 3,
+    frames: [
+      { pose: "looking_at_screen", hold: 5000 },
+      { pose: "seated_reviewing", hold: 6000 },
+      { pose: "looking_at_screen", hold: 5000 },
+    ],
+  },
+  {
+    id: "quinn-stretch",
+    employee: "quinn",
+    weight: 2,
+    frames: [
+      { pose: "stretching", hold: 2400 },
+      { pose: "seated_reviewing", hold: 6000 },
+    ],
+  },
+];
+
 AMBIENT_ROUTINES.push(
+  ...RELIABILITY_ROUTINES,
   ...EXPANSION_ROUTINES,
   ...MEETING_ROUTINES,
   ...CEO_ROUTINES,

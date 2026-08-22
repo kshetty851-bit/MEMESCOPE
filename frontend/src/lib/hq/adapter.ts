@@ -370,6 +370,19 @@ export function deriveHqState(sources: Partial<HqSources> = {}): HqState {
     echo: deriveEcho(pipeline, pipelineGone, pipelineAt),
     byte: deriveByte(s, pipeline, pipelineGone, pipelineAt),
     sage: deriveSage(s),
+    // The reliability trio read the operations telemetry surface, which does
+    // not exist yet. UNKNOWN with a reason, not idle: three calm figures at
+    // desks would say the machinery is being watched, and right now it is not.
+    //
+    // `sourced: false` is the important half. There is a real difference
+    // between a department that stopped reporting — which should worry Nova —
+    // and a surface nobody has built yet, which should not. Without this flag
+    // the roll-up would read three unbuilt endpoints as three sick subsystems
+    // and the office would sit at permanent concern for a reason that is not
+    // about MEMESCOPE at all.
+    sentinel: unknown("No operations telemetry source.", [], false),
+    patch: unknown("No incident record source.", [], false),
+    quinn: unknown("No verification record source.", [], false),
     // Filled in below: Nova reads the others rather than the backend.
     nova: unknown("Waiting on the rest of the office."),
   } as Record<EmployeeId, EmployeeReading>;

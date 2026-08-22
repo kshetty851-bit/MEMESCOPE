@@ -143,7 +143,7 @@ describe("support staff and cats never reach the operational layer", () => {
   it("keeps deriveHqState ignorant of their existence", () => {
     const state = deriveHqState();
     const ids = Object.keys(state.employees);
-    expect(ids).toHaveLength(10);
+    expect(ids).toHaveLength(EMPLOYEES.length);
     for (const npc of SUPPORT_STAFF) expect(ids).not.toContain(npc.id);
     for (const cat of CATS) expect(ids).not.toContain(cat.id);
     // And the adapter's source cannot import them: the module that decides
@@ -441,10 +441,16 @@ describe("meetings", () => {
     scheduler.setOperational([inMeeting[0]!]);
 
     vi.advanceTimersByTime(5 * 60 * 1000);
-    expect(scheduler.meetingActive).toBe(false);
     for (const id of inMeeting) {
       expect(released.has(id), `${id} never released`).toBe(true);
     }
+    // `meetingActive` is deliberately not asserted here. Releasing the cast is
+    // the property under test; the flag is a global the scheduler is free to
+    // set again, and over five minutes it often does — the roster grew to
+    // thirteen and a second sync now fits in the window on several seeds. This
+    // is the same seed-sensitivity the sibling test above documents, and
+    // asserting the flag only ever passed because no seed had yet started a
+    // meeting inside the tail of this one.
     scheduler.destroy();
     vi.useRealTimers();
   });

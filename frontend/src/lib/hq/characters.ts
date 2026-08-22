@@ -39,7 +39,10 @@ export type HairStyle =
   | "buzz"
   | "ponytail"
   | "swept"
-  | "locs";
+  | "locs"
+  | "flat-top"
+  | "shaggy"
+  | "braid";
 
 /** Outfit silhouette, drawn as a distinct torso overlay. */
 export type Outfit =
@@ -52,7 +55,10 @@ export type Outfit =
   | "rolled-shirt"
   | "utility"
   | "long-coat"
-  | "turtleneck";
+  | "turtleneck"
+  | "coveralls"
+  | "parka"
+  | "wrap-top";
 
 export type Accessory =
   | "duster"
@@ -66,7 +72,9 @@ export type Accessory =
   | "wrist-terminal"
   | "tool-belt"
   | "mug"
-  | "glasses";
+  | "glasses"
+  | "pager"
+  | "checklist";
 
 /**
  * Every pose the rig can draw.
@@ -128,7 +136,10 @@ export type DeskTheme =
   | "execution"
   | "operations"
   | "infrastructure"
-  | "performance";
+  | "performance"
+  | "sentry"
+  | "reliability"
+  | "verification";
 
 /**
  * The visual half of a character, without the operational identity.
@@ -320,6 +331,50 @@ export const CHARACTERS: Record<EmployeeId, CharacterDefinition> = {
     defaultPose: "seated_reviewing",
     deskTheme: "performance",
     personalityLine: "Patient with data. Impatient with conclusions.",
+  },
+  sentinel: {
+    id: "sentinel",
+    bodyType: "tall",
+    headShape: "square",
+    skinTone: "s1",
+    hair: "flat-top",
+    hairTone: "h2",
+    outfit: "parka",
+    accessory: "pager",
+    palette: "ice",
+    // Standing, like Nova and Milo, and for the same reason: the job is to be
+    // looking at something. A seated Sentinel would read as a second Byte.
+    defaultPose: "standing",
+    deskTheme: "sentry",
+    personalityLine: "Notices before anyone asks. Says the number, not the mood.",
+  },
+  patch: {
+    id: "patch",
+    bodyType: "broad",
+    headShape: "oval",
+    skinTone: "s3",
+    hair: "shaggy",
+    hairTone: "h3",
+    outfit: "coveralls",
+    accessory: "toolbox",
+    palette: "rust",
+    defaultPose: "seated_working",
+    deskTheme: "reliability",
+    personalityLine: "Finds the cause first. Fixes second, and only what is allowed.",
+  },
+  quinn: {
+    id: "quinn",
+    bodyType: "compact",
+    headShape: "round",
+    skinTone: "s4",
+    hair: "braid",
+    hairTone: "h4",
+    outfit: "wrap-top",
+    accessory: "checklist",
+    palette: "mint",
+    defaultPose: "seated_reviewing",
+    deskTheme: "verification",
+    personalityLine: "Takes nobody's word for it, including her own.",
   },
 };
 

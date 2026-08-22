@@ -61,6 +61,13 @@
   --hq-orange: oklch(0.68 0.150 52);
   --hq-lime: oklch(0.70 0.130 128);
   --hq-teal: oklch(0.62 0.100 195);
+  /* The reliability trio. Placed in the hue and lightness gaps the ten above
+     leave, so nobody is a second reading of somebody else at desk size:
+     `ice` is lighter and duller than cyan, `mint` sits between forest and
+     teal and well above both, `rust` is darker and duller than orange. */
+  --hq-ice: oklch(0.74 0.070 230);
+  --hq-rust: oklch(0.55 0.120 40);
+  --hq-mint: oklch(0.72 0.095 168);
   /* Support staff. Same rule: clothing colour is personality. */
   --hq-plum: oklch(0.50 0.110 330);
   --hq-khaki: oklch(0.58 0.070 100);

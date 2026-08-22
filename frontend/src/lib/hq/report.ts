@@ -287,6 +287,11 @@ export function buildDialogue(report: HqReport): DialogueLine[] {
     speak("rex", "execution"),
     speak("echo", "queues"),
     speak("byte", "health"),
+    // Patch reports the reliability desk. There is no incident surface behind
+    // this yet, so it says NO DATA — which is the truthful line for a desk
+    // whose evidence does not exist, and the one that will start carrying real
+    // incidents the moment the operations surface does.
+    speak("patch", "incidents"),
     speak("sage", "performance"),
     {
       employee: "nova",
