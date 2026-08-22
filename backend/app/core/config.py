@@ -11,6 +11,7 @@ import secrets
 from decimal import Decimal
 from functools import lru_cache
 from typing import Annotated, Any, Literal
+from urllib.parse import urlparse
 
 from pydantic import (
     AnyHttpUrl,
@@ -656,11 +657,44 @@ class Settings(BaseSettings):
     PHASE2_DEVNET_MAX_TRANSFER_LAMPORTS: int = Field(default=1_000_000, ge=1, le=10_000_000)
     PHASE2_DEVNET_CONFIRM_RETRIES: int = Field(default=6, ge=1, le=20)
     PHASE2_DEVNET_CONFIRM_RETRY_SECONDS: float = Field(default=1.0, ge=0.1, le=10)
+    #: Hosts a wallet RPC may be pointed at. `REAL_WALLET_RPC_URL` is editable
+    #: by anyone with environment access; a genesis check proves which chain an
+    #: endpoint *claims*, not that we agreed to ask that endpoint. Empty
+    #: permits nothing, which is the safe direction for a narrowing list.
+    REAL_WALLET_ALLOWED_RPC_HOSTS: CsvList = Field(
+        default_factory=lambda: ["api.devnet.solana.com"]
+    )
+    #: Programs a real swap transaction may invoke at the top level. Defaults
+    #: live in `real_wallet.tx_inspect`; this widens them only by deliberate
+    #: configuration after an operator has decoded a real order.
+    REAL_WALLET_ALLOWED_PROGRAM_IDS: CsvList = Field(default_factory=list)
+    #: What one real entry spends. **Zero means unconfigured, and unconfigured
+    #: refuses.** The final $100/$50/$25 ladder is the Paper position-size
+    #: evidence work's decision and has not been made; a default here would
+    #: quietly pre-empt it. Must not exceed `REAL_WALLET_MAX_TRADE_USD`.
+    REAL_WALLET_ENTRY_SIZE_USD: Decimal = Field(default=Decimal("0"), ge=0)
     REAL_WALLET_MAX_TRADE_USD: Decimal = Field(default=Decimal("5"), gt=0)
     REAL_WALLET_MAX_OPEN_POSITIONS: int = Field(default=1, ge=1)
     REAL_WALLET_MAX_TOTAL_EXPOSURE_USD: Decimal = Field(default=Decimal("10"), gt=0)
     REAL_WALLET_MAX_DAILY_NOTIONAL_USD: Decimal = Field(default=Decimal("20"), gt=0)
     REAL_WALLET_MAX_DAILY_LOSS_USD: Decimal = Field(default=Decimal("10"), gt=0)
+    #: How many real submissions may happen in one day, both sides counted. A
+    #: notional cap bounds how much a bug can spend; only a count bounds how
+    #: many times it can fire, and fee-only churn is invisible to the former.
+    REAL_WALLET_MAX_DAILY_TRADES: int = Field(default=4, ge=1, le=100)
+    #: The most SOL the canary wallet may ever hold. Compared in integer
+    #: lamports. This is the bound that makes the blast radius a number rather
+    #: than a promise: over-funding is refused instead of traded.
+    REAL_WALLET_MAX_BALANCE_SOL: Decimal = Field(
+        default=Decimal("0.25"), gt=0, le=Decimal("5")
+    )
+    #: Freshness and impact bounds for a real *exit* quote. An exit that cannot
+    #: be priced is reported as an explicit failure state, never retried away.
+    REAL_WALLET_EXIT_MAX_QUOTE_AGE_SECONDS: int = Field(default=15, ge=1, le=300)
+    REAL_WALLET_EXIT_MAX_PRICE_IMPACT_PCT: Decimal = Field(
+        default=Decimal("5"), gt=0, le=Decimal("50")
+    )
+    REAL_WALLET_EXIT_MAX_SLIPPAGE_BPS: int = Field(default=300, ge=1, le=5000)
     REAL_WALLET_MIN_SOL_FEE_RESERVE: Decimal = Field(default=Decimal("0.01"), ge=0)
     REAL_WALLET_AUTOTRADE_COOLDOWN_SECONDS: int = Field(default=300, ge=0)
     REAL_WALLET_MAX_CONSECUTIVE_EXECUTION_FAILURES: int = Field(default=2, ge=1)
@@ -922,6 +956,11 @@ class Settings(BaseSettings):
         # settings an operator is most likely to want to narrow by hand.
         "REAL_WALLET_SAFETY_SUPPORTED_VENUES",
         "REAL_WALLET_SAFETY_SUPPORTED_TOKEN_2022_EXTENSIONS",
+        # Fourth and fifth occurrence of the same trap, registered here from the
+        # start rather than after a failed boot. Both are allowlists an operator
+        # will set as `a.example.com,b.example.com` in a compose file.
+        "REAL_WALLET_ALLOWED_RPC_HOSTS",
+        "REAL_WALLET_ALLOWED_PROGRAM_IDS",
         # Third occurrence of the trap above, and caught the same way: the
         # recipient list was `CsvList` from the day the report landed but was
         # invisible until it reached a compose file, at which point
@@ -1143,6 +1182,31 @@ class Settings(BaseSettings):
             raise ValueError(
                 "REAL_WALLET_EXECUTION_SECRET_FILE is not permitted in application "
                 "processes during the read-only wallet phase"
+            )
+        # A configured entry size above the per-trade cap would be silently
+        # clamped somewhere downstream, and a limit that clamps is a limit
+        # nobody can read off the configuration. Refuse the contradiction
+        # instead of resolving it.
+        if self.REAL_WALLET_ENTRY_SIZE_USD > self.REAL_WALLET_MAX_TRADE_USD:
+            raise ValueError(
+                "REAL_WALLET_ENTRY_SIZE_USD must not exceed REAL_WALLET_MAX_TRADE_USD"
+            )
+        # The wallet RPC must be on its own allowlist. Shipping an endpoint the
+        # execution path will refuse is a deployment that looks configured and
+        # fails at the first signature, which is the worst moment to find out.
+        # Inlined rather than imported from `real_wallet.network`: settings are
+        # constructed at import time and that module reaches back here.
+        wallet_rpc_host = (
+            urlparse(self.REAL_WALLET_RPC_URL).hostname or ""
+        ).lower()
+        allowed_rpc_hosts = {
+            host.strip().lower()
+            for host in self.REAL_WALLET_ALLOWED_RPC_HOSTS
+            if host.strip()
+        }
+        if not wallet_rpc_host or wallet_rpc_host not in allowed_rpc_hosts:
+            raise ValueError(
+                "REAL_WALLET_RPC_URL host must appear in REAL_WALLET_ALLOWED_RPC_HOSTS"
             )
         return self
 

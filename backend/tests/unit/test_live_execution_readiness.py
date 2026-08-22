@@ -51,9 +51,26 @@ def _facts(**overrides: bool) -> SubmissionFacts:
         "daily_loss_within_limit": True,
         "open_position_within_limit": True,
         "trade_size_within_limit": True,
+        "mainnet_verified": True,
+        "transaction_approved": True,
+        "not_previously_signed": True,
+        "canary_limits_satisfied": True,
+        "transport_release_approved": True,
     }
     values.update(overrides)
     return SubmissionFacts(**values)
+
+
+def test_every_submission_fact_defaults_to_refusing() -> None:
+    """A caller that forgets a fact must be refused, never accidentally allowed.
+
+    This is the property that makes adding a condition safe: a new field cannot
+    silently pass at an existing call site, because the unset value is the one
+    that blocks.
+    """
+    decision = LiveSubmissionGuard().evaluate(SubmissionFacts())
+    assert decision.allowed is False
+    assert "KILL_SWITCH_ACTIVE" in decision.reasons
 
 
 def test_disabled_dry_run_and_armed_modes_cannot_submit(
