@@ -850,6 +850,71 @@ class TestBoundSurfaces:
         findings = await detect.run(db_session, wallet)
         assert not [f for f in findings if f.defect == "accounting_mismatch"]
 
+    async def test_the_tick_records_findings_and_executes_nothing(
+        self, db_session, wallet
+    ) -> None:
+        """The whole point of arming a tick under OBSERVE_ONLY.
+
+        Before this existed, detection ran on every API read and fed the
+        integrity score, but nothing persisted a finding — so §9's owner queue
+        and §10's action log were correct, tested and permanently empty. A
+        finding that lives only inside a score's reasoning is a finding nobody
+        can be assigned.
+
+        What must NOT change is that recording is not repairing.
+        """
+        # A position closed at a multiple below the published target: a real
+        # §16 defect, and one classified OWNER_REQUIRED.
+        await self._position(
+            db_session,
+            wallet,
+            n=300,
+            status="closed",
+            closed_at=datetime.now(UTC),
+            exit_price=Decimal("1.10"),
+            exit_proceeds_usd=Decimal(11),
+            exit_reason="target_1_25x",
+        )
+
+        before = await service.ledger(db_session)
+        assert not before.open_rows
+
+        result = await service.tick(db_session, mode="OBSERVE_ONLY")
+        assert result["status"] == "ok"
+        assert int(result["findings"]) >= 1
+        # Every one refused: allowlisted or not, nothing is armed.
+        assert result["refused"] == result["recorded"]
+
+        after = await service.ledger(db_session)
+        assert after.open_rows, "the tick recorded nothing"
+        assert after.actions, "the tick wrote no audit row"
+        for action in after.actions:
+            assert action.outcome == "skipped", "something executed under OBSERVE_ONLY"
+            assert action.agent == service.AGENT
+        # The target defect is owner work, and it reached the owner queue.
+        assert any(
+            row.component == "karthik.target_below_multiple" for row in after.owner_attention
+        )
+
+    async def test_the_tick_is_quiet_when_there_is_no_wallet(self, db_session) -> None:
+        """An unbound operator must not file an incident every five minutes.
+
+        Writing one would bury the real findings under a condition that is the
+        expected state of a deployment without the wallet.
+        """
+        result = await service.tick(db_session, mode="OBSERVE_ONLY")
+        assert result["status"] == "unbound"
+        ledger = await service.ledger(db_session)
+        assert not ledger.open_rows
+
+    async def test_the_tick_rides_the_existing_scheduler(self) -> None:
+        """§26: one scheduler. The tick is a task on the beat that already
+        exists, not a second one."""
+        from app.workers.celery_app import celery_app
+
+        entry = celery_app.conf.beat_schedule["karthik-ops-tick"]
+        assert entry["task"] == "app.hq_ops.tasks.karthik_ops_tick"
+
     async def test_the_integrity_score_becomes_a_number_once_there_is_evidence(
         self, db_session, wallet
     ) -> None:

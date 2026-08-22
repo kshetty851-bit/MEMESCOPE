@@ -73,6 +73,15 @@ celery_app.conf.beat_schedule = {
         "task": "app.hq_ops.tasks.hq_ops_tick",
         "schedule": crontab(minute="*/2"),
     },
+    # Karthik's observation pass. Five minutes rather than two: it watches one
+    # wallet's data quality, not the platform's liveness, and nothing it can
+    # find becomes more urgent for being noticed ninety seconds sooner. Under
+    # OBSERVE_ONLY it opens findings and writes audit rows; it executes no
+    # repair, and there is no code path from here to one.
+    "karthik-ops-tick": {
+        "task": "app.hq_ops.tasks.karthik_ops_tick",
+        "schedule": crontab(minute="*/5"),
+    },
     "purge-expired-refresh-tokens": {
         "task": "app.workers.tasks.purge_expired_refresh_tokens",
         "schedule": crontab(hour="3", minute="0"),

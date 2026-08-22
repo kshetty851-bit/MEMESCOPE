@@ -511,3 +511,68 @@ def evaluate_integrity(
 def autonomy_mode() -> AutonomyMode:
     """Published on every response, so the panel never guesses."""
     return autonomy()
+
+
+async def tick(
+    session: AsyncSession, *, mode: AutonomyMode | None = None
+) -> dict[str, object]:
+    """One observation pass over the Karthik wallet.
+
+    ── WHAT THIS ADDS, AND WHAT IT DELIBERATELY DOES NOT ────────────────
+
+    Detection already ran on every API read, because the integrity score needs
+    it. What was missing was *persistence*: §9's owner queue and §10's action
+    log were correct, tested and permanently empty, because nothing ever called
+    `consider()`. A finding that only exists inside a score's reasoning is a
+    finding nobody can be assigned.
+
+    This closes that, and nothing else. Under `OBSERVE_ONLY` — the production
+    default — `consider()` opens the finding, writes the audit row recording
+    that a repair was allowlisted but not armed, and returns. **No repair runs
+    from here.** Execution remains a separate surface that this function does
+    not call, which is what lets an observe-only deployment exercise the entire
+    decision path in production without a single side effect.
+
+    ── WHY IT IS A WORKER TASK AND NOT A REQUEST ────────────────────────
+
+    Same reason as `hq_ops.tick`: it opens sessions and writes rows, and a GET
+    that mutates is a GET nobody can poll freely. It rides the existing beat
+    schedule rather than introducing one, per §26.
+
+    Never raises. A monitoring loop that can crash its own worker is a
+    monitoring loop that causes the outage it watches for.
+    """
+    from app.karthik_ops import detect
+    from app.karthik_ops.wallet import resolve
+
+    binding = await resolve(session)
+    if not binding.readable:
+        # Not an error and not worth a row: an unbound operator on a
+        # deployment without the wallet is the expected state, and writing an
+        # incident for it every two minutes would bury the real ones.
+        return {"status": "unbound", "detail": binding.detail}
+
+    findings = await detect.run(session, binding)
+    opened = 0
+    refused = 0
+    for finding in findings:
+        _incident, permission = await consider(session, finding, mode=mode)
+        opened += 1
+        if not permission.allowed:
+            refused += 1
+    await session.commit()
+
+    logger.info(
+        "karthik_tick",
+        findings=len(findings),
+        recorded=opened,
+        refused=refused,
+        autonomy=mode or autonomy(),
+    )
+    return {
+        "status": "ok",
+        "findings": len(findings),
+        "recorded": opened,
+        "refused": refused,
+        "autonomy": mode or autonomy(),
+    }
