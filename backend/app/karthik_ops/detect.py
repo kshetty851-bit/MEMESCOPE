@@ -235,6 +235,12 @@ DEFAULT_ENTRY_USD = Decimal(10)
 ACCOUNTING_TOLERANCE = Decimal("0.01")
 
 
+def _count(value: object) -> int:
+    """Read a count out of a `dict[str, object]` reading. A non-number reads as
+    zero, which under-reports rather than raising inside a monitoring read."""
+    return int(value) if isinstance(value, (int, str)) else 0
+
+
 async def run(session: AsyncSession, binding: Binding) -> list[Finding]:
     """Every check Karthik can actually make, right now.
 
@@ -442,20 +448,29 @@ async def run(session: AsyncSession, binding: Binding) -> list[Finding]:
 
     # --- stale quotes ----------------------------------------------------
     live = await positions_screen(session, binding)
-    stale = [row for row in live.rows if row.get("quote_stale")]
-    if stale:
+    # `values` is `dict[str, object]`; these two are counts. Narrowed rather
+    # than cast, so a value that is somehow not a number reads as zero and
+    # under-reports instead of raising inside a monitoring read.
+    stale_total = _count(live.values.get("stale_total"))
+    open_total = _count(live.values.get("open_total"))
+    if stale_total:
         add(
             "stale_quote",
             "karthik.stale_quote",
             (
-                f"{len(stale)} open positions have no price newer than "
-                f"{int(QUOTE_STALE_AFTER.total_seconds() // 60)} minutes."
+                f"{stale_total} of {open_total} open positions have no price newer "
+                f"than {int(QUOTE_STALE_AFTER.total_seconds() // 60)} minutes."
             ),
-            positions=len(stale),
-            mints=[row["mint"] for row in stale][:10],
+            positions=stale_total,
+            open_total=open_total,
+            mints=[row["mint"] for row in live.rows if row.get("quote_stale")][:10],
         )
 
     # --- the accounting invariant ----------------------------------------
+    # Only when `accounting` reports a *measured* comparison. It currently does
+    # not — see its docstring: equity is derived from cash plus open value, so
+    # the difference is zero by construction. This branch is what runs once an
+    # independently derived equity is available to compare against.
     books = await accounting(session, binding)
     if books.measured:
         cash = Decimal(str(books.values["cash_usd"]))

@@ -372,7 +372,9 @@ def evaluate_integrity(
     for finding in findings:
         by_defect.setdefault(finding.defect, []).append(finding)
 
-    total_positions = len(positions.rows) or 1
+    # The whole book, not the rows Screen 3 shows. `positions.rows` is capped
+    # for display and using it here made every stale reading read as 100%.
+    total_positions = _count(positions.values.get("open_total")) or 1
 
     def hit(defect: str) -> bool:
         return defect in by_defect
@@ -462,10 +464,10 @@ def evaluate_integrity(
                 if not positions.measured
                 else (
                     f"{by_defect['stale_quote'][0].evidence.get('positions', 0)} of "
-                    f"{len(positions.rows)} open positions priced from a stale quote."
+                    f"{total_positions} open positions priced from a stale quote."
                 )
                 if hit("stale_quote")
-                else f"All {len(positions.rows)} open positions have a fresh quote."
+                else f"All {total_positions} open positions have a fresh quote."
             ),
         ),
         Deduction(

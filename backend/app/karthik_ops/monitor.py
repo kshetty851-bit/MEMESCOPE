@@ -190,11 +190,19 @@ async def feed_screen(session: AsyncSession, binding: Binding) -> Reading:
     )
 
 
-async def positions_screen(session: AsyncSession, binding: Binding) -> Reading:
-    """SCREEN 3 — open positions, their multiple, and how fresh the price is."""
-    if not binding.readable:
-        return _unavailable(binding)
+async def _priced_open(
+    session: AsyncSession, binding: Binding
+) -> tuple[list[dict[str, object]], int]:
+    """**Every** open position, priced, with the count of stale ones.
 
+    Split out from `positions_screen` because the screen truncates to twelve
+    rows and two callers must not: the accounting sum and the staleness ratio
+    are figures about the whole book, and computing them from a display slice
+    understated open value by three quarters the first time this ran against a
+    real wallet with forty-three positions open.
+
+    A display cap is a presentation decision. It must not reach arithmetic.
+    """
     open_rows = (
         await session.execute(
             select(
@@ -206,14 +214,13 @@ async def positions_screen(session: AsyncSession, binding: Binding) -> Reading:
             ).where(_POS.c.wallet_id == binding.wallet_id, _POS.c.closed_at.is_(None))
         )
     ).all()
-
     if not open_rows:
-        return Reading(measured=True, detail="No open positions.", rows=[])
+        return [], 0
 
     mints = [row.mint_address for row in open_rows]
-    # DISTINCT ON, not MAX. `MAX(price_usd)` grouped by mint returns the highest
-    # price a token ever reached, which would value every open position at its
-    # peak — the single most flattering bug this file could contain.
+    # DISTINCT ON, not MAX. `MAX(price_usd)` grouped by mint returns the
+    # highest price a token ever reached, which would value every open position
+    # at its peak — the single most flattering bug this file could contain.
     latest = {
         mint: (price, at)
         for mint, price, at in await session.execute(
@@ -233,14 +240,19 @@ async def positions_screen(session: AsyncSession, binding: Binding) -> Reading:
 
     now = datetime.now(UTC)
     rows: list[dict[str, object]] = []
-    for row in open_rows[:SCREEN_ROWS]:
+    stale = 0
+    for row in open_rows:
         price, observed = latest.get(row.mint_address, (None, None))
         age = (now - observed).total_seconds() if observed else None
+        is_stale = age is None or age > QUOTE_STALE_AFTER.total_seconds()
+        if is_stale:
+            stale += 1
         rows.append(
             {
                 "mint": row.mint_address,
                 "quantity": str(row.quantity),
                 "entry_price": str(row.entry_price),
+                "cost_basis": str(row.cost_basis),
                 "current_price": str(price) if price is not None else None,
                 "multiple": str(price / row.entry_price)
                 if price and row.entry_price
@@ -249,13 +261,38 @@ async def positions_screen(session: AsyncSession, binding: Binding) -> Reading:
                 # second multiplication here could disagree with the first.
                 "target_price": str(row.target_price),
                 "quote_age_seconds": age,
-                "quote_stale": age is None or age > QUOTE_STALE_AFTER.total_seconds(),
+                "quote_stale": is_stale,
             }
         )
+    return rows, stale
+
+
+async def positions_screen(session: AsyncSession, binding: Binding) -> Reading:
+    """SCREEN 3 — open positions, their multiple, and how fresh the price is.
+
+    `rows` is capped for display; `values` carries the counts over the whole
+    book, and those are what everything downstream reads.
+    """
+    if not binding.readable:
+        return _unavailable(binding)
+
+    rows, stale = await _priced_open(session, binding)
+    if not rows:
+        return Reading(measured=True, detail="No open positions.", rows=[])
+
     return Reading(
         measured=True,
-        detail=f"{len(open_rows)} open, priced from the latest market snapshot per mint.",
-        rows=rows,
+        detail=(
+            f"{len(rows)} open, priced from the latest market snapshot per mint"
+            + (f"; showing {SCREEN_ROWS}." if len(rows) > SCREEN_ROWS else ".")
+        ),
+        values={
+            "open_total": len(rows),
+            "stale_total": stale,
+            "priced_total": len([r for r in rows if r["current_price"] is not None]),
+            "showing": min(len(rows), SCREEN_ROWS),
+        },
+        rows=rows[:SCREEN_ROWS],
     )
 
 
@@ -269,10 +306,13 @@ async def target_screen(session: AsyncSession, binding: Binding) -> Reading:
     if not binding.readable:
         return _unavailable(binding)
 
-    live = await positions_screen(session, binding)
+    priced, _stale = await _priced_open(session, binding)
     target = binding.take_profit_multiple or Decimal("1.25")
+    # Across every open position, not the twelve Screen 3 happens to show. The
+    # whole question this screen answers is "what is about to happen", and the
+    # nearest position to target is very unlikely to be in an arbitrary slice.
     approaching = sorted(
-        (row for row in live.rows if row.get("multiple") is not None),
+        (row for row in priced if row.get("multiple") is not None),
         key=lambda row: abs(Decimal(str(row["multiple"])) - target),
     )[:SCREEN_ROWS]
 
@@ -293,27 +333,39 @@ async def target_screen(session: AsyncSession, binding: Binding) -> Reading:
 
 
 async def accounting(session: AsyncSession, binding: Binding) -> Reading:
-    """§15's invariant: cash + executable open value ≈ equity.
+    """§15's figures: cash, executable open value, and the equity they sum to.
 
-    Reported as a *difference* with the inputs beside it rather than as a
-    pass/fail. A boolean would hide the size of a mismatch, and the size is the
-    thing that tells an owner whether they are looking at a rounding artefact
-    or at a wallet that has lost track of its own money.
+    ── WHY THIS IS PUBLISHED BUT NOT CHECKED ────────────────────────────
+
+    §15 asks for the invariant `cash + executable open value ~= equity` and for
+    unexplained mismatches to be flagged. This computes all three from position
+    rows — and that is exactly why it cannot *check* them: equity here is
+    defined as cash plus open value, so the difference is zero by construction
+    and a comparison would be a tautology returning a clean tick forever.
+
+    A green light that cannot go red is worse than no light. So the figures are
+    published and the check is reported unmeasured, with the reason.
+
+    Making it a real check needs a second, independently derived equity to
+    compare against — the wallet publishes one on `GET /karthik` as
+    `full_equity`, computed by its own code from its own read model. Two
+    independent derivations disagreeing is a finding worth having; one
+    derivation compared with itself is not.
     """
     if not binding.readable:
         return _unavailable(binding)
 
     book = await wallet_screen(session, binding)
-    live = await positions_screen(session, binding)
+    rows, _stale = await _priced_open(session, binding)
 
-    priced = [row for row in live.rows if row.get("current_price") is not None]
-    if len(priced) != len(live.rows):
+    priced = [row for row in rows if row.get("current_price") is not None]
+    if len(priced) != len(rows):
         return Reading(
             measured=False,
             detail=(
-                f"{len(live.rows) - len(priced)} of {len(live.rows)} open positions "
-                "have no current price, so executable open value cannot be computed. "
-                "Not reported as a mismatch — an unpriced book is unmeasured, not wrong."
+                f"{len(rows) - len(priced)} of {len(rows)} open positions have no "
+                "current price, so executable open value cannot be computed. Not "
+                "reported as a mismatch — an unpriced book is unmeasured, not wrong."
             ),
         )
 
@@ -323,11 +375,17 @@ async def accounting(session: AsyncSession, binding: Binding) -> Reading:
         Decimal(0),
     )
     return Reading(
-        measured=True,
-        detail="cash + executable open value, against derived equity.",
+        measured=False,
+        detail=(
+            f"Derived over all {len(priced)} open positions. Published, not "
+            "cross-checked: equity here is cash plus open value, so comparing "
+            "them would always agree. A real check needs the wallet's own "
+            "independently derived equity from GET /karthik."
+        ),
         values={
             "cash_usd": str(cash),
             "open_value_usd": str(open_value),
             "equity_usd": str(cash + open_value),
+            "positions_valued": len(priced),
         },
     )

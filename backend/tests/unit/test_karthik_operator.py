@@ -796,6 +796,60 @@ class TestBoundSurfaces:
         # Decided an hour ago, so it is outside a thirty-minute window.
         assert recent.new_trades == 0
 
+    async def test_a_display_cap_never_reaches_the_arithmetic(
+        self, db_session, wallet
+    ) -> None:
+        """The bug this test exists for, found on the live wallet.
+
+        Screen 3 caps its rows at twelve. The staleness ratio, the open-value
+        sum and the target ranking were all reading that capped list, so with
+        forty-three positions open the wallet reported a quarter of its own
+        book: "12 of 12 stale" was twelve rows on a screen, and open value was
+        $89 of a $440 book.
+
+        A display cap is a presentation decision. Everything below asserts it
+        stays one.
+        """
+        from app.karthik_ops.monitor import SCREEN_ROWS
+
+        count = SCREEN_ROWS + 7
+        for n in range(count):
+            await self._position(db_session, wallet, n=100 + n)
+
+        screen = await monitor.positions_screen(db_session, wallet)
+        assert len(screen.rows) == SCREEN_ROWS, "the screen should still cap"
+        assert screen.values["open_total"] == count, "totals must cover the whole book"
+        assert screen.values["showing"] == SCREEN_ROWS
+        assert str(count) in screen.detail
+
+        # Open value sums every position, not the twelve on screen. Nothing is
+        # priced in this fixture, so the reading is unmeasured — and it names
+        # the full count rather than the capped one.
+        books = await monitor.accounting(db_session, wallet)
+        assert books.measured is False
+        assert f"of {count} open positions" in books.detail
+
+        # And the target screen ranks the whole book.
+        targets = await monitor.target_screen(db_session, wallet)
+        assert targets.measured is True
+
+    async def test_the_accounting_invariant_is_not_a_tautology(
+        self, db_session, wallet
+    ) -> None:
+        """It publishes three figures and claims no cross-check.
+
+        Equity is derived as cash plus open value, so comparing the two would
+        agree forever. Reporting that as a passing invariant is a green light
+        that cannot go red, which is worse than no light — so the reading is
+        `measured=False` and says what a real check would need.
+        """
+        await self._position(db_session, wallet, n=200)
+        books = await monitor.accounting(db_session, wallet)
+        assert books.measured is False
+        # And therefore the detector cannot raise an accounting mismatch from it.
+        findings = await detect.run(db_session, wallet)
+        assert not [f for f in findings if f.defect == "accounting_mismatch"]
+
     async def test_the_integrity_score_becomes_a_number_once_there_is_evidence(
         self, db_session, wallet
     ) -> None:
