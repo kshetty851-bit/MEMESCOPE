@@ -15,7 +15,17 @@ import type { HqState } from "@/lib/hq/adapter";
 import { useTokenCaseFile, useVisiblePackets } from "@/components/hq/use-token-cases";
 import { CaseFilePanel } from "@/components/hq/case-file-panel";
 import { RecentCases } from "@/components/hq/recent-cases";
-import { ExecutionVault, MissionBoard, PerformanceLab } from "@/components/hq/hq-boards";
+import {
+  ExecutionVault,
+  InfrastructureBoard,
+  MissionBoard,
+  PerformanceLab,
+} from "@/components/hq/hq-boards";
+import {
+  AutonomousActivity,
+  IncidentBoard,
+  OwnerInbox,
+} from "@/components/hq/operations-panel";
 import { CAT_BY_ID, type CatId } from "@/lib/hq/cats";
 import { SUPPORT_BY_ID, type SupportId } from "@/lib/hq/support";
 import { VISITOR_BY_ID, type VisitorId } from "@/lib/hq/visitors";
@@ -450,22 +460,38 @@ function useViewport(): Viewport {
 }
 
 /**
- * The three boards, laid out as one responsive row.
+ * The boards, laid out as responsive rows.
  *
  * Rendered on every viewport including mobile, where the room is not drawn at
  * all: the isometric scene is the charming half of HQ, and these are the half
  * that has to survive without it. Someone on a phone gets the same facts.
+ *
+ * Two rows rather than one long one. The first is what the platform is doing;
+ * the second is what HQ has done about it. Keeping them apart matters more
+ * than saving a row of space — the audit trail is the panel that answers "did
+ * something act on production", and it should not be something a reader finds
+ * by scrolling past six wallet figures.
  */
 function Boards({ state }: { state: HqState }) {
   return (
-    <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-      <MissionBoard state={state} />
-      <PerformanceLab
-        wallet={state.sources.paperWallet}
-        security={state.sources.tokenSecurity}
-        now={state.now}
-      />
-      <ExecutionVault source={state.sources.executionPosture} now={state.now} />
+    <div className="flex flex-col gap-4">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <MissionBoard state={state} />
+        <PerformanceLab
+          wallet={state.sources.paperWallet}
+          security={state.sources.tokenSecurity}
+          now={state.now}
+        />
+        <ExecutionVault source={state.sources.executionPosture} now={state.now} />
+      </div>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <InfrastructureBoard operations={state.sources.operations} now={state.now} />
+        <IncidentBoard operations={state.sources.operations} now={state.now} />
+      </div>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <AutonomousActivity operations={state.sources.operations} now={state.now} />
+        <OwnerInbox operations={state.sources.operations} now={state.now} />
+      </div>
     </div>
   );
 }

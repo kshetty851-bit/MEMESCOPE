@@ -2,6 +2,7 @@
 
 import type { HqState, Source } from "@/lib/hq/adapter";
 import { STALE_AFTER_MS, fresh, isSecurityGated } from "@/lib/hq/adapter";
+import type { ComponentStatus, HqOperations } from "@/lib/hq/operations";
 import type { ExecutionPosture, TokenSecuritySummary, VaultState } from "@/lib/hq/pipeline";
 import type { PaperWallet } from "@/types/paper";
 import { Panel } from "@/components/ui/panel";
@@ -206,6 +207,9 @@ const MISSION_ROWS: Array<{ id: keyof HqState["employees"]; label: string }> = [
   { id: "rex", label: "Paper execution" },
   { id: "byte", label: "Platform / stream" },
   { id: "sage", label: "Track record" },
+  { id: "sentinel", label: "Production watch" },
+  { id: "patch", label: "Incidents" },
+  { id: "quinn", label: "Verification" },
   { id: "nova", label: "Office roll-up" },
 ];
 
@@ -219,6 +223,12 @@ const STATE_TONE: Record<string, Tone> = {
   success: "good",
   idle: "muted",
   unknown: "muted",
+  // The autonomy states. `incident` is bad because it is; the other two are
+  // work in progress, which is informational rather than good — a repair
+  // underway is not yet a repair that worked.
+  incident: "bad",
+  investigating: "info",
+  verifying: "info",
 };
 
 export function MissionBoard({ state }: { state: HqState }) {
@@ -245,6 +255,144 @@ export function MissionBoard({ state }: { state: HqState }) {
           />
         );
       })}
+    </Board>
+  );
+}
+
+/* ── INFRASTRUCTURE ──────────────────────────────────────────────────── */
+
+/**
+ * How a component status reads as a tone.
+ *
+ * `unknown` is muted rather than amber, and that is deliberate: amber is a
+ * warning about the system, and "the probe did not run" is a warning about the
+ * *monitoring*. Colouring them the same trains a reader to treat a blind spot
+ * as a symptom, and then to ignore both.
+ */
+const COMPONENT_TONE: Record<ComponentStatus, Tone> = {
+  healthy: "good",
+  degraded: "warn",
+  down: "bad",
+  unknown: "muted",
+};
+
+/**
+ * The six things HQ can actually measure about the machinery.
+ *
+ * Every row is present whatever happened — an absent row reads as "nothing to
+ * worry about", which is exactly the impression an unmeasured component must
+ * not give. A component that could not be probed renders "No data" against its
+ * own label rather than disappearing.
+ */
+export function InfrastructureBoard({
+  operations,
+  now,
+}: {
+  operations: Source<HqOperations>;
+  now: number;
+}) {
+  const data = fresh(operations, STALE_AFTER_MS.operations, now);
+  const health = data?.health ?? null;
+
+  const value = (measured: boolean | undefined, text: string | null) =>
+    measured === false ? null : text;
+
+  return (
+    <Board
+      title="Infrastructure"
+      subtitle="What the production watch measured. A component nobody could reach reads No data, never healthy."
+    >
+      <Row
+        label="Roll-up"
+        value={health ? health.overall.toUpperCase() : null}
+        tone={health ? COMPONENT_TONE[health.overall] : "muted"}
+        note={
+          health && health.unmeasured > 0
+            ? `${health.unmeasured} of 6 components could not be measured.`
+            : undefined
+        }
+        source="hq/operations"
+      />
+      <Row
+        label="Disk"
+        value={value(
+          health?.disk.measured,
+          health?.disk.percent_used === null || health?.disk.percent_used === undefined
+            ? null
+            : `${health.disk.percent_used}%`,
+        )}
+        tone={health ? COMPONENT_TONE[health.disk.status] : "muted"}
+        note={
+          health
+            ? `Warning at ${health.disk.warning_percent}%, critical at ${health.disk.critical_percent}%.`
+            : undefined
+        }
+        source="hq/operations"
+      />
+      <Row
+        label="Broker"
+        value={value(
+          health?.redis.measured,
+          health?.redis.latency_ms === null || health?.redis.latency_ms === undefined
+            ? (health?.redis.status ?? null)
+            : `${health.redis.status} · ${health.redis.latency_ms}ms`,
+        )}
+        tone={health ? COMPONENT_TONE[health.redis.status] : "muted"}
+        source="hq/operations"
+      />
+      <Row
+        label="Database"
+        value={value(
+          health?.database.measured,
+          health?.database.latency_ms === null || health?.database.latency_ms === undefined
+            ? (health?.database.status ?? null)
+            : `${health.database.status} · ${health.database.latency_ms}ms`,
+        )}
+        tone={health ? COMPONENT_TONE[health.database.status] : "muted"}
+        source="hq/operations"
+      />
+      <Row
+        label="Workers"
+        value={value(
+          health?.worker.measured,
+          health ? `${health.worker.replies} answering` : null,
+        )}
+        tone={health ? COMPONENT_TONE[health.worker.status] : "muted"}
+        note={health?.worker.nodes.length ? health.worker.nodes.join(", ") : undefined}
+        source="hq/operations"
+      />
+      <Row
+        label="Scheduler"
+        value={value(
+          health?.scheduler.measured,
+          health?.scheduler.seconds_since_beat === null ||
+            health?.scheduler.seconds_since_beat === undefined
+            ? null
+            : `beat ${Math.round(health.scheduler.seconds_since_beat)}s ago`,
+        )}
+        tone={health ? COMPONENT_TONE[health.scheduler.status] : "muted"}
+        source="hq/operations"
+      />
+      <Row
+        label="Queue depth"
+        value={value(
+          health?.queues.measured,
+          health?.queues.total === null || health?.queues.total === undefined
+            ? null
+            : String(health.queues.total),
+        )}
+        tone={health ? COMPONENT_TONE[health.queues.status] : "muted"}
+        source="hq/operations"
+      />
+      {/* Named rather than omitted. HQ cannot see Docker from inside a
+          container, and a board that simply had no container row would imply
+          it had checked. */}
+      <Row
+        label="Containers"
+        value={null}
+        note="Not measurable — the API holds no Docker socket, by design."
+        source="not published"
+      />
     </Board>
   );
 }

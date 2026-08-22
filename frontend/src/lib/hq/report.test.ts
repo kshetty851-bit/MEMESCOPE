@@ -27,6 +27,9 @@ describe("a report with nothing behind it", () => {
       "paper",
       "execution",
       "queues",
+      "operations",
+      "incidents",
+      "verification",
       "performance",
     ]);
   });

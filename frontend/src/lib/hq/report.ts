@@ -195,6 +195,13 @@ export function buildReport(state: HqState): HqReport {
     paperSection(state),
     { id: "execution", title: "EXECUTION / EXITS", owner: "rex", lines: lines(state, "rex") },
     { id: "queues", title: "QUEUES / INFRASTRUCTURE", owner: "echo", lines: lines(state, "echo") },
+    // The production watch. Sentinel does not attend the briefing — somebody
+    // has to keep watching while everyone else is in a room — so her section
+    // is derived from the operations surface rather than from her attendance.
+    // The report is about what was measured, not about who turned up.
+    { id: "operations", title: "PRODUCTION WATCH", owner: "sentinel", lines: lines(state, "sentinel") },
+    { id: "incidents", title: "INCIDENTS & AUTONOMOUS ACTIONS", owner: "patch", lines: lines(state, "patch") },
+    { id: "verification", title: "VERIFICATION", owner: "quinn", lines: lines(state, "quinn") },
     { id: "performance", title: "PERFORMANCE", owner: "sage", lines: lines(state, "sage") },
   ];
 

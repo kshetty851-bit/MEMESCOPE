@@ -585,7 +585,13 @@
    reader who cannot distinguish these hues loses speed, never information. */
 .hq-anchor[data-state="working"] .hq-anchor-dot,
 .hq-anchor[data-state="busy"] .hq-anchor-dot,
-.hq-anchor[data-state="reviewing"] .hq-anchor-dot {
+.hq-anchor[data-state="reviewing"] .hq-anchor-dot,
+/* Investigating and verifying share the working hue rather than earning two
+   new ones. They *are* work, the state word is written beside the figure
+   either way, and the palette above deliberately carries four status colours
+   total — a fifth and sixth would turn a scannable room into a legend. */
+.hq-anchor[data-state="investigating"] .hq-anchor-dot,
+.hq-anchor[data-state="verifying"] .hq-anchor-dot {
   fill: var(--hq-status-work);
   stroke: none;
   opacity: 1;
@@ -603,7 +609,10 @@
   opacity: 1;
 }
 
-.hq-anchor[data-state="error"] .hq-anchor-dot {
+.hq-anchor[data-state="error"] .hq-anchor-dot,
+/* An open incident reads exactly as an error, because to a person looking at
+   the room they are the same fact: something is wrong and somebody is on it. */
+.hq-anchor[data-state="incident"] .hq-anchor-dot {
   fill: var(--hq-status-bad);
   stroke: none;
   opacity: 1;
@@ -614,12 +623,14 @@
    person the reader has to re-identify at the exact moment they need to read
    fast. */
 .hq-anchor[data-state="alert"] .hq-contact-shadow,
-.hq-anchor[data-state="error"] .hq-contact-shadow {
+.hq-anchor[data-state="error"] .hq-contact-shadow,
+.hq-anchor[data-state="incident"] .hq-contact-shadow {
   fill: var(--hq-status-warn);
   opacity: 0.45;
 }
 
-.hq-anchor[data-state="error"] .hq-contact-shadow {
+.hq-anchor[data-state="error"] .hq-contact-shadow,
+.hq-anchor[data-state="incident"] .hq-contact-shadow {
   fill: var(--hq-status-bad);
 }
 
