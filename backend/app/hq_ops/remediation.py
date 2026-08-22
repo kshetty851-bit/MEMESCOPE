@@ -35,6 +35,7 @@ action can skip a step by being written differently from its neighbours.
 from __future__ import annotations
 
 import asyncio
+import os
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -236,6 +237,38 @@ async def _noop() -> dict[str, Any]:
 AUTONOMOUS_KEYS: frozenset[str] = frozenset(
     key for key, action in REMEDIATIONS.items() if action.autonomy == "green"
 )
+
+#: The environment variable that arms execution.
+AUTONOMY_ENV_VAR = "HQ_AUTONOMY_ENABLED"
+
+_TRUE = frozenset({"1", "true", "yes", "on"})
+
+
+def autonomy_enabled() -> bool:
+    """May HQ execute repairs, or only detect and record?
+
+    ── DEFAULT IS OFF, AND THAT IS THE POINT ───────────────────────────
+
+    An operator who deploys this without knowing about the flag gets a system
+    that watches, opens incidents, and writes an audit trail — and touches
+    nothing. Defaulting the other way would mean a forgotten environment
+    variable is the difference between observation and a process that restarts
+    production workers, and that is the wrong way round for a default to fail.
+
+    Detection, incident records, resolution-on-evidence and the audit trail all
+    run regardless. This gates exactly one thing: whether a permitted repair is
+    actually executed. Observe-only is not a degraded mode — it is the same
+    system with its hands behind its back, and an incident it would have
+    repaired says so in the Owner Approval queue instead.
+
+    ponytail: read straight from the environment rather than from `Settings`,
+    because `app/core/config.py` currently carries a concurrent session's
+    uncommitted work and adding a field there would sweep 185 unrelated lines
+    into this commit. Move it into `Settings` — with the same default — once
+    that lands; it is a three-line change and this function is the only caller
+    site to update.
+    """
+    return os.getenv(AUTONOMY_ENV_VAR, "false").strip().lower() in _TRUE
 
 
 def get(key: str) -> Remediation | None:

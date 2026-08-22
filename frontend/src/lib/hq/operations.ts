@@ -135,6 +135,8 @@ export interface HqOperations {
   recent: Incident[];
   activity: IncidentAction[];
   allowlist: RemediationInfo[];
+  /** False when HQ detects and records but executes nothing. */
+  autonomy_enabled: boolean;
   invariants: { digest?: string; values?: Record<string, unknown> };
 }
 

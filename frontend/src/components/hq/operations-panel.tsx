@@ -228,6 +228,27 @@ export function AutonomousActivity({
       title="Autonomous activity"
       subtitle="Every action HQ attempted, whatever the outcome. Written before the action ran, so a failure still leaves a record."
     >
+      {/* The mode, first and unmissable. A trail of past repairs above a
+          system that is currently executing nothing would imply it still
+          is — and the whole point of this panel is that it cannot imply
+          anything the backend has not published. */}
+      {data ? (
+        <p
+          className="mb-2 rounded border px-2 py-1 text-[10px] leading-snug"
+          style={{
+            borderColor: data.autonomy_enabled
+              ? "var(--color-up)"
+              : "var(--color-ink-3, var(--color-ink))",
+            color: data.autonomy_enabled
+              ? "var(--color-up)"
+              : "var(--color-ink-3, var(--color-ink))",
+          }}
+        >
+          {data.autonomy_enabled
+            ? "ARMED — permitted repairs execute automatically."
+            : "OBSERVE-ONLY — HQ detects, records and closes incidents, but executes nothing."}
+        </p>
+      ) : null}
       {!data ? (
         <Empty>No data — the operations surface did not answer.</Empty>
       ) : data.activity.length === 0 ? (
@@ -260,6 +281,7 @@ export function AutonomousActivity({
           <p className="mt-1 text-[10px] leading-snug text-[var(--color-ink-3,var(--color-ink))] opacity-60">
             Read from the backend, not restated here. Nothing outside this list can run:
             no shell, no code changes, no container control, no wallet access.
+            {data.autonomy_enabled ? null : " In observe-only mode none of it runs at all."}
           </p>
         </footer>
       ) : null}

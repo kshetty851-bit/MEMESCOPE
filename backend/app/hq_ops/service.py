@@ -37,7 +37,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.logging import get_logger
 from app.hq_ops import invariants
 from app.hq_ops.probe import snapshot
-from app.hq_ops.remediation import REMEDIATIONS, Remediation
+from app.hq_ops.remediation import (
+    AUTONOMY_ENV_VAR,
+    REMEDIATIONS,
+    Remediation,
+    autonomy_enabled,
+)
 from app.hq_ops.schemas import OperationsHealth
 from app.models.hq_ops import HqAction, HqIncident
 
@@ -397,9 +402,14 @@ async def tick(session: AsyncSession) -> dict[str, Any]:
     conditions = detect(health)
     live = {condition.signature for condition in conditions}
 
+    # Read once per pass rather than per condition, so a tick cannot be armed
+    # for one incident and disarmed for the next.
+    armed = autonomy_enabled()
+
     report: dict[str, Any] = {
         "observed_at": health.observed_at.isoformat(),
         "overall": health.overall,
+        "armed": armed,
         "detected": sorted(live),
         "opened": [],
         "repaired": [],
@@ -436,6 +446,24 @@ async def tick(session: AsyncSession) -> dict[str, Any]:
         action = REMEDIATIONS.get(condition.remediation)
         if action is None or action.autonomy != "green":
             # Not autonomous. The incident stands and waits for a person.
+            continue
+
+        if not armed:
+            # Observe-only. Everything above this line still ran — the
+            # condition was detected, the incident is open, and it will still
+            # resolve on evidence when it clears. What is withheld is the hand
+            # on the lever, and the incident says so rather than sitting in
+            # `open` looking like nothing could be done about it.
+            if incident.status != "awaiting_owner":
+                incident.status = "awaiting_owner"
+                incident.owner_rationale = (
+                    f"HQ is in observe-only mode. {action.key} would have run here "
+                    f"— {action.summary} Set {AUTONOMY_ENV_VAR}=true to arm execution."
+                )
+                await session.commit()
+            report["repaired"].append(
+                {"code": incident.code, "action": action.key, "outcome": "withheld"}
+            )
             continue
 
         attempts = await _attempts_so_far(session, incident, action.key)

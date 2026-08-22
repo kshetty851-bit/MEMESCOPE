@@ -189,5 +189,9 @@ class HqOperations(BaseSchema):
     #: Exactly what HQ is permitted to do. Published so a reader can check the
     #: claim rather than take it on faith.
     allowlist: list[RemediationInfo]
+    #: False when HQ is detecting and recording but executing nothing. Published
+    #: rather than inferred, because a panel that guessed this wrong would
+    #: either claim repairs that cannot happen or hide ones that can.
+    autonomy_enabled: bool
     #: The protected trading rules, as currently read.
     invariants: dict[str, object]

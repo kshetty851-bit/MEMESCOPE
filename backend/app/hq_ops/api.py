@@ -23,7 +23,7 @@ from sqlalchemy import select
 from app.api.deps import DbSession
 from app.hq_ops import invariants as invariant_guard
 from app.hq_ops.probe import snapshot
-from app.hq_ops.remediation import REMEDIATIONS
+from app.hq_ops.remediation import REMEDIATIONS, autonomy_enabled
 from app.hq_ops.schemas import (
     HqOperations,
     Incident,
@@ -189,5 +189,6 @@ async def operations_state(session: DbSession) -> HqOperations:
             )
             for action in sorted(REMEDIATIONS.values(), key=lambda a: a.key)
         ],
+        autonomy_enabled=autonomy_enabled(),
         invariants=invariant_guard.capture(),
     )

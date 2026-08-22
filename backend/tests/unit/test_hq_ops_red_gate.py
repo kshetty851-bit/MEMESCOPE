@@ -144,3 +144,115 @@ async def test_the_red_incident_is_never_auto_resolved(db_session, monkeypatch):
     assert "INC-999" not in report["resolved"]
     await db_session.refresh(incident)
     assert incident.status == "open"
+
+
+# ── observe-only ────────────────────────────────────────────────────────
+
+
+def test_autonomy_is_off_unless_explicitly_armed(monkeypatch):
+    """The default decides what a forgotten environment variable means.
+
+    Off by default, so an operator who deploys without knowing about the flag
+    gets a system that watches and records and touches nothing. The other way
+    round, a forgotten variable is the difference between observation and a
+    process that restarts production workers.
+    """
+    from app.hq_ops.remediation import AUTONOMY_ENV_VAR, autonomy_enabled
+
+    monkeypatch.delenv(AUTONOMY_ENV_VAR, raising=False)
+    assert autonomy_enabled() is False
+
+    for value in ["", "false", "0", "no", "off", "banana", "TRUE-ish"]:
+        monkeypatch.setenv(AUTONOMY_ENV_VAR, value)
+        assert autonomy_enabled() is False, f"{value!r} should not arm execution"
+
+    for value in ["true", "TRUE", "  True  ", "1", "yes", "on"]:
+        monkeypatch.setenv(AUTONOMY_ENV_VAR, value)
+        assert autonomy_enabled() is True, f"{value!r} should arm execution"
+
+
+@pytest.mark.asyncio
+async def test_observe_only_detects_and_records_but_executes_nothing(
+    db_session, monkeypatch
+):
+    """The whole point of the mode, as one assertion set.
+
+    Everything except the execution still happens: the condition is detected,
+    an incident is opened, and it carries a rationale naming the repair that
+    would have run. What must not exist afterwards is an audit row — an action
+    row is a claim that something ran.
+    """
+    from app.hq_ops.remediation import AUTONOMY_ENV_VAR
+    from app.hq_ops.schemas import WorkerHealth
+
+    monkeypatch.delenv(AUTONOMY_ENV_VAR, raising=False)
+
+    sick = health(
+        worker=WorkerHealth(status="down", nodes=[], replies=0, detail="silent"),
+        overall="down",
+    )
+
+    async def fake_snapshot(_session, **_kwargs):
+        return sick
+
+    monkeypatch.setattr(service, "snapshot", fake_snapshot)
+
+    report = await service.tick(db_session)
+
+    assert report["armed"] is False
+    assert report["detected"] == ["worker:not-answering"]
+    assert len(report["opened"]) == 1
+    assert [entry["outcome"] for entry in report["repaired"]] == ["withheld"]
+
+    incident = (
+        (
+            await db_session.execute(
+                select(HqIncident).where(HqIncident.signature == "worker:not-answering")
+            )
+        )
+        .scalars()
+        .one()
+    )
+    assert incident.status == "awaiting_owner"
+    assert "observe-only" in (incident.owner_rationale or "")
+    assert "worker.pool_restart" in (incident.owner_rationale or "")
+
+    # The load-bearing assertion. No action row means nothing ran, and the
+    # audit trail cannot imply otherwise.
+    actions = (
+        (await db_session.execute(select(HqAction))).scalars().all()
+    )
+    assert actions == []
+
+
+@pytest.mark.asyncio
+async def test_observe_only_still_closes_incidents_on_evidence(db_session, monkeypatch):
+    """Withholding the repair must not withhold the recovery.
+
+    An observe-only HQ that opened incidents and never closed them would grow
+    an incident list nobody trusts, which is worse than not having one.
+    """
+    from app.hq_ops.remediation import AUTONOMY_ENV_VAR
+    from app.hq_ops.schemas import WorkerHealth
+
+    monkeypatch.delenv(AUTONOMY_ENV_VAR, raising=False)
+
+    state = {
+        "health": health(
+            worker=WorkerHealth(status="down", nodes=[], replies=0, detail="silent"),
+            overall="down",
+        )
+    }
+
+    async def fake_snapshot(_session, **_kwargs):
+        return state["health"]
+
+    monkeypatch.setattr(service, "snapshot", fake_snapshot)
+
+    opened = await service.tick(db_session)
+    code = opened["opened"][0]
+
+    state["health"] = health()
+    recovered = await service.tick(db_session)
+
+    assert code in recovered["resolved"]
