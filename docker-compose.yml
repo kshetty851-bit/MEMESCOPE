@@ -193,6 +193,14 @@ x-backend-env: &backend-env
   JUPITER_QUOTE_TIMEOUT_SECONDS: ${JUPITER_QUOTE_TIMEOUT_SECONDS:-6}
   JUPITER_QUOTE_SLIPPAGE_BPS: ${JUPITER_QUOTE_SLIPPAGE_BPS:-50}
   JUPITER_USDC_MINT: ${JUPITER_USDC_MINT:-EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v}
+  # The Karthik paper wallet. In the anchor, not on the worker: the Celery
+  # worker makes the decisions and the API reports them, so a pause set on one
+  # of them would show a paused wallet that was still buying — the exact shape
+  # of the three failures this anchor's comment above records.
+  KARTHIK_ENTRIES_PAUSED: ${KARTHIK_ENTRIES_PAUSED:-false}
+  KARTHIK_CANDIDATE_LIMIT: ${KARTHIK_CANDIDATE_LIMIT:-250}
+  KARTHIK_REVIEW_BATCH_LIMIT: ${KARTHIK_REVIEW_BATCH_LIMIT:-2000}
+  KARTHIK_MAX_MARKET_AGE_SECONDS: ${KARTHIK_MAX_MARKET_AGE_SECONDS:-900}
 
   # --- Real-wallet execution contract --------------------------------------
   # EVERY setting below is in the shared anchor on purpose, and this is the one

@@ -105,6 +105,13 @@ REQUIRED_IN_ANCHOR = {
     # signals the other closes early, or never closes at all.
     "OPPORTUNITY_TTL_BREAKOUT_SECONDS": "detection stamps expiry, review enforces it",
     "OPPORTUNITY_TTL_PRE_BREAKOUT_SECONDS": "detection stamps expiry, review enforces it",
+    # The Karthik wallet decides in the worker and reports through the API.
+    # A pause visible to only one of them is a wallet that reports itself
+    # stopped while it is still buying.
+    "KARTHIK_ENTRIES_PAUSED": "worker gates entries on it, API reports it",
+    "KARTHIK_MAX_MARKET_AGE_SECONDS": (
+        "the freshness bound that decides an entry must not differ per service"
+    ),
 }
 
 #: Real-wallet execution settings, kept as their own set because the failure

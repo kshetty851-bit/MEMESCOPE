@@ -558,6 +558,28 @@ class Settings(BaseSettings):
     JUPITER_QUOTE_SLIPPAGE_BPS: int = Field(default=50, ge=0, le=10_000)
     JUPITER_USDC_MINT: str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 
+    # --- The Karthik paper wallet ------------------------------------------
+    # A second, deliberately simpler paper experiment in its own tables. There
+    # is no enable flag: Karthik exists once a wallet row exists, and that row
+    # is created by one deliberate activation. A flag would be a second, weaker
+    # copy of a fact the database already holds — and the flag most people would
+    # reach for to "stop Karthik" would stop its exit monitoring too.
+    #
+    #: Entries only, and never anything else. Read at the single entry gate,
+    #: which runs *after* exits have already been settled, so pausing purchases
+    #: cannot strand an open position. The paper wallet's own pause is separated
+    #: the same way, for the same reason.
+    KARTHIK_ENTRIES_PAUSED: bool = False
+    #: How many undecided Track Record admissions one pass may judge. Bounded,
+    #: and taken oldest-admission-first so the tail cannot starve.
+    KARTHIK_CANDIDATE_LIMIT: int = Field(default=250, ge=1, le=2000)
+    #: How many open positions one pass advances, oldest watermark first.
+    KARTHIK_REVIEW_BATCH_LIMIT: int = Field(default=2000, ge=1, le=2000)
+    #: How old an observation may be and still stand in for the market *now*.
+    #: Karthik buys and sells against readings, so a stale one is not a price it
+    #: could have transacted at — it is refused rather than used.
+    KARTHIK_MAX_MARKET_AGE_SECONDS: int = Field(default=900, ge=30, le=86_400)
+
     # --- Future real-wallet safety gate ------------------------------------
     # This policy only produces an auditable ALLOW/REJECT decision. It is not
     # connected to a signer, transaction builder, or execution engine.
