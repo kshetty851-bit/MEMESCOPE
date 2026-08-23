@@ -250,28 +250,69 @@ def record(
     exit_route: str | None = None
     execution_confidence: str | None = "legacy_estimate"
 
-    if entry_execution is not None and exit_execution is not None:
-        execution_model_version = JUPITER_MODEL_VERSION
+    # ── PROVENANCE IS PER SIDE ──────────────────────────────────────────────
+    #
+    # This was `if entry_execution is not None and exit_execution is not None`,
+    # an all-or-nothing branch: a missing quote on *either* side sent the whole
+    # record down the legacy path, which then stamped both sides
+    # `legacy_constant_product_v1` and wrote the one available fallback reason
+    # into both columns.
+    #
+    # The two sides are independent facts. A position entered before its
+    # decimals were known and exited against a live Jupiter route is an
+    # ordinary trade, and on 2026-08-21 it was the common one: 66 of 260 audit
+    # rows (25%) mislabelled their exit model, and 53 of those had a real
+    # Jupiter exit quote sitting on the position row — route, context slot,
+    # price impact and `swapUsdValue` — while the ledger claimed a
+    # constant-product estimate and reported the *entry's* fallback reason
+    # under the exit's name.
+    #
+    # Each side is now described by its own evidence, and the summary version
+    # says "jupiter" only when a real quote priced the number that matters.
+    entry_is_quote = entry_execution is not None
+
+    if entry_execution is not None:
         entry_model = entry_execution.model_version
-        exit_model = exit_execution.model_version
         entry_quote = entry_execution.as_json()
-        exit_quote = exit_execution.as_json()
         entry_quoted_at = entry_execution.quoted_at
-        exit_quoted_at = exit_execution.quoted_at
         entry_context_slot = entry_execution.context_slot
-        exit_context_slot = exit_execution.context_slot
         entry_impact_pct = entry_execution.price_impact_pct
-        exit_impact_pct = exit_execution.price_impact_pct
         entry_fee_usd = entry_execution.platform_fee_usd
-        exit_fee_usd = exit_execution.platform_fee_usd
         entry_route = entry_execution.route
+
+    if exit_execution is not None:
+        exit_model = exit_execution.model_version
+        exit_quote = exit_execution.as_json()
+        exit_quoted_at = exit_execution.quoted_at
+        exit_context_slot = exit_execution.context_slot
+        exit_impact_pct = exit_execution.price_impact_pct
+        exit_fee_usd = exit_execution.platform_fee_usd
         exit_route = exit_execution.route
-        execution_confidence = "jupiter_route"
+
+    if exit_execution is not None:
+        # **Net is priced from the exit.** `output_amount_usd` is what the sell
+        # would actually have returned, so when a real exit quote exists it is
+        # the best truthful evidence available for the number the track record
+        # is judged on — whatever priced the entry. Nothing here invents a
+        # fill: it is the quote's own figure, or the constant-product model's,
+        # and never a stop trigger.
+        execution_model_version = JUPITER_MODEL_VERSION
+        execution_confidence = "jupiter_route" if entry_is_quote else "jupiter_exit_only"
         unavailable = None
         net_usd = (exit_execution.output_amount_usd or _ZERO) - trade.size_usd
         net_pct = _ZERO if trade.size_usd <= 0 else (net_usd / trade.size_usd * _HUNDRED)
         fee = (entry_fee_usd or _ZERO) + (exit_fee_usd or _ZERO)
         slippage = gross_usd - net_usd - fee
+        if not entry_is_quote:
+            # The entry still has to describe itself honestly, and the legacy
+            # summary is what it has. Only this side carries the fallback
+            # reason — writing it into both columns is the bug above.
+            entry_quote = legacy_side_summary(
+                side="entry",
+                notional_usd=trade.size_usd,
+                liquidity_usd=entry_liquidity_usd,
+                reason=execution_fallback_reason or "legacy execution model",
+            )
     else:
         round_trip = costs.round_trip(
             entry_notional=trade.size_usd,
@@ -281,18 +322,25 @@ def record(
             model=model,
         )
 
-        entry_quote = legacy_side_summary(
-            side="entry",
-            notional_usd=trade.size_usd,
-            liquidity_usd=entry_liquidity_usd,
-            reason=execution_fallback_reason or "legacy execution model",
-        )
+        if not entry_is_quote:
+            entry_quote = legacy_side_summary(
+                side="entry",
+                notional_usd=trade.size_usd,
+                liquidity_usd=entry_liquidity_usd,
+                reason=execution_fallback_reason or "legacy execution model",
+            )
         exit_quote = legacy_side_summary(
             side="exit",
             notional_usd=proceeds,
             liquidity_usd=exit_liquidity_usd,
             reason=execution_fallback_reason or "legacy execution model",
         )
+        if entry_is_quote:
+            # A real entry quote with a modelled exit. The summary version
+            # stays legacy because the *exit* decided net, and claiming
+            # `jupiter_quote_v2` for the record as a whole would overstate
+            # which half of it a route actually priced.
+            execution_confidence = "jupiter_entry_only"
         if round_trip is not None:
             unavailable = None
             fee = round_trip.entry.fee + round_trip.exit.fee

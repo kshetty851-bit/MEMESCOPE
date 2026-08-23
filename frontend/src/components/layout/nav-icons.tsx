@@ -167,3 +167,21 @@ export function IconHq(props: SVGProps<SVGSVGElement>) {
     </Base>
   );
 }
+
+/**
+ * STRATEGY LAB.
+ *
+ * A flask, drawn as an outline with a fill line partway up. Deliberately not a
+ * wallet, a chart or a coin: every one of those would file research beside the
+ * things it must never be confused with. Laboratory glassware says "experiment"
+ * without saying "money".
+ */
+export function IconFlask(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Base {...props}>
+      <path d="M10 3h4" />
+      <path d="M10.5 3v6.2L5.4 17.4A1.6 1.6 0 006.8 20h10.4a1.6 1.6 0 001.4-2.6L13.5 9.2V3" />
+      <path d="M8.2 14h7.6" />
+    </Base>
+  );
+}

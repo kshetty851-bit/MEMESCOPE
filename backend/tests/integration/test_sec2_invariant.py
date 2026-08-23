@@ -123,7 +123,15 @@ class TestTheRepositoryInvariant:
         allow = decide(verified(), now=NOW)
         assert allow.allowed is True
         created = await PaperRepository(db_session).open_position(
-            security=allow, **position_values(wallet)
+            security=allow,
+            # A gated wallet now needs *two* things to open: a live security
+            # ALLOW and market evidence recent enough to price against. This
+            # test owns the first; `test_market_data_gate.py` owns the second.
+            # Both are supplied here so a freshness failure can never be
+            # mistaken for a security regression.
+            market_observed_at=NOW,
+            now=NOW,
+            **position_values(wallet),
         )
         assert created is not None
 

@@ -11,6 +11,7 @@ import secrets
 from decimal import Decimal
 from functools import lru_cache
 from typing import Annotated, Any, Literal
+from urllib.parse import urlparse
 
 from pydantic import (
     AnyHttpUrl,
@@ -398,6 +399,21 @@ class Settings(BaseSettings):
     DISK_WARNING_PERCENT: float = Field(default=75.0, ge=1.0, le=99.0)
     DISK_CRITICAL_PERCENT: float = Field(default=85.0, ge=1.0, le=99.0)
 
+    # --- Wallet-flow intelligence (DATA-2) -----------------------------------
+    # Decoding trades from the log stream the scanner is ALREADY subscribed to,
+    # so this adds no subscription and no RPC. Off by default: it is data
+    # collection for future research and must never be able to affect a
+    # trading decision, so it ships dark and is switched on deliberately.
+    FEATURE_WALLET_FLOW_ENABLED: bool = False
+    #: Recent trades held per mint. Every metric is a share within one mint
+    #: over a window, so a small ring answers all of them exactly while the
+    #: memory stays bounded by construction.
+    WALLET_FLOW_EVENT_CAPACITY: int = Field(default=256, ge=16, le=4096)
+    #: Tracked mints, least-recently-traded evicted first.
+    WALLET_FLOW_MAX_MINTS: int = Field(default=4000, ge=100, le=100_000)
+    #: A mint with no trade for this long is dropped.
+    WALLET_FLOW_TTL_SECONDS: float = Field(default=3600.0, ge=60.0, le=86_400.0)
+
     # --- Fresh-token nursery lane -------------------------------------------
     # Every newly discovered token's first FRESH-window minutes of prioritised
     # observation, claimed ahead of the backlog but always behind the display
@@ -608,6 +624,136 @@ class Settings(BaseSettings):
     # were.
     PAPER_WALLET_MANAGE_ARCHIVED_GENERATIONS: bool = False
 
+    # --- Market-data safety: when the wallet may commit new capital -------
+    #
+    # Every number below was measured against production on 2026-08-21 rather
+    # than chosen, because a threshold nobody measured is a threshold that
+    # either never fires or fires constantly. The measurement is 18,163
+    # priced-observation gaps taken strictly inside the window each Generation
+    # 9 position was open:
+    #
+    #     p50 17.3s · p95 41.9s · p99 785s · max 10,114s (the outage itself)
+    #     2.4% of gaps > 60s · 1.8% > 120s · 1.5% > 180s
+    #
+    # ── ENTRY GATE, NOT AN EXIT GATE ──────────────────────────────────────
+    # Nothing here is read by any exit path. A stale feed must stop the wallet
+    # opening new positions and must never stop it closing one: the exit walk
+    # resolves from the stored observation series, so a breach that could not
+    # be priced today prices correctly whenever the reading arrives.
+
+    #: How old the newest priced observation anywhere may be before new
+    #: entries stop. Five minutes is 25x faster than the 125-minute outage
+    #: that went unnoticed, and ~7x the p95 gap, so ordinary jitter cannot
+    #: trip it.
+    PAPER_FEED_STALE_SECONDS: float = Field(default=300.0, ge=30.0, le=3600.0)
+    #: Reported as DEGRADED above this, without blocking. The per-candidate
+    #: gate below is what protects an individual entry while the feed is slow.
+    PAPER_FEED_DEGRADED_SECONDS: float = Field(default=120.0, ge=10.0, le=3600.0)
+    #: Window for the throughput reading that distinguishes "the feed is
+    #: alive" from "one token happens to have a fresh row".
+    PAPER_FEED_THROUGHPUT_WINDOW_SECONDS: float = Field(default=300.0, ge=60.0, le=3600.0)
+    #: Distinct mints that must be priced inside that window. Production runs
+    #: 1,026-2,662 per five minutes, so 50 is a 20x margin: it cannot fire on
+    #: jitter and still catches a worker wedged on a handful of tokens.
+    PAPER_FEED_MIN_RECENT_MINTS: int = Field(default=50, ge=1, le=10_000)
+
+    #: How old a candidate's priced observation may be at the moment the
+    #: position is committed. The top 25 Radar ranks measure 16s worst-case
+    #: and open positions p95 at 41.9s, so 120s carries ~3x headroom over p95
+    #: and cannot false-block during healthy operation.
+    PAPER_ENTRY_MAX_SNAPSHOT_AGE_SECONDS: float = Field(default=120.0, ge=10.0, le=3600.0)
+
+    #: Open-position watchdog. WARNING is visible and does not block; CRITICAL
+    #: blocks new entries.
+    #:
+    #: 60/180 rather than the 30/60 first proposed, because the measurement
+    #: says otherwise: p50 is 17.3s and p95 41.9s, so a 30s warning would fire
+    #: on roughly a sixth of ordinary gaps and a 60s critical would have
+    #: blocked entries on 2.4% of them — including a single 72s gap in an
+    #: otherwise healthy two-hour window. 60s is ~1.4x p95 and 180s is ~4.3x,
+    #: which still detects a real outage in three minutes.
+    PAPER_POSITION_WARNING_SECONDS: float = Field(default=60.0, ge=10.0, le=3600.0)
+    PAPER_POSITION_CRITICAL_SECONDS: float = Field(default=180.0, ge=15.0, le=7200.0)
+    #: Past this a position is counted as **unpriceable** rather than stale:
+    #: its pool is gone, no refresh will produce a price, and blocking entries
+    #: on it would fail closed on a condition that can never clear. Six hours
+    #: is more than twice the longest real outage on record, so a live
+    #: position is never misclassified, while the 94 open Generation 5
+    #: positions whose last price is four days old drop out of the gate.
+    #: They are still counted and named — never silently dropped.
+    PAPER_POSITION_UNPRICEABLE_SECONDS: float = Field(
+        default=21_600.0, ge=600.0, le=604_800.0
+    )
+    #: The whole market-data entry gate. Off means entries are not blocked on
+    #: feed health — the pre-2026-08-21 behaviour, kept switchable so the gate
+    #: can be disabled without a deploy if it ever misfires. It does not
+    #: disable the measurement, the census or the alarm.
+    FEATURE_PAPER_MARKET_HEALTH_GATE: bool = True
+
+    #: Capital-protection kill switch for **new paper entries only**.
+    #:
+    #: Read at the top of `PaperWalletService._open_entries`, which is the sole
+    #: gateway to `repository.open_position` and is reached only *after* the
+    #: caller's exit settlement has already returned. Every one of its three
+    #: callers — the scheduled review, the observation-triggered review and a
+    #: manual sell — settles exits first and calls this last, so turning it on
+    #: cannot stop a trailing stop, a HOLD-6H expiry, monitoring, enrichment,
+    #: discovery or an archived generation's book from closing.
+    #:
+    #: Deliberately NOT `FEATURE_PAPER_WALLET_ENABLED`: that one is checked in
+    #: `paper.scheduler._paper_review` before the review runs at all, so it
+    #: stops exits too. Pausing entries and disabling the wallet are different
+    #: operations and this is the one that keeps the open book managed.
+    #:
+    #: Set on 2026-08-22 after Generation 9 lost $1,424.92 across 65 trades,
+    #: $1,476.32 of it in 15 positions that fell 80-100%.
+    PAPER_WALLET_ENTRIES_PAUSED: bool = False
+
+    # --- Paper Wallet V2 (separate experiment, separate capital) ----------
+    #: V2's lifecycle, as one value rather than two booleans that can disagree.
+    #:
+    #:   ``disabled``     — the wallet does not exist and nothing runs. Default.
+    #:   ``observe``      — reviews run and are logged; no position is opened.
+    #:   ``paper_active`` — V2 opens and manages its own paper positions.
+    #:
+    #: Default is ``disabled`` and it is meant to stay that way until a backtest
+    #: has been read by a person. Implementation being finished is not evidence
+    #: that a strategy works.
+    PAPER_V2_MODE: Literal["disabled", "observe", "paper_active"] = "disabled"
+    #: V2's own entry pause. **Deliberately a separate setting from
+    #: `PAPER_WALLET_ENTRIES_PAUSED`.** Pausing V1 must not pause V2 and vice
+    #: versa: they are different experiments with different capital, and one
+    #: switch controlling both would make an incident in one silently halt the
+    #: other.
+    PAPER_V2_ENTRIES_PAUSED: bool = False
+    #: New simulated capital. Never inherited from V1 — see `paper_v2.service`.
+    PAPER_V2_STARTING_BALANCE: float = Field(default=1_000.0, gt=0)
+    #: Fixed notional per entry. Fixed is the experiment: no liquidity-aware
+    #: sizing, no compounding, no scaling with equity.
+    PAPER_V2_TRADE_SIZE_USD: float = Field(default=25.0, gt=0)
+
+    # --- Strategy Lab (research only; no capital execution) ---------------
+    #: What Strategy Lab is doing. Three values and **none of them is live** —
+    #: `LabState` has no live member, so this setting cannot be typed into one.
+    #:
+    #:   ``DISABLED``          — nothing runs. The API answers and says so.
+    #:   ``BACKTEST``          — historical replay on demand. Reads only.
+    #:   ``FORWARD_RESEARCH``  — new canonical opportunities are evaluated by
+    #:                           every strategy as they arrive, into simulated
+    #:                           $1,000 research wallets.
+    #:
+    #: Deliberately a separate setting from every paper flag: Strategy Lab is a
+    #: different experiment with different (simulated) capital, and one switch
+    #: governing both would let an incident in one silently halt the other.
+    STRATEGY_LAB_MODE: Literal["DISABLED", "BACKTEST", "FORWARD_RESEARCH"] = "DISABLED"
+    #: Simulated starting capital per strategy. Never inherited from any wallet,
+    #: never real, and never presented as a balance.
+    STRATEGY_LAB_STARTING_CAPITAL: float = Field(default=1_000.0, gt=0)
+    #: Seconds between forward-research ticks. A tick settles open positions and
+    #: offers new opportunities; it is bounded work, so the interval trades
+    #: freshness against load rather than correctness.
+    STRATEGY_LAB_TICK_SECONDS: int = Field(default=300, ge=60)
+
     # --- Shared token security evaluation (read-only, HQ-6) ---------------
     # Deliberately NOT gated on REAL_WALLET_EXECUTION_MODE. Token security is
     # a property of the token; tying it to whether a wallet is enabled is the
@@ -656,11 +802,44 @@ class Settings(BaseSettings):
     PHASE2_DEVNET_MAX_TRANSFER_LAMPORTS: int = Field(default=1_000_000, ge=1, le=10_000_000)
     PHASE2_DEVNET_CONFIRM_RETRIES: int = Field(default=6, ge=1, le=20)
     PHASE2_DEVNET_CONFIRM_RETRY_SECONDS: float = Field(default=1.0, ge=0.1, le=10)
+    #: Hosts a wallet RPC may be pointed at. `REAL_WALLET_RPC_URL` is editable
+    #: by anyone with environment access; a genesis check proves which chain an
+    #: endpoint *claims*, not that we agreed to ask that endpoint. Empty
+    #: permits nothing, which is the safe direction for a narrowing list.
+    REAL_WALLET_ALLOWED_RPC_HOSTS: CsvList = Field(
+        default_factory=lambda: ["api.devnet.solana.com"]
+    )
+    #: Programs a real swap transaction may invoke at the top level. Defaults
+    #: live in `real_wallet.tx_inspect`; this widens them only by deliberate
+    #: configuration after an operator has decoded a real order.
+    REAL_WALLET_ALLOWED_PROGRAM_IDS: CsvList = Field(default_factory=list)
+    #: What one real entry spends. **Zero means unconfigured, and unconfigured
+    #: refuses.** The final $100/$50/$25 ladder is the Paper position-size
+    #: evidence work's decision and has not been made; a default here would
+    #: quietly pre-empt it. Must not exceed `REAL_WALLET_MAX_TRADE_USD`.
+    REAL_WALLET_ENTRY_SIZE_USD: Decimal = Field(default=Decimal("0"), ge=0)
     REAL_WALLET_MAX_TRADE_USD: Decimal = Field(default=Decimal("5"), gt=0)
     REAL_WALLET_MAX_OPEN_POSITIONS: int = Field(default=1, ge=1)
     REAL_WALLET_MAX_TOTAL_EXPOSURE_USD: Decimal = Field(default=Decimal("10"), gt=0)
     REAL_WALLET_MAX_DAILY_NOTIONAL_USD: Decimal = Field(default=Decimal("20"), gt=0)
     REAL_WALLET_MAX_DAILY_LOSS_USD: Decimal = Field(default=Decimal("10"), gt=0)
+    #: How many real submissions may happen in one day, both sides counted. A
+    #: notional cap bounds how much a bug can spend; only a count bounds how
+    #: many times it can fire, and fee-only churn is invisible to the former.
+    REAL_WALLET_MAX_DAILY_TRADES: int = Field(default=4, ge=1, le=100)
+    #: The most SOL the canary wallet may ever hold. Compared in integer
+    #: lamports. This is the bound that makes the blast radius a number rather
+    #: than a promise: over-funding is refused instead of traded.
+    REAL_WALLET_MAX_BALANCE_SOL: Decimal = Field(
+        default=Decimal("0.25"), gt=0, le=Decimal("5")
+    )
+    #: Freshness and impact bounds for a real *exit* quote. An exit that cannot
+    #: be priced is reported as an explicit failure state, never retried away.
+    REAL_WALLET_EXIT_MAX_QUOTE_AGE_SECONDS: int = Field(default=15, ge=1, le=300)
+    REAL_WALLET_EXIT_MAX_PRICE_IMPACT_PCT: Decimal = Field(
+        default=Decimal("5"), gt=0, le=Decimal("50")
+    )
+    REAL_WALLET_EXIT_MAX_SLIPPAGE_BPS: int = Field(default=300, ge=1, le=5000)
     REAL_WALLET_MIN_SOL_FEE_RESERVE: Decimal = Field(default=Decimal("0.01"), ge=0)
     REAL_WALLET_AUTOTRADE_COOLDOWN_SECONDS: int = Field(default=300, ge=0)
     REAL_WALLET_MAX_CONSECUTIVE_EXECUTION_FAILURES: int = Field(default=2, ge=1)
@@ -922,6 +1101,11 @@ class Settings(BaseSettings):
         # settings an operator is most likely to want to narrow by hand.
         "REAL_WALLET_SAFETY_SUPPORTED_VENUES",
         "REAL_WALLET_SAFETY_SUPPORTED_TOKEN_2022_EXTENSIONS",
+        # Fourth and fifth occurrence of the same trap, registered here from the
+        # start rather than after a failed boot. Both are allowlists an operator
+        # will set as `a.example.com,b.example.com` in a compose file.
+        "REAL_WALLET_ALLOWED_RPC_HOSTS",
+        "REAL_WALLET_ALLOWED_PROGRAM_IDS",
         # Third occurrence of the trap above, and caught the same way: the
         # recipient list was `CsvList` from the day the report landed but was
         # invisible until it reached a compose file, at which point
@@ -1128,6 +1312,27 @@ class Settings(BaseSettings):
                 )
         if self.SCANNER_RECONNECT_ERROR_ATTEMPTS < 1:
             raise ValueError("SCANNER_RECONNECT_ERROR_ATTEMPTS must be at least 1")
+        # Same argument as the stage thresholds above, applied to the paper
+        # wallet's market-data gate. An inverted pair here is worse than an
+        # unobservable middle state: if CRITICAL sorted below WARNING, a
+        # position could block entries before it was ever merely warned about,
+        # and if UNPRICEABLE sorted below CRITICAL, every stale position would
+        # be excused as a dead pool and the gate would never close at all.
+        if self.PAPER_FEED_DEGRADED_SECONDS > self.PAPER_FEED_STALE_SECONDS:
+            raise ValueError(
+                "PAPER_FEED_DEGRADED_SECONDS must not exceed PAPER_FEED_STALE_SECONDS"
+            )
+        if self.PAPER_POSITION_WARNING_SECONDS > self.PAPER_POSITION_CRITICAL_SECONDS:
+            raise ValueError(
+                "PAPER_POSITION_WARNING_SECONDS must not exceed "
+                "PAPER_POSITION_CRITICAL_SECONDS"
+            )
+        if self.PAPER_POSITION_CRITICAL_SECONDS >= self.PAPER_POSITION_UNPRICEABLE_SECONDS:
+            raise ValueError(
+                "PAPER_POSITION_UNPRICEABLE_SECONDS must exceed "
+                "PAPER_POSITION_CRITICAL_SECONDS, or every stale position would be "
+                "excused as unpriceable and the entry gate could never close"
+            )
         if self.YELLOWSTONE_ENABLED and not self.YELLOWSTONE_SHADOW_MODE:
             raise ValueError("Phase 1 Yellowstone may run only with YELLOWSTONE_SHADOW_MODE=true")
         if self.YELLOWSTONE_ENABLED and (
@@ -1143,6 +1348,31 @@ class Settings(BaseSettings):
             raise ValueError(
                 "REAL_WALLET_EXECUTION_SECRET_FILE is not permitted in application "
                 "processes during the read-only wallet phase"
+            )
+        # A configured entry size above the per-trade cap would be silently
+        # clamped somewhere downstream, and a limit that clamps is a limit
+        # nobody can read off the configuration. Refuse the contradiction
+        # instead of resolving it.
+        if self.REAL_WALLET_ENTRY_SIZE_USD > self.REAL_WALLET_MAX_TRADE_USD:
+            raise ValueError(
+                "REAL_WALLET_ENTRY_SIZE_USD must not exceed REAL_WALLET_MAX_TRADE_USD"
+            )
+        # The wallet RPC must be on its own allowlist. Shipping an endpoint the
+        # execution path will refuse is a deployment that looks configured and
+        # fails at the first signature, which is the worst moment to find out.
+        # Inlined rather than imported from `real_wallet.network`: settings are
+        # constructed at import time and that module reaches back here.
+        wallet_rpc_host = (
+            urlparse(self.REAL_WALLET_RPC_URL).hostname or ""
+        ).lower()
+        allowed_rpc_hosts = {
+            host.strip().lower()
+            for host in self.REAL_WALLET_ALLOWED_RPC_HOSTS
+            if host.strip()
+        }
+        if not wallet_rpc_host or wallet_rpc_host not in allowed_rpc_hosts:
+            raise ValueError(
+                "REAL_WALLET_RPC_URL host must appear in REAL_WALLET_ALLOWED_RPC_HOSTS"
             )
         return self
 

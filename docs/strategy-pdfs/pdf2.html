@@ -1,0 +1,859 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Karthik Paper Wallet — Track Record Moonshot Strategy</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ══════════════════════ PAGE 1 — THE STRATEGY ══════════════════════ -->
+<section class="page">
+  <div class="eyebrow"><span><b>MEMESCOPE</b> &nbsp;·&nbsp; Karthik Paper Wallet</span><span>Verified 2026-08-22</span></div>
+
+  <h1>KARTHIK PAPER WALLET
+    <span class="sub">Track Record Moonshot Strategy</span>
+  </h1>
+
+  <p class="lead mt" style="max-width:154mm">
+    One rule, stated once, and nothing else:
+    <strong>$1,000 of capital. $10 into every new Track Record token. Sell all of it at 1.25&times;.
+    No stop loss. No time exit.</strong> Otherwise hold until the token is genuinely dead.
+  </p>
+
+  <div class="grid4 mt" style="margin-top:6mm">
+    <div class="panel accent stat"><div class="k">Starting capital</div><div class="v c">$1,000.00</div><div class="n">copied onto the wallet row at activation</div></div>
+    <div class="panel accent stat"><div class="k">Trade size</div><div class="v c">$10.00</div><div class="n">fixed — not a maximum, not a fraction</div></div>
+    <div class="panel accent stat"><div class="k">Profit target</div><div class="v c">1.25&times;</div><div class="n">sell 100%. One number, one exit</div></div>
+    <div class="panel risk stat"><div class="k">Stop loss</div><div class="v r">NONE</div><div class="n">a loser may go to $0.00</div></div>
+  </div>
+
+  <div class="grid2 mt" style="margin-top:6mm;gap:5mm">
+    <table class="tight">
+      <tr><th style="width:34mm">Verified in production</th><th>Value</th></tr>
+      <tr><td>Wallet ID</td><td><span class="mono">a0da0193-4fea-4ac1-891b-44abc897dc84</span></td></tr>
+      <tr><td>Name</td><td>Karthik &nbsp;<span class="pill live">Live · trading</span></td></tr>
+      <tr><td>Activated</td><td><span class="mono">2026-08-22 10:57:12.738872Z</span></td></tr>
+      <tr><td>Starting capital</td><td><span class="mono">1000.0000</span></td></tr>
+      <tr><td>Trade size</td><td><span class="mono">10.0000</span></td></tr>
+      <tr><td>Take profit multiple</td><td><span class="mono">1.2500</span></td></tr>
+      <tr><td>Entries paused</td><td><code>KARTHIK_ENTRIES_PAUSED=false</code> — entries are running</td></tr>
+      <tr><td>Review cadence</td><td>One pass per minute, <code>crontab(minute="*")</code></td></tr>
+      <tr><td>Execution</td><td><code>PAPER_EXECUTION_MODEL=jupiter</code> · 50 bps slippage</td></tr>
+    </table>
+
+    <div class="stack" style="gap:3.5mm">
+      <div class="panel">
+        <h3>Source of opportunities</h3>
+        <p style="font-size:8.1pt;margin:0">Every row in <code>radar_tokens</code> — the Track Record — whose
+        <code>first_detected_at</code> is <strong>later than the activation instant</strong>. Nothing before it is ever eligible;
+        nothing else is consulted. No score, rank or category filter is re-applied here, so Karthik's universe
+        cannot drift from what the Track Record page shows.</p>
+      </div>
+      <div class="panel">
+        <h3>Why there is no stop loss</h3>
+        <p style="font-size:8.1pt;margin:0">A stop loss is a rule about <em>price</em>. &ldquo;Goes to zero&rdquo; is a claim about
+        <em>executability</em>. A token at 0.05&times; is held exactly like a token at 1.10&times; is held; only the provider's own report
+        that the pool has no meaningful liquidity left ends the trade.</p>
+      </div>
+      <div class="panel accent">
+        <h3>Why a print is not a fill</h3>
+        <p style="font-size:8.1pt;margin:0">Reaching 1.25&times; is <strong>necessary but never sufficient</strong>. A drained pool can print any
+        number, and a rule that read the print would turn a rug into a winning trade. The position only closes when a router
+        will quote the <em>whole</em> position — and the proceeds are that quote's, never <code>1.25 × cost</code>.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="callout mt" style="margin-top:auto">
+    <b>Every expectation in the brief was checked against production, and all five hold.</b>
+    $1,000 starting capital &check; &nbsp;·&nbsp; $10 trade size &check; &nbsp;·&nbsp; new Track Record tokens only &check; &nbsp;·&nbsp;
+    1.25&times; profit target &check; &nbsp;·&nbsp; no stop loss &check;. What the brief did not anticipate is on page 7:
+    a target hit is <strong>not</strong> guaranteed to be a profit, and two of them so far were not.
+  </div>
+
+  <div class="foot"><span>Karthik Paper Wallet — Strategy &amp; Operation</span><span class="pg">1 / 8</span></div>
+</section>
+
+<!-- ══════════════════════ PAGE 2 — COMPLETE FLOWCHART ══════════════════════ -->
+<section class="page">
+  <div class="eyebrow"><span><b>KARTHIK</b> &nbsp;·&nbsp; Complete Decision Flow</span><span>as implemented, one pass per minute</span></div>
+
+  <h2><span class="n">02</span>Every decision Karthik makes</h2>
+  <p style="max-width:172mm">Corrected against the implementation. Two things the conceptual sketch did not have:
+  <strong>exits are settled before entries</strong> and never consult cash, and a skip is <strong>permanent</strong> — a token Karthik
+  could not afford or could not price is never queued and never bought later.</p>
+
+  <div class="svg-wrap fill mt">
+  <svg viewBox="0 0 760 680" role="img" aria-label="Complete Karthik decision flowchart">
+    <defs>
+      <marker id="k1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#38e1d4"/></marker>
+      <marker id="k2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#ff5f6d"/></marker>
+      <marker id="k3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#f5b13d"/></marker>
+      <style>
+        .b   { fill:#131c2f; stroke:#2c3b5c; stroke-width:1; rx:4; }
+        .bg  { fill:#0e2a2c; stroke:#1c8f89; stroke-width:1.4; rx:4; }
+        .br  { fill:#220f13; stroke:#8c3038; stroke-width:1.2; rx:4; }
+        .ba  { fill:#241c09; stroke:#a3762a; stroke-width:1.2; rx:4; }
+        .d   { fill:#1a1730; stroke:#8b7cf6; stroke-width:1.3; }
+        .h   { fill:#eaf0ff; font-family:Helvetica,Arial,sans-serif; font-size:10.6px; font-weight:700; }
+        .p   { fill:#7f8fb5; font-family:Helvetica,Arial,sans-serif; font-size:8.4px; }
+        .pr  { fill:#ff8a94; font-family:Helvetica,Arial,sans-serif; font-size:8.4px; }
+        .pc  { fill:#38e1d4; font-family:Helvetica,Arial,sans-serif; font-size:8.4px; }
+        .dt  { fill:#eaf0ff; font-family:Helvetica,Arial,sans-serif; font-size:9.8px; font-weight:700; text-anchor:middle; }
+        .ds  { fill:#7f8fb5; font-family:Helvetica,Arial,sans-serif; font-size:8px; text-anchor:middle; }
+        .e   { stroke:#38e1d4; stroke-width:1.4; fill:none; marker-end:url(#k1); }
+        .er  { stroke:#ff5f6d; stroke-width:1.3; fill:none; marker-end:url(#k2); stroke-dasharray:5 3; }
+        .ea  { stroke:#f5b13d; stroke-width:1.3; fill:none; marker-end:url(#k3); }
+        .l   { fill:#b9c6e4; font-family:Helvetica,Arial,sans-serif; font-size:8.2px; font-weight:700; }
+        .ttl { fill:#38e1d4; font-family:Helvetica,Arial,sans-serif; font-size:9px; font-weight:700; letter-spacing:1.2px; }
+      </style>
+    </defs>
+
+    <!-- ══ LEFT COLUMN — STEP 1, EXITS ══ -->
+    <text class="ttl" x="8" y="12">STEP 1 · SETTLE EXITS   (runs first, every pass, never consults cash)</text>
+
+    <rect class="b" x="8" y="22" width="330" height="34"/>
+    <text class="h" x="20" y="43">Every OPEN position, batch ≤ 2,000</text>
+
+    <path class="e" d="M173,56 L173,70"/>
+
+    <path class="d" d="M173,70 L318,104 L173,138 L28,104 Z"/>
+    <text class="dt" x="173" y="100">Provider says pool INACTIVE?</text>
+    <text class="ds" x="173" y="115">the only death test — never a price test</text>
+
+    <path class="er" d="M318,104 L338,104 L338,152 L332,152"/>
+    <text class="l" x="322" y="98" fill="#ff8a94">YES</text>
+    <rect class="br" x="176" y="146" width="156" height="46"/>
+    <text class="h"  x="186" y="164" style="font-size:9.6px">CLOSE · dead_zero</text>
+    <text class="pr" x="186" y="178">value $0.00 — the fact,</text>
+    <text class="pr" x="186" y="189">not an estimate</text>
+
+    <path class="e" d="M173,138 L173,206"/>
+    <text class="l" x="150" y="160" style="text-anchor:end">NO</text>
+
+    <path class="d" d="M173,206 L318,240 L173,274 L28,240 Z"/>
+    <text class="dt" x="173" y="236">Fresh reading? (≤ 900 s)</text>
+    <text class="ds" x="173" y="251">future-dated readings count as fresh</text>
+
+    <path class="ea" d="M28,240 L14,240 L14,300 L20,300" />
+    <text class="l" x="18" y="234" fill="#f5b13d">NO</text>
+
+    <path class="e" d="M173,274 L173,292"/>
+    <text class="l" x="180" y="290">YES</text>
+
+    <path class="d" d="M173,292 L318,326 L173,360 L28,326 Z"/>
+    <text class="dt" x="173" y="322">Price ≥ target?</text>
+    <text class="ds" x="173" y="337">target = 1.25 × the actual entry fill</text>
+
+    <path class="ea" d="M28,326 L14,326 L14,382 L20,382"/>
+    <text class="l" x="18" y="320" fill="#f5b13d">NO</text>
+
+    <path class="e" d="M173,360 L173,378"/>
+    <text class="l" x="180" y="376">YES</text>
+
+    <path class="d" d="M173,378 L318,412 L173,446 L28,412 Z"/>
+    <text class="dt" x="173" y="408">Pool depth ≥ $1?</text>
+    <text class="ds" x="173" y="423">refused before a quote is even requested</text>
+
+    <path class="ea" d="M28,412 L14,412 L14,464 L20,464"/>
+    <text class="l" x="18" y="406" fill="#f5b13d">NO</text>
+
+    <path class="e" d="M173,446 L173,464"/>
+    <text class="l" x="180" y="462">YES</text>
+
+    <path class="d" d="M173,464 L318,498 L173,532 L28,498 Z"/>
+    <text class="dt" x="173" y="494">Router quotes the WHOLE position?</text>
+    <text class="ds" x="173" y="509">no legacy fallback on this path, ever</text>
+
+    <path class="ea" d="M28,498 L14,498 L14,546 L20,546"/>
+    <text class="l" x="18" y="492" fill="#f5b13d">NO</text>
+
+    <path class="e" d="M173,532 L173,550"/>
+    <text class="l" x="180" y="548">YES</text>
+
+    <rect class="bg" x="24" y="550" width="300" height="52"/>
+    <text class="h"  x="36" y="570">SELL 100% · target_1_25x</text>
+    <text class="pc" x="36" y="585">proceeds = the router's own output,</text>
+    <text class="pc" x="36" y="597">never 1.25 × cost — worse quotes count too</text>
+
+    <!-- the four hold reasons, gathered -->
+    <rect class="ba" x="8" y="616" width="330" height="56"/>
+    <text class="h" x="20" y="634" style="font-size:9.6px">HELD — and the reason is counted, never inferred</text>
+    <text class="p" x="20" y="649">no_fresh_market · below_target (covers 1.24× and 0.05× alike)</text>
+    <text class="p" x="20" y="663">target_not_executable · no_executable_quote</text>
+    <path class="ea" d="M14,300 L14,614" opacity="0.55" marker-end="none"/>
+
+    <!-- ══ RIGHT COLUMN — STEP 2, ENTRIES ══ -->
+    <text class="ttl" x="392" y="12">STEP 2 · DECIDE NEW ADMISSIONS   (independent of step 1)</text>
+
+    <rect class="b" x="392" y="22" width="360" height="46"/>
+    <text class="h" x="404" y="42">NEW token appears in TRACK RECORD</text>
+    <text class="p" x="404" y="58">radar_tokens.first_detected_at, batch ≤ 250, oldest first</text>
+
+    <path class="e" d="M572,68 L572,82"/>
+
+    <path class="d" d="M572,82 L742,116 L572,150 L402,116 Z"/>
+    <text class="dt" x="572" y="112">Admitted AFTER activation?</text>
+    <text class="ds" x="572" y="127">&gt; 2026-08-22 10:57:12.738872Z</text>
+
+    <path class="er" d="M402,116 L378,116"/>
+    <text class="l" x="382" y="110" fill="#ff8a94">NO</text>
+    <text class="pr" x="344" y="134">IGNORE</text>
+    <text class="pr" x="344" y="146">forever</text>
+
+    <path class="e" d="M572,150 L572,168"/>
+    <text class="l" x="580" y="165">YES</text>
+
+    <path class="d" d="M572,168 L742,202 L572,236 L402,202 Z"/>
+    <text class="dt" x="572" y="198">Already decided this mint?</text>
+    <text class="ds" x="572" y="213">unique index, not a check-then-insert</text>
+
+    <path class="er" d="M402,202 L378,202"/>
+    <text class="l" x="382" y="196" fill="#ff8a94">YES</text>
+    <text class="pr" x="344" y="220">IGNORE</text>
+
+    <path class="e" d="M572,236 L572,254"/>
+    <text class="l" x="580" y="251">NO</text>
+
+    <path class="d" d="M572,254 L742,288 L572,322 L402,288 Z"/>
+    <text class="dt" x="572" y="284">Cash ≥ $10 ?</text>
+    <text class="ds" x="572" y="299">checked first, so the reason is the true one</text>
+
+    <path class="er" d="M742,288 L756,288 L756,344 L750,344"/>
+    <text class="l" x="746" y="282" fill="#ff8a94">NO</text>
+    <rect class="br" x="560" y="336" width="192" height="44"/>
+    <text class="h"  x="570" y="353" style="font-size:9.4px">SKIP — insufficient cash</text>
+    <text class="pr" x="570" y="367">PERMANENT. Never queued,</text>
+    <text class="pr" x="570" y="377">never bought later.</text>
+
+    <path class="e" d="M572,322 L490,322 L490,394"/>
+    <text class="l" x="496" y="340">YES</text>
+
+    <path class="d" d="M490,394 L660,428 L490,462 L320,428 Z"/>
+    <text class="dt" x="490" y="418">Priceable RIGHT NOW?</text>
+    <text class="ds" x="490" y="433">fresh · price &gt; 0 · not inactive · depth ≥ $1</text>
+
+    <path class="er" d="M660,428 L676,428 L676,484 L670,484"/>
+    <text class="l" x="666" y="422" fill="#ff8a94">NO</text>
+    <rect class="br" x="480" y="476" width="192" height="44"/>
+    <text class="h"  x="490" y="493" style="font-size:9.4px">SKIP — no market</text>
+    <text class="pr" x="490" y="507">Also PERMANENT: an opportunity</text>
+    <text class="pr" x="490" y="517">it could not price is one it missed.</text>
+
+    <path class="e" d="M490,462 L400,462 L400,550"/>
+    <text class="l" x="406" y="482">YES</text>
+
+    <rect class="bg" x="352" y="550" width="300" height="52"/>
+    <text class="h"  x="364" y="570">BUY $10</text>
+    <text class="pc" x="364" y="585">priced first, claimed second — nothing is</text>
+    <text class="pc" x="364" y="597">claimed until the outcome is already known</text>
+
+    <path class="e" d="M502,602 L502,616"/>
+    <path class="e" d="M174,602 L174,614"/>
+
+    <rect class="b" x="352" y="616" width="400" height="56"/>
+    <text class="h" x="364" y="634" style="font-size:9.6px">MONITOR — one pass per minute, forever</text>
+    <text class="p" x="364" y="649">peak_price carried on the row · no time exit · no trailing stop</text>
+    <text class="p" x="364" y="663">a position is only ever ended by the target or by the pool dying</text>
+  </svg>
+  </div>
+
+  <div class="grid3 mt" style="margin-top:auto">
+    <div class="panel">
+      <h3>Duplicate protection</h3>
+      <p style="font-size:7.8pt;margin:0">Two unique indexes, not application checks:
+      <code>uq_karthik_opportunities_wallet_mint</code> and <code>uq_karthik_positions_wallet_mint</code>.
+      A mint gets <strong>one decision and at most one position, ever</strong>. Two concurrent passes cost one wasted HTTP call
+      and cannot cost a duplicate. A per-pass advisory lock (<code>"MEME"/"KRTH"</code>) is a convenience on top, not the guarantee.</p>
+    </div>
+    <div class="panel">
+      <h3>The two prices</h3>
+      <p style="font-size:7.8pt;margin:0">Karthik <em>decides</em> from a stored observation and <em>executes</em> against a live router quote.
+      The observation says <strong>whether</strong>; the quote says <strong>at what</strong>. An entry seen twenty minutes late is bought at the
+      twenty-minutes-late price, because that is the price Karthik could have paid.</p>
+    </div>
+    <div class="panel">
+      <h3>The pause switch</h3>
+      <p style="font-size:7.8pt;margin:0"><code>KARTHIK_ENTRIES_PAUSED</code> is <strong>false</strong> in production — entries are running.
+      When set, it stops <em>entries only</em>: it is read inside step 2, which runs after exits have already settled, so it
+      cannot strand an open book.</p>
+    </div>
+  </div>
+
+  <div class="foot"><span>Karthik Paper Wallet — Strategy &amp; Operation</span><span class="pg">2 / 8</span></div>
+</section>
+
+<!-- ══════════════════════ PAGE 3 — MONEY EXAMPLES ══════════════════════ -->
+<section class="page">
+  <div class="eyebrow"><span><b>KARTHIK</b> &nbsp;·&nbsp; The Money, Trade by Trade</span><span>$10 in, $12.50 out — in theory</span></div>
+
+  <h2><span class="n">03</span>What $10 does, three ways</h2>
+
+  <div class="grid3 mt">
+    <div class="panel accent">
+      <h3 style="color:var(--green)">Trade A · target hit</h3>
+      <table class="tight" style="margin-top:1mm">
+        <tr><td>Invest</td><td>$10.00</td></tr>
+        <tr><td>Reaches</td><td>1.25&times; the entry fill</td></tr>
+        <tr><td>Router quotes</td><td>the whole position</td></tr>
+        <tr><td>Sell</td><td><strong>&asymp; $12.50</strong></td></tr>
+        <tr><td>Gross profit</td><td><strong style="color:var(--green)">&asymp; +$2.50</strong></td></tr>
+      </table>
+      <p style="font-size:7.5pt;margin:2mm 0 0">Nominal. What actually lands is the router's number.</p>
+    </div>
+    <div class="panel">
+      <h3 style="color:var(--amber)">Trade B · not there yet</h3>
+      <table class="tight" style="margin-top:1mm">
+        <tr><td>Invest</td><td>$10.00</td></tr>
+        <tr><td>Reaches</td><td>1.10&times;</td></tr>
+        <tr><td>Target</td><td>not met</td></tr>
+        <tr><td>Action</td><td><strong>keep holding</strong></td></tr>
+        <tr><td>Realised</td><td><strong style="color:var(--amber)">$0.00 — nothing</strong></td></tr>
+      </table>
+      <p style="font-size:7.5pt;margin:2mm 0 0">Held as <code>below_target</code>. No stop, no clock. The $10 stays locked up.</p>
+    </div>
+    <div class="panel risk">
+      <h3 style="color:var(--red)">Trade C · the rug</h3>
+      <table class="tight" style="margin-top:1mm">
+        <tr><td>Invest</td><td>$10.00</td></tr>
+        <tr><td>Pool</td><td>reported <code>inactive</code></td></tr>
+        <tr><td>Sellable</td><td>nothing</td></tr>
+        <tr><td>Value</td><td><strong>$0.00</strong></td></tr>
+        <tr><td>Loss</td><td><strong style="color:var(--red)">−$10.00</strong></td></tr>
+      </table>
+      <p style="font-size:7.5pt;margin:2mm 0 0">The whole stake. There is no rule that can make this smaller.</p>
+    </div>
+  </div>
+
+  <h3 class="mt" style="margin-top:6mm">The break-even arithmetic</h3>
+  <div class="svg-wrap">
+  <svg viewBox="0 0 760 150" role="img" aria-label="Four winners are needed to offset one total loss">
+    <defs><style>
+      .cw { fill:#0e2a2c; stroke:#45d97f; stroke-width:1.4; rx:4; }
+      .cl { fill:#220f13; stroke:#ff5f6d; stroke-width:1.6; rx:4; }
+      .cg { fill:#45d97f; font-family:Helvetica,Arial,sans-serif; font-size:15px; font-weight:700; text-anchor:middle; }
+      .cr { fill:#ff5f6d; font-family:Helvetica,Arial,sans-serif; font-size:24px; font-weight:700; text-anchor:middle; }
+      .cs { fill:#7f8fb5; font-family:Helvetica,Arial,sans-serif; font-size:8.4px; text-anchor:middle; }
+      .eq { fill:#eaf0ff; font-family:Helvetica,Arial,sans-serif; font-size:26px; font-weight:700; text-anchor:middle; }
+    </style></defs>
+
+    <rect class="cw" x="10"  y="30" width="82" height="66"/><text class="cg" x="51"  y="70">+$2.50</text>
+    <rect class="cw" x="102" y="30" width="82" height="66"/><text class="cg" x="143" y="70">+$2.50</text>
+    <rect class="cw" x="194" y="30" width="82" height="66"/><text class="cg" x="235" y="70">+$2.50</text>
+    <rect class="cw" x="286" y="30" width="82" height="66"/><text class="cg" x="327" y="70">+$2.50</text>
+    <text class="cs" x="189" y="116">FOUR clean +25% winners  ·  four separate $10 trades that each reached target</text>
+
+    <text class="eq" x="412" y="72">=</text>
+
+    <rect class="cl" x="452" y="30" width="180" height="66"/>
+    <text class="cr" x="542" y="74">−$10.00</text>
+    <text class="cs" x="542" y="116">ONE token that went to zero</text>
+
+    <text class="cs" x="700" y="52" style="font-size:9.4px;fill:#eaf0ff;font-weight:700">…and that is</text>
+    <text class="cs" x="700" y="68" style="font-size:9.4px;fill:#eaf0ff;font-weight:700">only to get</text>
+    <text class="cs" x="700" y="84" style="font-size:9.4px;fill:#eaf0ff;font-weight:700">back to flat.</text>
+    <text class="cs" x="700" y="104" style="font-size:7.8px">Before any cost.</text>
+  </svg>
+  </div>
+
+  <div class="grid2 mt" style="margin-top:4mm;gap:5mm">
+    <div class="panel">
+      <h3>Required win rate, from the nominal rule</h3>
+      <p style="font-size:8.1pt">If a winner returns $2.50 and a total loss costs $10, the break-even hit rate <em>p</em> solves
+      <code>2.50p = 10(1−p)</code>:</p>
+      <p style="font-size:14pt;font-weight:700;color:var(--amber);margin:1mm 0 2mm;text-align:center">p = 80%</p>
+      <p style="font-size:8.1pt;margin:0">Four out of every five positions must reach 1.25&times; just to break even — and that assumes
+      every non-winner is a <em>total</em> loss and every winner returns exactly the nominal amount. Neither is true.</p>
+    </div>
+    <div class="panel accent">
+      <h3>Required win rate, from Karthik's own fills</h3>
+      <p style="font-size:8.1pt">Production's 61 target hits returned <strong>$14.016 on average</strong> — above the nominal $12.50, because a
+      few sold well past the target. Using the real average, break-even is <code>10 / 14.016</code>:</p>
+      <p style="font-size:14pt;font-weight:700;color:var(--cyan);margin:1mm 0 2mm;text-align:center">p = 71.3%</p>
+      <p style="font-size:8.1pt;margin:0">But the average is carried by one $68.73 outlier. At the <strong>median</strong> of $12.748 the requirement is
+      <strong>78.4%</strong>. <strong style="color:var(--amber)">Karthik's actual hit rate is 61 / 91 = 67.0%</strong> — short of every one of these thresholds,
+      which is why realised P&amp;L is negative.</p>
+    </div>
+  </div>
+
+  <div class="callout mt" style="margin-top:auto">
+    <b>The execution-cost model, measured rather than assumed.</b>
+    Karthik quotes every fill through Jupiter (<code>PAPER_EXECUTION_MODEL=jupiter</code>, 50 bps slippage tolerance); all 132 entries
+    were priced by a real route. Across those entries the <strong>average entry price impact was 10.18%</strong> and the average exit impact
+    <strong>0.87%</strong>; the platform fee recorded was <strong>$0.00</strong>. Costs are taken out of the <em>tokens received</em>, never recorded beside
+    a full-size fill — cash always moves by exactly $10. Where no route is available the entry falls back to a deterministic model
+    charging <strong>30 bps per side</strong> plus exact constant-product impact; if that exceeds $10 there is no entry at all.
+    <strong>There is no fallback on the exit path, deliberately</strong> — the worst case there would be a rug booked as a 25% win.
+  </div>
+
+  <div class="foot"><span>Karthik Paper Wallet — Strategy &amp; Operation</span><span class="pg">3 / 8</span></div>
+</section>
+
+<!-- ══════════════════════ PAGE 4 — PORTFOLIO ══════════════════════ -->
+<section class="page">
+  <div class="eyebrow"><span><b>KARTHIK</b> &nbsp;·&nbsp; Portfolio Shape</span><span>$1,000 ÷ $10 = 100 slots</span></div>
+
+  <h2><span class="n">04</span>How $1,000 spreads across $10 positions</h2>
+  <p style="max-width:172mm">Every position is exactly $10, so the capital picture is simple arithmetic: the wallet has
+  <strong>100 slots</strong>, and each one is 1% of the book. Cash returns only when a position hits 1.25&times; — a dead token
+  returns nothing and frees nothing, because it is closed at $0.00.</p>
+
+  <div class="svg-wrap mt" style="margin-top:5mm">
+  <svg viewBox="0 0 760 210" role="img" aria-label="Capital allocation at 10, 25, 50 and 100 open positions">
+    <defs><style>
+      .tr { fill:#131c2f; stroke:#2c3b5c; stroke-width:1; rx:3; }
+      .fl { fill:#1c8f89; rx:3; }
+      .fh { fill:#38e1d4; rx:3; }
+      .fw { fill:#f5b13d; rx:3; }
+      .tx { fill:#eaf0ff; font-family:Helvetica,Arial,sans-serif; font-size:10.4px; font-weight:700; }
+      .tn { fill:#7f8fb5; font-family:Helvetica,Arial,sans-serif; font-size:8.6px; }
+      .tv { fill:#eaf0ff; font-family:Helvetica,Arial,sans-serif; font-size:10.4px; font-weight:700; text-anchor:end; }
+      .tc { fill:#38e1d4; font-family:Helvetica,Arial,sans-serif; font-size:8.6px; text-anchor:end; }
+    </style></defs>
+
+    <text class="tn" x="126" y="12">CAPITAL COMMITTED</text>
+    <text class="tn" x="752" y="12" style="text-anchor:end">CASH FREE FOR THE NEXT OPPORTUNITY</text>
+
+    <text class="tx" x="8"  y="36">10 open</text>
+    <rect class="tr" x="126" y="22" width="500" height="20"/>
+    <rect class="fl" x="126" y="22" width="50"  height="20"/>
+    <text class="tv" x="740" y="36">$100</text><text class="tc" x="740" y="48" style="font-size:7.8px">$900 free</text>
+
+    <text class="tx" x="8"  y="76">25 open</text>
+    <rect class="tr" x="126" y="62" width="500" height="20"/>
+    <rect class="fl" x="126" y="62" width="125" height="20"/>
+    <text class="tv" x="740" y="76">$250</text><text class="tc" x="740" y="88" style="font-size:7.8px">$750 free</text>
+
+    <text class="tx" x="8"  y="116">50 open</text>
+    <rect class="tr" x="126" y="102" width="500" height="20"/>
+    <rect class="fh" x="126" y="102" width="250" height="20"/>
+    <text class="tv" x="740" y="116">$500</text><text class="tc" x="740" y="128" style="font-size:7.8px">$500 free</text>
+
+    <text class="tx" x="8"  y="156">100 open</text>
+    <rect class="tr" x="126" y="142" width="500" height="20"/>
+    <rect class="fw" x="126" y="142" width="500" height="20"/>
+    <text class="tv" x="740" y="156">$1,000</text>
+    <text class="tc" x="740" y="168" style="font-size:7.8px;fill:#f5b13d">$0 — fully saturated</text>
+
+    <text class="tx" x="8"  y="196" style="fill:#38e1d4">ACTUAL</text>
+    <text class="tn" x="8"  y="207" style="font-size:7.6px">at 14:55 UTC</text>
+    <rect class="tr" x="126" y="182" width="500" height="20"/>
+    <rect class="fh" x="126" y="182" width="205" height="20"/>
+    <text class="tv" x="740" y="196">41 open · $410</text>
+    <text class="tc" x="740" y="208" style="font-size:7.8px">$534.99 cash</text>
+  </svg>
+  </div>
+
+  <div class="callout risk mt" style="margin-top:4mm">
+    <b>Cash is not $1,000 − allocated.</b> It is <code>starting capital − everything ever committed + everything ever returned</code>.
+    Karthik has committed <strong>$1,320</strong> across 132 entries and had <strong>$854.99</strong> returned, so cash is
+    <strong>$534.99</strong>, not $590. The $55.01 difference is realised loss — it is gone, and it never comes back into the slot count.
+  </div>
+
+  <div class="grid2 mt" style="margin-top:5mm;gap:5mm">
+    <div class="panel accent">
+      <h3>What $10 sizing genuinely buys</h3>
+      <ul style="font-size:8.1pt">
+        <li>A single rug costs <strong>1% of the book</strong>, not 10%. At $100 per trade the same rug would cost ten times as much.</li>
+        <li><strong>Far more opportunities captured.</strong> Karthik decided <strong>132 of 132</strong> admissions since activation — a 100% capture rate —
+        precisely because it could still afford every one of them.</li>
+        <li>The <strong>sample size</strong> needed to judge the strategy arrives far sooner. 91 closed trades in four hours is a measurement;
+        nine would have been an anecdote.</li>
+      </ul>
+    </div>
+    <div class="panel risk">
+      <h3 style="color:var(--red)">What it does <em>not</em> buy</h3>
+      <ul style="font-size:8.1pt">
+        <li class="no"><strong>It does not create positive expectancy.</strong> Smaller positions scale every outcome down together —
+        the winners shrink by exactly the same factor as the losses. The <em>ratio</em> is untouched.</li>
+        <li class="no">The break-even hit rate is <strong>identical at $10 and at $100</strong>: 80% nominally. Position size cannot move it;
+        only the win rate or the size of the wins can.</li>
+        <li class="no">More positions means <strong>more exposure to the same risk</strong>, not less. 100 open $10 positions is still
+        $1,000 exposed to the same market.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="grid4 mt" style="margin-top:auto">
+    <div class="panel stat"><div class="k">Admissions since activation</div><div class="v c">132</div><div class="n">Track Record rows after 10:57 UTC</div></div>
+    <div class="panel stat"><div class="k">Decided</div><div class="v">132</div><div class="n">100% capture · all <code>entered</code></div></div>
+    <div class="panel stat"><div class="k">Skipped for cash</div><div class="v g">0</div><div class="n">has not yet run out</div></div>
+    <div class="panel stat"><div class="k">Skipped, no market</div><div class="v g">0</div><div class="n">every admission was priceable</div></div>
+  </div>
+
+  <div class="foot"><span>Karthik Paper Wallet — Strategy &amp; Operation</span><span class="pg">4 / 8</span></div>
+</section>
+
+<!-- ══════════════════════ PAGE 5 — AGENT KARTHIK ══════════════════════ -->
+<section class="page">
+  <div class="eyebrow"><span><b>KARTHIK</b> &nbsp;·&nbsp; The Operator</span><span>Agent Karthik — status as deployed</span></div>
+
+  <h2><span class="n">05</span>Agent Karthik, and what it is allowed to do</h2>
+
+  <div class="callout" style="margin-bottom:4mm">
+    <b>Agent Karthik went live at 14:32 UTC, during this verification.</b> Production was rebuilt at commit <code>4b7f89e</code> and
+    <code>app/karthik_ops</code> is now in the running image, serving <code>GET /api/v1/karthik-ops</code>. It bound to the wallet
+    automatically — the binding is the existence of the <code>karthik_wallets</code> table, not a flag.
+    <strong>Its autonomy variable is unset, so it runs in <code>OBSERVE_ONLY</code>: it watches, records, and executes no repair.</strong>
+  </div>
+
+  <div class="grid2" style="gap:5mm">
+    <div class="svg-wrap">
+    <svg viewBox="0 0 350 330" role="img" aria-label="Agent Karthik relationship to the wallet">
+      <defs>
+        <marker id="m5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#38e1d4"/></marker>
+        <marker id="m5r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#ff5f6d"/></marker>
+        <style>
+          .n  { fill:#131c2f; stroke:#2c3b5c; stroke-width:1; rx:4; }
+          .ng { fill:#0e2a2c; stroke:#1c8f89; stroke-width:1.3; rx:4; }
+          .no { fill:#131c2f; stroke:#5c4fd0; stroke-width:1.2; stroke-dasharray:5 3; rx:4; }
+          .nr { fill:#220f13; stroke:#8c3038; stroke-width:1.2; rx:4; }
+          .na { fill:#241c09; stroke:#a3762a; stroke-width:1.2; rx:4; }
+          .t  { fill:#eaf0ff; font-family:Helvetica,Arial,sans-serif; font-size:9.6px; font-weight:700; text-anchor:middle; }
+          .s  { fill:#7f8fb5; font-family:Helvetica,Arial,sans-serif; font-size:7.6px; text-anchor:middle; }
+          .sr { fill:#ff8a94; font-family:Helvetica,Arial,sans-serif; font-size:7.6px; text-anchor:middle; }
+          .e  { stroke:#38e1d4; stroke-width:1.3; fill:none; marker-end:url(#m5); }
+          .er { stroke:#ff5f6d; stroke-width:1.3; fill:none; marker-end:url(#m5r); stroke-dasharray:5 3; }
+          .d  { fill:#1a1730; stroke:#8b7cf6; stroke-width:1.3; }
+        </style>
+      </defs>
+
+      <rect class="ng" x="95" y="2" width="160" height="30"/>
+      <text class="t" x="175" y="16">TRACK RECORD</text>
+      <text class="s" x="175" y="27">the opportunity feed</text>
+      <path class="e" d="M175,32 L175,46"/>
+
+      <rect class="ng" x="95" y="46" width="160" height="30"/>
+      <text class="t" x="175" y="60">KARTHIK WALLET</text>
+      <text class="s" x="175" y="71">live · trading · owns its rules</text>
+      <path class="e" d="M175,76 L175,90"/>
+
+      <rect class="na" x="60" y="90" width="230" height="34"/>
+      <text class="t" x="175" y="106">AGENT KARTHIK · karthik_ops</text>
+      <text class="s" x="175" y="118">DEPLOYED · OBSERVE-ONLY · reads only</text>
+
+      <path class="e" d="M120,124 L80,150"/>
+      <path class="e" d="M175,124 L175,150"/>
+      <path class="e" d="M230,124 L270,150"/>
+
+      <rect class="n" x="16" y="150" width="112" height="30"/>
+      <text class="t" x="72" y="165">MONITOR</text><text class="s" x="72" y="176">5 read-only screens</text>
+
+      <rect class="n" x="136" y="150" width="78" height="30"/>
+      <text class="t" x="175" y="165">AUDIT</text><text class="s" x="175" y="176">integrity score</text>
+
+      <rect class="n" x="222" y="150" width="112" height="30"/>
+      <text class="t" x="278" y="165">REPORT</text><text class="s" x="278" y="176">read-only routes</text>
+
+      <path class="e" d="M175,180 L175,196"/>
+
+      <rect class="n" x="80" y="196" width="190" height="28"/>
+      <text class="t" x="175" y="214">FAULT DETECTED</text>
+
+      <path class="e" d="M175,224 L175,238"/>
+
+      <path class="d" d="M175,238 L285,262 L175,286 L65,262 Z"/>
+      <text class="t" x="175" y="259">On the allowlist</text>
+      <text class="t" x="175" y="270" style="font-size:8.4px;font-weight:400;fill:#7f8fb5">AND autonomy armed?</text>
+
+      <path class="er" d="M65,262 L36,262 L36,296 L48,296"/>
+      <rect class="na" x="6" y="290" width="150" height="36"/>
+      <text class="t" x="81" y="306">OWNER ATTENTION</text>
+      <text class="s" x="81" y="318">the production path today</text>
+
+      <rect class="nr" x="196" y="290" width="150" height="36"/>
+      <text class="t" x="271" y="306" fill="#7f8fb5">SAFE AUTO-REPAIR</text>
+      <text class="sr" x="271" y="318">not armed — autonomy unset</text>
+      <path class="er" d="M285,262 L316,262 L316,286" opacity="0.4"/>
+    </svg>
+    </div>
+
+    <div class="stack" style="gap:3.5mm">
+      <div class="panel warn">
+        <h3 style="color:var(--amber)">Autonomy mode: OBSERVE-ONLY</h3>
+        <p style="font-size:8.1pt;margin-bottom:1.5mm">Two modes exist in the code: <code>OBSERVE_ONLY</code> and <code>SAFE_AUTOREPAIR</code>.
+        Anything unrecognised reads as <code>OBSERVE_ONLY</code>, and that is the production default.</p>
+        <p style="font-size:8.1pt;margin:0"><strong>No autonomous repairs are currently executed.</strong> The arming variable is unset,
+        so a fault that is on the allowlist is still <strong>refused</strong> under <code>OBSERVE_ONLY</code> and routed to the
+        owner-approval queue instead. Observe-only is not a degraded mode — it is the same system with its hands behind its back.</p>
+      </div>
+      <div class="panel">
+        <h3>What it is forbidden to touch</h3>
+        <p style="font-size:8.1pt;margin:0">Karthik is an <em>operational</em> layer. It does not decide what the wallet trades, when it enters,
+        or when it exits — those are the wallet's own rules, and every one of them is on the <code>FORBIDDEN_STRATEGY_IDS</code>
+        list it may not touch. Its API router carries <strong>no POST, PUT, PATCH or DELETE</strong>.</p>
+      </div>
+      <div class="panel">
+        <h3>Correct while unbound</h3>
+        <p style="font-size:8.1pt;margin:0">The module was written before the wallet existed, so every surface reports
+        <strong>NOT DESIGNATED</strong> rather than zero when unbound, and the integrity score is <code>None</code> rather than 100 —
+        no report claims a figure it could not read. It is <strong>now bound</strong>: the wallet table exists, so <code>resolve()</code> finds the
+        singleton row. <code>KARTHIK_WALLET_STRATEGY_ID</code> is an override for naming a different wallet and is <strong>not set</strong>.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel mt" style="margin-top:auto">
+    <h3>What <em>is</em> deployed and watching, today</h3>
+    <p style="font-size:8.1pt;margin:0"><code>hq_ops</code> — the platform-wide HQ layer — also runs.
+    It probes, classifies conditions, opens idempotent incidents and writes an audit row before it would act. Its own arming variable
+    <code>HQ_AUTONOMY_ENABLED</code> is unset, so it too defaults to <strong>false</strong> and executes no repair.
+    Record to date: <strong>7 incidents, all resolved, none open</strong>. HQ is not Karthik-specific — it watches the platform, and it
+    does not know the Karthik wallet's rules.</p>
+  </div>
+
+  <div class="foot"><span>Karthik Paper Wallet — Strategy &amp; Operation</span><span class="pg">5 / 8</span></div>
+</section>
+
+<!-- ══════════════════════ PAGE 6 — THE DASHBOARD ══════════════════════ -->
+<section class="page">
+  <div class="eyebrow"><span><b>KARTHIK</b> &nbsp;·&nbsp; What Is Monitored</span><span>snapshot 2026-08-22 14:55 UTC</span></div>
+
+  <h2><span class="n">06</span>The wallet, as measured</h2>
+  <p style="max-width:172mm">Read from the <code>karthik_*</code> tables and the production environment.
+  <code>karthik_ops</code> went live at 14:32 UTC and now serves these same figures read-only; where a number is not established it reports
+  <strong>NOT DESIGNATED</strong>, never zero.</p>
+
+  <h3 class="mt" style="margin-top:5mm">Capital</h3>
+  <div class="grid4">
+    <div class="panel accent stat"><div class="k">Wallet equity</div><div class="v c">$944.99</div><div class="n">cash + open book at cost</div></div>
+    <div class="panel stat"><div class="k">Available cash</div><div class="v">$534.99</div><div class="n">1,000 − 1,320 + 854.99</div></div>
+    <div class="panel stat"><div class="k">Capital allocated</div><div class="v">$410.00</div><div class="n">41 slots of 100</div></div>
+    <div class="panel stat"><div class="k">Realised P&amp;L</div><div class="v r">−$55.01</div><div class="n">−5.50% of starting capital</div></div>
+  </div>
+
+  <h3 class="mt" style="margin-top:4mm">Positions</h3>
+  <div class="grid4">
+    <div class="panel stat"><div class="k">Open positions</div><div class="v c">41</div><div class="n">no time limit on any of them</div></div>
+    <div class="panel stat"><div class="k">Closed positions</div><div class="v">91</div><div class="n">in the first 3 h 58 m</div></div>
+    <div class="panel stat"><div class="k">Target hits</div><div class="v g">61</div><div class="n">exit_reason target_1_25x</div></div>
+    <div class="panel stat"><div class="k">Dead / zero</div><div class="v r">30</div><div class="n">exit_reason dead_zero · $0.00 each</div></div>
+  </div>
+
+  <h3 class="mt" style="margin-top:4mm">Rates</h3>
+  <div class="grid4">
+    <div class="panel stat"><div class="k">Target hit rate</div><div class="v a">67.0%</div><div class="n">61 of 91 closed</div></div>
+    <div class="panel stat"><div class="k">Rug / dead rate</div><div class="v r">33.0%</div><div class="n">30 of 91 closed</div></div>
+    <div class="panel stat"><div class="k">Break-even needed</div><div class="v a">71–80%</div><div class="n">at realised avg → nominal</div></div>
+    <div class="panel stat"><div class="k">Opportunity capture</div><div class="v g">100%</div><div class="n">132 of 132 admissions decided</div></div>
+  </div>
+
+  <h3 class="mt" style="margin-top:4mm">Pipeline &amp; integrity</h3>
+  <div class="grid2" style="gap:4mm">
+    <table class="tight">
+      <tr><th style="width:44mm">Signal</th><th>Reading</th></tr>
+      <tr><td>Track Record → entry delay</td><td>mean <strong>29.5 s</strong> · min 0.7 s · max 119.6 s</td></tr>
+      <tr><td>Quote freshness rule</td><td>observations older than <strong>900 s</strong> are refused</td></tr>
+      <tr><td>Market feed lag</td><td>newest snapshot <strong>30 s</strong> old at verification</td></tr>
+      <tr><td>Execution confidence</td><td><strong>132 of 132</strong> entries via <code>jupiter_route</code> — no fallbacks used</td></tr>
+      <tr><td>Worker health</td><td>worker, scheduler, scanner all <strong>healthy</strong>; enrichment ×2 up</td></tr>
+      <tr><td>Review cadence</td><td>every minute, own lock — never blocked by the other wallet</td></tr>
+    </table>
+
+    <table class="tight">
+      <tr><th style="width:44mm">Signal</th><th>Reading</th></tr>
+      <tr><td>Experiment integrity</td><td>the activation instant is permanent by construction — a unique index makes a second wallet impossible</td></tr>
+      <tr><td>Duplicate protection</td><td>0 duplicates. 132 admissions → 132 decisions → 132 positions</td></tr>
+      <tr><td>Incidents (HQ, platform-wide)</td><td><strong>7 on record, all resolved, 0 open</strong></td></tr>
+      <tr><td>Owner attention queue</td><td>Served since 14:32 UTC. Empty — nothing has been escalated</td></tr>
+      <tr><td>Integrity score</td><td>Served since 14:32 UTC. Reports <code>None</code> rather than 100 where a check cannot be established</td></tr>
+      <tr><td>Accounting invariant</td><td>cash + open value ≈ equity — holds at this snapshot</td></tr>
+    </table>
+  </div>
+
+  <div class="callout mt" style="margin-top:auto">
+    <b>Equity is quoted at cost, and that is a deliberate limitation.</b> The open book is valued at $410 — its cost — because
+    an unpriced position is counted at cost rather than at zero: counting it at zero would report a loss nobody observed.
+    <strong>The true mark-to-market value of the 41 open positions is not stated here</strong>, and on this market it could be materially
+    lower. Only the <strong>realised</strong> figure, −$55.01, is a settled fact.
+  </div>
+
+  <div class="foot"><span>Karthik Paper Wallet — Strategy &amp; Operation</span><span class="pg">6 / 8</span></div>
+</section>
+
+<!-- ══════════════════════ PAGE 7 — RISKS ══════════════════════ -->
+<section class="page">
+  <div class="eyebrow"><span><b>KARTHIK</b> &nbsp;·&nbsp; Strategy Risks</span><span>candid, with production evidence</span></div>
+
+  <h2><span class="n">07</span>The arithmetic that decides this strategy</h2>
+
+  <div class="panel risk">
+    <div class="svg-wrap">
+    <svg viewBox="0 0 720 120" role="img" aria-label="Four winners equal one total loss">
+      <defs><style>
+        .g  { fill:#0e2a2c; stroke:#45d97f; stroke-width:1.4; rx:4; }
+        .r  { fill:#2a0f14; stroke:#ff5f6d; stroke-width:2; rx:4; }
+        .gt { fill:#45d97f; font-family:Helvetica,Arial,sans-serif; font-size:17px; font-weight:700; text-anchor:middle; }
+        .rt { fill:#ff5f6d; font-family:Helvetica,Arial,sans-serif; font-size:30px; font-weight:700; text-anchor:middle; }
+        .st { fill:#b9c6e4; font-family:Helvetica,Arial,sans-serif; font-size:9.4px; text-anchor:middle; }
+        .op { fill:#eaf0ff; font-family:Helvetica,Arial,sans-serif; font-size:30px; font-weight:700; text-anchor:middle; }
+      </style></defs>
+      <rect class="g" x="6"   y="18" width="80" height="60"/><text class="gt" x="46"  y="55">+$2.50</text>
+      <text class="op" x="102" y="58">+</text>
+      <rect class="g" x="118" y="18" width="80" height="60"/><text class="gt" x="158" y="55">+$2.50</text>
+      <text class="op" x="214" y="58">+</text>
+      <rect class="g" x="230" y="18" width="80" height="60"/><text class="gt" x="270" y="55">+$2.50</text>
+      <text class="op" x="326" y="58">+</text>
+      <rect class="g" x="342" y="18" width="80" height="60"/><text class="gt" x="382" y="55">+$2.50</text>
+      <text class="op" x="446" y="58">=</text>
+      <rect class="r" x="480" y="10" width="230" height="76"/><text class="rt" x="595" y="60">−$10.00</text>
+      <text class="st" x="214" y="102">FOUR clean +25% winners</text>
+      <text class="st" x="595" y="102">ONE rug</text>
+      <text class="st" x="214" y="114" style="font-size:8px;fill:#7f8fb5">…and the four only get you back to flat</text>
+      <text class="st" x="595" y="114" style="font-size:8px;fill:#7f8fb5">a single position, gone entirely</text>
+    </svg>
+    </div>
+  </div>
+
+  <div class="grid3 mt" style="margin-top:4mm">
+    <div class="panel risk">
+      <h3 style="color:var(--red)">A target hit is not a profit</h3>
+      <p style="font-size:7.9pt;margin:0">The strategy's most important assumption is false in production. Proceeds are the router's number,
+      not <code>1.25 × cost</code>. Of <strong>61 target hits: 18 returned less than the nominal $12.50, and 2 returned less than the $10 that went in</strong> —
+      the smallest was <strong>$5.08</strong>, a 49% loss on a trade the ledger calls a win. This is the guard working as designed, and it means
+      &ldquo;hit rate&rdquo; is not the same as &ldquo;win rate&rdquo;.</p>
+    </div>
+    <div class="panel risk">
+      <h3 style="color:var(--red)">The average hides the distribution</h3>
+      <p style="font-size:7.9pt;margin:0">Target hits averaged <strong>$14.016</strong> — but the median was <strong>$12.748</strong> and one outlier returned
+      <strong>$68.73</strong>. Strip that single trade and the picture changes materially. <strong>A handful of outliers is currently carrying the
+      strategy's entire positive side</strong>, which is exactly the shape that does not survive a small sample.</p>
+    </div>
+    <div class="panel warn">
+      <h3 style="color:var(--amber)">Capital tied up indefinitely</h3>
+      <p style="font-size:7.9pt;margin:0">There is no stop and no time exit. A position at 0.05&times; that the provider has not marked inactive is
+      held <strong>forever</strong>, and its $10 is unavailable for anything else. Its hold reason is recorded as <code>below_target</code> — the same
+      reason as a position at 1.24&times;. The wallet cannot tell you which of its 41 open slots are alive.</p>
+    </div>
+  </div>
+
+  <div class="grid2 mt" style="margin-top:4mm;gap:5mm">
+    <table class="tight">
+      <tr><th style="width:34mm">Risk</th><th>What production shows</th></tr>
+      <tr><td>Fees &amp; slippage</td><td>Average <strong>entry price impact 10.18%</strong> — charged into the entry price, so the 1.25&times; target is measured from an already-degraded fill.</td></tr>
+      <tr><td>Never reaches 1.25&times;</td><td>Unbounded. 41 positions are open with no deadline; any of them may simply never qualify.</td></tr>
+      <tr><td>Dead tokens</td><td><strong>30 of 91</strong> closed trades returned exactly $0.00 — a 33.0% total-loss rate against a strategy needing 71–80% winners.</td></tr>
+      <tr><td>Market-data gaps</td><td>Readings older than 900 s are refused. During a gap nothing can hit its target, but a token can still die — the two directions are not symmetric.</td></tr>
+      <tr><td>Opportunity cost</td><td>Skips are <strong>permanent</strong> — never revisited when cash frees up. Deliberate, so the capture rate means what it says, but a real cost.</td></tr>
+      <tr><td>Duplicate protection</td><td>Working: 132 → 132 → 132, zero duplicates. Also a ceiling — a token that later becomes a better opportunity can never be re-entered.</td></tr>
+      <tr><td>Track Record quality</td><td>Karthik inherits the Radar's admission standard <em>wholesale</em> and re-applies no filter, so its results are as good as admission is — and no better.</td></tr>
+    </table>
+
+    <div class="stack" style="gap:3.5mm">
+      <div class="panel risk">
+        <h3 style="color:var(--red)">Where the strategy stands right now</h3>
+        <table class="tight" style="margin-top:1mm">
+          <tr><td>Hit rate achieved</td><td><strong style="color:var(--amber)">67.0%</strong></td></tr>
+          <tr><td>Hit rate needed (realised avg)</td><td><strong>71.3%</strong></td></tr>
+          <tr><td>Hit rate needed (median)</td><td><strong>78.4%</strong></td></tr>
+          <tr><td>Hit rate needed (nominal)</td><td><strong>80.0%</strong></td></tr>
+          <tr><td>Realised P&amp;L</td><td><strong style="color:var(--red)">−$55.01</strong></td></tr>
+        </table>
+        <p style="font-size:7.7pt;margin:2mm 0 0">Below every threshold, and the realised figure agrees. <strong>Four hours is not a verdict</strong> —
+        but it is not encouraging either, and it should not be read as one.</p>
+      </div>
+      <div class="callout risk" style="font-size:7.9pt">
+        <b>The asymmetry, stated plainly.</b> The upside of any single trade is capped at +25% by the rule itself.
+        The downside is capped at −100% by reality. A strategy that <em>caps its winners and not its losers</em> needs a
+        very high hit rate to survive, and needs it consistently. That is the whole bet.
+      </div>
+    </div>
+  </div>
+
+  <div class="foot"><span>Karthik Paper Wallet — Strategy &amp; Operation</span><span class="pg">7 / 8</span></div>
+</section>
+
+<!-- ══════════════════════ PAGE 8 — WHAT SUCCESS LOOKS LIKE ══════════════════════ -->
+<section class="page">
+  <div class="eyebrow"><span><b>KARTHIK</b> &nbsp;·&nbsp; What Success Looks Like</span><span>the measurement contract</span></div>
+
+  <h2><span class="n">08</span>What must be measured before calling this a success</h2>
+
+  <div class="callout risk" style="margin-bottom:4mm">
+    <b>Rising equity is not evidence.</b> With no stop loss and no time exit, open positions are marked <em>at cost</em> until they
+    resolve — so equity can sit flat or drift upward while the book quietly fills with tokens that will settle at $0.00.
+    <strong>The only settled number is realised P&amp;L</strong>, and it is currently <strong>−$53.51</strong>. Judge on the list below, on a
+    sample large enough to mean something, and not before.
+  </div>
+
+  <table class="tight">
+    <tr><th style="width:38mm">Measure</th><th style="width:30mm">Now</th><th>What it has to establish</th></tr>
+    <tr><td>Target hit rate</td><td><strong style="color:var(--amber)">66.3%</strong></td><td>Sustained above the break-even threshold, not merely above it once</td></tr>
+    <tr><td>Dead / rug rate</td><td><strong style="color:var(--red)">33.8%</strong></td><td>Whether it is stable, or a function of the market regime it was measured in</td></tr>
+    <tr><td>Expectancy per trade</td><td><strong style="color:var(--red)">−$0.67</strong></td><td>Positive, with a confidence interval that excludes zero</td></tr>
+    <tr><td>Profit factor</td><td><strong>0.80</strong></td><td>gross win $216.49 ÷ gross loss $270.00 — must exceed 1.0</td></tr>
+    <tr><td>Max drawdown</td><td>not yet meaningful</td><td>Peak-to-trough on realised equity, across a full cycle</td></tr>
+    <tr><td>Time to 1.25&times;</td><td>not yet reported</td><td>How fast winners resolve — this is what sets capital turnover</td></tr>
+    <tr><td>Time capital stays locked</td><td>51 open, no deadline</td><td>How long non-winners hold a slot before dying or qualifying</td></tr>
+    <tr><td>Opportunity capture</td><td><strong style="color:var(--green)">100%</strong></td><td>Whether it survives saturation — untested, because cash has not yet run out</td></tr>
+    <tr><td>Avg concurrent positions</td><td>51 and climbing</td><td>The steady state, once entries and exits balance</td></tr>
+    <tr><td>Fees &amp; slippage</td><td>entry impact 10.24%</td><td>Whether impact scales with size, and how much of the edge it eats</td></tr>
+  </table>
+
+  <div class="grid2 mt" style="margin-top:4mm;gap:5mm">
+    <div class="panel">
+      <h3>Cuts that have to be run separately</h3>
+      <ul style="font-size:7.7pt">
+        <li><strong>Token age at entry</strong> — <code>detected_at</code> vs <code>track_record_at</code>, both stored, <code>NULL</code> when unknown</li>
+        <li><strong>Entry liquidity</strong> — <code>entry_liquidity_usd</code>; the thin-pool cohort is where impact does its damage</li>
+        <li><strong>Entry market cap</strong> — <code>entry_market_cap</code></li>
+        <li><strong>Track Record score at admission</strong> — does a better admission actually trade better?</li>
+        <li><strong>Daily / regime performance</strong> — a rising market can carry a strategy with no edge</li>
+      </ul>
+    </div>
+    <div class="panel accent">
+      <h3>The honest threshold</h3>
+      <p style="font-size:7.9pt">This strategy is a success when <strong>expectancy per trade is positive and profit factor exceeds 1.0 over a
+      sample large enough that a handful of outliers cannot explain it</strong> — measured on <em>realised</em> trades, across more than one market
+      regime, with fees and slippage already charged.</p>
+      <p style="font-size:7.9pt;margin:0">It is not a success because equity rose. It is not a failure because equity fell for three hours.
+      Neither statement is yet supported by 80 closed trades.</p>
+    </div>
+  </div>
+
+  <div class="grid2 mt" style="margin-top:auto;gap:4mm">
+    <div class="verify" style="font-size:7pt">
+      <h3>Verified against production</h3>
+      <dl style="grid-template-columns:25mm 1fr;gap:.5mm 2.5mm">
+        <dt>Environment</dt><dd>production</dd>
+        <dt>Host</dt><dd>vps-651730bb · 51.79.166.133 · OVH</dd>
+        <dt>Public website</dt><dd>www.memescope.site — HTTP 200</dd>
+        <dt>Public API</dt><dd>api.memescope.site — alpha-gated</dd>
+        <dt>Serving commit</dt><dd>bcc5550c2baf07aea484ae97e64de2f064626031</dd>
+        <dt>Host checkout</dt><dd>11fe5077aef76e086166a70ba9007b55c60f6401<br>NOT built · NOT serving</dd>
+        <dt>Alembic head</dt><dd>0044_karthik_wallet — single head</dd>
+        <dt>Strategy ID</dt><dd>karthik · wallet a0da0193-4fea-4ac1-891b-44abc897dc84</dd>
+        <dt>Strategy version</dt><dd>no registry entry — the rule is app/karthik/rules.py</dd>
+        <dt>Generated</dt><dd>2026-08-22 14:08 UTC</dd>
+      </dl>
+    </div>
+
+    <div class="panel">
+      <h3>Assumptions &amp; limitations</h3>
+      <ul style="font-size:7.1pt">
+        <li><strong>Three hours of trading.</strong> Every rate here rests on 80 closed positions taken between 11:00 and 14:08 UTC on a single day.
+        No conclusion about the strategy is supportable from it.</li>
+        <li><strong>Open positions are marked at cost</strong>, not at market. Equity of $946.49 is therefore an upper-ish bound, not a valuation.</li>
+        <li>Karthik has <strong>no registry strategy id or version</strong> — unlike the default wallet, its rule lives in code
+        (<code>app/karthik/rules.py</code>) rather than in a versioned registry entry. It is identified here by wallet ID and serving commit.</li>
+        <li>Expectancy and profit factor use <strong>realised</strong> trades only; the 51 open positions contribute nothing to either.
+        The API could not be queried programmatically (the alpha gate rejects scripted sign-in), so figures come from production
+        <strong>source, container environment and database</strong>.</li>
+        <li>Production moved from <code>bcc5550</code> to <code>11fe507</code> <em>on disk</em> during verification; every statement describes the
+        <strong>running image</strong>, still <code>bcc5550</code>. No production data, configuration, strategy or wallet was altered — nothing was
+        activated, paused or reset.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="foot"><span>Karthik Paper Wallet — Strategy &amp; Operation</span><span class="pg">8 / 8</span></div>
+</section>
+
+</body>
+</html>

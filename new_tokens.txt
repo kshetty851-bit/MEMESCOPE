@@ -1,0 +1,7 @@
+CREATE TABLE
+COPY 276
+SELECT 4
+new_tokens|4cd656e1-82a2-4096-b86a-d81b10d671d0
+new_tokens|c6b633f6-8bee-4b18-b495-e2237cbdcd50
+new_tokens|6743eaad-8f22-454a-9cc0-c3838bf3d5ff
+new_tokens|b7bd00c1-7df4-4127-b06f-8f0ecfcf8da3

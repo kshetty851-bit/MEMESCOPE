@@ -18,6 +18,25 @@ from app.models.market import (
     TokenMarketSnapshot,
     TradingStatus,
 )
+from app.models.paper_v2 import (  # noqa: F401
+    PaperV2Fill,
+    PaperV2Position,
+    PaperV2Wallet,
+)
+from app.models.strategy_lab_discovery import (  # noqa: F401
+    StrategyLabDiscoveryCandidate,
+    StrategyLabDiscoveryResult,
+    StrategyLabDiscoveryRun,
+)
+from app.models.strategy_lab import (  # noqa: F401
+    StrategyLabFill,
+    StrategyLabOpportunity,
+    StrategyLabPosition,
+    StrategyLabRefusal,
+    StrategyLabRun,
+    StrategyLabStrategy,
+    StrategyLabWallet,
+)
 from app.models.paper import (
     PaperPosition,
     PaperTradeAudit,
@@ -64,6 +83,19 @@ from app.models.token import DiscoveredToken, MetadataStatus
 from app.models.user import User, UserRole
 
 __all__ = [
+    "PaperV2Wallet",
+    "PaperV2Position",
+    "PaperV2Fill",
+    "StrategyLabRun",
+    "StrategyLabStrategy",
+    "StrategyLabOpportunity",
+    "StrategyLabWallet",
+    "StrategyLabPosition",
+    "StrategyLabFill",
+    "StrategyLabRefusal",
+    "StrategyLabDiscoveryRun",
+    "StrategyLabDiscoveryCandidate",
+    "StrategyLabDiscoveryResult",
     "AlphaSession",
     "Base",
     "DiscoveredToken",

@@ -55,6 +55,8 @@ from app.services.scanner.parser import (
     parse_pumpswap_pool_event,
     parse_transaction,
 )
+from app.services.scanner.trade_events import decode_trade_events
+from app.services.scanner.wallet_flow import WalletFlowTracker
 
 logger = get_logger(__name__)
 
@@ -158,6 +160,19 @@ class TokenScanner:
         #: None until the first notification; a cold start falls back to the
         #: database's highest recently discovered slot.
         self._last_slot: int | None = None
+        # Wallet-flow aggregation over the trades already arriving on this
+        # socket. `None` when the feature is off, so the hot path costs one
+        # attribute check rather than a decode.
+        self._flow: WalletFlowTracker | None = (
+            WalletFlowTracker(
+                capacity=settings.WALLET_FLOW_EVENT_CAPACITY,
+                max_mints=settings.WALLET_FLOW_MAX_MINTS,
+                ttl_seconds=settings.WALLET_FLOW_TTL_SECONDS,
+            )
+            if settings.FEATURE_WALLET_FLOW_ENABLED
+            else None
+        )
+        self._flow_decode_failures = 0
         self._recovery: asyncio.Task[None] | None = None
         #: Gap marker queued by a reconnect that arrived while a walk was
         #: already running. The running walk drains it rather than losing it.
@@ -290,6 +305,20 @@ class TokenScanner:
             reconnect_attempts=self.stats.consecutive_failures,
             failure_reason=self.stats.last_failure_reason,
         )
+
+    def _record_trades(self, event: LogEvent) -> None:
+        """Fold this transaction's trades into the rolling aggregates.
+
+        Keyed by mint when the chain gave one (pump.fun) and by pool otherwise
+        (PumpSwap names only the pool). Resolving pool -> mint is deliberately
+        left to the reader at decision time, where the mapping this platform
+        already stores is available; guessing it here would put a database
+        round trip on the socket loop.
+        """
+        for trade in decode_trade_events(event.logs):
+            key = trade.mint or trade.pool
+            if key:
+                self._flow.apply(key, trade, signature=event.signature)
 
     # --- Gap recovery -------------------------------------------------------
 
@@ -581,6 +610,16 @@ class TokenScanner:
             event = parse_log_notification(message)
             if event is None:
                 continue
+
+            # Wallet flow, before the creation pre-filter: a trade is not a
+            # creation, so anything gated behind that filter would never see
+            # one. Wrapped because observation must never be able to stop
+            # discovery — the same rule the research ledger follows.
+            if self._flow is not None:
+                try:
+                    self._record_trades(event)
+                except Exception:
+                    self._flow_decode_failures += 1
             # Every notification advances the gap marker, not just creations:
             # the stream is mostly trades, which is what makes it a dense clock.
             if event.slot > (self._last_slot or 0):

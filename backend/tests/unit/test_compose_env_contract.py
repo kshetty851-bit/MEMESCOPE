@@ -123,6 +123,16 @@ EXECUTION_REQUIRED_IN_ANCHOR = {
     "REAL_WALLET_AUTOTRADE_ENABLED": "third of three controls that must all agree",
     "REAL_WALLET_NETWORK": "wallet reads must not inherit scanner mainnet RPC",
     "REAL_WALLET_RPC_URL": "wallet RPC endpoint must match the declared network",
+    "REAL_WALLET_ALLOWED_RPC_HOSTS": "the endpoint allowlist is a security boundary",
+    "REAL_WALLET_ALLOWED_PROGRAM_IDS": (
+        "one service must not sign a program another would refuse"
+    ),
+    "REAL_WALLET_ENTRY_SIZE_USD": "the size the worker spends and the API reports",
+    "REAL_WALLET_MAX_DAILY_TRADES": "a count bound only works if every service shares it",
+    "REAL_WALLET_MAX_BALANCE_SOL": "the ceiling that makes the blast radius a number",
+    "REAL_WALLET_EXIT_MAX_QUOTE_AGE_SECONDS": "exit freshness must be one bound",
+    "REAL_WALLET_EXIT_MAX_PRICE_IMPACT_PCT": "exit impact ceiling must be one number",
+    "REAL_WALLET_EXIT_MAX_SLIPPAGE_BPS": "exit slippage ceiling must be one number",
     "REAL_WALLET_PUBLIC_KEY": "the pinned wallet; a divergent pin defeats key pinning",
     "REAL_WALLET_EXECUTION_SECRET_FILE": "must be rejected consistently during Phase 1",
     "REAL_WALLET_MAX_TRADE_USD": "a larger limit on the worker turns a $5 canary into more",

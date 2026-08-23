@@ -6,6 +6,7 @@ New feature areas (scanner, tokens, alerts, watchlists) get their own module in
 
 from fastapi import APIRouter
 
+from app.paper_v2 import api as paper_v2_api
 from app.api.v1.endpoints import (
     alpha,
     analysts,
@@ -27,6 +28,8 @@ from app.hq_ops import api as hq_ops
 from app.karthik_ops import api as karthik_ops
 from app.opportunities import api as opportunities
 from app.paper import api as paper
+from app.strategy_lab import api as strategy_lab
+from app.strategy_lab.discovery import api as strategy_discovery
 from app.radar import api as radar
 from app.real_wallet import api as real_wallet
 from app.real_wallet_safety import api as real_wallet_safety
@@ -39,6 +42,8 @@ api_router.include_router(health.router)
 # whether the platform is still producing anything.
 api_router.include_router(pipeline_health.router)
 api_router.include_router(alpha.router)
+# Paper Wallet V2 — a separate experiment on its own route, never V1's.
+api_router.include_router(paper_v2_api.router)
 api_router.include_router(reports.router)
 api_router.include_router(auth.router)
 api_router.include_router(discovery.router)
@@ -94,6 +99,16 @@ api_router.include_router(token_security.router)
 # the platform is producing anything, this reports whether the machinery
 # underneath it is alive. Read-only, and additive — no existing route changes.
 api_router.include_router(hq_ops.router)
+# Strategy Lab. Its own `/strategy-lab` namespace and its own tables: it is
+# research infrastructure, not a wallet, and filing it under `/paper` would
+# invite exactly the confusion the whole subsystem is built to prevent. Every
+# route is read-only — there is no POST, PUT, PATCH or DELETE on this router —
+# and no code path from it reaches a signer or a chain.
+api_router.include_router(strategy_lab.router)
+# The discovery engine, under Strategy Lab's namespace because that is what it
+# searches over. Also read-only: a search is started by an operator on the host,
+# never by a page load.
+api_router.include_router(strategy_discovery.router)
 # Karthik's operational layer, on `/karthik-ops`. Deliberately not `/karthik`,
 # which belongs to the wallet itself: one publishes what the experiment did and
 # the other publishes whether it is being run properly, and neither should be

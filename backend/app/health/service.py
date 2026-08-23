@@ -26,6 +26,7 @@ from app.core.logging import get_logger
 from app.core.redis import get_redis
 from app.health.schemas import (
     EnrichmentHealth,
+    PaperMarketHealth,
     PipelineHealth,
     RadarHealth,
     ScannerHealth,
@@ -132,6 +133,7 @@ class PipelineHealthService:
         enrichment = await self._enrichment(moment)
         scoring = await self._scoring(moment)
         radar = await self._radar(moment)
+        paper_market = await self._paper_market(moment)
 
         # Only stages that are switched on can be held against the roll-up.
         # A deployment that deliberately runs no scanner is not degraded.
@@ -144,6 +146,21 @@ class PipelineHealthService:
             enabled.append(scoring.status)
         if settings.FEATURE_RADAR_ENABLED:
             enabled.append(radar.status)
+        # `paper_market` is reported on its own and deliberately **excluded**
+        # from this roll-up.
+        #
+        # `overall` describes the pipeline, and drives a 503 and a container
+        # healthcheck. A blocked entry gate is not a pipeline fault — it is the
+        # wallet correctly refusing to trade on evidence it does not trust,
+        # which is the system working. Folding it in would page an operator
+        # about a pipeline that is fine.
+        #
+        # It would also be redundant where it *is* a fault: a feed that has
+        # stopped already shows up through `enrichment`, which is the stage
+        # that owns that measurement and the one a monitor should page from.
+        # And the gate can block for reasons that say nothing about the
+        # pipeline at all — a single recoverable stale position, or the
+        # RECOVERING window straight after a restart.
         overall = worst(enabled)
 
         logger.info(
@@ -165,6 +182,7 @@ class PipelineHealthService:
             market_enrichment=enrichment,
             scoring=scoring,
             radar=radar,
+            paper_market=paper_market,
             overall=overall,
             environment=settings.ENVIRONMENT,
             version=settings.VERSION,
@@ -369,6 +387,32 @@ class PipelineHealthService:
             minutes_since_last_score=None if minutes is None else round(minutes, 1),
             pending=int(pending or 0),
         )
+
+    async def _paper_market(self, now: datetime) -> PaperMarketHealth | None:
+        """Whether the paper wallet may open a position right now, and why not.
+
+        Read-only and never logged from here. The dead-man line belongs to the
+        decision (`market_health.entry_health`, once a minute), not to this
+        endpoint — a page that logs an error every time a dashboard polls it
+        teaches the reader to filter the message out.
+        """
+        if not settings.FEATURE_PAPER_WALLET_ENABLED:
+            return None
+        from app.paper.repository import PaperRepository
+
+        repository = PaperRepository(self._session)
+        health = await repository.market_health_snapshot(now=now)
+        archived_open, archived_unpriced = await repository.archived_open_stale(now=now)
+        payload = health.as_dict()
+        payload["archived_open_positions"] = archived_open
+        payload["archived_open_unpriced"] = archived_unpriced
+        # Bounded: a census with 94 unpriceable positions must not turn a
+        # health endpoint into a 94-element response every poll. The counts
+        # above are complete; these lists are a sample, and the field name
+        # says so by carrying the full count beside it.
+        payload["stale_positions"] = payload["stale_positions"][:20]
+        payload["unpriceable_positions"] = payload["unpriceable_positions"][:20]
+        return PaperMarketHealth(**payload)
 
     async def _radar(self, now: datetime) -> RadarHealth:
         # `last_evaluated_at` is updated on every sweep, whereas a radar

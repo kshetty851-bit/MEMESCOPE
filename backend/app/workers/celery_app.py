@@ -28,6 +28,7 @@ celery_app = Celery(
         "app.workers.enrichment_tasks",
         "app.workers.retention_tasks",
         "app.hq_ops.tasks",
+        "app.strategy_lab.scheduler",
     ],
 )
 
@@ -141,6 +142,15 @@ celery_app.conf.beat_schedule = {
     "paper-review": {
         "task": "app.paper.scheduler.paper_review",
         "schedule": crontab(minute="*"),
+    },
+    # Strategy Lab's forward research. Every five minutes, and a no-op that
+    # opens no database connection unless STRATEGY_LAB_MODE is
+    # FORWARD_RESEARCH. It reads rows Radar and the market collector already
+    # wrote, adds no provider call, and holds its own advisory lock so it can
+    # neither double-book a fill nor block the paper review.
+    "strategy-lab-tick": {
+        "task": "app.strategy_lab.scheduler.strategy_lab_tick",
+        "schedule": crontab(minute="*/5"),
     },
     "real-wallet-dry-run-reconciliation": {
         "task": "app.real_wallet.scheduler.real_wallet_dry_run",

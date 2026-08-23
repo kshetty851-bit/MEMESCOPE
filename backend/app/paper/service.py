@@ -24,14 +24,14 @@ says so rather than letting a reader assume they were closed at a fair price.
 from __future__ import annotations
 
 import uuid
-
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any, cast
 
-from sqlalchemy import update
+from sqlalchemy import select, update
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -41,7 +41,15 @@ from app.models.market import TokenMarketSnapshot
 from app.models.paper import PaperPosition, PaperTradeAudit, PaperWallet
 from app.models.radar import RadarToken
 from app.models.token import DiscoveredToken
-from app.paper import audit, benchmark, eligibility, execution, exits, metrics
+from app.paper import (
+    audit,
+    benchmark,
+    eligibility,
+    execution,
+    exits,
+    market_health,
+    metrics,
+)
 from app.paper.execution import (
     ExecutionQuote,
     ExecutionQuoteUnavailableError,
@@ -649,11 +657,30 @@ class PaperWalletService:
             return execution.LegacyExecution("PAPER_EXECUTION_MODEL=legacy")
 
         decimals = self._entry_output_decimals(position)
+        source = "entry_quote"
         if decimals is None:
             token = (
                 await TokenRepository(self._session).get_many_by_mints([position.mint_address])
             ).get(position.mint_address)
             decimals = token.decimals if token is not None else None
+            source = "token_metadata"
+        if decimals is None:
+            # Security evidence, before spending an RPC.
+            #
+            # `token_security_evaluations.evidence` carries the mint's decimals
+            # because the SEC-1 evaluator decodes the mint account to reach its
+            # verdict — the same field, read with the same decoder, on a row
+            # that is only written when the evaluation completed. On
+            # 2026-08-21 the UOTF exit fell through to the legacy model with
+            # "Token decimals unavailable", and `decimals: 6` had been sitting
+            # in a VERIFIED evaluation for that exact mint for six hours.
+            #
+            # Third rather than first: a quote's own `output_decimals` and the
+            # canonical token row are both more direct statements about the
+            # mint, and security evidence is a by-product of answering a
+            # different question. Reordering would prefer the indirect source.
+            decimals = await self._security_evidence_decimals(position.mint_address)
+            source = "security_evidence"
         if decimals is None:
             # Last resort: read them off the mint account.
             #
@@ -669,11 +696,21 @@ class PaperWalletService:
             # A failed read still returns LegacyExecution, so the fallback is
             # narrowed rather than removed.
             decimals = await self._mint_decimals(position.mint_address)
+            source = "rpc"
         if decimals is None:
             return execution.LegacyExecution(
                 "Token decimals unavailable for Jupiter exit quote."
             )
 
+        # Which source answered, recorded on every exit quote rather than only
+        # on the failures. A precedence chain nobody can observe is one nobody
+        # can tell has silently stopped using its best source.
+        logger.info(
+            "paper_exit_decimals_resolved",
+            mint_address=position.mint_address,
+            decimals=decimals,
+            source=source,
+        )
         try:
             return await self._execution.sell_quote(
                 input_mint=position.mint_address,
@@ -692,6 +729,94 @@ class PaperWalletService:
                 f"{exc}; fallback priced at observed notional {notional} "
                 f"with liquidity {decision_liquidity}"
             )
+
+    async def _security_evidence_decimals(self, mint: str) -> int | None:
+        """Decimals from this mint's newest security evaluation that decoded them.
+
+        ── WHY THERE IS NO FRESHNESS WINDOW HERE ───────────────────────────
+
+        Every other consumer of security evidence bounds it by
+        `MAX_EVIDENCE_AGE` (15 minutes), and copying that here would be the
+        obvious-looking thing to do. It would also be wrong twice over.
+
+        First, it would not have fixed the incident that prompted this: the
+        UOTF exit at 15:25 fell through to the legacy model with "Token
+        decimals unavailable", and the VERIFIED evaluation carrying
+        `decimals: 6` for that mint was recorded at 11:15 — four hours
+        outside a fifteen-minute window.
+
+        Second, the window exists for a reason that does not apply. Mint
+        authority can be revoked, freeze authority can be revoked, liquidity
+        moves; those verdicts decay, so they expire. **Decimals cannot
+        change.** The field is one byte of the mint account written at
+        `InitializeMint` (`security/mint.py`: `decimals=int(raw[44])`) and the
+        token program exposes no instruction to alter it. An old reading of an
+        immutable field is not stale evidence, it is the same evidence.
+
+        ── WHY THERE IS NO STATUS FILTER EITHER ────────────────────────────
+
+        `evidence["decimals"]` is written as `inspection.decimals if inspection
+        else None` — it is populated only when the mint-account decode
+        succeeded, and it is `None` otherwise, whatever the overall verdict
+        was. So a FAILED evaluation (mint authority still active, say) decoded
+        the account exactly as successfully as a VERIFIED one. Filtering on
+        VERIFIED would discard sound readings and buy nothing.
+
+        What is checked is what could actually be wrong:
+
+        * **Right mint** — filtered in SQL and re-asserted below. Decimals from
+          the wrong mint would not raise; it would silently misprice the sell
+          by a power of ten.
+        * **A plausible integer** — SPL decimals occupy one byte and no real
+          mint exceeds 9. `bool` is rejected explicitly, because
+          `isinstance(True, int)` is true in Python and `True` would otherwise
+          resolve to 1 decimal.
+
+        Anything failing a check returns `None` and the caller falls through to
+        the RPC read exactly as before. This narrows the legacy fallback; it
+        never widens what is trusted.
+        """
+        from app.models.token_security import TokenSecurityEvaluationRow
+
+        try:
+            row = await self._session.scalar(
+                select(TokenSecurityEvaluationRow)
+                .where(
+                    TokenSecurityEvaluationRow.mint_address == mint,
+                    TokenSecurityEvaluationRow.evidence["decimals"].as_integer().is_not(None),
+                )
+                .order_by(TokenSecurityEvaluationRow.evaluated_at.desc())
+                .limit(1)
+            )
+        except SQLAlchemyError:
+            # Deliberately narrow. A bare `except Exception` here once turned a
+            # missing import into a warning that read as "this mint has no
+            # evidence" — the fallback still worked, so nothing looked broken
+            # and the better source was silently never consulted. A database
+            # error is a reason to fall through; a bug is not.
+            logger.warning(
+                "paper_exit_security_decimals_unreadable", mint_address=mint, exc_info=True
+            )
+            return None
+        if row is None or row.mint_address != mint:
+            return None
+
+        evidence = row.evidence
+        if not isinstance(evidence, dict):
+            return None
+        value = evidence.get("decimals")
+        # Not `int(value)`: a string "6" would convert, and a malformed
+        # evidence row is exactly the case this must refuse rather than coerce.
+        if isinstance(value, bool) or not isinstance(value, int):
+            return None
+        if not 0 <= value <= 9:
+            logger.warning(
+                "paper_exit_security_decimals_implausible",
+                mint_address=mint,
+                decimals=value,
+            )
+            return None
+        return value
 
     def _entry_output_decimals(self, position: PaperPosition) -> int | None:
         quote = position.entry_execution_quote
@@ -1349,9 +1474,36 @@ class PaperWalletService:
         bound is reached it is **reported**. A capped search that says nothing
         reads exactly like an exhaustive one that found nothing.
         """
+        # --- ENTRY PAUSE (capital protection) ---------------------------
+        # Ahead of everything, including the track-record branch, because this
+        # is the one function every new position is born in. Exits are already
+        # settled by the time this runs — see the setting's own note for why
+        # returning here cannot reach them.
+        if settings.PAPER_WALLET_ENTRIES_PAUSED:
+            return 0, 0, False, {eligibility.ENTRIES_PAUSED_REFUSAL: 1}
+
         strategy = self.strategy
         if isinstance(strategy, TrackRecordBracketStrategy):
             return await self._open_track_record_entries(wallet, strategy=strategy, now=now)
+
+        # --- MARKET-DATA CIRCUIT BREAKER --------------------------------
+        # Before the Radar is even read. A feed that has stopped cannot rank
+        # anything worth buying, and every candidate would be refused one by
+        # one below anyway — this reports the single upstream cause instead of
+        # a page of identical per-token refusals.
+        #
+        # Entries only. `_settle_exits` has already run by the time this is
+        # reached, and returning here cannot reach it: an outage stops the
+        # wallet buying and never stops it selling (§43, §44).
+        health = await self._market_data_health(now=now)
+        if settings.FEATURE_PAPER_MARKET_HEALTH_GATE and not health.entries_allowed:
+            return (
+                0,
+                0,
+                False,
+                {market_health.MARKET_HEALTH_REFUSAL: 1},
+            )
+
         limit = strategy.top_n or settings.PAPER_WALLET_CANDIDATE_LIMIT
         entries = await self._radar.list_entries(
             category=None, active_only=True, sort="score", limit=limit, offset=0
@@ -1359,7 +1511,7 @@ class PaperWalletService:
         if not entries:
             return 0, 0, False, {}
 
-        verdicts = await self._screen(wallet, entries)
+        verdicts = await self._screen(wallet, entries, now=now)
 
         mints = [verdict.mint_address for verdict in verdicts if verdict.eligible]
 
@@ -1439,6 +1591,12 @@ class PaperWalletService:
                 # The exact decision that authorised this buy. The repository
                 # re-checks it rather than trusting this call site.
                 security=security,
+                # The reading this entry is priced from, re-checked against the
+                # clock inside the repository. `candidate.observed_at` is the
+                # snapshot's own `captured_at`, so the age measured there is the
+                # age of the evidence and not of the pass that read it.
+                market_observed_at=candidate.observed_at,
+                now=now,
                 wallet_id=wallet.id,
                 mint_address=candidate.mint_address,
                 token_id=token_ids.get(candidate.mint_address),
@@ -1579,6 +1737,17 @@ class PaperWalletService:
                 if isinstance(entry_execution, ExecutionQuote)
                 else instruction.quantity
             )
+            # Deliberately passes no `market_observed_at`. This path prices
+            # from the *first* priced snapshot after admission — a historical
+            # reading by design, because the canonical Track Record replays
+            # when a token was admitted rather than when the pass ran. A
+            # freshness gate would refuse every one of them.
+            #
+            # Not passing it is the fail-closed choice rather than an
+            # omission: `paper_track_record_tp125_sl50_v1` is not in
+            # `SECURITY_GATED_STRATEGY_IDS`, so the repository check no-ops
+            # today, and if anyone ever adds it there this raises immediately
+            # instead of quietly buying against six-hour-old evidence.
             created = await self._repository.open_position(
                 wallet_id=wallet.id,
                 mint_address=admission.mint_address,
@@ -1743,13 +1912,54 @@ class PaperWalletService:
                 availability={"screened_at": now.isoformat()},
             )
 
+    async def _market_data_health(self, *, now: datetime) -> market_health.MarketDataHealth:
+        """The reading the entry path gates on, with the dead-man line attached.
+
+        Logged from the *decision* rather than from the health endpoint, so the
+        record is written once a minute by the beat that has to act on it,
+        instead of once per dashboard poll. An endpoint that logs an error
+        every time somebody refreshes a page teaches the reader to mute it.
+        """
+        health = await self._repository.market_health_snapshot(now=now)
+        if not health.entries_allowed:
+            # ERROR, not warning: this is the dead-man line. The 125-minute
+            # outage on 2026-08-21 produced no log at any level, which is a
+            # large part of why it ran for 125 minutes.
+            logger.error(
+                "paper_entry_blocked_market_data",
+                state=str(health.state),
+                reason=str(health.primary_reason),
+                detail=health.detail,
+                global_last_priced_snapshot_age=health.feed_age_seconds,
+                **health.census.as_dict(),
+            )
+        elif health.state is market_health.FeedState.DEGRADED or health.census.warning:
+            logger.warning(
+                "paper_market_data_degraded",
+                state=str(health.state),
+                detail=health.detail,
+                **health.census.as_dict(),
+            )
+        return health
+
     async def _screen(
-        self, wallet: PaperWallet, entries: Sequence[RadarToken]
+        self,
+        wallet: PaperWallet,
+        entries: Sequence[RadarToken],
+        *,
+        now: datetime | None = None,
     ) -> list[eligibility.Verdict]:
         """Judge a ranked Radar page against §5's conditions.
 
         Shared by the evaluator and the read path so the page and the trades can
         never disagree about what qualified.
+
+        `now` switches the staleness condition on. The **read path passes it
+        too**, deliberately: if the page listed a token as qualified while the
+        evaluator refused it as stale, the two would disagree about what the
+        wallet is waiting for — which is the drift this method exists to
+        prevent. It is `None`-able only so a caller with no clock (the replay)
+        keeps judging historical readings by their own terms.
         """
         rows = list(entries)
         mints = [row.mint_address for row in rows]
@@ -1774,7 +1984,17 @@ class PaperWalletService:
                 )
             )
 
-        return eligibility.screen(observations, held_ever=held, open_now=open_now)
+        return eligibility.screen(
+            observations,
+            held_ever=held,
+            open_now=open_now,
+            now=now,
+            max_snapshot_age=(
+                timedelta(seconds=settings.PAPER_ENTRY_MAX_SNAPSHOT_AGE_SECONDS)
+                if now is not None and settings.FEATURE_PAPER_MARKET_HEALTH_GATE
+                else None
+            ),
+        )
 
     async def _cash_for(self, wallet: PaperWallet) -> Decimal:
         """Uninvested cash in this wallet's **shared capital pool**.
@@ -1984,7 +2204,7 @@ class PaperWalletService:
         return WalletContextRead(
             wallet=wallet,
             benchmarks=await self.benchmarks(wallet),
-            waiting_for=await self._waiting_for(wallet, cash=cash),
+            waiting_for=await self._waiting_for(wallet, cash=cash, now=now),
             observed_at=now,
         )
 
@@ -2035,7 +2255,9 @@ class PaperWalletService:
             benchmark.equal_weight_radar(constituents, capital=capital),
         ]
 
-    async def _waiting_for(self, wallet: PaperWallet, *, cash: Decimal) -> WaitingState | None:
+    async def _waiting_for(
+        self, wallet: PaperWallet, *, cash: Decimal, now: datetime | None = None
+    ) -> WaitingState | None:
         """Why the wallet is holding cash, when it is.
 
         **Two different idle states, and the wallet must name which one.** The
@@ -2069,7 +2291,7 @@ class PaperWalletService:
         entries = await self._radar.list_entries(
             category=None, active_only=True, sort="score", limit=limit, offset=0
         )
-        verdicts = await self._screen(wallet, entries)
+        verdicts = await self._screen(wallet, entries, now=now)
         eligible = sum(1 for verdict in verdicts if verdict.eligible)
 
         if cash < trade_size:

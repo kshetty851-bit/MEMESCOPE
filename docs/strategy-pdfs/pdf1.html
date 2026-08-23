@@ -1,0 +1,981 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>MEMESCOPE — System Architecture &amp; Default Trading Strategy</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ══════════════════════ PAGE 1 — OVERVIEW ══════════════════════ -->
+<section class="page">
+  <div class="eyebrow"><span><b>MEMESCOPE</b> &nbsp;·&nbsp; Production Documentation</span><span>Verified 2026-08-22</span></div>
+
+  <h1>MEMESCOPE
+    <span class="sub">System Architecture &amp; Default Trading Strategy</span>
+  </h1>
+
+  <p class="lead mt" style="max-width:150mm">
+    MEMESCOPE is an <em>opportunity intelligence platform</em> for the Solana meme-coin market.
+    A scanner answers <strong>&ldquo;what exists&rdquo;</strong>. MEMESCOPE answers
+    <strong>&ldquo;what became interesting, and why now&rdquo;</strong> &mdash; then commits that answer
+    to a permanent, immutable record before the outcome is known.
+  </p>
+
+  <div class="grid3 mt" style="margin-top:5mm">
+    <div class="panel">
+      <h3>The problem</h3>
+      <p style="font-size:8.3pt">Thousands of tokens launch daily. Almost all are worthless. Claims about which ones
+      mattered are made <strong>after</strong> the fact, when they cannot be checked.</p>
+    </div>
+    <div class="panel">
+      <h3>The method</h3>
+      <p style="font-size:8.3pt">Every judgement is written down <strong>before</strong> the outcome, with a stated rule,
+      a timestamp, and the evidence it was based on. Missing data is charged, never estimated.</p>
+    </div>
+    <div class="panel">
+      <h3>The proof</h3>
+      <p style="font-size:8.3pt">Paper wallets trade those judgements mechanically with real execution quotes.
+      An empty board is a truthful board. Failed calls stay visible.</p>
+    </div>
+  </div>
+
+  <h2 class="mt" style="margin-top:6mm"><span class="n">01</span>End-to-end production flow</h2>
+
+  <div class="svg-wrap fill">
+  <svg viewBox="0 0 760 530" role="img" aria-label="MEMESCOPE end-to-end production flow">
+    <defs>
+      <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#38e1d4"/>
+      </marker>
+      <marker id="arv" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#8b7cf6"/>
+      </marker>
+      <style>
+        .bx  { fill:#111827; stroke:#2c3b5c; stroke-width:1; rx:5; }
+        .bxc { fill:#0e2a2c; stroke:#1c8f89; stroke-width:1.2; rx:5; }
+        .bxv { fill:#1a1730; stroke:#5c4fd0; stroke-width:1.2; rx:5; }
+        .bxa { fill:#241c09; stroke:#a3762a; stroke-width:1.2; rx:5; }
+        .t   { fill:#eaf0ff; font-family:Helvetica,Arial,sans-serif; font-size:12px; font-weight:700; }
+        .ts  { fill:#7f8fb5; font-family:Helvetica,Arial,sans-serif; font-size:9px; }
+        .tc  { fill:#38e1d4; font-family:Helvetica,Arial,sans-serif; font-size:9px; }
+        .ln  { stroke:#38e1d4; stroke-width:1.4; fill:none; marker-end:url(#ar); }
+        .lnv { stroke:#8b7cf6; stroke-width:1.4; fill:none; marker-end:url(#arv); }
+        .lbl { fill:#7f8fb5; font-family:Helvetica,Arial,sans-serif; font-size:8.4px; font-style:italic; }
+      </style>
+    </defs>
+
+    <!-- ── column 1 : ingest → record ── -->
+    <rect class="bx"  x="8" y="8"   width="176" height="48"/>
+    <text class="t"  x="20" y="28">Solana · Helius WS</text>
+    <text class="ts" x="20" y="44">new-mint stream + RPC · PumpFun</text>
+
+    <rect class="bx"  x="8" y="78"  width="176" height="48"/>
+    <text class="t"  x="20" y="98">Scanner</text>
+    <text class="ts" x="20" y="114">websocket parse → discovered_tokens</text>
+
+    <rect class="bx"  x="8" y="148" width="176" height="60"/>
+    <text class="t"  x="20" y="168">Enrichment ×2</text>
+    <text class="ts" x="20" y="184">DexScreener + GeckoTerminal composite</text>
+    <text class="tc" x="20" y="199">lanes: nursery · priority · normal</text>
+
+    <rect class="bx"  x="8" y="230" width="176" height="48"/>
+    <text class="t"  x="20" y="250">Market snapshots</text>
+    <text class="ts" x="20" y="266">price · liquidity · trading_status</text>
+
+    <rect class="bx"  x="8" y="300" width="176" height="48"/>
+    <text class="t"  x="20" y="320">Scoring engine</text>
+    <text class="ts" x="20" y="336">5 dimensions · pure · replayable</text>
+
+    <rect class="bxc" x="8" y="370" width="176" height="60"/>
+    <text class="t"  x="20" y="390">Radar detector</text>
+    <text class="ts" x="20" y="406">score ≥ 55 · confidence ≥ 25</text>
+    <text class="ts" x="20" y="421">risk ≥ 30 · category gate</text>
+
+    <rect class="bxc" x="8" y="452" width="176" height="60"/>
+    <text class="t"  x="20" y="472">TRACK RECORD</text>
+    <text class="ts" x="20" y="488">radar_tokens · first_detected_at</text>
+    <text class="tc" x="20" y="503">written once · immutable</text>
+
+    <path class="ln" d="M96,56  L96,74"/>
+    <path class="ln" d="M96,126 L96,144"/>
+    <path class="ln" d="M96,208 L96,226"/>
+    <path class="ln" d="M96,278 L96,296"/>
+    <path class="ln" d="M96,348 L96,366"/>
+    <path class="ln" d="M96,430 L96,448"/>
+
+    <!-- ── column 2 : the two wallets and what follows ── -->
+    <text class="lbl" x="212" y="24">TWO INDEPENDENT ENTRY UNIVERSES</text>
+
+    <rect class="bxv" x="212" y="34" width="248" height="72"/>
+    <text class="t"  x="226" y="55">Default Paper Wallet · Gen 2</text>
+    <text class="ts" x="226" y="71">universe: ranked Radar, highest eligible first</text>
+    <text class="ts" x="226" y="86">$100 · trailing 25% · 6 h max hold</text>
+    <text class="tc" x="226" y="101">SEC-2 security gate required at entry</text>
+
+    <rect class="bxv" x="212" y="124" width="248" height="72"/>
+    <text class="t"  x="226" y="145">Karthik Paper Wallet</text>
+    <text class="ts" x="226" y="161">universe: NEW Track Record admissions only</text>
+    <text class="ts" x="226" y="176">$10 · take profit 1.25× · no stop loss</text>
+    <text class="tc" x="226" y="191">activation watermark 2026-08-22 10:57 UTC</text>
+
+    <!-- Radar feeds the default wallet; Track Record feeds Karthik -->
+    <path class="lnv" d="M184,400 C198,400 196,70 206,70"/>
+    <path class="lnv" d="M184,482 C200,482 194,160 206,160"/>
+
+    <rect class="bx" x="212" y="224" width="248" height="52"/>
+    <text class="t"  x="226" y="245">Position monitoring</text>
+    <text class="ts" x="226" y="262">one pass per minute · own advisory lock each</text>
+
+    <!-- both wallets route into monitoring through the right gutter, crossing nothing -->
+    <path class="ln" d="M460,70  L472,70  L472,242 L464,242"/>
+    <path class="ln" d="M460,160 L476,160 L476,258 L464,258"/>
+
+    <rect class="bx" x="212" y="294" width="248" height="64"/>
+    <text class="t"  x="226" y="315">Exit engine</text>
+    <text class="ts" x="226" y="331">rules travel on the position row</text>
+    <text class="tc" x="226" y="347">closes priced by a live Jupiter route quote</text>
+
+    <rect class="bx" x="212" y="376" width="248" height="52"/>
+    <text class="t"  x="226" y="397">P&amp;L · analytics · audit</text>
+    <text class="ts" x="226" y="414">paper_trade_audit · decision snapshots</text>
+
+    <rect class="bxa" x="212" y="446" width="248" height="52"/>
+    <text class="t"  x="226" y="467">HQ operations</text>
+    <text class="ts" x="226" y="484">detects · records · OBSERVE-ONLY, repairs nothing</text>
+
+    <path class="ln" d="M336,276 L336,290"/>
+    <path class="ln" d="M336,358 L336,372"/>
+    <path class="ln" d="M336,428 L336,442"/>
+
+    <!-- ── column 3 : surfaces, stores, and what is not trading ── -->
+    <rect class="bx" x="500" y="34" width="252" height="68"/>
+    <text class="t"  x="514" y="55">Public surfaces</text>
+    <text class="ts" x="514" y="72">www.memescope.site · Next.js via Caddy</text>
+    <text class="ts" x="514" y="88">api.memescope.site · FastAPI ×2, alpha-gated</text>
+
+    <rect class="bx" x="500" y="120" width="252" height="80"/>
+    <text class="t"  x="514" y="141">Stores</text>
+    <text class="ts" x="514" y="158">Postgres 16 — 344,673 tokens</text>
+    <text class="ts" x="514" y="174">3,950,781 market snapshots</text>
+    <text class="ts" x="514" y="190">Redis 7 — events, locks, cache</text>
+
+    <rect class="bx" x="500" y="218" width="252" height="80"/>
+    <text class="t"  x="514" y="239">Workers</text>
+    <text class="ts" x="514" y="256">worker · scheduler (Celery beat)</text>
+    <text class="ts" x="514" y="272">scanner · enrichment ×2</text>
+    <text class="ts" x="514" y="288">both wallet passes: crontab(minute="*")</text>
+
+    <rect class="bx" x="500" y="316" width="252" height="80"/>
+    <text class="t"  x="514" y="337">Not trading</text>
+    <text class="ts" x="514" y="354">Real Wallet — mode disabled, devnet</text>
+    <text class="ts" x="514" y="370">Strategy Lab — not deployed</text>
+    <text class="ts" x="514" y="386">Paper Wallet V2 — absent in production</text>
+
+    <rect class="bxa" x="500" y="414" width="252" height="98"/>
+    <text class="t"  x="514" y="435">Three rules that shape everything</text>
+    <text class="ts" x="514" y="455">Never estimate missing data —</text>
+    <text class="ts" x="514" y="470">say unavailable, with a reason</text>
+    <text class="ts" x="514" y="488">Never a recommendation — describe only</text>
+    <text class="ts" x="514" y="504">The permanent record is immutable</text>
+  </svg>
+  </div>
+
+  <div class="foot"><span>MEMESCOPE — Project Flow &amp; Default Strategy</span><span class="pg">1 / 7</span></div>
+</section>
+
+<!-- ══════════════════════ PAGE 2 — DATA PIPELINE ══════════════════════ -->
+<section class="page">
+  <div class="eyebrow"><span><b>MEMESCOPE</b> &nbsp;·&nbsp; Data Pipeline</span><span>Production · commit bcc5550</span></div>
+
+  <h2><span class="n">02</span>The four planes</h2>
+  <p style="max-width:170mm">Services are grouped by what they are allowed to do. The boundary matters: the
+  <em>data plane</em> never decides a trade, the <em>trading plane</em> never writes market history, and the
+  <em>operations plane</em> may read everything and, today, change nothing.</p>
+
+  <div class="grid4 mt">
+    <div class="panel"><h3 style="color:var(--cyan)">Data plane</h3><p style="font-size:7.7pt;margin:0">Ingests and stores what the market did. Writes tokens, snapshots, scores, Radar.</p></div>
+    <div class="panel"><h3 style="color:var(--violet)">Trading plane</h3><p style="font-size:7.7pt;margin:0">Reads market history, writes only its own wallet tables. Two isolated wallets.</p></div>
+    <div class="panel"><h3 style="color:var(--amber)">Operations plane</h3><p style="font-size:7.7pt;margin:0">Probes health, opens incidents, writes audit rows. Executes no repair.</p></div>
+    <div class="panel"><h3 style="color:var(--ink-2)">UI plane</h3><p style="font-size:7.7pt;margin:0">Next.js frontend and FastAPI, behind Caddy and the alpha access gate.</p></div>
+  </div>
+
+  <div class="svg-wrap fill mt" style="margin-top:5mm">
+  <svg viewBox="0 0 760 560" role="img" aria-label="MEMESCOPE service and store topology by plane">
+    <defs>
+      <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#7f8fb5"/>
+      </marker>
+      <style>
+        .zn  { fill:none; stroke-width:1; stroke-dasharray:4 3; rx:6; }
+        .zt  { font-family:Helvetica,Arial,sans-serif; font-size:9px; font-weight:700; letter-spacing:1.4px; }
+        .nb  { fill:#131c2f; stroke:#2c3b5c; stroke-width:1; rx:4; }
+        .nd  { fill:#0e2a2c; stroke:#1c8f89; stroke-width:1.2; rx:4; }
+        .nt  { fill:#eaf0ff; font-family:Helvetica,Arial,sans-serif; font-size:10.6px; font-weight:700; }
+        .ns  { fill:#7f8fb5; font-family:Helvetica,Arial,sans-serif; font-size:8.4px; }
+        .fl  { stroke:#7f8fb5; stroke-width:1.1; fill:none; marker-end:url(#a2); }
+        .flc { stroke:#38e1d4; stroke-width:1.3; fill:none; marker-end:url(#a2); }
+      </style>
+    </defs>
+
+    <!-- ── DATA PLANE ── -->
+    <rect class="zn" x="6" y="18" width="452" height="230" stroke="#1c8f89"/>
+    <text class="zt" x="16" y="13" fill="#38e1d4">DATA PLANE</text>
+
+    <rect class="nb" x="20" y="36" width="98" height="52"/>
+    <text class="nt" x="30" y="57">scanner</text><text class="ns" x="30" y="74">Helius WS</text>
+
+    <rect class="nb" x="140" y="36" width="114" height="52"/>
+    <text class="nt" x="150" y="57">enrichment ×2</text><text class="ns" x="150" y="74">DexScr · Gecko</text>
+
+    <rect class="nb" x="276" y="36" width="98" height="52"/>
+    <text class="nt" x="286" y="57">worker</text><text class="ns" x="286" y="74">scoring · radar</text>
+
+    <rect class="nb" x="396" y="36" width="48" height="52"/>
+    <text class="nt" x="404" y="57">beat</text><text class="ns" x="404" y="74">1 min</text>
+
+    <rect class="nd" x="20" y="124" width="202" height="106"/>
+    <text class="nt" x="32" y="146">Postgres 16</text>
+    <text class="ns" x="32" y="168">discovered_tokens · 344,673</text>
+    <text class="ns" x="32" y="188">token_market_snapshots · 3.95 M</text>
+    <text class="ns" x="32" y="208">radar_tokens · 1,326</text>
+
+    <rect class="nd" x="242" y="124" width="202" height="106"/>
+    <text class="nt" x="254" y="146">Redis 7</text>
+    <text class="ns" x="254" y="168">token event channel (env-namespaced)</text>
+    <text class="ns" x="254" y="188">celery broker · live update pub/sub</text>
+    <text class="ns" x="254" y="208">advisory locks + rate budgets</text>
+
+    <path class="fl" d="M69,88  L69,120"/>
+    <path class="fl" d="M197,88 L130,120"/>
+    <path class="fl" d="M325,88 L205,120"/>
+    <path class="fl" d="M420,88 L346,120"/>
+
+    <!-- ── TRADING PLANE ── -->
+    <rect class="zn" x="6" y="272" width="452" height="212" stroke="#5c4fd0"/>
+    <text class="zt" x="16" y="267" fill="#8b7cf6">TRADING / EXPERIMENT PLANE</text>
+
+    <rect class="nb" x="20" y="292" width="202" height="86" stroke="#5c4fd0"/>
+    <text class="nt" x="32" y="314">paper_review · every minute</text>
+    <text class="ns" x="32" y="336">lock "MEME"/"PAPR" · batch 200</text>
+    <text class="ns" x="32" y="356">paper_wallets · paper_positions</text>
+    <text class="ns" x="32" y="371">paper_trade_audit</text>
+
+    <rect class="nb" x="242" y="292" width="202" height="86" stroke="#5c4fd0"/>
+    <text class="nt" x="254" y="314">karthik_review · every minute</text>
+    <text class="ns" x="254" y="336">lock "MEME"/"KRTH" · batch 2,000</text>
+    <text class="ns" x="254" y="356">karthik_wallets · karthik_positions</text>
+    <text class="ns" x="254" y="371">karthik_opportunities</text>
+
+    <rect class="nb" x="20" y="404" width="424" height="64"/>
+    <text class="nt" x="32" y="426">Jupiter execution client — PAPER_EXECUTION_MODEL=jupiter</text>
+    <text class="ns" x="32" y="448">lite-api.jup.ag/swap/v1 · slippage 50 bps · 6 s timeout</text>
+    <text class="ns" x="32" y="462">both wallets quote every fill through it</text>
+
+    <path class="flc" d="M121,230 L121,288"/>
+    <path class="flc" d="M343,230 L343,288"/>
+    <path class="fl"  d="M121,378 L121,400"/>
+    <path class="fl"  d="M343,378 L343,400"/>
+
+    <!-- ── OPERATIONS PLANE ── -->
+    <rect class="zn" x="474" y="18" width="280" height="230" stroke="#a3762a"/>
+    <text class="zt" x="484" y="13" fill="#f5b13d">OPERATIONS PLANE</text>
+
+    <rect class="nb" x="488" y="36" width="252" height="94" stroke="#a3762a"/>
+    <text class="nt" x="500" y="58">hq_ops — deployed &amp; running</text>
+    <text class="ns" x="500" y="80">probe → condition → incident → audit row</text>
+    <text class="ns" x="500" y="100">HQ_AUTONOMY_ENABLED unset → default false</text>
+    <text class="ns" x="500" y="120">7 incidents, all resolved · 0 open</text>
+
+    <rect class="nb" x="488" y="150" width="252" height="94" stroke="#3a2a3f"/>
+    <text class="nt" x="500" y="172">karthik_ops — NOT in running image</text>
+    <text class="ns" x="500" y="194">present on host checkout 11fe507</text>
+    <text class="ns" x="500" y="214">the image was built at commit bcc5550</text>
+    <text class="ns" x="500" y="234">therefore serving no routes today</text>
+
+    <!-- ── UI PLANE ── -->
+    <rect class="zn" x="474" y="272" width="280" height="212" stroke="#2c3b5c"/>
+    <text class="zt" x="484" y="267" fill="#b9c6e4">UI PLANE</text>
+
+    <rect class="nb" x="488" y="292" width="252" height="56"/>
+    <text class="nt" x="500" y="314">caddy 2.8 — TLS terminator</text>
+    <text class="ns" x="500" y="334">the only published ports on the host</text>
+
+    <rect class="nb" x="488" y="372" width="252" height="46"/>
+    <text class="nt" x="500" y="394">backend ×2 — FastAPI / gunicorn</text>
+    <text class="ns" x="500" y="410">alpha access gate in front of every route</text>
+
+    <rect class="nb" x="488" y="438" width="252" height="46"/>
+    <text class="nt" x="500" y="460">frontend — Next.js 15 App Router</text>
+    <text class="ns" x="500" y="476">served by this stack, not Vercel</text>
+
+    <path class="fl" d="M614,348 L614,368"/>
+    <path class="fl" d="M614,418 L614,434"/>
+    <path class="fl" d="M484,196 L452,196"/>
+    <path class="fl" d="M484,394 L452,394"/>
+
+    <text class="ns" x="20" y="512">Enrichment lanes — nursery: fresh tokens, ≤ 1,000, every 60 s   ·   priority: ≤ 200, every 15 s   ·   normal: everything else, batch 120, concurrency 4</text>
+    <text class="ns" x="20" y="532">Snapshot freshness at verification: the newest market snapshot was 30 seconds old.   Alembic head 0044_karthik_wallet — single head, no divergence.</text>
+    <text class="ns" x="20" y="552">Caddy is the only ingress. Nothing else on the host publishes a port; the backend replicas are reachable only over the compose network.</text>
+  </svg>
+  </div>
+
+  <div class="callout mt" style="margin-top:3mm">
+    <b>Correction to the assumed flow.</b> There is no standalone &ldquo;Nursery&rdquo; pipeline stage between Discovery and Radar.
+    The nursery is a <strong>priority lane inside enrichment</strong> that polls newly discovered tokens more often.
+    Likewise, security (SEC-2) is not a pipeline stage before Track Record &mdash; it is an <strong>entry precondition applied inside the wallet</strong>,
+    at the moment a position would be opened.
+  </div>
+
+  <div class="foot"><span>MEMESCOPE — Project Flow &amp; Default Strategy</span><span class="pg">2 / 7</span></div>
+</section>
+
+<!-- ══════════════════════ PAGE 3 — TOKEN JOURNEY ══════════════════════ -->
+<section class="page">
+  <div class="eyebrow"><span><b>MEMESCOPE</b> &nbsp;·&nbsp; Token Journey</span><span>One token, end to end</span></div>
+
+  <h2><span class="n">03</span>One token through the system</h2>
+  <p style="max-width:170mm">Every branch below exists in production. The rejection paths are drawn because they are the
+  common case: of 344,673 discovered tokens, <strong>1,326</strong> have ever reached the Track Record &mdash; roughly
+  four in every thousand.</p>
+
+  <div class="svg-wrap fill mt">
+  <svg viewBox="0 0 760 680" role="img" aria-label="Journey of a single token including rejection branches">
+    <defs>
+      <marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#38e1d4"/>
+      </marker>
+      <marker id="a3r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#ff5f6d"/>
+      </marker>
+      <style>
+        .s   { fill:#131c2f; stroke:#2c3b5c; stroke-width:1; rx:4; }
+        .sg  { fill:#0e2a2c; stroke:#1c8f89; stroke-width:1.4; rx:4; }
+        .sr  { fill:#220f13; stroke:#8c3038; stroke-width:1.2; rx:4; }
+        .sv  { fill:#131c2f; stroke:#5c4fd0; stroke-width:1.2; rx:4; }
+        .dm  { fill:#1a1730; stroke:#8b7cf6; stroke-width:1.3; }
+        .h   { fill:#eaf0ff; font-family:Helvetica,Arial,sans-serif; font-size:11px; font-weight:700; }
+        .p   { fill:#7f8fb5; font-family:Helvetica,Arial,sans-serif; font-size:8.6px; }
+        .pc  { fill:#38e1d4; font-family:Helvetica,Arial,sans-serif; font-size:8.6px; }
+        .pr  { fill:#ff8a94; font-family:Helvetica,Arial,sans-serif; font-size:8.6px; }
+        .dt  { fill:#eaf0ff; font-family:Helvetica,Arial,sans-serif; font-size:10px; font-weight:700; text-anchor:middle; }
+        .ds  { fill:#7f8fb5; font-family:Helvetica,Arial,sans-serif; font-size:8.2px; text-anchor:middle; }
+        .e   { stroke:#38e1d4; stroke-width:1.4; fill:none; marker-end:url(#a3); }
+        .er  { stroke:#ff5f6d; stroke-width:1.3; fill:none; marker-end:url(#a3r); stroke-dasharray:5 3; }
+        .el  { fill:#b9c6e4; font-family:Helvetica,Arial,sans-serif; font-size:8.4px; font-weight:700; }
+        .ts  { fill:#f5b13d; font-family:Helvetica,Arial,sans-serif; font-size:8.2px; font-style:italic; }
+      </style>
+    </defs>
+
+    <!-- ── the spine ── -->
+    <rect class="s" x="280" y="4" width="200" height="36"/>
+    <text class="h" x="292" y="27">Token detected on chain</text>
+    <text class="ts" x="496" y="27">⏱ first_seen_at — written once</text>
+
+    <path class="e" d="M380,40 L380,54"/>
+
+    <rect class="s" x="280" y="54" width="200" height="36"/>
+    <text class="h" x="292" y="77">Discovery → discovered_tokens</text>
+    <text class="ts" x="496" y="77">⏱ discovery detection time</text>
+
+    <path class="e" d="M380,90 L380,104"/>
+
+    <rect class="s" x="280" y="104" width="200" height="48"/>
+    <text class="h" x="292" y="125">Enrichment · nursery lane</text>
+    <text class="p" x="292" y="142">price · liquidity · trading_status · market cap</text>
+    <text class="ts" x="496" y="133">⏱ captured_at on every snapshot</text>
+
+    <path class="e" d="M380,152 L380,166"/>
+
+    <rect class="s" x="280" y="166" width="200" height="36"/>
+    <text class="h" x="292" y="189">Scoring — 5 dimensions</text>
+
+    <path class="e" d="M380,202 L380,214"/>
+
+    <path class="dm" d="M380,214 L494,250 L380,286 L266,250 Z"/>
+    <text class="dt" x="380" y="246">Radar gate</text>
+    <text class="ds" x="380" y="262">score ≥55 · conf ≥25 · risk ≥30</text>
+
+    <path class="er" d="M266,250 L188,250"/>
+    <text class="el" x="212" y="243" fill="#ff8a94">NO</text>
+    <rect class="sr" x="20" y="230" width="162" height="40"/>
+    <text class="h" x="30" y="248" style="font-size:10px">Not admitted</text>
+    <text class="pr" x="30" y="263">stays a scanned token only</text>
+
+    <path class="e" d="M380,286 L380,302"/>
+    <text class="el" x="388" y="299">YES</text>
+
+    <rect class="sg" x="280" y="302" width="200" height="50"/>
+    <text class="h" x="292" y="323">TRACK RECORD ADMISSION</text>
+    <text class="pc" x="292" y="340">radar_tokens.first_detected_at</text>
+    <text class="ts" x="496" y="323">⏱ the admission instant.</text>
+    <text class="ts" x="496" y="338">Written once. Never updated.</text>
+
+    <!-- ── fork ── -->
+    <path class="e" d="M280,327 L200,327 L200,378"/>
+    <path class="e" d="M480,327 L580,327 L580,378"/>
+
+    <rect class="sv" x="60"  y="378" width="280" height="58"/>
+    <text class="h" x="72" y="399">Default Paper Wallet</text>
+    <text class="p" x="72" y="415">ranks the whole live Radar by score and takes</text>
+    <text class="p" x="72" y="429">the highest-ranked eligible token</text>
+
+    <rect class="sv" x="420" y="378" width="280" height="58"/>
+    <text class="h" x="432" y="399">Karthik Paper Wallet</text>
+    <text class="p" x="432" y="415">takes every admission whose first_detected_at</text>
+    <text class="p" x="432" y="429">is later than its own activation instant</text>
+
+    <path class="e" d="M200,436 L200,452"/>
+    <path class="e" d="M580,436 L580,452"/>
+
+    <path class="dm" d="M200,452 L302,490 L200,528 L98,490 Z"/>
+    <text class="dt" x="200" y="486">7 eligibility rules</text>
+    <text class="ds" x="200" y="502">+ SEC-2 gate + cash ≥ $100</text>
+
+    <path class="dm" d="M580,452 L682,490 L580,528 L478,490 Z"/>
+    <text class="dt" x="580" y="486">cash ≥ $10 ?</text>
+    <text class="ds" x="580" y="502">and priceable right now?</text>
+
+    <rect class="sr" x="318" y="450" width="144" height="82"/>
+    <text class="h"  x="328" y="468" style="font-size:9.6px">REFUSED</text>
+    <text class="pr" x="328" y="484">already_held · already_traded</text>
+    <text class="pr" x="328" y="498">no_market_data · no_price</text>
+    <text class="pr" x="328" y="512">not_tradeable · no_liquidity</text>
+    <text class="pr" x="328" y="526">insufficient cash · security_gate</text>
+
+    <path class="er" d="M302,490 L314,490"/>
+    <path class="er" d="M478,490 L466,490"/>
+    <text class="el" x="300" y="470" fill="#ff8a94">NO</text>
+    <text class="el" x="462" y="470" fill="#ff8a94">NO</text>
+
+    <path class="e" d="M200,528 L200,556"/>
+    <path class="e" d="M580,528 L580,556"/>
+    <text class="el" x="208" y="548">YES</text>
+    <text class="el" x="588" y="548">YES</text>
+
+    <rect class="sg" x="60" y="556" width="640" height="42"/>
+    <text class="dt" x="380" y="574" style="font-size:10.4px">BUY — at a live Jupiter route quote, each wallet from its own cash</text>
+    <text class="ds" x="380" y="590">$100 for the default wallet · $10 for Karthik · never a partial fill</text>
+
+    <path class="e" d="M380,598 L380,614"/>
+
+    <rect class="s" x="60" y="614" width="640" height="60"/>
+    <text class="dt" x="380" y="633" style="font-size:10.4px">MONITOR every minute  →  EXIT on this wallet's own rule  →  P&amp;L, audit row, decision snapshot</text>
+    <text class="ds" x="380" y="650">peak price carried on the row · the exit is priced by a real quote, never by the trigger level</text>
+    <text class="ds" x="380" y="666" style="fill:#38e1d4">One position per token, ever — in both wallets, enforced by a unique index rather than by a check</text>
+  </svg>
+  </div>
+
+  <div class="grid3 mt" style="margin-top:3mm">
+    <div class="panel"><h3>Timestamps captured</h3><p style="font-size:7.6pt;margin:0"><code>first_seen_at</code>, snapshot <code>captured_at</code>,
+    <code>radar_tokens.first_detected_at</code> (admission), position <code>opened_at</code>, <code>closed_at</code>,
+    <code>last_evaluated_at</code>, <code>last_market_check_at</code>.</p></div>
+    <div class="panel"><h3>Detection vs admission</h3><p style="font-size:7.6pt;margin:0">Deliberately different. A token first seen at 10:00 that
+    was admitted at 10:20 is a <strong>10:20 event</strong> for Karthik. Karthik stores <code>detected_at</code> too &mdash; as
+    <code>NULL</code> when unknown, never borrowed from the entry.</p></div>
+    <div class="panel"><h3>Measured entry delay</h3><p style="font-size:7.6pt;margin:0">Karthik: mean <strong>29.4 s</strong> from Track Record admission to
+    position open, range <strong>0.7 s – 119.6 s</strong> across 131 entries. Bounded by the one-minute beat.</p></div>
+  </div>
+
+  <div class="foot"><span>MEMESCOPE — Project Flow &amp; Default Strategy</span><span class="pg">3 / 7</span></div>
+</section>
+
+<!-- ══════════════════════ PAGE 4 — DEFAULT PAPER WALLET ══════════════════════ -->
+<section class="page">
+  <div class="eyebrow"><span><b>MEMESCOPE</b> &nbsp;·&nbsp; Default Paper Wallet</span><span>Generation 2 · live</span></div>
+
+  <h2><span class="n">04</span>The default paper wallet, as production runs it</h2>
+
+  <div class="callout risk" style="margin-bottom:4mm">
+    <b>Read this first — the wallet row and the trading rules disagree.</b>
+    <code>paper_wallets</code> still records this wallet as generation&nbsp;2, <code>trailing_stop_25_v1</code>&nbsp;<code>1.0.0</code>.
+    That strategy is marked <strong>retired</strong> in code, so the service falls back to the one operational strategy and actually trades
+    <code>trailing_stop_25_secured_hold6h_v3</code>&nbsp;<code>3.0.0-hold6h</code> &mdash; which is what every decision snapshot for the last 48 hours records.
+    The rules below are the ones <strong>being applied</strong>. See page 7 and the limitations note for the consequence.
+  </div>
+
+  <div class="grid2">
+    <div class="stack" style="gap:3mm">
+      <table class="tight">
+        <tr><th style="width:30mm">Identity</th><th>Production value</th></tr>
+        <tr><td>Wallet ID</td><td><span class="mono">a2888cec-7624-47a5-b5bb-987762bdc459</span></td></tr>
+        <tr><td>Generation</td><td>2 &nbsp;<span class="pill live">Live</span></td></tr>
+        <tr><td>Row strategy</td><td><span class="mono">trailing_stop_25_v1</span> · <span class="mono">1.0.0</span> &nbsp;<span class="pill warnp">stale</span></td></tr>
+        <tr><td>Applied strategy</td><td><span class="mono">trailing_stop_25_secured_hold6h_v3</span> · <span class="mono">3.0.0-hold6h</span></td></tr>
+        <tr><td>Started</td><td><span class="mono">2026-08-05 06:34:19.840157Z</span></td></tr>
+        <tr><td>Starting capital</td><td>$1,000.00</td></tr>
+        <tr><td>Trade size</td><td><strong>$100.00</strong> — equal weight, never partial</td></tr>
+      </table>
+
+      <table class="tight">
+        <tr><th style="width:30mm">Rule</th><th>Applied value</th></tr>
+        <tr><td>Universe</td><td>The whole ranked Radar (<code>top_n = None</code>), scanned by score</td></tr>
+        <tr><td>Entry</td><td>Highest-ranked <em>eligible</em> token, whenever cash allows</td></tr>
+        <tr><td>Re-entry</td><td>Never. One position per token, for the wallet's lifetime</td></tr>
+        <tr><td>Take profit · fixed stop</td><td><strong>Neither.</strong> This strategy has no target and no fixed stop</td></tr>
+        <tr><td>Trailing stop</td><td><strong>−25%</strong> from the highest price observed while open</td></tr>
+        <tr><td>Trailing reference</td><td>The high <em>before</em> the current reading — one snapshot cannot both set a high and fall from it</td></tr>
+        <tr><td>Maximum hold</td><td><strong>6 hours</strong>, written as an absolute <code>expires_at</code> at entry</td></tr>
+        <tr><td>Order of rules</td><td>Adverse first: expiry → fixed stop → trailing → target</td></tr>
+        <tr><td>Fill</td><td>Live Jupiter route quote when the rule fires; never assumed at the trigger</td></tr>
+        <tr><td>Discretion</td><td>None. No rule is applied by hand</td></tr>
+      </table>
+    </div>
+
+    <div class="stack" style="gap:3mm">
+      <div class="svg-wrap">
+      <svg viewBox="0 0 340 470" role="img" aria-label="Default paper wallet decision tree">
+        <defs>
+          <marker id="a4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="#38e1d4"/></marker>
+          <marker id="a4r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="#ff5f6d"/></marker>
+          <style>
+            .k  { fill:#131c2f; stroke:#2c3b5c; stroke-width:1; rx:4; }
+            .kg { fill:#0e2a2c; stroke:#1c8f89; stroke-width:1.3; rx:4; }
+            .kr { fill:#220f13; stroke:#8c3038; stroke-width:1.1; rx:4; }
+            .kd { fill:#1a1730; stroke:#8b7cf6; stroke-width:1.2; }
+            .kh { fill:#eaf0ff; font-family:Helvetica,Arial,sans-serif; font-size:9.4px; font-weight:700; }
+            .kp { fill:#7f8fb5; font-family:Helvetica,Arial,sans-serif; font-size:7.4px; }
+            .kx { fill:#ff8a94; font-family:Helvetica,Arial,sans-serif; font-size:7.4px; }
+            .kt { fill:#eaf0ff; font-family:Helvetica,Arial,sans-serif; font-size:8.4px; font-weight:700; text-anchor:middle; }
+            .ke { stroke:#38e1d4; stroke-width:1.2; fill:none; marker-end:url(#a4); }
+            .kv { stroke:#ff5f6d; stroke-width:1.1; fill:none; marker-end:url(#a4r); stroke-dasharray:4 3; }
+            .kl { fill:#b9c6e4; font-family:Helvetica,Arial,sans-serif; font-size:7.4px; font-weight:700; }
+          </style>
+        </defs>
+
+        <rect class="k" x="80" y="4" width="180" height="26"/>
+        <text class="kh" x="90" y="21">Radar re-ranked · every minute</text>
+        <path class="ke" d="M170,30 L170,44"/>
+
+        <path class="kd" d="M170,44 L268,72 L170,100 L72,72 Z"/>
+        <text class="kt" x="170" y="70">7 eligibility rules</text>
+        <text class="kt" x="170" y="81" style="font-size:7px;font-weight:400;fill:#7f8fb5">held · traded · data · price · status · depth</text>
+        <path class="kv" d="M72,72 L20,72"/>
+        <text class="kl" x="38" y="66" fill="#ff8a94">NO</text>
+        <rect class="kr" x="0" y="58" width="70" height="28"/>
+        <text class="kx" x="7" y="70">refused,</text><text class="kx" x="7" y="80">reason counted</text>
+
+        <path class="ke" d="M170,100 L170,114"/><text class="kl" x="176" y="111">YES</text>
+
+        <path class="kd" d="M170,114 L268,140 L170,166 L72,140 Z"/>
+        <text class="kt" x="170" y="138">Cash ≥ $100 ?</text>
+        <text class="kt" x="170" y="149" style="font-size:7px;font-weight:400;fill:#7f8fb5">never part-fills</text>
+        <path class="kv" d="M72,140 L20,140"/>
+        <text class="kl" x="38" y="134" fill="#ff8a94">NO</text>
+        <rect class="kr" x="0" y="126" width="70" height="28"/>
+        <text class="kx" x="7" y="138">SKIP —</text><text class="kx" x="7" y="148">insufficient cash</text>
+
+        <path class="ke" d="M170,166 L170,180"/><text class="kl" x="176" y="177">YES</text>
+
+        <path class="kd" d="M170,180 L268,208 L170,236 L72,208 Z"/>
+        <text class="kt" x="170" y="204">SEC-2 gate</text>
+        <text class="kt" x="170" y="215" style="font-size:7px;font-weight:400;fill:#7f8fb5">all 6 checks PASS on</text>
+        <text class="kt" x="170" y="224" style="font-size:7px;font-weight:400;fill:#7f8fb5">fresh evidence</text>
+        <path class="kv" d="M72,208 L20,208"/>
+        <text class="kl" x="38" y="202" fill="#ff8a94">NO</text>
+        <rect class="kr" x="0" y="192" width="70" height="34"/>
+        <text class="kx" x="7" y="204">REFUSE.</text>
+        <text class="kx" x="7" y="214">UNKNOWN also</text>
+        <text class="kx" x="7" y="224">refuses.</text>
+
+        <path class="ke" d="M170,236 L170,250"/><text class="kl" x="176" y="247">ALLOW</text>
+
+        <rect class="kg" x="80" y="250" width="180" height="34"/>
+        <text class="kh" x="90" y="266">BUY $100</text>
+        <text class="kp" x="90" y="278">live Jupiter route quote · 50 bps slippage</text>
+
+        <path class="ke" d="M170,284 L170,298"/>
+
+        <rect class="k" x="80" y="298" width="180" height="36"/>
+        <text class="kh" x="90" y="314">MONITOR — one pass / minute</text>
+        <text class="kp" x="90" y="326">replays every unseen snapshot in order</text>
+
+        <path class="ke" d="M170,334 L170,348"/>
+
+        <rect class="k" x="46" y="348" width="248" height="20" stroke="#5c4fd0"/>
+        <text class="kt" x="170" y="362" style="font-size:8px">EXIT LOGIC — first breach wins, adverse first</text>
+
+        <path class="ke" d="M100,368 L100,384"/>
+        <path class="ke" d="M170,368 L170,384"/>
+        <path class="ke" d="M242,368 L242,384"/>
+
+        <rect class="k" x="42" y="384" width="112" height="44" stroke="#a3762a"/>
+        <text class="kh" x="50" y="400" style="font-size:8.6px">1 · EXPIRY</text>
+        <text class="kp" x="50" y="412">6 h since opened_at,</text>
+        <text class="kp" x="50" y="422">at the next quote</text>
+
+        <rect class="k" x="162" y="384" width="76" height="44" stroke="#8c3038"/>
+        <text class="kh" x="170" y="400" style="font-size:8.6px">2 · TRAIL</text>
+        <text class="kp" x="170" y="412">price ≤ peak</text>
+        <text class="kp" x="170" y="422">× 0.75</text>
+
+        <rect class="k" x="246" y="384" width="92" height="44" stroke="#1c8f89"/>
+        <text class="kh" x="254" y="400" style="font-size:8.6px">3 · TERMINAL</text>
+        <text class="kp" x="254" y="412">provider reports</text>
+        <text class="kp" x="254" y="422">pool inactive</text>
+
+        <path class="ke" d="M100,428 L100,442"/>
+        <path class="ke" d="M200,428 L200,442"/>
+        <path class="ke" d="M292,428 L292,442"/>
+
+        <rect class="kg" x="42" y="442" width="296" height="24"/>
+        <text class="kt" x="190" y="458" style="font-size:8px">SELL 100% · proceeds = the executable quote, never the trigger</text>
+      </svg>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid4 mt" style="margin-top:4mm">
+    <div class="panel stat"><div class="k">Open positions</div><div class="v c">2</div><div class="n">$200 allocated</div></div>
+    <div class="panel stat"><div class="k">Closed positions</div><div class="v">240</div><div class="n">stop 181 · manual 48 · expiry 11</div></div>
+    <div class="panel stat"><div class="k">Cumulative entries</div><div class="v">$24,200</div><div class="n">$1,000 recycled since 2026-08-05</div></div>
+    <div class="panel stat"><div class="k">Dominant refusal</div><div class="v a">cash</div><div class="n">893 of 1,124 refusals in 24 h</div></div>
+  </div>
+
+  <div class="callout mt" style="margin-top:3mm">
+    <b>SEC-2 mandatory checks, all six must positively PASS:</b>
+    <code>MINT_AUTHORITY</code> · <code>FREEZE_AUTHORITY</code> · <code>TOKEN_PROGRAM</code> ·
+    <code>TOKEN_EXTENSIONS</code> · <code>VENUE</code> · <code>LIQUIDITY_SECURITY</code>.
+    <strong>UNKNOWN blocks the buy without labelling the token unsafe</strong> — an RPC outage is not evidence of a dangerous token,
+    but it is not good enough to buy against either. Only <code>TOKEN_EXTENSIONS</code> may answer NOT_APPLICABLE.
+  </div>
+
+  <div class="foot"><span>MEMESCOPE — Project Flow &amp; Default Strategy</span><span class="pg">4 / 7</span></div>
+</section>
+
+<!-- ══════════════════════ PAGE 5 — WORKED EXAMPLES ══════════════════════ -->
+<section class="page">
+  <div class="eyebrow"><span><b>MEMESCOPE</b> &nbsp;·&nbsp; Default Strategy Worked Through</span><span>$100 per trade — the configured size</span></div>
+
+  <h2><span class="n">05</span>What $100 actually does</h2>
+  <p style="max-width:170mm">Three price paths, one rule set. The <em>running peak</em> is stored on the position row and only ever moves up;
+  the <em>trailing threshold</em> is always 75% of it. The position closes at the first breach, and the money it returns is what a
+  route would actually pay &mdash; not what the trigger said.</p>
+
+  <div class="svg-wrap mt" style="margin-top:4mm">
+  <svg viewBox="0 0 760 320" role="img" aria-label="Three price-path scenarios for a $100 position">
+    <defs>
+      <style>
+        .ax  { stroke:#2c3b5c; stroke-width:1; }
+        .pk  { stroke:#f5b13d; stroke-width:1.1; stroke-dasharray:4 3; fill:none; }
+        .th  { stroke:#ff5f6d; stroke-width:1.1; stroke-dasharray:4 3; fill:none; }
+        .en  { stroke:#8b7cf6; stroke-width:1; stroke-dasharray:3 2; }
+        .pl  { stroke:#38e1d4; stroke-width:2.2; fill:none; stroke-linejoin:round; stroke-linecap:round; }
+        .lb  { fill:#7f8fb5; font-family:Helvetica,Arial,sans-serif; font-size:8.4px; text-anchor:end; }
+        .lba { fill:#f5b13d; font-family:Helvetica,Arial,sans-serif; font-size:8.4px; text-anchor:end; }
+        .lbr { fill:#ff8a94; font-family:Helvetica,Arial,sans-serif; font-size:8.4px; text-anchor:end; }
+        .lbv { fill:#a99bf8; font-family:Helvetica,Arial,sans-serif; font-size:8.4px; text-anchor:end; }
+        .ti  { fill:#eaf0ff; font-family:Helvetica,Arial,sans-serif; font-size:10px; font-weight:700; }
+        .an  { fill:#b9c6e4; font-family:Helvetica,Arial,sans-serif; font-size:8.6px; }
+        .ang { fill:#45d97f; font-family:Helvetica,Arial,sans-serif; font-size:8.6px; font-weight:700; }
+        .anr { fill:#ff5f6d; font-family:Helvetica,Arial,sans-serif; font-size:8.6px; font-weight:700; }
+        .dot { fill:#38e1d4; }
+        .dotr{ fill:#ff5f6d; }
+      </style>
+    </defs>
+
+    <!-- ═══ A · WINNER ═══ -->
+    <text class="ti" x="12" y="14">A · WINNER — the trailing stop does its job</text>
+    <line class="ax" x1="16" y1="250" x2="240" y2="250"/>
+    <line class="ax" x1="16" y1="34"  x2="16"  y2="250"/>
+
+    <line class="pk" x1="16" y1="56"  x2="240" y2="56"/>
+    <text class="lba" x="238" y="52">running peak 1.80×</text>
+    <line class="th" x1="16" y1="143" x2="240" y2="143"/>
+    <text class="lbr" x="200" y="139">trailing threshold 1.35×</text>
+    <line class="en" x1="16" y1="210" x2="240" y2="210"/>
+    <text class="lbv" x="238" y="223">entry 1.00×</text>
+
+    <path class="pl" d="M18,210 L46,196 L74,168 L102,146 L130,100 L152,56 L174,74 L198,110 L220,143"/>
+    <circle class="dot"  cx="18"  cy="210" r="3.4"/>
+    <circle class="dotr" cx="220" cy="143" r="3.8"/>
+
+    <text class="an"  x="12" y="272">BUY $100 &nbsp;→&nbsp; SELL ≈ $135</text>
+    <text class="ang" x="12" y="288">+$35 gross</text>
+    <text class="an"  x="12" y="306" style="font-size:7.8px;fill:#7f8fb5">Gave back 25% of a high well above cost.</text>
+
+    <!-- ═══ B · ORDINARY LOSS ═══ -->
+    <text class="ti" x="272" y="14">B · ORDINARY LOSS — it never went up</text>
+    <line class="ax" x1="276" y1="250" x2="500" y2="250"/>
+    <line class="ax" x1="276" y1="34"  x2="276" y2="250"/>
+
+    <line class="pk" x1="276" y1="60"  x2="500" y2="60"/>
+    <text class="lba" x="498" y="56">peak 1.05× — it barely moved</text>
+    <line class="en" x1="276" y1="88"  x2="500" y2="88"/>
+    <text class="lbv" x="498" y="101">entry 1.00×</text>
+    <line class="th" x1="276" y1="205" x2="500" y2="205"/>
+    <text class="lbr" x="280" y="201" style="text-anchor:start">threshold 0.79× — 21% below entry</text>
+
+    <path class="pl" d="M278,88 L306,60 L332,84 L358,112 L386,144 L414,176 L442,205"/>
+    <circle class="dot"  cx="278" cy="88"  r="3.4"/>
+    <circle class="dotr" cx="442" cy="205" r="3.8"/>
+
+    <text class="an"  x="272" y="272">BUY $100 &nbsp;→&nbsp; SELL ≈ $79</text>
+    <text class="anr" x="272" y="288">−$21</text>
+    <text class="an"  x="272" y="306" style="font-size:7.8px;fill:#7f8fb5">A position that never rises still gives back 25% of its own entry.</text>
+
+    <!-- ═══ C · GAP / RUG ═══ -->
+    <text class="ti" x="532" y="14">C · GAP / RUG — the rule fires too late</text>
+    <line class="ax" x1="536" y1="250" x2="756" y2="250"/>
+    <line class="ax" x1="536" y1="34"  x2="536" y2="250"/>
+
+    <line class="pk" x1="536" y1="56"  x2="756" y2="56"/>
+    <text class="lba" x="754" y="52">peak 1.15×</text>
+    <line class="en" x1="536" y1="80"  x2="756" y2="80"/>
+    <text class="lbv" x="754" y="93">entry 1.00×</text>
+    <line class="th" x1="536" y1="103" x2="756" y2="103"/>
+    <text class="lbr" x="628" y="118">threshold 0.86×</text>
+
+    <path class="pl" d="M538,80 L566,66 L594,56 L618,62 L638,70"/>
+    <path class="pl" d="M638,70 L656,234" stroke="#ff5f6d" stroke-dasharray="4 3"/>
+    <path class="pl" d="M656,234 L706,236 L754,237" stroke="#ff5f6d"/>
+    <circle class="dot"  cx="538" cy="80"  r="3.4"/>
+    <circle class="dotr" cx="656" cy="234" r="3.8"/>
+
+    <text class="an"  x="532" y="272">BUY $100 &nbsp;→&nbsp; SELL at what a route pays ≈ $6</text>
+    <text class="anr" x="532" y="288">−$94, not −$14</text>
+    <text class="an"  x="532" y="306" style="font-size:7.8px;fill:#7f8fb5">One snapshot later the pool is drained. The threshold was skipped over.</text>
+  </svg>
+  </div>
+
+  <div class="panel risk mt" style="margin-top:5mm">
+    <h3 style="color:var(--red)">Why a 25% trailing stop does not cap the loss at 25%</h3>
+    <div class="grid3" style="gap:5mm;margin-top:2mm">
+      <div>
+        <p style="font-size:8.2pt;margin-bottom:2mm"><strong>1 · A stop is a trigger, not a fill.</strong>
+        The rule says <em>when</em> to sell. The market says <em>at what</em>. Production deliberately books the
+        executable quote, never the trigger level — so if the price gapped straight through the threshold, the
+        fill is below it by however far it gapped.</p>
+      </div>
+      <div>
+        <p style="font-size:8.2pt;margin-bottom:2mm"><strong>2 · The market is sampled, not watched.</strong>
+        Positions are evaluated once a minute against snapshots that are themselves polled. Between two readings a
+        meme-coin pool can be drained entirely. <em>Nothing traded at the threshold, so nothing could have sold there.</em></p>
+      </div>
+      <div>
+        <p style="font-size:8.2pt;margin-bottom:2mm"><strong>3 · The threshold is 25% off the peak, not off cost.</strong>
+        A position that ran to 1.80× and gave back 25% is a <strong>+35% winner</strong>. A position that never rose gives
+        back 25% <em>of the entry</em> — and if the pool dies first, the provider marks it terminal and it returns <strong>$0.00</strong>.</p>
+      </div>
+    </div>
+    <p style="font-size:8.2pt;margin-top:1mm;margin-bottom:0"><strong>Evidence, not assertion:</strong>
+    the sibling Karthik wallet — same execution path, same market, exit target instead of trailing stop — has closed
+    <strong>30 positions at exactly $0.00</strong>, on the provider's own report that the pool had nothing left to sell into.
+    That outcome is available to this wallet on identical terms.</p>
+  </div>
+
+  <div class="grid3 mt" style="margin-top:auto">
+    <div class="panel"><h3>Also: the 6-hour cut</h3><p style="font-size:7.8pt;margin:0">Since 2026-08-21 every new position carries an absolute
+    <code>expires_at</code>. A position still climbing at hour six is sold anyway, at whatever is executable. <strong>11 of 240</strong>
+    closed trades exited this way.</p></div>
+    <div class="panel"><h3>Costs are charged, not assumed away</h3><p style="font-size:7.8pt;margin:0">Fills come from live Jupiter routes
+    (50 bps slippage tolerance). Where a route is unavailable the fallback model charges <strong>30 bps per side</strong> plus exact
+    constant-product impact <code>S²/(L/2)</code>.</p></div>
+    <div class="panel"><h3>What the numbers above are</h3><p style="font-size:7.8pt;margin:0">Illustrative price paths on the
+    <strong>real, verified rules</strong> — chosen to show each branch. They are <em>not</em> replays of specific production trades.
+    Production outcomes are on page 4 and page 7.</p></div>
+  </div>
+
+  <div class="foot"><span>MEMESCOPE — Project Flow &amp; Default Strategy</span><span class="pg">5 / 7</span></div>
+</section>
+
+<!-- ══════════════════════ PAGE 6 — RISK & FAILURE MODES ══════════════════════ -->
+<section class="page">
+  <div class="eyebrow"><span><b>MEMESCOPE</b> &nbsp;·&nbsp; Risk &amp; Failure Modes</span><span>Known weaknesses, stated</span></div>
+
+  <h2><span class="n">06</span>How this loses money, and how it breaks</h2>
+  <p style="max-width:170mm">Nothing here is hypothetical framing. Each item names the mechanism, what production does about it today,
+  and what remains exposed.</p>
+
+  <div class="grid2 mt" style="gap:3.4mm">
+
+    <div class="panel risk">
+      <h3 style="color:var(--red)">Rug / gap-through</h3>
+      <p style="font-size:7.9pt;margin-bottom:1.2mm">Liquidity is pulled between two snapshots; the trailing threshold is never traded.</p>
+      <p style="font-size:7.5pt;margin:0"><strong>Mitigated:</strong> the fill is the executable quote, so the loss is booked honestly.
+      <strong style="color:var(--red)">Exposed:</strong> the loss itself is uncapped — up to the full $100.</p>
+    </div>
+
+    <div class="panel risk">
+      <h3 style="color:var(--red)">Liquidity collapse</h3>
+      <p style="font-size:7.9pt;margin-bottom:1.2mm">The pool thins until no route will quote the position at all.</p>
+      <p style="font-size:7.5pt;margin:0"><strong>Mitigated:</strong> a pool reported <code>inactive</code> closes at $0.00, not at its last printed price.
+      <strong style="color:var(--red)">Exposed:</strong> that is a real, total loss — not a bookkeeping artefact.</p>
+    </div>
+
+    <div class="panel warn">
+      <h3 style="color:var(--amber)">Stale market data</h3>
+      <p style="font-size:7.9pt;margin-bottom:1.2mm">A position judged against a reading older than the market it claims to describe.</p>
+      <p style="font-size:7.5pt;margin:0"><strong>Mitigated:</strong> exits replay <em>every</em> unseen snapshot in timestamp order, and expiry is measured against each
+      observation's own timestamp — never a wall clock. A worker that missed six hours produces the same trades as one that missed none.</p>
+    </div>
+
+    <div class="panel warn">
+      <h3 style="color:var(--amber)">Feed outage</h3>
+      <p style="font-size:7.9pt;margin-bottom:1.2mm">Enrichment or a provider stops; positions stop being re-priced.</p>
+      <p style="font-size:7.5pt;margin:0"><strong>Mitigated:</strong> positions are <em>held and said to be held</em>, never closed on absent data; HQ opens an incident.
+      <strong style="color:var(--amber)">Exposed:</strong> during the gap no exit rule can fire, whatever the market does.</p>
+    </div>
+
+    <div class="panel">
+      <h3>Insufficient cash · capital saturation</h3>
+      <p style="font-size:7.9pt;margin-bottom:1.2mm">Qualified tokens arrive with no money left to buy them.</p>
+      <p style="font-size:7.5pt;margin:0"><strong>The dominant condition today: 897 of 1,159</strong> refusals in 24 h were <code>insufficient_paper_cash</code>.
+      With no take-profit and no fixed stop, capital sits in open positions until a trailing stop or the 6-hour clock releases it.</p>
+    </div>
+
+    <div class="panel">
+      <h3>Execution price vs trigger price</h3>
+      <p style="font-size:7.9pt;margin-bottom:1.2mm">The price that fires a rule is not the price that fills it.</p>
+      <p style="font-size:7.5pt;margin:0">Production stores both — <code>exit_observed_price</code> and <code>exit_price</code>. On the sibling wallet, average
+      <strong>entry price impact was 10.18%</strong>, exit impact 0.87%. An order against a thin pool moves the price it is trying to get.</p>
+    </div>
+
+    <div class="panel warn">
+      <h3 style="color:var(--amber)">SEC-2 limitation</h3>
+      <p style="font-size:7.9pt;margin-bottom:1.2mm">The gate proves specific, checkable properties. It is not a safety verdict.</p>
+      <p style="font-size:7.5pt;margin:0">It <strong>cannot</strong> detect a coordinated exit by holders, a social rug, or a team that simply stops.
+      LP holders are not resolved — an outstanding LP supply is UNKNOWN, which refuses the buy without calling the token unsafe.</p>
+    </div>
+
+    <div class="panel warn">
+      <h3 style="color:var(--amber)">Young-token risk</h3>
+      <p style="font-size:7.9pt;margin-bottom:1.2mm">The Radar has no minimum age and, by design, no market-cap floor.</p>
+      <p style="font-size:7.5pt;margin:0">Admission claims something <em>changed</em>, not that a project is durable. Bonding-curve pairs report no liquidity,
+      so they are refused rather than costed against an assumed depth — correct, and it removes a whole class of otherwise-eligible tokens.</p>
+    </div>
+  </div>
+
+  <div class="panel risk mt" style="margin-top:auto">
+    <h3 style="color:var(--red)">Two failure modes specific to <em>this deployment</em>, found during verification</h3>
+    <table class="tight" style="margin-top:1.5mm">
+      <tr><th style="width:46mm">Finding</th><th>Consequence</th></tr>
+      <tr>
+        <td>The wallet row records <code>trailing_stop_25_v1</code>, but the wallet trades <code>trailing_stop_25_secured_hold6h_v3</code>.</td>
+        <td>The repository's SEC-2 backstop keys off the <em>row</em>, and <code>trailing_stop_25_v1</code> is not in the gated set — so the last-line
+            defence is <strong>inert for the live wallet</strong>. The service-level gate is working (27 <code>security_gate</code> refusals in 24 h), but the
+            defence-in-depth check built to catch a future code path that skipped it is not armed.</td>
+      </tr>
+      <tr>
+        <td><code>PAPER_WALLET_STRATEGY_ID</code> is set to a retired strategy id.</td>
+        <td>The service logs <code>paper_strategy_unknown</code> on every pass and falls back to the registry default. The wallet trades correctly by
+            accident of a safe fallback, not because it was configured to.</td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="foot"><span>MEMESCOPE — Project Flow &amp; Default Strategy</span><span class="pg">6 / 7</span></div>
+</section>
+
+<!-- ══════════════════════ PAGE 7 — SYSTEM RELATIONSHIPS ══════════════════════ -->
+<section class="page">
+  <div class="eyebrow"><span><b>MEMESCOPE</b> &nbsp;·&nbsp; System Relationships</span><span>What is separate, and what is live</span></div>
+
+  <h2><span class="n">07</span>Seven systems — status as deployed</h2>
+
+  <table class="tight">
+    <tr><th style="width:34mm">System</th><th style="width:26mm">Status</th><th>What it is, in production, today</th></tr>
+    <tr><td>Track Record</td><td><span class="pill live">Live</span></td>
+      <td>The permanent record. <code>radar_tokens</code>, 1,326 rows, <code>first_detected_at</code> written once. Feeds Karthik's universe directly.</td></tr>
+    <tr><td>Default Paper Wallet</td><td><span class="pill live">Live</span></td>
+      <td>Generation 2 · own $1,000 · $100 per trade · own tables. Enters from the <strong>ranked Radar</strong>. 2 open, 240 closed.</td></tr>
+    <tr><td>Karthik Paper Wallet</td><td><span class="pill live">Live</span></td>
+      <td>Own $1,000 · $10 per trade · <strong>separate tables</strong>, separate advisory lock, separate Celery task. Enters from <strong>Track Record admissions</strong>. Activated 2026-08-22 10:57 UTC.</td></tr>
+    <tr><td>HQ Operations</td><td><span class="pill obs">Observe-only</span></td>
+      <td>Deployed and running. Probes, opens incidents, writes audit rows. <code>HQ_AUTONOMY_ENABLED</code> unset → defaults <strong>false</strong>, so it <strong>executes no repair</strong>. 7 incidents, all resolved.</td></tr>
+    <tr><td>Agent Karthik<br><code>karthik_ops</code></td><td><span class="pill obs">Observe-only</span></td>
+      <td><strong>Deployed 2026-08-22 14:32 UTC</strong>, mid-verification. Serves <code>GET /api/v1/karthik-ops</code> and nothing else — the router carries no POST, PUT, PATCH or DELETE. Binds to the wallet automatically because <code>karthik_wallets</code> exists. Autonomy variable unset → <code>OBSERVE_ONLY</code>: <strong>it executes no repair.</strong></td></tr>
+    <tr><td>Strategy Lab</td><td><span class="pill research">Research</span></td>
+      <td>No module and no tables exist in production. Built and verified locally only.</td></tr>
+    <tr><td>Paper Wallet V2</td><td><span class="pill off">Absent</span></td>
+      <td><code>PAPER_V2_MODE</code> exists in <strong>neither</strong> the runtime env, the image, nor the host checkout. &ldquo;V2&rdquo; is the historical name of the Sprint 30 relaunch that created generation 2 — it <em>is</em> the default wallet.</td></tr>
+    <tr><td>Real Wallet</td><td><span class="pill locked">Exec locked</span></td>
+      <td><code>MODE=disabled</code>, <code>EXECUTION_ENABLED=false</code>, <code>AUTOTRADE=false</code>, dry-run false, network <strong>devnet</strong>, entry size <strong>$0</strong>, no public key. <strong>0 positions. Nothing has ever executed.</strong></td></tr>
+  </table>
+
+  <div class="svg-wrap mt" style="margin-top:3.5mm">
+  <svg viewBox="0 0 760 186" role="img" aria-label="Isolation boundaries between MEMESCOPE trading systems">
+    <defs>
+      <marker id="a7" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#38e1d4"/></marker>
+      <style>
+        .w  { fill:#131c2f; stroke:#5c4fd0; stroke-width:1.2; rx:4; }
+        .wo { fill:#131c2f; stroke:#2c3b5c; stroke-width:1; stroke-dasharray:4 3; rx:4; }
+        .wd { fill:#0e2a2c; stroke:#1c8f89; stroke-width:1.3; rx:4; }
+        .wa { fill:#241c09; stroke:#a3762a; stroke-width:1.2; rx:4; }
+        .wh { fill:#eaf0ff; font-family:Helvetica,Arial,sans-serif; font-size:9.8px; font-weight:700; }
+        .wp { fill:#7f8fb5; font-family:Helvetica,Arial,sans-serif; font-size:8px; }
+        .we { stroke:#38e1d4; stroke-width:1.3; fill:none; marker-end:url(#a7); }
+        .wl { fill:#ff8a94; font-family:Helvetica,Arial,sans-serif; font-size:8px; font-style:italic; text-anchor:middle; }
+      </style>
+    </defs>
+
+    <rect class="wd" x="250" y="2" width="260" height="36"/>
+    <text class="wh" x="262" y="20">TRACK RECORD · radar_tokens</text>
+    <text class="wp" x="262" y="33">shared, and read-only to everything below</text>
+
+    <path class="we" d="M330,38 L330,56 L150,56 L150,72"/>
+    <path class="we" d="M430,38 L430,56 L610,56 L610,72"/>
+
+    <rect class="w" x="30" y="72" width="240" height="56"/>
+    <text class="wh" x="42" y="90">Default Paper Wallet</text>
+    <text class="wp" x="42" y="104">paper_wallets · paper_positions</text>
+    <text class="wp" x="42" y="117">$1,000 own capital · $100/trade · lock "PAPR"</text>
+
+    <rect class="w" x="490" y="72" width="240" height="56"/>
+    <text class="wh" x="502" y="90">Karthik Paper Wallet</text>
+    <text class="wp" x="502" y="104">karthik_wallets · karthik_positions</text>
+    <text class="wp" x="502" y="117">$1,000 own capital · $10/trade · lock "KRTH"</text>
+
+    <line x1="380" y1="66" x2="380" y2="182" stroke="#8c3038" stroke-width="1.2" stroke-dasharray="5 4"/>
+    <text class="wl" x="380" y="146">no shared capital</text>
+    <text class="wl" x="380" y="158">no shared table</text>
+    <text class="wl" x="380" y="170">no shared transaction</text>
+
+    <rect class="wa" x="30" y="140" width="240" height="34"/>
+    <text class="wh" x="42" y="157">HQ Operations — observe-only</text>
+    <text class="wp" x="42" y="169">reads both · repairs neither</text>
+
+    <rect class="wa" x="490" y="140" width="240" height="34"/>
+    <text class="wh" x="502" y="157">Agent Karthik — observe-only</text>
+    <text class="wp" x="502" y="169">reads the Karthik wallet · repairs nothing</text>
+  </svg>
+  </div>
+
+  <div class="grid2 mt" style="margin-top:auto;gap:4mm">
+    <div class="verify">
+      <h3>Verified against production</h3>
+      <dl style="grid-template-columns:26mm 1fr;gap:.7mm 2.5mm">
+        <dt>Environment</dt><dd>production</dd>
+        <dt>Host</dt><dd>vps-651730bb · 51.79.166.133 · OVH</dd>
+        <dt>Public website</dt><dd>www.memescope.site<br>HTTP 200</dd>
+        <dt>Public API</dt><dd>api.memescope.site<br>reachable · alpha-gated</dd>
+        <dt>Serving commit</dt><dd>4b7f89eabfcc6c561547e067ab7c996858db8225<br>image built 2026-08-22T14:32:24Z · up 14:43:49Z</dd>
+        <dt>Host checkout</dt><dd>4b7f89ea… — same commit, built and serving</dd>
+        <dt>Alembic head</dt><dd>0044_karthik_wallet — single head</dd>
+        <dt>Strategy ID</dt><dd>applied:<br>trailing_stop_25_secured_hold6h_v3<br>wallet row: trailing_stop_25_v1</dd>
+        <dt>Strategy version</dt><dd>applied: 3.0.0-hold6h · wallet row: 1.0.0</dd>
+        <dt>Generated</dt><dd>2026-08-22 14:55 UTC</dd>
+      </dl>
+    </div>
+
+    <div class="panel">
+      <h3>Assumptions &amp; limitations</h3>
+      <ul style="font-size:7.4pt">
+        <li>Wallet figures are a <strong>snapshot at 2026-08-22 14:55 UTC</strong>. Both wallets trade every minute; the numbers have moved since.</li>
+        <li>Page 5's price paths <strong>illustrate the verified rules</strong>; they are not replays of specific production trades.</li>
+        <li>Refusal counts are the trailing 24 h of <code>paper_decision_snapshots</code>. Execution-impact figures are averaged over Karthik's 132 entries, which share this wallet's execution client but not its $100 order size.</li>
+        <li>The API could not be queried programmatically — the alpha gate rejects scripted sign-in. Figures come from production <strong>source, container environment and database</strong>, which are the facts the API renders.</li>
+        <li><strong>Production was redeployed twice while this was being written</strong> — <code>bcc5550</code> → <code>11fe507</code> (disk only) → <code>4b7f89e</code> (built and served at 14:32 UTC, which is when Agent Karthik went live). Every statement here describes the <strong>image serving at 14:55 UTC</strong>.</li>
+        <li>No production data, configuration, strategy or wallet was altered to produce this document.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="foot"><span>MEMESCOPE — Project Flow &amp; Default Strategy</span><span class="pg">7 / 7</span></div>
+</section>
+
+</body>
+</html>
