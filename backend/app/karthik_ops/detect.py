@@ -265,6 +265,7 @@ async def run(session: AsyncSession, binding: Binding) -> list[Finding]:
                 positions.c.entry_price,
                 positions.c.cost_basis,
                 positions.c.exit_price,
+                positions.c.exit_observed_price,
                 positions.c.exit_proceeds_usd,
                 positions.c.exit_reason,
             ).where(positions.c.wallet_id == binding.wallet_id)
@@ -357,22 +358,37 @@ async def run(session: AsyncSession, binding: Binding) -> list[Finding]:
                 mint=row.mint_address,
                 exit_reason=row.exit_reason,
             )
+        # Against the *observed* price, not the executed one.
+        #
+        # These are two different numbers on purpose and conflating them was a
+        # real defect in this file: `exit_observed_price` is the market print
+        # that tripped the target and must be at or above the multiple, while
+        # `exit_price` is the router's executable quote, which the wallet
+        # deliberately books *worse* than the print — "if the quote comes back
+        # worse than the print, the worse number is the one that goes on the
+        # books". Comparing the executed price to the target therefore flags
+        # every honestly-modelled fill, which is what it did: fifty-three
+        # correct trades filed as critical owner work on the first live tick.
+        #
+        # A fill below target on the *print* is a genuine defect: the wallet
+        # sold early. A fill below target on the *quote* is slippage, which is
+        # the execution model working and is counted separately below.
+        observed = row.exit_observed_price
         if (
             row.exit_reason == "target_1_25x"
-            and row.exit_price is not None
+            and observed is not None
             and row.entry_price
-            and row.exit_price / row.entry_price < target_multiple
+            and observed / row.entry_price < target_multiple
         ):
             add(
                 "target_below_multiple",
                 f"karthik.target_below_multiple:{row.id}",
                 (
-                    f"{row.mint_address} booked a target fill at "
-                    f"{row.exit_price / row.entry_price}x, below the published "
-                    f"{target_multiple}x."
+                    f"{row.mint_address} triggered its target on an observed price of "
+                    f"{observed / row.entry_price}x, below the published {target_multiple}x."
                 ),
                 mint=row.mint_address,
-                multiple=str(row.exit_price / row.entry_price),
+                observed_multiple=str(observed / row.entry_price),
             )
 
     # --- the decision record --------------------------------------------

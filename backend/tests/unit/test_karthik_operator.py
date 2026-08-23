@@ -707,9 +707,11 @@ class TestBoundSurfaces:
         findings = await detect.run(db_session, wallet)
         assert any(f.defect == "pre_activation_entry" for f in findings)
 
-    async def test_finds_a_target_filled_below_the_published_multiple(
+    async def test_finds_a_target_triggered_below_the_published_multiple(
         self, db_session, wallet
     ) -> None:
+        """A fill whose *observed trigger* was under target. A real defect: the
+        wallet sold before its own rule said to."""
         await self._position(
             db_session,
             wallet,
@@ -717,11 +719,42 @@ class TestBoundSurfaces:
             status="closed",
             closed_at=datetime.now(UTC),
             exit_price=Decimal("1.10"),
+            exit_observed_price=Decimal("1.10"),
             exit_proceeds_usd=Decimal(11),
             exit_reason="target_1_25x",
         )
         findings = await detect.run(db_session, wallet)
         assert any(f.defect == "target_below_multiple" for f in findings)
+
+    async def test_slippage_below_target_is_not_a_defect(self, db_session, wallet) -> None:
+        """The false positive that reached production, pinned.
+
+        The wallet books the router's executable quote, which is deliberately
+        worse than the print that tripped the target — its own comment says
+        "if the quote comes back worse than the print, the worse number is the
+        one that goes on the books". Comparing that executed price to 1.25x
+        flags every honestly-modelled fill, and on the first live tick it filed
+        fifty-three correct trades as critical owner work.
+
+        Trigger at or above target, execute below it: correct, and silent.
+        """
+        await self._position(
+            db_session,
+            wallet,
+            n=61,
+            status="closed",
+            closed_at=datetime.now(UTC),
+            # Tripped the target cleanly at 1.26x...
+            exit_observed_price=Decimal("1.26"),
+            # ...and filled at 1.236x after impact and fees.
+            exit_price=Decimal("1.236"),
+            exit_proceeds_usd=Decimal("12.36"),
+            exit_reason="target_1_25x",
+        )
+        findings = await detect.run(db_session, wallet)
+        assert not [f for f in findings if f.defect == "target_below_multiple"], (
+            "slippage on an honest execution model was reported as a defect"
+        )
 
     async def test_finds_an_exit_the_wallet_has_no_rule_for(self, db_session, wallet) -> None:
         """The wallet has a target and no stop. Anything else closing a
@@ -871,6 +904,9 @@ class TestBoundSurfaces:
             n=300,
             status="closed",
             closed_at=datetime.now(UTC),
+            # Triggered below target on the observed print, which is the real
+            # defect — not merely filled below it, which is slippage.
+            exit_observed_price=Decimal("1.10"),
             exit_price=Decimal("1.10"),
             exit_proceeds_usd=Decimal(11),
             exit_reason="target_1_25x",
