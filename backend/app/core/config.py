@@ -502,6 +502,14 @@ class Settings(BaseSettings):
     SNAPSHOT_SANITY_MIN_PRIOR: int = Field(default=3, ge=2, le=10)
     SNAPSHOT_SANITY_WINDOW_SECONDS: int = Field(default=600, ge=60, le=3600)
 
+    # --- Chainstack RPC (primary production Solana RPC once configured) -----
+    #: Full endpoint URL INCLUDING the access token (Chainstack embeds it in
+    #: the path). Secret-bearing: reaches logs only through describe(), which
+    #: redacts. Empty = provider unavailable; the router then runs
+    #: Helius-only, and with neither configured it refuses rather than
+    #: falling back to the public node.
+    CHAINSTACK_RPC_URL: str = ""
+
     # --- Nursery: eligibility is not discovery (V4 Phase 2) -----------------
     #: Minimum minutes of observability before a qualifying token can become a
     #: Track Record admission. 0 disables the gate (previous behaviour). An

@@ -54,6 +54,9 @@ x-backend-env: &backend-env
   # and a value set on one service only would point the two at different nodes.
   # `solana` is plain JSON-RPC and needs no key.
   SOLANA_RPC_PROVIDER: ${SOLANA_RPC_PROVIDER:-helius}
+  # Chainstack: primary standard-RPC endpoint once configured (URL embeds the
+  # token; never printed). The router (provider "auto") reads it everywhere.
+  CHAINSTACK_RPC_URL: ${CHAINSTACK_RPC_URL:-}
   SOLANA_RPC_URL: ${SOLANA_RPC_URL:-https://api.mainnet-beta.solana.com}
   SOLANA_WS_URL: ${SOLANA_WS_URL:-wss://api.mainnet-beta.solana.com}
   HELIUS_API_KEY: ${HELIUS_API_KEY:-}

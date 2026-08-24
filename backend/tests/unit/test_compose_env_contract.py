@@ -93,6 +93,7 @@ REQUIRED_IN_ANCHOR = {
     # The scanner subscribes and the enrichment worker reads accounts. Split
     # across services, the two would talk to different nodes.
     "SOLANA_RPC_PROVIDER": "selects the RPC implementation for every service",
+    "CHAINSTACK_RPC_URL": "the router's primary node; a worker without it silently loses the primary",
     "SOLANA_RPC_URL": "the endpoint when the provider is not vendor-specific",
     # The Karthik wallet decides in the worker and reports through the API.
     # A pause visible to only one of them is a wallet that reports itself

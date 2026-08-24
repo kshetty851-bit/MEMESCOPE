@@ -35,6 +35,12 @@ class RpcError(RuntimeError):
     """An RPC call failed after exhausting retries."""
 
 
+class RpcExhaustedError(RpcError):
+    """Transient failures used up every attempt. Eligible for provider
+    failover — unlike a deterministic JSON-RPC application error, which will
+    fail identically on any node."""
+
+
 class RpcRateLimitError(RpcError):
     """The node returned 429. Its own class because quota exhaustion is an
     operational condition, not a bug, and the health surface reports it as one."""

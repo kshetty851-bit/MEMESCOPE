@@ -25,6 +25,7 @@ from app.core.backoff import BackoffPolicy
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.services.rpc.base import (
+    RpcExhaustedError,
     RpcDescription,
     RpcError,
     RpcRateLimitError,
@@ -146,7 +147,11 @@ class StandardSolanaRPC(SolanaRPC):
                 )
                 await asyncio.sleep(delay)
 
-        raise RpcError(f"{method} failed after {attempts} attempts: {last_error}")
+        if isinstance(last_error, RpcRateLimitError):
+            raise RpcRateLimitError(
+                f"{method} failed after {attempts} attempts: {last_error}"
+            )
+        raise RpcExhaustedError(f"{method} failed after {attempts} attempts: {last_error}")
 
     async def get_transaction(
         self, signature: str, *, attempts: int | None = None

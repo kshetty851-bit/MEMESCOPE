@@ -212,7 +212,7 @@ async def _holder_snapshots_collect() -> dict[str, Any]:
     if not settings.FEATURE_RESEARCH_COLLECTORS_ENABLED:
         return {"skipped": "collectors_disabled"}
 
-    from app.services.rpc.registry import get_rpc
+    from app.services.rpc.registry import get_research_rpc
 
     batch = settings.HOLDER_SNAPSHOT_BATCH
     now = datetime.now(UTC)
@@ -288,8 +288,7 @@ async def _holder_snapshots_collect() -> dict[str, Any]:
         # endpoint (measured live: every call 429'd, 30 failure rows, 0 data).
         # Use the keyed vendor node when one is configured, and pace the calls
         # regardless — this is a background collector, not a hot path.
-        rpc_name = "helius" if settings.HELIUS_API_KEY else None
-        async with get_rpc(rpc_name) as rpc:
+        async with get_research_rpc() as rpc:
             for mint, token_id, ctx in rows:
                 # This method is rate-limited harder than the general RPS on
                 # both the public node AND Helius (measured live: 0.6s pacing
@@ -325,7 +324,9 @@ async def _holder_snapshots_collect() -> dict[str, Any]:
                         token_id=token_id,
                         mint_address=mint,
                         captured_at=datetime.now(UTC),
-                        provider=settings.SOLANA_RPC_PROVIDER,
+                        provider=getattr(rpc, "last_provider", None) or rpc.name,
+                        rpc_latency_ms=getattr(rpc, "last_latency_ms", None),
+                        rpc_fallback_used=getattr(rpc, "last_fallback_used", None),
                         context=context,
                         supply_raw=Decimal(supply),
                         decimals=decimals,
@@ -343,7 +344,9 @@ async def _holder_snapshots_collect() -> dict[str, Any]:
                         token_id=token_id,
                         mint_address=mint,
                         captured_at=datetime.now(UTC),
-                        provider=settings.SOLANA_RPC_PROVIDER,
+                        provider=getattr(rpc, "last_provider", None) or rpc.name,
+                        rpc_latency_ms=None,
+                        rpc_fallback_used=None,
                         context=context,
                         failure_reason=type(exc).__name__[:64],
                     ))

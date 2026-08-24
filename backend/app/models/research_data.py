@@ -191,6 +191,10 @@ class HolderSnapshot(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     accounts: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     excluded: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     failure_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    #: Which node answered, how fast, and whether a fallback served it — so
+    #: provider data is never silently combined (V4 RPC router mission).
+    rpc_latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    rpc_fallback_used: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
     __table_args__ = (
         Index("ix_holder_snapshots_mint_captured", "mint_address", "captured_at"),
