@@ -88,23 +88,12 @@ REQUIRED_IN_ANCHOR = {
     "SCANNER_RECONNECT_ERROR_ATTEMPTS": "scanner escalates, API reports it degraded",
     "SCANNER_STATE_TTL_SECONDS": "scanner writes the key, API expects it to still exist",
     "HEALTH_SCANNER_DOWN_MINUTES": "read by the API endpoint and the scanner healthcheck",
-    # The enrichment worker runs detection and the API reads what it wrote, so
-    # the two must agree on whether the engine is on and on what a graduation
-    # is. A flag on one service is how this went wrong three times before.
-    "FEATURE_OPPORTUNITY_ENGINE_ENABLED": "read by the enrichment worker's detection pass",
-    "OPPORTUNITY_BONDING_CURVE_VENUES": "defines the transition; must not differ per service",
-    "OPPORTUNITY_GRADUATED_VENUES": "defines the transition; must not differ per service",
     # The enrichment worker collects curve readings and the API reads them back.
     "FEATURE_CURVE_COLLECTION_ENABLED": "read by the enrichment worker's curve pass",
     # The scanner subscribes and the enrichment worker reads accounts. Split
     # across services, the two would talk to different nodes.
     "SOLANA_RPC_PROVIDER": "selects the RPC implementation for every service",
     "SOLANA_RPC_URL": "the endpoint when the provider is not vendor-specific",
-    # The enrichment worker stamps a signal's expiry at detection; the beat
-    # scheduler decides what has lapsed. Divergent TTLs mean one service opens
-    # signals the other closes early, or never closes at all.
-    "OPPORTUNITY_TTL_BREAKOUT_SECONDS": "detection stamps expiry, review enforces it",
-    "OPPORTUNITY_TTL_PRE_BREAKOUT_SECONDS": "detection stamps expiry, review enforces it",
     # The Karthik wallet decides in the worker and reports through the API.
     # A pause visible to only one of them is a wallet that reports itself
     # stopped while it is still buying.

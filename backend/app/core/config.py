@@ -465,42 +465,12 @@ class Settings(BaseSettings):
     PUMPFUN_RADAR_MIN_LIQUIDITY: float = Field(default=0, ge=0)
     PUMPFUN_RADAR_BATCH_LIMIT: int = Field(default=500, ge=1, le=5000)
 
-    # --- Opportunity Engine ---------------------------------------------------
-    # Off by default like every other pipeline flag, so enabling it is a
-    # deliberate act. While off, detection never runs and no existing behaviour
-    # changes — the Radar, scoring and enrichment are untouched either way.
-    FEATURE_OPPORTUNITY_ENGINE_ENABLED: bool = False
-    #: Which venues count as a bonding curve, and which as a graduated pool.
-    #: Configurable because a launchpad renaming its venue must be a config
-    #: change, not a code change — pump.fun has already renamed an instruction
-    #: once (see the scanner's `InitializeMint` reasoning).
-    OPPORTUNITY_BONDING_CURVE_VENUES: CsvList = Field(default_factory=lambda: ["pumpfun"])
-    OPPORTUNITY_GRADUATED_VENUES: CsvList = Field(default_factory=lambda: ["pumpswap"])
-    #: Observations a signal needs before it may become ACTIVE. Below this the
-    #: opportunity sits in PENDING_CONFIRMATION and reaches no board: one
-    #: snapshot is noise.
-    OPPORTUNITY_REQUIRED_CONFIRMATIONS: int = Field(default=2, ge=1)
-    #: How many observations to load per token for provider evaluation.
-    OPPORTUNITY_WINDOW_SIZE: int = Field(default=12, ge=2, le=200)
-    #: Per-signal-type TTL. Fresh graduation is a bounded factual window; a
-    #: token that graduated three days ago did not graduate *now*.
-    OPPORTUNITY_TTL_FRESH_GRADUATION_SECONDS: int = Field(default=172_800, ge=60)
-    #: Fallback for any signal type without its own TTL, so a provider added in
-    #: a future sprint cannot produce an immortal signal by omission.
-    OPPORTUNITY_TTL_DEFAULT_SECONDS: int = Field(default=21_600, ge=60)
-    #: How long an opportunity stays EXPIRING before closing. A re-detection
-    #: inside this window revives it in place rather than minting a generation.
-    OPPORTUNITY_GRACE_SECONDS: int = Field(default=3_600, ge=0)
-    #: How long a CLOSED opportunity settles before archival frees its token to
-    #: open a new generation.
-    OPPORTUNITY_ARCHIVE_AFTER_SECONDS: int = Field(default=86_400, ge=0)
-    #: Per-signal TTL for the breakout family. Hours, not days: ADR §11 puts
-    #: breakout at "confirmed or invalidated fast", and a stale breakout is the
-    #: most misleading card the board can show — it claims a move is happening.
-    OPPORTUNITY_TTL_BREAKOUT_SECONDS: int = Field(default=21_600, ge=60)
-    #: Pre-breakout resolves more slowly by nature: it is a claim about pressure
-    #: building, which either realises into a breakout or quietly does not.
-    OPPORTUNITY_TTL_PRE_BREAKOUT_SECONDS: int = Field(default=86_400, ge=60)
+    # --- Opportunity Engine: retired (V4 Phase 2 follow-up) -------------------
+    # The engine ran flag-off for its whole production life; the near-graduation
+    # provider was closed as unanswerable (ARCHITECTURE_DECISIONS.md §14a) and
+    # V4 found the concept duplicated Radar admission. Its tables and history
+    # remain (app/models/opportunity.py); its settings are gone — Settings uses
+    # extra="ignore", so stale FEATURE_OPPORTUNITY_* env vars are harmless.
 
     # --- Priority enrichment lane ---------------------------------------------
     # Sprint 28. A lane inside the existing queue, not a second queue: the claim
@@ -1050,8 +1020,6 @@ class Settings(BaseSettings):
         "TRUSTED_PROXY_IPS",
         "SCANNER_WATCH_PROGRAMS",
         "YELLOWSTONE_PROGRAM_IDS",
-        "OPPORTUNITY_BONDING_CURVE_VENUES",
-        "OPPORTUNITY_GRADUATED_VENUES",
         # Both were `CsvList` from the day the safety gate landed but were never
         # registered here, because neither had ever appeared in a compose file —
         # so the omission was invisible. Putting the execution contract in the

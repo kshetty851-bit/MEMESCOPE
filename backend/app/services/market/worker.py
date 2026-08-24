@@ -29,7 +29,6 @@ from app.core.events import publish_live_update, publish_score_events
 from app.core.logging import get_logger
 from app.core.redis import get_redis
 from app.db.session import SessionFactory
-from app.opportunities.engine import OpportunityEngine
 from app.paper.service import PaperWalletService
 from app.radar.service import RadarService
 from app.repositories.market import EnrichmentStateRepository
@@ -78,10 +77,6 @@ class WorkerStats:
     # Opportunity detection runs in its own transaction after scoring, so its
     # counters are separate too: a detection failure says nothing about whether
     # the snapshots or the scores landed.
-    opportunities_opened: int = 0
-    opportunity_signals: int = 0
-    opportunity_events: int = 0
-    opportunity_failures: int = 0
     # Curve collection reads a different source in its own transaction, so its
     # counters are separate too: a Helius outage says nothing about whether the
     # market snapshots landed.
@@ -110,10 +105,6 @@ class WorkerStats:
             "score_history_written": self.score_history_written,
             "score_events_published": self.score_events_published,
             "scoring_failures": self.scoring_failures,
-            "opportunities_opened": self.opportunities_opened,
-            "opportunity_signals": self.opportunity_signals,
-            "opportunity_events": self.opportunity_events,
-            "opportunity_failures": self.opportunity_failures,
             "curve_reads": self.curve_reads,
             "curve_snapshots": self.curve_snapshots,
             "curve_unparsable": self.curve_unparsable,
@@ -404,7 +395,6 @@ class MarketEnrichmentWorker:
         await self._refresh_radar(refreshed_mints)
         await self._review_held_positions(refreshed_mints)
         await self._collect_curves(mints)
-        await self._detect_opportunities(mints)
         return total
 
     # --- Scoring (TX-2) -----------------------------------------------------
@@ -560,39 +550,6 @@ class MarketEnrichmentWorker:
         self.stats.curve_snapshots += outcome.written
         self.stats.curve_unparsable += outcome.unparsable
 
-    # --- Opportunity detection (TX-6) ---------------------------------------
-
-    async def _detect_opportunities(self, mints: Sequence[str]) -> None:
-        """Run signal detection over the batch that was just enriched.
-
-        This is what makes detection event-driven rather than a scan: the
-        engine evaluates exactly the tokens whose observations just changed, on
-        the tiered cadence the scheduler already paces. There is no recurring
-        sweep over the token universe, and work is proportional to change
-        rather than to table size (ARCHITECTURE_DECISIONS.md AD-12).
-
-        Its own transaction, after scoring, for the same reason scoring is
-        separate from enrichment: `claim_due` holds row locks until TX-1
-        commits, and detection is derived and recomputable. A failure is
-        contained and logged — the snapshots are already durable, and the next
-        refresh of the same token re-evaluates it.
-        """
-        if not settings.FEATURE_OPPORTUNITY_ENGINE_ENABLED or not mints:
-            return
-
-        try:
-            async with SessionFactory() as session:
-                engine = OpportunityEngine(session)
-                outcome = await engine.detect(mints, now=datetime.now(UTC))
-                await session.commit()
-        except Exception:
-            self.stats.opportunity_failures += 1
-            logger.exception("opportunity_cycle_failed", tokens=len(mints))
-            return
-
-        self.stats.opportunities_opened += outcome.opportunities_opened
-        self.stats.opportunity_signals += outcome.signals_added
-        self.stats.opportunity_events += outcome.events_recorded
 
 
 async def run_worker() -> None:

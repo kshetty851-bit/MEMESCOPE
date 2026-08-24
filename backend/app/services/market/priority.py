@@ -35,12 +35,11 @@ from app.models.market import (
     EnrichmentStatus,
     TokenEnrichmentState,
 )
-from app.models.opportunity import Opportunity
+from app.models.opportunity import LIVE_STATUSES, Opportunity
 from app.models.paper import PaperPosition
 from app.models.radar import RadarToken
 from app.models.research_data import NurseryAdmission
 from app.models.token import DiscoveredToken
-from app.opportunities.models import LIVE_STATUSES
 from app.paper.models import PositionStatus
 
 

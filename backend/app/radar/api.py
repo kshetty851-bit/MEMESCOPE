@@ -22,7 +22,6 @@ from app.core.config import settings
 from app.core.exceptions import NotFoundError
 from app.models.opportunity import OpportunitySignal
 from app.models.radar import RadarSnapshot, RadarToken
-from app.opportunities.repository import OpportunityRepository
 from app.radar import achievements as achievement_tiers
 from app.radar import detector, explain, readout, scorer
 from app.radar.models import RadarCategory, RadarDimension, RadarReason
@@ -131,36 +130,15 @@ def _to_base_rate(category: str, raw: dict[str, Any] | None) -> BaseRateOut | No
     )
 
 
-async def _live_signals_for(
-    session: DbSession, mints: list[str], *, now: datetime
-) -> dict[str, OpportunitySignal]:
-    """The strongest live signal per mint, for a whole page, in two queries.
+def _live_signals_for() -> dict[str, OpportunitySignal]:
+    """Always empty: the Opportunity Engine is retired.
 
-    Returns at most one signal per token: the Radar row has one "why now" line,
-    and `live_signals_for` already orders by confidence, so the first is the
-    engine's own strongest claim rather than a choice made here.
-
-    Empty — never absent — while the engine is switched off. A Radar row is
-    ranked by the Radar score, and it stays a complete row without a signal;
-    the signal is the answer to "why now", not to "is this worth ranking".
+    The signature survives as a seam so the row builders keep one shape. A
+    Radar row is ranked by the Radar score and is complete without a signal;
+    historical `opportunity_signals` rows remain queryable in SQL, but no code
+    path decorates a live row from them any more.
     """
-    if not mints or not settings.FEATURE_OPPORTUNITY_ENGINE_ENABLED:
-        return {}
-
-    repository = OpportunityRepository(session)
-    live = await repository.live_for(mints)
-    if not live:
-        return {}
-
-    by_opportunity = await repository.live_signals_for(
-        [opportunity.id for opportunity in live.values()], now=now
-    )
-    strongest: dict[str, OpportunitySignal] = {}
-    for mint, opportunity in live.items():
-        found = by_opportunity.get(opportunity.id) or []
-        if found:
-            strongest[mint] = found[0]
-    return strongest
+    return {}
 
 
 def _risk_from(snapshot: RadarSnapshot | None) -> tuple[Decimal | None, list[str]]:
@@ -451,7 +429,7 @@ async def get_leaderboard(
     rates = await repository.base_rates()
     context = await resolve_token_context(session, board_mints, now=now)
     snapshots = await repository.latest_snapshots_for(board_mints)
-    signals = await _live_signals_for(session, board_mints, now=now)
+    signals = _live_signals_for()
     detections = await repository.detection_times_for(board_mints)
     return [
         _to_entry(
@@ -525,7 +503,7 @@ async def list_radar(
     rates = await repository.base_rates()
     context = await resolve_token_context(session, mints, now=now)
     snapshots = await repository.latest_snapshots_for(mints)
-    signals = await _live_signals_for(session, mints, now=now)
+    signals = _live_signals_for()
     detections = await repository.detection_times_for(mints)
 
     return RadarPage(
@@ -775,7 +753,7 @@ async def get_entry(session: DbSession, mint: str) -> RadarDetailOut:
         await repository.detection_times_for([entry.mint_address]),
         context=await resolve_token_context(session, [entry.mint_address], now=now),
         snapshots=await repository.latest_snapshots_for([entry.mint_address]),
-        signals=await _live_signals_for(session, [entry.mint_address], now=now),
+        signals=_live_signals_for(),
     )
 
     dimensions: list[DimensionOut] = []

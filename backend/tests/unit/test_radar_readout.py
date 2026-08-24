@@ -35,14 +35,18 @@ class TestSignalLabel:
         assert readout.signal_label("some_future_provider") is None
         assert readout.signal_label(None) is None
 
-    def test_every_declared_signal_type_has_a_label(self) -> None:
-        """Guards the gap this module exists to close: a signal the engine can
-        emit and this layer cannot say."""
-        from app.opportunities.models import SignalType
-
-        for member in SignalType:
-            assert member.value in readout.SIGNAL_LABEL
-            assert member.value in readout.SIGNAL_WHY
+    def test_every_persisted_signal_type_has_a_label(self) -> None:
+        """The engine is retired but its rows are history: every signal type it
+        ever persisted must still render as prose, not as an engine code."""
+        persisted = {
+            "fresh_graduation",
+            "near_graduation",
+            "breakout",
+            "pre_breakout",
+        }
+        for value in persisted:
+            assert value in readout.SIGNAL_LABEL
+            assert value in readout.SIGNAL_WHY
 
 
 class TestRiskBand:
