@@ -152,3 +152,4 @@ test-ledger/
 # never committed — verified) and now lives outside the tree entirely.
 *-signer.json
 *signer*.key
+frontend/node_modules
