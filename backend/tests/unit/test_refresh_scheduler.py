@@ -222,3 +222,47 @@ class TestDeadLetteringNeedsTimeAsWellAsCount:
         mint that has never once returned data is a different case from one
         that broke this afternoon."""
         assert _scheduler().should_dead_letter(10, now=NOW, failing_since=None)
+
+
+class TestTheObservationWindowActuallyObserves:
+    """A token the Radar nursery holds OBSERVING keeps the nursery cadence for
+    the WHOLE window, not merely its first FRESH minutes.
+
+    Measured on production 2026-08-24: observing tokens 30-60 minutes old fell
+    through to the YOUNG tier's five-minute cadence and collected 4-8
+    observations where the window promised roughly sixty. A window that does
+    not observe is not a window.
+    """
+
+    POLICY = SchedulePolicy(
+        fresh_max_minutes=30,
+        fresh_interval_seconds=30,
+        young_max_minutes=360,
+        young_interval_seconds=300,
+        nursery_interval_seconds=60,
+        nursery_window_minutes=60,
+    )
+
+    def test_nursery_cadence_covers_the_whole_observation_window(self) -> None:
+        scheduler = RefreshScheduler(policy=self.POLICY)
+        decision = scheduler.decide(
+            now=NOW, discovered_at=NOW - timedelta(minutes=45), nursery=True
+        )
+        assert decision.tier is RefreshTier.NURSERY
+        assert decision.interval_seconds == 60
+
+    def test_past_the_window_a_stale_token_falls_back_to_its_age_tier(self) -> None:
+        """The original anti-staleness guard survives: a lagging membership
+        beat still cannot hold an old token on the fast cadence."""
+        scheduler = RefreshScheduler(policy=self.POLICY)
+        decision = scheduler.decide(
+            now=NOW, discovered_at=NOW - timedelta(minutes=90), nursery=True
+        )
+        assert decision.tier is RefreshTier.YOUNG
+        assert decision.interval_seconds == 300
+
+    def test_the_window_defaults_to_the_fresh_bound_when_the_nursery_is_off(self) -> None:
+        from app.core.config import settings
+
+        policy = SchedulePolicy.from_settings()
+        assert policy.nursery_window_minutes >= settings.ENRICHMENT_TIER_FRESH_MAX_MINUTES

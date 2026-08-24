@@ -57,6 +57,16 @@ class SchedulePolicy:
     #: `cap * 60 / interval` per minute, which must fit inside the worker's
     #: measured throughput (~1,000 claims/min) *after* the display lane is fed.
     nursery_interval_seconds: int = 60
+    #: How long a nursery-lane token keeps the nursery cadence. Was implicitly
+    #: `fresh_max_minutes` (30). The Radar's observation window (V4 Phase 2)
+    #: holds a token OBSERVING for `RADAR_MIN_OBSERVATION_MINUTES` before it
+    #: may be admitted, and measured on 2026-08-24 those tokens fell to the
+    #: YOUNG tier's 5-minute cadence half way through — 4-8 observations where
+    #: the window promised ~60. A window that does not observe is not a
+    #: window. The anti-staleness intent of the original bound is kept: past
+    #: this horizon a lagging membership beat still cannot hold a stale token
+    #: on the fast cadence.
+    nursery_window_minutes: int = 30
 
     @classmethod
     def from_settings(cls) -> SchedulePolicy:
@@ -69,6 +79,10 @@ class SchedulePolicy:
             mature_interval_seconds=settings.ENRICHMENT_TIER_MATURE_INTERVAL_SECONDS,
             old_interval_seconds=settings.ENRICHMENT_TIER_OLD_INTERVAL_SECONDS,
             priority_interval_seconds=settings.ENRICHMENT_PRIORITY_INTERVAL_SECONDS,
+            nursery_window_minutes=max(
+                settings.ENRICHMENT_TIER_FRESH_MAX_MINUTES,
+                settings.RADAR_MIN_OBSERVATION_MINUTES,
+            ),
             nursery_interval_seconds=settings.ENRICHMENT_NURSERY_INTERVAL_SECONDS,
         )
 
@@ -144,7 +158,7 @@ class RefreshScheduler:
         age_minutes = max(0.0, (now - discovered_at).total_seconds() / 60.0)
         if priority:
             tier = RefreshTier.PRIORITY
-        elif nursery and age_minutes < self.policy.fresh_max_minutes:
+        elif nursery and age_minutes < self.policy.nursery_window_minutes:
             tier = RefreshTier.NURSERY
         else:
             tier = self.policy.tier_for_age(age_minutes)

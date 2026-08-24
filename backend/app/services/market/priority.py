@@ -331,7 +331,16 @@ async def refresh_nursery_lane(session: AsyncSession, *, now: datetime) -> Nurse
             .where(
                 TokenEnrichmentState.status == EnrichmentStatus.ACTIVE,
                 TokenEnrichmentState.priority == LANE_NORMAL,
-                DiscoveredToken.discovered_at >= cutoff,
+                # Fresh by age, OR held OBSERVING by the Radar nursery. The
+                # second clause is what makes the observation window real:
+                # exempting a member from eviction does nothing for one that
+                # was already in the backlog when its window opened (measured
+                # 2026-08-24: 3 of 11 observing tokens sat in LANE_NORMAL
+                # behind 400k overdue rows, collecting nothing).
+                or_(
+                    DiscoveredToken.discovered_at >= cutoff,
+                    TokenEnrichmentState.token_id.in_(still_observing),
+                ),
             )
             .order_by(DiscoveredToken.discovered_at.desc(), TokenEnrichmentState.id)
             .limit(room)
