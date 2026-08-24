@@ -14,6 +14,7 @@ regime telemetry that separates the pipeline from the market.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -264,8 +265,14 @@ async def _holder_snapshots_collect() -> dict[str, Any]:
             )).all()
         )
 
-        async with get_rpc() as rpc:
+        # `getTokenLargestAccounts` is aggressively rate-limited on the public
+        # endpoint (measured live: every call 429'd, 30 failure rows, 0 data).
+        # Use the keyed vendor node when one is configured, and pace the calls
+        # regardless — this is a background collector, not a hot path.
+        rpc_name = "helius" if settings.HELIUS_API_KEY else None
+        async with get_rpc(rpc_name) as rpc:
             for mint, token_id, ctx in rows:
+                await asyncio.sleep(0.6)
                 context = "nursery_entry" if ctx == "observing" else "admission"
                 try:
                     largest = await rpc.call("getTokenLargestAccounts", [mint])
