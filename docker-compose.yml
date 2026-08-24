@@ -165,7 +165,6 @@ x-backend-env: &backend-env
   # engine runs there but the API reads the same tables and the same venue
   # config, so a value set on one service only would let the two disagree about
   # what counts as a graduation.
-  FEATURE_OPPORTUNITY_ENGINE_ENABLED: ${FEATURE_OPPORTUNITY_ENGINE_ENABLED:-false}
   # Priority enrichment lane. In the anchor because the scheduler beat marks
   # the lane and the enrichment worker reads it — a cadence set on one service
   # only would let them disagree about what "displayed" means.
@@ -304,31 +303,16 @@ x-backend-env: &backend-env
   EXECUTION_PRIORITY_FEE_SOL: ${EXECUTION_PRIORITY_FEE_SOL:-0.0005}
   EXECUTION_EXIT_FEE_RESERVE_MULTIPLIER: ${EXECUTION_EXIT_FEE_RESERVE_MULTIPLIER:-2}
 
-  OPPORTUNITY_BONDING_CURVE_VENUES: ${OPPORTUNITY_BONDING_CURVE_VENUES:-pumpfun}
-  OPPORTUNITY_GRADUATED_VENUES: ${OPPORTUNITY_GRADUATED_VENUES:-pumpswap}
-  OPPORTUNITY_REQUIRED_CONFIRMATIONS: ${OPPORTUNITY_REQUIRED_CONFIRMATIONS:-2}
-  OPPORTUNITY_TTL_FRESH_GRADUATION_SECONDS: ${OPPORTUNITY_TTL_FRESH_GRADUATION_SECONDS:-172800}
-  OPPORTUNITY_GRACE_SECONDS: ${OPPORTUNITY_GRACE_SECONDS:-3600}
   # Breakout TTLs. In the anchor because two services read them: the enrichment
   # worker sets a signal's expiry at detection and the beat scheduler decides
   # what has lapsed. Split across services, one would open signals the other
   # closes early — or never.
-  OPPORTUNITY_TTL_BREAKOUT_SECONDS: ${OPPORTUNITY_TTL_BREAKOUT_SECONDS:-21600}
-  OPPORTUNITY_TTL_PRE_BREAKOUT_SECONDS: ${OPPORTUNITY_TTL_PRE_BREAKOUT_SECONDS:-86400}
   # The published boundaries of the breakout claim. Measured, not chosen — see
   # app/opportunities/providers/breakout.py.
-  OPPORTUNITY_BREAKOUT_MIN_OBSERVATIONS: ${OPPORTUNITY_BREAKOUT_MIN_OBSERVATIONS:-8}
-  OPPORTUNITY_BREAKOUT_PRICE_MARGIN: ${OPPORTUNITY_BREAKOUT_PRICE_MARGIN:-0.15}
-  OPPORTUNITY_BREAKOUT_VOLUME_MULTIPLE: ${OPPORTUNITY_BREAKOUT_VOLUME_MULTIPLE:-2.0}
-  OPPORTUNITY_BREAKOUT_PROXIMITY: ${OPPORTUNITY_BREAKOUT_PROXIMITY:-0.90}
-  OPPORTUNITY_ARCHIVE_AFTER_SECONDS: ${OPPORTUNITY_ARCHIVE_AFTER_SECONDS:-86400}
   # Near graduation. Off because the data does not support it, not because the
   # provider is unfinished — see app/opportunities/providers/near_graduation.py.
   # In the anchor with the rest: the enrichment worker runs detection and the API
   # reads what it wrote, so both must agree on whether the signal can be emitted.
-  OPPORTUNITY_NEAR_GRADUATION_ENABLED: ${OPPORTUNITY_NEAR_GRADUATION_ENABLED:-false}
-  OPPORTUNITY_GRADUATION_MARKET_CAP: ${OPPORTUNITY_GRADUATION_MARKET_CAP:-69000}
-  OPPORTUNITY_NEAR_GRADUATION_MIN_PROGRESS: ${OPPORTUNITY_NEAR_GRADUATION_MIN_PROGRESS:-0.55}
   # Direct bonding-curve reads. In the anchor with the rest: the enrichment
   # worker collects and the API reads what it wrote, so both must agree on
   # whether curve data exists. Blocked today by the Helius plan quota.

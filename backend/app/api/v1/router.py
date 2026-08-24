@@ -26,7 +26,6 @@ from app.health import api as pipeline_health
 from app.hq_ops import api as hq_ops
 from app.karthik import api as karthik
 from app.karthik_ops import api as karthik_ops
-from app.opportunities import api as opportunities
 from app.paper import api as paper
 from app.radar import api as radar
 from app.real_wallet import api as real_wallet
@@ -70,11 +69,6 @@ api_router.include_router(analysts.router)
 # no existing route changed shape.
 api_router.include_router(watchlists.router)
 api_router.include_router(events.router)
-# Sprint 4/5: the Opportunity board. Its own namespace rather than reshaping
-# `/radar` — opportunities live in their own tables and `/radar` has an
-# established shape driven by a different model. Additive: no existing route
-# changes, and the board is empty while the engine's feature flag is off.
-api_router.include_router(opportunities.router)
 # Sprint 25: the paper wallet. Its own namespace. Sprint 35 adds a paper-only
 # manual close endpoint, but still no manual entry and no real execution path.
 # Additive: no existing route changes, and the wallet reports itself as not
