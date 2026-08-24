@@ -35,6 +35,13 @@ class RpcError(RuntimeError):
     """An RPC call failed after exhausting retries."""
 
 
+class RpcMethodRestrictedError(RpcError):
+    """The provider refused the METHOD outright (403/404/405) — a plan or
+    capability gap, deterministic for this provider but possibly served by
+    another. Routers fail over without retrying and without charging the
+    provider's health breaker."""
+
+
 class RpcExhaustedError(RpcError):
     """Transient failures used up every attempt. Eligible for provider
     failover — unlike a deterministic JSON-RPC application error, which will

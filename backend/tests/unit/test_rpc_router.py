@@ -8,7 +8,7 @@ import pytest
 from app.core.config import settings
 from app.services.rpc import router as router_module
 from app.services.rpc.base import RpcError, RpcExhaustedError, RpcRateLimitError
-from app.services.rpc.router import FallbackRPC, _BREAKERS
+from app.services.rpc.router import FallbackRPC, _BREAKERS, _RESTRICTED
 
 pytestmark = pytest.mark.unit
 
@@ -33,10 +33,12 @@ class _Stub:
 @pytest.fixture(autouse=True)
 def _fresh_breakers(monkeypatch):
     _BREAKERS.clear()
+    _RESTRICTED.clear()
     monkeypatch.setattr(settings, "CHAINSTACK_RPC_URL", "https://example.invalid/t")
     monkeypatch.setattr(settings, "HELIUS_API_KEY", "test-key")
     yield
     _BREAKERS.clear()
+    _RESTRICTED.clear()
 
 
 def _router(primary, secondary):
@@ -101,3 +103,15 @@ def test_chainstack_requires_its_endpoint(monkeypatch):
     monkeypatch.setattr(settings, "CHAINSTACK_RPC_URL", "")
     with pytest.raises(RpcError, match="CHAINSTACK_RPC_URL"):
         ChainstackRPC()
+
+
+async def test_method_restriction_fails_over_without_breaker_charge():
+    primary = _Stub("chainstack", [__import__("app.services.rpc.base", fromlist=["RpcMethodRestrictedError"]).RpcMethodRestrictedError("403"), {"never": 1}])
+    secondary = _Stub("helius", [{"ok": 1}, {"ok": 2}])
+    r = _router(primary, secondary)
+    assert await r.call("getTokenLargestAccounts", []) == {"ok": 1}
+    assert r.last_provider == "helius" and r.last_fallback_used
+    assert _BREAKERS["chainstack"].failures == 0  # no health charge
+    # second call skips the restricted primary entirely
+    assert await r.call("getTokenLargestAccounts", []) == {"ok": 2}
+    assert primary.calls == 1

@@ -26,6 +26,7 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.services.rpc.base import (
     RpcExhaustedError,
+    RpcMethodRestrictedError,
     RpcDescription,
     RpcError,
     RpcRateLimitError,
@@ -121,6 +122,13 @@ class StandardSolanaRPC(SolanaRPC):
 
                 if response.status_code == 429:
                     last_error = RpcRateLimitError(f"{method} rate limited")
+                elif response.status_code in (403, 404, 405):
+                    # A capability refusal, not weather: retrying is waste and
+                    # the message must never carry the URL httpx puts in it.
+                    raise RpcMethodRestrictedError(
+                        f"{method} refused by {self.name} "
+                        f"(HTTP {response.status_code}; plan/method restriction)"
+                    )
                 elif response.status_code >= 500:
                     last_error = RpcError(f"{method} returned {response.status_code}")
                 else:
@@ -131,7 +139,10 @@ class StandardSolanaRPC(SolanaRPC):
                     return body.get("result") if isinstance(body, dict) else None
 
             except (httpx.TransportError, httpx.HTTPStatusError) as exc:
-                last_error = exc
+                last_error = RpcError(
+                    f"{type(exc).__name__}: "
+                    + str(exc).replace(self._rpc_url, _redact(self._rpc_url))
+                )
             except ValueError as exc:  # malformed JSON body
                 last_error = RpcError(f"{method} returned invalid JSON: {exc}")
 
@@ -215,5 +226,15 @@ class StandardSolanaRPC(SolanaRPC):
 
 
 def _redact(url: str) -> str:
-    """The endpoint without its query string, which is where keys live."""
-    return url.split("?", 1)[0] if url else ""
+    """The endpoint with every place a credential can live masked.
+
+    Keys arrive as query strings (Helius) AND as path segments (Chainstack
+    embeds the access token directly in the path) — measured live when an
+    httpx 403 message printed a full Chainstack URL into worker logs. Host
+    survives; nothing after it does.
+    """
+    if not url:
+        return ""
+    base = url.split("?", 1)[0]
+    parts = base.split("/", 3)
+    return "/".join(parts[:3]) + ("/***" if len(parts) > 3 and parts[3] else "")

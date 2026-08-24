@@ -35,6 +35,7 @@ from app.services.rpc.base import (
     RpcDescription,
     RpcError,
     RpcExhaustedError,
+    RpcMethodRestrictedError,
     RpcRateLimitError,
     SolanaRPC,
 )
@@ -70,6 +71,12 @@ class _Breaker:
     def is_open(self) -> bool:
         return time.monotonic() < self.open_until
 
+
+#: (provider, method) pairs a provider has refused outright (403/404/405).
+#: A plan gap is stable for the life of the process — skipping the refusing
+#: provider saves a wasted round trip per call, and a plan upgrade is a
+#: deploy/restart anyway.
+_RESTRICTED: set[tuple[str, str]] = set()
 
 #: Module-level breaker state, keyed by provider name. Shared across router
 #: instances within one process on purpose: ten collectors should learn from
@@ -127,6 +134,11 @@ class FallbackRPC(SolanaRPC):
             )
         last_transient: Exception | None = None
         for index, provider in enumerate(self._providers):
+            if (provider.name, method) in _RESTRICTED:
+                last_transient = last_transient or RpcMethodRestrictedError(
+                    f"{method} restricted on {provider.name}"
+                )
+                continue
             breaker = _BREAKERS.setdefault(provider.name, _Breaker())
             if breaker.is_open:
                 last_transient = last_transient or RpcError(
@@ -136,6 +148,17 @@ class FallbackRPC(SolanaRPC):
             started = time.perf_counter()
             try:
                 result = await provider.call(method, params, attempts=attempts)
+            except RpcMethodRestrictedError as exc:
+                # Capability gap, not unhealth: remember it, skip the breaker,
+                # let the next provider answer.
+                _RESTRICTED.add((provider.name, method))
+                last_transient = exc
+                logger.warning(
+                    "rpc_method_restricted",
+                    method=method,
+                    provider=provider.name,
+                )
+                continue
             except TRANSIENT as exc:
                 breaker.record_failure()
                 last_transient = exc
