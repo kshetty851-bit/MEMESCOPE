@@ -29,6 +29,12 @@ from app.models.research_data import (
 HEALTHY = "RESEARCH_DATA_HEALTHY"
 DEGRADED = "RESEARCH_DATA_DEGRADED"
 
+#: How much sustained evidence READY demands. A healthy minute is weather;
+#: READY is climate: every sustained check must hold over this window with a
+#: meaningful sample behind it.
+SUSTAINED_WINDOW_HOURS = 6
+SUSTAINED_MIN_CADENCE_SAMPLE = 50
+
 
 @dataclass(frozen=True, slots=True)
 class Check:
@@ -113,6 +119,7 @@ class ResearchDataHealthService:
         )
 
         verdict = HEALTHY if all(c.ok for c in checks) else DEGRADED
+        sustained = await self._sustained(moment)
         return {
             "verdict": verdict,
             "observed_at": moment,
@@ -121,7 +128,111 @@ class ResearchDataHealthService:
                 "admissions_1h": int(admissions_1h or 0),
                 "nursery_observing": int(nursery_observing or 0),
             },
+            "sustained": [asdict(c) for c in sustained],
+            # READY is a stronger claim than HEALTHY: the instrumentation has
+            # held up under real production traffic for the whole window, with
+            # samples big enough to mean something. A single good reading can
+            # flip `verdict`; only the window flips this.
+            "foundation_ready": all(c.ok for c in sustained),
         }
+
+    async def _sustained(self, now: datetime) -> list[Check]:
+        """The READY gate: the same qualities, proven over hours not minutes."""
+        w = timedelta(hours=SUSTAINED_WINDOW_HOURS)
+        out: list[Check] = []
+
+        row = (await self._session.execute(text(
+            """
+            WITH cohort AS (
+                SELECT r.token_id, r.first_detected_at AS t0
+                FROM radar_tokens r
+                WHERE r.first_detected_at >= :since AND r.first_detected_at <= :matured
+                UNION
+                SELECT n.token_id, n.entered_at
+                FROM nursery_admissions n
+                WHERE n.entered_at >= :since AND n.entered_at <= :matured
+            )
+            SELECT count(*),
+                   percentile_cont(0.5) WITHIN GROUP (ORDER BY obs)
+            FROM (
+                SELECT c.token_id,
+                       (SELECT count(*) FROM token_market_snapshots s
+                        WHERE s.token_id = c.token_id
+                          AND s.captured_at >= c.t0
+                          AND s.captured_at < c.t0 + interval '1 hour') AS obs
+                FROM cohort c
+            ) counted
+            """
+        ).bindparams(since=now - w - timedelta(hours=1), matured=now - timedelta(hours=1)))).one()
+        sample, median = int(row[0] or 0), (float(row[1]) if row[1] is not None else None)
+        out.append(Check(
+            name="sustained_cadence",
+            ok=(sample >= SUSTAINED_MIN_CADENCE_SAMPLE
+                and median is not None
+                and median >= settings.RESEARCH_SLA_FIRST_HOUR_MIN_OBS),
+            value=median,
+            threshold=(f"median >= {settings.RESEARCH_SLA_FIRST_HOUR_MIN_OBS} over >= "
+                       f"{SUSTAINED_MIN_CADENCE_SAMPLE} matured tokens in {SUSTAINED_WINDOW_HOURS}h"
+                       f" (sample={sample})"),
+            detail="first-hour observation cadence, whole recent matured cohort",
+        ))
+
+        hours_with_flow = int(await self._session.scalar(text(
+            "SELECT count(DISTINCT date_trunc('hour', captured_at)) FROM wallet_flow_snapshots"
+            " WHERE captured_at >= :since").bindparams(since=now - w)) or 0)
+        out.append(Check(
+            name="sustained_wallet_flow",
+            ok=(not settings.FEATURE_WALLET_FLOW_ENABLED) or hours_with_flow >= SUSTAINED_WINDOW_HOURS - 1,
+            value=float(hours_with_flow),
+            threshold=f">= {SUSTAINED_WINDOW_HOURS - 1} of the last {SUSTAINED_WINDOW_HOURS} hours wrote flow rows",
+            detail="wallet-flow persistence held through the window",
+        ))
+
+        hours_with_quotes = int(await self._session.scalar(text(
+            "SELECT count(DISTINCT date_trunc('hour', requested_at)) FROM research_quotes"
+            " WHERE requested_at >= :since").bindparams(since=now - w)) or 0)
+        out.append(Check(
+            name="sustained_quotes",
+            ok=(not settings.FEATURE_RESEARCH_COLLECTORS_ENABLED) or hours_with_quotes >= SUSTAINED_WINDOW_HOURS - 1,
+            value=float(hours_with_quotes),
+            threshold=f">= {SUSTAINED_WINDOW_HOURS - 1} of the last {SUSTAINED_WINDOW_HOURS} hours sampled quotes",
+            detail="skipped-quote execution truth held through the window",
+        ))
+
+        row = (await self._session.execute(text(
+            """
+            SELECT count(*),
+                   count(*) FILTER (WHERE EXISTS (
+                       SELECT 1 FROM radar_executable_outcomes o
+                       WHERE o.radar_token_id = r.id AND o.decided_24h
+                   ))
+            FROM radar_tokens r WHERE r.first_detected_at < now() - interval '25 hours'
+            """
+        ))).one()
+        total_due, decided = int(row[0] or 0), int(row[1] or 0)
+        coverage = (decided / total_due) if total_due else None
+        out.append(Check(
+            name="sustained_executable_coverage",
+            ok=(coverage is not None and coverage >= 0.9),
+            value=coverage,
+            threshold=">= 90% of admissions past their 24h horizon have a decided executable outcome",
+            detail="the executable-truth batch is keeping up with the record",
+        ))
+
+        flagged_leaks = int(await self._session.scalar(text(
+            """
+            SELECT count(*) FROM radar_executable_outcomes o
+            WHERE o.suspects_excluded IS NULL AND o.computed_at >= :since
+            """
+        ).bindparams(since=now - w)) or 0)
+        out.append(Check(
+            name="sustained_firewall_accounting",
+            ok=flagged_leaks == 0,
+            value=float(flagged_leaks),
+            threshold="every recent executable outcome records its suspect exclusions",
+            detail="derived truth always says what it excluded",
+        ))
+        return out
 
     async def _first_hour_cadence(self, now: datetime) -> float | None:
         """Median first-hour observation count over the matured recent cohort.

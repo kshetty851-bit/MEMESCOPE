@@ -36,6 +36,36 @@ class TestNeverAutomatic:
         assert "@shared_task" not in text
 
 
+async def _seed_token_scores(rows: int = 5) -> None:
+    """The maintenance contract is about an ANALYZEd table with rows in it —
+    an empty scratch database was exercising a different (vacuous) question,
+    which is why this file flickered between rigs. Seed deterministically."""
+    import uuid as _uuid
+
+    from sqlalchemy import text as _text
+
+    from app.db.session import SessionFactory as _SF
+
+    async with _SF() as session:
+        for i in range(rows):
+            tid = _uuid.uuid4()
+            await session.execute(_text(
+                "INSERT INTO discovered_tokens (id, mint_address, signature, slot,"
+                " discovered_at, source_program, metadata_status, metadata_attempts)"
+                " VALUES (:id, :mint, :sig, 1, now(), 'pumpfun', 'pending', 0)"
+                " ON CONFLICT DO NOTHING"
+            ), {"id": tid, "mint": f"MAINTSEED{i}x{tid.hex[:8]}", "sig": f"maintsig-{tid}"})
+            await session.execute(_text(
+                "INSERT INTO token_scores (id, token_id, mint_address, model_version,"
+                " score, evidence, coverage, market_risk, opportunity_raw, observations,"
+                " is_elite, has_veto, evaluated_at, grade, created_at, updated_at)"
+                " VALUES (:id, :tid, :mint, 'v1', 50, 50, 50, 50, 50, 3,"
+                " false, false, now(), 'watch', now(), now())"
+                " ON CONFLICT DO NOTHING"
+            ), {"id": _uuid.uuid4(), "tid": tid, "mint": f"MAINTSEED{i}x{tid.hex[:8]}"})
+        await session.commit()
+
+
 class TestReport:
     async def test_it_reports_drift_without_changing_anything(self) -> None:
         """Read-only: what an operator runs to decide whether to maintain."""
@@ -56,6 +86,7 @@ class TestReport:
         real count closely on a freshly analyzed table, which `n_live_tup`
         would not.
         """
+        await _seed_token_scores()
         await maintenance.maintain(tables=("token_scores",))
         row = (await maintenance.statistics_drift(("token_scores",)))[0]
 

@@ -107,10 +107,17 @@ class WalletPauseOut(BaseSchema):
 
 
 class ResearchDataHealth(BaseSchema):
-    """RESEARCH_DATA_HEALTHY / RESEARCH_DATA_DEGRADED, with the evidence."""
+    """RESEARCH_DATA_HEALTHY / RESEARCH_DATA_DEGRADED, with the evidence.
+
+    `verdict` is the instant reading; `foundation_ready` is the stronger,
+    windowed claim — the instrumentation held under real traffic for hours.
+    A good minute never flips it.
+    """
 
     verdict: str
     observed_at: datetime
     checks: list[ResearchCheckOut]
     population: dict[str, int]
     wallets: WalletPauseOut
+    sustained: list[ResearchCheckOut] = []
+    foundation_ready: bool = False

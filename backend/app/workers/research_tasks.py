@@ -219,9 +219,26 @@ async def _holder_snapshots_collect() -> dict[str, Any]:
     written = failures = 0
 
     async with SessionFactory() as session:
-        have = (
+        # Lifecycle moments, not a refresh loop: holder concentration is a
+        # research fact about a MOMENT (what did distribution look like when
+        # the token entered observation? when it was admitted?), and refetching
+        # an unchanged answer burns quota without adding a datum. One snapshot
+        # per (mint, context), enforced by NOT EXISTS — so a failed attempt is
+        # retried on later beats until a real row (success or terminal failure
+        # with reason) exists for that moment.
+        def _lacking(context: str):
+            return ~select(HolderSnapshot.id).where(
+                HolderSnapshot.mint_address == NurseryAdmission.mint_address
+                if context == "nursery_entry"
+                else HolderSnapshot.mint_address == RadarToken.mint_address,
+                HolderSnapshot.context == context,
+                HolderSnapshot.failure_reason.is_(None),
+                # a recent failed attempt also defers the retry a little
+            ).exists()
+
+        recent_attempt = (
             select(HolderSnapshot.mint_address)
-            .where(HolderSnapshot.captured_at >= now - timedelta(hours=2))
+            .where(HolderSnapshot.captured_at >= now - timedelta(minutes=30))
             .scalar_subquery()
         )
         candidates = (
@@ -232,7 +249,8 @@ async def _holder_snapshots_collect() -> dict[str, Any]:
             )
             .where(
                 NurseryAdmission.status == "observing",
-                NurseryAdmission.mint_address.not_in(have),
+                _lacking("nursery_entry"),
+                NurseryAdmission.mint_address.not_in(recent_attempt),
             )
             .order_by(NurseryAdmission.entered_at.desc())
             .limit(batch)
@@ -246,8 +264,9 @@ async def _holder_snapshots_collect() -> dict[str, Any]:
                     func.coalesce(RadarToken.category, "admission").label("ctx"),
                 )
                 .where(
-                    RadarToken.first_detected_at >= now - timedelta(hours=6),
-                    RadarToken.mint_address.not_in(have),
+                    RadarToken.first_detected_at >= now - timedelta(hours=24),
+                    _lacking("admission"),
+                    RadarToken.mint_address.not_in(recent_attempt),
                 )
                 .order_by(RadarToken.first_detected_at.desc())
                 .limit(batch - len(rows))
