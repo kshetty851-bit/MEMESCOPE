@@ -574,7 +574,7 @@ class Settings(BaseSettings):
     RESEARCH_QUOTE_BATCH: int = Field(default=8, ge=1, le=50)
     RESEARCH_QUOTE_SIZE_USD: float = Field(default=10.0, gt=0, le=100.0)
     #: Holder snapshots per 10-minute run (2 RPC calls each).
-    HOLDER_SNAPSHOT_BATCH: int = Field(default=15, ge=1, le=100)
+    HOLDER_SNAPSHOT_BATCH: int = Field(default=10, ge=1, le=100)
     #: The operational containment thresholds the regime telemetry RECORDS.
     #: Explicitly not a validated alpha model — see V4 REPORT §7.
     REGIME_HOSTILE_ADMISSIONS_PER_DAY: int = Field(default=100, ge=1)

@@ -272,7 +272,11 @@ async def _holder_snapshots_collect() -> dict[str, Any]:
         rpc_name = "helius" if settings.HELIUS_API_KEY else None
         async with get_rpc(rpc_name) as rpc:
             for mint, token_id, ctx in rows:
-                await asyncio.sleep(0.6)
+                # This method is rate-limited harder than the general RPS on
+                # both the public node AND Helius (measured live: 0.6s pacing
+                # still 429'd 14/15). The collector's budget is minutes, not
+                # seconds — 2.5s a token clears a batch well inside one beat.
+                await asyncio.sleep(2.5)
                 context = "nursery_entry" if ctx == "observing" else "admission"
                 try:
                     largest = await rpc.call("getTokenLargestAccounts", [mint])
