@@ -105,6 +105,8 @@ REQUIRED_IN_ANCHOR = {
     "RADAR_MIN_OBSERVATION_MINUTES": "enrichment admits through it, API reports the nursery",
     "FEATURE_WALLET_FLOW_ENABLED": "scanner collects, health reports coverage",
     "FEATURE_RESEARCH_COLLECTORS_ENABLED": "beat worker collects, health reports coverage",
+    "FEATURE_ARENA_ENABLED": "worker scores the arena, API serves it",
+    "ARENA_VALID_FROM": "the contamination boundary must be identical in every service",
     "KARTHIK_MAX_MARKET_AGE_SECONDS": (
         "the freshness bound that decides an entry must not differ per service"
     ),

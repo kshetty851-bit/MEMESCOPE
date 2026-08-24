@@ -65,6 +65,11 @@ from app.models.score import (
     TokenScore,
     TokenScoreHistory,
 )
+from app.models.arena import (  # noqa: F401
+    ArenaCandidate,
+    ArenaDecision,
+    ArenaPosition,
+)
 from app.models.research_data import (  # noqa: F401
     HolderSnapshot,
     JupiterUniverseSnapshot,

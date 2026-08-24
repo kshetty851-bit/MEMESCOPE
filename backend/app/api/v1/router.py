@@ -27,6 +27,7 @@ from app.hq_ops import api as hq_ops
 from app.karthik import api as karthik
 from app.karthik_ops import api as karthik_ops
 from app.paper import api as paper
+from app.arena import api as arena
 from app.radar import api as radar
 from app.real_wallet import api as real_wallet
 from app.real_wallet_safety import api as real_wallet_safety
@@ -54,6 +55,8 @@ api_router.include_router(scores.router)
 # The Opportunity Radar. Additive: no existing route changes shape. Its own
 # module declares literal paths before `/{mint}`, as the scores router does.
 api_router.include_router(radar.router)
+# Research simulation, clearly separated from the wallet surfaces.
+api_router.include_router(arena.router)
 # Exit Watch, the permanent record and the leaderboards. Additive; the Radar's
 # own routes and every pre-existing endpoint are unchanged.
 api_router.include_router(intelligence.router)

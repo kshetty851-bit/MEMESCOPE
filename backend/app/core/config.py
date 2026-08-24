@@ -538,6 +538,16 @@ class Settings(BaseSettings):
     #: Wallet-flow snapshot retention (research primitives; see scanner flush).
     WALLET_FLOW_RETENTION_DAYS: int = Field(default=14, ge=1, le=90)
 
+    # --- V5 Forward Strategy Arena (research simulation only) ---------------
+    # Five $1,000 virtual portfolios scoring frozen entry hypotheses against a
+    # cash control. It never creates a paper/karthik/real position and never
+    # writes outside arena_*. Ships dark; production turns it on deliberately.
+    FEATURE_ARENA_ENABLED: bool = False
+    #: The contamination boundary (protocol §0): tokens whose 30-minute
+    #: checkpoint precedes this instant are never scored. ISO-8601 UTC. Empty
+    #: means "stamp at first activation", which is then immutable in the row.
+    ARENA_VALID_FROM: str = ""
+
     #: First-hour observation SLA: the median matured admission/nursery token
     #: must have at least this many stored observations in its first hour.
     #: V4 measured 7; the fast lane targets 30+ (nursery asks for 60s refresh).
@@ -1061,6 +1071,20 @@ class Settings(BaseSettings):
                 return json.loads(text)
             return [item.strip() for item in text.split(",") if item.strip()]
         return value
+
+    @property
+    def arena_valid_from(self) -> "datetime | None":
+        """The frozen contamination boundary, parsed. None = stamp at activation."""
+        from datetime import datetime as _dt
+
+        raw = (self.ARENA_VALID_FROM or "").strip()
+        if not raw:
+            return None
+        try:
+            return _dt.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+
 
     @computed_field  # type: ignore[prop-decorator]
     @property

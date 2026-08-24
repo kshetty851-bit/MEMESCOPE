@@ -28,6 +28,7 @@ celery_app = Celery(
         "app.workers.enrichment_tasks",
         "app.workers.retention_tasks",
         "app.workers.research_tasks",
+        "app.arena.scheduler",
         "app.hq_ops.tasks",
     ],
 )
@@ -187,6 +188,12 @@ celery_app.conf.beat_schedule = {
     "universe-snapshot-daily": {
         "task": "app.workers.research_tasks.universe_snapshot_daily",
         "schedule": crontab(hour="2", minute="10"),
+    },
+    # Research simulation: judges due checkpoints and advances virtual
+    # positions. Cannot touch paper, karthik or real-wallet accounting.
+    "arena-tick": {
+        "task": "app.arena.scheduler.arena_tick",
+        "schedule": crontab(minute="*"),
     },
     "regime-snapshot-hourly": {
         "task": "app.workers.research_tasks.regime_snapshot_hourly",
