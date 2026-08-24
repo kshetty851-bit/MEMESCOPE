@@ -109,6 +109,12 @@ REQUIRED_IN_ANCHOR = {
     # A pause visible to only one of them is a wallet that reports itself
     # stopped while it is still buying.
     "KARTHIK_ENTRIES_PAUSED": "worker gates entries on it, API reports it",
+    "PAPER_WALLET_ENTRIES_PAUSED": "worker gates entries on it, API reports it",
+    "WALLET_ENTRIES_PAUSE_REASON": "both wallet APIs and HQ must print the same reason",
+    "FEATURE_SNAPSHOT_SANITY_ENABLED": "enrichment writes the flags the API's reads exclude on",
+    "RADAR_MIN_OBSERVATION_MINUTES": "enrichment admits through it, API reports the nursery",
+    "FEATURE_WALLET_FLOW_ENABLED": "scanner collects, health reports coverage",
+    "FEATURE_RESEARCH_COLLECTORS_ENABLED": "beat worker collects, health reports coverage",
     "KARTHIK_MAX_MARKET_AGE_SECONDS": (
         "the freshness bound that decides an entry must not differ per service"
     ),

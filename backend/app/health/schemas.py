@@ -88,3 +88,29 @@ class PipelineHealth(BaseSchema):
     environment: str
     version: str
     observed_at: datetime
+
+
+class ResearchCheckOut(BaseSchema):
+    name: str
+    ok: bool
+    value: float | None
+    threshold: str
+    detail: str
+
+
+class WalletPauseOut(BaseSchema):
+    """The containment state, printed where the operator looks first."""
+
+    paper_entries_paused: bool
+    karthik_entries_paused: bool
+    reason: str
+
+
+class ResearchDataHealth(BaseSchema):
+    """RESEARCH_DATA_HEALTHY / RESEARCH_DATA_DEGRADED, with the evidence."""
+
+    verdict: str
+    observed_at: datetime
+    checks: list[ResearchCheckOut]
+    population: dict[str, int]
+    wallets: WalletPauseOut

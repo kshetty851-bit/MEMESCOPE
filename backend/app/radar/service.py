@@ -28,7 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.radar import RadarToken
-from app.radar import achievements, detector, scorer
+from app.radar import achievements, detector, nursery, scorer
 from app.radar.models import OpportunityResult, RadarSeries
 from app.radar.quality import PendingDecision, build_pending, capture_pending
 from app.radar.repository import PeakObservation, RadarRepository
@@ -59,6 +59,7 @@ class RadarService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
         self._repository = RadarRepository(session)
+        self._nursery = nursery.NurseryGate(session)
         # Held in memory until the *normal* Radar transaction commits.  Research
         # persistence is then a separate best-effort transaction, so no capture
         # exception can alter ranking, detection, or scanner behaviour.
@@ -85,16 +86,42 @@ class RadarService:
         existing = await self._repository.get(mint_address)
 
         if existing is None:
+            window = nursery.window_minutes()
+            age = nursery.age_minutes(series, now=moment)
             if category is None:
+                # A nursery member evaluated past its window that no longer
+                # qualifies gets its at-window verdict recorded — once. The
+                # update is a no-op for the overwhelming majority of mints,
+                # which were never in the nursery at all.
+                if window > 0 and age is not None and age >= window:
+                    await self._nursery.record_window_decision(
+                        series,
+                        qualified=False,
+                        reason=f"score_{result.score}",
+                        now=moment,
+                    )
                 self._queue_quality(series, result, category, selected=False, moment=moment)
                 # Not interesting enough to enter the existing Radar record.
                 return False
+            # --- nursery: eligibility is not discovery (V4 Phase 2) --------
+            # A qualifying token younger than the observation window is HELD:
+            # recorded, densely observed, and re-judged by these same gates on
+            # a later pass — never admitted on its first impressive minutes.
+            if await self._nursery.hold(series, result, now=moment):
+                self._queue_quality(series, result, category, selected=False, moment=moment)
+                return False
+            if window > 0 and age is not None:
+                await self._nursery.record_window_decision(
+                    series, qualified=True, reason="qualified_at_window", now=moment
+                )
             entry = await self._record_first_detection(series, result, category, moment)
             # A concurrent Radar worker can win the immutable insertion race;
             # its canonical entry, not this capture, remains authoritative.
             selected = (
                 entry is not None or await self._repository.get(mint_address) is not None
             )
+            if selected:
+                await self._nursery.record_admission(series, now=moment)
             self._queue_quality(series, result, category, selected=selected, moment=moment)
             return True
 

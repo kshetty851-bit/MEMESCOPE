@@ -81,6 +81,9 @@ class TestTheEntryContractIsUntouched:
             "no_liquidity",
             "not_tradeable",
             "insufficient_paper_cash",
+            # V4 Phase 2 containment: an administrative whole-pass refusal,
+            # deliberately not a per-token judgement and not a security claim.
+            "entries_paused",
         }
 
     def test_judge_module_does_not_import_the_security_package(self) -> None:

@@ -142,3 +142,13 @@ test_err.log
 unit_test.log
 backend/scratch_send_report.py
 .pnpm-store/
+
+# --- V4 Phase 2 hygiene -------------------------------------------------
+# Bulk local data that must never be staged: production dumps and a solana
+# test-ledger once lived at these paths (now in ~/Projects/MEMESCOPE-attic).
+backups/
+test-ledger/
+# Key material. The devnet signer file was found in the repo ROOT (untracked,
+# never committed — verified) and now lives outside the tree entirely.
+*-signer.json
+*signer*.key

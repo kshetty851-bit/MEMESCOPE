@@ -59,6 +59,9 @@ class Refusal(enum.StrEnum):
     NOT_TRADEABLE = "not_tradeable"
     #: Everything passed, but the cash left is below one position.
     INSUFFICIENT_CASH = "insufficient_paper_cash"
+    #: Entries are administratively paused (V4 containment). Not a judgement
+    #: about any token — the whole pass was refused before ranking.
+    ENTRIES_PAUSED = "entries_paused"
 
 
 #: The sentence each refusal renders as. Server-side, from a stable code — the
@@ -74,6 +77,10 @@ REFUSAL_LABELS: dict[str, str] = {
     Refusal.NOT_TRADEABLE: "The market provider does not report this token as trading.",
     Refusal.INSUFFICIENT_CASH: (
         "INSUFFICIENT_PAPER_CASH: not enough cash left for a full $10 position."
+    ),
+    Refusal.ENTRIES_PAUSED: (
+        "Entries are paused: no validated edge on the current admission stream. "
+        "Open positions are still reviewed and exits still settle."
     ),
 }
 

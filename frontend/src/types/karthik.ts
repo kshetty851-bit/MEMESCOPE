@@ -98,6 +98,8 @@ export interface KarthikWallet {
   name: string;
   strategy: string;
   entries_paused: boolean;
+  /** Why, in the server's words — shared with the paper wallet and HQ. */
+  pause_reason: string;
   wallet_id: string | null;
   activated_at: string | null;
   trade_size: string | null;

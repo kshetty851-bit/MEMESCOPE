@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { EntriesPausedBanner } from "@/components/paper/entries-paused-banner";
 
 import { WalletSwitch } from "@/components/paper/wallet-switch";
 import { DataTable, type Column } from "@/components/ui/data-table";
@@ -308,6 +309,10 @@ export default function KarthikWalletPage() {
   return (
     <div className="flex flex-col gap-6">
       {header}
+
+      {wallet.data.entries_paused ? (
+        <EntriesPausedBanner reason={wallet.data.pause_reason} />
+      ) : null}
 
       {/* When the wallet started is the eligibility rule, not decoration: every
           token admitted to the Track Record after this instant is Karthik's,

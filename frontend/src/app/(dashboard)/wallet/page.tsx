@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 
 import { AuditLog } from "@/components/paper/audit-log";
+import { EntriesPausedBanner } from "@/components/paper/entries-paused-banner";
 import { DailyReturns } from "@/components/paper/daily-returns";
 import { PositionsTable } from "@/components/paper/positions-table";
 import { StrategyCard } from "@/components/paper/strategy-card";
@@ -184,6 +185,10 @@ export default function WalletPage() {
           ) : null}
         </div>
       </header>
+
+      {wallet.data.entries_paused ? (
+        <EntriesPausedBanner reason={wallet.data.pause_reason} />
+      ) : null}
 
       {wallet.data.resumed_at ? (
         <Panel density="compact" className="border-line-strong bg-raised/40">

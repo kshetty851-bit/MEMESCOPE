@@ -184,6 +184,7 @@ async def _prune_telemetry() -> dict[str, Any]:
         "score_history": 0,
         "market_snapshots": 0,
         "radar_decision_snapshots": 0,
+        "wallet_flow_snapshots": 0,
         "failures": [],
     }
 
@@ -194,6 +195,11 @@ async def _prune_telemetry() -> dict[str, Any]:
             "radar_decision_snapshots",
             _prune_radar_decision_snapshots,
             settings.RADAR_DECISION_SNAPSHOT_RETENTION_DAYS,
+        ),
+        (
+            "wallet_flow_snapshots",
+            _prune_wallet_flow_snapshots,
+            settings.WALLET_FLOW_RETENTION_DAYS,
         ),
     )
     for name, prune, days in jobs:
@@ -216,6 +222,22 @@ async def _prune_telemetry() -> dict[str, Any]:
     else:
         logger.info("retention_completed", **report)
     return report
+
+
+async def _prune_wallet_flow_snapshots(days: int) -> int:
+    """Wallet-flow rows are research primitives with a bounded shelf life —
+    decision-time reads happen within hours; the window covers any replay."""
+    return await _delete_in_batches(
+        """
+        DELETE FROM wallet_flow_snapshots
+        WHERE ctid IN (
+            SELECT ctid FROM wallet_flow_snapshots
+            WHERE captured_at < :cutoff
+            LIMIT :batch
+        )
+        """,
+        {"cutoff": datetime.now(UTC) - timedelta(days=days), "batch": _BATCH},
+    )
 
 
 @celery_app.task(name="app.workers.retention_tasks.check_disk_space")

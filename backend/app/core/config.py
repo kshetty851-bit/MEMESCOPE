@@ -519,6 +519,75 @@ class Settings(BaseSettings):
     #: turns the lane back into the backlog it was built to escape.
     ENRICHMENT_PRIORITY_MAX_TOKENS: int = Field(default=200, ge=1, le=2000)
 
+    # --- Ingest data-quality firewall (V4 Phase 2) -------------------------
+    # Annotates incoming snapshots against their own 10-minute history; a
+    # flagged row is stored untouched but excluded from peaks, features,
+    # outcomes and wallet reads. V4 measured 8 prints >100x (worst 304,776x)
+    # reaching peak_multiple unchallenged in one fresh day.
+    FEATURE_SNAPSHOT_SANITY_ENABLED: bool = True
+    #: A print outside baseline*band / baseline/band is suspect — unless the
+    #: last MIN_PRIOR prints already agree with it (a persistent real move).
+    SNAPSHOT_SANITY_BAND: float = Field(default=3.0, ge=1.5, le=100.0)
+    SNAPSHOT_SANITY_LIQUIDITY_JUMP: float = Field(default=10.0, ge=2.0, le=1000.0)
+    SNAPSHOT_SANITY_MIN_PRIOR: int = Field(default=3, ge=2, le=10)
+    SNAPSHOT_SANITY_WINDOW_SECONDS: int = Field(default=600, ge=60, le=3600)
+
+    # --- Nursery: eligibility is not discovery (V4 Phase 2) -----------------
+    #: Minimum minutes of observability before a qualifying token can become a
+    #: Track Record admission. 0 disables the gate (previous behaviour). An
+    #: OPERATIONAL CONTAINMENT default, recorded on every nursery row — not a
+    #: researched trading threshold, and research must treat it as censoring.
+    RADAR_MIN_OBSERVATION_MINUTES: int = Field(default=0, ge=0, le=1440)
+    #: An OBSERVING row never re-judged for this long is closed as EXPIRED.
+    RADAR_NURSERY_EXPIRE_HOURS: int = Field(default=24, ge=1, le=168)
+
+    # --- Wallet-flow instrumentation (V4 Phase 2) ---------------------------
+    # Decodes the Buy/Sell events already arriving on the scanner's socket into
+    # bounded rolling per-mint aggregates. DATA COLLECTION ONLY: read by no
+    # trading rule; ships dark and is switched on deliberately.
+    FEATURE_WALLET_FLOW_ENABLED: bool = False
+    #: Recent trades held per mint. Every metric is a share within one mint
+    #: over a window, so a small ring answers all of them exactly while the
+    #: memory stays bounded by construction.
+    WALLET_FLOW_EVENT_CAPACITY: int = Field(default=256, ge=16, le=4096)
+    #: Tracked mints, least-recently-traded evicted first.
+    WALLET_FLOW_MAX_MINTS: int = Field(default=4000, ge=100, le=100_000)
+    #: A mint with no trade for this long is dropped.
+    WALLET_FLOW_TTL_SECONDS: float = Field(default=3600.0, ge=60.0, le=86_400.0)
+    #: How often the scanner persists snapshots for research-relevant mints
+    #: (nursery members + recent admissions). 0 disables persistence.
+    WALLET_FLOW_FLUSH_SECONDS: int = Field(default=300, ge=0, le=3600)
+    #: Wallet-flow snapshot retention (research primitives; see scanner flush).
+    WALLET_FLOW_RETENTION_DAYS: int = Field(default=14, ge=1, le=90)
+
+    #: First-hour observation SLA: the median matured admission/nursery token
+    #: must have at least this many stored observations in its first hour.
+    #: V4 measured 7; the fast lane targets 30+ (nursery asks for 60s refresh).
+    RESEARCH_SLA_FIRST_HOUR_MIN_OBS: int = Field(default=30, ge=1, le=3600)
+
+    # --- Research collectors (V4 Phase 2) -----------------------------------
+    # One flag for the four instrumentation beats (skipped quotes, holder
+    # snapshots, universe snapshot, regime telemetry). They collect; they are
+    # read by no trading path. Ships dark; production turns it on deliberately.
+    FEATURE_RESEARCH_COLLECTORS_ENABLED: bool = False
+    #: Round-trip quote samples per 5-minute run (2 API calls each).
+    RESEARCH_QUOTE_BATCH: int = Field(default=8, ge=1, le=50)
+    RESEARCH_QUOTE_SIZE_USD: float = Field(default=10.0, gt=0, le=100.0)
+    #: Holder snapshots per 10-minute run (2 RPC calls each).
+    HOLDER_SNAPSHOT_BATCH: int = Field(default=15, ge=1, le=100)
+    #: The operational containment thresholds the regime telemetry RECORDS.
+    #: Explicitly not a validated alpha model — see V4 REPORT §7.
+    REGIME_HOSTILE_ADMISSIONS_PER_DAY: int = Field(default=100, ge=1)
+    REGIME_HOSTILE_MEDIAN_AGE_MINUTES: int = Field(default=60, ge=1)
+
+    # --- Fast-lane enrichment replica (V4 Phase 2) --------------------------
+    # V4 measured first-hour cadence at median 7 observations: the full cycle
+    # spends most of its wall clock on scoring/radar/curves AFTER snapshots
+    # commit, throttling collection to ~30 tokens/min/replica. A replica with
+    # this flag claims only nursery/display/track-record lanes and runs the
+    # snapshot stages alone — collection first, judgement elsewhere.
+    ENRICHMENT_FAST_LANE_ONLY: bool = False
+
     # --- Paper wallet ---------------------------------------------------------
     # A deterministic simulation over stored market history. No wallet is
     # connected, no order is routed and no chain is touched: a position is a row
@@ -528,6 +597,19 @@ class Settings(BaseSettings):
     # nothing closes, and the API reports the wallet as not running rather than
     # serving an empty one that looks like a strategy which never traded.
     FEATURE_PAPER_WALLET_ENABLED: bool = False
+    #: Entry-only pause for the Original Paper Wallet — the V4 research
+    #: containment (2026-08-24): no validated edge exists and the admission
+    #: stream is hostile, so new positions stop while the open book keeps
+    #: being reviewed, exits keep settling and the record keeps being kept.
+    #: Deliberately NOT `FEATURE_PAPER_WALLET_ENABLED`: that flag is checked
+    #: before the review runs at all, so it stops exits too. This one is read
+    #: at the single function every new position is born in, after exits have
+    #: already settled.
+    PAPER_WALLET_ENTRIES_PAUSED: bool = False
+    #: The operational reason both wallet APIs and HQ print while entries are
+    #: paused. A statement about the platform's evidence, never a market
+    #: prediction — e.g. "NO_VALIDATED_EDGE/HOSTILE_POPULATION".
+    WALLET_ENTRIES_PAUSE_REASON: str = ""
     #: Starting capital. Configurable, but written onto the wallet row at
     #: creation and read from there afterwards — every return is measured
     #: against the balance the wallet *started* with, so changing this setting

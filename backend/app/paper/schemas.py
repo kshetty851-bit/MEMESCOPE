@@ -496,6 +496,10 @@ class WalletOut(BaseSchema):
     next_radar_evaluation_at: datetime | None = None
     #: How many trades are in the permanent record.
     audited_trades: int = 0
+    #: Entry-only pause (V4 containment). Exits keep settling while true.
+    entries_paused: bool = False
+    #: The operational reason printed while paused. Never a market prediction.
+    pause_reason: str = ""
     #: Realised profit from trades closed since midnight UTC. Realised only —
     #: an open position's unrealised move is not a figure anyone can act on.
     pnl_today: Decimal

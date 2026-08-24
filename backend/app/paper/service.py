@@ -1349,6 +1349,15 @@ class PaperWalletService:
         bound is reached it is **reported**. A capped search that says nothing
         reads exactly like an exhaustive one that found nothing.
         """
+        # --- ENTRY PAUSE (V4 containment) --------------------------------
+        # Ahead of everything, because this is the one function every new
+        # position is born in. Exits are already settled by the time this
+        # runs, and returning here cannot reach them — the same separation
+        # Karthik's pause has, and for the same reason: a switch that stopped
+        # exit monitoring would strand an open book.
+        if settings.PAPER_WALLET_ENTRIES_PAUSED:
+            return 0, 0, False, {eligibility.Refusal.ENTRIES_PAUSED.value: 1}
+
         strategy = self.strategy
         if isinstance(strategy, TrackRecordBracketStrategy):
             return await self._open_track_record_entries(wallet, strategy=strategy, now=now)

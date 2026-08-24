@@ -136,6 +136,21 @@ class TokenMarketSnapshot(Base, UUIDPrimaryKeyMixin):
     is_verified: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false", nullable=False
     )
+    # --- ingest data-quality firewall (V4 Phase 2) ------------------------
+    # The provider's print is preserved untouched in `price_usd`; these
+    # columns only ANNOTATE it. A flagged row is excluded from peaks,
+    # features, outcomes and wallet reads — but remains fully auditable.
+    suspect: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False
+    )
+    #: Why the row was flagged: price_band_high / price_band_low /
+    #: liquidity_jump / pair_switch. NULL on clean rows.
+    suspect_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    #: The rolling-median baseline the print was compared against, recorded so
+    #: the judgement can be re-audited without reconstructing the window.
+    baseline_price_usd: Mapped[Decimal | None] = mapped_column(
+        PRICE_PRECISION, nullable=True
+    )
 
     provider: Mapped[str] = mapped_column(String(32), nullable=False)
     # Round-trip time of the provider call that produced this row.

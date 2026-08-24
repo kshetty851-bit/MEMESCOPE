@@ -121,6 +121,9 @@ class KarthikWalletOut(BaseModel):
     #: in the UI so the rule and the trades come from the same place.
     strategy: str
     entries_paused: bool
+    #: The operational reason printed while paused. Shared with the paper
+    #: wallet — one pause, one stated reason, in the system's words.
+    pause_reason: str = ""
     wallet_id: str | None = None
     activated_at: datetime | None = None
     trade_size: str | None = None

@@ -331,6 +331,10 @@ export interface PaperLineage {
 }
 
 export interface PaperWallet {
+  /** Entry-only pause (V4 containment). Exits keep settling while true. */
+  entries_paused: boolean;
+  /** The operational reason printed while paused. Never a market prediction. */
+  pause_reason: string;
   /** False when the feature flag is off — not the same as "traded nothing". */
   enabled: boolean;
   strategy: PaperStrategy;

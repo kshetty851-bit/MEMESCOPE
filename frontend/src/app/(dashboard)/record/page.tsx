@@ -59,6 +59,18 @@ import type { RadarEntry } from "@/types/radar";
  * so the column names survive past row twelve.
  */
 
+function fmtPct(value: string | null): string {
+  if (value === null) return "—";
+  const n = Number(value);
+  return Number.isFinite(n) ? `${(n * 100).toFixed(1)}%` : "—";
+}
+
+function fmtCents(value: string | null): string {
+  if (value === null) return "—";
+  const n = Number(value);
+  return Number.isFinite(n) ? `$${n.toFixed(2)}` : "—";
+}
+
 const TIER_ORDER = ["2x", "5x", "10x", "25x", "50x", "100x", "250x", "500x", "1000x"];
 
 type ReachedFilter = "all" | "2x" | "5x" | "10x";
@@ -548,6 +560,24 @@ export default function TrackRecordPage() {
               hint="From peak"
             />
           </StatRow>
+
+          {data?.executable ? (
+            <p className="text-xs leading-relaxed text-ink-3">
+              <span className="font-medium text-ink-2">Executable truth</span>{" "}
+              — valuing each detection as a $10 position that pays fees and
+              measured price impact, glitch prints excluded:{" "}
+              <span data-numeric className="text-ink-2">
+                {fmtPct(data.executable.reached_2x_24h_rate)}
+              </span>{" "}
+              reached 2× within 24h and the median position was worth{" "}
+              <span data-numeric className="text-ink-2">
+                {fmtCents(data.executable.median_final_value_frac_24h)}
+              </span>{" "}
+              per $1 after 24h, over {data.executable.decided} decided
+              detections. The headline above counts raw market prints with no
+              horizon; both are true, and they answer different questions.
+            </p>
+          ) : null}
 
           <section className="flex flex-col gap-2.5">
             <div className="flex flex-wrap items-center justify-between gap-3">

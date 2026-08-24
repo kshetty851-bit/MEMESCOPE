@@ -173,6 +173,26 @@ services:
       resources:
         limits: { cpus: "1", memory: 768M }
 
+  enrichment-fast:
+    build:
+      context: ./backend
+      target: production
+    environment:
+      ENVIRONMENT: production
+      LOG_FORMAT: json
+      RUN_MIGRATIONS: "false"
+      ENRICHMENT_FAST_LANE_ONLY: "true"
+      ALPHA_ACCESS_CODE: ${ALPHA_ACCESS_CODE:?ALPHA_ACCESS_CODE is required in production}
+      ALPHA_ACCESS_REQUIRED: "true"
+      ALPHA_ACCESS_COOKIE_SECURE: "true"
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      BUILD_SHA: ${BUILD_SHA:-unknown}
+    volumes: !reset []
+    restart: on-failure
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 512M }
+
   enrichment:
     build:
       context: ./backend

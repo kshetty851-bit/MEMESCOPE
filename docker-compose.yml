@@ -198,6 +198,16 @@ x-backend-env: &backend-env
   # of them would show a paused wallet that was still buying — the exact shape
   # of the three failures this anchor's comment above records.
   KARTHIK_ENTRIES_PAUSED: ${KARTHIK_ENTRIES_PAUSED:-false}
+  # V4 containment: entry-only pause for the Original Paper Wallet, and the
+  # one reason string every surface prints for both pauses.
+  PAPER_WALLET_ENTRIES_PAUSED: ${PAPER_WALLET_ENTRIES_PAUSED:-false}
+  WALLET_ENTRIES_PAUSE_REASON: ${WALLET_ENTRIES_PAUSE_REASON:-}
+  # V4 Phase 2 data foundation: the enrichment workers write what the API and
+  # research read, so the writers and readers must agree on every one of these.
+  FEATURE_SNAPSHOT_SANITY_ENABLED: ${FEATURE_SNAPSHOT_SANITY_ENABLED:-true}
+  RADAR_MIN_OBSERVATION_MINUTES: ${RADAR_MIN_OBSERVATION_MINUTES:-0}
+  FEATURE_WALLET_FLOW_ENABLED: ${FEATURE_WALLET_FLOW_ENABLED:-false}
+  FEATURE_RESEARCH_COLLECTORS_ENABLED: ${FEATURE_RESEARCH_COLLECTORS_ENABLED:-false}
   KARTHIK_CANDIDATE_LIMIT: ${KARTHIK_CANDIDATE_LIMIT:-250}
   KARTHIK_REVIEW_BATCH_LIMIT: ${KARTHIK_REVIEW_BATCH_LIMIT:-2000}
   KARTHIK_MAX_MARKET_AGE_SECONDS: ${KARTHIK_MAX_MARKET_AGE_SECONDS:-900}
@@ -570,6 +580,24 @@ services:
     environment:
       <<: *backend-env
       RUN_MIGRATIONS: "false"
+    volumes:
+      - ./backend:/app
+    healthcheck:
+      disable: true
+
+  # V4 Phase 2: snapshot-only replica for the nursery/display cadence SLA.
+  # Same image, one env flag — it claims only the priority lanes and skips
+  # the scoring/radar/curves tail that throttled collection to ~30 tokens/min.
+  enrichment-fast:
+    build:
+      context: ./backend
+      target: development
+    restart: unless-stopped
+    command: python -m app.enrichment_main
+    environment:
+      <<: *backend-env
+      RUN_MIGRATIONS: "false"
+      ENRICHMENT_FAST_LANE_ONLY: "true"
     volumes:
       - ./backend:/app
     healthcheck:

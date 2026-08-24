@@ -12,10 +12,33 @@ from __future__ import annotations
 from fastapi import APIRouter, Response, status
 
 from app.api.deps import DbSession
-from app.health.schemas import PipelineHealth
+from app.core.config import settings
+from app.health.research_data import ResearchDataHealthService
+from app.health.schemas import (
+    PipelineHealth,
+    ResearchDataHealth,
+    WalletPauseOut,
+)
 from app.health.service import PipelineHealthService
 
 router = APIRouter(prefix="/health", tags=["health"])
+
+
+@router.get(
+    "/research-data",
+    response_model=ResearchDataHealth,
+    summary="Whether the data the next research round depends on is being collected",
+)
+async def research_data_health(session: DbSession) -> ResearchDataHealth:
+    payload = await ResearchDataHealthService(session).snapshot()
+    return ResearchDataHealth(
+        **payload,
+        wallets=WalletPauseOut(
+            paper_entries_paused=settings.PAPER_WALLET_ENTRIES_PAUSED,
+            karthik_entries_paused=settings.KARTHIK_ENTRIES_PAUSED,
+            reason=settings.WALLET_ENTRIES_PAUSE_REASON,
+        ),
+    )
 
 
 @router.get(

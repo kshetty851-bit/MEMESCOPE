@@ -284,6 +284,26 @@ class TierCount(BaseSchema):
     count: int
 
 
+class ExecutableStatsOut(BaseSchema):
+    """Derived EXECUTABLE truth beside the raw record — never instead of it.
+
+    Raw figures above value provider prints; these value what a $10 position
+    could actually have sold for (fees + calibrated impact paid, ingest-flagged
+    prints excluded, horizons stated). Absent until the compute has coverage.
+    """
+
+    method_version: str
+    #: Admissions whose 24h horizon has fully elapsed inside stored data.
+    decided: int
+    #: Of `decided`: share whose sellable value ever reached 2x within 24h.
+    reached_2x_24h_rate: Decimal | None
+    reached_125_24h_rate: Decimal | None
+    #: Median sellable value per $1 at the 24h mark, over `decided`.
+    median_final_value_frac_24h: Decimal | None
+    #: decided / total admissions — how much of the record is computed yet.
+    coverage: Decimal | None
+
+
 class PerformanceOut(BaseSchema):
     """The platform's track record.
 
@@ -315,6 +335,8 @@ class PerformanceOut(BaseSchema):
     average_current_multiple: Decimal | None = None
     average_days_to_5x: Decimal | None = None
     above_entry: int = 0
+    #: RAW MARKET PRINT vs EXECUTABLE OUTCOME, distinguished by name (V4 P2).
+    executable: ExecutableStatsOut | None = None
     below_entry: int = 0
     #: Liveness, measured only. `alive` means a market was observed recently;
     #: `unknown` means it was not, which is not the same as dead. `inactive` is

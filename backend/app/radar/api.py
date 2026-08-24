@@ -28,6 +28,7 @@ from app.radar import detector, explain, readout, scorer
 from app.radar.models import RadarCategory, RadarDimension, RadarReason
 from app.radar.repository import RadarRepository
 from app.radar.schemas import (
+    ExecutableStatsOut,
     AchievementOut,
     BaseRateOut,
     BenchmarkOut,
@@ -356,6 +357,12 @@ async def get_model() -> ModelOut:
     )
 
 
+def _dec(value: object) -> Decimal | None:
+    if value is None:
+        return None
+    return Decimal(str(value)).quantize(Decimal("0.0001"))
+
+
 @router.get("/performance", response_model=PerformanceOut, summary="Platform track record")
 async def get_performance(session: DbSession) -> PerformanceOut:
     """Aggregate performance across every opportunity ever detected.
@@ -367,6 +374,21 @@ async def get_performance(session: DbSession) -> PerformanceOut:
     repository = RadarRepository(session)
     now = datetime.now(UTC)
     summary = await repository.performance_summary()
+    executable_raw = await repository.executable_summary()
+    executable_stats = None
+    if executable_raw is not None:
+        executable_stats = ExecutableStatsOut(
+            method_version=str(executable_raw["method"]),
+            decided=int(executable_raw["decided"]),
+            reached_2x_24h_rate=_dec(executable_raw["rate_2x"]),
+            reached_125_24h_rate=_dec(executable_raw["rate_125"]),
+            median_final_value_frac_24h=_dec(executable_raw["median_final"]),
+            coverage=(
+                Decimal(executable_raw["decided"]) / Decimal(summary.total)
+                if summary.total
+                else None
+            ),
+        )
     alive_count = len(
         await repository.observed_within(
             await repository.all_mints(), since=now - LIVENESS_WINDOW
@@ -393,6 +415,7 @@ async def get_performance(session: DbSession) -> PerformanceOut:
         # can see is honest, and a missing field looks like an oversight.
         expired_opportunities=summary.total - summary.active,
         median_peak_multiple=summary.median_peak_multiple,
+        executable=executable_stats,
         average_drawdown=summary.average_drawdown,
         average_days_to_2x=summary.average_days_to_2x,
         average_days_tracked=summary.average_days_tracked,

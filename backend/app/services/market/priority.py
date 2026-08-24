@@ -38,6 +38,7 @@ from app.models.market import (
 from app.models.opportunity import Opportunity
 from app.models.paper import PaperPosition
 from app.models.radar import RadarToken
+from app.models.research_data import NurseryAdmission
 from app.models.token import DiscoveredToken
 from app.opportunities.models import LIVE_STATUSES
 from app.paper.models import PositionStatus
@@ -269,6 +270,11 @@ async def refresh_nursery_lane(session: AsyncSession, *, now: datetime) -> Nurse
     cutoff = now - timedelta(minutes=settings.ENRICHMENT_TIER_FRESH_MAX_MINUTES)
 
     # 1. Age eviction: the window is over; back to the age-tier cadence.
+    # A token the Radar nursery still holds as OBSERVING is exempt: its whole
+    # purpose is to be densely observed until its window decision (V4 Phase 2).
+    still_observing = select(NurseryAdmission.token_id).where(
+        NurseryAdmission.status == "observing"
+    )
     result = cast(
         CursorResult[Any],
         await session.execute(
@@ -277,6 +283,7 @@ async def refresh_nursery_lane(session: AsyncSession, *, now: datetime) -> Nurse
                 TokenEnrichmentState.priority == LANE_NURSERY,
                 TokenEnrichmentState.token_id == DiscoveredToken.id,
                 DiscoveredToken.discovered_at < cutoff,
+                TokenEnrichmentState.token_id.not_in(still_observing),
             )
             .values(priority=LANE_NORMAL)
         ),
@@ -287,7 +294,10 @@ async def refresh_nursery_lane(session: AsyncSession, *, now: datetime) -> Nurse
     overflow = (
         select(TokenEnrichmentState.id)
         .join(DiscoveredToken, TokenEnrichmentState.token_id == DiscoveredToken.id)
-        .where(TokenEnrichmentState.priority == LANE_NURSERY)
+        .where(
+            TokenEnrichmentState.priority == LANE_NURSERY,
+            TokenEnrichmentState.token_id.not_in(still_observing),
+        )
         .order_by(DiscoveredToken.discovered_at.desc(), TokenEnrichmentState.id)
         .offset(cap)
         .scalar_subquery()

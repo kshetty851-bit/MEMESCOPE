@@ -24,6 +24,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from app.core.config import settings
+from app.models.market import LANE_NURSERY
 from app.core.events import publish_live_update, publish_score_events
 from app.core.logging import get_logger
 from app.core.redis import get_redis
@@ -326,7 +327,11 @@ class MarketEnrichmentWorker:
             service = MarketEnrichmentService(
                 session, self._provider, scheduler=self._scheduler
             )
-            states = await service.claim_batch(limit=self._batch_limit)
+            states = await service.claim_batch(
+                limit=self._batch_limit,
+                # Fast-lane replica: only the lanes with a cadence promise.
+                min_priority=(LANE_NURSERY if settings.ENRICHMENT_FAST_LANE_ONLY else None),
+            )
             if not states:
                 await session.commit()
                 return 0
@@ -387,6 +392,13 @@ class MarketEnrichmentWorker:
                 committed_at=snapshot_committed_at.isoformat(),
             )
             await publish_live_update("market.changed", mints=refreshed_mints)
+
+        if settings.ENRICHMENT_FAST_LANE_ONLY:
+            # Snapshot collection IS this replica's whole job. Scoring, radar
+            # evaluation, curve collection and opportunity detection all run in
+            # the full-pipeline replica and the beat tasks; duplicating them
+            # here is what held first-hour cadence to 7 observations.
+            return total
 
         await self._score_batch(mints)
         await self._refresh_radar(refreshed_mints)

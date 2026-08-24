@@ -302,6 +302,8 @@ async def get_wallet(session: DbSession) -> WalletOut:
             pnl_today=Decimal(0),
             disclosure=DISCLOSURE,
             observed_at=now,
+            entries_paused=settings.PAPER_WALLET_ENTRIES_PAUSED,
+            pause_reason=settings.WALLET_ENTRIES_PAUSE_REASON,
         )
 
     read = await PaperWalletService(session).read(now=now)
@@ -325,6 +327,8 @@ async def get_wallet(session: DbSession) -> WalletOut:
         pnl_today=read.pnl_today,
         disclosure=DISCLOSURE,
         observed_at=now,
+        entries_paused=settings.PAPER_WALLET_ENTRIES_PAUSED,
+        pause_reason=settings.WALLET_ENTRIES_PAUSE_REASON,
     )
 
 

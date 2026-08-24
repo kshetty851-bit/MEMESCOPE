@@ -187,6 +187,7 @@ async def read_wallet(session: DbSession) -> KarthikWalletOut:
             activated=False,
             strategy=STRATEGY,
             entries_paused=settings.KARTHIK_ENTRIES_PAUSED,
+            pause_reason=settings.WALLET_ENTRIES_PAUSE_REASON,
             disclosure=DISCLOSURE,
         )
     return KarthikWalletOut(
@@ -194,6 +195,7 @@ async def read_wallet(session: DbSession) -> KarthikWalletOut:
         name=read.wallet.name,
         strategy=STRATEGY,
         entries_paused=settings.KARTHIK_ENTRIES_PAUSED,
+        pause_reason=settings.WALLET_ENTRIES_PAUSE_REASON,
         wallet_id=str(read.wallet.id),
         activated_at=read.wallet.activated_at,
         trade_size=str(read.wallet.trade_size.quantize(_MONEY)),

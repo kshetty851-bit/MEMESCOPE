@@ -28,6 +28,7 @@ celery_app = Celery(
         "app.workers.priority_tasks",
         "app.workers.enrichment_tasks",
         "app.workers.retention_tasks",
+        "app.workers.research_tasks",
         "app.hq_ops.tasks",
     ],
 )
@@ -191,6 +192,30 @@ celery_app.conf.beat_schedule = {
     # the other maintenance, and deliberately delete-only — reclaiming pages to
     # the filesystem needs VACUUM FULL, which takes an exclusive lock and is an
     # operator action, not something a beat should do behind your back.
+    "nursery-sweep": {
+        "task": "app.workers.research_tasks.nursery_sweep",
+        "schedule": crontab(minute="*/15"),
+    },
+    "research-quotes-sample": {
+        "task": "app.workers.research_tasks.research_quotes_sample",
+        "schedule": crontab(minute="*/5"),
+    },
+    "holder-snapshots-collect": {
+        "task": "app.workers.research_tasks.holder_snapshots_collect",
+        "schedule": crontab(minute="*/10"),
+    },
+    "universe-snapshot-daily": {
+        "task": "app.workers.research_tasks.universe_snapshot_daily",
+        "schedule": crontab(hour="2", minute="10"),
+    },
+    "regime-snapshot-hourly": {
+        "task": "app.workers.research_tasks.regime_snapshot_hourly",
+        "schedule": crontab(minute="7"),
+    },
+    "executable-outcomes-compute": {
+        "task": "app.workers.research_tasks.executable_outcomes_compute",
+        "schedule": crontab(minute="37"),
+    },
     "prune-telemetry": {
         "task": "app.workers.retention_tasks.prune_telemetry",
         "schedule": crontab(hour="3", minute="45"),

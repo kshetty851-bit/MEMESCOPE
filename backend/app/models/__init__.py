@@ -65,6 +65,15 @@ from app.models.score import (
     TokenScore,
     TokenScoreHistory,
 )
+from app.models.research_data import (  # noqa: F401
+    HolderSnapshot,
+    JupiterUniverseSnapshot,
+    NurseryAdmission,
+    RadarExecutableOutcome,
+    RegimeSnapshot,
+    ResearchQuote,
+    WalletFlowSnapshot,
+)
 from app.models.token import DiscoveredToken, MetadataStatus
 from app.models.user import User, UserRole
 

@@ -19,7 +19,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import BigInteger, Select, String, func, literal_column, or_, select, true
+from sqlalchemy import case, BigInteger, Select, String, func, literal_column, or_, select, true
 from sqlalchemy.dialects.postgresql import BIT, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
@@ -252,7 +252,14 @@ class RadarRepository:
                 DiscoveredToken,
                 DiscoveredToken.mint_address == TokenMarketSnapshot.mint_address,
             )
-            .where(TokenMarketSnapshot.mint_address == mint_address)
+            .where(
+                TokenMarketSnapshot.mint_address == mint_address,
+                # Ingest firewall: flagged prints never reach the engine. This
+                # single filter is what keeps them out of the score, the
+                # category gates AND `peak_multiple` — the window high is
+                # taken from this same series (radar/service.py).
+                TokenMarketSnapshot.suspect.is_not(True),
+            )
             .order_by(TokenMarketSnapshot.captured_at.desc())
             .limit(limit)
         )
@@ -748,6 +755,37 @@ class RadarRepository:
         if active_only:
             statement = statement.where(RadarToken.is_active.is_(True))
         return await self._session.scalar(statement) or 0
+
+    async def executable_summary(self) -> dict[str, object] | None:
+        """Aggregates over `radar_executable_outcomes` (decided 24h rows)."""
+        from app.models.research_data import RadarExecutableOutcome as Outcome
+
+        row = (
+            await self._session.execute(
+                select(
+                    func.count().label("decided"),
+                    func.avg(
+                        case((Outcome.reached_2x_24h.is_(True), 1.0), else_=0.0)
+                    ).label("rate_2x"),
+                    func.avg(
+                        case((Outcome.reached_125_24h.is_(True), 1.0), else_=0.0)
+                    ).label("rate_125"),
+                    func.percentile_cont(0.5)
+                    .within_group(Outcome.final_value_frac_24h.asc())
+                    .label("median_final"),
+                    func.max(Outcome.method_version).label("method"),
+                ).where(Outcome.decided_24h.is_(True))
+            )
+        ).one()
+        if not row.decided:
+            return None
+        return {
+            "decided": int(row.decided),
+            "rate_2x": row.rate_2x,
+            "rate_125": row.rate_125,
+            "median_final": row.median_final,
+            "method": row.method,
+        }
 
     async def performance_summary(self) -> PerformanceSummary:
         """Aggregates for the track record page.
