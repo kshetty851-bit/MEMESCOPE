@@ -263,3 +263,68 @@ async def test_health_reports_circuit_state() -> None:
 async def test_unstarted_provider_raises_clearly() -> None:
     with pytest.raises(ProviderError, match="not started"):
         await DexScreenerProvider(base_url="https://api.test").fetch_many([MINT])
+
+
+class TestSolanaOnly:
+    """This platform trades one chain. A pair from anywhere else is not a
+    cheaper venue — it is a different asset, and pricing a position from it
+    would be silently wrong in the one direction nobody checks.
+    """
+
+    def test_a_non_solana_pair_is_never_selected(self):
+        provider = DexScreenerProvider()
+        mint = "So11111111111111111111111111111111111111112"
+        payload = {
+            "pairs": [
+                {
+                    "chainId": "ethereum",
+                    "baseToken": {"address": mint, "symbol": "FAKE"},
+                    "quoteToken": {"address": "0xquote", "symbol": "WETH"},
+                    "priceUsd": "999.0",
+                    "liquidity": {"usd": 99_000_000},
+                },
+                {
+                    "chainId": "solana",
+                    "baseToken": {"address": mint, "symbol": "SOL"},
+                    "quoteToken": {"address": "usdc", "symbol": "USDC"},
+                    "priceUsd": "200.0",
+                    "liquidity": {"usd": 1_000},
+                },
+            ]
+        }
+        result = provider._parse(payload, requested={mint}, latency_ms=1)
+        assert mint in result
+        # The Ethereum pair has 99,000x the liquidity and would have won on
+        # depth alone. It must lose on chain instead.
+        assert result[mint].price_usd == Decimal("200.0")
+
+    def test_an_all_foreign_response_yields_nothing_rather_than_a_wrong_price(self):
+        provider = DexScreenerProvider()
+        mint = "So11111111111111111111111111111111111111112"
+        payload = {
+            "pairs": [
+                {
+                    "chainId": "base",
+                    "baseToken": {"address": mint, "symbol": "FAKE"},
+                    "quoteToken": {"address": "0xq", "symbol": "WETH"},
+                    "priceUsd": "1.0",
+                    "liquidity": {"usd": 5_000_000},
+                }
+            ]
+        }
+        assert provider._parse(payload, requested={mint}, latency_ms=1) == {}
+
+    def test_a_pair_with_no_chain_stated_is_not_assumed_to_be_solana(self):
+        provider = DexScreenerProvider()
+        mint = "So11111111111111111111111111111111111111112"
+        payload = {
+            "pairs": [
+                {
+                    "baseToken": {"address": mint, "symbol": "SOL"},
+                    "quoteToken": {"address": "usdc", "symbol": "USDC"},
+                    "priceUsd": "200.0",
+                    "liquidity": {"usd": 1_000_000},
+                }
+            ]
+        }
+        assert provider._parse(payload, requested={mint}, latency_ms=1) == {}

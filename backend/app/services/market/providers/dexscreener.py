@@ -41,6 +41,12 @@ from app.services.market.providers.base import (
 
 logger = get_logger(__name__)
 
+#: The only chain this platform trades. DexScreener answers token queries
+#: across all indexed chains; everything downstream — Jupiter routing, the
+#: scanner's program subscriptions, every execution quote — is Solana, so a
+#: pair from anywhere else is not a cheaper venue, it is a different asset.
+SOLANA_CHAIN_ID = "solana"
+
 # Below this USD liquidity a pool is treated as effectively untradeable.
 MIN_TRADEABLE_LIQUIDITY_USD = Decimal("100")
 
@@ -205,6 +211,16 @@ class DexScreenerProvider(MarketDataProvider):
         best: dict[str, dict[str, Any]] = {}
         for pair in pairs:
             if not isinstance(pair, dict):
+                continue
+            # SOLANA ONLY. `/latest/dex/tokens/{addresses}` answers across every
+            # chain DexScreener indexes, and this parser previously selected a
+            # pair on address alone — so a same-address or provider-side
+            # mismatch on another chain could price a different asset entirely.
+            # This platform is Solana-only end to end (Jupiter routes, the
+            # scanner's programs, every execution quote), so a non-Solana pair
+            # is never the right answer and is dropped before selection rather
+            # than out-competed on liquidity.
+            if pair.get("chainId") != SOLANA_CHAIN_ID:
                 continue
             base = pair.get("baseToken")
             quote = pair.get("quoteToken")
