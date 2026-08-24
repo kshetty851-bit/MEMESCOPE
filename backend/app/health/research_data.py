@@ -9,7 +9,7 @@ threshold so "DEGRADED" always says why.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -116,7 +116,7 @@ class ResearchDataHealthService:
         return {
             "verdict": verdict,
             "observed_at": moment,
-            "checks": [c.__dict__ for c in checks],
+            "checks": [asdict(c) for c in checks],
             "population": {
                 "admissions_1h": int(admissions_1h or 0),
                 "nursery_observing": int(nursery_observing or 0),
