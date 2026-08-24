@@ -85,6 +85,7 @@ describe("SidebarContent", () => {
       "Scanner",
       "Track record",
       "Paper wallet",
+      "Forward Arena",
     ]) {
       expect(within(nav).getByRole("link", { name: label })).toBeInTheDocument();
     }

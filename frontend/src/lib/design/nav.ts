@@ -92,6 +92,15 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "Strategy",
     items: [
       { href: "/wallet", label: "Paper wallet", icon: IconWallet, status: "ready" },
+      // The Arena sits beside the wallet because that is where a reader looks
+      // for it — but it is a research simulation, and the page says so above
+      // the fold. Its equity is not the Paper Wallet's equity.
+      {
+        href: "/strategy-lab/forward-arena",
+        label: "Forward Arena",
+        icon: IconSpark,
+        status: "ready",
+      },
     ],
   },
   {
