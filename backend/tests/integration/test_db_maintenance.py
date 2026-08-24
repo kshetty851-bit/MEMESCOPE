@@ -66,6 +66,19 @@ async def _seed_token_scores(rows: int = 5) -> None:
         await session.commit()
 
 
+async def _unseed_token_scores() -> None:
+    """Leave the shared database exactly as found — the seed is per-test
+    evidence, not a fixture other files should ever be able to observe."""
+    from sqlalchemy import text as _text
+
+    from app.db.session import SessionFactory as _SF
+
+    async with _SF() as session:
+        await session.execute(_text("DELETE FROM token_scores WHERE mint_address LIKE 'MAINTSEED%'"))
+        await session.execute(_text("DELETE FROM discovered_tokens WHERE mint_address LIKE 'MAINTSEED%'"))
+        await session.commit()
+
+
 class TestReport:
     async def test_it_reports_drift_without_changing_anything(self) -> None:
         """Read-only: what an operator runs to decide whether to maintain."""
@@ -87,10 +100,13 @@ class TestReport:
         would not.
         """
         await _seed_token_scores()
-        await maintenance.maintain(tables=("token_scores",))
-        row = (await maintenance.statistics_drift(("token_scores",)))[0]
+        try:
+            await maintenance.maintain(tables=("token_scores",))
+            row = (await maintenance.statistics_drift(("token_scores",)))[0]
 
-        assert row["drift_factor"] == pytest.approx(1.0, abs=0.05)
+            assert row["drift_factor"] == pytest.approx(1.0, abs=0.05)
+        finally:
+            await _unseed_token_scores()
 
 
 class TestAnalyze:
