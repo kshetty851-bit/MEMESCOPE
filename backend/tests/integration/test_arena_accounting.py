@@ -203,3 +203,93 @@ async def test_arena_settlement_touches_no_production_wallet_table(db_session):
     await svc.settle(now=NOW + timedelta(minutes=1))
     assert (await db_session.execute(select(PaperPosition))).scalars().all() == []
     assert (await db_session.execute(select(KarthikPosition))).scalars().all() == []
+
+
+class TestScoreboardAccounting:
+    """Cash, cost and worth are three different numbers.
+
+    The defect this guards: an open position carried at its $10 cost makes a
+    collapsed token look like $10 of equity. Opening a position must not move
+    total equity at all (capital changes form, not amount), and a position that
+    loses value must reduce equity even before it closes.
+    """
+
+    async def _board(self, client):
+        response = await client.get("/api/v1/arena")
+        assert response.status_code == 200
+        return {c["code"]: c for c in response.json()["candidates"]}
+
+    async def test_opening_a_position_does_not_change_total_equity(
+        self, db_session, client
+    ):
+        svc = ArenaService(db_session)
+        await svc.activate(valid_from=VALID_FROM)
+        before = await self._board(client)
+        assert Decimal(before["B"]["equity"]) == Decimal("1000.0000")
+
+        await _candidate_token(db_session, mint="MARK1111111111111111111111111111111111",
+                               entered=NOW - timedelta(hours=1), liq=Decimal("50000"))
+        await svc.evaluate_due(now=NOW)
+        await db_session.commit()
+
+        after = await self._board(client)
+        b = after["B"]
+        assert Decimal(b["cash"]) == Decimal("990.0000")
+        assert Decimal(b["deployed_cost"]) == Decimal("10.0000")
+        # The position is worth roughly its cost less costs — equity must stay
+        # near $1,000, and must NEVER read as $990.
+        assert Decimal(b["equity"]) > Decimal("995")
+        assert Decimal(b["equity_at_cost"]) == Decimal("1000.0000")
+        assert Decimal(b["unrealized_value"]) > Decimal("0")
+
+    async def test_a_collapsed_open_position_reduces_equity_before_it_closes(
+        self, db_session, client
+    ):
+        svc = ArenaService(db_session)
+        await svc.activate(valid_from=VALID_FROM)
+        tok = await _candidate_token(db_session, mint="FALL1111111111111111111111111111111111",
+                                     entered=NOW - timedelta(hours=1), liq=Decimal("50000"))
+        await svc.evaluate_due(now=NOW)
+        db_session.add(TokenMarketSnapshot(
+            token_id=tok.id, mint_address="FALL1111111111111111111111111111111111",
+            captured_at=NOW + timedelta(minutes=1), price_usd=Decimal("0.0001"),
+            liquidity_usd=Decimal("50000"), trading_status=TradingStatus.TRADING,
+            provider="test", suspect=False))
+        await db_session.commit()
+
+        b = (await self._board(client))["B"]
+        assert Decimal(b["deployed_cost"]) == Decimal("10.0000")
+        assert Decimal(b["unrealized_value"]) < Decimal("3")
+        assert Decimal(b["unrealized_pnl"]) < Decimal("0")
+        assert Decimal(b["equity"]) < Decimal("995")
+        # ...while the cost-carried figure still reads a full $1,000, which is
+        # exactly why it is not the headline.
+        assert Decimal(b["equity_at_cost"]) == Decimal("1000.0000")
+
+    async def test_a_dead_open_position_is_worth_nothing_not_its_cost(
+        self, db_session, client
+    ):
+        svc = ArenaService(db_session)
+        await svc.activate(valid_from=VALID_FROM)
+        tok = await _candidate_token(db_session, mint="GONE1111111111111111111111111111111111",
+                                     entered=NOW - timedelta(hours=1), liq=Decimal("50000"))
+        await svc.evaluate_due(now=NOW)
+        db_session.add(TokenMarketSnapshot(
+            token_id=tok.id, mint_address="GONE1111111111111111111111111111111111",
+            captured_at=NOW + timedelta(minutes=1), price_usd=Decimal("0.05"),
+            liquidity_usd=Decimal("0"), trading_status=TradingStatus.INACTIVE,
+            provider="test", suspect=False))
+        await db_session.commit()
+
+        b = (await self._board(client))["B"]
+        assert Decimal(b["unrealized_value"]) == Decimal("0")
+        assert Decimal(b["equity"]) == Decimal("990.0000")
+
+    async def test_the_cash_control_reports_a_clean_thousand(self, db_session, client):
+        await ArenaService(db_session).activate(valid_from=VALID_FROM)
+        await db_session.commit()
+        a = (await self._board(client))["A"]
+        assert Decimal(a["equity"]) == Decimal("1000.0000")
+        assert Decimal(a["cash"]) == Decimal("1000.0000")
+        assert Decimal(a["deployed_cost"]) == Decimal("0")
+        assert Decimal(a["unrealized_value"]) == Decimal("0")

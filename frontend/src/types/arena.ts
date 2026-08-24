@@ -13,9 +13,18 @@ export interface ArenaCandidate {
   status: string;
   failed_reason: string | null;
   starting_equity: string;
-  equity: string;
+  /** Uninvested cash. */
   cash: string;
-  deployed: string;
+  /** What the open positions COST — capital tied up, not worth. */
+  deployed_cost: string;
+  /** What the open positions could actually be SOLD for right now. */
+  unrealized_value: string;
+  /** unrealized_value − deployed_cost. */
+  unrealized_pnl: string;
+  /** cash + unrealized_value. The headline number. */
+  equity: string;
+  /** cash + deployed_cost, published beside the real figure for contrast. */
+  equity_at_cost: string;
   realized_pnl: string;
   total_return: string;
   trades: number;

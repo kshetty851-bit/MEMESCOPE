@@ -15,16 +15,51 @@ from sqlalchemy import func, select
 
 from app.api.deps import DbSession
 from app.arena import rules
+from app.arena.service import _model_proceeds
 from app.arena.schemas import ArenaBoard, ArenaCandidateOut, ArenaDecisionOut
 from app.models.arena import ArenaCandidate, ArenaDecision, ArenaPosition
+from app.models.market import TokenMarketSnapshot, TradingStatus
 
 router = APIRouter(prefix="/arena", tags=["arena"])
 
 DISCLOSURE = (
     "RESEARCH SIMULATION — NOT THE OFFICIAL PAPER WALLET. Five virtual $1,000 "
     "portfolios scoring frozen entry hypotheses against a cash control. No real "
-    "or paper position is ever created by this experiment."
+    "or paper position is ever created by this experiment. Equity is cash plus "
+    "what the open book could be SOLD for, not plus what it cost; drawdown is "
+    "measured on the cost basis its peak is recorded on."
 )
+
+
+async def _mark_to_market(session, positions: list[ArenaPosition]) -> Decimal:
+    """What the open positions could actually be sold for, right now.
+
+    Carrying an open position at its $10 cost is the accounting error this
+    function exists to prevent: a token that has collapsed to $3 of executable
+    value is not $10 of equity merely because that is what was paid for it.
+    Marks with the SAME model settlement uses — a dead pool marks at $0.00,
+    never at its last healthy print — so the equity a reader sees and the
+    proceeds a close would book cannot disagree.
+    """
+    total = Decimal(0)
+    for pos in positions:
+        snap = (
+            await session.execute(
+                select(TokenMarketSnapshot)
+                .where(
+                    TokenMarketSnapshot.token_id == pos.token_id,
+                    TokenMarketSnapshot.suspect.is_not(True),
+                )
+                .order_by(TokenMarketSnapshot.captured_at.desc())
+                .limit(1)
+            )
+        ).scalars().first()
+        if snap is None or snap.trading_status == TradingStatus.INACTIVE:
+            continue  # unquotable or dead: worth nothing, not worth its cost
+        if not snap.price_usd or not snap.liquidity_usd:
+            continue
+        total += _model_proceeds(pos.quantity, snap.price_usd, snap.liquidity_usd)
+    return total
 
 
 def _wilson(k: int, n: int) -> tuple[float, float] | None:
@@ -67,8 +102,13 @@ async def board(session: DbSession) -> ArenaBoard:
         losses = [x for x in pnls if x <= 0]
         gross_w = sum(wins) or Decimal(0)
         gross_l = -sum(losses) if losses else Decimal(0)
-        deployed = sum((p.size_usd for p in opens), Decimal(0))
-        equity = c.cash + deployed
+        deployed_cost = sum((p.size_usd for p in opens), Decimal(0))
+        unrealized_value = await _mark_to_market(session, opens)
+        # Equity is cash plus what the open book is WORTH, never plus what it
+        # cost. The cost-carried figure is published beside it rather than
+        # instead of it.
+        equity = c.cash + unrealized_value
+        equity_at_cost = c.cash + deployed_cost
         skipped = int(
             await session.scalar(
                 select(func.count()).select_from(ArenaDecision).where(
@@ -90,8 +130,10 @@ async def board(session: DbSession) -> ArenaBoard:
             ArenaCandidateOut(
                 code=c.code, name=c.name, version=c.version, status=c.status,
                 failed_reason=c.failed_reason,
-                starting_equity=c.starting_equity, equity=equity, cash=c.cash,
-                deployed=deployed,
+                starting_equity=c.starting_equity, cash=c.cash,
+                deployed_cost=deployed_cost, unrealized_value=unrealized_value,
+                unrealized_pnl=unrealized_value - deployed_cost,
+                equity=equity, equity_at_cost=equity_at_cost,
                 realized_pnl=sum(pnls, Decimal(0)),
                 total_return=((equity - c.starting_equity) / c.starting_equity)
                 if c.starting_equity else Decimal(0),
@@ -103,7 +145,13 @@ async def board(session: DbSession) -> ArenaBoard:
                 profit_factor=(gross_w / gross_l) if gross_l > 0 else None,
                 avg_win=(gross_w / len(wins)) if wins else None,
                 avg_loss=(-gross_l / len(losses)) if losses else None,
-                max_drawdown=((c.peak_equity - equity) / c.peak_equity)
+                # Compared against `equity_at_cost`, not the marked figure:
+                # `peak_equity` is maintained by settlement on the cost basis
+                # (it feeds the frozen circuit breaker, which this display
+                # change must not move). Pairing a cost-carried peak with a
+                # marked current would compare two different quantities and
+                # report a drawdown neither basis actually saw.
+                max_drawdown=((c.peak_equity - equity_at_cost) / c.peak_equity)
                 if c.peak_equity else Decimal(0),
                 open_positions=len(opens), skipped=skipped,
                 buy_failures=int(routes.get("BUY_FAILED", 0)),

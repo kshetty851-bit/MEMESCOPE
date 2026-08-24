@@ -92,6 +92,33 @@ function CandidateCard({ c, cash }: { c: ArenaCandidate; cash: number }) {
         </p>
       ) : null}
 
+      {/* Cash, cost and worth are three different numbers and are shown as
+          three different numbers. Equity is cash + what the open book would
+          fetch — never cash + what it cost. */}
+      {!isCash ? (
+        <dl className="mt-3 grid grid-cols-3 gap-2 rounded border border-line bg-raised/30 px-2.5 py-2 text-[11px]">
+          <div>
+            <dt className="text-ink-3">Cash</dt>
+            <dd data-numeric className="text-ink-2">{money(c.cash)}</dd>
+          </div>
+          <div>
+            <dt className="text-ink-3">Open cost</dt>
+            <dd data-numeric className="text-ink-2">{money(c.deployed_cost)}</dd>
+          </div>
+          <div>
+            <dt className="text-ink-3">Open value</dt>
+            <dd
+              data-numeric
+              className={
+                Number(c.unrealized_pnl) < 0 ? "text-danger" : "text-ink-2"
+              }
+            >
+              {money(c.unrealized_value)}
+            </dd>
+          </div>
+        </dl>
+      ) : null}
+
       {isCash ? (
         <p className="mt-3 text-xs leading-relaxed text-ink-3">
           Never trades. The number every other candidate has to beat.
@@ -124,7 +151,7 @@ function CandidateCard({ c, cash }: { c: ArenaCandidate; cash: number }) {
             <div className="flex justify-between">
               <dt className="text-ink-3">Open</dt>
               <dd data-numeric className="text-ink-2">
-                {c.open_positions} ({money(c.deployed)})
+                {c.open_positions} @ {money(c.deployed_cost)} cost
               </dd>
             </div>
             <div className="flex justify-between">

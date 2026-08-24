@@ -16,9 +16,23 @@ class ArenaCandidateOut(BaseSchema):
     status: str
     failed_reason: str | None = None
     starting_equity: Decimal
-    equity: Decimal
+    #: Uninvested cash.
     cash: Decimal
-    deployed: Decimal
+    #: What the open positions COST — the capital they tie up. Not their worth.
+    deployed_cost: Decimal
+    #: What the open positions could actually be SOLD for right now, under the
+    #: same execution model settlement uses. A position that has collapsed is
+    #: worth what it would fetch, not what it cost.
+    unrealized_value: Decimal
+    #: unrealized_value - deployed_cost. Negative while open positions are down.
+    unrealized_pnl: Decimal
+    #: cash + unrealized_value. THE headline number.
+    equity: Decimal
+    #: cash + deployed_cost — what equity would read if open positions were
+    #: carried at cost. Published beside the real figure so the difference
+    #: between "capital committed" and "capital worth" is visible rather than
+    #: implied.
+    equity_at_cost: Decimal
     realized_pnl: Decimal
     total_return: Decimal
     trades: int
