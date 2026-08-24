@@ -232,6 +232,11 @@ class ResearchQuote(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     price_usd_at: Mapped[Decimal | None] = mapped_column(PRICE, nullable=True)
     liquidity_usd_at: Mapped[Decimal | None] = mapped_column(MONEY, nullable=True)
     context: Mapped[str] = mapped_column(String(24), nullable=False)
+    #: Which V5 protocol checkpoint this quote answers for (minutes since
+    #: nursery entry: 5/10/20/30/45/60). NULL for opportunistic samples — the
+    #: research question "was it two-sided AT the decision moment" can only be
+    #: answered by a quote that knows which moment it belongs to.
+    checkpoint_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     __table_args__ = (
         CheckConstraint("side IN ('buy','sell')", name="ck_research_quotes_side"),

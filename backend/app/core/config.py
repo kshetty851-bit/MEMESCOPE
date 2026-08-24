@@ -549,7 +549,11 @@ class Settings(BaseSettings):
     # read by no trading path. Ships dark; production turns it on deliberately.
     FEATURE_RESEARCH_COLLECTORS_ENABLED: bool = False
     #: Round-trip quote samples per 5-minute run (2 API calls each).
-    RESEARCH_QUOTE_BATCH: int = Field(default=8, ge=1, le=50)
+    #: Round-trip quote samples per 5-minute run (2 API calls each). Sized for
+    #: the V5 protocol's six checkpoints across a live nursery: at ~40 members
+    #: a checkpoint falls due roughly every 90s, and the sampler must clear
+    #: them before their grace window closes.
+    RESEARCH_QUOTE_BATCH: int = Field(default=16, ge=1, le=50)
     RESEARCH_QUOTE_SIZE_USD: float = Field(default=10.0, gt=0, le=100.0)
     #: Holder snapshots per 10-minute run (2 RPC calls each).
     HOLDER_SNAPSHOT_BATCH: int = Field(default=10, ge=1, le=100)

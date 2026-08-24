@@ -42,6 +42,11 @@ from app.workers.runtime import run_async
 logger = get_logger(__name__)
 
 USDC_DECIMALS = 6
+#: V5 protocol §4 decision checkpoints, minutes after nursery entry. Frozen.
+CHECKPOINT_MINUTES: tuple[int, ...] = (5, 10, 20, 30, 45, 60)
+#: How late a checkpoint quote may still be taken and still count as that
+#: checkpoint. Beyond this the moment is gone and is recorded as missing.
+CHECKPOINT_GRACE_MINUTES = 4
 #: pump.fun mints are uniformly 6 decimals; used only when the token row has
 #: no stored value, and recorded implicitly by the raw amounts either way.
 DEFAULT_DECIMALS = 6
@@ -84,6 +89,41 @@ async def _research_quotes_sample() -> dict[str, Any]:
     quoted = failures = 0
 
     async with SessionFactory() as session:
+        # --- checkpoint-aligned candidates first (V5 protocol §4) ------------
+        # A nursery member that has just crossed one of the fixed decision
+        # checkpoints and has no quote for it yet. This is the only quote that
+        # can answer "was this token two-sided AT the decision moment" — a
+        # randomly timed sample cannot, however many of them there are.
+        rows: list[Any] = []
+        checkpoints: dict[str, int] = {}
+        for minutes in CHECKPOINT_MINUTES:
+            if len(rows) >= batch:
+                break
+            due = (
+                select(NurseryAdmission.mint_address, NurseryAdmission.token_id)
+                .where(
+                    NurseryAdmission.status == "observing",
+                    NurseryAdmission.entered_at <= now - timedelta(minutes=minutes),
+                    # inside a grace window, so a late beat still lands the
+                    # checkpoint rather than skipping it forever
+                    NurseryAdmission.entered_at
+                    > now - timedelta(minutes=minutes + CHECKPOINT_GRACE_MINUTES),
+                    ~select(ResearchQuote.id)
+                    .where(
+                        ResearchQuote.mint_address == NurseryAdmission.mint_address,
+                        ResearchQuote.checkpoint_minutes == minutes,
+                    )
+                    .exists(),
+                )
+                .order_by(NurseryAdmission.entered_at)
+                .limit(batch - len(rows))
+            )
+            for mint, token_id in (await session.execute(due)).all():
+                if mint in checkpoints:
+                    continue
+                checkpoints[mint] = minutes
+                rows.append((mint, token_id))
+
         # Candidates: newest admissions and observing nursery members that have
         # no quote in the last hour. Newest first — execution truth is most
         # valuable at the moment research would have acted.
@@ -101,7 +141,8 @@ async def _research_quotes_sample() -> dict[str, Any]:
             .order_by(RadarToken.first_detected_at.desc())
             .limit(batch)
         )
-        rows = list((await session.execute(admitted)).all())
+        if len(rows) < batch:
+            rows += list((await session.execute(admitted.limit(batch - len(rows)))).all())
         if len(rows) < batch:
             observing = (
                 select(NurseryAdmission.mint_address, NurseryAdmission.token_id)
@@ -139,7 +180,8 @@ async def _research_quotes_sample() -> dict[str, Any]:
                     size_usd=size,
                     price_usd_at=price,
                     liquidity_usd_at=liq,
-                    context="skip_sample",
+                    context=("checkpoint" if mint in checkpoints else "skip_sample"),
+                    checkpoint_minutes=checkpoints.get(mint),
                 )
                 try:
                     buy = await client.buy_quote(
