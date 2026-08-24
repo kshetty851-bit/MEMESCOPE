@@ -77,6 +77,16 @@ def configure_logging() -> None:
     # uvicorn's access log duplicates our RequestContextMiddleware line.
     logging.getLogger("uvicorn.access").disabled = True
 
+    # httpx logs every request as `HTTP Request: POST <full url> "200 OK"` at
+    # INFO — and RPC endpoints carry credentials in the URL (Helius in the
+    # query string, Chainstack in the path). Measured 2026-08-24: 85 scanner
+    # lines and 6 worker lines held live provider secrets, purely from this
+    # logger. Application code redacts its own messages; this is the one path
+    # that formats a URL nobody in this codebase wrote. WARNING keeps genuine
+    # transport failures visible while the routine request line goes away.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+
 
 def get_logger(name: str | None = None) -> structlog.stdlib.BoundLogger:
     return structlog.stdlib.get_logger(name)
