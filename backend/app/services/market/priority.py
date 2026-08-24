@@ -190,7 +190,7 @@ async def apply_membership(
             ),
         )
         # Counts rows *touched*, which is promotions plus re-clamps.
-        promoted = result.rowcount or 0
+        promoted += result.rowcount or 0
 
     demote = update(TokenEnrichmentState).where(TokenEnrichmentState.priority == LANE_DISPLAY)
     if members:
@@ -323,6 +323,38 @@ async def refresh_nursery_lane(session: AsyncSession, *, now: datetime) -> Nurse
     # 3. Promotion, newest first, into the remaining room. Only ACTIVE rows: a
     # dead-lettered fresh token re-enters through the requeue beat, not here.
     promoted = 0
+
+    # --- observing members first, and unconditionally ------------------------
+    # The Radar's observation window is a bounded, deliberate reservation
+    # (admission rate x window, closed by expiry) — it must not queue behind
+    # fresh-token churn. Measured 2026-08-24: the lane sat at 1,011 against a
+    # cap of 1,000, so `room` went negative and four ACTIVE observing tokens
+    # were never promoted at all — the window that exists to observe them was
+    # collecting nothing. Capacity still bounds the fresh-by-age population
+    # below; it no longer bounds the population the window is *about*.
+    observing_waiting = (
+        select(TokenEnrichmentState.id)
+        .where(
+            TokenEnrichmentState.status == EnrichmentStatus.ACTIVE,
+            TokenEnrichmentState.priority == LANE_NORMAL,
+            TokenEnrichmentState.token_id.in_(still_observing),
+        )
+        .scalar_subquery()
+    )
+    result = cast(
+        CursorResult[Any],
+        await session.execute(
+            update(TokenEnrichmentState)
+            .where(TokenEnrichmentState.id.in_(observing_waiting))
+            .values(
+                priority=LANE_NURSERY,
+                next_refresh_at=func.least(TokenEnrichmentState.next_refresh_at, now),
+            )
+        ),
+    )
+    promoted += result.rowcount or 0
+    members += promoted
+
     room = cap - members
     if room > 0:
         candidates = (
@@ -331,16 +363,7 @@ async def refresh_nursery_lane(session: AsyncSession, *, now: datetime) -> Nurse
             .where(
                 TokenEnrichmentState.status == EnrichmentStatus.ACTIVE,
                 TokenEnrichmentState.priority == LANE_NORMAL,
-                # Fresh by age, OR held OBSERVING by the Radar nursery. The
-                # second clause is what makes the observation window real:
-                # exempting a member from eviction does nothing for one that
-                # was already in the backlog when its window opened (measured
-                # 2026-08-24: 3 of 11 observing tokens sat in LANE_NORMAL
-                # behind 400k overdue rows, collecting nothing).
-                or_(
-                    DiscoveredToken.discovered_at >= cutoff,
-                    TokenEnrichmentState.token_id.in_(still_observing),
-                ),
+                DiscoveredToken.discovered_at >= cutoff,
             )
             .order_by(DiscoveredToken.discovered_at.desc(), TokenEnrichmentState.id)
             .limit(room)
