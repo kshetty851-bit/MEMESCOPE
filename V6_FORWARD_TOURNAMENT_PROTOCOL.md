@@ -112,11 +112,18 @@ different 24-hour leaderboard, and a boundary crossed during downtime is still c
 the next tick at its frozen instant.
 
 **24 hours is a snapshot, not the end of the experiment.** The tournament continues
-unchanged afterwards, automatically.
+unchanged afterwards, automatically: no strategy is deactivated, no wallet is reset, the
+beat keeps judging and settling, and tokens admitted after the boundary are traded
+exactly as before. Three integration tests hold this — one opens a position after the
+boundary, one asserts all twenty stay `active` through it, and one runs the snapshot
+step twice after simulated downtime to prove a frozen leaderboard is never rewritten.
 
 ## 12. Continuation checkpoints
 
-Further immutable snapshots at **48H, 72H, 7D, 14D, 21D**. Sample-size language on every
+Further immutable snapshots at **48H, 72H, 7D, 14D, 21D, 30D, 60D, 90D**, and at
+**closed-trade milestones 25 / 50 / 100 / 200 / 500** (taken when the best-sampled
+strategy first reaches each, because a record becomes worth reading at a sample size
+rather than at a date). Sample-size language on every
 report: 25 `EXTREMELY LOW CONFIDENCE` · 50 `EARLY` · 100 `PRELIMINARY` · 200 `INTERMEDIATE`
 · 500 `SUBSTANTIAL FORWARD SAMPLE`. Below 25 closed trades a leader is reported as
 **OBSERVED PROFIT**, never as **EVIDENCE OF EDGE**.
@@ -132,12 +139,36 @@ of profit comes from the top three trades) · `EXECUTABLE 2× LEADER` (highest g
 executable 2× capture with its sample stated). Independent by construction; no strategy is
 forced to win all three. **Cash is allowed to win.**
 
+## 13a. The 30-day review
+
+`30D` is the first boundary at which a strategy could plausibly carry enough closed
+trades to be worth arguing about. It is a **review point, not a trigger**: reaching it
+profitable authorises a decision, never an automatic promotion. What would have to be
+true for a candidate to be taken seriously there:
+
+* **≥100 closed trades** for that strategy (`PRELIMINARY` or better). Below that the
+  interval is wider than any edge being claimed.
+* **Beats `V6-01 CASH`** on executable equity, not on chart P&L.
+* **Beats `V6-02 RANDOM`**, its matched control from the same eligible population. A
+  strategy that cannot beat random selection from the tokens it was allowed to pick from
+  has demonstrated nothing about its rules.
+* **Survives `-best 1` and `-best 3`.** V6 red-teaming killed a candidate on exactly this.
+* **Top-3 trades carry < 80% of gross profit** — otherwise the result is one lucky token.
+* **No unexplained sell-route failures** above 30% of closed trades.
+
+A candidate meeting all six is a *hypothesis worth a larger paper allocation*. It is
+still not evidence that real money should follow it: this program has produced seven
+NO-EDGE verdicts, and the two strategies that beat cash historically (V6-06, V6-07) are
+both flagged HIGH overfit risk with their gate's prevalence quadrupling across the very
+sample that made them look good.
+
 ## 14. Promotion
 
 Being first in the Lab promotes nothing. No strategy is promoted to the official Paper
 Wallet or to any real-money consideration by this protocol. After the 24-hour snapshot the
 leader is classified `PROMISING` / `NOT PROMISING` / `INSUFFICIENT SAMPLE` and the
-tournament continues. A separate, explicit authorisation would be required for any promotion.
+tournament continues. A separate, explicit authorisation would be required for any promotion, and real-money
+consideration additionally requires the real-wallet safety gates, which remain DISABLED.
 
 ## 15. Immutability
 

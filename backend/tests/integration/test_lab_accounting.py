@@ -19,7 +19,13 @@ from sqlalchemy import func, select
 
 from app.lab import leaderboard, spec
 from app.lab.service import LabService
-from app.models.lab import LabDecision, LabPosition, LabStrategy, LabTournament
+from app.models.lab import (
+    LabDecision,
+    LabPosition,
+    LabSnapshot,
+    LabStrategy,
+    LabTournament,
+)
 from app.models.market import TokenMarketSnapshot, TradingStatus
 from app.models.radar import RadarToken
 from app.models.research_data import ResearchQuote, WalletFlowSnapshot
@@ -607,3 +613,87 @@ async def test_equity_points_are_recorded_for_every_strategy(db_session):
     svc = LabService(db_session)
     await svc.activate(valid_from=VALID_FROM)
     assert await svc.record_equity(now=NOW) == 20
+
+
+# --- the tournament outlives its own snapshot --------------------------------
+# The 24-hour mark is a photograph, not a finish line. These hold the system to
+# that, because "it keeps running" is the kind of claim that is easy to assert
+# and easy to get silently wrong.
+
+async def test_trading_continues_after_the_24h_snapshot(db_session):
+    svc = LabService(db_session)
+    t = await svc.activate(valid_from=VALID_FROM)
+    boundary = t.snapshot_at
+    after = boundary + timedelta(hours=2)
+
+    await leaderboard.build_snapshot(
+        db_session, tournament=t, label="24H", boundary=boundary, now=boundary
+    )
+    t.snapshot_taken_at = boundary
+    await db_session.flush()
+
+    # a token admitted AFTER the snapshot must still be judged and bought
+    await _radar_token(db_session, mint="A" + "1" * 20,
+                       detected=after - timedelta(hours=2), liq=D("600000"),
+                       pool="POOLAFTER1")
+    out = await svc.evaluate_due(now=after)
+    assert out["decided"] > 0, "judging must not stop at the snapshot"
+    assert out["opened"] > 0, "buying must not stop at the snapshot"
+
+    live = list((await db_session.execute(
+        select(LabPosition).where(LabPosition.opened_at > boundary)
+    )).scalars())
+    assert live, "positions opened after the boundary must exist"
+
+
+async def test_no_strategy_is_deactivated_by_the_snapshot(db_session):
+    svc = LabService(db_session)
+    t = await svc.activate(valid_from=VALID_FROM)
+    await leaderboard.build_snapshot(
+        db_session, tournament=t, label="24H", boundary=t.snapshot_at, now=t.snapshot_at
+    )
+    rows = list((await db_session.execute(select(LabStrategy))).scalars())
+    assert len(rows) == 20
+    assert all(r.status == "active" for r in rows)
+    assert t.status == "active"
+
+
+async def test_a_snapshot_is_written_once_however_often_the_tick_runs(db_session):
+    """A restart at the wrong moment must not produce a second, different 24h
+    leaderboard, and a boundary crossed during downtime is still captured."""
+    from app.lab import scheduler
+
+    svc = LabService(db_session)
+    t = await svc.activate(valid_from=VALID_FROM)
+    late = t.snapshot_at + timedelta(hours=9)          # tick returns after downtime
+
+    first = await scheduler._snapshots(db_session, t, late)
+    second = await scheduler._snapshots(db_session, t, late)
+    assert "24H" in first
+    assert second == [], "a re-run must not rewrite a frozen snapshot"
+
+    rows = list((await db_session.execute(
+        select(LabSnapshot).where(LabSnapshot.label == "24H")
+    )).scalars())
+    assert len(rows) == 1
+    # the boundary is the frozen instant, never the clock that happened to notice
+    assert rows[0].boundary_at == t.snapshot_at
+    assert rows[0].elapsed_hours == 24
+
+
+async def test_the_thirty_day_boundary_is_scheduled(db_session):
+    """The 30-day mark the operator cares about must exist as a real boundary."""
+    from app.lab.scheduler import CALENDAR_SNAPSHOTS
+
+    labels = dict(CALENDAR_SNAPSHOTS)
+    assert labels["30D"] == 720
+    assert labels["24H"] == 24
+    assert "90D" in labels
+
+    svc = LabService(db_session)
+    t = await svc.activate(valid_from=VALID_FROM)
+    from app.lab import scheduler
+    written = await scheduler._snapshots(
+        db_session, t, t.valid_from + timedelta(days=30, minutes=1)
+    )
+    assert "30D" in written and "24H" in written

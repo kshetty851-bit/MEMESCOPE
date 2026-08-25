@@ -12,22 +12,29 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.db.session import SessionFactory
 from app.lab import leaderboard, spec
 from app.lab.service import LabService
-from app.models.lab import LabSnapshot, LabTournament
+from app.models.lab import LabPosition, LabSnapshot, LabTournament
 from app.workers.celery_app import celery_app
 from app.workers.runtime import run_async
 
 logger = get_logger(__name__)
 
-#: Calendar boundaries that get their own immutable snapshot (mission §17).
+#: Calendar boundaries that get their own immutable snapshot (protocol §12).
+#: The 24-hour one is a SNAPSHOT, not an ending — nothing here stops the
+#: tournament, and a test holds that to be true.
 CALENDAR_SNAPSHOTS = (("24H", 24), ("48H", 48), ("72H", 72),
-                      ("7D", 168), ("14D", 336), ("21D", 504))
+                      ("7D", 168), ("14D", 336), ("21D", 504),
+                      ("30D", 720), ("60D", 1440), ("90D", 2160))
+
+#: Closed-trade milestones. A strategy's record becomes worth reading at a
+#: sample size, not at a date, so these fire independently of the calendar.
+TRADE_MILESTONES = (25, 50, 100, 200, 500)
 
 
 @celery_app.task(name="app.lab.scheduler.lab_tick")
@@ -86,4 +93,29 @@ async def _snapshots(session, tournament: LabTournament, now: datetime) -> list[
         written.append(label)
         logger.info("lab_snapshot_written", label=label,
                     closed=payload.get("total_closed_trades"))
+
+    # Sample-size milestones: taken when the BEST-sampled strategy first
+    # reaches a threshold, because that is when its record starts to mean
+    # something. Independent of the calendar and of each other.
+    best = int(await session.scalar(
+        select(func.count()).select_from(LabPosition)
+        .where(LabPosition.status == "closed")
+        .group_by(LabPosition.strategy_row_id)
+        .order_by(func.count().desc()).limit(1)
+    ) or 0)
+    for threshold in TRADE_MILESTONES:
+        label = f"TRADES_{threshold}"
+        if best < threshold or label in existing:
+            continue
+        payload = await leaderboard.build_snapshot(
+            session, tournament=tournament, label=label, boundary=now, now=now
+        )
+        session.add(LabSnapshot(
+            tournament_id=tournament.id, label=label, boundary_at=now, taken_at=now,
+            elapsed_hours=(now - tournament.valid_from).total_seconds() / 3600,
+            payload=payload,
+        ))
+        await session.flush()
+        written.append(label)
+        logger.info("lab_snapshot_written", label=label, best_sampled=best)
     return written
