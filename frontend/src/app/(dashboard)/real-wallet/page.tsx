@@ -217,6 +217,137 @@ function StatusCard({ label, value }: { label: string; value: string }) {
   );
 }
 
+type FundingCheck = {
+  key: string;
+  title: string;
+  owner: "CODE" | "OPERATOR" | "EVIDENCE";
+  status: "PASS" | "BLOCKED" | "UNKNOWN";
+  detail: string;
+  remediation: string;
+};
+
+type FundingReadiness = {
+  ready_to_fund: boolean;
+  ready_to_trade: boolean;
+  blocked_total: number;
+  blocked_by_owner: Record<string, string[]>;
+  checks: FundingCheck[];
+};
+
+/**
+ * What stands between here and a funded canary.
+ *
+ * Served by the API, which owns the decision; this renders it. Each blocker
+ * names its owner because the three kinds resolve completely differently — a
+ * reviewed diff, a human action, or evidence that does not exist yet — and a
+ * flat list of twenty-one refusals hides that distinction.
+ */
+function FundingReadinessPanel({ data }: { data: FundingReadiness | undefined }) {
+  const [open, setOpen] = useState<string | null>(null);
+  // A supplementary panel must never be able to take down a safety page: an
+  // absent or malformed payload renders nothing rather than throwing.
+  if (!data || !Array.isArray(data.checks) || data.checks.length === 0) return null;
+
+  const badge = (s: FundingCheck["status"]) =>
+    s === "PASS"
+      ? "border-up/40 text-up"
+      : s === "UNKNOWN"
+        ? "border-line text-ink-3"
+        : "border-down/40 text-down";
+
+  const owners: FundingCheck["owner"][] = ["OPERATOR", "CODE", "EVIDENCE"];
+  const blurb: Record<string, string> = {
+    OPERATOR: "Your hands — a key, a funded wallet, a configuration decision.",
+    CODE: "A reviewed diff. An operator with environment access alone cannot do this.",
+    EVIDENCE: "A result the tournament has not produced. No engineering closes it.",
+  };
+
+  return (
+    <section className="mt-6 rounded-lg border border-line p-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-3">
+        <div>
+          <p className="text-label text-ink-3">Funding readiness</p>
+          <p className="mt-1 text-sm text-ink">
+            {data.ready_to_fund
+              ? "The rail is configured — this wallet can be funded."
+              : "Not ready to fund yet."}{" "}
+            <span className="text-ink-3">
+              {data.blocked_total} of {data.checks.length} preconditions outstanding.
+            </span>
+          </p>
+        </div>
+        <div className="flex gap-2 text-xs">
+          <span
+            className={`rounded border px-2 py-1 ${
+              data.ready_to_fund ? "border-up/40 text-up" : "border-down/40 text-down"
+            }`}
+          >
+            READY TO FUND: {data.ready_to_fund ? "YES" : "NO"}
+          </span>
+          <span
+            className={`rounded border px-2 py-1 ${
+              data.ready_to_trade ? "border-up/40 text-up" : "border-down/40 text-down"
+            }`}
+          >
+            READY TO TRADE: {data.ready_to_trade ? "YES" : "NO"}
+          </span>
+        </div>
+      </div>
+
+      {owners.map((owner) => {
+        const rows = data.checks.filter((c) => c.owner === owner);
+        if (rows.length === 0) return null;
+        const done = rows.filter((c) => c.status === "PASS").length;
+        return (
+          <div key={owner} className="mt-4">
+            <p className="text-label text-ink-3">
+              {owner} · {done}/{rows.length} clear
+            </p>
+            <p className="mt-0.5 text-xs text-ink-3">{blurb[owner]}</p>
+            <ul className="mt-2 space-y-1">
+              {rows.map((c) => (
+                <li key={c.key} className="rounded border border-line-subtle p-2">
+                  <button
+                    className="flex w-full items-baseline justify-between gap-3 text-left"
+                    onClick={() => setOpen(open === c.key ? null : c.key)}
+                    type="button"
+                  >
+                    <span className="text-sm text-ink">{c.title}</span>
+                    <span
+                      className={`shrink-0 rounded border px-1.5 text-[10px] ${badge(
+                        c.status,
+                      )}`}
+                    >
+                      {c.status}
+                    </span>
+                  </button>
+                  <p className="mt-1 font-mono text-[11px] text-ink-3">{c.detail}</p>
+                  {open === c.key ? (
+                    <p className="mt-1 text-xs leading-relaxed text-ink-3">
+                      {c.remediation}
+                    </p>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          </div>
+        );
+      })}
+
+      <p className="mt-4 border-t border-line pt-3 text-xs leading-relaxed text-ink-3">
+        To fund this wallet you generate the keypair yourself, on your own machine —{" "}
+        <code className="text-ink">
+          python -m app.real_wallet.generate_wallet --output /secure/path/memescope.json
+        </code>{" "}
+        — set <code className="text-ink">REAL_WALLET_PUBLIC_KEY</code> and{" "}
+        <code className="text-ink">REAL_WALLET_EXECUTION_SECRET_FILE</code>, then send SOL
+        to the address shown below. The command never contacts Solana and never sends
+        funds, and no key material ever reaches this dashboard or the API.
+      </p>
+    </section>
+  );
+}
+
 export default function RealWalletPage() {
   const queryClient = useQueryClient();
   const [destination, setDestination] = useState("");
@@ -229,6 +360,11 @@ export default function RealWalletPage() {
     queryFn: () => api.get<WalletStatus>("/real-wallet/status"),
     retry: false,
     refetchInterval: 30_000,
+  });
+  const readinessQuery = useQuery<FundingReadiness>({
+    queryKey: ["real-wallet", "funding-readiness"],
+    queryFn: () => api.get<FundingReadiness>("/real-wallet/funding-readiness"),
+    refetchInterval: 60_000,
   });
   const intentsQuery = useQuery({
     queryKey: ["real-wallet-devnet-intents"],
@@ -352,6 +488,7 @@ export default function RealWalletPage() {
           an armed kill switch, which is a separate authenticated and attributed action.
         </p>
       </section>
+      <FundingReadinessPanel data={readinessQuery.data} />
       <section className="mt-6 rounded-lg border border-line p-4">
         <p className="text-label text-ink-3">Manual devnet verification</p>
         <p className="mt-1 text-sm text-ink-3">

@@ -120,6 +120,20 @@ export const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    // The execution wallet has its own group: it is the only surface in the
+    // product that could ever touch real money, and filing it under Strategy
+    // would put it beside twenty paper wallets it must never be confused with.
+    label: "Execution",
+    items: [
+      {
+        href: "/real-wallet",
+        label: "Real wallet",
+        icon: IconWallet,
+        status: "ready",
+      },
+    ],
+  },
+  {
     label: "Operations",
     items: [
       // HQ renders system state as an organisation. Its own group rather than
