@@ -35,6 +35,8 @@ from app.real_wallet.network import (
 )
 from app.real_wallet.funding_readiness import as_dict as readiness_as_dict
 from app.real_wallet.funding_readiness import evaluate as evaluate_funding_readiness
+from app.real_wallet.rehearsal import as_dict as rehearsal_as_dict
+from app.real_wallet.rehearsal import rehearse
 from app.real_wallet.policy import configured_entry_size_usd
 from app.real_wallet.repository import RealWalletExecutionRepository
 from app.real_wallet.sol_price import JupiterSolUsdPriceSource, SolUsdPrice
@@ -144,6 +146,16 @@ def _fee_accounting_readiness(
             None if fresh else "No fresh SOL/USD reading; net figures would be gross."
         ),
     }
+
+
+@router.get(
+    "/rehearsal",
+    summary="ARMED rehearsal — evaluate every pre-submission condition",
+)
+async def rehearsal(_admin: AdminUser, session: DbSession) -> dict[str, object]:
+    """Prove the chain with no transaction existing. It cannot submit or sign."""
+    report = await rehearse(session, now=datetime.now(UTC))
+    return rehearsal_as_dict(report)
 
 
 @router.get(

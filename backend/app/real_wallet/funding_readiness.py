@@ -186,6 +186,22 @@ def evaluate(
             "postable to an arbitrary configured host.",
         ),
         _check(
+            "mainnet_execution_permitted", "Mainnet execution is not code-blocked",
+            Owner.CODE,
+            # Phase 1 is observation-only on mainnet, enforced in the central
+            # execute policy so no future caller can route around it by picking
+            # a different code path or setting the ordinary enable flags.
+            settings.REAL_WALLET_NETWORK != "mainnet",
+            ("mainnet: MAINNET_EXECUTION_DISABLED is asserted by "
+             "ExecutionTransportPolicy" if settings.REAL_WALLET_NETWORK == "mainnet"
+             else f"network={settings.REAL_WALLET_NETWORK}: clause not engaged"),
+            "A SECOND reviewed diff, independent of the release switch: mainnet "
+            "submission is refused in ExecutionTransportPolicy.authorise even when "
+            "mode is live and all three enable flags are on. Funding a mainnet "
+            "wallet is therefore safe — it is observation-only until this is "
+            "deliberately changed and reviewed.",
+        ),
+        _check(
             "release_approved", "The reviewed release switch is on",
             Owner.CODE, LIVE_TRANSPORT_RELEASE_APPROVED,
             f"LIVE_TRANSPORT_RELEASE_APPROVED={LIVE_TRANSPORT_RELEASE_APPROVED}",
