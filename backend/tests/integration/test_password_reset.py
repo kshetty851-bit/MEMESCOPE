@@ -152,3 +152,45 @@ async def test_the_reset_url_carries_the_token_and_points_at_the_frontend():
     url = PasswordResetService.reset_url("abc123")
     assert url.endswith("/reset-password?token=abc123")
     assert url.startswith(settings.FRONTEND_URL.rstrip("/"))
+
+
+def test_the_reset_link_is_configurable_in_the_compose_anchor():
+    """FRONTEND_URL builds the reset link. It lived only in .env.production, so
+    containers fell back to localhost and every emailed link pointed there."""
+    import yaml
+    from pathlib import Path
+
+    doc = yaml.safe_load(
+        (Path(__file__).resolve().parents[3] / "docker-compose.yml").read_text()
+    )
+    for name in ("backend", "worker"):
+        assert "FRONTEND_URL" in doc["services"][name]["environment"], name
+
+
+async def test_the_operator_cli_issues_a_real_single_use_link(db_session):
+    """It must go through the same service, not around it — a second issuing
+    path with its own rules is a second set of bugs."""
+    import ast
+    from pathlib import Path
+
+    import app.services.password_reset_cli as cli
+
+    user = await _user(db_session, email="cli@example.com")
+    issued = await PasswordResetService(db_session).request(
+        email=user.email, now=NOW, ip="operator-cli"
+    )
+    assert issued.token
+    await PasswordResetService(db_session).complete(
+        token=issued.token, new_password="issued-by-operator", now=NOW
+    )
+    await db_session.refresh(user)
+    assert verify_password("issued-by-operator", user.hashed_password)
+
+    # And it must not be reachable over HTTP: a browser-clickable version would
+    # let an administrator take over any account.
+    src = Path(cli.__file__).read_text()
+    tree = ast.parse(src)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            assert not node.module.startswith(("fastapi", "app.api")), node.module
+    assert "@router" not in src

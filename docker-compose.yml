@@ -32,6 +32,11 @@ x-backend-env: &backend-env
   SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
   SMTP_FROM_NAME: ${SMTP_FROM_NAME:-}
   CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+  # In the anchor because a password-reset link is built from it. It was set in
+  # .env.production and absent here, so the container fell back to the code
+  # default and every reset link would have pointed at http://localhost:3000 —
+  # the same trap this anchor's comment above describes, now for the fifth time.
+  FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
   # Every setting the production validators demand must live in this anchor, not
   # on one service. `ENVIRONMENT` reaches all of these containers from here, so
   # anything production then *requires* has to arrive with it — otherwise the
