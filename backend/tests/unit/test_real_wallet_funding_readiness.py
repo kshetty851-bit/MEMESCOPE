@@ -84,12 +84,47 @@ def test_naming_a_strategy_alone_never_makes_it_ready_to_trade():
     )
 
 
-def test_ready_to_fund_ignores_the_release_and_the_strategy():
-    """Funding a wallet that cannot submit is a safe intermediate state, and it
-    is the next real milestone — so it must not be gated on the last one."""
-    keys = {c.key for c in fr.evaluate().checks}
-    assert {"wallet_configured", "signer_secret_configured",
-            "network_is_mainnet", "network_verified"} <= keys
+def test_ready_to_fund_asks_only_what_receiving_sol_requires(monkeypatch):
+    """The bug this pins: a wallet funded correctly on mainnet reported
+    `ready_to_fund: False` because the flag also demanded a SIGNER — which is
+    about spending, not receiving. Funding needs an address and the right chain.
+    """
+    from decimal import Decimal
+
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "REAL_WALLET_PUBLIC_KEY",
+                        "7WctMGpqz1tGkYStBBjJRMnmuh9uwJubYV2tL4pLwRr9")
+    monkeypatch.setattr(settings, "REAL_WALLET_NETWORK", "mainnet")
+    monkeypatch.setattr(settings, "REAL_WALLET_EXECUTION_SECRET_FILE", "")
+
+    r = fr.evaluate(wallet_balance_sol=Decimal("0.05"), network_verified=True,
+                    kill_switch_active=False)
+    assert r.ready_to_fund is True, "no signer is needed to RECEIVE SOL"
+    # And the things that gate SPENDING are all still blocking.
+    assert r.ready_to_trade is False
+    blocked = {c.key for c in r.blocked}
+    assert "signer_secret_configured" in blocked
+    assert "release_approved" in blocked
+    assert "validated_strategy" in blocked
+
+
+def test_ready_to_fund_is_false_without_an_address_or_a_proven_chain(monkeypatch):
+    from decimal import Decimal
+
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "REAL_WALLET_PUBLIC_KEY", "")
+    assert fr.evaluate(network_verified=True).ready_to_fund is False
+
+    monkeypatch.setattr(settings, "REAL_WALLET_PUBLIC_KEY",
+                        "7WctMGpqz1tGkYStBBjJRMnmuh9uwJubYV2tL4pLwRr9")
+    monkeypatch.setattr(settings, "REAL_WALLET_NETWORK", "mainnet")
+    # An unverified chain is not a chain you should be sending real SOL to.
+    assert fr.evaluate(network_verified=None,
+                       wallet_balance_sol=Decimal("0.05")).ready_to_fund is False
+    assert fr.evaluate(network_verified=False,
+                       wallet_balance_sol=Decimal("0.05")).ready_to_fund is False
 
 
 def test_the_module_performs_no_io_and_holds_no_signer():

@@ -224,18 +224,22 @@ def evaluate(
     ]
 
     ordered = tuple(checks)
-    operator_and_code = tuple(
-        c for c in ordered if c.owner in (Owner.OPERATOR, Owner.CODE)
-    )
     return FundingReadiness(
-        # Funding the wallet needs the rail configured — not the release, and
-        # not a validated strategy. A funded wallet that cannot submit is a
-        # perfectly safe intermediate state, and it is the next real milestone.
+        # What it takes to RECEIVE SOL, and nothing more: an address to send to,
+        # and proof that address is on the chain the sender is using.
+        #
+        # This previously also demanded `signer_secret_configured`, which is
+        # about SIGNING. The result was a wallet that had been funded correctly
+        # on mainnet still reporting `ready_to_fund: False` — the flag was
+        # stricter than the question its name asks, and contradicted the (true)
+        # advice that funding needs only the public key. The signer, the release
+        # switch and a validated strategy all gate SPENDING, and spending is
+        # `ready_to_trade`.
         ready_to_fund=all(
             c.status is Status.PASS
             for c in ordered
-            if c.key in ("wallet_configured", "signer_secret_configured",
-                         "network_is_mainnet", "network_verified")
+            if c.key in ("wallet_configured", "network_is_mainnet",
+                         "network_verified")
         ),
         # Trading needs everything, evidence included.
         ready_to_trade=all(c.status is Status.PASS for c in ordered),
