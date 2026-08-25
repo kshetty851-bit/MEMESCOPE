@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import RealWalletPage from "@/app/(dashboard)/real-wallet/page";
 import { api } from "@/lib/api-client";
@@ -134,6 +134,39 @@ afterEach(() => {
 });
 
 describe("RealWalletPage", () => {
+  // The seatbelt is a once-per-session pause in front of the page. These tests
+  // are about what the page shows once you are through it, so they start
+  // buckled; the gate itself is covered separately below.
+  beforeEach(() => {
+    window.sessionStorage.setItem("memescope.seatbelt", "1");
+  });
+
+  it("stops at the seatbelt before showing anything, once per session", async () => {
+    window.sessionStorage.removeItem("memescope.seatbelt");
+    vi.mocked(api.get).mockResolvedValue(lockedStatus());
+    render(<RealWalletPage />, { wrapper });
+
+    expect(screen.getByText("Fasten your seatbelt")).toBeInTheDocument();
+    // Nothing behind the gate is rendered yet — not the address, not a control.
+    expect(screen.queryByText("Public address")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Start" })).not.toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /enter the execution wallet/i }),
+    );
+    await waitFor(() =>
+      expect(screen.getByText("PublicExecutionWalletAddress")).toBeInTheDocument(),
+    );
+  });
+
+  it("says plainly that the seatbelt is not the access control", async () => {
+    window.sessionStorage.removeItem("memescope.seatbelt");
+    vi.mocked(api.get).mockResolvedValue(lockedStatus());
+    render(<RealWalletPage />, { wrapper });
+    expect(screen.getByText(/pause, not a permission/i)).toBeInTheDocument();
+    expect(screen.getByText(/administrator role on the server/i)).toBeInTheDocument();
+  });
+
   it("does not reveal execution wallet information after an authorization failure", async () => {
     vi.mocked(api.get).mockRejectedValue(new Error("forbidden"));
     render(<RealWalletPage />, { wrapper });

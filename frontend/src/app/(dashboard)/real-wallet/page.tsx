@@ -491,8 +491,73 @@ function AutotradeControl() {
   );
 }
 
+/**
+ * The seatbelt.
+ *
+ * A deliberate speed bump in front of the only surface in the product that
+ * could ever move real money. It is **not** an access control and is not
+ * presented as one — the server's admin role is the access control, and this
+ * cannot be a second one: anything the browser can check, the browser can be
+ * told to skip.
+ *
+ * What it is worth is the pause. This page has a start/stop control and a
+ * funding address on it; arriving here by a stray click and arriving here on
+ * purpose should not feel identical. Acknowledged once per browser session.
+ */
+function Seatbelt({ onEnter }: { onEnter: () => void }) {
+  return (
+    <main>
+      <p className="text-label text-accent">Execution wallet</p>
+      <h1 className="mt-2 text-3xl font-medium text-ink">Fasten your seatbelt</h1>
+      <section className="mt-6 max-w-2xl rounded-lg border border-warning/40 bg-warning/[0.08] p-4">
+        <p className="text-label text-warning">ACCESS APPROVED — READ THIS FIRST</p>
+        <ul className="mt-3 space-y-2 text-sm text-ink-3">
+          <li>
+            <span className="text-ink">This is the only page that could ever touch real money.</span>{" "}
+            Everything else in MEMESCOPE — all twenty V6 wallets, the Arena, the
+            Track Record — is simulated and cannot spend anything.
+          </li>
+          <li>
+            <span className="text-ink">Today it still cannot.</span> Mainnet submission
+            is refused by two independent code constants, no mainnet signer exists,
+            and no strategy has earned real money. Nothing on this page can change
+            that.
+          </li>
+          <li>
+            <span className="text-ink">The funding address here is real.</span> SOL sent
+            to it is gone from wherever it came from. Keep the balance under the
+            canary ceiling — a wallet above it is refused, not rewarded.
+          </li>
+          <li>
+            <span className="text-ink">Stop always works.</span> The start/stop control
+            below can be stopped unconditionally, from any state, at any time.
+          </li>
+        </ul>
+        <button
+          className="mt-4 rounded border border-warning/60 px-4 py-2 text-sm text-warning hover:bg-warning/10"
+          onClick={onEnter}
+          type="button"
+        >
+          I understand — enter the execution wallet
+        </button>
+      </section>
+      <p className="mt-4 max-w-2xl text-xs text-ink-3">
+        This acknowledgement is a pause, not a permission. Access is granted by your
+        account&rsquo;s administrator role on the server; this screen only makes sure
+        you meant to be here.
+      </p>
+    </main>
+  );
+}
+
 export default function RealWalletPage() {
   const queryClient = useQueryClient();
+  // Acknowledged once per browser session; a pause, never a permission.
+  const [buckled, setBuckled] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      window.sessionStorage.getItem("memescope.seatbelt") === "1",
+  );
   const [destination, setDestination] = useState("");
   const [lamports, setLamports] = useState("100000");
   const [selectedIntentId, setSelectedIntentId] = useState<string | null>(null);
@@ -603,6 +668,17 @@ export default function RealWalletPage() {
   const explorerUrl = address
     ? `https://solscan.io/account/${address}${data?.network === "devnet" ? "?cluster=devnet" : ""}`
     : undefined;
+  if (!buckled) {
+    return (
+      <Seatbelt
+        onEnter={() => {
+          window.sessionStorage.setItem("memescope.seatbelt", "1");
+          setBuckled(true);
+        }}
+      />
+    );
+  }
+
   return (
     <main>
       <p className="text-label text-accent">Operator only · DEVNET ONLY</p>
