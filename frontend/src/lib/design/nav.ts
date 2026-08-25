@@ -103,6 +103,14 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: IconSpark,
         status: "ready",
       },
+      // The trades view exists so a reader can copy a contract address and
+      // check the token against the market rather than trusting the Lab.
+      {
+        href: "/strategy-lab/trades",
+        label: "Lab Trades",
+        icon: IconSpark,
+        status: "ready",
+      },
       {
         href: "/strategy-lab/forward-arena",
         label: "Forward Arena",

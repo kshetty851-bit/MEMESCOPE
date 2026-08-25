@@ -1,5 +1,5 @@
 import { api } from "@/lib/api-client";
-import type { LabBoard, LabStrategyDetail } from "@/types/lab";
+import type { LabBoard, LabStrategyDetail, LabTrades } from "@/types/lab";
 
 /**
  * Strategy Lab client. Fetches and formats; it never decides and never
@@ -13,4 +13,14 @@ export function fetchLabBoard(): Promise<LabBoard> {
 
 export function fetchLabStrategy(id: string): Promise<LabStrategyDetail> {
   return api.get<LabStrategyDetail>(`/lab/strategies/${id}`);
+}
+
+export function fetchLabTrades(
+  strategyId?: string,
+  status?: "open" | "closed",
+): Promise<LabTrades> {
+  const query = new URLSearchParams({ limit: "2000" });
+  if (strategyId) query.set("strategy_id", strategyId);
+  if (status) query.set("status", status);
+  return api.get<LabTrades>(`/lab/trades?${query.toString()}`);
 }

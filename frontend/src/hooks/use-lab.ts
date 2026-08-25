@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 
-import { fetchLabBoard, fetchLabStrategy } from "@/lib/lab";
+import { fetchLabBoard, fetchLabStrategy, fetchLabTrades } from "@/lib/lab";
 
 /**
  * Lab queries. Polled on the beat's cadence (one minute), not the market's:
@@ -24,6 +24,14 @@ export function useLabStrategy(id: string | null) {
     queryKey: ["lab", "strategy", id],
     queryFn: () => fetchLabStrategy(id as string),
     enabled: Boolean(id),
+    refetchInterval: LAB_POLL_MS,
+  });
+}
+
+export function useLabTrades(strategyId?: string, status?: "open" | "closed") {
+  return useQuery({
+    queryKey: ["lab", "trades", strategyId ?? "all", status ?? "all"],
+    queryFn: () => fetchLabTrades(strategyId, status),
     refetchInterval: LAB_POLL_MS,
   });
 }

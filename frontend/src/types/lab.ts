@@ -139,3 +139,40 @@ export interface LabStrategyDetail {
   equity_curve: { at: string; equity: number; cash: number; open_value: number }[];
   positions: LabPositionRow[];
 }
+
+export interface LabTrade {
+  strategy_id: string;
+  strategy_name: string | null;
+  /** The full contract address, never truncated — this view exists so it can be copied. */
+  mint: string;
+  symbol: string | null;
+  token_name: string | null;
+  status: "open" | "closed";
+  opened_at: string;
+  closed_at: string | null;
+  held_hours: number;
+  size_usd: number;
+  entry_price: number;
+  entry_liquidity_usd: number | null;
+  current_value_usd: number | null;
+  unrealised_pnl: number | null;
+  realised_pnl: number | null;
+  exec_multiple: number | null;
+  peak_exec_multiple: number;
+  exit_reason: string | null;
+  exit_proceeds_usd: number | null;
+  route_state: string | null;
+  reached_125: boolean;
+  reached_150: boolean;
+  reached_200: boolean;
+  partial_done: boolean;
+  entry_source: string;
+}
+
+export interface LabTrades {
+  disclosure: string;
+  total: number;
+  open: number;
+  closed: number;
+  trades: LabTrade[];
+}

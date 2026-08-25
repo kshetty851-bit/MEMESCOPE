@@ -14,6 +14,7 @@ from sqlalchemy import select
 
 from app.api.deps import DbSession
 from app.lab import leaderboard, spec
+from app.models.token import DiscoveredToken
 from app.models.lab import (
     LabDecision,
     LabEquityPoint,
@@ -178,4 +179,74 @@ async def decisions(session: DbSession,
             "eligible": r.eligible, "skip_reason": r.skip_reason,
             "route_state": r.route_state, "features": r.features,
         } for r in rows],
+    })
+
+@router.get("/trades")
+async def trades(session: DbSession,
+                 strategy_id: str | None = Query(default=None),
+                 status: str | None = Query(default=None, pattern="^(open|closed)$"),
+                 limit: int = Query(default=500, le=2000)) -> dict[str, Any]:
+    """Every position the Lab holds or has closed, with its full mint address.
+
+    The mint is returned unabbreviated on purpose: the point of this view is
+    that a reader can copy the contract address and check the token against the
+    market themselves, rather than taking the Lab's word for it.
+    """
+    q = (
+        select(LabPosition, DiscoveredToken.symbol, DiscoveredToken.name)
+        .outerjoin(DiscoveredToken, DiscoveredToken.id == LabPosition.token_id)
+        .order_by(LabPosition.opened_at.desc())
+        .limit(limit)
+    )
+    if strategy_id:
+        q = q.where(LabPosition.strategy_id == strategy_id.upper())
+    if status:
+        q = q.where(LabPosition.status == status)
+    rows = list((await session.execute(q)).all())
+
+    names = {r.strategy_id: r.name for r in
+             (await session.execute(select(LabStrategy))).scalars()}
+
+    out = []
+    for pos, symbol, token_name in rows:
+        realised = ((pos.exit_proceeds_usd - pos.size_usd)
+                    if pos.exit_proceeds_usd is not None else None)
+        value = (pos.exit_proceeds_usd if pos.status == "closed"
+                 else (pos.last_open_value_usd if pos.last_open_value_usd is not None
+                       else pos.size_usd))
+        out.append({
+            "strategy_id": pos.strategy_id,
+            "strategy_name": names.get(pos.strategy_id),
+            # The full contract address, never truncated.
+            "mint": pos.mint_address,
+            "symbol": symbol, "token_name": token_name,
+            "status": pos.status,
+            "opened_at": pos.opened_at.isoformat(),
+            "closed_at": pos.closed_at.isoformat() if pos.closed_at else None,
+            "held_hours": (((pos.closed_at or pos.last_evaluated_at or pos.opened_at)
+                            - pos.opened_at).total_seconds() / 3600),
+            "size_usd": pos.size_usd,
+            "entry_price": pos.entry_price,
+            "entry_liquidity_usd": pos.entry_liquidity_usd,
+            "current_value_usd": value,
+            "unrealised_pnl": (None if pos.status == "closed"
+                               else (value - pos.size_usd if value is not None else None)),
+            "realised_pnl": realised,
+            "exec_multiple": pos.last_exec_multiple,
+            "peak_exec_multiple": pos.peak_exec_multiple,
+            "exit_reason": pos.exit_reason,
+            "exit_proceeds_usd": pos.exit_proceeds_usd,
+            "route_state": pos.route_state,
+            "reached_125": pos.reached_125,
+            "reached_150": pos.reached_150,
+            "reached_200": pos.reached_200,
+            "partial_done": pos.partial_done,
+            "entry_source": pos.entry_source,
+        })
+    return leaderboard._jsonable({
+        "disclosure": DISCLOSURE,
+        "total": len(out),
+        "open": sum(1 for t in out if t["status"] == "open"),
+        "closed": sum(1 for t in out if t["status"] == "closed"),
+        "trades": out,
     })

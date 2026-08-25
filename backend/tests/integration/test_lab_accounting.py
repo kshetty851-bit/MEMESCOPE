@@ -697,3 +697,79 @@ async def test_the_thirty_day_boundary_is_scheduled(db_session):
         db_session, t, t.valid_from + timedelta(days=30, minutes=1)
     )
     assert "30D" in written and "24H" in written
+
+
+# --- the trades view ---------------------------------------------------------
+# This view exists so a reader can copy a contract address and check the token
+# against the market. An abbreviated address would defeat the whole feature.
+
+async def test_trades_return_the_full_untruncated_mint(db_session):
+    from app.lab.api import trades
+
+    svc = LabService(db_session)
+    await svc.activate(valid_from=VALID_FROM)
+    mint = "T" + "r" * 20
+    await _radar_token(db_session, mint=mint, detected=NOW - timedelta(hours=2),
+                       liq=D("600000"), pool="POOLTRADE")
+    await svc.evaluate_due(now=NOW)
+
+    got = await trades(db_session, strategy_id=None, status=None, limit=500)
+    assert got["trades"], "an opened position must appear in the trades view"
+    for t in got["trades"]:
+        assert t["mint"] == mint
+        assert len(t["mint"]) == len(mint)
+        assert "…" not in t["mint"] and "..." not in t["mint"]
+
+
+async def test_trades_filter_by_strategy_and_status(db_session):
+    from app.lab.api import trades
+
+    svc = LabService(db_session)
+    await svc.activate(valid_from=VALID_FROM)
+    await _radar_token(db_session, mint="T" + "f" * 20, detected=NOW - timedelta(hours=2),
+                       liq=D("600000"), pool="POOLFILTER")
+    await svc.evaluate_due(now=NOW)
+
+    everything = await trades(db_session, strategy_id=None, status=None, limit=500)
+    assert everything["total"] == everything["open"] + everything["closed"]
+
+    one = await trades(db_session, strategy_id="v6-06", status=None, limit=500)
+    assert one["trades"]
+    assert {t["strategy_id"] for t in one["trades"]} == {"V6-06"}
+
+    opens = await trades(db_session, strategy_id=None, status="open", limit=500)
+    assert {t["status"] for t in opens["trades"]} == {"open"}
+    closed = await trades(db_session, strategy_id=None, status="closed", limit=500)
+    assert closed["trades"] == []
+
+
+async def test_trades_report_sellable_value_not_cost(db_session):
+    """An open position must be shown at what it could be sold for."""
+    from app.lab.api import trades
+
+    svc = LabService(db_session)
+    await svc.activate(valid_from=VALID_FROM)
+    await _radar_token(db_session, mint="T" + "v" * 20, detected=NOW - timedelta(hours=2),
+                       liq=D("600000"), pool="POOLVALUE")
+    await svc.evaluate_due(now=NOW)
+    # A fresh print, so the mark is allowed: the fixture's own series ends more
+    # than 15 minutes back, and a stale print is deliberately not acted on.
+    pos = (await db_session.execute(
+        select(LabPosition).where(LabPosition.strategy_id == "V6-06")
+    )).scalars().first()
+    db_session.add(TokenMarketSnapshot(
+        token_id=pos.token_id, mint_address=pos.mint_address,
+        captured_at=NOW + timedelta(seconds=30), price_usd=D("0.001"),
+        liquidity_usd=D("600000"), trading_status=TradingStatus.TRADING,
+        provider="test", suspect=False,
+    ))
+    await db_session.flush()
+    await svc.settle(now=NOW + timedelta(minutes=1))
+
+    got = await trades(db_session, strategy_id="V6-06", status=None, limit=500)
+    row = got["trades"][0]
+    assert row["current_value_usd"] < row["size_usd"], (
+        "a fresh position is worth less than it cost, because of impact and fees"
+    )
+    assert row["unrealised_pnl"] is not None
+    assert row["realised_pnl"] is None
