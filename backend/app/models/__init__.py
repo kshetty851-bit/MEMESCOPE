@@ -72,6 +72,7 @@ from app.models.arena import (  # noqa: F401
     ArenaDecision,
     ArenaPosition,
 )
+from app.models.password_reset import PasswordResetToken  # noqa: F401
 from app.models.lab import (  # noqa: F401
     LabDecision,
     LabEquityPoint,

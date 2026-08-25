@@ -77,7 +77,16 @@ export default function LoginPage() {
         </Button>
       </form>
 
-      <p className="mt-6 text-center text-sm text-ink-faint">
+      <p className="mt-4 text-center text-sm text-ink-faint">
+        <Link
+          href="/forgot-password"
+          className="text-plasma transition-colors hover:text-ink"
+        >
+          Forgot your password?
+        </Link>
+      </p>
+
+      <p className="mt-2 text-center text-sm text-ink-faint">
         No clearance?{" "}
         <Link href="/register" className="text-plasma transition-colors hover:text-ink">
           Request access
