@@ -26,17 +26,20 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import Select, func, select, update
+from sqlalchemy import Select, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
+from app.models.market import TokenMarketSnapshot, TradingStatus
 from app.models.paper import PaperPosition, PaperTradeAudit, PaperWallet
 from app.models.paper_research import PaperDecisionSnapshot
 from app.models.radar import RadarToken
+from app.models.token import DiscoveredToken
 from app.paper.models import PositionStatus
 from app.security.entry_policy import EntryDecision
 
@@ -320,6 +323,97 @@ class PaperRepository:
                 .limit(limit)
             )
         ).all()
+
+    async def universe_candidates(
+        self, *, limit: int, as_of: datetime, min_liquidity: Decimal,
+        min_age_days: int, freshness_seconds: int,
+    ) -> Sequence[tuple[DiscoveredToken, TokenMarketSnapshot]]:
+        """Tradeable market tokens, deepest pool first.
+
+        Ranked by liquidity and nothing else. That is deliberate: ordering by
+        anything predictive would smuggle a second, unpublished opinion into a
+        wallet whose only published rules are equal weight and a trailing stop.
+        Depth is an execution property, not a forecast — the deepest pool is
+        the cheapest to enter and leave, and that is the whole claim.
+
+        Every bound is applied in SQL so a stale or shallow row cannot reach
+        the strategy: the token must be old enough by its own chain creation
+        time, the reading must be recent, the pool must be deep enough for the
+        position, and the venue must report it as trading.
+        """
+        from app.models.research_data import JupiterUniverseSnapshot
+        from app.universe.enrolment import SOURCE_PROGRAM
+        from app.universe.rules import MAX_MARKET_CAP_RATIO
+
+        # The universe provider's own view of the same token, most recent day
+        # first. Used as an INDEPENDENT second opinion on what the token is
+        # worth — see MAX_MARKET_CAP_RATIO for the measured failure this
+        # catches. Left-joined, so a token the provider has no figure for is
+        # judged by the other rules rather than silently dropped.
+        reference = (
+            select(
+                JupiterUniverseSnapshot.mint_address,
+                JupiterUniverseSnapshot.market_cap,
+                func.row_number()
+                .over(
+                    partition_by=JupiterUniverseSnapshot.mint_address,
+                    order_by=JupiterUniverseSnapshot.snapshot_date.desc(),
+                )
+                .label("rn"),
+            )
+            .subquery()
+        )
+
+        newest = (
+            select(
+                TokenMarketSnapshot,
+                func.row_number()
+                .over(
+                    partition_by=TokenMarketSnapshot.mint_address,
+                    order_by=TokenMarketSnapshot.captured_at.desc(),
+                )
+                .label("rn"),
+            )
+            .where(
+                TokenMarketSnapshot.captured_at >= as_of - timedelta(seconds=freshness_seconds),
+                TokenMarketSnapshot.suspect.is_not(True),
+            )
+            .subquery()
+        )
+        snapshot = aliased(TokenMarketSnapshot, newest)
+        rows = await self._session.execute(
+            select(DiscoveredToken, snapshot)
+            .join(newest, newest.c.mint_address == DiscoveredToken.mint_address)
+            .outerjoin(
+                reference,
+                (reference.c.mint_address == DiscoveredToken.mint_address)
+                & (reference.c.rn == 1),
+            )
+            .where(
+                newest.c.rn == 1,
+                DiscoveredToken.source_program == SOURCE_PROGRAM,
+                DiscoveredToken.block_time
+                <= as_of - timedelta(days=min_age_days),
+                newest.c.liquidity_usd >= min_liquidity,
+                newest.c.price_usd.is_not(None),
+                newest.c.price_usd > 0,
+                newest.c.trading_status == TradingStatus.TRADING,
+                # Two sources must roughly agree on the token's value. Only a
+                # PROVEN disagreement refuses the token: if either side has no
+                # figure there is no evidence to act on, and the remaining
+                # rules decide.
+                or_(
+                    newest.c.market_cap.is_(None),
+                    reference.c.market_cap.is_(None),
+                    reference.c.market_cap <= 0,
+                    newest.c.market_cap
+                    <= reference.c.market_cap * MAX_MARKET_CAP_RATIO,
+                ),
+            )
+            .order_by(newest.c.liquidity_usd.desc(), DiscoveredToken.mint_address.asc())
+            .limit(limit)
+        )
+        return [(token, snap) for token, snap in rows.all()]
 
     async def claim_track_record_entry_decision(
         self,

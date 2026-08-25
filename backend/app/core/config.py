@@ -613,7 +613,7 @@ class Settings(BaseSettings):
     # One forward-only paper experiment.  Replacing this id does not reset a
     # wallet implicitly: the explicit paper-wallet reset migration archives the
     # old generation before this strategy is allowed to run.
-    PAPER_WALLET_STRATEGY_ID: str = "trailing_stop_25_v1"
+    PAPER_WALLET_STRATEGY_ID: str = "universe_trailing_stop_25_v1"
     #: How many positions the evaluator advances per pass. Bounded and ordered
     #: oldest-watermark-first, which is what keeps a growing book from starving
     #: its own tail — the failure that livelocked the score sweep.

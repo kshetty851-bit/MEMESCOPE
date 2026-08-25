@@ -155,7 +155,12 @@ async def test_ignores_pairs_for_mints_that_were_not_requested() -> None:
 
 
 async def test_partial_pair_does_not_raise() -> None:
-    payload = {"pairs": [{"baseToken": {"address": MINT}, "pairAddress": "p1"}]}
+    # `chainId` is present because every real DexScreener pair carries one and
+    # the parser drops pairs it cannot place on Solana. The point of this case
+    # is the MISSING optional fields below it — price, volume, quoteToken.
+    payload = {
+        "pairs": [{"chainId": "solana", "baseToken": {"address": MINT}, "pairAddress": "p1"}]
+    }
     result = await _provider(_respond(payload)).fetch_many([MINT])
 
     data = result[MINT]

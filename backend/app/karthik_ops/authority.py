@@ -163,6 +163,7 @@ FORBIDDEN_STRATEGY_IDS: frozenset[str] = frozenset(
         "paper_2x_trail25_v1",
         "paper_all_scanned_tp125_sl50_v1",
         "paper_track_record_tp125_sl50_v1",
+        "universe_trailing_stop_25_v1",
     }
 )
 

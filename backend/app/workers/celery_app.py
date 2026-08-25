@@ -189,6 +189,12 @@ celery_app.conf.beat_schedule = {
         "task": "app.workers.research_tasks.universe_snapshot_daily",
         "schedule": crontab(hour="2", minute="10"),
     },
+    # Enrolment follows the snapshot by twenty minutes, then repeats hourly so
+    # a token crossing the liquidity floor mid-day is observed the same day.
+    "universe-enrol": {
+        "task": "app.workers.research_tasks.universe_enrol",
+        "schedule": crontab(minute="30"),
+    },
     # Research simulation: judges due checkpoints and advances virtual
     # positions. Cannot touch paper, karthik or real-wallet accounting.
     "arena-tick": {

@@ -463,6 +463,29 @@ async def _universe_snapshot_daily() -> dict[str, Any]:
     return {"written": len(rows)}
 
 
+# ------------------------------------------------------------ universe enrolment
+
+@celery_app.task(name="app.workers.research_tasks.universe_enrol")
+def universe_enrol() -> dict[str, Any]:
+    """Register qualifying market tokens so the pipeline can price them.
+
+    Runs after the daily snapshot, and again through the day: the snapshot is
+    what Jupiter said, this is what the platform is willing to observe, and a
+    token that crosses the liquidity floor between snapshots should not wait a
+    day to be seen.
+    """
+    return run_async(_universe_enrol())
+
+
+async def _universe_enrol() -> dict[str, Any]:
+    from app.universe.enrolment import enrol
+
+    async with SessionFactory() as session:
+        result = await enrol(session)
+        await session.commit()
+    return result
+
+
 # ------------------------------------------------------------- regime telemetry
 
 @celery_app.task(name="app.workers.research_tasks.regime_snapshot_hourly")

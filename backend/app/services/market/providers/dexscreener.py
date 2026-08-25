@@ -222,20 +222,23 @@ class DexScreenerProvider(MarketDataProvider):
             # than out-competed on liquidity.
             if pair.get("chainId") != SOLANA_CHAIN_ID:
                 continue
+            # BASE SIDE ONLY. Every field on a pair — `priceUsd`, `fdv`,
+            # `marketCap`, `volume`, `txns` — describes the BASE token. A pair
+            # where the requested mint is the QUOTE side therefore answers a
+            # question about a different asset, and accepting it priced that
+            # other asset as if it were this one: JUP, quoted in hundreds of
+            # pools, read back at $1,095.89 against a real price near $0.50.
+            #
+            # The damage scales with how established a token is, because deep
+            # tokens are the ones other pairs quote in — so the market universe
+            # is the population most exposed to it, not the least.
             base = pair.get("baseToken")
-            quote = pair.get("quoteToken")
-            if not isinstance(base, dict) or not isinstance(quote, dict):
+            if not isinstance(base, dict):
                 continue
-                
             base_address = base.get("address")
-            quote_address = quote.get("address")
-            
-            if isinstance(base_address, str) and base_address in requested:
-                mint = base_address
-            elif isinstance(quote_address, str) and quote_address in requested:
-                mint = quote_address
-            else:
+            if not isinstance(base_address, str) or base_address not in requested:
                 continue
+            mint = base_address
 
             incumbent = best.get(mint)
             if incumbent is None or self._liquidity(pair) > self._liquidity(incumbent):

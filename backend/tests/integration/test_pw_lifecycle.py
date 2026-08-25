@@ -327,15 +327,38 @@ class TestNothingHistoricalChanges:
         SEC-2 cutover and of Generation 7 at the HOLD-6H cutover, so it is
         asserted of every retired member of the lineage rather than of one.
         """
-        from app.paper.strategy import TRAILING_STOP_25_SECURED_HOLD6H_V3
+        from app.paper.strategy import (
+            TRAILING_STOP_25_SECURED_HOLD6H_V3,
+            UNIVERSE_TRAILING_STOP_25_V1,
+        )
 
-        assert registry.default.id == TRAILING_STOP_25_SECURED_HOLD6H_V3.id
+        assert registry.default.id == UNIVERSE_TRAILING_STOP_25_V1.id
         assert registry.default.operational is True
-        for retired in (TRAILING_STOP_25_V1, TRAILING_STOP_25_SECURED_V2):
+
+        # The old lineage is unchanged and still shares its capital. Asserted
+        # of the lineage itself rather than of `registry.default`, because the
+        # generation now taking entries is deliberately NOT a member of it.
+        inherited = lineage_for(TRAILING_STOP_25_SECURED_HOLD6H_V3.id)
+        for retired in (
+            TRAILING_STOP_25_V1,
+            TRAILING_STOP_25_SECURED_V2,
+            TRAILING_STOP_25_SECURED_HOLD6H_V3,
+        ):
             assert retired.operational is False, retired.id
             assert retired.unavailable_reason, retired.id
             # Still in the lineage: retired for entries, not for capital.
-            assert retired.id in lineage_for(registry.default.id), retired.id
+            assert retired.id in inherited, retired.id
+
+        # THE RESET, STATED. The universe generation was funded fresh rather
+        # than by inheritance, so it is absent from every declared lineage and
+        # `lineage_for` falls through to funding it alone. That is what makes
+        # its balance exactly $1,000 instead of whatever the pump.fun lineage
+        # had left — and it is the one thing about this cutover that differs
+        # from every cutover before it, so it is asserted rather than assumed.
+        assert lineage_for(UNIVERSE_TRAILING_STOP_25_V1.id) == frozenset(
+            {UNIVERSE_TRAILING_STOP_25_V1.id}
+        )
+        assert UNIVERSE_TRAILING_STOP_25_V1.id not in inherited
 
     def test_the_capital_change_is_inert_for_a_single_wallet_lineage(
         self, db_session: AsyncSession

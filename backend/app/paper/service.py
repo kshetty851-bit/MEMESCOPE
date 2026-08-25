@@ -69,6 +69,7 @@ from app.repositories.market import EnrichmentStateRepository, MarketSnapshotRep
 from app.repositories.token import TokenRepository
 from app.security import entry_policy
 from app.security.mint import decode_mint_account
+from app.universe import rules as universe_rules
 from app.security.service import TokenSecurityService, capture_candidate_security
 from app.services.jupiter import JupiterExecutionClient
 from app.services.rpc.registry import get_rpc
@@ -1362,9 +1363,37 @@ class PaperWalletService:
         if isinstance(strategy, TrackRecordBracketStrategy):
             return await self._open_track_record_entries(wallet, strategy=strategy, now=now)
         limit = strategy.top_n or settings.PAPER_WALLET_CANDIDATE_LIMIT
-        entries = await self._radar.list_entries(
-            category=None, active_only=True, sort="score", limit=limit, offset=0
-        )
+        # --- CANDIDATE SOURCE ---------------------------------------------
+        # The only thing that varies. Everything below this point — screening,
+        # sizing, the security gate, execution, the cash arithmetic — is
+        # identical for both sources and is deliberately NOT duplicated: a
+        # second copy of the entry loop is a second place for the two to drift
+        # apart on what "eligible" means.
+        #
+        # This works because `_screen` reads exactly one attribute off these
+        # rows, `mint_address`, and gets price, depth and trading status from
+        # the market snapshot itself. Rank is position in the list, so for the
+        # universe it means depth rank rather than score rank.
+        if getattr(strategy, "candidate_source", "radar") == "universe":
+            entries = [
+                token
+                # A depth-ranked list puts the stablecoins at the very top, and
+                # a 25% trailing stop on a dollar peg is a position that never
+                # closes. Refused here rather than at enrolment because the
+                # test needs an observed price, which only the snapshot has.
+                for token, snapshot in await self._repository.universe_candidates(
+                    limit=limit,
+                    as_of=now,
+                    min_liquidity=universe_rules.MIN_LIQUIDITY_USD,
+                    min_age_days=universe_rules.MIN_AGE_DAYS,
+                    freshness_seconds=universe_rules.MAX_SNAPSHOT_AGE_SECONDS,
+                )
+                if not universe_rules.is_pegged(snapshot.price_usd)
+            ]
+        else:
+            entries = await self._radar.list_entries(
+                category=None, active_only=True, sort="score", limit=limit, offset=0
+            )
         if not entries:
             return 0, 0, False, {}
 
