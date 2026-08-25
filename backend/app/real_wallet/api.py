@@ -33,6 +33,8 @@ from app.real_wallet.network import (
     is_valid_wallet_address,
     verify_wallet_network,
 )
+from app.real_wallet.funding_readiness import as_dict as readiness_as_dict
+from app.real_wallet.funding_readiness import evaluate as evaluate_funding_readiness
 from app.real_wallet.policy import configured_entry_size_usd
 from app.real_wallet.repository import RealWalletExecutionRepository
 from app.real_wallet.sol_price import JupiterSolUsdPriceSource, SolUsdPrice
@@ -142,6 +144,55 @@ def _fee_accounting_readiness(
             None if fresh else "No fresh SOL/USD reading; net figures would be gross."
         ),
     }
+
+
+@router.get(
+    "/funding-readiness",
+    summary="What stands between here and a funded canary",
+)
+async def funding_readiness(_admin: AdminUser, session: DbSession) -> dict[str, object]:
+    """A read-only checklist. It can never enable anything.
+
+    Measures what it can (balance, genesis, kill switch) and reports the rest as
+    UNKNOWN rather than as satisfied — an unmeasured precondition has not been
+    met, it has merely not been looked at.
+    """
+    public_key = settings.REAL_WALLET_PUBLIC_KEY.strip()
+    balance_sol: Decimal | None = None
+    network_verified: bool | None = None
+    if public_key and is_valid_wallet_address(public_key):
+        rpc = StandardSolanaRPC(rpc_url=settings.REAL_WALLET_RPC_URL)
+        try:
+            async with rpc:
+                network = await verify_wallet_network(
+                    rpc, network=settings.REAL_WALLET_NETWORK
+                )
+                network_verified = network.verified
+                if network.verified:
+                    balances = ExecutionWalletBalanceService(rpc)
+                    balance_sol = Decimal(
+                        str((await balances.get_sol_balance(public_key)).sol)
+                    )
+        except Exception:  # pragma: no cover - an unreadable chain is UNKNOWN
+            network_verified = None
+
+    kill_switch_active: bool | None = None
+    try:
+        kill_switch_active = bool(
+            await LiveIntentRepository(session).active_kill_switches()
+        )
+    except Exception:  # pragma: no cover - unreadable state stays UNKNOWN
+        kill_switch_active = None
+
+    readiness = evaluate_funding_readiness(
+        wallet_balance_sol=balance_sol,
+        network_verified=network_verified,
+        kill_switch_active=kill_switch_active,
+        # Nothing has been promoted. When the V6 review promotes something this
+        # becomes its id, and it is deliberately not derivable from config.
+        validated_strategy=None,
+    )
+    return readiness_as_dict(readiness)
 
 
 @router.get("/status", summary="Read dedicated execution-wallet status")
