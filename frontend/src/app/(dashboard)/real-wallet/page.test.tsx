@@ -4,9 +4,15 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import RealWalletPage from "@/app/(dashboard)/real-wallet/page";
-import { api } from "@/lib/api-client";
+import { ApiError, api } from "@/lib/api-client";
 
-vi.mock("@/lib/api-client", () => ({ api: { get: vi.fn() } }));
+// `api` is mocked; `ApiError` is not. The page branches on the real error type,
+// so a stubbed one would let the branch pass a test it does not pass in a
+// browser — which is the whole failure this file now covers.
+vi.mock("@/lib/api-client", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api-client")>()),
+  api: { get: vi.fn(), post: vi.fn() },
+}));
 
 function wrapper({ children }: { children: ReactNode }) {
   const queryClient = new QueryClient({
@@ -168,9 +174,28 @@ describe("RealWalletPage", () => {
   });
 
   it("does not reveal execution wallet information after an authorization failure", async () => {
-    vi.mocked(api.get).mockRejectedValue(new Error("forbidden"));
+    vi.mocked(api.get).mockRejectedValue(new ApiError(403, "forbidden", "forbidden"));
     render(<RealWalletPage />, { wrapper });
     await waitFor(() => expect(screen.getByText("Restricted")).toBeInTheDocument());
+    expect(screen.queryByText("Public address")).not.toBeInTheDocument();
+  });
+
+  it("tells an expired session it is expired, not that it lacks permission", async () => {
+    // The failure that wasted an owner's time: a 401 rendered as "Restricted"
+    // sends someone hunting for a permissions problem they do not have.
+    vi.mocked(api.get).mockRejectedValue(new ApiError(401, "unauthorized", "nope"));
+    render(<RealWalletPage />, { wrapper });
+    await waitFor(() => expect(screen.getByText("Signed out")).toBeInTheDocument());
+    expect(screen.getByText(/session has expired/i)).toBeInTheDocument();
+    expect(screen.queryByText("Restricted")).not.toBeInTheDocument();
+    expect(screen.queryByText("Public address")).not.toBeInTheDocument();
+  });
+
+  it("does not claim a permissions verdict when the request simply failed", async () => {
+    vi.mocked(api.get).mockRejectedValue(new ApiError(503, "unavailable", "down"));
+    render(<RealWalletPage />, { wrapper });
+    await waitFor(() => expect(screen.getByText("Unavailable")).toBeInTheDocument());
+    expect(screen.getByText(/not a statement that you lack access/i)).toBeInTheDocument();
     expect(screen.queryByText("Public address")).not.toBeInTheDocument();
   });
 

@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
-import { api } from "@/lib/api-client";
+import { ApiError, api } from "@/lib/api-client";
 
 type WalletStatus = {
   public_key: string | null;
@@ -652,12 +652,45 @@ export default function RealWalletPage() {
     detail?.intent ?? intents.find((intent) => intent.id === selectedIntentId) ?? null;
   const quote = detail?.quote;
   if (query.isError) {
+    // "Restricted" used to be shown for ANY failure, which sent an owner whose
+    // session had merely expired hunting for a permissions problem that did not
+    // exist. 401 and 403 are different questions and get different answers.
+    const failure = query.error;
+    const status = failure instanceof ApiError ? failure.status : null;
+    const signedOut = status === 401;
     return (
       <main>
-        <p className="text-label text-accent">Restricted</p>
+        <p className="text-label text-accent">
+          {signedOut ? "Signed out" : status === 403 ? "Restricted" : "Unavailable"}
+        </p>
         <h1 className="mt-2 text-2xl font-medium text-ink">
-          Execution wallet status is available only to an account-level administrator.
+          {signedOut
+            ? "Your session has expired — sign in again to reach the execution wallet."
+            : status === 403
+              ? "Execution wallet status is available only to an account-level administrator."
+              : "The execution wallet status could not be read."}
         </h1>
+        <p className="mt-3 max-w-2xl text-sm text-ink-3">
+          {signedOut ? (
+            <>
+              This page needs a current signed-in session, not just dashboard access.
+              Sign in with the account that holds the administrator role and return
+              here.
+            </>
+          ) : status === 403 ? (
+            <>
+              You are signed in, but this account does not hold the administrator
+              role. That role is granted on the server; no control on this page can
+              grant it.
+            </>
+          ) : (
+            <>
+              The request failed before any answer about permissions was reached
+              {status ? ` (HTTP ${status})` : ""}. This is not a statement that you
+              lack access.
+            </>
+          )}
+        </p>
       </main>
     );
   }
