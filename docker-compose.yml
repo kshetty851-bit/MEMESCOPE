@@ -213,6 +213,10 @@ x-backend-env: &backend-env
   # V5 Forward Arena: worker scores it, API reads it — both must agree.
   FEATURE_ARENA_ENABLED: ${FEATURE_ARENA_ENABLED:-false}
   ARENA_VALID_FROM: ${ARENA_VALID_FROM:-}
+  # Socket only. MAINNET_SIGNER_FILE is deliberately absent from this anchor:
+  # the signer service reads it from its own environment, and no application
+  # container may name a key path.
+  MAINNET_SIGNER_SOCKET: ${MAINNET_SIGNER_SOCKET:-}
   FEATURE_LAB_ENABLED: ${FEATURE_LAB_ENABLED:-false}
   LAB_VALID_FROM: ${LAB_VALID_FROM:-}
   KARTHIK_CANDIDATE_LIMIT: ${KARTHIK_CANDIDATE_LIMIT:-250}
@@ -457,6 +461,45 @@ services:
       redis:
         condition: service_healthy
 
+  # Opt-in only, and the only process that mounts the MAINNET key. Every API and
+  # worker container receives the socket and nothing else — `MAINNET_SIGNER_FILE`
+  # is absent from the backend env anchor on purpose, so no application
+  # container can name a key path even by accident.
+  #
+  # It answers exactly one question, `identity`, and refuses to sign: there is no
+  # mainnet intent model to sign, and a signer built for intents that do not yet
+  # exist is a speculative attack surface on the component whose compromise
+  # loses the wallet. It also refuses to start off mainnet, or against an RPC
+  # host that is not on the allowlist.
+  mainnet-signer:
+    profiles: ["mainnet-signer"]
+    build:
+      context: ./backend
+      target: development
+    restart: on-failure
+    command:
+      - python
+      - -m
+      - app.real_wallet.mainnet_signer
+      - --serve
+      - --socket
+      - /run/memescope-mainnet-signer/signer.sock
+    environment:
+      <<: *backend-env
+      RUN_MIGRATIONS: "false"
+      MAINNET_SIGNER_SOCKET: /run/memescope-mainnet-signer/signer.sock
+      MAINNET_SIGNER_FILE: /run/secrets/mainnet-signer.json
+    volumes:
+      - ./backend:/app
+      - mainnet-signer-socket:/run/memescope-mainnet-signer
+      # Inert until the profile is selected; the default deliberately points
+      # nowhere useful so the signer fails closed rather than picking up an
+      # accidental key location.
+      - ${MAINNET_SIGNER_FILE_HOST:-/run/memescope-mainnet-signer-missing}:/run/secrets/mainnet-signer.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   worker:
     build:
       context: ./backend
@@ -627,3 +670,4 @@ volumes:
   postgres-data:
   redis-data:
   devnet-signer-socket:
+  mainnet-signer-socket:

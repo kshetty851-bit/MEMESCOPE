@@ -548,6 +548,13 @@ class Settings(BaseSettings):
     #: means "stamp at first activation", which is then immutable in the row.
     ARENA_VALID_FROM: str = ""
 
+    # --- Isolated mainnet signer ------------------------------------------
+    # The socket the API may talk to. The signer FILE path is deliberately not
+    # a setting any application container reads: only the signer service reads
+    # MAINNET_SIGNER_FILE, from its own environment, and it is the one process
+    # that mounts key material.
+    MAINNET_SIGNER_SOCKET: str = ""
+
     # --- V6 Forward Strategy Lab (research simulation only) -----------------
     # Twenty $1,000 virtual portfolios scoring the frozen V6_FINAL_20_STRATEGIES
     # registry against a cash control, all fed by the one MEMESCOPE scanner. It

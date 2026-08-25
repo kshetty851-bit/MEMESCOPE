@@ -22,7 +22,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
-from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,10 +35,10 @@ from app.real_wallet.live_readiness import (
 from app.real_wallet.live_repository import LiveIntentRepository
 from app.real_wallet.network import is_valid_wallet_address, verify_wallet_network
 from app.real_wallet.policy import AutonomousExecutionPolicy, PolicyState
-from app.real_wallet.signer import (
-    ExecutionSignerUnavailableError,
-    ExecutionWalletPublicKeyMismatchError,
-    FileExecutionSigner,
+from app.real_wallet.mainnet_signer_client import (
+    MainnetSignerRejectedError,
+    MainnetSignerUnavailableError,
+    UnixMainnetSignerClient,
 )
 from app.real_wallet.transport_policy import (
     ExecutionTransportPolicy,
@@ -98,30 +97,36 @@ async def rehearse(session: AsyncSession, *, now: datetime) -> RehearsalReport:
         return bool(value)
 
     public_key = settings.REAL_WALLET_PUBLIC_KEY.strip()
-    secret_file = settings.REAL_WALLET_EXECUTION_SECRET_FILE.strip()
 
-    # --- signer: is the key mounted, and is it the key we pinned? -----------
+    # --- signer: ASK the isolated service; never load the key here ----------
+    # Application containers are deliberately denied a signer path, so this
+    # cannot answer by opening the file. It asks the one process that holds it,
+    # over a socket, and receives a public key back. On devnet there is no
+    # mainnet signer to ask, and "unavailable" is the honest answer rather than
+    # a failure — which is why it reports UNAVAILABLE rather than False.
     signer_ready: bool | None = None
     signer_matches: bool | None = None
-    if not secret_file or not public_key:
-        signer_ready = False
-        signer_matches = False
-        note = "no secret file or no pinned public key configured"
+    note = ""
+    if not public_key:
+        signer_ready = signer_matches = False
+        note = "no pinned public key configured"
+    elif not settings.MAINNET_SIGNER_SOCKET.strip():
+        note = "no mainnet signer socket configured — service not deployed"
     else:
-        note = ""
         try:
-            FileExecutionSigner.load(
-                secret_file=Path(secret_file), expected_public_key=public_key
-            )
+            got = await UnixMainnetSignerClient().identity()
             signer_ready = True
-            signer_matches = True
-        except ExecutionWalletPublicKeyMismatchError:
+            signer_matches = bool(got.get("matches_pinned_key"))
+            note = f"signer holds {got.get('public_key', '')[:8]}…"
+            if not signer_matches:
+                note = "signer holds a DIFFERENT key than the pinned one"
+        except MainnetSignerRejectedError as exc:
             signer_ready, signer_matches = True, False
-            note = "signer loaded but derives a DIFFERENT public key"
-        except (ExecutionSignerUnavailableError, OSError, ValueError) as exc:
-            signer_ready, signer_matches = False, False
-            note = f"signer unavailable: {type(exc).__name__}"
-    seen("signer_ready", signer_ready, "FileExecutionSigner.load", note)
+            note = f"signer refused: {exc}"
+        except MainnetSignerUnavailableError as exc:
+            signer_ready = signer_matches = False
+            note = f"signer unreachable: {exc}"
+    seen("signer_ready", signer_ready, "mainnet signer socket", note)
     seen("signer_matches_pinned_key", signer_matches, "derived vs pinned", note)
 
     # --- chain: the endpoint we would actually trade through ----------------
