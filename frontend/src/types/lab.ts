@@ -60,6 +60,27 @@ export interface LabLeaders {
                    trades: number; confidence: string };
 }
 
+export interface LabRule {
+  id: string;
+  name: string;
+  hypothesis: string;
+  checkpoint_minutes: number | null;
+  checkpoint_label: string;
+  entry: { feature: string; op: string; value: string; reason: string; text: string }[];
+  entry_text: string[];
+  exits: Record<string, string | number>;
+  exit_text: string[];
+  size_usd: string;
+  max_concurrent: number;
+  max_exposure_usd: string;
+  evidence: string;
+  overfit_risk: string;
+  hist: Record<string, number | string>;
+  hist_is_proxy: boolean;
+  caveats: string[];
+  note: string;
+}
+
 export interface LabBoard {
   disclosure: string;
   spec_version: string;
@@ -77,6 +98,7 @@ export interface LabBoard {
   overall_confidence: string;
   leaders: LabLeaders;
   strategies: LabStrategyRow[];
+  rulebook: LabRule[];
 }
 
 export interface LabPositionRow {

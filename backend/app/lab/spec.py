@@ -38,6 +38,42 @@ FAILURE_EQUITY_FLOOR = Decimal("800.00")
 OPS = ("gte", "lte", "gt", "lt", "is_true", "gt_field", "eq")
 
 
+#: Feature names as a reader would say them. The engine never reads these.
+FEATURE_LABELS = {
+    "liq": "liquidity",
+    "liq_mcap": "liquidity / market cap",
+    "liqchg_15m": "liquidity change over 15 min",
+    "ret_15m": "price return over 15 min",
+    "vol_accel": "volume acceleration (5m vs previous 5m)",
+    "vol1h": "volume over 1 hour",
+    "sell_share_15m": "sell share of trades over 15 min",
+    "dd_from_peak_det": "drawdown from peak since detection",
+    "tx_15m": "trades over 15 min",
+    "w1h_unique_wallets": "unique wallets (1h)",
+    "w1h_unique_buyers": "unique buyers (1h)",
+    "w1h_unique_sellers": "unique sellers (1h)",
+    "w1h_top10_tx_share": "top-10 wallet share of trades (1h)",
+    "flow_quality": "wallet-flow window quality",
+    "buy_route_ok": "Jupiter BUY quote",
+    "sell_route_ok": "Jupiter SELL quote",
+    "buy_impact_pct": "quoted buy price impact",
+}
+
+#: Features denominated in dollars, percent, or a bare count.
+_USD = {"liq", "vol1h"}
+_PCT = {"liq_mcap", "liqchg_15m", "ret_15m", "vol_accel", "sell_share_15m",
+        "dd_from_peak_det", "w1h_top10_tx_share", "buy_impact_pct"}
+
+
+def _fmt(feature: str, value: object) -> str:
+    if feature in _USD:
+        return f"${int(Decimal(str(value))):,}"
+    if feature in _PCT:
+        pct = Decimal(str(value)) * (1 if feature == "buy_impact_pct" else 100)
+        return f"{pct.normalize():f}%"
+    return str(value)
+
+
 @dataclass(frozen=True, slots=True)
 class Condition:
     """One entry condition. `feature` UNKNOWN => the condition is FALSE.
@@ -72,6 +108,18 @@ class Condition:
     def skip_reason(self) -> str:
         return self.reason or f"{self.feature}_{self.op}_{self.value}"
 
+    def describe(self) -> str:
+        """The condition in words, for readers rather than for the engine."""
+        name = FEATURE_LABELS.get(self.feature, self.feature)
+        if self.op == "is_true":
+            return f"{name} succeeded"
+        if self.op == "gt_field":
+            return f"{name} > {FEATURE_LABELS.get(str(self.value), self.value)}"
+        if self.op == "eq":
+            return f"{name} is \"{self.value}\""
+        symbol = {"gte": "\u2265", "lte": "\u2264", "gt": ">", "lt": "<"}[self.op]
+        return f"{name} {symbol} {_fmt(self.feature, self.value)}"
+
 
 @dataclass(frozen=True, slots=True)
 class Exits:
@@ -103,6 +151,41 @@ class Exits:
     #: "hold_and_retry" keeps the position when the route is gone (the V6
     #: default); "exit_at_best_quote" sells into whatever is quotable.
     sell_route_loss: str = "hold_and_retry"
+
+    def describe(self) -> list[str]:
+        """The exit policy in words, in the order the engine evaluates it."""
+        out: list[str] = ["dead pool settles at $0.00"]
+        if self.liquidity_exit_absolute_usd is not None:
+            out.append(f"exit if liquidity < ${int(self.liquidity_exit_absolute_usd):,}")
+        if self.liquidity_exit_frac_of_entry is not None:
+            pct = int(self.liquidity_exit_frac_of_entry * 100)
+            out.append(f"exit if liquidity < {pct}% of entry depth")
+        out.append("sell-route loss: "
+                   + ("exit at best quote" if self.sell_route_loss == "exit_at_best_quote"
+                      else "hold and retry"))
+        if self.break_even_arm is not None:
+            out.append(f"break-even: once {self.break_even_arm}x is touched, exit if it "
+                       f"returns to {self.break_even_exit or 1}x")
+        if self.trailing_drawdown is not None:
+            out.append(f"trailing stop {int(self.trailing_drawdown * 100)}% off the peak, "
+                       f"armed only at {self.trailing_arm_at}x")
+        if self.partial_at is not None:
+            out.append(f"sell {int((self.partial_fraction or 0) * 100)}% at "
+                       f"{self.partial_at}x")
+        if self.runner_target is not None:
+            out.append(f"runner exits at {self.runner_target}x")
+        if self.take_profit is not None:
+            out.append(f"take profit at {self.take_profit}x")
+        if self.stagnation_hours is not None:
+            out.append(f"stagnation exit after {self.stagnation_hours}h inside "
+                       f"\u00b15% of entry")
+        if self.time_exit_hours is not None:
+            out.append(f"time exit at {self.time_exit_hours}h")
+        else:
+            out.append("no time exit")
+        if self.stop_loss is None:
+            out.append("no stop loss (V6 contains none by design)")
+        return out
 
 
 @dataclass(frozen=True, slots=True)
@@ -434,6 +517,37 @@ STRATEGIES: tuple[Strategy, ...] = (
               "forward: 32 of 112 route-resolved tokens were BUY_OK / SELL_FAILED."),
     ),
 )
+
+def rules_json(s: "Strategy") -> dict:
+    """One strategy as data a reader can check against the report.
+
+    Carries both the machine form (feature/op/value) and the human form, so the
+    page never re-derives a threshold in TypeScript — a second implementation
+    would be a second answer.
+    """
+    from dataclasses import asdict
+
+    return {
+        "id": s.id, "name": s.name, "hypothesis": s.hypothesis,
+        "checkpoint_minutes": s.checkpoint_minutes,
+        "checkpoint_label": ("never" if s.checkpoint_minutes is None
+                             else "at admission" if s.checkpoint_minutes == 0
+                             else f"+{s.checkpoint_minutes} min"),
+        "entry": [{"feature": c.feature, "op": c.op, "value": str(c.value),
+                   "reason": c.skip_reason, "text": c.describe()} for c in s.entry],
+        "entry_text": ([c.describe() for c in s.entry] or
+                       (["never enters"] if not s.trades
+                        else ["every eligible token (control)"])),
+        "exits": {k: (str(v) if isinstance(v, Decimal) else v)
+                  for k, v in asdict(s.exits).items() if v is not None},
+        "exit_text": s.exits.describe() if s.trades else ["n/a"],
+        "size_usd": str(s.size_usd), "max_concurrent": s.max_concurrent,
+        "max_exposure_usd": str(s.max_exposure_usd),
+        "evidence": s.evidence, "overfit_risk": s.overfit_risk,
+        "hist": s.hist, "hist_is_proxy": s.hist_is_proxy,
+        "caveats": list(s.caveats), "note": s.note,
+    }
+
 
 BY_ID = {s.id: s for s in STRATEGIES}
 #: Distinct checkpoints the Lab must evaluate. Derived, never hand-maintained.

@@ -558,17 +558,4 @@ def _jsonable(features: dict[str, Any]) -> dict[str, Any]:
 
 
 def _rules_json(s: Strategy) -> dict[str, Any]:
-    from dataclasses import asdict
-    return {
-        "id": s.id, "name": s.name, "hypothesis": s.hypothesis,
-        "checkpoint_minutes": s.checkpoint_minutes,
-        "entry": [{"feature": c.feature, "op": c.op, "value": str(c.value),
-                   "reason": c.skip_reason} for c in s.entry],
-        "size_usd": str(s.size_usd), "max_concurrent": s.max_concurrent,
-        "max_exposure_usd": str(s.max_exposure_usd),
-        "exits": {k: (str(v) if isinstance(v, Decimal) else v)
-                  for k, v in asdict(s.exits).items() if v is not None},
-        "evidence": s.evidence, "overfit_risk": s.overfit_risk,
-        "hist": s.hist, "hist_is_proxy": s.hist_is_proxy,
-        "caveats": list(s.caveats), "note": s.note,
-    }
+    return spec.rules_json(s)

@@ -71,6 +71,10 @@ async def board(session: DbSession) -> dict[str, Any]:
         "overall_confidence": leaderboard.confidence(total_closed),
         "leaders": leaderboard.leaders(rows),
         "strategies": rows,
+        # The frozen rulebook, served rather than duplicated in the client, so
+        # a reader checking the page against the report is reading the same
+        # registry the engine judges with.
+        "rulebook": [spec.rules_json(s) for s in spec.STRATEGIES],
     })
 
 

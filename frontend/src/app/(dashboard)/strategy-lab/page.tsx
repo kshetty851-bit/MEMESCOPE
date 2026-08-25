@@ -6,7 +6,7 @@ import { Label, Panel } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/states";
 import { useLabBoard, useLabStrategy } from "@/hooks/use-lab";
-import type { LabBoard, LabStrategyRow } from "@/types/lab";
+import type { LabBoard, LabRule, LabStrategyRow } from "@/types/lab";
 
 /**
  * V6 FORWARD STRATEGY LAB
@@ -381,6 +381,151 @@ function Sparkline({ points }: { points: number[] }) {
   );
 }
 
+
+/**
+ * The frozen rulebook, in full, at the bottom of the page.
+ *
+ * Served by the API rather than transcribed here: a TypeScript copy of twenty
+ * thresholds would be a second source of truth, and the first time either
+ * changed they would disagree. What a reader sees is what the engine judges
+ * with — the same registry, under the same hash shown in the header.
+ */
+function Rulebook({ rules, specHash }: { rules: LabRule[]; specHash: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Panel density="compact">
+      <div className="flex flex-wrap items-baseline justify-between gap-3">
+        <div>
+          <Label>THE FROZEN RULES — ALL 20 STRATEGIES</Label>
+          <p className="mt-1 text-xs text-muted">
+            Every rule each wallet trades by, exactly as frozen before scoring began.
+            Changing any number here would start a new tournament at zero.
+          </p>
+        </div>
+        <button
+          onClick={() => setOpen(!open)}
+          className="shrink-0 rounded border border-line px-2 py-1 text-xs text-muted hover:text-ink"
+        >
+          {open ? "collapse all" : "expand all"}
+        </button>
+      </div>
+
+      <div className="mt-3 grid gap-3 lg:grid-cols-2">
+        {rules.map((r) => (
+          <div key={r.id} className="rounded border border-line p-3">
+            <div className="flex items-baseline justify-between gap-2">
+              <h3 className="font-mono text-xs font-medium text-ink">
+                {r.id} <span className="text-muted">{r.name}</span>
+              </h3>
+              <span className="shrink-0 font-mono text-[10px] text-muted">
+                {r.checkpoint_label}
+              </span>
+            </div>
+            <p className="mt-1 text-[11px] leading-relaxed text-muted">{r.hypothesis}</p>
+
+            {r.overfit_risk === "HIGH" ? (
+              <p className="mt-2 rounded border border-warning/40 bg-warning/[0.05] px-2 py-1 text-[10px] text-warning">
+                HISTORICALLY INTERESTING — HIGH OVERFIT RISK. Historical profit is context,
+                not validation.
+              </p>
+            ) : null}
+            {r.evidence === "NONE_HISTORICALLY" ? (
+              <p className="mt-2 rounded border border-line px-2 py-1 text-[10px] text-muted">
+                NO HISTORICAL EVIDENCE — this hypothesis rests on data that only exists
+                going forward.
+              </p>
+            ) : null}
+
+            <dl className="mt-2 space-y-1 text-[11px]">
+              <div>
+                <dt className="text-muted">Enters when</dt>
+                <dd className="font-mono text-ink">
+                  <ul className="mt-0.5 space-y-0.5">
+                    {r.entry_text.map((t, i) => (
+                      <li key={i}>· {t}</li>
+                    ))}
+                  </ul>
+                </dd>
+              </div>
+              <div>
+                <dt className="text-muted">Sizing</dt>
+                <dd className="font-mono text-ink">
+                  ${r.size_usd} per position · max {r.max_concurrent} concurrent · max $
+                  {r.max_exposure_usd} deployed
+                </dd>
+              </div>
+              <div>
+                <dt className="text-muted">Exits, in the order they are checked</dt>
+                <dd className="font-mono text-ink">
+                  <ol className="mt-0.5 space-y-0.5">
+                    {r.exit_text.map((t, i) => (
+                      <li key={i}>
+                        {i + 1}. {t}
+                      </li>
+                    ))}
+                  </ol>
+                </dd>
+              </div>
+              {open ? (
+                <>
+                  <div>
+                    <dt className="text-muted">Historical context</dt>
+                    <dd className="font-mono text-ink">
+                      {r.hist_is_proxy ? "PROXY ONLY — " : ""}
+                      {Object.entries(r.hist).length === 0
+                        ? "—"
+                        : Object.entries(r.hist)
+                            .map(([k, v]) => `${k} ${v}`)
+                            .join(" · ")}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted">Evidence / overfit risk</dt>
+                    <dd className="font-mono text-ink">
+                      {r.evidence.replace(/_/g, " ")} / {r.overfit_risk.replace(/_/g, " ")}
+                    </dd>
+                  </div>
+                  {r.caveats.length > 0 ? (
+                    <div>
+                      <dt className="text-muted">Caveats</dt>
+                      <dd className="text-warning">
+                        {r.caveats.map((c) => c.replace(/_/g, " ")).join(" · ")}
+                      </dd>
+                    </div>
+                  ) : null}
+                  {r.note ? (
+                    <div>
+                      <dt className="text-muted">Note</dt>
+                      <dd className="leading-relaxed text-muted">{r.note}</dd>
+                    </div>
+                  ) : null}
+                </>
+              ) : null}
+            </dl>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-3 space-y-1 border-t border-line pt-3 text-[10px] leading-relaxed text-muted">
+        <p>
+          Shared by all twenty: 30 bps per side · constant-product impact against
+          (liquidity ÷ 2) ÷ 12, calibrated on 320 live Jupiter quotes · a real quote is
+          preferred where one exists · level exits fill at no better than trigger × 1.15 ·
+          prints more than 3× off the 10-minute median never fill in either direction ·
+          nothing is acted on across a gap over 15 minutes · a pool the provider reports
+          inactive settles at $0.00, never at its last healthy print.
+        </p>
+        <p>
+          There are no conventional stop losses anywhere in V6. On 27 days of real series a
+          −25% stop filled at a median of $0.03 against a nominal $7.50, so the family is
+          omitted on purpose rather than by oversight.
+        </p>
+        <p className="font-mono">registry hash {specHash}</p>
+      </div>
+    </Panel>
+  );
+}
+
 export default function StrategyLabPage() {
   const { data, isLoading, error } = useLabBoard();
   const [sortKey, setSortKey] = useState<string>("rank");
@@ -470,6 +615,7 @@ export default function StrategyLabPage() {
         </p>
       </Panel>
       {selected ? <Drawer id={selected} onClose={() => setSelected(null)} /> : null}
+      <Rulebook rules={data.rulebook ?? []} specHash={data.spec_hash} />
     </div>
   );
 }

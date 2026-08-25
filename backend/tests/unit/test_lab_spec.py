@@ -166,3 +166,53 @@ def test_max_exposure_never_exceeds_the_wallet():
         assert s.max_exposure_usd <= spec.STARTING_EQUITY
         if s.trades:
             assert s.size_usd * s.max_concurrent >= s.max_exposure_usd
+
+
+# --- the public rulebook -----------------------------------------------------
+# The page renders these strings verbatim. They are served rather than
+# transcribed into TypeScript, so this is the only place they can drift.
+
+def test_rulebook_covers_every_strategy():
+    book = [spec.rules_json(s) for s in spec.STRATEGIES]
+    assert len(book) == 20
+    assert [r["id"] for r in book] == [s.id for s in spec.STRATEGIES]
+    for r in book:
+        assert r["entry_text"], f"{r['id']} must describe its entry"
+        assert r["exit_text"], f"{r['id']} must describe its exits"
+
+
+def test_rulebook_prose_never_changes_the_hash():
+    """Descriptions are for readers. Editing one must not invalidate a live
+    record, so the hash must not cover them."""
+    assert spec.SPEC_HASH == (
+        "672dffdb91a4c1a295ed2d6f4d95e0fa081bf34dea5b6ef11cbf6071558521e0"
+    )
+
+
+def test_rulebook_states_the_real_thresholds():
+    v606 = spec.rules_json(spec.BY_ID["V6-06"])
+    assert v606["entry_text"] == ["liquidity ≥ $400,000"]
+    assert "take profit at 1.25x" in v606["exit_text"]
+    assert v606["checkpoint_label"] == "+30 min"
+
+    v619 = spec.rules_json(spec.BY_ID["V6-19"])
+    assert "sell 50% at 1.25x" in v619["exit_text"]
+    assert "runner exits at 2.00x" in v619["exit_text"]
+
+    v618 = spec.rules_json(spec.BY_ID["V6-18"])
+    assert v618["size_usd"] == "5"
+    assert v618["max_exposure_usd"] == "20"
+
+
+def test_every_strategy_declares_no_stop_loss_in_words():
+    for s in spec.STRATEGIES:
+        if not s.trades:
+            continue
+        assert any("no stop loss" in line for line in s.exits.describe())
+
+
+def test_controls_say_what_they_do():
+    assert spec.rules_json(spec.BY_ID["V6-01"])["entry_text"] == ["never enters"]
+    assert spec.rules_json(spec.BY_ID["V6-02"])["entry_text"] == [
+        "every eligible token (control)"
+    ]
