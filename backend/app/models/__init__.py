@@ -50,6 +50,8 @@ from app.models.real_wallet_execution import (
     RealWalletKillSwitch,
     RealWalletLiveIntent,
     RealWalletPosition,
+    RealWalletAutotradeEvent,
+    RealWalletAutotradeSwitch,
 )
 from app.models.real_wallet_safety import RealWalletSafetyEvaluation
 from app.models.token_security import TokenSecurityEvaluationRow

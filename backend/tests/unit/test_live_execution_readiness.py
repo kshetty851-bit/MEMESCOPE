@@ -56,9 +56,22 @@ def _facts(**overrides: bool) -> SubmissionFacts:
         "not_previously_signed": True,
         "canary_limits_satisfied": True,
         "transport_release_approved": True,
+        # The operator start/stop control. `off` refuses on its own, which is
+        # exactly what the exhaustiveness test below then proves per field.
+        "autotrade_switch_on": True,
     }
     values.update(overrides)
     return SubmissionFacts(**values)
+
+
+def test_the_facts_helper_covers_every_field_the_guard_reads() -> None:
+    """A field added to SubmissionFacts without being added here would silently
+    stop being exercised — the helper must stay exhaustive."""
+    # `SubmissionFacts` is a slots dataclass, so it has no __dict__ — asdict is
+    # the only way to enumerate what an instance actually carries.
+    from dataclasses import asdict, fields
+
+    assert {f.name for f in fields(SubmissionFacts)} == set(asdict(_facts()))
 
 
 def test_every_submission_fact_defaults_to_refusing() -> None:

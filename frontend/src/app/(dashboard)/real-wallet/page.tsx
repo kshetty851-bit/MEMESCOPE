@@ -348,6 +348,149 @@ function FundingReadinessPanel({ data }: { data: FundingReadiness | undefined })
   );
 }
 
+type AutotradeState = {
+  enabled: boolean;
+  nominated_strategy: string | null;
+  started_at: string | null;
+  started_by: string | null;
+  start_reason: string | null;
+  stopped_at: string | null;
+  stopped_by: string | null;
+  stop_reason: string | null;
+  authorises_execution: boolean;
+  history?: Array<{
+    action: string;
+    actor: string | null;
+    reason: string | null;
+    nominated_strategy: string | null;
+    occurred_at: string;
+  }>;
+};
+
+/**
+ * The operator start/stop control.
+ *
+ * Deliberately asymmetric, and the asymmetry is stated on the surface rather
+ * than buried in a tooltip. STOP is unconditional: it needs no other condition
+ * to be true and can never be refused. START records an intent and authorises
+ * nothing — every barrier is evaluated independently, so on today's deployment
+ * turning it on leaves submission exactly as impossible as it was.
+ *
+ * The server owns both decisions. This renders them.
+ */
+function AutotradeControl() {
+  const queryClient = useQueryClient();
+  const [strategy, setStrategy] = useState("V6-06");
+  const [reason, setReason] = useState("");
+
+  const state = useQuery<AutotradeState>({
+    queryKey: ["real-wallet", "autotrade"],
+    queryFn: () => api.get<AutotradeState>("/real-wallet/autotrade"),
+    refetchInterval: 30_000,
+  });
+
+  const mutate = useMutation({
+    mutationFn: (vars: { action: "start" | "stop" }) =>
+      api.post<AutotradeState>(
+        `/real-wallet/autotrade/${vars.action}`,
+        vars.action === "start" ? { strategy_id: strategy, reason } : { reason },
+      ),
+    onSuccess: () => {
+      setReason("");
+      void queryClient.invalidateQueries({ queryKey: ["real-wallet"] });
+    },
+  });
+
+  const data = state.data;
+  const running = data?.enabled === true;
+  const canAct = reason.trim().length >= 3 && !mutate.isPending;
+
+  return (
+    <section className="mt-6 rounded-lg border border-line p-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-3">
+        <div>
+          <p className="text-label text-ink-3">Autonomous trading</p>
+          <p className="mt-1 text-sm text-ink">
+            {running ? (
+              <>
+                STARTED — nominated strategy{" "}
+                <span className="font-mono">{data?.nominated_strategy}</span>
+              </>
+            ) : (
+              "STOPPED"
+            )}
+          </p>
+        </div>
+        <span
+          className={`rounded border px-2 py-1 text-xs ${
+            running ? "border-up/40 text-up" : "border-line text-ink-3"
+          }`}
+        >
+          {running ? "INTENT: ON" : "INTENT: OFF"}
+        </span>
+      </div>
+
+      <p className="mt-2 rounded border border-warning/40 bg-warning/[0.06] p-2 text-xs leading-relaxed text-warning">
+        Starting authorises nothing. Mode, the three enable flags, the release
+        constant, the mainnet clause, the submission guard, SEC-2 freshness, network
+        verification and the canary limits are each evaluated independently. On this
+        deployment submission is still impossible. Stopping, by contrast, is
+        unconditional and takes effect immediately.
+      </p>
+
+      <div className="mt-3 grid gap-2 sm:grid-cols-[160px_1fr_auto_auto]">
+        <select
+          className="rounded border border-line bg-transparent px-2 py-2 text-sm text-ink"
+          disabled={running}
+          onChange={(e) => setStrategy(e.target.value)}
+          value={strategy}
+        >
+          {Array.from({ length: 20 }, (_, i) => `V6-${String(i + 1).padStart(2, "0")}`)
+            .filter((id) => id !== "V6-01")
+            .map((id) => (
+              <option key={id} value={id}>
+                {id}
+              </option>
+            ))}
+        </select>
+        <input
+          className="rounded border border-line bg-transparent px-2 py-2 text-sm text-ink"
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="Reason (recorded and attributed, min 3 chars)"
+          value={reason}
+        />
+        <button
+          className="rounded border border-up/40 px-3 py-2 text-sm text-up disabled:opacity-40"
+          disabled={!canAct || running}
+          onClick={() => mutate.mutate({ action: "start" })}
+          type="button"
+        >
+          Start
+        </button>
+        <button
+          className="rounded border border-down/40 px-3 py-2 text-sm text-down disabled:opacity-40"
+          disabled={!canAct}
+          onClick={() => mutate.mutate({ action: "stop" })}
+          type="button"
+        >
+          Stop
+        </button>
+      </div>
+
+      {data?.history?.length ? (
+        <ul className="mt-3 space-y-0.5 border-t border-line pt-3 font-mono text-[11px] text-ink-3">
+          {data.history.slice(0, 6).map((h, i) => (
+            <li key={i}>
+              {h.occurred_at.slice(0, 16).replace("T", " ")} · {h.action} ·{" "}
+              {h.nominated_strategy ?? "—"} · {h.actor ?? "system"} · {h.reason ?? ""}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </section>
+  );
+}
+
 export default function RealWalletPage() {
   const queryClient = useQueryClient();
   const [destination, setDestination] = useState("");
@@ -489,6 +632,7 @@ export default function RealWalletPage() {
         </p>
       </section>
       <FundingReadinessPanel data={readinessQuery.data} />
+      <AutotradeControl />
       <section className="mt-6 rounded-lg border border-line p-4">
         <p className="text-label text-ink-3">Manual devnet verification</p>
         <p className="mt-1 text-sm text-ink-3">

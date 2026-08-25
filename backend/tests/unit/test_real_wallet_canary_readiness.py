@@ -410,6 +410,9 @@ def _all_facts_true() -> dict[str, bool]:
         "daily_loss_within_limit": True,
         "open_position_within_limit": True,
         "trade_size_within_limit": True,
+        # The operator start/stop control. Its `off` refuses on its own, which
+        # is exactly what this test then proves for every field.
+        "autotrade_switch_on": True,
         "mainnet_verified": True,
         "transaction_approved": True,
         "not_previously_signed": True,
@@ -599,3 +602,14 @@ def test_an_emergency_exit_still_needs_somebody_to_sell_to() -> None:
     manual = exit_triggers.emergency_exit(at=NOW, quote=_executable())
     assert manual.executable is True
     assert manual.reason is ExitReason.MANUAL
+
+
+def test_the_all_facts_fixture_covers_every_field_the_guard_reads() -> None:
+    """A field added to SubmissionFacts without being added here would silently
+    stop being adversarially tested — the fixture must stay exhaustive."""
+    from dataclasses import fields
+
+    declared = {f.name for f in fields(SubmissionFacts)}
+    assert declared == set(_all_facts_true()), (
+        "SubmissionFacts and _all_facts_true have drifted apart"
+    )

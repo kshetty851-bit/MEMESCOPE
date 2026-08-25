@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.api.deps import AdminUser, DbSession
@@ -35,6 +35,7 @@ from app.real_wallet.network import (
 )
 from app.real_wallet.funding_readiness import as_dict as readiness_as_dict
 from app.real_wallet.funding_readiness import evaluate as evaluate_funding_readiness
+from app.real_wallet.autotrade import AutotradeSwitchService, UnknownStrategyError
 from app.real_wallet.rehearsal import as_dict as rehearsal_as_dict
 from app.real_wallet.rehearsal import rehearse
 from app.real_wallet.policy import configured_entry_size_usd
@@ -146,6 +147,76 @@ def _fee_accounting_readiness(
             None if fresh else "No fresh SOL/USD reading; net figures would be gross."
         ),
     }
+
+
+class AutotradeStartIn(BaseModel):
+    """Starting requires naming a strategy and a reason. Both are recorded."""
+
+    strategy_id: str = Field(min_length=2, max_length=16)
+    reason: str = Field(min_length=3, max_length=256)
+
+
+class AutotradeStopIn(BaseModel):
+    reason: str = Field(min_length=3, max_length=256)
+
+
+@router.get("/autotrade", summary="Read the operator start/stop control")
+async def read_autotrade(_admin: AdminUser, session: DbSession) -> dict[str, object]:
+    service = AutotradeSwitchService(session)
+    state = await service.state()
+    return {
+        **state.as_dict(),
+        "history": [
+            {"action": e.action, "actor": e.actor, "reason": e.reason,
+             "nominated_strategy": e.nominated_strategy,
+             "occurred_at": e.occurred_at.isoformat()}
+            for e in await service.history(limit=20)
+        ],
+    }
+
+
+@router.post("/autotrade/start", summary="Record the intent to trade autonomously")
+async def start_autotrade(
+    payload: AutotradeStartIn, admin: AdminUser, session: DbSession
+) -> dict[str, object]:
+    """**This authorises nothing.**
+
+    Every barrier is evaluated independently and is untouched here: mode, the
+    three enable flags, the release constant, the mainnet clause, the submission
+    guard, SEC-2 freshness, network verification and the canary limits. Starting
+    records that an operator intends to trade and names which strategy; on
+    today's deployment submission remains exactly as impossible as before.
+    """
+    service = AutotradeSwitchService(session)
+    try:
+        state = await service.start(
+            actor=admin.email, reason=payload.reason,
+            strategy_id=payload.strategy_id, at=datetime.now(UTC),
+        )
+    except UnknownStrategyError as exc:
+        raise HTTPException(
+            status_code=422, detail=f"unknown strategy: {exc}"
+        ) from exc
+    await session.commit()
+    return state.as_dict()
+
+
+@router.post("/autotrade/stop", summary="Stop autonomous trading, unconditionally")
+async def stop_autotrade(
+    payload: AutotradeStopIn, admin: AdminUser, session: DbSession
+) -> dict[str, object]:
+    """Stop. This can never be refused and needs no other condition to be true.
+
+    A control an operator cannot trust to stop is a control they will be afraid
+    to start, so this path has no barrier of its own and takes effect on the
+    next guard evaluation.
+    """
+    service = AutotradeSwitchService(session)
+    state = await service.stop(
+        actor=admin.email, reason=payload.reason, at=datetime.now(UTC)
+    )
+    await session.commit()
+    return state.as_dict()
 
 
 @router.get(

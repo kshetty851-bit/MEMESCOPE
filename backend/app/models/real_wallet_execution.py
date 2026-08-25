@@ -254,6 +254,62 @@ class RealWalletKillSwitch(Base, UUIDPrimaryKeyMixin):
     )
 
 
+class RealWalletAutotradeSwitch(Base, UUIDPrimaryKeyMixin):
+    """The operator's start/stop control for autonomous trading.
+
+    Deliberately the mirror image of a kill switch. A kill switch is fail-closed
+    and its *armed* state stops things; this is an intent and its *on* state
+    stops nothing from being checked. Starting it authorises nothing: mode, the
+    enable flags, the release constant, the mainnet clause, the submission guard,
+    SEC-2 freshness, network verification and the canary limits are all evaluated
+    independently and are untouched by it.
+
+    What it does own is the other direction. **Stopping is unconditional and
+    immediate**, because a control an operator cannot trust to stop is a control
+    they will be afraid to start. The guard reads this switch as one more
+    required condition, so `off` refuses regardless of what every other barrier
+    says.
+
+    `nominated_strategy` records WHICH strategy the operator intends to trade —
+    a V6 Lab id. Recording it is not promoting it; nothing reads it as
+    permission, and the evidence gate in the funding report is unmoved by it.
+    """
+
+    __tablename__ = "real_wallet_autotrade_switch"
+
+    #: Singleton in practice; unique so a second row cannot disagree with it.
+    scope: Mapped[str] = mapped_column(
+        String(32), nullable=False, unique=True, server_default="default"
+    )
+    enabled: Mapped[bool] = mapped_column(
+        nullable=False, default=False, server_default="false"
+    )
+    #: A V6 strategy id, e.g. "V6-06". Never a permission.
+    nominated_strategy: Mapped[str | None] = mapped_column(String(16))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    started_by: Mapped[str | None] = mapped_column(String(128))
+    start_reason: Mapped[str | None] = mapped_column(String(256))
+    stopped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    stopped_by: Mapped[str | None] = mapped_column(String(128))
+    stop_reason: Mapped[str | None] = mapped_column(String(256))
+
+
+class RealWalletAutotradeEvent(Base, UUIDPrimaryKeyMixin):
+    """Append-only start/stop history. The switch row is state; this is evidence."""
+
+    __tablename__ = "real_wallet_autotrade_events"
+
+    scope: Mapped[str] = mapped_column(String(32), nullable=False)
+    #: `started` or `stopped`.
+    action: Mapped[str] = mapped_column(String(16), nullable=False)
+    actor: Mapped[str | None] = mapped_column(String(128))
+    reason: Mapped[str | None] = mapped_column(String(256))
+    nominated_strategy: Mapped[str | None] = mapped_column(String(16))
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
 class RealWalletKillSwitchEvent(Base, UUIDPrimaryKeyMixin):
     """Append-only arm/clear history. The switch row is state; this is evidence."""
 

@@ -111,6 +111,10 @@ class SubmissionFacts:
     #: `LIVE_TRANSPORT_RELEASE_APPROVED`. Restated here so one read of the
     #: guard's reasons explains a refusal without also reading the transport.
     transport_release_approved: bool = False
+    #: The operator's start/stop control. False refuses regardless of what every
+    #: other barrier says, which is what makes STOP trustworthy; True satisfies
+    #: only this condition and authorises nothing on its own.
+    autotrade_switch_on: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,6 +153,7 @@ class LiveSubmissionGuard:
             "TRANSACTION_ALREADY_SIGNED": facts.not_previously_signed,
             "CANARY_LIMIT_BREACH": facts.canary_limits_satisfied,
             "RELEASE_NOT_APPROVED": facts.transport_release_approved,
+            "AUTOTRADE_SWITCH_OFF": facts.autotrade_switch_on,
         }
         reasons.extend(reason for reason, passed in checks.items() if not passed)
         return SubmissionDecision(allowed=not reasons, reasons=tuple(reasons))
