@@ -678,6 +678,23 @@ class Settings(BaseSettings):
     REAL_WALLET_SAFETY_SUPPORTED_VENUES: CsvList = Field(
         default_factory=lambda: ["pumpfun", "pumpswap"]
     )
+    #: Venues the SECURITY EVALUATOR recognises. Deliberately a separate
+    #: setting from the real wallet's list above, which it used to share.
+    #:
+    #: They answer different questions. The real wallet's list is "where may
+    #: this platform SEND MONEY", and stays as narrow as it has always been.
+    #: This one is "is this a market we recognise at all" — and Raydium,
+    #: Meteora and Orca are the three largest AMMs on Solana, which the
+    #: platform already prices from on every snapshot. Calling them
+    #: unrecognised was a statement about pump.fun's dominance in the scanner's
+    #: population, not about the venues.
+    #:
+    #: Sharing one list meant the market-universe wallet could not be admitted
+    #: without also widening what the real wallet would be permitted to trade.
+    #: Splitting them keeps that surface untouched.
+    SECURITY_RECOGNISED_VENUES: CsvList = Field(
+        default_factory=lambda: ["pumpfun", "pumpswap", "raydium", "meteora", "orca"]
+    )
     # Token-2022 extension discriminants, deliberately an explicit allowlist.
     # 18=MetadataPointer and 19=TokenMetadata are the two observed in the
     # audit; an unknown extension is not presumed safe.
@@ -1049,6 +1066,7 @@ class Settings(BaseSettings):
         # These two are the venue and Token-2022 extension allowlists, i.e. the
         # settings an operator is most likely to want to narrow by hand.
         "REAL_WALLET_SAFETY_SUPPORTED_VENUES",
+        "SECURITY_RECOGNISED_VENUES",
         "REAL_WALLET_SAFETY_SUPPORTED_TOKEN_2022_EXTENSIONS",
         # Fourth and fifth occurrence of the same trap, registered here from the
         # start rather than after a failed boot. Both are allowlists an operator

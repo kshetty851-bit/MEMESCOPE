@@ -130,6 +130,10 @@ class Reason:
     #: did not graduate to PumpSwap through pump.fun, so custody here is a
     #: question this evaluator does not answer.
     POOL_NOT_PROTOCOL_MIGRATED = "POOL_NOT_PROTOCOL_MIGRATED"
+    #: The token was never in pump.fun's custody model, so that model has
+    #: nothing to say about it. NOT a statement that its LP is safe — see
+    #: `liquidity_verifier` for what this does and does not claim.
+    POOL_CUSTODY_OUT_OF_SCOPE = "POOL_CUSTODY_OUT_OF_SCOPE"
     #: The pool account is not owned by the PumpSwap program.
     POOL_PROGRAM_MISMATCH = "POOL_PROGRAM_MISMATCH"
     #: The pool account exists but does not decode as a pool.
