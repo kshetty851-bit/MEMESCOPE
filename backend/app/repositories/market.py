@@ -291,6 +291,17 @@ class MarketSnapshotRepository(BaseRepository[TokenMarketSnapshot]):
         watermark per row trims in memory, as `window_for_mints` documents.
         Rows with no price are excluded: an unpriced observation cannot breach a
         price rule, and treating it as zero would stop out every position.
+
+        **Flagged prints are excluded too**, for the same reason and with more
+        force. This is the series a position is EXITED on, so a bad print here
+        does not merely mislead a reader — it closes a trade. On 2026-08-25
+        ANTFUN printed $0.00000025 against a $0.0418 running high while its
+        reported pool depth fell from $38.7M to $7.7M in the same reading: a
+        pair switch, not a 166,000x collapse. The ingest firewall caught it and
+        marked the row `price_band_low`, `_newest_per_mint` already refused to
+        let such a row answer "latest" — and this series handed it straight to
+        the exit rule, which stopped the position out. Only the fill-drift cap
+        kept the booked result honest.
         """
         unique = list(dict.fromkeys(mints))
         if not unique:
@@ -306,6 +317,9 @@ class MarketSnapshotRepository(BaseRepository[TokenMarketSnapshot]):
                     TokenMarketSnapshot.mint_address.in_(chunk),
                     TokenMarketSnapshot.captured_at > since,
                     TokenMarketSnapshot.price_usd.is_not(None),
+                    # Ingest firewall: a print the platform distrusts must
+                    # never be the reading that closes a position.
+                    TokenMarketSnapshot.suspect.is_not(True),
                 )
                 .order_by(
                     TokenMarketSnapshot.mint_address,
