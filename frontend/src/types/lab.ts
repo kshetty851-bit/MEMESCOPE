@@ -23,7 +23,16 @@ export interface LabStrategyRow {
   open_value: number;
   equity: number;
   net_pnl: number;
+  /** Return on the full $1,000 wallet — mostly idle cash. */
   return_pct: number;
+  open_cost_basis: number;
+  open_pnl: number;
+  /** Return on the book held right now: (open value − open cost) / open cost. */
+  open_return_pct: number | null;
+  deployed_ever: number;
+  /** Return on every dollar ever committed, realised + unrealised. */
+  deployed_return_pct: number | null;
+  capital_at_work_pct: number;
   trades: number;
   open_positions: number;
   wins: number;

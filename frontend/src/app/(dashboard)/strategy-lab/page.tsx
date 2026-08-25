@@ -70,7 +70,10 @@ const COLUMNS: { key: keyof LabStrategyRow | "rank"; label: string; numeric: boo
   { key: "open_value", label: "Open value", numeric: true },
   { key: "equity", label: "Equity", numeric: true },
   { key: "net_pnl", label: "Net P&L", numeric: true },
-  { key: "return_pct", label: "Return", numeric: true },
+  { key: "return_pct", label: "Return (wallet)", numeric: true },
+  { key: "open_return_pct", label: "Return (open book)", numeric: true },
+  { key: "deployed_return_pct", label: "Return (deployed)", numeric: true },
+  { key: "capital_at_work_pct", label: "At work", numeric: true },
   { key: "trades", label: "Trades", numeric: true },
   { key: "wins", label: "W", numeric: true },
   { key: "losses", label: "L", numeric: true },
@@ -97,6 +100,9 @@ function cell(row: LabStrategyRow, key: string): string {
     case "equity": return money(row.equity);
     case "net_pnl": return signed(row.net_pnl);
     case "return_pct": return pct(row.return_pct, 2);
+    case "open_return_pct": return pct(row.open_return_pct, 2);
+    case "deployed_return_pct": return pct(row.deployed_return_pct, 2);
+    case "capital_at_work_pct": return pct(row.capital_at_work_pct, 1);
     case "trades": return String(row.trades);
     case "wins": return String(row.wins);
     case "losses": return String(row.losses);
@@ -609,8 +615,16 @@ export default function StrategyLabPage() {
           </table>
         </div>
         <p className="mt-2 text-[10px] text-muted">
-          Equity is cash plus what the open book could be SOLD for, never plus what it
-          cost. A row in red has tripped the −20% circuit breaker: it stops opening and
+          <span className="text-ink">Return (wallet)</span> is measured on the full
+          $1,000 and is mostly idle cash, so it compresses every strategy into the same
+          fraction of a percent. <span className="text-ink">Return (open book)</span> is
+          how the positions held right now are doing against what they cost;{" "}
+          <span className="text-ink">Return (deployed)</span> is how every dollar ever
+          committed has done, realised and unrealised — that is the fair comparison
+          between strategies that risk different amounts.{" "}
+          <span className="text-ink">At work</span> is the share of the wallet currently
+          in the market. Equity is cash plus what the open book could be SOLD for, never
+          plus what it cost. A row in red has tripped the −20% circuit breaker: it stops opening and
           its open positions still run to their own frozen exits. Cash is allowed to win.
         </p>
       </Panel>

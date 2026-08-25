@@ -773,3 +773,53 @@ async def test_trades_report_sellable_value_not_cost(db_session):
     )
     assert row["unrealised_pnl"] is not None
     assert row["realised_pnl"] is None
+
+
+# --- return on capital at risk ----------------------------------------------
+# With $10 positions against $1,000 a wallet is ~99% idle cash, so a return
+# measured on the wallet hides which strategies can actually trade.
+
+async def test_returns_are_reported_on_wallet_open_book_and_deployed_capital(db_session):
+    svc = LabService(db_session)
+    await svc.activate(valid_from=VALID_FROM)
+    await _radar_token(db_session, mint="R" + "1" * 20, detected=NOW - timedelta(hours=2),
+                       liq=D("600000"), pool="POOLRET")
+    await svc.evaluate_due(now=NOW)
+    pos = (await db_session.execute(
+        select(LabPosition).where(LabPosition.strategy_id == "V6-06")
+    )).scalars().first()
+    # a fresh print so the position may be marked, then halve it
+    db_session.add(TokenMarketSnapshot(
+        token_id=pos.token_id, mint_address=pos.mint_address,
+        captured_at=NOW + timedelta(seconds=30), price_usd=D("0.0005"),
+        liquidity_usd=D("600000"), trading_status=TradingStatus.TRADING,
+        provider="test", suspect=False,
+    ))
+    await db_session.flush()
+    await svc.settle(now=NOW + timedelta(minutes=1))
+
+    rows = await leaderboard.strategy_rows(db_session)
+    r = next(x for x in rows if x["strategy_id"] == "V6-06")
+
+    assert r["open_cost_basis"] == D("10")
+    assert r["capital_at_work_pct"] == D("1")           # $10 of $1,000
+    # the position halved: the open book is down ~50%, the wallet down ~0.5%
+    assert r["open_return_pct"] < -40
+    assert r["deployed_return_pct"] < -40
+    assert -1 < r["return_pct"] < 0
+    assert r["open_return_pct"] < r["return_pct"], (
+        "return on risk must not be diluted by idle cash"
+    )
+
+
+async def test_a_wallet_with_nothing_at_risk_reports_no_return_on_risk(db_session):
+    """Cash has never committed a dollar, so a return on committed capital is
+    undefined for it — reported as None rather than as a flattering zero."""
+    svc = LabService(db_session)
+    await svc.activate(valid_from=VALID_FROM)
+    rows = await leaderboard.strategy_rows(db_session)
+    cash = next(x for x in rows if x["strategy_id"] == "V6-01")
+    assert cash["open_return_pct"] is None
+    assert cash["deployed_return_pct"] is None
+    assert cash["capital_at_work_pct"] == 0
+    assert cash["return_pct"] == 0

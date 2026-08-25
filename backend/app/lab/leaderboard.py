@@ -69,6 +69,15 @@ async def strategy_rows(session: AsyncSession, *, before: datetime | None = None
              for p in opens), Decimal(0)
         )
         realized = sum(pnls, Decimal(0))
+        # Return on the money that is actually AT RISK, not on the wallet.
+        # With $10 positions against $1,000 a strategy is ~99% idle cash, so
+        # `return_pct` compresses every candidate into the same tenth of a
+        # percent and hides which of them can trade. These two undo that:
+        #   open_return_pct     — how the book it holds RIGHT NOW is doing
+        #   deployed_return_pct — how every dollar it has ever committed did
+        deployed_ever = sum((p.size_usd for p in positions), Decimal(0))
+        open_pnl = open_value - open_cost
+        total_pnl = realized + open_pnl
         # Cash is reconstructed rather than read, so a snapshot bounded in the
         # past is consistent with the positions it actually contains.
         cash = row.starting_equity - open_cost + realized
@@ -88,6 +97,14 @@ async def strategy_rows(session: AsyncSession, *, before: datetime | None = None
             "net_pnl": equity - row.starting_equity,
             "return_pct": ((equity / row.starting_equity - 1) * 100
                            if row.starting_equity else Decimal(0)),
+            "open_cost_basis": open_cost,
+            "open_pnl": open_pnl,
+            "open_return_pct": ((open_pnl / open_cost * 100) if open_cost > 0 else None),
+            "deployed_ever": deployed_ever,
+            "deployed_return_pct": ((total_pnl / deployed_ever * 100)
+                                    if deployed_ever > 0 else None),
+            "capital_at_work_pct": ((open_cost / row.starting_equity * 100)
+                                    if row.starting_equity else Decimal(0)),
             "trades": len(closed), "open_positions": len(opens),
             "wins": len(wins), "losses": len(losses),
             "win_pct": (Decimal(len(wins)) / len(closed) * 100) if closed else None,
