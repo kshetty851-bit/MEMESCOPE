@@ -1,0 +1,119 @@
+/**
+ * V6 Forward Strategy Lab wire types.
+ *
+ * Every number arrives already computed. The client formats and sorts; it
+ * never derives a figure the experiment owns, because a second implementation
+ * would be a second answer and the first time either changed they would
+ * disagree.
+ */
+
+export interface LabStrategyRow {
+  rank: number;
+  strategy_id: string;
+  name: string;
+  status: "active" | "failed";
+  failed_reason: string | null;
+  checkpoint_minutes: number | null;
+  size_usd: number;
+  max_concurrent: number;
+  max_exposure_usd: number;
+  starting_equity: number;
+  cash: number;
+  open_cost: number;
+  open_value: number;
+  equity: number;
+  net_pnl: number;
+  return_pct: number;
+  trades: number;
+  open_positions: number;
+  wins: number;
+  losses: number;
+  win_pct: number | null;
+  expectancy: number | null;
+  profit_factor: number | null;
+  max_dd_pct: number;
+  avg_position: number;
+  exec_125_pct: number;
+  exec_150_pct: number;
+  exec_200_pct: number;
+  best_trade: number | null;
+  worst_trade: number | null;
+  expectancy_ex_best1: number | null;
+  expectancy_ex_best3: number | null;
+  top1_profit_share_pct: number | null;
+  top3_profit_share_pct: number | null;
+  losing_streak: number;
+  confidence: string;
+  evidence: string;
+  overfit_risk: string;
+  hist: Record<string, number | string>;
+  hist_is_proxy: boolean;
+}
+
+export interface LabLeaders {
+  profit: { strategy_id: string; name: string; equity: number; return_pct: number;
+            confidence: string };
+  risk_adjusted: { strategy_id: string; name: string; return_pct: number;
+                   profit_factor: number | null; max_dd_pct: number; trades: number;
+                   confidence: string };
+  executable_2x: { strategy_id: string; name: string; exec_200_pct: number;
+                   trades: number; confidence: string };
+}
+
+export interface LabBoard {
+  disclosure: string;
+  spec_version: string;
+  spec_hash: string;
+  spec_immutable: boolean;
+  valid_from: string;
+  snapshot_at: string;
+  snapshot_taken: boolean;
+  snapshot_taken_at: string | null;
+  elapsed_hours: number;
+  hours_to_snapshot: number;
+  status: string;
+  real_money_enabled: boolean;
+  total_closed_trades: number;
+  overall_confidence: string;
+  leaders: LabLeaders;
+  strategies: LabStrategyRow[];
+}
+
+export interface LabPositionRow {
+  mint: string;
+  opened_at: string;
+  status: string;
+  size_usd: number;
+  open_value: number | null;
+  exec_multiple: number | null;
+  peak_exec_multiple: number;
+  closed_at: string | null;
+  exit_reason: string | null;
+  exit_proceeds_usd: number | null;
+  pnl: number | null;
+  route_state: string | null;
+  reached_125: boolean;
+  reached_150: boolean;
+  reached_200: boolean;
+  partial_done: boolean;
+}
+
+export interface LabStrategyDetail {
+  disclosure: string;
+  strategy: {
+    id: string; name: string; hypothesis: string;
+    checkpoint_minutes: number | null;
+    entry: { feature: string; op: string; value: string; reason: string }[];
+    size_usd: string; max_concurrent: number; max_exposure_usd: string;
+    exits: Record<string, string | number>;
+    evidence: string; overfit_risk: string;
+    hist: Record<string, number | string>; hist_is_proxy: boolean;
+    caveats: string[]; note: string;
+  };
+  stats: LabStrategyRow;
+  historical_warning: string | null;
+  skip_reasons: Record<string, number>;
+  decisions_total: number;
+  equity_curve: { at: string; equity: number; cash: number; open_value: number }[];
+  positions: LabPositionRow[];
+}

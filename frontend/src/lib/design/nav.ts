@@ -95,6 +95,14 @@ export const NAV_GROUPS: NavGroup[] = [
       // The Arena sits beside the wallet because that is where a reader looks
       // for it — but it is a research simulation, and the page says so above
       // the fold. Its equity is not the Paper Wallet's equity.
+      // The V6 Lab is the live experiment; the Arena stays reachable because
+      // its record is evidence and a UI change must not bury it.
+      {
+        href: "/strategy-lab",
+        label: "Strategy Lab",
+        icon: IconSpark,
+        status: "ready",
+      },
       {
         href: "/strategy-lab/forward-arena",
         label: "Forward Arena",

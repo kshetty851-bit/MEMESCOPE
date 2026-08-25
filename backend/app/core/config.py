@@ -548,6 +548,19 @@ class Settings(BaseSettings):
     #: means "stamp at first activation", which is then immutable in the row.
     ARENA_VALID_FROM: str = ""
 
+    # --- V6 Forward Strategy Lab (research simulation only) -----------------
+    # Twenty $1,000 virtual portfolios scoring the frozen V6_FINAL_20_STRATEGIES
+    # registry against a cash control, all fed by the one MEMESCOPE scanner. It
+    # never creates a paper/karthik/real position and never writes outside
+    # lab_*. Ships dark; production turns it on deliberately.
+    FEATURE_LAB_ENABLED: bool = False
+    #: The contamination boundary (mission §15): tokens whose checkpoint
+    #: precedes this instant are never scored, because the historical dataset
+    #: has already been inspected seven times. ISO-8601 UTC. Empty means "stamp
+    #: at first activation", after which the row makes it immutable — including
+    #: the 24-hour snapshot instant derived from it.
+    LAB_VALID_FROM: str = ""
+
     #: First-hour observation SLA: the median matured admission/nursery token
     #: must have at least this many stored observations in its first hour.
     #: V4 measured 7; the fast lane targets 30+ (nursery asks for 60s refresh).
@@ -1089,6 +1102,19 @@ class Settings(BaseSettings):
                 return json.loads(text)
             return [item.strip() for item in text.split(",") if item.strip()]
         return value
+
+    @property
+    def lab_valid_from(self) -> "datetime | None":
+        """The frozen V6 contamination boundary, parsed. None = stamp at activation."""
+        from datetime import datetime as _dt
+
+        raw = (self.LAB_VALID_FROM or "").strip()
+        if not raw:
+            return None
+        try:
+            return _dt.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            return None
 
     @property
     def arena_valid_from(self) -> "datetime | None":

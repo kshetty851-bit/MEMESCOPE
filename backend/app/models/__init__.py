@@ -70,6 +70,14 @@ from app.models.arena import (  # noqa: F401
     ArenaDecision,
     ArenaPosition,
 )
+from app.models.lab import (  # noqa: F401
+    LabDecision,
+    LabEquityPoint,
+    LabPosition,
+    LabSnapshot,
+    LabStrategy,
+    LabTournament,
+)
 from app.models.research_data import (  # noqa: F401
     HolderSnapshot,
     JupiterUniverseSnapshot,

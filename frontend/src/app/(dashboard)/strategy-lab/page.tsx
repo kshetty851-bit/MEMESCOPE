@@ -1,0 +1,475 @@
+"use client";
+
+import { useMemo, useState } from "react";
+
+import { Label, Panel } from "@/components/ui/panel";
+import { Skeleton } from "@/components/ui/skeleton";
+import { ErrorState } from "@/components/ui/states";
+import { useLabBoard, useLabStrategy } from "@/hooks/use-lab";
+import type { LabBoard, LabStrategyRow } from "@/types/lab";
+
+/**
+ * V6 FORWARD STRATEGY LAB
+ *
+ * Twenty virtual $1,000 portfolios scoring the frozen V6 registry against a
+ * cash control, all fed by the one MEMESCOPE scanner. **This is not the Paper
+ * Wallet and it is not real money.** The page says so above the fold rather
+ * than in a footnote: a reader who confused them would draw a conclusion about
+ * money that does not exist.
+ *
+ * Every figure is served already computed. Nothing here recomputes an
+ * expectancy, a profit factor or a rate — a second implementation would be a
+ * second answer, and the first time either changed they would disagree.
+ *
+ * Historical and forward figures are shown in separate columns and are never
+ * added together. The entire point of the tournament is to find out whether
+ * the historical liquidity effect survives data nobody has seen.
+ */
+
+function money(v: number | null | undefined, digits = 2): string {
+  return v === null || v === undefined || !Number.isFinite(v)
+    ? "—"
+    : `$${v.toFixed(digits)}`;
+}
+
+function signed(v: number | null | undefined): string {
+  if (v === null || v === undefined || !Number.isFinite(v)) return "—";
+  return `${v >= 0 ? "+" : "−"}$${Math.abs(v).toFixed(2)}`;
+}
+
+function pct(v: number | null | undefined, digits = 1): string {
+  return v === null || v === undefined || !Number.isFinite(v)
+    ? "—"
+    : `${v.toFixed(digits)}%`;
+}
+
+function num(v: number | null | undefined, digits = 2): string {
+  return v === null || v === undefined || !Number.isFinite(v)
+    ? "—"
+    : v.toFixed(digits);
+}
+
+function checkpoint(minutes: number | null): string {
+  if (minutes === null) return "never";
+  return minutes === 0 ? "admission" : `+${minutes}m`;
+}
+
+function elapsed(hours: number): string {
+  const h = Math.floor(hours);
+  const m = Math.floor((hours - h) * 60);
+  return `${h}h ${String(m).padStart(2, "0")}m`;
+}
+
+const COLUMNS: { key: keyof LabStrategyRow | "rank"; label: string; numeric: boolean }[] = [
+  { key: "rank", label: "#", numeric: true },
+  { key: "strategy_id", label: "Strategy", numeric: false },
+  { key: "status", label: "Status", numeric: false },
+  { key: "starting_equity", label: "Start", numeric: true },
+  { key: "cash", label: "Cash", numeric: true },
+  { key: "open_cost", label: "Open cost", numeric: true },
+  { key: "open_value", label: "Open value", numeric: true },
+  { key: "equity", label: "Equity", numeric: true },
+  { key: "net_pnl", label: "Net P&L", numeric: true },
+  { key: "return_pct", label: "Return", numeric: true },
+  { key: "trades", label: "Trades", numeric: true },
+  { key: "wins", label: "W", numeric: true },
+  { key: "losses", label: "L", numeric: true },
+  { key: "win_pct", label: "Win %", numeric: true },
+  { key: "expectancy", label: "Expectancy", numeric: true },
+  { key: "profit_factor", label: "PF", numeric: true },
+  { key: "max_dd_pct", label: "Max DD", numeric: true },
+  { key: "avg_position", label: "Avg pos", numeric: true },
+  { key: "max_exposure_usd", label: "Max exp", numeric: true },
+  { key: "exec_125_pct", label: "Exec 1.25×", numeric: true },
+  { key: "exec_150_pct", label: "Exec 1.5×", numeric: true },
+  { key: "exec_200_pct", label: "Exec 2×", numeric: true },
+];
+
+function cell(row: LabStrategyRow, key: string): string {
+  switch (key) {
+    case "rank": return String(row.rank);
+    case "strategy_id": return `${row.strategy_id} ${row.name}`;
+    case "status": return row.status === "failed" ? "FAILED — DRAWDOWN" : "active";
+    case "starting_equity": return money(row.starting_equity);
+    case "cash": return money(row.cash);
+    case "open_cost": return money(row.open_cost);
+    case "open_value": return money(row.open_value);
+    case "equity": return money(row.equity);
+    case "net_pnl": return signed(row.net_pnl);
+    case "return_pct": return pct(row.return_pct, 2);
+    case "trades": return String(row.trades);
+    case "wins": return String(row.wins);
+    case "losses": return String(row.losses);
+    case "win_pct": return pct(row.win_pct);
+    case "expectancy": return signed(row.expectancy);
+    case "profit_factor": return num(row.profit_factor, 3);
+    case "max_dd_pct": return pct(row.max_dd_pct);
+    case "avg_position": return money(row.avg_position);
+    case "max_exposure_usd": return money(row.max_exposure_usd, 0);
+    case "exec_125_pct": return pct(row.exec_125_pct);
+    case "exec_150_pct": return pct(row.exec_150_pct);
+    case "exec_200_pct": return pct(row.exec_200_pct);
+    default: return "—";
+  }
+}
+
+function Header({ board }: { board: LabBoard }) {
+  return (
+    <Panel density="compact">
+      <div className="flex flex-wrap items-baseline justify-between gap-4">
+        <div>
+          <Label>V6 FORWARD STRATEGY LAB</Label>
+          <h1 className="mt-1 text-lg font-medium text-ink">
+            20 STRATEGIES · $1,000 EACH · SAME MEMESCOPE SCANNER
+          </h1>
+          <p className="mt-1 text-xs font-medium tracking-wide text-warning">
+            PAPER / RESEARCH ONLY — REAL MONEY OFF
+          </p>
+        </div>
+        <dl className="grid grid-cols-2 gap-x-8 gap-y-1 text-xs sm:grid-cols-4">
+          <div>
+            <dt className="text-muted">Start</dt>
+            <dd className="font-mono text-ink">
+              {new Date(board.valid_from).toISOString().replace("T", " ").slice(0, 16)}Z
+            </dd>
+          </div>
+          <div>
+            <dt className="text-muted">24h snapshot</dt>
+            <dd className="font-mono text-ink">
+              {new Date(board.snapshot_at).toISOString().replace("T", " ").slice(0, 16)}Z
+            </dd>
+          </div>
+          <div>
+            <dt className="text-muted">Elapsed</dt>
+            <dd className="font-mono text-ink">{elapsed(board.elapsed_hours)}</dd>
+          </div>
+          <div>
+            <dt className="text-muted">Status</dt>
+            <dd className="font-mono text-ink">
+              {board.snapshot_taken
+                ? "24H SNAPSHOT TAKEN — RUNNING ON"
+                : `${elapsed(board.hours_to_snapshot)} to snapshot`}
+            </dd>
+          </div>
+        </dl>
+      </div>
+      <p className="mt-3 border-t border-line pt-3 text-xs leading-relaxed text-muted">
+        {board.disclosure}
+      </p>
+      <p className="mt-2 font-mono text-[10px] text-muted">
+        spec {board.spec_version} · hash {board.spec_hash.slice(0, 16)}… ·
+        STRATEGY SPEC IMMUTABLE = TRUE · {board.total_closed_trades} closed trades ·
+        confidence {board.overall_confidence.replace(/_/g, " ")}
+      </p>
+    </Panel>
+  );
+}
+
+function Leaders({ board }: { board: LabBoard }) {
+  const { profit, risk_adjusted: risk, executable_2x: twoX } = board.leaders;
+  const badges = [
+    { title: "PROFIT LEADER", id: profit.strategy_id, name: profit.name,
+      main: money(profit.equity),
+      sub: `${pct(profit.return_pct, 2)} · ${profit.confidence.replace(/_/g, " ")}` },
+    { title: "RISK-ADJUSTED LEADER", id: risk.strategy_id, name: risk.name,
+      main: pct(risk.return_pct, 2),
+      sub: `PF ${num(risk.profit_factor, 2)} · DD ${pct(risk.max_dd_pct)} · ${risk.trades} trades` },
+    { title: "EXECUTABLE 2× LEADER", id: twoX.strategy_id, name: twoX.name,
+      main: pct(twoX.exec_200_pct),
+      sub: `${twoX.trades} trades · ${twoX.confidence.replace(/_/g, " ")}` },
+  ];
+  return (
+    <div className="grid gap-3 sm:grid-cols-3">
+      {badges.map((b) => (
+        <Panel key={b.title} density="compact">
+          <Label>{b.title}</Label>
+          <p className="mt-1 font-mono text-sm text-ink">
+            {b.id} <span className="text-muted">{b.name}</span>
+          </p>
+          <p className="mt-1 text-xl font-medium text-ink">{b.main}</p>
+          <p className="mt-0.5 text-xs text-muted">{b.sub}</p>
+        </Panel>
+      ))}
+    </div>
+  );
+}
+
+function Drawer({ id, onClose }: { id: string; onClose: () => void }) {
+  const { data, isLoading } = useLabStrategy(id);
+  return (
+    <Panel>
+      <div className="flex items-start justify-between gap-4">
+        <Label>STRATEGY DETAIL — {id}</Label>
+        <button onClick={onClose} className="text-xs text-muted hover:text-ink">
+          close
+        </button>
+      </div>
+      {isLoading || !data ? (
+        <Skeleton className="mt-3 h-40 w-full" />
+      ) : (
+        <div className="mt-3 space-y-4 text-xs">
+          <div>
+            <h3 className="text-sm font-medium text-ink">{data.strategy.name}</h3>
+            <p className="mt-1 leading-relaxed text-muted">{data.strategy.hypothesis}</p>
+          </div>
+          {data.historical_warning ? (
+            <p className="rounded border border-warning/40 bg-warning/[0.05] p-2 text-warning">
+              {data.historical_warning}
+            </p>
+          ) : null}
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <Label>FROZEN RULES</Label>
+              <ul className="mt-1 space-y-0.5 font-mono text-[11px] text-ink">
+                <li>decision: {checkpoint(data.strategy.checkpoint_minutes)}</li>
+                {data.strategy.entry.length === 0 ? (
+                  <li>entry: every eligible token (control)</li>
+                ) : (
+                  data.strategy.entry.map((c, i) => (
+                    <li key={i}>
+                      entry {i + 1}: {c.feature} {c.op} {c.value}
+                    </li>
+                  ))
+                )}
+                <li>size: ${data.strategy.size_usd}</li>
+                <li>max concurrent: {data.strategy.max_concurrent}</li>
+                <li>max exposure: ${data.strategy.max_exposure_usd}</li>
+                {Object.entries(data.strategy.exits).map(([k, v]) => (
+                  <li key={k}>
+                    {k.replace(/_/g, " ")}: {String(v)}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div>
+              <Label>
+                HISTORICAL CONTEXT{data.strategy.hist_is_proxy ? " — PROXY ONLY" : ""}
+              </Label>
+              <ul className="mt-1 space-y-0.5 font-mono text-[11px] text-muted">
+                {Object.entries(data.strategy.hist).map(([k, v]) => (
+                  <li key={k}>
+                    {k}: {String(v)}
+                  </li>
+                ))}
+                <li>evidence: {data.strategy.evidence}</li>
+                <li>overfit risk: {data.strategy.overfit_risk}</li>
+              </ul>
+              {data.strategy.caveats.length > 0 ? (
+                <ul className="mt-2 space-y-0.5 text-[11px] text-warning">
+                  {data.strategy.caveats.map((c) => (
+                    <li key={c}>⚠ {c.replace(/_/g, " ")}</li>
+                  ))}
+                </ul>
+              ) : null}
+              {data.strategy.note ? (
+                <p className="mt-2 leading-relaxed text-muted">{data.strategy.note}</p>
+              ) : null}
+            </div>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <Label>FORWARD RESULT (this tournament)</Label>
+              <ul className="mt-1 space-y-0.5 font-mono text-[11px] text-ink">
+                <li>equity: {money(data.stats?.equity)}</li>
+                <li>cash: {money(data.stats?.cash)}</li>
+                <li>
+                  open: {money(data.stats?.open_value)} value /{" "}
+                  {money(data.stats?.open_cost)} cost
+                </li>
+                <li>closed trades: {data.stats?.trades ?? 0}</li>
+                <li>expectancy: {signed(data.stats?.expectancy)}</li>
+                <li>PF: {num(data.stats?.profit_factor, 3)}</li>
+                <li>max DD: {pct(data.stats?.max_dd_pct)}</li>
+                <li>best / worst: {signed(data.stats?.best_trade)} / {signed(data.stats?.worst_trade)}</li>
+                <li>without best 1: {signed(data.stats?.expectancy_ex_best1)}</li>
+                <li>without best 3: {signed(data.stats?.expectancy_ex_best3)}</li>
+                <li>top-1 profit share: {pct(data.stats?.top1_profit_share_pct)}</li>
+                <li>top-3 profit share: {pct(data.stats?.top3_profit_share_pct)}</li>
+                <li>longest losing streak: {data.stats?.losing_streak ?? 0}</li>
+              </ul>
+            </div>
+            <div>
+              <Label>SKIP REASONS ({data.decisions_total} decisions)</Label>
+              <ul className="mt-1 space-y-0.5 font-mono text-[11px] text-muted">
+                {Object.entries(data.skip_reasons).slice(0, 12).map(([r, n]) => (
+                  <li key={r}>
+                    {r.replace(/_/g, " ")}: {n}
+                  </li>
+                ))}
+                {Object.keys(data.skip_reasons).length === 0 ? <li>none yet</li> : null}
+              </ul>
+            </div>
+          </div>
+          <div>
+            <Label>POSITIONS ({data.positions.length})</Label>
+            <div className="mt-1 max-h-64 overflow-auto">
+              <table className="w-full text-left font-mono text-[11px]">
+                <thead className="text-muted">
+                  <tr>
+                    <th className="py-1 pr-3">mint</th>
+                    <th className="py-1 pr-3">opened</th>
+                    <th className="py-1 pr-3">status</th>
+                    <th className="py-1 pr-3 text-right">value</th>
+                    <th className="py-1 pr-3 text-right">P&L</th>
+                    <th className="py-1 pr-3">exit</th>
+                    <th className="py-1 pr-3">route</th>
+                    <th className="py-1">marks</th>
+                  </tr>
+                </thead>
+                <tbody className="text-ink">
+                  {data.positions.map((p) => (
+                    <tr key={p.mint} className="border-t border-line">
+                      <td className="py-1 pr-3">{p.mint.slice(0, 6)}…</td>
+                      <td className="py-1 pr-3">{p.opened_at.slice(5, 16).replace("T", " ")}</td>
+                      <td className="py-1 pr-3">{p.status}</td>
+                      <td className="py-1 pr-3 text-right">
+                        {money(p.status === "closed" ? p.exit_proceeds_usd : p.open_value)}
+                      </td>
+                      <td className="py-1 pr-3 text-right">{signed(p.pnl)}</td>
+                      <td className="py-1 pr-3">{p.exit_reason ?? "—"}</td>
+                      <td className="py-1 pr-3">{p.route_state ?? "—"}</td>
+                      <td className="py-1">
+                        {[p.reached_125 && "1.25×", p.reached_150 && "1.5×",
+                          p.reached_200 && "2×"].filter(Boolean).join(" ") || "—"}
+                      </td>
+                    </tr>
+                  ))}
+                  {data.positions.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="py-2 text-muted">
+                        no positions yet
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          {data.equity_curve.length > 1 ? (
+            <div>
+              <Label>EQUITY CURVE ({data.equity_curve.length} marks)</Label>
+              <Sparkline points={data.equity_curve.map((p) => p.equity)} />
+            </div>
+          ) : null}
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+/** A curve, not a chart library: one path over the marks the ledger recorded. */
+function Sparkline({ points }: { points: number[] }) {
+  if (points.length < 2) return null;
+  const min = Math.min(...points, 1000);
+  const max = Math.max(...points, 1000);
+  const span = max - min || 1;
+  const d = points
+    .map((v, i) => {
+      const x = (i / (points.length - 1)) * 100;
+      const y = 30 - ((v - min) / span) * 30;
+      return `${i === 0 ? "M" : "L"}${x.toFixed(2)},${y.toFixed(2)}`;
+    })
+    .join(" ");
+  const baseline = 30 - ((1000 - min) / span) * 30;
+  return (
+    <svg viewBox="0 0 100 30" preserveAspectRatio="none" className="mt-1 h-16 w-full">
+      <line x1="0" x2="100" y1={baseline} y2={baseline}
+            stroke="currentColor" strokeWidth="0.3" className="text-muted" />
+      <path d={d} fill="none" stroke="currentColor" strokeWidth="0.7"
+            className="text-accent" vectorEffect="non-scaling-stroke" />
+    </svg>
+  );
+}
+
+export default function StrategyLabPage() {
+  const { data, isLoading, error } = useLabBoard();
+  const [sortKey, setSortKey] = useState<string>("rank");
+  const [asc, setAsc] = useState(true);
+  const [selected, setSelected] = useState<string | null>(null);
+
+  const rows = useMemo(() => {
+    if (!data) return [];
+    const copy = [...data.strategies];
+    copy.sort((a, b) => {
+      const x = a[sortKey as keyof LabStrategyRow];
+      const y = b[sortKey as keyof LabStrategyRow];
+      if (typeof x === "number" && typeof y === "number") return asc ? x - y : y - x;
+      return asc
+        ? String(x).localeCompare(String(y))
+        : String(y).localeCompare(String(x));
+    });
+    return copy;
+  }, [data, sortKey, asc]);
+
+  if (error) return <ErrorState body="The Strategy Lab board is unavailable." />;
+  if (isLoading || !data) return <Skeleton className="h-96 w-full" />;
+
+  return (
+    <div className="space-y-4">
+      <Header board={data} />
+      <Leaders board={data} />
+      <Panel density="compact">
+        <div className="flex items-baseline justify-between">
+          <Label>LIVE LEADERBOARD — 20 STRATEGIES</Label>
+          <p className="text-[10px] text-muted">
+            historical figures are shown per strategy and are never added to these
+          </p>
+        </div>
+        <div className="mt-2 overflow-x-auto">
+          <table className="w-full text-left text-[11px]">
+            <thead className="text-muted">
+              <tr>
+                {COLUMNS.map((c) => (
+                  <th
+                    key={String(c.key)}
+                    className={`cursor-pointer whitespace-nowrap py-1 pr-3 font-normal hover:text-ink ${
+                      c.numeric ? "text-right" : ""
+                    }`}
+                    onClick={() => {
+                      if (sortKey === c.key) setAsc(!asc);
+                      else {
+                        setSortKey(String(c.key));
+                        setAsc(c.key === "rank" || !c.numeric);
+                      }
+                    }}
+                  >
+                    {c.label}
+                    {sortKey === c.key ? (asc ? " ↑" : " ↓") : ""}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="font-mono text-ink">
+              {rows.map((r) => (
+                <tr
+                  key={r.strategy_id}
+                  onClick={() => setSelected(r.strategy_id)}
+                  className={`cursor-pointer border-t border-line hover:bg-surface-2 ${
+                    r.status === "failed" ? "text-danger" : ""
+                  } ${r.strategy_id === "V6-01" ? "font-medium" : ""}`}
+                >
+                  {COLUMNS.map((c) => (
+                    <td
+                      key={String(c.key)}
+                      className={`whitespace-nowrap py-1 pr-3 ${
+                        c.numeric ? "text-right" : ""
+                      }`}
+                    >
+                      {cell(r, String(c.key))}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="mt-2 text-[10px] text-muted">
+          Equity is cash plus what the open book could be SOLD for, never plus what it
+          cost. A row in red has tripped the −20% circuit breaker: it stops opening and
+          its open positions still run to their own frozen exits. Cash is allowed to win.
+        </p>
+      </Panel>
+      {selected ? <Drawer id={selected} onClose={() => setSelected(null)} /> : null}
+    </div>
+  );
+}
