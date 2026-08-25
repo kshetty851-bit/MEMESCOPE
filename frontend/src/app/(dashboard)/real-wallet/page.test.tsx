@@ -4,13 +4,14 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import RealWalletPage from "@/app/(dashboard)/real-wallet/page";
+import type * as ApiClientModule from "@/lib/api-client";
 import { ApiError, api } from "@/lib/api-client";
 
 // `api` is mocked; `ApiError` is not. The page branches on the real error type,
 // so a stubbed one would let the branch pass a test it does not pass in a
 // browser — which is the whole failure this file now covers.
 vi.mock("@/lib/api-client", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/api-client")>()),
+  ...(await importOriginal<typeof ApiClientModule>()),
   api: { get: vi.fn(), post: vi.fn() },
 }));
 
