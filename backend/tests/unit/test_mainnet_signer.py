@@ -1,8 +1,10 @@
 """The mainnet signer holds the key. Everything about it is adversarial.
 
-Three properties, and losing any one of them loses the wallet:
+Four properties, and losing any one of them loses the wallet:
   * it proves the chain BEFORE it says anything about the key;
-  * it never returns a secret, and cannot produce a signature at all;
+  * it never returns a secret, only a public key and a signature;
+  * it reloads and re-verifies every intent it signs, so a compromised caller
+    can ask for a signature and still not choose what gets signed;
   * an application container can never read the key path it uses.
 """
 
@@ -21,21 +23,9 @@ from app.real_wallet.mainnet_signer_client import UnixMainnetSignerClient
 pytestmark = pytest.mark.unit
 
 
-def test_it_refuses_to_sign_by_name_not_by_omission():
-    """A missing branch reads as an oversight; a named refusal reads as a
-    decision, and tells the next person why."""
-    assert ms.SIGN_REFUSAL == "mainnet_signing_not_implemented"
-    src = Path(ms.__file__).read_text()
-    tree = ast.parse(src)
-    called = {
-        n.func.attr for n in ast.walk(tree)
-        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
-    }
-    assert "sign_message" not in called
-    assert "sign" not in called
-
-
-async def test_sign_is_refused_over_the_wire(monkeypatch):
+async def test_a_sign_request_without_an_intent_id_is_refused():
+    """The caller may send exactly one thing: an id. Anything else is refused
+    before a database or a key is touched."""
     captured: dict = {}
 
     class _Writer:
@@ -45,11 +35,33 @@ async def test_sign_is_refused_over_the_wire(monkeypatch):
         async def wait_closed(self): ...
 
     class _Reader:
-        async def readline(self): return b'{"op":"sign","intent_id":"x"}\n'
+        async def readline(self): return b'{"op":"sign"}\n'
 
     await ms._handle_connection(_Reader(), _Writer())
     assert captured["body"]["ok"] is False
-    assert captured["body"]["error"] == ms.SIGN_REFUSAL
+    assert captured["body"]["error"] == "invalid_signer_request"
+
+
+def test_signing_never_trusts_what_the_caller_sends():
+    """Every value deciding WHAT gets signed is reloaded inside the signer, so
+    a compromised caller can ask for a signature and still not choose it."""
+    tree = ast.parse(Path(ms.__file__).read_text())
+    fn = next(n for n in ast.walk(tree)
+              if isinstance(n, ast.AsyncFunctionDef) and n.name == "sign_intent")
+    assert [a.arg for a in fn.args.args] == ["intent_id"]
+    called = {n.func.attr for n in ast.walk(fn)
+              if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)}
+    assert "by_id" in called                    # reloads the intent itself
+    assert "intent_fingerprint" in called       # recomputes, never accepts
+    assert "sign_jupiter_transaction" in called # signs through the re-verifier
+    assert "sign_message" not in called         # never the raw key
+
+
+def test_signing_is_legal_from_exactly_one_state_and_one_wallet():
+    src = Path(ms.__file__).read_text()
+    assert "ExecutionState.ORDER_CREATED" in src
+    assert "intent_not_signable" in src
+    assert "intent_wallet_is_not_this_signer" in src
 
 
 async def test_an_unsupported_operation_is_refused():
@@ -133,7 +145,7 @@ async def test_the_client_refuses_when_no_socket_is_configured(monkeypatch):
         await UnixMainnetSignerClient().identity()
 
 
-def test_identity_returns_a_public_key_and_says_it_cannot_sign():
+def test_identity_returns_a_public_key_and_never_a_secret():
     """The response shape is the contract, read off the parse tree."""
     tree = ast.parse(Path(ms.__file__).read_text())
     fn = next(
@@ -145,14 +157,9 @@ def test_identity_returns_a_public_key_and_says_it_cannot_sign():
         k.value for k in returned.value.keys
         if isinstance(k, ast.Constant)
     }
-    assert {"public_key", "matches_pinned_key", "can_sign", "sign_refusal"} <= keys
-    # `can_sign` is a hard False, not a computed value that could become True.
-    can_sign = returned.value.values[list(keys).index("can_sign")] \
-        if False else next(
-            v for k, v in zip(returned.value.keys, returned.value.values)
-            if isinstance(k, ast.Constant) and k.value == "can_sign"
-        )
-    assert isinstance(can_sign, ast.Constant) and can_sign.value is False
+    assert {"public_key", "matches_pinned_key", "network", "genesis_hash"} <= keys
+    # Identity must never return anything derived from the secret itself.
+    assert not {"secret", "private_key", "keypair", "seed"} & keys
 
 
 # --- deployment isolation ----------------------------------------------------
