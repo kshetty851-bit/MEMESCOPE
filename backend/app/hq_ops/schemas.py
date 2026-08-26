@@ -118,6 +118,26 @@ class TaskOutcome(BaseSchema):
     consecutive_failures: int
 
 
+class LabHealthRow(BaseSchema):
+    """Whether the Strategy Lab is still producing evidence, or only ticks.
+
+    Every field is nullable because unmeasurable is not zero: "no stale
+    positions" and "the stale positions could not be counted" are opposite
+    readings, and reporting the second as the first is the failure this exists
+    to catch.
+    """
+
+    measured: bool
+    detail: str
+    open_positions: int | None = None
+    stale_positions: int | None = None
+    stale_pct: float | None = None
+    quote_backed_pct: float | None = None
+    minutes_since_decision: float | None = None
+    minutes_since_close: float | None = None
+    spec_version: str | None = None
+
+
 class OperationsHealth(BaseSchema):
     """Everything HQ's production watch can actually see.
 
@@ -139,6 +159,10 @@ class OperationsHealth(BaseSchema):
     tasks: list[TaskOutcome] = []
     #: Tasks that have failed on `FAILURE_THRESHOLD` consecutive runs.
     tasks_failing: int = 0
+    #: The Strategy Lab's own evidence quality. Reported beside the components
+    #: and, like `tasks`, deliberately outside `overall`: a Lab that has stopped
+    #: measuring is not a sick database.
+    lab: LabHealthRow | None = None
     #: Worst status across everything that was actually measured. Components
     #: that could not be probed do not drag this down — they are reported as
     #: `unknown` on their own row, where a reader can see them.

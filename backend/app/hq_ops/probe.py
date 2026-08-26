@@ -39,6 +39,7 @@ from app.hq_ops.schemas import (
     DiskHealth,
     OperationsHealth,
     QueueHealth,
+    LabHealthRow,
     SchedulerHealth,
     TaskOutcome,
     WorkerHealth,
@@ -288,6 +289,27 @@ def _roll_up(statuses: list[ComponentStatus]) -> ComponentStatus:
     return max(measured, key=lambda status: _SEVERITY[status])
 
 
+async def _probe_lab(session: AsyncSession, now: datetime) -> LabHealthRow:
+    """The Strategy Lab's evidence quality, asked of the Lab itself.
+
+    `app.lab.health` owns the semantics — what stale means, which tournament is
+    current, how a mark is backed — because those are the Lab's rules and a
+    second copy here would drift from them. This wraps it so a Lab failure
+    reports as unmeasured rather than taking the whole snapshot down.
+    """
+    from app.lab.health import read as read_lab
+
+    try:
+        return LabHealthRow(**read_lab_result(await read_lab(session, now=now)))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("hq_lab_probe_failed", error=str(exc))
+        return LabHealthRow(measured=False, detail=f"Lab health probe failed: {exc}")
+
+
+def read_lab_result(reading) -> dict:
+    return reading.as_dict()
+
+
 async def snapshot(session: AsyncSession, *, now: datetime | None = None) -> OperationsHealth:
     """One reading of every component. Probes run concurrently.
 
@@ -296,7 +318,8 @@ async def snapshot(session: AsyncSession, *, now: datetime | None = None) -> Ope
     to be monitoring.
     """
     moment = now or datetime.now(UTC)
-    disk, redis_health, database, worker, scheduler, queues, task_rows = await asyncio.gather(
+    (disk, redis_health, database, worker, scheduler, queues, task_rows,
+     lab_row) = await asyncio.gather(
         _probe_disk(),
         _probe_redis(),
         _probe_database(session),
@@ -304,6 +327,7 @@ async def snapshot(session: AsyncSession, *, now: datetime | None = None) -> Ope
         _probe_scheduler(now=moment),
         _probe_queues(),
         task_outcomes.read_all(),
+        _probe_lab(session, moment),
     )
 
     parts: list[ComponentStatus] = [
@@ -340,6 +364,7 @@ async def snapshot(session: AsyncSession, *, now: datetime | None = None) -> Ope
         # line. They are different questions and they get different rows.
         tasks=[TaskOutcome(**row) for row in task_rows],
         tasks_failing=len(task_outcomes.failing(task_rows)),
+        lab=lab_row,
         overall=_roll_up(parts),
         unmeasured=unmeasured,
         environment=settings.ENVIRONMENT,

@@ -44,6 +44,24 @@ from app.hq_ops.remediation import (
     autonomy_enabled,
 )
 from app.hq_ops.task_outcomes import FAILURE_THRESHOLD as TASK_FAILURE_THRESHOLD
+
+#: Lab thresholds. Here rather than in `app.lab.health`, with every other
+#: threshold HQ acts on, so "amber at what?" has one answer in one place.
+#:
+#: Half the book. Not a tenth: some staleness is normal — a token stops being
+#: enriched the moment it stops mattering — and a watch that fires on the normal
+#: case is one nobody reads. At 72%, which is what was actually happening, the
+#: Lab has stopped measuring most of what it holds.
+LAB_STALE_PCT = 50.0
+
+#: Below this, most of the book's VALUE rests on the CPMM model rather than on a
+#: quote anyone could act on. Two thirds is deliberately demanding: the model
+#: priced dying positions at cost, and the leaderboard is the thing a real
+#: strategy gets chosen from.
+LAB_QUOTE_BACKED_PCT = 66.0
+
+LAB_ENTRY_SILENCE_MINUTES = 60.0
+LAB_EXIT_SILENCE_MINUTES = 180.0
 from app.hq_ops.schemas import OperationsHealth
 from app.models.hq_ops import HqAction, HqIncident
 
@@ -143,6 +161,94 @@ def detect(health: OperationsHealth) -> list[Condition]:
                         "reason": row.reason,
                         "last_at": row.at,
                     },
+                )
+            )
+
+    # ── the Strategy Lab ────────────────────────────────────────────────
+    #
+    # None of these has a remediation and none of them ever will. HQ may
+    # restart a worker; it may not touch a tournament, and an action here would
+    # be changing the experiment it is supposed to be observing.
+    lab = health.lab
+    if lab is not None and lab.measured:
+        if lab.stale_pct is not None and lab.stale_pct >= LAB_STALE_PCT:
+            found.append(
+                Condition(
+                    signature="lab:book-unmarkable",
+                    component="worker",
+                    severity="degraded",
+                    summary=(
+                        f"{lab.stale_pct}% of the Lab's open book cannot be marked "
+                        f"({lab.stale_positions} of {lab.open_positions} positions). "
+                        "Those positions are frozen at their last price and are not "
+                        "being evaluated for an exit."
+                    ),
+                    remediation=None,
+                    symptoms={"stale_pct": lab.stale_pct,
+                              "stale_positions": lab.stale_positions,
+                              "open_positions": lab.open_positions},
+                )
+            )
+
+        # By VALUE, not by count. The question is how much of the book's worth
+        # rests on a model that has been wrong before, and a dust position and a
+        # large one do not weigh the same.
+        if (lab.quote_backed_pct is not None
+                and lab.open_positions
+                and lab.quote_backed_pct < LAB_QUOTE_BACKED_PCT):
+            found.append(
+                Condition(
+                    signature="lab:marks-unverified",
+                    component="worker",
+                    severity="degraded",
+                    summary=(
+                        f"Only {lab.quote_backed_pct}% of the Lab's open value is "
+                        "priced from a real sell quote; the rest is the CPMM model "
+                        "over reported liquidity, which overstated dying positions "
+                        "at cost before."
+                    ),
+                    remediation=None,
+                    symptoms={"quote_backed_pct": lab.quote_backed_pct},
+                )
+            )
+
+        # Silence, on both sides. Entries stopping and exits stopping are
+        # different faults with the same appearance from outside: a beat that
+        # keeps ticking.
+        if (lab.minutes_since_decision is not None
+                and lab.minutes_since_decision >= LAB_ENTRY_SILENCE_MINUTES):
+            found.append(
+                Condition(
+                    signature="lab:no-decisions",
+                    component="worker",
+                    severity="degraded",
+                    summary=(
+                        f"The Lab has made no decision for {lab.minutes_since_decision:.0f} "
+                        "minutes. Checkpoints run at admission, +30 and +60, so nothing "
+                        "has reached any of them."
+                    ),
+                    remediation=None,
+                    symptoms={"minutes_since_decision": lab.minutes_since_decision},
+                )
+            )
+
+        if (lab.open_positions
+                and lab.minutes_since_close is not None
+                and lab.minutes_since_close >= LAB_EXIT_SILENCE_MINUTES):
+            found.append(
+                Condition(
+                    signature="lab:no-closes",
+                    component="worker",
+                    severity="degraded",
+                    summary=(
+                        f"No Lab position has closed for {lab.minutes_since_close:.0f} "
+                        f"minutes while {lab.open_positions} are open. Every trading "
+                        "strategy carries a time exit of six hours or less, so the "
+                        "exits themselves have stopped rather than the market gone quiet."
+                    ),
+                    remediation=None,
+                    symptoms={"minutes_since_close": lab.minutes_since_close,
+                              "open_positions": lab.open_positions},
                 )
             )
 
