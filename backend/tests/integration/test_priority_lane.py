@@ -40,6 +40,7 @@ from app.services.market.priority import (
     apply_membership,
     refresh_nursery_lane,
     refresh_priority_lane,
+    resolve_membership,
 )
 from app.workers import priority_tasks
 
@@ -440,3 +441,70 @@ class TestTheNursery:
 
             assert calls == ["nursery"], f"flag={flag} capacity={capacity}"
             assert "nursery" in result
+
+
+class TestTheLabsBookIsProtected:
+    """The Lab holds the platform's live book. Its tokens must keep getting
+    priced, or its positions cannot be marked — or sold.
+
+    Regression for HQ INC-056: the lane queried `paper_positions` only, so when
+    the Paper wallet was retired it reported `paper: 0` and the Lab's holdings
+    inherited no protection. 61 of 108 open positions went unmarkable.
+    """
+
+    @staticmethod
+    async def _lab_position(session: AsyncSession, mint: str) -> None:
+        """Seed through the Lab's own activation, so the row shape stays the
+        Lab's problem rather than this test's."""
+        from decimal import Decimal
+
+        from app.lab.service import LabService
+        from app.models.lab import LabDecision, LabPosition, LabStrategy
+
+        await LabService(session).activate(valid_from=NOW - timedelta(days=1))
+        row = (await session.execute(select(LabStrategy).limit(1))).scalars().one()
+        token_id = await session.scalar(
+            select(TokenTable.id).where(TokenTable.mint_address == mint)
+        )
+        decision = LabDecision(
+            strategy_row_id=row.id, strategy_id=row.strategy_id,
+            mint_address=mint, token_id=token_id,
+            checkpoint_at=NOW, checkpoint_minutes=30, decided_at=NOW,
+            eligible=True, features={}, snapshot_ids={},
+        )
+        session.add(decision)
+        await session.flush()
+        session.add(LabPosition(
+            decision_id=decision.id,
+            strategy_row_id=row.id, strategy_id=row.strategy_id,
+            mint_address=mint, token_id=token_id, opened_at=NOW,
+            entry_price=Decimal("1"), size_usd=Decimal("5"),
+            quantity=Decimal("5"), quantity_remaining=Decimal("5"),
+            banked_proceeds_usd=Decimal(0), status="open", entry_source="model",
+            peak_exec_multiple=Decimal(1),
+        ))
+        await session.flush()
+
+    async def test_an_open_lab_holding_joins_the_lane(
+        self, db_session: AsyncSession
+    ) -> None:
+        mint = "LabHeld" + "1" * 30
+        await _token_with_state(db_session, mint, due_in_seconds=9_000)
+        await self._lab_position(db_session, mint)
+        await db_session.flush()
+
+        members, membership = await resolve_membership(db_session)
+
+        assert mint in members, "an open Lab position must be kept priced"
+        assert membership.lab >= 1
+
+    async def test_a_token_the_lab_does_not_hold_is_not_pulled_in(
+        self, db_session: AsyncSession
+    ) -> None:
+        """The lane stays a bounded, derived set — not everything ever seen."""
+        mint = "LabAbsent" + "1" * 28
+        await _token_with_state(db_session, mint, due_in_seconds=9_000)
+        await db_session.flush()
+
+        members, _ = await resolve_membership(db_session)
+        assert mint not in members

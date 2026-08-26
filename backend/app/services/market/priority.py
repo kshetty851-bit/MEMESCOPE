@@ -36,6 +36,7 @@ from app.models.market import (
     TokenEnrichmentState,
 )
 from app.models.opportunity import LIVE_STATUSES, Opportunity
+from app.models.lab import LabPosition
 from app.models.paper import PaperPosition
 from app.models.radar import RadarToken
 from app.models.research_data import NurseryAdmission
@@ -50,6 +51,7 @@ class PriorityMembership:
     radar: int
     opportunities: int
     paper: int
+    lab: int
     total: int
     promoted: int
     demoted: int
@@ -60,6 +62,7 @@ class PriorityMembership:
             "radar": self.radar,
             "opportunities": self.opportunities,
             "paper": self.paper,
+            "lab": self.lab,
             "total": self.total,
             "promoted": self.promoted,
             "demoted": self.demoted,
@@ -107,14 +110,31 @@ async def resolve_membership(session: AsyncSession) -> tuple[set[str], PriorityM
         ).all()
     )
 
+    lab_mints = list(
+        (
+            await session.scalars(
+                select(LabPosition.mint_address).where(LabPosition.status == "open")
+            )
+        ).all()
+    )
+
     # Open paper positions first. A paper holding is not merely displayed: its
     # next quote can settle an existing position, so allowing the Radar or an
     # opportunity list to consume the cap first can strand it on an old tier.
     # The lane is still one bounded, derived set; this only gives the wallet's
     # already-committed capital precedence within that set.
+    #
+    # LAB HOLDINGS SIT BESIDE PAPER ONES, and were missing until 2026-08-26.
+    # The reasoning above is about committed capital, not about which table it
+    # is recorded in — but only `paper_positions` was ever queried, so when the
+    # Paper wallet was retired the lane went to `paper: 0` and the Lab's book
+    # inherited no protection at all. Its tokens fell out of the refresh
+    # rotation, their snapshots went stale, and 61 of 108 open positions could
+    # not be marked or exited: HQ INC-056. A position the platform will not
+    # re-price is a position it cannot sell.
     ordered: list[str] = []
     seen: set[str] = set()
-    for mint in [*paper_mints, *radar_mints, *opportunity_mints]:
+    for mint in [*paper_mints, *lab_mints, *radar_mints, *opportunity_mints]:
         if mint not in seen:
             seen.add(mint)
             ordered.append(mint)
@@ -127,6 +147,7 @@ async def resolve_membership(session: AsyncSession) -> tuple[set[str], PriorityM
         radar=len(set(radar_mints)),
         opportunities=len(set(opportunity_mints)),
         paper=len(set(paper_mints)),
+        lab=len(set(lab_mints)),
         total=len(members),
         promoted=0,
         demoted=0,
@@ -214,6 +235,7 @@ async def refresh_priority_lane(session: AsyncSession, *, now: datetime) -> Prio
         radar=membership.radar,
         opportunities=membership.opportunities,
         paper=membership.paper,
+        lab=membership.lab,
         total=membership.total,
         promoted=promoted,
         demoted=demoted,
