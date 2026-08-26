@@ -29,7 +29,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
-from app.lab import execution, spec
+from app.lab import execution, sellability, spec
 from app.lab.rules import MarkState, evaluate_entry, evaluate_exit
 from app.lab.spec import STARTING_EQUITY, Strategy
 from app.models.lab import (
@@ -501,6 +501,28 @@ class LabService:
                    ResearchQuote.side == "sell")
             .order_by(ResearchQuote.requested_at.desc()).limit(1)
         )
+        # What a seller would ACTUALLY be offered, when someone asked recently.
+        #
+        # The CPMM model below prices impact against the REPORTED liquidity, and
+        # once a pool collapses that figure stops describing a market: 618dCC…
+        # fell from $727k to $1,722 and the model still called a $3 position
+        # negligible, marking it at $3.07 while Jupiter would pay nothing.
+        #
+        # `None` means nobody asked recently enough to know, and the model stands.
+        # This corrects a FACT the frozen exits read; it changes no rule, and
+        # `dead_zero` — which every strategy already has — is what then fires.
+        realisable = await sellability.realisable_price(
+            self._session, pos.mint_address, now=now
+        )
+        if realisable is not None:
+            worth = realisable * pos.quantity_remaining
+            if worth <= pos.size_usd * sellability.DEAD_FRACTION:
+                return latest.price_usd, latest.liquidity_usd, True, sell_ok
+            # Cap, never raise: a quote for the largest holder understates a
+            # smaller one, and crediting a position with more than the model
+            # already allows would be inventing value rather than removing it.
+            if realisable < latest.price_usd:
+                return realisable, latest.liquidity_usd, False, sell_ok
         return latest.price_usd, latest.liquidity_usd, False, sell_ok
 
     async def _apply_breaker(self, row: LabStrategy, now: datetime) -> None:

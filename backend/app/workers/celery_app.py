@@ -209,6 +209,16 @@ celery_app.conf.beat_schedule = {
         "task": "app.lab.scheduler.lab_tick",
         "schedule": crontab(minute="*"),
     },
+    # Re-quotes what the Lab holds open so `settle` marks it at what a seller
+    # would actually be offered, rather than at a CPMM model over a reported
+    # liquidity figure that stops describing a market once the pool collapses.
+    # Every three minutes, not every minute: Jupiter rate-limits hard and the
+    # sweep paces itself, and a mark that is three minutes behind is still
+    # incomparably better than one that trusts a dead pool.
+    "lab-sellability-refresh": {
+        "task": "app.lab.scheduler.lab_sellability_refresh",
+        "schedule": crontab(minute="*/3"),
+    },
     # The real wallet's heartbeat. Beside the Lab's and at the same cadence,
     # because it acts on Lab decisions and those are actionable for ten minutes.
     # It creates at most one BUY intent per tick and only while the operator's

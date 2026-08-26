@@ -17,13 +17,18 @@ from sqlalchemy import func, select
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.db.session import SessionFactory
-from app.lab import leaderboard, spec
+from app.lab import leaderboard, sellability, spec
 from app.lab.service import LabService
 from app.models.lab import LabPosition, LabSnapshot, LabTournament
 from app.workers.celery_app import celery_app
 from app.workers.runtime import run_async
 
 logger = get_logger(__name__)
+
+#: Its own advisory-lock key. The sweep paces itself against Jupiter's rate
+#: limit and must never hold up the tick that judges checkpoints.
+DRY_RUN_LOCK_NAMESPACE = 0x4D454D45
+SELLABILITY_LOCK_KEY = 0x53454C4C
 
 #: Calendar boundaries that get their own immutable snapshot (protocol §12).
 #: The 24-hour one is a SNAPSHOT, not an ending — nothing here stops the
@@ -119,3 +124,37 @@ async def _snapshots(session, tournament: LabTournament, now: datetime) -> list[
         written.append(label)
         logger.info("lab_snapshot_written", label=label, best_sampled=best)
     return written
+
+
+@celery_app.task(name="app.lab.scheduler.lab_sellability_refresh")
+def lab_sellability_refresh() -> dict[str, Any]:
+    """Re-quote what the Lab is holding, so `settle` marks it honestly.
+
+    Separate from `lab_tick` because it is slow by necessity: Jupiter rate-limits
+    hard, so the sweep paces itself and would otherwise hold up the tick that
+    judges checkpoints. It writes quote rows and decides nothing; `settle` reads
+    them and the frozen exits do the rest.
+    """
+    return run_async(_lab_sellability_refresh())
+
+
+async def _lab_sellability_refresh() -> dict[str, Any]:
+    if not settings.FEATURE_LAB_ENABLED:
+        return {"skipped": "lab_disabled"}
+    try:
+        async with SessionFactory() as session:
+            acquired = await session.scalar(
+                select(func.pg_try_advisory_xact_lock(
+                    DRY_RUN_LOCK_NAMESPACE, SELLABILITY_LOCK_KEY
+                ))
+            )
+            if not acquired:
+                await session.rollback()
+                return {"skipped": "sellability_already_running"}
+            outcome = await sellability.refresh(session, now=utcnow())
+            await session.commit()
+    except Exception:
+        logger.exception("lab_sellability_refresh_failed")
+        return {"failed": True}
+    logger.info("lab_sellability_refresh", **outcome)
+    return outcome

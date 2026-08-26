@@ -379,6 +379,22 @@ async def status(_admin: AdminUser, session: DbSession) -> dict[str, object]:
         "network": settings.REAL_WALLET_NETWORK,
         "rpc": rpc_status,
         "sol_balance": balance_sol,
+        # The balance in the unit every limit on this page is written in. The
+        # price was already being fetched for fee accounting and was only
+        # reachable three levels down; a wallet that shows SOL alone makes the
+        # operator convert in their head against a number the page already knows.
+        # `None` when the price is unreadable — never a stale or guessed rate.
+        "sol_price_usd": (float(sol_price.usd) if sol_price is not None else None),
+        "sol_price_fresh": (
+            sol_price.is_fresh(
+                now, max_age_seconds=settings.EXECUTION_SOL_PRICE_MAX_AGE_SECONDS
+            )
+            if sol_price is not None else False
+        ),
+        "balance_usd": (
+            float(Decimal(str(balance_sol)) * sol_price.usd)
+            if balance_sol is not None and sol_price is not None else None
+        ),
         "token_balances": token_balances,
         "balance_error": balance_error,
         "funding_status": (

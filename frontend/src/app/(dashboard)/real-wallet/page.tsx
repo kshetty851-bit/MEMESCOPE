@@ -16,6 +16,9 @@ type WalletStatus = {
     error: string | null;
   };
   sol_balance: number | null;
+  sol_price_usd: number | null;
+  sol_price_fresh: boolean;
+  balance_usd: number | null;
   token_balances: Array<{
     token_account: string;
     mint_address: string;
@@ -271,6 +274,23 @@ function BalanceCard({
             {balance != null ? balance.toFixed(6) : "—"}
             <span className="ml-2 text-lg text-ink-3">SOL</span>
           </p>
+          <p className="mt-1 text-lg tabular-nums text-ink-2">
+            {data?.balance_usd != null ? (
+              <>
+                ${data.balance_usd.toFixed(2)}
+                <span className="ml-2 text-xs text-ink-3">
+                  at ${data.sol_price_usd?.toFixed(2)}/SOL
+                  {data.sol_price_fresh ? "" : " · PRICE STALE"}
+                </span>
+              </>
+            ) : (
+              // Never a guessed rate: every limit on this page is in dollars, so
+              // a made-up conversion would be a made-up limit.
+              <span className="text-sm text-ink-3">
+                USD unavailable — no fresh SOL price
+              </span>
+            )}
+          </p>
           {address ? (
             <button
               type="button"
@@ -335,7 +355,12 @@ function BalanceCard({
           </p>
           <p className="mt-2 text-sm text-ink-3">
             Keep the total under{" "}
-            <span className="text-ink">{ceiling} SOL</span>
+            <span className="text-ink">
+              {ceiling} SOL
+              {data?.sol_price_usd
+                ? ` (~$${(ceiling * data.sol_price_usd).toFixed(0)})`
+                : ""}
+            </span>
             {headroom != null && headroom > 0 ? (
               <>
                 {" "}
@@ -414,6 +439,9 @@ function BalanceCard({
             Balance available after the fee reserve:{" "}
             <span className="text-ink">
               {balance != null ? Math.max(0, balance - reserve).toFixed(6) : "—"} SOL
+              {balance != null && data?.sol_price_usd
+                ? ` (~$${(Math.max(0, balance - reserve) * data.sol_price_usd).toFixed(2)})`
+                : ""}
             </span>
             .
           </p>
