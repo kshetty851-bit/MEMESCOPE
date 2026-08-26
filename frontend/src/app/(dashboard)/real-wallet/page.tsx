@@ -697,9 +697,10 @@ function Seatbelt({ onEnter }: { onEnter: () => void }) {
           </li>
           <li>
             <span className="text-ink">Today it still cannot.</span> Mainnet submission
-            is refused by two independent code constants, no mainnet signer exists,
-            and no strategy has earned real money. Nothing on this page can change
-            that.
+            is refused by two independent code constants, and no strategy has earned
+            real money. Nothing on this page can change that. The signer now exists and
+            holds the pinned key — which changes who could sign, not whether anything
+            may be submitted.
           </li>
           <li>
             <span className="text-ink">The funding address here is real.</span> SOL sent
