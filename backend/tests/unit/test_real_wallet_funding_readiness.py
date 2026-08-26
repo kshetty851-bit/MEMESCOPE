@@ -96,7 +96,6 @@ def test_ready_to_fund_asks_only_what_receiving_sol_requires(monkeypatch):
     monkeypatch.setattr(settings, "REAL_WALLET_PUBLIC_KEY",
                         "7WctMGpqz1tGkYStBBjJRMnmuh9uwJubYV2tL4pLwRr9")
     monkeypatch.setattr(settings, "REAL_WALLET_NETWORK", "mainnet")
-    monkeypatch.setattr(settings, "REAL_WALLET_EXECUTION_SECRET_FILE", "")
 
     r = fr.evaluate(wallet_balance_sol=Decimal("0.05"), network_verified=True,
                     kill_switch_active=False)
@@ -104,7 +103,7 @@ def test_ready_to_fund_asks_only_what_receiving_sol_requires(monkeypatch):
     # And the things that gate SPENDING are all still blocking.
     assert r.ready_to_trade is False
     blocked = {c.key for c in r.blocked}
-    assert "signer_secret_configured" in blocked
+    assert "signer_holds_pinned_key" in blocked
     assert "release_approved" in blocked
     assert "validated_strategy" in blocked
 
@@ -162,3 +161,36 @@ def test_every_owner_bucket_is_reachable(owner):
     buckets = {o: r.by_owner(o) for o in Owner}
     assert sum(len(v) for v in buckets.values()) == len(r.blocked)
     assert isinstance(buckets[owner], tuple)
+
+
+def test_the_signer_check_is_measured_over_the_socket_not_read_from_config():
+    """This container is deliberately denied any key path, so asking its own
+    environment whether a key is mounted can only ever answer 'no'. That is what
+    it did: a permanently BLOCKED item no operator action could clear, because
+    clearing it would mean handing an application container a key path.
+
+    Unreachable is UNKNOWN, not failure — nothing here is misconfigured when the
+    signer is simply down.
+    """
+    unmeasured = {c.key: c for c in fr.evaluate().checks}["signer_holds_pinned_key"]
+    assert unmeasured.status is fr.Status.UNKNOWN
+
+    holds = {c.key: c for c in fr.evaluate(signer_holds_pinned_key=True).checks}
+    assert holds["signer_holds_pinned_key"].status is fr.Status.PASS
+
+    wrong = {c.key: c for c in fr.evaluate(signer_holds_pinned_key=False).checks}
+    assert wrong["signer_holds_pinned_key"].status is fr.Status.BLOCKED
+
+
+def test_no_readiness_check_reads_a_key_path_from_this_container():
+    """The isolation guarantee, pinned where it would be broken: readiness must
+    never learn about the key from settings."""
+    import ast
+    from pathlib import Path
+
+    src = Path(fr.__file__).read_text()
+    names = {
+        n.attr for n in ast.walk(ast.parse(src)) if isinstance(n, ast.Attribute)
+    }
+    assert "REAL_WALLET_EXECUTION_SECRET_FILE" not in names
+    assert "MAINNET_SIGNER_FILE" not in names

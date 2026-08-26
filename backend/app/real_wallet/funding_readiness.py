@@ -83,12 +83,12 @@ def evaluate(
     wallet_balance_sol: Decimal | None = None,
     network_verified: bool | None = None,
     kill_switch_active: bool | None = None,
+    signer_holds_pinned_key: bool | None = None,
     validated_strategy: str | None = None,
 ) -> FundingReadiness:
     """Assess every precondition. Facts the caller could not measure pass as
     `None` and are reported UNKNOWN — never as satisfied."""
     public_key = settings.REAL_WALLET_PUBLIC_KEY.strip()
-    secret_file = settings.REAL_WALLET_EXECUTION_SECRET_FILE.strip()
     entry_size = configured_entry_size_usd()
     execute_host = (urlparse(settings.JUPITER_V2_BASE_URL).hostname or "").lower() \
         if getattr(settings, "JUPITER_V2_BASE_URL", "") else ""
@@ -105,12 +105,17 @@ def evaluate(
             "held anything else.",
         ),
         _check(
-            "signer_secret_configured", "The signer secret is mounted",
-            Owner.OPERATOR, bool(secret_file),
-            f"REAL_WALLET_EXECUTION_SECRET_FILE={secret_file or '(unset)'}",
-            "Mount the keypair file read-only (0600, never tracked in git) and "
-            "point REAL_WALLET_EXECUTION_SECRET_FILE at it. Claude must not "
-            "handle the key material.",
+            "signer_holds_pinned_key", "The signer holds the pinned key",
+            Owner.OPERATOR, bool(signer_holds_pinned_key),
+            "matches" if signer_holds_pinned_key else
+            ("does not match or is unreachable" if signer_holds_pinned_key is False
+             else "not measured"),
+            "Bring up the `mainnet-signer` profile with the keypair mounted "
+            "read-only at 0600. This is asked OVER THE SOCKET, not read from "
+            "this container's environment: an application container that could "
+            "name a key path would defeat the isolation the signer exists for, "
+            "so the answer can only come from the signer itself.",
+            unknown=signer_holds_pinned_key is None,
         ),
         _check(
             "network_is_mainnet", "The wallet is pointed at mainnet",

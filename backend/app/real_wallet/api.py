@@ -28,6 +28,11 @@ from app.real_wallet.devnet_workflow import (
     DevnetManualWorkflowError,
 )
 from app.real_wallet.live_repository import LiveIntentRepository
+from app.real_wallet.mainnet_signer_client import (
+    MainnetSignerRejectedError,
+    MainnetSignerUnavailableError,
+    UnixMainnetSignerClient,
+)
 from app.real_wallet.network import (
     DevnetExecutionBlockedError,
     is_valid_wallet_address,
@@ -267,10 +272,24 @@ async def funding_readiness(_admin: AdminUser, session: DbSession) -> dict[str, 
     except Exception:  # pragma: no cover - unreadable state stays UNKNOWN
         kill_switch_active = None
 
+    # Asked over the socket. This container cannot answer it from its own
+    # environment — it is deliberately denied any key path — so an unreachable
+    # signer is UNKNOWN rather than a failure to configure something here.
+    signer_holds_pinned_key: bool | None = None
+    try:
+        signer_holds_pinned_key = bool(
+            (await UnixMainnetSignerClient().identity()).get("matches_pinned_key")
+        )
+    except MainnetSignerUnavailableError:
+        signer_holds_pinned_key = None
+    except MainnetSignerRejectedError:
+        signer_holds_pinned_key = False
+
     readiness = evaluate_funding_readiness(
         wallet_balance_sol=balance_sol,
         network_verified=network_verified,
         kill_switch_active=kill_switch_active,
+        signer_holds_pinned_key=signer_holds_pinned_key,
         # Nothing has been promoted. When the V6 review promotes something this
         # becomes its id, and it is deliberately not derivable from config.
         validated_strategy=None,
