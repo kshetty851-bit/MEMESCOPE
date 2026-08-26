@@ -23,17 +23,46 @@ def test_exactly_twenty_strategies_with_unique_ids():
     assert ids == [f"V6-{i:02d}" for i in range(1, 21)]
 
 
-def test_every_wallet_starts_at_one_thousand():
-    assert spec.STARTING_EQUITY == D("1000.00")
-    assert spec.FAILURE_EQUITY_FLOOR == D("800.00")
-
-
 def test_spec_hash_is_stable():
-    """A frozen registry has a frozen hash. Update this ONLY with a version bump."""
-    assert spec.SPEC_VERSION == "1.0.0"
+    """A frozen registry has a frozen hash. Update this ONLY with a version bump.
+
+    1.0.0 was 672dffdb91a4c1a295ed2d6f4d95e0fa081bf34dea5b6ef11cbf6071558521e0.
+    It ran for nineteen hours on a $1,000 book and its record is kept; 1.1.0 is a
+    new record at $100 rather than an edit of that one, which is exactly what the
+    version bump is for.
+    """
+    assert spec.SPEC_VERSION == "1.1.0"
     assert spec.SPEC_HASH == (
-        "672dffdb91a4c1a295ed2d6f4d95e0fa081bf34dea5b6ef11cbf6071558521e0"
+        "a5f0c2ed0fd29a1ce9ac6bc98efdafd96dea974a5db6c523f98e23bdcc447a41"
     )
+
+
+def test_the_book_is_what_the_operator_will_actually_fund():
+    """$1,000 was not a neutral choice — it made a $50 loss read as -5%.
+
+    Replayed against the real price record, the same trades on a $100 book at the
+    old $10 positions came to a mean of -33.6%, random control -98%. The sizes are
+    now chosen for the book instead of inherited from one ten times larger.
+    """
+    assert spec.STARTING_EQUITY == D("100.00")
+    assert spec.FAILURE_EQUITY_FLOOR == spec.STARTING_EQUITY * D("0.8")
+    for s in spec.STRATEGIES:
+        assert s.max_exposure_usd <= spec.STARTING_EQUITY * spec.MAX_DEPLOYED_FRACTION, s.id
+        assert s.size_usd * s.max_concurrent == s.max_exposure_usd, s.id
+
+
+def test_every_trading_strategy_can_time_out():
+    """A position that neither reaches its target nor dies never returns its
+    capital. On a $1,000 book that was a rounding error; on $100 it is the
+    experiment stopping. V6-04's first 1.0.0 entry was still open nineteen hours
+    later marked at $0.0003, and under a one-position cap that is a wallet that
+    never trades again.
+    """
+    missing = [s.id for s in spec.STRATEGIES
+               if s.trades and s.exits.time_exit_hours is None]
+    assert missing == []
+    # The control must not time out into a different strategy than it is.
+    assert spec.BY_ID["V6-01"].exits.time_exit_hours is None
 
 
 def test_cash_control_never_trades():
@@ -51,16 +80,16 @@ def test_checkpoints_are_the_three_declared_ones():
 
 #: (id, checkpoint, size, max_concurrent, max_exposure) straight from section 19.
 SIZING = [
-    ("V6-02", 30, "10", 8, "80"), ("V6-03", 0, "10", 20, "200"),
-    ("V6-04", 30, "10", 10, "100"), ("V6-05", 30, "10", 10, "100"),
-    ("V6-06", 30, "10", 8, "80"), ("V6-07", 30, "15", 8, "120"),
-    ("V6-08", 30, "10", 10, "100"), ("V6-09", 30, "10", 10, "100"),
-    ("V6-10", 30, "10", 10, "100"), ("V6-11", 30, "10", 10, "100"),
-    ("V6-12", 30, "10", 10, "100"), ("V6-13", 30, "10", 10, "100"),
-    ("V6-14", 30, "10", 10, "100"), ("V6-15", 0, "5", 20, "100"),
-    ("V6-16", 60, "10", 10, "100"), ("V6-17", 30, "10", 10, "100"),
-    ("V6-18", 60, "5", 4, "20"), ("V6-19", 30, "10", 8, "80"),
-    ("V6-20", 30, "10", 10, "100"),
+    ("V6-02", 30, "5", 8, "40"), ("V6-03", 0, "3", 20, "60"),
+    ("V6-04", 30, "5", 10, "50"), ("V6-05", 30, "5", 10, "50"),
+    ("V6-06", 30, "5", 8, "40"), ("V6-07", 30, "7.5", 8, "60"),
+    ("V6-08", 30, "5", 10, "50"), ("V6-09", 30, "5", 10, "50"),
+    ("V6-10", 30, "5", 10, "50"), ("V6-11", 30, "5", 10, "50"),
+    ("V6-12", 30, "5", 10, "50"), ("V6-13", 30, "5", 10, "50"),
+    ("V6-14", 30, "5", 10, "50"), ("V6-15", 0, "2.5", 20, "50"),
+    ("V6-16", 60, "5", 10, "50"), ("V6-17", 30, "5", 10, "50"),
+    ("V6-18", 60, "2.5", 4, "10"), ("V6-19", 30, "5", 8, "40"),
+    ("V6-20", 30, "5", 10, "50"),
 ]
 
 
@@ -75,12 +104,12 @@ def test_frozen_sizing(sid, checkpoint, size, conc, expo):
 
 #: (id, take_profit, time_exit_hours) for the plain take-profit strategies.
 TAKE_PROFITS = [
-    ("V6-02", "1.25", 6), ("V6-03", "1.25", None), ("V6-04", "1.25", None),
-    ("V6-05", "1.25", None), ("V6-06", "1.25", None), ("V6-07", "1.50", None),
-    ("V6-08", "1.25", None), ("V6-09", "1.50", None), ("V6-10", "1.25", None),
-    ("V6-11", "1.25", None), ("V6-12", "1.25", 6), ("V6-13", "1.50", 6),
-    ("V6-15", "1.25", 2), ("V6-16", "1.25", None), ("V6-17", "1.25", None),
-    ("V6-18", "1.25", None), ("V6-20", "1.25", None),
+    ("V6-02", "1.25", 6), ("V6-03", "1.25", 6), ("V6-04", "1.25", 6),
+    ("V6-05", "1.25", 6), ("V6-06", "1.25", 6), ("V6-07", "1.50", 6),
+    ("V6-08", "1.25", 6), ("V6-09", "1.50", 6), ("V6-10", "1.25", 6),
+    ("V6-11", "1.25", 6), ("V6-12", "1.25", 6), ("V6-13", "1.50", 6),
+    ("V6-15", "1.25", 2), ("V6-16", "1.25", 6), ("V6-17", "1.25", 6),
+    ("V6-18", "1.25", 6), ("V6-20", "1.25", 6),
 ]
 
 
@@ -185,7 +214,7 @@ def test_rulebook_prose_never_changes_the_hash():
     """Descriptions are for readers. Editing one must not invalidate a live
     record, so the hash must not cover them."""
     assert spec.SPEC_HASH == (
-        "672dffdb91a4c1a295ed2d6f4d95e0fa081bf34dea5b6ef11cbf6071558521e0"
+        "a5f0c2ed0fd29a1ce9ac6bc98efdafd96dea974a5db6c523f98e23bdcc447a41"
     )
 
 
@@ -200,8 +229,8 @@ def test_rulebook_states_the_real_thresholds():
     assert "runner exits at 2.00x" in v619["exit_text"]
 
     v618 = spec.rules_json(spec.BY_ID["V6-18"])
-    assert v618["size_usd"] == "5"
-    assert v618["max_exposure_usd"] == "20"
+    assert v618["size_usd"] == "2.5"
+    assert v618["max_exposure_usd"] == "10"
 
 
 def test_every_strategy_declares_no_stop_loss_in_words():

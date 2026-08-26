@@ -24,12 +24,40 @@ from dataclasses import asdict, dataclass, field
 from decimal import Decimal
 
 #: Bumping this starts a new record at zero. It is not a version of the code.
-SPEC_VERSION = "1.0.0"
+#:
+#: 1.1.0 — the $100 book. Two things forced it, and neither could be applied to a
+#: running record without rewriting history, which is why this is a new tournament
+#: rather than an edit:
+#:
+#:   * $1,000 hid the losses. The strategies deploy $80–$200 of it, so 80–90% of
+#:     every book sat idle and diluted the percentage. Replayed against the real
+#:     price record, the same trades on a $100 book at the SAME $10 positions came
+#:     to a mean of −33.6% in nineteen hours, with the random control at −98%. The
+#:     book is what the operator will actually fund, so the book is now $100 and
+#:     the positions are sized to fit it.
+#:
+#:   * Fourteen of the nineteen trading strategies had no time exit. A position
+#:     that neither reaches its target nor dies simply never returns its capital —
+#:     V6-04's first entry was still open nineteen hours later marked at $0.0003 —
+#:     and on a small book that is capital removed from the experiment, not a
+#:     position. Every trading strategy now has one.
+SPEC_VERSION = "1.1.0"
 
-STARTING_EQUITY = Decimal("1000.00")
+#: What the operator will actually fund. See the note above: this is the number
+#: that decides whether a loss reads as −5% or −50%, and the honest one is the one
+#: the money is really at.
+STARTING_EQUITY = Decimal("100.00")
 #: Circuit breaker (mission §14): below this a strategy stops opening, and its
-#: open positions still run to their own frozen exits.
-FAILURE_EQUITY_FLOOR = Decimal("800.00")
+#: open positions still run to their own frozen exits. Held at 80% of the book,
+#: as it was at $1,000.
+FAILURE_EQUITY_FLOOR = Decimal("80.00")
+
+#: No strategy may commit more than this fraction of its book at once. At $1,000
+#: the caps happened to land at 8–20%, which was never a decision — it was the
+#: residue of sizes chosen for a book ten times larger. Capping the FRACTION makes
+#: it one: enough capital genuinely at work to be worth measuring, enough held back
+#: that one bad hour is a drawdown rather than the end of the record.
+MAX_DEPLOYED_FRACTION = Decimal("0.60")
 
 # --------------------------------------------------------------- conditions
 
@@ -230,8 +258,7 @@ STRATEGIES: tuple[Strategy, ...] = (
     Strategy(
         id="V6-02", name="RANDOM-CONTROL",
         hypothesis="Any selection rule must beat blind entry from the same eligible pool.",
-        checkpoint_minutes=30, entry=(), size_usd=D("10"), max_concurrent=8,
-        max_exposure_usd=D("80"),
+        checkpoint_minutes=30, entry=(), size_usd=D("5"), max_concurrent=8, max_exposure_usd=D("40"),
         exits=Exits(take_profit=D("1.25"), time_exit_hours=6),
         evidence="HIGH", overfit_risk="NONE",
         hist={"trades": 790, "win": 0.565, "expectancy": -1.644, "pf": 0.468,
@@ -241,8 +268,7 @@ STRATEGIES: tuple[Strategy, ...] = (
     Strategy(
         id="V6-03", name="KARTHIK-REPLICA",
         hypothesis="Production's live policy is the honest baseline; reproduce it exactly.",
-        checkpoint_minutes=0, entry=(), size_usd=D("10"), max_concurrent=20,
-        max_exposure_usd=D("200"), exits=Exits(take_profit=D("1.25")),
+        checkpoint_minutes=0, entry=(), size_usd=D("3"), max_concurrent=20, max_exposure_usd=D("60"), exits=Exits(take_profit=D("1.25"), time_exit_hours=6),
         evidence="HIGH_LIVE_ANCHORED", overfit_risk="NONE",
         hist={"trades": 2466, "win": 0.526, "expectancy": -2.749, "pf": 0.366,
               "max_dd": 0.991, "end_equity": 9.42, "exec_125": 0.495,
@@ -253,8 +279,8 @@ STRATEGIES: tuple[Strategy, ...] = (
         hypothesis="Pool depth at +30m is survival evidence and execution capacity.",
         checkpoint_minutes=30,
         entry=(_c("liq", "gte", D("100000"), "liq_below_100k"),),
-        size_usd=D("10"), max_concurrent=10, max_exposure_usd=D("100"),
-        exits=Exits(take_profit=D("1.25")),
+        size_usd=D("5"), max_concurrent=10, max_exposure_usd=D("50"),
+        exits=Exits(take_profit=D("1.25"), time_exit_hours=6),
         evidence="HIGH", overfit_risk="LOW",
         hist={"trades": 372, "win": 0.720, "expectancy": -0.887, "pf": 0.682,
               "max_dd": 0.210, "end_equity": 815.50, "exec_125": 0.654,
@@ -265,8 +291,8 @@ STRATEGIES: tuple[Strategy, ...] = (
         hypothesis="The depth effect is monotone; 3x the floor should roughly halve the loss.",
         checkpoint_minutes=30,
         entry=(_c("liq", "gte", D("300000"), "liq_below_300k"),),
-        size_usd=D("10"), max_concurrent=10, max_exposure_usd=D("100"),
-        exits=Exits(take_profit=D("1.25")),
+        size_usd=D("5"), max_concurrent=10, max_exposure_usd=D("50"),
+        exits=Exits(take_profit=D("1.25"), time_exit_hours=6),
         evidence="MEDIUM", overfit_risk="LOW",
         hist={"trades": 173, "win": 0.751, "expectancy": -0.460, "pf": 0.815,
               "max_dd": 0.135, "end_equity": 931.33, "exec_125": 0.732,
@@ -278,8 +304,8 @@ STRATEGIES: tuple[Strategy, ...] = (
                     "~80% breakeven bar a 1.25x/-100% payoff requires."),
         checkpoint_minutes=30,
         entry=(_c("liq", "gte", D("400000"), "liq_below_400k"),),
-        size_usd=D("10"), max_concurrent=8, max_exposure_usd=D("80"),
-        exits=Exits(take_profit=D("1.25")),
+        size_usd=D("5"), max_concurrent=8, max_exposure_usd=D("40"),
+        exits=Exits(take_profit=D("1.25"), time_exit_hours=6),
         evidence="MEDIUM_LOW", overfit_risk="HIGH",
         hist={"trades": 113, "win": 0.832, "expectancy": 0.565, "pf": 1.336,
               "max_dd": 0.035, "end_equity": 1064.51, "exec_125": 0.815,
@@ -296,8 +322,8 @@ STRATEGIES: tuple[Strategy, ...] = (
                     "larger target should pay more than 1.25x. Perturbs V6-06 on both axes."),
         checkpoint_minutes=30,
         entry=(_c("liq", "gte", D("500000"), "liq_below_500k"),),
-        size_usd=D("15"), max_concurrent=8, max_exposure_usd=D("120"),
-        exits=Exits(take_profit=D("1.50")),
+        size_usd=D("7.5"), max_concurrent=8, max_exposure_usd=D("60"),
+        exits=Exits(take_profit=D("1.50"), time_exit_hours=6),
         evidence="LOW", overfit_risk="HIGH",
         hist={"trades": 96, "win": 0.708, "expectancy": 1.160, "pf": 1.265,
               "max_dd": 0.064, "end_equity": 1117.29, "exec_125": 0.819,
@@ -311,10 +337,10 @@ STRATEGIES: tuple[Strategy, ...] = (
         checkpoint_minutes=30,
         entry=(_c("liq", "gte", D("100000"), "liq_below_100k"),
                _c("liqchg_15m", "gte", D("-0.10"), "liquidity_decaying_over_10pct")),
-        size_usd=D("10"), max_concurrent=10, max_exposure_usd=D("100"),
+        size_usd=D("5"), max_concurrent=10, max_exposure_usd=D("50"),
         exits=Exits(take_profit=D("1.25"), liquidity_exit_frac_of_entry=D("0.50"),
                     liquidity_exit_absolute_usd=D("1000"),
-                    sell_route_loss="exit_at_best_quote"),
+                    sell_route_loss="exit_at_best_quote", time_exit_hours=6),
         evidence="HIGH", overfit_risk="LOW",
         hist={"trades": 368, "win": 0.682, "expectancy": -1.368, "pf": 0.568,
               "max_dd": 0.308, "end_equity": 728.31, "exec_125": 0.666,
@@ -326,8 +352,8 @@ STRATEGIES: tuple[Strategy, ...] = (
         checkpoint_minutes=30,
         entry=(_c("liq", "gte", D("100000"), "liq_below_100k"),
                _c("liqchg_15m", "gte", D("0.0"), "liquidity_not_growing")),
-        size_usd=D("10"), max_concurrent=10, max_exposure_usd=D("100"),
-        exits=Exits(take_profit=D("1.50")),
+        size_usd=D("5"), max_concurrent=10, max_exposure_usd=D("50"),
+        exits=Exits(take_profit=D("1.50"), time_exit_hours=6),
         evidence="HIGH", overfit_risk="LOW",
         hist={"trades": 312, "win": 0.583, "expectancy": -1.216, "pf": 0.707,
               "max_dd": 0.287, "end_equity": 735.04, "exec_125": 0.667,
@@ -340,8 +366,8 @@ STRATEGIES: tuple[Strategy, ...] = (
         checkpoint_minutes=30,
         entry=(_c("liq", "gte", D("100000"), "liq_below_100k"),
                _c("liq_mcap", "lte", D("0.15"), "liq_mcap_above_0_15")),
-        size_usd=D("10"), max_concurrent=10, max_exposure_usd=D("100"),
-        exits=Exits(take_profit=D("1.25")),
+        size_usd=D("5"), max_concurrent=10, max_exposure_usd=D("50"),
+        exits=Exits(take_profit=D("1.25"), time_exit_hours=6),
         evidence="MEDIUM", overfit_risk="MEDIUM_HIGH",
         hist={"trades": 269, "win": 0.773, "expectancy": -0.258, "pf": 0.886,
               "max_dd": 0.151, "end_equity": 903.98, "exec_125": 0.684,
@@ -355,8 +381,8 @@ STRATEGIES: tuple[Strategy, ...] = (
         checkpoint_minutes=30,
         entry=(_c("liq", "gte", D("100000"), "liq_below_100k"),
                _c("sell_share_15m", "lte", D("0.45"), "sell_share_above_0_45")),
-        size_usd=D("10"), max_concurrent=10, max_exposure_usd=D("100"),
-        exits=Exits(take_profit=D("1.25")),
+        size_usd=D("5"), max_concurrent=10, max_exposure_usd=D("50"),
+        exits=Exits(take_profit=D("1.25"), time_exit_hours=6),
         evidence="HIGH", overfit_risk="LOW",
         hist={"trades": 305, "win": 0.767, "expectancy": -0.314, "pf": 0.865,
               "max_dd": 0.141, "end_equity": 903.07, "exec_125": 0.704,
@@ -373,7 +399,7 @@ STRATEGIES: tuple[Strategy, ...] = (
                _c("w1h_unique_buyers", "gt_field", "w1h_unique_sellers",
                   "buyers_not_above_sellers"),
                _c("w1h_top10_tx_share", "lte", D("0.80"), "top10_share_above_80pct")),
-        size_usd=D("10"), max_concurrent=10, max_exposure_usd=D("100"),
+        size_usd=D("5"), max_concurrent=10, max_exposure_usd=D("50"),
         exits=Exits(take_profit=D("1.25"), time_exit_hours=6),
         evidence="NONE_HISTORICALLY", overfit_risk="NOT_APPLICABLE",
         hist={"proxy_rule": "liq>=50k AND tx_15m>=50 AND sell_share_15m<=0.50",
@@ -393,7 +419,7 @@ STRATEGIES: tuple[Strategy, ...] = (
         entry=(_c("liq", "gte", D("100000"), "liq_below_100k"),
                _c("ret_15m", "gt", D("0.0"), "not_rising_15m"),
                _c("dd_from_peak_det", "gte", D("-0.15"), "drawdown_over_15pct")),
-        size_usd=D("10"), max_concurrent=10, max_exposure_usd=D("100"),
+        size_usd=D("5"), max_concurrent=10, max_exposure_usd=D("50"),
         exits=Exits(take_profit=D("1.50"), time_exit_hours=6),
         evidence="HIGH", overfit_risk="LOW",
         hist={"trades": 349, "win": 0.564, "expectancy": -1.756, "pf": 0.596,
@@ -408,7 +434,7 @@ STRATEGIES: tuple[Strategy, ...] = (
         entry=(_c("liq", "gte", D("100000"), "liq_below_100k"),
                _c("vol_accel", "gt", D("0.0"), "volume_not_accelerating"),
                _c("vol1h", "gte", D("50000"), "vol1h_below_50k")),
-        size_usd=D("10"), max_concurrent=10, max_exposure_usd=D("100"),
+        size_usd=D("5"), max_concurrent=10, max_exposure_usd=D("50"),
         exits=Exits(trailing_drawdown=D("0.35"), trailing_arm_at=D("1.50"),
                     time_exit_hours=6, sell_route_loss="exit_at_best_quote"),
         evidence="HIGH", overfit_risk="LOW",
@@ -423,7 +449,7 @@ STRATEGIES: tuple[Strategy, ...] = (
                     "and cut the holding period so capital turns over before the pool dies."),
         checkpoint_minutes=0,
         entry=(_c("liq", "gte", D("100000"), "liq_below_100k"),),
-        size_usd=D("5"), max_concurrent=20, max_exposure_usd=D("100"),
+        size_usd=D("2.5"), max_concurrent=20, max_exposure_usd=D("50"),
         exits=Exits(take_profit=D("1.25"), time_exit_hours=2),
         evidence="HIGH", overfit_risk="LOW",
         hist={"trades": 651, "win": 0.656, "expectancy": -0.855, "pf": 0.469,
@@ -436,8 +462,8 @@ STRATEGIES: tuple[Strategy, ...] = (
                     "same depth gate applied later should admit better tokens."),
         checkpoint_minutes=60,
         entry=(_c("liq", "gte", D("100000"), "liq_below_100k"),),
-        size_usd=D("10"), max_concurrent=10, max_exposure_usd=D("100"),
-        exits=Exits(take_profit=D("1.25")),
+        size_usd=D("5"), max_concurrent=10, max_exposure_usd=D("50"),
+        exits=Exits(take_profit=D("1.25"), time_exit_hours=6),
         evidence="HIGH", overfit_risk="LOW",
         hist={"trades": 302, "win": 0.748, "expectancy": -0.470, "pf": 0.809,
               "max_dd": 0.094, "end_equity": 928.19, "exec_125": 0.677,
@@ -452,8 +478,8 @@ STRATEGIES: tuple[Strategy, ...] = (
                _c("liqchg_15m", "gte", D("0.0"), "liquidity_not_growing"),
                _c("sell_share_15m", "lte", D("0.50"), "sell_share_above_0_50"),
                _c("dd_from_peak_det", "gte", D("-0.30"), "drawdown_over_30pct")),
-        size_usd=D("10"), max_concurrent=10, max_exposure_usd=D("100"),
-        exits=Exits(take_profit=D("1.25")),
+        size_usd=D("5"), max_concurrent=10, max_exposure_usd=D("50"),
+        exits=Exits(take_profit=D("1.25"), time_exit_hours=6),
         evidence="HIGH", overfit_risk="LOW_MEDIUM",
         hist={"trades": 309, "win": 0.725, "expectancy": -0.816, "pf": 0.703,
               "max_dd": 0.189, "end_equity": 838.32, "exec_125": 0.676,
@@ -467,10 +493,10 @@ STRATEGIES: tuple[Strategy, ...] = (
         entry=(_c("liq", "gte", D("300000"), "liq_below_300k"),
                _c("liqchg_15m", "gte", D("0.0"), "liquidity_not_growing"),
                _c("sell_share_15m", "lte", D("0.45"), "sell_share_above_0_45")),
-        size_usd=D("5"), max_concurrent=4, max_exposure_usd=D("20"),
+        size_usd=D("2.5"), max_concurrent=4, max_exposure_usd=D("10"),
         exits=Exits(take_profit=D("1.25"), liquidity_exit_frac_of_entry=D("0.50"),
                     liquidity_exit_absolute_usd=D("1000"),
-                    sell_route_loss="exit_at_best_quote"),
+                    sell_route_loss="exit_at_best_quote", time_exit_hours=6),
         evidence="MEDIUM", overfit_risk="LOW",
         hist={"trades": 134, "win": 0.739, "expectancy": -0.339, "pf": 0.740,
               "max_dd": 0.032, "end_equity": 989.33, "exec_125": 0.764,
@@ -483,10 +509,10 @@ STRATEGIES: tuple[Strategy, ...] = (
         checkpoint_minutes=30,
         entry=(_c("liq", "gte", D("400000"), "liq_below_400k"),
                _c("sell_share_15m", "lte", D("0.50"), "sell_share_above_0_50")),
-        size_usd=D("10"), max_concurrent=8, max_exposure_usd=D("80"),
+        size_usd=D("5"), max_concurrent=8, max_exposure_usd=D("40"),
         exits=Exits(partial_at=D("1.25"), partial_fraction=D("0.50"),
                     runner_target=D("2.00"), break_even_arm=D("1.25"),
-                    break_even_exit=D("1.00"), sell_route_loss="exit_at_best_quote"),
+                    break_even_exit=D("1.00"), sell_route_loss="exit_at_best_quote", time_exit_hours=6),
         evidence="LOW", overfit_risk="HIGH",
         hist={"trades": 105, "win": 0.486, "expectancy": 0.047, "pf": 1.016,
               "max_dd": 0.088, "end_equity": 951.51, "exec_125": 0.820,
@@ -503,9 +529,9 @@ STRATEGIES: tuple[Strategy, ...] = (
                _c("sell_route_ok", "is_true", None, "sell_route_failed"),
                _c("buy_impact_pct", "lte", D("3.0"), "impact_above_3pct"),
                _c("liq", "gte", D("100000"), "liq_below_100k")),
-        size_usd=D("10"), max_concurrent=10, max_exposure_usd=D("100"),
+        size_usd=D("5"), max_concurrent=10, max_exposure_usd=D("50"),
         exits=Exits(take_profit=D("1.25"), liquidity_exit_absolute_usd=D("1000"),
-                    sell_route_loss="exit_at_best_quote"),
+                    sell_route_loss="exit_at_best_quote", time_exit_hours=6),
         evidence="NONE_HISTORICALLY", overfit_risk="NOT_APPLICABLE",
         hist={"proxy_rule": "liq>=100k AND volume_1h/liquidity <= 3.0",
               "trades": 268, "win": 0.772, "expectancy": -0.269, "pf": 0.881,
