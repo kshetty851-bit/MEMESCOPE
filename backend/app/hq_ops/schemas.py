@@ -138,6 +138,22 @@ class LabHealthRow(BaseSchema):
     spec_version: str | None = None
 
 
+class WalletHealthRow(BaseSchema):
+    """The execution rail's own health. Nullable throughout: unmeasurable is not
+    zero, and on the balance row it is emphatically not "nothing moved"."""
+
+    measured: bool
+    detail: str
+    stuck_intents: int | None = None
+    oldest_stuck_minutes: float | None = None
+    repeated_reason: str | None = None
+    repeated_count: int | None = None
+    balance_lamports: int | None = None
+    balance_delta_lamports: int | None = None
+    balance_unexplained: bool | None = None
+    balance_observed_minutes_ago: float | None = None
+
+
 class OperationsHealth(BaseSchema):
     """Everything HQ's production watch can actually see.
 
@@ -163,6 +179,10 @@ class OperationsHealth(BaseSchema):
     #: and, like `tasks`, deliberately outside `overall`: a Lab that has stopped
     #: measuring is not a sick database.
     lab: LabHealthRow | None = None
+    #: The execution wallet. Like `lab`, outside `overall`: a stalled intent is
+    #: not a sick database, and an unexplained balance is not an ops problem at
+    #: all — it is a security one, and it gets its own severity.
+    wallet: WalletHealthRow | None = None
     #: Worst status across everything that was actually measured. Components
     #: that could not be probed do not drag this down — they are reported as
     #: `unknown` on their own row, where a reader can see them.

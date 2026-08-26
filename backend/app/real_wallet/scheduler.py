@@ -209,3 +209,40 @@ async def _real_wallet_exit_tick() -> dict[str, Any]:
     if outcome.exits_requested:
         logger.warning("real_wallet_exit_tick", **outcome.as_dict())
     return outcome.as_dict()
+
+
+@celery_app.task(name="app.real_wallet.scheduler.real_wallet_balance_watch")
+def real_wallet_balance_watch() -> dict[str, Any]:
+    """Record what the chain says the wallet holds, and whether the rail explains it.
+
+    Every other guard here asks whether a spend may PROCEED. None notices money
+    that never used the rail at all — a key used elsewhere, a signature produced
+    outside it. The chain balance compared against what the rail did is the only
+    evidence for that, and it is the one signal in this file that is security
+    rather than operations.
+
+    It writes an observation and decides nothing. HQ turns an unexplained
+    decrease into a condition; there is no code path from here to an action.
+    """
+    return run_async(_real_wallet_balance_watch())
+
+
+async def _real_wallet_balance_watch() -> dict[str, Any]:
+    from app.real_wallet import balance_watch
+    from app.services.rpc.standard import StandardSolanaRPC
+
+    try:
+        rpc = StandardSolanaRPC(rpc_url=settings.REAL_WALLET_RPC_URL)
+        async with rpc:
+            async with SessionFactory() as session:
+                reading = await balance_watch.observe(session, rpc, now=utcnow())
+                await session.commit()
+    except Exception:
+        logger.exception("real_wallet_balance_watch_failed")
+        return {"failed": True}
+    return {
+        "measured": reading.measured,
+        "lamports": reading.lamports,
+        "delta_lamports": reading.delta_lamports,
+        "unexplained": reading.unexplained,
+    }

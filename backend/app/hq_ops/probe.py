@@ -40,6 +40,7 @@ from app.hq_ops.schemas import (
     OperationsHealth,
     QueueHealth,
     LabHealthRow,
+    WalletHealthRow,
     SchedulerHealth,
     TaskOutcome,
     WorkerHealth,
@@ -314,6 +315,24 @@ async def _probe_lab(now: datetime) -> LabHealthRow:
         return LabHealthRow(measured=False, detail=f"Lab health probe failed: {exc}")
 
 
+async def _probe_wallet(now: datetime) -> WalletHealthRow:
+    """The execution rail, asked of the wallet's own module.
+
+    Its own session for the same reason as the Lab probe: these run under
+    `asyncio.gather` and a SQLAlchemy session is not safe for concurrent use.
+    """
+    from app.db.session import SessionFactory
+    from app.real_wallet.wallet_health import read as read_wallet
+
+    try:
+        async with SessionFactory() as session:
+            reading = await read_wallet(session, now=now)
+        return WalletHealthRow(**reading.as_dict())
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("hq_wallet_probe_failed", error=str(exc))
+        return WalletHealthRow(measured=False, detail=f"Wallet probe failed: {exc}")
+
+
 async def snapshot(session: AsyncSession, *, now: datetime | None = None) -> OperationsHealth:
     """One reading of every component. Probes run concurrently.
 
@@ -323,7 +342,7 @@ async def snapshot(session: AsyncSession, *, now: datetime | None = None) -> Ope
     """
     moment = now or datetime.now(UTC)
     (disk, redis_health, database, worker, scheduler, queues, task_rows,
-     lab_row) = await asyncio.gather(
+     lab_row, wallet_row) = await asyncio.gather(
         _probe_disk(),
         _probe_redis(),
         _probe_database(session),
@@ -332,6 +351,7 @@ async def snapshot(session: AsyncSession, *, now: datetime | None = None) -> Ope
         _probe_queues(),
         task_outcomes.read_all(),
         _probe_lab(moment),
+        _probe_wallet(moment),
     )
 
     parts: list[ComponentStatus] = [
@@ -369,6 +389,7 @@ async def snapshot(session: AsyncSession, *, now: datetime | None = None) -> Ope
         tasks=[TaskOutcome(**row) for row in task_rows],
         tasks_failing=len(task_outcomes.failing(task_rows)),
         lab=lab_row,
+        wallet=wallet_row,
         overall=_roll_up(parts),
         unmeasured=unmeasured,
         environment=settings.ENVIRONMENT,

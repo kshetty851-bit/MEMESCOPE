@@ -60,6 +60,18 @@ LAB_STALE_PCT = 50.0
 #: strategy gets chosen from.
 LAB_QUOTE_BACKED_PCT = 66.0
 
+#: Execution-rail thresholds.
+#:
+#: Five minutes of no movement. The executor advances one state per tick at one
+#: tick a minute, so this is several passes with nothing happening — a stall,
+#: not a slow step.
+WALLET_STUCK_MINUTES = 5.0
+
+#: Identical refusals in an hour before it is a wall rather than a decision.
+#: Ten: a quiet hour legitimately produces a handful of the same skip, and
+#: firing on three would report the system working.
+WALLET_REPEAT_COUNT = 10
+
 LAB_ENTRY_SILENCE_MINUTES = 60.0
 LAB_EXIT_SILENCE_MINUTES = 180.0
 from app.hq_ops.schemas import OperationsHealth
@@ -249,6 +261,77 @@ def detect(health: OperationsHealth) -> list[Condition]:
                     remediation=None,
                     symptoms={"minutes_since_close": lab.minutes_since_close,
                               "open_positions": lab.open_positions},
+                )
+            )
+
+    # ── the execution wallet ────────────────────────────────────────────
+    wallet = health.wallet
+    if wallet is not None and wallet.measured:
+        # THE SECURITY ONE. Every other guard in this platform sits in front of
+        # the rail and asks whether a spend may proceed. This is money that
+        # never used the rail — a key used elsewhere, a signature produced
+        # outside it. Critical, and deliberately the only wallet signal that is.
+        if wallet.balance_unexplained:
+            moved = abs(wallet.balance_delta_lamports or 0) / 1e9
+            found.append(
+                Condition(
+                    signature="wallet:balance-unexplained",
+                    component="worker",
+                    severity="critical",
+                    summary=(
+                        f"The execution wallet is {moved:.6f} SOL lighter with no "
+                        "submitted or confirmed intent to account for it. Money left "
+                        "without going through the rail."
+                    ),
+                    # There is nothing safe to do automatically. Anything that
+                    # could move funds in response is the same capability that
+                    # may already be being misused.
+                    remediation=None,
+                    symptoms={
+                        "delta_lamports": wallet.balance_delta_lamports,
+                        "lamports": wallet.balance_lamports,
+                        "observed_minutes_ago": wallet.balance_observed_minutes_ago,
+                    },
+                )
+            )
+
+        if (wallet.stuck_intents
+                and wallet.oldest_stuck_minutes is not None
+                and wallet.oldest_stuck_minutes >= WALLET_STUCK_MINUTES):
+            found.append(
+                Condition(
+                    signature="wallet:intents-stuck",
+                    component="worker",
+                    severity="degraded",
+                    summary=(
+                        f"{wallet.stuck_intents} execution intent(s) have not advanced, "
+                        f"the oldest for {wallet.oldest_stuck_minutes:.0f} minutes. The "
+                        "executor advances one state per tick, so these are not moving."
+                    ),
+                    remediation=None,
+                    symptoms={"stuck_intents": wallet.stuck_intents,
+                              "oldest_stuck_minutes": wallet.oldest_stuck_minutes},
+                )
+            )
+
+        # One rejection is the system working. Forty identical ones is a wall
+        # nobody can see — which is exactly what `safety:` with nothing after it
+        # was, for hours, while every intent was blocked.
+        if (wallet.repeated_count is not None
+                and wallet.repeated_count >= WALLET_REPEAT_COUNT):
+            found.append(
+                Condition(
+                    signature="wallet:blocked-repeatedly",
+                    component="worker",
+                    severity="degraded",
+                    summary=(
+                        f"{wallet.repeated_count} intents blocked with the same reason "
+                        f"in the last hour: {wallet.repeated_reason}. A refusal that "
+                        "repeats is a wall, not a decision."
+                    ),
+                    remediation=None,
+                    symptoms={"reason": wallet.repeated_reason,
+                              "count": wallet.repeated_count},
                 )
             )
 

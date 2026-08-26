@@ -260,6 +260,14 @@ celery_app.conf.beat_schedule = {
         "task": "app.real_wallet.scheduler.real_wallet_executor_tick",
         "schedule": crontab(minute="*"),
     },
+    # The chain balance against what the rail says it did. Every two minutes,
+    # matching HQ's own pass: this is the only real-wallet signal that is
+    # security rather than operations, and the window a movement can hide in
+    # should be the shortest one that is not wasteful.
+    "real-wallet-balance-watch": {
+        "task": "app.real_wallet.scheduler.real_wallet_balance_watch",
+        "schedule": crontab(minute="*/2"),
+    },
     "real-wallet-exit-tick": {
         "task": "app.real_wallet.scheduler.real_wallet_exit_tick",
         "schedule": crontab(minute="*"),

@@ -12,6 +12,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
+    Identity,
     Index,
     Integer,
     Numeric,
@@ -477,4 +478,43 @@ class RealWalletDevnetEvent(Base, UUIDPrimaryKeyMixin):
     __table_args__ = (
         Index("ix_real_wallet_devnet_event_intent", "intent_id"),
         Index("ix_real_wallet_devnet_event_intent_order", "intent_id", "event_order"),
+    )
+
+
+class RealWalletBalanceObservation(Base):
+    """What the chain said the wallet held, and whether the rail explains it.
+
+    Every other guard asks whether a spend may PROCEED. None notices money that
+    left without going through one — a key used elsewhere, a signature produced
+    outside the rail, a transfer nobody recorded. The chain balance compared
+    against what the rail says it did is the only evidence for that.
+
+    Append-only. `delta_lamports` and `unexplained` are NULL on a first row
+    because there is nothing to compare against, and zero would claim there was.
+    """
+
+    __tablename__ = "real_wallet_balance_observations"
+
+    id: Mapped[int] = mapped_column(
+        BigInteger, Identity(always=True), primary_key=True
+    )
+    wallet_public_key: Mapped[str] = mapped_column(String(44), nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    #: Integer lamports, never floating SOL: a balance that rounds is a balance
+    #: whose movement can be rounded away.
+    lamports: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    delta_lamports: Mapped[int | None] = mapped_column(BigInteger)
+    #: NULL means not assessed — a first row, or a check that could not run.
+    #: False is accounted for. True is the alarm.
+    unexplained: Mapped[bool | None] = mapped_column(Boolean)
+    note: Mapped[str | None] = mapped_column(String(200))
+
+    __table_args__ = (
+        Index(
+            "ix_real_wallet_balance_observations_wallet_observed",
+            "wallet_public_key",
+            "observed_at",
+        ),
     )
