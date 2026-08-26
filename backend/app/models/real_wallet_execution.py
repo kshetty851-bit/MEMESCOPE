@@ -9,6 +9,7 @@ from typing import Any
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     DateTime,
     ForeignKey,
     Index,
@@ -18,6 +19,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    false,
     func,
     text,
 )
@@ -87,6 +89,31 @@ class RealWalletPosition(Base, UUIDPrimaryKeyMixin):
     entry_price_usd: Mapped[Decimal] = mapped_column(Numeric(38, 18), nullable=False)
     opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # --- exit state -------------------------------------------------------
+    # What the frozen V6 exits are written against. A trailing stop or a
+    # break-even rule cannot be evaluated from entry price and quantity alone;
+    # without these the position could be opened and never closed, which is
+    # exactly what happened.
+    peak_exec_multiple: Mapped[Decimal] = mapped_column(
+        Numeric(20, 6), nullable=False, server_default=text("1")
+    )
+    #: NULL disables the liquidity-collapse exit rather than firing it against a
+    #: number nobody measured.
+    entry_liquidity_usd: Mapped[Decimal | None] = mapped_column(Numeric(24, 4))
+    last_exec_multiple: Mapped[Decimal | None] = mapped_column(Numeric(20, 6))
+    break_even_armed: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=false()
+    )
+    partial_done: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=false()
+    )
+    #: When the executable multiple entered the stagnation band. NULL means "not
+    #: flat", never "flat since forever".
+    flat_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    banked_proceeds_usd: Mapped[Decimal] = mapped_column(
+        Numeric(24, 4), nullable=False, server_default=text("0")
+    )
+    last_marked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     wallet_public_key: Mapped[str | None] = mapped_column(String(44))
     strategy_id: Mapped[str | None] = mapped_column(String(64))
     strategy_version: Mapped[str | None] = mapped_column(String(32))

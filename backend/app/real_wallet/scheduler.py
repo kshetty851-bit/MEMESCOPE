@@ -15,6 +15,7 @@ from app.paper.service import utcnow
 from app.real_wallet.driver import RealWalletDriver
 from app.real_wallet.dry_run import RealWalletDryRunService
 from app.real_wallet.executor import RealWalletExecutor
+from app.real_wallet.exit_driver import RealWalletExitDriver
 from app.workers.celery_app import celery_app
 from app.workers.runtime import run_async
 
@@ -25,6 +26,8 @@ DRY_RUN_LOCK_KEY = 0x44525952
 DRIVER_LOCK_KEY = 0x44525652
 #: And the runner's, for the same reason.
 EXECUTOR_LOCK_KEY = 0x45584543
+#: And the exit driver's.
+EXIT_LOCK_KEY = 0x45584954
 
 #: States that still have somewhere to go. Terminal ones are skipped rather than
 #: queried, so a finished book does not grow the work every minute.
@@ -168,3 +171,41 @@ async def _real_wallet_executor_tick() -> dict[str, Any]:
                        states=[o["state"] for o in advanced])
     return {"examined": len(outcomes), "advanced": len(advanced),
             "outcomes": outcomes}
+
+
+@celery_app.task(name="app.real_wallet.scheduler.real_wallet_exit_tick")
+def real_wallet_exit_tick() -> dict[str, Any]:
+    """Mark every open real position and request the exit its rules call for.
+
+    Without this the wallet buys and never sells: nothing else in production
+    creates a SELL intent, so no profit is ever realised and nothing compounds.
+
+    It adds no authority. Positions exit by the rules they were ENTERED under,
+    read from the position rather than from whatever strategy is nominated now,
+    and creating a SELL intent is not selling — the order, the signature and the
+    submission each keep their own barrier.
+    """
+    return run_async(_real_wallet_exit_tick())
+
+
+async def _real_wallet_exit_tick() -> dict[str, Any]:
+    try:
+        async with SessionFactory() as session:
+            acquired = await session.scalar(
+                select(func.pg_try_advisory_xact_lock(
+                    DRY_RUN_LOCK_NAMESPACE, EXIT_LOCK_KEY
+                ))
+            )
+            if not acquired:
+                await session.rollback()
+                return {"skipped": "exit_driver_already_running"}
+            outcome = await RealWalletExitDriver(session).tick(now=utcnow())
+            await session.commit()
+    except Exception:
+        # Contained like the others. An exit driver that raises into beat would
+        # take down the tasks that mark the rest of the book with it.
+        logger.exception("real_wallet_exit_tick_failed")
+        return {"failed": True}
+    if outcome.exits_requested:
+        logger.warning("real_wallet_exit_tick", **outcome.as_dict())
+    return outcome.as_dict()

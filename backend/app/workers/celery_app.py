@@ -217,6 +217,13 @@ celery_app.conf.beat_schedule = {
         "task": "app.real_wallet.scheduler.real_wallet_driver_tick",
         "schedule": crontab(minute="*"),
     },
+    # The other half of the driver. Without it the wallet buys and never sells,
+    # so no profit is realised and nothing compounds. Every minute, because a
+    # take-profit is measured against a mark and a mark an hour old is not one.
+    "real-wallet-exit-tick": {
+        "task": "app.real_wallet.scheduler.real_wallet_exit_tick",
+        "schedule": crontab(minute="*"),
+    },
     "regime-snapshot-hourly": {
         "task": "app.workers.research_tasks.regime_snapshot_hourly",
         "schedule": crontab(minute="7"),
