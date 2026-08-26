@@ -217,3 +217,19 @@ def test_no_application_container_mounts_the_key():
             continue
         for mount in svc.get("volumes") or []:
             assert "mainnet-signer.json" not in str(mount), name
+
+
+def test_identity_reads_public_key_as_a_property_not_a_method():
+    """`FileExecutionSigner.public_key` is a @property. Calling it raised
+    TypeError on the first real run against a mounted key — the rehearsal's
+    whole purpose, and cheap to pin so it cannot come back."""
+    import inspect
+
+    from app.real_wallet.signer import FileExecutionSigner
+
+    assert isinstance(
+        inspect.getattr_static(FileExecutionSigner, "public_key"), property
+    )
+    src = Path(ms.__file__).read_text()
+    assert "signer.public_key()" not in src
+    assert "signer.public_key" in src

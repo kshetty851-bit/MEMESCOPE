@@ -119,8 +119,9 @@ async def identity() -> dict[str, Any]:
         secret_file=_secret_file(), expected_public_key=expected
     )
     return {
-        "public_key": signer.public_key(),
-        "matches_pinned_key": signer.public_key() == expected,
+        # `public_key` is a property on FileExecutionSigner, not a method.
+        "public_key": signer.public_key,
+        "matches_pinned_key": signer.public_key == expected,
         "network": settings.REAL_WALLET_NETWORK,
         "genesis_hash": genesis,
         "can_sign": True,
