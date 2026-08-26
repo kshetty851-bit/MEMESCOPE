@@ -188,6 +188,13 @@ describe("RealWalletPage", () => {
     render(<RealWalletPage />, { wrapper });
     await waitFor(() => expect(screen.getByText("Signed out")).toBeInTheDocument());
     expect(screen.getByText(/session has expired/i)).toBeInTheDocument();
+    // Telling somebody to sign in without giving them a way to is a dead end,
+    // and it sent the owner round the homepage access code three times.
+    const link = screen.getByRole("link", { name: /go to sign in/i });
+    expect(link).toHaveAttribute("href", "/login");
+    // And it must name the trap: the access code is not an account.
+    expect(screen.getByText(/site-wide cookie rather than an account/i))
+      .toBeInTheDocument();
     expect(screen.queryByText("Restricted")).not.toBeInTheDocument();
     expect(screen.queryByText("Public address")).not.toBeInTheDocument();
   });

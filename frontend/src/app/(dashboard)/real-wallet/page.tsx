@@ -673,9 +673,9 @@ export default function RealWalletPage() {
         <p className="mt-3 max-w-2xl text-sm text-ink-3">
           {signedOut ? (
             <>
-              This page needs a current signed-in session, not just dashboard access.
-              Sign in with the account that holds the administrator role and return
-              here.
+              The access code on the homepage unlocks the dashboard, but it is a
+              site-wide cookie rather than an account &mdash; and this page needs an
+              account. Sign in with the one holding the administrator role.
             </>
           ) : status === 403 ? (
             <>
@@ -691,6 +691,14 @@ export default function RealWalletPage() {
             </>
           )}
         </p>
+        {signedOut ? (
+          <a
+            href="/login"
+            className="mt-4 inline-block rounded border border-accent/50 px-4 py-2 text-sm text-accent hover:bg-accent/10"
+          >
+            Go to sign in
+          </a>
+        ) : null}
       </main>
     );
   }
