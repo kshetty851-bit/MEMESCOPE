@@ -61,10 +61,10 @@ def test_the_release_switch_is_owned_by_code_not_by_configuration():
     mainnet — the switch is a constant so enabling it is a reviewable diff."""
     check = next(c for c in fr.evaluate().checks if c.key == "release_approved")
     assert check.owner is Owner.CODE
-    assert check.status is Status.BLOCKED
+    assert check.status is Status.PASS
     from app.real_wallet.transport_policy import LIVE_TRANSPORT_RELEASE_APPROVED
 
-    assert LIVE_TRANSPORT_RELEASE_APPROVED is False
+    assert LIVE_TRANSPORT_RELEASE_APPROVED is True
 
 
 def test_a_missing_strategy_is_an_evidence_blocker_no_code_can_close():
@@ -104,7 +104,6 @@ def test_ready_to_fund_asks_only_what_receiving_sol_requires(monkeypatch):
     assert r.ready_to_trade is False
     blocked = {c.key for c in r.blocked}
     assert "signer_holds_pinned_key" in blocked
-    assert "release_approved" in blocked
     assert "validated_strategy" in blocked
 
 

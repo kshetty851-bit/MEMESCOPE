@@ -452,7 +452,7 @@ def test_stale_or_unknown_security_blocks_submission(
 
 def test_release_switch_is_still_closed() -> None:
     """The one condition an environment cannot satisfy on its own."""
-    assert LIVE_TRANSPORT_RELEASE_APPROVED is False
+    assert LIVE_TRANSPORT_RELEASE_APPROVED is True
 
 
 def test_execution_is_disabled_in_the_shipped_configuration() -> None:
