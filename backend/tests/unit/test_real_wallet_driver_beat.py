@@ -129,3 +129,29 @@ def test_the_spend_is_stored_not_recomputed_at_assembly():
     src = Path(po.__file__).read_text()
     assert "intent.actual_input_amount_raw" in src
     assert "buy_intent_missing_lamports" in src
+
+
+def test_the_entry_is_quantised_down_to_whole_lamports():
+    """`lamports_from_sol` refuses anything inexact by design — a limit that
+    rounds is a limit that can be crossed by rounding — and $5 at any real SOL
+    price is not a whole number of lamports. Without quantising, every driver
+    tick raised and the beat recorded `{"failed": True}`.
+
+    DOWN, not nearest: the entry must be at most the authorised size, never a
+    lamport over it.
+    """
+    from decimal import ROUND_DOWN, Decimal
+
+    from app.real_wallet import driver as drv
+    from app.real_wallet.tx_inspect import lamports_from_sol
+
+    src = ast.unparse(ast.parse(Path(drv.__file__).read_text()))
+    assert "ROUND_DOWN" in src
+
+    # The real arithmetic, at a real price, must not raise.
+    entry, price = Decimal("5"), Decimal("96.32")
+    sol = (entry / price).quantize(Decimal("1e-9"), rounding=ROUND_DOWN)
+    lamports = lamports_from_sol(sol)
+    assert lamports > 0
+    # And never more than the authorised size.
+    assert Decimal(lamports).scaleb(-9) * price <= entry

@@ -24,7 +24,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal
+from decimal import ROUND_DOWN, Decimal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -128,7 +128,15 @@ class RealWalletDriver:
             # An unpriced entry is an entry nobody sized. Refuse rather than
             # guess: every limit this wallet has is written in dollars.
             return DriverOutcome(0, "sol_price_unavailable")
-        lamports = lamports_from_sol(entry_usd / sol_price)
+        # Quantised DOWN to whole lamports before conversion. `lamports_from_sol`
+        # refuses anything inexact by design — a limit that rounds is a limit
+        # that can be crossed by rounding — and $5 at any real SOL price is not
+        # a whole number of lamports. Rounding down means the entry is at most
+        # the authorised size, never a lamport over it.
+        sol_amount = (entry_usd / sol_price).quantize(
+            Decimal("1e-9"), rounding=ROUND_DOWN
+        )
+        lamports = lamports_from_sol(sol_amount)
         if lamports <= 0:
             return DriverOutcome(0, "entry_size_rounds_to_zero_lamports")
 
