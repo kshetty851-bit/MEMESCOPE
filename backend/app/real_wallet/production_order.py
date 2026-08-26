@@ -137,11 +137,21 @@ class ProductionOrderFactory:
     async def _fetch(
         self, *, input_mint: str, output_mint: str, amount_raw: int, taker: str
     ) -> dict[str, Any]:
+        # The SAME policy the evidence check verifies against, sent with the
+        # request. Omitting it let Jupiter apply its own auto-slippage — 500 bps
+        # against a policy of 300 — so `verify` refused every order this factory
+        # ever built, and the tolerance inside the signed transaction was
+        # Jupiter's rather than ours.
+        #
+        # This is the SECOND place that builds an order request; the client in
+        # `jupiter_v2.py` is the other, and it was fixed first while this one
+        # went on failing. Two copies of a request is two places to forget.
         params = {
             "inputMint": input_mint,
             "outputMint": output_mint,
             "amount": str(amount_raw),
             "taker": taker,
+            "slippageBps": str(int(settings.REAL_WALLET_EXIT_MAX_SLIPPAGE_BPS)),
         }
         headers: dict[str, str] = {}
         api_key = settings.JUPITER_API_KEY.get_secret_value()

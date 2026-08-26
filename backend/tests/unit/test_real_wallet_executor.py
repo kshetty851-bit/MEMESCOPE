@@ -248,3 +248,29 @@ def test_the_order_request_states_our_slippage_rather_than_inheriting_jupiters()
     assert "slippageBps" in keys
     # And it is the policy, not a literal that could drift from it.
     assert settings.REAL_WALLET_EXIT_MAX_SLIPPAGE_BPS > 0
+
+
+def test_every_jupiter_order_request_carries_our_slippage():
+    """There are TWO places that build an order request and only one was fixed,
+    so the executor went on failing while a direct client call succeeded.
+
+    Both are asserted here rather than one, because two copies of a request is
+    two places to forget — and the one that matters is whichever the executor
+    happens to call.
+    """
+    import ast as _ast
+
+    from app.real_wallet import jupiter_v2, production_order
+
+    for module in (jupiter_v2, production_order):
+        tree = _ast.parse(Path(module.__file__).read_text())
+        requests = [
+            d for d in _ast.walk(tree)
+            if isinstance(d, _ast.Dict)
+            and any(isinstance(k, _ast.Constant) and k.value == "inputMint"
+                    for k in d.keys)
+        ]
+        assert requests, f"{module.__name__} builds no order request"
+        for d in requests:
+            keys = {k.value for k in d.keys if isinstance(k, _ast.Constant)}
+            assert "slippageBps" in keys, module.__name__
