@@ -193,3 +193,36 @@ def test_no_readiness_check_reads_a_key_path_from_this_container():
     }
     assert "REAL_WALLET_EXECUTION_SECRET_FILE" not in names
     assert "MAINNET_SIGNER_FILE" not in names
+
+
+def test_the_mainnet_clause_is_measured_not_restated():
+    """This check hardcoded `REAL_WALLET_NETWORK != "mainnet"`, which DESCRIBED
+    the phase gate rather than measuring it.
+
+    So when the clause was reviewed and removed, the report went on naming a
+    blocker that no longer existed — and an operator reading it would have
+    believed mainnet was still code-blocked when it was not. A readiness check
+    that cannot notice the thing it reports on is worse than no check, because
+    it is trusted.
+    """
+    import ast
+    from pathlib import Path
+
+    from app.real_wallet import transport_policy
+
+    src = Path(fr.__file__).read_text()
+    tree = ast.parse(src)
+    assigns = [
+        ast.unparse(n) for n in ast.walk(tree)
+        if isinstance(n, ast.Assign) and "mainnet_clause_engaged" in ast.unparse(n)
+    ]
+    assert assigns, "the clause is not measured anywhere"
+    assert "transport_readiness()" in assigns[0], "it is inferred, not asked"
+
+    # And the answer tracks the policy, whichever way the policy points.
+    engaged = (
+        transport_policy.TransportReason.MAINNET_EXECUTION_DISABLED
+        in transport_policy.readiness().reasons
+    )
+    check = {c.key: c for c in fr.evaluate().checks}["mainnet_execution_permitted"]
+    assert (check.status is Status.BLOCKED) == engaged
