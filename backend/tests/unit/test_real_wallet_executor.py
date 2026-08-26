@@ -220,3 +220,31 @@ def test_an_order_that_fails_its_recheck_blocks_rather_than_escaping():
     # Both end in a recorded block, not a re-raise.
     for h in handlers:
         assert "_block" in ast.unparse(h)
+
+
+def test_the_order_request_states_our_slippage_rather_than_inheriting_jupiters():
+    """Jupiter applies its own auto-slippage when none is asked for — measured
+    at 500 bps on a token whose real price impact was 0.0059%, against a policy
+    of 300.
+
+    Vetoing that afterwards is not the same as governing it: the tolerance baked
+    into the SIGNED TRANSACTION was Jupiter's, so an order that slipped 4% would
+    have been honoured on chain. The request now carries the policy.
+    """
+    from app.core.config import settings
+    from app.real_wallet import jupiter_v2
+
+    src = Path(jupiter_v2.__file__).read_text()
+    assert '"slippageBps"' in src
+    assert "REAL_WALLET_EXIT_MAX_SLIPPAGE_BPS" in src
+
+    tree = ast.parse(src)
+    fn = next(n for n in ast.walk(tree)
+              if isinstance(n, ast.AsyncFunctionDef) and n.name == "order")
+    params = next(d for d in ast.walk(fn) if isinstance(d, ast.Dict)
+                  and any(isinstance(k, ast.Constant) and k.value == "inputMint"
+                          for k in d.keys))
+    keys = {k.value for k in params.keys if isinstance(k, ast.Constant)}
+    assert "slippageBps" in keys
+    # And it is the policy, not a literal that could drift from it.
+    assert settings.REAL_WALLET_EXIT_MAX_SLIPPAGE_BPS > 0

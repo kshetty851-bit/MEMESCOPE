@@ -63,11 +63,21 @@ class RealWalletJupiterV2Client:
     ) -> JupiterV2OrderEvidence:
         if amount_raw <= 0 or not taker_public_key:
             raise JupiterV2OrderUnavailableError("invalid_v2_order_input")
+        # STATE the slippage we accept; do not inherit whatever Jupiter picks.
+        #
+        # Without this the endpoint applies its own auto-slippage — measured at
+        # 500 bps on a memecoin whose actual price impact was 0.0059% — and the
+        # evidence check could only veto the result AFTER the fact. Worse, the
+        # tolerance baked into the signed transaction was Jupiter's rather than
+        # ours, so an order that slipped 4% would have been honoured on chain.
+        # Sending it makes the policy the thing that governs the trade instead
+        # of the thing that complains about it.
         params = {
             "inputMint": input_mint,
             "outputMint": output_mint,
             "amount": str(amount_raw),
             "taker": taker_public_key,
+            "slippageBps": str(int(settings.REAL_WALLET_EXIT_MAX_SLIPPAGE_BPS)),
         }
         headers: dict[str, str] = {}
         api_key = settings.JUPITER_API_KEY.get_secret_value()
