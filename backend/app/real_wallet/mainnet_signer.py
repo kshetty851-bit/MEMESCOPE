@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import grp
 import json
 import os
 import stat
@@ -239,10 +240,33 @@ def _prepare_socket(socket_path: Path) -> None:
         socket_path.unlink()
 
 
+#: The application account in the shared image. This service runs as root
+#: because it must read a 0600 key; the callers run as this unprivileged user,
+#: so the socket has to carry its group or nothing can reach the signer.
+APP_USER = "memescope"
+
+
+def _grant_socket_to_app_group(socket_path: Path) -> None:
+    """Give the socket the app group, keeping it 0660.
+
+    Mode alone is not enough: a root-owned 0660 socket is unreachable by the
+    unprivileged callers, which is precisely how `signer_ready` stayed False
+    while the signer was healthy and answering on the command line. Widening to
+    0666 would work and is refused — the group is the narrower grant.
+
+    It raises rather than warning. A signer nobody can reach is the exact
+    silent failure this whole rehearsal exists to surface.
+    """
+    gid = grp.getgrnam(APP_USER).gr_gid
+    if socket_path.stat().st_gid != gid:
+        os.chown(socket_path, -1, gid)
+    os.chmod(socket_path, 0o660)
+
+
 async def serve(socket_path: Path) -> None:
     await asyncio.to_thread(_prepare_socket, socket_path)
     server = await asyncio.start_unix_server(_handle_connection, path=str(socket_path))
-    os.chmod(socket_path, 0o660)
+    _grant_socket_to_app_group(socket_path)
     logger.info("mainnet_signer_listening", socket=str(socket_path))
     async with server:
         await server.serve_forever()

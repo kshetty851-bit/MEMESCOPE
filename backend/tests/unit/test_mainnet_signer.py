@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import ast
 import json
+import stat
 from pathlib import Path
 
 import pytest
@@ -233,3 +234,32 @@ def test_identity_reads_public_key_as_a_property_not_a_method():
     src = Path(ms.__file__).read_text()
     assert "signer.public_key()" not in src
     assert "signer.public_key" in src
+
+
+def test_the_socket_is_reachable_by_the_unprivileged_callers(tmp_path, monkeypatch):
+    """The signer runs as root to read a 0600 key; every caller runs as the
+    unprivileged app user. A root-owned 0660 socket is therefore unreachable —
+    which is exactly how the rehearsal reported the signer down while it was
+    healthy and answering. The group is the grant; 0666 would also work and is
+    deliberately not what this does."""
+    sock = tmp_path / "signer.sock"
+    sock.touch()
+    sock.chmod(0o600)
+
+    chowned: list[tuple] = []
+    monkeypatch.setattr(ms.grp, "getgrnam", lambda name: type("G", (), {"gr_gid": 4242})())
+    monkeypatch.setattr(ms.os, "chown", lambda p, u, g: chowned.append((str(p), u, g)))
+
+    ms._grant_socket_to_app_group(sock)
+
+    assert chowned == [(str(sock), -1, 4242)]
+    assert stat.S_IMODE(sock.stat().st_mode) == 0o660  # group, never world
+
+
+def test_the_socket_grant_raises_rather_than_leaving_it_unreachable():
+    """A signer nobody can reach is the silent failure the rehearsal exists to
+    surface, so the grant must not be best-effort."""
+    tree = ast.parse(Path(ms.__file__).read_text())
+    fn = next(n for n in ast.walk(tree)
+              if isinstance(n, ast.FunctionDef) and n.name == "_grant_socket_to_app_group")
+    assert not [n for n in ast.walk(fn) if isinstance(n, ast.Try)]
