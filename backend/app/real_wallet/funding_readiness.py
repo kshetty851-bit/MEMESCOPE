@@ -29,6 +29,7 @@ from enum import StrEnum
 from urllib.parse import urlparse
 
 from app.core.config import settings
+from app.real_wallet import withdrawal
 from app.real_wallet.policy import configured_entry_size_usd
 from app.real_wallet.transport_policy import (
     ALLOWED_EXECUTE_HOSTS,
@@ -116,6 +117,17 @@ def evaluate(
             "name a key path would defeat the isolation the signer exists for, "
             "so the answer can only come from the signer itself.",
             unknown=signer_holds_pinned_key is None,
+        ),
+        _check(
+            "withdrawal_address_nominated", "Withdrawals are locked to one address",
+            Owner.OPERATOR, withdrawal.policy().usable,
+            (f"only {withdrawal.policy().destination}" if withdrawal.policy().usable
+             else (withdrawal.policy().reason or "not configured")),
+            "Set REAL_WALLET_WITHDRAWAL_ADDRESS to the ONE address funds may ever "
+            "leave for. Deposits stay open — the execution address is public and "
+            "anyone may send to it — but the way out is bounded so a compromised "
+            "caller could at worst return the money to its owner. Empty permits "
+            "nothing.",
         ),
         _check(
             "network_is_mainnet", "The wallet is pointed at mainnet",

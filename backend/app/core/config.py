@@ -780,6 +780,14 @@ class Settings(BaseSettings):
     #: during Phase 1; a later isolated signer service needs separate review.
     REAL_WALLET_PUBLIC_KEY: str = ""
     REAL_WALLET_EXECUTION_SECRET_FILE: str = ""
+    #: The ONLY address SOL may ever be withdrawn to. Deposits are open — the
+    #: execution address is public and anyone may send to it — but the way out is
+    #: a single destination the operator nominated, so a compromised caller,
+    #: signer or API cannot choose where the money goes; it can at worst return
+    #: it to the owner. Empty permits NOTHING: a withdrawal path with no
+    #: nominated destination refuses rather than accepting any address, which is
+    #: the same fail-closed direction as the RPC host list.
+    REAL_WALLET_WITHDRAWAL_ADDRESS: str = ""
     # Phase 2 is a separate, deliberately tiny manual-devnet workflow. These
     # values are used by the API and signer to enforce the same small envelope;
     # the signer-file *path* is intentionally not a Settings field because the

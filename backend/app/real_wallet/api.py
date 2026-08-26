@@ -28,6 +28,7 @@ from app.real_wallet.devnet_workflow import (
     DevnetManualWorkflowError,
 )
 from app.real_wallet.live_repository import LiveIntentRepository
+from app.real_wallet import withdrawal
 from app.real_wallet.mainnet_signer_client import (
     MainnetSignerRejectedError,
     MainnetSignerUnavailableError,
@@ -439,6 +440,13 @@ async def status(_admin: AdminUser, session: DbSession) -> dict[str, object]:
                 ],
             },
             "fee_accounting": _fee_accounting_readiness(sol_price, now=now),
+        },
+        # Asymmetric on purpose: anyone may deposit to a public address, and the
+        # money may leave for exactly one nominated destination.
+        "withdrawal": {
+            "locked_to": withdrawal.policy().destination or None,
+            "configured": withdrawal.policy().usable,
+            "reason": withdrawal.policy().reason or None,
         },
         # The one line that must never be ambiguous on a dashboard. `LOCKED`
         # means no configuration reachable from this process can submit; it is

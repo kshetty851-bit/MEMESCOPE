@@ -28,6 +28,11 @@ type WalletStatus = {
     image_url: string | null;
   }>;
   balance_error: string | null;
+  withdrawal: {
+    locked_to: string | null;
+    configured: boolean;
+    reason: string | null;
+  } | null;
   funding_status: "unfunded" | "funded" | "unknown";
   mode: "disabled" | "dry_run" | "armed" | "live";
   execution_enabled: boolean;
@@ -382,6 +387,29 @@ function BalanceCard({
             import the keypair file into Phantom or Solflare and send from there. That
             uses your key, on your machine, with no server in the path.
           </p>
+          <div className="mt-3 rounded border border-line p-3">
+            <p className="text-label text-ink-3">Locked destination</p>
+            {data?.withdrawal?.configured && data.withdrawal.locked_to ? (
+              <>
+                <p className="mt-1 break-all font-mono text-xs text-ink">
+                  {data.withdrawal.locked_to}
+                </p>
+                <p className="mt-2 text-sm text-ink-3">
+                  The only address this wallet may ever send to. Deposits stay open —
+                  anyone can send to the public address above — but the way out is
+                  bounded, so if any barrier upstream were ever wrong the worst
+                  outcome is the funds returning to you rather than going to whoever
+                  asked. Changing it is a deliberate configuration change.
+                </p>
+              </>
+            ) : (
+              <p className="mt-1 text-sm text-warning">
+                No destination nominated
+                {data?.withdrawal?.reason ? ` — ${data.withdrawal.reason}` : ""}. An
+                unset destination permits nothing rather than anything.
+              </p>
+            )}
+          </div>
           <p className="mt-2 text-sm text-ink-3">
             Balance available after the fee reserve:{" "}
             <span className="text-ink">
