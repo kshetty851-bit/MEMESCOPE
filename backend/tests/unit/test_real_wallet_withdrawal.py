@@ -9,6 +9,7 @@ money going back to its owner rather than to whoever asked.
 from __future__ import annotations
 
 import ast
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -133,3 +134,47 @@ def test_the_compose_anchor_actually_passes_the_address_through():
     assert "${REAL_WALLET_WITHDRAWAL_ADDRESS" in str(
         anchor["REAL_WALLET_WITHDRAWAL_ADDRESS"]
     )
+
+
+def test_the_balance_ceiling_is_a_typo_guard_not_a_growth_cap():
+    """Two jobs used to be one number and the smaller one won.
+
+    The SETTING is the operator's risk decision. The field bound is a typo guard
+    — it stops `500` written for `5.00`. It was 5 SOL, chosen as 20x the 0.25
+    default when this was scoped as a canary, and a typo guard sized for a canary
+    caps legitimate growth. Profits compound in the wallet by design (no
+    auto-sweep), so the ceiling must be able to sit above where the book is
+    going.
+    """
+    from pydantic import ValidationError
+
+    from app.core.config import Settings
+
+    field = Settings.model_fields["REAL_WALLET_MAX_BALANCE_SOL"]
+    bounds = {type(m).__name__: getattr(m, "le", getattr(m, "gt", None))
+              for m in field.metadata}
+    assert bounds.get("Le") == Decimal("1000"), "a canary-sized guard caps growth"
+    # Still a guard: an absurd value is refused rather than accepted.
+    with pytest.raises(ValidationError):
+        Settings(REAL_WALLET_MAX_BALANCE_SOL=5000)
+    # And zero or negative is still meaningless.
+    with pytest.raises(ValidationError):
+        Settings(REAL_WALLET_MAX_BALANCE_SOL=0)
+
+
+def test_the_ceiling_blocks_buying_and_never_selling():
+    """A wallet that grows past its ceiling stops opening positions and can
+    always still close them. Success must not trap the book."""
+    import ast
+    from pathlib import Path
+
+    from app.real_wallet import policy as policy_mod
+
+    tree = ast.parse(Path(policy_mod.__file__).read_text())
+    holders = [
+        fn.name for fn in ast.walk(tree)
+        if isinstance(fn, ast.FunctionDef)
+        and "MAX_BALANCE_SOL" in ast.unparse(fn)
+    ]
+    # The ceiling lives on the entry path alone.
+    assert holders == ["evaluate_canary_entry"], holders

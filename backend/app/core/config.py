@@ -836,11 +836,24 @@ class Settings(BaseSettings):
     #: notional cap bounds how much a bug can spend; only a count bounds how
     #: many times it can fire, and fee-only churn is invisible to the former.
     REAL_WALLET_MAX_DAILY_TRADES: int = Field(default=4, ge=1, le=100)
-    #: The most SOL the canary wallet may ever hold. Compared in integer
-    #: lamports. This is the bound that makes the blast radius a number rather
-    #: than a promise: over-funding is refused instead of traded.
+    #: The most SOL the execution wallet may hold and still open new positions.
+    #: Compared in integer lamports. This is the bound that makes the blast
+    #: radius a number rather than a promise: over-funding is refused instead of
+    #: traded, and it is checked ONLY on the entry path — an exit is never
+    #: blocked by it, so a wallet that grows past its ceiling stops buying and
+    #: can always still sell.
+    #:
+    #: Two different jobs used to be one number, and the smaller one won. The
+    #: SETTING is the operator's risk decision: how much they are willing to have
+    #: exposed. The `le` below is a TYPO GUARD — it exists so a fat-fingered
+    #: `500` in place of `5.00` cannot silently permit a five-hundred-SOL wallet.
+    #: It was 5, chosen as 20x the 0.25 default back when this was scoped as a
+    #: canary, and a typo guard sized for a canary caps legitimate growth, which
+    #: is not its job. Profits compound in the wallet by design — there is no
+    #: auto-sweep — so the ceiling has to be able to sit above where the book is
+    #: going, not where it started.
     REAL_WALLET_MAX_BALANCE_SOL: Decimal = Field(
-        default=Decimal("0.25"), gt=0, le=Decimal("5")
+        default=Decimal("0.25"), gt=0, le=Decimal("1000")
     )
     #: Freshness and impact bounds for a real *exit* quote. An exit that cannot
     #: be priced is reported as an explicit failure state, never retried away.
