@@ -337,3 +337,25 @@ async def test_the_supply_cap_is_the_configured_three_percent() -> None:
     assert settings.REAL_WALLET_SAFETY_MAX_SUPPLY_RATIO == Decimal("0.03")
     # Both concentration caps are kept: they answer different questions.
     assert settings.REAL_WALLET_SAFETY_MAX_POSITION_LIQUIDITY_RATIO == Decimal("0.01")
+
+
+def test_every_rpc_implementation_can_read_a_token_supply():
+    """A default that silently disables a check is worse than no check.
+
+    `FallbackRPC` inherited the abstract base's `None`, which the concentration
+    cap reads as "unreadable" and therefore REFUSES. Every token failed the gate
+    for a fact nobody could measure — fail-closed, so nothing unsafe shipped, but
+    nothing tradeable either, and the report said TOKEN_SUPPLY_UNREADABLE rather
+    than "this call is not implemented here".
+    """
+    import inspect
+
+    from app.services.rpc.base import SolanaRPC
+    from app.services.rpc.router import FallbackRPC
+    from app.services.rpc.standard import StandardSolanaRPC
+
+    base = inspect.getsource(SolanaRPC.get_token_supply)
+    for impl in (StandardSolanaRPC, FallbackRPC):
+        own = inspect.getsource(impl.get_token_supply)
+        assert own != base, f"{impl.__name__} inherits the refusing default"
+        assert "getTokenSupply" in own, impl.__name__

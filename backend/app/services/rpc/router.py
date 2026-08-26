@@ -25,6 +25,7 @@ exactly where the answer came from, so research rows can say so.
 from __future__ import annotations
 
 import time
+from decimal import Decimal
 from typing import Any, ClassVar
 
 import httpx
@@ -192,6 +193,32 @@ class FallbackRPC(SolanaRPC):
             [signature, {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}],
             attempts=attempts or 2,
         )
+
+    async def get_token_supply(self, mint_address: str) -> Decimal | None:
+        """Route the supply read through the same failover the rest uses.
+
+        Without this the router inherited the abstract base's `None`, which
+        means "unreadable" — and the concentration cap treats unreadable as a
+        REFUSAL, so every token failed the safety gate for a fact nobody could
+        measure. Fail-closed, so nothing unsafe shipped, but nothing tradeable
+        either: a default that silently disables a check is worse than no check,
+        because it looks like the check is running.
+        """
+        try:
+            response = await self.call("getTokenSupply", [mint_address])
+        except RpcError:
+            return None
+        value = (response or {}).get("value") if isinstance(response, dict) else None
+        if not isinstance(value, dict):
+            return None
+        raw, decimals = value.get("amount"), value.get("decimals")
+        if raw is None or decimals is None:
+            return None
+        try:
+            supply = Decimal(str(raw)) / (Decimal(10) ** int(decimals))
+        except (ArithmeticError, ValueError):
+            return None
+        return supply if supply > 0 else None
 
     async def get_multiple_accounts(
         self, addresses: list[str], *, encoding: str = "base64"
