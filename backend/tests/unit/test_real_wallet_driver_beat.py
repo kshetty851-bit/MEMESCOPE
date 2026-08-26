@@ -84,3 +84,48 @@ async def test_the_switch_being_off_is_what_stops_it(monkeypatch):
     outcome = await RealWalletDriver(object()).tick()
     assert outcome.created == 0
     assert outcome.skipped == "autotrade_switch_off"
+
+
+def test_the_driver_spends_the_asset_the_wallet_actually_holds():
+    """It named USDC as the input mint and set no amount at all.
+
+    The wallet holds SOL and zero USDC, so the swap would have tried to spend a
+    token that is not there — and the order factory refuses first anyway, on
+    `buy_intent_missing_lamports`, because a BUY's spend is read from the ROW
+    rather than recomputed at assembly.
+    """
+    from app.real_wallet import driver as drv
+
+    tree = ast.parse(Path(drv.__file__).read_text())
+    fn = next(n for n in ast.walk(tree)
+              if isinstance(n, ast.AsyncFunctionDef) and n.name == "tick")
+    src = ast.unparse(fn)
+    assert "settings.EXECUTION_SOL_MINT" in src
+    assert "JUPITER_USDC_MINT" not in src
+    assert "actual_input_amount_raw=lamports" in src
+
+
+def test_an_unpriced_entry_refuses_rather_than_guessing():
+    """Every limit this wallet has is written in dollars, so an entry that
+    cannot be priced is an entry nobody sized. A stale reading is not a price."""
+    from app.real_wallet import driver as drv
+
+    tree = ast.parse(Path(drv.__file__).read_text())
+    tick = ast.unparse(next(n for n in ast.walk(tree)
+                            if isinstance(n, ast.AsyncFunctionDef) and n.name == "tick"))
+    assert "sol_price_unavailable" in tick
+    assert "entry_size_rounds_to_zero_lamports" in tick
+
+    priced = ast.unparse(next(n for n in ast.walk(tree)
+                              if isinstance(n, ast.AsyncFunctionDef) and n.name == "_sol_usd"))
+    assert "is_fresh" in priced, "a stale SOL price must not size an entry"
+
+
+def test_the_spend_is_stored_not_recomputed_at_assembly():
+    """A price that moves between authorisation and assembly must not change
+    what gets spent — which is why the lamports live on the row."""
+    from app.real_wallet import production_order as po
+
+    src = Path(po.__file__).read_text()
+    assert "intent.actual_input_amount_raw" in src
+    assert "buy_intent_missing_lamports" in src

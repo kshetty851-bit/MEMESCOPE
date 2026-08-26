@@ -36,6 +36,8 @@ from app.models.real_wallet_execution import RealWalletLiveIntent
 from app.real_wallet.autotrade import AutotradeSwitchService
 from app.real_wallet.live_repository import LiveIntentRepository
 from app.real_wallet.policy import AutonomousExecutionPolicy, PolicyState
+from app.real_wallet.sol_price import JupiterSolUsdPriceSource
+from app.real_wallet.tx_inspect import lamports_from_sol
 
 logger = get_logger(__name__)
 
@@ -112,6 +114,24 @@ class RealWalletDriver:
         if candidate is None:
             return DriverOutcome(0, "no_fresh_candidate")
 
+        # Price the entry in the asset the wallet actually holds, and store it.
+        #
+        # This used to name USDC as the input mint and set no amount at all. The
+        # wallet holds SOL and zero USDC, so the swap would have tried to spend
+        # a token that is not there — and the order factory refuses first
+        # anyway, on `buy_intent_missing_lamports`, because a BUY's spend is
+        # taken from the ROW rather than recomputed at assembly. A price that
+        # moves between authorisation and assembly must not change what gets
+        # spent, which is exactly why it is stored here.
+        sol_price = await self._sol_usd(now)
+        if sol_price is None:
+            # An unpriced entry is an entry nobody sized. Refuse rather than
+            # guess: every limit this wallet has is written in dollars.
+            return DriverOutcome(0, "sol_price_unavailable")
+        lamports = lamports_from_sol(entry_usd / sol_price)
+        if lamports <= 0:
+            return DriverOutcome(0, "entry_size_rounds_to_zero_lamports")
+
         # One intent per tick, deliberately. A loop here would turn a single
         # bad minute into a whole book.
         intent = await repo.create_intent(
@@ -122,8 +142,9 @@ class RealWalletDriver:
             strategy_version=settings.REAL_WALLET_SAFETY_POLICY_VERSION,
             wallet_public_key=wallet,
             requested_usd=entry_usd,
-            input_mint=settings.JUPITER_USDC_MINT,
+            input_mint=settings.EXECUTION_SOL_MINT,
             output_mint=candidate,
+            actual_input_amount_raw=lamports,
         )
         if intent is None:
             return DriverOutcome(0, "already_traded", candidate)
@@ -131,6 +152,20 @@ class RealWalletDriver:
         logger.warning("real_wallet_intent_created", mint=candidate,
                        strategy=switch.nominated_strategy, usd=str(entry_usd))
         return DriverOutcome(1, None, candidate)
+
+    async def _sol_usd(self, now: datetime) -> Decimal | None:
+        """The wallet's own SOL/USD reading, or None. Never a guessed rate."""
+        try:
+            price = await JupiterSolUsdPriceSource().current(now=now)
+        except Exception:  # noqa: BLE001 - an unpriced entry refuses
+            return None
+        if price is None or price.usd <= 0:
+            return None
+        if not price.is_fresh(
+            now, max_age_seconds=settings.EXECUTION_SOL_PRICE_MAX_AGE_SECONDS
+        ):
+            return None
+        return Decimal(str(price.usd))
 
     async def _wallet_lamports(self, wallet: str) -> int | None:
         """Chain balance in lamports, or None when it could not be read."""
