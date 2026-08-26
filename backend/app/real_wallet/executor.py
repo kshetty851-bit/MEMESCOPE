@@ -175,9 +175,15 @@ class RealWalletExecutor:
             trade_size_usd=Decimal(str(intent.requested_usd)),
             now=now,
         )
-        if decision.decision.upper() != "ALLOWED":
+        # "ALLOW", not "ALLOWED". This compared against a verdict the gate never
+        # returns, so EVERY intent was blocked — and with an empty reason string,
+        # because an allowed decision carries no reason codes. It read as
+        # "safety:" and named nothing. Found by walking a real intent in ARMED,
+        # which is the only reason it was not found with money on the line.
+        if decision.decision.upper() != "ALLOW":
             return await self._block(
-                intent, now, "safety:" + ",".join(decision.reason_codes[:3])
+                intent, now,
+                "safety:" + (",".join(decision.reason_codes[:3]) or "unspecified"),
             )
         await self._repository.transition(
             intent=intent,

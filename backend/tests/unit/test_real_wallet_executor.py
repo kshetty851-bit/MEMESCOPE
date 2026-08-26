@@ -172,3 +172,33 @@ def test_only_states_with_a_handler_advance():
     assert "terminal_state" in src
     for terminal in ("CONFIRMED", "FAILED", "BLOCKED"):
         assert f"ExecutionState.{terminal}: self._" not in src
+
+
+def test_the_safety_verdict_is_compared_against_what_the_gate_returns():
+    """It compared against "ALLOWED"; the gate returns "ALLOW".
+
+    So every intent was blocked, and the recorded reason was the empty string —
+    an allowed decision carries no reason codes, so the row read `safety:` and
+    named nothing. Fail-closed, and completely broken.
+
+    Asserted against the gate's own literal rather than a copy, so the two
+    cannot drift apart again.
+    """
+    import inspect
+
+    from app.real_wallet_safety import service as safety
+
+    gate_src = inspect.getsource(safety.RealWalletSafetyGate)
+    assert '"ALLOW" if not reasons else "REJECT"' in gate_src
+
+    fn = _fn("_run_safety")
+    src = ast.unparse(fn)
+    assert "'ALLOW'" in src
+    assert "'ALLOWED'" not in src
+
+
+def test_a_block_always_names_something():
+    """`safety:` with nothing after it is not a reason. A blocked intent that
+    cannot say why is an intent nobody can debug."""
+    src = ast.unparse(_fn("_run_safety"))
+    assert "or 'unspecified'" in src
