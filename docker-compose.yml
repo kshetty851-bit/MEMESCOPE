@@ -256,6 +256,10 @@ x-backend-env: &backend-env
   # Public address only. Phase 1 rejects a signer path in every application
   # container; a later isolated signer service will own its own secret mount.
   REAL_WALLET_PUBLIC_KEY: ${REAL_WALLET_PUBLIC_KEY:-}
+  # The one address funds may leave for. Absent here it never reaches the
+  # container and the policy refuses everything — fail-closed, but silently the
+  # wrong reason. This anchor has swallowed a variable five times before.
+  REAL_WALLET_WITHDRAWAL_ADDRESS: ${REAL_WALLET_WITHDRAWAL_ADDRESS:-}
   REAL_WALLET_EXECUTION_SECRET_FILE: ${REAL_WALLET_EXECUTION_SECRET_FILE:-}
   # API/workers receive a socket path only. The actual signer-file path is
   # deliberately absent from this shared environment and mounted only into the

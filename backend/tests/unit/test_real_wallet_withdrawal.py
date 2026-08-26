@@ -113,3 +113,23 @@ def test_readiness_reports_the_lock_and_names_the_address():
     check = {c.key: c for c in fr.evaluate().checks}["withdrawal_address_nominated"]
     assert check.status is fr.Status.PASS
     assert OWNER in check.detail
+
+
+def test_the_compose_anchor_actually_passes_the_address_through():
+    """Checked on the PARSED document, not its text — a comment naming the
+    variable is harmless, an env key is what matters, and matching text cannot
+    tell them apart.
+
+    Absent from the anchor the value never reaches the container and the policy
+    refuses everything: fail-closed, but for silently the wrong reason. This
+    anchor has swallowed a variable five times before.
+    """
+    import yaml
+
+    root = Path(__file__).resolve().parents[3]
+    doc = yaml.safe_load((root / "docker-compose.yml").read_text())
+    anchor = doc["x-backend-env"]
+    assert "REAL_WALLET_WITHDRAWAL_ADDRESS" in anchor
+    assert "${REAL_WALLET_WITHDRAWAL_ADDRESS" in str(
+        anchor["REAL_WALLET_WITHDRAWAL_ADDRESS"]
+    )
