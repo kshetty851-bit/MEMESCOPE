@@ -90,7 +90,19 @@ class _Gate(RealWalletSafetyGate):
         gate = self
 
         class _SupplyRPC:
+            #: The real client must be started before use and closed after —
+            #: `get_rpc()` returns a NEW, UNSTARTED one every call. The double
+            #: carries them so the production start/close is exercised here
+            #: rather than only discovered against a live node.
+            started = 0
+
+            async def start(self):
+                type(self).started += 1
+
+            async def close(self): ...
+
             async def get_token_supply(self, mint_address: str):
+                assert type(self).started, "supply read before start()"
                 return gate.supply
 
         self._rpc = _SupplyRPC()  # type: ignore[assignment]

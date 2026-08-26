@@ -331,7 +331,19 @@ class RealWalletSafetyGate:
             # No price means no token quantity to compute; the market reasons
             # already refused, and adding a second reason would just be noise.
             return None, None
-        supply = await self._rpc.get_token_supply(mint_address)
+        # Started and closed around the call, exactly as `_inspect_mint` does.
+        # `get_rpc()` hands back a NEW, UNSTARTED client, so calling it directly
+        # raises "not started" — which this function turns into `None`, which
+        # means unreadable, which REFUSES. Every token failed the gate and the
+        # reason blamed the token rather than the missing `start()`.
+        try:
+            await self._rpc.start()
+            try:
+                supply = await self._rpc.get_token_supply(mint_address)
+            finally:
+                await self._rpc.close()
+        except Exception:  # noqa: BLE001 - an unreadable supply still refuses
+            supply = None
         if supply is None:
             reasons.append(Reason.TOKEN_SUPPLY_UNREADABLE)
             return None, None
