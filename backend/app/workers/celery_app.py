@@ -209,6 +209,14 @@ celery_app.conf.beat_schedule = {
         "task": "app.lab.scheduler.lab_tick",
         "schedule": crontab(minute="*"),
     },
+    # The real wallet's heartbeat. Beside the Lab's and at the same cadence,
+    # because it acts on Lab decisions and those are actionable for ten minutes.
+    # It creates at most one BUY intent per tick and only while the operator's
+    # switch is on; with the switch off — its default — it refuses immediately.
+    "real-wallet-driver-tick": {
+        "task": "app.real_wallet.scheduler.real_wallet_driver_tick",
+        "schedule": crontab(minute="*"),
+    },
     "regime-snapshot-hourly": {
         "task": "app.workers.research_tasks.regime_snapshot_hourly",
         "schedule": crontab(minute="7"),
