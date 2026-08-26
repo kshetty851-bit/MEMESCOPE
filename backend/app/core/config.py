@@ -389,6 +389,10 @@ class Settings(BaseSettings):
     #: days returns ~2.8 GB of that and lifts projected free space from ~12 GB
     #: to ~15 GB.
     RADAR_DECISION_SNAPSHOT_RETENTION_DAYS: int = Field(default=2, ge=1, le=365)
+    #: Rank telemetry. Fourteen days rather than the seven used for scores and
+    #: snapshots: this is the series a rank-stability replay reads, and two
+    #: weeks is the shortest window that still contains one.
+    RADAR_RANK_EVENT_RETENTION_DAYS: int = Field(default=14, ge=1, le=365)
     #: Windows used only by the emergency pass above the critical threshold.
     SCORING_HISTORY_EMERGENCY_DAYS: int = Field(default=3, ge=1, le=365)
     RADAR_DECISION_SNAPSHOT_EMERGENCY_DAYS: int = Field(default=1, ge=1, le=365)

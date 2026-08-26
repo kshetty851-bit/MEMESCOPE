@@ -185,6 +185,7 @@ async def _prune_telemetry() -> dict[str, Any]:
         "market_snapshots": 0,
         "radar_decision_snapshots": 0,
         "wallet_flow_snapshots": 0,
+        "radar_rank_events": 0,
         "failures": [],
     }
 
@@ -200,6 +201,11 @@ async def _prune_telemetry() -> dict[str, Any]:
             "wallet_flow_snapshots",
             _prune_wallet_flow_snapshots,
             settings.WALLET_FLOW_RETENTION_DAYS,
+        ),
+        (
+            "radar_rank_events",
+            _prune_radar_rank_events,
+            settings.RADAR_RANK_EVENT_RETENTION_DAYS,
         ),
     )
     for name, prune, days in jobs:
@@ -233,6 +239,32 @@ async def _prune_wallet_flow_snapshots(days: int) -> int:
         WHERE ctid IN (
             SELECT ctid FROM wallet_flow_snapshots
             WHERE captured_at < :cutoff
+            LIMIT :batch
+        )
+        """,
+        {"cutoff": datetime.now(UTC) - timedelta(days=days), "batch": _BATCH},
+    )
+
+
+async def _prune_radar_rank_events(days: int) -> int:
+    """Rank telemetry: one row per mint per rank observation.
+
+    Added 2026-08-26. This table had NO retention and was the only unbounded
+    telemetry left — 1.27M rows and 865MB when it was found, while every
+    neighbouring table was being pruned on schedule. It stopped being written
+    on 2026-08-22 when the flag that produced it was paused, so today it is a
+    frozen 865MB rather than a growing one; the policy exists so that turning
+    that flag back on does not quietly restart the growth.
+
+    Pruned on `observed_at` rather than `created_at`: the former is when the
+    rank was true, which is the only timestamp a replay would filter on.
+    """
+    return await _delete_in_batches(
+        """
+        DELETE FROM radar_rank_events
+        WHERE ctid IN (
+            SELECT ctid FROM radar_rank_events
+            WHERE observed_at < :cutoff
             LIMIT :batch
         )
         """,
