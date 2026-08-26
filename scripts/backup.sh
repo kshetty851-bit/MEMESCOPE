@@ -51,8 +51,23 @@ prune() {
 	done
 }
 
-prune "$DAILY" 7
-prune "$WEEKLY" 4
-prune "$MONTHLY" 6
+# RETENTION IS BOUNDED BY THE DISK, not by what would be nice to keep.
+#
+# 7/4/6 was the original policy and it does not fit this host. A dump is ~1.5GB
+# against a 38GB disk that already carries a 12GB database, so seventeen
+# retained dumps is up to 25GB — more than the free space that exists. On
+# 2026-08-26 it filled the disk to 95% and starved a deploy's build of space,
+# which failed its health check and took the worker, scheduler and scanner
+# down with it.
+#
+# 3/1/1 caps backups near 7.5GB and still leaves three days of daily restore
+# points plus a weekly and a monthly. Weeklies and monthlies are hardlinks to
+# a daily (see above), so they cost nothing extra until the daily is pruned
+# out from under them.
+#
+# If the disk grows, raise these. Do not raise them without checking `df`.
+prune "$DAILY" 3
+prune "$WEEKLY" 1
+prune "$MONTHLY" 1
 
 echo "[backup] complete: $(ls -1 "$DAILY" | wc -l) daily, $(ls -1 "$WEEKLY" | wc -l) weekly, $(ls -1 "$MONTHLY" | wc -l) monthly"
