@@ -846,14 +846,25 @@ class Settings(BaseSettings):
     #: Two different jobs used to be one number, and the smaller one won. The
     #: SETTING is the operator's risk decision: how much they are willing to have
     #: exposed. The `le` below is a TYPO GUARD — it exists so a fat-fingered
-    #: `500` in place of `5.00` cannot silently permit a five-hundred-SOL wallet.
+    #: `500` in place of `5.00` cannot silently permit a wallet nobody intended.
     #: It was 5, chosen as 20x the 0.25 default back when this was scoped as a
     #: canary, and a typo guard sized for a canary caps legitimate growth, which
     #: is not its job. Profits compound in the wallet by design — there is no
     #: auto-sweep — so the ceiling has to be able to sit above where the book is
     #: going, not where it started.
+    #:
+    #: 25,000 SOL is set against a stated ambition of a seven-figure balance:
+    #: $1M is ~10,300 SOL at $97, and a SOL price that halves doubles the SOL a
+    #: dollar target needs. The guard therefore has to clear roughly 20,600 SOL
+    #: for that target to survive a bad market in the denominator.
+    #:
+    #: **Set the value as a ladder, not at the guard.** The ceiling only bounds
+    #: anything while it is near the book: at a $100 balance a ceiling of $2M
+    #: refuses nothing, including a mis-sent transfer that has no business being
+    #: in a trading wallet. Raising it deliberately as the book grows is what
+    #: keeps it a control rather than a formality.
     REAL_WALLET_MAX_BALANCE_SOL: Decimal = Field(
-        default=Decimal("0.25"), gt=0, le=Decimal("1000")
+        default=Decimal("0.25"), gt=0, le=Decimal("25000")
     )
     #: Freshness and impact bounds for a real *exit* quote. An exit that cannot
     #: be priced is reported as an explicit failure state, never retried away.

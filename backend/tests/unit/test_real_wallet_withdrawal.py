@@ -153,10 +153,10 @@ def test_the_balance_ceiling_is_a_typo_guard_not_a_growth_cap():
     field = Settings.model_fields["REAL_WALLET_MAX_BALANCE_SOL"]
     bounds = {type(m).__name__: getattr(m, "le", getattr(m, "gt", None))
               for m in field.metadata}
-    assert bounds.get("Le") == Decimal("1000"), "a canary-sized guard caps growth"
+    assert bounds.get("Le") == Decimal("25000"), "a canary-sized guard caps growth"
     # Still a guard: an absurd value is refused rather than accepted.
     with pytest.raises(ValidationError):
-        Settings(REAL_WALLET_MAX_BALANCE_SOL=5000)
+        Settings(REAL_WALLET_MAX_BALANCE_SOL=100000)
     # And zero or negative is still meaningless.
     with pytest.raises(ValidationError):
         Settings(REAL_WALLET_MAX_BALANCE_SOL=0)
