@@ -31,6 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.logging import get_logger
 from app.lab import execution, sellability, spec
 from app.lab.rules import MarkState, evaluate_entry, evaluate_exit
+from app import sizing
 from app.lab.spec import STARTING_EQUITY, Strategy
 from app.models.lab import (
     LabDecision,
@@ -329,22 +330,42 @@ class LabService:
         if live >= row.max_concurrent:
             decision.skip_reason = "max_concurrent"
             return False
-        if deployed + row.size_usd > row.max_exposure_usd:
+
+        # --- GROWTH LADDER -------------------------------------------------
+        # The stake rises with the portfolio: base size until $200, twice that
+        # from $200, four times from $400 (see `app.sizing`). Derived here from
+        # live equity rather than written back onto the row, so the frozen spec
+        # figure stays readable next to what was actually staked.
+        #
+        # The exposure ceiling is scaled by the same factor deliberately. It is
+        # denominated in dollars, so leaving it fixed while the stake doubles
+        # would quietly halve how many positions the strategy can hold at once
+        # — a change to its diversification that nobody asked for, arriving as
+        # a side effect of a sizing rule.
+        multiplier = sizing.growth_multiplier(await self.equity(row), base=row.starting_equity)
+        size_usd = row.size_usd * multiplier
+        max_exposure_usd = row.max_exposure_usd * multiplier
+        # The decision row was written with the spec's base size before this
+        # ran. Correct it to what the ladder actually asked for, so the record
+        # of the request and the position that follows it cannot disagree.
+        decision.requested_size_usd = size_usd
+
+        if deployed + size_usd > max_exposure_usd:
             decision.skip_reason = "max_exposure"
             return False
-        if row.cash < row.size_usd:
+        if row.cash < size_usd:
             decision.skip_reason = "insufficient_cash"
             return False
         price, liq = features.get("price"), features.get("liq")
         if price is None or liq is None:
             decision.skip_reason = "unpriceable"
             return False
-        qty = execution.buy_quantity(row.size_usd, price, liq)
+        qty = execution.buy_quantity(size_usd, price, liq)
         if qty is None or qty <= 0:
             decision.skip_reason = "unpriceable"
             return False
 
-        row.cash -= row.size_usd
+        row.cash -= size_usd
         # Flushed immediately, not at the end of the tick: the concurrency and
         # exposure counts for the NEXT strategy must see this row, and any
         # settlement in the same tick must be able to find it.
@@ -352,7 +373,7 @@ class LabService:
             strategy_row_id=row.id, strategy_id=row.strategy_id, decision_id=decision.id,
             mint_address=decision.mint_address, token_id=decision.token_id,
             opened_at=at, entry_price=price, entry_liquidity_usd=liq,
-            size_usd=row.size_usd, quantity=qty, quantity_remaining=qty,
+            size_usd=size_usd, quantity=qty, quantity_remaining=qty,
             banked_proceeds_usd=Decimal(0),
             entry_impact_pct=features.get("buy_impact_pct"),
             entry_source=("quote" if features.get("buy_impact_pct") is not None else "model"),

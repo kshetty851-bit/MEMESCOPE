@@ -827,6 +827,15 @@ class Settings(BaseSettings):
     #: evidence work's decision and has not been made; a default here would
     #: quietly pre-empt it. Must not exceed `REAL_WALLET_MAX_TRADE_USD`.
     REAL_WALLET_ENTRY_SIZE_USD: Decimal = Field(default=Decimal("0"), ge=0)
+    #: The account size the growth ladder measures from (see `app.sizing`).
+    #: At twice this, one entry stakes double; at four times, quadruple.
+    #:
+    #: **Zero — the default — means no ladder, and every entry stakes the base
+    #: size.** Same discipline as the entry size above: a default here would
+    #: decide, on the operator's behalf, at what balance a real order silently
+    #: doubles. `REAL_WALLET_MAX_TRADE_USD` still caps the result, so the
+    #: ladder can never lift a safety bound.
+    REAL_WALLET_SIZING_BASE_USD: Decimal = Field(default=Decimal("0"), ge=0)
     REAL_WALLET_MAX_TRADE_USD: Decimal = Field(default=Decimal("5"), gt=0)
     REAL_WALLET_MAX_OPEN_POSITIONS: int = Field(default=1, ge=1)
     REAL_WALLET_MAX_TOTAL_EXPOSURE_USD: Decimal = Field(default=Decimal("10"), gt=0)

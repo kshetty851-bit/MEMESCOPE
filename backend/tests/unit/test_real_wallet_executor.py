@@ -202,3 +202,21 @@ def test_a_block_always_names_something():
     cannot say why is an intent nobody can debug."""
     src = ast.unparse(_fn("_run_safety"))
     assert "or 'unspecified'" in src
+
+
+def test_an_order_that_fails_its_recheck_blocks_rather_than_escaping():
+    """`OrderEvidenceRejectedError` is a different thing from the order being
+    unavailable, and it escaped uncaught: the intent stayed at SAFETY_APPROVED
+    and was retried every minute against a market that had already refused it.
+
+    Seen for real — Jupiter built a transaction whose slippage was above policy,
+    and the exception propagated straight out of the executor.
+    """
+    fn = _fn("_build_order")
+    handlers = [h for n in ast.walk(fn) if isinstance(n, ast.Try) for h in n.handlers]
+    caught = {ast.unparse(h.type) for h in handlers if h.type is not None}
+    assert "JupiterV2OrderUnavailableError" in caught
+    assert "OrderEvidenceRejectedError" in caught
+    # Both end in a recorded block, not a re-raise.
+    for h in handlers:
+        assert "_block" in ast.unparse(h)

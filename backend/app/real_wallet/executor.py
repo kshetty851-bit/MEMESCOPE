@@ -74,6 +74,7 @@ from app.real_wallet.mainnet_signer_client import (
     MainnetSignerUnavailableError,
     UnixMainnetSignerClient,
 )
+from app.real_wallet.order_evidence import OrderEvidenceRejectedError
 from app.real_wallet.network import require_verified_network
 from app.real_wallet.policy import AutonomousExecutionPolicy, PolicyState
 from app.real_wallet.production_order import (
@@ -211,6 +212,12 @@ class RealWalletExecutor:
             prepared = await self._orders.prepare(intent)
         except JupiterV2OrderUnavailableError as exc:
             return await self._block(intent, now, f"order_unavailable:{exc}")
+        except OrderEvidenceRejectedError as exc:
+            # The order came back and FAILED its re-check — a different thing
+            # from the order being unavailable, and it escaped uncaught. The
+            # intent stayed at SAFETY_APPROVED and was retried every minute
+            # against a market that had already refused it, for ever.
+            return await self._block(intent, now, f"order_rejected:{exc}")
         await self._repository.transition(
             intent=intent,
             next_state=ExecutionState.ORDER_CREATED,

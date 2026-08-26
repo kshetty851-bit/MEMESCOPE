@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from enum import StrEnum
 
+from app import sizing
 from app.core.config import settings
 from app.real_wallet.tx_inspect import lamports_from_sol
 
@@ -48,7 +49,7 @@ class PolicyDecision:
     reason_codes: tuple[str, ...]
 
 
-def configured_entry_size_usd() -> Decimal | None:
+def configured_entry_size_usd(equity_usd: Decimal | None = None) -> Decimal | None:
     """The size one real entry may spend, or `None` when nobody has decided.
 
     Deliberately **not** the final $100/$50/$25 ladder. That decision belongs to
@@ -59,9 +60,25 @@ def configured_entry_size_usd() -> Decimal | None:
     Zero — the default — means unconfigured, and unconfigured refuses. An entry
     size that falls back to something sensible is an entry size that ships
     whatever the fallback was.
+
+    Growth ladder: when `equity_usd` is supplied and a sizing base is
+    configured, the stake doubles at each doubling of the account, exactly as
+    it does for the Strategy Lab — one rule, in `app.sizing`, for both.
+
+    `REAL_WALLET_MAX_TRADE_USD` is applied last and always wins. That ordering
+    is the point: the per-trade cap bounds the blast radius of a mistake, and a
+    growth rule permitted to raise its own ceiling would not be a bound. It
+    also has to be clamped HERE rather than left to the policy, because the
+    policy REFUSES an oversized request outright — an unclamped ladder would
+    stop the wallet trading the moment it grew instead of sizing it correctly.
     """
     size = settings.REAL_WALLET_ENTRY_SIZE_USD
-    return size if size > 0 else None
+    if size <= 0:
+        return None
+    multiplier = sizing.growth_multiplier(
+        equity_usd, base=settings.REAL_WALLET_SIZING_BASE_USD
+    )
+    return sizing.scaled(size, multiplier, cap=settings.REAL_WALLET_MAX_TRADE_USD)
 
 
 class AutonomousExecutionPolicy:

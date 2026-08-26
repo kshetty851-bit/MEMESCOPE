@@ -35,9 +35,17 @@ from app.models.lab import LabDecision
 from app.models.real_wallet_execution import RealWalletLiveIntent
 from app.real_wallet.autotrade import AutotradeSwitchService
 from app.real_wallet.live_repository import LiveIntentRepository
-from app.real_wallet.policy import AutonomousExecutionPolicy, PolicyState
+from app.real_wallet.policy import (
+    AutonomousExecutionPolicy,
+    PolicyState,
+    configured_entry_size_usd,
+)
 from app.real_wallet.sol_price import JupiterSolUsdPriceSource
 from app.real_wallet.tx_inspect import lamports_from_sol
+
+#: Lamports in one SOL. Named rather than inline so the conversion in
+#: `equity_usd` reads as a unit change and not a magic number.
+_LAMPORTS_PER_SOL = Decimal(1_000_000_000)
 
 logger = get_logger(__name__)
 
@@ -74,8 +82,7 @@ class RealWalletDriver:
         if not wallet:
             return DriverOutcome(0, "wallet_not_configured")
 
-        entry_usd = settings.REAL_WALLET_ENTRY_SIZE_USD
-        if entry_usd <= 0:
+        if settings.REAL_WALLET_ENTRY_SIZE_USD <= 0:
             # Zero means nobody decided. A fallback size is a size that ships
             # whatever the fallback was.
             return DriverOutcome(0, "entry_size_not_configured")
@@ -92,8 +99,36 @@ class RealWalletDriver:
         if balance_lamports is None:
             return DriverOutcome(0, "wallet_balance_unreadable")
 
-        # The server-owned bounds, asked rather than reimplemented.
+        # Priced here rather than after the policy check, because the size the
+        # policy judges has to be the size actually intended. The growth ladder
+        # is denominated in dollars and the wallet holds SOL, so there is no
+        # equity figure — and therefore no stake — without this reading.
+        sol_price = await self._sol_usd(now)
+        if sol_price is None:
+            # An unpriced entry is an entry nobody sized. Refuse rather than
+            # guess: every limit this wallet has is written in dollars.
+            return DriverOutcome(0, "sol_price_unavailable")
+
         open_positions = await repo.open_positions_count()
+
+        # --- GROWTH LADDER -------------------------------------------------
+        # What the account is worth right now: the SOL it holds, plus what is
+        # already committed to open positions. `configured_entry_size_usd`
+        # turns that into a stake and clamps it to REAL_WALLET_MAX_TRADE_USD,
+        # so the ladder can raise the stake but never the ceiling.
+        #
+        # Inert until an operator sets REAL_WALLET_SIZING_BASE_USD. Unset means
+        # nobody has said at what balance a real order should double, and this
+        # is not the place to assume one.
+        equity_usd = (
+            Decimal(balance_lamports) / _LAMPORTS_PER_SOL * sol_price
+            + await repo.open_exposure_usd()
+        )
+        entry_usd = configured_entry_size_usd(equity_usd)
+        if entry_usd is None or entry_usd <= 0:
+            return DriverOutcome(0, "entry_size_not_configured")
+
+        # The server-owned bounds, asked rather than reimplemented.
         decision = AutonomousExecutionPolicy().evaluate_canary_entry(
             requested_usd=entry_usd,
             state=PolicyState(
@@ -123,11 +158,6 @@ class RealWalletDriver:
         # taken from the ROW rather than recomputed at assembly. A price that
         # moves between authorisation and assembly must not change what gets
         # spent, which is exactly why it is stored here.
-        sol_price = await self._sol_usd(now)
-        if sol_price is None:
-            # An unpriced entry is an entry nobody sized. Refuse rather than
-            # guess: every limit this wallet has is written in dollars.
-            return DriverOutcome(0, "sol_price_unavailable")
         # Quantised DOWN to whole lamports before conversion. `lamports_from_sol`
         # refuses anything inexact by design — a limit that rounds is a limit
         # that can be crossed by rounding — and $5 at any real SOL price is not

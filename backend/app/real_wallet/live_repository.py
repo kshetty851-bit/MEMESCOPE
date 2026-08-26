@@ -291,6 +291,27 @@ class LiveIntentRepository:
         )
         return len(rows.all())
 
+    async def open_exposure_usd(self) -> Decimal:
+        """What the open book cost, at entry, in dollars.
+
+        Cost rather than current value: this wallet stores no running mark, and
+        an unmarked position valued at whatever it last traded for would make
+        the growth ladder move on a stale print. Cost is the conservative
+        reading — it cannot inflate equity, so it cannot inflate a stake.
+        """
+        total = await self._session.scalar(
+            select(
+                func.coalesce(
+                    func.sum(
+                        RealWalletPosition.quantity
+                        * RealWalletPosition.entry_price_usd
+                    ),
+                    0,
+                )
+            ).where(RealWalletPosition.status == "OPEN")
+        )
+        return Decimal(total or 0)
+
     async def open_position(self, position_id: uuid.UUID) -> RealWalletPosition | None:
         return cast(
             RealWalletPosition | None,
