@@ -9,10 +9,11 @@ normal.
 Four questions, each chosen because it has a specific way of going silently
 wrong, and each answerable from the Lab's own tables:
 
-  STALE      what fraction of the open book cannot be marked at all. The failure
-             is self-selecting — a dying token stops being enriched, so its
-             snapshot goes stale, so it is never marked again — which means the
-             positions this hides are exactly the ones that matter.
+  UNMARKABLE what fraction of the open book cannot be priced AT ALL — neither
+             from a fresh snapshot nor from a fresh sell quote. The failure is
+             self-selecting: a dying token stops being enriched, so its snapshot
+             goes stale, so it is never marked again, which means the positions
+             this hides are exactly the ones that matter.
 
   ENTRIES    decisions are still being made. Zero decisions is normal for a
              minute and abnormal for an hour, and nothing else in the platform
@@ -80,7 +81,9 @@ class LabHealth:
     measured: bool
     detail: str
     open_positions: int | None = None
-    #: Open positions whose freshest market print is already too old to act on.
+    #: Open positions that can be priced from neither a snapshot nor a quote.
+    #: NOT simply "stale snapshot": `_mark` consults a fresh quote before the
+    #: staleness guard, so a quoted position is marked however old its snapshot.
     stale_positions: int | None = None
     stale_pct: float | None = None
     #: Fraction of open VALUE priced from a real sell quote rather than a model.
@@ -127,8 +130,11 @@ async def read(session: AsyncSession, *, now: datetime | None = None) -> LabHeal
         )).all())
         open_count = len(rows)
 
-        stale = await _stale_count(session, [r.mint_address for r in rows], now)
-        quote_backed = await _quote_backed_pct(session, rows, now)
+        quoted = await _quoted_mints(session, [r.mint_address for r in rows], now)
+        stale = await _unmarkable_count(
+            session, [r.mint_address for r in rows], quoted, now
+        )
+        quote_backed = _quote_backed_pct(rows, quoted)
         since_decision = await _minutes_since(
             session, select(func.max(LabDecision.checkpoint_at))
             .join(LabStrategy, LabStrategy.id == LabDecision.strategy_row_id)
@@ -157,14 +163,35 @@ async def read(session: AsyncSession, *, now: datetime | None = None) -> LabHeal
     )
 
 
-async def _stale_count(
+async def _quoted_mints(
     session: AsyncSession, mints: list[str], now: datetime
-) -> int | None:
-    """Open positions whose freshest print is already too old to act on.
+) -> set[str]:
+    """Mints with a fresh, successful sell quote from the mark-refresh sweep."""
+    if not mints:
+        return set()
+    return set((await session.execute(
+        select(ResearchQuote.mint_address).where(
+            ResearchQuote.mint_address.in_(mints),
+            ResearchQuote.context == MARK_CONTEXT,
+            ResearchQuote.side == "sell",
+            ResearchQuote.ok.is_(True),
+            ResearchQuote.requested_at >= now - MAX_QUOTE_AGE,
+        ).distinct()
+    )).scalars())
 
-    Counted the same way `_mark` decides to skip one, so this number IS the
-    number of positions the next tick will refuse to evaluate — not an
-    approximation of it.
+
+async def _unmarkable_count(
+    session: AsyncSession, mints: list[str], quoted: set[str], now: datetime
+) -> int | None:
+    """Open positions the next tick will refuse to evaluate at all.
+
+    A stale SNAPSHOT is no longer disqualifying on its own. `_mark` consults a
+    fresh sell quote BEFORE the staleness guard — that was the fix for the
+    frozen book — so a position with a current quote is marked however old its
+    snapshot is. Counting stale snapshots alone measured the behaviour that was
+    replaced, and reported 57% unmarkable on a book that was 100% quote-backed.
+
+    Unmarkable is therefore: no fresh quote AND no fresh snapshot.
     """
     if not mints:
         return 0
@@ -179,13 +206,12 @@ async def _stale_count(
     fresh = set((await session.execute(
         select(latest.c.mint_address).where(latest.c.captured_at >= cutoff)
     )).scalars())
-    # A mint with NO snapshot at all is stale too — it cannot be marked either.
-    return sum(1 for mint in mints if mint not in fresh)
+    # A mint with NO snapshot at all counts as stale — it cannot be marked from
+    # one either. What rescues it is a quote, not the absence of evidence.
+    return sum(1 for mint in mints if mint not in fresh and mint not in quoted)
 
 
-async def _quote_backed_pct(
-    session: AsyncSession, rows: list, now: datetime
-) -> float | None:
+def _quote_backed_pct(rows: list, quoted: set[str]) -> float | None:
     """Fraction of open VALUE priced from a real sell quote, not a model.
 
     By value rather than by count on purpose: ten dust positions backed by
@@ -194,17 +220,6 @@ async def _quote_backed_pct(
     """
     if not rows:
         return 100.0
-    mints = [r.mint_address for r in rows]
-    quoted = set((await session.execute(
-        select(ResearchQuote.mint_address).where(
-            ResearchQuote.mint_address.in_(mints),
-            ResearchQuote.context == MARK_CONTEXT,
-            ResearchQuote.side == "sell",
-            ResearchQuote.ok.is_(True),
-            ResearchQuote.requested_at >= now - MAX_QUOTE_AGE,
-        ).distinct()
-    )).scalars())
-
     total = Decimal(0)
     backed = Decimal(0)
     for row in rows:

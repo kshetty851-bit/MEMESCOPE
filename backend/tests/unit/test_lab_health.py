@@ -168,3 +168,21 @@ def test_the_lab_probe_does_not_share_the_caller_s_session():
     # It takes no session, and opens one of its own.
     assert [a.arg for a in fn.args.args] == ["now"]
     assert "SessionFactory()" in ast.unparse(fn)
+
+
+def test_a_quoted_position_is_not_counted_as_unmarkable():
+    """A stale SNAPSHOT stopped being disqualifying when `_mark` began
+    consulting a fresh sell quote first — that was the fix for the frozen book.
+
+    Counting stale snapshots alone measured the behaviour that was replaced. It
+    reported 57% unmarkable on a book that was 100% quote-backed, which is a
+    watch describing a fault that no longer exists.
+    """
+    src = Path(health.__file__).read_text()
+    tree = ast.parse(src)
+    fn = next(n for n in ast.walk(tree)
+              if isinstance(n, ast.AsyncFunctionDef) and n.name == "_unmarkable_count")
+    body = ast.unparse(fn)
+    # Unmarkable requires BOTH to be absent.
+    assert "not in fresh and mint not in quoted" in body
+    assert "quoted" in {a.arg for a in fn.args.args}
