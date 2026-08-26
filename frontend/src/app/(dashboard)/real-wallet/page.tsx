@@ -217,6 +217,184 @@ function StatusCard({ label, value }: { label: string; value: string }) {
   );
 }
 
+/**
+ * The balance, first thing on the page, with the two things an owner wants to do.
+ *
+ * Deposit is a real action here because receiving needs nothing but an address on
+ * a proven chain — that is exactly what `ready_to_fund` means. Withdrawing is not,
+ * and the panel says why instead of offering a button that cannot work: moving SOL
+ * out is a signed mainnet submission, the same path a trade takes, and that path is
+ * refused by `MAINNET_EXECUTION_DISABLED` and the release constant. Wiring a second
+ * way out of this wallet that skipped those barriers would defeat them.
+ *
+ * The keypair is an ordinary Solana keypair, so the operator can always move funds
+ * with their own wallet software. That route is stated plainly rather than hidden
+ * behind a disabled control.
+ */
+function BalanceCard({
+  data,
+  readiness,
+}: {
+  data: WalletStatus | undefined;
+  readiness: FundingReadiness | undefined;
+}) {
+  const [panel, setPanel] = useState<"none" | "deposit" | "withdraw">("none");
+  const [copied, setCopied] = useState(false);
+  const address = data?.public_key ?? null;
+  const balance = data?.sol_balance;
+  const ceiling = Number(data?.limits?.max_balance_sol ?? 0);
+  const reserve = Number(data?.limits?.min_sol_fee_reserve ?? 0);
+  const overCeiling = balance != null && ceiling > 0 && balance > ceiling;
+  const headroom = ceiling > 0 && balance != null ? ceiling - balance : null;
+
+  const copy = () => {
+    if (!address) return;
+    void navigator.clipboard.writeText(address);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1500);
+  };
+
+  return (
+    <section className="mt-6 rounded-lg border border-line p-5">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="text-label text-ink-3">
+            Execution wallet balance · {(data?.network ?? "—").toUpperCase()}
+            {data?.rpc?.verified ? " · genesis verified" : " · UNVERIFIED CHAIN"}
+          </p>
+          <p className="mt-2 text-4xl font-medium tabular-nums text-ink">
+            {balance != null ? balance.toFixed(6) : "—"}
+            <span className="ml-2 text-lg text-ink-3">SOL</span>
+          </p>
+          {address ? (
+            <button
+              type="button"
+              onClick={copy}
+              className="mt-2 break-all text-left font-mono text-xs text-ink-3 underline decoration-dotted"
+            >
+              {address}
+              <span className="ml-2 not-italic text-accent">
+                {copied ? "copied" : "copy"}
+              </span>
+            </button>
+          ) : (
+            <p className="mt-2 text-sm text-ink-3">No wallet configured.</p>
+          )}
+        </div>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => setPanel(panel === "deposit" ? "none" : "deposit")}
+            className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-black disabled:opacity-40"
+            disabled={!address}
+          >
+            Deposit
+          </button>
+          <button
+            type="button"
+            onClick={() => setPanel(panel === "withdraw" ? "none" : "withdraw")}
+            className="rounded-md border border-line px-4 py-2 text-sm font-medium text-ink disabled:opacity-40"
+            disabled={!address}
+          >
+            Withdraw
+          </button>
+        </div>
+      </div>
+
+      {data?.balance_error ? (
+        <p className="mt-3 text-sm text-warning">
+          Balance unreadable: {data.balance_error}. An unreadable balance refuses rather
+          than assuming zero.
+        </p>
+      ) : null}
+
+      {overCeiling ? (
+        <p className="mt-3 rounded-md border border-warning/40 bg-warning/[0.08] p-3 text-sm text-warning">
+          Above the {ceiling} SOL canary ceiling. The policy REFUSES a wallet over the
+          ceiling, so overfunding blocks trading rather than enabling it. Withdraw the
+          excess.
+        </p>
+      ) : null}
+
+      {panel === "deposit" ? (
+        <div className="mt-4 rounded-md border border-line bg-raised p-4">
+          <p className="text-label text-ink-3">Deposit SOL</p>
+          <p className="mt-2 text-sm text-ink-3">
+            Send SOL on <span className="text-ink">{data?.network}</span> to the address
+            above. Receiving needs only the address and a proven chain, which is what
+            {readiness?.ready_to_fund ? " is confirmed" : " is not yet confirmed"} —{" "}
+            <span className="text-ink">
+              ready_to_fund: {String(readiness?.ready_to_fund ?? "unknown")}
+            </span>
+            .
+          </p>
+          <p className="mt-2 text-sm text-ink-3">
+            Keep the total under{" "}
+            <span className="text-ink">{ceiling} SOL</span>
+            {headroom != null && headroom > 0 ? (
+              <>
+                {" "}
+                — room for <span className="text-ink">{headroom.toFixed(4)} SOL</span> more
+              </>
+            ) : null}
+            . At least <span className="text-ink">{reserve} SOL</span> is held back for
+            fees.
+          </p>
+          <p className="mt-2 text-xs text-ink-3">
+            Receive URI: {address ? `solana:${address}` : "—"}. A QR image is
+            intentionally not rendered through a third-party service, so the address is
+            never disclosed to one.
+          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={copy}
+              className="rounded-md border border-line px-3 py-2 text-sm text-ink"
+            >
+              {copied ? "Address copied" : "Copy address"}
+            </button>
+            <a
+              className="text-sm text-accent"
+              href={`https://solscan.io/account/${address}${
+                data?.network === "devnet" ? "?cluster=devnet" : ""
+              }`}
+              rel="noreferrer"
+              target="_blank"
+            >
+              View on Solscan
+            </a>
+          </div>
+        </div>
+      ) : null}
+
+      {panel === "withdraw" ? (
+        <div className="mt-4 rounded-md border border-line bg-raised p-4">
+          <p className="text-label text-ink-3">Withdraw SOL</p>
+          <p className="mt-2 text-sm text-ink-3">
+            Not available in the app, and deliberately so. Sending SOL out is a signed
+            mainnet submission — the same path a trade takes — and that path is refused by{" "}
+            <span className="font-mono text-ink">MAINNET_EXECUTION_DISABLED</span> and the
+            reviewed release constant. A second way out of this wallet that skipped those
+            barriers would defeat them.
+          </p>
+          <p className="mt-2 text-sm text-ink-3">
+            This is an ordinary Solana keypair, so you can always move funds yourself:
+            import the keypair file into Phantom or Solflare and send from there. That
+            uses your key, on your machine, with no server in the path.
+          </p>
+          <p className="mt-2 text-sm text-ink-3">
+            Balance available after the fee reserve:{" "}
+            <span className="text-ink">
+              {balance != null ? Math.max(0, balance - reserve).toFixed(6) : "—"} SOL
+            </span>
+            .
+          </p>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 type FundingCheck = {
   key: string;
   title: string;
@@ -704,11 +882,7 @@ export default function RealWalletPage() {
   }
   const data = query.data;
   const readiness = data?.readiness;
-  const address = data?.public_key;
-  const copyAddress = () => address && void navigator.clipboard.writeText(address);
-  const explorerUrl = address
-    ? `https://solscan.io/account/${address}${data?.network === "devnet" ? "?cluster=devnet" : ""}`
-    : undefined;
+  // The address, its copy control and the Solscan link all live in BalanceCard now.
   if (!buckled) {
     return (
       <Seatbelt
@@ -722,12 +896,15 @@ export default function RealWalletPage() {
 
   return (
     <main>
-      <p className="text-label text-accent">Operator only · DEVNET ONLY</p>
+      <p className="text-label text-accent">
+        Operator only · {(data?.network ?? "—").toUpperCase()}
+      </p>
       <h1 className="mt-2 text-3xl font-medium text-ink">MEMESCOPE execution wallet</h1>
       <p className="mt-2 max-w-2xl text-sm text-ink-3">
-        Dedicated low-balance wallet. Phase 2 supports one explicit, manual native-SOL
-        devnet transfer flow for custody verification; it is not a trading surface.
+        Dedicated low-balance wallet. Deposits are live; every way of spending — a trade
+        or a withdrawal alike — is still refused in code.
       </p>
+      <BalanceCard data={data} readiness={readinessQuery.data} />
       <section className="mt-6 rounded-lg border border-warning/40 bg-warning/[0.08] p-4">
         <p className="text-label text-warning">
           {data?.lock_state === "LOCKED"
@@ -991,34 +1168,6 @@ export default function RealWalletPage() {
             </p>
           )}
         </div>
-      </section>
-      <section className="mt-6 rounded-lg border border-line p-4">
-        <p className="text-label text-ink-3">Public address</p>
-        {address ? (
-          <div className="mt-2 flex flex-wrap items-center gap-3">
-            <code className="break-all text-sm text-ink">{address}</code>
-            <button className="text-sm text-accent" onClick={copyAddress} type="button">
-              Copy address
-            </button>
-            <a
-              className="text-sm text-accent"
-              href={explorerUrl}
-              rel="noreferrer"
-              target="_blank"
-            >
-              View on Solscan
-            </a>
-          </div>
-        ) : (
-          <p className="mt-2 text-sm text-ink-3">
-            Not configured. Generate it locally first.
-          </p>
-        )}
-        <p className="mt-3 text-xs text-ink-3">
-          Receive URI: {address ? `solana:${address}` : "—"}. A QR image is intentionally
-          not rendered through a third-party service, so the address is never disclosed to
-          one.
-        </p>
       </section>
       <section className="mt-6 overflow-x-auto rounded-lg border border-line">
         <div className="p-4">

@@ -213,7 +213,9 @@ describe("RealWalletPage", () => {
     await waitFor(() =>
       expect(screen.getByText("PublicExecutionWalletAddress")).toBeInTheDocument(),
     );
-    expect(screen.getByText("Copy address")).toBeInTheDocument();
+    // The address itself is the copy control now; the labelled button moved into
+    // the Deposit panel, which is collapsed until asked for.
+    expect(screen.getByText("copy")).toBeInTheDocument();
     expect(screen.getByText("Confirmed lifecycle ledger")).toBeInTheDocument();
     expect(screen.getByText("$2.5")).toBeInTheDocument();
     // Execution and autotrade each read DISABLED on their own status card.
@@ -246,5 +248,48 @@ describe("RealWalletPage", () => {
     expect(
       controls.filter((label) => /enable|arm|unlock|go live|mainnet/i.test(label)),
     ).toEqual([]);
+  });
+});
+
+describe("RealWalletPage balance card", () => {
+  beforeEach(() => {
+    window.sessionStorage.setItem("memescope.seatbelt", "1");
+  });
+
+  it("puts the balance and the address first, before any barrier prose", async () => {
+    vi.mocked(api.get).mockResolvedValue(lockedStatus());
+    render(<RealWalletPage />, { wrapper });
+    await waitFor(() =>
+      expect(screen.getByText("PublicExecutionWalletAddress")).toBeInTheDocument(),
+    );
+    expect(screen.getByRole("button", { name: /deposit/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /withdraw/i })).toBeInTheDocument();
+  });
+
+  it("offers deposit as a real action, because receiving needs only an address", async () => {
+    vi.mocked(api.get).mockResolvedValue(lockedStatus());
+    render(<RealWalletPage />, { wrapper });
+    await waitFor(() =>
+      expect(screen.getByText("PublicExecutionWalletAddress")).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /deposit/i }));
+    expect(screen.getByText("Deposit SOL")).toBeInTheDocument();
+    expect(screen.getByText("Copy address")).toBeInTheDocument();
+  });
+
+  it("refuses to offer an in-app withdrawal and says which barrier refuses it", async () => {
+    // Sending SOL out is a signed mainnet submission — the same path a trade
+    // takes. A second way out of this wallet that skipped the guard would defeat
+    // it, so the panel explains rather than offering a control that cannot work.
+    vi.mocked(api.get).mockResolvedValue(lockedStatus());
+    render(<RealWalletPage />, { wrapper });
+    await waitFor(() =>
+      expect(screen.getByText("PublicExecutionWalletAddress")).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /withdraw/i }));
+    expect(screen.getByText("Withdraw SOL")).toBeInTheDocument();
+    expect(screen.getByText(/MAINNET_EXECUTION_DISABLED/)).toBeInTheDocument();
+    // And it must not have grown a control that would attempt one.
+    expect(screen.queryByRole("button", { name: /send|confirm withdraw/i })).toBeNull();
   });
 });
