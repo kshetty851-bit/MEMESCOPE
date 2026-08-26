@@ -418,6 +418,7 @@ services:
       - ./backend:/app
       # API gets only the signer IPC endpoint, never the signer-file mount.
       - devnet-signer-socket:/run/memescope-devnet-signer
+      - mainnet-signer-socket:/run/memescope-mainnet-signer
     depends_on:
       postgres:
         condition: service_healthy
@@ -516,6 +517,7 @@ services:
       RUN_MIGRATIONS: "false"
     volumes:
       - ./backend:/app
+      - mainnet-signer-socket:/run/memescope-mainnet-signer
     depends_on:
       backend:
         condition: service_healthy
