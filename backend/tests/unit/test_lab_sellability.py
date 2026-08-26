@@ -73,7 +73,11 @@ def test_the_quote_can_only_lower_a_mark_never_raise_it():
     tree = ast.parse(Path(service.__file__).read_text())
     fn = next(n for n in ast.walk(tree)
               if isinstance(n, ast.AsyncFunctionDef) and n.name == "_mark")
-    assert "if realisable < latest.price_usd:" in ast.unparse(fn)
+    src = ast.unparse(fn)
+    # The comparison is against the model's own price, so the quote can only
+    # pull a mark down. Written as a guarded condition since the restructure.
+    assert "realisable < latest.price_usd" in src
+    assert "realisable > latest.price_usd" not in src
 
 
 def test_worthless_means_a_fraction_of_cost_not_exactly_zero():
@@ -146,3 +150,33 @@ async def test_the_scheduled_task_actually_runs(monkeypatch):
 
     assert result.get("failed") is not True, result
     assert called.get("now") is not None, "the task never reached refresh()"
+
+
+def test_a_fresh_quote_outranks_a_stale_snapshot():
+    """The staleness guard was skipping 162 of 224 open positions every tick.
+
+    The skip is self-selecting in the worst way: a dying token stops being
+    enriched, so its snapshot goes stale, so it is never marked and never
+    evaluated for an exit again. The Lab froze its worst positions at their last
+    healthy price and held them for ever.
+
+    Staleness is a statement about the SNAPSHOT, not about the market. A quote
+    taken minutes ago is current evidence whatever the snapshot's age, so it is
+    consulted BEFORE the guard rather than after it.
+    """
+    tree = ast.parse(Path(service.__file__).read_text())
+    fn = next(n for n in ast.walk(tree)
+              if isinstance(n, ast.AsyncFunctionDef) and n.name == "_mark")
+    src = ast.unparse(fn)
+    quote_at = src.index("sellability.realisable_price")
+    give_up_at = src.index("if stale:\n        return None")
+    assert quote_at < give_up_at, "the guard still runs before the quote"
+
+
+def test_a_stale_position_with_no_quote_is_still_refused():
+    """Consulting the quote first must not turn "we do not know" into a mark.
+    Without a quote, an unusable snapshot is still unusable."""
+    tree = ast.parse(Path(service.__file__).read_text())
+    fn = next(n for n in ast.walk(tree)
+              if isinstance(n, ast.AsyncFunctionDef) and n.name == "_mark")
+    assert "if stale:\n        return None" in ast.unparse(fn)

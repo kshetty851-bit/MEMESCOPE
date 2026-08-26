@@ -484,7 +484,35 @@ class LabService:
         latest = rows[0]
         if latest.trading_status == TradingStatus.INACTIVE:
             return Decimal(0), Decimal(0), True, None
-        if execution.is_stale(latest.captured_at, now):
+
+        # A fresh SELL QUOTE outranks a fresh snapshot, and is consulted before
+        # the staleness guard rather than after it.
+        #
+        # This guard was skipping 162 of 224 open positions every tick — 72% of
+        # the book — and the skip is self-selecting in the worst possible way: a
+        # dying token stops being enriched, so its snapshot goes stale, so it is
+        # never marked and never evaluated for an exit again. The Lab froze its
+        # worst positions at their last healthy price and held them for ever,
+        # which is precisely what Karthik found by hand.
+        #
+        # Staleness is a statement about the SNAPSHOT, not about the market. If
+        # someone asked Jupiter within the last few minutes, the answer is
+        # current evidence whatever the snapshot's age.
+        realisable = await sellability.realisable_price(
+            self._session, pos.mint_address, now=now
+        )
+        stale = execution.is_stale(latest.captured_at, now)
+        if realisable is not None:
+            worth = realisable * pos.quantity_remaining
+            if worth <= pos.size_usd * sellability.DEAD_FRACTION:
+                return realisable, Decimal(0), True, None
+            if stale:
+                # No usable snapshot, but a real quote: price from the quote and
+                # carry the last observed liquidity, which only the opt-in
+                # liquidity exits read and which the quote already reflects.
+                return (realisable, Decimal(str(latest.liquidity_usd or 0)),
+                        False, True)
+        if stale:
             return None
         if not latest.price_usd or latest.price_usd <= 0 or not latest.liquidity_usd \
                 or latest.liquidity_usd <= 0:
@@ -501,28 +529,12 @@ class LabService:
                    ResearchQuote.side == "sell")
             .order_by(ResearchQuote.requested_at.desc()).limit(1)
         )
-        # What a seller would ACTUALLY be offered, when someone asked recently.
-        #
-        # The CPMM model below prices impact against the REPORTED liquidity, and
-        # once a pool collapses that figure stops describing a market: 618dCC…
-        # fell from $727k to $1,722 and the model still called a $3 position
-        # negligible, marking it at $3.07 while Jupiter would pay nothing.
-        #
-        # `None` means nobody asked recently enough to know, and the model stands.
-        # This corrects a FACT the frozen exits read; it changes no rule, and
-        # `dead_zero` — which every strategy already has — is what then fires.
-        realisable = await sellability.realisable_price(
-            self._session, pos.mint_address, now=now
-        )
-        if realisable is not None:
-            worth = realisable * pos.quantity_remaining
-            if worth <= pos.size_usd * sellability.DEAD_FRACTION:
-                return latest.price_usd, latest.liquidity_usd, True, sell_ok
-            # Cap, never raise: a quote for the largest holder understates a
-            # smaller one, and crediting a position with more than the model
-            # already allows would be inventing value rather than removing it.
-            if realisable < latest.price_usd:
-                return realisable, latest.liquidity_usd, False, sell_ok
+        # Snapshot is usable. The quote can still LOWER the mark — it is taken at
+        # the largest holder's size, so a smaller position would really fill
+        # better, and crediting one with more than the model allows would be
+        # inventing value rather than removing it.
+        if realisable is not None and realisable < latest.price_usd:
+            return realisable, latest.liquidity_usd, False, sell_ok
         return latest.price_usd, latest.liquidity_usd, False, sell_ok
 
     async def _apply_breaker(self, row: LabStrategy, now: datetime) -> None:
