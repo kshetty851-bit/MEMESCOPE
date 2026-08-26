@@ -151,7 +151,7 @@ async def _lab_sellability_refresh() -> dict[str, Any]:
             if not acquired:
                 await session.rollback()
                 return {"skipped": "sellability_already_running"}
-            outcome = await sellability.refresh(session, now=utcnow())
+            outcome = await sellability.refresh(session, now=datetime.now(UTC))
             await session.commit()
     except Exception:
         logger.exception("lab_sellability_refresh_failed")

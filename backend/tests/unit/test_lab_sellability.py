@@ -111,3 +111,38 @@ def test_usdc_and_the_token_do_not_share_decimals():
     src = ast.unparse(ast.parse(Path(sellability.__file__).read_text()))
     assert "USDC_DECIMALS" in src
     assert "token_decimals" in src
+
+
+async def test_the_scheduled_task_actually_runs(monkeypatch):
+    """Registration is not execution.
+
+    The first version of this suite asserted the task existed in the beat
+    schedule and stopped there. It shipped with `utcnow` unimported and every
+    scheduled run returned `{"failed": True}` — caught only by reading production
+    logs, because the task swallows its own exception by design so a Lab failure
+    cannot stop the beat. That containment is right, and it means a test has to
+    invoke the body or nothing will.
+    """
+    from app.lab import scheduler
+
+    called: dict = {}
+
+    async def _fake_refresh(session, *, now, **kw):
+        called["now"] = now
+        return {"mints": 0, "quoted": 0, "failed": 0, "skipped_fresh": 0}
+
+    class _Session:
+        async def scalar(self, *a, **k): return True
+        async def commit(self): ...
+        async def rollback(self): ...
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+
+    monkeypatch.setattr(scheduler.sellability, "refresh", _fake_refresh)
+    monkeypatch.setattr(scheduler, "SessionFactory", lambda: _Session())
+    monkeypatch.setattr(scheduler.settings, "FEATURE_LAB_ENABLED", True)
+
+    result = await scheduler._lab_sellability_refresh()
+
+    assert result.get("failed") is not True, result
+    assert called.get("now") is not None, "the task never reached refresh()"
