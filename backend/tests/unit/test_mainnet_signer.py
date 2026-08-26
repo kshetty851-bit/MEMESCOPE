@@ -113,21 +113,31 @@ def test_the_key_path_is_never_read_from_settings():
     assert "settings.MAINNET_SIGNER_FILE" not in src
 
 
-def test_the_client_sends_no_secret_and_receives_no_signature():
+def test_the_client_can_ask_for_a_signature_but_never_holds_a_key():
     """Checked on the parse tree. Prose about not carrying secrets must not be
     able to fail a test about not carrying secrets — a mistake made three times
-    while writing this suite."""
+    while writing this suite.
+
+    The client asks two things and only two. It gained `sign` when the
+    production executor needed a signature; that is the designed contract, not a
+    weakening, because everything deciding WHAT gets signed is reloaded on the
+    far side and this end sends only an id. What must never change is that the
+    client cannot produce, load, or derive key material itself.
+    """
     import app.real_wallet.mainnet_signer_client as client_mod
 
     tree = ast.parse(Path(client_mod.__file__).read_text())
-    literals = {
-        n.value for n in ast.walk(tree)
-        if isinstance(n, ast.Constant) and isinstance(n.value, str)
+    ops = {
+        n.value for call in ast.walk(tree)
+        if isinstance(call, ast.Call)
+        for kw in ast.walk(call)
+        if isinstance(kw, ast.Dict)
+        for k, n in zip(kw.keys, kw.values)
+        if isinstance(k, ast.Constant) and k.value == "op" and isinstance(n, ast.Constant)
     }
-    # The only operation it can ask for.
-    assert "identity" in literals
-    assert "sign" not in literals
-    # And it imports nothing that could produce or handle key material.
+    assert ops == {"identity", "sign"}, "exactly two questions cross this boundary"
+
+    # It imports nothing that could produce or handle key material.
     imported: set[str] = set()
     for n in ast.walk(tree):
         if isinstance(n, ast.ImportFrom) and n.module:
@@ -136,6 +146,23 @@ def test_the_client_sends_no_secret_and_receives_no_signature():
             imported.update(a.name for a in n.names)
     assert not {"solders", "solders.keypair", "nacl"} & imported
     assert not any(m.startswith("app.real_wallet.signer") for m in imported)
+
+
+def test_the_client_sends_only_an_id_when_it_asks_for_a_signature():
+    """It must not be able to hand over an assembled transaction: the signer's
+    guarantee is that a compromised caller can ask for a signature and still not
+    choose what is in it."""
+    import app.real_wallet.mainnet_signer_client as client_mod
+
+    tree = ast.parse(Path(client_mod.__file__).read_text())
+    fn = next(n for n in ast.walk(tree)
+              if isinstance(n, ast.AsyncFunctionDef) and n.name == "sign")
+    assert [a.arg for a in fn.args.args] == ["self", "intent_id"]
+    sent = {
+        k.value for d in ast.walk(fn) if isinstance(d, ast.Dict)
+        for k in d.keys if isinstance(k, ast.Constant)
+    }
+    assert sent == {"op", "intent_id"}
 
 
 async def test_the_client_refuses_when_no_socket_is_configured(monkeypatch):
