@@ -11,7 +11,7 @@ import type { LabBoard, LabRule, LabStrategyRow } from "@/types/lab";
 /**
  * V6 FORWARD STRATEGY LAB
  *
- * Twenty virtual $1,000 portfolios scoring the frozen V6 registry against a
+ * Twenty virtual $100 portfolios scoring the frozen V6 registry against a
  * cash control, all fed by the one MEMESCOPE scanner. **This is not the Paper
  * Wallet and it is not real money.** The page says so above the fold rather
  * than in a footnote: a reader who confused them would draw a conclusion about
@@ -26,37 +26,15 @@ import type { LabBoard, LabRule, LabStrategyRow } from "@/types/lab";
  * the historical liquidity effect survives data nobody has seen.
  */
 
-/**
- * Book sizes the board can be read at.
- *
- * $1,000 is what actually ran. $100 is an EXACT rescale of it — every position,
- * every fill and every P&L divided by ten — not a re-run at a smaller size. That
- * distinction matters: the strategies deploy $80–$200 against $1,000, so simply
- * starting them with $100 and leaving the position sizes alone would have run
- * several of them out of cash and changed which trades they could take. Six of the
- * twenty could not have funded their real history on $100 (V6-03 needed $266 of
- * capital, V6-14 $196, V6-02 $189).
- *
- * Because it is a pure change of units, every RATIO is identical at both scales —
- * return %, win %, profit factor, expectancy %, drawdown %. Only dollar labels
- * move. The rescale is also mildly conservative: $1 positions take less price
- * impact than $10 ones, so a genuine $100 book would have filled slightly better.
- */
-const BOOK_SIZES = [
-  { usd: 1000, scale: 1, label: "$1,000" },
-  { usd: 100, scale: 0.1, label: "$100" },
-] as const;
-
-function money(v: number | null | undefined, digits = 2, scale = 1): string {
+function money(v: number | null | undefined, digits = 2): string {
   return v === null || v === undefined || !Number.isFinite(v)
     ? "—"
-    : `$${(v * scale).toFixed(digits)}`;
+    : `$${v.toFixed(digits)}`;
 }
 
-function signed(v: number | null | undefined, scale = 1): string {
+function signed(v: number | null | undefined): string {
   if (v === null || v === undefined || !Number.isFinite(v)) return "—";
-  const x = v * scale;
-  return `${x >= 0 ? "+" : "−"}$${Math.abs(x).toFixed(2)}`;
+  return `${v >= 0 ? "+" : "−"}$${Math.abs(v).toFixed(2)}`;
 }
 
 function pct(v: number | null | undefined, digits = 1): string {
@@ -110,17 +88,17 @@ const COLUMNS: { key: keyof LabStrategyRow | "rank"; label: string; numeric: boo
   { key: "exec_200_pct", label: "Exec 2×", numeric: true },
 ];
 
-function cell(row: LabStrategyRow, key: string, scale = 1): string {
+function cell(row: LabStrategyRow, key: string): string {
   switch (key) {
     case "rank": return String(row.rank);
     case "strategy_id": return `${row.strategy_id} ${row.name}`;
     case "status": return row.status === "failed" ? "FAILED — DRAWDOWN" : "active";
-    case "starting_equity": return money(row.starting_equity, 2, scale);
-    case "cash": return money(row.cash, 2, scale);
-    case "open_cost": return money(row.open_cost, 2, scale);
-    case "open_value": return money(row.open_value, 2, scale);
-    case "equity": return money(row.equity, 2, scale);
-    case "net_pnl": return signed(row.net_pnl, scale);
+    case "starting_equity": return money(row.starting_equity);
+    case "cash": return money(row.cash);
+    case "open_cost": return money(row.open_cost);
+    case "open_value": return money(row.open_value);
+    case "equity": return money(row.equity);
+    case "net_pnl": return signed(row.net_pnl);
     case "return_pct": return pct(row.return_pct, 2);
     case "open_return_pct": return pct(row.open_return_pct, 2);
     case "deployed_return_pct": return pct(row.deployed_return_pct, 2);
@@ -129,11 +107,11 @@ function cell(row: LabStrategyRow, key: string, scale = 1): string {
     case "wins": return String(row.wins);
     case "losses": return String(row.losses);
     case "win_pct": return pct(row.win_pct);
-    case "expectancy": return signed(row.expectancy, scale);
+    case "expectancy": return signed(row.expectancy);
     case "profit_factor": return num(row.profit_factor, 3);
     case "max_dd_pct": return pct(row.max_dd_pct);
-    case "avg_position": return money(row.avg_position, 2, scale);
-    case "max_exposure_usd": return money(row.max_exposure_usd, scale === 1 ? 0 : 2, scale);
+    case "avg_position": return money(row.avg_position);
+    case "max_exposure_usd": return money(row.max_exposure_usd);
     case "exec_125_pct": return pct(row.exec_125_pct);
     case "exec_150_pct": return pct(row.exec_150_pct);
     case "exec_200_pct": return pct(row.exec_200_pct);
@@ -141,53 +119,18 @@ function cell(row: LabStrategyRow, key: string, scale = 1): string {
   }
 }
 
-function Header({
-  board,
-  scale,
-  onScale,
-}: {
-  board: LabBoard;
-  scale: number;
-  onScale: (scale: number) => void;
-}) {
-  const book = BOOK_SIZES.find((b) => b.scale === scale) ?? BOOK_SIZES[0];
+function Header({ board }: { board: LabBoard }) {
   return (
     <Panel density="compact">
       <div className="flex flex-wrap items-baseline justify-between gap-4">
         <div>
           <Label>V6 FORWARD STRATEGY LAB</Label>
           <h1 className="mt-1 text-lg font-medium text-ink">
-            20 STRATEGIES · {book.label} EACH · SAME MEMESCOPE SCANNER
+            20 STRATEGIES · ${board.starting_equity.toFixed(0)} EACH · SAME MEMESCOPE SCANNER
           </h1>
           <p className="mt-1 text-xs font-medium tracking-wide text-warning">
             PAPER / RESEARCH ONLY — REAL MONEY OFF
           </p>
-          <div className="mt-2 flex items-center gap-2">
-            <span className="text-[10px] text-muted">READ AS</span>
-            {BOOK_SIZES.map((b) => (
-              <button
-                key={b.usd}
-                type="button"
-                onClick={() => onScale(b.scale)}
-                className={
-                  b.scale === scale
-                    ? "rounded border border-accent px-2 py-0.5 text-[10px] text-accent"
-                    : "rounded border border-line px-2 py-0.5 text-[10px] text-muted"
-                }
-              >
-                {b.label}
-              </button>
-            ))}
-          </div>
-          {scale !== 1 ? (
-            <p className="mt-1 max-w-xl text-[10px] leading-relaxed text-muted">
-              An exact ÷10 rescale of the $1,000 book that actually ran — every position
-              and P&L divided by ten. Percentages are identical at both scales; only the
-              dollar labels move. It is not a re-run: the strategies deploy $80–$200
-              against $1,000, so starting them with $100 at the same position sizes would
-              have run six of the twenty out of cash and changed which trades they took.
-            </p>
-          ) : null}
         </div>
         <dl className="grid grid-cols-2 gap-x-8 gap-y-1 text-xs sm:grid-cols-4">
           <div>
@@ -228,11 +171,11 @@ function Header({
   );
 }
 
-function Leaders({ board, scale }: { board: LabBoard; scale: number }) {
+function Leaders({ board }: { board: LabBoard }) {
   const { profit, risk_adjusted: risk, executable_2x: twoX } = board.leaders;
   const badges = [
     { title: "PROFIT LEADER", id: profit.strategy_id, name: profit.name,
-      main: money(profit.equity, 2, scale),
+      main: money(profit.equity),
       sub: `${pct(profit.return_pct, 2)} · ${profit.confidence.replace(/_/g, " ")}` },
     { title: "RISK-ADJUSTED LEADER", id: risk.strategy_id, name: risk.name,
       main: pct(risk.return_pct, 2),
@@ -257,15 +200,7 @@ function Leaders({ board, scale }: { board: LabBoard; scale: number }) {
   );
 }
 
-function Drawer({
-  id,
-  onClose,
-  scale,
-}: {
-  id: string;
-  onClose: () => void;
-  scale: number;
-}) {
+function Drawer({ id, onClose }: { id: string; onClose: () => void }) {
   const { data, isLoading } = useLabStrategy(id);
   return (
     <Panel>
@@ -302,7 +237,7 @@ function Drawer({
                     </li>
                   ))
                 )}
-                <li>size: ${data.strategy.size_usd} (as frozen)</li>
+                <li>size: ${data.strategy.size_usd}</li>
                 <li>max concurrent: {data.strategy.max_concurrent}</li>
                 <li>max exposure: ${data.strategy.max_exposure_usd}</li>
                 {Object.entries(data.strategy.exits).map(([k, v]) => (
@@ -341,19 +276,19 @@ function Drawer({
             <div>
               <Label>FORWARD RESULT (this tournament)</Label>
               <ul className="mt-1 space-y-0.5 font-mono text-[11px] text-ink">
-                <li>equity: {money(data.stats?.equity, 2, scale)}</li>
-                <li>cash: {money(data.stats?.cash, 2, scale)}</li>
+                <li>equity: {money(data.stats?.equity)}</li>
+                <li>cash: {money(data.stats?.cash)}</li>
                 <li>
-                  open: {money(data.stats?.open_value, 2, scale)} value /{" "}
-                  {money(data.stats?.open_cost, 2, scale)} cost
+                  open: {money(data.stats?.open_value)} value /{" "}
+                  {money(data.stats?.open_cost)} cost
                 </li>
                 <li>closed trades: {data.stats?.trades ?? 0}</li>
-                <li>expectancy: {signed(data.stats?.expectancy, scale)}</li>
+                <li>expectancy: {signed(data.stats?.expectancy)}</li>
                 <li>PF: {num(data.stats?.profit_factor, 3)}</li>
                 <li>max DD: {pct(data.stats?.max_dd_pct)}</li>
-                <li>best / worst: {signed(data.stats?.best_trade, scale)} / {signed(data.stats?.worst_trade, scale)}</li>
-                <li>without best 1: {signed(data.stats?.expectancy_ex_best1, scale)}</li>
-                <li>without best 3: {signed(data.stats?.expectancy_ex_best3, scale)}</li>
+                <li>best / worst: {signed(data.stats?.best_trade)} / {signed(data.stats?.worst_trade)}</li>
+                <li>without best 1: {signed(data.stats?.expectancy_ex_best1)}</li>
+                <li>without best 3: {signed(data.stats?.expectancy_ex_best3)}</li>
                 <li>top-1 profit share: {pct(data.stats?.top1_profit_share_pct)}</li>
                 <li>top-3 profit share: {pct(data.stats?.top3_profit_share_pct)}</li>
                 <li>longest losing streak: {data.stats?.losing_streak ?? 0}</li>
@@ -394,9 +329,9 @@ function Drawer({
                       <td className="py-1 pr-3">{p.opened_at.slice(5, 16).replace("T", " ")}</td>
                       <td className="py-1 pr-3">{p.status}</td>
                       <td className="py-1 pr-3 text-right">
-                        {money(p.status === "closed" ? p.exit_proceeds_usd : p.open_value, 2, scale)}
+                        {money(p.status === "closed" ? p.exit_proceeds_usd : p.open_value)}
                       </td>
-                      <td className="py-1 pr-3 text-right">{signed(p.pnl, scale)}</td>
+                      <td className="py-1 pr-3 text-right">{signed(p.pnl)}</td>
                       <td className="py-1 pr-3">{p.exit_reason ?? "—"}</td>
                       <td className="py-1 pr-3">{p.route_state ?? "—"}</td>
                       <td className="py-1">
@@ -602,7 +537,6 @@ export default function StrategyLabPage() {
   const [sortKey, setSortKey] = useState<string>("rank");
   const [asc, setAsc] = useState(true);
   const [selected, setSelected] = useState<string | null>(null);
-  const [scale, setScale] = useState<number>(1);
 
   const rows = useMemo(() => {
     if (!data) return [];
@@ -623,8 +557,8 @@ export default function StrategyLabPage() {
 
   return (
     <div className="space-y-4">
-      <Header board={data} scale={scale} onScale={setScale} />
-      <Leaders board={data} scale={scale} />
+      <Header board={data} />
+      <Leaders board={data} />
       <Panel density="compact">
         <div className="flex items-baseline justify-between">
           <Label>LIVE LEADERBOARD — 20 STRATEGIES</Label>
@@ -672,7 +606,7 @@ export default function StrategyLabPage() {
                         c.numeric ? "text-right" : ""
                       }`}
                     >
-                      {cell(r, String(c.key), scale)}
+                      {cell(r, String(c.key))}
                     </td>
                   ))}
                 </tr>
@@ -694,9 +628,7 @@ export default function StrategyLabPage() {
           its open positions still run to their own frozen exits. Cash is allowed to win.
         </p>
       </Panel>
-      {selected ? (
-        <Drawer id={selected} onClose={() => setSelected(null)} scale={scale} />
-      ) : null}
+      {selected ? <Drawer id={selected} onClose={() => setSelected(null)} /> : null}
       <Rulebook rules={data.rulebook ?? []} specHash={data.spec_hash} />
     </div>
   );

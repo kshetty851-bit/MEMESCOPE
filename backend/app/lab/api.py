@@ -26,13 +26,16 @@ from app.models.lab import (
 
 router = APIRouter(prefix="/lab", tags=["lab"])
 
+# The book size is interpolated rather than written out: it said "$1,000" for as
+# long as the book was $1,000 and would have gone on saying it afterwards.
 DISCLOSURE = (
     "RESEARCH SIMULATION — NOT THE OFFICIAL PAPER WALLET, NOT REAL MONEY. Twenty "
-    "virtual $1,000 portfolios scoring frozen V6 hypotheses against a cash control, "
-    "all fed by the one MEMESCOPE scanner. Equity is cash plus what the open book "
-    "could be SOLD for, never plus what it cost. Historical figures shown beside a "
-    "strategy are context from a closed dataset that six studies have already "
-    "mined; they are not validation and are never merged with forward results."
+    f"virtual ${spec.STARTING_EQUITY:,.0f} portfolios scoring frozen V6 hypotheses "
+    "against a cash control, all fed by the one MEMESCOPE scanner. Equity is cash "
+    "plus what the open book could be SOLD for, never plus what it cost. Historical "
+    "figures shown beside a strategy are context from a closed dataset that six "
+    "studies have already mined; they are not validation and are never merged with "
+    "forward results."
 )
 
 
@@ -50,7 +53,7 @@ async def board(session: DbSession) -> dict[str, Any]:
     """The live leaderboard: twenty strategies, three leader badges, timings."""
     t = await _tournament(session)
     now = datetime.now(UTC)
-    rows = await leaderboard.strategy_rows(session)
+    rows = await leaderboard.strategy_rows(session, tournament_id=t.id)
     rows.sort(key=lambda r: r["equity"], reverse=True)
     for i, r in enumerate(rows, 1):
         r["rank"] = i
@@ -60,6 +63,9 @@ async def board(session: DbSession) -> dict[str, Any]:
         "disclosure": DISCLOSURE,
         "spec_version": t.spec_version, "spec_hash": t.spec_hash,
         "spec_immutable": True,
+        # Served, not assumed by the client. The page hardcoded $1,000 in its
+        # heading and kept saying it after the book became $100.
+        "starting_equity": spec.STARTING_EQUITY,
         "valid_from": t.valid_from.isoformat(),
         "snapshot_at": t.snapshot_at.isoformat(),
         "snapshot_taken": snap_taken,
@@ -85,8 +91,13 @@ async def strategy_detail(strategy_id: str, session: DbSession) -> dict[str, Any
     s = spec.BY_ID.get(strategy_id.upper())
     if s is None:
         raise HTTPException(status_code=404, detail=f"unknown strategy {strategy_id}")
+    # Scoped to the current record. `strategy_id` alone matches one row PER
+    # tournament, so once V6.1 existed this returned whichever the database
+    # happened to hand back first — V6-04 at $1,000 or V6-04 at $100, silently.
+    t = await _tournament(session)
     row = (await session.execute(
-        select(LabStrategy).where(LabStrategy.strategy_id == s.id)
+        select(LabStrategy).where(LabStrategy.tournament_id == t.id,
+                                  LabStrategy.strategy_id == s.id)
     )).scalars().first()
     if row is None:
         raise HTTPException(status_code=404, detail="V6 Strategy Lab is not activated")
@@ -108,7 +119,7 @@ async def strategy_detail(strategy_id: str, session: DbSession) -> dict[str, Any
         .where(LabEquityPoint.strategy_row_id == row.id)
         .order_by(LabEquityPoint.captured_at)
     )).all())
-    all_rows = await leaderboard.strategy_rows(session)
+    all_rows = await leaderboard.strategy_rows(session, tournament_id=t.id)
     mine = next((r for r in all_rows if r["strategy_id"] == s.id), {})
     return leaderboard._jsonable({
         "disclosure": DISCLOSURE,
@@ -164,7 +175,14 @@ async def decisions(session: DbSession,
                     eligible: bool | None = Query(default=None),
                     limit: int = Query(default=100, le=500)) -> dict[str, Any]:
     """The decision ledger — skips included, because a refusal is evidence."""
-    q = select(LabDecision).order_by(LabDecision.checkpoint_at.desc()).limit(limit)
+    t = await _tournament(session)
+    q = (
+        select(LabDecision)
+        .join(LabStrategy, LabStrategy.id == LabDecision.strategy_row_id)
+        .where(LabStrategy.tournament_id == t.id)
+        .order_by(LabDecision.checkpoint_at.desc())
+        .limit(limit)
+    )
     if strategy_id:
         q = q.where(LabDecision.strategy_id == strategy_id.upper())
     if eligible is not None:
@@ -192,9 +210,15 @@ async def trades(session: DbSession,
     that a reader can copy the contract address and check the token against the
     market themselves, rather than taking the Lab's word for it.
     """
+    # Scoped to the current record. Positions carry a bare `strategy_id`, so
+    # without the join this listed V6's $1,000 trades alongside V6.1's $100 ones
+    # under one heading, which is the same book twice at two different sizes.
+    t = await _tournament(session)
     q = (
         select(LabPosition, DiscoveredToken.symbol, DiscoveredToken.name)
+        .join(LabStrategy, LabStrategy.id == LabPosition.strategy_row_id)
         .outerjoin(DiscoveredToken, DiscoveredToken.id == LabPosition.token_id)
+        .where(LabStrategy.tournament_id == t.id)
         .order_by(LabPosition.opened_at.desc())
         .limit(limit)
     )

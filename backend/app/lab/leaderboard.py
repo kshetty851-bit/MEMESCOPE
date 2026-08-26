@@ -11,6 +11,7 @@ and destroys its wallet doing it must not also be presented as risk-adjusted or
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
@@ -39,11 +40,22 @@ def _pnl(p: LabPosition) -> Decimal:
     return (p.exit_proceeds_usd or Decimal(0)) - p.size_usd
 
 
-async def strategy_rows(session: AsyncSession, *, before: datetime | None = None
+async def strategy_rows(session: AsyncSession, *, tournament_id: uuid.UUID,
+                        before: datetime | None = None
                         ) -> list[dict[str, Any]]:
-    """One row per strategy. `before` bounds the book to a snapshot boundary."""
+    """One row per strategy IN ONE TOURNAMENT. `before` bounds the book to a
+    snapshot boundary.
+
+    `tournament_id` is required rather than defaulted. This query had no
+    tournament filter at all, which was invisible while exactly one record
+    existed and wrong the instant a second did: V6.1 opened at $100 and the board
+    rendered V6's $1,000 rows underneath a 1.1.0 header. A default would have
+    reintroduced the same silence.
+    """
     strategies = list((await session.execute(
-        select(LabStrategy).order_by(LabStrategy.strategy_id)
+        select(LabStrategy)
+        .where(LabStrategy.tournament_id == tournament_id)
+        .order_by(LabStrategy.strategy_id)
     )).scalars())
     out = []
     for row in strategies:
@@ -185,7 +197,8 @@ def leaders(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-async def mark_open_at_boundary(session: AsyncSession, *, boundary: datetime) -> int:
+async def mark_open_at_boundary(session: AsyncSession, *, tournament_id: uuid.UUID,
+                                boundary: datetime) -> int:
     """Stamp each open position's executable value at the boundary, once.
 
     Positions are NOT force-closed: that rule was frozen before launch
@@ -193,9 +206,12 @@ async def mark_open_at_boundary(session: AsyncSession, *, boundary: datetime) ->
     in the ongoing tournament.
     """
     opens = list((await session.execute(
-        select(LabPosition).where(LabPosition.status == "open",
-                                  LabPosition.opened_at <= boundary,
-                                  LabPosition.snapshot_value_usd.is_(None))
+        select(LabPosition)
+        .join(LabStrategy, LabStrategy.id == LabPosition.strategy_row_id)
+        .where(LabStrategy.tournament_id == tournament_id,
+               LabPosition.status == "open",
+               LabPosition.opened_at <= boundary,
+               LabPosition.snapshot_value_usd.is_(None))
     )).scalars())
     for pos in opens:
         pos.snapshot_value_usd = (pos.last_open_value_usd
@@ -206,8 +222,9 @@ async def mark_open_at_boundary(session: AsyncSession, *, boundary: datetime) ->
 
 async def build_snapshot(session: AsyncSession, *, tournament: LabTournament,
                          label: str, boundary: datetime, now: datetime) -> dict[str, Any]:
-    await mark_open_at_boundary(session, boundary=boundary)
-    rows = await strategy_rows(session, before=boundary)
+    await mark_open_at_boundary(session, tournament_id=tournament.id,
+                                boundary=boundary)
+    rows = await strategy_rows(session, tournament_id=tournament.id, before=boundary)
     rows.sort(key=lambda r: r["equity"], reverse=True)
     for i, r in enumerate(rows, 1):
         r["rank"] = i

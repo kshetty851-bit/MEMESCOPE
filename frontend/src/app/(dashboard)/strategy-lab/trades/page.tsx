@@ -23,22 +23,15 @@ import type { LabTrade } from "@/types/lab";
  * Every figure is served already computed — nothing here recomputes a P&L.
  */
 
-/** Same $1,000 / $100 rescale the leaderboard offers; see BOOK_SIZES there. */
-const BOOK_SIZES = [
-  { usd: 1000, scale: 1, label: "$1,000" },
-  { usd: 100, scale: 0.1, label: "$100" },
-] as const;
-
-function money(v: number | null | undefined, digits = 2, scale = 1): string {
+function money(v: number | null | undefined, digits = 2): string {
   return v === null || v === undefined || !Number.isFinite(v)
     ? "—"
-    : `$${(v * scale).toFixed(digits)}`;
+    : `$${v.toFixed(digits)}`;
 }
 
-function signed(v: number | null | undefined, scale = 1): string {
+function signed(v: number | null | undefined): string {
   if (v === null || v === undefined || !Number.isFinite(v)) return "—";
-  const x = v * scale;
-  return `${x >= 0 ? "+" : "−"}$${Math.abs(x).toFixed(2)}`;
+  return `${v >= 0 ? "+" : "−"}$${Math.abs(v).toFixed(2)}`;
 }
 
 function mult(v: number | null | undefined): string {
@@ -115,7 +108,6 @@ export default function StrategyLabTradesPage() {
   const [status, setStatus] = useState<"" | "open" | "closed">("");
   const [sortKey, setSortKey] = useState<string>("opened_at");
   const [asc, setAsc] = useState(false);
-  const [scale, setScale] = useState<number>(1);
 
   const board = useLabBoard();
   const { data, isLoading, error } = useLabTrades(
@@ -218,20 +210,6 @@ export default function StrategyLabTradesPage() {
               {v === "" ? "all" : v}
             </button>
           ))}
-          <span className="ml-3 text-[10px] text-muted">READ AS</span>
-          {BOOK_SIZES.map((b) => (
-            <button
-              key={b.usd}
-              onClick={() => setScale(b.scale)}
-              className={`rounded border px-2 py-1 text-xs ${
-                b.scale === scale
-                  ? "border-accent text-accent"
-                  : "border-line text-muted hover:text-ink"
-              }`}
-            >
-              {b.label}
-            </button>
-          ))}
           <p className="ml-auto text-[10px] text-muted">
             addresses are shown in full — click <span className="text-ink">copy</span>, or
             open DexScreener / Solscan / Jupiter to check the token yourself
@@ -299,10 +277,10 @@ export default function StrategyLabTradesPage() {
                       {held(t.held_hours)}
                     </td>
                     <td className="whitespace-nowrap py-1 pr-3 text-right font-mono">
-                      {money(t.size_usd, 2, scale)}
+                      {money(t.size_usd)}
                     </td>
                     <td className="whitespace-nowrap py-1 pr-3 text-right font-mono">
-                      {money(t.current_value_usd, 2, scale)}
+                      {money(t.current_value_usd)}
                     </td>
                     <td
                       className={`whitespace-nowrap py-1 pr-3 text-right font-mono ${
@@ -313,7 +291,7 @@ export default function StrategyLabTradesPage() {
                             : ""
                       }`}
                     >
-                      {signed(pnl, scale)}
+                      {signed(pnl)}
                     </td>
                     <td className="whitespace-nowrap py-1 pr-3 text-right font-mono">
                       {mult(t.exec_multiple)}

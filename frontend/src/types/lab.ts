@@ -95,6 +95,8 @@ export interface LabBoard {
   spec_version: string;
   spec_hash: string;
   spec_immutable: boolean;
+  /** The book each strategy starts with. Served so the page cannot hardcode it. */
+  starting_equity: number;
   valid_from: string;
   snapshot_at: string;
   snapshot_taken: boolean;
