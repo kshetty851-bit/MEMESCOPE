@@ -44,6 +44,8 @@ class Reason:
     LIQUIDITY_INVALID = "LIQUIDITY_INVALID"
     TRADING_STATUS_UNSAFE = "TRADING_STATUS_UNSAFE"
     POSITION_TOO_LARGE_FOR_LIQUIDITY = "POSITION_TOO_LARGE_FOR_LIQUIDITY"
+    POSITION_TOO_LARGE_FOR_SUPPLY = "POSITION_TOO_LARGE_FOR_SUPPLY"
+    TOKEN_SUPPLY_UNREADABLE = "TOKEN_SUPPLY_UNREADABLE"  # noqa: S105
     TOKEN_CONFIGURATION_UNKNOWN = "TOKEN_CONFIGURATION_UNKNOWN"  # noqa: S105
     UNSUPPORTED_TOKEN_PROGRAM = "UNSUPPORTED_TOKEN_PROGRAM"  # noqa: S105
     UNSUPPORTED_TOKEN_EXTENSION = "UNSUPPORTED_TOKEN_EXTENSION"  # noqa: S105
@@ -86,6 +88,10 @@ class SafetyDecision:
     token_configuration: dict[str, object] | None
     evaluation_id: uuid.UUID | None = None
     token_decimals: int | None = None
+    #: Fraction of the token's whole supply this position would buy, and the
+    #: supply it was measured against. Both None when the supply was unreadable.
+    position_supply_ratio: Decimal | None = None
+    token_supply: Decimal | None = None
 
 
 def _decimal(value: object) -> Decimal | None:
@@ -147,6 +153,16 @@ class RealWalletSafetyGate:
             and ratio > settings.REAL_WALLET_SAFETY_MAX_POSITION_LIQUIDITY_RATIO
         ):
             reasons.append(Reason.POSITION_TOO_LARGE_FOR_LIQUIDITY)
+
+        # How much of the token itself this buys. A separate question from the
+        # liquidity ratio and both are kept: liquidity decides whether the
+        # position can be SOLD, supply decides how much of the thing you become.
+        # A deep pool will happily fill an order that leaves you holding a tenth
+        # of everything in existence, and the exit price for that is not the
+        # entry price.
+        supply, supply_ratio = await self._supply_reasons(
+            mint_address, trade_size_usd, price, reasons
+        )
 
         inspection: TokenInspection | None = None
         if token is not None:
@@ -230,6 +246,8 @@ class RealWalletSafetyGate:
             round_trip_loss_usd=round_trip_loss,
             round_trip_loss_pct=round_trip_loss_pct,
             position_liquidity_ratio=ratio,
+            position_supply_ratio=supply_ratio,
+            token_supply=supply,
             token_program=(inspection.token_program if inspection else None),
             mint_authority_active=(inspection.mint_authority_active if inspection else None),
             freeze_authority_active=(
@@ -289,6 +307,39 @@ class RealWalletSafetyGate:
             "discovery_slot": token.slot if token else None,
             "venue": snapshot.dex_name if snapshot else None,
         }
+
+    async def _supply_reasons(
+        self,
+        mint_address: str,
+        trade_size_usd: Decimal,
+        price: Decimal | None,
+        reasons: list[str],
+    ) -> tuple[Decimal | None, Decimal | None]:
+        """What fraction of the token this position would own, and is it too much.
+
+        Read from the chain, not from a stored column: nothing in the token table
+        carries supply, and a cached supply is a supply that was true once. Mints
+        with an active mint authority can issue more, which is itself a refusal
+        the inspector raises separately.
+
+        **Unreadable supply refuses.** `None` here means the read did not happen,
+        never that the supply is zero, and a concentration cap that cannot measure
+        concentration has not shown the position to be small. Every other
+        unmeasured fact in this rail refuses; this one does too.
+        """
+        if price is None or price <= 0:
+            # No price means no token quantity to compute; the market reasons
+            # already refused, and adding a second reason would just be noise.
+            return None, None
+        supply = await self._rpc.get_token_supply(mint_address)
+        if supply is None:
+            reasons.append(Reason.TOKEN_SUPPLY_UNREADABLE)
+            return None, None
+        quantity = trade_size_usd / price
+        ratio = quantity / supply
+        if ratio > settings.REAL_WALLET_SAFETY_MAX_SUPPLY_RATIO:
+            reasons.append(Reason.POSITION_TOO_LARGE_FOR_SUPPLY)
+        return supply, ratio
 
     @staticmethod
     def _market_reasons(

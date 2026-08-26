@@ -692,6 +692,19 @@ class Settings(BaseSettings):
     REAL_WALLET_SAFETY_MAX_POSITION_LIQUIDITY_RATIO: Decimal = Field(
         default=Decimal("0.01"), gt=Decimal("0"), le=Decimal("1")
     )
+    #: The most of a token's SUPPLY one position may buy, as a fraction.
+    #:
+    #: A different question from the liquidity ratio above, and both are kept.
+    #: Liquidity governs whether a position can be SOLD; supply governs how much
+    #: of the token you become. A deep pool can happily fill an order that leaves
+    #: you holding a tenth of everything in existence, and the exit price for that
+    #: is not the entry price.
+    #:
+    #: In practice the liquidity ratio binds first at any sane size — this is the
+    #: backstop for the pathological case where it does not.
+    REAL_WALLET_SAFETY_MAX_SUPPLY_RATIO: Decimal = Field(
+        default=Decimal("0.03"), gt=Decimal("0"), le=Decimal("1")
+    )
     REAL_WALLET_SAFETY_MAX_PRICE_DEVIATION_PCT: Decimal = Field(
         default=Decimal("5"), ge=Decimal("0"), le=Decimal("100")
     )

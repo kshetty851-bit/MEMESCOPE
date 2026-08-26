@@ -73,16 +73,33 @@ class _Quotes:
 
 
 class _Gate(RealWalletSafetyGate):
-    def __init__(self, inspection: TokenInspection, quotes: _Quotes) -> None:
+    #: Whole-token supply the fake chain reports. The default is large enough
+    #: that the $100 test position is a rounding error against it, so the supply
+    #: cap never fires by accident; tests that mean to trip it pass their own.
+    #: `None` means the read failed, which REFUSES — an unmeasured concentration
+    #: has not been shown to be small.
+    supply: Decimal | None = Decimal("1000000000")
+
+    def __init__(self, inspection: TokenInspection, quotes: _Quotes,
+                 supply: Decimal | None = Decimal("1000000000")) -> None:
         super().__init__(
             SimpleNamespace(add=lambda _: None, flush=self._flush), jupiter=quotes
         )  # type: ignore[arg-type]
         self.inspection = inspection
+        self.supply = supply
+        gate = self
+
+        class _SupplyRPC:
+            async def get_token_supply(self, mint_address: str):
+                return gate.supply
+
+        self._rpc = _SupplyRPC()  # type: ignore[assignment]
 
     async def _flush(self) -> None: ...
 
     async def _inspect_mint(self, mint: str) -> TokenInspection:
         return self.inspection
+
 
     async def _persist(self, decision: service.SafetyDecision) -> service.SafetyDecision:
         return decision
@@ -124,6 +141,7 @@ async def _decision(
     quotes: _Quotes | None = None,
     token: object = UNSET,
     snapshot: object = UNSET,
+    supply: Decimal | None = Decimal("1000000000"),
 ) -> service.SafetyDecision:
     token_row = _token() if token is UNSET else token
     snapshot_row = _snapshot() if snapshot is UNSET else snapshot
@@ -143,6 +161,7 @@ async def _decision(
         or _Quotes(
             _quote(side="entry", output="100000000"), _quote(side="exit", output="98000000")
         ),
+        supply=supply,
     )
     return await gate.evaluate(mint_address=MINT, trade_size_usd=Decimal("100"), now=NOW)
 
@@ -275,3 +294,46 @@ def test_token_2022_mint_decoder_reads_authorities_and_extensions() -> None:
     assert inspection.extensions == (18,)
     assert inspection.mint_authority_active is False
     assert inspection.freeze_authority_active is False
+
+
+async def test_a_position_over_three_percent_of_supply_is_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Liquidity decides whether a position can be SOLD; supply decides how much
+    of the token you become. A deep pool will happily fill an order that leaves
+    you holding a tenth of everything in existence, and the exit price for that
+    is not the entry price."""
+    # $100 at the fixture's price buys a quantity that is >3% of this supply.
+    decision = await _decision(monkeypatch, supply=Decimal("1000"))
+    assert decision.decision == "REJECT"
+    assert service.Reason.POSITION_TOO_LARGE_FOR_SUPPLY in decision.reason_codes
+    assert decision.position_supply_ratio is not None
+    assert decision.position_supply_ratio > Decimal("0.03")
+
+
+async def test_a_position_inside_the_supply_cap_is_allowed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    decision = await _decision(monkeypatch, supply=Decimal("1000000000"))
+    assert service.Reason.POSITION_TOO_LARGE_FOR_SUPPLY not in decision.reason_codes
+    assert decision.token_supply == Decimal("1000000000")
+
+
+async def test_an_unreadable_supply_refuses_rather_than_assuming_it_is_small(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`None` means the read did not happen, never that the supply is zero. A
+    concentration cap that cannot measure concentration has not shown the
+    position to be small, and every other unmeasured fact in this rail refuses."""
+    decision = await _decision(monkeypatch, supply=None)
+    assert decision.decision == "REJECT"
+    assert service.Reason.TOKEN_SUPPLY_UNREADABLE in decision.reason_codes
+    assert decision.position_supply_ratio is None
+
+
+async def test_the_supply_cap_is_the_configured_three_percent() -> None:
+    from app.core.config import settings
+
+    assert settings.REAL_WALLET_SAFETY_MAX_SUPPLY_RATIO == Decimal("0.03")
+    # Both concentration caps are kept: they answer different questions.
+    assert settings.REAL_WALLET_SAFETY_MAX_POSITION_LIQUIDITY_RATIO == Decimal("0.01")

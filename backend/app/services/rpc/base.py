@@ -25,6 +25,8 @@ never omitted, and never filled in with a guess.
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from types import TracebackType
@@ -144,6 +146,18 @@ class SolanaRPC(ABC):
         that was never opened or has been closed, and distinct from a failed
         read, which raises.
         """
+
+    async def get_token_supply(self, mint_address: str) -> Decimal | None:
+        """Circulating supply of a mint in whole tokens, or `None` if unreadable.
+
+        `None` is "this read did not happen", never "the supply is zero". A
+        concentration cap that treats an unknown supply as zero would compute an
+        infinite ownership share and refuse everything, or — far worse if the
+        comparison were flipped — permit everything. Callers must decide which,
+        and they refuse.
+        """
+        del mint_address
+        return None
 
     async def get_asset(
         self, mint_address: str, *, attempts: int | None = None

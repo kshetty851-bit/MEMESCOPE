@@ -19,6 +19,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any, ClassVar
 
+from decimal import Decimal
+
 import httpx
 
 from app.core.backoff import BackoffPolicy
@@ -223,6 +225,30 @@ class StandardSolanaRPC(SolanaRPC):
         if not isinstance(values, list):
             raise RpcError("getMultipleAccounts returned no value array")
         return list(values)
+
+
+    async def get_token_supply(self, mint_address: str) -> Decimal | None:
+        """`getTokenSupply`, returned in whole tokens rather than base units.
+
+        Unreadable is `None` rather than an exception: a concentration check is
+        one input among several, and an RPC hiccup should make the caller refuse
+        the trade, not crash the evaluation that would have refused it anyway.
+        """
+        try:
+            response = await self.call("getTokenSupply", [mint_address])
+        except RpcError:
+            return None
+        value = (response or {}).get("value") or {}
+        raw, decimals = value.get("amount"), value.get("decimals")
+        if raw is None or decimals is None:
+            return None
+        try:
+            supply = Decimal(str(raw)) / (Decimal(10) ** int(decimals))
+        except (ArithmeticError, ValueError):
+            return None
+        # A zero or negative supply is not a real mint; treat it as unreadable
+        # so a caller cannot divide by it.
+        return supply if supply > 0 else None
 
 
 def _redact(url: str) -> str:
