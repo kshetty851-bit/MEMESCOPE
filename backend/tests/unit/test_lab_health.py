@@ -148,3 +148,23 @@ def test_the_staleness_rule_is_the_lab_s_own():
     src = Path(health.__file__).read_text()
     assert "STALE_GUARD_SECONDS" in src
     assert "from app.lab.execution import" in src
+
+
+def test_the_lab_probe_does_not_share_the_caller_s_session():
+    """The probes run concurrently and a SQLAlchemy session is not safe for
+    concurrent use.
+
+    Sharing the caller's put this probe and `_probe_database` on the same
+    connection, and the first snapshot after it shipped failed with "concurrent
+    operations are not permitted" — reported honestly as unmeasured, and
+    measuring nothing.
+    """
+    from app.hq_ops import probe
+
+    src = Path(probe.__file__).read_text()
+    tree = ast.parse(src)
+    fn = next(n for n in ast.walk(tree)
+              if isinstance(n, ast.AsyncFunctionDef) and n.name == "_probe_lab")
+    # It takes no session, and opens one of its own.
+    assert [a.arg for a in fn.args.args] == ["now"]
+    assert "SessionFactory()" in ast.unparse(fn)
