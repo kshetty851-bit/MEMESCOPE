@@ -73,6 +73,30 @@ def _strategy_fingerprint() -> dict[str, Any]:
     return out
 
 
+def _lab_fingerprint() -> dict[str, Any]:
+    """The V6 Strategy Lab's frozen registry, by its own hash.
+
+    The Lab already computes `SPEC_HASH` over the canonical JSON of all twenty
+    strategies and compares it on every tick, halting if it drifts. That guard
+    protects the RECORD — it stops a tournament being scored against rules it
+    was not opened under. This one protects the OPERATOR: it says the rules
+    moved, and when, in the same place every other protected value is reported.
+
+    Both are wanted. The Lab's own check fails closed and stops scoring; this
+    one raises an incident a person reads. A deliberate change bumps
+    SPEC_VERSION alongside, and seeing both move together is what makes an
+    accidental change obvious.
+    """
+    from app.lab import spec
+
+    return {
+        "spec_version": spec.SPEC_VERSION,
+        "spec_hash": spec.SPEC_HASH,
+        "starting_equity": str(spec.STARTING_EQUITY),
+        "strategies": len(spec.STRATEGIES),
+    }
+
+
 #: Settings fields that are protected trading policy.
 #:
 #: Listed explicitly rather than pattern-matched on a prefix. A prefix rule
@@ -80,6 +104,14 @@ def _strategy_fingerprint() -> dict[str, Any]:
 #: of this list is the one to prefer: a missing field is a gap somebody can see
 #: in a diff, where a broken glob is invisible.
 PROTECTED_SETTINGS: tuple[str, ...] = (
+    # WHERE THE MONEY CAN GO. The single most security-critical value in the
+    # system: the one address the execution wallet may ever send to. A
+    # deployment that changed it would redirect every withdrawal, and until it
+    # was listed here nothing in the platform would have noticed.
+    "REAL_WALLET_WITHDRAWAL_ADDRESS",
+    # And whose money it is. A changed public key is a different wallet
+    # entirely; the pinned key is what the signer proves itself against.
+    "REAL_WALLET_PUBLIC_KEY",
     # Real Wallet permissions and execution safety.
     "REAL_WALLET_AUTOTRADE_ENABLED",
     "REAL_WALLET_AUTOTRADE_COOLDOWN_SECONDS",
@@ -91,6 +123,18 @@ PROTECTED_SETTINGS: tuple[str, ...] = (
     "REAL_WALLET_SAFETY_MAX_ROUND_TRIP_LOSS_PCT",
     "REAL_WALLET_SAFETY_MAX_POSITION_LIQUIDITY_RATIO",
     "REAL_WALLET_SAFETY_MAX_PRICE_DEVIATION_PCT",
+    # How much of a token one position may become. Added with the cap itself;
+    # a concentration limit nobody watches is a limit that can be widened
+    # quietly.
+    "REAL_WALLET_SAFETY_MAX_SUPPLY_RATIO",
+    # The canary's blast radius, and the slippage the wallet actually asks
+    # Jupiter for — the value that ends up inside the signed transaction.
+    "REAL_WALLET_MAX_BALANCE_SOL",
+    "REAL_WALLET_EXIT_MAX_SLIPPAGE_BPS",
+    # The three that decide whether anything may be submitted at all.
+    "REAL_WALLET_EXECUTION_MODE",
+    "REAL_WALLET_EXECUTION_ENABLED",
+    "REAL_WALLET_NETWORK",
     # The security entry gate.
     "TOKEN_SECURITY_EVALUATION_ENABLED",
     # Paper entry policy.
@@ -116,6 +160,10 @@ def capture() -> dict[str, Any]:
         values["_strategies"] = _strategy_fingerprint()
     except Exception as exc:
         values["_strategies"] = f"<unreadable: {exc}>"
+    try:
+        values["_lab"] = _lab_fingerprint()
+    except Exception as exc:  # noqa: BLE001 - unreadable differs from unchanged
+        values["_lab"] = f"<unreadable: {exc}>"
 
     blob = json.dumps(values, sort_keys=True, default=str)
     return {
