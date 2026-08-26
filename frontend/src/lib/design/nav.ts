@@ -111,6 +111,14 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: IconSpark,
         status: "ready",
       },
+      // The live board keeps moving, so by the time a boundary result is read
+      // it is no longer what that boundary said. These are the frozen copies.
+      {
+        href: "/strategy-lab/snapshots",
+        label: "Snapshots",
+        icon: IconSpark,
+        status: "ready",
+      },
       {
         href: "/strategy-lab/forward-arena",
         label: "Forward Arena",

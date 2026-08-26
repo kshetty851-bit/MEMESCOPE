@@ -1,5 +1,10 @@
 import { api } from "@/lib/api-client";
-import type { LabBoard, LabStrategyDetail, LabTrades } from "@/types/lab";
+import type {
+  LabBoard,
+  LabSnapshots,
+  LabStrategyDetail,
+  LabTrades,
+} from "@/types/lab";
 
 /**
  * Strategy Lab client. Fetches and formats; it never decides and never
@@ -23,4 +28,13 @@ export function fetchLabTrades(
   if (strategyId) query.set("strategy_id", strategyId);
   if (status) query.set("status", status);
   return api.get<LabTrades>(`/lab/trades?${query.toString()}`);
+}
+
+/**
+ * Frozen leaderboards. The live board keeps moving, so by the time anyone reads
+ * it the 24-hour snapshot is no longer what the 24-hour snapshot said — these
+ * are the immutable copies taken at each boundary.
+ */
+export function fetchLabSnapshots(): Promise<LabSnapshots> {
+  return api.get<LabSnapshots>("/lab/snapshots");
 }

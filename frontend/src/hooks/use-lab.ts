@@ -2,7 +2,12 @@
 
 import { useQuery } from "@tanstack/react-query";
 
-import { fetchLabBoard, fetchLabStrategy, fetchLabTrades } from "@/lib/lab";
+import {
+  fetchLabBoard,
+  fetchLabSnapshots,
+  fetchLabStrategy,
+  fetchLabTrades,
+} from "@/lib/lab";
 
 /**
  * Lab queries. Polled on the beat's cadence (one minute), not the market's:
@@ -33,5 +38,14 @@ export function useLabTrades(strategyId?: string, status?: "open" | "closed") {
     queryKey: ["lab", "trades", strategyId ?? "all", status ?? "all"],
     queryFn: () => fetchLabTrades(strategyId, status),
     refetchInterval: LAB_POLL_MS,
+  });
+}
+
+/** Frozen boards. They never change once written, so this polls slowly. */
+export function useLabSnapshots() {
+  return useQuery({
+    queryKey: ["lab", "snapshots"],
+    queryFn: fetchLabSnapshots,
+    refetchInterval: 5 * LAB_POLL_MS,
   });
 }

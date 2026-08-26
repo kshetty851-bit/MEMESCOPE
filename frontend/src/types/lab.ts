@@ -187,3 +187,23 @@ export interface LabTrades {
   closed: number;
   trades: LabTrade[];
 }
+
+/** One immutable leaderboard, frozen at a boundary and never rewritten. */
+export interface LabSnapshot {
+  label: string;
+  boundary_at: string;
+  taken_at: string;
+  elapsed_hours: number;
+  payload: {
+    spec_version?: string;
+    spec_hash?: string;
+    total_closed_trades?: number;
+    overall_confidence?: string;
+    strategies?: LabStrategyRow[];
+  };
+}
+
+export interface LabSnapshots {
+  disclosure: string;
+  snapshots: LabSnapshot[];
+}
