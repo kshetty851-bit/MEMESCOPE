@@ -178,3 +178,90 @@ def test_the_ceiling_blocks_buying_and_never_selling():
     ]
     # The ceiling lives on the entry path alone.
     assert holders == ["evaluate_canary_entry"], holders
+
+
+# --- the withdraw path -------------------------------------------------------
+# The only route in MEMESCOPE that moves money without a trade. Every other one
+# can lose value; this one can only ever send the operator their own money, and
+# that is the whole reason it is allowed to exist.
+
+
+def test_the_destination_is_never_a_parameter():
+    """It cannot be passed in, so it cannot be passed in wrongly. An endpoint
+    that accepted a recipient would be one validation bug from a drain."""
+    import ast as _ast
+
+    from app.real_wallet import withdraw_service
+
+    tree = _ast.parse(Path(withdraw_service.__file__).read_text())
+    fn = next(n for n in _ast.walk(tree)
+              if isinstance(n, _ast.AsyncFunctionDef) and n.name == "prepare")
+    args = {a.arg for a in fn.args.args} | {a.arg for a in fn.args.kwonlyargs}
+    assert "destination" not in args
+    assert "to" not in args
+    src = _ast.unparse(fn)
+    assert "withdrawal.assert_permitted" in src
+
+
+def test_the_signer_proves_the_destination_for_itself():
+    """`sign_withdrawal` receives BYTES rather than an id, so the caller could
+    hand it anything. It is safe only because the signer re-derives the
+    destination from those bytes and compares it against the address in ITS OWN
+    environment — the check that survives a fully compromised API."""
+    import ast as _ast
+
+    from app.real_wallet import mainnet_signer as ms
+
+    tree = _ast.parse(Path(ms.__file__).read_text())
+    fn = next(n for n in _ast.walk(tree)
+              if isinstance(n, _ast.AsyncFunctionDef) and n.name == "sign_withdrawal")
+    src = _ast.unparse(fn)
+    assert "settings.REAL_WALLET_WITHDRAWAL_ADDRESS" in src
+    assert "inspect_native_transfer" in src
+    # The spec it verifies against is built here, never received.
+    assert "NativeTransferSpec(" in src
+    assert "withdrawal_destination_is_the_wallet_itself" in src
+
+
+def test_a_withdrawal_is_submitted_once_and_never_retried():
+    """A submitted transfer whose response was lost is UNCERTAIN. Asking again
+    is how one withdrawal becomes two."""
+    import ast as _ast
+
+    from app.real_wallet import withdraw_service
+
+    tree = _ast.parse(Path(withdraw_service.__file__).read_text())
+    fn = next(n for n in _ast.walk(tree)
+              if isinstance(n, _ast.AsyncFunctionDef) and n.name == "submit")
+    src = _ast.unparse(fn)
+    assert "attempts=1" in src
+    assert "'maxRetries': 0" in src or '"maxRetries": 0' in src
+    assert "for " not in src and "while " not in src, "no retry loop"
+
+
+def test_it_refuses_to_strand_the_wallet_below_its_fee_reserve():
+    """The reserve pays for the NEXT transaction, including a later withdrawal.
+    Emptying to the last lamport strands whatever is left."""
+    import ast as _ast
+
+    from app.real_wallet import withdraw_service
+
+    src = _ast.unparse(_ast.parse(Path(withdraw_service.__file__).read_text()))
+    assert "REAL_WALLET_MIN_SOL_FEE_RESERVE" in src
+    assert "would_leave_less_than_fee_reserve" in src
+
+
+def test_the_chain_is_proven_before_a_transfer_is_built():
+    """A transfer assembled against the wrong chain pays an address that may not
+    be the operator's on that chain."""
+    import ast as _ast
+
+    from app.real_wallet import withdraw_service
+
+    fn = next(n for n in _ast.walk(
+        _ast.parse(Path(withdraw_service.__file__).read_text()))
+        if isinstance(n, _ast.AsyncFunctionDef) and n.name == "prepare")
+    src = _ast.unparse(fn)
+    verify_at = src.index("require_verified_network")
+    build_at = src.index("build_unsigned_native_transfer")
+    assert verify_at < build_at

@@ -135,7 +135,12 @@ def test_the_client_can_ask_for_a_signature_but_never_holds_a_key():
         for k, n in zip(kw.keys, kw.values)
         if isinstance(k, ast.Constant) and k.value == "op" and isinstance(n, ast.Constant)
     }
-    assert ops == {"identity", "sign"}, "exactly two questions cross this boundary"
+    # Three now: identity, sign (by id), and sign_withdrawal (by bytes). The
+    # last sends BYTES, which is only safe because the signer re-derives the
+    # DESTINATION from them and compares it to the withdrawal address in its own
+    # environment — see the withdrawal tests. What must stay true is that this
+    # list is short and every entry is deliberate.
+    assert ops == {"identity", "sign", "sign_withdrawal"}
 
     # It imports nothing that could produce or handle key material.
     imported: set[str] = set()

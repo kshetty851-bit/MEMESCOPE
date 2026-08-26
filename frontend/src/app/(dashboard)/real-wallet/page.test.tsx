@@ -33,6 +33,11 @@ function wrapper({ children }: { children: ReactNode }) {
 function lockedStatus() {
   return {
     public_key: "PublicExecutionWalletAddress",
+    withdrawal: {
+      locked_to: "FoHVQyJmv5AHPjccV3BWpMoKiMHLPkF5cfQdqo1nH5TN",
+      configured: true,
+      reason: null,
+    },
     address_valid: true,
     network: "devnet",
     rpc: {
@@ -277,10 +282,11 @@ describe("RealWalletPage balance card", () => {
     expect(screen.getByText("Copy address")).toBeInTheDocument();
   });
 
-  it("refuses to offer an in-app withdrawal and says which barrier refuses it", async () => {
-    // Sending SOL out is a signed mainnet submission — the same path a trade
-    // takes. A second way out of this wallet that skipped the guard would defeat
-    // it, so the panel explains rather than offering a control that cannot work.
+  it("offers a withdrawal with no recipient field, only an amount", async () => {
+    // The one control here that moves money without a trade. It used to refuse
+    // outright and this test pinned the refusal; withdrawal is now built, and
+    // what makes it safe to put on a screen is that the form CANNOT choose a
+    // recipient — the destination is configuration, re-proven inside the signer.
     vi.mocked(api.get).mockResolvedValue(lockedStatus());
     render(<RealWalletPage />, { wrapper });
     await waitFor(() =>
@@ -288,8 +294,56 @@ describe("RealWalletPage balance card", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: /withdraw/i }));
     expect(screen.getByText("Withdraw SOL")).toBeInTheDocument();
-    expect(screen.getByText(/MAINNET_EXECUTION_DISABLED/)).toBeInTheDocument();
-    // And it must not have grown a control that would attempt one.
-    expect(screen.queryByRole("button", { name: /send|confirm withdraw/i })).toBeNull();
+
+    // Scoped to the withdraw panel — the separate devnet workflow lower down
+    // has its own recipient field and is not what this asserts about.
+    const panel = screen.getByText("Withdraw SOL").closest("div");
+    expect(panel).not.toBeNull();
+    const inputs = Array.from(panel!.querySelectorAll("input"));
+    expect(inputs).toHaveLength(1);
+    expect(inputs[0].placeholder).toBe("0.00");
+    // And the destination is shown as fixed text, never as something editable.
+    expect(panel!.textContent).toContain("Locked destination");
+  });
+
+  it("requires a second, explicit confirmation before it sends", async () => {
+    // A submitted transfer whose response was lost is UNCERTAIN, and pressing
+    // again is how one withdrawal becomes two. One click must not send.
+    vi.mocked(api.get).mockResolvedValue(lockedStatus());
+    render(<RealWalletPage />, { wrapper });
+    await waitFor(() =>
+      expect(screen.getByText("PublicExecutionWalletAddress")).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^withdraw$/i }));
+
+    expect(api.post).not.toHaveBeenCalled();
+    expect(
+      screen.queryByRole("button", { name: /confirm — send now/i }),
+    ).toBeNull();
+  });
+});
+
+describe("RealWalletPage withdrawal without a destination", () => {
+  beforeEach(() => {
+    window.sessionStorage.setItem("memescope.seatbelt", "1");
+  });
+
+  it("offers nothing to press when no destination is nominated", async () => {
+    // An unset destination permits nothing rather than anything — the same
+    // fail-closed direction the server takes. There must be no amount field to
+    // fill in and no way to send.
+    vi.mocked(api.get).mockResolvedValue({
+      ...lockedStatus(),
+      withdrawal: { locked_to: null, configured: false, reason: "not configured" },
+    });
+    render(<RealWalletPage />, { wrapper });
+    await waitFor(() =>
+      expect(screen.getByText("PublicExecutionWalletAddress")).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /withdraw/i }));
+
+    expect(screen.getByText(/No destination is nominated/)).toBeInTheDocument();
+    const panel = screen.getByText("Withdraw SOL").closest("div");
+    expect(panel!.querySelectorAll("input")).toHaveLength(0);
   });
 });

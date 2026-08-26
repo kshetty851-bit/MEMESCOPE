@@ -46,6 +46,18 @@ class UnixMainnetSignerClient:
         """
         return await self._ask({"op": "sign", "intent_id": str(intent_id)})
 
+    async def sign_withdrawal(self, encoded_transaction: str) -> dict[str, Any]:
+        """Ask for a signature over a native SOL transfer.
+
+        Unlike `sign`, this sends BYTES — and that is safe for one reason: the
+        signer re-derives the destination from those bytes and compares it
+        against the withdrawal address in its own environment. Handing it a
+        transaction that pays anyone else gets a refusal, not a signature.
+        """
+        return await self._ask(
+            {"op": "sign_withdrawal", "transaction": encoded_transaction}
+        )
+
     async def _ask(self, request: dict[str, Any]) -> dict[str, Any]:
         socket_path = settings.MAINNET_SIGNER_SOCKET.strip()
         if not socket_path:

@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
 import grp
 import json
 import os
@@ -50,10 +51,17 @@ from app.real_wallet import tx_inspect
 from app.real_wallet.live_readiness import ExecutionState
 from app.real_wallet.live_repository import LiveIntentRepository
 from app.real_wallet.network import require_verified_network
+from app.real_wallet.devnet_transaction import (
+    DevnetTransactionValidationError,
+    NativeTransferSpec,
+    inspect_native_transfer,
+)
 from app.real_wallet.signer import (
     ExecutionTransactionValidationError,
     FileExecutionSigner,
 )
+from solders.transaction import Transaction
+
 from app.services.rpc.standard import StandardSolanaRPC
 
 logger = get_logger(__name__)
@@ -206,6 +214,64 @@ async def sign_intent(intent_id: uuid.UUID) -> dict[str, Any]:
     }
 
 
+async def sign_withdrawal(encoded_transaction: str) -> dict[str, Any]:
+    """Sign a native SOL transfer, after proving for itself where it goes.
+
+    The caller sends bytes here rather than an id, which is the opposite of
+    `sign_intent` — and it is safe for the one reason that matters: this process
+    re-derives the DESTINATION from the assembled bytes and compares it against
+    the withdrawal address in its OWN environment. A caller that has been fully
+    compromised can hand over any transaction it likes; anything that does not
+    pay the operator is refused here, where the key is.
+
+    It also re-checks the amount is a plain transfer with the expected account
+    count, order, program and discriminator. `inspect_native_transfer` does all
+    of that against a spec this function builds from its own settings, never
+    from anything received.
+    """
+    genesis = await _verified_chain()
+    expected = settings.REAL_WALLET_PUBLIC_KEY.strip()
+    if not expected:
+        raise MainnetSignerError("mainnet_signer_pinned_key_not_configured")
+
+    destination = settings.REAL_WALLET_WITHDRAWAL_ADDRESS.strip()
+    if not destination:
+        raise MainnetSignerError("withdrawal_destination_not_configured")
+    if destination == expected:
+        raise MainnetSignerError("withdrawal_destination_is_the_wallet_itself")
+
+    # Read the amount out of the bytes, then rebuild the spec this signer would
+    # have authorised and require the bytes to match it exactly.
+    try:
+        raw = base64.b64decode(encoded_transaction, validate=True)
+        message = Transaction.from_bytes(raw).message
+        lamports = int.from_bytes(bytes(message.instructions[0].data)[4:12], "little")
+    except Exception as exc:  # noqa: BLE001
+        raise MainnetSignerError("malformed_withdrawal_transaction") from exc
+
+    spec = NativeTransferSpec(
+        fee_payer=expected, destination=destination, lamports=lamports
+    )
+    try:
+        inspected = inspect_native_transfer(encoded_transaction, expected=spec)
+    except DevnetTransactionValidationError as exc:
+        logger.warning("mainnet_signer_refused_withdrawal", reason=str(exc))
+        raise MainnetSignerError(f"withdrawal_rejected:{exc}") from exc
+
+    signer = FileExecutionSigner.load(
+        secret_file=_secret_file(), expected_public_key=expected
+    )
+    signed, signature = signer.sign_native_transaction(encoded_transaction)
+    logger.warning("mainnet_signer_signed_withdrawal", genesis=genesis[:12],
+                   destination=inspected.destination, lamports=inspected.lamports)
+    return {
+        "signed_transaction": signed,
+        "signature": signature,
+        "destination": inspected.destination,
+        "lamports": inspected.lamports,
+    }
+
+
 async def _handle_connection(
     reader: asyncio.StreamReader, writer: asyncio.StreamWriter
 ) -> None:
@@ -217,6 +283,11 @@ async def _handle_connection(
         op = body.get("op")
         if op == IDENTITY:
             response: dict[str, Any] = {"ok": True, **(await identity())}
+        elif op == "sign_withdrawal":
+            encoded = body.get("transaction")
+            if not isinstance(encoded, str) or not encoded:
+                raise MainnetSignerError("invalid_signer_request")
+            response = {"ok": True, **(await sign_withdrawal(encoded))}
         elif op == "sign":
             raw_id = body.get("intent_id")
             if not isinstance(raw_id, str):

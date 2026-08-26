@@ -28,7 +28,7 @@ from app.real_wallet.devnet_workflow import (
     DevnetManualWorkflowError,
 )
 from app.real_wallet.live_repository import LiveIntentRepository
-from app.real_wallet import withdrawal
+from app.real_wallet import withdraw_service, withdrawal
 from app.real_wallet.mainnet_signer_client import (
     MainnetSignerRejectedError,
     MainnetSignerUnavailableError,
@@ -53,6 +53,9 @@ from app.repositories.token import TokenRepository
 from app.security import entry_policy
 from app.services.rpc.standard import StandardSolanaRPC
 
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
 router = APIRouter(prefix="/real-wallet", tags=["real-wallet"])
 
 
@@ -296,6 +299,64 @@ async def funding_readiness(_admin: AdminUser, session: DbSession) -> dict[str, 
         validated_strategy=None,
     )
     return readiness_as_dict(readiness)
+
+
+class WithdrawIn(BaseModel):
+    """Amount only. The destination is not a parameter and cannot be one."""
+
+    sol_amount: Decimal = Field(gt=0)
+    confirmation_phrase: Literal["WITHDRAW_TO_MY_ADDRESS"]
+
+
+@router.post("/withdraw", summary="Send SOL to the one nominated address")
+async def withdraw(
+    payload: WithdrawIn, admin: AdminUser, session: DbSession
+) -> dict[str, object]:
+    """The only path here that moves money without a trade.
+
+    It cannot choose a recipient. The destination comes from configuration, is
+    checked in the service, and is checked AGAIN inside the isolated signer
+    against that process's own copy of the setting — so the worst a compromised
+    caller achieves is sending the operator their own money.
+
+    Never retried. A submitted transfer whose response was lost is UNCERTAIN,
+    and asking again is how one withdrawal becomes two.
+    """
+    del session
+    rpc = StandardSolanaRPC(rpc_url=settings.REAL_WALLET_RPC_URL)
+    try:
+        async with rpc:
+            balances = ExecutionWalletBalanceService(rpc)
+            sol = (await balances.get_sol_balance(
+                settings.REAL_WALLET_PUBLIC_KEY.strip()
+            )).sol
+            prepared = await withdraw_service.prepare(
+                rpc,
+                sol_amount=payload.sol_amount,
+                balance_lamports=lamports_from_sol(Decimal(str(sol))),
+            )
+            signed = await UnixMainnetSignerClient().sign_withdrawal(
+                prepared.unsigned_transaction
+            )
+            signature = await withdraw_service.submit(
+                rpc, signed_transaction=signed["signed_transaction"]
+            )
+    except withdraw_service.WithdrawError as exc:
+        raise ConflictError(str(exc)) from exc
+    except (MainnetSignerUnavailableError, MainnetSignerRejectedError) as exc:
+        raise ServiceUnavailableError(f"signer: {exc}") from exc
+
+    logger.warning("real_wallet_withdrawal_submitted", actor=str(admin.id),
+                   signature=signature, lamports=prepared.lamports)
+    return {
+        "submitted": True,
+        "signature": signature,
+        "destination": prepared.destination,
+        "sol": str(prepared.sol),
+        "explorer": f"https://solscan.io/tx/{signature}",
+        "note": ("Submitted once and never retried. If this response was lost, "
+                 "check the signature on chain rather than sending again."),
+    }
 
 
 @router.get("/status", summary="Read dedicated execution-wallet status")

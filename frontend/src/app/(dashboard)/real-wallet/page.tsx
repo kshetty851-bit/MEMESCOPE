@@ -239,6 +239,138 @@ function StatusCard({ label, value }: { label: string; value: string }) {
  * with their own wallet software. That route is stated plainly rather than hidden
  * behind a disabled control.
  */
+/**
+ * The one control in MEMESCOPE that moves money without a trade.
+ *
+ * It has no recipient field, deliberately. The destination is configuration and
+ * is re-proven inside the isolated signer, so this form can only ever choose an
+ * AMOUNT — which is why it is safe to put on a screen at all.
+ *
+ * A withdrawal is submitted once and never retried: a lost response means an
+ * UNCERTAIN transfer, and pressing again is how one withdrawal becomes two. The
+ * button therefore disables itself for the whole request and the result says so
+ * explicitly rather than inviting a retry.
+ */
+function WithdrawForm({ data }: { data: WalletStatus | undefined }) {
+  const [amount, setAmount] = useState("");
+  const [confirming, setConfirming] = useState(false);
+  const queryClient = useQueryClient();
+
+  const balance = data?.sol_balance ?? 0;
+  const reserve = Number(data?.limits?.min_sol_fee_reserve ?? 0);
+  const most = Math.max(0, balance - reserve);
+  const locked = data?.withdrawal?.locked_to ?? null;
+  const value = Number(amount);
+  const valid = Number.isFinite(value) && value > 0 && value <= most;
+
+  const send = useMutation({
+    mutationFn: () =>
+      api.post<{ signature: string; sol: string; explorer: string; note: string }>(
+        "/real-wallet/withdraw",
+        { sol_amount: amount, confirmation_phrase: "WITHDRAW_TO_MY_ADDRESS" },
+      ),
+    onSuccess: () => {
+      setAmount("");
+      setConfirming(false);
+      void queryClient.invalidateQueries({ queryKey: ["real-wallet-status"] });
+    },
+  });
+
+  if (!locked) {
+    return (
+      <p className="mt-2 text-sm text-warning">
+        No destination is nominated, so nothing can be sent. An unset destination
+        permits nothing rather than anything.
+      </p>
+    );
+  }
+
+  return (
+    <div className="mt-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          inputMode="decimal"
+          value={amount}
+          onChange={(e) => {
+            setAmount(e.target.value);
+            setConfirming(false);
+          }}
+          placeholder="0.00"
+          className="w-32 rounded border border-line bg-transparent px-2 py-1 text-sm text-ink"
+        />
+        <span className="text-sm text-ink-3">SOL</span>
+        <button
+          type="button"
+          onClick={() => {
+            setAmount(most.toFixed(9).replace(/0+$/, "").replace(/\.$/, ""));
+            setConfirming(false);
+          }}
+          className="rounded border border-line px-2 py-1 text-xs text-ink-3"
+        >
+          max {most.toFixed(4)}
+        </button>
+        {confirming ? (
+          <button
+            type="button"
+            disabled={send.isPending}
+            onClick={() => send.mutate()}
+            className="rounded-md bg-warning px-3 py-1 text-sm font-medium text-black disabled:opacity-50"
+          >
+            {send.isPending ? "Sending — do not retry…" : "Confirm — send now"}
+          </button>
+        ) : (
+          <button
+            type="button"
+            disabled={!valid}
+            onClick={() => setConfirming(true)}
+            className="rounded-md border border-line px-3 py-1 text-sm text-ink disabled:opacity-40"
+          >
+            Withdraw
+          </button>
+        )}
+      </div>
+
+      {amount && !valid ? (
+        <p className="mt-2 text-xs text-warning">
+          Enter an amount above zero and at most {most.toFixed(6)} SOL — the fee
+          reserve of {reserve} SOL has to stay behind to pay for the next
+          transaction, including a later withdrawal.
+        </p>
+      ) : null}
+
+      {confirming && !send.isPending && !send.data ? (
+        <p className="mt-2 text-xs text-warning">
+          Sending {amount} SOL to {locked.slice(0, 12)}…{locked.slice(-6)}. This is
+          submitted once and never retried.
+        </p>
+      ) : null}
+
+      {send.data ? (
+        <div className="mt-3 rounded border border-line p-3 text-sm">
+          <p className="text-ink">Sent {send.data.sol} SOL.</p>
+          <a
+            className="mt-1 block break-all font-mono text-xs text-accent"
+            href={send.data.explorer}
+            target="_blank"
+            rel="noreferrer"
+          >
+            {send.data.signature}
+          </a>
+          <p className="mt-2 text-xs text-ink-3">{send.data.note}</p>
+        </div>
+      ) : null}
+
+      {send.error ? (
+        <p className="mt-2 text-xs text-warning">
+          Refused: {send.error instanceof ApiError ? send.error.message : "unavailable"}.
+          Nothing was sent — but if you saw a timeout rather than this message, check
+          the wallet balance before trying again.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function BalanceCard({
   data,
   readiness,
@@ -401,17 +533,13 @@ function BalanceCard({
         <div className="mt-4 rounded-md border border-line bg-raised p-4">
           <p className="text-label text-ink-3">Withdraw SOL</p>
           <p className="mt-2 text-sm text-ink-3">
-            Not available in the app, and deliberately so. Sending SOL out is a signed
-            mainnet submission — the same path a trade takes — and that path is refused by{" "}
-            <span className="font-mono text-ink">MAINNET_EXECUTION_DISABLED</span> and the
-            reviewed release constant. A second way out of this wallet that skipped those
-            barriers would defeat them.
+            Sends SOL to the one address below and nowhere else. The destination is
+            not something this form can set — it comes from configuration, is checked
+            in the service, and is checked again inside the signer against that
+            process&apos;s own copy. The worst a compromised caller achieves is
+            sending you your own money.
           </p>
-          <p className="mt-2 text-sm text-ink-3">
-            This is an ordinary Solana keypair, so you can always move funds yourself:
-            import the keypair file into Phantom or Solflare and send from there. That
-            uses your key, on your machine, with no server in the path.
-          </p>
+          <WithdrawForm data={data} />
           <div className="mt-3 rounded border border-line p-3">
             <p className="text-label text-ink-3">Locked destination</p>
             {data?.withdrawal?.configured && data.withdrawal.locked_to ? (
@@ -422,9 +550,8 @@ function BalanceCard({
                 <p className="mt-2 text-sm text-ink-3">
                   The only address this wallet may ever send to. Deposits stay open —
                   anyone can send to the public address above — but the way out is
-                  bounded, so if any barrier upstream were ever wrong the worst
-                  outcome is the funds returning to you rather than going to whoever
-                  asked. Changing it is a deliberate configuration change.
+                  bounded. Changing it is a deliberate configuration change, not
+                  something any screen can do.
                 </p>
               </>
             ) : (
