@@ -356,7 +356,13 @@ def test_every_anchor_key_is_a_real_setting() -> None:
 
     known = set(Settings.model_fields)
     # Not Settings fields, but legitimately consumed elsewhere.
-    infrastructure = {"RUN_MIGRATIONS", "BUILD_SHA"}
+    #
+    # HQ_AUTONOMY_ENABLED is read by `remediation.autonomy_enabled()` straight
+    # from the environment rather than through Settings, deliberately: it is the
+    # switch between observing production and repairing it, and reading it at
+    # the point of use means no cached settings object can hold a stale answer
+    # about whether HQ may act.
+    infrastructure = {"RUN_MIGRATIONS", "BUILD_SHA", "HQ_AUTONOMY_ENABLED"}
 
     unknown = _anchor_keys() - known - infrastructure
     assert not unknown, (
