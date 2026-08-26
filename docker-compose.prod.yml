@@ -82,7 +82,13 @@ services:
       SENTRY_DSN: ${SENTRY_DSN:-}
       SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0.1}
       BUILD_SHA: ${BUILD_SHA:-unknown}
-    volumes: !reset []
+    # `!reset` drops the base file's source bind-mount, which production must
+    # not have — but it drops everything else in that list too, so anything
+    # production still needs has to be restated here. The socket was added to
+    # the base file, silently discarded here, and the rehearsal reported the
+    # signer unreachable while it was healthy.
+    volumes: !reset
+      - mainnet-signer-socket:/run/memescope-mainnet-signer
     # Unpublished on purpose: Caddy reaches the backend over the compose
     # network. Publishing a fixed host port is also incompatible with more than
     # one replica — the second container cannot bind an address the first holds,
@@ -108,7 +114,10 @@ services:
       ALPHA_ACCESS_COOKIE_SECURE: "true"
       SENTRY_DSN: ${SENTRY_DSN:-}
       BUILD_SHA: ${BUILD_SHA:-unknown}
-    volumes: !reset []
+    # Restated for the same reason as the backend's: `!reset` would otherwise
+    # drop it. The driver runs in this container.
+    volumes: !reset
+      - mainnet-signer-socket:/run/memescope-mainnet-signer
     restart: unless-stopped
     healthcheck:
       # The image's HEALTHCHECK curls the API's /live, which does not exist in
