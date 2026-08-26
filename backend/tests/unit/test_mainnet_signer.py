@@ -263,3 +263,17 @@ def test_the_socket_grant_raises_rather_than_leaving_it_unreachable():
     fn = next(n for n in ast.walk(tree)
               if isinstance(n, ast.FunctionDef) and n.name == "_grant_socket_to_app_group")
     assert not [n for n in ast.walk(fn) if isinstance(n, ast.Try)]
+
+
+def test_every_image_stage_defines_the_account_the_socket_grant_needs():
+    """The signer builds from `development`, which inherited no such account
+    while it lived in `production` — so the grant raised KeyError on startup and
+    the signer crash-looped. Defining it in `base` is what makes the name
+    resolvable in both stages."""
+    lines = (Path(__file__).resolve().parents[2] / "Dockerfile").read_text().splitlines()
+    stages = [i for i, ln in enumerate(lines) if ln.startswith("FROM ")]
+    groupadd = [i for i, ln in enumerate(lines) if "groupadd" in ln]
+    assert len(groupadd) == 1, "one account, defined once"
+    # Before the second FROM means it is in `base`, which every stage descends from.
+    assert groupadd[0] < stages[1]
+    assert f"--gid 1001 {ms.APP_USER}" in lines[groupadd[0]]
