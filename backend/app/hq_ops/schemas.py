@@ -101,6 +101,23 @@ class QueueHealth(BaseSchema):
     detail: str
 
 
+class TaskOutcome(BaseSchema):
+    """What one scheduled task last RETURNED, which is not the same question as
+    whether it ran.
+
+    A task can run perfectly on a healthy worker and return `{"failed": True}`
+    every time. Liveness cannot see that; this can.
+    """
+
+    task: str
+    #: `ok`, `skipped`, `failed` or `error`. `skipped` is NOT a fault — a task
+    #: declining because a switch is off has worked as designed.
+    verdict: str
+    reason: str
+    at: str
+    consecutive_failures: int
+
+
 class OperationsHealth(BaseSchema):
     """Everything HQ's production watch can actually see.
 
@@ -117,6 +134,11 @@ class OperationsHealth(BaseSchema):
     worker: WorkerHealth
     scheduler: SchedulerHealth
     queues: QueueHealth
+    #: What the scheduled tasks returned. Empty when Redis could not be read —
+    #: absent, never "all fine".
+    tasks: list[TaskOutcome] = []
+    #: Tasks that have failed on `FAILURE_THRESHOLD` consecutive runs.
+    tasks_failing: int = 0
     #: Worst status across everything that was actually measured. Components
     #: that could not be probed do not drag this down — they are reported as
     #: `unknown` on their own row, where a reader can see them.

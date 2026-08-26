@@ -43,6 +43,7 @@ from app.hq_ops.remediation import (
     Remediation,
     autonomy_enabled,
 )
+from app.hq_ops.task_outcomes import FAILURE_THRESHOLD as TASK_FAILURE_THRESHOLD
 from app.hq_ops.schemas import OperationsHealth
 from app.models.hq_ops import HqAction, HqIncident
 
@@ -112,6 +113,35 @@ def detect(health: OperationsHealth) -> list[Condition]:
                     symptoms={
                         "percent_used": health.disk.percent_used,
                         "warning_percent": health.disk.warning_percent,
+                    },
+                )
+            )
+
+    # A task that RUNS and FAILS. Liveness cannot see this: the beat published,
+    # the worker answered, the queue drained — and the task returned
+    # {"failed": True} every time. That is what happened to the Lab's
+    # sellability sweep for an hour on 2026-08-26 while HQ showed green.
+    #
+    # No remediation. Restarting a worker does not fix a task that is failing
+    # for its own reasons, and pretending otherwise would put a useless action
+    # in the audit trail on every pass.
+    for row in health.tasks:
+        if row.consecutive_failures >= TASK_FAILURE_THRESHOLD:
+            found.append(
+                Condition(
+                    signature=f"task:failing:{row.task}",
+                    component="worker",
+                    severity="degraded",
+                    summary=(
+                        f"{row.task} has failed {row.consecutive_failures} runs in a "
+                        f"row: {row.reason or 'no reason recorded'}."
+                    ),
+                    remediation=None,
+                    symptoms={
+                        "task": row.task,
+                        "consecutive_failures": row.consecutive_failures,
+                        "reason": row.reason,
+                        "last_at": row.at,
                     },
                 )
             )

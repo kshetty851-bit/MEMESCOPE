@@ -32,6 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.redis import get_redis
+from app.hq_ops import task_outcomes
 from app.hq_ops.schemas import (
     ComponentHealth,
     ComponentStatus,
@@ -39,6 +40,7 @@ from app.hq_ops.schemas import (
     OperationsHealth,
     QueueHealth,
     SchedulerHealth,
+    TaskOutcome,
     WorkerHealth,
 )
 
@@ -294,13 +296,14 @@ async def snapshot(session: AsyncSession, *, now: datetime | None = None) -> Ope
     to be monitoring.
     """
     moment = now or datetime.now(UTC)
-    disk, redis_health, database, worker, scheduler, queues = await asyncio.gather(
+    disk, redis_health, database, worker, scheduler, queues, task_rows = await asyncio.gather(
         _probe_disk(),
         _probe_redis(),
         _probe_database(session),
         _probe_worker(),
         _probe_scheduler(now=moment),
         _probe_queues(),
+        task_outcomes.read_all(),
     )
 
     parts: list[ComponentStatus] = [
@@ -330,6 +333,13 @@ async def snapshot(session: AsyncSession, *, now: datetime | None = None) -> Ope
         worker=worker,
         scheduler=scheduler,
         queues=queues,
+        # Reported beside the components but deliberately NOT folded into
+        # `overall`. A failing task is a fault in the platform's WORK; `overall`
+        # is a verdict on its INFRASTRUCTURE, and merging them would make a
+        # broken Lab sweep look like a sick database to anyone reading the top
+        # line. They are different questions and they get different rows.
+        tasks=[TaskOutcome(**row) for row in task_rows],
+        tasks_failing=len(task_outcomes.failing(task_rows)),
         overall=_roll_up(parts),
         unmeasured=unmeasured,
         environment=settings.ENVIRONMENT,

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from celery import Celery
 from celery.schedules import crontab
+from celery.signals import task_postrun
 
 from app.core.config import settings
 
@@ -55,6 +56,31 @@ celery_app.conf.update(
     # network; this does not widen who can reach it, only what they can ask.
     worker_pool_restarts=True,
 )
+
+@task_postrun.connect
+def _record_task_outcome(sender=None, state=None, retval=None, **_: object) -> None:
+    """Record what every task RETURNED, so HQ can see a task that runs and fails.
+
+    A signal rather than a decorator on each task: nothing has to be added to a
+    task for it to be covered, and a task written next year is covered the day
+    it is written. An opt-in registry would be a list somebody forgets, which is
+    the exact failure this is here to catch.
+
+    Wrapped completely. A monitoring write must never be able to fail the thing
+    it monitors, and this runs inside the worker's task lifecycle.
+    """
+    name = getattr(sender, "name", None) or ""
+    # Celery's own bookkeeping tasks are not the platform's work.
+    if not name or name.startswith("celery."):
+        return
+    try:
+        from app.hq_ops.task_outcomes import record
+        from app.workers.runtime import run_async
+
+        run_async(record(name, state=str(state or ""), result=retval))
+    except Exception:  # noqa: BLE001
+        pass
+
 
 celery_app.conf.beat_schedule = {
     # Beat's proof of life, for HQ's production watch. Beat has no control
