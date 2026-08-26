@@ -70,6 +70,12 @@ export const CHATTER: Chatter[] = [
   // real reaction and lives in the event routines, where a reading is behind
   // it — saying it on a timer would be the exact fabrication §22 forbids.
   { actor: "karthik", lines: ["One second.", "Bear with me.", "Almost.", "Not mine to change."] },
+  // Vault. Held to the same rule and it bites hardest here: these fire on a
+  // timer, so not one of them may hint at a balance, a barrier, a signature or
+  // a state. "Still sealed" would be a claim about the one thing this desk
+  // exists to report, and a claim made by a clock is a fabrication however true
+  // it happens to be. What is left is a person with a quiet job.
+  { actor: "vault", lines: ["Mm.", "Nothing from me.", "Door's shut.", "I'll be here."] },
   { actor: "maya", lines: ["Won't be a minute.", "Nearly finished.", "Mind the floor."] },
   { actor: "sam", lines: ["I'll fix it.", "Spare's in the back.", "That'll do it."] },
 ];

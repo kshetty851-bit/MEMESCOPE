@@ -74,6 +74,12 @@
      and far more chromatic, and 48 off violet. oklch rather than a hex so it
      is comparable with the other fifteen at a glance. */
   --hq-magenta: oklch(0.63 0.175 348);
+  /* Vault. The only DESATURATED hue in the cast — chroma 0.030 against a
+     minimum of 0.070 everywhere else. Every other character reads as a colour
+     first; this one reads as the absence of one, which is the right note for
+     the person standing in the room that is supposed to stay shut. Hue 250 so
+     the little chroma there is leans cold rather than neutral-warm. */
+  --hq-slate: oklch(0.58 0.030 250);
   /* Support staff. Same rule: clothing colour is personality. */
   --hq-plum: oklch(0.50 0.110 330);
   --hq-khaki: oklch(0.58 0.070 100);

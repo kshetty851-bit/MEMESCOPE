@@ -1497,6 +1497,39 @@ const KARTHIK_TO_NOVA: Tile[] = [
   { col: 8, row: 2 },
 ];
 
+const VAULT_ROUTINES: AmbientRoutine[] = [
+  {
+    // The signature behaviour, and deliberately the dullest in the building:
+    // long holds and almost no motion. Every other desk fidgets, types or
+    // walks; this one mostly does not move, which is what a person guarding a
+    // shut door looks like and reads as stillness beside thirteen busy figures.
+    id: "vault-watch",
+    employee: "vault",
+    weight: 7,
+    frames: [{ pose: "seated_reviewing", hold: 14_000, detail: "Watching the door." }],
+  },
+  {
+    id: "vault-ledger",
+    employee: "vault",
+    weight: 4,
+    frames: [
+      { pose: "looking_at_screen", hold: 5_200, detail: "Reading the posture panel." },
+      { pose: "seated_reviewing", hold: 9_000, detail: "Sitting with it." },
+    ],
+  },
+  {
+    // The one time he stands: a slow check and straight back down. Rare weight
+    // so it registers as an event rather than a habit.
+    id: "vault-check",
+    employee: "vault",
+    weight: 2,
+    frames: [
+      { pose: "standing", hold: 2_600, detail: "Up, checking the room." },
+      { pose: "seated_reviewing", hold: 11_000, detail: "Back down, watching." },
+    ],
+  },
+];
+
 const KARTHIK_ROUTINES: AmbientRoutine[] = [
   {
     id: "karthik-typing",
@@ -1708,6 +1741,7 @@ AMBIENT_ROUTINES.push(
   ...MEETING_ROUTINES,
   ...CEO_ROUTINES,
   ...BREAK_ROUTINES,
+  ...VAULT_ROUTINES,
   ...KARTHIK_ROUTINES,
 );
 

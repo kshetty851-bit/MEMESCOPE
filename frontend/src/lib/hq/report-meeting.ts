@@ -89,8 +89,13 @@ export const REPORT_ORDER: EmployeeId[] = [
  * Karthik Paper Wallet is a separate experiment under a separate mandate, and
  * a report on it is a different meeting with a different attendance. He joins
  * when the subject is his, which is what the escalation walk to Nova is for.
+ *
+ * Vault holds the floor for the plainest reason on the list: the custodian of
+ * the one room that can spend real money does not leave it to attend a
+ * briefing. The vault is the post, and a post nobody is at during the meeting
+ * is the meeting's blind spot.
  */
-export const HOLDS_THE_FLOOR: EmployeeId[] = ["sentinel", "quinn", "karthik"];
+export const HOLDS_THE_FLOOR: EmployeeId[] = ["sentinel", "quinn", "karthik", "vault"];
 
 export interface Station {
   employee: EmployeeId;
