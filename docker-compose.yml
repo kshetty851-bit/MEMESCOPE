@@ -227,6 +227,14 @@ x-backend-env: &backend-env
   KARTHIK_CANDIDATE_LIMIT: ${KARTHIK_CANDIDATE_LIMIT:-250}
   KARTHIK_REVIEW_BATCH_LIMIT: ${KARTHIK_REVIEW_BATCH_LIMIT:-2000}
   KARTHIK_MAX_MARKET_AGE_SECONDS: ${KARTHIK_MAX_MARKET_AGE_SECONDS:-900}
+  # HQ's autonomous repair switch. Read straight from the environment by
+  # `app.hq_ops.remediation.autonomy_enabled`, not through settings, so it has
+  # to be passed explicitly here or HQ silently stays in detect-only mode —
+  # which is exactly what it was doing while the disk climbed to 95%.
+  #
+  # Default OFF is deliberate and stays that way: this is the one switch that
+  # lets a scheduled job change the running system.
+  HQ_AUTONOMY_ENABLED: ${HQ_AUTONOMY_ENABLED:-false}
 
   # --- Real-wallet execution contract --------------------------------------
   # EVERY setting below is in the shared anchor on purpose, and this is the one
