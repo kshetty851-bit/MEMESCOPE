@@ -20,6 +20,7 @@ from app.models.real_wallet_safety import RealWalletSafetyEvaluation
 from app.models.token import DiscoveredToken
 from app.repositories.market import MarketSnapshotRepository
 from app.repositories.token import TokenRepository
+from app.security.liquidity import PUMPSWAP_PROGRAM
 from app.security.mint import (
     PUMP_FUN_PROGRAM,
     TOKEN_2022_PROGRAM,
@@ -33,6 +34,34 @@ from app.services.rpc.registry import get_rpc
 
 _ZERO = Decimal(0)
 _HUNDRED = Decimal(100)
+
+#: Discovery programs whose observation counts as provenance.
+#:
+#: What provenance actually asserts is narrow and worth stating plainly: THIS
+#: PLATFORM WATCHED THIS TOKEN BEING CREATED ON CHAIN. Not that the token is
+#: good, not that it is safe -- only that its existence is first-party
+#: evidence, carrying a transaction signature and a slot, rather than a mint
+#: address some API handed us. That is what stops money going to a lookalike
+#: address, and it is the only thing this particular check defends.
+#:
+#: PumpSwap was added on 2026-08-27. It had been pump.fun alone since the gate
+#: was written on 2026-08-09, when pump.fun was the only thing the scanner
+#: discovered -- an artefact of the scanner's population at the time, never a
+#: finding that a graduation pool is weaker evidence. It is not weaker: same
+#: scanner, same chain observation, same signature, same slot. The only
+#: difference is WHICH on-chain event was witnessed, the initial mint or the
+#: graduation pool.
+#:
+#: A constant rather than a setting, deliberately. Everything else the real
+#: wallet may reach is a setting, but those answer "how much" and "how often";
+#: this answers WHICH TOKENS EXIST ENOUGH TO SEND MONEY TO. Widening it should
+#: cost a code review and appear in a diff, not an env var.
+#:
+#: NOT included, and this is the point of a set rather than a boolean: sources
+#: with no slot, such as `jupiter_verified`. A third party's assurance that a
+#: token is real is somebody else's evidence, and `slot > 0` below is what
+#: makes that distinction load-bearing rather than decorative.
+VERIFIED_DISCOVERY_PROGRAMS = frozenset({PUMP_FUN_PROGRAM, PUMPSWAP_PROGRAM})
 
 
 class Reason:
@@ -298,7 +327,7 @@ class RealWalletSafetyGate:
         return {
             "verified": bool(
                 token
-                and token.source_program == PUMP_FUN_PROGRAM
+                and token.source_program in VERIFIED_DISCOVERY_PROGRAMS
                 and token.signature
                 and token.slot > 0
             ),

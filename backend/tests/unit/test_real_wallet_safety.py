@@ -13,7 +13,9 @@ from app.paper.execution import ExecutionQuote, ExecutionQuoteUnavailableError
 from app.real_wallet_safety import service
 from app.real_wallet_safety.service import (
     PUMP_FUN_PROGRAM,
+    PUMPSWAP_PROGRAM,
     TOKEN_2022_PROGRAM,
+    VERIFIED_DISCOVERY_PROGRAMS,
     RealWalletSafetyGate,
     Reason,
     TokenInspection,
@@ -242,6 +244,95 @@ async def test_unknown_provenance_rejects(monkeypatch: pytest.MonkeyPatch) -> No
         monkeypatch, token=SimpleNamespace(source_program="other", signature="sig", slot=1)
     )
     assert Reason.PROVENANCE_UNVERIFIED in decision.reason_codes
+
+
+class TestProvenanceAcceptsEveryRecognisedDiscoveryProgram:
+    """Widened from pump.fun-only on 2026-08-27.
+
+    A V6 Lab strategy trading deep pools ($500k+) is by construction trading
+    GRADUATED tokens, and those are discovered by the PumpSwap program rather
+    than pump.fun's. Every one of them failed provenance and the real wallet
+    could not touch the strategy at all -- while the rest of the stack, LP
+    custody included (`PUMPSWAP_MIGRATED_LP_BURNED`), had been built for
+    graduated pools all along.
+
+    The tests below are deliberately lopsided: one proves the gate opened, four
+    prove it did not open any further than intended.
+    """
+
+    async def test_a_graduated_pumpswap_token_is_verified(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The fix. Same scanner, same chain, same signature and slot -- the
+        only difference is which on-chain event was witnessed."""
+        decision = await _decision(
+            monkeypatch,
+            token=SimpleNamespace(
+                source_program=PUMPSWAP_PROGRAM, signature="sig", slot=1
+            ),
+        )
+        assert Reason.PROVENANCE_UNVERIFIED not in decision.reason_codes
+
+    async def test_pump_fun_is_still_verified(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Regression: widening must not swap one program for another."""
+        decision = await _decision(
+            monkeypatch,
+            token=SimpleNamespace(
+                source_program=PUMP_FUN_PROGRAM, signature="sig", slot=1
+            ),
+        )
+        assert Reason.PROVENANCE_UNVERIFIED not in decision.reason_codes
+
+    async def test_a_third_partys_word_is_still_not_provenance(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`jupiter_verified` carries slot 0 -- nobody here watched it happen.
+
+        This is the case the whole check exists for, and the one most likely to
+        be waved through by anyone widening the gate in a hurry: it is real,
+        it trades, and a reputable third party vouches for it. It is still
+        somebody else's evidence.
+        """
+        decision = await _decision(
+            monkeypatch,
+            token=SimpleNamespace(
+                source_program="jupiter_verified", signature="sig", slot=0
+            ),
+        )
+        assert Reason.PROVENANCE_UNVERIFIED in decision.reason_codes
+
+    async def test_a_recognised_program_without_a_slot_still_fails(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Being on the list is necessary, not sufficient. No slot means the
+        observation was never anchored to a block."""
+        decision = await _decision(
+            monkeypatch,
+            token=SimpleNamespace(
+                source_program=PUMPSWAP_PROGRAM, signature="sig", slot=0
+            ),
+        )
+        assert Reason.PROVENANCE_UNVERIFIED in decision.reason_codes
+
+    async def test_a_recognised_program_without_a_signature_still_fails(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        decision = await _decision(
+            monkeypatch,
+            token=SimpleNamespace(
+                source_program=PUMPSWAP_PROGRAM, signature=None, slot=1
+            ),
+        )
+        assert Reason.PROVENANCE_UNVERIFIED in decision.reason_codes
+
+    def test_the_accepted_set_is_exactly_two_programs(self) -> None:
+        """Pinned. A third entry is a decision about where real money may go,
+        and it should fail a test rather than arrive quietly in a diff."""
+        assert VERIFIED_DISCOVERY_PROGRAMS == frozenset(
+            {PUMP_FUN_PROGRAM, PUMPSWAP_PROGRAM}
+        )
 
 
 async def test_missing_market_data_rejects(monkeypatch: pytest.MonkeyPatch) -> None:
