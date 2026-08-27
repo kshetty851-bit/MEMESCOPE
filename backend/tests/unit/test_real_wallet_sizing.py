@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 
@@ -80,6 +81,20 @@ class TestTheCapMovesWithTheLadder:
         sized(entry="5", base="100", cap="5")
         ceiling = Decimal("5") * (2 ** sizing.MAX_DOUBLINGS)
         assert configured_entry_size_usd(Decimal("1000000000")) == ceiling
+
+    def test_the_lab_and_the_real_wallet_share_one_ladder(self) -> None:
+        """MAX_DOUBLINGS governs the Lab's twenty portfolios as well as the real
+        wallet, so raising it is a change to a running experiment's rules.
+
+        It was safe at 6 -> 8 only because it is unreachable there: the bound
+        binds at 2^6 = 64x, and the live tournament's best portfolio stood at
+        1.65x — it had not reached the FIRST doubling. Anyone raising this
+        again should check that number rather than assume it.
+        """
+        from app.lab import service as lab_service
+
+        assert "growth_multiplier" in Path(lab_service.__file__).read_text()
+        assert sizing.MAX_DOUBLINGS >= 6
 
     def test_it_clamps_rather_than_refusing(self, sized) -> None:
         """Clamped here on purpose: the POLICY refuses an oversized request

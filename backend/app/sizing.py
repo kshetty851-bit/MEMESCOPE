@@ -38,9 +38,24 @@ from decimal import Decimal
 #:
 #: A ceiling rather than an open-ended doubling because this multiplies a real
 #: order size, and equity is a computed figure: one bad mark on an illiquid
-#: position can inflate it. Six doublings is 64x, far past the depth these
-#: pools support, so the cap can only ever bind on a number that is wrong.
-MAX_DOUBLINGS = 6
+#: position can inflate it. This is the only bound left on that failure since
+#: the per-trade cap began scaling with the account, so it is load-bearing.
+#:
+#: RAISED 6 -> 8 on 2026-08-27, on instruction, and the measurement that argues
+#: against going further is recorded here rather than lost. Round-trip cost on
+#: live V6-07 candidates, quoted both ways through Jupiter:
+#:
+#:     $5      1.7 - 2.5%
+#:     $100    1.9 - 4.4%
+#:     $500    3.0 - 11.8%
+#:     $2000   6.9 - 31.6%
+#:
+#: From a $5 base, 64x is $320 and 256x is $1,280. The first sits where fills
+#: are still good; the second is into the range where a single round trip can
+#: cost more than a strategy's whole edge. So 8 is headroom, not a target, and
+#: the thing that will stop this account is pool depth rather than this number.
+#: Raising it further buys permission the market will not honour.
+MAX_DOUBLINGS = 8
 
 
 def growth_multiplier(
