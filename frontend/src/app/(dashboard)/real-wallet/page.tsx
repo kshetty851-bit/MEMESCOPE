@@ -278,7 +278,7 @@ function WithdrawForm({ data }: { data: WalletStatus | undefined }) {
 
   if (!locked) {
     return (
-      <p className="mt-2 text-sm text-warning">
+      <p className="mt-2 text-sm text-warn">
         No destination is nominated, so nothing can be sent. An unset destination
         permits nothing rather than anything.
       </p>
@@ -314,7 +314,7 @@ function WithdrawForm({ data }: { data: WalletStatus | undefined }) {
             type="button"
             disabled={send.isPending}
             onClick={() => send.mutate()}
-            className="rounded-md bg-warning px-4 py-2 text-sm font-semibold text-black shadow-sm disabled:opacity-50"
+            className="rounded-md bg-warn px-4 py-2 text-sm font-semibold text-black shadow-sm disabled:opacity-50"
           >
             {send.isPending ? "Sending — do not retry…" : "Confirm — send now"}
           </button>
@@ -331,7 +331,7 @@ function WithdrawForm({ data }: { data: WalletStatus | undefined }) {
       </div>
 
       {!valid ? (
-        <p className={`mt-2 text-xs ${amount ? "text-warning" : "text-ink-3"}`}>
+        <p className={`mt-2 text-xs ${amount ? "text-warn" : "text-ink-3"}`}>
           Enter an amount above zero and at most {most.toFixed(6)} SOL — the fee
           reserve of {reserve} SOL has to stay behind to pay for the next
           transaction, including a later withdrawal.
@@ -339,7 +339,7 @@ function WithdrawForm({ data }: { data: WalletStatus | undefined }) {
       ) : null}
 
       {confirming && !send.isPending && !send.data ? (
-        <p className="mt-2 text-xs text-warning">
+        <p className="mt-2 text-xs text-warn">
           Nothing has been sent yet. Press <b>Confirm — send now</b> to send {amount}{" "}
           SOL to {locked.slice(0, 12)}…{locked.slice(-6)}. It is submitted once and
           never retried.
@@ -362,7 +362,7 @@ function WithdrawForm({ data }: { data: WalletStatus | undefined }) {
       ) : null}
 
       {send.error ? (
-        <p className="mt-2 text-xs text-warning">
+        <p className="mt-2 text-xs text-warn">
           Refused: {send.error instanceof ApiError ? send.error.message : "unavailable"}.
           Nothing was sent — but if you saw a timeout rather than this message, check
           the wallet balance before trying again.
@@ -460,14 +460,14 @@ function BalanceCard({
       </div>
 
       {data?.balance_error ? (
-        <p className="mt-3 text-sm text-warning">
+        <p className="mt-3 text-sm text-warn">
           Balance unreadable: {data.balance_error}. An unreadable balance refuses rather
           than assuming zero.
         </p>
       ) : null}
 
       {overCeiling ? (
-        <p className="mt-3 rounded-md border border-warning/40 bg-warning/[0.08] p-3 text-sm text-warning">
+        <p className="mt-3 rounded-md border border-warn/40 bg-warn/[0.08] p-3 text-sm text-warn">
           Above the {ceiling} SOL canary ceiling. The policy REFUSES a wallet over the
           ceiling, so overfunding blocks trading rather than enabling it. Withdraw the
           excess.
@@ -556,7 +556,7 @@ function BalanceCard({
                 </p>
               </>
             ) : (
-              <p className="mt-1 text-sm text-warning">
+              <p className="mt-1 text-sm text-warn">
                 No destination nominated
                 {data?.withdrawal?.reason ? ` — ${data.withdrawal.reason}` : ""}. An
                 unset destination permits nothing rather than anything.
@@ -792,7 +792,7 @@ function AutotradeControl() {
         </span>
       </div>
 
-      <p className="mt-2 rounded border border-warning/40 bg-warning/[0.06] p-2 text-xs leading-relaxed text-warning">
+      <p className="mt-2 rounded border border-warn/40 bg-warn/[0.06] p-2 text-xs leading-relaxed text-warn">
         Starting authorises nothing. Mode, the three enable flags, the release
         constant, the mainnet clause, the submission guard, SEC-2 freshness, network
         verification and the canary limits are each evaluated independently. On this
@@ -871,8 +871,8 @@ function Seatbelt({ onEnter }: { onEnter: () => void }) {
     <main>
       <p className="text-label text-accent">Execution wallet</p>
       <h1 className="mt-2 text-3xl font-medium text-ink">Fasten your seatbelt</h1>
-      <section className="mt-6 max-w-2xl rounded-lg border border-warning/40 bg-warning/[0.08] p-4">
-        <p className="text-label text-warning">ACCESS APPROVED — READ THIS FIRST</p>
+      <section className="mt-6 max-w-2xl rounded-lg border border-warn/40 bg-warn/[0.08] p-4">
+        <p className="text-label text-warn">ACCESS APPROVED — READ THIS FIRST</p>
         <ul className="mt-3 space-y-2 text-sm text-ink-3">
           <li>
             <span className="text-ink">This is the only page that could ever touch real money.</span>{" "}
@@ -897,7 +897,7 @@ function Seatbelt({ onEnter }: { onEnter: () => void }) {
           </li>
         </ul>
         <button
-          className="mt-4 rounded border border-warning/60 px-4 py-2 text-sm text-warning hover:bg-warning/10"
+          className="mt-4 rounded border border-warn/60 px-4 py-2 text-sm text-warn hover:bg-warn/10"
           onClick={onEnter}
           type="button"
         >
@@ -1091,8 +1091,8 @@ export default function RealWalletPage() {
         a successful simulation, the isolated signer, and the autotrade switch.
       </p>
       <BalanceCard data={data} readiness={readinessQuery.data} />
-      <section className="mt-6 rounded-lg border border-warning/40 bg-warning/[0.08] p-4">
-        <p className="text-label text-warning">
+      <section className="mt-6 rounded-lg border border-warn/40 bg-warn/[0.08] p-4">
+        <p className="text-label text-warn">
           {data?.lock_state === "LOCKED"
             ? "LOCKED · NO REAL SUBMISSION IS POSSIBLE"
             : "SUBMISSION PERMITTED — VERIFY THIS IS INTENDED"}
@@ -1276,7 +1276,7 @@ export default function RealWalletPage() {
                       I reviewed the simulation and authorize this DEVNET transfer.
                     </label>
                     <button
-                      className="rounded bg-warning px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+                      className="rounded bg-warn px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
                       disabled={!approvalChecked || action.isPending}
                       onClick={() =>
                         action.mutate({ intentId: selected.id, actionName: "approve" })
@@ -1391,7 +1391,7 @@ export default function RealWalletPage() {
                 <td>
                   {row.buy_impact_pct ?? "—"} / {row.sell_impact_pct ?? "—"}
                 </td>
-                <td className={row.status === "WOULD_BUY" ? "text-up" : "text-warning"}>
+                <td className={row.status === "WOULD_BUY" ? "text-up" : "text-warn"}>
                   {row.status}
                 </td>
                 <td className="p-3 text-xs text-ink-3">

@@ -83,7 +83,7 @@ export default function TesterActivityPage() {
                       row.status === "active"
                         ? "text-up"
                         : row.status === "idle"
-                          ? "text-warning"
+                          ? "text-warn"
                           : "text-ink-3"
                     }
                   >

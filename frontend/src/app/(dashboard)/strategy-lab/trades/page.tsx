@@ -161,7 +161,7 @@ export default function StrategyLabTradesPage() {
             <h1 className="mt-1 text-lg font-medium text-ink">
               Every open and closed position, with its contract address
             </h1>
-            <p className="mt-1 text-xs font-medium tracking-wide text-warning">
+            <p className="mt-1 text-xs font-medium tracking-wide text-warn">
               PAPER / RESEARCH ONLY — no real order was placed for any of these
             </p>
           </div>

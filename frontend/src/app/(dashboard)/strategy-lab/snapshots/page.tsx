@@ -78,7 +78,7 @@ export default function StrategyLabSnapshotsPage() {
           these.
         </p>
         {snapshots.length === 0 ? (
-          <p className="mt-3 text-xs text-warning">
+          <p className="mt-3 text-xs text-warn">
             No snapshot has been taken yet. The first lands at the 24-hour
             boundary and appears here on its own.
           </p>
@@ -142,7 +142,7 @@ export default function StrategyLabSnapshotsPage() {
                     </td>
                     <td
                       className={`py-1 pr-3 text-right tabular-nums ${
-                        (r.return_pct ?? 0) < 0 ? "text-warning" : "text-ink"
+                        (r.return_pct ?? 0) < 0 ? "text-warn" : "text-ink"
                       }`}
                     >
                       {pct(r.return_pct)}

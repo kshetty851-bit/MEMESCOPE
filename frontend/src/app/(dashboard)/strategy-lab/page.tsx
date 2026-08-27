@@ -128,7 +128,7 @@ function Header({ board }: { board: LabBoard }) {
           <h1 className="mt-1 text-lg font-medium text-ink">
             20 STRATEGIES · ${board.starting_equity.toFixed(0)} EACH · SAME MEMESCOPE SCANNER
           </h1>
-          <p className="mt-1 text-xs font-medium tracking-wide text-warning">
+          <p className="mt-1 text-xs font-medium tracking-wide text-warn">
             PAPER / RESEARCH ONLY — REAL MONEY OFF
           </p>
         </div>
@@ -219,7 +219,7 @@ function Drawer({ id, onClose }: { id: string; onClose: () => void }) {
             <p className="mt-1 leading-relaxed text-muted">{data.strategy.hypothesis}</p>
           </div>
           {data.historical_warning ? (
-            <p className="rounded border border-warning/40 bg-warning/[0.05] p-2 text-warning">
+            <p className="rounded border border-warn/40 bg-warn/[0.05] p-2 text-warn">
               {data.historical_warning}
             </p>
           ) : null}
@@ -261,7 +261,7 @@ function Drawer({ id, onClose }: { id: string; onClose: () => void }) {
                 <li>overfit risk: {data.strategy.overfit_risk}</li>
               </ul>
               {data.strategy.caveats.length > 0 ? (
-                <ul className="mt-2 space-y-0.5 text-[11px] text-warning">
+                <ul className="mt-2 space-y-0.5 text-[11px] text-warn">
                   {data.strategy.caveats.map((c) => (
                     <li key={c}>⚠ {c.replace(/_/g, " ")}</li>
                   ))}
@@ -430,7 +430,7 @@ function Rulebook({ rules, specHash }: { rules: LabRule[]; specHash: string }) {
             <p className="mt-1 text-[11px] leading-relaxed text-muted">{r.hypothesis}</p>
 
             {r.overfit_risk === "HIGH" ? (
-              <p className="mt-2 rounded border border-warning/40 bg-warning/[0.05] px-2 py-1 text-[10px] text-warning">
+              <p className="mt-2 rounded border border-warn/40 bg-warn/[0.05] px-2 py-1 text-[10px] text-warn">
                 HISTORICALLY INTERESTING — HIGH OVERFIT RISK. Historical profit is context,
                 not validation.
               </p>
@@ -494,7 +494,7 @@ function Rulebook({ rules, specHash }: { rules: LabRule[]; specHash: string }) {
                   {r.caveats.length > 0 ? (
                     <div>
                       <dt className="text-muted">Caveats</dt>
-                      <dd className="text-warning">
+                      <dd className="text-warn">
                         {r.caveats.map((c) => c.replace(/_/g, " ")).join(" · ")}
                       </dd>
                     </div>
