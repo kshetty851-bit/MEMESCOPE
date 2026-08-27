@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -322,6 +322,37 @@ describe("RealWalletPage balance card", () => {
     const panel = screen.getByText("Withdraw SOL").closest("div");
     expect(panel!.querySelector("input")!).toHaveValue("");
     expect(panel!.textContent).toContain("Enter an amount above zero");
+  });
+
+  it("does not claim to be sending while it is still only armed", async () => {
+    // The wallet's owner typed 0.001, pressed Withdraw, read "Sending 0.001
+    // SOL to …" and waited. Nothing was in flight — the send needs a second
+    // press — so the copy described an action that had not started and the
+    // user correctly waited for a completion that could never arrive. On the
+    // one screen that moves real money, a progress message for a thing that
+    // is not happening is the worst available wording.
+    // A FUNDED wallet: the shared fixture holds 0 SOL, which makes every amount
+    // invalid and would arm nothing at all.
+    vi.mocked(api.get).mockResolvedValue({ ...lockedStatus(), sol_balance: 0.05 });
+    render(<RealWalletPage />, { wrapper });
+    await waitFor(() =>
+      expect(screen.getByText("PublicExecutionWalletAddress")).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^withdraw$/i }));
+
+    const panel = screen.getByText("Withdraw SOL").closest("div")!;
+    fireEvent.change(within(panel).getByPlaceholderText("0.00"), {
+      target: { value: "0.001" },
+    });
+    fireEvent.click(within(panel).getByRole("button", { name: /^withdraw$/i }));
+
+    // Armed, not sent.
+    expect(api.post).not.toHaveBeenCalled();
+    expect(panel.textContent).toContain("Nothing has been sent yet");
+    expect(panel.textContent).not.toContain("Sending 0.001 SOL to");
+    expect(
+      within(panel).getByRole("button", { name: /confirm — send now/i }),
+    ).toBeInTheDocument();
   });
 
   it("requires a second, explicit confirmation before it sends", async () => {

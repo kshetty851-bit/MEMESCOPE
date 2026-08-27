@@ -314,7 +314,7 @@ function WithdrawForm({ data }: { data: WalletStatus | undefined }) {
             type="button"
             disabled={send.isPending}
             onClick={() => send.mutate()}
-            className="rounded-md bg-warning px-3 py-1 text-sm font-medium text-black disabled:opacity-50"
+            className="rounded-md bg-warning px-4 py-2 text-sm font-semibold text-black shadow-sm disabled:opacity-50"
           >
             {send.isPending ? "Sending — do not retry…" : "Confirm — send now"}
           </button>
@@ -340,8 +340,9 @@ function WithdrawForm({ data }: { data: WalletStatus | undefined }) {
 
       {confirming && !send.isPending && !send.data ? (
         <p className="mt-2 text-xs text-warning">
-          Sending {amount} SOL to {locked.slice(0, 12)}…{locked.slice(-6)}. This is
-          submitted once and never retried.
+          Nothing has been sent yet. Press <b>Confirm — send now</b> to send {amount}{" "}
+          SOL to {locked.slice(0, 12)}…{locked.slice(-6)}. It is submitted once and
+          never retried.
         </p>
       ) : null}
 
@@ -1085,8 +1086,9 @@ export default function RealWalletPage() {
       </p>
       <h1 className="mt-2 text-3xl font-medium text-ink">MEMESCOPE execution wallet</h1>
       <p className="mt-2 max-w-2xl text-sm text-ink-3">
-        Dedicated low-balance wallet. Deposits are live; every way of spending — a trade
-        or a withdrawal alike — is still refused in code.
+        Dedicated low-balance wallet. Deposits are open and withdrawal to the nominated
+        address works. Trading is the part that stays gated: it needs a fresh quote,
+        a successful simulation, the isolated signer, and the autotrade switch.
       </p>
       <BalanceCard data={data} readiness={readinessQuery.data} />
       <section className="mt-6 rounded-lg border border-warning/40 bg-warning/[0.08] p-4">
