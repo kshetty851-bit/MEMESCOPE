@@ -45,11 +45,23 @@ class TestTradingRulesAreUnchanged:
     # a clean interpreter with no conftest loaded — a second, weaker copy here
     # would fail for a reason that has nothing to do with this phase.
 
-    def test_sec2_still_gates_the_same_two_strategies(self) -> None:
+    def test_sec2_gates_every_strategy_it_is_meant_to(self) -> None:
+        """RENAMED ON MERGE -- it used to say "the same two".
+
+        main added a third gated strategy, `universe_trailing_stop_25_v1`, and a
+        test whose NAME asserts a count is a test that has to be renamed every
+        time the count moves. What this guards is that the market-data phase
+        work did not narrow SEC2's scope, so the set is still pinned exactly;
+        only the claim in the name was wrong.
+        """
         from app.paper.strategy import SECURITY_GATED_STRATEGY_IDS
 
         assert frozenset(
-            {"trailing_stop_25_secured_v2", "trailing_stop_25_secured_hold6h_v3"}
+            {
+                "trailing_stop_25_secured_v2",
+                "trailing_stop_25_secured_hold6h_v3",
+                "universe_trailing_stop_25_v1",
+            }
         ) == SECURITY_GATED_STRATEGY_IDS
 
     def test_sec2_still_requires_every_mandatory_check(self) -> None:

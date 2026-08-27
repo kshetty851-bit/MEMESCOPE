@@ -25,11 +25,11 @@ from app.api.v1.endpoints import (
 from app.exit_signals import api as intelligence
 from app.health import api as pipeline_health
 from app.hq_ops import api as hq_ops
+from app.karthik import api as karthik
 from app.karthik_ops import api as karthik_ops
-from app.opportunities import api as opportunities
 from app.paper import api as paper
-from app.strategy_lab import api as strategy_lab
-from app.strategy_lab.discovery import api as strategy_discovery
+from app.arena import api as arena
+from app.lab import api as lab
 from app.radar import api as radar
 from app.real_wallet import api as real_wallet
 from app.real_wallet_safety import api as real_wallet_safety
@@ -59,6 +59,9 @@ api_router.include_router(scores.router)
 # The Opportunity Radar. Additive: no existing route changes shape. Its own
 # module declares literal paths before `/{mint}`, as the scores router does.
 api_router.include_router(radar.router)
+# Research simulation, clearly separated from the wallet surfaces.
+api_router.include_router(arena.router)
+api_router.include_router(lab.router)
 # Exit Watch, the permanent record and the leaderboards. Additive; the Radar's
 # own routes and every pre-existing endpoint are unchanged.
 api_router.include_router(intelligence.router)
@@ -74,16 +77,16 @@ api_router.include_router(analysts.router)
 # no existing route changed shape.
 api_router.include_router(watchlists.router)
 api_router.include_router(events.router)
-# Sprint 4/5: the Opportunity board. Its own namespace rather than reshaping
-# `/radar` — opportunities live in their own tables and `/radar` has an
-# established shape driven by a different model. Additive: no existing route
-# changes, and the board is empty while the engine's feature flag is off.
-api_router.include_router(opportunities.router)
 # Sprint 25: the paper wallet. Its own namespace. Sprint 35 adds a paper-only
 # manual close endpoint, but still no manual entry and no real execution path.
 # Additive: no existing route changes, and the wallet reports itself as not
 # running while its feature flag is off rather than serving an empty book.
 api_router.include_router(paper.router)
+# The Karthik paper wallet. Its own namespace over its own tables — it shares
+# no route, no schema and no storage with `/paper`, so a reader cannot confuse
+# the two wallets' figures and a change to one cannot reshape the other.
+# Read-only: activation is an operator command, never an HTTP call.
+api_router.include_router(karthik.router)
 # Safety decisions are an audit/read surface only. They cannot request a
 # wallet, build a transaction, or invoke an execution engine.
 api_router.include_router(real_wallet_safety.router)
@@ -99,16 +102,13 @@ api_router.include_router(token_security.router)
 # the platform is producing anything, this reports whether the machinery
 # underneath it is alive. Read-only, and additive — no existing route changes.
 api_router.include_router(hq_ops.router)
-# Strategy Lab. Its own `/strategy-lab` namespace and its own tables: it is
-# research infrastructure, not a wallet, and filing it under `/paper` would
-# invite exactly the confusion the whole subsystem is built to prevent. Every
-# route is read-only — there is no POST, PUT, PATCH or DELETE on this router —
-# and no code path from it reaches a signer or a chain.
-api_router.include_router(strategy_lab.router)
-# The discovery engine, under Strategy Lab's namespace because that is what it
-# searches over. Also read-only: a search is started by an operator on the host,
-# never by a page load.
-api_router.include_router(strategy_discovery.router)
+# NOT REGISTERED, deliberately: `app.strategy_lab` and its discovery engine.
+# They are the predecessor of `app.lab` + `app.arena`, registered above. Both
+# packages exist in this tree only because the merge saw two independent adds
+# rather than a rename, so registering both would serve one feature twice and
+# let two `/strategy-lab` namespaces shadow each other on the route table.
+# main's router is the authority here. The old package is left on disk rather
+# than deleted, because deleting a subsystem is a decision for its owner.
 # Karthik's operational layer, on `/karthik-ops`. Deliberately not `/karthik`,
 # which belongs to the wallet itself: one publishes what the experiment did and
 # the other publishes whether it is being run properly, and neither should be

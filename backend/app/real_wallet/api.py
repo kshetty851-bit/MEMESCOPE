@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.api.deps import AdminUser, DbSession
@@ -28,11 +28,22 @@ from app.real_wallet.devnet_workflow import (
     DevnetManualWorkflowError,
 )
 from app.real_wallet.live_repository import LiveIntentRepository
+from app.real_wallet import withdraw_service, withdrawal
+from app.real_wallet.mainnet_signer_client import (
+    MainnetSignerRejectedError,
+    MainnetSignerUnavailableError,
+    UnixMainnetSignerClient,
+)
 from app.real_wallet.network import (
     DevnetExecutionBlockedError,
     is_valid_wallet_address,
     verify_wallet_network,
 )
+from app.real_wallet.funding_readiness import as_dict as readiness_as_dict
+from app.real_wallet.funding_readiness import evaluate as evaluate_funding_readiness
+from app.real_wallet.autotrade import AutotradeSwitchService, UnknownStrategyError
+from app.real_wallet.rehearsal import as_dict as rehearsal_as_dict
+from app.real_wallet.rehearsal import rehearse
 from app.real_wallet.policy import configured_entry_size_usd
 from app.real_wallet.repository import RealWalletExecutionRepository
 from app.real_wallet.sol_price import JupiterSolUsdPriceSource, SolUsdPrice
@@ -42,6 +53,9 @@ from app.repositories.token import TokenRepository
 from app.security import entry_policy
 from app.services.rpc.standard import StandardSolanaRPC
 
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
 router = APIRouter(prefix="/real-wallet", tags=["real-wallet"])
 
 
@@ -144,6 +158,207 @@ def _fee_accounting_readiness(
     }
 
 
+class AutotradeStartIn(BaseModel):
+    """Starting requires naming a strategy and a reason. Both are recorded."""
+
+    strategy_id: str = Field(min_length=2, max_length=16)
+    reason: str = Field(min_length=3, max_length=256)
+
+
+class AutotradeStopIn(BaseModel):
+    reason: str = Field(min_length=3, max_length=256)
+
+
+@router.get("/autotrade", summary="Read the operator start/stop control")
+async def read_autotrade(_admin: AdminUser, session: DbSession) -> dict[str, object]:
+    service = AutotradeSwitchService(session)
+    state = await service.state()
+    return {
+        **state.as_dict(),
+        "history": [
+            {"action": e.action, "actor": e.actor, "reason": e.reason,
+             "nominated_strategy": e.nominated_strategy,
+             "occurred_at": e.occurred_at.isoformat()}
+            for e in await service.history(limit=20)
+        ],
+    }
+
+
+@router.post("/autotrade/start", summary="Record the intent to trade autonomously")
+async def start_autotrade(
+    payload: AutotradeStartIn, admin: AdminUser, session: DbSession
+) -> dict[str, object]:
+    """**This authorises nothing.**
+
+    Every barrier is evaluated independently and is untouched here: mode, the
+    three enable flags, the release constant, the mainnet clause, the submission
+    guard, SEC-2 freshness, network verification and the canary limits. Starting
+    records that an operator intends to trade and names which strategy; on
+    today's deployment submission remains exactly as impossible as before.
+    """
+    service = AutotradeSwitchService(session)
+    try:
+        state = await service.start(
+            actor=admin.email, reason=payload.reason,
+            strategy_id=payload.strategy_id, at=datetime.now(UTC),
+        )
+    except UnknownStrategyError as exc:
+        raise HTTPException(
+            status_code=422, detail=f"unknown strategy: {exc}"
+        ) from exc
+    await session.commit()
+    return state.as_dict()
+
+
+@router.post("/autotrade/stop", summary="Stop autonomous trading, unconditionally")
+async def stop_autotrade(
+    payload: AutotradeStopIn, admin: AdminUser, session: DbSession
+) -> dict[str, object]:
+    """Stop. This can never be refused and needs no other condition to be true.
+
+    A control an operator cannot trust to stop is a control they will be afraid
+    to start, so this path has no barrier of its own and takes effect on the
+    next guard evaluation.
+    """
+    service = AutotradeSwitchService(session)
+    state = await service.stop(
+        actor=admin.email, reason=payload.reason, at=datetime.now(UTC)
+    )
+    await session.commit()
+    return state.as_dict()
+
+
+@router.get(
+    "/rehearsal",
+    summary="ARMED rehearsal — evaluate every pre-submission condition",
+)
+async def rehearsal(_admin: AdminUser, session: DbSession) -> dict[str, object]:
+    """Prove the chain with no transaction existing. It cannot submit or sign."""
+    report = await rehearse(session, now=datetime.now(UTC))
+    return rehearsal_as_dict(report)
+
+
+@router.get(
+    "/funding-readiness",
+    summary="What stands between here and a funded canary",
+)
+async def funding_readiness(_admin: AdminUser, session: DbSession) -> dict[str, object]:
+    """A read-only checklist. It can never enable anything.
+
+    Measures what it can (balance, genesis, kill switch) and reports the rest as
+    UNKNOWN rather than as satisfied — an unmeasured precondition has not been
+    met, it has merely not been looked at.
+    """
+    public_key = settings.REAL_WALLET_PUBLIC_KEY.strip()
+    balance_sol: Decimal | None = None
+    network_verified: bool | None = None
+    if public_key and is_valid_wallet_address(public_key):
+        rpc = StandardSolanaRPC(rpc_url=settings.REAL_WALLET_RPC_URL)
+        try:
+            async with rpc:
+                network = await verify_wallet_network(
+                    rpc, network=settings.REAL_WALLET_NETWORK
+                )
+                network_verified = network.verified
+                if network.verified:
+                    balances = ExecutionWalletBalanceService(rpc)
+                    balance_sol = Decimal(
+                        str((await balances.get_sol_balance(public_key)).sol)
+                    )
+        except Exception:  # pragma: no cover - an unreadable chain is UNKNOWN
+            network_verified = None
+
+    kill_switch_active: bool | None = None
+    try:
+        kill_switch_active = bool(
+            await LiveIntentRepository(session).active_kill_switches()
+        )
+    except Exception:  # pragma: no cover - unreadable state stays UNKNOWN
+        kill_switch_active = None
+
+    # Asked over the socket. This container cannot answer it from its own
+    # environment — it is deliberately denied any key path — so an unreachable
+    # signer is UNKNOWN rather than a failure to configure something here.
+    signer_holds_pinned_key: bool | None = None
+    try:
+        signer_holds_pinned_key = bool(
+            (await UnixMainnetSignerClient().identity()).get("matches_pinned_key")
+        )
+    except MainnetSignerUnavailableError:
+        signer_holds_pinned_key = None
+    except MainnetSignerRejectedError:
+        signer_holds_pinned_key = False
+
+    readiness = evaluate_funding_readiness(
+        wallet_balance_sol=balance_sol,
+        network_verified=network_verified,
+        kill_switch_active=kill_switch_active,
+        signer_holds_pinned_key=signer_holds_pinned_key,
+        # Nothing has been promoted. When the V6 review promotes something this
+        # becomes its id, and it is deliberately not derivable from config.
+        validated_strategy=None,
+    )
+    return readiness_as_dict(readiness)
+
+
+class WithdrawIn(BaseModel):
+    """Amount only. The destination is not a parameter and cannot be one."""
+
+    sol_amount: Decimal = Field(gt=0)
+    confirmation_phrase: Literal["WITHDRAW_TO_MY_ADDRESS"]
+
+
+@router.post("/withdraw", summary="Send SOL to the one nominated address")
+async def withdraw(
+    payload: WithdrawIn, admin: AdminUser, session: DbSession
+) -> dict[str, object]:
+    """The only path here that moves money without a trade.
+
+    It cannot choose a recipient. The destination comes from configuration, is
+    checked in the service, and is checked AGAIN inside the isolated signer
+    against that process's own copy of the setting — so the worst a compromised
+    caller achieves is sending the operator their own money.
+
+    Never retried. A submitted transfer whose response was lost is UNCERTAIN,
+    and asking again is how one withdrawal becomes two.
+    """
+    del session
+    rpc = StandardSolanaRPC(rpc_url=settings.REAL_WALLET_RPC_URL)
+    try:
+        async with rpc:
+            balances = ExecutionWalletBalanceService(rpc)
+            sol = (await balances.get_sol_balance(
+                settings.REAL_WALLET_PUBLIC_KEY.strip()
+            )).sol
+            prepared = await withdraw_service.prepare(
+                rpc,
+                sol_amount=payload.sol_amount,
+                balance_lamports=lamports_from_sol(Decimal(str(sol))),
+            )
+            signed = await UnixMainnetSignerClient().sign_withdrawal(
+                prepared.unsigned_transaction
+            )
+            signature = await withdraw_service.submit(
+                rpc, signed_transaction=signed["signed_transaction"]
+            )
+    except withdraw_service.WithdrawError as exc:
+        raise ConflictError(str(exc)) from exc
+    except (MainnetSignerUnavailableError, MainnetSignerRejectedError) as exc:
+        raise ServiceUnavailableError(f"signer: {exc}") from exc
+
+    logger.warning("real_wallet_withdrawal_submitted", actor=str(admin.id),
+                   signature=signature, lamports=prepared.lamports)
+    return {
+        "submitted": True,
+        "signature": signature,
+        "destination": prepared.destination,
+        "sol": str(prepared.sol),
+        "explorer": f"https://solscan.io/tx/{signature}",
+        "note": ("Submitted once and never retried. If this response was lost, "
+                 "check the signature on chain rather than sending again."),
+    }
+
+
 @router.get("/status", summary="Read dedicated execution-wallet status")
 async def status(_admin: AdminUser, session: DbSession) -> dict[str, object]:
     """Return public and readiness metadata only; never signer material."""
@@ -225,6 +440,22 @@ async def status(_admin: AdminUser, session: DbSession) -> dict[str, object]:
         "network": settings.REAL_WALLET_NETWORK,
         "rpc": rpc_status,
         "sol_balance": balance_sol,
+        # The balance in the unit every limit on this page is written in. The
+        # price was already being fetched for fee accounting and was only
+        # reachable three levels down; a wallet that shows SOL alone makes the
+        # operator convert in their head against a number the page already knows.
+        # `None` when the price is unreadable — never a stale or guessed rate.
+        "sol_price_usd": (float(sol_price.usd) if sol_price is not None else None),
+        "sol_price_fresh": (
+            sol_price.is_fresh(
+                now, max_age_seconds=settings.EXECUTION_SOL_PRICE_MAX_AGE_SECONDS
+            )
+            if sol_price is not None else False
+        ),
+        "balance_usd": (
+            float(Decimal(str(balance_sol)) * sol_price.usd)
+            if balance_sol is not None and sol_price is not None else None
+        ),
         "token_balances": token_balances,
         "balance_error": balance_error,
         "funding_status": (
@@ -286,6 +517,13 @@ async def status(_admin: AdminUser, session: DbSession) -> dict[str, object]:
                 ],
             },
             "fee_accounting": _fee_accounting_readiness(sol_price, now=now),
+        },
+        # Asymmetric on purpose: anyone may deposit to a public address, and the
+        # money may leave for exactly one nominated destination.
+        "withdrawal": {
+            "locked_to": withdrawal.policy().destination or None,
+            "configured": withdrawal.policy().usable,
+            "reason": withdrawal.policy().reason or None,
         },
         # The one line that must never be ambiguous on a dashboard. `LOCKED`
         # means no configuration reachable from this process can submit; it is

@@ -19,12 +19,16 @@ from __future__ import annotations
 import asyncio
 from typing import Any, ClassVar
 
+from decimal import Decimal
+
 import httpx
 
 from app.core.backoff import BackoffPolicy
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.services.rpc.base import (
+    RpcExhaustedError,
+    RpcMethodRestrictedError,
     RpcDescription,
     RpcError,
     RpcRateLimitError,
@@ -120,6 +124,13 @@ class StandardSolanaRPC(SolanaRPC):
 
                 if response.status_code == 429:
                     last_error = RpcRateLimitError(f"{method} rate limited")
+                elif response.status_code in (403, 404, 405):
+                    # A capability refusal, not weather: retrying is waste and
+                    # the message must never carry the URL httpx puts in it.
+                    raise RpcMethodRestrictedError(
+                        f"{method} refused by {self.name} "
+                        f"(HTTP {response.status_code}; plan/method restriction)"
+                    )
                 elif response.status_code >= 500:
                     last_error = RpcError(f"{method} returned {response.status_code}")
                 else:
@@ -130,7 +141,10 @@ class StandardSolanaRPC(SolanaRPC):
                     return body.get("result") if isinstance(body, dict) else None
 
             except (httpx.TransportError, httpx.HTTPStatusError) as exc:
-                last_error = exc
+                last_error = RpcError(
+                    f"{type(exc).__name__}: "
+                    + str(exc).replace(self._rpc_url, _redact(self._rpc_url))
+                )
             except ValueError as exc:  # malformed JSON body
                 last_error = RpcError(f"{method} returned invalid JSON: {exc}")
 
@@ -146,7 +160,11 @@ class StandardSolanaRPC(SolanaRPC):
                 )
                 await asyncio.sleep(delay)
 
-        raise RpcError(f"{method} failed after {attempts} attempts: {last_error}")
+        if isinstance(last_error, RpcRateLimitError):
+            raise RpcRateLimitError(
+                f"{method} failed after {attempts} attempts: {last_error}"
+            )
+        raise RpcExhaustedError(f"{method} failed after {attempts} attempts: {last_error}")
 
     async def get_transaction(
         self, signature: str, *, attempts: int | None = None
@@ -209,6 +227,40 @@ class StandardSolanaRPC(SolanaRPC):
         return list(values)
 
 
+    async def get_token_supply(self, mint_address: str) -> Decimal | None:
+        """`getTokenSupply`, returned in whole tokens rather than base units.
+
+        Unreadable is `None` rather than an exception: a concentration check is
+        one input among several, and an RPC hiccup should make the caller refuse
+        the trade, not crash the evaluation that would have refused it anyway.
+        """
+        try:
+            response = await self.call("getTokenSupply", [mint_address])
+        except RpcError:
+            return None
+        value = (response or {}).get("value") or {}
+        raw, decimals = value.get("amount"), value.get("decimals")
+        if raw is None or decimals is None:
+            return None
+        try:
+            supply = Decimal(str(raw)) / (Decimal(10) ** int(decimals))
+        except (ArithmeticError, ValueError):
+            return None
+        # A zero or negative supply is not a real mint; treat it as unreadable
+        # so a caller cannot divide by it.
+        return supply if supply > 0 else None
+
+
 def _redact(url: str) -> str:
-    """The endpoint without its query string, which is where keys live."""
-    return url.split("?", 1)[0] if url else ""
+    """The endpoint with every place a credential can live masked.
+
+    Keys arrive as query strings (Helius) AND as path segments (Chainstack
+    embeds the access token directly in the path) — measured live when an
+    httpx 403 message printed a full Chainstack URL into worker logs. Host
+    survives; nothing after it does.
+    """
+    if not url:
+        return ""
+    base = url.split("?", 1)[0]
+    parts = base.split("/", 3)
+    return "/".join(parts[:3]) + ("/***" if len(parts) > 3 and parts[3] else "")

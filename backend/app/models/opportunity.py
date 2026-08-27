@@ -59,13 +59,67 @@ from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
-from app.opportunities.models import (
-    LIVE_STATUSES,
-    OpportunityPriority,
-    OpportunityStage,
-    OpportunityStatus,
-    SignalStatus,
+
+# --- Persisted vocabulary --------------------------------------------------
+# These enums lived in `app.opportunities.models` while the engine ran. The
+# engine is retired (V4 Phase 2 follow-up); the TABLES and their history stay,
+# so the vocabulary the columns are typed against moves in with them. Values
+# are persisted strings: append-only, never renamed.
+
+import enum
+
+
+class OpportunityStatus(enum.StrEnum):
+    """Where an opportunity sat in its lifecycle. Historical rows only."""
+
+    NEW = "new"
+    PENDING_CONFIRMATION = "pending_confirmation"
+    ACTIVE = "active"
+    EXPIRING = "expiring"
+    CLOSED = "closed"
+    ARCHIVED = "archived"
+
+
+#: Statuses that occupied a token's live slot — still referenced by the
+#: partial unique index predicate and the priority lane's membership query.
+LIVE_STATUSES: frozenset[OpportunityStatus] = frozenset(
+    {
+        OpportunityStatus.NEW,
+        OpportunityStatus.PENDING_CONFIRMATION,
+        OpportunityStatus.ACTIVE,
+        OpportunityStatus.EXPIRING,
+    }
 )
+
+
+class SignalStatus(enum.StrEnum):
+    """A signal's own lifecycle, independent of its opportunity."""
+
+    PENDING = "pending"
+    ACTIVE = "active"
+    EXPIRED = "expired"
+    INVALIDATED = "invalidated"
+    REALISED = "realised"
+
+
+class OpportunityStage(enum.StrEnum):
+    """Where the token was in its own life when the row was written."""
+
+    UNKNOWN = "unknown"
+    PRE_GRADUATION = "pre_graduation"
+    NEAR_GRADUATION = "near_graduation"
+    FRESH_GRADUATION = "fresh_graduation"
+    ESTABLISHED = "established"
+
+
+class OpportunityPriority(enum.StrEnum):
+    """Coarse ranking band, derived from the numeric priority."""
+
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
 
 #: 0-100 with two decimals, matching `token_scores` and `radar_tokens`.
 _SCORE = Numeric(5, 2)

@@ -19,14 +19,14 @@ describe("middleware", () => {
   });
 
   it.each(["/login", "/register", "/login?auth=manual"])(
-    "sends %s to the alpha landing page",
+    "lets %s through, because the alpha code grants no account session",
     (pathname) => {
-      const response = middleware(request(pathname));
-
-      expect(redirectTarget(response)).toBe("/");
-      // Temporary, so the browser stops honouring it the moment the real auth
-      // flow replaces the alpha gate. A 308 would outlive the product decision.
-      expect(response.status).toBe(307);
+      // Redirecting these away left no way to obtain a user session at all, so
+      // every endpoint behind an account role was unreachable by construction —
+      // including the execution wallet, which then told its own owner they were
+      // not an administrator. With no password-reset flow either, an account
+      // nobody can sign into can only be replaced, so /register matters too.
+      expect(redirectTarget(middleware(request(pathname)))).toBeNull();
     },
   );
 

@@ -46,7 +46,11 @@ export type HairStyle =
   // Karthik. Short and flat on the sides with volume left on top — the only
   // two-height crown in the cast, which is what makes it read at 64px beside
   // twelve silhouettes that are uniform all the way round.
-  | "undercut";
+  | "undercut"
+  // Vault. Pulled back and tied low — the only style in the cast with mass
+  // BEHIND the skull rather than on top of it, so the profile is different
+  // before any colour is read.
+  | "low-tie";
 
 /** Outfit silhouette, drawn as a distinct torso overlay. */
 export type Outfit =
@@ -66,7 +70,11 @@ export type Outfit =
   // Karthik. A zipped athletic jacket with raglan shoulders: the seam runs to
   // the collar instead of across the shoulder, so the outline has no square
   // corner where every tailored garment in the cast has one.
-  | "track-jacket";
+  | "track-jacket"
+  // Vault. A closed double-breasted coat: two vertical seams instead of the
+  // single centre line every other garment uses, and a hem that stops square
+  // rather than flaring. Reads as somebody who does not open the jacket.
+  | "sealed-coat";
 
 export type Accessory =
   | "duster"
@@ -87,7 +95,12 @@ export type Accessory =
   // whole differentiation from Radar's headset: two cups sitting at the
   // collarbone read nothing like a band over the crown with a boom mic, and at
   // this size the position is the only cue that survives.
-  | "headphones";
+  | "headphones"
+  // Vault. A ring of keys at the hip — the only accessory carried BELOW the
+  // waist, so it never competes with the fourteen held at chest height or worn
+  // on the head. Literal for a custodian, and the silhouette is unmistakable
+  // even as three dots on a loop.
+  | "keyring";
 
 /**
  * Every pose the rig can draw.
@@ -152,6 +165,10 @@ export type DeskTheme =
   | "performance"
   | "sentry"
   | "reliability"
+  // Vault. Its own theme rather than a second "execution": Rex's desk is a
+  // paper simulator and this one is a room with real money in it. Two desks
+  // that mean different things must not look the same.
+  | "vault"
   | "verification"
   // Karthik's six-monitor wall. The only desk in the office with a screen
   // count as its identity, because a six-screen bench is what the job looks
@@ -392,6 +409,31 @@ export const CHARACTERS: Record<EmployeeId, CharacterDefinition> = {
     defaultPose: "seated_reviewing",
     deskTheme: "verification",
     personalityLine: "Takes nobody's word for it, including her own.",
+  },
+  vault: {
+    id: "vault",
+    // Tall and square is taken by Sentinel in a parka; the coat and the low tie
+    // are what separate them, and they never stand in the same room.
+    bodyType: "tall",
+    headShape: "square",
+    skinTone: "s2",
+    hair: "low-tie",
+    hairTone: "h2",
+    outfit: "sealed-coat",
+    accessory: "keyring",
+    // Slate: the only desaturated hue in the cast. Every other character reads
+    // as a colour first; this one reads as absence of one, which is the right
+    // note for the room that is supposed to stay shut.
+    palette: "slate",
+    // Seated, though the instinct was to stand him at the door. The cast allows
+    // at most four standing figures — a room where everyone stands reads as a
+    // meeting rather than a working floor — and Nova, who must stand, already
+    // shares that budget. Facing the door is the characterisation; standing up
+    // is not required to carry it.
+    defaultPose: "seated_reviewing",
+    deskTheme: "vault",
+    personalityLine:
+      "Stands at the door rather than the desk. Says the reason, never the reassurance.",
   },
   karthik: {
     id: "karthik",

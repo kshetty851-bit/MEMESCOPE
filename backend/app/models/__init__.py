@@ -48,6 +48,11 @@ from app.models.paper_research import (
     PaperDecisionSnapshot,
 )
 from app.models.hq_ops import HqAction, HqIncident  # noqa: F401
+from app.models.karthik import (  # noqa: F401
+    KarthikOpportunity,
+    KarthikPosition,
+    KarthikWallet,
+)
 from app.models.radar import RadarAchievement, RadarSnapshot, RadarToken
 from app.models.radar_quality import (
     RadarDecisionOutcome,
@@ -64,6 +69,8 @@ from app.models.real_wallet_execution import (
     RealWalletKillSwitch,
     RealWalletLiveIntent,
     RealWalletPosition,
+    RealWalletAutotradeEvent,
+    RealWalletAutotradeSwitch,
 )
 from app.models.real_wallet_safety import RealWalletSafetyEvaluation
 from app.models.token_security import TokenSecurityEvaluationRow
@@ -78,6 +85,29 @@ from app.models.score import (
     ScoreTrigger,
     TokenScore,
     TokenScoreHistory,
+)
+from app.models.arena import (  # noqa: F401
+    ArenaCandidate,
+    ArenaDecision,
+    ArenaPosition,
+)
+from app.models.password_reset import PasswordResetToken  # noqa: F401
+from app.models.lab import (  # noqa: F401
+    LabDecision,
+    LabEquityPoint,
+    LabPosition,
+    LabSnapshot,
+    LabStrategy,
+    LabTournament,
+)
+from app.models.research_data import (  # noqa: F401
+    HolderSnapshot,
+    JupiterUniverseSnapshot,
+    NurseryAdmission,
+    RadarExecutableOutcome,
+    RegimeSnapshot,
+    ResearchQuote,
+    WalletFlowSnapshot,
 )
 from app.models.token import DiscoveredToken, MetadataStatus
 from app.models.user import User, UserRole
@@ -104,6 +134,9 @@ __all__ = [
     "EnrichmentStatus",
     "HqAction",
     "HqIncident",
+    "KarthikOpportunity",
+    "KarthikPosition",
+    "KarthikWallet",
     "MetadataStatus",
     "PaperDecisionEnrichment",
     "PaperDecisionOutcome",

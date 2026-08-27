@@ -143,9 +143,21 @@ unit_test.log
 backend/scratch_send_report.py
 .pnpm-store/
 
-# Solana keypair files. `phase2-devnet-signer.json` was sitting untracked and
-# un-ignored at the repository root, one `git add -A` away from a committed
-# signing key. Devnet-only today; the pattern is what stops the mainnet one.
+# --- V4 Phase 2 hygiene -------------------------------------------------
+# Bulk local data that must never be staged: production dumps and a solana
+# test-ledger once lived at these paths (now in ~/Projects/MEMESCOPE-attic).
+backups/
+test-ledger/
+# Key material. The devnet signer file was found in the repo ROOT (untracked,
+# never committed — verified) and now lives outside the tree entirely.
+#
+# UNION on merge, deliberately. Both branches wrote key-material rules and each
+# caught a pattern the other missed: `*signer*.key` came from main, and
+# `*keypair*.json` came from karthik-hq and is matched by NOTHING on main. A
+# merge that picked a side would have silently dropped one of them, which is
+# the exact failure these lines exist to prevent.
 *-signer.json
+*signer*.key
 *keypair*.json
 phase2-devnet-signer.json
+frontend/node_modules

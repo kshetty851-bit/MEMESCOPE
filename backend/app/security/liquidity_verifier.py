@@ -149,6 +149,39 @@ def classify(
 
     evidence["curve_complete"] = bool(curve_state.complete) if curve_state else None
 
+    # --- never a pump.fun token at all ----------------------------------
+    # This whole verifier answers ONE question: is the liquidity held by
+    # pump.fun's program-derived accounts, where no creator authority over it
+    # exists. A token that never had a curve and trades on a recognised AMM was
+    # never inside that mechanism, so the question does not apply to it — the
+    # same shape as TOKEN_EXTENSIONS answering NOT_APPLICABLE for a mint that
+    # is not Token-2022.
+    #
+    # WHAT THIS DOES NOT CLAIM: that the LP is locked or burned. Custody on
+    # Raydium, Meteora and Orca is NOT verified by this platform — no code
+    # here reads those pools. It is out of scope, stated as out of scope,
+    # rather than reported as an unresolved pump.fun check that no amount of
+    # RPC could ever resolve.
+    if not curve_owned and pool_account is None:
+        venue = (traded_venue or "").strip().lower()
+        recognised = {
+            value.lower() for value in settings.SECURITY_RECOGNISED_VENUES
+        } - {"pumpfun", "pumpswap"}
+        if venue and venue in recognised:
+            evidence |= {"venue": venue, "custody_verified": False}
+            return _finding(
+                CheckStatus.NOT_APPLICABLE,
+                Mechanism.NONE,
+                (
+                    f"Never a pump.fun token — trading on {venue}. This check "
+                    f"verifies pump.fun custody only, so it has nothing to "
+                    f"establish here. LP custody on {venue} is not verified by "
+                    f"this platform."
+                ),
+                evidence,
+                Reason.POOL_CUSTODY_OUT_OF_SCOPE,
+            )
+
     # --- graduated: verify the destination ------------------------------
     if pool_account is None:
         # No account at the derived canonical migration pool address. The

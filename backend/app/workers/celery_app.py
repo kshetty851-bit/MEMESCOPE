@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from celery import Celery
 from celery.schedules import crontab
+from celery.signals import task_postrun
 
 from app.core.config import settings
 
@@ -20,13 +21,16 @@ celery_app = Celery(
         "app.workers.scoring_tasks",
         "app.radar.scheduler",
         "app.events.scheduler",
-        "app.opportunities.scheduler",
         "app.paper.scheduler",
+        "app.karthik.scheduler",
         "app.real_wallet.scheduler",
         "app.reports.scheduler",
         "app.workers.priority_tasks",
         "app.workers.enrichment_tasks",
         "app.workers.retention_tasks",
+        "app.workers.research_tasks",
+        "app.arena.scheduler",
+        "app.lab.scheduler",
         "app.hq_ops.tasks",
         "app.strategy_lab.scheduler",
     ],
@@ -54,6 +58,31 @@ celery_app.conf.update(
     worker_pool_restarts=True,
 )
 
+@task_postrun.connect
+def _record_task_outcome(sender=None, state=None, retval=None, **_: object) -> None:
+    """Record what every task RETURNED, so HQ can see a task that runs and fails.
+
+    A signal rather than a decorator on each task: nothing has to be added to a
+    task for it to be covered, and a task written next year is covered the day
+    it is written. An opt-in registry would be a list somebody forgets, which is
+    the exact failure this is here to catch.
+
+    Wrapped completely. A monitoring write must never be able to fail the thing
+    it monitors, and this runs inside the worker's task lifecycle.
+    """
+    name = getattr(sender, "name", None) or ""
+    # Celery's own bookkeeping tasks are not the platform's work.
+    if not name or name.startswith("celery."):
+        return
+    try:
+        from app.hq_ops.task_outcomes import record
+        from app.workers.runtime import run_async
+
+        run_async(record(name, state=str(state or ""), result=retval))
+    except Exception:  # noqa: BLE001
+        pass
+
+
 celery_app.conf.beat_schedule = {
     # Beat's proof of life, for HQ's production watch. Beat has no control
     # channel and runs where the API cannot see it, so the only way to know it
@@ -72,6 +101,15 @@ celery_app.conf.beat_schedule = {
     "hq-ops-tick": {
         "task": "app.hq_ops.tasks.hq_ops_tick",
         "schedule": crontab(minute="*/2"),
+    },
+    # Karthik's observation pass. Five minutes rather than two: it watches one
+    # wallet's data quality, not the platform's liveness, and nothing it can
+    # find becomes more urgent for being noticed ninety seconds sooner. Under
+    # OBSERVE_ONLY it opens findings and writes audit rows; it executes no
+    # repair, and there is no code path from here to one.
+    "karthik-ops-tick": {
+        "task": "app.hq_ops.tasks.karthik_ops_tick",
+        "schedule": crontab(minute="*/5"),
     },
     "purge-expired-refresh-tokens": {
         "task": "app.workers.tasks.purge_expired_refresh_tokens",
@@ -96,12 +134,6 @@ celery_app.conf.beat_schedule = {
         "task": "app.radar.scheduler.radar_sweep",
         "schedule": crontab(minute="*/15"),
     },
-    # Label-only forward research.  It reads committed decision snapshots and
-    # immutable market history; it never enters the Radar's ranking path.
-    "radar-quality-outcomes": {
-        "task": "app.radar.scheduler.radar_quality_outcomes",
-        "schedule": crontab(minute="*/5"),
-    },
     # Admission only: reuses persisted discovery and market data without
     # invoking the existing opportunity-scoring sweep above.
     "pumpfun-radar-scan": {
@@ -115,15 +147,6 @@ celery_app.conf.beat_schedule = {
     "event-cycle": {
         "task": "app.events.scheduler.event_cycle",
         "schedule": crontab(minute="3,18,33,48"),
-    },
-    # Closing an opportunity needs no new data, only elapsed time, and the
-    # enrichment fast path cannot do it: a token whose signal has gone quiet is
-    # exactly the one detection stops visiting. Every five minutes, not fifteen,
-    # because the grace window is an hour — a board that shows a lapsed
-    # opportunity as ACTIVE is making a claim about now from data about then.
-    "opportunity-review": {
-        "task": "app.opportunities.scheduler.opportunity_review",
-        "schedule": crontab(minute="*/5"),
     },
     # The paper wallet advances on its own beat because nothing else can move
     # it: a position whose token stopped being enriched is exactly the one most
@@ -143,18 +166,15 @@ celery_app.conf.beat_schedule = {
         "task": "app.paper.scheduler.paper_review",
         "schedule": crontab(minute="*"),
     },
-    # Strategy Lab's forward research. Every five minutes, and a no-op that
-    # opens no database connection unless STRATEGY_LAB_MODE is
-    # FORWARD_RESEARCH. It reads rows Radar and the market collector already
-    # wrote, adds no provider call, and holds its own advisory lock so it can
-    # neither double-book a fill nor block the paper review.
-    "strategy-lab-tick": {
-        "task": "app.strategy_lab.scheduler.strategy_lab_tick",
-        "schedule": crontab(minute="*/5"),
-    },
-    "real-wallet-dry-run-reconciliation": {
-        "task": "app.real_wallet.scheduler.real_wallet_dry_run",
-        "schedule": crontab(minute="*/5"),
+    # The Karthik wallet's own beat, beside the paper wallet's rather than
+    # inside it. Every minute for the same reason: Karthik prices both its
+    # entries and its exits from the freshest observation it can see, so the
+    # gap between admission and entry — the number the experiment is measured
+    # on — is bounded by this cadence. Its task takes a different advisory lock
+    # and its own session, so neither wallet can delay or roll back the other.
+    "karthik-review": {
+        "task": "app.karthik.scheduler.karthik_review",
+        "schedule": crontab(minute="*"),
     },
     # Membership of the priority enrichment lane is derived from what the
     # product currently displays, so it has to be recomputed rather than
@@ -181,6 +201,86 @@ celery_app.conf.beat_schedule = {
     # the other maintenance, and deliberately delete-only — reclaiming pages to
     # the filesystem needs VACUUM FULL, which takes an exclusive lock and is an
     # operator action, not something a beat should do behind your back.
+    "nursery-sweep": {
+        "task": "app.workers.research_tasks.nursery_sweep",
+        "schedule": crontab(minute="*/15"),
+    },
+    "research-quotes-sample": {
+        "task": "app.workers.research_tasks.research_quotes_sample",
+        "schedule": crontab(minute="*/5"),
+    },
+    "holder-snapshots-collect": {
+        "task": "app.workers.research_tasks.holder_snapshots_collect",
+        "schedule": crontab(minute="*/10"),
+    },
+    "universe-snapshot-daily": {
+        "task": "app.workers.research_tasks.universe_snapshot_daily",
+        "schedule": crontab(hour="2", minute="10"),
+    },
+    # Enrolment follows the snapshot by twenty minutes, then repeats hourly so
+    # a token crossing the liquidity floor mid-day is observed the same day.
+    "universe-enrol": {
+        "task": "app.workers.research_tasks.universe_enrol",
+        "schedule": crontab(minute="30"),
+    },
+    # Research simulation: judges due checkpoints and advances virtual
+    # positions. Cannot touch paper, karthik or real-wallet accounting.
+    "arena-tick": {
+        "task": "app.arena.scheduler.arena_tick",
+        "schedule": crontab(minute="*"),
+    },
+    # V6 Strategy Lab: twenty virtual portfolios. Every minute, like the Arena,
+    # so a 30-minute checkpoint is judged within a minute of coming due and the
+    # 24-hour snapshot lands on its frozen boundary rather than drifting.
+    "lab-tick": {
+        "task": "app.lab.scheduler.lab_tick",
+        "schedule": crontab(minute="*"),
+    },
+    # Re-quotes what the Lab holds open so `settle` marks it at what a seller
+    # would actually be offered, rather than at a CPMM model over a reported
+    # liquidity figure that stops describing a market once the pool collapses.
+    # Every three minutes, not every minute: Jupiter rate-limits hard and the
+    # sweep paces itself, and a mark that is three minutes behind is still
+    # incomparably better than one that trusts a dead pool.
+    "lab-sellability-refresh": {
+        "task": "app.lab.scheduler.lab_sellability_refresh",
+        "schedule": crontab(minute="*/3"),
+    },
+    # The real wallet's heartbeat. Beside the Lab's and at the same cadence,
+    # because it acts on Lab decisions and those are actionable for ten minutes.
+    # It creates at most one BUY intent per tick and only while the operator's
+    # switch is on; with the switch off — its default — it refuses immediately.
+    "real-wallet-driver-tick": {
+        "task": "app.real_wallet.scheduler.real_wallet_driver_tick",
+        "schedule": crontab(minute="*"),
+    },
+    # The other half of the driver. Without it the wallet buys and never sells,
+    # so no profit is realised and nothing compounds. Every minute, because a
+    # take-profit is measured against a mark and a mark an hour old is not one.
+    "real-wallet-executor-tick": {
+        "task": "app.real_wallet.scheduler.real_wallet_executor_tick",
+        "schedule": crontab(minute="*"),
+    },
+    # The chain balance against what the rail says it did. Every two minutes,
+    # matching HQ's own pass: this is the only real-wallet signal that is
+    # security rather than operations, and the window a movement can hide in
+    # should be the shortest one that is not wasteful.
+    "real-wallet-balance-watch": {
+        "task": "app.real_wallet.scheduler.real_wallet_balance_watch",
+        "schedule": crontab(minute="*/2"),
+    },
+    "real-wallet-exit-tick": {
+        "task": "app.real_wallet.scheduler.real_wallet_exit_tick",
+        "schedule": crontab(minute="*"),
+    },
+    "regime-snapshot-hourly": {
+        "task": "app.workers.research_tasks.regime_snapshot_hourly",
+        "schedule": crontab(minute="7"),
+    },
+    "executable-outcomes-compute": {
+        "task": "app.workers.research_tasks.executable_outcomes_compute",
+        "schedule": crontab(minute="37"),
+    },
     "prune-telemetry": {
         "task": "app.workers.retention_tasks.prune_telemetry",
         "schedule": crontab(hour="3", minute="45"),

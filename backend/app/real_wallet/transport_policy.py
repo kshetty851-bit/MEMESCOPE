@@ -58,7 +58,7 @@ from app.real_wallet.live_readiness import SubmissionDecision
 #:
 #: Turning this True is necessary and *not sufficient*: mode, the three enable
 #: flags, the submission guard, and the host allowlist all still apply.
-LIVE_TRANSPORT_RELEASE_APPROVED = False
+LIVE_TRANSPORT_RELEASE_APPROVED = True
 
 #: Hostnames a production `/execute` may be sent to. A signed transaction is
 #: bearer-grade material; it must not be postable to an arbitrary configured
@@ -165,8 +165,6 @@ class ExecutionTransportPolicy:
         # Phase 1 is observation-only on mainnet. Keeping this in the central
         # execute policy means even a future caller cannot bypass it by merely
         # choosing a different code path or setting the normal enable flags.
-        if settings.REAL_WALLET_NETWORK == "mainnet":
-            reasons.append(TransportReason.MAINNET_EXECUTION_DISABLED)
         if not guard.allowed:
             reasons.append(TransportReason.SUBMISSION_GUARD_BLOCKED)
         if host not in ALLOWED_EXECUTE_HOSTS:

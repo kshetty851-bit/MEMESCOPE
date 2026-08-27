@@ -441,6 +441,31 @@ function Garment({
           />
         </g>
       );
+    case "sealed-coat":
+      return (
+        <g>
+          {/* Double-breasted and closed. Every other garment in the cast has a
+              single centre line; this one has two verticals with a gap between,
+              which is what reads at 64px. The hem stops square rather than
+              flaring, so the silhouette is a column — the visual note for the
+              room that is supposed to stay shut. */}
+          <path className="hq-garment" d={body} />
+          <path
+            className="hq-garment-dark"
+            d={`M-4 ${shoulderY + 2} L-2 ${shoulderY + 2} L-2 ${hipY} L-4 ${hipY} Z`}
+          />
+          <path
+            className="hq-garment-dark"
+            d={`M2 ${shoulderY + 2} L4 ${shoulderY + 2} L4 ${hipY} L2 ${hipY} Z`}
+          />
+          {/* Closed lapel: a single band across the collarbone rather than a
+              V. Nothing else in the cast has a horizontal there. */}
+          <path
+            className="hq-garment-light"
+            d={`M${-s + 1} ${shoulderY} L${s - 1} ${shoulderY} L${s - 2} ${shoulderY + 3} L${-s + 2} ${shoulderY + 3} Z`}
+          />
+        </g>
+      );
     case "track-jacket":
       return (
         <g>
@@ -666,6 +691,22 @@ function Hair({ style, shape, y }: { style: HairStyle; shape: HeadShape; y: numb
           {[0, 1, 2].map((i) => (
             <ellipse key={i} className="hq-hair" cx={-r - 1} cy={y + 1 + i * 4} rx={2.6} ry={2.4} />
           ))}
+        </g>
+      );
+    case "low-tie":
+      return (
+        <g>
+          {/* The only style in the cast with mass BEHIND the skull. Every other
+              silhouette carries its volume on top or at the sides, so a bulge
+              at the nape is unambiguous even before hue is read — and it stays
+              legible from behind, which matters for a character who stands at a
+              door facing away from the floor. */}
+          <path className="hq-hair" d={`M${-r} ${y} Q0 ${top - 1} ${r} ${y} L${r} ${y - 3} Q0 ${top - 4} ${-r} ${y - 3} Z`} />
+          {/* The tail: a small closed mass low and slightly proud of the head. */}
+          <path
+            className="hq-hair"
+            d={`M${-r + 1} ${y + 1} Q${-r - 2} ${y + 5} ${-r + 0.5} ${y + 7} Q${-r + 3} ${y + 5} ${-r + 2} ${y + 1} Z`}
+          />
         </g>
       );
     case "undercut":

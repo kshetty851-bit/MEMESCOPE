@@ -78,6 +78,7 @@ from app.repositories.market import EnrichmentStateRepository, MarketSnapshotRep
 from app.repositories.token import TokenRepository
 from app.security import entry_policy
 from app.security.mint import decode_mint_account
+from app.universe import rules as universe_rules
 from app.security.service import TokenSecurityService, capture_candidate_security
 from app.services.jupiter import JupiterExecutionClient
 from app.services.rpc.registry import get_rpc
@@ -1475,13 +1476,14 @@ class PaperWalletService:
         bound is reached it is **reported**. A capped search that says nothing
         reads exactly like an exhaustive one that found nothing.
         """
-        # --- ENTRY PAUSE (capital protection) ---------------------------
-        # Ahead of everything, including the track-record branch, because this
-        # is the one function every new position is born in. Exits are already
-        # settled by the time this runs — see the setting's own note for why
-        # returning here cannot reach them.
+        # --- ENTRY PAUSE (V4 containment) --------------------------------
+        # Ahead of everything, because this is the one function every new
+        # position is born in. Exits are already settled by the time this
+        # runs, and returning here cannot reach them — the same separation
+        # Karthik's pause has, and for the same reason: a switch that stopped
+        # exit monitoring would strand an open book.
         if settings.PAPER_WALLET_ENTRIES_PAUSED:
-            return 0, 0, False, {eligibility.ENTRIES_PAUSED_REFUSAL: 1}
+            return 0, 0, False, {eligibility.Refusal.ENTRIES_PAUSED.value: 1}
 
         strategy = self.strategy
         if isinstance(strategy, TrackRecordBracketStrategy):
@@ -1506,9 +1508,37 @@ class PaperWalletService:
             )
 
         limit = strategy.top_n or settings.PAPER_WALLET_CANDIDATE_LIMIT
-        entries = await self._radar.list_entries(
-            category=None, active_only=True, sort="score", limit=limit, offset=0
-        )
+        # --- CANDIDATE SOURCE ---------------------------------------------
+        # The only thing that varies. Everything below this point — screening,
+        # sizing, the security gate, execution, the cash arithmetic — is
+        # identical for both sources and is deliberately NOT duplicated: a
+        # second copy of the entry loop is a second place for the two to drift
+        # apart on what "eligible" means.
+        #
+        # This works because `_screen` reads exactly one attribute off these
+        # rows, `mint_address`, and gets price, depth and trading status from
+        # the market snapshot itself. Rank is position in the list, so for the
+        # universe it means depth rank rather than score rank.
+        if getattr(strategy, "candidate_source", "radar") == "universe":
+            entries = [
+                token
+                # A depth-ranked list puts the stablecoins at the very top, and
+                # a 25% trailing stop on a dollar peg is a position that never
+                # closes. Refused here rather than at enrolment because the
+                # test needs an observed price, which only the snapshot has.
+                for token, snapshot in await self._repository.universe_candidates(
+                    limit=limit,
+                    as_of=now,
+                    min_liquidity=universe_rules.MIN_LIQUIDITY_USD,
+                    min_age_days=universe_rules.MIN_AGE_DAYS,
+                    freshness_seconds=universe_rules.MAX_SNAPSHOT_AGE_SECONDS,
+                )
+                if not universe_rules.is_pegged(snapshot.price_usd)
+            ]
+        else:
+            entries = await self._radar.list_entries(
+                category=None, active_only=True, sort="score", limit=limit, offset=0
+            )
         if not entries:
             return 0, 0, False, {}
 

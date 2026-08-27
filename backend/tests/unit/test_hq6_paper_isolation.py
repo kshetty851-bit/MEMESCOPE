@@ -89,10 +89,28 @@ class TestTheEntryContractIsUntouched:
         }
 
     def test_refusal_vocabulary_gained_no_security_reason(self) -> None:
-        assert not {
-            member.value
-            for member in Refusal
-            if "secur" in member.value or "authority" in member.value
+        assert {member.value for member in Refusal} == {
+            "already_traded",
+            "already_held",
+            "no_market_data",
+            "no_price",
+            "no_liquidity",
+            "not_tradeable",
+            "insufficient_paper_cash",
+            # V4 Phase 2 containment: an administrative whole-pass refusal,
+            # deliberately not a per-token judgement and not a security claim.
+            "entries_paused",
+            # ADDED ON MERGE. main's pin could not know about these three: they
+            # come from karthik-hq's entry-selectivity and market-health work,
+            # which main never carried. The pin is deliberately kept EXHAUSTIVE
+            # rather than loosened to a subset check -- the point of this test is
+            # that a new refusal cannot appear unnoticed, and a subset check
+            # would have let all three in silently. Each is a data-quality or
+            # ranking judgement; none is a security claim, so the property this
+            # test defends is intact.
+            "below_score_percentile",
+            "category_not_eligible",
+            "market_data_stale",
         }
 
     def test_judge_module_does_not_import_the_security_package(self) -> None:

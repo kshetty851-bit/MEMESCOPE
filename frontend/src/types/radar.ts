@@ -217,6 +217,20 @@ export interface TierCount {
   count: number;
 }
 
+export interface ExecutableStats {
+  /** Names the execution model, so a recomputation is a visible new fact. */
+  method_version: string;
+  /** Admissions whose 24h horizon has fully elapsed inside stored data. */
+  decided: number;
+  /** Of `decided`: share whose SELLABLE value reached 2x within 24h. */
+  reached_2x_24h_rate: string | null;
+  reached_125_24h_rate: string | null;
+  /** Median sellable value per $1 at the 24h mark. */
+  median_final_value_frac_24h: string | null;
+  /** decided / total admissions — how much of the record is computed yet. */
+  coverage: string | null;
+}
+
 export interface RadarPerformance {
   total_opportunities: number;
   active_opportunities: number;
@@ -243,6 +257,8 @@ export interface RadarPerformance {
   average_current_multiple: string | null;
   average_days_to_5x: string | null;
   above_entry: number;
+  /** RAW MARKET PRINT vs EXECUTABLE OUTCOME, distinguished by name. */
+  executable: ExecutableStats | null;
   below_entry: number;
   alive: number;
   unknown: number;

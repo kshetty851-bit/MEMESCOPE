@@ -2,7 +2,6 @@ import type { ComponentType, SVGProps } from "react";
 
 import {
   IconBookmark,
-  IconFlask,
   IconHq,
   IconLedger,
   IconScanner,
@@ -95,6 +94,11 @@ export const NAV_GROUPS: NavGroup[] = [
       { href: "/wallet", label: "Paper wallet", icon: IconWallet, status: "ready" },
       // A separate experiment on separate capital, not a new generation of the
       // wallet above. Its own route so neither page can render the other's money.
+      //
+      // KEPT ON MERGE: main has no paper_v2 at all -- no package, no models, no
+      // route -- so this entry is not a stale duplicate of anything on main. The
+      // page it points at survives the merge, and a surviving page with no nav
+      // entry is a feature that silently stops existing for the reader.
       {
         href: "/wallet-v2",
         label: "Paper wallet V2",
@@ -102,16 +106,52 @@ export const NAV_GROUPS: NavGroup[] = [
         status: "ready",
         note: "Experimental. $25 fixed, no stop loss, profit ladder, 6h max hold.",
       },
-      // Research infrastructure, not a third wallet. Strategy Lab replays many
-      // rules over one canonical opportunity stream and holds only simulated
-      // capital — filed beside the wallets because that is what it studies, and
-      // labelled so the rail never implies it trades.
+      // The Arena sits beside the wallet because that is where a reader looks
+      // for it — but it is a research simulation, and the page says so above
+      // the fold. Its equity is not the Paper Wallet's equity.
+      // The V6 Lab is the live experiment; the Arena stays reachable because
+      // its record is evidence and a UI change must not bury it.
       {
         href: "/strategy-lab",
         label: "Strategy Lab",
-        icon: IconFlask,
+        icon: IconSpark,
         status: "ready",
-        note: "Research only. No capital execution.",
+      },
+      // The trades view exists so a reader can copy a contract address and
+      // check the token against the market rather than trusting the Lab.
+      {
+        href: "/strategy-lab/trades",
+        label: "Lab Trades",
+        icon: IconSpark,
+        status: "ready",
+      },
+      // The live board keeps moving, so by the time a boundary result is read
+      // it is no longer what that boundary said. These are the frozen copies.
+      {
+        href: "/strategy-lab/snapshots",
+        label: "Snapshots",
+        icon: IconSpark,
+        status: "ready",
+      },
+      {
+        href: "/strategy-lab/forward-arena",
+        label: "Forward Arena",
+        icon: IconSpark,
+        status: "ready",
+      },
+    ],
+  },
+  {
+    // The execution wallet has its own group: it is the only surface in the
+    // product that could ever touch real money, and filing it under Strategy
+    // would put it beside twenty paper wallets it must never be confused with.
+    label: "Execution",
+    items: [
+      {
+        href: "/real-wallet",
+        label: "Real wallet",
+        icon: IconWallet,
+        status: "ready",
       },
     ],
   },

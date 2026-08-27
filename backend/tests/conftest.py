@@ -91,7 +91,6 @@ async def test_session_factory(engine, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr("app.services.market.worker.SessionFactory", factory)
     monkeypatch.setattr("app.workers.scoring_tasks.SessionFactory", factory)
     monkeypatch.setattr("app.workers.retention_tasks.SessionFactory", factory)
-    monkeypatch.setattr("app.opportunities.scheduler.SessionFactory", factory)
     monkeypatch.setattr("app.db.session.SessionFactory", factory)
     return factory
 

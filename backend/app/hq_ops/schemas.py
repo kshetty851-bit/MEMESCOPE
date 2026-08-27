@@ -101,6 +101,59 @@ class QueueHealth(BaseSchema):
     detail: str
 
 
+class TaskOutcome(BaseSchema):
+    """What one scheduled task last RETURNED, which is not the same question as
+    whether it ran.
+
+    A task can run perfectly on a healthy worker and return `{"failed": True}`
+    every time. Liveness cannot see that; this can.
+    """
+
+    task: str
+    #: `ok`, `skipped`, `failed` or `error`. `skipped` is NOT a fault — a task
+    #: declining because a switch is off has worked as designed.
+    verdict: str
+    reason: str
+    at: str
+    consecutive_failures: int
+
+
+class LabHealthRow(BaseSchema):
+    """Whether the Strategy Lab is still producing evidence, or only ticks.
+
+    Every field is nullable because unmeasurable is not zero: "no stale
+    positions" and "the stale positions could not be counted" are opposite
+    readings, and reporting the second as the first is the failure this exists
+    to catch.
+    """
+
+    measured: bool
+    detail: str
+    open_positions: int | None = None
+    stale_positions: int | None = None
+    stale_pct: float | None = None
+    quote_backed_pct: float | None = None
+    minutes_since_decision: float | None = None
+    minutes_since_close: float | None = None
+    spec_version: str | None = None
+
+
+class WalletHealthRow(BaseSchema):
+    """The execution rail's own health. Nullable throughout: unmeasurable is not
+    zero, and on the balance row it is emphatically not "nothing moved"."""
+
+    measured: bool
+    detail: str
+    stuck_intents: int | None = None
+    oldest_stuck_minutes: float | None = None
+    repeated_reason: str | None = None
+    repeated_count: int | None = None
+    balance_lamports: int | None = None
+    balance_delta_lamports: int | None = None
+    balance_unexplained: bool | None = None
+    balance_observed_minutes_ago: float | None = None
+
+
 class OperationsHealth(BaseSchema):
     """Everything HQ's production watch can actually see.
 
@@ -117,6 +170,19 @@ class OperationsHealth(BaseSchema):
     worker: WorkerHealth
     scheduler: SchedulerHealth
     queues: QueueHealth
+    #: What the scheduled tasks returned. Empty when Redis could not be read —
+    #: absent, never "all fine".
+    tasks: list[TaskOutcome] = []
+    #: Tasks that have failed on `FAILURE_THRESHOLD` consecutive runs.
+    tasks_failing: int = 0
+    #: The Strategy Lab's own evidence quality. Reported beside the components
+    #: and, like `tasks`, deliberately outside `overall`: a Lab that has stopped
+    #: measuring is not a sick database.
+    lab: LabHealthRow | None = None
+    #: The execution wallet. Like `lab`, outside `overall`: a stalled intent is
+    #: not a sick database, and an unexplained balance is not an ops problem at
+    #: all — it is a security one, and it gets its own severity.
+    wallet: WalletHealthRow | None = None
     #: Worst status across everything that was actually measured. Components
     #: that could not be probed do not drag this down — they are reported as
     #: `unknown` on their own row, where a reader can see them.

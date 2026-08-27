@@ -4,20 +4,24 @@ import type { NextRequest } from "next/server";
 /**
  * Temporary alpha routing.
  *
- * During private alpha, the access-code homepage is the only entry gate. The
- * real auth pages remain in the tree for later, but they are not part of the
- * current product flow and should not appear after unlocking alpha access.
+ * The alpha access code is the product's entry gate. It is a cookie, not an
+ * account, and that distinction had a consequence nobody had noticed: it grants
+ * no user session, so while `/login` and `/register` were both redirected away,
+ * there was no way to obtain one at all — and every endpoint behind an account
+ * role was unreachable by construction. The execution wallet is the only such
+ * surface, which is why it told its own owner they were not an administrator.
+ *
+ * There is also no password-reset flow, so an account whose password nobody
+ * knows cannot be recovered — only replaced. Reaching `/login` alone was
+ * therefore not enough to fix anything.
+ *
+ * Both routes are reachable again. What that widens is small and deliberate:
+ * registration still requires the alpha code to reach the site at all, and a new
+ * account is created with the ordinary `user` role, which grants nothing beyond
+ * what the alpha cookie already did. The administrator role is grantable only in
+ * the database, and it remains the thing that guards the wallet.
  */
-const BYPASSED_ROUTES = new Set(["/login", "/register"]);
-
-export function middleware(request: NextRequest) {
-  if (BYPASSED_ROUTES.has(request.nextUrl.pathname)) {
-    const target = new URL("/", request.url);
-    // Temporary, deliberately: a permanent redirect would be cached by the
-    // browser after the real auth flow replaces the alpha access gate.
-    return NextResponse.redirect(target, 307);
-  }
-
+export function middleware(_request: NextRequest) {
   return NextResponse.next();
 }
 

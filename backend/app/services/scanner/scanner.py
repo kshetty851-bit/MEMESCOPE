@@ -205,6 +205,10 @@ class TokenScanner:
             asyncio.create_task(self._worker(index), name=f"scanner-worker-{index}")
             for index in range(settings.SCANNER_WORKER_CONCURRENCY)
         ]
+        if self._flow is not None and settings.WALLET_FLOW_FLUSH_SECONDS > 0:
+            self._workers.append(
+                asyncio.create_task(self._flow_flush_loop(), name="scanner-flow-flush")
+            )
 
         try:
             await self._stream_forever()
@@ -305,6 +309,34 @@ class TokenScanner:
             reconnect_attempts=self.stats.consecutive_failures,
             failure_reason=self.stats.last_failure_reason,
         )
+
+    async def _flow_flush_loop(self) -> None:
+        """Persist research-relevant flow snapshots on a slow, contained beat.
+
+        Observation must never stop discovery: every failure is swallowed and
+        counted, and the loop shares nothing with the socket path but the
+        tracker it reads.
+        """
+        from app.services.scanner import flow_persistence
+
+        while not self._stop.is_set():
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(
+                    self._stop.wait(), timeout=settings.WALLET_FLOW_FLUSH_SECONDS
+                )
+            if self._stop.is_set():
+                return
+            try:
+                now = datetime.now(UTC)
+                self._flow.expire(now)
+                written = await flow_persistence.flush(self._flow, now=now)
+                if written:
+                    logger.info(
+                        "wallet_flow_flushed", rows=written, **self._flow.metrics()
+                    )
+            except Exception:
+                self._flow_decode_failures += 1
+                logger.exception("wallet_flow_flush_failed")
 
     def _record_trades(self, event: LogEvent) -> None:
         """Fold this transaction's trades into the rolling aggregates.

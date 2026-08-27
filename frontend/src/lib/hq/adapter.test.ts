@@ -295,6 +295,23 @@ function karthik(overrides: Record<string, unknown> = {}) {
   };
 }
 
+/** Locked is the resting posture: sealed, nothing armed, nothing to say. */
+function posture(over: Record<string, unknown> = {}) {
+  return {
+    state: "LOCKED",
+    detail: "Vault locked. No submission is possible.",
+    mode: "disabled",
+    execution_enabled: false,
+    autotrade_enabled: false,
+    network: "mainnet",
+    kill_switches: [],
+    active_kill_switches: 0,
+    observed_at: new Date(NOW).toISOString(),
+    sourced: true,
+    ...over,
+  } as never;
+}
+
 function build(overrides: Partial<HqSources> = {}) {
   return deriveHqState({
     operations: at(operations() as never),
@@ -305,6 +322,11 @@ function build(overrides: Partial<HqSources> = {}) {
     paperAudit: at(audit()),
     radarPerformance: at(performance()),
     tokenSecurity: at(security()),
+    // The Execution Vault's source. Present by default because it IS present in
+    // production — `use-hq-state` polls it — and a fixture that omitted it
+    // would leave Vault permanently unread, which Nova correctly reports as a
+    // department with no reading and which would make QUIET unreachable.
+    executionPosture: at(posture()),
     activity: activity(),
     stream: "live",
     transients: {},
@@ -965,5 +987,79 @@ describe("the entry security gate survives a generation cutover", () => {
   it("says nothing when the backend has not said anything", () => {
     expect(isSecurityGated(null)).toBe(false);
     expect(isSecurityGated(undefined)).toBe(false);
+  });
+});
+
+/* ── the Execution Vault's occupant ───────────────────────────────────── */
+
+describe("Vault — the execution wallet custodian", () => {
+  it("is quiet when the vault is locked", () => {
+    // The resting posture. Idle rather than working, for the same reason
+    // Sentinel is idle when six components answer: watching is this desk's
+    // permanent condition, and treating it as activity would put QUIET out of
+    // reach for ever.
+    const state = build({ executionPosture: at(posture({ state: "LOCKED" })) });
+    expect(state.employees.vault.state).toBe("idle");
+  });
+
+  it("is still quiet while ARMED, because armed is a resting state too", () => {
+    // Armed means every precondition is evaluated against real facts and
+    // submission is still impossible. It is the posture the rail was built to
+    // sit in, and a desk that looks worried for weeks teaches the room to
+    // ignore it. The metrics still say ARMED for anyone reading the panel.
+    const state = build({ executionPosture: at(posture({ state: "ARMED" })) });
+    expect(state.employees.vault.state).toBe("idle");
+    expect(state.employees.vault.metrics.find((m) => m.label === "Vault")?.value).toBe(
+      "ARMED",
+    );
+  });
+
+  it("raises an alert the moment real submission becomes possible", () => {
+    // Never `success`. The operator unlocked it deliberately; this desk's job
+    // is to keep that a decision rather than letting it become the background.
+    const state = build({
+      executionPosture: at(posture({ state: "UNLOCKED", mode: "live" })),
+    });
+    expect(state.employees.vault.state).toBe("alert");
+  });
+
+  it("reports an armed kill switch as an error, above every other posture", () => {
+    // A kill switch is not a warning about something that might happen. It is a
+    // barrier that has already fired, and it outranks whatever the state says.
+    const state = build({
+      executionPosture: at(
+        posture({
+          state: "UNLOCKED",
+          kill_switches: [{ kind: "execution", active: true, reason: null, activated_at: null }],
+        }),
+      ),
+    });
+    expect(state.employees.vault.state).toBe("error");
+    expect(state.employees.vault.detail).toContain("execution");
+  });
+
+  it("says it cannot see, rather than that all is well, with no source", () => {
+    const state = build({ executionPosture: { data: null, observedAt: null } });
+    expect(state.employees.vault.state).toBe("unknown");
+  });
+
+  it("never reports a balance or a position it cannot see", () => {
+    // `execution-posture` carries no balances, intents or trades. A custodian
+    // who appeared to be watching positions he has no source for would be the
+    // exact fabrication the roster file warns about.
+    // Matched on whole words: "Autotrade" is a posture field and legitimately
+    // contains "trade", so a substring check here would fail on the very data
+    // the desk is entitled to show.
+    const words = build()
+      .employees.vault.metrics.flatMap((m) => m.label.toLowerCase().split(/[^a-z&]+/));
+    for (const forbidden of ["balance", "position", "positions", "p&l", "intent", "intents"]) {
+      expect(words, `vault must not claim ${forbidden}`).not.toContain(forbidden);
+    }
+  });
+
+  it("says the desk handles REAL funds before it says anything else", () => {
+    const first = build().employees.vault.metrics[0];
+    expect(first?.label).toBe("Desk");
+    expect(String(first?.value)).toContain("REAL");
   });
 });

@@ -36,11 +36,12 @@ from app.models.market import (
     EnrichmentStatus,
     TokenEnrichmentState,
 )
-from app.models.opportunity import Opportunity
+from app.models.opportunity import LIVE_STATUSES, Opportunity
+from app.models.lab import LabPosition
 from app.models.paper import PaperPosition
 from app.models.radar import RadarToken
+from app.models.research_data import NurseryAdmission
 from app.models.token import DiscoveredToken
-from app.opportunities.models import LIVE_STATUSES
 from app.paper.models import PositionStatus
 
 
@@ -51,6 +52,7 @@ class PriorityMembership:
     radar: int
     opportunities: int
     paper: int
+    lab: int
     total: int
     promoted: int
     demoted: int
@@ -61,6 +63,7 @@ class PriorityMembership:
             "radar": self.radar,
             "opportunities": self.opportunities,
             "paper": self.paper,
+            "lab": self.lab,
             "total": self.total,
             "promoted": self.promoted,
             "demoted": self.demoted,
@@ -108,14 +111,31 @@ async def resolve_membership(session: AsyncSession) -> tuple[set[str], PriorityM
         ).all()
     )
 
+    lab_mints = list(
+        (
+            await session.scalars(
+                select(LabPosition.mint_address).where(LabPosition.status == "open")
+            )
+        ).all()
+    )
+
     # Open paper positions first. A paper holding is not merely displayed: its
     # next quote can settle an existing position, so allowing the Radar or an
     # opportunity list to consume the cap first can strand it on an old tier.
     # The lane is still one bounded, derived set; this only gives the wallet's
     # already-committed capital precedence within that set.
+    #
+    # LAB HOLDINGS SIT BESIDE PAPER ONES, and were missing until 2026-08-26.
+    # The reasoning above is about committed capital, not about which table it
+    # is recorded in — but only `paper_positions` was ever queried, so when the
+    # Paper wallet was retired the lane went to `paper: 0` and the Lab's book
+    # inherited no protection at all. Its tokens fell out of the refresh
+    # rotation, their snapshots went stale, and 61 of 108 open positions could
+    # not be marked or exited: HQ INC-056. A position the platform will not
+    # re-price is a position it cannot sell.
     ordered: list[str] = []
     seen: set[str] = set()
-    for mint in [*paper_mints, *radar_mints, *opportunity_mints]:
+    for mint in [*paper_mints, *lab_mints, *radar_mints, *opportunity_mints]:
         if mint not in seen:
             seen.add(mint)
             ordered.append(mint)
@@ -128,6 +148,7 @@ async def resolve_membership(session: AsyncSession) -> tuple[set[str], PriorityM
         radar=len(set(radar_mints)),
         opportunities=len(set(opportunity_mints)),
         paper=len(set(paper_mints)),
+        lab=len(set(lab_mints)),
         total=len(members),
         promoted=0,
         demoted=0,
@@ -191,7 +212,7 @@ async def apply_membership(
             ),
         )
         # Counts rows *touched*, which is promotions plus re-clamps.
-        promoted = result.rowcount or 0
+        promoted += result.rowcount or 0
 
     demote = update(TokenEnrichmentState).where(TokenEnrichmentState.priority == LANE_DISPLAY)
     if members:
@@ -275,6 +296,7 @@ async def refresh_priority_lane(session: AsyncSession, *, now: datetime) -> Prio
         radar=membership.radar,
         opportunities=membership.opportunities,
         paper=membership.paper,
+        lab=membership.lab,
         total=membership.total,
         promoted=promoted,
         demoted=demoted,
@@ -330,6 +352,11 @@ async def refresh_nursery_lane(session: AsyncSession, *, now: datetime) -> Nurse
     cutoff = now - timedelta(minutes=settings.ENRICHMENT_TIER_FRESH_MAX_MINUTES)
 
     # 1. Age eviction: the window is over; back to the age-tier cadence.
+    # A token the Radar nursery still holds as OBSERVING is exempt: its whole
+    # purpose is to be densely observed until its window decision (V4 Phase 2).
+    still_observing = select(NurseryAdmission.token_id).where(
+        NurseryAdmission.status == "observing"
+    )
     result = cast(
         CursorResult[Any],
         await session.execute(
@@ -338,6 +365,7 @@ async def refresh_nursery_lane(session: AsyncSession, *, now: datetime) -> Nurse
                 TokenEnrichmentState.priority == LANE_NURSERY,
                 TokenEnrichmentState.token_id == DiscoveredToken.id,
                 DiscoveredToken.discovered_at < cutoff,
+                TokenEnrichmentState.token_id.not_in(still_observing),
             )
             .values(priority=LANE_NORMAL)
         ),
@@ -348,7 +376,10 @@ async def refresh_nursery_lane(session: AsyncSession, *, now: datetime) -> Nurse
     overflow = (
         select(TokenEnrichmentState.id)
         .join(DiscoveredToken, TokenEnrichmentState.token_id == DiscoveredToken.id)
-        .where(TokenEnrichmentState.priority == LANE_NURSERY)
+        .where(
+            TokenEnrichmentState.priority == LANE_NURSERY,
+            TokenEnrichmentState.token_id.not_in(still_observing),
+        )
         .order_by(DiscoveredToken.discovered_at.desc(), TokenEnrichmentState.id)
         .offset(cap)
         .scalar_subquery()
@@ -375,6 +406,38 @@ async def refresh_nursery_lane(session: AsyncSession, *, now: datetime) -> Nurse
     # 3. Promotion, newest first, into the remaining room. Only ACTIVE rows: a
     # dead-lettered fresh token re-enters through the requeue beat, not here.
     promoted = 0
+
+    # --- observing members first, and unconditionally ------------------------
+    # The Radar's observation window is a bounded, deliberate reservation
+    # (admission rate x window, closed by expiry) — it must not queue behind
+    # fresh-token churn. Measured 2026-08-24: the lane sat at 1,011 against a
+    # cap of 1,000, so `room` went negative and four ACTIVE observing tokens
+    # were never promoted at all — the window that exists to observe them was
+    # collecting nothing. Capacity still bounds the fresh-by-age population
+    # below; it no longer bounds the population the window is *about*.
+    observing_waiting = (
+        select(TokenEnrichmentState.id)
+        .where(
+            TokenEnrichmentState.status == EnrichmentStatus.ACTIVE,
+            TokenEnrichmentState.priority == LANE_NORMAL,
+            TokenEnrichmentState.token_id.in_(still_observing),
+        )
+        .scalar_subquery()
+    )
+    result = cast(
+        CursorResult[Any],
+        await session.execute(
+            update(TokenEnrichmentState)
+            .where(TokenEnrichmentState.id.in_(observing_waiting))
+            .values(
+                priority=LANE_NURSERY,
+                next_refresh_at=func.least(TokenEnrichmentState.next_refresh_at, now),
+            )
+        ),
+    )
+    promoted += result.rowcount or 0
+    members += promoted
+
     room = cap - members
     if room > 0:
         candidates = (

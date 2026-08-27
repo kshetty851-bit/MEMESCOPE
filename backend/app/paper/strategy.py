@@ -252,6 +252,13 @@ class TrailingStopStrategy:
     #: taken. It is checked **first** by the shared resolver, ahead of every
     #: price rule: at the cutoff the position sells whatever the price is.
     hold_for: timedelta | None = None
+    #: Where candidates come from. "radar" is the ranked Radar this strategy
+    #: was built on; "universe" is the enrolled Jupiter verified market list.
+    #: A field rather than a subclass because nothing about the rules changes —
+    #: same equal weight, same trailing stop, same absence of a target — only
+    #: the population they are applied to, which is the whole point of the
+    #: experiment and must be visible on the strategy card.
+    candidate_source: str = "radar"
     operational: bool = True
     unavailable_reason: str | None = None
 
@@ -641,7 +648,13 @@ TRAILING_STOP_25_SECURED_HOLD6H_V3 = TrailingStopStrategy(
     trade_size_usd=Decimal(100),
     trailing_drawdown=Decimal("0.25"),
     hold_for=timedelta(hours=6),
-    operational=True,
+    operational=False,
+    unavailable_reason=(
+        "Retired on 2026-08-24 when the wallet moved from scanner discoveries to "
+        "the Solana market universe. Generation 6's positions kept these exact "
+        "rules until they closed — the rules travel on the position row — and its "
+        "record is unchanged."
+    ),
 )
 
 #: Strategies that share one pool of capital.
@@ -694,6 +707,37 @@ def lineage_for(strategy_id: str) -> frozenset[str]:
     return frozenset({strategy_id})
 
 
+#: THE MARKET UNIVERSE STRATEGY. Same two rules the wallet has always had —
+#: equal weight in, 25% trailing stop out — applied to a different population.
+#:
+#: Every prior generation traded what the scanner found: pump.fun mints, often
+#: minutes old, whose pools are shallow enough that a $50 order pays 9% in
+#: impact. Five research programmes agreed the binding constraint was that
+#: population rather than the exit. This generation changes only the
+#: population: Solana tokens from Jupiter's verified list, at least seven days
+#: old, deep enough that the measured round trip at $50 is about half a
+#: percent.
+#:
+#: **It is not validated.** No forward evidence supports it, the trailing stop
+#: is the most-refuted exit in this codebase's own research, and the wallet
+#: page says so. It is an experiment run deliberately, on paper, with its own
+#: fresh capital — it is absent from CAPITAL_LINEAGES, so it funds itself
+#: rather than inheriting a lineage's money and its history.
+UNIVERSE_TRAILING_STOP_25_V1 = TrailingStopStrategy(
+    id="universe_trailing_stop_25_v1",
+    name="Market Universe — Trailing Stop 25%",
+    version="1.0.0",
+    trade_size_usd=Decimal(50),
+    trailing_drawdown=Decimal("0.25"),
+    candidate_source="universe",
+    # Bounds the scan, not the outcome. $1,000 at $50 a position funds twenty
+    # holdings, so a sixty-deep look is ample headroom for rows already traded
+    # or already held — while keeping the per-candidate security observation
+    # off a two-hundred-mint sweep every minute against a rate-limited RPC.
+    top_n=60,
+)
+
+
 #: Which strategies enforce the security entry gate.
 #:
 #: A set rather than a flag on the dataclass, because the gate is a property of
@@ -709,7 +753,17 @@ def lineage_for(strategy_id: str) -> frozenset[str]:
 #: repository refuse an unauthorised insert, and a retired wallet must not
 #: become *easier* to open a position on than a live one.
 SECURITY_GATED_STRATEGY_IDS: frozenset[str] = frozenset(
-    {TRAILING_STOP_25_SECURED_V2.id, TRAILING_STOP_25_SECURED_HOLD6H_V3.id}
+    {
+        TRAILING_STOP_25_SECURED_V2.id,
+        TRAILING_STOP_25_SECURED_HOLD6H_V3.id,
+        # The universe generation inherits the gate rather than dropping it.
+        # Its population is older and deeper, which changes how LIKELY a
+        # failure is and not whether one matters: a live mint authority is a
+        # live mint authority at any age. The two checks cost `getAccountInfo`
+        # and `getMultipleAccounts`, both ordinary methods — this is not the
+        # holder-concentration call that has been rate-limited.
+        UNIVERSE_TRAILING_STOP_25_V1.id,
+    }
 )
 
 #: **Retired at the Sprint 30 relaunch, and kept because its wallet still
@@ -818,8 +872,11 @@ class StrategyRegistry:
         return self._by_id[self._default]
 
 
+
+
 registry = StrategyRegistry(
     (
+        UNIVERSE_TRAILING_STOP_25_V1,
         TRAILING_STOP_25_SECURED_HOLD6H_V3,
         TRAILING_STOP_25_SECURED_V2,
         PAPER_TRACK_RECORD_TP125_SL50_V1,
@@ -828,5 +885,5 @@ registry = StrategyRegistry(
         TRAILING_STOP_25_V1,
         EQUAL_WEIGHT_V1,
     ),
-    default=TRAILING_STOP_25_SECURED_HOLD6H_V3.id,
+    default=UNIVERSE_TRAILING_STOP_25_V1.id,
 )

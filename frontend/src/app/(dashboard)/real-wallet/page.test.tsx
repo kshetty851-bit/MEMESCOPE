@@ -1,12 +1,19 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import RealWalletPage from "@/app/(dashboard)/real-wallet/page";
-import { api } from "@/lib/api-client";
+import type * as ApiClientModule from "@/lib/api-client";
+import { ApiError, api } from "@/lib/api-client";
 
-vi.mock("@/lib/api-client", () => ({ api: { get: vi.fn() } }));
+// `api` is mocked; `ApiError` is not. The page branches on the real error type,
+// so a stubbed one would let the branch pass a test it does not pass in a
+// browser — which is the whole failure this file now covers.
+vi.mock("@/lib/api-client", async (importOriginal) => ({
+  ...(await importOriginal<typeof ApiClientModule>()),
+  api: { get: vi.fn(), post: vi.fn() },
+}));
 
 function wrapper({ children }: { children: ReactNode }) {
   const queryClient = new QueryClient({
@@ -26,6 +33,11 @@ function wrapper({ children }: { children: ReactNode }) {
 function lockedStatus() {
   return {
     public_key: "PublicExecutionWalletAddress",
+    withdrawal: {
+      locked_to: "FoHVQyJmv5AHPjccV3BWpMoKiMHLPkF5cfQdqo1nH5TN",
+      configured: true,
+      reason: null,
+    },
     address_valid: true,
     network: "devnet",
     rpc: {
@@ -134,10 +146,69 @@ afterEach(() => {
 });
 
 describe("RealWalletPage", () => {
+  // The seatbelt is a once-per-session pause in front of the page. These tests
+  // are about what the page shows once you are through it, so they start
+  // buckled; the gate itself is covered separately below.
+  beforeEach(() => {
+    window.sessionStorage.setItem("memescope.seatbelt", "1");
+  });
+
+  it("stops at the seatbelt before showing anything, once per session", async () => {
+    window.sessionStorage.removeItem("memescope.seatbelt");
+    vi.mocked(api.get).mockResolvedValue(lockedStatus());
+    render(<RealWalletPage />, { wrapper });
+
+    expect(screen.getByText("Fasten your seatbelt")).toBeInTheDocument();
+    // Nothing behind the gate is rendered yet — not the address, not a control.
+    expect(screen.queryByText("Public address")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Start" })).not.toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /enter the execution wallet/i }),
+    );
+    await waitFor(() =>
+      expect(screen.getByText("PublicExecutionWalletAddress")).toBeInTheDocument(),
+    );
+  });
+
+  it("says plainly that the seatbelt is not the access control", async () => {
+    window.sessionStorage.removeItem("memescope.seatbelt");
+    vi.mocked(api.get).mockResolvedValue(lockedStatus());
+    render(<RealWalletPage />, { wrapper });
+    expect(screen.getByText(/pause, not a permission/i)).toBeInTheDocument();
+    expect(screen.getByText(/administrator role on the server/i)).toBeInTheDocument();
+  });
+
   it("does not reveal execution wallet information after an authorization failure", async () => {
-    vi.mocked(api.get).mockRejectedValue(new Error("forbidden"));
+    vi.mocked(api.get).mockRejectedValue(new ApiError(403, "forbidden", "forbidden"));
     render(<RealWalletPage />, { wrapper });
     await waitFor(() => expect(screen.getByText("Restricted")).toBeInTheDocument());
+    expect(screen.queryByText("Public address")).not.toBeInTheDocument();
+  });
+
+  it("tells an expired session it is expired, not that it lacks permission", async () => {
+    // The failure that wasted an owner's time: a 401 rendered as "Restricted"
+    // sends someone hunting for a permissions problem they do not have.
+    vi.mocked(api.get).mockRejectedValue(new ApiError(401, "unauthorized", "nope"));
+    render(<RealWalletPage />, { wrapper });
+    await waitFor(() => expect(screen.getByText("Signed out")).toBeInTheDocument());
+    expect(screen.getByText(/session has expired/i)).toBeInTheDocument();
+    // Telling somebody to sign in without giving them a way to is a dead end,
+    // and it sent the owner round the homepage access code three times.
+    const link = screen.getByRole("link", { name: /go to sign in/i });
+    expect(link).toHaveAttribute("href", "/login");
+    // And it must name the trap: the access code is not an account.
+    expect(screen.getByText(/site-wide cookie rather than an account/i))
+      .toBeInTheDocument();
+    expect(screen.queryByText("Restricted")).not.toBeInTheDocument();
+    expect(screen.queryByText("Public address")).not.toBeInTheDocument();
+  });
+
+  it("does not claim a permissions verdict when the request simply failed", async () => {
+    vi.mocked(api.get).mockRejectedValue(new ApiError(503, "unavailable", "down"));
+    render(<RealWalletPage />, { wrapper });
+    await waitFor(() => expect(screen.getByText("Unavailable")).toBeInTheDocument());
+    expect(screen.getByText(/not a statement that you lack access/i)).toBeInTheDocument();
     expect(screen.queryByText("Public address")).not.toBeInTheDocument();
   });
 
@@ -147,7 +218,9 @@ describe("RealWalletPage", () => {
     await waitFor(() =>
       expect(screen.getByText("PublicExecutionWalletAddress")).toBeInTheDocument(),
     );
-    expect(screen.getByText("Copy address")).toBeInTheDocument();
+    // The address itself is the copy control now; the labelled button moved into
+    // the Deposit panel, which is collapsed until asked for.
+    expect(screen.getByText("copy")).toBeInTheDocument();
     expect(screen.getByText("Confirmed lifecycle ledger")).toBeInTheDocument();
     expect(screen.getByText("$2.5")).toBeInTheDocument();
     // Execution and autotrade each read DISABLED on their own status card.
@@ -180,5 +253,97 @@ describe("RealWalletPage", () => {
     expect(
       controls.filter((label) => /enable|arm|unlock|go live|mainnet/i.test(label)),
     ).toEqual([]);
+  });
+});
+
+describe("RealWalletPage balance card", () => {
+  beforeEach(() => {
+    window.sessionStorage.setItem("memescope.seatbelt", "1");
+  });
+
+  it("puts the balance and the address first, before any barrier prose", async () => {
+    vi.mocked(api.get).mockResolvedValue(lockedStatus());
+    render(<RealWalletPage />, { wrapper });
+    await waitFor(() =>
+      expect(screen.getByText("PublicExecutionWalletAddress")).toBeInTheDocument(),
+    );
+    expect(screen.getByRole("button", { name: /deposit/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /withdraw/i })).toBeInTheDocument();
+  });
+
+  it("offers deposit as a real action, because receiving needs only an address", async () => {
+    vi.mocked(api.get).mockResolvedValue(lockedStatus());
+    render(<RealWalletPage />, { wrapper });
+    await waitFor(() =>
+      expect(screen.getByText("PublicExecutionWalletAddress")).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /deposit/i }));
+    expect(screen.getByText("Deposit SOL")).toBeInTheDocument();
+    expect(screen.getByText("Copy address")).toBeInTheDocument();
+  });
+
+  it("offers a withdrawal with no recipient field, only an amount", async () => {
+    // The one control here that moves money without a trade. It used to refuse
+    // outright and this test pinned the refusal; withdrawal is now built, and
+    // what makes it safe to put on a screen is that the form CANNOT choose a
+    // recipient — the destination is configuration, re-proven inside the signer.
+    vi.mocked(api.get).mockResolvedValue(lockedStatus());
+    render(<RealWalletPage />, { wrapper });
+    await waitFor(() =>
+      expect(screen.getByText("PublicExecutionWalletAddress")).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /withdraw/i }));
+    expect(screen.getByText("Withdraw SOL")).toBeInTheDocument();
+
+    // Scoped to the withdraw panel — the separate devnet workflow lower down
+    // has its own recipient field and is not what this asserts about.
+    const panel = screen.getByText("Withdraw SOL").closest("div");
+    expect(panel).not.toBeNull();
+    const inputs = Array.from(panel!.querySelectorAll("input"));
+    expect(inputs).toHaveLength(1);
+    expect(inputs[0].placeholder).toBe("0.00");
+    // And the destination is shown as fixed text, never as something editable.
+    expect(panel!.textContent).toContain("Locked destination");
+  });
+
+  it("requires a second, explicit confirmation before it sends", async () => {
+    // A submitted transfer whose response was lost is UNCERTAIN, and pressing
+    // again is how one withdrawal becomes two. One click must not send.
+    vi.mocked(api.get).mockResolvedValue(lockedStatus());
+    render(<RealWalletPage />, { wrapper });
+    await waitFor(() =>
+      expect(screen.getByText("PublicExecutionWalletAddress")).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^withdraw$/i }));
+
+    expect(api.post).not.toHaveBeenCalled();
+    expect(
+      screen.queryByRole("button", { name: /confirm — send now/i }),
+    ).toBeNull();
+  });
+});
+
+describe("RealWalletPage withdrawal without a destination", () => {
+  beforeEach(() => {
+    window.sessionStorage.setItem("memescope.seatbelt", "1");
+  });
+
+  it("offers nothing to press when no destination is nominated", async () => {
+    // An unset destination permits nothing rather than anything — the same
+    // fail-closed direction the server takes. There must be no amount field to
+    // fill in and no way to send.
+    vi.mocked(api.get).mockResolvedValue({
+      ...lockedStatus(),
+      withdrawal: { locked_to: null, configured: false, reason: "not configured" },
+    });
+    render(<RealWalletPage />, { wrapper });
+    await waitFor(() =>
+      expect(screen.getByText("PublicExecutionWalletAddress")).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /withdraw/i }));
+
+    expect(screen.getByText(/No destination is nominated/)).toBeInTheDocument();
+    const panel = screen.getByText("Withdraw SOL").closest("div");
+    expect(panel!.querySelectorAll("input")).toHaveLength(0);
   });
 });

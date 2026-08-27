@@ -32,13 +32,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.redis import get_redis
+from app.hq_ops import task_outcomes
 from app.hq_ops.schemas import (
     ComponentHealth,
     ComponentStatus,
     DiskHealth,
     OperationsHealth,
     QueueHealth,
+    LabHealthRow,
+    WalletHealthRow,
     SchedulerHealth,
+    TaskOutcome,
     WorkerHealth,
 )
 
@@ -286,6 +290,49 @@ def _roll_up(statuses: list[ComponentStatus]) -> ComponentStatus:
     return max(measured, key=lambda status: _SEVERITY[status])
 
 
+async def _probe_lab(now: datetime) -> LabHealthRow:
+    """The Strategy Lab's evidence quality, asked of the Lab itself.
+
+    `app.lab.health` owns the semantics — what stale means, which tournament is
+    current, how a mark is backed — because those are the Lab's rules and a
+    second copy here would drift from them.
+
+    ITS OWN SESSION, deliberately. The probes run concurrently and a SQLAlchemy
+    session is not safe for concurrent use: sharing the caller's put this probe
+    and `_probe_database` on the same connection, and the first snapshot after
+    it shipped failed with "concurrent operations are not permitted" — reported
+    honestly as unmeasured, but measuring nothing.
+    """
+    from app.db.session import SessionFactory
+    from app.lab.health import read as read_lab
+
+    try:
+        async with SessionFactory() as session:
+            reading = await read_lab(session, now=now)
+        return LabHealthRow(**reading.as_dict())
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("hq_lab_probe_failed", error=str(exc))
+        return LabHealthRow(measured=False, detail=f"Lab health probe failed: {exc}")
+
+
+async def _probe_wallet(now: datetime) -> WalletHealthRow:
+    """The execution rail, asked of the wallet's own module.
+
+    Its own session for the same reason as the Lab probe: these run under
+    `asyncio.gather` and a SQLAlchemy session is not safe for concurrent use.
+    """
+    from app.db.session import SessionFactory
+    from app.real_wallet.wallet_health import read as read_wallet
+
+    try:
+        async with SessionFactory() as session:
+            reading = await read_wallet(session, now=now)
+        return WalletHealthRow(**reading.as_dict())
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("hq_wallet_probe_failed", error=str(exc))
+        return WalletHealthRow(measured=False, detail=f"Wallet probe failed: {exc}")
+
+
 async def snapshot(session: AsyncSession, *, now: datetime | None = None) -> OperationsHealth:
     """One reading of every component. Probes run concurrently.
 
@@ -294,13 +341,17 @@ async def snapshot(session: AsyncSession, *, now: datetime | None = None) -> Ope
     to be monitoring.
     """
     moment = now or datetime.now(UTC)
-    disk, redis_health, database, worker, scheduler, queues = await asyncio.gather(
+    (disk, redis_health, database, worker, scheduler, queues, task_rows,
+     lab_row, wallet_row) = await asyncio.gather(
         _probe_disk(),
         _probe_redis(),
         _probe_database(session),
         _probe_worker(),
         _probe_scheduler(now=moment),
         _probe_queues(),
+        task_outcomes.read_all(),
+        _probe_lab(moment),
+        _probe_wallet(moment),
     )
 
     parts: list[ComponentStatus] = [
@@ -330,6 +381,15 @@ async def snapshot(session: AsyncSession, *, now: datetime | None = None) -> Ope
         worker=worker,
         scheduler=scheduler,
         queues=queues,
+        # Reported beside the components but deliberately NOT folded into
+        # `overall`. A failing task is a fault in the platform's WORK; `overall`
+        # is a verdict on its INFRASTRUCTURE, and merging them would make a
+        # broken Lab sweep look like a sick database to anyone reading the top
+        # line. They are different questions and they get different rows.
+        tasks=[TaskOutcome(**row) for row in task_rows],
+        tasks_failing=len(task_outcomes.failing(task_rows)),
+        lab=lab_row,
+        wallet=wallet_row,
         overall=_roll_up(parts),
         unmeasured=unmeasured,
         environment=settings.ENVIRONMENT,

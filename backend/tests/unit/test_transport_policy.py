@@ -133,11 +133,31 @@ class TestProductionEnvelopes:
 
         assert _authorise().envelope is TransportEnvelope.ARMED
 
-    def test_live_still_requires_the_reviewed_release(
+    def test_the_release_is_approved_and_live_is_therefore_reachable(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The whole point: environment access alone cannot reach mainnet."""
+        """The release was reviewed and turned on deliberately.
+
+        Until then this asserted the opposite, and the assertion was right at
+        the time: environment access alone could not reach mainnet. What still
+        holds is that permission is the ABSENCE of reasons — mode, the enable
+        flags, the guard and the host allowlist each still refuse on their own,
+        and the tests below hold each of them.
+        """
         _production(monkeypatch, mode="live")
+
+        decision = _authorise()
+
+        assert decision.permitted
+        assert TransportReason.RELEASE_NOT_APPROVED not in decision.reasons
+
+    def test_turning_the_release_off_again_closes_everything(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The constant is still the master switch, and reverting it is still
+        the one-line rollback."""
+        _production(monkeypatch, mode="live")
+        monkeypatch.setattr(transport_policy, "LIVE_TRANSPORT_RELEASE_APPROVED", False)
 
         decision = _authorise()
 
@@ -155,17 +175,25 @@ class TestProductionEnvelopes:
         assert not decision.permitted
         assert TransportReason.SUBMISSION_GUARD_BLOCKED in decision.reasons
 
-    def test_mainnet_execution_stays_blocked_even_with_every_other_gate_open(
+    def test_mainnet_is_permitted_only_when_every_other_gate_is_open(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """The phase gate that made mainnet observation-only was removed
+        deliberately. Mainnet is now ordinary: it passes when everything else
+        passes, and refuses the moment anything else does not.
+
+        The pair matters more than either half — the first case is what changed,
+        the second is the guarantee that nothing else did.
+        """
         _production(monkeypatch, mode="live")
         monkeypatch.setattr(settings, "REAL_WALLET_NETWORK", "mainnet")
         monkeypatch.setattr(transport_policy, "LIVE_TRANSPORT_RELEASE_APPROVED", True)
 
-        decision = _authorise()
+        assert _authorise().permitted
 
-        assert not decision.permitted
-        assert TransportReason.MAINNET_EXECUTION_DISABLED in decision.reasons
+        blocked = _authorise(guard=BLOCKED)
+        assert not blocked.permitted
+        assert TransportReason.SUBMISSION_GUARD_BLOCKED in blocked.reasons
 
     @pytest.mark.parametrize(
         ("flag", "reason"),
@@ -209,7 +237,10 @@ class TestProductionEnvelopes:
         decision = _authorise(guard=BLOCKED, base_url="https://nope.example")
 
         assert not decision.permitted
-        assert len(decision.reasons) == 5
+        # Four, not five: the unconditional mainnet clause was removed with the
+        # release. The remaining four are mode, enablement, autotrade and the
+        # guard — each still independent.
+        assert len(decision.reasons) == 4
 
     def test_a_fully_satisfied_live_attempt_is_the_only_permitted_one(
         self, monkeypatch: pytest.MonkeyPatch
@@ -223,16 +254,34 @@ class TestProductionEnvelopes:
 
 
 class TestTheShippedState:
-    def test_the_release_constant_is_off_in_this_build(self) -> None:
-        """A checkout must never be one environment edit from mainnet."""
-        assert transport_policy.LIVE_TRANSPORT_RELEASE_APPROVED is False
+    def test_the_release_constant_is_on_and_that_was_a_reviewed_decision(self) -> None:
+        """This asserted `is False` under the docstring "a checkout must never
+        be one environment edit from mainnet". That guarantee was given up
+        knowingly, and the test now records which state was chosen rather than
+        being deleted — a constant nobody asserts is a constant that can drift
+        back either way unnoticed.
+        """
+        assert transport_policy.LIVE_TRANSPORT_RELEASE_APPROVED is True
 
-    def test_readiness_reports_blocked_without_attempting_anything(self) -> None:
+    def test_a_fresh_checkout_still_cannot_trade_without_deliberate_config(self) -> None:
+        """What replaced the guarantee above, and the reason losing it is
+        survivable: the SETTINGS still ship closed. Cloning this repository and
+        running it trades nothing until someone edits an environment on purpose.
+        """
+        from app.core.config import Settings
+
+        fresh = Settings()
+        assert fresh.REAL_WALLET_EXECUTION_MODE == "disabled"
+        assert fresh.REAL_WALLET_EXECUTION_ENABLED is False
+        assert fresh.REAL_WALLET_AUTOTRADE_ENABLED is False
+
+    def test_readiness_still_refuses_until_the_environment_agrees(self) -> None:
+        """The release is on; this environment has not enabled execution, so
+        submission is still refused and the reasons still say why."""
         readiness = transport_policy.readiness()
 
+        assert readiness.release_approved is True
         assert readiness.submission_permitted is False
-        assert readiness.release_approved is False
-        assert readiness.production_transport_installed is False
         assert readiness.reasons
 
     def test_require_raises_rather_than_returning_a_falsy_value(self) -> None:

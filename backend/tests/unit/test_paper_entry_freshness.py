@@ -158,4 +158,12 @@ class TestScreenKeepsItsContract:
             "category_not_eligible",
             "below_score_percentile",
             "insufficient_paper_cash",
+            # ADDED ON MERGE: main's V4 containment refusal, which this branch
+            # had never seen. Note the docstring above says this pin was moved
+            # here FROM test_hq6_paper_isolation.py -- but main kept a pin there
+            # too, so the merged tree now pins the vocabulary in both files.
+            # Both are correct and both are exhaustive; the redundancy is left
+            # deliberately rather than resolved by deleting one mid-merge, since
+            # choosing which home is right is a decision for this test's owner.
+            "entries_paused",
         }

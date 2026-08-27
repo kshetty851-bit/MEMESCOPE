@@ -22,12 +22,12 @@ from app.core.config import settings
 from app.core.exceptions import NotFoundError
 from app.models.opportunity import OpportunitySignal
 from app.models.radar import RadarSnapshot, RadarToken
-from app.opportunities.repository import OpportunityRepository
 from app.radar import achievements as achievement_tiers
 from app.radar import detector, explain, readout, scorer
 from app.radar.models import RadarCategory, RadarDimension, RadarReason
 from app.radar.repository import RadarRepository
 from app.radar.schemas import (
+    ExecutableStatsOut,
     AchievementOut,
     BaseRateOut,
     BenchmarkOut,
@@ -130,36 +130,15 @@ def _to_base_rate(category: str, raw: dict[str, Any] | None) -> BaseRateOut | No
     )
 
 
-async def _live_signals_for(
-    session: DbSession, mints: list[str], *, now: datetime
-) -> dict[str, OpportunitySignal]:
-    """The strongest live signal per mint, for a whole page, in two queries.
+def _live_signals_for() -> dict[str, OpportunitySignal]:
+    """Always empty: the Opportunity Engine is retired.
 
-    Returns at most one signal per token: the Radar row has one "why now" line,
-    and `live_signals_for` already orders by confidence, so the first is the
-    engine's own strongest claim rather than a choice made here.
-
-    Empty — never absent — while the engine is switched off. A Radar row is
-    ranked by the Radar score, and it stays a complete row without a signal;
-    the signal is the answer to "why now", not to "is this worth ranking".
+    The signature survives as a seam so the row builders keep one shape. A
+    Radar row is ranked by the Radar score and is complete without a signal;
+    historical `opportunity_signals` rows remain queryable in SQL, but no code
+    path decorates a live row from them any more.
     """
-    if not mints or not settings.FEATURE_OPPORTUNITY_ENGINE_ENABLED:
-        return {}
-
-    repository = OpportunityRepository(session)
-    live = await repository.live_for(mints)
-    if not live:
-        return {}
-
-    by_opportunity = await repository.live_signals_for(
-        [opportunity.id for opportunity in live.values()], now=now
-    )
-    strongest: dict[str, OpportunitySignal] = {}
-    for mint, opportunity in live.items():
-        found = by_opportunity.get(opportunity.id) or []
-        if found:
-            strongest[mint] = found[0]
-    return strongest
+    return {}
 
 
 def _risk_from(snapshot: RadarSnapshot | None) -> tuple[Decimal | None, list[str]]:
@@ -356,6 +335,12 @@ async def get_model() -> ModelOut:
     )
 
 
+def _dec(value: object) -> Decimal | None:
+    if value is None:
+        return None
+    return Decimal(str(value)).quantize(Decimal("0.0001"))
+
+
 @router.get("/performance", response_model=PerformanceOut, summary="Platform track record")
 async def get_performance(session: DbSession) -> PerformanceOut:
     """Aggregate performance across every opportunity ever detected.
@@ -367,6 +352,21 @@ async def get_performance(session: DbSession) -> PerformanceOut:
     repository = RadarRepository(session)
     now = datetime.now(UTC)
     summary = await repository.performance_summary()
+    executable_raw = await repository.executable_summary()
+    executable_stats = None
+    if executable_raw is not None:
+        executable_stats = ExecutableStatsOut(
+            method_version=str(executable_raw["method"]),
+            decided=int(executable_raw["decided"]),
+            reached_2x_24h_rate=_dec(executable_raw["rate_2x"]),
+            reached_125_24h_rate=_dec(executable_raw["rate_125"]),
+            median_final_value_frac_24h=_dec(executable_raw["median_final"]),
+            coverage=(
+                Decimal(executable_raw["decided"]) / Decimal(summary.total)
+                if summary.total
+                else None
+            ),
+        )
     alive_count = len(
         await repository.observed_within(
             await repository.all_mints(), since=now - LIVENESS_WINDOW
@@ -393,6 +393,7 @@ async def get_performance(session: DbSession) -> PerformanceOut:
         # can see is honest, and a missing field looks like an oversight.
         expired_opportunities=summary.total - summary.active,
         median_peak_multiple=summary.median_peak_multiple,
+        executable=executable_stats,
         average_drawdown=summary.average_drawdown,
         average_days_to_2x=summary.average_days_to_2x,
         average_days_tracked=summary.average_days_tracked,
@@ -428,7 +429,7 @@ async def get_leaderboard(
     rates = await repository.base_rates()
     context = await resolve_token_context(session, board_mints, now=now)
     snapshots = await repository.latest_snapshots_for(board_mints)
-    signals = await _live_signals_for(session, board_mints, now=now)
+    signals = _live_signals_for()
     detections = await repository.detection_times_for(board_mints)
     return [
         _to_entry(
@@ -502,7 +503,7 @@ async def list_radar(
     rates = await repository.base_rates()
     context = await resolve_token_context(session, mints, now=now)
     snapshots = await repository.latest_snapshots_for(mints)
-    signals = await _live_signals_for(session, mints, now=now)
+    signals = _live_signals_for()
     detections = await repository.detection_times_for(mints)
 
     return RadarPage(
@@ -752,7 +753,7 @@ async def get_entry(session: DbSession, mint: str) -> RadarDetailOut:
         await repository.detection_times_for([entry.mint_address]),
         context=await resolve_token_context(session, [entry.mint_address], now=now),
         snapshots=await repository.latest_snapshots_for([entry.mint_address]),
-        signals=await _live_signals_for(session, [entry.mint_address], now=now),
+        signals=_live_signals_for(),
     )
 
     dimensions: list[DimensionOut] = []

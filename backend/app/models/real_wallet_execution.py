@@ -9,8 +9,10 @@ from typing import Any
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     DateTime,
     ForeignKey,
+    Identity,
     Index,
     Integer,
     Numeric,
@@ -18,6 +20,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    false,
     func,
     text,
 )
@@ -87,6 +90,31 @@ class RealWalletPosition(Base, UUIDPrimaryKeyMixin):
     entry_price_usd: Mapped[Decimal] = mapped_column(Numeric(38, 18), nullable=False)
     opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # --- exit state -------------------------------------------------------
+    # What the frozen V6 exits are written against. A trailing stop or a
+    # break-even rule cannot be evaluated from entry price and quantity alone;
+    # without these the position could be opened and never closed, which is
+    # exactly what happened.
+    peak_exec_multiple: Mapped[Decimal] = mapped_column(
+        Numeric(20, 6), nullable=False, server_default=text("1")
+    )
+    #: NULL disables the liquidity-collapse exit rather than firing it against a
+    #: number nobody measured.
+    entry_liquidity_usd: Mapped[Decimal | None] = mapped_column(Numeric(24, 4))
+    last_exec_multiple: Mapped[Decimal | None] = mapped_column(Numeric(20, 6))
+    break_even_armed: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=false()
+    )
+    partial_done: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=false()
+    )
+    #: When the executable multiple entered the stagnation band. NULL means "not
+    #: flat", never "flat since forever".
+    flat_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    banked_proceeds_usd: Mapped[Decimal] = mapped_column(
+        Numeric(24, 4), nullable=False, server_default=text("0")
+    )
+    last_marked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     wallet_public_key: Mapped[str | None] = mapped_column(String(44))
     strategy_id: Mapped[str | None] = mapped_column(String(64))
     strategy_version: Mapped[str | None] = mapped_column(String(32))
@@ -254,6 +282,62 @@ class RealWalletKillSwitch(Base, UUIDPrimaryKeyMixin):
     )
 
 
+class RealWalletAutotradeSwitch(Base, UUIDPrimaryKeyMixin):
+    """The operator's start/stop control for autonomous trading.
+
+    Deliberately the mirror image of a kill switch. A kill switch is fail-closed
+    and its *armed* state stops things; this is an intent and its *on* state
+    stops nothing from being checked. Starting it authorises nothing: mode, the
+    enable flags, the release constant, the mainnet clause, the submission guard,
+    SEC-2 freshness, network verification and the canary limits are all evaluated
+    independently and are untouched by it.
+
+    What it does own is the other direction. **Stopping is unconditional and
+    immediate**, because a control an operator cannot trust to stop is a control
+    they will be afraid to start. The guard reads this switch as one more
+    required condition, so `off` refuses regardless of what every other barrier
+    says.
+
+    `nominated_strategy` records WHICH strategy the operator intends to trade —
+    a V6 Lab id. Recording it is not promoting it; nothing reads it as
+    permission, and the evidence gate in the funding report is unmoved by it.
+    """
+
+    __tablename__ = "real_wallet_autotrade_switch"
+
+    #: Singleton in practice; unique so a second row cannot disagree with it.
+    scope: Mapped[str] = mapped_column(
+        String(32), nullable=False, unique=True, server_default="default"
+    )
+    enabled: Mapped[bool] = mapped_column(
+        nullable=False, default=False, server_default="false"
+    )
+    #: A V6 strategy id, e.g. "V6-06". Never a permission.
+    nominated_strategy: Mapped[str | None] = mapped_column(String(16))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    started_by: Mapped[str | None] = mapped_column(String(128))
+    start_reason: Mapped[str | None] = mapped_column(String(256))
+    stopped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    stopped_by: Mapped[str | None] = mapped_column(String(128))
+    stop_reason: Mapped[str | None] = mapped_column(String(256))
+
+
+class RealWalletAutotradeEvent(Base, UUIDPrimaryKeyMixin):
+    """Append-only start/stop history. The switch row is state; this is evidence."""
+
+    __tablename__ = "real_wallet_autotrade_events"
+
+    scope: Mapped[str] = mapped_column(String(32), nullable=False)
+    #: `started` or `stopped`.
+    action: Mapped[str] = mapped_column(String(16), nullable=False)
+    actor: Mapped[str | None] = mapped_column(String(128))
+    reason: Mapped[str | None] = mapped_column(String(256))
+    nominated_strategy: Mapped[str | None] = mapped_column(String(16))
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
 class RealWalletKillSwitchEvent(Base, UUIDPrimaryKeyMixin):
     """Append-only arm/clear history. The switch row is state; this is evidence."""
 
@@ -394,4 +478,43 @@ class RealWalletDevnetEvent(Base, UUIDPrimaryKeyMixin):
     __table_args__ = (
         Index("ix_real_wallet_devnet_event_intent", "intent_id"),
         Index("ix_real_wallet_devnet_event_intent_order", "intent_id", "event_order"),
+    )
+
+
+class RealWalletBalanceObservation(Base):
+    """What the chain said the wallet held, and whether the rail explains it.
+
+    Every other guard asks whether a spend may PROCEED. None notices money that
+    left without going through one — a key used elsewhere, a signature produced
+    outside the rail, a transfer nobody recorded. The chain balance compared
+    against what the rail says it did is the only evidence for that.
+
+    Append-only. `delta_lamports` and `unexplained` are NULL on a first row
+    because there is nothing to compare against, and zero would claim there was.
+    """
+
+    __tablename__ = "real_wallet_balance_observations"
+
+    id: Mapped[int] = mapped_column(
+        BigInteger, Identity(always=True), primary_key=True
+    )
+    wallet_public_key: Mapped[str] = mapped_column(String(44), nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    #: Integer lamports, never floating SOL: a balance that rounds is a balance
+    #: whose movement can be rounded away.
+    lamports: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    delta_lamports: Mapped[int | None] = mapped_column(BigInteger)
+    #: NULL means not assessed — a first row, or a check that could not run.
+    #: False is accounted for. True is the alarm.
+    unexplained: Mapped[bool | None] = mapped_column(Boolean)
+    note: Mapped[str | None] = mapped_column(String(200))
+
+    __table_args__ = (
+        Index(
+            "ix_real_wallet_balance_observations_wallet_observed",
+            "wallet_public_key",
+            "observed_at",
+        ),
     )

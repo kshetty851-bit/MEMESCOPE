@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.models.real_wallet_execution import RealWalletDevnetIntent, RealWalletDevnetQuote
+from app.real_wallet import withdrawal
 from app.real_wallet.devnet_intent import DevnetIntentState
 from app.real_wallet.devnet_repository import (
     DevnetIntentExpiredError,
@@ -92,6 +93,14 @@ class DevnetManualWorkflow:
             raise DevnetManualWorkflowError("invalid_transfer_destination")
         if destination_public_key == wallet:
             raise DevnetManualWorkflowError("self_transfer_not_permitted")
+        # The single nominated destination. Checked at the QUOTE, which is the
+        # first step of the only path out — refusing here means a transfer to
+        # anywhere else never acquires an id, an approval or a signature, rather
+        # than being stopped at the last moment by a check someone could skip.
+        try:
+            withdrawal.assert_permitted(destination_public_key)
+        except withdrawal.WithdrawalDestinationError as exc:
+            raise DevnetManualWorkflowError(str(exc)) from exc
         if not 0 < lamports <= settings.PHASE2_DEVNET_MAX_TRANSFER_LAMPORTS:
             raise DevnetManualWorkflowError("transfer_amount_outside_devnet_limit")
         # Jupiter quote/swap APIs do not offer a reviewed devnet route. The

@@ -16,7 +16,9 @@ from collections.abc import Callable
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.services.rpc.base import SolanaRPC
+from app.services.rpc.chainstack import ChainstackRPC
 from app.services.rpc.helius import HeliusRPC
+from app.services.rpc.router import FallbackRPC
 from app.services.rpc.standard import StandardSolanaRPC
 
 logger = get_logger(__name__)
@@ -26,7 +28,21 @@ RpcFactory = Callable[[], SolanaRPC]
 _PROVIDERS: dict[str, RpcFactory] = {
     StandardSolanaRPC.name: StandardSolanaRPC,
     HeliusRPC.name: HeliusRPC,
+    ChainstackRPC.name: ChainstackRPC,
+    # Chainstack primary -> Helius fallback -> unavailable. Public never.
+    FallbackRPC.name: FallbackRPC,
 }
+
+
+def get_research_rpc() -> SolanaRPC:
+    """The only RPC research collectors may use: the production router.
+
+    Never the public endpoint — a collector that silently leaned on it is how
+    holder data became sixty failure rows and one datum. With nothing
+    configured the router refuses loudly, and the collector records honest
+    failure rows instead of quiet zeros.
+    """
+    return FallbackRPC()
 
 
 def register_rpc(name: str, factory: RpcFactory) -> None:

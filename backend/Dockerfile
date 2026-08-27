@@ -16,6 +16,12 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
+# Defined in `base` so EVERY stage shares one account. Production runs as it;
+# the mainnet signer runs as root (it must read a 0600 key) and needs the group
+# to exist so it can hand its socket to callers that run as this user.
+RUN groupadd --system --gid 1001 memescope \
+    && useradd --system --uid 1001 --gid memescope --create-home memescope
+
 # uv resolves and installs an order of magnitude faster than pip.
 COPY --from=ghcr.io/astral-sh/uv:0.5.11 /uv /usr/local/bin/uv
 
@@ -50,10 +56,8 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload
 # ---- Production -------------------------------------------------------------
 FROM base AS production
 
-# Run unprivileged: a container compromise should not be a root shell.
-RUN groupadd --system --gid 1001 memescope \
-    && useradd --system --uid 1001 --gid memescope --create-home memescope
-
+# Runs unprivileged (see `USER` below): a container compromise should not be a
+# root shell. The account itself is created in `base`.
 COPY --from=builder --chown=memescope:memescope /opt/venv /opt/venv
 COPY --chown=memescope:memescope alembic.ini ./
 COPY --chown=memescope:memescope alembic ./alembic

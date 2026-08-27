@@ -74,7 +74,22 @@ MANDATORY_CHECKS: tuple[CheckName, ...] = (
 #: Checks whose NOT_APPLICABLE is an answer rather than a gap. Deliberately a
 #: allowlist: a future check that starts returning NOT_APPLICABLE will block
 #: entry until somebody decides it should not, which is the safe direction.
-NOT_APPLICABLE_ALLOWED: frozenset[CheckName] = frozenset({CheckName.TOKEN_EXTENSIONS})
+NOT_APPLICABLE_ALLOWED: frozenset[CheckName] = frozenset(
+    {
+        CheckName.TOKEN_EXTENSIONS,
+        # Added 2026-08-25 for the market-universe generation. LIQUIDITY_SECURITY
+        # verifies pump.fun custody, and only the verifier's own out-of-scope
+        # branch can return NOT_APPLICABLE — a token that never had a curve and
+        # trades on a recognised non-pump.fun AMM. Every pump.fun-lineage token
+        # still gets the full check, and an unresolved one still refuses.
+        #
+        # This is a real reduction in what is proven before a buy: LP custody on
+        # Raydium, Meteora and Orca is NOT verified. The three checks that catch
+        # the rug vectors this gate was built for — mint authority, freeze
+        # authority, token program — are unchanged and still mandatory.
+        CheckName.LIQUIDITY_SECURITY,
+    }
+)
 
 #: The oldest security evidence that may authorise a buy (§15).
 #:

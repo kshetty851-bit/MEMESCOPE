@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Sequence
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any, cast
 
@@ -25,6 +25,8 @@ from sqlalchemy import (
     update,
 )
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy import cast as sa_cast
+from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import aliased
 
 from app.models.market import (
@@ -59,10 +61,50 @@ class MarketSnapshotRepository(BaseRepository[TokenMarketSnapshot]):
         await self.session.execute(pg_insert(TokenMarketSnapshot).values(list(rows)))
         return len(rows)
 
+    async def recent_context(
+        self, token_ids: Sequence[Any], *, window_seconds: int, per_token: int = 12
+    ) -> dict[Any, list[TokenMarketSnapshot]]:
+        """The comparison window the ingest firewall judges new prints against.
+
+        Oldest-first per token, flagged rows included (the classifier needs
+        them for its persistence rule). One LATERAL seek per token, same shape
+        as `_newest_per_mint` and for the same reason.
+        """
+        unique = list(dict.fromkeys(token_ids))
+        if not unique:
+            return {}
+        cutoff = datetime.now(UTC) - timedelta(seconds=window_seconds)
+        wanted = select(
+            func.unnest(literal([str(t) for t in unique], ARRAY(String))).label("tid")
+        ).subquery("wanted")
+        recent = (
+            select(TokenMarketSnapshot)
+            .where(
+                TokenMarketSnapshot.token_id == sa_cast(wanted.c.tid, PgUUID(as_uuid=True)),
+                TokenMarketSnapshot.captured_at >= cutoff,
+            )
+            .order_by(TokenMarketSnapshot.captured_at.desc())
+            .limit(per_token)
+            .lateral("recent")
+        )
+        entity = aliased(TokenMarketSnapshot, recent)
+        stmt = select(entity).select_from(wanted).join(recent, true())
+        out: dict[Any, list[TokenMarketSnapshot]] = {}
+        for row in (await self.session.execute(stmt)).scalars():
+            out.setdefault(row.token_id, []).append(row)
+        for rows in out.values():
+            rows.sort(key=lambda r: r.captured_at)
+        return out
+
     async def latest_for_mint(self, mint_address: str) -> TokenMarketSnapshot | None:
         stmt = (
             select(TokenMarketSnapshot)
-            .where(TokenMarketSnapshot.mint_address == mint_address)
+            .where(
+                TokenMarketSnapshot.mint_address == mint_address,
+                # Ingest firewall: a flagged print stays stored and auditable,
+                # but it is never "the market right now".
+                TokenMarketSnapshot.suspect.is_not(True),
+            )
             .order_by(TokenMarketSnapshot.captured_at.desc())
             .limit(1)
         )
@@ -83,6 +125,7 @@ class MarketSnapshotRepository(BaseRepository[TokenMarketSnapshot]):
                 TokenMarketSnapshot.captured_at <= as_of,
                 TokenMarketSnapshot.price_usd.is_not(None),
                 TokenMarketSnapshot.price_usd > 0,
+                TokenMarketSnapshot.suspect.is_not(True),
             )
             .order_by(TokenMarketSnapshot.captured_at.desc())
             .limit(1)
@@ -161,6 +204,8 @@ class MarketSnapshotRepository(BaseRepository[TokenMarketSnapshot]):
                 select(TokenMarketSnapshot)
                 .where(
                     TokenMarketSnapshot.mint_address == wanted.c.mint_address,
+                    # Ingest firewall: flagged prints never answer "latest".
+                    TokenMarketSnapshot.suspect.is_not(True),
                     *predicates,
                 )
                 .order_by(TokenMarketSnapshot.captured_at.desc())
@@ -246,6 +291,17 @@ class MarketSnapshotRepository(BaseRepository[TokenMarketSnapshot]):
         watermark per row trims in memory, as `window_for_mints` documents.
         Rows with no price are excluded: an unpriced observation cannot breach a
         price rule, and treating it as zero would stop out every position.
+
+        **Flagged prints are excluded too**, for the same reason and with more
+        force. This is the series a position is EXITED on, so a bad print here
+        does not merely mislead a reader — it closes a trade. On 2026-08-25
+        ANTFUN printed $0.00000025 against a $0.0418 running high while its
+        reported pool depth fell from $38.7M to $7.7M in the same reading: a
+        pair switch, not a 166,000x collapse. The ingest firewall caught it and
+        marked the row `price_band_low`, `_newest_per_mint` already refused to
+        let such a row answer "latest" — and this series handed it straight to
+        the exit rule, which stopped the position out. Only the fill-drift cap
+        kept the booked result honest.
         """
         unique = list(dict.fromkeys(mints))
         if not unique:
@@ -261,6 +317,9 @@ class MarketSnapshotRepository(BaseRepository[TokenMarketSnapshot]):
                     TokenMarketSnapshot.mint_address.in_(chunk),
                     TokenMarketSnapshot.captured_at > since,
                     TokenMarketSnapshot.price_usd.is_not(None),
+                    # Ingest firewall: a print the platform distrusts must
+                    # never be the reading that closes a position.
+                    TokenMarketSnapshot.suspect.is_not(True),
                 )
                 .order_by(
                     TokenMarketSnapshot.mint_address,
@@ -371,6 +430,7 @@ class MarketSnapshotRepository(BaseRepository[TokenMarketSnapshot]):
         newest = (
             select(TokenMarketSnapshot)
             .distinct(TokenMarketSnapshot.mint_address)
+            .where(TokenMarketSnapshot.suspect.is_not(True))
             .order_by(
                 TokenMarketSnapshot.mint_address,
                 TokenMarketSnapshot.captured_at.desc(),
@@ -469,7 +529,10 @@ class EnrichmentStateRepository(BaseRepository[TokenEnrichmentState]):
                 status=EnrichmentStatus.ACTIVE,
                 priority=priority,
             )
-            .on_conflict_do_nothing(index_elements=[TokenEnrichmentState.mint_address])
+            .on_conflict_do_nothing()  # any arbiter: the row exists under EITHER
+            # unique constraint (mint_address OR token_id). Naming only the
+            # mint index let the token_id constraint fire first in production
+            # — 2,073 spurious enrichment_discovery_failed warnings by V4.
             .returning(TokenEnrichmentState)
         )
         row = (await self.session.execute(stmt)).scalars().first()
@@ -504,7 +567,10 @@ class EnrichmentStateRepository(BaseRepository[TokenEnrichmentState]):
                     for token_id, mint_address in rows
                 ]
             )
-            .on_conflict_do_nothing(index_elements=[TokenEnrichmentState.mint_address])
+            .on_conflict_do_nothing()  # any arbiter: the row exists under EITHER
+            # unique constraint (mint_address OR token_id). Naming only the
+            # mint index let the token_id constraint fire first in production
+            # — 2,073 spurious enrichment_discovery_failed warnings by V4.
         )
         return len(rows)
 
@@ -548,7 +614,12 @@ class EnrichmentStateRepository(BaseRepository[TokenEnrichmentState]):
         return int(result.rowcount or 0)
 
     async def claim_due(
-        self, *, now: datetime, limit: int, lease_seconds: int = 120
+        self,
+        *,
+        now: datetime,
+        limit: int,
+        lease_seconds: int = 120,
+        min_priority: int | None = None,
     ) -> Sequence[TokenEnrichmentState]:
         """Atomically claim tokens that are due for refresh.
 
@@ -567,11 +638,17 @@ class EnrichmentStateRepository(BaseRepository[TokenEnrichmentState]):
         Within a lane the order is unchanged — oldest due first — so the
         ordinary population still cannot starve its own tail.
         """
+        lane_filter = (
+            [TokenEnrichmentState.priority >= min_priority]
+            if min_priority is not None
+            else []
+        )
         due = (
             select(TokenEnrichmentState.id)
             .where(
                 TokenEnrichmentState.status == EnrichmentStatus.ACTIVE,
                 TokenEnrichmentState.next_refresh_at <= now,
+                *lane_filter,
             )
             .order_by(
                 TokenEnrichmentState.priority.desc(),

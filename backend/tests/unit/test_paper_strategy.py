@@ -242,11 +242,15 @@ class TestRegistry:
             SECURITY_GATED_STRATEGY_IDS,
             TRAILING_STOP_25_SECURED_HOLD6H_V3,
             TRAILING_STOP_25_SECURED_V2,
+            UNIVERSE_TRAILING_STOP_25_V1,
         )
 
-        assert registry.default.id == TRAILING_STOP_25_SECURED_HOLD6H_V3.id
+        assert registry.default.id == UNIVERSE_TRAILING_STOP_25_V1.id
         assert registry.default.operational
         assert registry.default.id in SECURITY_GATED_STRATEGY_IDS
+        # Every predecessor is retired, and the gate was carried forward rather
+        # than dropped at the cutover — which is the property this guards.
+        assert TRAILING_STOP_25_SECURED_HOLD6H_V3.operational is False
         assert TRAILING_STOP_25_SECURED_V2.operational is False
         assert TRAILING_STOP_25_V1.operational is False
 
@@ -278,11 +282,18 @@ class TestRegistry:
 
     def test_the_entry_writes_the_cutoff_onto_the_position(self) -> None:
         """The rule travels on the row, so a later change cannot reach back."""
+        import dataclasses
+
         from app.paper.strategy import TRAILING_STOP_25_SECURED_HOLD6H_V3
 
-        entry = TRAILING_STOP_25_SECURED_HOLD6H_V3.entry_for(
-            candidate(), cash_available=Decimal(1000), now=NOW
-        )
+        # Retired at the universe cutover, so `entry_for` now declines on the
+        # operational check before it ever reaches the cutoff arithmetic. The
+        # subject here is the RULE, not whether this generation is currently
+        # taking entries, so it is exercised on an operational copy — the same
+        # rules, minus the retirement that would short-circuit them.
+        entry = dataclasses.replace(
+            TRAILING_STOP_25_SECURED_HOLD6H_V3, operational=True, unavailable_reason=None
+        ).entry_for(candidate(), cash_available=Decimal(1000), now=NOW)
         assert entry is not None
         assert entry.expires_at == NOW + timedelta(hours=6)
         # And the rules it deliberately does not have stay absent.

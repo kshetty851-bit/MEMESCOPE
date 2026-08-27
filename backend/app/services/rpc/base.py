@@ -25,6 +25,8 @@ never omitted, and never filled in with a guess.
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from types import TracebackType
@@ -33,6 +35,19 @@ from typing import Any, ClassVar, Self
 
 class RpcError(RuntimeError):
     """An RPC call failed after exhausting retries."""
+
+
+class RpcMethodRestrictedError(RpcError):
+    """The provider refused the METHOD outright (403/404/405) — a plan or
+    capability gap, deterministic for this provider but possibly served by
+    another. Routers fail over without retrying and without charging the
+    provider's health breaker."""
+
+
+class RpcExhaustedError(RpcError):
+    """Transient failures used up every attempt. Eligible for provider
+    failover — unlike a deterministic JSON-RPC application error, which will
+    fail identically on any node."""
 
 
 class RpcRateLimitError(RpcError):
@@ -131,6 +146,18 @@ class SolanaRPC(ABC):
         that was never opened or has been closed, and distinct from a failed
         read, which raises.
         """
+
+    async def get_token_supply(self, mint_address: str) -> Decimal | None:
+        """Circulating supply of a mint in whole tokens, or `None` if unreadable.
+
+        `None` is "this read did not happen", never "the supply is zero". A
+        concentration cap that treats an unknown supply as zero would compute an
+        infinite ownership share and refuse everything, or — far worse if the
+        comparison were flipped — permit everything. Callers must decide which,
+        and they refuse.
+        """
+        del mint_address
+        return None
 
     async def get_asset(
         self, mint_address: str, *, attempts: int | None = None

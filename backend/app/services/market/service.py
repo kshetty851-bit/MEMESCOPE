@@ -11,12 +11,14 @@ from __future__ import annotations
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
+from decimal import Decimal
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.services.market import sanity
 from app.core.logging import get_logger
 from app.models.market import (
     LANE_DISPLAY,
@@ -142,9 +144,13 @@ class MarketEnrichmentService:
                 resolved += 1
         return resolved
 
-    async def claim_batch(self, *, limit: int | None = None) -> Sequence[TokenEnrichmentState]:
+    async def claim_batch(
+        self, *, limit: int | None = None, min_priority: int | None = None
+    ) -> Sequence[TokenEnrichmentState]:
         return await self.states.claim_due(
-            now=datetime.now(UTC), limit=limit or settings.ENRICHMENT_BATCH_LIMIT
+            now=datetime.now(UTC),
+            limit=limit or settings.ENRICHMENT_BATCH_LIMIT,
+            min_priority=min_priority,
         )
 
     async def _refresh_token_image(self, token: Any) -> bool:
@@ -361,6 +367,8 @@ class MarketEnrichmentService:
                 dead_letter=should_dead_letter,
             )
 
+        if snapshot_rows and settings.FEATURE_SNAPSHOT_SANITY_ENABLED:
+            await self._annotate_suspects(snapshot_rows)
         if snapshot_rows:
             await self.snapshots.add_many(snapshot_rows)
             logger.info(
@@ -443,6 +451,50 @@ class MarketEnrichmentService:
             degraded=True,
             deferred=len(states),
         )
+
+    async def _annotate_suspects(self, rows: list[dict[str, Any]]) -> None:
+        """Ingest firewall: judge each new print against its stored window.
+
+        Annotation only — no row is dropped or altered beyond the three flag
+        columns, and a failure here must never cost the batch (observation
+        beats judgement, so the guard is best-effort by design).
+        """
+        try:
+            context = await self.snapshots.recent_context(
+                [row["token_id"] for row in rows],
+                window_seconds=settings.SNAPSHOT_SANITY_WINDOW_SECONDS,
+            )
+            band = Decimal(str(settings.SNAPSHOT_SANITY_BAND))
+            liq_jump = Decimal(str(settings.SNAPSHOT_SANITY_LIQUIDITY_JUMP))
+            flagged = 0
+            for row in rows:
+                prior = [
+                    sanity.PriorPoint(
+                        captured_at=s.captured_at,
+                        price_usd=s.price_usd,
+                        liquidity_usd=s.liquidity_usd,
+                        pool_address=s.pool_address,
+                        suspect=s.suspect,
+                    )
+                    for s in context.get(row["token_id"], [])
+                ]
+                verdict = sanity.classify(
+                    price_usd=row.get("price_usd"),
+                    liquidity_usd=row.get("liquidity_usd"),
+                    pool_address=row.get("pool_address"),
+                    prior=prior,
+                    band=band,
+                    liquidity_jump=liq_jump,
+                    min_prior=settings.SNAPSHOT_SANITY_MIN_PRIOR,
+                )
+                row["suspect"] = verdict.suspect
+                row["suspect_reason"] = verdict.reason
+                row["baseline_price_usd"] = verdict.baseline_price_usd
+                flagged += int(verdict.suspect)
+            if flagged:
+                logger.info("snapshots_flagged_suspect", count=flagged, batch=len(rows))
+        except Exception:
+            logger.exception("snapshot_sanity_failed")
 
     @staticmethod
     def _to_snapshot_row(

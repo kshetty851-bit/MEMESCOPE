@@ -414,6 +414,7 @@ export function deriveHqState(sources: Partial<HqSources> = {}): HqState {
     sentinel: deriveSentinel(operations, operationsGone, operationsAt),
     patch: derivePatch(operations, operationsGone, operationsAt),
     quinn: deriveQuinn(operations, operationsGone, operationsAt),
+    vault: deriveVault(s),
     karthik: deriveKarthik(karthik, karthikGone, karthikAt),
     // Filled in below: Nova reads the others rather than the backend.
     nova: unknown("Waiting on the rest of the office."),
@@ -1118,6 +1119,132 @@ function sentinelMetrics(operations: HqOperations | null): Metric[] {
       label: "Queue depth",
       value: health.queues.total === null ? null : String(health.queues.total),
       source: "hq/operations",
+    },
+  ];
+}
+
+/**
+ * The Execution Vault's occupant.
+ *
+ * The room has had a footprint, a label and a source since HQ-1 and nobody in
+ * it — correctly, while mainnet submission was refused by two code constants
+ * and there was nothing to watch. Those were reviewed and turned off and the
+ * wallet is funded, so the one room that can spend real money now has an
+ * occupant.
+ *
+ * WHAT HE READS, AND WHAT HE REFUSES TO SAY
+ *
+ * `execution-posture` is the only source. It reports whether submission is
+ * possible and which kill switches are armed — it does NOT report balances,
+ * intents or trades, so this reading does not either. A custodian who appeared
+ * to be watching positions he cannot see would be the exact failure the roster
+ * file warns about.
+ *
+ * The tone is inverted against every other desk on purpose. Elsewhere "enabled"
+ * is healthy; here a sealed vault is the good state and an open one is merely
+ * *expected* once the operator has deliberately opened it. He never says
+ * "healthy" about a wallet that can spend — he says what is true and lets the
+ * reader decide whether that is what they intended.
+ */
+function deriveVault(s: HqSources): EmployeeReading {
+  const posture = fresh(s.executionPosture, STALE_AFTER_MS.executionPosture, s.now);
+  const metrics = vaultMetrics(posture);
+  const at = s.executionPosture.observedAt;
+
+  if (!posture) {
+    return unknown(
+      absence(s.executionPosture, STALE_AFTER_MS.executionPosture, s.now, "Execution posture"),
+      metrics,
+    );
+  }
+
+  const armed = posture.kill_switches?.filter((row) => row.active) ?? [];
+  if (armed.length > 0) {
+    // The loudest thing this desk can say. A kill switch is not a warning about
+    // something that might happen; it is a barrier that has already fired.
+    return reading(
+      "error",
+      `Kill switch armed: ${armed.map((row) => row.kind).join(", ")}. Nothing can be submitted.`,
+      metrics,
+      at,
+    );
+  }
+
+  // The four real postures, each said plainly. Note that none of them is
+  // `success`: this desk never congratulates a wallet for being able to spend.
+  switch (posture.state) {
+    case "HALTED":
+      return reading(
+        "error",
+        posture.detail || "Execution halted. Nothing can be submitted.",
+        metrics,
+        at,
+      );
+    case "LOCKED":
+      // The good state, and the quiet one. A sealed vault is the resting
+      // posture this room was designed around.
+      return reading(
+        "idle",
+        posture.detail || "Vault locked. No submission is possible.",
+        metrics,
+        at,
+      );
+    case "ARMED":
+      // Every precondition is evaluated against real facts and submission is
+      // still impossible. Reported as IDLE, not as a state of concern: armed is
+      // the resting posture for as long as the operator wants it, and a desk
+      // that looks worried for weeks teaches the room to ignore it. The metrics
+      // still say ARMED for anyone reading the panel.
+      return reading(
+        "idle",
+        posture.detail ||
+          `Armed — rehearsing against real facts, submission still refused. Autotrade ${
+            posture.autotrade_enabled ? "on" : "off"
+          }.`,
+        metrics,
+        at,
+      );
+    case "UNLOCKED":
+      // Stated as alert and never as success. The operator opened it on
+      // purpose; this desk's job is to keep that a decision rather than letting
+      // it become the background.
+      return reading(
+        "alert",
+        posture.detail ||
+          `Vault UNLOCKED — real submission is possible on ${posture.network ?? "an unread network"}.`,
+        metrics,
+        at,
+      );
+    default:
+      return unknown(
+        "The posture could not be read, so HQ cannot say whether execution is possible.",
+        metrics,
+      );
+  }
+}
+
+function vaultMetrics(posture: ExecutionPosture | null): Metric[] {
+  const armed = posture?.kill_switches?.filter((row) => row.active).length ?? null;
+  return [
+    // Fixed, and first. Everything else on this panel is about real money and
+    // the panel has to say so before it says anything else.
+    { label: "Desk", value: "Execution — REAL funds", source: "HQ" },
+    { label: "Vault", value: posture?.state ?? null, source: "execution-posture" },
+    { label: "Mode", value: posture?.mode ?? null, source: "execution-posture" },
+    {
+      label: "Network",
+      value: posture?.network ?? null,
+      source: "execution-posture",
+    },
+    {
+      label: "Autotrade",
+      value: posture ? (posture.autotrade_enabled ? "ON" : "off") : null,
+      source: "execution-posture",
+    },
+    {
+      label: "Kill switches armed",
+      value: armed === null ? null : String(armed),
+      source: "execution-posture",
     },
   ];
 }

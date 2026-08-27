@@ -82,3 +82,32 @@ async def _tick() -> dict[str, Any]:
     except Exception as exc:
         logger.exception("hq_ops_tick_failed", error=str(exc))
         return {"status": "error", "detail": str(exc)}
+
+
+@celery_app.task(name="app.hq_ops.tasks.karthik_ops_tick")
+def karthik_ops_tick() -> dict[str, Any]:
+    """Karthik's observation pass, on the same beat as HQ's own.
+
+    Filed here rather than in a `karthik_ops.tasks` of its own because §26 is
+    explicit that there is one scheduler, and the argument extends to the task
+    registry: a second module registering a second periodic task against the
+    same beat is two places to look when the schedule misbehaves.
+
+    What it *does* is entirely Karthik's, and it is one call into his own
+    service. Under OBSERVE_ONLY it records and executes nothing.
+
+    Never raises, for the same reason as `hq_ops_tick`.
+    """
+    return run_async(_karthik_tick())
+
+
+async def _karthik_tick() -> dict[str, Any]:
+    from app.db.session import SessionFactory
+    from app.karthik_ops.service import tick
+
+    try:
+        async with SessionFactory() as session:
+            return await tick(session)
+    except Exception as exc:
+        logger.exception("karthik_ops_tick_failed", error=str(exc))
+        return {"status": "error", "detail": str(exc)}

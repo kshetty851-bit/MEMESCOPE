@@ -158,9 +158,9 @@ class TestIsolation:
     def test_reaches_exactly_three_tables_and_they_are_all_karthiks(self) -> None:
         """The isolation, at its strongest point.
 
-        The operator does not import the wallet's ORM model; it declares the
-        columns it reads as Core tables. That list is therefore the complete
-        set of rows Karthik can reach, and it is three tables long.
+        Three tables, no relationships, no writes. That list is the complete
+        set of rows Karthik can reach, and the isolation claim is checkable
+        against it rather than against a sentence.
         """
         assert set(tables.declared_tables()) == {
             "karthik_wallets",
@@ -174,7 +174,7 @@ class TestIsolation:
         only one that survives a refactor nobody reviewed."""
         import pathlib
 
-        root = pathlib.Path(__file__).resolve().parents[2] / "app" / "karthik"
+        root = pathlib.Path(__file__).resolve().parents[2] / "app" / "karthik_ops"
         forbidden = ("app.paper_v2", "app.strategy_lab", "app.real_wallet", "app.paper.")
         for path in root.glob("*.py"):
             source = path.read_text()
@@ -187,7 +187,7 @@ class TestIsolation:
         other statement rather than as a promise."""
         import pathlib
 
-        root = pathlib.Path(__file__).resolve().parents[2] / "app" / "karthik"
+        root = pathlib.Path(__file__).resolve().parents[2] / "app" / "karthik_ops"
         for path in root.glob("*.py"):
             source = path.read_text()
             for write in ("session.add(RadarToken", "update(RadarToken", "delete(RadarToken"):
@@ -519,22 +519,18 @@ class TestBoundSurfaces:
     module is written to be correct the moment the wallet's migration lands,
     and code that has only ever run in its empty state is code nobody has run.
 
-    The tables are created here from `tables.py`'s own declarations. That is
-    deliberate and it is the strongest part of this class: if the wallet's
-    branch renames a column the operator reads, these tests keep passing
-    against the operator's stale idea of the schema — so the *other* half of
-    the guarantee is `test_reaches_exactly_three_tables_and_they_are_all_karthiks`
-    plus the integration run against a real merged database. What this proves
-    is that the queries, the arithmetic and the classifications are right.
+    Since the merge these run against the wallet's real model, so a renamed
+    column now fails here rather than passing against the operator's stale idea
+    of the schema. That was the one gap in this class before, and closing it is
+    what importing the model bought.
     """
 
     @pytest.fixture
     async def wallet(self, db_session):
-        from app.karthik_ops.tables import _metadata
-
-        connection = await db_session.connection()
-        await connection.run_sync(_metadata.create_all)
-
+        # The wallet's tables are part of `Base.metadata` now that the branches
+        # have merged, so conftest's `create_all` has already made them. Before
+        # the merge this fixture created them from the operator's own Core
+        # declarations; that scaffolding is gone with the thing it stood in for.
         wallet_id = uuid.uuid4()
         activated = datetime.now(UTC) - timedelta(days=2)
         await db_session.execute(
@@ -552,6 +548,10 @@ class TestBoundSurfaces:
 
     async def _position(self, db_session, wallet, *, n: int = 1, **over):
         opened = over.pop("opened_at", datetime.now(UTC) - timedelta(hours=1))
+        # Every NOT NULL column on the real table, so a fixture row is a row
+        # the wallet itself could have written. The operator reads a subset of
+        # these, but inserting a partial row would be testing against a schema
+        # that does not exist.
         values = {
             "id": uuid.uuid4(),
             "wallet_id": wallet.wallet_id,
@@ -560,9 +560,14 @@ class TestBoundSurfaces:
             "track_record_at": opened,
             "opened_at": opened,
             "entry_price": Decimal(1),
+            "entry_observed_price": Decimal(1),
+            "entry_observed_at": opened,
             "cost_basis": Decimal(10),
             "quantity": Decimal(10),
+            "decimals": 6,
             "target_price": Decimal("1.25"),
+            "peak_price": Decimal(1),
+            "last_evaluated_at": opened,
             "status": "open",
         }
         values.update(over)
@@ -593,26 +598,39 @@ class TestBoundSurfaces:
         # The rules are read to check fills against, never to instruct.
         assert "no stop" in wallet.detail
 
-    async def test_refuses_a_second_wallet_rather_than_picking_one(
+    async def test_the_schema_forbids_a_second_wallet_and_the_resolver_agrees(
         self, db_session, wallet
     ) -> None:
-        """Reading either of two wallets would publish half an experiment as
-        the whole of it. The schema forbids this; the operator does not assume
-        the schema was applied."""
-        await db_session.execute(
-            tables.karthik_wallets.insert().values(
-                id=uuid.uuid4(),
-                name="karthik-2",
-                starting_capital=Decimal(1000),
-                trade_size=Decimal(10),
-                take_profit_multiple=Decimal("1.25"),
-                activated_at=datetime.now(UTC),
-            )
+        """The guard in `resolve()` is a second line, and this says which line.
+
+        `uq_karthik_wallets_singleton` is a unique index on a constant
+        expression — the database saying "at most one of these" — so a second
+        wallet cannot be inserted at all. The resolver still counts, because a
+        `limit(1)` that silently picked one of two would publish half an
+        experiment as the whole of it, and a constraint is a thing a future
+        migration can drop.
+        """
+        from sqlalchemy.exc import IntegrityError
+
+        from app.models.karthik import KarthikWallet
+
+        assert any(
+            index.name == "uq_karthik_wallets_singleton" and index.unique
+            for index in KarthikWallet.__table__.indexes
         )
-        await db_session.flush()
-        binding = await resolve(db_session)
-        assert binding.readable is False
-        assert binding.needs_owner is True
+
+        with pytest.raises(IntegrityError):
+            await db_session.execute(
+                tables.karthik_wallets.insert().values(
+                    id=uuid.uuid4(),
+                    name="karthik-2",
+                    starting_capital=Decimal(1000),
+                    trade_size=Decimal(10),
+                    take_profit_multiple=Decimal("1.25"),
+                    activated_at=datetime.now(UTC),
+                )
+            )
+        await db_session.rollback()
 
     async def test_derives_the_book_from_position_rows(self, db_session, wallet) -> None:
         await self._position(db_session, wallet, n=1)
@@ -642,15 +660,37 @@ class TestBoundSurfaces:
         assert Decimal(str(reading.values["realised_pnl_usd"])) == Decimal(0)
         assert "proceeds" in reading.detail
 
-    async def test_finds_a_duplicate_position_and_refuses_to_fix_it(
-        self, db_session, wallet
-    ) -> None:
+    async def test_the_schema_forbids_a_duplicate_position(self, db_session, wallet) -> None:
+        """`uq_karthik_positions_wallet_mint` makes one-position-per-token a
+        database fact rather than a rule somebody follows.
+
+        The operator's `duplicate_position` check therefore cannot fire today,
+        and that is the correct outcome — it is kept as the second line for the
+        same reason as the wallet singleton above: one indexed GROUP BY per
+        tick is nothing, and a constraint is a thing a migration can drop. What
+        this test pins is *which* mechanism is actually doing the work, so
+        nobody later reads a permanently-empty check as coverage.
+        """
+        from sqlalchemy.exc import IntegrityError
+
+        from app.models.karthik import KarthikPosition
+
+        assert any(
+            constraint.name == "uq_karthik_positions_wallet_mint"
+            for constraint in KarthikPosition.__table__.constraints
+        )
+
         await self._position(db_session, wallet, n=9)
-        await self._position(db_session, wallet, n=9)
-        findings = await detect.run(db_session, wallet)
-        duplicates = [f for f in findings if f.defect == "duplicate_position"]
-        assert len(duplicates) == 1
-        assert duplicates[0].rectification == "OWNER_REQUIRED"
+        with pytest.raises(IntegrityError):
+            await self._position(db_session, wallet, n=9)
+        await db_session.rollback()
+
+    async def test_a_duplicate_would_be_owner_work_if_one_ever_appeared(self) -> None:
+        # Classification, asserted without needing a row the database refuses
+        # to create. A duplicate is about the experiment's record, so §17 puts
+        # it out of reach of any repair.
+        assert detect.DEFECT_BY_KEY["duplicate_position"].rectification == "OWNER_REQUIRED"
+        assert detect.DEFECT_BY_KEY["duplicate_position"].repair is None
 
     async def test_finds_a_wrong_entry_size_against_the_published_rule(
         self, db_session, wallet
@@ -667,9 +707,11 @@ class TestBoundSurfaces:
         findings = await detect.run(db_session, wallet)
         assert any(f.defect == "pre_activation_entry" for f in findings)
 
-    async def test_finds_a_target_filled_below_the_published_multiple(
+    async def test_finds_a_target_triggered_below_the_published_multiple(
         self, db_session, wallet
     ) -> None:
+        """A fill whose *observed trigger* was under target. A real defect: the
+        wallet sold before its own rule said to."""
         await self._position(
             db_session,
             wallet,
@@ -677,11 +719,42 @@ class TestBoundSurfaces:
             status="closed",
             closed_at=datetime.now(UTC),
             exit_price=Decimal("1.10"),
+            exit_observed_price=Decimal("1.10"),
             exit_proceeds_usd=Decimal(11),
             exit_reason="target_1_25x",
         )
         findings = await detect.run(db_session, wallet)
         assert any(f.defect == "target_below_multiple" for f in findings)
+
+    async def test_slippage_below_target_is_not_a_defect(self, db_session, wallet) -> None:
+        """The false positive that reached production, pinned.
+
+        The wallet books the router's executable quote, which is deliberately
+        worse than the print that tripped the target — its own comment says
+        "if the quote comes back worse than the print, the worse number is the
+        one that goes on the books". Comparing that executed price to 1.25x
+        flags every honestly-modelled fill, and on the first live tick it filed
+        fifty-three correct trades as critical owner work.
+
+        Trigger at or above target, execute below it: correct, and silent.
+        """
+        await self._position(
+            db_session,
+            wallet,
+            n=61,
+            status="closed",
+            closed_at=datetime.now(UTC),
+            # Tripped the target cleanly at 1.26x...
+            exit_observed_price=Decimal("1.26"),
+            # ...and filled at 1.236x after impact and fees.
+            exit_price=Decimal("1.236"),
+            exit_proceeds_usd=Decimal("12.36"),
+            exit_reason="target_1_25x",
+        )
+        findings = await detect.run(db_session, wallet)
+        assert not [f for f in findings if f.defect == "target_below_multiple"], (
+            "slippage on an honest execution model was reported as a defect"
+        )
 
     async def test_finds_an_exit_the_wallet_has_no_rule_for(self, db_session, wallet) -> None:
         """The wallet has a target and no stop. Anything else closing a
@@ -755,6 +828,128 @@ class TestBoundSurfaces:
         assert recent.measured is True
         # Decided an hour ago, so it is outside a thirty-minute window.
         assert recent.new_trades == 0
+
+    async def test_a_display_cap_never_reaches_the_arithmetic(
+        self, db_session, wallet
+    ) -> None:
+        """The bug this test exists for, found on the live wallet.
+
+        Screen 3 caps its rows at twelve. The staleness ratio, the open-value
+        sum and the target ranking were all reading that capped list, so with
+        forty-three positions open the wallet reported a quarter of its own
+        book: "12 of 12 stale" was twelve rows on a screen, and open value was
+        $89 of a $440 book.
+
+        A display cap is a presentation decision. Everything below asserts it
+        stays one.
+        """
+        from app.karthik_ops.monitor import SCREEN_ROWS
+
+        count = SCREEN_ROWS + 7
+        for n in range(count):
+            await self._position(db_session, wallet, n=100 + n)
+
+        screen = await monitor.positions_screen(db_session, wallet)
+        assert len(screen.rows) == SCREEN_ROWS, "the screen should still cap"
+        assert screen.values["open_total"] == count, "totals must cover the whole book"
+        assert screen.values["showing"] == SCREEN_ROWS
+        assert str(count) in screen.detail
+
+        # Open value sums every position, not the twelve on screen. Nothing is
+        # priced in this fixture, so the reading is unmeasured — and it names
+        # the full count rather than the capped one.
+        books = await monitor.accounting(db_session, wallet)
+        assert books.measured is False
+        assert f"of {count} open positions" in books.detail
+
+        # And the target screen ranks the whole book.
+        targets = await monitor.target_screen(db_session, wallet)
+        assert targets.measured is True
+
+    async def test_the_accounting_invariant_is_not_a_tautology(
+        self, db_session, wallet
+    ) -> None:
+        """It publishes three figures and claims no cross-check.
+
+        Equity is derived as cash plus open value, so comparing the two would
+        agree forever. Reporting that as a passing invariant is a green light
+        that cannot go red, which is worse than no light — so the reading is
+        `measured=False` and says what a real check would need.
+        """
+        await self._position(db_session, wallet, n=200)
+        books = await monitor.accounting(db_session, wallet)
+        assert books.measured is False
+        # And therefore the detector cannot raise an accounting mismatch from it.
+        findings = await detect.run(db_session, wallet)
+        assert not [f for f in findings if f.defect == "accounting_mismatch"]
+
+    async def test_the_tick_records_findings_and_executes_nothing(
+        self, db_session, wallet
+    ) -> None:
+        """The whole point of arming a tick under OBSERVE_ONLY.
+
+        Before this existed, detection ran on every API read and fed the
+        integrity score, but nothing persisted a finding — so §9's owner queue
+        and §10's action log were correct, tested and permanently empty. A
+        finding that lives only inside a score's reasoning is a finding nobody
+        can be assigned.
+
+        What must NOT change is that recording is not repairing.
+        """
+        # A position closed at a multiple below the published target: a real
+        # §16 defect, and one classified OWNER_REQUIRED.
+        await self._position(
+            db_session,
+            wallet,
+            n=300,
+            status="closed",
+            closed_at=datetime.now(UTC),
+            # Triggered below target on the observed print, which is the real
+            # defect — not merely filled below it, which is slippage.
+            exit_observed_price=Decimal("1.10"),
+            exit_price=Decimal("1.10"),
+            exit_proceeds_usd=Decimal(11),
+            exit_reason="target_1_25x",
+        )
+
+        before = await service.ledger(db_session)
+        assert not before.open_rows
+
+        result = await service.tick(db_session, mode="OBSERVE_ONLY")
+        assert result["status"] == "ok"
+        assert int(result["findings"]) >= 1
+        # Every one refused: allowlisted or not, nothing is armed.
+        assert result["refused"] == result["recorded"]
+
+        after = await service.ledger(db_session)
+        assert after.open_rows, "the tick recorded nothing"
+        assert after.actions, "the tick wrote no audit row"
+        for action in after.actions:
+            assert action.outcome == "skipped", "something executed under OBSERVE_ONLY"
+            assert action.agent == service.AGENT
+        # The target defect is owner work, and it reached the owner queue.
+        assert any(
+            row.component == "karthik.target_below_multiple" for row in after.owner_attention
+        )
+
+    async def test_the_tick_is_quiet_when_there_is_no_wallet(self, db_session) -> None:
+        """An unbound operator must not file an incident every five minutes.
+
+        Writing one would bury the real findings under a condition that is the
+        expected state of a deployment without the wallet.
+        """
+        result = await service.tick(db_session, mode="OBSERVE_ONLY")
+        assert result["status"] == "unbound"
+        ledger = await service.ledger(db_session)
+        assert not ledger.open_rows
+
+    async def test_the_tick_rides_the_existing_scheduler(self) -> None:
+        """§26: one scheduler. The tick is a task on the beat that already
+        exists, not a second one."""
+        from app.workers.celery_app import celery_app
+
+        entry = celery_app.conf.beat_schedule["karthik-ops-tick"]
+        assert entry["task"] == "app.hq_ops.tasks.karthik_ops_tick"
 
     async def test_the_integrity_score_becomes_a_number_once_there_is_evidence(
         self, db_session, wallet

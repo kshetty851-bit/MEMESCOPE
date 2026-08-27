@@ -389,6 +389,10 @@ class Settings(BaseSettings):
     #: days returns ~2.8 GB of that and lifts projected free space from ~12 GB
     #: to ~15 GB.
     RADAR_DECISION_SNAPSHOT_RETENTION_DAYS: int = Field(default=2, ge=1, le=365)
+    #: Rank telemetry. Fourteen days rather than the seven used for scores and
+    #: snapshots: this is the series a rank-stability replay reads, and two
+    #: weeks is the shortest window that still contains one.
+    RADAR_RANK_EVENT_RETENTION_DAYS: int = Field(default=14, ge=1, le=365)
     #: Windows used only by the emergency pass above the critical threshold.
     SCORING_HISTORY_EMERGENCY_DAYS: int = Field(default=3, ge=1, le=365)
     RADAR_DECISION_SNAPSHOT_EMERGENCY_DAYS: int = Field(default=1, ge=1, le=365)
@@ -480,42 +484,12 @@ class Settings(BaseSettings):
     PUMPFUN_RADAR_MIN_LIQUIDITY: float = Field(default=0, ge=0)
     PUMPFUN_RADAR_BATCH_LIMIT: int = Field(default=500, ge=1, le=5000)
 
-    # --- Opportunity Engine ---------------------------------------------------
-    # Off by default like every other pipeline flag, so enabling it is a
-    # deliberate act. While off, detection never runs and no existing behaviour
-    # changes — the Radar, scoring and enrichment are untouched either way.
-    FEATURE_OPPORTUNITY_ENGINE_ENABLED: bool = False
-    #: Which venues count as a bonding curve, and which as a graduated pool.
-    #: Configurable because a launchpad renaming its venue must be a config
-    #: change, not a code change — pump.fun has already renamed an instruction
-    #: once (see the scanner's `InitializeMint` reasoning).
-    OPPORTUNITY_BONDING_CURVE_VENUES: CsvList = Field(default_factory=lambda: ["pumpfun"])
-    OPPORTUNITY_GRADUATED_VENUES: CsvList = Field(default_factory=lambda: ["pumpswap"])
-    #: Observations a signal needs before it may become ACTIVE. Below this the
-    #: opportunity sits in PENDING_CONFIRMATION and reaches no board: one
-    #: snapshot is noise.
-    OPPORTUNITY_REQUIRED_CONFIRMATIONS: int = Field(default=2, ge=1)
-    #: How many observations to load per token for provider evaluation.
-    OPPORTUNITY_WINDOW_SIZE: int = Field(default=12, ge=2, le=200)
-    #: Per-signal-type TTL. Fresh graduation is a bounded factual window; a
-    #: token that graduated three days ago did not graduate *now*.
-    OPPORTUNITY_TTL_FRESH_GRADUATION_SECONDS: int = Field(default=172_800, ge=60)
-    #: Fallback for any signal type without its own TTL, so a provider added in
-    #: a future sprint cannot produce an immortal signal by omission.
-    OPPORTUNITY_TTL_DEFAULT_SECONDS: int = Field(default=21_600, ge=60)
-    #: How long an opportunity stays EXPIRING before closing. A re-detection
-    #: inside this window revives it in place rather than minting a generation.
-    OPPORTUNITY_GRACE_SECONDS: int = Field(default=3_600, ge=0)
-    #: How long a CLOSED opportunity settles before archival frees its token to
-    #: open a new generation.
-    OPPORTUNITY_ARCHIVE_AFTER_SECONDS: int = Field(default=86_400, ge=0)
-    #: Per-signal TTL for the breakout family. Hours, not days: ADR §11 puts
-    #: breakout at "confirmed or invalidated fast", and a stale breakout is the
-    #: most misleading card the board can show — it claims a move is happening.
-    OPPORTUNITY_TTL_BREAKOUT_SECONDS: int = Field(default=21_600, ge=60)
-    #: Pre-breakout resolves more slowly by nature: it is a claim about pressure
-    #: building, which either realises into a breakout or quietly does not.
-    OPPORTUNITY_TTL_PRE_BREAKOUT_SECONDS: int = Field(default=86_400, ge=60)
+    # --- Opportunity Engine: retired (V4 Phase 2 follow-up) -------------------
+    # The engine ran flag-off for its whole production life; the near-graduation
+    # provider was closed as unanswerable (ARCHITECTURE_DECISIONS.md §14a) and
+    # V4 found the concept duplicated Radar admission. Its tables and history
+    # remain (app/models/opportunity.py); its settings are gone — Settings uses
+    # extra="ignore", so stale FEATURE_OPPORTUNITY_* env vars are harmless.
 
     # --- Priority enrichment lane ---------------------------------------------
     # Sprint 28. A lane inside the existing queue, not a second queue: the claim
@@ -534,6 +508,117 @@ class Settings(BaseSettings):
     #: turns the lane back into the backlog it was built to escape.
     ENRICHMENT_PRIORITY_MAX_TOKENS: int = Field(default=200, ge=1, le=2000)
 
+    # --- Ingest data-quality firewall (V4 Phase 2) -------------------------
+    # Annotates incoming snapshots against their own 10-minute history; a
+    # flagged row is stored untouched but excluded from peaks, features,
+    # outcomes and wallet reads. V4 measured 8 prints >100x (worst 304,776x)
+    # reaching peak_multiple unchallenged in one fresh day.
+    FEATURE_SNAPSHOT_SANITY_ENABLED: bool = True
+    #: A print outside baseline*band / baseline/band is suspect — unless the
+    #: last MIN_PRIOR prints already agree with it (a persistent real move).
+    SNAPSHOT_SANITY_BAND: float = Field(default=3.0, ge=1.5, le=100.0)
+    SNAPSHOT_SANITY_LIQUIDITY_JUMP: float = Field(default=10.0, ge=2.0, le=1000.0)
+    SNAPSHOT_SANITY_MIN_PRIOR: int = Field(default=3, ge=2, le=10)
+    SNAPSHOT_SANITY_WINDOW_SECONDS: int = Field(default=600, ge=60, le=3600)
+
+    # --- Chainstack RPC (primary production Solana RPC once configured) -----
+    #: Full endpoint URL INCLUDING the access token (Chainstack embeds it in
+    #: the path). Secret-bearing: reaches logs only through describe(), which
+    #: redacts. Empty = provider unavailable; the router then runs
+    #: Helius-only, and with neither configured it refuses rather than
+    #: falling back to the public node.
+    CHAINSTACK_RPC_URL: str = ""
+
+    # --- Nursery: eligibility is not discovery (V4 Phase 2) -----------------
+    #: Minimum minutes of observability before a qualifying token can become a
+    #: Track Record admission. 0 disables the gate (previous behaviour). An
+    #: OPERATIONAL CONTAINMENT default, recorded on every nursery row — not a
+    #: researched trading threshold, and research must treat it as censoring.
+    RADAR_MIN_OBSERVATION_MINUTES: int = Field(default=0, ge=0, le=1440)
+    #: An OBSERVING row never re-judged for this long is closed as EXPIRED.
+    RADAR_NURSERY_EXPIRE_HOURS: int = Field(default=24, ge=1, le=168)
+
+    # --- Wallet-flow instrumentation (V4 Phase 2) ---------------------------
+    # Decodes the Buy/Sell events already arriving on the scanner's socket into
+    # bounded rolling per-mint aggregates. DATA COLLECTION ONLY: read by no
+    # trading rule; ships dark and is switched on deliberately.
+    FEATURE_WALLET_FLOW_ENABLED: bool = False
+    #: Recent trades held per mint. Every metric is a share within one mint
+    #: over a window, so a small ring answers all of them exactly while the
+    #: memory stays bounded by construction.
+    WALLET_FLOW_EVENT_CAPACITY: int = Field(default=256, ge=16, le=4096)
+    #: Tracked mints, least-recently-traded evicted first.
+    WALLET_FLOW_MAX_MINTS: int = Field(default=4000, ge=100, le=100_000)
+    #: A mint with no trade for this long is dropped.
+    WALLET_FLOW_TTL_SECONDS: float = Field(default=3600.0, ge=60.0, le=86_400.0)
+    #: How often the scanner persists snapshots for research-relevant mints
+    #: (nursery members + recent admissions). 0 disables persistence.
+    WALLET_FLOW_FLUSH_SECONDS: int = Field(default=300, ge=0, le=3600)
+    #: Wallet-flow snapshot retention (research primitives; see scanner flush).
+    WALLET_FLOW_RETENTION_DAYS: int = Field(default=14, ge=1, le=90)
+
+    # --- V5 Forward Strategy Arena (research simulation only) ---------------
+    # Five $1,000 virtual portfolios scoring frozen entry hypotheses against a
+    # cash control. It never creates a paper/karthik/real position and never
+    # writes outside arena_*. Ships dark; production turns it on deliberately.
+    FEATURE_ARENA_ENABLED: bool = False
+    #: The contamination boundary (protocol §0): tokens whose 30-minute
+    #: checkpoint precedes this instant are never scored. ISO-8601 UTC. Empty
+    #: means "stamp at first activation", which is then immutable in the row.
+    ARENA_VALID_FROM: str = ""
+
+    # --- Isolated mainnet signer ------------------------------------------
+    # The socket the API may talk to. The signer FILE path is deliberately not
+    # a setting any application container reads: only the signer service reads
+    # MAINNET_SIGNER_FILE, from its own environment, and it is the one process
+    # that mounts key material.
+    MAINNET_SIGNER_SOCKET: str = ""
+
+    # --- V6 Forward Strategy Lab (research simulation only) -----------------
+    # Twenty $1,000 virtual portfolios scoring the frozen V6_FINAL_20_STRATEGIES
+    # registry against a cash control, all fed by the one MEMESCOPE scanner. It
+    # never creates a paper/karthik/real position and never writes outside
+    # lab_*. Ships dark; production turns it on deliberately.
+    FEATURE_LAB_ENABLED: bool = False
+    #: The contamination boundary (mission §15): tokens whose checkpoint
+    #: precedes this instant are never scored, because the historical dataset
+    #: has already been inspected seven times. ISO-8601 UTC. Empty means "stamp
+    #: at first activation", after which the row makes it immutable — including
+    #: the 24-hour snapshot instant derived from it.
+    LAB_VALID_FROM: str = ""
+
+    #: First-hour observation SLA: the median matured admission/nursery token
+    #: must have at least this many stored observations in its first hour.
+    #: V4 measured 7; the fast lane targets 30+ (nursery asks for 60s refresh).
+    RESEARCH_SLA_FIRST_HOUR_MIN_OBS: int = Field(default=30, ge=1, le=3600)
+
+    # --- Research collectors (V4 Phase 2) -----------------------------------
+    # One flag for the four instrumentation beats (skipped quotes, holder
+    # snapshots, universe snapshot, regime telemetry). They collect; they are
+    # read by no trading path. Ships dark; production turns it on deliberately.
+    FEATURE_RESEARCH_COLLECTORS_ENABLED: bool = False
+    #: Round-trip quote samples per 5-minute run (2 API calls each).
+    #: Round-trip quote samples per 5-minute run (2 API calls each). Sized for
+    #: the V5 protocol's six checkpoints across a live nursery: at ~40 members
+    #: a checkpoint falls due roughly every 90s, and the sampler must clear
+    #: them before their grace window closes.
+    RESEARCH_QUOTE_BATCH: int = Field(default=16, ge=1, le=50)
+    RESEARCH_QUOTE_SIZE_USD: float = Field(default=10.0, gt=0, le=100.0)
+    #: Holder snapshots per 10-minute run (2 RPC calls each).
+    HOLDER_SNAPSHOT_BATCH: int = Field(default=10, ge=1, le=100)
+    #: The operational containment thresholds the regime telemetry RECORDS.
+    #: Explicitly not a validated alpha model — see V4 REPORT §7.
+    REGIME_HOSTILE_ADMISSIONS_PER_DAY: int = Field(default=100, ge=1)
+    REGIME_HOSTILE_MEDIAN_AGE_MINUTES: int = Field(default=60, ge=1)
+
+    # --- Fast-lane enrichment replica (V4 Phase 2) --------------------------
+    # V4 measured first-hour cadence at median 7 observations: the full cycle
+    # spends most of its wall clock on scoring/radar/curves AFTER snapshots
+    # commit, throttling collection to ~30 tokens/min/replica. A replica with
+    # this flag claims only nursery/display/track-record lanes and runs the
+    # snapshot stages alone — collection first, judgement elsewhere.
+    ENRICHMENT_FAST_LANE_ONLY: bool = False
+
     # --- Paper wallet ---------------------------------------------------------
     # A deterministic simulation over stored market history. No wallet is
     # connected, no order is routed and no chain is touched: a position is a row
@@ -543,6 +628,19 @@ class Settings(BaseSettings):
     # nothing closes, and the API reports the wallet as not running rather than
     # serving an empty one that looks like a strategy which never traded.
     FEATURE_PAPER_WALLET_ENABLED: bool = False
+    #: Entry-only pause for the Original Paper Wallet — the V4 research
+    #: containment (2026-08-24): no validated edge exists and the admission
+    #: stream is hostile, so new positions stop while the open book keeps
+    #: being reviewed, exits keep settling and the record keeps being kept.
+    #: Deliberately NOT `FEATURE_PAPER_WALLET_ENABLED`: that flag is checked
+    #: before the review runs at all, so it stops exits too. This one is read
+    #: at the single function every new position is born in, after exits have
+    #: already settled.
+    PAPER_WALLET_ENTRIES_PAUSED: bool = False
+    #: The operational reason both wallet APIs and HQ print while entries are
+    #: paused. A statement about the platform's evidence, never a market
+    #: prediction — e.g. "NO_VALIDATED_EDGE/HOSTILE_POPULATION".
+    WALLET_ENTRIES_PAUSE_REASON: str = ""
     #: Starting capital. Configurable, but written onto the wallet row at
     #: creation and read from there afterwards — every return is measured
     #: against the balance the wallet *started* with, so changing this setting
@@ -554,7 +652,7 @@ class Settings(BaseSettings):
     # One forward-only paper experiment.  Replacing this id does not reset a
     # wallet implicitly: the explicit paper-wallet reset migration archives the
     # old generation before this strategy is allowed to run.
-    PAPER_WALLET_STRATEGY_ID: str = "trailing_stop_25_v1"
+    PAPER_WALLET_STRATEGY_ID: str = "universe_trailing_stop_25_v1"
     #: How many positions the evaluator advances per pass. Bounded and ordered
     #: oldest-watermark-first, which is what keeps a growing book from starving
     #: its own tail — the failure that livelocked the score sweep.
@@ -572,6 +670,28 @@ class Settings(BaseSettings):
     JUPITER_QUOTE_TIMEOUT_SECONDS: float = Field(default=6.0, gt=0, le=30)
     JUPITER_QUOTE_SLIPPAGE_BPS: int = Field(default=50, ge=0, le=10_000)
     JUPITER_USDC_MINT: str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+
+    # --- The Karthik paper wallet ------------------------------------------
+    # A second, deliberately simpler paper experiment in its own tables. There
+    # is no enable flag: Karthik exists once a wallet row exists, and that row
+    # is created by one deliberate activation. A flag would be a second, weaker
+    # copy of a fact the database already holds — and the flag most people would
+    # reach for to "stop Karthik" would stop its exit monitoring too.
+    #
+    #: Entries only, and never anything else. Read at the single entry gate,
+    #: which runs *after* exits have already been settled, so pausing purchases
+    #: cannot strand an open position. The paper wallet's own pause is separated
+    #: the same way, for the same reason.
+    KARTHIK_ENTRIES_PAUSED: bool = False
+    #: How many undecided Track Record admissions one pass may judge. Bounded,
+    #: and taken oldest-admission-first so the tail cannot starve.
+    KARTHIK_CANDIDATE_LIMIT: int = Field(default=250, ge=1, le=2000)
+    #: How many open positions one pass advances, oldest watermark first.
+    KARTHIK_REVIEW_BATCH_LIMIT: int = Field(default=2000, ge=1, le=2000)
+    #: How old an observation may be and still stand in for the market *now*.
+    #: Karthik buys and sells against readings, so a stale one is not a price it
+    #: could have transacted at — it is refused rather than used.
+    KARTHIK_MAX_MARKET_AGE_SECONDS: int = Field(default=900, ge=30, le=86_400)
 
     # --- Future real-wallet safety gate ------------------------------------
     # This policy only produces an auditable ALLOW/REJECT decision. It is not
@@ -591,11 +711,41 @@ class Settings(BaseSettings):
     REAL_WALLET_SAFETY_MAX_POSITION_LIQUIDITY_RATIO: Decimal = Field(
         default=Decimal("0.01"), gt=Decimal("0"), le=Decimal("1")
     )
+    #: The most of a token's SUPPLY one position may buy, as a fraction.
+    #:
+    #: A different question from the liquidity ratio above, and both are kept.
+    #: Liquidity governs whether a position can be SOLD; supply governs how much
+    #: of the token you become. A deep pool can happily fill an order that leaves
+    #: you holding a tenth of everything in existence, and the exit price for that
+    #: is not the entry price.
+    #:
+    #: In practice the liquidity ratio binds first at any sane size — this is the
+    #: backstop for the pathological case where it does not.
+    REAL_WALLET_SAFETY_MAX_SUPPLY_RATIO: Decimal = Field(
+        default=Decimal("0.03"), gt=Decimal("0"), le=Decimal("1")
+    )
     REAL_WALLET_SAFETY_MAX_PRICE_DEVIATION_PCT: Decimal = Field(
         default=Decimal("5"), ge=Decimal("0"), le=Decimal("100")
     )
     REAL_WALLET_SAFETY_SUPPORTED_VENUES: CsvList = Field(
         default_factory=lambda: ["pumpfun", "pumpswap"]
+    )
+    #: Venues the SECURITY EVALUATOR recognises. Deliberately a separate
+    #: setting from the real wallet's list above, which it used to share.
+    #:
+    #: They answer different questions. The real wallet's list is "where may
+    #: this platform SEND MONEY", and stays as narrow as it has always been.
+    #: This one is "is this a market we recognise at all" — and Raydium,
+    #: Meteora and Orca are the three largest AMMs on Solana, which the
+    #: platform already prices from on every snapshot. Calling them
+    #: unrecognised was a statement about pump.fun's dominance in the scanner's
+    #: population, not about the venues.
+    #:
+    #: Sharing one list meant the market-universe wallet could not be admitted
+    #: without also widening what the real wallet would be permitted to trade.
+    #: Splitting them keeps that surface untouched.
+    SECURITY_RECOGNISED_VENUES: CsvList = Field(
+        default_factory=lambda: ["pumpfun", "pumpswap", "raydium", "meteora", "orca"]
     )
     # Token-2022 extension discriminants, deliberately an explicit allowlist.
     # 18=MetadataPointer and 19=TokenMetadata are the two observed in the
@@ -848,6 +998,14 @@ class Settings(BaseSettings):
     #: during Phase 1; a later isolated signer service needs separate review.
     REAL_WALLET_PUBLIC_KEY: str = ""
     REAL_WALLET_EXECUTION_SECRET_FILE: str = ""
+    #: The ONLY address SOL may ever be withdrawn to. Deposits are open — the
+    #: execution address is public and anyone may send to it — but the way out is
+    #: a single destination the operator nominated, so a compromised caller,
+    #: signer or API cannot choose where the money goes; it can at worst return
+    #: it to the owner. Empty permits NOTHING: a withdrawal path with no
+    #: nominated destination refuses rather than accepting any address, which is
+    #: the same fail-closed direction as the RPC host list.
+    REAL_WALLET_WITHDRAWAL_ADDRESS: str = ""
     # Phase 2 is a separate, deliberately tiny manual-devnet workflow. These
     # values are used by the API and signer to enforce the same small envelope;
     # the signer-file *path* is intentionally not a Settings field because the
@@ -874,6 +1032,15 @@ class Settings(BaseSettings):
     #: evidence work's decision and has not been made; a default here would
     #: quietly pre-empt it. Must not exceed `REAL_WALLET_MAX_TRADE_USD`.
     REAL_WALLET_ENTRY_SIZE_USD: Decimal = Field(default=Decimal("0"), ge=0)
+    #: The account size the growth ladder measures from (see `app.sizing`).
+    #: At twice this, one entry stakes double; at four times, quadruple.
+    #:
+    #: **Zero — the default — means no ladder, and every entry stakes the base
+    #: size.** Same discipline as the entry size above: a default here would
+    #: decide, on the operator's behalf, at what balance a real order silently
+    #: doubles. `REAL_WALLET_MAX_TRADE_USD` still caps the result, so the
+    #: ladder can never lift a safety bound.
+    REAL_WALLET_SIZING_BASE_USD: Decimal = Field(default=Decimal("0"), ge=0)
     REAL_WALLET_MAX_TRADE_USD: Decimal = Field(default=Decimal("5"), gt=0)
     REAL_WALLET_MAX_OPEN_POSITIONS: int = Field(default=1, ge=1)
     REAL_WALLET_MAX_TOTAL_EXPOSURE_USD: Decimal = Field(default=Decimal("10"), gt=0)
@@ -883,11 +1050,35 @@ class Settings(BaseSettings):
     #: notional cap bounds how much a bug can spend; only a count bounds how
     #: many times it can fire, and fee-only churn is invisible to the former.
     REAL_WALLET_MAX_DAILY_TRADES: int = Field(default=4, ge=1, le=100)
-    #: The most SOL the canary wallet may ever hold. Compared in integer
-    #: lamports. This is the bound that makes the blast radius a number rather
-    #: than a promise: over-funding is refused instead of traded.
+    #: The most SOL the execution wallet may hold and still open new positions.
+    #: Compared in integer lamports. This is the bound that makes the blast
+    #: radius a number rather than a promise: over-funding is refused instead of
+    #: traded, and it is checked ONLY on the entry path — an exit is never
+    #: blocked by it, so a wallet that grows past its ceiling stops buying and
+    #: can always still sell.
+    #:
+    #: Two different jobs used to be one number, and the smaller one won. The
+    #: SETTING is the operator's risk decision: how much they are willing to have
+    #: exposed. The `le` below is a TYPO GUARD — it exists so a fat-fingered
+    #: `500` in place of `5.00` cannot silently permit a wallet nobody intended.
+    #: It was 5, chosen as 20x the 0.25 default back when this was scoped as a
+    #: canary, and a typo guard sized for a canary caps legitimate growth, which
+    #: is not its job. Profits compound in the wallet by design — there is no
+    #: auto-sweep — so the ceiling has to be able to sit above where the book is
+    #: going, not where it started.
+    #:
+    #: 25,000 SOL is set against a stated ambition of a seven-figure balance:
+    #: $1M is ~10,300 SOL at $97, and a SOL price that halves doubles the SOL a
+    #: dollar target needs. The guard therefore has to clear roughly 20,600 SOL
+    #: for that target to survive a bad market in the denominator.
+    #:
+    #: **Set the value as a ladder, not at the guard.** The ceiling only bounds
+    #: anything while it is near the book: at a $100 balance a ceiling of $2M
+    #: refuses nothing, including a mis-sent transfer that has no business being
+    #: in a trading wallet. Raising it deliberately as the book grows is what
+    #: keeps it a control rather than a formality.
     REAL_WALLET_MAX_BALANCE_SOL: Decimal = Field(
-        default=Decimal("0.25"), gt=0, le=Decimal("5")
+        default=Decimal("0.25"), gt=0, le=Decimal("25000")
     )
     #: Freshness and impact bounds for a real *exit* quote. An exit that cannot
     #: be priced is reported as an explicit failure state, never retried away.
@@ -1147,8 +1338,6 @@ class Settings(BaseSettings):
         "TRUSTED_PROXY_IPS",
         "SCANNER_WATCH_PROGRAMS",
         "YELLOWSTONE_PROGRAM_IDS",
-        "OPPORTUNITY_BONDING_CURVE_VENUES",
-        "OPPORTUNITY_GRADUATED_VENUES",
         # Both were `CsvList` from the day the safety gate landed but were never
         # registered here, because neither had ever appeared in a compose file —
         # so the omission was invisible. Putting the execution contract in the
@@ -1156,6 +1345,7 @@ class Settings(BaseSettings):
         # These two are the venue and Token-2022 extension allowlists, i.e. the
         # settings an operator is most likely to want to narrow by hand.
         "REAL_WALLET_SAFETY_SUPPORTED_VENUES",
+        "SECURITY_RECOGNISED_VENUES",
         "REAL_WALLET_SAFETY_SUPPORTED_TOKEN_2022_EXTENSIONS",
         # Fourth and fifth occurrence of the same trap, registered here from the
         # start rather than after a failed boot. Both are allowlists an operator
@@ -1178,6 +1368,33 @@ class Settings(BaseSettings):
                 return json.loads(text)
             return [item.strip() for item in text.split(",") if item.strip()]
         return value
+
+    @property
+    def lab_valid_from(self) -> "datetime | None":
+        """The frozen V6 contamination boundary, parsed. None = stamp at activation."""
+        from datetime import datetime as _dt
+
+        raw = (self.LAB_VALID_FROM or "").strip()
+        if not raw:
+            return None
+        try:
+            return _dt.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+
+    @property
+    def arena_valid_from(self) -> "datetime | None":
+        """The frozen contamination boundary, parsed. None = stamp at activation."""
+        from datetime import datetime as _dt
+
+        raw = (self.ARENA_VALID_FROM or "").strip()
+        if not raw:
+            return None
+        try:
+            return _dt.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+
 
     @computed_field  # type: ignore[prop-decorator]
     @property

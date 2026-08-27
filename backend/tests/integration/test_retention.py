@@ -176,3 +176,56 @@ class TestScoreHistoryPrune:
         self, session: AsyncSession
     ) -> None:
         assert await _prune_score_history(7) >= 0
+
+
+# ------------------------------------------------------- radar rank telemetry
+
+class TestRadarRankEventRetention:
+    """This table had no retention at all until 2026-08-26 — 1.27M rows and
+    865MB while every neighbouring table was pruned on schedule."""
+
+    @staticmethod
+    async def _seed(session: AsyncSession, *, label: str, age_days: int) -> str:
+        from app.models.radar_quality import RadarRankEvent
+
+        key = f"rank:{label}:{uuid.uuid4().hex}"
+        session.add(
+            RadarRankEvent(
+                event_key=key,
+                mint_address=f"Mint{label}{uuid.uuid4().hex}"[:44],
+                radar_rank=1,
+                rank_band="top_10",
+                event_source="test",
+                observed_at=NOW - timedelta(days=age_days),
+            )
+        )
+        await session.flush()
+        return key
+
+    async def test_old_rank_events_are_pruned(self, session: AsyncSession) -> None:
+        from app.workers.retention_tasks import _prune_radar_rank_events
+
+        old = await self._seed(session, label="old", age_days=30)
+        fresh = await self._seed(session, label="fresh", age_days=1)
+        await session.commit()
+
+        await _prune_radar_rank_events(14)
+
+        remaining = set(
+            (await session.execute(
+                text("SELECT event_key FROM radar_rank_events WHERE event_key IN (:a, :b)"),
+                {"a": old, "b": fresh},
+            )).scalars()
+        )
+        assert fresh in remaining, "a recent rank observation must survive"
+        assert old not in remaining, "a 30-day-old rank observation must be pruned"
+
+    async def test_it_is_registered_in_the_scheduled_job(self) -> None:
+        """A prune nobody calls is not a retention policy."""
+        import inspect
+
+        from app.workers import retention_tasks
+
+        source = inspect.getsource(retention_tasks._prune_telemetry)
+        assert "_prune_radar_rank_events" in source
+        assert "RADAR_RANK_EVENT_RETENTION_DAYS" in source

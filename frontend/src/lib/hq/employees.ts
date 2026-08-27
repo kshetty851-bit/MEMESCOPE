@@ -41,6 +41,7 @@ export type EmployeeId =
   | "sentinel"
   | "patch"
   | "quinn"
+  | "vault"
   // The Karthik Paper Wallet's dedicated operator. Added because that wallet is
   // a *separate experiment* with a separate mandate: nobody already on this
   // roster may touch it, and nobody on it may touch anything else. A desk that
@@ -89,6 +90,7 @@ export type DepartmentId =
   | "infrastructure"
   | "research"
   | "karthik_lab"
+  | "execution"
   | "qa";
 
 export const DEPARTMENT_LABEL: Record<DepartmentId, string> = {
@@ -102,6 +104,7 @@ export const DEPARTMENT_LABEL: Record<DepartmentId, string> = {
   research: "Performance & Research",
   qa: "Quality Assurance",
   karthik_lab: "Karthik Lab",
+  execution: "Execution",
 };
 
 export interface Employee {
@@ -364,6 +367,31 @@ export const EMPLOYEES: Employee[] = [
     // other thirteen stand for something the platform runs; Karthik stands for
     // one experiment being run *properly*, which is a different job and gets a
     // different room.
+    id: "vault",
+    name: "Vault",
+    role: "Execution Wallet Custodian",
+    zone: "vault",
+    department: "execution",
+    // Inside the sealed room, not beside it. The Execution Vault has had a
+    // footprint and a summary since HQ-1 and nobody in it, because there was
+    // nothing to watch: mainnet submission was refused by two code constants.
+    // Those were reviewed and turned off, the wallet is funded, and a room with
+    // real money in it and no occupant is the one room that needs one.
+    desk: { col: 14, row: 3 },
+    systemResponsibility:
+      "Execution wallet: balance, intents, the isolated signer, the withdrawal address, the kill switch",
+    whatIDo:
+      "I watch the one wallet that can spend real money. I read where each intent stopped and why, whether the signer still holds the pinned key, and whether the balance moved without a confirmed intent behind it. I authorise nothing — the guard and the transport policy decide that, and I only ever report.",
+    // Atlas because safety decides what may be entered at all; Rex because the
+    // paper desk runs the same strategies without the money; Nova because an
+    // owner-attention item has to reach somebody who can decide.
+    worksWith: ["atlas", "rex", "nova"],
+    personality:
+      "Still, and slow to speak. Sits facing the door rather than the floor. Says the reason, never the reassurance.",
+    accessory: "keyring",
+    palette: "slate",
+  },
+  {
     id: "karthik",
     name: "Karthik",
     role: "Paper Wallet Operator",

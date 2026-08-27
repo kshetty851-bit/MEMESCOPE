@@ -46,6 +46,10 @@ IO_MODULES = {
     "scheduler.py",
     "api.py",
     "schemas.py",
+    # V4 Phase 2: the nursery gate is an I/O seam beside service.py — it owns
+    # the lifecycle rows, so it holds a session and reads settings by design.
+    # `executable.py` is NOT here: the executable-truth math stays pure.
+    "nursery.py",
 }
 
 #: Modules outside the package the pure engine may reach for.

@@ -53,19 +53,31 @@ export async function fetchAllRadarDetections(params: {
   const pages = Math.ceil(first.total / RADAR_PAGE_CAP);
   if (pages <= 1) return first;
 
-  const items = [...first.items];
-  for (let page = 2; page <= pages; page += 1) {
-    const next = await fetchRadar({
-      ...params,
-      page,
-      pageSize: RADAR_PAGE_CAP,
-    });
-    items.push(...next.items);
-  }
+  // Pages 2..N concurrently rather than one after another.
+  //
+  // The server caps `page_size` at 100 and the track record holds ~1,300
+  // detections, so this is fourteen requests however it is written. Awaiting
+  // them in a loop made that fourteen *round trips in series*: each `/radar`
+  // page measured 2-4s against production on 2026-08-22, so the page spent
+  // roughly half a minute fetching before it could render a row.
+  //
+  // Same requests, same responses, same order — `Promise.all` resolves to an
+  // array positionally, so page 2 stays at index 0 and the concatenation below
+  // reproduces the sequential result exactly. Nothing about which detections
+  // appear, or in what order, changes; only how long the browser waits.
+  //
+  // Still a fan-out of thirteen, which is why the real fix is server-side
+  // pagination — but that requires the table's column sorts to have server
+  // equivalents, and getting that wrong changes what the track record claims.
+  const rest = await Promise.all(
+    Array.from({ length: pages - 1 }, (_, index) =>
+      fetchRadar({ ...params, page: index + 2, pageSize: RADAR_PAGE_CAP }),
+    ),
+  );
 
   return {
     ...first,
-    items,
+    items: [...first.items, ...rest.flatMap((page) => page.items)],
     page: 1,
     page_size: RADAR_PAGE_CAP,
   };

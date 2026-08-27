@@ -244,7 +244,7 @@ def evaluate_venue(snapshot: TokenMarketSnapshot | None) -> list[SecurityCheck]:
     liquidity verdict comes from `liquidity_verifier`, which reads accounts.
     """
     venue = (snapshot.dex_name or "").strip().lower() if snapshot else ""
-    supported = {value.lower() for value in settings.REAL_WALLET_SAFETY_SUPPORTED_VENUES}
+    supported = {value.lower() for value in settings.SECURITY_RECOGNISED_VENUES}
 
     if not venue:
         venue_check = _unknown(
