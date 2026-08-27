@@ -360,6 +360,24 @@ def test_the_floor_is_the_reserve_itself_not_more() -> None:
     assert PolicyReason.MIN_SOL_FEE_RESERVE in one_short.reason_codes
 
 
+@pytest.mark.parametrize("side", ["SELL", "sell", " SELL ", " sell ", "Sell"])
+def test_whitespace_and_case_never_turn_a_sell_into_a_floored_buy(side: str) -> None:
+    """The other half of `.strip()`, which the first version left untested.
+
+    The strip was written reasoning about a stray BUY — `"BUY "` must still be
+    caught — and the sell behaviour came along for free without anyone
+    checking it. That is luck, not coverage, and it is the more expensive
+    direction: a floored buy merely declines a trade, whereas a floored SELL
+    refuses the transaction that ends a stranded position.
+    """
+    decision = AutonomousExecutionPolicy().evaluate_canary_entry(
+        requested_usd=Decimal("1"),
+        state=_state(side=side, wallet_balance_lamports=1, spend_lamports=None),
+    )
+    assert PolicyReason.MIN_SOL_FEE_RESERVE not in decision.reason_codes
+    assert PolicyReason.SPEND_NOT_MEASURED not in decision.reason_codes
+
+
 def test_a_sell_is_never_refused_for_a_low_balance() -> None:
     """The exemption is the whole point, not an oversight.
 
