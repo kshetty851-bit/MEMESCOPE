@@ -1,10 +1,21 @@
 """Trade-flow features derived from two market snapshots.
 
-One implementation, because two systems now read the same number and a second
-copy would be a second definition the moment either was edited. The Strategy
-Lab computes `sell_share_15m` for its twenty portfolios; the paper wallet needs
-the identical figure to test a rule derived from the Lab's own trades, and a
-rule tested against a differently-computed feature would not be the same rule.
+The Strategy Lab computes `sell_share_15m` for its twenty portfolios; the paper
+wallet needs the IDENTICAL figure to test a rule derived from the Lab's own
+trades, because a rule tested against a differently-computed feature would not
+be the same rule.
+
+**This is not shared code, and saying so would be false.** `lab/service.py`
+still computes its own inline, and was deliberately left alone: it was running
+a live tournament that halts on a spec change. So there are two
+implementations that agree, verified by `tests/unit/test_flow_feature_equivalence.py`
+over twelve cases including backwards counters and empty windows.
+
+That test is the only thing holding them together. If the Lab's block is
+edited, update the transcription there and it will tell you whether these
+still match — because if they silently diverge, both systems keep running,
+neither errors, and the comparison the paper strategy exists for stops
+measuring the same thing.
 
 ## Why sell share
 
@@ -36,8 +47,8 @@ def counter_delta(now: int | None, then: int | None) -> int | None:
 
     The 24h counters tick backwards on a small fraction of rows — the window
     slides, so an old trade can leave it — and a negative trade count is not
-    information. Clamping is what the Lab has always done; it is restated here
-    rather than reimplemented so the two cannot drift apart.
+    information. Clamping is what the Lab's `_delta` does; this is a second
+    implementation of it, held to it by test rather than by imports.
     """
     if now is None or then is None:
         return None
