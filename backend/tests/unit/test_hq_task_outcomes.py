@@ -156,3 +156,60 @@ def _health(*, tasks):
         overall="healthy", unmeasured=0, environment="test", version="0",
         observed_at=datetime.now(UTC),
     )
+
+
+def test_autonomy_may_act_on_exactly_four_things():
+    """The set HQ is allowed to execute without a human, pinned by identity.
+
+    HQ autonomy is ARMED on production — `HQ_AUTONOMY_ENABLED=true`, set
+    deliberately after the disk hit 95% — so this set is now the difference
+    between a system that reports and one that acts. It is four things, none of
+    which touches a wallet, a tournament, a strategy or a position.
+
+    Asserted as an exact set rather than a maximum count. A test that allowed
+    "four or fewer" would pass while somebody swapped one of these for something
+    that trades, which is the substitution worth catching, not the growth.
+
+    Adding a fifth is a deliberate act and should require editing this line.
+    """
+    from app.hq_ops.remediation import AUTONOMOUS_KEYS, REMEDIATIONS
+
+    assert AUTONOMOUS_KEYS == frozenset({
+        "worker.pool_restart",
+        "disk.run_retention",
+        "disk.emergency_check",
+        "diagnostics.reprobe",
+    })
+    # And nothing outside the allowlist can be reached by name.
+    for key in AUTONOMOUS_KEYS:
+        assert key in REMEDIATIONS
+
+
+def test_no_autonomous_action_can_reach_money_or_a_tournament():
+    """The invariant behind the list, checked on what the actions DO rather than
+    on what they are called — a rename must not be able to smuggle one in."""
+    import ast
+    from pathlib import Path
+
+    from app.hq_ops import remediation
+
+    src = Path(remediation.__file__).read_text()
+    tree = ast.parse(src)
+    called = {
+        n.func.attr for n in ast.walk(tree)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+    }
+    assert not called & {
+        "sign", "sign_withdrawal", "submit", "execute_signed_order",
+        "advance", "tick", "create_intent", "create_sell_intent",
+    }
+    imported: set[str] = set()
+    for n in ast.walk(tree):
+        if isinstance(n, ast.ImportFrom) and n.module:
+            imported.add(n.module)
+        elif isinstance(n, ast.Import):
+            imported.update(a.name for a in n.names)
+    assert not any(
+        m.startswith("app.lab") or m.startswith("app.real_wallet")
+        for m in imported
+    ), "HQ's autonomous actions must not import the Lab or the wallet"
