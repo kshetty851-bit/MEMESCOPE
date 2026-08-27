@@ -1419,6 +1419,7 @@ class PaperWalletService:
         opened = 0
         refusals = eligibility.refusal_counts(verdicts)
         cash_refused: set[str] = set()
+        strategy_refused: set[str] = set()
         security_refused: dict[str, entry_policy.EntryDecision] = {}
         for verdict in verdicts:
             candidate = verdict.candidate
@@ -1427,15 +1428,33 @@ class PaperWalletService:
 
             instruction = strategy.entry_for(candidate, cash_available=cash, now=now)
             if instruction is None:
-                # Every eligibility condition already passed, so the only reason
-                # left is cash. Counted, because idle capital with qualified
-                # tokens in front of it is a fact the dashboard has to state.
-                refusals[eligibility.Refusal.INSUFFICIENT_CASH] = (
-                    refusals.get(eligibility.Refusal.INSUFFICIENT_CASH, 0) + 1
-                )
-                # Named as well as counted, so the per-mint evidence written
-                # below can say *which* token the wallet could not afford.
-                cash_refused.add(candidate.mint_address)
+                # WHY it declined, not merely THAT it did.
+                #
+                # This block used to record every `None` as insufficient cash,
+                # on the reasoning that eligibility had already passed so
+                # nothing else could be left. That held while every strategy
+                # declined only on cash and rank. It stopped holding the moment
+                # one published entry conditions of its own — the flow-filtered
+                # twin refuses on a liquidity floor and a sell-share ceiling —
+                # and every such refusal was being written to the record as
+                # "the wallet could not afford it".
+                #
+                # The two are opposite claims. Idle capital with qualified
+                # tokens in front of it is a problem; a strategy declining a
+                # token it was built to decline is the strategy working. A
+                # research wallet whose log confuses them cannot be read.
+                if cash < strategy.trade_size_usd:
+                    refusals[eligibility.Refusal.INSUFFICIENT_CASH] = (
+                        refusals.get(eligibility.Refusal.INSUFFICIENT_CASH, 0) + 1
+                    )
+                    # Named as well as counted, so the per-mint evidence written
+                    # below can say *which* token the wallet could not afford.
+                    cash_refused.add(candidate.mint_address)
+                else:
+                    refusals[eligibility.Refusal.STRATEGY_DECLINED] = (
+                        refusals.get(eligibility.Refusal.STRATEGY_DECLINED, 0) + 1
+                    )
+                    strategy_refused.add(candidate.mint_address)
                 continue
 
             # --- SEC-2 SECURITY ENTRY GATE ---------------------------------
@@ -1534,6 +1553,7 @@ class PaperWalletService:
             wallet,
             verdicts,
             cash_refused=cash_refused,
+            strategy_refused=strategy_refused,
             security_refused=security_refused,
             now=now,
         )
@@ -1698,6 +1718,7 @@ class PaperWalletService:
         verdicts: Sequence[eligibility.Verdict],
         *,
         cash_refused: set[str],
+        strategy_refused: set[str],
         security_refused: dict[str, entry_policy.EntryDecision] | None = None,
         now: datetime,
     ) -> None:
@@ -1769,6 +1790,13 @@ class PaperWalletService:
                 # part a reader cares about: the wallet wanted this token and
                 # could not afford it.
                 reason = eligibility.Refusal.INSUFFICIENT_CASH.value
+                decision = "declined"
+            elif verdict.mint_address in strategy_refused:
+                # `judge()` passed it and the STRATEGY'S OWN RULES declined it
+                # — its liquidity floor or its flow ceiling. The wallet could
+                # afford this token and chose not to buy it, which for a
+                # research wallet is the more interesting of the two records.
+                reason = eligibility.Refusal.STRATEGY_DECLINED.value
                 decision = "declined"
             else:
                 decision = "eligible" if verdict.eligible else "declined"

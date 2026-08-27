@@ -59,6 +59,12 @@ class Refusal(enum.StrEnum):
     NOT_TRADEABLE = "not_tradeable"
     #: Everything passed, but the cash left is below one position.
     INSUFFICIENT_CASH = "insufficient_paper_cash"
+    #: The strategy's own entry rules declined a candidate that passed every
+    #: eligibility condition — its liquidity floor, its flow ceiling, whatever
+    #: it publishes. Distinct from INSUFFICIENT_CASH because the two say
+    #: opposite things about the wallet: one is idle capital with qualified
+    #: tokens in front of it, the other is the strategy working as designed.
+    STRATEGY_DECLINED = "strategy_declined"
     #: Entries are administratively paused (V4 containment). Not a judgement
     #: about any token — the whole pass was refused before ranking.
     ENTRIES_PAUSED = "entries_paused"
@@ -77,6 +83,11 @@ REFUSAL_LABELS: dict[str, str] = {
     Refusal.NOT_TRADEABLE: "The market provider does not report this token as trading.",
     Refusal.INSUFFICIENT_CASH: (
         "INSUFFICIENT_PAPER_CASH: not enough cash left for a full $10 position."
+    ),
+    Refusal.STRATEGY_DECLINED: (
+        "STRATEGY_DECLINED: the token qualified and the wallet could afford it, "
+        "but the strategy's own entry rules refused it — its liquidity floor or "
+        "its flow ceiling. This is the strategy working, not capital sitting idle."
     ),
     Refusal.ENTRIES_PAUSED: (
         "Entries are paused: no validated edge on the current admission stream. "

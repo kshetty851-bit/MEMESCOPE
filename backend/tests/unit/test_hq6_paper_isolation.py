@@ -84,6 +84,17 @@ class TestTheEntryContractIsUntouched:
             # V4 Phase 2 containment: an administrative whole-pass refusal,
             # deliberately not a per-token judgement and not a security claim.
             "entries_paused",
+            # The strategy's own entry rules declining a token — a liquidity
+            # floor or a flow ceiling. Added when a strategy first published
+            # conditions of its own, because until then every `entry_for`
+            # returning None was recorded as "insufficient cash" and a wallet
+            # refusing by design read as a wallet out of money.
+            #
+            # Not a security claim either, which is what this test guards: it
+            # says nothing about mint authority, freeze authority or any
+            # security evaluation, and `eligibility` still imports nothing
+            # from app.security — asserted separately below.
+            "strategy_declined",
         }
 
     def test_judge_module_does_not_import_the_security_package(self) -> None:
