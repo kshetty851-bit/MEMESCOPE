@@ -285,31 +285,49 @@ class LiveIntentRepository:
             )
         )
 
-    async def open_positions_count(self) -> int:
-        rows = await self._session.scalars(
-            select(RealWalletPosition.id).where(RealWalletPosition.status == "OPEN")
+    async def open_positions_count(self, *, strategy_id: str | None = None) -> int:
+        """Open positions, for the whole book or for one strategy.
+
+        `strategy_id` narrows it; omitting it keeps the global count the policy
+        has always been given. The two are different questions and both are
+        asked: the global count bounds the wallet, the per-strategy count bounds
+        one strategy's share of it.
+        """
+        stmt = select(RealWalletPosition.id).where(
+            RealWalletPosition.status == "OPEN"
         )
+        if strategy_id is not None:
+            stmt = stmt.where(RealWalletPosition.strategy_id == strategy_id)
+        rows = await self._session.scalars(stmt)
         return len(rows.all())
 
-    async def open_exposure_usd(self) -> Decimal:
+    async def open_exposure_usd(self, *, strategy_id: str | None = None) -> Decimal:
         """What the open book cost, at entry, in dollars.
 
         Cost rather than current value: this wallet stores no running mark, and
         an unmarked position valued at whatever it last traded for would make
         the growth ladder move on a stale print. Cost is the conservative
         reading — it cannot inflate equity, so it cannot inflate a stake.
+
+        `strategy_id` narrows this to one strategy's deployed capital, which is
+        what an allocation is measured against. Note that positions opened
+        before strategies were tagged carry a NULL `strategy_id`: those count
+        toward the GLOBAL exposure and toward no strategy's allocation. That is
+        the safe direction — an untagged position still bounds the wallet, and
+        crediting it to a strategy that may not have opened it would let that
+        strategy's share be spent twice.
         """
-        total = await self._session.scalar(
-            select(
-                func.coalesce(
-                    func.sum(
-                        RealWalletPosition.quantity
-                        * RealWalletPosition.entry_price_usd
-                    ),
-                    0,
-                )
-            ).where(RealWalletPosition.status == "OPEN")
-        )
+        stmt = select(
+            func.coalesce(
+                func.sum(
+                    RealWalletPosition.quantity * RealWalletPosition.entry_price_usd
+                ),
+                0,
+            )
+        ).where(RealWalletPosition.status == "OPEN")
+        if strategy_id is not None:
+            stmt = stmt.where(RealWalletPosition.strategy_id == strategy_id)
+        total = await self._session.scalar(stmt)
         return Decimal(total or 0)
 
     async def open_position(self, position_id: uuid.UUID) -> RealWalletPosition | None:

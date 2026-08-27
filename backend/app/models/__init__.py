@@ -69,6 +69,7 @@ from app.models.real_wallet_execution import (
     RealWalletKillSwitch,
     RealWalletLiveIntent,
     RealWalletPosition,
+    RealWalletAllocation,
     RealWalletAutotradeEvent,
     RealWalletAutotradeSwitch,
 )

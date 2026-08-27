@@ -1,4 +1,4 @@
-"""Turn a nominated V6 strategy into at most one real BUY intent per tick.
+"""Turn the funded V6 strategies into at most one real BUY intent per tick.
 
 The binding is deliberately narrow: the real wallet trades **what the Lab
 strategy already decided to trade**, read from `lab_decisions`. It does not
@@ -26,13 +26,14 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import ROUND_DOWN, Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.lab import LabDecision
 from app.models.real_wallet_execution import RealWalletLiveIntent
+from app.real_wallet.allocations import Allocation, AllocationService
 from app.real_wallet.autotrade import AutotradeSwitchService
 from app.real_wallet.live_repository import LiveIntentRepository
 from app.real_wallet.policy import (
@@ -70,12 +71,29 @@ class RealWalletDriver:
         self._session = session
 
     async def tick(self, *, now: datetime | None = None) -> DriverOutcome:
+        """At most one BUY intent, across all funded strategies.
+
+        STILL ONE INTENT PER TICK, and that is the whole reason this loops the
+        way it does. The single-strategy version said "a loop here would turn a
+        single bad minute into a whole book" — dividing the wallet between five
+        strategies and then creating one intent EACH would have quietly made
+        that exact loop, five times worse, while looking like the same throttle.
+        So the loop finds the first strategy that can act, acts once, and stops.
+
+        Which strategy gets the tick is decided by least-recently-served
+        rotation, not by allocation size or alphabetical order. Ordering by
+        anything correlated with the strategies themselves would let one of them
+        take every tick while a rival never trades, and the difference between
+        their records would then be an artefact of this function.
+        """
         now = now or datetime.now(UTC)
 
         switch = await AutotradeSwitchService(self._session).state()
         if not switch.enabled:
             return DriverOutcome(0, "autotrade_switch_off")
-        if not switch.nominated_strategy:
+
+        allocations = await AllocationService(self._session).enabled()
+        if not allocations:
             return DriverOutcome(0, "no_strategy_nominated")
 
         wallet = settings.REAL_WALLET_PUBLIC_KEY.strip()
@@ -109,31 +127,86 @@ class RealWalletDriver:
             # guess: every limit this wallet has is written in dollars.
             return DriverOutcome(0, "sol_price_unavailable")
 
-        open_positions = await repo.open_positions_count()
-
-        # --- GROWTH LADDER -------------------------------------------------
-        # What the account is worth right now: the SOL it holds, plus what is
-        # already committed to open positions. `configured_entry_size_usd`
-        # turns that into a stake and clamps it to REAL_WALLET_MAX_TRADE_USD,
-        # so the ladder can raise the stake but never the ceiling.
-        #
-        # Inert until an operator sets REAL_WALLET_SIZING_BASE_USD. Unset means
-        # nobody has said at what balance a real order should double, and this
-        # is not the place to assume one.
-        equity_usd = (
+        # Total equity is read ONCE and divided, never read per strategy. Two
+        # reads a few milliseconds apart would give two strategies two different
+        # books to take their share of, and the shares would then not add up to
+        # the wallet.
+        total_equity_usd = (
             Decimal(balance_lamports) / _LAMPORTS_PER_SOL * sol_price
             + await repo.open_exposure_usd()
         )
-        entry_usd = configured_entry_size_usd(equity_usd)
+
+        skipped: list[str] = []
+        for allocation in await self._rotation_order(allocations):
+            outcome = await self._try_strategy(
+                allocation,
+                repo=repo,
+                wallet=wallet,
+                now=now,
+                total_equity_usd=total_equity_usd,
+                sol_price=sol_price,
+                balance_lamports=balance_lamports,
+            )
+            if outcome.created:
+                return outcome
+            skipped.append((allocation.strategy_id, outcome.skipped))
+
+        # Every strategy declined. Report all of their reasons rather than the
+        # first: "V6-06 had no candidate and V6-11 is at its allocation" is an
+        # operator's answer, and the first reason alone is a guess at it.
+        #
+        # One strategy reports its reason BARE, with no id prefix. That is the
+        # string an undivided wallet has always returned, and the caller reading
+        # it should not have to learn a new format because a feature it is not
+        # using now exists. The prefix appears only when it carries information.
+        if len(skipped) == 1:
+            return DriverOutcome(0, skipped[0][1])
+        return DriverOutcome(0, " ".join(f"{sid}={why}" for sid, why in skipped))
+
+    async def _try_strategy(
+        self,
+        allocation: Allocation,
+        *,
+        repo: LiveIntentRepository,
+        wallet: str,
+        now: datetime,
+        total_equity_usd: Decimal,
+        sol_price: Decimal,
+        balance_lamports: int,
+    ) -> DriverOutcome:
+        """One strategy's turn. Returns created=1 only if it actually acted."""
+        strategy_id = allocation.strategy_id
+
+        # --- THIS STRATEGY'S SHARE ------------------------------------------
+        # The ladder measures the strategy's OWN capital, not the wallet's. A
+        # strategy holding 20% of a $1,000 book is running $200 and should
+        # double its stake when ITS $200 becomes $400 — not when somebody
+        # else's strategy doubles the wallet. Sizing every strategy off total
+        # equity would have each of them growing on the others' results.
+        strategy_equity = total_equity_usd * allocation.fraction
+        entry_usd = configured_entry_size_usd(strategy_equity)
         if entry_usd is None or entry_usd <= 0:
             return DriverOutcome(0, "entry_size_not_configured")
 
-        # The server-owned bounds, asked rather than reimplemented.
+        # --- THE ALLOCATION ITSELF ------------------------------------------
+        # Deployed cost against the share. Untagged legacy positions count
+        # toward no strategy (see `open_exposure_usd`), so this can only
+        # under-state a strategy's usage, never over-state it — and an
+        # under-stated usage is bounded by the global caps below regardless.
+        deployed = await repo.open_exposure_usd(strategy_id=strategy_id)
+        if deployed + entry_usd > strategy_equity:
+            return DriverOutcome(0, "allocation_exhausted")
+
+        # --- THE SERVER-OWNED BOUNDS, UNCHANGED AND GLOBAL -------------------
+        # Asked, not reimplemented, and asked with the WHOLE book's numbers.
+        # An allocation divides the wallet; it does not give any strategy its
+        # own private set of caps. Five strategies at 20% each still share one
+        # max-open-positions and one daily notional.
         decision = AutonomousExecutionPolicy().evaluate_canary_entry(
             requested_usd=entry_usd,
             state=PolicyState(
-                open_positions=open_positions,
-                exposure_usd=Decimal(open_positions) * entry_usd,
+                open_positions=await repo.open_positions_count(),
+                exposure_usd=await repo.open_exposure_usd(),
                 daily_notional_usd=await self._notional_today(now),
                 daily_realised_loss_usd=Decimal(0),
                 daily_trades=await self._trades_today(now),
@@ -143,26 +216,13 @@ class RealWalletDriver:
         if not decision.allowed:
             return DriverOutcome(0, "policy:" + ",".join(decision.reason_codes))
 
-        candidate = await self._next_candidate(
-            strategy_id=switch.nominated_strategy, now=now
-        )
+        candidate = await self._next_candidate(strategy_id=strategy_id, now=now)
         if candidate is None:
             return DriverOutcome(0, "no_fresh_candidate")
 
         # Price the entry in the asset the wallet actually holds, and store it.
-        #
-        # This used to name USDC as the input mint and set no amount at all. The
-        # wallet holds SOL and zero USDC, so the swap would have tried to spend
-        # a token that is not there — and the order factory refuses first
-        # anyway, on `buy_intent_missing_lamports`, because a BUY's spend is
-        # taken from the ROW rather than recomputed at assembly. A price that
-        # moves between authorisation and assembly must not change what gets
-        # spent, which is exactly why it is stored here.
-        # Quantised DOWN to whole lamports before conversion. `lamports_from_sol`
-        # refuses anything inexact by design — a limit that rounds is a limit
-        # that can be crossed by rounding — and $5 at any real SOL price is not
-        # a whole number of lamports. Rounding down means the entry is at most
-        # the authorised size, never a lamport over it.
+        # Quantised DOWN to whole lamports before conversion: rounding down
+        # means the entry is at most the authorised size, never a lamport over.
         sol_amount = (entry_usd / sol_price).quantize(
             Decimal("1e-9"), rounding=ROUND_DOWN
         )
@@ -170,13 +230,11 @@ class RealWalletDriver:
         if lamports <= 0:
             return DriverOutcome(0, "entry_size_rounds_to_zero_lamports")
 
-        # One intent per tick, deliberately. A loop here would turn a single
-        # bad minute into a whole book.
         intent = await repo.create_intent(
-            idempotency_key=f"v6:{switch.nominated_strategy}:{candidate}",
+            idempotency_key=f"v6:{strategy_id}:{candidate}",
             mint_address=candidate,
             side="BUY",
-            strategy_id=switch.nominated_strategy,
+            strategy_id=strategy_id,
             strategy_version=settings.REAL_WALLET_SAFETY_POLICY_VERSION,
             wallet_public_key=wallet,
             requested_usd=entry_usd,
@@ -187,9 +245,36 @@ class RealWalletDriver:
         if intent is None:
             return DriverOutcome(0, "already_traded", candidate)
 
-        logger.warning("real_wallet_intent_created", mint=candidate,
-                       strategy=switch.nominated_strategy, usd=str(entry_usd))
+        logger.warning(
+            "real_wallet_intent_created",
+            mint=candidate,
+            strategy=strategy_id,
+            usd=str(entry_usd),
+            allocation=str(allocation.fraction),
+        )
         return DriverOutcome(1, None, candidate)
+
+    async def _rotation_order(
+        self, allocations: list[Allocation]
+    ) -> list[Allocation]:
+        """Least-recently-served first; a strategy that never traded goes first.
+
+        Read from the intents themselves rather than kept as a cursor. A stored
+        pointer would drift the moment an intent was created by anything else,
+        and the intents are already the record of who was served when.
+        """
+        rows = await self._session.execute(
+            select(
+                RealWalletLiveIntent.strategy_id,
+                func.max(RealWalletLiveIntent.created_at),
+            ).group_by(RealWalletLiveIntent.strategy_id)
+        )
+        last_served = {sid: at for sid, at in rows.all() if sid}
+        never = datetime.min.replace(tzinfo=UTC)
+        return sorted(
+            allocations,
+            key=lambda a: (last_served.get(a.strategy_id, never), a.strategy_id),
+        )
 
     async def _sol_usd(self, now: datetime) -> Decimal | None:
         """The wallet's own SOL/USD reading, or None. Never a guessed rate."""

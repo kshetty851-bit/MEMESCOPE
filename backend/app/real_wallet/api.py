@@ -41,6 +41,11 @@ from app.real_wallet.network import (
 )
 from app.real_wallet.funding_readiness import as_dict as readiness_as_dict
 from app.real_wallet.funding_readiness import evaluate as evaluate_funding_readiness
+from app.real_wallet.allocations import (
+    FULL_BOOK,
+    AllocationService,
+    OverCommittedError,
+)
 from app.real_wallet.autotrade import AutotradeSwitchService, UnknownStrategyError
 from app.real_wallet.rehearsal import as_dict as rehearsal_as_dict
 from app.real_wallet.rehearsal import rehearse
@@ -169,6 +174,26 @@ class AutotradeStopIn(BaseModel):
     reason: str = Field(min_length=3, max_length=256)
 
 
+class AllocationIn(BaseModel):
+    """One strategy's share of the book, as a fraction.
+
+    `fraction` is bounded here, again in `AllocationService`, and again by a
+    CHECK constraint in the database. Three copies of one rule is deliberate:
+    this one gives a caller a 422 instead of a 500, the service owns the
+    cross-row sum a constraint cannot see, and the database is what still holds
+    when something writes around both.
+    """
+
+    strategy_id: str = Field(min_length=2, max_length=16)
+    fraction: Decimal = Field(gt=Decimal(0), le=Decimal(1))
+    enabled: bool = True
+    note: str | None = Field(default=None, max_length=256)
+
+
+class AllocationDisableIn(BaseModel):
+    strategy_id: str = Field(min_length=2, max_length=16)
+
+
 @router.get("/autotrade", summary="Read the operator start/stop control")
 async def read_autotrade(_admin: AdminUser, session: DbSession) -> dict[str, object]:
     service = AutotradeSwitchService(session)
@@ -182,6 +207,83 @@ async def read_autotrade(_admin: AdminUser, session: DbSession) -> dict[str, obj
             for e in await service.history(limit=20)
         ],
     }
+
+
+@router.get("/allocations", summary="How the wallet is divided between strategies")
+async def read_allocations(_admin: AdminUser, session: DbSession) -> dict[str, object]:
+    """The division, and what is left of the book.
+
+    `implicit` on an entry means nobody has divided anything and this is the
+    single nominated strategy the wallet has always traded — a reader needs to
+    tell "the operator allocated 100%" from "the operator never allocated".
+    """
+    service = AllocationService(session)
+    enabled = await service.enabled()
+    committed = await service.committed()
+    return {
+        "enabled": [a.as_dict() for a in enabled],
+        "rows": [
+            {
+                "strategy_id": r.strategy_id,
+                "fraction": str(r.fraction),
+                "enabled": r.enabled,
+                "note": r.note,
+            }
+            for r in await service.rows()
+        ],
+        "committed": str(committed),
+        "unallocated": str(FULL_BOOK - committed),
+        # Restated on every read, for the same reason the autotrade switch
+        # restates it: a share of the book is not permission to trade it.
+        "authorises_execution": False,
+    }
+
+
+@router.post("/allocations", summary="Give one strategy a share of the wallet")
+async def set_allocation(
+    payload: AllocationIn, _admin: AdminUser, session: DbSession
+) -> dict[str, object]:
+    """**This authorises nothing and enlarges nothing.**
+
+    An allocation can only narrow what a strategy may do. Every server-owned
+    bound — max trade, max open positions, total exposure, daily notional,
+    daily loss — stays global and is evaluated unchanged on top of it. A
+    strategy given 100% is permitted exactly the same order as one given 10%.
+    """
+    service = AllocationService(session)
+    try:
+        row = await service.set(
+            strategy_id=payload.strategy_id,
+            fraction=payload.fraction,
+            enabled=payload.enabled,
+            note=payload.note,
+        )
+    except OverCommittedError as exc:
+        # 409, not 422: the request is well-formed and would be valid against a
+        # book that had the room. What is wrong is the state, not the input.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    await session.commit()
+    return {
+        "strategy_id": row.strategy_id,
+        "fraction": str(row.fraction),
+        "enabled": row.enabled,
+        "authorises_execution": False,
+    }
+
+
+@router.post("/allocations/disable", summary="Stop a strategy trading its share")
+async def disable_allocation(
+    payload: AllocationDisableIn, _admin: AdminUser, session: DbSession
+) -> dict[str, object]:
+    """Frees the share for another strategy. Never deletes the row: that a
+    strategy once held real capital stays true after it stops holding it."""
+    row = await AllocationService(session).disable(strategy_id=payload.strategy_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="no such allocation")
+    await session.commit()
+    return {"strategy_id": row.strategy_id, "enabled": row.enabled}
 
 
 @router.post("/autotrade/start", summary="Record the intent to trade autonomously")

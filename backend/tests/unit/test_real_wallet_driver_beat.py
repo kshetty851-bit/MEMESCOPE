@@ -86,6 +86,28 @@ async def test_the_switch_being_off_is_what_stops_it(monkeypatch):
     assert outcome.skipped == "autotrade_switch_off"
 
 
+def _entry_path_source() -> str:
+    """Everything `tick` does to create one BUY intent, as source.
+
+    It used to be one method. Dividing the wallet between strategies split it in
+    two — `tick` decides WHICH strategy gets the tick, `_try_strategy` does the
+    sizing and creates the intent — so a test that reads only `tick` would now
+    pass by looking at the wrong half. Both are read, because together they are
+    the entry path these tests were written to guard.
+    """
+    from app.real_wallet import driver as drv
+
+    tree = ast.parse(Path(drv.__file__).read_text())
+    wanted = {"tick", "_try_strategy"}
+    found = [
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.AsyncFunctionDef) and n.name in wanted
+    ]
+    assert {n.name for n in found} == wanted, "the entry path moved again"
+    return "\n".join(ast.unparse(n) for n in found)
+
+
 def test_the_driver_spends_the_asset_the_wallet_actually_holds():
     """It named USDC as the input mint and set no amount at all.
 
@@ -94,12 +116,7 @@ def test_the_driver_spends_the_asset_the_wallet_actually_holds():
     `buy_intent_missing_lamports`, because a BUY's spend is read from the ROW
     rather than recomputed at assembly.
     """
-    from app.real_wallet import driver as drv
-
-    tree = ast.parse(Path(drv.__file__).read_text())
-    fn = next(n for n in ast.walk(tree)
-              if isinstance(n, ast.AsyncFunctionDef) and n.name == "tick")
-    src = ast.unparse(fn)
+    src = _entry_path_source()
     assert "settings.EXECUTION_SOL_MINT" in src
     assert "JUPITER_USDC_MINT" not in src
     assert "actual_input_amount_raw=lamports" in src
@@ -110,12 +127,11 @@ def test_an_unpriced_entry_refuses_rather_than_guessing():
     cannot be priced is an entry nobody sized. A stale reading is not a price."""
     from app.real_wallet import driver as drv
 
-    tree = ast.parse(Path(drv.__file__).read_text())
-    tick = ast.unparse(next(n for n in ast.walk(tree)
-                            if isinstance(n, ast.AsyncFunctionDef) and n.name == "tick"))
-    assert "sol_price_unavailable" in tick
-    assert "entry_size_rounds_to_zero_lamports" in tick
+    entry = _entry_path_source()
+    assert "sol_price_unavailable" in entry
+    assert "entry_size_rounds_to_zero_lamports" in entry
 
+    tree = ast.parse(Path(drv.__file__).read_text())
     priced = ast.unparse(next(n for n in ast.walk(tree)
                               if isinstance(n, ast.AsyncFunctionDef) and n.name == "_sol_usd"))
     assert "is_fresh" in priced, "a stale SOL price must not size an entry"

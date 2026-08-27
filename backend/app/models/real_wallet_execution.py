@@ -10,6 +10,7 @@ from typing import Any
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Identity,
@@ -320,6 +321,52 @@ class RealWalletAutotradeSwitch(Base, UUIDPrimaryKeyMixin):
     stopped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     stopped_by: Mapped[str | None] = mapped_column(String(128))
     stop_reason: Mapped[str | None] = mapped_column(String(256))
+
+
+class RealWalletAllocation(Base, UUIDPrimaryKeyMixin):
+    """One strategy's share of the execution wallet.
+
+    A FRACTION of the book, never a dollar amount. Dollars would have to be
+    re-set every time the wallet grew, shrank or took a fill, and an allocation
+    that drifts out of date is an allocation that silently over-commits. A
+    fraction is correct at every balance without anybody maintaining it.
+
+    **This can only ever narrow.** Every server-owned bound in
+    `AutonomousExecutionPolicy` -- max trade, max open positions, total
+    exposure, daily notional, daily loss -- stays global and is evaluated
+    unchanged on top of this. A strategy with a 100% allocation is not thereby
+    permitted a larger order than a strategy with 10%; it is permitted the same
+    order, subject to one more limit. An allocation is a division of blast
+    radius, never a grant of one.
+
+    The sum of enabled fractions is held at or below 1 by
+    `AllocationService`, not by a CHECK constraint: the invariant spans rows,
+    and a per-row constraint cannot see the other rows. Anything that writes
+    these rows outside that service can therefore over-commit the book, which
+    is why nothing else is allowed to.
+    """
+
+    __tablename__ = "real_wallet_allocations"
+
+    #: A V6 Lab strategy id, e.g. "V6-06". One row per strategy, ever.
+    strategy_id: Mapped[str] = mapped_column(
+        String(64), nullable=False, unique=True
+    )
+    #: Share of total equity this strategy may deploy. 0 < fraction <= 1.
+    fraction: Mapped[Decimal] = mapped_column(Numeric(6, 5), nullable=False)
+    #: Disabled rows keep their fraction but are not counted and never trade.
+    #: Retained rather than deleted so a strategy that was funded stays visible
+    #: as a fact, the same way an archived wallet does.
+    enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
+    note: Mapped[str | None] = mapped_column(String(256))
+
+    __table_args__ = (
+        CheckConstraint(
+            "fraction > 0 AND fraction <= 1", name="ck_real_wallet_allocation_fraction"
+        ),
+    )
 
 
 class RealWalletAutotradeEvent(Base, UUIDPrimaryKeyMixin):
