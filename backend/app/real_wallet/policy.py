@@ -136,12 +136,13 @@ class AutonomousExecutionPolicy:
         # ceiling that can be crossed by rounding. An unreadable balance is a
         # refusal, not a pass — the bound exists to keep the canary tiny, and an
         # unmeasured wallet has not been shown to be tiny.
-        # Zero means NO ceiling — an account meant to compound cannot have a
-        # bound that halts it at a fixed size. An unreadable balance still
-        # refuses either way: the fee-reserve floor below needs the number, and
-        # a balance nobody measured has not been shown to satisfy anything.
+        # An account meant to compound cannot carry a bound that halts it at a
+        # fixed size, so the ceiling can be switched off — by its own flag,
+        # never by a sentinel value on the number. An unreadable balance still
+        # refuses either way: the fee-reserve floor below needs that number,
+        # and a balance nobody measured has not been shown to satisfy anything.
         ceiling = (lamports_from_sol(settings.REAL_WALLET_MAX_BALANCE_SOL)
-                   if settings.REAL_WALLET_MAX_BALANCE_SOL > 0 else None)
+                   if settings.REAL_WALLET_BALANCE_CEILING_ENABLED else None)
         if state.wallet_balance_lamports is None or (
             ceiling is not None and state.wallet_balance_lamports > ceiling
         ):

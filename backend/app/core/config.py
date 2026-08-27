@@ -879,6 +879,19 @@ class Settings(BaseSettings):
     REAL_WALLET_MAX_BALANCE_SOL: Decimal = Field(
         default=Decimal("0.25"), gt=0, le=Decimal("25000")
     )
+    #: Whether the ceiling above applies at all.
+    #:
+    #: A separate flag rather than a sentinel value on the number, because
+    #: every other zero in this file fails CLOSED — an entry size of zero
+    #: refuses, a sizing base of zero disables the ladder — and making zero
+    #: mean "unbounded" on exactly one field would put the least conservative
+    #: value where the pattern says the safest one lives. Whoever reads this
+    #: next should not have to know which field is the exception.
+    #:
+    #: False is a deliberate act with a name. The number keeps its own value
+    #: while disabled, so re-enabling restores the bound that was there rather
+    #: than some forgotten large one.
+    REAL_WALLET_BALANCE_CEILING_ENABLED: bool = True
     #: Freshness and impact bounds for a real *exit* quote. An exit that cannot
     #: be priced is reported as an explicit failure state, never retried away.
     REAL_WALLET_EXIT_MAX_QUOTE_AGE_SECONDS: int = Field(default=15, ge=1, le=300)

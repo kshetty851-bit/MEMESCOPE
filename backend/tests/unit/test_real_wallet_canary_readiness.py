@@ -388,10 +388,10 @@ def test_unmeasured_equity_holds_the_caps_at_base(monkeypatch) -> None:
 # --------------------------------------------------------------------------
 
 
-def test_a_zero_ceiling_means_no_ceiling(monkeypatch) -> None:
+def test_the_ceiling_is_disabled_by_its_own_flag(monkeypatch) -> None:
     """An account meant to compound cannot carry a bound that halts it at a
     fixed size."""
-    monkeypatch.setattr(settings, "REAL_WALLET_MAX_BALANCE_SOL", Decimal("0"))
+    monkeypatch.setattr(settings, "REAL_WALLET_BALANCE_CEILING_ENABLED", False)
     d = AutonomousExecutionPolicy().evaluate_canary_entry(
         requested_usd=Decimal("1"),
         state=_state(wallet_balance_lamports=10_000 * 1_000_000_000,
@@ -400,12 +400,43 @@ def test_a_zero_ceiling_means_no_ceiling(monkeypatch) -> None:
     assert PolicyReason.MAX_WALLET_BALANCE not in d.reason_codes
 
 
+def test_zero_is_not_a_way_to_disable_the_ceiling() -> None:
+    """The number cannot express "unbounded", and must not learn to.
+
+    Every other zero in the settings fails CLOSED — entry size zero refuses,
+    sizing base zero disables the ladder. A sentinel zero here would put the
+    LEAST conservative value exactly where the pattern says the safest one
+    lives. It is also unreachable: the field is gt=0, so a deployment that
+    tried it would fail Settings validation at import and take every process
+    on the image down at its next restart.
+    """
+    from pydantic import ValidationError
+
+    from app.core.config import Settings
+
+    with pytest.raises(ValidationError):
+        Settings(REAL_WALLET_MAX_BALANCE_SOL=Decimal("0"))
+
+
 def test_an_unreadable_balance_still_refuses_with_no_ceiling(monkeypatch) -> None:
-    """Removing the ceiling must not turn an unmeasured balance into a pass."""
-    monkeypatch.setattr(settings, "REAL_WALLET_MAX_BALANCE_SOL", Decimal("0"))
+    """Disabling the ceiling must not turn an unmeasured balance into a pass."""
+    monkeypatch.setattr(settings, "REAL_WALLET_BALANCE_CEILING_ENABLED", False)
     d = AutonomousExecutionPolicy().evaluate_canary_entry(
         requested_usd=Decimal("1"),
         state=_state(wallet_balance_lamports=None),
+    )
+    assert PolicyReason.MAX_WALLET_BALANCE in d.reason_codes
+
+
+def test_re_enabling_restores_the_bound_that_was_there(monkeypatch) -> None:
+    """The number keeps its value while disabled, so switching the flag back on
+    does not restore some forgotten large ceiling."""
+    monkeypatch.setattr(settings, "REAL_WALLET_BALANCE_CEILING_ENABLED", True)
+    monkeypatch.setattr(settings, "REAL_WALLET_MAX_BALANCE_SOL", Decimal("15"))
+    d = AutonomousExecutionPolicy().evaluate_canary_entry(
+        requested_usd=Decimal("1"),
+        state=_state(wallet_balance_lamports=16 * 1_000_000_000,
+                     spend_lamports=1_000_000),
     )
     assert PolicyReason.MAX_WALLET_BALANCE in d.reason_codes
 
