@@ -377,6 +377,26 @@ def test_a_sell_is_never_refused_for_a_low_balance() -> None:
     assert PolicyReason.SPEND_NOT_MEASURED not in decision.reason_codes
 
 
+@pytest.mark.parametrize("side", ["BUY", "BUY ", " buy", "Buy2", "WHATEVER", "SWAP", ""])
+def test_only_an_explicit_sell_escapes_the_floor(side: str) -> None:
+    """The third value is the one that matters.
+
+    `!= "BUY"` and `== "SELL"` agree on BUY and SELL and disagree on
+    everything else, and `side` is a free-form String(8) with no enum and no
+    CHECK constraint — so "BUY " with a trailing space is ordinary data, not a
+    hypothetical. Under the inverted test it skipped the fee-reserve floor
+    entirely: the precise case the floor exists to catch, failing open.
+    """
+    decision = AutonomousExecutionPolicy().evaluate_canary_entry(
+        requested_usd=Decimal("1"),
+        state=_state(side=side, wallet_balance_lamports=49_801_910,
+                     spend_lamports=49_435_357),
+    )
+    assert PolicyReason.MIN_SOL_FEE_RESERVE in decision.reason_codes, (
+        f"side={side!r} escaped the floor"
+    )
+
+
 def test_an_unmeasured_buy_spend_refuses_rather_than_skipping_the_floor() -> None:
     """Zero would sail through the subtraction; None must not become zero."""
     decision = AutonomousExecutionPolicy().evaluate_canary_entry(

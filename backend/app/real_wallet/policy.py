@@ -152,8 +152,17 @@ class AutonomousExecutionPolicy:
         oversight. A sell spends the token and pays SOL back in, so applying a
         floor there would refuse exactly the transaction that ENDS the stranded
         state — turning a temporary shortfall into a permanent one.
+
+        The test is `== "SELL"`, not `!= "BUY"`. Those differ on every third
+        value, and `side` is a free-form `String(8)` with no enum and no CHECK
+        constraint behind it, so third values are ordinary data rather than a
+        hypothetical: `"BUY "` with a trailing space is not equal to `"BUY"`,
+        and under the inverted test it would have skipped the floor — the exact
+        case the floor exists to catch. Exempting only an explicit SELL means
+        anything unrecognised is treated as something that spends SOL, so the
+        unknown case fails closed.
         """
-        if state.side.upper() != "BUY":
+        if state.side.upper().strip() == "SELL":
             return []
         reserve = lamports_from_sol(
             Decimal(str(settings.REAL_WALLET_MIN_SOL_FEE_RESERVE))
