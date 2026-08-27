@@ -41,7 +41,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
-from app.models.lab import LabPosition
+from app.lab import spec
+from app.models.lab import LabPosition, LabStrategy, LabTournament
 from app.models.research_data import ResearchQuote
 from app.models.token import DiscoveredToken
 from app.services.jupiter import JupiterExecutionClient
@@ -61,6 +62,21 @@ CONTEXT = "lab_open_mark"
 #: couple of ticks.
 MAX_QUOTE_AGE = timedelta(minutes=12)
 
+#: When the sweep renews a quote. SHORTER than `MAX_QUOTE_AGE`, deliberately.
+#:
+#: The sweep used to skip anything still usable, which meant a quote was only
+#: renewed AFTER it had already expired — so every mint spent the gap between
+#: expiry and the next pass uncovered. Measured on live data: one mint quoted at
+#: 02:42, 02:57, 03:12 — a fifteen-minute rhythm against a twelve-minute window,
+#: leaving it unusable for three minutes of every cycle. Twenty-six of
+#: twenty-eight mints were covered at any instant and the two that were not held
+#: enough value to drag mark quality to 60%.
+#:
+#: Refresh-ahead fixes it: renew at eight minutes, stay valid to twelve, and the
+#: four minutes of headroom is more than one sweep cadence. Raising the per-run
+#: limit would have changed nothing — it was never the binding constraint.
+REFRESH_AFTER = timedelta(minutes=8)
+
 #: Seconds between quotes. Measured, not guessed: 0.2s produced `429 Too Many
 #: Requests` on essentially every call, and every one of those would have looked
 #: like a dead token.
@@ -77,12 +93,21 @@ async def refresh(session: AsyncSession, *, now: datetime | None = None,
                   limit: int = 40) -> dict[str, int]:
     """Re-quote the mints the Lab holds open. Writes rows; decides nothing."""
     now = now or datetime.now(UTC)
+    # Scoped to the CURRENT tournament. Unscoped, the sweep spent its per-run
+    # budget quoting a dormant record's open positions — V6 1.0.0 carried 158 of
+    # them — and the live book competed for what was left. It is not biting today
+    # only because that record has since closed out, which is the worst kind of
+    # not-biting: the bug is fixed by luck and returns the next time a version is
+    # bumped with positions still open.
     rows = list((await session.execute(
         select(LabPosition.mint_address,
                LabPosition.token_id,
                LabPosition.quantity,
                LabPosition.size_usd)
-        .where(LabPosition.status == "open")
+        .join(LabStrategy, LabStrategy.id == LabPosition.strategy_row_id)
+        .join(LabTournament, LabTournament.id == LabStrategy.tournament_id)
+        .where(LabPosition.status == "open",
+               LabTournament.spec_version == spec.SPEC_VERSION)
     )).all())
     if not rows:
         return {"mints": 0, "quoted": 0, "failed": 0, "skipped_fresh": 0}
@@ -96,7 +121,8 @@ async def refresh(session: AsyncSession, *, now: datetime | None = None,
         if mint not in largest or q > largest[mint][1]:
             largest[mint] = (token_id, q, Decimal(str(size or 0)))
 
-    fresh_cutoff = now - MAX_QUOTE_AGE
+    # REFRESH_AFTER, not MAX_QUOTE_AGE: renew before expiry, not after it.
+    fresh_cutoff = now - REFRESH_AFTER
     already = {
         m for (m,) in (await session.execute(
             select(ResearchQuote.mint_address).where(

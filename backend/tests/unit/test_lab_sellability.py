@@ -13,6 +13,7 @@ why `SPEC_HASH` must not move.
 from __future__ import annotations
 
 import ast
+from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -180,3 +181,48 @@ def test_a_stale_position_with_no_quote_is_still_refused():
     fn = next(n for n in ast.walk(tree)
               if isinstance(n, ast.AsyncFunctionDef) and n.name == "_mark")
     assert "if stale:\n        return None" in ast.unparse(fn)
+
+
+def test_quotes_are_renewed_before_they_expire():
+    """The sweep skipped anything still usable, so a quote was only renewed
+    AFTER it had already expired — every mint spent the gap between expiry and
+    the next pass uncovered.
+
+    Measured live: one mint quoted at 02:42, 02:57, 03:12 — a fifteen-minute
+    rhythm against a twelve-minute window, unusable for three minutes of every
+    cycle. Twenty-six of twenty-eight mints covered at any instant, and the two
+    that were not held enough value to drag mark quality to 60%.
+    """
+    assert sellability.REFRESH_AFTER < sellability.MAX_QUOTE_AGE
+    # The headroom must exceed one sweep cadence (3 min) or the gap reopens.
+    headroom = sellability.MAX_QUOTE_AGE - sellability.REFRESH_AFTER
+    assert headroom >= timedelta(minutes=3)
+
+    # And the sweep must actually select on the shorter window.
+    src = ast.unparse(ast.parse(Path(sellability.__file__).read_text()))
+    assert "fresh_cutoff = now - REFRESH_AFTER" in src
+
+
+def test_the_read_side_still_accepts_the_full_window():
+    """Renewing early must not shorten how long a quote may be USED. A mark is
+    still valid to twelve minutes; only the refresh moved."""
+    tree = ast.parse(Path(sellability.__file__).read_text())
+    fn = next(n for n in ast.walk(tree)
+              if isinstance(n, ast.AsyncFunctionDef) and n.name == "realisable_price")
+    assert "MAX_QUOTE_AGE" in ast.unparse(fn)
+
+
+def test_the_sweep_only_quotes_the_current_tournament():
+    """Unscoped, it spent its per-run budget on a dormant record's open
+    positions — V6 1.0.0 carried 158 — while the live book competed for what was
+    left.
+
+    It is not biting today only because that record has closed out, which is the
+    worst kind of not-biting: fixed by luck, and back the next time a version is
+    bumped with positions still open.
+    """
+    tree = ast.parse(Path(sellability.__file__).read_text())
+    fn = next(n for n in ast.walk(tree)
+              if isinstance(n, ast.AsyncFunctionDef) and n.name == "refresh")
+    src = ast.unparse(fn)
+    assert "LabTournament.spec_version == spec.SPEC_VERSION" in src
