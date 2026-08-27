@@ -26,17 +26,22 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import Select, func, select, update
+from sqlalchemy import or_ as sa_or
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
+from app.models.market import TokenMarketSnapshot
 from app.models.paper import PaperPosition, PaperTradeAudit, PaperWallet
 from app.models.paper_research import PaperDecisionSnapshot
 from app.models.radar import RadarToken
+from app.paper import market_health
+from app.paper.market_health import EntryBlockReason
 from app.paper.models import PositionStatus
 from app.security.entry_policy import EntryDecision
 
@@ -46,6 +51,17 @@ class SecurityGateViolationError(RuntimeError):
 
     A programming error, never a market condition, so it raises. Distinct
     from the ordinary `None` return, which means another worker won the race.
+    """
+
+
+class MarketDataGateViolationError(RuntimeError):
+    """A gated wallet was asked to open a position on stale or undated evidence.
+
+    Raises for the same reason as the security violation above: `None` means
+    "lost the race" and is counted as ordinary, so a freshness failure
+    reported that way would be indistinguishable from one and would disappear
+    into a refusal counter. The caller is expected to have refused already —
+    reaching this is a caller that did not.
     """
 
 
@@ -365,7 +381,12 @@ class PaperRepository:
         return select(PaperPosition).where(PaperPosition.wallet_id == wallet_id)
 
     async def open_position(
-        self, *, security: EntryDecision | None = None, **values: Any
+        self,
+        *,
+        security: EntryDecision | None = None,
+        market_observed_at: datetime | None = None,
+        now: datetime | None = None,
+        **values: Any,
     ) -> PaperPosition | None:
         """Insert one position, or return `None` if the token was already taken.
 
@@ -392,8 +413,29 @@ class PaperRepository:
 
         Ungated wallets are untouched, which is what lets Generation 2 keep
         trading under its original rules until the cutover.
+
+        ── THE MARKET-DATA FRESHNESS INVARIANT ─────────────────────────────
+
+        The same argument, for the same reason, one layer down. On 2026-08-21
+        the observation feed stopped for 125 minutes and nothing anywhere
+        refused to trade on a two-hour-old price — the wallet simply had no
+        concept of evidence being too old to buy against. A check in
+        `_open_entries` alone would cover the paths that exist today; this
+        covers every path there will ever be.
+
+        `market_observed_at` is the timestamp of the reading the entry is
+        priced from, and it is required for a gated wallet. Absent or too old,
+        this **raises** rather than returning `None`, for exactly the reason
+        the security gate does: `None` means "lost the race" and is swallowed
+        as ordinary, so a missing freshness check reported that way would
+        vanish into a refusal counter.
         """
         await self._assert_security_authorized(values.get("wallet_id"), security)
+        await self._assert_market_data_fresh(
+            values.get("wallet_id"),
+            observed_at=market_observed_at,
+            now=now,
+        )
         result = await self._session.execute(
             insert(PaperPosition)
             .values(**values)
@@ -430,6 +472,51 @@ class PaperRepository:
             raise SecurityGateViolationError(
                 f"security refused this entry: {security.outcome} "
                 f"{list(security.reason_codes)}"
+            )
+
+    async def _assert_market_data_fresh(
+        self,
+        wallet_id: uuid.UUID | None,
+        *,
+        observed_at: datetime | None,
+        now: datetime | None,
+    ) -> None:
+        """Refuse to price an entry from evidence that is too old.
+
+        Scoped to the same wallets as the security gate, and for the same
+        reason: the gate is a property of the generation policy, so turning it
+        on for a strategy is one set membership. Generation 2's record stays
+        exactly what it was.
+
+        `now` defaults to the wall clock rather than being required, so a
+        caller that forgets it still gets the check rather than silently
+        skipping it. Being lenient about the clock would make this gate
+        opt-in, and an opt-in invariant is not one.
+        """
+        from app.paper.strategy import SECURITY_GATED_STRATEGY_IDS
+
+        if not settings.FEATURE_PAPER_MARKET_HEALTH_GATE:
+            return
+        if wallet_id is None:  # pragma: no cover - security gate raises first
+            raise MarketDataGateViolationError("a position must belong to a wallet")
+        strategy_id = await self._session.scalar(
+            select(PaperWallet.strategy_id).where(PaperWallet.id == wallet_id)
+        )
+        if strategy_id not in SECURITY_GATED_STRATEGY_IDS:
+            return
+
+        moment = now or datetime.now(UTC)
+        if observed_at is None:
+            raise MarketDataGateViolationError(
+                f"strategy {strategy_id!r} requires a dated market observation to "
+                f"open a position"
+            )
+        age = (moment - observed_at).total_seconds()
+        limit = settings.PAPER_ENTRY_MAX_SNAPSHOT_AGE_SECONDS
+        if age > limit:
+            raise MarketDataGateViolationError(
+                f"market data is {age:.0f}s old, above the {limit:.0f}s entry limit "
+                f"({EntryBlockReason.MARKET_DATA_STALE})"
             )
 
     async def open_positions(
@@ -736,3 +823,207 @@ class PaperRepository:
             .group_by(PaperPosition.status)
         )
         return {status: int(count) for status, count in rows.all()}
+
+    # --- Market-data health -------------------------------------------------
+    #
+    # The reads behind `market_health.assess`. They live here because this file
+    # is the package's declared database seam and that module is pure — a
+    # decision that answered differently depending on what was in the database
+    # would not be reproducible, which is the property the whole simulation
+    # rests on.
+
+    @staticmethod
+    def market_health_thresholds() -> market_health.Thresholds:
+        """The deployment's calibration, read at the one layer allowed to.
+
+        `market_health` carries its own measured defaults so it stays testable
+        without a configuration file; this is what overrides them in a running
+        process.
+        """
+        return market_health.Thresholds(
+            feed_stale_seconds=settings.PAPER_FEED_STALE_SECONDS,
+            feed_degraded_seconds=settings.PAPER_FEED_DEGRADED_SECONDS,
+            feed_min_recent_mints=settings.PAPER_FEED_MIN_RECENT_MINTS,
+            position_warning_seconds=settings.PAPER_POSITION_WARNING_SECONDS,
+            position_critical_seconds=settings.PAPER_POSITION_CRITICAL_SECONDS,
+            position_unpriceable_seconds=settings.PAPER_POSITION_UNPRICEABLE_SECONDS,
+        )
+
+    async def feed_evidence(self, *, now: datetime) -> market_health.FeedEvidence:
+        """System-level feed facts. Never derived from a single token.
+
+        Two readings, because they fail differently. Recency alone would report
+        a worker wedged on one hot token as healthy; throughput alone would
+        report a feed that stopped a minute ago as fine. Both are index-backed:
+        a `max()` and a bounded `count()` over `ix_snapshots_captured_at`.
+
+        `price_usd IS NOT NULL` on both. A snapshot row is written even when
+        the provider returns nothing usable, so counting rows rather than
+        prices would measure the poller instead of the market.
+        """
+        priced = TokenMarketSnapshot.price_usd.is_not(None)
+        newest = await self._session.scalar(
+            select(func.max(TokenMarketSnapshot.captured_at)).where(priced)
+        )
+        window_start = now - timedelta(
+            seconds=settings.PAPER_FEED_THROUGHPUT_WINDOW_SECONDS
+        )
+        counts = (
+            await self._session.execute(
+                select(
+                    func.count().label("snapshots"),
+                    func.count(func.distinct(TokenMarketSnapshot.mint_address)).label(
+                        "mints"
+                    ),
+                ).where(priced, TokenMarketSnapshot.captured_at >= window_start)
+            )
+        ).one()
+        return market_health.FeedEvidence(
+            newest_priced_at=newest,
+            recent_priced_snapshots=int(counts.snapshots or 0),
+            recent_priced_mints=int(counts.mints or 0),
+        )
+
+    async def open_book_freshness(
+        self, *, now: datetime
+    ) -> list[market_health.PositionFreshness]:
+        """The **live wallet's** open positions and the age of each newest priced row.
+
+        ── WHY THE LIVE WALLET AND NOT EVERY OPEN BOOK ─────────────────────
+
+        This was scoped to every managed book, archived generations included,
+        on the reasoning that all open capital deserves watching. Measured
+        against production that is wrong, and visibly so: generation 9 held
+        four positions, all four priced within seconds, and the gate was shut
+        by **one abandoned generation 5 position** whose pool died on
+        2026-08-17.
+
+        Two things make that the wrong scope:
+
+        * **It cannot be satisfied.** 93 of the 96 archived open positions have
+          no priceable market at all. Their generations are retired and nothing
+          will ever re-price them, so a gate that waits on them is waiting for
+          something that cannot happen.
+        * **It oscillates.** A dying mint drifts across the critical threshold,
+          blocks entries for up to six hours until it crosses the unpriceable
+          one, and blocks again the moment it receives a single further price.
+          The live wallet's ability to trade would depend on the death throes
+          of a book nobody manages.
+
+        The question this gate exists to answer is narrower than "is all
+        capital observable": it is **"can the wallet see well enough to open a
+        new position?"**, and new positions are only ever opened on the live
+        wallet. Its own book is exactly the right evidence.
+
+        Archived books keep their exits — `review` still walks them, unchanged
+        — and their staleness is still reported through `archived_open_stale`
+        below. It is surfaced rather than acted on, because the abandoned book
+        is a real problem and a different one.
+
+        One correlated `max()` per position over
+        `ix_snapshots_mint_captured_desc` — the same access path
+        `latest_for_mints` uses, for the same reason.
+        """
+        newest = (
+            select(func.max(TokenMarketSnapshot.captured_at))
+            .where(
+                TokenMarketSnapshot.mint_address == PaperPosition.mint_address,
+                TokenMarketSnapshot.price_usd.is_not(None),
+            )
+            .correlate(PaperPosition)
+            .scalar_subquery()
+        )
+        statement = (
+            select(
+                PaperPosition.mint_address,
+                PaperWallet.generation,
+                newest.label("observed_at"),
+            )
+            .select_from(PaperPosition)
+            .join(PaperWallet, PaperWallet.id == PaperPosition.wallet_id)
+            .where(
+                PaperPosition.status == PositionStatus.OPEN.value,
+                PaperWallet.archived_at.is_(None),
+            )
+        )
+        rows = (await self._session.execute(statement)).all()
+        return [
+            market_health.PositionFreshness(
+                mint_address=row.mint_address,
+                generation=int(row.generation),
+                observed_at=row.observed_at,
+                age_seconds=(
+                    None
+                    if row.observed_at is None
+                    # Clock skew between containers can date a row slightly
+                    # ahead; a negative age would read as impossibly healthy.
+                    else max((now - row.observed_at).total_seconds(), 0.0)
+                ),
+            )
+            for row in rows
+        ]
+
+    async def archived_open_stale(self, *, now: datetime) -> tuple[int, int]:
+        """`(open, unpriced_recently)` across retired generations. Reported, not gated.
+
+        The gate above deliberately ignores these. That makes it correct and
+        also makes it silent about 96 positions holding capital in books whose
+        generations are retired, 93 of which have had no price since
+        2026-08-17 — so the number is surfaced on the health endpoint instead.
+
+        Not a metric for its own sake: those positions are frozen mid-trade and
+        their recorded outcome is therefore wrong, which is a real problem and
+        a different phase's. A count on the endpoint is what stops it being
+        forgotten now that nothing fails because of it.
+        """
+        cutoff = now - timedelta(seconds=settings.PAPER_POSITION_CRITICAL_SECONDS)
+        newest = (
+            select(func.max(TokenMarketSnapshot.captured_at))
+            .where(
+                TokenMarketSnapshot.mint_address == PaperPosition.mint_address,
+                TokenMarketSnapshot.price_usd.is_not(None),
+            )
+            .correlate(PaperPosition)
+            .scalar_subquery()
+        )
+        row = (
+            await self._session.execute(
+                select(
+                    func.count().label("total"),
+                    func.count()
+                    .filter(sa_or(newest.is_(None), newest < cutoff))
+                    .label("stale"),
+                )
+                .select_from(PaperPosition)
+                .join(PaperWallet, PaperWallet.id == PaperPosition.wallet_id)
+                .where(
+                    PaperPosition.status == PositionStatus.OPEN.value,
+                    PaperWallet.archived_at.is_not(None),
+                )
+            )
+        ).one()
+        return int(row.total or 0), int(row.stale or 0)
+
+    async def market_health_snapshot(
+        self, *, now: datetime
+    ) -> market_health.MarketDataHealth:
+        """The verdict, assembled from the two readings above."""
+        thresholds = self.market_health_thresholds()
+        return market_health.assess(
+            await self.feed_evidence(now=now),
+            market_health.census_from(
+                await self.open_book_freshness(now=now), thresholds=thresholds
+            ),
+            now=now,
+            thresholds=thresholds,
+        )
+
+    async def stale_open_mints(self, *, now: datetime) -> list[str]:
+        """Managed open positions due an urgent refresh.
+
+        Excludes the unpriceable: re-asking a provider for a pool that has
+        answered empty three thousand times is not a recovery action, and
+        spending the head of the queue on it would starve the positions that
+        can actually be recovered.
+        """
+        return list((await self.market_health_snapshot(now=now)).census.critical_mints)

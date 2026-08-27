@@ -53,6 +53,17 @@ class RadarRefreshOutcome:
     ranking_changed: bool
 
 
+def _min_liquidity_usd() -> Decimal | None:
+    """The configured Radar admission liquidity floor, or `None` when off.
+
+    The engine is pure and cannot read settings, so the flag is resolved here —
+    the I/O layer — and threaded in. `None` is the pre-flag behaviour exactly.
+    """
+    if not settings.FEATURE_RADAR_LIQUIDITY_FLOOR:
+        return None
+    return Decimal(str(settings.RADAR_MIN_LIQUIDITY_USD))
+
+
 class RadarService:
     """Evaluate tokens and maintain the Radar record."""
 
@@ -81,7 +92,7 @@ class RadarService:
         if result is None:
             return False
 
-        category = detector.classify(result)
+        category = detector.classify(result, min_liquidity_usd=_min_liquidity_usd())
         existing = await self._repository.get(mint_address)
 
         if existing is None:

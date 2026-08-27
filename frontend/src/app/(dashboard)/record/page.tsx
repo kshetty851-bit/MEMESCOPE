@@ -15,7 +15,16 @@ import { EmptyState, ErrorState } from "@/components/ui/states";
 import { HistoryFeed } from "@/components/record/history-feed";
 import { Journey } from "@/components/record/journey";
 import { usePaperPositions } from "@/hooks/use-paper";
-import { byMint, exitLabel, usd } from "@/lib/paper";
+import {
+  byMint,
+  clock,
+  entryDelaySeconds,
+  epoch,
+  exitLabel,
+  formatDelay,
+  stamp,
+  usd,
+} from "@/lib/paper";
 import { num } from "@/lib/design/bands";
 import {
   useAllRadarDetections,
@@ -171,6 +180,15 @@ export default function TrackRecordPage() {
           return num(row.days_since_detection);
         case "paper":
           return num(traded.get(row.mint_address)?.pnl_usd);
+        case "detectedAt":
+          return epoch(row.discovered_at);
+        case "entryAt":
+          return epoch(traded.get(row.mint_address)?.opened_at);
+        case "entryDelay":
+          return entryDelaySeconds(
+            row.discovered_at,
+            traded.get(row.mint_address)?.opened_at,
+          );
         default:
           return null;
       }
@@ -373,6 +391,88 @@ export default function TrackRecordPage() {
         cellClassName: "hidden xl:table-cell",
         cell: (row) => <PaperCell position={traded.get(row.mint_address)} />,
       },
+      {
+        // DETECTION → ENTRY → EXIT. Placed after Paper because the last two are
+        // trade facts, and deliberately far from the "Detected" column above,
+        // which is a market cap in dollars rather than a clock.
+        key: "detectedAt",
+        header: "Detected at",
+        align: "right",
+        width: "92px",
+        sortable: true,
+        srHeader: "Detection time",
+        cell: (row) => (
+          <Num
+            display={clock(row.discovered_at)}
+            absentLabel="Not available"
+            tone="flat"
+            className="text-xs"
+            title={
+              stamp(row.discovered_at) ??
+              "No discovery record is stored for this mint — the detection time is not available, and is not estimated."
+            }
+          />
+        ),
+      },
+      {
+        key: "entryAt",
+        header: "Entry",
+        align: "right",
+        width: "96px",
+        sortable: true,
+        srHeader: "Paper wallet entry and exit time",
+        headerClassName: "hidden lg:table-cell",
+        cellClassName: "hidden lg:table-cell",
+        cell: (row) => {
+          const position = traded.get(row.mint_address);
+          if (!position) return <Num value={null} absentLabel="not traded" />;
+          const exit = position.closed_at;
+          return (
+            <span className="flex flex-col items-end leading-tight">
+              <Num
+                display={clock(position.opened_at)}
+                absentLabel="Not available"
+                className="text-xs"
+                title={stamp(position.opened_at) ?? undefined}
+              />
+              <span
+                className="text-[0.625rem] text-ink-3"
+                title={exit ? (stamp(exit) ?? undefined) : "Still open"}
+              >
+                {exit ? `exit ${clock(exit)}` : "open"}
+              </span>
+            </span>
+          );
+        },
+      },
+      {
+        key: "entryDelay",
+        header: "Entry delay",
+        align: "right",
+        width: "88px",
+        sortable: true,
+        srHeader: "Time between detection and entry",
+        headerClassName: "hidden lg:table-cell",
+        cellClassName: "hidden lg:table-cell",
+        cell: (row) => {
+          const position = traded.get(row.mint_address);
+          if (!position) return <Num value={null} absentLabel="not traded" />;
+          const seconds = entryDelaySeconds(row.discovered_at, position.opened_at);
+          return (
+            <Num
+              display={formatDelay(seconds)}
+              absentLabel="Not available"
+              tone="muted"
+              className="text-xs"
+              title={
+                seconds === null
+                  ? "No stored detection time for this mint, so the delay cannot be measured."
+                  : `Detected ${clock(row.discovered_at)} · Entry ${clock(position.opened_at)} · ${formatDelay(seconds)}`
+              }
+            />
+          );
+        },
+      },
     ],
     [traded],
   );
@@ -487,7 +587,7 @@ export default function TrackRecordPage() {
               density="compact"
               stickyHeader
               maxHeight="calc(100dvh - 24rem)"
-              minWidth="880px"
+              minWidth="980px"
               isPending={record.isPending}
               pendingRows={12}
               empty={

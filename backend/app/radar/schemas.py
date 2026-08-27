@@ -127,6 +127,13 @@ class RadarEntryOut(BaseSchema):
     opportunity_score: Decimal
     confidence: Decimal
 
+    #: When MEMESCOPE first *discovered* the mint — the minimum across every
+    #: stored discovery record for it. Distinct from `first_detected_at`, which
+    #: is admission to the Radar and happens later. `None` only when no
+    #: discovery row survives for the mint; clients render that as unavailable
+    #: rather than substituting a nearby timestamp.
+    discovered_at: datetime | None = None
+
     first_detected_at: datetime
     first_price: Decimal | None
     first_market_cap: Decimal | None

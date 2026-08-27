@@ -153,3 +153,84 @@ export const PAPER_STATE_LABEL: Record<PaperTokenState, string> = {
 export function byMint(items: PaperPosition[]): Map<string, PaperPosition> {
   return new Map(items.map((item) => [item.mint_address, item]));
 }
+
+/**
+ * DETECTION → ENTRY → EXIT
+ *
+ * The three stored moments a track record row is made of, and the one figure
+ * derived from them. Nothing here invents a timestamp: a mint whose discovery
+ * record the backend could not find renders as unavailable, and the delay is
+ * withheld with it. Substituting the entry time for a missing detection would
+ * make every such row read "+0s", which is the one wrong answer that looks
+ * like a right one.
+ *
+ * Times render in the reader's own zone, like every other clock in MEMESCOPE.
+ * The backend keeps UTC; `Date` does the conversion, and `stamp()` carries the
+ * unambiguous version into the title for anyone comparing against the API.
+ */
+export function clock(iso: string | null | undefined): string | null {
+  const date = iso ? new Date(iso) : null;
+  if (!date || !Number.isFinite(date.getTime())) return null;
+  return date.toLocaleTimeString("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+/** The same moment, spelled out — for `title`, where space is not scarce. */
+export function stamp(iso: string | null | undefined): string | null {
+  const date = iso ? new Date(iso) : null;
+  if (!date || !Number.isFinite(date.getTime())) return null;
+  const local = date.toLocaleString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+  return `${local} · ${date.toISOString().replace("T", " ").replace(".000Z", "Z")}`;
+}
+
+/** Milliseconds since epoch, or null — the sort key for a column of times. */
+export function epoch(iso: string | null | undefined): number | null {
+  const date = iso ? new Date(iso) : null;
+  if (!date || !Number.isFinite(date.getTime())) return null;
+  return date.getTime();
+}
+
+/**
+ * Entry delay in seconds: how long the platform held the token between seeing
+ * it and taking it. Null unless *both* moments are stored.
+ */
+export function entryDelaySeconds(
+  detectedAt: string | null | undefined,
+  openedAt: string | null | undefined,
+): number | null {
+  const from = epoch(detectedAt);
+  const to = epoch(openedAt);
+  if (from === null || to === null) return null;
+  return (to - from) / 1000;
+}
+
+/**
+ * `+22m 33s`. Signed, and the sign is not decorative — an entry recorded
+ * before its own detection is a data fault worth seeing, not one worth
+ * clamping to zero.
+ */
+export function formatDelay(seconds: number | null): string | null {
+  if (seconds === null || !Number.isFinite(seconds)) return null;
+
+  const sign = seconds < 0 ? "−" : "+";
+  const total = Math.round(Math.abs(seconds));
+  const s = total % 60;
+  const m = Math.floor(total / 60) % 60;
+  const h = Math.floor(total / 3600) % 24;
+  const d = Math.floor(total / 86400);
+
+  if (d > 0) return `${sign}${d}d ${h}h`;
+  if (h > 0) return `${sign}${h}h ${String(m).padStart(2, "0")}m`;
+  if (m > 0) return `${sign}${m}m ${String(s).padStart(2, "0")}s`;
+  return `${sign}${s}s`;
+}

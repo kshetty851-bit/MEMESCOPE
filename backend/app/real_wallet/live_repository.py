@@ -7,7 +7,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any, cast
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,6 +17,7 @@ from app.models.real_wallet_execution import (
     RealWalletExecutionEvent,
     RealWalletExecutionHealth,
     RealWalletKillSwitch,
+    RealWalletKillSwitchEvent,
     RealWalletLiveIntent,
     RealWalletPosition,
 )
@@ -159,15 +160,80 @@ class LiveIntentRepository:
             ),
         )
 
-    async def activate_kill_switch(self, *, kind: str, reason: str, at: datetime) -> None:
+    async def activate_kill_switch(
+        self, *, kind: str, reason: str, at: datetime, actor: str | None = None
+    ) -> None:
         """Persist a fail-closed switch. Repeating activation preserves no secret data."""
         await self._session.execute(
             insert(RealWalletKillSwitch)
-            .values(kind=kind, active=True, reason=reason, activated_at=at)
+            .values(
+                kind=kind,
+                active=True,
+                reason=reason,
+                activated_at=at,
+                actor=actor,
+            )
             .on_conflict_do_update(
                 index_elements=[RealWalletKillSwitch.kind],
-                set_={"active": True, "reason": reason, "activated_at": at},
+                set_={
+                    "active": True,
+                    "reason": reason,
+                    "activated_at": at,
+                    "actor": actor,
+                },
             )
+        )
+        self._session.add(
+            RealWalletKillSwitchEvent(
+                kind=kind, action="armed", actor=actor, reason=reason, created_at=at
+            )
+        )
+
+    async def clear_kill_switch(
+        self, *, kind: str, actor: str, reason: str, at: datetime
+    ) -> bool:
+        """Clear one armed switch, attributed. Returns False when none was armed.
+
+        **This clears exactly one barrier and nothing else.** Every other
+        condition — mode, the three enable flags, the release constant, the
+        submission guard, the canary limits, SEC-2 freshness, mainnet
+        verification — is evaluated independently and is unaffected by this
+        call. That is deliberate: an operator clearing a switch after
+        investigating a failure must not thereby re-authorise execution, and
+        the only way to guarantee that is for this to have no reach beyond its
+        own row.
+
+        The consecutive-failure counter is *not* reset here either. It armed
+        this switch; zeroing it as a side effect would let a repeating fault
+        re-arm from a clean slate every time instead of tripping immediately.
+        """
+        if not actor or not reason:
+            raise ValueError("kill_switch_clear_requires_actor_and_reason")
+        result = await self._session.execute(
+            update(RealWalletKillSwitch)
+            .where(RealWalletKillSwitch.kind == kind, RealWalletKillSwitch.active)
+            .values(
+                active=False, cleared_at=at, cleared_by=actor, cleared_reason=reason
+            )
+        )
+        cleared = isinstance(result, CursorResult) and result.rowcount == 1
+        if cleared:
+            self._session.add(
+                RealWalletKillSwitchEvent(
+                    kind=kind, action="cleared", actor=actor, reason=reason, created_at=at
+                )
+            )
+        return cleared
+
+    async def kill_switch_history(self, *, limit: int = 50) -> list[RealWalletKillSwitchEvent]:
+        return list(
+            (
+                await self._session.scalars(
+                    select(RealWalletKillSwitchEvent)
+                    .order_by(RealWalletKillSwitchEvent.created_at.desc())
+                    .limit(limit)
+                )
+            ).all()
         )
 
     async def record_execution_failure(self, *, reason: str, at: datetime) -> int:
@@ -290,6 +356,41 @@ class LiveIntentRepository:
         position.exit_intent_id = intent.id
         return intent
 
+    async def record_signature_before_submission(
+        self, *, intent: RealWalletLiveIntent, signature: str, at: datetime
+    ) -> None:
+        """Persist the signature at `SIGNED`, before any network call happens.
+
+        This is the difference between a lost `/execute` response being
+        *recoverable* and being permanently unknown. An ed25519 signature is
+        deterministic in the key and the message, so the signer knows it before
+        anything is sent; storing it here means a timeout leaves behind the one
+        value reconciliation needs to ask the chain what actually happened.
+
+        Never a licence to resend. The transaction bytes are still not stored,
+        and no caller can rebuild them from this.
+
+        The unique partial index on the column is the replay guard: recording
+        the same signature against a second intent raises rather than quietly
+        creating a duplicate path to the same on-chain transaction.
+        """
+        if not signature:
+            raise SettlementEvidenceError("signature_required_before_submission")
+        result = await self._session.execute(
+            update(RealWalletLiveIntent)
+            .where(
+                RealWalletLiveIntent.id == intent.id,
+                RealWalletLiveIntent.state == ExecutionState.SIGNED,
+                RealWalletLiveIntent.transaction_signature.is_(None),
+            )
+            .values(transaction_signature=signature)
+        )
+        if not isinstance(result, CursorResult) or result.rowcount != 1:
+            raise ConcurrentIntentTransitionError("execution_intent_already_signed")
+        intent.transaction_signature = signature
+        # The signature itself is public on-chain data, not secret material.
+        await self._event(intent.id, "signed", {"signature": signature, "at": str(at)})
+
     async def record_submission_result(
         self,
         *,
@@ -297,18 +398,33 @@ class LiveIntentRepository:
         signature: str | None,
         outcome: str,
     ) -> None:
-        """Record only safe submission facts; transaction bytes are never stored."""
+        """Record only safe submission facts; transaction bytes are never stored.
+
+        A signature already stored at `SIGNED` is **kept**, not overwritten. An
+        unknown outcome carries `signature=None`, and writing that None would
+        erase the one value reconciliation needs — turning the exact failure
+        this system is built to survive into a permanently unresolvable intent.
+        """
         result = await self._session.execute(
             update(RealWalletLiveIntent)
             .where(
                 RealWalletLiveIntent.id == intent.id,
                 RealWalletLiveIntent.state == ExecutionState.SUBMITTED,
             )
-            .values(transaction_signature=signature)
+            .values(
+                transaction_signature=func.coalesce(
+                    signature, RealWalletLiveIntent.transaction_signature
+                )
+            )
         )
         if not isinstance(result, CursorResult) or result.rowcount != 1:
             raise ConcurrentIntentTransitionError("execution_intent_submission_changed")
-        intent.transaction_signature = signature
+        # Assign only when there is something to assign. Reading the attribute
+        # first to build a fallback would refresh an instance the last commit
+        # expired, which is a lazy load in an async context; and there is
+        # nothing to fall back to anyway — the COALESCE above already kept it.
+        if signature:
+            intent.transaction_signature = signature
         await self._event(
             intent.id,
             "submission_result",

@@ -11,11 +11,27 @@ import json
 import os
 import stat
 from base64 import b64decode, b64encode
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
 from solders.keypair import Keypair
 from solders.transaction import Transaction, VersionedTransaction
+
+from app.real_wallet import tx_inspect
+
+
+@dataclass(frozen=True, slots=True)
+class SignedTransaction:
+    """What leaves the signer. Never the key, never the keypair, never a path."""
+
+    signed_transaction: str
+    #: Known *before* submission, because it is computed from the message we
+    #: just signed. This is what makes a lost submit response reconcilable.
+    signature: str
+    #: Replay key. The same message signed twice yields the same value.
+    message_fingerprint: str
+    program_ids: tuple[str, ...]
 
 
 class ExecutionSignerUnavailableError(RuntimeError):
@@ -87,26 +103,62 @@ class FileExecutionSigner:
         """Unit-testable primitive only; no transaction is built or submitted here."""
         return bytes(self._keypair.sign_message(message))
 
-    def sign_jupiter_transaction(self, encoded_transaction: str) -> str:
-        """Sign one assembled V0 transaction after structural wallet checks.
+    def sign_jupiter_transaction(
+        self,
+        encoded_transaction: str,
+        *,
+        expected_intent_fingerprint: str,
+        intent_fingerprint_value: str,
+        allowed_programs: frozenset[str] | None = None,
+        seen_message_fingerprints: frozenset[str] = frozenset(),
+    ) -> SignedTransaction:
+        """Sign one assembled V0 transaction, or refuse it with named reasons.
 
-        This verifies the required signer set and payer/taker identity.  Route
-        instructions are compiled and may use lookup tables, so mint/amount
-        semantics remain authoritative only in the separately persisted order
-        evidence and must be rechecked upstream before this boundary.
+        Three questions are answered before a signature exists, and they are
+        deliberately different questions:
+
+        * **Whose transaction is this** — one required signature, fee payer is
+          the pinned wallet. That was always here.
+        * **What does it invoke** — `tx_inspect` decodes the message and refuses
+          any top-level program outside the allowlist, and any program id that
+          would have to be resolved from an address lookup table. Compiled route
+          instructions are opaque; an unauditable program id is not signed.
+        * **Is it the transaction we authorised** — the caller's fingerprint
+          must equal one recomputed from the authoritative intent. A caller
+          therefore cannot nominate what it is signing.
+
+        Mint and amount semantics remain the job of `order_evidence.verify`
+        against the JSON `/order` body, which must run before this boundary;
+        those values are genuinely not readable from compiled route bytes.
+
+        Returns the signature alongside the signed bytes. **The signature must
+        be persisted before submission**: a lost `/execute` response with no
+        stored signature is a transaction that may have landed and can never be
+        reconciled, which is the one failure that forces a blind retry.
         """
+        verdict = tx_inspect.verify(
+            encoded_transaction=encoded_transaction,
+            expected_fee_payer=self.public_key,
+            allowed_programs=allowed_programs,
+            expected_intent_fingerprint=expected_intent_fingerprint,
+            intent_fingerprint_value=intent_fingerprint_value,
+            seen_message_fingerprints=seen_message_fingerprints,
+        )
+        if not verdict.approved:
+            raise ExecutionTransactionValidationError(",".join(verdict.reason_codes))
+        facts = verdict.facts
+        assert facts is not None
         try:
             transaction = VersionedTransaction.from_bytes(b64decode(encoded_transaction))
             message = transaction.message
-            if message.header.num_required_signatures != 1:
-                raise ExecutionTransactionValidationError("unexpected_signer_requirement")
-            if str(message.account_keys[0]) != self.public_key:
-                raise ExecutionTransactionValidationError("transaction_taker_mismatch")
             signature = self._keypair.sign_message(bytes(message))
             signed = VersionedTransaction.populate(message, [signature])
-            return b64encode(bytes(signed)).decode("ascii")
-        except ExecutionTransactionValidationError:
-            raise
+            return SignedTransaction(
+                signed_transaction=b64encode(bytes(signed)).decode("ascii"),
+                signature=str(signature),
+                message_fingerprint=facts.message_fingerprint,
+                program_ids=facts.program_ids,
+            )
         except Exception as exc:
             raise ExecutionTransactionValidationError("malformed_jupiter_transaction") from exc
 

@@ -22,6 +22,8 @@ import { EmptyState, ErrorState } from "@/components/ui/states";
 import { useIdentity } from "@/hooks/use-identity";
 import { useLiveUpdates } from "@/hooks/use-live-updates";
 import { useRadarEntry } from "@/hooks/use-radar";
+import { usePaperPositions } from "@/hooks/use-paper";
+import { byMint } from "@/lib/paper";
 import { useTokenScore } from "@/hooks/use-scores";
 import { ApiError, api } from "@/lib/api-client";
 import { buildHealth } from "@/lib/health";
@@ -80,6 +82,9 @@ export default function TokenIntelligencePage() {
   const scoreQuery = useTokenScore(mint);
   const radarEntry = useRadarEntry(mint);
   const identity = useIdentity(mint);
+  // The trade, if the wallet took one. Needed here only so the timeline can put
+  // entry and exit on the same clock as detection.
+  const paper = usePaperPositions();
 
   if (token.error instanceof ApiError && token.error.status === 404) {
     return (
@@ -112,6 +117,7 @@ export default function TokenIntelligencePage() {
   // state with its own sentence, never an error.
   const score = scoreQuery.data?.status === "scored" ? scoreQuery.data.score : null;
   const radar = radarEntry.data;
+  const position = byMint(paper.data?.items ?? []).get(mint);
 
   return (
     <div className="flex flex-col gap-5 pb-8">
@@ -177,7 +183,9 @@ export default function TokenIntelligencePage() {
                     <ProjectHealth dimensions={buildHealth(score ?? null)} />
                   </>
                 )}
-                {radar ? <OpportunityTimeline entry={radar} /> : null}
+                {radar ? (
+                  <OpportunityTimeline entry={radar} position={position} />
+                ) : null}
               </aside>
             </div>
           ) : tab === "market" ? (

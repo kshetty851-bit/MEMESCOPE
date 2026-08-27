@@ -142,3 +142,10 @@ test_err.log
 unit_test.log
 backend/scratch_send_report.py
 .pnpm-store/
+
+# Solana keypair files. `phase2-devnet-signer.json` was sitting untracked and
+# un-ignored at the repository root, one `git add -A` away from a committed
+# signing key. Devnet-only today; the pattern is what stops the mainnet one.
+*-signer.json
+*keypair*.json
+phase2-devnet-signer.json

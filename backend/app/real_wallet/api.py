@@ -33,13 +33,26 @@ from app.real_wallet.network import (
     is_valid_wallet_address,
     verify_wallet_network,
 )
+from app.real_wallet.policy import configured_entry_size_usd
 from app.real_wallet.repository import RealWalletExecutionRepository
 from app.real_wallet.sol_price import JupiterSolUsdPriceSource, SolUsdPrice
 from app.real_wallet.transport_policy import readiness as transport_readiness
+from app.real_wallet.tx_inspect import DEFAULT_ALLOWED_PROGRAMS, lamports_from_sol
 from app.repositories.token import TokenRepository
+from app.security import entry_policy
 from app.services.rpc.standard import StandardSolanaRPC
 
 router = APIRouter(prefix="/real-wallet", tags=["real-wallet"])
+
+
+def _allowed_programs() -> frozenset[str]:
+    """The effective program allowlist: the reviewed defaults plus configuration."""
+    extra = {
+        program.strip()
+        for program in settings.REAL_WALLET_ALLOWED_PROGRAM_IDS
+        if program.strip()
+    }
+    return DEFAULT_ALLOWED_PROGRAMS | extra
 
 
 class NativeTransferQuoteIn(BaseModel):
@@ -54,6 +67,20 @@ class DevnetIntentIn(BaseModel):
 
 class ManualApprovalIn(BaseModel):
     confirmation_phrase: Literal["APPROVE_DEVNET_TRANSFER"]
+
+
+class KillSwitchClearIn(BaseModel):
+    """Clearing a kill switch is an authorised, attributed, explained act.
+
+    The confirmation phrase is not ceremony. This is the one control in the
+    product that removes a safety barrier, and a bare POST is something a
+    mis-scoped script or a stray click can perform. A required literal cannot
+    be sent by accident, and `reason` is what the audit row is for — a cleared
+    switch with no stated reason is a cleared switch nobody can review.
+    """
+
+    confirmation_phrase: Literal["CLEAR_REAL_WALLET_KILL_SWITCH"]
+    reason: str = Field(min_length=8, max_length=256)
 
 
 class DevnetIntentSummary(BaseModel):
@@ -188,6 +215,7 @@ async def status(_admin: AdminUser, session: DbSession) -> dict[str, object]:
     live = LiveIntentRepository(session)
     unresolved = await live.unresolved()
     kill_switches = await live.active_kill_switches()
+    kill_switch_history = await live.kill_switch_history(limit=20)
     open_positions = await live.open_positions_count()
     health = await live.health()
     positions = await live.positions(limit=30)
@@ -259,14 +287,44 @@ async def status(_admin: AdminUser, session: DbSession) -> dict[str, object]:
             },
             "fee_accounting": _fee_accounting_readiness(sol_price, now=now),
         },
+        # The one line that must never be ambiguous on a dashboard. `LOCKED`
+        # means no configuration reachable from this process can submit; it is
+        # derived from the transport policy rather than restated by hand, so it
+        # cannot say unlocked while the policy refuses.
+        "lock_state": (
+            "LOCKED" if not transport.submission_permitted else "SUBMISSION_PERMITTED"
+        ),
         "limits": {
+            "entry_size_usd": (
+                None
+                if configured_entry_size_usd() is None
+                else _decimal(settings.REAL_WALLET_ENTRY_SIZE_USD)
+            ),
+            "entry_size_configured": configured_entry_size_usd() is not None,
             "max_trade_usd": _decimal(settings.REAL_WALLET_MAX_TRADE_USD),
             "max_open_positions": settings.REAL_WALLET_MAX_OPEN_POSITIONS,
             "max_total_exposure_usd": _decimal(settings.REAL_WALLET_MAX_TOTAL_EXPOSURE_USD),
             "max_daily_notional_usd": _decimal(settings.REAL_WALLET_MAX_DAILY_NOTIONAL_USD),
+            "max_daily_trades": settings.REAL_WALLET_MAX_DAILY_TRADES,
             "max_daily_loss_usd": _decimal(settings.REAL_WALLET_MAX_DAILY_LOSS_USD),
+            "max_balance_sol": _decimal(settings.REAL_WALLET_MAX_BALANCE_SOL),
+            "max_balance_lamports": lamports_from_sol(settings.REAL_WALLET_MAX_BALANCE_SOL),
             "min_sol_fee_reserve": _decimal(settings.REAL_WALLET_MIN_SOL_FEE_RESERVE),
         },
+        "security_gate": {
+            # Named so the dashboard can state it rather than imply it: real
+            # entries are gated by the same SEC-2 evaluator and the same pure
+            # `entry_policy.decide` that Paper uses.
+            "shared_with_paper": True,
+            "evaluator": "sec2_entry_policy",
+            "mandatory_checks": [
+                str(check) for check in entry_policy.MANDATORY_CHECKS
+            ],
+            "max_evidence_age_seconds": int(
+                entry_policy.MAX_EVIDENCE_AGE.total_seconds()
+            ),
+        },
+        "program_allowlist": sorted(_allowed_programs()),
         "dry_run": {
             "feature_enabled": settings.FEATURE_REAL_WALLET_DRY_RUN_ENABLED,
             "decisions": [
@@ -309,7 +367,23 @@ async def status(_admin: AdminUser, session: DbSession) -> dict[str, object]:
                 for intent in unresolved
             ],
             "kill_switches": [
-                {"kind": switch.kind, "reason": switch.reason} for switch in kill_switches
+                {
+                    "kind": switch.kind,
+                    "reason": switch.reason,
+                    "activated_at": switch.activated_at,
+                    "activated_by": switch.actor,
+                }
+                for switch in kill_switches
+            ],
+            "kill_switch_history": [
+                {
+                    "kind": event.kind,
+                    "action": event.action,
+                    "actor": event.actor,
+                    "reason": event.reason,
+                    "at": event.created_at,
+                }
+                for event in kill_switch_history
             ],
         },
         "confirmed_lifecycle": {
@@ -359,6 +433,52 @@ async def status(_admin: AdminUser, session: DbSession) -> dict[str, object]:
                 for position in positions
             ],
         },
+    }
+
+
+@router.post(
+    "/kill-switches/{kind}/clear",
+    summary="Clear one armed kill switch, with attribution",
+)
+async def clear_kill_switch(
+    kind: str,
+    payload: KillSwitchClearIn,
+    admin: AdminUser,
+    session: DbSession,
+) -> dict[str, object]:
+    """Disarm one switch. **This authorises nothing else.**
+
+    Every other barrier is evaluated independently and is untouched here: mode,
+    the enable flags, the release constant, the submission guard, SEC-2
+    freshness, network verification and the canary limits. Clearing a switch
+    returns the system to whatever those already said, which today is still
+    "no submission is possible".
+
+    The consecutive-failure counter is deliberately not reset. It armed this
+    switch; zeroing it here would let a repeating fault start from a clean
+    slate after every clear instead of tripping again immediately.
+    """
+    live = LiveIntentRepository(session)
+    cleared = await live.clear_kill_switch(
+        kind=kind,
+        actor=admin.email,
+        reason=payload.reason,
+        at=datetime.now(UTC),
+    )
+    if not cleared:
+        raise NotFoundError("No armed kill switch of that kind.")
+    await session.commit()
+    remaining = await live.active_kill_switches()
+    return {
+        "kind": kind,
+        "cleared": True,
+        "cleared_by": admin.email,
+        "active_kill_switches": [switch.kind for switch in remaining],
+        # Restated so nobody reads a successful clear as a release.
+        "execution_still_blocked": True,
+        "mode": settings.REAL_WALLET_EXECUTION_MODE,
+        "execution_enabled": settings.REAL_WALLET_EXECUTION_ENABLED,
+        "submission_permitted": transport_readiness().submission_permitted,
     }
 
 

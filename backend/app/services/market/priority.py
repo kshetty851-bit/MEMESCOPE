@@ -20,6 +20,7 @@ guard on the same failure.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, cast
@@ -204,6 +205,66 @@ async def apply_membership(
     demoted = result.rowcount or 0
 
     return promoted, demoted
+
+
+async def reprime_open_positions(
+    session: AsyncSession, mints: Sequence[str], *, now: datetime
+) -> int:
+    """Put stale open paper positions at the head of the queue. Returns rows moved.
+
+    ── WHY THIS IS SEPARATE FROM `apply_membership` ────────────────────────
+
+    That method clamps a member's due time to `now + priority_interval`, which
+    is the right promise for a token that is merely *displayed*: it says "you
+    will be refreshed on the lane's cadence". It is the wrong promise for a
+    position holding capital that has already gone dark, because it schedules
+    the refresh fifteen seconds into the future and then sorts that row behind
+    every already-overdue member of the same lane.
+
+    On 2026-08-21 the feed returned after a 125-minute stop and 62 of 106 open
+    positions waited a further 44 minutes for their first observation. The lane
+    ordering was correct throughout and paper positions had sorted first since
+    August; what was missing was any statement that these particular rows
+    needed a quote *now*, and any check that they got one.
+
+    So this clamps to `now` rather than to a future interval — due immediately,
+    which within `claim_due`'s `ORDER BY priority DESC, next_refresh_at ASC`
+    puts them at the head of the highest lane they can occupy.
+
+    It is a **clamp and a `greatest`**, exactly like `apply_membership`: it can
+    only ever bring a refresh forward and can never pull a token down out of a
+    higher lane. Calling it repeatedly is a no-op once the rows are already due.
+
+    The caller decides which mints are stale — see
+    `paper.market_health.stale_open_mints`, which excludes the unpriceable, so
+    this never spends the head of the queue re-asking for a pool that has
+    answered empty three thousand times.
+    """
+    unique = list(dict.fromkeys(mints))
+    if not unique:
+        return 0
+    result = cast(
+        CursorResult[Any],
+        await session.execute(
+            update(TokenEnrichmentState)
+            .where(
+                TokenEnrichmentState.mint_address.in_(unique),
+                TokenEnrichmentState.status == EnrichmentStatus.ACTIVE,
+                # Nothing to do for a row already at the head of the queue.
+                # The predicate is what makes a repeated pass write no rows
+                # and produce no dead tuples.
+                or_(
+                    TokenEnrichmentState.priority < LANE_DISPLAY,
+                    TokenEnrichmentState.next_refresh_at > now,
+                ),
+            )
+            .values(
+                priority=func.greatest(TokenEnrichmentState.priority, LANE_DISPLAY),
+                next_refresh_at=func.least(TokenEnrichmentState.next_refresh_at, now),
+            )
+        ),
+    )
+    return result.rowcount or 0
 
 
 async def refresh_priority_lane(session: AsyncSession, *, now: datetime) -> PriorityMembership:

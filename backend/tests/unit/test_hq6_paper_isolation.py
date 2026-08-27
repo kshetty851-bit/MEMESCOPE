@@ -68,19 +68,31 @@ class TestTheEntryContractIsUntouched:
             if "secur" in name or "authority" in name or "mint_auth" in name
         }
 
-    def test_judge_signature_is_unchanged(self) -> None:
-        parameters = list(inspect.signature(eligibility.judge).parameters)
-        assert parameters == ["observation", "held_ever", "open_now"]
+    def test_judge_takes_no_security_shaped_parameter(self) -> None:
+        """The guard is about *security*, not about growth.
+
+        This pinned the exact parameter list until the market-data safety
+        phase added `now` and `max_snapshot_age` — neither of which is a
+        security concept, and both of which the freshness gate legitimately
+        needs. Pinning the whole signature made this fail for a reason it was
+        never written to catch, so it now asserts what it actually means. The
+        full vocabulary is still pinned exactly, in
+        `test_paper_entry_freshness.py`, where an addition is the thing under
+        review rather than a false alarm.
+        """
+        parameters = set(inspect.signature(eligibility.judge).parameters)
+        assert {"observation", "held_ever", "open_now"} <= parameters
+        assert not {
+            name
+            for name in parameters
+            if "secur" in name or "authority" in name or "mint_auth" in name
+        }
 
     def test_refusal_vocabulary_gained_no_security_reason(self) -> None:
-        assert {member.value for member in Refusal} == {
-            "already_traded",
-            "already_held",
-            "no_market_data",
-            "no_price",
-            "no_liquidity",
-            "not_tradeable",
-            "insufficient_paper_cash",
+        assert not {
+            member.value
+            for member in Refusal
+            if "secur" in member.value or "authority" in member.value
         }
 
     def test_judge_module_does_not_import_the_security_package(self) -> None:

@@ -23,9 +23,10 @@ Pure: no I/O, no clock, no randomness.
 from __future__ import annotations
 
 import enum
+import math
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 from app.paper.models import Candidate
@@ -57,13 +58,36 @@ class Refusal(enum.StrEnum):
     NO_LIQUIDITY = "no_liquidity"
     #: The provider does not report the token as trading.
     NOT_TRADEABLE = "not_tradeable"
+    #: A price exists but is too old to buy against. Distinct from
+    #: `NO_MARKET_DATA` on purpose: a token nobody has priced and a token
+    #: whose price stopped updating two hours ago are different failures, and
+    #: on 2026-08-21 it was the second one that cost the wallet money.
+    MARKET_DATA_STALE = "market_data_stale"
+    #: The token's detector category is not one this wallet enters.
+    #: Entry-only: it never stops an exit, and the Radar still detects and
+    #: tracks the token exactly as before.
+    CATEGORY_NOT_ELIGIBLE = "category_not_eligible"
+    #: The token's score sits below the required percentile of the candidate
+    #: page it was judged against. The wallet buys the best of what it sees
+    #: rather than the first of what it sees.
+    BELOW_SCORE_PERCENTILE = "below_score_percentile"
     #: Everything passed, but the cash left is below one position.
     INSUFFICIENT_CASH = "insufficient_paper_cash"
+
+
+#: The wallet-level refusal recorded when the *operator*, not the candidate and
+#: not the feed, stopped an entry. Shaped like `market_health.MARKET_HEALTH_REFUSAL`
+#: so the dashboard's refusal counts stay one flat mapping.
+ENTRIES_PAUSED_REFUSAL = "entries_paused"
 
 
 #: The sentence each refusal renders as. Server-side, from a stable code — the
 #: platform's rule for all prose, so a rewording is a deploy and not a migration.
 REFUSAL_LABELS: dict[str, str] = {
+    ENTRIES_PAUSED_REFUSAL: (
+        "New entries are paused for capital protection. "
+        "Open positions continue to be evaluated and exited normally."
+    ),
     Refusal.ALREADY_TRADED: "Already traded by this wallet. One position per token, ever.",
     Refusal.ALREADY_HELD: "Already held.",
     Refusal.NO_MARKET_DATA: "No market data has been collected for this token.",
@@ -72,6 +96,13 @@ REFUSAL_LABELS: dict[str, str] = {
         "The venue reports no pool depth, so the trade could not be costed or audited."
     ),
     Refusal.NOT_TRADEABLE: "The market provider does not report this token as trading.",
+    Refusal.MARKET_DATA_STALE: ("The latest price for this token is too old to buy against."),
+    Refusal.CATEGORY_NOT_ELIGIBLE: (
+        "This wallet does not enter tokens in this Radar category."
+    ),
+    Refusal.BELOW_SCORE_PERCENTILE: (
+        "Scored below the required percentile of the candidates it was judged against."
+    ),
     Refusal.INSUFFICIENT_CASH: (
         "INSUFFICIENT_PAPER_CASH: not enough cash left for a full $10 position."
     ),
@@ -97,6 +128,12 @@ class Observation:
     market_cap: Decimal | None = None
     volume_24h: Decimal | None = None
     trading_status: str | None = None
+    #: The Radar's current category for this token, when the caller has it.
+    #: `None` leaves the category condition inapplicable, which is what the
+    #: replay and the read path want when they judge a historical page.
+    category: str | None = None
+    #: The Radar's current opportunity score, used for the percentile floor.
+    score: Decimal | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,6 +155,10 @@ def judge(
     *,
     held_ever: frozenset[str] | set[str],
     open_now: frozenset[str] | set[str],
+    now: datetime | None = None,
+    max_snapshot_age: timedelta | None = None,
+    eligible_categories: frozenset[str] | None = None,
+    min_score: Decimal | None = None,
 ) -> Verdict:
     """Apply §5's conditions to one token, in published order.
 
@@ -126,6 +167,13 @@ def judge(
     it fails is the one named. Ownership is checked first because it is the
     cheapest and the most permanent — a token already traded will never become
     eligible again however its market moves.
+
+    `now` and `max_snapshot_age` add the staleness condition. Both are
+    parameters rather than a clock read here, because this module is pure and
+    the replay's reproducibility depends on it staying that way. Passing
+    neither leaves behaviour exactly as it was — which is what lets the replay
+    and the benchmark keep judging historical observations without a
+    wall-clock notion of "stale" leaking into them.
     """
     if observation.mint_address in open_now:
         return _refuse(observation, Refusal.ALREADY_HELD)
@@ -137,11 +185,35 @@ def judge(
         return _refuse(observation, Refusal.NO_MARKET_DATA)
     if observation.price_usd is None or observation.price_usd <= 0:
         return _refuse(observation, Refusal.NO_PRICE)
+    # Checked after the price exists and before anything about the venue: an
+    # old price is still a price, so this is not `NO_PRICE`, and refusing it
+    # for the venue's sake would name the wrong cause.
+    if (
+        now is not None
+        and max_snapshot_age is not None
+        and now - observation.observed_at > max_snapshot_age
+    ):
+        return _refuse(observation, Refusal.MARKET_DATA_STALE)
     status = observation.trading_status
     if status is not None and status != TRADEABLE_STATUS:
         return _refuse(observation, Refusal.NOT_TRADEABLE)
     if observation.liquidity_usd is None or observation.liquidity_usd <= 0:
         return _refuse(observation, Refusal.NO_LIQUIDITY)
+    # The two selectivity conditions come last, after every condition about
+    # whether the token is *tradeable* at all. A token refused for category or
+    # percentile is a token the wallet could have bought and chose not to, and
+    # the refusal counts read correctly only when that distinction survives:
+    # naming a token "below percentile" when it had no price would hide an
+    # outage behind a preference.
+    #
+    # `None` on either parameter leaves that condition inapplicable, which is
+    # exactly the behaviour before the flags existed.
+    if eligible_categories is not None and (
+        observation.category is None or observation.category not in eligible_categories
+    ):
+        return _refuse(observation, Refusal.CATEGORY_NOT_ELIGIBLE)
+    if min_score is not None and (observation.score is None or observation.score < min_score):
+        return _refuse(observation, Refusal.BELOW_SCORE_PERCENTILE)
 
     return Verdict(
         mint_address=observation.mint_address,
@@ -166,19 +238,75 @@ def _refuse(observation: Observation, reason: Refusal) -> Verdict:
     )
 
 
+def score_cutoff(scores: Sequence[Decimal], percentile: float) -> Decimal | None:
+    """The score at `percentile` of `scores`, by nearest rank. `None` if empty.
+
+    Nearest rank rather than interpolation: the cutoff is then always a score
+    some real token actually posted, which is what makes the refusal
+    explainable — "below the 60th percentile" names a token that cleared it.
+
+    A single-element page returns that element, so a lone candidate always
+    clears its own percentile and the floor can never empty a page it did not
+    need to.
+    """
+    ordered = sorted(scores)
+    if not ordered:
+        return None
+    rank = math.ceil(percentile / 100 * len(ordered))
+    index = min(max(rank - 1, 0), len(ordered) - 1)
+    return ordered[index]
+
+
 def screen(
     observations: Sequence[Observation],
     *,
     held_ever: frozenset[str] | set[str],
     open_now: frozenset[str] | set[str],
+    now: datetime | None = None,
+    max_snapshot_age: timedelta | None = None,
+    eligible_categories: frozenset[str] | None = None,
+    score_percentile: float | None = None,
 ) -> list[Verdict]:
     """Judge a whole ranked page, keeping the ranking.
 
     The order in is the Radar's order, and the order out is the same. "The
     highest-ranked eligible token" is then just the first eligible verdict —
     the rule reads as one line because the ranking was never resorted.
+
+    The percentile floor is resolved **here** rather than in `judge`, because a
+    percentile is a property of the page and not of a token: judging one
+    observation in isolation cannot know what it is competing against. The page
+    is therefore judged twice — once to find which tokens were buyable at all,
+    then again with the cutoff those tokens imply. Tokens already refused for
+    any other condition never enter the distribution, so an outage that leaves
+    most of the page unpriced cannot drag the cutoff down to nothing.
     """
-    return [judge(item, held_ever=held_ever, open_now=open_now) for item in observations]
+
+    def _judge(item: Observation, min_score: Decimal | None) -> Verdict:
+        return judge(
+            item,
+            held_ever=held_ever,
+            open_now=open_now,
+            now=now,
+            max_snapshot_age=max_snapshot_age,
+            eligible_categories=eligible_categories,
+            min_score=min_score,
+        )
+
+    verdicts = [_judge(item, None) for item in observations]
+    if score_percentile is None:
+        return verdicts
+
+    buyable = {verdict.mint_address for verdict in verdicts if verdict.eligible}
+    scores = [
+        item.score
+        for item in observations
+        if item.mint_address in buyable and item.score is not None
+    ]
+    cutoff = score_cutoff(scores, score_percentile)
+    if cutoff is None:
+        return verdicts
+    return [_judge(item, cutoff) for item in observations]
 
 
 def first_eligible(verdicts: Iterable[Verdict]) -> Verdict | None:

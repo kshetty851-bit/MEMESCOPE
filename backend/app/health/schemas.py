@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
+from pydantic import Field
+
 from app.schemas.common import BaseSchema
 
 #: The three states every stage and the overall roll-up can be in.
@@ -76,11 +78,61 @@ class RadarHealth(BaseSchema):
     tracked_tokens: int
 
 
+class PaperMarketHealth(BaseSchema):
+    """Whether the paper wallet may commit new capital, and the evidence.
+
+    Its own block rather than fields on `EnrichmentHealth`, because it answers
+    a different question. Enrichment health asks "is the pipeline working";
+    this asks "is the evidence good enough to spend money on", and the second
+    is strictly stricter than the first — a feed can be healthy while the open
+    book is not yet re-primed.
+    """
+
+    #: HEALTHY · DEGRADED · STALE · RECOVERING.
+    market_data: str
+    #: ENABLED · BLOCKED.
+    entry_safety: str
+    #: Always ACTIVE. Stated as a field rather than assumed, because the whole
+    #: design claim is that exits never depend on feed health, and a claim
+    #: nobody can read on the endpoint is one nobody can check.
+    exit_management: str
+    #: COMPLETE · INCOMPLETE.
+    recovery: str
+    block_reasons: list[str] = Field(default_factory=list)
+    detail: str = ""
+    global_last_priced_snapshot_age: float | None = None
+    recent_priced_snapshots: int = 0
+    recent_priced_mints: int = 0
+    open_positions_total: int = 0
+    open_positions_fresh: int = 0
+    open_positions_warning: int = 0
+    open_positions_stale: int = 0
+    #: Open positions with no priceable market. Counted separately because
+    #: they cannot be recovered and so must not hold the entry gate shut —
+    #: and listed, because a number excluded from a gate is exactly the one
+    #: that gets forgotten.
+    open_positions_unpriceable: int = 0
+    oldest_open_position_snapshot_age: float | None = None
+    open_position_refresh_p50: float | None = None
+    open_position_refresh_p95: float | None = None
+    stale_positions: list[str] = Field(default_factory=list)
+    unpriceable_positions: list[str] = Field(default_factory=list)
+    #: Open positions in **retired** generations, and how many of those have no
+    #: recent price. Reported and deliberately not gated on: their generations
+    #: are archived and nothing will re-price them, so waiting on them would be
+    #: waiting for something that cannot happen. Surfaced so that scoping the
+    #: gate to the live wallet does not also make 96 frozen positions invisible.
+    archived_open_positions: int = 0
+    archived_open_unpriced: int = 0
+
+
 class PipelineHealth(BaseSchema):
     scanner: ScannerHealth
     market_enrichment: EnrichmentHealth
     scoring: ScoringHealth
     radar: RadarHealth
+    #: `None` only when the paper wallet is switched off entirely.
+    paper_market: PaperMarketHealth | None = None
     #: The worst status of any *enabled* stage. A stage whose feature flag is
     #: off is reported on its own but excluded here, so a deployment that
     #: deliberately runs without the scanner is not permanently degraded.

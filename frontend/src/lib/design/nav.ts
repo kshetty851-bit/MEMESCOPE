@@ -2,6 +2,7 @@ import type { ComponentType, SVGProps } from "react";
 
 import {
   IconBookmark,
+  IconFlask,
   IconHq,
   IconLedger,
   IconScanner,
@@ -92,6 +93,26 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "Strategy",
     items: [
       { href: "/wallet", label: "Paper wallet", icon: IconWallet, status: "ready" },
+      // A separate experiment on separate capital, not a new generation of the
+      // wallet above. Its own route so neither page can render the other's money.
+      {
+        href: "/wallet-v2",
+        label: "Paper wallet V2",
+        icon: IconWallet,
+        status: "ready",
+        note: "Experimental. $25 fixed, no stop loss, profit ladder, 6h max hold.",
+      },
+      // Research infrastructure, not a third wallet. Strategy Lab replays many
+      // rules over one canonical opportunity stream and holds only simulated
+      // capital — filed beside the wallets because that is what it studies, and
+      // labelled so the rail never implies it trades.
+      {
+        href: "/strategy-lab",
+        label: "Strategy Lab",
+        icon: IconFlask,
+        status: "ready",
+        note: "Research only. No capital execution.",
+      },
     ],
   },
   {

@@ -65,12 +65,49 @@ def _agreeing(result: OpportunityResult, floor: Decimal) -> int:
     )
 
 
-def qualifies(result: OpportunityResult) -> bool:
-    """Whether the token belongs on the Radar at all."""
+def observed_liquidity(result: OpportunityResult) -> Decimal | None:
+    """The liquidity the dimensions actually read, or `None` if none did.
+
+    Both the liquidity-quality and risk dimensions record the figure they
+    scored; either will do, and neither exists on a bonding-curve pair where
+    the provider reports no depth at all (ADR 0002). `None` therefore means
+    "not observed", which the floor below treats as failing rather than as
+    passing — the same stance `qualifies` already takes on unknown risk.
+    """
+    for dimension in (RadarDimension.LIQUIDITY_QUALITY, RadarDimension.RISK):
+        found = result.dimension(dimension)
+        if found is None:
+            continue
+        value = found.raw.get("liquidity_usd")
+        if value is not None:
+            return value
+    return None
+
+
+def qualifies(result: OpportunityResult, *, min_liquidity_usd: Decimal | None = None) -> bool:
+    """Whether the token belongs on the Radar at all.
+
+    `min_liquidity_usd` is a hard floor, off by default. It is a **parameter
+    rather than a setting read** because this module is pure — `service.py`
+    owns the configuration and threads it in, which is what keeps a score
+    recorded a month ago recomputable from the stored series alone.
+
+    Passing `None` is exactly the pre-flag behaviour. Passing a figure adds a
+    gate that no score can outvote: liquidity currently reaches admission only
+    through the risk dimension, where anything above $5,000 already scores 55+,
+    so a high momentum reading can carry a $1,200 pool onto the Radar today.
+    """
     if result.score < MIN_RADAR_SCORE:
         return False
     if result.confidence < MIN_RADAR_CONFIDENCE:
         return False
+
+    if min_liquidity_usd is not None:
+        liquidity = observed_liquidity(result)
+        # Unobserved depth fails the floor. A pool the platform cannot measure
+        # is not a pool it can claim clears a threshold.
+        if liquidity is None or liquidity < min_liquidity_usd:
+            return False
 
     # An unknown risk reading is not treated as a pass. Where the platform
     # cannot see the danger it declines to advertise the opportunity.
@@ -78,14 +115,16 @@ def qualifies(result: OpportunityResult) -> bool:
     return risk is not None and risk >= MIN_RISK_FLOOR
 
 
-def classify(result: OpportunityResult) -> RadarCategory | None:
+def classify(
+    result: OpportunityResult, *, min_liquidity_usd: Decimal | None = None
+) -> RadarCategory | None:
     """Which category describes this opportunity, if any.
 
     Ordered most-specific first. Elite outranks everything; a project that would
     also read as a breakout is reported as Elite because that is the more
     informative statement.
     """
-    if not qualifies(result):
+    if not qualifies(result, min_liquidity_usd=min_liquidity_usd):
         return None
 
     momentum = _score_of(result, RadarDimension.MOMENTUM)

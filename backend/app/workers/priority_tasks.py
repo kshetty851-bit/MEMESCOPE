@@ -18,7 +18,12 @@ from typing import Any
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.db.session import SessionFactory
-from app.services.market.priority import refresh_nursery_lane, refresh_priority_lane
+from app.paper.repository import PaperRepository
+from app.services.market.priority import (
+    refresh_nursery_lane,
+    refresh_priority_lane,
+    reprime_open_positions,
+)
 from app.workers.celery_app import celery_app
 from app.workers.runtime import run_async
 
@@ -34,18 +39,67 @@ def refresh_priority_lane_task() -> dict[str, Any]:
 async def _refresh() -> dict[str, Any]:
     result: dict[str, Any] = {}
 
+    # ── RECOVERY ORDER ──────────────────────────────────────────────────
+    #
+    # Committed capital is re-primed FIRST, before lane membership is
+    # recomputed and long before the nursery admits a single speculative
+    # launch. The order is the whole point, and it is the order the beat
+    # executes in rather than a comment describing an intention:
+    #
+    #   1. re-prime stale open positions        (here, own transaction)
+    #   2. recompute display-lane membership    (refresh_priority_lane)
+    #   3. admit and trim the nursery           (refresh_nursery_lane)
+    #   4. allow new entries                    (paper.review, only once the
+    #                                            census says the book is fresh)
+    #
+    # Step 4 is not enforced here and must not be: it is enforced by evidence
+    # in `market_health.assess`, which keeps entries blocked while any
+    # recoverable open position is stale. A recovery defined by "this beat ran"
+    # would be a sleep timer wearing a different name — it would report
+    # complete whether or not a single quote had arrived.
+    #
+    # Its own transaction, and first, so that a failure anywhere below cannot
+    # cost the open book its refresh. This is the one step that is about money
+    # already committed rather than about what the product displays.
+    reprimed = 0
+    try:
+        async with SessionFactory() as session:
+            stale = await PaperRepository(session).stale_open_mints(
+                now=datetime.now(UTC)
+            )
+            if stale:
+                reprimed = await reprime_open_positions(
+                    session, stale, now=datetime.now(UTC)
+                )
+                await session.commit()
+                # WARNING, not info: an open position with no recent price is
+                # the condition that cost the wallet $500 on 2026-08-21, and
+                # it produced no log line at any level while it happened.
+                logger.warning(
+                    "open_positions_reprimed",
+                    stale=len(stale),
+                    rows_moved=reprimed,
+                    mints=stale[:20],
+                )
+    except Exception:
+        # Never let the re-prime take the lane refresh down with it. A lane
+        # that stopped being maintained is a slower version of the same
+        # outage.
+        logger.warning("open_position_reprime_failed", exc_info=True)
+    result["open_positions_reprimed"] = reprimed
+
     if settings.FEATURE_PRIORITY_ENRICHMENT_ENABLED:
         async with SessionFactory() as session:
             membership = await refresh_priority_lane(session, now=datetime.now(UTC))
             await session.commit()
         logger.info("priority_lane_refreshed", **membership.as_dict())
-        result = dict(membership.as_dict())
+        result.update(membership.as_dict())
     else:
         # Reported rather than silently skipped: a lane that stopped being
         # maintained shows up as staleness on the homepage long before anyone
         # thinks to check whether the beat is running.
         logger.info("priority_lane_skipped", reason="disabled")
-        result = {"skipped": "disabled"}
+        result["skipped"] = "disabled"
 
     # **Unconditional, and deliberately not behind the display lane's flag.**
     # `register_token` admits every discovery to the nursery whenever the

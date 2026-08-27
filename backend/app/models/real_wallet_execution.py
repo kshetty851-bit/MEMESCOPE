@@ -224,7 +224,14 @@ class RealWalletExecutionEvent(Base, UUIDPrimaryKeyMixin):
 
 
 class RealWalletKillSwitch(Base, UUIDPrimaryKeyMixin):
-    """Persisted fail-closed kill switches; never a browser control surface."""
+    """Persisted fail-closed kill switches; never a browser control surface.
+
+    A switch that can only ever be armed is a switch nobody can use twice: the
+    first automatic arming would permanently end execution, so the pressure
+    would be to clear it by hand in the database — untracked, unattributed, and
+    exactly the change nobody would find afterwards. So clearing is a first
+    class, attributed operation, and both halves of the history are kept.
+    """
 
     __tablename__ = "real_wallet_kill_switches"
 
@@ -232,9 +239,36 @@ class RealWalletKillSwitch(Base, UUIDPrimaryKeyMixin):
     active: Mapped[bool] = mapped_column(nullable=False, default=False, server_default="false")
     reason: Mapped[str | None] = mapped_column(String(256))
     activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    #: Who armed it. `None` means the system did, from a durable failure count.
+    #: Named `actor` because the column already existed under that name in the
+    #: deployed database; adding an `activated_by` beside it would have left two
+    #: columns for one fact, which is worse than an imperfect name.
+    actor: Mapped[str | None] = mapped_column(String(128))
+    #: Clearing evidence. Retained after a re-arm so the row carries the whole
+    #: sequence rather than only its current state.
+    cleared_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cleared_by: Mapped[str | None] = mapped_column(String(128))
+    cleared_reason: Mapped[str | None] = mapped_column(String(256))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
+
+
+class RealWalletKillSwitchEvent(Base, UUIDPrimaryKeyMixin):
+    """Append-only arm/clear history. The switch row is state; this is evidence."""
+
+    __tablename__ = "real_wallet_kill_switch_events"
+
+    kind: Mapped[str] = mapped_column(String(64), nullable=False)
+    #: `armed` or `cleared`.
+    action: Mapped[str] = mapped_column(String(16), nullable=False)
+    actor: Mapped[str | None] = mapped_column(String(128))
+    reason: Mapped[str] = mapped_column(String(256), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (Index("ix_real_wallet_kill_switch_event_kind", "kind"),)
 
 
 class RealWalletExecutionHealth(Base, UUIDPrimaryKeyMixin):
