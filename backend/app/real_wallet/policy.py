@@ -26,6 +26,8 @@ class PolicyReason(StrEnum):
     MAX_TRADE_SIZE = "MAX_TRADE_SIZE"
     MAX_WALLET_BALANCE = "MAX_WALLET_BALANCE"
     ENTRY_SIZE_NOT_CONFIGURED = "ENTRY_SIZE_NOT_CONFIGURED"
+    MIN_SOL_FEE_RESERVE = "MIN_SOL_FEE_RESERVE"
+    SPEND_NOT_MEASURED = "SPEND_NOT_MEASURED"
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +43,16 @@ class PolicyState:
     #: balance could not be read — which refuses, because a canary bound that
     #: cannot be measured has not been satisfied.
     wallet_balance_lamports: int | None = None
+    #: "BUY" or "SELL". The distinction matters for the fee-reserve floor and
+    #: nowhere else: a BUY spends SOL, a SELL spends the token and RETURNS SOL.
+    #: Defaulting to BUY keeps the floor engaged for any caller that has not
+    #: thought about it, which is the safe direction to be wrong in.
+    side: str = "BUY"
+    #: Lamports this entry will take out of the wallet. Required for a BUY —
+    #: `None` refuses rather than skipping the floor, because a spend nobody
+    #: measured has not been shown to leave the reserve behind. Ignored for a
+    #: SELL, which spends no SOL.
+    spend_lamports: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,7 +130,39 @@ class AutonomousExecutionPolicy:
             or state.wallet_balance_lamports > ceiling
         ):
             reasons.append(PolicyReason.MAX_WALLET_BALANCE)
+        reasons.extend(self._fee_reserve_reasons(state))
         return PolicyDecision(allowed=not reasons, reason_codes=tuple(reasons))
+
+    @staticmethod
+    def _fee_reserve_reasons(state: PolicyState) -> list[str]:
+        """A BUY must leave enough SOL behind to pay for its own exit.
+
+        The balance bound above is a CEILING — it keeps the canary small. There
+        was no floor, and on 2026-08-27 a $5 entry against a $5.04 wallet priced
+        out at 0.049435 of 0.049802 SOL: 99.3% of the wallet, leaving 0.000367
+        SOL against a 0.01 reserve. Not enough to open the token account, and
+        nowhere near enough to sell afterwards. The policy allowed it.
+
+        A position that cannot pay its exit fee is not a loss, it is a position
+        that cannot be closed at any price — the one outcome no stop, no time
+        exit and no kill switch can rescue, because every one of them has to
+        submit a transaction to work.
+
+        SELLs are exempt, and that exemption is the point rather than an
+        oversight. A sell spends the token and pays SOL back in, so applying a
+        floor there would refuse exactly the transaction that ENDS the stranded
+        state — turning a temporary shortfall into a permanent one.
+        """
+        if state.side.upper() != "BUY":
+            return []
+        reserve = lamports_from_sol(
+            Decimal(str(settings.REAL_WALLET_MIN_SOL_FEE_RESERVE))
+        )
+        if state.spend_lamports is None or state.wallet_balance_lamports is None:
+            return [PolicyReason.SPEND_NOT_MEASURED]
+        if state.wallet_balance_lamports - state.spend_lamports < reserve:
+            return [PolicyReason.MIN_SOL_FEE_RESERVE]
+        return []
 
     @staticmethod
     def _size_and_count_reasons(

@@ -32,10 +32,25 @@ def _configured(monkeypatch):
     # The driver reads the chain balance because the canary ceiling refuses an
     # unmeasured wallet. These tests are about the driver's own guards, so the
     # read is stubbed to a funded-but-tiny wallet.
+    #
+    # 0.5 SOL, not the 0.05 this used to hold. A $5 entry against 0.05 SOL is
+    # the exact production hazard the fee-reserve floor now refuses — the
+    # fixture had quietly encoded it — so the old value made every test here
+    # stop at MIN_SOL_FEE_RESERVE instead of reaching the guard it names.
+    # 0.2 SOL sits inside BOTH bounds: above spend + reserve (0.05 + 0.01) and
+    # below the 0.25 canary ceiling. The window is narrow by design.
     async def _lamports(self, wallet):  # noqa: ARG001
-        return 50_000_000
+        return 200_000_000
+
+    # Pinned, because the spend is now priced BEFORE the policy judges it and a
+    # live rate would make the fee-reserve floor pass or fail with the market.
+    # These tests reached out to Jupiter for a real SOL price until the floor
+    # made that dependency matter.
+    async def _price(self, now):  # noqa: ARG001
+        return Decimal("100")
 
     monkeypatch.setattr(RealWalletDriver, "_wallet_lamports", _lamports)
+    monkeypatch.setattr(RealWalletDriver, "_sol_usd", _price)
     monkeypatch.setattr(settings, "REAL_WALLET_PUBLIC_KEY", WALLET)
     monkeypatch.setattr(settings, "REAL_WALLET_ENTRY_SIZE_USD", Decimal("5"))
     monkeypatch.setattr(settings, "REAL_WALLET_MAX_TRADE_USD", Decimal("5"))
@@ -182,6 +197,32 @@ async def test_an_unreadable_balance_is_a_skip_never_a_trade(db_session, monkeyp
     out = await RealWalletDriver(db_session).tick(now=NOW)
     assert out.created == 0
     assert out.skipped == "wallet_balance_unreadable"
+
+
+async def test_an_entry_that_would_spend_the_fee_reserve_is_refused(
+    db_session, monkeypatch
+):
+    """The production scenario on 2026-08-27, pinned.
+
+    0.04980191 SOL and a $5 entry at ~$101: the swap prices out at 0.049435
+    SOL, leaving 0.000367 against a 0.01 reserve. The driver created the intent
+    happily — the balance bound was a ceiling, and nothing checked the floor.
+
+    A position that cannot pay its exit fee cannot be closed at any price: no
+    stop, no time exit and no kill switch can rescue it, because every one of
+    them has to submit a transaction.
+    """
+    async def _thin(self, wallet):  # noqa: ARG001
+        return 49_801_910
+
+    monkeypatch.setattr(RealWalletDriver, "_wallet_lamports", _thin)
+    monkeypatch.setattr(settings, "REAL_WALLET_MAX_BALANCE_SOL", Decimal("15"))
+    await _decision(db_session)
+    await _switch_on(db_session)
+
+    out = await RealWalletDriver(db_session).tick(now=NOW)
+    assert out.created == 0
+    assert out.skipped == "policy:MIN_SOL_FEE_RESERVE"
 
 
 async def test_a_wallet_over_the_canary_ceiling_is_refused(db_session, monkeypatch):

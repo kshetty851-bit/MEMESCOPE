@@ -128,27 +128,6 @@ class RealWalletDriver:
         if entry_usd is None or entry_usd <= 0:
             return DriverOutcome(0, "entry_size_not_configured")
 
-        # The server-owned bounds, asked rather than reimplemented.
-        decision = AutonomousExecutionPolicy().evaluate_canary_entry(
-            requested_usd=entry_usd,
-            state=PolicyState(
-                open_positions=open_positions,
-                exposure_usd=Decimal(open_positions) * entry_usd,
-                daily_notional_usd=await self._notional_today(now),
-                daily_realised_loss_usd=Decimal(0),
-                daily_trades=await self._trades_today(now),
-                wallet_balance_lamports=balance_lamports,
-            ),
-        )
-        if not decision.allowed:
-            return DriverOutcome(0, "policy:" + ",".join(decision.reason_codes))
-
-        candidate = await self._next_candidate(
-            strategy_id=switch.nominated_strategy, now=now
-        )
-        if candidate is None:
-            return DriverOutcome(0, "no_fresh_candidate")
-
         # Price the entry in the asset the wallet actually holds, and store it.
         #
         # This used to name USDC as the input mint and set no amount at all. The
@@ -169,6 +148,33 @@ class RealWalletDriver:
         lamports = lamports_from_sol(sol_amount)
         if lamports <= 0:
             return DriverOutcome(0, "entry_size_rounds_to_zero_lamports")
+
+        # The server-owned bounds, asked rather than reimplemented.
+        #
+        # Sized BEFORE this call, not after. The fee-reserve floor is a bound on
+        # what the wallet keeps, so the policy cannot judge it without knowing
+        # what leaves — and a bound evaluated after the decision is not a bound.
+        decision = AutonomousExecutionPolicy().evaluate_canary_entry(
+            requested_usd=entry_usd,
+            state=PolicyState(
+                open_positions=open_positions,
+                exposure_usd=Decimal(open_positions) * entry_usd,
+                daily_notional_usd=await self._notional_today(now),
+                daily_realised_loss_usd=Decimal(0),
+                daily_trades=await self._trades_today(now),
+                wallet_balance_lamports=balance_lamports,
+                side="BUY",
+                spend_lamports=lamports,
+            ),
+        )
+        if not decision.allowed:
+            return DriverOutcome(0, "policy:" + ",".join(decision.reason_codes))
+
+        candidate = await self._next_candidate(
+            strategy_id=switch.nominated_strategy, now=now
+        )
+        if candidate is None:
+            return DriverOutcome(0, "no_fresh_candidate")
 
         # One intent per tick, deliberately. A loop here would turn a single
         # bad minute into a whole book.

@@ -311,9 +311,88 @@ def _state(**overrides: object) -> PolicyState:
         "daily_realised_loss_usd": Decimal(0),
         "daily_trades": 0,
         "wallet_balance_lamports": 100_000_000,
+        # A spend small enough to clear the fee-reserve floor, so the tests
+        # around it keep testing the bound they name rather than this one.
+        "spend_lamports": 1_000_000,
     }
     values.update(overrides)
     return PolicyState(**values)  # type: ignore[arg-type]
+
+
+# --------------------------------------------------------------------------
+# The fee-reserve FLOOR. The balance bound above is a ceiling; this is the
+# other side of it, and until 2026-08-27 it did not exist.
+# --------------------------------------------------------------------------
+
+
+def test_a_buy_may_not_spend_the_fee_reserve() -> None:
+    """The exact production numbers that exposed the gap.
+
+    A $5 entry against a $5.04 wallet priced out at 0.049435357 SOL of
+    0.04980191 — 99.3% of the balance — leaving 0.000367 SOL against a 0.01
+    reserve. The policy allowed it. Nothing downstream would have caught it
+    either: the reserve was enforced only on the withdrawal path.
+    """
+    decision = AutonomousExecutionPolicy().evaluate_canary_entry(
+        requested_usd=Decimal("1"),
+        state=_state(wallet_balance_lamports=49_801_910,
+                     spend_lamports=49_435_357),
+    )
+    assert decision.allowed is False
+    assert PolicyReason.MIN_SOL_FEE_RESERVE in decision.reason_codes
+
+
+def test_the_floor_is_the_reserve_itself_not_more() -> None:
+    """Leaving EXACTLY the reserve is permitted; a lamport less is not."""
+    policy = AutonomousExecutionPolicy()
+    exact = policy.evaluate_canary_entry(
+        requested_usd=Decimal("1"),
+        state=_state(wallet_balance_lamports=100_000_000,
+                     spend_lamports=90_000_000),
+    )
+    assert exact.allowed is True, exact.reason_codes
+
+    one_short = policy.evaluate_canary_entry(
+        requested_usd=Decimal("1"),
+        state=_state(wallet_balance_lamports=100_000_000,
+                     spend_lamports=90_000_001),
+    )
+    assert PolicyReason.MIN_SOL_FEE_RESERVE in one_short.reason_codes
+
+
+def test_a_sell_is_never_refused_for_a_low_balance() -> None:
+    """The exemption is the whole point, not an oversight.
+
+    A sell spends the token and pays SOL back in. Applying the floor to it
+    would refuse the one transaction that ENDS a stranded position, turning a
+    temporary shortfall into a permanent one — so a wallet down to a single
+    lamport must still be allowed to close.
+    """
+    decision = AutonomousExecutionPolicy().evaluate_canary_entry(
+        requested_usd=Decimal("1"),
+        state=_state(side="SELL", wallet_balance_lamports=1,
+                     spend_lamports=None),
+    )
+    assert PolicyReason.MIN_SOL_FEE_RESERVE not in decision.reason_codes
+    assert PolicyReason.SPEND_NOT_MEASURED not in decision.reason_codes
+
+
+def test_an_unmeasured_buy_spend_refuses_rather_than_skipping_the_floor() -> None:
+    """Zero would sail through the subtraction; None must not become zero."""
+    decision = AutonomousExecutionPolicy().evaluate_canary_entry(
+        requested_usd=Decimal("1"), state=_state(spend_lamports=None)
+    )
+    assert decision.allowed is False
+    assert PolicyReason.SPEND_NOT_MEASURED in decision.reason_codes
+
+
+def test_the_floor_defaults_to_engaged_for_a_caller_that_forgets() -> None:
+    """`side` defaults to BUY so an unthinking caller gets the floor, not a
+    silent exemption."""
+    assert PolicyState(
+        open_positions=0, exposure_usd=Decimal(0), daily_notional_usd=Decimal(0),
+        daily_realised_loss_usd=Decimal(0),
+    ).side == "BUY"
 
 
 def test_canary_entry_allows_only_inside_every_bound() -> None:

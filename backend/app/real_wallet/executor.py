@@ -394,6 +394,11 @@ class RealWalletExecutor:
 
         open_positions = await self._repository.open_positions_count()
         entry_usd = Decimal(str(intent.requested_usd))
+        # The spend as the ROW records it, not as anything recomputed here: the
+        # floor has to judge the amount that will actually be signed. `None`
+        # stays `None` rather than becoming 0 — a missing spend is unmeasured
+        # and must refuse, whereas 0 would sail through a subtraction.
+        raw_spend = intent.actual_input_amount_raw
         canary = AutonomousExecutionPolicy().evaluate_canary_entry(
             requested_usd=entry_usd,
             state=PolicyState(
@@ -403,6 +408,8 @@ class RealWalletExecutor:
                 daily_realised_loss_usd=Decimal(0),
                 daily_trades=0,
                 wallet_balance_lamports=balance_lamports,
+                side=str(intent.side or "BUY"),
+                spend_lamports=None if raw_spend is None else int(raw_spend),
             ),
         )
         switch = await AutotradeSwitchService(self._session).state()
