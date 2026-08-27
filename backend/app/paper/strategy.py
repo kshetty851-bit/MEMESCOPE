@@ -735,6 +735,16 @@ UNIVERSE_TRAILING_STOP_25_V1 = TrailingStopStrategy(
     # or already held — while keeping the per-candidate security observation
     # off a two-hundred-mint sweep every minute against a rate-limited RPC.
     top_n=60,
+    # RETIRED 2026-08-27, declared rather than deleted so the record of what
+    # ran stays readable. Its wallet had already been removed and paper entries
+    # paused; the slot now carries the flow-filtered V6-07 twin, which tests a
+    # specific hypothesis against a live control instead of running a general
+    # rule with nothing to compare it to.
+    operational=False,
+    unavailable_reason=(
+        "Retired 2026-08-27. The paper slot now runs "
+        "flow_filtered_liq500k_tp150_v1 against V6-07 in the Strategy Lab."
+    ),
 )
 
 
@@ -763,6 +773,16 @@ SECURITY_GATED_STRATEGY_IDS: frozenset[str] = frozenset(
         # and `getMultipleAccounts`, both ordinary methods — this is not the
         # holder-concentration call that has been rate-limited.
         UNIVERSE_TRAILING_STOP_25_V1.id,
+        # The flow-filtered twin inherits the gate too. Its whole purpose is
+        # to open FEWER positions that go to zero, and the security gate is the
+        # check that refuses a live mint authority or a live freeze authority —
+        # so leaving it out would drop the strongest anti-rug protection from
+        # the one strategy built specifically to avoid rugs.
+        #
+        # A literal rather than `.id` because the set is declared above the
+        # strategy it names; `test_flow_filtered_strategy` asserts the two match
+        # so they cannot drift apart.
+        "flow_filtered_liq500k_tp150_v1",
     }
 )
 
@@ -835,6 +855,154 @@ AnyStrategy = (
 )
 
 
+@dataclass(frozen=True, slots=True)
+class FlowFilteredBracketStrategy:
+    """V6-07's rule with one addition: refuse tokens already being sold.
+
+    ## Where this came from, and what it is worth
+
+    V6.1's first 26 closed V6-07 trades had a striking shape. Twenty-one
+    winners at roughly +$3.80 each, and FIVE losers of which FOUR were
+    `dead_zero` — the token going to zero, a total loss of the position. The
+    profit factor is set by one thing only: how often that happens.
+
+    V6-07's entire entry rule is `liquidity >= $500k`, and it has no power over
+    that outcome. Liquidity at entry was $698k median for the winners and $684k
+    for the deaths. It filters on something that does not separate them.
+
+    Sell share did separate them: 0.023 for winners against 0.244 for the
+    deaths. The story is mechanical rather than statistical — a quarter of
+    recent flow already selling is distribution in progress, and buying into it
+    is buying from someone leaving.
+
+    **That is four losing trades.** Any threshold fitted to four points is
+    fitted to noise as much as to signal, and the profit factor such a filter
+    shows on those same trades is arithmetic on its own training set, not a
+    forecast. This strategy exists to be measured FORWARD, against V6-07 still
+    running unfiltered in the Lab as the control. If it does not beat that
+    control on trades neither has seen, it has failed and that is the result.
+
+    ## The threshold
+
+    0.20, where the data fitted 0.15. Both cut the same trades — no observed
+    winner sits between them — so the looser one is chosen deliberately: it is
+    further from the boundary the data drew, and therefore less shaped by it.
+
+    ## What is deliberately NOT here
+
+    **No stop loss.** Already refuted: `lab/spec.py` records that stops filled
+    at a median of $0.03 against a nominal -25%. When these tokens fail there
+    is no exit at any price, so a stop does not bound the loss, it just books
+    it late.
+
+    **No liquidity exit**, which is the other half of the design and the better
+    half. Leaving as depth drains is the only mechanism that acts on the rug
+    itself rather than predicting it, and `ExitRules` here has no such rule —
+    it offers take-profit, stop, trailing and time and nothing about depth.
+    Building it is a larger change to the exit resolver.
+
+    So this tests exactly ONE variable against the control: does refusing
+    tokens already under distribution reduce how often a position goes to zero?
+    One change, one question, one answer.
+    """
+
+    id: str
+    name: str
+    version: str
+    trade_size_usd: Decimal
+    #: Entry floor on pool depth, matching V6-07's only rule.
+    min_liquidity_usd: Decimal
+    #: Entry ceiling on sell share. UNMEASURED refuses — see `entry_for`.
+    max_sell_share: Decimal
+    take_profit_multiple: Decimal
+    hold_for: timedelta
+    top_n: int | None = None
+    candidate_source: str = "universe"
+    operational: bool = False
+    unavailable_reason: str | None = None
+
+    @property
+    def spec(self) -> StrategySpec:
+        return self.describe()
+
+    @property
+    def exit_rules(self) -> ExitRules:
+        """Take profit and a holding period. No stop, for the reason above."""
+        return ExitRules(
+            take_profit_multiple=self.take_profit_multiple, hold_for=self.hold_for
+        )
+
+    def describe(self) -> StrategySpec:
+        hours = int(self.hold_for.total_seconds() // 3600)
+        pct = self.max_sell_share * 100
+        return StrategySpec(
+            id=self.id,
+            name=self.name,
+            version=self.version,
+            summary=(
+                f"Buys ${self.trade_size_usd:,.0f} of tokens with at least "
+                f"${self.min_liquidity_usd:,.0f} of liquidity, but only when under "
+                f"{pct:.0f}% of recent trades were sells. Sells at "
+                f"{self.take_profit_multiple}x or after {hours} hours, whichever "
+                "comes first. There is no stop loss."
+            ),
+            rules=(
+                Rule("Allocation", "Equal weight"),
+                Rule("Trade size", f"${self.trade_size_usd:,.0f}"),
+                Rule("Entry — depth", f"Liquidity at or above ${self.min_liquidity_usd:,.0f}"),
+                Rule("Entry — flow",
+                     f"Sell share of the last 15 minutes at or below {pct:.0f}%. "
+                     "A token whose flow cannot be measured is refused, not admitted."),
+                Rule("Re-entry", "Never. One position per token, ever."),
+                Rule("Take profit", f"{self.take_profit_multiple}x entry"),
+                Rule("Fixed stop", "None. Stops on these tokens historically "
+                                   "filled near zero, so they book a loss late "
+                                   "rather than bounding it."),
+                Rule("Maximum hold", f"{hours} hours"),
+                Rule("Control", "V6-07 in the Strategy Lab, same rule without the "
+                                "flow filter. This is only meaningful against it."),
+            ),
+        )
+
+    def entry_for(
+        self, candidate: Candidate, *, cash_available: Decimal, now: datetime
+    ) -> Entry | None:
+        """Size and bound one entry, or decline it."""
+        if not self.operational:
+            return None
+        if self.top_n is not None and candidate.rank > self.top_n:
+            return None
+        if candidate.price_usd <= 0:
+            return None
+        if candidate.liquidity_usd is None or candidate.liquidity_usd < self.min_liquidity_usd:
+            return None
+        # UNMEASURED REFUSES. `None` here means nobody observed the buy/sell
+        # mix — a missing earlier snapshot, a missing counter, or a window with
+        # no trades in it. Admitting on `None` would turn every unobservable
+        # token into a pass, and the tokens this filter exists to catch are
+        # exactly the ones whose data is thin.
+        if candidate.sell_share_15m is None:
+            return None
+        if candidate.sell_share_15m > self.max_sell_share:
+            return None
+        if cash_available < self.trade_size_usd:
+            return None
+
+        quantity = self.trade_size_usd / candidate.price_usd
+        return Entry(
+            mint_address=candidate.mint_address,
+            price_usd=candidate.price_usd,
+            size_usd=self.trade_size_usd,
+            quantity=quantity,
+            target_price=candidate.price_usd * self.take_profit_multiple,
+            stop_price=None,
+            expires_at=now + self.hold_for,
+            opened_at=now,
+            market_cap=candidate.market_cap,
+            liquidity_usd=candidate.liquidity_usd,
+        )
+
+
 class StrategyRegistry:
     """Every declared strategy, and the one that actually trades.
 
@@ -874,8 +1042,28 @@ class StrategyRegistry:
 
 
 
+#: The flow-filtered V6-07 twin, and the wallet's operational strategy.
+#:
+#: $5 rather than V6-07's $7.50: the wallet starts at $100 and $5 is the size
+#: the real wallet is configured for, so a result here reads across without a
+#: scaling argument in the middle of it.
+FLOW_FILTERED_LIQ500K_TP150_V1 = FlowFilteredBracketStrategy(
+    id="flow_filtered_liq500k_tp150_v1",
+    name="Flow-Filtered Deep Liquidity — TP 1.5x",
+    version="1.0.0",
+    trade_size_usd=Decimal(5),
+    min_liquidity_usd=Decimal(500_000),
+    max_sell_share=Decimal("0.20"),
+    take_profit_multiple=Decimal("1.50"),
+    hold_for=timedelta(hours=6),
+    candidate_source="universe",
+    operational=True,
+)
+
+
 registry = StrategyRegistry(
     (
+        FLOW_FILTERED_LIQ500K_TP150_V1,
         UNIVERSE_TRAILING_STOP_25_V1,
         TRAILING_STOP_25_SECURED_HOLD6H_V3,
         TRAILING_STOP_25_SECURED_V2,
@@ -885,5 +1073,5 @@ registry = StrategyRegistry(
         TRAILING_STOP_25_V1,
         EQUAL_WEIGHT_V1,
     ),
-    default=UNIVERSE_TRAILING_STOP_25_V1.id,
+    default=FLOW_FILTERED_LIQ500K_TP150_V1.id,
 )

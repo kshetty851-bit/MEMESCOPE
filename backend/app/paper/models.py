@@ -100,6 +100,16 @@ class Candidate:
     liquidity_usd: Decimal | None = None
     market_cap: Decimal | None = None
     volume_24h: Decimal | None = None
+    #: Sell trades as a fraction of all trades over the last ~15 minutes, from
+    #: `app.flow_features.trade_flow`. `None` means UNMEASURED, never "no
+    #: selling" — a strategy filtering on it must refuse rather than admit.
+    #:
+    #: This widens a deliberately narrow type, so the reason is on the record.
+    #: The narrowness exists to stop a strategy re-ranking on the Radar's score;
+    #: this is not a score. It is an observation about the token's own order
+    #: flow, of the same kind as `liquidity_usd` directly above, and it is here
+    #: for an ENTRY GATE rather than for sizing. Nothing scales a position by it.
+    sell_share_15m: Decimal | None = None
 
 
 @dataclass(frozen=True, slots=True)

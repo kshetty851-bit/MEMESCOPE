@@ -245,9 +245,13 @@ class TestRegistry:
             UNIVERSE_TRAILING_STOP_25_V1,
         )
 
-        assert registry.default.id == UNIVERSE_TRAILING_STOP_25_V1.id
+        # Names the INVARIANT rather than the incumbent. The default changed on
+        # 2026-08-27 to the flow-filtered twin, and the property this test
+        # exists to guard — that whatever trades is behind the security gate —
+        # is the half that must never change with it.
         assert registry.default.operational
         assert registry.default.id in SECURITY_GATED_STRATEGY_IDS
+        assert UNIVERSE_TRAILING_STOP_25_V1.operational is False
         # Every predecessor is retired, and the gate was carried forward rather
         # than dropped at the cutover — which is the property this guards.
         assert TRAILING_STOP_25_SECURED_HOLD6H_V3.operational is False

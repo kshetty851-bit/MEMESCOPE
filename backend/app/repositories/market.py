@@ -273,6 +273,26 @@ class MarketSnapshotRepository(BaseRepository[TokenMarketSnapshot]):
             if row.price_usd is not None and row.price_usd > 0
         }
 
+    async def snapshots_as_of_for_mints(
+        self, mints: Sequence[str], *, as_of: datetime
+    ) -> dict[str, TokenMarketSnapshot]:
+        """Each mint's newest FULL snapshot at or before `as_of`, batched.
+
+        `price_as_of_for_mints` returns prices; this returns the rows, because
+        trade-flow features need the buy/sell counters rather than the price.
+
+        A mint absent from the result had no observation that far back. The
+        caller must treat that as unmeasured rather than as a zero — the two
+        are different claims and only one of them is true.
+        """
+        unique = list(dict.fromkeys(mints))
+        if not unique:
+            return {}
+        rows = await self._newest_per_mint(
+            unique, [TokenMarketSnapshot.captured_at <= as_of]
+        )
+        return {row.mint_address: row for row in rows}
+
     async def series_for_mints(
         self, mints: Sequence[str], *, since: datetime
     ) -> dict[str, list[TokenMarketSnapshot]]:

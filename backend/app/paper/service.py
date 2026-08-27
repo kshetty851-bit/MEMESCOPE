@@ -34,6 +34,7 @@ from typing import Any, cast
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import flow_features
 from app.core.config import settings
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
 from app.core.logging import get_logger
@@ -75,6 +76,11 @@ from app.services.jupiter import JupiterExecutionClient
 from app.services.rpc.registry import get_rpc
 
 logger = get_logger(__name__)
+
+#: How far back the trade-flow reading looks. Matches the Strategy Lab's
+#: `sell_share_15m` window exactly — a rule derived from the Lab's trades and
+#: tested over a different window is not the same rule.
+FLOW_WINDOW = timedelta(minutes=15)
 
 _PCT = Decimal("0.0001")
 
@@ -1794,10 +1800,18 @@ class PaperWalletService:
         held = await self._repository.held_mints(wallet.id)
         open_now = await self._repository.open_mints(wallet.id)
         prices = await self._market.latest_for_mints(mints)
+        # The reading ~15 minutes back, for trade flow. Same source and same
+        # arithmetic as the Strategy Lab's `sell_share_15m`, via
+        # `app.flow_features`, because a rule derived from the Lab's trades and
+        # tested against a differently-computed feature is not the same rule.
+        earlier = await self._market.snapshots_as_of_for_mints(
+            mints, as_of=datetime.now(UTC) - FLOW_WINDOW
+        )
 
         observations = []
         for rank, row in enumerate(rows, start=1):
             snapshot = prices.get(row.mint_address)
+            flow = flow_features.trade_flow(snapshot, earlier.get(row.mint_address))
             observations.append(
                 eligibility.Observation(
                     mint_address=row.mint_address,
@@ -1809,6 +1823,7 @@ class PaperWalletService:
                     market_cap=snapshot.market_cap if snapshot else None,
                     volume_24h=snapshot.volume_24h if snapshot else None,
                     trading_status=(str(snapshot.trading_status.value) if snapshot else None),
+                    sell_share_15m=flow.sell_share,
                 )
             )
 

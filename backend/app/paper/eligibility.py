@@ -104,6 +104,8 @@ class Observation:
     market_cap: Decimal | None = None
     volume_24h: Decimal | None = None
     trading_status: str | None = None
+    #: Sell fraction of trades over the last ~15 minutes. `None` is UNMEASURED.
+    sell_share_15m: Decimal | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -161,6 +163,7 @@ def judge(
             liquidity_usd=observation.liquidity_usd,
             market_cap=observation.market_cap,
             volume_24h=observation.volume_24h,
+            sell_share_15m=observation.sell_share_15m,
         ),
     )
 
