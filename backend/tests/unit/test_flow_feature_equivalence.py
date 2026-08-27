@@ -10,14 +10,30 @@ They do NOT share code. `app.flow_features` was written for the paper wallet;
 running a live tournament and the instruction was not to touch it. So this is
 two implementations that agree, and nothing in either runtime enforces that.
 
-This test is the enforcement. If somebody simplifies the clamp, or decides an
-empty window should be zero rather than undefined, one side moves, both keep
-running, neither errors, and the control comparison quietly stops measuring the
-same thing. That is the failure this file exists to make loud and immediate.
+This test is the enforcement, and it enforces the two halves UNEQUALLY. That
+distinction is load-bearing, so it is stated rather than left to be discovered:
 
-Found in review by a second session, which pointed out that the original
-docstring claimed the two "cannot drift apart" when restating IS
-reimplementing. The claim is now enforced rather than asserted.
+  THE HELPER IS PINNED AUTOMATICALLY. `_delta` is imported from
+  `app.lab.service`, so editing the clamp compares the real edited function and
+  fails immediately.
+
+  THE FORMULA IS PINNED BY CONVENTION. `_lab_sell_share` below is a
+  TRANSCRIPTION. If somebody changes the ratio in `lab/service.py`, or its
+  `(db + ds) > 0` branch, the Lab moves and this test keeps comparing
+  `flow_features` against the stale transcription — and passes.
+
+The comment on `_lab_sell_share` is the mitigation, and it is the best
+available while the Lab must not be touched: pinning the formula properly means
+`lab/service.py` importing `flow_features`, which would have meant editing a
+module inside a running tournament.
+
+**If the Lab is ever unfrozen, that is the moment to make `lab/service.py`
+import `flow_features` and delete the transcription entirely.**
+
+Both this file and the unequal-enforcement distinction above came out of review
+by a second session: first that the original claim of "cannot drift apart" was
+false because restating IS reimplementing, then that the fix itself claimed
+more enforcement than it delivers.
 """
 
 from __future__ import annotations
