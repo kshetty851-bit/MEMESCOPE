@@ -10,6 +10,7 @@ silently.
 from __future__ import annotations
 
 import ast
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -17,7 +18,7 @@ import pytest
 from app.real_wallet import scheduler as sched
 from app.workers.celery_app import celery_app
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.anyio]
 
 
 def test_the_driver_is_actually_scheduled():
@@ -116,9 +117,57 @@ def test_an_unpriced_entry_refuses_rather_than_guessing():
     assert "sol_price_unavailable" in tick
     assert "entry_size_rounds_to_zero_lamports" in tick
 
-    priced = ast.unparse(next(n for n in ast.walk(tree)
-                              if isinstance(n, ast.AsyncFunctionDef) and n.name == "_sol_usd"))
-    assert "is_fresh" in priced, "a stale SOL price must not size an entry"
+
+@pytest.mark.parametrize(
+    ("age_seconds", "usd", "expected"),
+    [
+        (0, "100", "100"),        # fresh and positive -> usable
+        (10_000, "100", None),    # stale -> refuses
+        (-60, "100", None),       # from the future is not fresh, it is wrong
+        (0, "0", None),           # a zero price is not a price
+    ],
+)
+async def test_a_stale_or_absent_sol_price_refuses(monkeypatch, age_seconds,
+                                                   usd, expected):
+    """A stale reading is not a price.
+
+    Asserted by CALLING it rather than by looking for "is_fresh" in the
+    function's source, which is how this was written and which broke the moment
+    the freshness rule moved into a shared helper. The property is about what
+    the function returns, and source text is not evidence of that in either
+    direction.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from app.real_wallet import sol_price as sp
+
+    now = datetime(2026, 8, 27, 12, 0, tzinfo=UTC)
+
+    class _Source:
+        async def current(self, *, now):  # noqa: ARG002
+            return sp.SolUsdPrice(
+                usd=Decimal(usd),
+                observed_at=now - timedelta(seconds=age_seconds),
+                source="test",
+            )
+
+    monkeypatch.setattr(sp, "JupiterSolUsdPriceSource", _Source)
+    got = await sp.current_usd(now)
+    assert got == (Decimal(expected) if expected is not None else None)
+
+
+async def test_an_unreachable_price_source_refuses(monkeypatch):
+    """An exception is an unpriced entry, never a guessed one."""
+    from datetime import UTC, datetime
+
+    from app.real_wallet import sol_price as sp
+
+    class _Broken:
+        async def current(self, *, now):  # noqa: ARG002
+            raise RuntimeError("jupiter down")
+
+    monkeypatch.setattr(sp, "JupiterSolUsdPriceSource", _Broken)
+    assert await sp.current_usd(datetime(2026, 8, 27, tzinfo=UTC)) is None
 
 
 def test_the_spend_is_stored_not_recomputed_at_assembly():

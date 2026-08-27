@@ -62,6 +62,7 @@ from app.real_wallet.live_readiness import (
     LiveSubmissionGuard,
     SubmissionFacts,
 )
+from app.real_wallet import sol_price
 from app.real_wallet.live_repository import LiveIntentRepository
 from app.real_wallet.live_transport import (
     JupiterExecuteOutcome,
@@ -394,6 +395,19 @@ class RealWalletExecutor:
 
         open_positions = await self._repository.open_positions_count()
         entry_usd = Decimal(str(intent.requested_usd))
+        # Equity, recomputed here rather than trusted from the row, because the
+        # ladder scales the caps this re-check enforces. Without it the
+        # executor would judge a grown account against BASE bounds and refuse
+        # the size the driver had just correctly authorised.
+        #
+        # A missing price leaves it None, which holds the caps at base — the
+        # safe direction, and it refuses rather than silently widening.
+        price = await sol_price.current_usd(now)
+        equity_usd = (
+            (Decimal(balance_lamports) / Decimal(1_000_000_000) * price
+             + await self._repository.open_exposure_usd())
+            if price is not None and balance_lamports is not None else None
+        )
         # The spend as the ROW records it, not as anything recomputed here: the
         # floor has to judge the amount that will actually be signed. `None`
         # stays `None` rather than becoming 0 — a missing spend is unmeasured
@@ -408,6 +422,7 @@ class RealWalletExecutor:
                 daily_realised_loss_usd=Decimal(0),
                 daily_trades=0,
                 wallet_balance_lamports=balance_lamports,
+                equity_usd=equity_usd,
                 side=str(intent.side or "BUY"),
                 spend_lamports=None if raw_spend is None else int(raw_spend),
             ),

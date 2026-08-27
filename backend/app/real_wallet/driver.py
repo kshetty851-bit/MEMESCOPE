@@ -40,7 +40,7 @@ from app.real_wallet.policy import (
     PolicyState,
     configured_entry_size_usd,
 )
-from app.real_wallet.sol_price import JupiterSolUsdPriceSource
+from app.real_wallet import sol_price
 from app.real_wallet.tx_inspect import lamports_from_sol
 
 #: Lamports in one SOL. Named rather than inline so the conversion in
@@ -163,6 +163,7 @@ class RealWalletDriver:
                 daily_realised_loss_usd=Decimal(0),
                 daily_trades=await self._trades_today(now),
                 wallet_balance_lamports=balance_lamports,
+                equity_usd=equity_usd,
                 side="BUY",
                 spend_lamports=lamports,
             ),
@@ -199,17 +200,7 @@ class RealWalletDriver:
 
     async def _sol_usd(self, now: datetime) -> Decimal | None:
         """The wallet's own SOL/USD reading, or None. Never a guessed rate."""
-        try:
-            price = await JupiterSolUsdPriceSource().current(now=now)
-        except Exception:  # noqa: BLE001 - an unpriced entry refuses
-            return None
-        if price is None or price.usd <= 0:
-            return None
-        if not price.is_fresh(
-            now, max_age_seconds=settings.EXECUTION_SOL_PRICE_MAX_AGE_SECONDS
-        ):
-            return None
-        return Decimal(str(price.usd))
+        return await sol_price.current_usd(now)
 
     async def _wallet_lamports(self, wallet: str) -> int | None:
         """Chain balance in lamports, or None when it could not be read."""

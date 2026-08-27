@@ -43,6 +43,12 @@ class PolicyState:
     #: balance could not be read — which refuses, because a canary bound that
     #: cannot be measured has not been satisfied.
     wallet_balance_lamports: int | None = None
+    #: Account value in USD — SOL held plus what is committed to open
+    #: positions. Drives the growth ladder, which scales the MONEY caps below
+    #: so a doubled account trades doubled size against doubled bounds. `None`
+    #: means unmeasured and holds every cap at its base value, which is the
+    #: safe direction: an unmeasured account has not earned a bigger bound.
+    equity_usd: Decimal | None = None
     #: "BUY" or "SELL". The distinction matters for the fee-reserve floor and
     #: nowhere else: a BUY spends SOL, a SELL spends the token and RETURNS SOL.
     #: Defaulting to BUY keeps the floor engaged for any caller that has not
@@ -77,12 +83,15 @@ def configured_entry_size_usd(equity_usd: Decimal | None = None) -> Decimal | No
     configured, the stake doubles at each doubling of the account, exactly as
     it does for the Strategy Lab — one rule, in `app.sizing`, for both.
 
-    `REAL_WALLET_MAX_TRADE_USD` is applied last and always wins. That ordering
-    is the point: the per-trade cap bounds the blast radius of a mistake, and a
-    growth rule permitted to raise its own ceiling would not be a bound. It
-    also has to be clamped HERE rather than left to the policy, because the
-    policy REFUSES an oversized request outright — an unclamped ladder would
-    stop the wallet trading the moment it grew instead of sizing it correctly.
+    `REAL_WALLET_MAX_TRADE_USD` is applied last and always wins, and it is
+    SCALED BY THE SAME LADDER so that the cap moves with the stake rather than
+    freezing it. A fixed cap over a growing stake is not a bound, it is an
+    off switch: the stake reaches the cap once and every doubling after that is
+    silently discarded.
+
+    Clamped HERE rather than left to the policy, because the policy REFUSES an
+    oversized request outright — an unclamped ladder would stop the wallet
+    trading the moment it grew instead of sizing it correctly.
     """
     size = settings.REAL_WALLET_ENTRY_SIZE_USD
     if size <= 0:
@@ -90,7 +99,10 @@ def configured_entry_size_usd(equity_usd: Decimal | None = None) -> Decimal | No
     multiplier = sizing.growth_multiplier(
         equity_usd, base=settings.REAL_WALLET_SIZING_BASE_USD
     )
-    return sizing.scaled(size, multiplier, cap=settings.REAL_WALLET_MAX_TRADE_USD)
+    return sizing.scaled(
+        size, multiplier,
+        cap=settings.REAL_WALLET_MAX_TRADE_USD * multiplier,
+    )
 
 
 class AutonomousExecutionPolicy:
@@ -124,10 +136,14 @@ class AutonomousExecutionPolicy:
         # ceiling that can be crossed by rounding. An unreadable balance is a
         # refusal, not a pass — the bound exists to keep the canary tiny, and an
         # unmeasured wallet has not been shown to be tiny.
-        ceiling = lamports_from_sol(settings.REAL_WALLET_MAX_BALANCE_SOL)
-        if (
-            state.wallet_balance_lamports is None
-            or state.wallet_balance_lamports > ceiling
+        # Zero means NO ceiling — an account meant to compound cannot have a
+        # bound that halts it at a fixed size. An unreadable balance still
+        # refuses either way: the fee-reserve floor below needs the number, and
+        # a balance nobody measured has not been shown to satisfy anything.
+        ceiling = (lamports_from_sol(settings.REAL_WALLET_MAX_BALANCE_SOL)
+                   if settings.REAL_WALLET_MAX_BALANCE_SOL > 0 else None)
+        if state.wallet_balance_lamports is None or (
+            ceiling is not None and state.wallet_balance_lamports > ceiling
         ):
             reasons.append(PolicyReason.MAX_WALLET_BALANCE)
         reasons.extend(self._fee_reserve_reasons(state))
@@ -174,27 +190,54 @@ class AutonomousExecutionPolicy:
         return []
 
     @staticmethod
+    def _ladder(state: PolicyState) -> Decimal:
+        """How many times its base bound this account has earned.
+
+        The SAME rule that sizes the stake, deliberately. A ladder that grew
+        the order but not the bound around it would stop the wallet trading the
+        moment it grew — the cap would refuse the size the ladder had just
+        authorised — and a ladder that grew the bound but not the order would
+        be a loosened limit bought with nothing.
+
+        Inert until `REAL_WALLET_SIZING_BASE_USD` is set. Unset means nobody
+        has said at what account size the bounds should double, and a default
+        here would be inventing that decision.
+        """
+        base = settings.REAL_WALLET_SIZING_BASE_USD
+        if base <= 0:
+            return Decimal(1)
+        return sizing.growth_multiplier(state.equity_usd, base=base)
+
+    @staticmethod
     def _size_and_count_reasons(
         requested_usd: Decimal, state: PolicyState
     ) -> list[str]:
         reasons: list[str] = []
+        # Every DOLLAR bound scales with the account; the two COUNT bounds do
+        # not. A position limit and a trade limit exist to bound how many times
+        # a bug can fire, and that has nothing to do with how rich the account
+        # is — scaling them would loosen the blast radius exactly as the
+        # account got large enough for it to matter.
+        mult = AutonomousExecutionPolicy._ladder(state)
+        max_trade = settings.REAL_WALLET_MAX_TRADE_USD * mult
+        max_exposure = settings.REAL_WALLET_MAX_TOTAL_EXPOSURE_USD * mult
+        max_notional = settings.REAL_WALLET_MAX_DAILY_NOTIONAL_USD * mult
+        max_loss = settings.REAL_WALLET_MAX_DAILY_LOSS_USD * mult
+
         if requested_usd <= 0:
             reasons.append(PolicyReason.ENTRY_SIZE_NOT_CONFIGURED)
         # The per-trade cap is enforced here as well as at sizing, so a caller
         # that computes its own amount cannot exceed it by not asking.
-        if requested_usd > settings.REAL_WALLET_MAX_TRADE_USD:
+        if requested_usd > max_trade:
             reasons.append(PolicyReason.MAX_TRADE_SIZE)
         if state.open_positions >= settings.REAL_WALLET_MAX_OPEN_POSITIONS:
             reasons.append(PolicyReason.MAX_OPEN_POSITIONS)
-        if state.exposure_usd + requested_usd > settings.REAL_WALLET_MAX_TOTAL_EXPOSURE_USD:
+        if state.exposure_usd + requested_usd > max_exposure:
             reasons.append(PolicyReason.MAX_TOTAL_EXPOSURE)
-        if (
-            state.daily_notional_usd + requested_usd
-            > settings.REAL_WALLET_MAX_DAILY_NOTIONAL_USD
-        ):
+        if state.daily_notional_usd + requested_usd > max_notional:
             reasons.append(PolicyReason.MAX_DAILY_NOTIONAL)
         if state.daily_trades >= settings.REAL_WALLET_MAX_DAILY_TRADES:
             reasons.append(PolicyReason.MAX_DAILY_TRADES)
-        if state.daily_realised_loss_usd >= settings.REAL_WALLET_MAX_DAILY_LOSS_USD:
+        if state.daily_realised_loss_usd >= max_loss:
             reasons.append(PolicyReason.MAX_DAILY_LOSS)
         return reasons

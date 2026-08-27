@@ -320,6 +320,97 @@ def _state(**overrides: object) -> PolicyState:
 
 
 # --------------------------------------------------------------------------
+# The GROWTH LADDER applied to the caps. A doubled account must trade doubled
+# size against doubled bounds, or the bound silently discards every doubling.
+# --------------------------------------------------------------------------
+
+
+def test_without_a_sizing_base_the_caps_do_not_move(monkeypatch) -> None:
+    """Inert until somebody says at what account size bounds should double."""
+    monkeypatch.setattr(settings, "REAL_WALLET_SIZING_BASE_USD", Decimal("0"))
+    d = AutonomousExecutionPolicy().evaluate_canary_entry(
+        requested_usd=settings.REAL_WALLET_MAX_TRADE_USD * 2,
+        state=_state(equity_usd=Decimal("10000")),
+    )
+    assert PolicyReason.MAX_TRADE_SIZE in d.reason_codes
+
+
+def test_a_doubled_account_gets_doubled_money_caps(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "REAL_WALLET_SIZING_BASE_USD", Decimal("100"))
+    monkeypatch.setattr(settings, "REAL_WALLET_MAX_TRADE_USD", Decimal("5"))
+    monkeypatch.setattr(settings, "REAL_WALLET_MAX_TOTAL_EXPOSURE_USD", Decimal("50"))
+    policy = AutonomousExecutionPolicy()
+
+    # $10 at $100 equity is over the base cap...
+    at_100 = policy.evaluate_canary_entry(
+        requested_usd=Decimal("10"), state=_state(equity_usd=Decimal("100")))
+    assert PolicyReason.MAX_TRADE_SIZE in at_100.reason_codes
+
+    # ...and exactly at the cap once the account has doubled.
+    at_200 = policy.evaluate_canary_entry(
+        requested_usd=Decimal("10"), state=_state(equity_usd=Decimal("200")))
+    assert PolicyReason.MAX_TRADE_SIZE not in at_200.reason_codes
+
+    # The book cap moves with it: $50 -> $100 of exposure at 2x.
+    assert PolicyReason.MAX_TOTAL_EXPOSURE not in policy.evaluate_canary_entry(
+        requested_usd=Decimal("10"),
+        state=_state(equity_usd=Decimal("200"), exposure_usd=Decimal("90")),
+    ).reason_codes
+    assert PolicyReason.MAX_TOTAL_EXPOSURE in policy.evaluate_canary_entry(
+        requested_usd=Decimal("10"),
+        state=_state(equity_usd=Decimal("100"), exposure_usd=Decimal("45")),
+    ).reason_codes
+
+
+def test_the_count_bounds_never_scale(monkeypatch) -> None:
+    """Position and trade COUNTS bound how many times a bug can fire, which has
+    nothing to do with how rich the account is."""
+    monkeypatch.setattr(settings, "REAL_WALLET_SIZING_BASE_USD", Decimal("100"))
+    monkeypatch.setattr(settings, "REAL_WALLET_MAX_OPEN_POSITIONS", 10)
+    d = AutonomousExecutionPolicy().evaluate_canary_entry(
+        requested_usd=Decimal("1"),
+        state=_state(equity_usd=Decimal("100000"), open_positions=10),
+    )
+    assert PolicyReason.MAX_OPEN_POSITIONS in d.reason_codes
+
+
+def test_unmeasured_equity_holds_the_caps_at_base(monkeypatch) -> None:
+    """An account nobody measured has not earned a bigger bound."""
+    monkeypatch.setattr(settings, "REAL_WALLET_SIZING_BASE_USD", Decimal("100"))
+    monkeypatch.setattr(settings, "REAL_WALLET_MAX_TRADE_USD", Decimal("5"))
+    d = AutonomousExecutionPolicy().evaluate_canary_entry(
+        requested_usd=Decimal("10"), state=_state(equity_usd=None))
+    assert PolicyReason.MAX_TRADE_SIZE in d.reason_codes
+
+
+# --------------------------------------------------------------------------
+# The balance CEILING, now optional.
+# --------------------------------------------------------------------------
+
+
+def test_a_zero_ceiling_means_no_ceiling(monkeypatch) -> None:
+    """An account meant to compound cannot carry a bound that halts it at a
+    fixed size."""
+    monkeypatch.setattr(settings, "REAL_WALLET_MAX_BALANCE_SOL", Decimal("0"))
+    d = AutonomousExecutionPolicy().evaluate_canary_entry(
+        requested_usd=Decimal("1"),
+        state=_state(wallet_balance_lamports=10_000 * 1_000_000_000,
+                     spend_lamports=1_000_000),
+    )
+    assert PolicyReason.MAX_WALLET_BALANCE not in d.reason_codes
+
+
+def test_an_unreadable_balance_still_refuses_with_no_ceiling(monkeypatch) -> None:
+    """Removing the ceiling must not turn an unmeasured balance into a pass."""
+    monkeypatch.setattr(settings, "REAL_WALLET_MAX_BALANCE_SOL", Decimal("0"))
+    d = AutonomousExecutionPolicy().evaluate_canary_entry(
+        requested_usd=Decimal("1"),
+        state=_state(wallet_balance_lamports=None),
+    )
+    assert PolicyReason.MAX_WALLET_BALANCE in d.reason_codes
+
+
+# --------------------------------------------------------------------------
 # The fee-reserve FLOOR. The balance bound above is a ceiling; this is the
 # other side of it, and until 2026-08-27 it did not exist.
 # --------------------------------------------------------------------------
