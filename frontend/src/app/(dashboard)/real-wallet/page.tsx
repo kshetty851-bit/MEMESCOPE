@@ -740,10 +740,23 @@ type AutotradeState = {
  *
  * The server owns both decisions. This renders them.
  */
-function AutotradeControl() {
+function AutotradeControl({ status }: { status: WalletStatus | undefined }) {
   const queryClient = useQueryClient();
-  const [strategy, setStrategy] = useState("V6-06");
+  // No default. A pre-filled strategy means a mis-tap nominates whichever one
+  // happened to be first in the list, and this control commits real capital to
+  // the name in this box — so it has to be chosen, not merely accepted.
+  const [strategy, setStrategy] = useState("");
   const [reason, setReason] = useState("");
+
+  // Whether pressing Start actually spends money, read from the deployment
+  // rather than stated in prose. Undefined status reads as ARMED: claiming the
+  // barriers are up while they cannot be confirmed is the error that costs
+  // money, and the opposite error only over-warns.
+  const armed =
+    status === undefined ||
+    (status.mode === "live" &&
+      status.execution_enabled !== false &&
+      status.autotrade_enabled !== false);
 
   const state = useQuery<AutotradeState>({
     queryKey: ["real-wallet", "autotrade"],
@@ -766,6 +779,9 @@ function AutotradeControl() {
   const data = state.data;
   const running = data?.enabled === true;
   const canAct = reason.trim().length >= 3 && !mutate.isPending;
+  // Stopping deliberately does NOT require a strategy: it is unconditional and
+  // must never be gated on a field that has nothing to do with stopping.
+  const canStart = canAct && strategy !== "";
 
   return (
     <section className="mt-6 rounded-lg border border-line p-4">
@@ -792,12 +808,31 @@ function AutotradeControl() {
         </span>
       </div>
 
+      {/* Derived, never asserted. This paragraph used to end "on this deployment
+          submission is still impossible", which was true when it was written and
+          false from the day the flags went live — the most dangerous possible
+          place for stale prose, since it reads as reassurance at the exact
+          moment of committing real money. */}
       <p className="mt-2 rounded border border-warn/40 bg-warn/[0.06] p-2 text-xs leading-relaxed text-warn">
-        Starting authorises nothing. Mode, the three enable flags, the release
-        constant, the mainnet clause, the submission guard, SEC-2 freshness, network
-        verification and the canary limits are each evaluated independently. On this
-        deployment submission is still impossible. Stopping, by contrast, is
-        unconditional and takes effect immediately.
+        {armed ? (
+          <>
+            <b>Starting will trade real money.</b> Mode is {status?.mode ?? "—"},
+            execution and autotrade are both enabled, and the release constant is
+            on — so every barrier ahead of this control is already satisfied and
+            this switch is the last one. The nominated strategy will begin opening
+            positions on the next cycle.
+          </>
+        ) : (
+          <>
+            Starting records intent only. Submission is still refused by{" "}
+            {[
+              status?.mode !== "live" ? `mode=${status?.mode ?? "—"}` : null,
+              status?.execution_enabled === false ? "execution disabled" : null,
+              status?.autotrade_enabled === false ? "autotrade disabled" : null,
+            ].filter(Boolean).join(", ") || "a barrier ahead of this control"}.
+          </>
+        )}{" "}
+        Stopping, by contrast, is unconditional and takes effect immediately.
       </p>
 
       <div className="mt-3 grid gap-2 sm:grid-cols-[160px_1fr_auto_auto]">
@@ -807,6 +842,9 @@ function AutotradeControl() {
           onChange={(e) => setStrategy(e.target.value)}
           value={strategy}
         >
+          <option value="" disabled>
+            Choose a strategy…
+          </option>
           {Array.from({ length: 20 }, (_, i) => `V6-${String(i + 1).padStart(2, "0")}`)
             .filter((id) => id !== "V6-01")
             .map((id) => (
@@ -823,7 +861,7 @@ function AutotradeControl() {
         />
         <button
           className="rounded border border-up/40 px-3 py-2 text-sm text-up disabled:opacity-40"
-          disabled={!canAct || running}
+          disabled={!canStart || running}
           onClick={() => mutate.mutate({ action: "start" })}
           type="button"
         >
@@ -1112,7 +1150,7 @@ export default function RealWalletPage() {
         </p>
       </section>
       <FundingReadinessPanel data={readinessQuery.data} />
-      <AutotradeControl />
+      <AutotradeControl status={data} />
       <section className="mt-6 rounded-lg border border-line p-4">
         <p className="text-label text-ink-3">Manual devnet verification</p>
         <p className="mt-1 text-sm text-ink-3">

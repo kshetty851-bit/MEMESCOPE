@@ -372,6 +372,73 @@ describe("RealWalletPage balance card", () => {
   });
 });
 
+describe("RealWalletPage autotrade control", () => {
+  beforeEach(() => {
+    window.sessionStorage.setItem("memescope.seatbelt", "1");
+  });
+
+  it("says starting spends real money when the barriers are already down", async () => {
+    // This paragraph used to end "on this deployment submission is still
+    // impossible" — true when written, false from the day the flags went live.
+    // Stale reassurance directly above the control that commits real capital is
+    // the worst place in the product for it, so the text is now DERIVED.
+    vi.mocked(api.get).mockResolvedValue({
+      ...lockedStatus(),
+      mode: "live",
+      execution_enabled: true,
+      autotrade_enabled: true,
+    });
+    render(<RealWalletPage />, { wrapper });
+    await waitFor(() =>
+      expect(screen.getByText("Autonomous trading")).toBeInTheDocument(),
+    );
+    const panel = screen.getByText("Autonomous trading").closest("section")!;
+    expect(panel.textContent).toContain("Starting will trade real money");
+    expect(panel.textContent).not.toContain("submission is still impossible");
+  });
+
+  it("will not start until a strategy is actually chosen", async () => {
+    // A pre-filled strategy means a mis-tap nominates whichever name happened
+    // to be sitting in the box. Karthik presses this from a phone.
+    vi.mocked(api.get).mockResolvedValue(lockedStatus());
+    render(<RealWalletPage />, { wrapper });
+    await waitFor(() =>
+      expect(screen.getByText("Autonomous trading")).toBeInTheDocument(),
+    );
+    const panel = screen.getByText("Autonomous trading").closest("section")!;
+    const start = within(panel).getByRole("button", { name: /^start$/i });
+
+    fireEvent.change(
+      within(panel).getByPlaceholderText(/reason/i),
+      { target: { value: "going live" } },
+    );
+    expect(start).toBeDisabled();          // reason given, strategy still empty
+
+    fireEvent.change(within(panel).getByRole("combobox"), {
+      target: { value: "V6-07" },
+    });
+    expect(start).toBeEnabled();
+    expect(api.post).not.toHaveBeenCalled();
+  });
+
+  it("never gates STOP on the strategy field", async () => {
+    // Stopping is unconditional. Gating it on a field that has nothing to do
+    // with stopping would make the emergency control depend on the thing the
+    // emergency is about.
+    vi.mocked(api.get).mockResolvedValue(lockedStatus());
+    render(<RealWalletPage />, { wrapper });
+    await waitFor(() =>
+      expect(screen.getByText("Autonomous trading")).toBeInTheDocument(),
+    );
+    const panel = screen.getByText("Autonomous trading").closest("section")!;
+    fireEvent.change(
+      within(panel).getByPlaceholderText(/reason/i),
+      { target: { value: "stop now" } },
+    );
+    expect(within(panel).getByRole("button", { name: /^stop$/i })).toBeEnabled();
+  });
+});
+
 describe("RealWalletPage withdrawal without a destination", () => {
   beforeEach(() => {
     window.sessionStorage.setItem("memescope.seatbelt", "1");
