@@ -294,6 +294,14 @@ x-backend-env: &backend-env
   # The ceiling that makes the blast radius a number rather than a promise.
   # Compared in integer lamports; over-funding is refused, not traded.
   REAL_WALLET_MAX_BALANCE_SOL: ${REAL_WALLET_MAX_BALANCE_SOL:-0.25}
+  # Whether that ceiling applies at all. Defaults TRUE so a compose file that
+  # has not heard of it keeps the bound — the safe direction, and the reason
+  # this is a named flag rather than a sentinel value on the number above.
+  REAL_WALLET_BALANCE_CEILING_ENABLED: ${REAL_WALLET_BALANCE_CEILING_ENABLED:-true}
+  # Account size at which the stake and every DOLLAR cap double. Zero leaves
+  # the ladder inert, matching ENTRY_SIZE_USD above: nobody has said at what
+  # balance a real order should grow, and a default here would invent it.
+  REAL_WALLET_SIZING_BASE_USD: ${REAL_WALLET_SIZING_BASE_USD:-0}
   # Real exit quote bounds. A fired trigger with no priceable route becomes an
   # explicit failure state; divergence would let one service call it executable.
   REAL_WALLET_EXIT_MAX_QUOTE_AGE_SECONDS: ${REAL_WALLET_EXIT_MAX_QUOTE_AGE_SECONDS:-15}
