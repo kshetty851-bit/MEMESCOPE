@@ -306,6 +306,24 @@ describe("RealWalletPage balance card", () => {
     expect(panel!.textContent).toContain("Locked destination");
   });
 
+  it("says why the button is greyed instead of just looking broken", async () => {
+    // A disabled control with no reason reads as a broken feature, and it did:
+    // the wallet's owner reported the withdrawal as "not enabled" when it was
+    // working and merely waiting for an amount. The hint used to require a
+    // keystroke before it appeared, so the empty state — the one everybody
+    // lands on — explained nothing.
+    vi.mocked(api.get).mockResolvedValue(lockedStatus());
+    render(<RealWalletPage />, { wrapper });
+    await waitFor(() =>
+      expect(screen.getByText("PublicExecutionWalletAddress")).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /withdraw/i }));
+
+    const panel = screen.getByText("Withdraw SOL").closest("div");
+    expect(panel!.querySelector("input")!).toHaveValue("");
+    expect(panel!.textContent).toContain("Enter an amount above zero");
+  });
+
   it("requires a second, explicit confirmation before it sends", async () => {
     // A submitted transfer whose response was lost is UNCERTAIN, and pressing
     // again is how one withdrawal becomes two. One click must not send.

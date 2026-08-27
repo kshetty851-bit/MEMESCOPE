@@ -330,8 +330,8 @@ function WithdrawForm({ data }: { data: WalletStatus | undefined }) {
         )}
       </div>
 
-      {amount && !valid ? (
-        <p className="mt-2 text-xs text-warning">
+      {!valid ? (
+        <p className={`mt-2 text-xs ${amount ? "text-warning" : "text-ink-3"}`}>
           Enter an amount above zero and at most {most.toFixed(6)} SOL — the fee
           reserve of {reserve} SOL has to stay behind to pay for the next
           transaction, including a later withdrawal.
