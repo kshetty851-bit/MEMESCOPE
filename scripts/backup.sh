@@ -60,13 +60,25 @@ prune() {
 # which failed its health check and took the worker, scheduler and scanner
 # down with it.
 #
-# 3/1/1 caps backups near 7.5GB and still leaves three days of daily restore
-# points plus a weekly and a monthly. Weeklies and monthlies are hardlinks to
-# a daily (see above), so they cost nothing extra until the daily is pruned
-# out from under them.
+# 3/1/1 capped backups near 7.5GB. Widened to 5 daily on 2026-08-27 at the
+# operator's instruction: the recovery window matters more now that a funded
+# mainnet wallet and a 30-day tournament depend on this host, and two restore
+# points was thin for that.
 #
-# If the disk grows, raise these. Do not raise them without checking `df`.
-prune "$DAILY" 3
+# THE COST, STATED, because it is not free. A dump is ~1.65GB, so five daily
+# plus a weekly and a monthly is up to ~11.5GB of a 38GB disk that also holds
+# a 10GB database — roughly 92% at full accumulation, past the 85% line the
+# disk guard and HQ both act on.
+#
+# It does not fill by the day, it fills by the RUN: deploy.sh takes a dump
+# before every migration, so three landed within two hours on 2026-08-26.
+# Five deploys in a day is five dumps, not one.
+#
+# So this number is only safe while something else keeps the disk down. Today
+# that is scripts/disk-guard.sh (Docker cache above 85%) and the retention
+# prunes in app/workers/retention_tasks.py. If those stop reclaiming, cut this
+# back before the disk does it for you. Check `df` before raising it further.
+prune "$DAILY" 5
 prune "$WEEKLY" 1
 prune "$MONTHLY" 1
 
