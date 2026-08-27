@@ -349,9 +349,13 @@ class RealWalletAllocation(Base, UUIDPrimaryKeyMixin):
     __tablename__ = "real_wallet_allocations"
 
     #: A V6 Lab strategy id, e.g. "V6-06". One row per strategy, ever.
-    strategy_id: Mapped[str] = mapped_column(
-        String(64), nullable=False, unique=True
-    )
+    #:
+    #: Uniqueness is declared in `__table_args__` below rather than as
+    #: `unique=True` here. Both produce the same constraint, but the column form
+    #: takes its NAME from the metadata naming convention while the migration
+    #: names it explicitly, and `alembic check` then reports a permanent
+    #: remove-then-add pair for a constraint that never changed.
+    strategy_id: Mapped[str] = mapped_column(String(64), nullable=False)
     #: Share of total equity this strategy may deploy. 0 < fraction <= 1.
     fraction: Mapped[Decimal] = mapped_column(Numeric(6, 5), nullable=False)
     #: Disabled rows keep their fraction but are not counted and never trade.
@@ -363,6 +367,7 @@ class RealWalletAllocation(Base, UUIDPrimaryKeyMixin):
     note: Mapped[str | None] = mapped_column(String(256))
 
     __table_args__ = (
+        UniqueConstraint("strategy_id", name="uq_real_wallet_allocation_strategy"),
         CheckConstraint(
             "fraction > 0 AND fraction <= 1", name="ck_real_wallet_allocation_fraction"
         ),
