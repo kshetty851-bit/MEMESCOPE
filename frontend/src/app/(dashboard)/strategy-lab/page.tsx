@@ -5,7 +5,7 @@ import { useMemo, useState } from "react";
 import { Label, Panel } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/states";
-import { useLabBoard, useLabStrategy } from "@/hooks/use-lab";
+import { useLabBoard, useLabStrategy, useLabTrades } from "@/hooks/use-lab";
 import type { LabBoard, LabRule, LabStrategyRow, LabProjection } from "@/types/lab";
 import { SellButton } from "./sell-button";
 import { cellTone, generationOf, isCashControl, toneOf } from "./tone";
@@ -461,6 +461,83 @@ function Drawer({ id, onClose }: { id: string; onClose: () => void }) {
   );
 }
 
+/**
+ * Every open position across every wallet, with its sell control.
+ *
+ * On THIS page rather than only on the trades view because this is the page a
+ * reader is on. The leaderboard's rows are strategies, not trades, so there is
+ * no row here to hang a sell button from — and a control one navigation step
+ * away from where somebody is looking is, in practice, a control they do not
+ * have.
+ *
+ * Its own query rather than a slice of the board: the board carries per-
+ * strategy totals, not the individual holdings, and deriving positions from
+ * totals is not possible.
+ */
+function OpenPositions() {
+  const { data, isLoading } = useLabTrades(undefined, "open");
+  const rows = data?.trades ?? [];
+
+  return (
+    <Panel density="compact">
+      <div className="flex flex-wrap items-baseline justify-between gap-3">
+        <Label>OPEN POSITIONS ({isLoading ? "…" : rows.length})</Label>
+        <p className="text-[10px] text-muted">
+          Paper positions. Selling by hand records the exit as{" "}
+          <span className="font-mono">manual_close</span> — not a result the
+          frozen rules produced.
+        </p>
+      </div>
+      {isLoading ? (
+        <Skeleton className="mt-2 h-24 w-full" />
+      ) : rows.length === 0 ? (
+        <p className="mt-2 text-xs text-muted">Nothing open right now.</p>
+      ) : (
+        <div className="mt-2 max-h-80 overflow-auto">
+          <table className="w-full text-left font-mono text-[11px]">
+            <thead className="text-muted">
+              <tr>
+                <th className="py-1 pr-3 font-normal">sell</th>
+                <th className="py-1 pr-3 font-normal">strategy</th>
+                <th className="py-1 pr-3 font-normal">token</th>
+                <th className="py-1 pr-3 text-right font-normal">size</th>
+                <th className="py-1 pr-3 text-right font-normal">value</th>
+                <th className="py-1 pr-3 text-right font-normal">P&L</th>
+                <th className="py-1 pr-3 text-right font-normal">exec ×</th>
+                <th className="py-1 font-normal">held</th>
+              </tr>
+            </thead>
+            <tbody className="text-ink">
+              {rows.map((t) => (
+                <tr key={t.id} className="border-t border-line">
+                  <td className="py-1 pr-3">
+                    <SellButton id={t.id} />
+                  </td>
+                  <td className="py-1 pr-3">{t.strategy_id}</td>
+                  <td className="py-1 pr-3">
+                    {t.symbol ?? `${t.mint.slice(0, 6)}…`}
+                  </td>
+                  <td className="py-1 pr-3 text-right">{money(t.size_usd)}</td>
+                  <td className="py-1 pr-3 text-right">
+                    {money(t.current_value_usd)}
+                  </td>
+                  <td className={`py-1 pr-3 text-right ${toneOf(t.unrealised_pnl)}`}>
+                    {signed(t.unrealised_pnl)}
+                  </td>
+                  <td className="py-1 pr-3 text-right">
+                    {t.exec_multiple === null ? "—" : `${t.exec_multiple.toFixed(3)}×`}
+                  </td>
+                  <td className="py-1">{t.held_hours.toFixed(1)}h</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Panel>
+  );
+}
+
 /** A curve, not a chart library: one path over the marks the ledger recorded. */
 function Sparkline({ points }: { points: number[] }) {
   if (points.length < 2) return null;
@@ -659,6 +736,7 @@ export default function StrategyLabPage() {
       <Header board={data} />
       <Leaders board={data} />
       <Projection board={data} />
+      <OpenPositions />
       <Panel density="compact">
         <div className="flex items-baseline justify-between">
           <Label>LIVE LEADERBOARD — {data.strategies.length} STRATEGIES</Label>
