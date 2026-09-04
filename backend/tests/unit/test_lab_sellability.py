@@ -28,9 +28,13 @@ def test_the_frozen_spec_is_untouched():
     """A running tournament whose rules changed mid-flight would be worthless.
     Every strategy already exits on `dead_zero`; none were firing because nothing
     told them the position was dead."""
-    assert spec.SPEC_VERSION == "1.1.0"
+    # Updated deliberately at the V6.1 -> V7 cutover on 2026-09-04, which is the
+    # only circumstance in which these two lines may change. If this test fails
+    # and nobody bumped the version on purpose, a live tournament's rules moved
+    # underneath it and the results are void.
+    assert spec.SPEC_VERSION == "1.2.0"
     assert spec.SPEC_HASH == (
-        "a5f0c2ed0fd29a1ce9ac6bc98efdafd96dea974a5db6c523f98e23bdcc447a41"
+        "ae1627b4ec0d3f9f4202e874333582f0deba1e306068a6401e7c9bf6a396f70c"
     )
 
 

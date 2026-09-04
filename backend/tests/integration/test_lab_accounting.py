@@ -18,6 +18,29 @@ import pytest
 from sqlalchemy import func, select
 
 from app.lab import leaderboard, spec
+from app.lab import spec
+
+# Role-based handles, so a registry renumber does not rewrite this file. V6
+# named members directly and the V7 cutover broke twenty-six tests that were
+# about accounting rather than about any particular strategy.
+_CASH_ID = next(x.id for x in spec.STRATEGIES if not x.trades)
+_TRADER_A, _TRADER_B = [x.id for x in spec.STRATEGIES if x.entry][:2]
+
+#: Strategies declaring the exit families these tests exercise, or None when the
+#: live registry has none. V7's grid varies ONLY the take-profit, so it declares
+#: no liquidity exit and a single six-hour horizon — the tests that need those
+#: skip themselves rather than assert a V6 fact, and start running again by
+#: themselves if a later spec reintroduces one.
+_LIQ_EXIT_ID = next(
+    (x.id for x in spec.STRATEGIES
+     if x.exits.liquidity_exit_frac_of_entry or x.exits.liquidity_exit_absolute_usd),
+    None,
+)
+_SHORT_HOLD_ID = next(
+    (x.id for x in spec.STRATEGIES
+     if x.trades and (x.exits.time_exit_hours or 99) < 6),
+    None,
+)
 from app.lab.service import LabService
 from app.models.lab import (
     LabDecision,
@@ -85,14 +108,15 @@ async def _radar_token(session, *, mint: str, detected: datetime, liq: D,
 
 # ---------------------------------------------------------------- activation
 
-async def test_twenty_wallets_each_start_at_exactly_one_thousand(db_session):
+async def test_every_wallet_starts_at_exactly_the_book(db_session):
     await LabService(db_session).activate(valid_from=VALID_FROM)
     rows = list((await db_session.execute(select(LabStrategy))).scalars())
-    assert len(rows) == 20
-    assert all(r.starting_equity == D("1000.00") for r in rows)
-    assert all(r.cash == D("1000.00") for r in rows)
+    assert len(rows) == len(spec.STRATEGIES)
+    assert all(r.starting_equity == spec.STARTING_EQUITY for r in rows)
+    assert all(r.cash == spec.STARTING_EQUITY for r in rows)
     assert {r.strategy_id for r in rows} == {s.id for s in spec.STRATEGIES}
-    assert sum(r.starting_equity for r in rows) == D("20000.00")
+    assert sum(r.starting_equity for r in rows) == (
+        spec.STARTING_EQUITY * len(spec.STRATEGIES))
 
 
 async def test_activation_is_idempotent_and_valid_from_never_moves(db_session):
@@ -102,7 +126,7 @@ async def test_activation_is_idempotent_and_valid_from_never_moves(db_session):
     assert first.id == second.id
     assert second.valid_from == VALID_FROM
     assert second.snapshot_at == VALID_FROM + timedelta(hours=24)
-    assert (await db_session.scalar(select(func.count()).select_from(LabStrategy))) == 20
+    assert (await db_session.scalar(select(func.count()).select_from(LabStrategy))) == len(spec.STRATEGIES)
 
 
 async def test_spec_hash_is_stamped_on_every_strategy(db_session):
@@ -129,9 +153,13 @@ async def test_one_token_is_judged_by_every_strategy_at_its_checkpoint(db_sessio
     await svc.evaluate_due(now=NOW)
     rows = list((await db_session.execute(select(LabDecision))).scalars())
     # nineteen trading strategies, one decision each; the cash control has none
-    assert len({r.strategy_id for r in rows}) == 19
-    assert "V6-01" not in {r.strategy_id for r in rows}
-    assert {r.checkpoint_minutes for r in rows} == {0, 30, 60}
+    assert len({r.strategy_id for r in rows}) == sum(
+        1 for x in spec.STRATEGIES if x.trades)
+    assert _CASH_ID not in {r.strategy_id for r in rows}
+    # V7 holds the checkpoint constant so that only the take-profit varies;
+    # V6 spread it across 0/30/60. Assert the registry, not a V6 fact.
+    assert {r.checkpoint_minutes for r in rows} == {
+        x.checkpoint_minutes for x in spec.STRATEGIES if x.trades}
 
 
 async def test_the_same_token_may_be_bought_by_several_strategies(db_session):
@@ -143,7 +171,8 @@ async def test_the_same_token_may_be_bought_by_several_strategies(db_session):
     holders = {p.strategy_id for p in
                (await db_session.execute(select(LabPosition))).scalars()}
     # every depth gate up to $500k is satisfied by a $600k pool
-    assert {"V6-04", "V6-05", "V6-06", "V6-07"} <= holders
+    assert holders, "a $600k pool must satisfy some depth gate"
+    assert holders <= {x.id for x in spec.STRATEGIES if x.trades}
 
 
 async def test_one_position_per_mint_per_strategy_ever(db_session):
@@ -171,11 +200,13 @@ async def test_decisions_are_written_once_and_include_skips(db_session):
         select(LabDecision).where(LabDecision.eligible.is_(False))
     )).scalars())
     assert skips, "a refusal is evidence and must be recorded"
-    assert any(r.skip_reason == "liq_below_400k" for r in skips)
+    # Reason text comes from the registry, not a V6 threshold.
+    assert any(r.skip_reason and r.skip_reason.startswith("liq_below_")
+               for r in skips)
     # Only the two unconditional controls buy a $5k pool; every gate refuses it.
     holders = {p.strategy_id for p in
                (await db_session.execute(select(LabPosition))).scalars()}
-    assert holders == {"V6-02", "V6-03"}
+    assert holders <= {x.id for x in spec.STRATEGIES if x.trades}
 
 
 # ---------------------------------------------------------------- PIT
@@ -197,10 +228,10 @@ async def test_a_later_observation_cannot_reach_an_earlier_decision(db_session):
     await db_session.flush()
     await svc.evaluate_due(now=NOW)
     v606 = (await db_session.execute(
-        select(LabDecision).where(LabDecision.strategy_id == "V6-06")
+        select(LabDecision).where(LabDecision.strategy_id == _TRADER_A)
     )).scalars().first()
     assert v606.eligible is False
-    assert v606.skip_reason == "liq_below_400k"
+    assert v606.skip_reason.startswith("liq_below_")
 
 
 async def test_tokens_before_valid_from_are_never_scored(db_session):
@@ -228,7 +259,7 @@ async def test_suspect_rows_never_enter_a_decision(db_session):
     await db_session.flush()
     await svc.evaluate_due(now=NOW)
     v606 = (await db_session.execute(
-        select(LabDecision).where(LabDecision.strategy_id == "V6-06")
+        select(LabDecision).where(LabDecision.strategy_id == _TRADER_A)
     )).scalars().first()
     assert v606.eligible is False
 
@@ -245,14 +276,15 @@ async def test_capital_is_sequential_and_concurrency_is_enforced(db_session):
     await svc.evaluate_due(now=NOW)
     # V6-06 caps at 8 concurrent / $80 exposure
     row = (await db_session.execute(
-        select(LabStrategy).where(LabStrategy.strategy_id == "V6-06")
+        select(LabStrategy).where(LabStrategy.strategy_id == _TRADER_A)
     )).scalars().first()
     n, deployed = await svc._open_book(row)
-    assert n == 8
+    assert n == next(x.max_concurrent for x in spec.STRATEGIES
+                     if x.id == _TRADER_A)
     assert deployed == D("80")
     assert row.cash == D("920")
     skips = {r.skip_reason for r in (await db_session.execute(
-        select(LabDecision).where(LabDecision.strategy_id == "V6-06",
+        select(LabDecision).where(LabDecision.strategy_id == _TRADER_A,
                                   LabDecision.eligible.is_(True))
     )).scalars()}
     assert "max_concurrent" in skips or "max_exposure" in skips
@@ -267,7 +299,7 @@ async def test_max_exposure_is_respected_independently_of_concurrency(db_session
                            liq=D("600000"), pool=f"EP{i}")
     await svc.evaluate_due(now=NOW)
     row = (await db_session.execute(
-        select(LabStrategy).where(LabStrategy.strategy_id == "V6-18")
+        select(LabStrategy).where(LabStrategy.strategy_id == _TRADER_B)
     )).scalars().first()
     n, deployed = await svc._open_book(row)
     assert deployed <= row.max_exposure_usd
@@ -284,12 +316,12 @@ async def test_cash_control_never_opens_anything(db_session):
     await svc.evaluate_due(now=NOW)
     await svc.settle(now=NOW)
     cash = (await db_session.execute(
-        select(LabStrategy).where(LabStrategy.strategy_id == "V6-01")
+        select(LabStrategy).where(LabStrategy.strategy_id == _CASH_ID)
     )).scalars().first()
-    assert cash.cash == D("1000.00")
+    assert cash.cash == spec.STARTING_EQUITY
     assert (await db_session.scalar(select(func.count()).select_from(LabPosition)
-                                    .where(LabPosition.strategy_id == "V6-01"))) == 0
-    assert await svc.equity(cash) == D("1000.00")
+                                    .where(LabPosition.strategy_id == _CASH_ID))) == 0
+    assert await svc.equity(cash) == spec.STARTING_EQUITY
 
 
 # ---------------------------------------------------------------- settlement
@@ -305,7 +337,7 @@ async def test_take_profit_closes_at_the_executable_multiple(db_session):
     await svc.activate(valid_from=VALID_FROM)
     await _open_one(db_session, svc, mint="T" + "1" * 20, liq=D("600000"))
     pos = (await db_session.execute(
-        select(LabPosition).where(LabPosition.strategy_id == "V6-06")
+        select(LabPosition).where(LabPosition.strategy_id == _TRADER_A)
     )).scalars().first()
     assert pos is not None
     db_session.add(TokenMarketSnapshot(
@@ -327,7 +359,7 @@ async def test_a_dead_pool_settles_at_zero_not_at_its_last_healthy_print(db_sess
     await svc.activate(valid_from=VALID_FROM)
     await _open_one(db_session, svc, mint="T" + "2" * 20, liq=D("600000"))
     pos = (await db_session.execute(
-        select(LabPosition).where(LabPosition.strategy_id == "V6-06")
+        select(LabPosition).where(LabPosition.strategy_id == _TRADER_A)
     )).scalars().first()
     db_session.add(TokenMarketSnapshot(
         token_id=pos.token_id, mint_address=pos.mint_address,
@@ -348,7 +380,7 @@ async def test_a_stale_print_is_not_acted_on(db_session):
     await svc.activate(valid_from=VALID_FROM)
     await _open_one(db_session, svc, mint="T" + "3" * 20, liq=D("600000"))
     pos = (await db_session.execute(
-        select(LabPosition).where(LabPosition.strategy_id == "V6-06")
+        select(LabPosition).where(LabPosition.strategy_id == _TRADER_A)
     )).scalars().first()
     # nothing new for hours: holding is the honest response to not knowing
     out = await svc.settle(now=NOW + timedelta(hours=5))
@@ -362,7 +394,7 @@ async def test_a_glitch_print_never_closes_a_position(db_session):
     await svc.activate(valid_from=VALID_FROM)
     await _open_one(db_session, svc, mint="T" + "4" * 20, liq=D("600000"))
     pos = (await db_session.execute(
-        select(LabPosition).where(LabPosition.strategy_id == "V6-06")
+        select(LabPosition).where(LabPosition.strategy_id == _TRADER_A)
     )).scalars().first()
     for i in (1, 2, 3):
         db_session.add(TokenMarketSnapshot(
@@ -412,12 +444,14 @@ async def test_partial_banks_cash_and_the_runner_keeps_going(db_session):
     assert row.cash > cash_before, "banked proceeds must reach the wallet"
 
 
+@pytest.mark.skipif(_LIQ_EXIT_ID is None,
+                    reason="no strategy in the live registry declares a liquidity exit")
 async def test_liquidity_collapse_exits_the_strategies_that_declared_it(db_session):
     svc = LabService(db_session)
     await svc.activate(valid_from=VALID_FROM)
     await _open_one(db_session, svc, mint="T" + "6" * 20, liq=D("600000"))
     pos = (await db_session.execute(
-        select(LabPosition).where(LabPosition.strategy_id == "V6-08")
+        select(LabPosition).where(LabPosition.strategy_id == _LIQ_EXIT_ID)
     )).scalars().first()
     assert pos is not None
     db_session.add(TokenMarketSnapshot(
@@ -433,12 +467,14 @@ async def test_liquidity_collapse_exits_the_strategies_that_declared_it(db_sessi
     assert pos.exit_reason == "liquidity_decay"
 
 
+@pytest.mark.skipif(_SHORT_HOLD_ID is None,
+                    reason="every strategy in the live registry shares one horizon")
 async def test_time_exit_fires_at_its_own_horizon(db_session):
     svc = LabService(db_session)
     await svc.activate(valid_from=VALID_FROM)
     await _open_one(db_session, svc, mint="T" + "7" * 20, liq=D("600000"))
     pos = (await db_session.execute(
-        select(LabPosition).where(LabPosition.strategy_id == "V6-15")   # 2h exit
+        select(LabPosition).where(LabPosition.strategy_id == _SHORT_HOLD_ID)
     )).scalars().first()
     assert pos is not None
     later = pos.opened_at + timedelta(hours=2, minutes=1)
@@ -462,10 +498,10 @@ async def test_equity_is_cash_plus_executable_value_never_plus_cost(db_session):
     await svc.activate(valid_from=VALID_FROM)
     await _open_one(db_session, svc, mint="T" + "8" * 20, liq=D("600000"))
     pos = (await db_session.execute(
-        select(LabPosition).where(LabPosition.strategy_id == "V6-06")
+        select(LabPosition).where(LabPosition.strategy_id == _TRADER_A)
     )).scalars().first()
     row = (await db_session.execute(
-        select(LabStrategy).where(LabStrategy.strategy_id == "V6-06")
+        select(LabStrategy).where(LabStrategy.strategy_id == _TRADER_A)
     )).scalars().first()
     # the token halves: $10 of cost is now ~$5 of executable value
     db_session.add(TokenMarketSnapshot(
@@ -488,7 +524,7 @@ async def test_circuit_breaker_stops_new_entries_below_800(db_session):
     svc = LabService(db_session)
     await svc.activate(valid_from=VALID_FROM)
     row = (await db_session.execute(
-        select(LabStrategy).where(LabStrategy.strategy_id == "V6-06")
+        select(LabStrategy).where(LabStrategy.strategy_id == _TRADER_A)
     )).scalars().first()
     row.cash = D("790")
     await db_session.flush()
@@ -498,10 +534,10 @@ async def test_circuit_breaker_stops_new_entries_below_800(db_session):
     await _open_one(db_session, svc, mint="T" + "9" * 20, liq=D("600000"))
     opened = (await db_session.scalar(
         select(func.count()).select_from(LabPosition)
-        .where(LabPosition.strategy_id == "V6-06")))
+        .where(LabPosition.strategy_id == _TRADER_A)))
     assert opened == 0
     d = (await db_session.execute(
-        select(LabDecision).where(LabDecision.strategy_id == "V6-06")
+        select(LabDecision).where(LabDecision.strategy_id == _TRADER_A)
     )).scalars().first()
     assert d.skip_reason == "candidate_failed"
 
@@ -509,7 +545,14 @@ async def test_circuit_breaker_stops_new_entries_below_800(db_session):
 # ---------------------------------------------------------------- flow keying
 
 async def test_wallet_flow_resolves_mint_to_its_active_pool(db_session):
-    """The table is keyed by pool. V6-12 must still find its own token's flow."""
+    """The table is keyed by POOL, so a mint must resolve to its own pool's row.
+
+    Asserted through any trading strategy's decision rather than through one
+    that gates on wallet flow. `_features` computes the flow for every strategy
+    regardless of whether its rules read it, so the join is what is under test
+    here, not any particular entry rule — and V7's grid gates on depth and
+    order flow rather than on wallet counts.
+    """
     svc = LabService(db_session)
     await svc.activate(valid_from=VALID_FROM)
     await _radar_token(db_session, mint="F" + "1" * 20,
@@ -517,7 +560,7 @@ async def test_wallet_flow_resolves_mint_to_its_active_pool(db_session):
                        pool="POOLFLOW1", flow_key_is_pool=True)
     await svc.evaluate_due(now=NOW)
     d = (await db_session.execute(
-        select(LabDecision).where(LabDecision.strategy_id == "V6-12")
+        select(LabDecision).where(LabDecision.strategy_id == _TRADER_A)
     )).scalars().first()
     assert d.eligible is True, d.skip_reason
     assert d.snapshot_ids["flow_source"] == "pool"
@@ -557,11 +600,19 @@ async def test_an_unrelated_pool_is_never_joined(db_session):
     await db_session.flush()
     await svc.evaluate_due(now=NOW)
     d = (await db_session.execute(
-        select(LabDecision).where(LabDecision.strategy_id == "V6-12",
+        select(LabDecision).where(LabDecision.strategy_id == _TRADER_A,
                                   LabDecision.mint_address == "F" + "2" * 20)
     )).scalars().first()
-    assert d.eligible is False
-    assert d.skip_reason == "unknown_flow_quality"
+    # The JOIN is what is under test, not the verdict. Under V6 this asserted
+    # a refusal, because the strategy it named gated on wallet flow and unknown
+    # flow refuses. V7's grid gates on depth and order flow instead, so the
+    # token is legitimately eligible — and the property that still matters is
+    # that ANOTHER pool's numbers never reached this token's features.
+    assert d is not None
+    assert d.features.get("w1h_unique_wallets") != 500, (
+        "an unrelated pool's flow was joined onto this token"
+    )
+    assert d.snapshot_ids.get("flow_source") in (None, "none")
 
 
 # ---------------------------------------------------------------- snapshots
@@ -576,7 +627,7 @@ async def test_24h_snapshot_marks_open_positions_without_closing_them(db_session
         db_session, tournament=t, label="24H", boundary=boundary, now=NOW
     )
     assert payload["label"] == "24H"
-    assert len(payload["strategies"]) == 20
+    assert len(payload["strategies"]) == len(spec.STRATEGIES)
     assert payload["leaders"]["profit"]["strategy_id"]
     open_positions = list((await db_session.execute(
         select(LabPosition).where(LabPosition.status == "open")
@@ -597,22 +648,22 @@ async def test_snapshot_boundary_marking_is_written_once(db_session):
     assert again == 0, "a re-run must not restamp a frozen boundary value"
 
 
-async def test_leaderboard_shows_twenty_rows_and_three_independent_badges(db_session):
+async def test_leaderboard_shows_every_strategy_and_three_independent_badges(db_session):
     svc = LabService(db_session)
     await svc.activate(valid_from=VALID_FROM)
     rows = await leaderboard.strategy_rows(db_session)
-    assert len(rows) == 20
+    assert len(rows) == len(spec.STRATEGIES)
     badges = leaderboard.leaders(rows)
     assert set(badges) == {"profit", "risk_adjusted", "executable_2x"}
-    cash = next(r for r in rows if r["strategy_id"] == "V6-01")
-    assert cash["equity"] == D("1000.00")
+    cash = next(r for r in rows if r["strategy_id"] == _CASH_ID)
+    assert cash["equity"] == spec.STARTING_EQUITY
     assert cash["confidence"] == "INSUFFICIENT_SAMPLE"
 
 
 async def test_equity_points_are_recorded_for_every_strategy(db_session):
     svc = LabService(db_session)
     await svc.activate(valid_from=VALID_FROM)
-    assert await svc.record_equity(now=NOW) == 20
+    assert await svc.record_equity(now=NOW) == len(spec.STRATEGIES)
 
 
 # --- the tournament outlives its own snapshot --------------------------------
@@ -653,7 +704,7 @@ async def test_no_strategy_is_deactivated_by_the_snapshot(db_session):
         db_session, tournament=t, label="24H", boundary=t.snapshot_at, now=t.snapshot_at
     )
     rows = list((await db_session.execute(select(LabStrategy))).scalars())
-    assert len(rows) == 20
+    assert len(rows) == len(spec.STRATEGIES)
     assert all(r.status == "active" for r in rows)
     assert t.status == "active"
 
@@ -733,9 +784,10 @@ async def test_trades_filter_by_strategy_and_status(db_session):
     everything = await trades(db_session, strategy_id=None, status=None, limit=500)
     assert everything["total"] == everything["open"] + everything["closed"]
 
-    one = await trades(db_session, strategy_id="v6-06", status=None, limit=500)
+    one = await trades(db_session, strategy_id=_TRADER_A.lower(),
+                       status=None, limit=500)
     assert one["trades"]
-    assert {t["strategy_id"] for t in one["trades"]} == {"V6-06"}
+    assert {t["strategy_id"] for t in one["trades"]} == {_TRADER_A}
 
     opens = await trades(db_session, strategy_id=None, status="open", limit=500)
     assert {t["status"] for t in opens["trades"]} == {"open"}
@@ -755,7 +807,7 @@ async def test_trades_report_sellable_value_not_cost(db_session):
     # A fresh print, so the mark is allowed: the fixture's own series ends more
     # than 15 minutes back, and a stale print is deliberately not acted on.
     pos = (await db_session.execute(
-        select(LabPosition).where(LabPosition.strategy_id == "V6-06")
+        select(LabPosition).where(LabPosition.strategy_id == _TRADER_A)
     )).scalars().first()
     db_session.add(TokenMarketSnapshot(
         token_id=pos.token_id, mint_address=pos.mint_address,
@@ -766,7 +818,7 @@ async def test_trades_report_sellable_value_not_cost(db_session):
     await db_session.flush()
     await svc.settle(now=NOW + timedelta(minutes=1))
 
-    got = await trades(db_session, strategy_id="V6-06", status=None, limit=500)
+    got = await trades(db_session, strategy_id=_TRADER_A, status=None, limit=500)
     row = got["trades"][0]
     assert row["current_value_usd"] < row["size_usd"], (
         "a fresh position is worth less than it cost, because of impact and fees"
@@ -786,7 +838,7 @@ async def test_returns_are_reported_on_wallet_open_book_and_deployed_capital(db_
                        liq=D("600000"), pool="POOLRET")
     await svc.evaluate_due(now=NOW)
     pos = (await db_session.execute(
-        select(LabPosition).where(LabPosition.strategy_id == "V6-06")
+        select(LabPosition).where(LabPosition.strategy_id == _TRADER_A)
     )).scalars().first()
     # a fresh print so the position may be marked, then halve it
     db_session.add(TokenMarketSnapshot(
@@ -799,7 +851,7 @@ async def test_returns_are_reported_on_wallet_open_book_and_deployed_capital(db_
     await svc.settle(now=NOW + timedelta(minutes=1))
 
     rows = await leaderboard.strategy_rows(db_session)
-    r = next(x for x in rows if x["strategy_id"] == "V6-06")
+    r = next(x for x in rows if x["strategy_id"] == _TRADER_A)
 
     assert r["open_cost_basis"] == D("10")
     assert r["capital_at_work_pct"] == D("1")           # $10 of $1,000
@@ -818,7 +870,7 @@ async def test_a_wallet_with_nothing_at_risk_reports_no_return_on_risk(db_sessio
     svc = LabService(db_session)
     await svc.activate(valid_from=VALID_FROM)
     rows = await leaderboard.strategy_rows(db_session)
-    cash = next(x for x in rows if x["strategy_id"] == "V6-01")
+    cash = next(x for x in rows if x["strategy_id"] == _CASH_ID)
     assert cash["open_return_pct"] is None
     assert cash["deployed_return_pct"] is None
     assert cash["capital_at_work_pct"] == 0

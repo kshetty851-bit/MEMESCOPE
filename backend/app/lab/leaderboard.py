@@ -28,6 +28,17 @@ CONFIDENCE_STEPS = ((500, "SUBSTANTIAL"), (200, "INTERMEDIATE"), (100, "PRELIMIN
                     (50, "EARLY"), (25, "EXTREMELY_LOW_CONFIDENCE"))
 MIN_TRADES_FOR_RISK_BADGE = 5
 
+#: The non-trading control, exempted from the minimum-trades gate because doing
+#: nothing IS its result and it can never accumulate trades to qualify.
+#:
+#: Derived from the spec rather than hardcoded. It read "V6-01" until the V7
+#: registry renumbered everything, at which point the cash control would have
+#: silently dropped off the risk board — the one row whose whole purpose is to
+#: be compared against.
+_CASH_CONTROLS: frozenset[str] = frozenset(
+    s.id for s in spec.STRATEGIES if not s.trades
+)
+
 
 def confidence(closed: int) -> str:
     for floor, label in CONFIDENCE_STEPS:
@@ -168,7 +179,7 @@ def leaders(rows: list[dict[str, Any]]) -> dict[str, Any]:
     def risk_score(r: dict[str, Any]) -> tuple:
         # Only strategies with enough closed trades to have a shape compete;
         # a wallet that has done nothing is not "risk-adjusted excellent".
-        if r["trades"] < MIN_TRADES_FOR_RISK_BADGE and r["strategy_id"] != "V6-01":
+        if r["trades"] < MIN_TRADES_FOR_RISK_BADGE and r["strategy_id"] not in _CASH_CONTROLS:
             return (-1, Decimal(0))
         pf = r["profit_factor"] or Decimal(0)
         dd = r["max_dd_pct"] or Decimal(0)
