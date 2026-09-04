@@ -139,6 +139,7 @@ class RefreshScheduler:
         consecutive_empty: int = 0,
         priority: bool = False,
         nursery: bool = False,
+        ever_had_data: bool = False,
     ) -> ScheduleDecision:
         """Compute the next refresh time for one token.
 
@@ -169,14 +170,41 @@ class RefreshScheduler:
             # consuming budget, but never below the tier's own cadence.
             interval = max(base_interval, self._backoff.delay_for(consecutive_failures))
             reason = f"failure_backoff(attempt={consecutive_failures})"
-        elif consecutive_empty > 0:
-            # No pool indexed yet. Expected for new mints, so ease off gently
+        elif consecutive_empty > 0 and not ever_had_data:
+            # No pool indexed YET. Expected for new mints, so ease off gently
             # and linearly rather than punishing them like an error.
             interval = min(
                 base_interval * (1 + consecutive_empty),
                 float(self.policy.mature_interval_seconds),
             )
             reason = f"awaiting_listing(empty={consecutive_empty})"
+        elif consecutive_empty > 0:
+            # HAD a pool and lost it. That is a death, not a token waiting to
+            # be listed, and the two must not share a backoff.
+            #
+            # Easing off here is how the platform stopped watching tokens at
+            # the exact moment they were failing. It is also self-reinforcing:
+            # each empty result lengthens the interval, so the next empty
+            # arrives later, so the death is timestamped later still. Measured
+            # 2026-09-04, the effect was large enough to bias market-wide
+            # return estimates from -2.3% to +16.4% — the difference between a
+            # losing population and an apparently profitable one, produced
+            # entirely by watching the losers less.
+            #
+            # So a dying token is polled at the FASTER of its own tier and the
+            # mature cadence, and never backs off.
+            #
+            # `min`, not the tier alone: an OLD token sits on a six-hour tier,
+            # and the previous code accidentally sped it up, because the empty
+            # backoff was capped at the mature interval which is shorter. That
+            # accident was the only thing giving old tokens a usable death
+            # time, and holding the tier here would have removed it — a fix
+            # that made the very tokens this is for less observable, not more.
+            #
+            # So: never slower than mature, never slower than the tier already
+            # was, no growth with the empty count.
+            interval = min(base_interval, float(self.policy.mature_interval_seconds))
+            reason = f"confirming_death(empty={consecutive_empty})"
         else:
             interval = base_interval
             reason = f"tier({tier})"

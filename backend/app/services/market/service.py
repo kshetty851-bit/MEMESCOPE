@@ -321,6 +321,11 @@ class MarketEnrichmentService:
                 consecutive_empty=(
                     (state.consecutive_empty + 1) if succeeded and not had_data else 0
                 ),
+                # A token that has produced a snapshot before is DYING, not
+                # awaiting listing. The scheduler holds its cadence so the
+                # death gets an honest timestamp instead of one pushed later
+                # by its own backoff.
+                ever_had_data=state.total_snapshots > 0,
                 # The lane the membership beats placed this token in. Read from
                 # the row rather than recomputed here: membership is decided in
                 # one place, and the worker only honours it.

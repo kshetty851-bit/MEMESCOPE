@@ -719,7 +719,31 @@ class EnrichmentStateRepository(BaseRepository[TokenEnrichmentState]):
             if had_data:
                 state.total_snapshots += 1
                 state.consecutive_empty = 0
+                # Back from the dead, or never gone. Either way the token is
+                # tradeable now and any recorded death was wrong.
+                state.delisted_at = None
             else:
+                # FIRST observed absence of a pool this token used to have.
+                #
+                # Stamped here rather than when a threshold is crossed, because
+                # this is the earliest moment the platform can defensibly say
+                # the token stopped being tradeable — it had data at the
+                # previous poll and does not now. Waiting for the tenth empty
+                # would date the death by the confirmation instead of the event.
+                #
+                # `last_success_at` cannot serve: it is set above on ANY
+                # successful call, including this empty one, so it means "the
+                # provider answered", not "the token was alive".
+                #
+                # Cleared the moment data returns, so a brief provider gap
+                # leaves nothing behind. A non-null value on a token that never
+                # came back IS the death time.
+                #
+                # Only for tokens that HAD a pool. A mint that has never
+                # produced a snapshot is awaiting listing, not delisted, and
+                # calling that a death would mark most of the table dead.
+                if state.consecutive_empty == 0 and state.total_snapshots > 0:
+                    state.delisted_at = now
                 state.consecutive_empty += 1
         else:
             state.consecutive_failures += 1

@@ -226,6 +226,21 @@ class TokenEnrichmentState(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         Integer, default=0, server_default="0", nullable=False
     )
 
+    #: When this token stopped being tradeable, or NULL while it still is.
+    #:
+    #: Set once, when a run of empty provider results confirms a pool that
+    #: existed has gone; cleared if the token ever returns. Durable on purpose:
+    #: the `INACTIVE` snapshot that marks the same event is written once and
+    #: then expires with retention, so it cannot answer "was this alive at time
+    #: T" for any T outside the window it happens to sit in.
+    #:
+    #: A query for a PRICE silently excludes dead tokens, which is how a
+    #: population that returns -2.3% measured as +16.4%. This column is what
+    #: lets a measurement count the deaths instead of dropping them.
+    delisted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     last_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
     # Which adaptive tier produced the current interval; logged for tuning.
     tier: Mapped[str | None] = mapped_column(String(16), nullable=True)
