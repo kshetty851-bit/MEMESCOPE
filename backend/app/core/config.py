@@ -565,6 +565,13 @@ class Settings(BaseSettings):
     # never creates a paper/karthik/real position and never writes outside
     # lab_*. Ships dark; production turns it on deliberately.
     FEATURE_LAB_ENABLED: bool = False
+    #: The Compound Lab: one $100 wallet on V7's leading entry rule, taking
+    #: profit on the WALLET at +10% and compounding from what it actually
+    #: realised. A separate frozen registry with its own hash, so it can never
+    #: rescore the running tournament. Off by default, like the Lab: a second
+    #: experiment should start when somebody decides it starts, not when a
+    #: deploy happens to carry it.
+    FEATURE_COMPOUND_LAB_ENABLED: bool = False
     #: The contamination boundary (mission §15): tokens whose checkpoint
     #: precedes this instant are never scored, because the historical dataset
     #: has already been inspected seven times. ISO-8601 UTC. Empty means "stamp

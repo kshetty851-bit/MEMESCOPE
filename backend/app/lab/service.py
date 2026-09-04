@@ -56,8 +56,22 @@ def _frac_change(now: Decimal | None, then: Decimal | None) -> Decimal | None:
 
 
 class LabService:
-    def __init__(self, session: AsyncSession) -> None:
+    """The tournament engine, over whichever frozen registry it is handed.
+
+    `registry` defaults to the V7 spec, so every existing caller is unchanged.
+    It exists because a SECOND tournament (the Compound Lab) needs the same
+    execution model, marking, settling and accounting over a different set of
+    rules — and the alternative was a parallel copy of this file, which would
+    drift from it the first time either was fixed.
+
+    A registry supplies `SPEC_VERSION`, `SPEC_HASH`, `STRATEGIES`, `BY_ID` and
+    `FAILURE_EQUITY_FLOOR`. Nothing here may reach `app.lab.spec` directly, or
+    the second tournament silently scores itself against the first one's rules.
+    """
+
+    def __init__(self, session: AsyncSession, registry: Any = spec) -> None:
         self._session = session
+        self._spec = registry
 
     # --- activation ---------------------------------------------------------
 
@@ -70,14 +84,14 @@ class LabService:
         """
         existing = (
             await self._session.execute(
-                select(LabTournament).where(LabTournament.spec_version == spec.SPEC_VERSION)
+                select(LabTournament).where(LabTournament.spec_version == self._spec.SPEC_VERSION)
             )
         ).scalars().first()
         if existing is not None:
             return existing
 
         tournament = LabTournament(
-            spec_version=spec.SPEC_VERSION, spec_hash=spec.SPEC_HASH,
+            spec_version=self._spec.SPEC_VERSION, spec_hash=self._spec.SPEC_HASH,
             valid_from=valid_from,
             snapshot_at=valid_from + timedelta(hours=SNAPSHOT_HOURS),
             status="active",
@@ -87,18 +101,18 @@ class LabService:
         self._session.add(tournament)
         await self._session.flush()
 
-        for s in spec.STRATEGIES:
+        for s in self._spec.STRATEGIES:
             self._session.add(LabStrategy(
                 tournament_id=tournament.id, strategy_id=s.id, name=s.name,
-                version=spec.SPEC_VERSION, spec_hash=spec.SPEC_HASH,
+                version=self._spec.SPEC_VERSION, spec_hash=self._spec.SPEC_HASH,
                 checkpoint_minutes=s.checkpoint_minutes, size_usd=s.size_usd,
                 max_concurrent=s.max_concurrent, max_exposure_usd=s.max_exposure_usd,
                 rules=_rules_json(s), starting_equity=STARTING_EQUITY,
                 cash=STARTING_EQUITY, peak_equity=STARTING_EQUITY, status="active",
             ))
         await self._session.flush()
-        logger.info("lab_activated", strategies=len(spec.STRATEGIES),
-                    valid_from=valid_from.isoformat(), spec_hash=spec.SPEC_HASH)
+        logger.info("lab_activated", strategies=len(self._spec.STRATEGIES),
+                    valid_from=valid_from.isoformat(), spec_hash=self._spec.SPEC_HASH)
         return tournament
 
     # --- observation --------------------------------------------------------
@@ -241,13 +255,13 @@ class LabService:
         by every strategy acting there.
         """
         tournament = (await self._session.execute(
-            select(LabTournament).where(LabTournament.spec_version == spec.SPEC_VERSION)
+            select(LabTournament).where(LabTournament.spec_version == self._spec.SPEC_VERSION)
         )).scalars().first()
         if tournament is None:
             return {"skipped": "not_activated"}
-        if tournament.spec_hash != spec.SPEC_HASH:
+        if tournament.spec_hash != self._spec.SPEC_HASH:
             logger.error("lab_spec_hash_drift", stored=tournament.spec_hash,
-                         current=spec.SPEC_HASH)
+                         current=self._spec.SPEC_HASH)
             return {"halted": "spec_hash_drift"}
 
         strategies = list((await self._session.execute(
@@ -291,7 +305,7 @@ class LabService:
                     detected_at=detected_at, checkpoint_at=checkpoint_at,
                 )
                 for row in rows:
-                    s = spec.BY_ID[row.strategy_id]
+                    s = self._spec.BY_ID[row.strategy_id]
                     verdict = evaluate_entry(s, features)
                     decision = LabDecision(
                         strategy_row_id=row.id, strategy_id=row.strategy_id,
@@ -390,21 +404,44 @@ class LabService:
         )).one()
         return int(got[0] or 0), Decimal(got[1] or 0)
 
+    async def _my_strategy_rows(self) -> list[LabStrategy]:
+        """This registry's strategy rows, and only these.
+
+        Two tournaments now share these tables — V7 and the Compound Lab — so a
+        query for "every strategy" is a query for someone else's as well.
+        `settle` and `record_equity` both did exactly that, and the failure it
+        would have caused is not subtle: `settle` looks its strategy up with
+        `self._spec.BY_ID[pos.strategy_id]`, so the first Compound position
+        would have raised KeyError inside V7's tick and STOPPED the running
+        tournament.
+        """
+        return list((await self._session.execute(
+            select(LabStrategy).where(
+                LabStrategy.spec_hash == self._spec.SPEC_HASH
+            )
+        )).scalars())
+
     # --- settlement ---------------------------------------------------------
 
     async def settle(self, *, now: datetime) -> dict[str, int]:
         """Mark every open position and fire whichever frozen exit applies."""
+        mine = await self._my_strategy_rows()
+        rows = {r.id: r for r in mine}
+        if not rows:
+            return {"closed": 0, "partials": 0, "stale": 0, "open": 0}
         opens = list((await self._session.execute(
-            select(LabPosition).where(LabPosition.status == "open")
+            select(LabPosition).where(
+                LabPosition.status == "open",
+                LabPosition.strategy_row_id.in_(list(rows)),
+            )
         )).scalars())
-        rows = {r.id: r for r in (await self._session.execute(select(LabStrategy))).scalars()}
         closed = partials = stale = 0
 
         for pos in opens:
             row = rows.get(pos.strategy_row_id)
             if row is None:
                 continue
-            s = spec.BY_ID[pos.strategy_id]
+            s = self._spec.BY_ID[pos.strategy_id]
             mark = await self._mark(pos, now)
             pos.last_evaluated_at = now
             if mark is None:
@@ -488,7 +525,8 @@ class LabService:
     MANUAL_EXIT_REASON = "manual_close"
 
     async def close_manually(
-        self, *, position_id: uuid.UUID, now: datetime, actor: str
+        self, *, position_id: uuid.UUID, now: datetime, actor: str,
+        reason: str | None = None,
     ) -> dict[str, Any]:
         """Close one open position by hand, at the price the market will bear.
 
@@ -542,7 +580,10 @@ class LabService:
 
         pos.status = "closed"
         pos.closed_at = now
-        pos.exit_reason = self.MANUAL_EXIT_REASON
+        # `reason` lets the Compound Lab's wallet target reuse this exact fill
+        # path while recording WHY the position left the book. A cycle close is
+        # not a hand sell and must not be counted as one.
+        pos.exit_reason = reason or self.MANUAL_EXIT_REASON
         pos.exit_proceeds_usd = proceeds
         pos.last_open_value_usd = Decimal(0)
         row.cash += proceeds - pos.banked_proceeds_usd
@@ -554,7 +595,7 @@ class LabService:
         return {"closed": True, "strategy_id": pos.strategy_id,
                 "mint": pos.mint_address, "proceeds_usd": proceeds,
                 "pnl_usd": proceeds - pos.size_usd,
-                "exit_reason": self.MANUAL_EXIT_REASON}
+                "exit_reason": pos.exit_reason}
 
     async def _mark(
         self, pos: LabPosition, now: datetime
@@ -635,7 +676,7 @@ class LabService:
         equity = await self.equity(row)
         if equity > row.peak_equity:
             row.peak_equity = equity
-        if row.status == "active" and equity < spec.FAILURE_EQUITY_FLOOR:
+        if row.status == "active" and equity < self._spec.FAILURE_EQUITY_FLOOR:
             row.status = "failed"
             row.failed_reason = "drawdown_below_800"
             row.failed_at = now
@@ -653,7 +694,7 @@ class LabService:
         return row.cash + open_value
 
     async def record_equity(self, *, now: datetime) -> int:
-        rows = list((await self._session.execute(select(LabStrategy))).scalars())
+        rows = await self._my_strategy_rows()
         for row in rows:
             got = (await self._session.execute(
                 select(func.count(),

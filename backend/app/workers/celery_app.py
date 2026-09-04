@@ -31,6 +31,7 @@ celery_app = Celery(
         "app.workers.research_tasks",
         "app.arena.scheduler",
         "app.lab.scheduler",
+        "app.compound.scheduler",
         "app.hq_ops.tasks",
     ],
 )
@@ -233,6 +234,14 @@ celery_app.conf.beat_schedule = {
     # 24-hour snapshot lands on its frozen boundary rather than drifting.
     "lab-tick": {
         "task": "app.lab.scheduler.lab_tick",
+        "schedule": crontab(minute="*"),
+    },
+    # The Compound Lab: one wallet, one rule, and a target on the WALLET rather
+    # than on a position. Same cadence as the Lab it shares an engine with — the
+    # cycle target has to be tested on the same marks the Lab settles against,
+    # and a slower beat would bank a cycle at a price that had already moved.
+    "compound-tick": {
+        "task": "app.compound.scheduler.compound_tick",
         "schedule": crontab(minute="*"),
     },
     # Re-quotes what the Lab holds open so `settle` marks it at what a seller
