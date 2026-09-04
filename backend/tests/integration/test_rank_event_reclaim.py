@@ -23,6 +23,27 @@ pytestmark = pytest.mark.integration
 NOW = datetime.now(UTC)
 
 
+@pytest.fixture
+async def session(test_session_factory):
+    """A really-committed session bound to the TEST database.
+
+    `_reclaim_radar_rank_events` opens its own session via `SessionFactory`,
+    so without `test_session_factory` rebinding that name it reaches the
+    DEVELOPMENT database instead — where the table happened to be empty and
+    small, so the guard returned 0 and both tests passed for entirely the
+    wrong reason. They asserted nothing about the code under test.
+
+    Caught because the same tests failed in another environment that has no
+    `memescope` role. A test that passes only where the developer's own
+    database happens to agree with it is worse than no test.
+    """
+    async with test_session_factory() as s:
+        yield s
+        await s.rollback()
+        await s.execute(text("TRUNCATE TABLE radar_rank_events"))
+        await s.commit()
+
+
 async def _row(session: AsyncSession) -> None:
     session.add(
         RadarRankEvent(
