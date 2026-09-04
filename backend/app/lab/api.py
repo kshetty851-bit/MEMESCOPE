@@ -297,6 +297,7 @@ async def trades(session: DbSession,
                  else (pos.last_open_value_usd if pos.last_open_value_usd is not None
                        else pos.size_usd))
         out.append({
+            "id": str(pos.id),
             "strategy_id": pos.strategy_id,
             "strategy_name": names.get(pos.strategy_id),
             # The full contract address, never truncated.

@@ -181,6 +181,8 @@ export interface LabStrategyDetail {
 }
 
 export interface LabTrade {
+  /** Needed to target a manual close. */
+  id: string;
   strategy_id: string;
   strategy_name: string | null;
   /** The full contract address, never truncated — this view exists so it can be copied. */

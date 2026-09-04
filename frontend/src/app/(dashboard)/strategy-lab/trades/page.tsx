@@ -6,6 +6,7 @@ import { Label, Panel } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/states";
 import { useLabBoard, useLabTrades } from "@/hooks/use-lab";
+import { SellButton } from "../sell-button";
 import type { LabTrade } from "@/types/lab";
 
 /**
@@ -222,6 +223,9 @@ export default function StrategyLabTradesPage() {
           <table className="w-full text-left text-[11px]">
             <thead className="text-muted">
               <tr>
+                {/* First on purpose: the action must be reachable without
+                    scrolling past sixteen columns of evidence. */}
+                <th className="py-1 pr-3 font-normal">Sell</th>
                 {th("strategy_id", "Strategy")}
                 {th("symbol", "Token")}
                 <th className="py-1 pr-3 font-normal">Contract address (CA)</th>
@@ -248,6 +252,9 @@ export default function StrategyLabTradesPage() {
                     key={`${t.strategy_id}-${t.mint}`}
                     className="border-t border-line align-top hover:bg-surface-2"
                   >
+                    <td className="whitespace-nowrap py-1 pr-3">
+                      {t.status === "open" ? <SellButton id={t.id} /> : null}
+                    </td>
                     <td className="whitespace-nowrap py-1 pr-3 font-mono">
                       {t.strategy_id}
                     </td>
@@ -312,7 +319,7 @@ export default function StrategyLabTradesPage() {
               })}
               {rows.length === 0 ? (
                 <tr>
-                  <td colSpan={16} className="py-3 text-muted">
+                  <td colSpan={17} className="py-3 text-muted">
                     No trades match this filter yet.
                   </td>
                 </tr>
