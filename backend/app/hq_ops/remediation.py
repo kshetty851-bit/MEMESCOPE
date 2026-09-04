@@ -213,6 +213,78 @@ REMEDIATIONS: dict[str, Remediation] = {
             else (False, "The worker stopped answering after the check was queued.")
         ),
     ),
+    # ── KARTHIK: the Strategy Lab ────────────────────────────────────────
+    #
+    # Four Lab conditions have been DETECTED since the day the probe was built
+    # and every one carried `remediation=None`: HQ could see the tournament
+    # stop and do nothing about it. These two close that, and they are
+    # deliberately the smallest actions that can.
+    #
+    # WHAT THEY CANNOT DO, because it is the whole basis for making them green:
+    # neither opens a position, closes one, changes a strategy, touches the
+    # frozen spec, or goes anywhere near the real wallet. Each re-enqueues a
+    # task the beat already runs every minute, so the worst case of a spurious
+    # firing is that scheduled work happens slightly early. A repair that could
+    # change a RESULT would make the tournament unciteable, and an experiment
+    # nobody can cite is worse than one that paused.
+    "lab.run_tick": Remediation(
+        key="lab.run_tick",
+        autonomy="green",
+        agent="karthik",
+        summary="Re-enqueue the Lab tick. Judges due checkpoints and settles exits.",
+        # The beat publishes every minute, so a Lab that has gone quiet for an
+        # hour is not a slow market — it is a tick that is not arriving or not
+        # completing. Requires a healthy worker for the same reason the worker
+        # restart requires a healthy broker: shouting into a component that is
+        # itself down buries the real incident under a failed repair.
+        precondition=lambda h: (
+            (True, "The Lab has gone silent and a worker is available to run it.")
+            if h.worker.status == "healthy" and h.lab.measured
+            else (
+                False,
+                f"Worker is {h.worker.status}"
+                + ("" if h.lab.measured else " and Lab health is unmeasured"),
+            )
+        ),
+        execute=lambda: _enqueue("app.lab.scheduler.lab_tick"),
+        # Weak on purpose, like the retention prune above. A tick takes seconds
+        # and decisions land asynchronously, so what is checkable now is that
+        # the system can still run the job. Whether the Lab resumed shows up in
+        # the NEXT detection pass, as the absence of the condition.
+        verify=lambda h: (
+            (True, "Tick accepted; the worker is still consuming.")
+            if h.worker.status == "healthy"
+            else (False, "The worker stopped answering after the tick was queued.")
+        ),
+    ),
+    "lab.refresh_marks": Remediation(
+        key="lab.refresh_marks",
+        autonomy="green",
+        agent="karthik",
+        # Worded to keep clear of the vocabulary check in `test_hq_ops_safety`:
+        # no HQ summary may read as though the office is acting on the book.
+        # This re-quotes prices; it does not touch what is held.
+        summary="Re-quote the mints the Lab holds so its marks can be taken again.",
+        # The failure this answers is specific and has happened: on 2026-08-26
+        # 162 of 224 open positions were skipped every tick as stale, so 72% of
+        # the book sat frozen at its last healthy price while every liveness
+        # signal read normal. The sweep is what un-freezes it.
+        precondition=lambda h: (
+            (True, "Marks are stale or unverified and a worker can re-quote them.")
+            if h.worker.status == "healthy" and h.lab.measured
+            else (
+                False,
+                f"Worker is {h.worker.status}"
+                + ("" if h.lab.measured else " and Lab health is unmeasured"),
+            )
+        ),
+        execute=lambda: _enqueue("app.lab.scheduler.lab_sellability_refresh"),
+        verify=lambda h: (
+            (True, "Refresh accepted; the worker is still consuming.")
+            if h.worker.status == "healthy"
+            else (False, "The worker stopped answering after the refresh was queued.")
+        ),
+    ),
     "diagnostics.reprobe": Remediation(
         key="diagnostics.reprobe",
         autonomy="green",

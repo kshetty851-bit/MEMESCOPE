@@ -415,7 +415,7 @@ export function deriveHqState(sources: Partial<HqSources> = {}): HqState {
     patch: derivePatch(operations, operationsGone, operationsAt),
     quinn: deriveQuinn(operations, operationsGone, operationsAt),
     vault: deriveVault(s),
-    karthik: deriveKarthik(karthik, karthikGone, karthikAt),
+    karthik: deriveKarthik(karthik, karthikGone, karthikAt, operations),
     // Filled in below: Nova reads the others rather than the backend.
     nova: unknown("Waiting on the rest of the office."),
   } as Record<EmployeeId, EmployeeReading>;
@@ -1581,6 +1581,47 @@ function deriveActivity(
  * the whole point of this desk is that it never rounds an unmeasured figure
  * up to a comfortable one.
  */
+/**
+ * The Strategy Lab lines on Karthik's desk.
+ *
+ * Separate from the wallet metrics above because they come from a different
+ * endpoint, and a stale `/hq` must not be able to make the wallet look stale
+ * or the reverse. Each renders `null` — which the desk shows as UNKNOWN —
+ * rather than 0 when the probe could not read, because "no stalled minutes"
+ * and "the minutes could not be counted" are opposite readings.
+ *
+ * Three lines, chosen to answer the only question the watch exists for: is the
+ * tournament still trading? Positions open, whether the book can still be
+ * priced, and how long since anything was decided.
+ */
+function karthikLabMetrics(operations: HqOperations | null): Metric[] {
+  const lab = operations?.health.lab;
+  const ok = lab?.measured ? lab : null;
+  const mins = (v: number | null | undefined): string | null =>
+    v === null || v === undefined ? null : `${Math.round(v)} min ago`;
+  return [
+    {
+      label: "Lab open positions",
+      value: ok?.open_positions === null || ok?.open_positions === undefined
+        ? null
+        : String(ok.open_positions),
+      source: "GET /hq · health.lab.open_positions",
+    },
+    {
+      label: "Lab book priced",
+      value: ok?.quote_backed_pct === null || ok?.quote_backed_pct === undefined
+        ? null
+        : `${ok.quote_backed_pct.toFixed(0)}% quote-backed`,
+      source: "GET /hq · health.lab.quote_backed_pct",
+    },
+    {
+      label: "Lab last decision",
+      value: mins(ok?.minutes_since_decision),
+      source: "GET /hq · health.lab.minutes_since_decision",
+    },
+  ];
+}
+
 function karthikMetrics(state: KarthikState | null): Metric[] {
   const wallet = state?.screens.wallet;
   const positions = state?.screens.positions;
@@ -1646,8 +1687,12 @@ function deriveKarthik(
   state: KarthikState | null,
   gone: string,
   at: number | null,
+  operations: HqOperations | null,
 ): EmployeeReading {
-  const metrics = karthikMetrics(state);
+  // Wallet lines first: the Lab watch was added to this desk, it did not
+  // replace what the desk was for. A reader looking for the wallet must not
+  // have to scroll past the tournament to find it.
+  const metrics = [...karthikMetrics(state), ...karthikLabMetrics(operations)];
   if (!state) return unknown(gone, metrics);
 
   if (!state.binding.readable) {

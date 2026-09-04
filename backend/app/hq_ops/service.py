@@ -195,7 +195,7 @@ def detect(health: OperationsHealth) -> list[Condition]:
                         "Those positions are frozen at their last price and are not "
                         "being evaluated for an exit."
                     ),
-                    remediation=None,
+                    remediation="lab.refresh_marks",   # book-unmarkable
                     symptoms={"stale_pct": lab.stale_pct,
                               "stale_positions": lab.stale_positions,
                               "open_positions": lab.open_positions},
@@ -219,7 +219,7 @@ def detect(health: OperationsHealth) -> list[Condition]:
                         "over reported liquidity, which overstated dying positions "
                         "at cost before."
                     ),
-                    remediation=None,
+                    remediation="lab.refresh_marks",   # marks-unverified
                     symptoms={"quote_backed_pct": lab.quote_backed_pct},
                 )
             )
@@ -239,7 +239,7 @@ def detect(health: OperationsHealth) -> list[Condition]:
                         "minutes. Checkpoints run at admission, +30 and +60, so nothing "
                         "has reached any of them."
                     ),
-                    remediation=None,
+                    remediation="lab.run_tick",        # no-decisions
                     symptoms={"minutes_since_decision": lab.minutes_since_decision},
                 )
             )
@@ -258,7 +258,7 @@ def detect(health: OperationsHealth) -> list[Condition]:
                         "strategy carries a time exit of six hours or less, so the "
                         "exits themselves have stopped rather than the market gone quiet."
                     ),
-                    remediation=None,
+                    remediation="lab.run_tick",        # no-closes
                     symptoms={"minutes_since_close": lab.minutes_since_close,
                               "open_positions": lab.open_positions},
                 )

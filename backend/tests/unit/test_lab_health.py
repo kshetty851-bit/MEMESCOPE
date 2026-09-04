@@ -110,15 +110,36 @@ def test_an_unmeasured_lab_raises_nothing():
     assert not any(c.signature.startswith("lab:") for c in service.detect(reading))
 
 
-def test_the_lab_never_gets_a_remediation():
-    """HQ may restart a worker. It may not touch a tournament — an action here
-    would be changing the experiment it exists to observe."""
+def test_a_lab_remediation_may_only_restart_the_labs_own_schedule():
+    """This test used to read "the Lab never gets a remediation", on the
+    grounds that acting on a tournament changes the experiment being observed.
+
+    That was right about the danger and wrong about the boundary. Held
+    literally it meant a wedged queue stopped the tournament and HQ watched it
+    happen — and a tournament that silently stopped is not a preserved
+    experiment, it is a lost one. All four `lab:` conditions sat on
+    `remediation=None` for exactly this reason.
+
+    So the line moved from WHETHER HQ may act to WHAT it may do: re-run the
+    Lab's own scheduled work, never change what that work does. Re-enqueueing
+    `lab_tick` cannot open a position, close one, pick a strategy or edit the
+    frozen spec — it makes work that was already due happen now instead of
+    never. The original concern survives as the assertion below.
+    """
     reading = _health(open_positions=224, stale_positions=200, stale_pct=89.0,
                       quote_backed_pct=5.0, minutes_since_decision=999.0,
                       minutes_since_close=999.0)
+    seen = 0
     for condition in service.detect(reading):
-        if condition.signature.startswith("lab:"):
-            assert condition.remediation is None, condition.signature
+        if not condition.signature.startswith("lab:"):
+            continue
+        seen += 1
+        assert condition.remediation is not None, condition.signature
+        assert condition.remediation in ("lab.run_tick", "lab.refresh_marks"), (
+            f"{condition.signature} reaches beyond re-running the Lab's own "
+            f"schedule: {condition.remediation}"
+        )
+    assert seen, "the fixture is meant to trip the lab conditions"
 
 
 def test_unmeasurable_is_never_reported_as_zero():

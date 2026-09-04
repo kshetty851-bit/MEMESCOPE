@@ -158,19 +158,24 @@ def _health(*, tasks):
     )
 
 
-def test_autonomy_may_act_on_exactly_four_things():
+def test_autonomy_may_act_on_exactly_six_things():
     """The set HQ is allowed to execute without a human, pinned by identity.
 
     HQ autonomy is ARMED on production — `HQ_AUTONOMY_ENABLED=true`, set
-    deliberately after the disk hit 95% — so this set is now the difference
-    between a system that reports and one that acts. It is four things, none of
-    which touches a wallet, a tournament, a strategy or a position.
+    deliberately after the disk hit 95% — so this set is the difference between
+    a system that reports and one that acts. None of the six moves money.
 
     Asserted as an exact set rather than a maximum count. A test that allowed
-    "four or fewer" would pass while somebody swapped one of these for something
+    "six or fewer" would pass while somebody swapped one of these for something
     that trades, which is the substitution worth catching, not the growth.
 
-    Adding a fifth is a deliberate act and should require editing this line.
+    Adding a seventh is a deliberate act and should require editing this line.
+
+    The two `lab.*` entries were the deliberate act of 2026-09-04. They narrow
+    an earlier rule that no autonomous action may touch a tournament AT ALL —
+    which in practice meant a wedged queue stopped the Lab and HQ watched. They
+    re-run the Lab's own beat tasks and can change no result; the assertion
+    below still forbids anything that reaches a wallet or a decision.
     """
     from app.hq_ops.remediation import AUTONOMOUS_KEYS, REMEDIATIONS
 
@@ -179,6 +184,8 @@ def test_autonomy_may_act_on_exactly_four_things():
         "disk.run_retention",
         "disk.emergency_check",
         "diagnostics.reprobe",
+        "lab.run_tick",
+        "lab.refresh_marks",
     })
     # And nothing outside the allowlist can be reached by name.
     for key in AUTONOMOUS_KEYS:

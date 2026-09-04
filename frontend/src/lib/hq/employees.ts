@@ -403,9 +403,17 @@ export const EMPLOYEES: Employee[] = [
     // on one of those four tiles.
     desk: { col: 18, row: 9 },
     systemResponsibility:
-      "Karthik Paper Wallet monitoring, audit, safe auto-repair, reporting and owner escalation",
+      "Karthik Paper Wallet and Strategy Lab monitoring, audit, safe auto-repair, reporting and owner escalation",
+    // The Lab watch was added on the owner's instruction, 2026-09-04. It widens
+    // the isolation note above: this desk now also watches the Strategy Lab
+    // tournament, because all four `lab:` conditions were being DETECTED with
+    // no repair attached and a wedged queue would stop the tournament unseen.
+    //
+    // The isolation that matters is unchanged and is enforced in the backend,
+    // not here: the two Lab repairs re-enqueue the Lab's own beat tasks and can
+    // open nothing, close nothing, pick no strategy and reach no wallet.
     whatIDo:
-      "I watch every Karthik Paper Wallet opportunity, entry, open position, target, dead token and accounting event. I repair the small operational failures that cannot change a result, and I escalate anything that needs the owner's judgement.",
+      "I watch every Karthik Paper Wallet opportunity, entry, open position, target, dead token and accounting event, and I keep the Strategy Lab tournament running. I repair the small operational failures that cannot change a result, and I escalate anything that needs the owner's judgement.",
     // Radar and Atlas because the wallet's universe is theirs; Byte because
     // the machinery underneath is his; Nova because an owner-attention item
     // has to reach somebody who can decide.

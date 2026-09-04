@@ -73,6 +73,12 @@ def test_the_allowlist_is_small_enough_to_read():
         "disk.run_retention",
         "disk.emergency_check",
         "diagnostics.reprobe",
+        # Added deliberately: the Lab could be watched stopping and not
+        # restarted. Both do one thing — re-enqueue a task the beat already
+        # runs — and `test_hq_lab_remediation` holds them to it by calling
+        # them, not by reading their source.
+        "lab.run_tick",
+        "lab.refresh_marks",
     }
 
 
@@ -99,7 +105,7 @@ def test_only_green_actions_are_autonomous():
 def test_every_action_is_credited_to_a_real_hq_agent():
     # The room shows this name. A name here that no character has is a name the
     # office invents, which is the one thing HQ is not allowed to do.
-    known = {"nova", "sentinel", "patch", "quinn", "byte", "echo"}
+    known = {"nova", "sentinel", "patch", "quinn", "byte", "echo", "karthik"}
     for action in REMEDIATIONS.values():
         assert action.agent in known, f"{action.key} credits unknown agent {action.agent}"
 

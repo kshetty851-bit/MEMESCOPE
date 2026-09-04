@@ -30,6 +30,17 @@ logger = get_logger(__name__)
 DRY_RUN_LOCK_NAMESPACE = 0x4D454D45
 SELLABILITY_LOCK_KEY = 0x53454C4C
 
+#: The tick's own key, so two ticks can never run at once.
+#:
+#: `settle()` credits proceeds with `row.cash += ...` — a read-modify-write on
+#: the strategy row. Two overlapping ticks closing the same position bank it
+#: twice and INVENT capital, which is unrecoverable in a tournament whose whole
+#: output is a P&L. The beat alone made this unlikely but not impossible (a tick
+#: slower than its 60s period overlaps the next); HQ re-enqueueing the tick when
+#: it looks stuck makes it likely, because "looks stuck" and "still running" are
+#: the same observation from outside.
+TICK_LOCK_KEY = 0x5449434B
+
 #: Calendar boundaries that get their own immutable snapshot (protocol §12).
 #: The 24-hour one is a SNAPSHOT, not an ending — nothing here stops the
 #: tournament, and a test holds that to be true.
@@ -54,6 +65,14 @@ async def _lab_tick() -> dict[str, Any]:
     now = datetime.now(UTC)
     try:
         async with SessionFactory() as session:
+            acquired = await session.scalar(
+                select(func.pg_try_advisory_xact_lock(
+                    DRY_RUN_LOCK_NAMESPACE, TICK_LOCK_KEY
+                ))
+            )
+            if not acquired:
+                await session.rollback()
+                return {"skipped": "tick_already_running"}
             service = LabService(session)
             tournament = await service.activate(
                 valid_from=settings.lab_valid_from or now

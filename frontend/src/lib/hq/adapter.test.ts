@@ -1063,3 +1063,60 @@ describe("Vault — the execution wallet custodian", () => {
     expect(String(first?.value)).toContain("REAL");
   });
 });
+
+describe("Karthik's Strategy Lab watch", () => {
+  const labLines = (over: Record<string, unknown> | undefined) => {
+    const state = build({
+      operations: at(
+        operations({
+          health: { ...(operations() as never as { health: object }).health, lab: over },
+        }) as never,
+      ),
+    });
+    const metrics = state.employees.karthik!.metrics;
+    return Object.fromEntries(
+      metrics.filter((m) => m.label.startsWith("Lab ")).map((m) => [m.label, m.value]),
+    );
+  };
+
+  it("shows the tournament on the desk it was assigned to", () => {
+    const lines = labLines({
+      measured: true,
+      detail: "ok",
+      open_positions: 42,
+      quote_backed_pct: 96.4,
+      minutes_since_decision: 7.2,
+    });
+    expect(lines["Lab open positions"]).toBe("42");
+    expect(lines["Lab book priced"]).toBe("96% quote-backed");
+    expect(lines["Lab last decision"]).toBe("7 min ago");
+  });
+
+  it("reports an unread probe as unknown rather than as zero", () => {
+    // The distinction the whole Lab health module exists for: "nothing is
+    // stalled" and "the probe could not read" must never render alike, or a
+    // broken probe reads as a healthy tournament.
+    expect(labLines({ measured: false, detail: "could not read" })).toEqual({
+      "Lab open positions": null,
+      "Lab book priced": null,
+      "Lab last decision": null,
+    });
+  });
+
+  it("survives a payload from before the Lab probe existed", () => {
+    expect(labLines(undefined)["Lab open positions"]).toBeNull();
+  });
+
+  it("still leads with the wallet this desk is for", () => {
+    const metrics = build().employees.karthik!.metrics;
+    expect(metrics[0]!.label).toBe("Wallet");
+    expect(metrics.some((m) => m.label === "Lab open positions")).toBe(true);
+  });
+
+  it("distinguishes a genuinely empty book from an unread one", () => {
+    // 0 open positions is a real reading and must print as 0.
+    expect(labLines({ measured: true, detail: "ok", open_positions: 0 })[
+      "Lab open positions"
+    ]).toBe("0");
+  });
+});

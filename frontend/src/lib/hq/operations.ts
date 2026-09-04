@@ -62,6 +62,26 @@ export interface QueueHealth {
   detail: string;
 }
 
+/**
+ * The Strategy Lab's own row. Served by the backend since the probe was
+ * written; typed here when Karthik was given the Lab watch and his desk needed
+ * to show whether the tournament is still trading.
+ *
+ * Every field is optional because `measured: false` is a real reading — the
+ * probe opens its own session and can fail — and the desk has to render "could
+ * not be read" as distinct from zero. A missing count is not a quiet nil.
+ */
+export interface LabHealthRow {
+  measured: boolean;
+  detail: string;
+  open_positions?: number | null;
+  stale_positions?: number | null;
+  stale_pct?: number | null;
+  quote_backed_pct?: number | null;
+  minutes_since_decision?: number | null;
+  minutes_since_close?: number | null;
+}
+
 export interface OperationsHealth {
   disk: DiskHealth;
   redis: ComponentHealth;
@@ -69,6 +89,8 @@ export interface OperationsHealth {
   worker: WorkerHealth;
   scheduler: SchedulerHealth;
   queues: QueueHealth;
+  /** Optional: older payloads predate the Lab probe. */
+  lab?: LabHealthRow;
   overall: ComponentStatus;
   unmeasured: number;
   environment: string;
