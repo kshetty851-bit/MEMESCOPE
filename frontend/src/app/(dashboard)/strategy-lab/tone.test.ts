@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { cellTone, generationOf, toneOf } from "./page";
+import { cellTone, generationOf, toneOf } from "./tone";
 import type { LabStrategyRow } from "@/types/lab";
 
 describe("toneOf", () => {
