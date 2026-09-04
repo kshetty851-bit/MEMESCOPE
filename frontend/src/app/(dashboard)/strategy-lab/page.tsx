@@ -9,9 +9,9 @@ import { useLabBoard, useLabStrategy } from "@/hooks/use-lab";
 import type { LabBoard, LabRule, LabStrategyRow, LabProjection } from "@/types/lab";
 
 /**
- * V6 FORWARD STRATEGY LAB
+ * FORWARD STRATEGY LAB
  *
- * Twenty virtual $100 portfolios scoring the frozen V6 registry against a
+ * A frozen registry of virtual $100 portfolios scored against a
  * cash control, all fed by the one MEMESCOPE scanner. **This is not the Paper
  * Wallet and it is not real money.** The page says so above the fold rather
  * than in a footnote: a reader who confused them would draw a conclusion about
@@ -89,6 +89,34 @@ export function cellTone(row: LabStrategyRow, key: string): string {
   return toneOf(row[key as keyof LabStrategyRow] as number | null | undefined);
 }
 
+/**
+ * Which generation of the tournament this is — "V7" — read from the ids the
+ * API served rather than written here.
+ *
+ * This page read "V6 FORWARD STRATEGY LAB · 20 STRATEGIES" for the whole of
+ * V7, which has 21. A generation written into a heading is wrong from the
+ * moment the next tournament starts and nobody re-reads a heading, so it is
+ * derived once and every caption follows it.
+ *
+ * Null when the ids do not agree on one prefix: a mixed board should say
+ * nothing rather than name the wrong generation confidently.
+ */
+export function generationOf(ids: string[]): string | null {
+  const prefixes = new Set(ids.map((id) => id.split("-")[0]).filter(Boolean));
+  return prefixes.size === 1 ? [...prefixes][0]! : null;
+}
+
+/**
+ * The do-nothing benchmark, identified by what it IS rather than by its id.
+ *
+ * This was pinned to the literal "V6-01" and so had silently highlighted
+ * nothing since V7 began. A control stakes no money and holds no positions,
+ * which is true of it in any generation.
+ */
+function isCashControl(row: LabStrategyRow): boolean {
+  return row.size_usd === 0 && row.max_concurrent === 0;
+}
+
 function checkpoint(minutes: number | null): string {
   if (minutes === null) return "never";
   return minutes === 0 ? "admission" : `+${minutes}m`;
@@ -164,9 +192,13 @@ function Header({ board }: { board: LabBoard }) {
     <Panel density="compact">
       <div className="flex flex-wrap items-baseline justify-between gap-4">
         <div>
-          <Label>V6 FORWARD STRATEGY LAB</Label>
+          <Label>
+            {generationOf(board.strategies.map((s) => s.strategy_id)) ?? ""} FORWARD
+            STRATEGY LAB
+          </Label>
           <h1 className="mt-1 text-lg font-medium text-ink">
-            20 STRATEGIES · ${board.starting_equity.toFixed(0)} EACH · SAME MEMESCOPE SCANNER
+            {board.strategies.length} STRATEGIES · ${board.starting_equity.toFixed(0)} EACH ·
+            SAME MEMESCOPE SCANNER
           </h1>
           <p className="mt-1 text-xs font-medium tracking-wide text-warn">
             PAPER / RESEARCH ONLY — REAL MONEY OFF
@@ -519,7 +551,7 @@ function Sparkline({ points }: { points: number[] }) {
 /**
  * The frozen rulebook, in full, at the bottom of the page.
  *
- * Served by the API rather than transcribed here: a TypeScript copy of twenty
+ * Served by the API rather than transcribed here: a TypeScript copy of the
  * thresholds would be a second source of truth, and the first time either
  * changed they would disagree. What a reader sees is what the engine judges
  * with — the same registry, under the same hash shown in the header.
@@ -530,7 +562,7 @@ function Rulebook({ rules, specHash }: { rules: LabRule[]; specHash: string }) {
     <Panel density="compact">
       <div className="flex flex-wrap items-baseline justify-between gap-3">
         <div>
-          <Label>THE FROZEN RULES — ALL 20 STRATEGIES</Label>
+          <Label>THE FROZEN RULES — ALL {rules.length} STRATEGIES</Label>
           <p className="mt-1 text-xs text-muted">
             Every rule each wallet trades by, exactly as frozen before scoring began.
             Changing any number here would start a new tournament at zero.
@@ -642,7 +674,7 @@ function Rulebook({ rules, specHash }: { rules: LabRule[]; specHash: string }) {
 
       <div className="mt-3 space-y-1 border-t border-line pt-3 text-[10px] leading-relaxed text-muted">
         <p>
-          Shared by all twenty: 30 bps per side · constant-product impact against
+          Shared by all {rules.length}: 30 bps per side · constant-product impact against
           (liquidity ÷ 2) ÷ 12, calibrated on 320 live Jupiter quotes · a real quote is
           preferred where one exists · level exits fill at no better than trigger × 1.15 ·
           prints more than 3× off the 10-minute median never fill in either direction ·
@@ -650,7 +682,8 @@ function Rulebook({ rules, specHash }: { rules: LabRule[]; specHash: string }) {
           inactive settles at $0.00, never at its last healthy print.
         </p>
         <p>
-          There are no conventional stop losses anywhere in V6. On 27 days of real series a
+          There are no conventional stop losses anywhere in{" "}
+          {generationOf(rules.map((r) => r.id)) ?? "this registry"}. On 27 days of real series a
           −25% stop filled at a median of $0.03 against a nominal $7.50, so the family is
           omitted on purpose rather than by oversight.
         </p>
@@ -690,7 +723,7 @@ export default function StrategyLabPage() {
       <Projection board={data} />
       <Panel density="compact">
         <div className="flex items-baseline justify-between">
-          <Label>LIVE LEADERBOARD — 20 STRATEGIES</Label>
+          <Label>LIVE LEADERBOARD — {data.strategies.length} STRATEGIES</Label>
           <p className="text-[10px] text-muted">
             historical figures are shown per strategy and are never added to these
           </p>
@@ -726,7 +759,7 @@ export default function StrategyLabPage() {
                   onClick={() => setSelected(r.strategy_id)}
                   className={`cursor-pointer border-t border-line hover:bg-surface-2 ${
                     r.status === "failed" ? "text-danger" : ""
-                  } ${r.strategy_id === "V6-01" ? "font-medium" : ""}`}
+                  } ${isCashControl(r) ? "font-medium" : ""}`}
                 >
                   {COLUMNS.map((c) => (
                     <td

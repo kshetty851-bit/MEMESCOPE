@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { cellTone, toneOf } from "./page";
+import { cellTone, generationOf, toneOf } from "./page";
 import type { LabStrategyRow } from "@/types/lab";
 
 describe("toneOf", () => {
@@ -61,5 +61,22 @@ describe("cellTone", () => {
                        "cash", "starting_equity", "strategy_id"]) {
       expect(cellTone(row(), key)).toBe("");
     }
+  });
+});
+
+describe("generationOf", () => {
+  it("reads the generation off the ids the API served", () => {
+    expect(generationOf(["V7-01", "V7-02", "V7-21"])).toBe("V7");
+    expect(generationOf(["V6-01", "V6-20"])).toBe("V6");
+  });
+
+  it("names nothing when the board mixes generations", () => {
+    // Better a heading with no generation than one confidently naming the
+    // wrong tournament — which is the failure this replaced.
+    expect(generationOf(["V6-01", "V7-02"])).toBeNull();
+  });
+
+  it("survives an empty board", () => {
+    expect(generationOf([])).toBeNull();
   });
 });
