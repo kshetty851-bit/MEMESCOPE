@@ -483,6 +483,79 @@ class LabService:
         return {"closed": closed, "partials": partials, "stale": stale,
                 "open": len(opens) - closed}
 
+    #: The one exit a person can cause. Named so it can never be mistaken for a
+    #: rule the tournament followed.
+    MANUAL_EXIT_REASON = "manual_close"
+
+    async def close_manually(
+        self, *, position_id: uuid.UUID, now: datetime, actor: str
+    ) -> dict[str, Any]:
+        """Close one open position by hand, at the price the market will bear.
+
+        **This is the only way a position leaves the book without a frozen rule
+        firing, and it is why the exit is tagged rather than blended in.** The
+        tournament's whole claim is that every result followed the registry; a
+        hand-closed position did not, so it is labelled at the point of exit and
+        counted separately wherever the record is read. Silently recording it as
+        an ordinary exit would make the leaderboard a number nobody can cite.
+
+        The FILL is deliberately not a favour. It goes through `_mark` and the
+        shared execution model — the same stale guard, the same glitch band, the
+        same impact against real depth — so selling by hand cannot invent a
+        price the strategies themselves could never have got. An unmarkable
+        position is refused rather than closed at its last healthy print, which
+        is the same answer `settle` gives.
+        """
+        pos = (await self._session.execute(
+            select(LabPosition).where(LabPosition.id == position_id)
+        )).scalars().first()
+        if pos is None:
+            return {"closed": False, "reason": "not_found"}
+        if pos.status != "open":
+            # Not an error worth raising: two clicks on the same row, or a
+            # settle that won the race, both land here and both are fine.
+            return {"closed": False, "reason": "already_closed",
+                    "exit_reason": pos.exit_reason}
+
+        row = (await self._session.execute(
+            select(LabStrategy).where(LabStrategy.id == pos.strategy_row_id)
+        )).scalars().first()
+        if row is None:
+            return {"closed": False, "reason": "strategy_missing"}
+
+        mark = await self._mark(pos, now)
+        if mark is None:
+            return {"closed": False, "reason": "unmarkable"}
+        price, liq, is_dead, _sell_ok = mark
+
+        if is_dead:
+            proceeds = pos.banked_proceeds_usd
+            pos.exit_price = Decimal(0)
+        else:
+            # No `capped_fill_price` here: that cap exists to stop a LEVEL exit
+            # claiming it filled at its trigger. A manual sell has no trigger —
+            # it takes the marked price and the impact that comes with it.
+            proceeds = pos.banked_proceeds_usd + execution.sell_proceeds(
+                pos.quantity_remaining, price, liq
+            )
+            pos.exit_price = price
+
+        pos.status = "closed"
+        pos.closed_at = now
+        pos.exit_reason = self.MANUAL_EXIT_REASON
+        pos.exit_proceeds_usd = proceeds
+        pos.last_open_value_usd = Decimal(0)
+        row.cash += proceeds - pos.banked_proceeds_usd
+        await self._session.flush()
+
+        logger.warning("lab_position_closed_by_hand", position=str(pos.id),
+                       strategy=pos.strategy_id, mint=pos.mint_address,
+                       actor=actor, proceeds=str(proceeds))
+        return {"closed": True, "strategy_id": pos.strategy_id,
+                "mint": pos.mint_address, "proceeds_usd": proceeds,
+                "pnl_usd": proceeds - pos.size_usd,
+                "exit_reason": self.MANUAL_EXIT_REASON}
+
     async def _mark(
         self, pos: LabPosition, now: datetime
     ) -> tuple[Decimal, Decimal, bool, bool | None] | None:

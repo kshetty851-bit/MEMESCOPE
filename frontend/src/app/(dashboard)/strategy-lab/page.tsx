@@ -5,7 +5,7 @@ import { useMemo, useState } from "react";
 import { Label, Panel } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/states";
-import { useLabBoard, useLabStrategy } from "@/hooks/use-lab";
+import { useCloseLabPosition, useLabBoard, useLabStrategy } from "@/hooks/use-lab";
 import type { LabBoard, LabRule, LabStrategyRow, LabProjection } from "@/types/lab";
 import { cellTone, generationOf, isCashControl, toneOf } from "./tone";
 
@@ -410,7 +410,8 @@ function Drawer({ id, onClose }: { id: string; onClose: () => void }) {
                     <th className="py-1 pr-3 text-right">P&L</th>
                     <th className="py-1 pr-3">exit</th>
                     <th className="py-1 pr-3">route</th>
-                    <th className="py-1">marks</th>
+                    <th className="py-1 pr-3">marks</th>
+                    <th className="py-1">sell</th>
                   </tr>
                 </thead>
                 <tbody className="text-ink">
@@ -427,15 +428,18 @@ function Drawer({ id, onClose }: { id: string; onClose: () => void }) {
                       </td>
                       <td className="py-1 pr-3">{p.exit_reason ?? "—"}</td>
                       <td className="py-1 pr-3">{p.route_state ?? "—"}</td>
-                      <td className="py-1">
+                      <td className="py-1 pr-3">
                         {[p.reached_125 && "1.25×", p.reached_150 && "1.5×",
                           p.reached_200 && "2×"].filter(Boolean).join(" ") || "—"}
+                      </td>
+                      <td className="py-1">
+                        {p.status === "open" ? <SellButton id={p.id} /> : null}
                       </td>
                     </tr>
                   ))}
                   {data.positions.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="py-2 text-muted">
+                      <td colSpan={9} className="py-2 text-muted">
                         no positions yet
                       </td>
                     </tr>
@@ -453,6 +457,59 @@ function Drawer({ id, onClose }: { id: string; onClose: () => void }) {
         </div>
       )}
     </Panel>
+  );
+}
+
+/**
+ * Close one position by hand.
+ *
+ * Two clicks, because a close cannot be undone: the position leaves the book,
+ * the cash returns, and there is no reopening it. A single-click sell next to
+ * a scrollable list of rows is a misclick waiting to happen, and the row it
+ * lands on is chosen at random.
+ *
+ * The refusal is rendered, not swallowed. "unmarkable" is the answer that
+ * matters — it means no fresh price exists, so the sale would have to invent
+ * one, and the reader needs to see that rather than a button that quietly did
+ * nothing.
+ */
+function SellButton({ id }: { id: string }) {
+  const [armed, setArmed] = useState(false);
+  const close = useCloseLabPosition();
+  const outcome = close.data;
+
+  if (close.isPending) {
+    return <span className="text-muted">selling…</span>;
+  }
+  if (outcome && !outcome.closed) {
+    return (
+      <span className="text-warn" title={outcome.reason}>
+        {outcome.reason === "unmarkable" ? "no price" : outcome.reason}
+      </span>
+    );
+  }
+  if (close.isError) {
+    // The likeliest cause by far is the admin role, not a bug: the alpha
+    // cookie grants no account, so say which rather than "failed".
+    return <span className="text-down">refused — admin only?</span>;
+  }
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        if (armed) close.mutate(id);
+        else setArmed(true);
+      }}
+      onBlur={() => setArmed(false)}
+      className={`rounded border px-1.5 py-0.5 text-[10px] ${
+        armed
+          ? "border-down text-down"
+          : "border-line text-muted hover:border-ink-3 hover:text-ink"
+      }`}
+    >
+      {armed ? "confirm" : "sell"}
+    </button>
   );
 }
 

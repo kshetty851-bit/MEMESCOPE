@@ -6,14 +6,16 @@ equity, and the two must never be presented as the same number.
 
 from __future__ import annotations
 
+import uuid
 from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import select
 
-from app.api.deps import DbSession
+from app.api.deps import AdminUser, DbSession
 from app.lab import leaderboard, projection, spec
+from app.lab.service import LabService
 from app.models.token import DiscoveredToken
 from app.models.lab import (
     LabDecision,
@@ -191,6 +193,7 @@ async def strategy_detail(strategy_id: str, session: DbSession) -> dict[str, Any
         "equity_curve": [{"at": a.isoformat(), "equity": e, "cash": c, "open_value": o}
                          for a, e, c, o in curve],
         "positions": [{
+            "id": str(p.id),
             "mint": p.mint_address, "opened_at": p.opened_at.isoformat(),
             "status": p.status, "size_usd": p.size_usd,
             "open_value": p.last_open_value_usd, "exec_multiple": p.last_exec_multiple,
@@ -329,3 +332,31 @@ async def trades(session: DbSession,
         "closed": sum(1 for t in out if t["status"] == "closed"),
         "trades": out,
     })
+
+
+@router.post("/positions/{position_id}/close")
+async def close_position(
+    position_id: uuid.UUID, admin: AdminUser, session: DbSession
+) -> dict[str, Any]:
+    """Close ONE open position by hand. Admin only, and always recorded as such.
+
+    The only write on an otherwise read-only surface, and the only exit in the
+    system a frozen rule did not cause. It is behind `AdminUser` for the same
+    reason the autotrade switch is: the alpha cookie grants no account, so a
+    reader who reaches this page cannot reach this button.
+
+    The refusals are as important as the action. An already-closed position
+    answers `already_closed` rather than erroring, because two clicks and a
+    settle that won the race are both ordinary. An UNMARKABLE position is
+    refused outright — closing at a last healthy print would book a profit the
+    market would not have paid, which is precisely the fiction the Lab's
+    execution model exists to prevent.
+    """
+    service = LabService(session)
+    outcome = await service.close_manually(
+        position_id=position_id, now=datetime.now(UTC), actor=admin.email
+    )
+    await session.commit()
+    if not outcome["closed"] and outcome["reason"] == "not_found":
+        raise HTTPException(status_code=404, detail="unknown position")
+    return leaderboard._jsonable(outcome)

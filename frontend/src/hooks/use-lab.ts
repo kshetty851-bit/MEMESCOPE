@@ -1,8 +1,9 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
+  closeLabPosition,
   fetchLabBoard,
   fetchLabSnapshots,
   fetchLabStrategy,
@@ -47,5 +48,21 @@ export function useLabSnapshots() {
     queryKey: ["lab", "snapshots"],
     queryFn: fetchLabSnapshots,
     refetchInterval: 5 * LAB_POLL_MS,
+  });
+}
+
+/**
+ * Close one position by hand.
+ *
+ * Invalidates every Lab query rather than just the strategy's own: the close
+ * returns cash, which moves that wallet's equity and therefore its rank, so a
+ * board left un-refetched would disagree with the panel the click happened in
+ * until the next poll.
+ */
+export function useCloseLabPosition() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: closeLabPosition,
+    onSettled: () => client.invalidateQueries({ queryKey: ["lab"] }),
   });
 }

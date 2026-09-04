@@ -140,6 +140,8 @@ export interface LabBoard {
 }
 
 export interface LabPositionRow {
+  /** Needed to target a manual close. */
+  id: string;
   mint: string;
   opened_at: string;
   status: string;

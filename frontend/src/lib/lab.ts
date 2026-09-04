@@ -38,3 +38,21 @@ export function fetchLabTrades(
 export function fetchLabSnapshots(): Promise<LabSnapshots> {
   return api.get<LabSnapshots>("/lab/snapshots");
 }
+
+/**
+ * Close one open Lab position by hand. Admin only.
+ *
+ * The only write this client makes. It returns the outcome rather than
+ * throwing on a refusal — "already closed" and "unmarkable" are ordinary
+ * answers the caller has to show, not failures.
+ */
+export interface LabCloseOutcome {
+  closed: boolean;
+  reason?: string;
+  proceeds_usd?: number;
+  pnl_usd?: number;
+}
+
+export function closeLabPosition(id: string): Promise<LabCloseOutcome> {
+  return api.post<LabCloseOutcome>(`/lab/positions/${id}/close`, {});
+}
