@@ -112,6 +112,14 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: IconSpark,
         status: "ready",
       },
+      // The copy lab. Beside the other tournaments because it is one — a
+      // separate frozen registry with its own wallet, not a view.
+      {
+        href: "/pumpfun-lab",
+        label: "PumpFun Lab",
+        icon: IconSpark,
+        status: "ready",
+      },
       // The trades view exists so a reader can copy a contract address and
       // check the token against the market rather than trusting the Lab.
       {

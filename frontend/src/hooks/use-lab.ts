@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { fetchCompoundBoard } from "@/lib/compound";
+import { fetchPumpfunBoard } from "@/lib/pumpfun";
 import {
   closeLabPosition,
   fetchLabBoard,
@@ -73,6 +74,15 @@ export function useCompoundBoard() {
   return useQuery({
     queryKey: ["compound", "board"],
     queryFn: fetchCompoundBoard,
+    refetchInterval: LAB_POLL_MS,
+  });
+}
+
+/** The PumpFun copy lab. Polls on the beat's cadence, like the other labs. */
+export function usePumpfunBoard() {
+  return useQuery({
+    queryKey: ["pumpfun", "board"],
+    queryFn: fetchPumpfunBoard,
     refetchInterval: LAB_POLL_MS,
   });
 }

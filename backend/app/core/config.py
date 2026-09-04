@@ -572,6 +572,11 @@ class Settings(BaseSettings):
     #: experiment should start when somebody decides it starts, not when a
     #: deploy happens to carry it.
     FEATURE_COMPOUND_LAB_ENABLED: bool = False
+    #: The PumpFun Lab: a $100 wallet mirroring one on-chain trader's entries
+    #: and exits, FORWARD ONLY — nothing he did before the lab started is ever
+    #: actionable. Off by default: a copy lab that began at deploy time would
+    #: have no honest start date.
+    FEATURE_PUMPFUN_LAB_ENABLED: bool = False
     #: The contamination boundary (mission §15): tokens whose checkpoint
     #: precedes this instant are never scored, because the historical dataset
     #: has already been inspected seven times. ISO-8601 UTC. Empty means "stamp

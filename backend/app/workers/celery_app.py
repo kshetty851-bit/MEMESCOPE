@@ -32,6 +32,7 @@ celery_app = Celery(
         "app.arena.scheduler",
         "app.lab.scheduler",
         "app.compound.scheduler",
+        "app.pumpfun.scheduler",
         "app.hq_ops.tasks",
     ],
 )
@@ -242,6 +243,13 @@ celery_app.conf.beat_schedule = {
     # and a slower beat would bank a cycle at a price that had already moved.
     "compound-tick": {
         "task": "app.compound.scheduler.compound_tick",
+        "schedule": crontab(minute="*"),
+    },
+    # The PumpFun Lab mirrors one on-chain wallet. Every minute, because the
+    # leader's median hold is 8.5 minutes — a slower poll would copy trades he
+    # had already closed.
+    "pumpfun-tick": {
+        "task": "app.pumpfun.scheduler.pumpfun_tick",
         "schedule": crontab(minute="*"),
     },
     # Re-quotes what the Lab holds open so `settle` marks it at what a seller
