@@ -111,7 +111,8 @@ def test_a_lab_repair_cannot_be_confused_with_a_wallet_one() -> None:
     the incident log can tell at a glance what was allowed to happen."""
     for key in rem.AUTONOMOUS_KEYS:
         assert "." in key, key
-        assert key.split(".")[0] in {"worker", "disk", "lab", "diagnostics"}, key
+        assert key.split(".")[0] in {"worker", "disk", "lab", "compound",
+                                     "diagnostics"}, key
 
 
 # --------------------------------------------------------------------------

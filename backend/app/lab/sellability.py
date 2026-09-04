@@ -90,8 +90,22 @@ DEAD_FRACTION = Decimal("0.02")
 
 
 async def refresh(session: AsyncSession, *, now: datetime | None = None,
-                  limit: int = 40) -> dict[str, int]:
-    """Re-quote the mints the Lab holds open. Writes rows; decides nothing."""
+                  limit: int = 40,
+                  spec_versions: tuple[str, ...] = (spec.SPEC_VERSION,)
+                  ) -> dict[str, int]:
+    """Re-quote the mints the LIVE tournaments hold open. Decides nothing.
+
+    `spec_versions` is every tournament currently being ticked, not every
+    tournament that exists. The distinction is the one the scoping comment
+    below is about: a dormant record's open positions would eat the per-run
+    budget while the live book waited.
+
+    It became a tuple when a SECOND tournament started (the Compound Lab). Its
+    book was invisible to this sweep for as long as it was scoped to one
+    version, so it was being marked from the CPMM model over reported
+    liquidity — the exact condition that froze 72% of the Lab's book on
+    2026-08-26 — with nothing saying so.
+    """
     now = now or datetime.now(UTC)
     # Scoped to the CURRENT tournament. Unscoped, the sweep spent its per-run
     # budget quoting a dormant record's open positions — V6 1.0.0 carried 158 of
@@ -107,7 +121,7 @@ async def refresh(session: AsyncSession, *, now: datetime | None = None,
         .join(LabStrategy, LabStrategy.id == LabPosition.strategy_row_id)
         .join(LabTournament, LabTournament.id == LabStrategy.tournament_id)
         .where(LabPosition.status == "open",
-               LabTournament.spec_version == spec.SPEC_VERSION)
+               LabTournament.spec_version.in_(spec_versions))
     )).all())
     if not rows:
         return {"mints": 0, "quoted": 0, "failed": 0, "skipped_fresh": 0}

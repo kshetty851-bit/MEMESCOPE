@@ -79,6 +79,9 @@ def test_the_allowlist_is_small_enough_to_read():
         # them, not by reading their source.
         "lab.run_tick",
         "lab.refresh_marks",
+        # The Compound Lab's tick. Same argument as the Lab's, plus its own
+        # advisory lock, so a spurious firing cannot bank a cycle twice.
+        "compound.run_tick",
     }
 
 

@@ -178,9 +178,12 @@ def detect(health: OperationsHealth) -> list[Condition]:
 
     # ── the Strategy Lab ────────────────────────────────────────────────
     #
-    # None of these has a remediation and none of them ever will. HQ may
-    # restart a worker; it may not touch a tournament, and an action here would
-    # be changing the experiment it is supposed to be observing.
+    # The repairs attached here re-run the Lab's OWN scheduled work and can
+    # change no result. The rule that used to sit here — "none of these has a
+    # remediation and none ever will" — was right about the danger and wrong
+    # about the boundary: held literally, a wedged queue stopped the tournament
+    # and HQ watched it happen. A drift is the case with NO repair, because the
+    # ways out are different experiments.
     lab = health.lab
     if lab is not None and lab.measured:
         if lab.stale_pct is not None and lab.stale_pct >= LAB_STALE_PCT:
@@ -304,6 +307,82 @@ def detect(health: OperationsHealth) -> list[Condition]:
                               "open_positions": lab.open_positions},
                 )
             )
+
+
+    # ── the Compound Lab ────────────────────────────────────────────────
+    #
+    # A second tournament on the same tables, measured by the same rules under
+    # its own registry. Its signals are separated from the Lab's rather than
+    # merged: they are different experiments, and an incident that named "the
+    # Lab" while meaning the other one would send somebody to the wrong book.
+    compound = health.compound
+    if compound is not None and compound.measured:
+        # First, for the same reason the Lab's is: a halt CAUSES the silence
+        # and staleness the later checks would otherwise report as their own
+        # faults, an hour later and pointing at the wrong thing.
+        if compound.spec_hash_drift:
+            found.append(
+                Condition(
+                    signature="compound:spec-drift",
+                    component="worker",
+                    severity="critical",
+                    summary=(
+                        "The Compound Lab is HALTED: the running spec hash "
+                        f"{(compound.running_spec_hash or '?')[:12]} does not match "
+                        f"the {(compound.stored_spec_hash or '?')[:12]} its "
+                        "tournament was activated under, so every tick refuses to "
+                        "score. No decisions, exits, marks or cycle banking are "
+                        "happening. Revert the spec edit to resume this wallet, or "
+                        "activate a new one to start a different experiment."
+                    ),
+                    remediation=None,
+                    symptoms={"stored": compound.stored_spec_hash,
+                              "running": compound.running_spec_hash,
+                              "spec_version": compound.spec_version},
+                )
+            )
+        else:
+            if (compound.stale_pct is not None
+                    and compound.stale_pct >= LAB_STALE_PCT):
+                found.append(
+                    Condition(
+                        signature="compound:book-unmarkable",
+                        component="worker",
+                        severity="degraded",
+                        summary=(
+                            f"{compound.stale_pct}% of the Compound Lab's open book "
+                            f"cannot be marked ({compound.stale_positions} of "
+                            f"{compound.open_positions}). Its cycle target is tested "
+                            "against these marks, so a frozen book can bank a cycle "
+                            "at a price no seller would have been offered."
+                        ),
+                        # The sweep re-quotes every LIVE tournament's book, this
+                        # one included, so the Lab's repair is this one's too.
+                        remediation="lab.refresh_marks",
+                        symptoms={"stale_pct": compound.stale_pct,
+                                  "open": compound.open_positions},
+                    )
+                )
+            if (compound.minutes_since_decision is not None
+                    and compound.minutes_since_decision >= LAB_ENTRY_SILENCE_MINUTES):
+                found.append(
+                    Condition(
+                        signature="compound:no-decisions",
+                        component="worker",
+                        severity="degraded",
+                        summary=(
+                            "The Compound Lab has made no decision for "
+                            f"{compound.minutes_since_decision:.0f} minutes. Its tick "
+                            "runs every minute, so this is a tick that is not "
+                            "arriving or not completing."
+                        ),
+                        remediation="compound.run_tick",
+                        symptoms={
+                            "minutes": compound.minutes_since_decision,
+                            "open": compound.open_positions,
+                        },
+                    )
+                )
 
     # ── the execution wallet ────────────────────────────────────────────
     wallet = health.wallet

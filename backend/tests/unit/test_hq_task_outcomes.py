@@ -158,18 +158,18 @@ def _health(*, tasks):
     )
 
 
-def test_autonomy_may_act_on_exactly_six_things():
+def test_autonomy_may_act_on_exactly_seven_things():
     """The set HQ is allowed to execute without a human, pinned by identity.
 
     HQ autonomy is ARMED on production — `HQ_AUTONOMY_ENABLED=true`, set
     deliberately after the disk hit 95% — so this set is the difference between
-    a system that reports and one that acts. None of the six moves money.
+    a system that reports and one that acts. None of the seven moves money.
 
     Asserted as an exact set rather than a maximum count. A test that allowed
-    "six or fewer" would pass while somebody swapped one of these for something
-    that trades, which is the substitution worth catching, not the growth.
+    "seven or fewer" would pass while somebody swapped one of these for
+    something that trades, which is the substitution worth catching.
 
-    Adding a seventh is a deliberate act and should require editing this line.
+    Adding an eighth is a deliberate act and should require editing this line.
 
     The two `lab.*` entries were the deliberate act of 2026-09-04. They narrow
     an earlier rule that no autonomous action may touch a tournament AT ALL —
@@ -186,6 +186,9 @@ def test_autonomy_may_act_on_exactly_six_things():
         "diagnostics.reprobe",
         "lab.run_tick",
         "lab.refresh_marks",
+        # Added 2026-09-04 with the Compound Lab, which was otherwise the only
+        # tournament on the box that nothing watched.
+        "compound.run_tick",
     })
     # And nothing outside the allowlist can be reached by name.
     for key in AUTONOMOUS_KEYS:

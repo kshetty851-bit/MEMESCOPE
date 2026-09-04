@@ -285,6 +285,35 @@ REMEDIATIONS: dict[str, Remediation] = {
             else (False, "The worker stopped answering after the refresh was queued.")
         ),
     ),
+    "compound.run_tick": Remediation(
+        key="compound.run_tick",
+        autonomy="green",
+        agent="karthik",
+        summary="Re-enqueue the Compound Lab tick. Judges, settles and banks cycles.",
+        # Safe to fire spuriously for the same reason the Lab's is, plus one
+        # that is specific to this tournament: `compound_tick` takes its own
+        # advisory lock, so a second copy arriving while one is running is a
+        # no-op rather than a second pass at banking a cycle. Without that lock
+        # this repair would be the most dangerous one here — cycle banking
+        # credits the wallet with a read-modify-write.
+        precondition=lambda h: (
+            (True, "The Compound Lab has gone silent and a worker is available.")
+            if h.worker.status == "healthy"
+            and h.compound is not None and h.compound.measured
+            else (
+                False,
+                f"Worker is {h.worker.status}"
+                + ("" if h.compound is not None and h.compound.measured
+                   else " and Compound Lab health is unmeasured"),
+            )
+        ),
+        execute=lambda: _enqueue("app.compound.scheduler.compound_tick"),
+        verify=lambda h: (
+            (True, "Tick accepted; the worker is still consuming.")
+            if h.worker.status == "healthy"
+            else (False, "The worker stopped answering after the tick was queued.")
+        ),
+    ),
     "diagnostics.reprobe": Remediation(
         key="diagnostics.reprobe",
         autonomy="green",

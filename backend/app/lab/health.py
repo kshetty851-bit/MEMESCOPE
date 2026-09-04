@@ -47,6 +47,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -118,8 +119,16 @@ class LabHealth:
         }
 
 
-async def read(session: AsyncSession, *, now: datetime | None = None) -> LabHealth:
-    """Measure the four signals for the CURRENT tournament.
+async def read(session: AsyncSession, *, now: datetime | None = None,
+               registry: Any = spec) -> LabHealth:
+    """Measure the signals for the CURRENT tournament of `registry`.
+
+    `registry` defaults to the V7 spec, so every existing caller is unchanged.
+    It exists because a SECOND tournament runs on these tables (the Compound
+    Lab) and every signal here — a frozen book, a halted tick, silence where
+    there should be decisions — means exactly the same thing for it. A parallel
+    copy of this module would drift from this one the first time either was
+    fixed.
 
     Scoped by `spec_version` like every other Lab read: a dormant record's
     positions are not this tournament's book, and counting them would report a
@@ -128,7 +137,7 @@ async def read(session: AsyncSession, *, now: datetime | None = None) -> LabHeal
     now = now or datetime.now(UTC)
     try:
         tournament = (await session.execute(
-            select(LabTournament).where(LabTournament.spec_version == spec.SPEC_VERSION)
+            select(LabTournament).where(LabTournament.spec_version == registry.SPEC_VERSION)
         )).scalars().first()
         if tournament is None:
             return LabHealth(measured=False, detail="No tournament is activated.")
@@ -139,7 +148,7 @@ async def read(session: AsyncSession, *, now: datetime | None = None) -> LabHeal
         # no marking. The staleness and silence that follow are consequences of
         # the halt, and reporting them as separate faults would send somebody
         # hunting quote coverage while the experiment is stopped.
-        drift = tournament.spec_hash != spec.SPEC_HASH
+        drift = tournament.spec_hash != registry.SPEC_HASH
 
         rows = list((await session.execute(
             select(LabPosition.mint_address, LabPosition.quantity_remaining,
@@ -185,7 +194,7 @@ async def read(session: AsyncSession, *, now: datetime | None = None) -> LabHeal
         spec_version=tournament.spec_version,
         spec_hash_drift=drift,
         stored_spec_hash=tournament.spec_hash,
-        running_spec_hash=spec.SPEC_HASH,
+        running_spec_hash=registry.SPEC_HASH,
     )
 
 

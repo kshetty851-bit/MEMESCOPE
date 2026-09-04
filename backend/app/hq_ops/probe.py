@@ -315,6 +315,31 @@ async def _probe_lab(now: datetime) -> LabHealthRow:
         return LabHealthRow(measured=False, detail=f"Lab health probe failed: {exc}")
 
 
+
+async def _probe_compound(now: datetime) -> LabHealthRow:
+    """The Compound Lab, measured by the same rules as the Lab.
+
+    A second tournament runs on these tables and every signal means the same
+    thing for it — a frozen book, a halted tick, silence where decisions should
+    be. `app.lab.health.read` takes the registry, so this is the same
+    measurement rather than a second copy that would drift.
+
+    Its own session for the same concurrency reason as `_probe_lab`.
+    """
+    from app.compound import spec as cspec
+    from app.db.session import SessionFactory
+    from app.lab.health import read as read_lab
+
+    try:
+        async with SessionFactory() as session:
+            reading = await read_lab(session, now=now, registry=cspec)
+        return LabHealthRow(**reading.as_dict())
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("hq_compound_probe_failed", error=str(exc))
+        return LabHealthRow(
+            measured=False, detail=f"Compound Lab health probe failed: {exc}")
+
+
 async def _probe_wallet(now: datetime) -> WalletHealthRow:
     """The execution rail, asked of the wallet's own module.
 
@@ -342,7 +367,7 @@ async def snapshot(session: AsyncSession, *, now: datetime | None = None) -> Ope
     """
     moment = now or datetime.now(UTC)
     (disk, redis_health, database, worker, scheduler, queues, task_rows,
-     lab_row, wallet_row) = await asyncio.gather(
+     lab_row, compound_row, wallet_row) = await asyncio.gather(
         _probe_disk(),
         _probe_redis(),
         _probe_database(session),
@@ -351,6 +376,7 @@ async def snapshot(session: AsyncSession, *, now: datetime | None = None) -> Ope
         _probe_queues(),
         task_outcomes.read_all(),
         _probe_lab(moment),
+        _probe_compound(moment),
         _probe_wallet(moment),
     )
 
@@ -389,6 +415,7 @@ async def snapshot(session: AsyncSession, *, now: datetime | None = None) -> Ope
         tasks=[TaskOutcome(**row) for row in task_rows],
         tasks_failing=len(task_outcomes.failing(task_rows)),
         lab=lab_row,
+        compound=compound_row,
         wallet=wallet_row,
         overall=_roll_up(parts),
         unmeasured=unmeasured,

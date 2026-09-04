@@ -185,6 +185,10 @@ class OperationsHealth(BaseSchema):
     #: and, like `tasks`, deliberately outside `overall`: a Lab that has stopped
     #: measuring is not a sick database.
     lab: LabHealthRow | None = None
+    #: The Compound Lab, measured by the same rules under its own registry.
+    #: Optional for the same reason `lab` is: a payload written before the
+    #: probe existed must still parse.
+    compound: LabHealthRow | None = None
     #: The execution wallet. Like `lab`, outside `overall`: a stalled intent is
     #: not a sick database, and an unexplained balance is not an ops problem at
     #: all — it is a security one, and it gets its own severity.

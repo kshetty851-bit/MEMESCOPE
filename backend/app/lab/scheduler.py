@@ -17,6 +17,7 @@ from sqlalchemy import func, select
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.db.session import SessionFactory
+from app.compound import spec as cspec
 from app.lab import leaderboard, sellability, spec
 from app.lab.service import LabService
 from app.models.lab import LabPosition, LabSnapshot, LabTournament
@@ -170,7 +171,13 @@ async def _lab_sellability_refresh() -> dict[str, Any]:
             if not acquired:
                 await session.rollback()
                 return {"skipped": "sellability_already_running"}
-            outcome = await sellability.refresh(session, now=datetime.now(UTC))
+            # Both live tournaments in ONE sweep rather than a second beat
+            # entry: Jupiter rate-limits hard and the sweep paces itself, so
+            # two sweeps would halve the budget each rather than share it.
+            outcome = await sellability.refresh(
+                session, now=datetime.now(UTC),
+                spec_versions=(spec.SPEC_VERSION, cspec.SPEC_VERSION),
+            )
             await session.commit()
     except Exception:
         logger.exception("lab_sellability_refresh_failed")

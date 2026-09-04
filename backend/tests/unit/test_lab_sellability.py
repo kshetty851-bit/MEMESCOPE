@@ -13,6 +13,7 @@ why `SPEC_HASH` must not move.
 from __future__ import annotations
 
 import ast
+import inspect
 from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -216,17 +217,37 @@ def test_the_read_side_still_accepts_the_full_window():
     assert "MAX_QUOTE_AGE" in ast.unparse(fn)
 
 
-def test_the_sweep_only_quotes_the_current_tournament():
+def test_the_sweep_only_quotes_the_tournaments_that_are_running():
     """Unscoped, it spent its per-run budget on a dormant record's open
     positions — V6 1.0.0 carried 158 — while the live book competed for what was
     left.
 
-    It is not biting today only because that record has closed out, which is the
-    worst kind of not-biting: fixed by luck, and back the next time a version is
-    bumped with positions still open.
+    The scope became a SET, not a single version, when a second tournament
+    started running (the Compound Lab). The invariant is unchanged and is the
+    one that matters: quote what is live, never everything that exists. The
+    default is still exactly one version, so a caller that forgets the argument
+    narrows the sweep rather than widening it to every dormant record.
     """
+    import inspect
+
     tree = ast.parse(Path(sellability.__file__).read_text())
     fn = next(n for n in ast.walk(tree)
               if isinstance(n, ast.AsyncFunctionDef) and n.name == "refresh")
     src = ast.unparse(fn)
-    assert "LabTournament.spec_version == spec.SPEC_VERSION" in src
+    assert "LabTournament.spec_version.in_(spec_versions)" in src
+    assert (inspect.signature(sellability.refresh)
+            .parameters["spec_versions"].default == (spec.SPEC_VERSION,))
+
+
+def test_the_beat_sweeps_every_live_tournament():
+    """The Compound Lab's book was invisible to this sweep for as long as it was
+    scoped to one version, so it was marked from the CPMM model over reported
+    liquidity — the condition that froze 72% of the Lab's book on 2026-08-26 —
+    with nothing saying so. One sweep covers both, rather than a second beat
+    entry halving the Jupiter budget."""
+    from app.compound import spec as cspec
+    from app.lab import scheduler
+
+    src = inspect.getsource(scheduler._lab_sellability_refresh)
+    assert "cspec.SPEC_VERSION" in src and "spec.SPEC_VERSION" in src
+    assert cspec.SPEC_VERSION != spec.SPEC_VERSION
