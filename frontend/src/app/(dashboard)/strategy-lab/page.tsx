@@ -49,6 +49,46 @@ function num(v: number | null | undefined, digits = 2): string {
     : v.toFixed(digits);
 }
 
+/**
+ * Green for gain, red for loss — and NOTHING for zero or unmeasured.
+ *
+ * The third case is the one that matters. A strategy with no closed trades has
+ * a null P&L, and `—` painted green would read as a flat result rather than as
+ * an absent one. Exactly zero stays neutral too: it is a real reading, not a
+ * win. `text-up` / `text-down` are the platform's own tokens; inventing a
+ * colour here would compile to nothing and fail silently.
+ */
+export function toneOf(v: number | null | undefined): string {
+  if (v === null || v === undefined || !Number.isFinite(v) || v === 0) return "";
+  return v > 0 ? "text-up" : "text-down";
+}
+
+/**
+ * The columns that are a profit or a loss, and are therefore coloured.
+ *
+ * Deliberately not every numeric column. Max drawdown is always a loss and
+ * would be permanently red, win rate is not P&L, and a table where most cells
+ * are coloured is one where the colour stops carrying information.
+ *
+ * `equity` is the exception that needs its own comparison: it is always a
+ * positive number, so its sign says nothing — what makes it a gain or a loss
+ * is where it sits against the money the strategy started with.
+ */
+const PNL_COLUMNS = new Set([
+  "net_pnl",
+  "return_pct",
+  "open_return_pct",
+  "deployed_return_pct",
+  "expectancy",
+  "equity",
+]);
+
+export function cellTone(row: LabStrategyRow, key: string): string {
+  if (!PNL_COLUMNS.has(key)) return "";
+  if (key === "equity") return toneOf(row.equity - row.starting_equity);
+  return toneOf(row[key as keyof LabStrategyRow] as number | null | undefined);
+}
+
 function checkpoint(minutes: number | null): string {
   if (minutes === null) return "never";
   return minutes === 0 ? "admission" : `+${minutes}m`;
@@ -369,12 +409,12 @@ function Drawer({ id, onClose }: { id: string; onClose: () => void }) {
                   {money(data.stats?.open_cost)} cost
                 </li>
                 <li>closed trades: {data.stats?.trades ?? 0}</li>
-                <li>expectancy: {signed(data.stats?.expectancy)}</li>
+                <li>expectancy: <span className={toneOf(data.stats?.expectancy)}>{signed(data.stats?.expectancy)}</span></li>
                 <li>PF: {num(data.stats?.profit_factor, 3)}</li>
                 <li>max DD: {pct(data.stats?.max_dd_pct)}</li>
-                <li>best / worst: {signed(data.stats?.best_trade)} / {signed(data.stats?.worst_trade)}</li>
-                <li>without best 1: {signed(data.stats?.expectancy_ex_best1)}</li>
-                <li>without best 3: {signed(data.stats?.expectancy_ex_best3)}</li>
+                <li>best / worst: <span className={toneOf(data.stats?.best_trade)}>{signed(data.stats?.best_trade)}</span> / <span className={toneOf(data.stats?.worst_trade)}>{signed(data.stats?.worst_trade)}</span></li>
+                <li>without best 1: <span className={toneOf(data.stats?.expectancy_ex_best1)}>{signed(data.stats?.expectancy_ex_best1)}</span></li>
+                <li>without best 3: <span className={toneOf(data.stats?.expectancy_ex_best3)}>{signed(data.stats?.expectancy_ex_best3)}</span></li>
                 <li>top-1 profit share: {pct(data.stats?.top1_profit_share_pct)}</li>
                 <li>top-3 profit share: {pct(data.stats?.top3_profit_share_pct)}</li>
                 <li>longest losing streak: {data.stats?.losing_streak ?? 0}</li>
@@ -417,7 +457,9 @@ function Drawer({ id, onClose }: { id: string; onClose: () => void }) {
                       <td className="py-1 pr-3 text-right">
                         {money(p.status === "closed" ? p.exit_proceeds_usd : p.open_value)}
                       </td>
-                      <td className="py-1 pr-3 text-right">{signed(p.pnl)}</td>
+                      <td className={`py-1 pr-3 text-right ${toneOf(p.pnl)}`}>
+                        {signed(p.pnl)}
+                      </td>
                       <td className="py-1 pr-3">{p.exit_reason ?? "—"}</td>
                       <td className="py-1 pr-3">{p.route_state ?? "—"}</td>
                       <td className="py-1">
@@ -691,7 +733,7 @@ export default function StrategyLabPage() {
                       key={String(c.key)}
                       className={`whitespace-nowrap py-1 pr-3 ${
                         c.numeric ? "text-right" : ""
-                      }`}
+                      } ${cellTone(r, String(c.key))}`}
                     >
                       {cell(r, String(c.key))}
                     </td>
