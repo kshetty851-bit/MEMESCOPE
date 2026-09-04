@@ -104,7 +104,8 @@ class PumpfunService:
         self._session.add(PumpfunSignal(
             tournament_id=t.id, signature=trade.signature,
             mint_address=trade.mint, side=trade.side,
-            leader_sol=Decimal(str(round(trade.sol_amount, 4))),
+            leader_sol=(Decimal(str(round(trade.sol_amount, 4)))
+                        if trade.sol_amount is not None else None),
             leader_at=trade.at, seen_at=now,
             acted=acted, outcome=outcome, position_id=position_id,
         ))
@@ -148,7 +149,8 @@ class PumpfunService:
             features={"leader": spec.LEADER_ADDRESS,
                       "leader_label": spec.LEADER_LABEL,
                       "signature": trade.signature,
-                      "leader_sol": round(trade.sol_amount, 4),
+                      "leader_sol": (round(trade.sol_amount, 4)
+                                    if trade.sol_amount is not None else None),
                       "lag_seconds": round((now - trade.at).total_seconds(), 1)},
             requested_size_usd=s.size_usd,
         )

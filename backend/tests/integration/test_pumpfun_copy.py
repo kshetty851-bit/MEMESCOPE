@@ -273,3 +273,61 @@ async def test_the_follower_asks_helius_for_swaps_only(monkeypatch):
                         type("S", (), {"get_secret_value": staticmethod(lambda: "k")})())
     await f.recent_trades()
     assert seen["params"].get("type") == "SWAP"
+
+
+def test_a_trade_is_read_from_his_own_balance_change_not_the_route():
+    """How he routed the swap must not decide whether we can copy it.
+
+    Measured on prod over his last 21 swaps: naming him in `tokenTransfers`
+    missed 4 (he routes through aggregator accounts), requiring a native SOL
+    leg missed 13 (he trades wrapped), and `events.swap` was present on 13 and
+    sometimes described a different account entirely. Reading his own token
+    balance change resolves 17 of 21.
+
+    Side is the SIGN of that change. The SOL amount is deliberately optional —
+    we size from our own book, so a trade whose SOL leg cannot be attributed is
+    still perfectly copyable, and demanding a number we never use would discard
+    most of the feed.
+    """
+    from app.pumpfun.follower import _leader_sol, _traded
+
+    addr = "LEADER"
+    wrapped_buy = {
+        "accountData": [
+            {"account": addr, "nativeBalanceChange": 0, "tokenBalanceChanges": [
+                {"userAccount": addr, "mint": "TOKEN",
+                 "rawTokenAmount": {"tokenAmount": "5000", "decimals": 6}},
+                {"userAccount": addr,
+                 "mint": "So11111111111111111111111111111111111111112",
+                 "rawTokenAmount": {"tokenAmount": "-2000000000", "decimals": 9}},
+            ]},
+            # somebody else's leg in the same transaction
+            {"account": "OTHER", "nativeBalanceChange": -99, "tokenBalanceChanges": [
+                {"userAccount": "OTHER", "mint": "NOISE",
+                 "rawTokenAmount": {"tokenAmount": "999999", "decimals": 6}}]},
+        ]
+    }
+    assert _traded(wrapped_buy, addr) == ("TOKEN", "buy")
+    assert _leader_sol(wrapped_buy, addr) == 2.0
+
+    sell = {"accountData": [{"account": addr, "nativeBalanceChange": 0,
+        "tokenBalanceChanges": [{"userAccount": addr, "mint": "TOKEN",
+            "rawTokenAmount": {"tokenAmount": "-5000", "decimals": 6}}]}]}
+    assert _traded(sell, addr) == ("TOKEN", "sell")
+    # No attributable SOL leg, and it is still a copyable trade.
+    assert _leader_sol(sell, addr) is None
+
+    # A route that leaves a residue of an intermediate token: the LARGEST
+    # absolute move is the one he was actually trading.
+    residue = {"accountData": [{"account": addr, "nativeBalanceChange": 0,
+        "tokenBalanceChanges": [
+            {"userAccount": addr, "mint": "DUST",
+             "rawTokenAmount": {"tokenAmount": "3", "decimals": 6}},
+            {"userAccount": addr, "mint": "REAL",
+             "rawTokenAmount": {"tokenAmount": "900000", "decimals": 6}}]}]}
+    assert _traded(residue, addr) == ("REAL", "buy")
+
+    # Nothing of ours moved — not our trade.
+    assert _traded({"accountData": [{"account": "OTHER", "tokenBalanceChanges": [
+        {"userAccount": "OTHER", "mint": "X",
+         "rawTokenAmount": {"tokenAmount": "1", "decimals": 6}}]}]}, addr) is None

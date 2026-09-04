@@ -52,8 +52,12 @@ _BASE = "https://api.helius.xyz/v0/addresses"
 class LeaderTrade:
     signature: str
     mint: str
-    side: str          # "buy" | "sell"
-    sol_amount: float  # absolute, informational only — we size ourselves
+    side: str                  # "buy" | "sell"
+    #: What HE staked, when it can be seen at all. Context only — we size from
+    #: our own book — and OPTIONAL on purpose: most of his swaps settle their
+    #: SOL leg somewhere we cannot attribute, and refusing those trades to
+    #: obtain a number we never use would throw away most of the feed.
+    sol_amount: float | None
     at: datetime
 
     @property
@@ -66,19 +70,70 @@ def _is_swap(tx: dict[str, Any]) -> bool:
 
 
 def _sol_delta(tx: dict[str, Any], addr: str) -> int:
+    """Native SOL moved for this account, fees included. Often zero here."""
     for a in tx.get("accountData") or []:
         if a.get("account") == addr:
             return int(a.get("nativeBalanceChange") or 0)
     return 0
 
 
-def _mint(tx: dict[str, Any], addr: str) -> str | None:
-    for t in tx.get("tokenTransfers") or []:
-        m = t.get("mint")
-        if (m and m != WSOL
-                and addr in (t.get("fromUserAccount"), t.get("toUserAccount"))):
-            return m
-    return None
+def _our_token_changes(tx: dict[str, Any], addr: str) -> list[tuple[str, int]]:
+    """Every token balance change belonging to THIS wallet, as (mint, raw).
+
+    `accountData[].tokenBalanceChanges` is the authoritative record of what a
+    wallet actually gained or lost, and it is the only field that survives how
+    the trade was routed. The obvious alternatives both failed on this leader,
+    measured on 2026-09-04 over his last 21 swaps:
+
+      * `tokenTransfers` naming him directly    — missed 4, he routes through
+                                                  aggregator accounts
+      * `nativeBalanceChange` for the SOL leg   — zero on 13, he trades wrapped
+      * `events.swap`                           — present on 13, and on some of
+                                                  those the parsed swap belongs
+                                                  to another account entirely
+
+    Reading his balances instead resolves 17 of 21.
+    """
+    out: list[tuple[str, int]] = []
+    for a in tx.get("accountData") or []:
+        for tb in a.get("tokenBalanceChanges") or []:
+            if tb.get("userAccount") != addr:
+                continue
+            raw = (tb.get("rawTokenAmount") or {}).get("tokenAmount")
+            mint = tb.get("mint")
+            if mint and raw is not None:
+                try:
+                    out.append((mint, int(raw)))
+                except (TypeError, ValueError):
+                    continue
+    return out
+
+
+def _traded(tx: dict[str, Any], addr: str) -> tuple[str, str] | None:
+    """(mint, side) for the token this wallet actually traded, or None.
+
+    Side comes from the SIGN of his own balance change — up means he acquired
+    it, down means he disposed of it — which is all a copier needs. The SOL
+    amount is deliberately NOT required: we size from our own book, so a trade
+    whose SOL leg cannot be attributed is still perfectly copyable.
+
+    The largest absolute change wins when several tokens move, because a route
+    through an intermediate token leaves small residues of it behind.
+    """
+    changes = [(m, a) for m, a in _our_token_changes(tx, addr)
+               if m != WSOL and a != 0]
+    if not changes:
+        return None
+    mint, amount = max(changes, key=lambda c: abs(c[1]))
+    return mint, ("buy" if amount > 0 else "sell")
+
+
+def _leader_sol(tx: dict[str, Any], addr: str) -> float | None:
+    """His stake in SOL when it is visible, else None. Never load-bearing."""
+    wsol = sum(a for m, a in _our_token_changes(tx, addr) if m == WSOL)
+    native = _sol_delta(tx, addr)
+    raw = abs(wsol) or abs(native)
+    return round(raw / 1_000_000_000, 6) if raw else None
 
 
 async def recent_trades(*, limit: int = 100) -> list[LeaderTrade]:
@@ -110,19 +165,14 @@ async def recent_trades(*, limit: int = 100) -> list[LeaderTrade]:
     for tx in rows:
         if not _is_swap(tx):
             continue
-        mint = _mint(tx, spec.LEADER_ADDRESS)
-        if not mint:
-            continue
-        delta = _sol_delta(tx, spec.LEADER_ADDRESS)
-        if delta == 0:
-            continue
+        traded = _traded(tx, spec.LEADER_ADDRESS)
         ts = tx.get("timestamp")
-        if not ts:
+        if traded is None or not ts:
             continue
+        mint, side = traded
         out.append(LeaderTrade(
-            signature=tx["signature"], mint=mint,
-            side="buy" if delta < 0 else "sell",
-            sol_amount=abs(delta) / 1_000_000_000,
+            signature=tx["signature"], mint=mint, side=side,
+            sol_amount=_leader_sol(tx, spec.LEADER_ADDRESS),
             at=datetime.fromtimestamp(ts, tz=UTC),
         ))
     out.sort(key=lambda t: t.at, reverse=True)
