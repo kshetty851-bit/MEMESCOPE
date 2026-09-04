@@ -90,6 +90,29 @@ export interface LabRule {
   note: string;
 }
 
+/** A thirty-day band, resampled from a strategy's own closed trades.
+ *
+ * `projectable` false means the sample cannot support one — render `reason`,
+ * never a number. The random control is always served alongside the leader,
+ * because a band that beats zero but not blind entry has shown nothing. */
+export interface LabProjection {
+  strategy_id: string;
+  name: string;
+  equity_now: string;
+  projectable: boolean;
+  reason: string;
+  trades_observed: number;
+  trades_per_day: number;
+  projected_trades: number;
+  horizon_days: number;
+  p10: string | null;
+  p50: string | null;
+  p90: string | null;
+  p_profit: number | null;
+  p_ruin: number | null;
+  notes: string[];
+}
+
 export interface LabBoard {
   disclosure: string;
   spec_version: string;
@@ -108,6 +131,10 @@ export interface LabBoard {
   total_closed_trades: number;
   overall_confidence: string;
   leaders: LabLeaders;
+  projection?: {
+    leader?: LabProjection;
+    random_control?: LabProjection;
+  };
   strategies: LabStrategyRow[];
   rulebook: LabRule[];
 }

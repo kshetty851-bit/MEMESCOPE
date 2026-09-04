@@ -13,7 +13,7 @@ from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import select
 
 from app.api.deps import DbSession
-from app.lab import leaderboard, spec
+from app.lab import leaderboard, projection, spec
 from app.models.token import DiscoveredToken
 from app.models.lab import (
     LabDecision,
@@ -22,6 +22,13 @@ from app.models.lab import (
     LabSnapshot,
     LabStrategy,
     LabTournament,
+)
+
+_NON_TRADING: frozenset[str] = frozenset(
+    x.id for x in spec.STRATEGIES if not x.trades
+)
+_RANDOM_CONTROLS: frozenset[str] = frozenset(
+    x.id for x in spec.STRATEGIES if x.trades and not x.entry
 )
 
 router = APIRouter(prefix="/lab", tags=["lab"])
@@ -77,12 +84,60 @@ async def board(session: DbSession) -> dict[str, Any]:
         "total_closed_trades": total_closed,
         "overall_confidence": leaderboard.confidence(total_closed),
         "leaders": leaderboard.leaders(rows),
+        # Thirty days for the LEADER and for the random control, side by side.
+        # Never the leader alone: a band that beats zero but not blind entry
+        # from the same pool is a band that has shown nothing, and separating
+        # the two on the page would let a reader take the first without the
+        # second.
+        "projection": await _projections(session, t, rows, now),
         "strategies": rows,
         # The frozen rulebook, served rather than duplicated in the client, so
         # a reader checking the page against the report is reading the same
         # registry the engine judges with.
         "rulebook": [spec.rules_json(s) for s in spec.STRATEGIES],
     })
+
+
+def _target_of(strategy_id: str):
+    s = spec.BY_ID.get(strategy_id)
+    return s.exits.take_profit if s else None
+
+
+async def _projections(
+    session, tournament, rows: list[dict[str, Any]], now: datetime
+) -> dict[str, Any]:
+    """The leader's thirty-day band, and the random control's for scale."""
+    ranked = [r for r in rows if r["strategy_id"] not in _NON_TRADING]
+    if not ranked:
+        return {}
+    leader = ranked[0]
+    # The control at the LEADER'S OWN target where one exists, so the
+    # comparison isolates the entry rule instead of mixing in the exit. Falling
+    # back to any random control is better than none: a band with nothing
+    # beside it is the thing this must never render.
+    leader_tp = _target_of(leader["strategy_id"])
+    control = next(
+        (r for r in rows if r["strategy_id"] in _RANDOM_CONTROLS
+         and _target_of(r["strategy_id"]) == leader_tp),
+        next((r for r in rows if r["strategy_id"] in _RANDOM_CONTROLS), None),
+    )
+    out: dict[str, Any] = {}
+    for label, row in (("leader", leader), ("random_control", control)):
+        if row is None:
+            continue
+        pnls, first = await leaderboard.closed_pnls(
+            session, tournament_id=tournament.id, strategy_id=row["strategy_id"]
+        )
+        out[label] = {
+            "strategy_id": row["strategy_id"],
+            "name": row["name"],
+            "equity_now": str(row["equity"]),
+            **projection.project(
+                pnls=pnls, equity_now=row["equity"], first_trade_at=first,
+                now=now, failure_floor=spec.FAILURE_EQUITY_FLOOR,
+            ).as_dict(),
+        }
+    return out
 
 
 @router.get("/strategies/{strategy_id}")

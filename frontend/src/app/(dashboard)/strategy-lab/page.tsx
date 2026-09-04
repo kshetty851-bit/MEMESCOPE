@@ -6,7 +6,7 @@ import { Label, Panel } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/states";
 import { useLabBoard, useLabStrategy } from "@/hooks/use-lab";
-import type { LabBoard, LabRule, LabStrategyRow } from "@/types/lab";
+import type { LabBoard, LabRule, LabStrategyRow, LabProjection } from "@/types/lab";
 
 /**
  * V6 FORWARD STRATEGY LAB
@@ -166,6 +166,92 @@ function Header({ board }: { board: LabBoard }) {
         spec {board.spec_version} · hash {board.spec_hash.slice(0, 16)}… ·
         STRATEGY SPEC IMMUTABLE = TRUE · {board.total_closed_trades} closed trades ·
         confidence {board.overall_confidence.replace(/_/g, " ")}
+      </p>
+    </Panel>
+  );
+}
+
+/**
+ * THIRTY-DAY BAND
+ *
+ * The most dangerous number this page can show. It is the one a reader turns
+ * straight into a funding decision, and the history is unambiguous: V6-07 had a
+ * 3.0 profit factor on 23 trades, was nearly funded on it, and ended at -25%.
+ *
+ * So three rules govern this panel.
+ *
+ * It renders a REFUSAL as prominently as a number. Below the minimum sample the
+ * API sends `projectable: false` and a reason, and that is what appears — not a
+ * greyed-out figure, not a dash, a sentence saying why there is no answer.
+ *
+ * It never shows the leader alone. The random control sits beside it at the
+ * same size, because the question is never "will this make money" but "does it
+ * beat blind entry from the same pool". Two overlapping bands mean nothing has
+ * been shown, and the reader must be able to see that without scrolling.
+ *
+ * It leads with the SPREAD, not the midpoint. A median is what gets quoted; the
+ * p10 is what gets lived through.
+ */
+function Projection({ board }: { board: LabBoard }) {
+  const leader = board.projection?.leader;
+  const control = board.projection?.random_control;
+  if (!leader) return null;
+
+  const money = (v: string | null) =>
+    v === null ? "—" : `$${Number(v).toFixed(0)}`;
+  const pct = (v: number | null) =>
+    v === null ? "—" : `${(v * 100).toFixed(0)}%`;
+
+  const Band = ({ p, kind }: { p: LabProjection; kind: string }) => (
+    <div className="rounded border border-line p-3">
+      <div className="flex items-baseline justify-between gap-2">
+        <Label>{kind}</Label>
+        <span className="font-mono text-[10px] text-muted">
+          {p.strategy_id} · {p.trades_observed} trades
+        </span>
+      </div>
+      <p className="mt-1 truncate text-sm text-ink">{p.name}</p>
+      {!p.projectable ? (
+        <p className="mt-2 text-xs leading-relaxed text-warn">{p.reason}</p>
+      ) : (
+        <>
+          <div className="mt-2 grid grid-cols-3 gap-2 text-center">
+            <div>
+              <div className="text-muted text-[10px]">WORST 10%</div>
+              <div className="font-mono text-sm text-down">{money(p.p10)}</div>
+            </div>
+            <div>
+              <div className="text-muted text-[10px]">MEDIAN</div>
+              <div className="font-mono text-sm text-ink">{money(p.p50)}</div>
+            </div>
+            <div>
+              <div className="text-muted text-[10px]">BEST 10%</div>
+              <div className="font-mono text-sm text-up">{money(p.p90)}</div>
+            </div>
+          </div>
+          <p className="mt-2 font-mono text-[11px] text-muted">
+            P(profit) {pct(p.p_profit)} · P(ruin) {pct(p.p_ruin)} ·{" "}
+            {p.projected_trades} trades at {p.trades_per_day.toFixed(1)}/day
+          </p>
+        </>
+      )}
+    </div>
+  );
+
+  return (
+    <Panel density="compact">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <Label>NEXT {leader.horizon_days} DAYS — RESAMPLED FROM OWN TRADES</Label>
+        <span className="font-mono text-[10px] text-warn">
+          NOT A FORECAST
+        </span>
+      </div>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <Band p={leader} kind="LEADER" />
+        {control ? <Band p={control} kind="RANDOM CONTROL — THE BAR" /> : null}
+      </div>
+      <p className="mt-3 border-t border-line pt-3 text-xs leading-relaxed text-muted">
+        {leader.notes.join(" ")}
       </p>
     </Panel>
   );
@@ -559,6 +645,7 @@ export default function StrategyLabPage() {
     <div className="space-y-4">
       <Header board={data} />
       <Leaders board={data} />
+      <Projection board={data} />
       <Panel density="compact">
         <div className="flex items-baseline justify-between">
           <Label>LIVE LEADERBOARD — 20 STRATEGIES</Label>

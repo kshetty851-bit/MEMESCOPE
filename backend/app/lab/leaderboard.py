@@ -12,7 +12,7 @@ and destroys its wallet doing it must not also be presented as risk-adjusted or
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -263,3 +263,32 @@ def _jsonable(obj: Any) -> Any:
     if isinstance(obj, list):
         return [_jsonable(v) for v in obj]
     return obj
+
+
+async def closed_pnls(
+    session: AsyncSession, *, tournament_id: uuid.UUID, strategy_id: str
+) -> tuple[list[Decimal], datetime | None]:
+    """Every closed trade's P&L for one strategy, and when it opened its first.
+
+    Returned as raw per-trade numbers rather than a summary because the
+    projection resamples them: an expectancy and a standard deviation would
+    assume a shape this distribution does not have — the losses are total and
+    the wins are capped, so it is not remotely symmetric.
+    """
+    rows = list((await session.execute(
+        select(LabPosition.size_usd, LabPosition.exit_proceeds_usd,
+               LabPosition.opened_at)
+        .join(LabStrategy, LabStrategy.id == LabPosition.strategy_row_id)
+        .where(LabStrategy.tournament_id == tournament_id,
+               LabStrategy.strategy_id == strategy_id,
+               LabPosition.status == "closed")
+        .order_by(LabPosition.opened_at)
+    )).all())
+    if not rows:
+        return [], None
+    pnls = [Decimal(str(r.exit_proceeds_usd or 0)) - Decimal(str(r.size_usd))
+            for r in rows]
+    first = rows[0].opened_at
+    if first is not None and first.tzinfo is None:
+        first = first.replace(tzinfo=UTC)
+    return pnls, first
