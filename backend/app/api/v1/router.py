@@ -28,6 +28,7 @@ from app.karthik import api as karthik
 from app.karthik_ops import api as karthik_ops
 from app.paper import api as paper
 from app.arena import api as arena
+from app.compound import api as compound
 from app.lab import api as lab
 from app.radar import api as radar
 from app.real_wallet import api as real_wallet
@@ -59,6 +60,7 @@ api_router.include_router(radar.router)
 # Research simulation, clearly separated from the wallet surfaces.
 api_router.include_router(arena.router)
 api_router.include_router(lab.router)
+api_router.include_router(compound.router)
 # Exit Watch, the permanent record and the leaderboards. Additive; the Radar's
 # own routes and every pre-existing endpoint are unchanged.
 api_router.include_router(intelligence.router)

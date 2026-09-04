@@ -103,6 +103,15 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: IconSpark,
         status: "ready",
       },
+      // The Compound Lab is a SECOND tournament, not a view onto the first:
+      // its own frozen registry, its own hash, its own wallet. It sits beside
+      // the Lab because that is where a reader looks for an experiment.
+      {
+        href: "/compound-lab",
+        label: "Compound Lab",
+        icon: IconSpark,
+        status: "ready",
+      },
       // The trades view exists so a reader can copy a contract address and
       // check the token against the market rather than trusting the Lab.
       {

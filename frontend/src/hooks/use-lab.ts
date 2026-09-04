@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { fetchCompoundBoard } from "@/lib/compound";
 import {
   closeLabPosition,
   fetchLabBoard,
@@ -64,5 +65,14 @@ export function useCloseLabPosition() {
   return useMutation({
     mutationFn: closeLabPosition,
     onSettled: () => client.invalidateQueries({ queryKey: ["lab"] }),
+  });
+}
+
+/** The Compound Lab. Same cadence as the Lab it shares an engine with. */
+export function useCompoundBoard() {
+  return useQuery({
+    queryKey: ["compound", "board"],
+    queryFn: fetchCompoundBoard,
+    refetchInterval: LAB_POLL_MS,
   });
 }
