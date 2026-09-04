@@ -3,14 +3,24 @@
 Read-only and stateless. It answers one question — which tokens did this
 wallet buy or sell recently — and the service decides what to do about it.
 
-## Classification
+## The filter is not an optimisation, it is the difference between working
+## and silently never trading
 
-A trade is a swap (`type == "SWAP"` or a known DEX `source`). Everything else
-this wallet receives is noise, and there is a lot of it: most of what lands on
-these addresses is airdrop dust — token transfers of amount 1 with a native
-balance change of zero. An earlier version of this measurement counted that as
-trading and produced "+0.00 SOL over hundreds of trades", which looked like a
-result and was an artefact.
+Helius is asked for `type=SWAP` SERVER-SIDE. Fetching his last hundred
+transactions unfiltered and sorting them here returns, in practice, ZERO
+trades: measured on this wallet on 2026-09-04, the most recent 100 transactions
+were 95 TRANSFERs and 5 account initialisations spanning four hours — he
+receives roughly twenty-five airdrop dust transfers an hour, which floods his
+own trading out of any unfiltered window. The same request with `type=SWAP`
+returned 21 real swaps across three days.
+
+The lab shipped with client-side filtering and ticked green while seeing
+nothing at all, which is the failure this comment exists to stop somebody
+reintroducing.
+
+The client-side check is kept as a second gate: the API filter is theirs and
+could change, and a TRANSFER that reached here would otherwise be treated as a
+trade. Belt and braces, cheap.
 
 Side comes from the SOL leg, read from `accountData.nativeBalanceChange` for
 the leader's own account: SOL out means he bought the token, SOL in means he
@@ -85,7 +95,9 @@ async def recent_trades(*, limit: int = 100) -> list[LeaderTrade]:
     url = f"{_BASE}/{spec.LEADER_ADDRESS}/transactions"
     try:
         async with httpx.AsyncClient(timeout=25) as client:
-            r = await client.get(url, params={"api-key": key, "limit": limit})
+            r = await client.get(url, params={
+                "api-key": key, "limit": limit, "type": "SWAP",
+            })
         if r.status_code != 200:
             logger.warning("pumpfun_follower_http", status=r.status_code)
             return []

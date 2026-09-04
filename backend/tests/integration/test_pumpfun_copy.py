@@ -225,3 +225,51 @@ def test_the_registry_is_distinct_from_the_other_tournaments():
     assert len({spec.SPEC_HASH, cspec.SPEC_HASH, v7.SPEC_HASH}) == 3
     assert spec.STRATEGIES[0].size_usd * spec.STRATEGIES[0].max_concurrent \
         <= spec.STARTING_EQUITY
+
+
+# --------------------------------------------------------------------------
+# the request itself
+# --------------------------------------------------------------------------
+
+
+async def test_the_follower_asks_helius_for_swaps_only(monkeypatch):
+    """Not an optimisation — the difference between working and silently
+    never trading.
+
+    This wallet receives ~25 airdrop dust transfers an hour. Measured on
+    2026-09-04 its most recent 100 transactions were 95 TRANSFERs and 5 account
+    initialisations, spanning four hours and containing ZERO swaps; the same
+    request with `type=SWAP` returned 21 swaps over three days. The lab shipped
+    without this and ticked green while seeing nothing.
+
+    Asserted on the request that is actually made, because the bug was
+    invisible in every other signal: the task succeeded, the book was empty,
+    and nothing was wrong anywhere a test was looking.
+    """
+    from app.pumpfun import follower as f
+
+    seen: dict[str, object] = {}
+
+    class _Resp:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return []
+
+    class _Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def get(self, url, params=None):
+            seen["params"] = params or {}
+            return _Resp()
+
+    monkeypatch.setattr(f.httpx, "AsyncClient", lambda **_kw: _Client())
+    monkeypatch.setattr(f.settings, "HELIUS_API_KEY",
+                        type("S", (), {"get_secret_value": staticmethod(lambda: "k")})())
+    await f.recent_trades()
+    assert seen["params"].get("type") == "SWAP"
