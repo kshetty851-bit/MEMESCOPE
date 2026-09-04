@@ -85,6 +85,44 @@ async def _prune_score_history(days: int) -> int:
     )
 
 
+async def _reclaim_radar_rank_events() -> int:
+    """Return an emptied `radar_rank_events` to the operating system.
+
+    DELETE frees space INSIDE the file, for that table to reuse. Nothing has
+    written to this one since 2026-08-22 — the flag that produced it is paused
+    — so there is no reuse coming, and retention draining it from 1,267,469
+    rows to zero still leaves 865MB (355MB heap, 510MB indexes) held against a
+    38GB disk that was at 87% when this was written.
+
+    TRUNCATE rather than VACUUM FULL: both reclaim, but TRUNCATE is O(1),
+    transactional, and does not need a second copy of the table on a disk that
+    is short of room — which is the condition that makes this worth doing.
+
+    GUARDED ON EMPTY, and that guard is the whole safety argument. It runs only
+    when a COUNT returns zero in the same transaction as the TRUNCATE, so the
+    lock is held across both and no row can arrive between them. If the flag is
+    ever turned back on, the count stops being zero and this stops firing.
+    Returns bytes reclaimed, or 0 when it did nothing.
+    """
+    async with SessionFactory() as session:
+        size = int(await session.scalar(
+            text("SELECT pg_total_relation_size('radar_rank_events')")
+        ) or 0)
+        # Nothing to give back: either it still holds rows, or it is already
+        # small. The size floor stops this from logging a "reclaim" of an
+        # empty table every single pass forever.
+        remaining = int(await session.scalar(
+            text("SELECT count(*) FROM radar_rank_events")
+        ) or 0)
+        if remaining or size < 64 * 1024 * 1024:
+            await session.rollback()
+            return 0
+        await session.execute(text("TRUNCATE TABLE radar_rank_events"))
+        await session.commit()
+    logger.info("radar_rank_events_reclaimed", bytes_freed=size)
+    return size
+
+
 async def _prune_market_snapshots(days: int) -> int:
     """Prune ordinary tokens only. Admitted and traded mints are kept forever.
 
@@ -216,6 +254,15 @@ async def _prune_telemetry() -> dict[str, Any]:
             # must not raise into the beat.
             report["failures"].append(name)
             logger.exception("retention_prune_failed", table=name, error=str(exc))
+
+    # Frozen-table reclaim, after the prunes that might have emptied it.
+    # Its own try/except for the same reason each prune has one: a failure
+    # here costs disk, and must not cost the report.
+    try:
+        report["radar_rank_events_bytes_reclaimed"] = await _reclaim_radar_rank_events()
+    except Exception as exc:
+        report["failures"].append("radar_rank_events_reclaim")
+        logger.exception("radar_rank_events_reclaim_failed", error=str(exc))
 
     report["disk_percent_after"] = disk_usage_percent()
 
