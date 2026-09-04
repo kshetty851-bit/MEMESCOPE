@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { fetchCompoundBoard } from "@/lib/compound";
+import { fetchMomentumBoard } from "@/lib/momentum";
 import { fetchPumpfunBoard } from "@/lib/pumpfun";
 import {
   closeLabPosition,
@@ -83,6 +84,15 @@ export function usePumpfunBoard() {
   return useQuery({
     queryKey: ["pumpfun", "board"],
     queryFn: fetchPumpfunBoard,
+    refetchInterval: LAB_POLL_MS,
+  });
+}
+
+/** Momentum V2. Same cadence as the tournaments it shares an engine with. */
+export function useMomentumBoard() {
+  return useQuery({
+    queryKey: ["momentum", "board"],
+    queryFn: fetchMomentumBoard,
     refetchInterval: LAB_POLL_MS,
   });
 }

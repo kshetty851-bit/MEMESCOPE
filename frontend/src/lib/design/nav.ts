@@ -112,6 +112,13 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: IconSpark,
         status: "ready",
       },
+      // Momentum V2: the entry-rule grid, with its controls inside it.
+      {
+        href: "/momentum-lab",
+        label: "Momentum V2",
+        icon: IconSpark,
+        status: "ready",
+      },
       // The copy lab. Beside the other tournaments because it is one — a
       // separate frozen registry with its own wallet, not a view.
       {

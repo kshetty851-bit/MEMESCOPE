@@ -160,3 +160,44 @@ async def test_one_wallet_banking_does_not_move_the_others(db_session):
     others = [c for c in cycles if c.strategy_row_id != winner.id]
     assert all(c.reached_at is None and c.base_usd == D("100") for c in others)
     assert len([c for c in cycles if c.strategy_row_id == winner.id]) == 2
+
+
+async def test_the_board_serves_all_twenty_with_their_controls_marked(db_session):
+    """The payload was derived from the Compound Lab's, which serves ONE
+    wallet. This asserts the derivation actually produced a twenty-wallet
+    board rather than something that merely imports."""
+    from app.momentum.api import board
+
+    await CompoundService(db_session, registry=mspec).tick(now=NOW)
+    out = await board(db_session)
+
+    assert out["activated"] is True
+    assert len(out["wallets"]) == 20
+    assert [w["rank"] for w in out["wallets"]] == list(range(1, 21))
+    assert sum(1 for w in out["wallets"] if w["is_control"]) == 2
+    for w in out["wallets"]:
+        assert w["entry_text"], w["strategy_id"]
+        assert w["cycle_no"] == 1
+        assert float(w["target_usd"]) == 110.0
+        assert w["cycles_banked"] == 0
+    # The controls must be identifiable, or a reader compares eighteen numbers
+    # with nothing to compare them against.
+    controls = [w for w in out["wallets"] if w["is_control"]]
+    assert all("RANDOM-CONTROL" in w["name"] for w in controls)
+
+
+async def test_the_board_ranks_by_equity(db_session):
+    svc = CompoundService(db_session, registry=mspec)
+    await svc.tick(now=NOW)
+    rows = list((await db_session.execute(
+        select(LabStrategy).where(LabStrategy.spec_hash == mspec.SPEC_HASH)
+        .order_by(LabStrategy.strategy_id)
+    )).scalars())
+    rows[7].cash = D("142")
+    await db_session.flush()
+
+    from app.momentum.api import board
+
+    out = await board(db_session)
+    assert out["wallets"][0]["strategy_id"] == rows[7].strategy_id
+    assert float(out["wallets"][0]["equity"]) == 142.0
