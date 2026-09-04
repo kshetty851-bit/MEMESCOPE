@@ -42,6 +42,7 @@ from app.models.lab import (
 )
 from app.models.market import TokenMarketSnapshot, TradingStatus
 from app.models.radar import RadarToken
+from app.models.token import DiscoveredToken
 from app.models.research_data import ResearchQuote, WalletFlowSnapshot
 
 logger = get_logger(__name__)
@@ -166,6 +167,15 @@ class LabService:
         prev10 = at_or_before(10)
 
         f: dict[str, Any] = {}
+        # PROVENANCE as a feature, so a registry can require it in its entry
+        # rules rather than the engine deciding for everyone. 1 when the token
+        # was discovered on pump.fun's bonding curve or on PumpSwap, which is
+        # pump.fun's own AMM for pools that never touch the curve — both are
+        # pump.fun. `jupiter_verified` and anything else is 0.
+        #
+        # Additive: SPEC_HASH is taken over the STRATEGIES, not over the feature
+        # builder, so adding a key here cannot drift a running tournament.
+        f["is_pumpfun"] = Decimal(1) if await self._is_pumpfun(token_id) else Decimal(0)
         f["liq"] = last.liquidity_usd if last.liquidity_usd and last.liquidity_usd > 0 else None
         f["mcap"] = last.market_cap if last.market_cap and last.market_cap > 0 else None
         f["vol1h"] = last.volume_1h
@@ -596,6 +606,28 @@ class LabService:
                 "mint": pos.mint_address, "proceeds_usd": proceeds,
                 "pnl_usd": proceeds - pos.size_usd,
                 "exit_reason": pos.exit_reason}
+
+    #: pump.fun's bonding curve, and PumpSwap — its own AMM for direct pool
+    #: launches. `SCANNER_WATCH_PROGRAMS` is the same pair the scanner listens
+    #: to, so this cannot drift from what discovery actually admitted.
+    @staticmethod
+    def _pumpfun_programs() -> set[str]:
+        from app.core.config import settings
+
+        return set(settings.SCANNER_WATCH_PROGRAMS)
+
+    async def _is_pumpfun(self, token_id) -> bool:
+        """Was this token discovered on pump.fun?
+
+        Read from `discovered_tokens.source_program`, which records the program
+        that emitted the launch — the fact at discovery, not a guess from the
+        pool it trades in now.
+        """
+        src = await self._session.scalar(
+            select(DiscoveredToken.source_program)
+            .where(DiscoveredToken.id == token_id)
+        )
+        return bool(src) and src in self._pumpfun_programs()
 
     async def _mark(
         self, pos: LabPosition, now: datetime

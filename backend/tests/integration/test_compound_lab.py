@@ -89,7 +89,9 @@ async def test_below_target_it_banks_nothing(db_session):
     svc = CompoundService(db_session)
     await svc.tick(now=NOW)
     out = await svc.tick(now=NOW + timedelta(minutes=1))
-    assert out["banked"] is False
+    # A LIST now, one entry per wallet that banked: the same mechanism drives
+    # twenty wallets in Momentum V2, and a bool could not say which.
+    assert out["banked"] == []
 
 
 async def test_reaching_the_target_sells_the_book_and_opens_the_next_cycle(db_session):
@@ -103,9 +105,11 @@ async def test_reaching_the_target_sells_the_book_and_opens_the_next_cycle(db_se
     await db_session.flush()
 
     out = await svc.tick(now=NOW + timedelta(minutes=2))
-    assert out["banked"] is True
-    assert out["cycle"] == 1
-    assert out["next_cycle"] == 2
+    assert len(out["banked"]) == 1
+    banked = out["banked"][0]
+    assert banked["strategy_id"] == "CMP-01"
+    assert banked["cycle"] == 1
+    assert banked["next_cycle"] == 2
 
     cycles = list((await db_session.execute(
         select(CompoundCycle).where(CompoundCycle.strategy_row_id == row.id)

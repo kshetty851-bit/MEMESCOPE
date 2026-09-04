@@ -33,6 +33,7 @@ celery_app = Celery(
         "app.lab.scheduler",
         "app.compound.scheduler",
         "app.pumpfun.scheduler",
+        "app.momentum.scheduler",
         "app.hq_ops.tasks",
     ],
 )
@@ -250,6 +251,13 @@ celery_app.conf.beat_schedule = {
     # had already closed.
     "pumpfun-tick": {
         "task": "app.pumpfun.scheduler.pumpfun_tick",
+        "schedule": crontab(minute="*"),
+    },
+    # Momentum V2: twenty wallets on a 3x6 entry grid, each ratcheting at +10%.
+    # Same cadence as the tournaments it shares an engine with — the cycle
+    # target has to be tested on the same marks `settle` produced.
+    "momentum-tick": {
+        "task": "app.momentum.scheduler.momentum_tick",
         "schedule": crontab(minute="*"),
     },
     # Re-quotes what the Lab holds open so `settle` marks it at what a seller

@@ -577,6 +577,11 @@ class Settings(BaseSettings):
     #: actionable. Off by default: a copy lab that began at deploy time would
     #: have no honest start date.
     FEATURE_PUMPFUN_LAB_ENABLED: bool = False
+    #: Momentum V2: twenty $100 wallets on a 3x6 grid of momentum rule against
+    #: liquidity floor, each banking at +10% and compounding from what it
+    #: realised. Two of the twenty are random controls, without which the other
+    #: eighteen cannot be interpreted. Off by default.
+    FEATURE_MOMENTUM_LAB_ENABLED: bool = False
     #: The contamination boundary (mission §15): tokens whose checkpoint
     #: precedes this instant are never scored, because the historical dataset
     #: has already been inspected seven times. ISO-8601 UTC. Empty means "stamp

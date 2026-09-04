@@ -51,21 +51,38 @@ CYCLE_EXIT_REASON = "cycle_target"
 
 
 class CompoundService:
-    def __init__(self, session) -> None:
-        self._session = session
-        self._lab = LabService(session, registry=cspec)
+    """The wallet-level ratchet, over whichever registry it is handed.
 
-    async def _row(self) -> tuple[LabTournament, LabStrategy] | None:
+    `registry` defaults to the Compound Lab's single wallet, so every existing
+    caller is unchanged. It takes a registry — and loops over EVERY strategy in
+    it — because Momentum V2 runs the identical mechanism across twenty wallets
+    at once, and a second copy of the banking arithmetic is the last thing this
+    platform needs: the number that decides whether the whole idea is honest
+    (compound from what was REALISED, never from the target) would then exist
+    in two places and drift.
+
+    A registry supplies `SPEC_VERSION`, `SPEC_HASH`, `STRATEGIES`, `BY_ID`,
+    `STARTING_EQUITY`, `FAILURE_EQUITY_FLOOR` and `CYCLE_TARGET_MULTIPLE`.
+    """
+
+    def __init__(self, session, registry: Any = cspec) -> None:
+        self._session = session
+        self._spec = registry
+        self._lab = LabService(session, registry=registry)
+
+    async def _rows(self) -> tuple[LabTournament, list[LabStrategy]] | None:
+        """This registry's tournament and EVERY wallet in it."""
         t = (await self._session.execute(
             select(LabTournament).where(
-                LabTournament.spec_version == cspec.SPEC_VERSION)
+                LabTournament.spec_version == self._spec.SPEC_VERSION)
         )).scalars().first()
         if t is None:
             return None
-        row = (await self._session.execute(
+        rows = list((await self._session.execute(
             select(LabStrategy).where(LabStrategy.tournament_id == t.id)
-        )).scalars().first()
-        return None if row is None else (t, row)
+            .order_by(LabStrategy.strategy_id)
+        )).scalars())
+        return None if not rows else (t, rows)
 
     async def _open_cycle(self, t, row, *, now: datetime) -> CompoundCycle:
         """The running cycle, opening the first one if there is none."""
@@ -86,11 +103,12 @@ class CompoundService:
         # The first cycle starts at the registry's book. Every later one starts
         # at what the previous cycle actually banked.
         base = (last.realised_equity if last is not None
-                else cspec.STARTING_EQUITY)
+                else self._spec.STARTING_EQUITY)
         cycle = CompoundCycle(
             tournament_id=t.id, strategy_row_id=row.id,
             cycle_no=(last.cycle_no + 1) if last else 1,
-            base_usd=base, target_usd=base * cspec.CYCLE_TARGET_MULTIPLE,
+            base_usd=base,
+            target_usd=base * self._spec.CYCLE_TARGET_MULTIPLE,
             started_at=now,
         )
         self._session.add(cycle)
@@ -121,40 +139,48 @@ class CompoundService:
         return closed
 
     async def tick(self, *, now: datetime) -> dict[str, Any]:
-        """One pass: judge, settle, then test the wallet against its target."""
+        """One pass: judge, settle, then test EVERY wallet against its target.
+
+        Judging and settling happen once for the whole registry — they are
+        already registry-wide — and only the ratchet is per wallet. Each wallet
+        carries its own cycle number, base and target, so one banking at $110
+        cannot move another that is still at $103.
+        """
         t = await self._lab.activate(valid_from=now)
-        found = await self._row()
+        found = await self._rows()
         if found is None:
             return {"skipped": "not_activated"}
-        _t, row = found
+        _t, rows = found
 
-        cycle = await self._open_cycle(t, row, now=now)
+        cycles = {row.id: await self._open_cycle(t, row, now=now) for row in rows}
         decided = await self._lab.evaluate_due(now=now)
         settled = await self._lab.settle(now=now)
         await self._lab.record_equity(now=now)
 
-        equity = await self._lab.equity(row)
-        if equity < cycle.target_usd:
-            return {"cycle": cycle.cycle_no, "base": str(cycle.base_usd),
-                    "target": str(cycle.target_usd), "equity": str(equity),
-                    "decided": decided, "settled": settled, "banked": False}
-
-        # Target reached. Sell everything, then bank what actually came back.
-        closed = await self._sell_the_book(row, now=now)
-        realised = await self._lab.equity(row)
-        cycle.reached_at = now
-        cycle.equity_at_target = equity
-        cycle.realised_equity = realised
-        cycle.positions_closed = closed
-        cycle.outcome = "target_reached"
-        await self._session.flush()
-        logger.info("compound_cycle_banked", cycle=cycle.cycle_no,
-                    at_target=str(equity), realised=str(realised),
-                    closed=closed)
-
-        nxt = await self._open_cycle(t, row, now=now)
-        return {"cycle": cycle.cycle_no, "banked": True,
+        banked: list[dict[str, Any]] = []
+        for row in rows:
+            cycle = cycles[row.id]
+            equity = await self._lab.equity(row)
+            if equity < cycle.target_usd:
+                continue
+            closed = await self._sell_the_book(row, now=now)
+            realised = await self._lab.equity(row)
+            cycle.reached_at = now
+            cycle.equity_at_target = equity
+            cycle.realised_equity = realised
+            cycle.positions_closed = closed
+            cycle.outcome = "target_reached"
+            await self._session.flush()
+            nxt = await self._open_cycle(t, row, now=now)
+            logger.info("compound_cycle_banked", strategy=row.strategy_id,
+                        cycle=cycle.cycle_no, at_target=str(equity),
+                        realised=str(realised), closed=closed)
+            banked.append({
+                "strategy_id": row.strategy_id, "cycle": cycle.cycle_no,
                 "equity_at_target": str(equity), "realised": str(realised),
-                "positions_closed": closed,
-                "next_cycle": nxt.cycle_no, "next_target": str(nxt.target_usd),
-                "decided": decided, "settled": settled}
+                "positions_closed": closed, "next_cycle": nxt.cycle_no,
+                "next_target": str(nxt.target_usd),
+            })
+
+        return {"wallets": len(rows), "decided": decided, "settled": settled,
+                "banked": banked}
