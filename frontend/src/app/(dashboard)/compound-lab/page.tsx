@@ -68,7 +68,8 @@ export default function CompoundLabPage() {
           <div>
             <Label>COMPOUND LAB</Label>
             <h1 className="mt-1 text-lg font-medium text-ink">
-              {data.name} · {money(data.starting_equity, 0)} START · BANK AT +
+              {data.strategy_id} {data.name} · {money(data.starting_equity, 0)}{" "}
+              START · BANK AT +
               {((data.target_multiple - 1) * 100).toFixed(0)}%
             </h1>
             <p className="mt-1 text-xs font-medium tracking-wide text-warn">
@@ -100,6 +101,66 @@ export default function CompoundLabPage() {
           {data.disclosure}
         </p>
       </Panel>
+
+      {data.rules ? (
+        <Panel density="compact">
+          <div className="flex flex-wrap items-baseline justify-between gap-3">
+            <Label>
+              THE STRATEGY — {data.rules.id} {data.rules.name}
+            </Label>
+            <p className="font-mono text-[10px] text-muted">
+              frozen · registry {data.spec_hash.slice(0, 12)}…
+            </p>
+          </div>
+          <p className="mt-1 text-xs text-ink-3">{data.rules.hypothesis}</p>
+
+          <div className="mt-3 grid gap-4 sm:grid-cols-2">
+            <div>
+              <p className="text-[10px] uppercase tracking-wide text-muted">
+                Buys when, at {data.rules.checkpoint_label}
+              </p>
+              <ul className="mt-1 space-y-0.5 font-mono text-[11px] text-ink">
+                {data.rules.entry_text.map((t) => (
+                  <li key={t}>· {t}</li>
+                ))}
+              </ul>
+            </div>
+            <div>
+              <p className="text-[10px] uppercase tracking-wide text-muted">
+                Sells when
+              </p>
+              <ul className="mt-1 space-y-0.5 font-mono text-[11px] text-ink">
+                {/* The wallet target is not in `exit_text`: it is not a rule
+                    the position carries. Named first because it is the exit
+                    that defines this lab. */}
+                <li className="text-accent">
+                  · the WALLET reaches +
+                  {((data.target_multiple - 1) * 100).toFixed(0)}% (
+                  {money(data.current_cycle?.target_usd)}) — sells everything
+                </li>
+                {data.rules.exit_text.map((t) => (
+                  <li key={t}>· {t}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+
+          <div className="mt-3 flex flex-wrap gap-x-6 gap-y-1 border-t border-line pt-2 font-mono text-[10px] text-muted">
+            <span>size {money(Number(data.rules.size_usd))} per position</span>
+            <span>max {data.rules.max_concurrent} at once</span>
+            <span>
+              max exposure {money(Number(data.rules.max_exposure_usd))}
+            </span>
+            <span>no take-profit per position — the wallet target is the exit</span>
+          </div>
+          <p className="mt-2 text-[10px] leading-relaxed text-warn">
+            Chosen because FLOW was the only V7 family above the cash control —
+            on five to seven closed trades per arm. That is a hypothesis, not a
+            measured edge: V6-07 showed a 3.0 profit factor on twenty-three
+            trades and ended at −25%. Overfit risk {data.rules.overfit_risk}.
+          </p>
+        </Panel>
+      ) : null}
 
       {data.current_cycle ? (
         <Panel density="compact">

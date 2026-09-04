@@ -27,6 +27,21 @@ export interface CompoundPosition {
   pnl: number | null;
 }
 
+/** The frozen rule this wallet trades, as the engine judges with it. */
+export interface CompoundRules {
+  id: string;
+  name: string;
+  hypothesis: string;
+  checkpoint_label: string;
+  entry_text: string[];
+  exit_text: string[];
+  size_usd: string;
+  max_concurrent: number;
+  max_exposure_usd: string;
+  evidence: string;
+  overfit_risk: string;
+}
+
 export interface CompoundBoard {
   disclosure: string;
   activated: boolean;
@@ -34,6 +49,7 @@ export interface CompoundBoard {
   spec_hash: string;
   strategy_id?: string;
   name?: string;
+  rules?: CompoundRules;
   starting_equity: number;
   target_multiple: number;
   failure_floor?: number;
