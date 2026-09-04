@@ -78,7 +78,16 @@ prune() {
 # that is scripts/disk-guard.sh (Docker cache above 85%) and the retention
 # prunes in app/workers/retention_tasks.py. If those stop reclaiming, cut this
 # back before the disk does it for you. Check `df` before raising it further.
-prune "$DAILY" 5
+# CUT BACK 5 -> 2 on 2026-09-04, doing what the paragraph above says to do.
+# The disk reached 89% and HQ was running emergency prunes every two minutes
+# that reclaimed a few hundred score-history rows against an 11.5GB backup
+# store — losing, and heading for the 100% that stops every scheduled job.
+#
+# Two daily plus the weekly and monthly is ~7GB and still four restore points
+# across five days, because the weekly and monthly are HARDLINKS to dailies
+# that would otherwise be pruned: the recovery window is wider than the daily
+# count suggests, which is why cutting to two costs less than it reads.
+prune "$DAILY" 2
 prune "$WEEKLY" 1
 prune "$MONTHLY" 1
 
