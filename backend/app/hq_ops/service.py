@@ -224,6 +224,47 @@ def detect(health: OperationsHealth) -> list[Condition]:
                 )
             )
 
+        # The halt itself, named rather than deduced. `lab_tick` returns
+        # {"halted": "spec_hash_drift"} on every pass when the running spec no
+        # longer matches the one the tournament was activated under — so no
+        # decisions, no exits, no marking, on a stack where every container is
+        # healthy and the beat keeps ticking.
+        #
+        # Raised ahead of the silence checks below because it is the CAUSE of
+        # the silence they would report an hour later. Without this, the first
+        # sign is `lab:no-decisions` after sixty minutes, pointing at the
+        # worker, with `lab.run_tick` attached as a repair that cannot work:
+        # re-running the tick halts again.
+        #
+        # NO REMEDIATION, deliberately. The two ways out are reverting the spec
+        # edit or activating a new tournament under the new hash, and those are
+        # different experiments — the second abandons the forward record the
+        # first preserves. Nothing autonomous should pick between them.
+        if lab.spec_hash_drift:
+            found.append(
+                Condition(
+                    signature="lab:spec-drift",
+                    component="worker",
+                    severity="critical",
+                    summary=(
+                        "The Lab is HALTED: the running spec hash "
+                        f"{(lab.running_spec_hash or '?')[:12]} does not match the "
+                        f"{(lab.stored_spec_hash or '?')[:12]} its tournament was "
+                        "activated under, so every tick refuses to score. No "
+                        "decisions, exits or marks are happening. Revert the spec "
+                        "edit to resume this tournament, or activate a new one to "
+                        "start a different experiment."
+                    ),
+                    remediation=None,
+                    symptoms={
+                        "running_spec_hash": lab.running_spec_hash,
+                        "stored_spec_hash": lab.stored_spec_hash,
+                        "spec_version": lab.spec_version,
+                        "open_positions": lab.open_positions,
+                    },
+                )
+            )
+
         # Silence, on both sides. Entries stopping and exits stopping are
         # different faults with the same appearance from outside: a beat that
         # keeps ticking.

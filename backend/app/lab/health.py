@@ -91,6 +91,15 @@ class LabHealth:
     minutes_since_decision: float | None = None
     minutes_since_close: float | None = None
     spec_version: str | None = None
+    #: The running spec no longer matches the one the tournament was activated
+    #: under, so `lab_tick` halts on every pass. Measured here rather than
+    #: inferred from silence: the halt is a definite fact the tick already
+    #: knows, and waiting an hour to deduce it from an absence of decisions
+    #: reports a stopped experiment as a quiet one.
+    spec_hash_drift: bool | None = None
+    #: What the tournament was activated under, for the incident to name.
+    stored_spec_hash: str | None = None
+    running_spec_hash: str | None = None
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -103,6 +112,9 @@ class LabHealth:
             "minutes_since_decision": self.minutes_since_decision,
             "minutes_since_close": self.minutes_since_close,
             "spec_version": self.spec_version,
+            "spec_hash_drift": self.spec_hash_drift,
+            "stored_spec_hash": self.stored_spec_hash,
+            "running_spec_hash": self.running_spec_hash,
         }
 
 
@@ -120,6 +132,14 @@ async def read(session: AsyncSession, *, now: datetime | None = None) -> LabHeal
         )).scalars().first()
         if tournament is None:
             return LabHealth(measured=False, detail="No tournament is activated.")
+
+        # Checked BEFORE anything else is measured, because it decides what the
+        # rest of the reading means. On a drift `lab_tick` returns
+        # {"halted": "spec_hash_drift"} on every pass: no decisions, no exits,
+        # no marking. The staleness and silence that follow are consequences of
+        # the halt, and reporting them as separate faults would send somebody
+        # hunting quote coverage while the experiment is stopped.
+        drift = tournament.spec_hash != spec.SPEC_HASH
 
         rows = list((await session.execute(
             select(LabPosition.mint_address, LabPosition.quantity_remaining,
@@ -151,8 +171,11 @@ async def read(session: AsyncSession, *, now: datetime | None = None) -> LabHeal
                  if open_count and stale is not None else None)
     return LabHealth(
         measured=True,
-        detail=(f"{open_count} open, {stale if stale is not None else '?'} unmarkable, "
-                f"{quote_backed if quote_backed is not None else '?'}% quote-backed."),
+        detail=(
+            ("HALTED on spec-hash drift. " if drift else "")
+            + f"{open_count} open, {stale if stale is not None else '?'} unmarkable, "
+            + f"{quote_backed if quote_backed is not None else '?'}% quote-backed."
+        ),
         open_positions=open_count,
         stale_positions=stale,
         stale_pct=stale_pct,
@@ -160,6 +183,9 @@ async def read(session: AsyncSession, *, now: datetime | None = None) -> LabHeal
         minutes_since_decision=since_decision,
         minutes_since_close=since_close,
         spec_version=tournament.spec_version,
+        spec_hash_drift=drift,
+        stored_spec_hash=tournament.spec_hash,
+        running_spec_hash=spec.SPEC_HASH,
     )
 
 

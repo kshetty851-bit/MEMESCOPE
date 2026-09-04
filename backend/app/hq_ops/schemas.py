@@ -136,6 +136,12 @@ class LabHealthRow(BaseSchema):
     minutes_since_decision: float | None = None
     minutes_since_close: float | None = None
     spec_version: str | None = None
+    #: The running spec no longer matches the tournament's, so every tick
+    #: halts. `None` is unmeasured and is NOT a halt — the distinction this
+    #: whole schema exists for.
+    spec_hash_drift: bool | None = None
+    stored_spec_hash: str | None = None
+    running_spec_hash: str | None = None
 
 
 class WalletHealthRow(BaseSchema):
