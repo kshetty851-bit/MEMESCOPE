@@ -172,3 +172,52 @@ async def test_every_cell_reports_the_floor_it_is_testing(db_session):
     out = await board(db_session)
     assert all(w["floor_usd"] > 0 for w in out["wallets"])
     assert len({w["floor_usd"] for w in out["wallets"]}) == 20
+
+
+async def test_a_cells_record_is_counted_over_every_row_not_the_window(db_session):
+    """The trades list is a display window; the counts beside it are not.
+
+    Deriving `closed_positions` or `realised_pnl` from the truncated list would
+    understate a cell exactly in proportion to how much it had traded — the
+    busiest cells, the ones the curve depends on, would be wrong by the most.
+    """
+    from app.depth.api import PER_CELL_TRADES, board
+
+    svc = CompoundService(db_session, registry=dspec)
+    await svc.tick(now=NOW)
+    row = (await db_session.execute(
+        select(LabStrategy).where(LabStrategy.spec_hash == dspec.SPEC_HASH)
+        .order_by(LabStrategy.strategy_id)
+    )).scalars().first()
+
+    from app.models.lab import LabDecision, LabPosition
+
+    n = PER_CELL_TRADES + 15
+    for i in range(n):
+        d = LabDecision(
+            strategy_row_id=row.id, strategy_id=row.strategy_id,
+            mint_address=f"T{i:04d}" + "z" * 16, checkpoint_at=NOW,
+            checkpoint_minutes=30, decided_at=NOW, eligible=True,
+        )
+        db_session.add(d)
+        await db_session.flush()
+        db_session.add(LabPosition(
+            strategy_row_id=row.id, strategy_id=row.strategy_id,
+            decision_id=d.id, mint_address=d.mint_address,
+            opened_at=NOW - timedelta(minutes=i), entry_price=D("0.001"),
+            entry_liquidity_usd=D("500000"), size_usd=D("20"),
+            quantity=D("1000"), quantity_remaining=D("0"),
+            banked_proceeds_usd=D("0"), status="closed",
+            entry_source="test",
+            closed_at=NOW, exit_price=D("0.001"),
+            exit_proceeds_usd=D("21"), exit_reason="time_6h",
+            peak_exec_multiple=D("1"), last_exec_multiple=D("1"),
+            last_open_value_usd=D("0"),
+        ))
+    await db_session.flush()
+
+    out = await board(db_session)
+    cell = next(w for w in out["wallets"] if w["strategy_id"] == row.strategy_id)
+    assert cell["closed_positions"] == n, "the count must span every row"
+    assert float(cell["realised_pnl"]) == pytest.approx(n * 1.0)
+    assert len(cell["trades"]) == PER_CELL_TRADES, "the LIST is windowed"
