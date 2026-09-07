@@ -34,6 +34,7 @@ celery_app = Celery(
         "app.compound.scheduler",
         "app.pumpfun.scheduler",
         "app.momentum.scheduler",
+        "app.depth.scheduler",
         "app.hq_ops.tasks",
     ],
 )
@@ -258,6 +259,11 @@ celery_app.conf.beat_schedule = {
     # target has to be tested on the same marks `settle` produced.
     "momentum-tick": {
         "task": "app.momentum.scheduler.momentum_tick",
+        "schedule": crontab(minute="*"),
+    },
+    # The Depth Lab: twenty wallets differing only in their liquidity floor.
+    "depth-tick": {
+        "task": "app.depth.scheduler.depth_tick",
         "schedule": crontab(minute="*"),
     },
     # Re-quotes what the Lab holds open so `settle` marks it at what a seller

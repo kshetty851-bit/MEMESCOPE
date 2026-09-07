@@ -582,6 +582,11 @@ class Settings(BaseSettings):
     #: realised. Two of the twenty are random controls, without which the other
     #: eighteen cannot be interpreted. Off by default.
     FEATURE_MOMENTUM_LAB_ENABLED: bool = False
+    #: The Depth Lab: twenty $100 wallets differing ONLY in their liquidity
+    #: floor, from $25k to $1M. No momentum, no score, no filter of any kind
+    #: beyond the floor — a dose-response curve on the one variable ten
+    #: experiments have left standing. Off by default.
+    FEATURE_DEPTH_LAB_ENABLED: bool = False
     #: The contamination boundary (mission §15): tokens whose checkpoint
     #: precedes this instant are never scored, because the historical dataset
     #: has already been inspected seven times. ISO-8601 UTC. Empty means "stamp

@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { fetchCompoundBoard } from "@/lib/compound";
+import { fetchDepthBoard } from "@/lib/depth";
 import { fetchMomentumBoard } from "@/lib/momentum";
 import { fetchPumpfunBoard } from "@/lib/pumpfun";
 import {
@@ -93,6 +94,15 @@ export function useMomentumBoard() {
   return useQuery({
     queryKey: ["momentum", "board"],
     queryFn: fetchMomentumBoard,
+    refetchInterval: LAB_POLL_MS,
+  });
+}
+
+/** The depth curve. Same cadence as the tournaments it shares an engine with. */
+export function useDepthBoard() {
+  return useQuery({
+    queryKey: ["depth", "board"],
+    queryFn: fetchDepthBoard,
     refetchInterval: LAB_POLL_MS,
   });
 }

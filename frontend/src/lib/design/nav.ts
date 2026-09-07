@@ -112,6 +112,14 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: IconSpark,
         status: "ready",
       },
+      // Depth: the dose-response curve on the one variable ten experiments
+      // left standing. A curve, not a leaderboard.
+      {
+        href: "/depth-lab",
+        label: "Depth Curve",
+        icon: IconSpark,
+        status: "ready",
+      },
       // Momentum V2: the entry-rule grid, with its controls inside it.
       {
         href: "/momentum-lab",

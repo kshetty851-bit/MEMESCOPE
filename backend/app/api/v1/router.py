@@ -29,6 +29,7 @@ from app.karthik_ops import api as karthik_ops
 from app.paper import api as paper
 from app.arena import api as arena
 from app.compound import api as compound
+from app.depth import api as depth
 from app.momentum import api as momentum
 from app.pumpfun import api as pumpfun
 from app.lab import api as lab
@@ -65,6 +66,7 @@ api_router.include_router(lab.router)
 api_router.include_router(compound.router)
 api_router.include_router(pumpfun.router)
 api_router.include_router(momentum.router)
+api_router.include_router(depth.router)
 # Exit Watch, the permanent record and the leaderboards. Additive; the Radar's
 # own routes and every pre-existing endpoint are unchanged.
 api_router.include_router(intelligence.router)
