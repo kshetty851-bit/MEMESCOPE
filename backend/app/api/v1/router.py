@@ -27,7 +27,6 @@ from app.hq_ops import api as hq_ops
 from app.karthik import api as karthik
 from app.karthik_ops import api as karthik_ops
 from app.paper import api as paper
-from app.arena import api as arena
 from app.compound import api as compound
 from app.depth import api as depth
 from app.momentum import api as momentum
@@ -61,7 +60,6 @@ api_router.include_router(scores.router)
 # module declares literal paths before `/{mint}`, as the scores router does.
 api_router.include_router(radar.router)
 # Research simulation, clearly separated from the wallet surfaces.
-api_router.include_router(arena.router)
 api_router.include_router(lab.router)
 api_router.include_router(compound.router)
 api_router.include_router(pumpfun.router)

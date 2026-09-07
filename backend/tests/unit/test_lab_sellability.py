@@ -239,6 +239,28 @@ def test_the_sweep_only_quotes_the_tournaments_that_are_running():
             .parameters["spec_versions"].default == (spec.SPEC_VERSION,))
 
 
+def test_the_sweep_covers_every_registry_that_holds_positions():
+    """The list of swept tournaments must not be able to fall behind the list
+    of tournaments that exist.
+
+    It fell behind twice: the Compound Lab, then Momentum V2 and Depth. The
+    failure is silent — an unquoted book is marked from the CPMM model over
+    reported liquidity, the condition that froze 72% of the Lab's book on
+    2026-08-26 — and for the ratchet labs it is worse than a wrong number,
+    because the +10% target is TESTED against those marks.
+    """
+    from app.compound import spec as cspec
+    from app.depth import spec as dspec
+    from app.lab import scheduler
+    from app.momentum import spec as mspec
+    from app.pumpfun import spec as pspec
+
+    expected = {spec.SPEC_VERSION, cspec.SPEC_VERSION, mspec.SPEC_VERSION,
+                dspec.SPEC_VERSION, pspec.SPEC_VERSION}
+    assert set(scheduler.LIVE_SPEC_VERSIONS) == expected
+    assert len(scheduler.LIVE_SPEC_VERSIONS) == len(expected), "no duplicates"
+
+
 def test_the_beat_sweeps_every_live_tournament():
     """The Compound Lab's book was invisible to this sweep for as long as it was
     scoped to one version, so it was marked from the CPMM model over reported
@@ -249,5 +271,5 @@ def test_the_beat_sweeps_every_live_tournament():
     from app.lab import scheduler
 
     src = inspect.getsource(scheduler._lab_sellability_refresh)
-    assert "cspec.SPEC_VERSION" in src and "spec.SPEC_VERSION" in src
+    assert "LIVE_SPEC_VERSIONS" in src
     assert cspec.SPEC_VERSION != spec.SPEC_VERSION

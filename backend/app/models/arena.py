@@ -1,4 +1,23 @@
-"""V5 Forward Strategy Arena — research simulation, never money.
+"""V5 Forward Strategy Arena — RETIRED 2026-09-07. Models kept, data kept.
+
+The Arena's engine, API, scheduler and page were deleted on the owner's
+instruction. These model definitions survive on purpose, and deleting them
+would be the mistake:
+
+  * `alembic revision --autogenerate` compares the models against the live
+    schema. With these gone it would propose DROP TABLE for all three arena
+    tables, and somebody would eventually apply it — taking 47MB and 324
+    positions of a completed forward experiment with it.
+  * The record is still evidence. The Arena ran to 320 closed positions and
+    those outcomes are as citeable as any other finding here.
+
+Nothing imports these any more except the metadata. If the tables are ever
+genuinely wanted gone, that is a deliberate migration and a decision about
+DATA, not a side effect of deleting code.
+
+--- original header follows ---
+
+V5 Forward Strategy Arena — research simulation, never money.
 
 Five independently accounted $1,000 virtual portfolios. Nothing here may be
 imported by the paper wallet, the Karthik wallet or the real wallet, and

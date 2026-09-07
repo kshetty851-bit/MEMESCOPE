@@ -2,7 +2,7 @@
 
 Research simulation, never money. Nothing here may be imported by the paper,
 karthik or real-wallet packages, and nothing here writes to their tables; a
-source-parsing test enforces the boundary, as it does for the Arena.
+source-parsing test enforces the boundary.
 
 The decision ledger is the point of the structure. Every token that reaches a
 strategy's checkpoint produces a row for THAT strategy — including the skips,
@@ -209,7 +209,7 @@ class LabPosition(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
 class LabEquityPoint(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     """One mark of one strategy's book. Equity is cash + EXECUTABLE open value,
-    never cash + deployed cost — the distinction the Arena UI already makes."""
+    never cash + deployed cost."""
 
     __tablename__ = "lab_equity_points"
 

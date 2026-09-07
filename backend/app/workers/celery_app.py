@@ -29,7 +29,6 @@ celery_app = Celery(
         "app.workers.enrichment_tasks",
         "app.workers.retention_tasks",
         "app.workers.research_tasks",
-        "app.arena.scheduler",
         "app.lab.scheduler",
         "app.compound.scheduler",
         "app.pumpfun.scheduler",
@@ -228,12 +227,8 @@ celery_app.conf.beat_schedule = {
     },
     # Research simulation: judges due checkpoints and advances virtual
     # positions. Cannot touch paper, karthik or real-wallet accounting.
-    "arena-tick": {
-        "task": "app.arena.scheduler.arena_tick",
-        "schedule": crontab(minute="*"),
-    },
-    # V6 Strategy Lab: twenty virtual portfolios. Every minute, like the Arena,
-    # so a 30-minute checkpoint is judged within a minute of coming due and the
+    # V6 Strategy Lab: twenty virtual portfolios. Every minute, so a 30-minute
+    # checkpoint is judged within a minute of coming due and the
     # 24-hour snapshot lands on its frozen boundary rather than drifting.
     "lab-tick": {
         "task": "app.lab.scheduler.lab_tick",

@@ -151,12 +151,6 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: IconSpark,
         status: "ready",
       },
-      {
-        href: "/strategy-lab/forward-arena",
-        label: "Forward Arena",
-        icon: IconSpark,
-        status: "ready",
-      },
     ],
   },
   {

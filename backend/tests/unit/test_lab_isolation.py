@@ -3,7 +3,7 @@
 Parses the package's own source rather than trusting a convention: a Lab
 failure must not be able to disturb paper, karthik or real-wallet accounting,
 and the boundary is worth enforcing mechanically because it is invisible in a
-diff. Mirrors `test_arena_isolation.py`.
+diff.
 """
 
 from __future__ import annotations

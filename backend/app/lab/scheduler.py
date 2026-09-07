@@ -2,7 +2,7 @@
 paper position.
 
 Wrapped so a Lab failure is contained: the task logs and returns rather than
-raising into the beat, exactly as the Arena and the research collectors do.
+raising into the beat, exactly as the research collectors do.
 The Lab is instrumentation, and instrumentation must never disturb what it
 observes.
 """
@@ -18,6 +18,9 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.db.session import SessionFactory
 from app.compound import spec as cspec
+from app.depth import spec as dspec
+from app.momentum import spec as mspec
+from app.pumpfun import spec as pspec
 from app.lab import leaderboard, sellability, spec
 from app.lab.service import LabService
 from app.models.lab import LabPosition, LabSnapshot, LabTournament
@@ -48,6 +51,13 @@ TICK_LOCK_KEY = 0x5449434B
 CALENDAR_SNAPSHOTS = (("24H", 24), ("48H", 48), ("72H", 72),
                       ("7D", 168), ("14D", 336), ("21D", 504),
                       ("30D", 720), ("60D", 1440), ("90D", 2160))
+
+#: Every tournament whose open book must be re-quoted. Derived from the
+#: registries themselves rather than typed, so a new lab cannot be added
+#: without appearing here.
+LIVE_SPEC_VERSIONS = (spec.SPEC_VERSION, cspec.SPEC_VERSION,
+                      mspec.SPEC_VERSION, dspec.SPEC_VERSION,
+                      pspec.SPEC_VERSION)
 
 #: Closed-trade milestones. A strategy's record becomes worth reading at a
 #: sample size, not at a date, so these fire independently of the calendar.
@@ -171,12 +181,22 @@ async def _lab_sellability_refresh() -> dict[str, Any]:
             if not acquired:
                 await session.rollback()
                 return {"skipped": "sellability_already_running"}
-            # Both live tournaments in ONE sweep rather than a second beat
-            # entry: Jupiter rate-limits hard and the sweep paces itself, so
-            # two sweeps would halve the budget each rather than share it.
+            # EVERY live tournament in ONE sweep, rather than a beat entry
+            # each: Jupiter rate-limits hard and the sweep paces itself, so
+            # five sweeps would divide the budget rather than share it.
+            #
+            # This list is the thing to update when a tournament is added. It
+            # was missed twice — the Compound Lab, and then Momentum V2 and
+            # Depth — and the failure is silent in the worst way: an unquoted
+            # book is marked from the CPMM model over reported liquidity, which
+            # is the condition that froze 72% of the Lab's book on 2026-08-26.
+            # For the ratchet labs it is worse than a bad number on a page,
+            # because the +10% target is TESTED against these marks: a stale
+            # book can bank a cycle at a price no seller was ever offered, and
+            # every later cycle then compounds from it.
             outcome = await sellability.refresh(
                 session, now=datetime.now(UTC),
-                spec_versions=(spec.SPEC_VERSION, cspec.SPEC_VERSION),
+                spec_versions=LIVE_SPEC_VERSIONS,
             )
             await session.commit()
     except Exception:

@@ -67,6 +67,8 @@ from app.models.score import (
     TokenScore,
     TokenScoreHistory,
 )
+# Retired experiment. Imported so the metadata still describes the tables it
+# left behind — without this, autogenerate proposes dropping them.
 from app.models.arena import (  # noqa: F401
     ArenaCandidate,
     ArenaDecision,
