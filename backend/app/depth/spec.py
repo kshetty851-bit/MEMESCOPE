@@ -43,10 +43,17 @@ and would have produced wallets with almost nothing to buy.
 
 ## Everything else is held constant, deliberately
 
-$100 a wallet, $20 a position, five open, 30-minute checkpoint, six-hour time
-exit, no take-profit, +10% wallet ratchet. Identical to Momentum V2 so the two
-can be read against each other — a different size or horizon would confound the
-floor with the thing that changed beside it.
+$100 a wallet, **$5 a position, twenty open**, 30-minute checkpoint, six-hour
+time exit, no take-profit, +10% wallet ratchet.
+
+v1 ran $20 x 5 and is kept as the comparison: same twenty floors, same
+universe, same target, same horizon, so the ONLY difference between the two
+tournaments is position size. That is what makes v1's record worth keeping
+rather than deleting.
+
+Note this breaks the earlier equality with Momentum V2, which still runs
+$20 x 5. The floors-versus-momentum comparison is now confounded by size; the
+v1-versus-v2 comparison is the clean one.
 """
 
 from __future__ import annotations
@@ -58,14 +65,31 @@ from decimal import Decimal as D
 
 from app.lab.spec import Condition, Exits, Strategy, rules_json
 
-SPEC_VERSION = "depth-1.0.0"
+SPEC_VERSION = "depth-2.0.0"
 
 STARTING_EQUITY = D("100")
 CYCLE_TARGET_MULTIPLE = D("1.10")
 FAILURE_EQUITY_FLOOR = D("50")
 
-SIZE_USD = D("20")
-MAX_CONCURRENT = 5
+#: v2, 2026-09-07. Was $20 x 5.
+#:
+#: The book is unchanged at $100; only the SLICING moved. It matters because
+#: every loss here is total — 39 of 39 deaths in v1 closed at exactly -100% —
+#: and at $20 a position ONE death costs a fifth of the wallet, which puts the
+#: +10% cycle target out of reach until several wins have repaired it. At $5 a
+#: death costs a twentieth, and the target stays reachable.
+#:
+#: This does NOT change expectancy. Twenty small bets on a negative-mean
+#: population have the same expected value as five large ones and merely reach
+#: it with less noise. What it changes is the RATCHET's mechanics, which is the
+#: thing being tested.
+#:
+#: It should also fix a flaw v1 exposed: with five slots, adjacent floors held
+#: the same top-five tokens and twenty cells produced only NINE distinct books.
+#: Twenty slots reach further into each floor's eligible set, so the cells have
+#: room to diverge.
+SIZE_USD = D("5")
+MAX_CONCURRENT = 20
 
 #: Twenty floors, roughly log-spaced from $25k to $1M — the range over which
 #: the pump.fun population goes from thousands of tokens to about ten. Round

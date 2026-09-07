@@ -75,18 +75,37 @@ def test_the_ladder_stops_where_the_population_does() -> None:
     assert min(floors) == 25_000
 
 
-def test_it_holds_momentum_v2_constant_so_the_two_can_be_compared() -> None:
-    """A different size or horizon would confound the floor with whatever else
-    moved beside it."""
-    from app.momentum import spec as mspec
+def test_v2_slices_the_same_book_rather_than_committing_less() -> None:
+    """$5 x 20 against v1's $20 x 5 — the BOOK is the constant.
 
-    d, m = dspec.STRATEGIES[0], mspec.STRATEGIES[0]
-    assert (d.size_usd, d.max_concurrent, d.checkpoint_minutes,
-            d.exits.time_exit_hours, d.exits.take_profit) == \
-           (m.size_usd, m.max_concurrent, m.checkpoint_minutes,
-            m.exits.time_exit_hours, m.exits.take_profit)
-    assert dspec.CYCLE_TARGET_MULTIPLE == mspec.CYCLE_TARGET_MULTIPLE
-    assert dspec.STARTING_EQUITY == mspec.STARTING_EQUITY
+    A smaller position that left cash idle would be testing position size and
+    capital deployment at once, and neither answer would be readable. The whole
+    $100 is still deployable; only the slicing moved.
+    """
+    s = dspec.STRATEGIES[0]
+    assert s.size_usd == D("5")
+    assert s.max_concurrent == 20
+    assert s.size_usd * s.max_concurrent == dspec.STARTING_EQUITY == D("100")
+
+
+def test_v2_is_a_new_tournament_not_an_edit_of_the_old_one() -> None:
+    """Bumping the VERSION starts a fresh tournament at $100. Editing v1's
+    rules in place would instead halt it on `spec_hash_drift` and leave its
+    record unreadable — the same registry describing two different experiments.
+    """
+    assert dspec.SPEC_VERSION == "depth-2.0.0"
+
+
+def test_only_the_position_size_changed_from_v1() -> None:
+    """v1 is the comparison, so everything else must be identical or the
+    difference between the two tournaments is not attributable to size."""
+    s = dspec.STRATEGIES[0]
+    assert s.checkpoint_minutes == 30
+    assert s.exits.time_exit_hours == 6
+    assert s.exits.take_profit is None
+    assert dspec.CYCLE_TARGET_MULTIPLE == D("1.10")
+    assert dspec.STARTING_EQUITY == D("100")
+    assert len(dspec._FLOORS) == 20 and dspec._FLOORS[0] == 25_000
 
 
 def test_it_is_a_separate_registry_from_every_other_tournament() -> None:
