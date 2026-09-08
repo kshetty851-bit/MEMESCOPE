@@ -233,6 +233,20 @@ x-backend-env: &backend-env
   FEATURE_SOCIAL_LAB_ENABLED: ${FEATURE_SOCIAL_LAB_ENABLED:-false}
   FEATURE_V7_LAB_ENABLED: ${FEATURE_V7_LAB_ENABLED:-true}
   FEATURE_COPYCONTROL_ENABLED: ${FEATURE_COPYCONTROL_ENABLED:-false}
+  # Connection pool, PER SERVICE. Nine services connect, so the fleet's ceiling
+  # is 9 x (POOL_SIZE + MAX_OVERFLOW) against Postgres's max_connections of 100.
+  # The old 10+20 made that ceiling 270: fine while services peak at different
+  # times, and an outage the moment they all restart together and open pools at
+  # once — which is exactly what a full redeploy does. 5+5 caps the fleet at 90.
+  #
+  # Raising max_connections instead was the obvious fix and is the wrong one
+  # here: the box has 3GB of RAM with ~1GB free, and each backend connection
+  # costs several MB.
+  #
+  # These were absent from this anchor, so setting them in .env.production did
+  # NOTHING — the same trap that silently un-armed HQ autonomy before c77aef6.
+  DB_POOL_SIZE: ${DB_POOL_SIZE:-5}
+  DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-5}
   LAB_VALID_FROM: ${LAB_VALID_FROM:-}
   KARTHIK_CANDIDATE_LIMIT: ${KARTHIK_CANDIDATE_LIMIT:-250}
   KARTHIK_REVIEW_BATCH_LIMIT: ${KARTHIK_REVIEW_BATCH_LIMIT:-2000}
