@@ -55,10 +55,19 @@ function sum(rows: LabTrade[]): number {
   return rows.reduce((acc, t) => acc + (pnlOf(t) ?? 0), 0);
 }
 
+/** Which arm a row belongs to. Both arms buy the SAME mints at the same
+ *  instant, so without this column the record reads as every token duplicated
+ *  for no visible reason. `HOLD-05` -> `5m`. */
+function arm(t: LabTrade): string {
+  const m = /HOLD-(\d+)/.exec(t.strategy_id ?? "");
+  return m?.[1] ? `${Number(m[1])}m` : (t.strategy_id ?? "—");
+}
+
 function Row({ t }: { t: LabTrade }) {
   const p = pnlOf(t);
   return (
     <tr className="border-t border-line align-top">
+      <td className="whitespace-nowrap py-1.5 pr-3 font-mono text-[10px] text-ink-3">{arm(t)}</td>
       <td className="break-all py-1.5 pr-3 font-mono text-[10px] text-ink">{t.mint}</td>
       <td className="py-1.5 pr-3 font-mono text-[10px] text-muted">{t.symbol ?? "—"}</td>
       <td className="whitespace-nowrap py-1.5 pr-3 font-mono text-[10px] text-muted">
@@ -89,6 +98,7 @@ function Table({ rows }: { rows: LabTrade[] }) {
       <table className="mt-2 w-full text-xs">
         <thead>
           <tr className="text-[10px] uppercase text-muted">
+            <th className="pb-1 pr-3 text-left font-normal">Arm</th>
             <th className="pb-1 pr-3 text-left font-normal">Mint</th>
             <th className="pb-1 pr-3 text-left font-normal">Sym</th>
             <th className="pb-1 pr-3 text-left font-normal">Opened</th>
