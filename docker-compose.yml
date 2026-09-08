@@ -233,6 +233,7 @@ x-backend-env: &backend-env
   FEATURE_SOCIAL_LAB_ENABLED: ${FEATURE_SOCIAL_LAB_ENABLED:-false}
   FEATURE_V7_LAB_ENABLED: ${FEATURE_V7_LAB_ENABLED:-true}
   FEATURE_COPYCONTROL_ENABLED: ${FEATURE_COPYCONTROL_ENABLED:-false}
+  FEATURE_PUMPFUN_GRADUATION_ENABLED: ${FEATURE_PUMPFUN_GRADUATION_ENABLED:-false}
   # Connection pool, PER SERVICE. Nine services connect, so the fleet's ceiling
   # is 9 x (POOL_SIZE + MAX_OVERFLOW) against Postgres's max_connections of 100.
   # The old 10+20 made that ceiling 270: fine while services peak at different

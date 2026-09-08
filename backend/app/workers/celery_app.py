@@ -37,6 +37,7 @@ celery_app = Celery(
         "app.depth.scheduler",
         "app.social.scheduler",
         "app.copycontrol.scheduler",
+        "app.pumpfun.graduation_scheduler",
         "app.hq_ops.tasks",
     ],
 )
@@ -271,6 +272,12 @@ celery_app.conf.beat_schedule = {
     "pumpfun-social-tick": {
         "task": "app.pumpfun.social_scheduler.pumpfun_social_tick",
         "schedule": crontab(minute="*/10"),
+    },
+    # Graduation collector. Every minute: the stamp's accuracy IS the
+    # measurement, and the first follow-up target is at five minutes.
+    "pumpfun-graduation-tick": {
+        "task": "app.pumpfun.graduation_scheduler.pumpfun_graduation_tick",
+        "schedule": crontab(minute="*"),
     },
     # CPY-02, the PumpFun Lab's control arm. Second 30 rather than on the
     # minute: it consumes `pumpfun_signals`, so running it before the pumpfun

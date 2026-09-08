@@ -77,6 +77,10 @@ from app.models.arena import (  # noqa: F401
 from app.models.password_reset import PasswordResetToken  # noqa: F401
 from app.models.compound import CompoundCycle  # noqa: F401
 from app.models.pumpfun import PumpfunSignal  # noqa: F401
+from app.models.graduation import (  # noqa: F401
+    PumpfunGraduation,
+    PumpfunGraduationMark,
+)
 from app.models.social import PumpfunSocialSnapshot  # noqa: F401
 from app.models.lab import (  # noqa: F401
     LabDecision,

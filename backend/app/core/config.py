@@ -584,6 +584,9 @@ class Settings(BaseSettings):
     #: The Social Lab: two $100 wallets differing only in whether they require
     #: a coin's comment rate to be RISING. Off by default.
     FEATURE_SOCIAL_LAB_ENABLED: bool = False
+    #: The graduation collector: stamps pump.fun graduations as they happen and
+    #: follows each coin for an hour. Read-only research; it trades nothing.
+    FEATURE_PUMPFUN_GRADUATION_ENABLED: bool = False
     #: CPY-02: the control arm for the PumpFun Lab. Off by default.
     FEATURE_COPYCONTROL_ENABLED: bool = False
     #: V7's own switch, so it can be stopped without stopping the labs that
