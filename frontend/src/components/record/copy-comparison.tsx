@@ -91,7 +91,21 @@ function Arm({ arm }: { arm: CopyArm }) {
 
 export function CopyComparisonPanel() {
   const { data, isLoading, error } = useCopyComparison();
-  if (isLoading || error || !data || !data.activated) return null;
+  // Same reason as the graduation panels: an invisible failure reads as a
+  // feature that was never shipped.
+  if (isLoading) return null;
+  if (error || !data) {
+    return (
+      <Panel density="compact">
+        <Label>COPY TRADING — SIGNAL vs ITS CONTROL</Label>
+        <p className="mt-2 text-xs text-muted">
+          Not available. The comparison endpoint did not answer — usually the
+          backend running an older build than this page.
+        </p>
+      </Panel>
+    );
+  }
+  if (!data.activated) return null;
 
   const signal = data.arms.find((a) => a.role === "signal");
   const control = data.arms.find((a) => a.role === "control");

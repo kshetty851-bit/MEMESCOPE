@@ -58,7 +58,22 @@ function Row({ h }: { h: PaperHorizon }) {
 
 export function GraduationPaperPanel() {
   const { data, isLoading, error } = useGraduationPaper();
-  if (isLoading || error || !data) return null;
+  // A panel that vanishes on error is indistinguishable from one that was
+  // never built — which is exactly how this looked on 2026-09-08 when the page
+  // shipped via Vercel minutes before its endpoint reached the backend. Silence
+  // is the one thing this must not render.
+  if (isLoading) return null;
+  if (error || !data) {
+    return (
+      <Panel density="compact">
+        <Label>"SIMULATED $100 BOOK"</Label>
+        <p className="mt-2 text-xs text-muted">
+          Not available. The measurement exists but its endpoint did not answer —
+          usually the backend running an older build than this page.
+        </p>
+      </Panel>
+    );
+  }
 
   return (
     <Panel density="compact">
