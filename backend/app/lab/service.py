@@ -374,7 +374,21 @@ class LabService:
         # would quietly halve how many positions the strategy can hold at once
         # — a change to its diversification that nobody asked for, arriving as
         # a side effect of a sizing rule.
-        multiplier = sizing.growth_multiplier(await self.equity(row), base=row.starting_equity)
+        # A registry may opt OUT of the ladder entirely with SIZING_SCALES =
+        # False, and the Five-Minute Lab does. Default True, so every registry
+        # that has not heard of this keeps the behaviour it has today.
+        #
+        # It exists because the wallet ratchet is ALREADY a compounding effect:
+        # each cycle's base is the last cycle's target. Letting the stake also
+        # double at 2x equity runs two of them at once and makes a result
+        # unattributable to either — the same argument the Compound spec makes
+        # for refusing a per-position take-profit beside a wallet target.
+        if getattr(self._spec, "SIZING_SCALES", True):
+            multiplier = sizing.growth_multiplier(
+                await self.equity(row), base=row.starting_equity
+            )
+        else:
+            multiplier = Decimal(1)
         size_usd = row.size_usd * multiplier
         max_exposure_usd = row.max_exposure_usd * multiplier
         # The decision row was written with the spec's base size before this

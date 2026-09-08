@@ -29,8 +29,16 @@ DISCLOSURE = (
 )
 
 
-@router.get("/board")
-async def board(session: DbSession) -> dict[str, Any]:
+async def build_board(session, registry: Any = cspec) -> dict[str, Any]:
+    """The board for ONE ratchet tournament, whichever registry is handed in.
+
+    Parameterised rather than copied when the Five-Minute Lab arrived. Both
+    read the same tables through the same service, so a second copy of this
+    would be a second definition of "cycles banked" and "equity" — and the
+    first time one was edited the two pages would disagree about the same
+    wallet without either being obviously wrong.
+    """
+    cspec = registry  # noqa: A001 - the whole body reads it by this name
     t = (await session.execute(
         select(LabTournament).where(
             LabTournament.spec_version == cspec.SPEC_VERSION)
@@ -102,3 +110,9 @@ async def board(session: DbSession) -> dict[str, Any]:
                     if p.exit_proceeds_usd is not None else None),
         } for p in positions],
     })
+
+
+@router.get("/board")
+async def board(session: DbSession) -> dict[str, Any]:
+    """The Compound Lab's own board."""
+    return await build_board(session)

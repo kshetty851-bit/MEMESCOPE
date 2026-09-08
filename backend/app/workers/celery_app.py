@@ -31,6 +31,7 @@ celery_app = Celery(
         "app.workers.research_tasks",
         "app.lab.scheduler",
         "app.compound.scheduler",
+        "app.fivemin.scheduler",
         "app.pumpfun.scheduler",
         "app.pumpfun.social_scheduler",
         "app.momentum.scheduler",
@@ -244,6 +245,14 @@ celery_app.conf.beat_schedule = {
     # and a slower beat would bank a cycle at a price that had already moved.
     "compound-tick": {
         "task": "app.compound.scheduler.compound_tick",
+        "schedule": crontab(minute="*"),
+    },
+    # The Five-Minute Lab. Every minute, because a five-minute hold cannot be
+    # settled on a slower beat than the hold itself — a position would be
+    # closed late by however long the beat waited, and the lateness would be
+    # counted as the strategy's result.
+    "fivemin-tick": {
+        "task": "app.fivemin.scheduler.fivemin_tick",
         "schedule": crontab(minute="*"),
     },
     # The PumpFun Lab mirrors one on-chain wallet. Every minute, because the

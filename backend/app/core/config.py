@@ -563,6 +563,10 @@ class Settings(BaseSettings):
     #: experiment should start when somebody decides it starts, not when a
     #: deploy happens to carry it.
     FEATURE_COMPOUND_LAB_ENABLED: bool = False
+    #: The Five-Minute Lab: the wallet ratchet on a five-minute hold, flat
+    #: stake. Default False — it is a hypothesis fitted to one 47x coin and
+    #: should be switched on deliberately, not inherited.
+    FEATURE_FIVEMIN_LAB_ENABLED: bool = False
     #: The PumpFun Lab: a $100 wallet mirroring one on-chain trader's entries
     #: and exits, FORWARD ONLY — nothing he did before the lab started is ever
     #: actionable. Off by default: a copy lab that began at deploy time would

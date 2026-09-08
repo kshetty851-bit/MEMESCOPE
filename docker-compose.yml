@@ -225,6 +225,7 @@ x-backend-env: &backend-env
   # the deploy appears to succeed and the flag does nothing. That has happened
   # here before (fixed in 55feaa3) and it costs an hour every time.
   FEATURE_COMPOUND_LAB_ENABLED: ${FEATURE_COMPOUND_LAB_ENABLED:-false}
+  FEATURE_FIVEMIN_LAB_ENABLED: ${FEATURE_FIVEMIN_LAB_ENABLED:-false}
   FEATURE_PUMPFUN_LAB_ENABLED: ${FEATURE_PUMPFUN_LAB_ENABLED:-false}
   FEATURE_MOMENTUM_LAB_ENABLED: ${FEATURE_MOMENTUM_LAB_ENABLED:-false}
   FEATURE_DEPTH_LAB_ENABLED: ${FEATURE_DEPTH_LAB_ENABLED:-false}

@@ -28,6 +28,7 @@ from app.karthik import api as karthik
 from app.karthik_ops import api as karthik_ops
 from app.paper import api as paper
 from app.compound import api as compound
+from app.fivemin import api as fivemin
 from app.depth import api as depth
 from app.social import api as social
 from app.copycontrol import api as copycontrol
@@ -65,6 +66,7 @@ api_router.include_router(radar.router)
 # Research simulation, clearly separated from the wallet surfaces.
 api_router.include_router(lab.router)
 api_router.include_router(compound.router)
+api_router.include_router(fivemin.router)
 api_router.include_router(pumpfun.router)
 api_router.include_router(momentum.router)
 api_router.include_router(depth.router)
