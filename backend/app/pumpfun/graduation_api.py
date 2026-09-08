@@ -18,6 +18,7 @@ Two exclusions, both of which change the answer:
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -26,6 +27,7 @@ from sqlalchemy import func, select
 
 from app.api.deps import DbSession
 from app.models.graduation import PumpfunGraduation, PumpfunGraduationMark
+from app.lab import leaderboard
 from app.pumpfun.graduation import TARGET_MINUTES
 
 router = APIRouter(prefix="/pumpfun", tags=["pumpfun"])
@@ -93,3 +95,125 @@ async def graduations(session: DbSession) -> dict[str, Any]:
         "since": cold_start.isoformat() if cold_start else None,
         "ages": rows,
     }
+
+
+# --------------------------------------------------------------------------
+# A simulated $100 book over the same cohort
+# --------------------------------------------------------------------------
+
+#: The book, and how it is divided. $10 x 10 means the whole $100 can be at
+#: work at once and every position is the same size — no discretion about which
+#: coin deserves more, because there is no basis for such a judgement here.
+PAPER_BOOK_USD = Decimal("100")
+PAPER_POSITION_USD = Decimal("10")
+PAPER_MAX_CONCURRENT = 10
+
+#: A multiple above this inside an hour is a corrupt market cap, not a trade.
+#: The raw feed produced 11,670x on one coin; left in, it alone would have
+#: reported the book turning $100 into six figures. Excluded and COUNTED, never
+#: clamped — a clamped glitch is still a number somebody trusts.
+PAPER_GLITCH_MULTIPLE = Decimal("100")
+
+#: Round-trip execution assumed for the NET figure. Measured from real Jupiter
+#: quotes at >= $100k liquidity. A coin at graduation sits in a much thinner
+#: pool, so this is a FLOOR on the true cost and the net number is optimistic.
+PAPER_EXECUTION_PCT = Decimal("0.0078")
+
+
+@router.get("/graduations/paper")
+async def graduation_paper(session: DbSession) -> dict[str, Any]:
+    """What a $100 book would have made buying every graduation and selling at
+    a fixed age — simulated over the cohort we actually stamped.
+
+    NOT a lab. Nothing is traded; this replays the collected marks under one
+    rule, so it cannot drift from the data it describes.
+
+    Every exclusion is reported rather than silently dropped, because a
+    backtest that quietly discards what it cannot price reports the survivors
+    as if they were the population — which is the single error that has made
+    every previous result on this platform look better than it was.
+    """
+    cold_start = await session.scalar(
+        select(func.min(PumpfunGraduation.first_seen_complete_at))
+    )
+    rows = list((await session.execute(
+        select(PumpfunGraduation)
+        .where(PumpfunGraduation.mcap_usd_at_graduation.is_not(None),
+               PumpfunGraduation.mcap_usd_at_graduation > 0,
+               PumpfunGraduation.first_seen_complete_at != cold_start)
+        .order_by(PumpfunGraduation.first_seen_complete_at)
+    )).scalars())
+
+    marks: dict[tuple, Decimal] = {}
+    for m in (await session.execute(
+        select(PumpfunGraduationMark)
+        .where(PumpfunGraduationMark.mcap_usd.is_not(None))
+    )).scalars():
+        marks[(m.graduation_id, m.minutes_since)] = m.mcap_usd
+
+    horizons = []
+    for minutes in TARGET_MINUTES:
+        cash = PAPER_BOOK_USD
+        equity_realised = Decimal(0)
+        open_until: list[datetime] = []
+        taken = skipped_capacity = no_mark = glitched = 0
+
+        for g in rows:
+            t0 = g.first_seen_complete_at
+            open_until = [t for t in open_until if t > t0]
+            if len(open_until) >= PAPER_MAX_CONCURRENT:
+                skipped_capacity += 1
+                continue
+            exit_mcap = marks.get((g.id, minutes))
+            if exit_mcap is None:
+                # Not yet old enough, or unreadable. NOT a zero and not a win.
+                no_mark += 1
+                continue
+            mult = exit_mcap / g.mcap_usd_at_graduation
+            if mult > PAPER_GLITCH_MULTIPLE:
+                glitched += 1
+                continue
+            if cash < PAPER_POSITION_USD:
+                skipped_capacity += 1
+                continue
+            cash -= PAPER_POSITION_USD
+            proceeds = PAPER_POSITION_USD * mult
+            cash += proceeds
+            equity_realised += proceeds - PAPER_POSITION_USD
+            open_until.append(t0 + timedelta(minutes=minutes))
+            taken += 1
+
+        gross = cash
+        # Execution charged on BOTH legs of every trade actually taken.
+        cost = PAPER_POSITION_USD * PAPER_EXECUTION_PCT * Decimal(taken)
+        horizons.append({
+            "minutes": minutes,
+            "trades": taken,
+            "final_equity_gross": round(gross, 2),
+            "final_equity_net": round(gross - cost, 2),
+            "pnl_gross": round(gross - PAPER_BOOK_USD, 2),
+            "pnl_net": round(gross - PAPER_BOOK_USD - cost, 2),
+            "execution_charged": round(cost, 2),
+            "skipped_no_mark_yet": no_mark,
+            "skipped_capacity": skipped_capacity,
+            "excluded_glitch": glitched,
+        })
+
+    return leaderboard._jsonable({
+        "disclosure": (
+            f"Simulated. A ${PAPER_BOOK_USD:.0f} book, ${PAPER_POSITION_USD:.0f} "
+            f"per position and at most {PAPER_MAX_CONCURRENT} at once, buying "
+            "every graduation we stamped and selling at a fixed age. Nothing "
+            "was traded. Entry is our first sighting of the completed curve — "
+            "up to a minute after the real graduation — so a fill at that price "
+            "is assumed, not demonstrated. Execution is charged at "
+            f"{PAPER_EXECUTION_PCT*100:.2f}% round trip, measured on pools at "
+            "$100k+ liquidity; a coin at graduation sits in a far thinner pool, "
+            "so the net figure is a BEST CASE and the true cost is higher."
+        ),
+        "book_usd": PAPER_BOOK_USD,
+        "position_usd": PAPER_POSITION_USD,
+        "max_concurrent": PAPER_MAX_CONCURRENT,
+        "cohort": len(rows),
+        "horizons": horizons,
+    })

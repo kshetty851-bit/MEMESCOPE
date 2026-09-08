@@ -261,3 +261,112 @@ async def test_an_age_with_no_readings_reports_zero_rather_than_nothing(db_sessi
 
 
 TARGET_MINUTES_FOR_TEST = graduation.TARGET_MINUTES
+
+
+# --------------------------------------------------------------------------
+# the simulated $100 book — every guard against a flattering number
+# --------------------------------------------------------------------------
+
+
+async def test_a_glitch_multiple_is_excluded_not_banked(db_session):
+    """THE test. The raw feed produced an 11,670x on one coin. Left in, that
+    single row turns a $100 book into six figures and the page reports a
+    fortune that never existed."""
+    from app.pumpfun.graduation_api import graduation_paper
+
+    cold = NOW
+    await _grad(db_session, "Cold" + "g" * 40, seen_at=cold, mcap=50000)
+    g = await _grad(db_session, "Glitch" + "h" * 38,
+                    seen_at=cold + timedelta(minutes=1), mcap=50000)
+    await _mark(db_session, g, minutes=5, mcap=50000 * 11670)
+
+    out = await graduation_paper(db_session)
+    five = next(h for h in out["horizons"] if h["minutes"] == 5)
+    assert five["excluded_glitch"] == 1
+    assert five["trades"] == 0
+    assert float(five["final_equity_gross"]) == 100.0, "the book must not move"
+
+
+async def test_a_coin_with_no_mark_yet_is_not_counted_as_flat(db_session):
+    """An unpriced position is not a break-even one. Counting it as flat would
+    report the survivors as the population."""
+    from app.pumpfun.graduation_api import graduation_paper
+
+    cold = NOW
+    await _grad(db_session, "Cold" + "i" * 40, seen_at=cold, mcap=50000)
+    await _grad(db_session, "NoMark" + "j" * 38,
+                seen_at=cold + timedelta(minutes=1), mcap=50000)
+
+    out = await graduation_paper(db_session)
+    five = next(h for h in out["horizons"] if h["minutes"] == 5)
+    assert five["skipped_no_mark_yet"] == 1
+    assert five["trades"] == 0
+
+
+async def test_a_total_loss_is_banked_as_a_total_loss(db_session):
+    """The whole point. A coin that went to nothing must cost the book its
+    stake, not quietly leave the simulation."""
+    from app.pumpfun.graduation_api import graduation_paper
+
+    cold = NOW
+    await _grad(db_session, "Cold" + "k" * 40, seen_at=cold, mcap=50000)
+    g = await _grad(db_session, "Dead" + "l" * 40,
+                    seen_at=cold + timedelta(minutes=1), mcap=50000)
+    await _mark(db_session, g, minutes=5, mcap=1)  # ~ -100%
+
+    out = await graduation_paper(db_session)
+    five = next(h for h in out["horizons"] if h["minutes"] == 5)
+    assert five["trades"] == 1
+    assert float(five["pnl_gross"]) < -9.9, "a rug must cost the full stake"
+
+
+async def test_the_book_cannot_hold_more_than_its_slots(db_session):
+    """$10 x 10 is the whole $100. An eleventh concurrent position would be
+    money the book does not have, and a simulation that spends it reports
+    returns on capital that was never at risk."""
+    from app.pumpfun.graduation_api import graduation_paper
+
+    cold = NOW
+    await _grad(db_session, "Cold" + "m" * 40, seen_at=cold, mcap=50000)
+    for i in range(14):  # all inside the 5-minute window, so slots overlap
+        g = await _grad(db_session, f"Many{i:02d}" + "n" * 36,
+                        seen_at=cold + timedelta(seconds=30 + i), mcap=50000)
+        await _mark(db_session, g, minutes=5, mcap=55000)
+
+    out = await graduation_paper(db_session)
+    five = next(h for h in out["horizons"] if h["minutes"] == 5)
+    assert five["trades"] == 10, f"took {five['trades']}, book has 10 slots"
+    assert five["skipped_capacity"] == 4
+
+
+async def test_execution_is_charged_on_every_trade_taken(db_session):
+    from app.pumpfun.graduation_api import (PAPER_EXECUTION_PCT,
+                                            PAPER_POSITION_USD,
+                                            graduation_paper)
+
+    cold = NOW
+    await _grad(db_session, "Cold" + "o" * 40, seen_at=cold, mcap=50000)
+    g = await _grad(db_session, "Flat" + "p" * 40,
+                    seen_at=cold + timedelta(minutes=1), mcap=50000)
+    await _mark(db_session, g, minutes=5, mcap=50000)  # exactly flat
+
+    out = await graduation_paper(db_session)
+    five = next(h for h in out["horizons"] if h["minutes"] == 5)
+    # The payload rounds to cents for display, so compare at that resolution.
+    expected = float(PAPER_POSITION_USD * PAPER_EXECUTION_PCT)
+    assert abs(float(five["execution_charged"]) - expected) < 0.01
+    assert float(five["pnl_gross"]) == 0.0
+    assert float(five["pnl_net"]) < 0.0, "a flat trade still costs the spread"
+
+
+async def test_the_cold_start_batch_is_excluded_from_the_book(db_session):
+    from app.pumpfun.graduation_api import graduation_paper
+
+    cold = NOW
+    for i in range(3):
+        g = await _grad(db_session, f"Cold{i}" + "q" * 38, seen_at=cold, mcap=50000)
+        await _mark(db_session, g, minutes=5, mcap=100000)  # would double
+    out = await graduation_paper(db_session)
+    five = next(h for h in out["horizons"] if h["minutes"] == 5)
+    assert five["trades"] == 0
+    assert float(five["final_equity_gross"]) == 100.0
