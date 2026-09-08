@@ -367,9 +367,10 @@ class Settings(BaseSettings):
 
     # --- Retention and disk protection --------------------------------------
     # Raw telemetry is expired; evidence is not. `token_market_snapshots` keeps
-    # a permanent carve-out for every mint in `radar_tokens` or
-    # `paper_positions`, so an admitted or traded token keeps its whole series
-    # regardless of these windows.
+    # a permanent carve-out for every mint in `paper_positions` or
+    # `lab_positions`, so a traded token keeps its whole series regardless of
+    # these windows. Radar admission alone stopped counting on 2026-09-08 —
+    # that carve-out was 3.7M rows for tokens nothing ever traded.
     #
     # Sized from the 2026-08-21 audit of production: score history was 11 GB
     # (79% older than 7 days), radar decision snapshots 4.2 GB growing at
