@@ -25,7 +25,8 @@ from app.social import spec as socspec
 from app.pumpfun import spec as pspec
 from app.lab import leaderboard, sellability, spec
 from app.lab.service import LabService
-from app.models.lab import LabPosition, LabSnapshot, LabTournament
+from app.models.lab import (LabPosition, LabSnapshot, LabStrategy,
+                            LabTournament)
 from app.workers.celery_app import celery_app
 from app.workers.runtime import run_async
 
@@ -54,9 +55,13 @@ CALENDAR_SNAPSHOTS = (("24H", 24), ("48H", 48), ("72H", 72),
                       ("7D", 168), ("14D", 336), ("21D", 504),
                       ("30D", 720), ("60D", 1440), ("90D", 2160))
 
-#: Every tournament whose open book must be re-quoted. Derived from the
-#: registries themselves rather than typed, so a new lab cannot be added
-#: without appearing here.
+#: Every LIVE tournament. Derived from the registries themselves rather than
+#: typed, so a new lab cannot be added without appearing here.
+#:
+#: NOT the whole answer to what must be re-quoted — see `_swept_versions`. A
+#: superseded tournament is absent from this tuple by construction (its
+#: registry now reports the new version) yet can still be holding an open
+#: position, and that book needs quotes exactly as much as a live one.
 LIVE_SPEC_VERSIONS = (spec.SPEC_VERSION, cspec.SPEC_VERSION,
                       mspec.SPEC_VERSION, dspec.SPEC_VERSION,
                       pspec.SPEC_VERSION, socspec.SPEC_VERSION,
@@ -206,7 +211,7 @@ async def _lab_sellability_refresh() -> dict[str, Any]:
             # every later cycle then compounds from it.
             outcome = await sellability.refresh(
                 session, now=datetime.now(UTC),
-                spec_versions=LIVE_SPEC_VERSIONS,
+                spec_versions=await _swept_versions(session),
             )
             await session.commit()
     except Exception:
@@ -214,3 +219,33 @@ async def _lab_sellability_refresh() -> dict[str, Any]:
         return {"failed": True}
     logger.info("lab_sellability_refresh", **outcome)
     return outcome
+
+
+async def _swept_versions(session) -> tuple[str, ...]:
+    """Every live tournament, PLUS any superseded one still holding a position.
+
+    The live list alone was not enough, and the way it failed was silent. A
+    version bump removes the old tournament from `LIVE_SPEC_VERSIONS` — the
+    registry now reports the new version — while its book can still be open.
+    Those positions then get no fresh Jupiter quote and are marked from the CPMM
+    model over reported liquidity, which is the condition that froze 72% of the
+    Lab's book on 2026-08-26.
+
+    It is not a stranding: `resolve_membership` keeps any open position's mint
+    in the priority lane with no tournament filter at all, so snapshots stay
+    fresh and `_mark` still works. But a modelled mark on a book nobody is
+    quoting is a worse number than a quoted one, and the marks are what the
+    ratchet targets are TESTED against.
+
+    Asking the database which tournaments hold open positions is also the last
+    version of this list that cannot fall behind: the previous two attempts were
+    hand-maintained tuples and both were missed on the deploy that needed them.
+    """
+    held = {v for v in (await session.execute(
+        select(LabTournament.spec_version)
+        .join(LabStrategy, LabStrategy.tournament_id == LabTournament.id)
+        .join(LabPosition, LabPosition.strategy_row_id == LabStrategy.id)
+        .where(LabPosition.status == "open")
+        .distinct()
+    )).scalars()}
+    return tuple(sorted(held | set(LIVE_SPEC_VERSIONS)))

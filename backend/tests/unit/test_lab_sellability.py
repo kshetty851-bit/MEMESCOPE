@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import ast
 import inspect
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -139,10 +139,19 @@ async def test_the_scheduled_task_actually_runs(monkeypatch):
 
     async def _fake_refresh(session, *, now, **kw):
         called["now"] = now
+        called["versions"] = kw.get("spec_versions")
         return {"mints": 0, "quoted": 0, "failed": 0, "skipped_fresh": 0}
+
+    class _Result:
+        def scalars(self): return self
+        def __iter__(self): return iter(())
 
     class _Session:
         async def scalar(self, *a, **k): return True
+        # `_swept_versions` asks the database which tournaments hold open
+        # positions; an empty answer leaves just the live list, which is what
+        # this test is about.
+        async def execute(self, *a, **k): return _Result()
         async def commit(self): ...
         async def rollback(self): ...
         async def __aenter__(self): return self
@@ -327,6 +336,112 @@ def test_the_beat_sweeps_every_live_tournament():
     from app.compound import spec as cspec
     from app.lab import scheduler
 
-    src = inspect.getsource(scheduler._lab_sellability_refresh)
-    assert "LIVE_SPEC_VERSIONS" in src
+    # Asserted on the versions the task ACTUALLY passes to `refresh`, not on
+    # its source. The source-grep version of this test broke the moment the
+    # list moved behind a helper — while the behaviour it cared about was
+    # unchanged — which is the whole argument against grepping source.
+    captured: dict = {}
+
+    async def _fake_refresh(session, *, now, spec_versions, **kw):
+        captured["versions"] = spec_versions
+        return {"mints": 0, "quoted": 0, "failed": 0, "skipped_fresh": 0}
+
+    async def _fake_swept(session):
+        return tuple(scheduler.LIVE_SPEC_VERSIONS)
+
+    class _Session:
+        async def scalar(self, *a, **k): return True
+        async def commit(self): ...
+        async def rollback(self): ...
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+
+    import asyncio
+
+    from unittest.mock import patch
+
+    with patch.object(scheduler.sellability, "refresh", _fake_refresh), \
+            patch.object(scheduler, "_swept_versions", _fake_swept), \
+            patch.object(scheduler, "SessionFactory", lambda: _Session()), \
+            patch.object(scheduler.settings, "FEATURE_LAB_ENABLED", True):
+        asyncio.get_event_loop_policy().new_event_loop().run_until_complete(
+            scheduler._lab_sellability_refresh())
+
+    assert cspec.SPEC_VERSION in captured["versions"]
+    assert spec.SPEC_VERSION in captured["versions"]
     assert cspec.SPEC_VERSION != spec.SPEC_VERSION
+
+
+# --------------------------------------------------------------------------
+# a superseded book still gets quoted
+# --------------------------------------------------------------------------
+
+
+async def test_the_swept_list_always_contains_every_live_tournament(db_session):
+    """The two previous versions of this list were hand-maintained tuples and
+    BOTH were missed on the deploy that needed them — the Compound Lab, then
+    Momentum V2 and Depth. Derived from a query it cannot fall behind, but it
+    must never derive its way into DROPPING a live one."""
+    from app.lab.scheduler import LIVE_SPEC_VERSIONS, _swept_versions
+
+    assert set(LIVE_SPEC_VERSIONS) <= set(await _swept_versions(db_session))
+
+
+async def test_a_superseded_tournament_with_an_open_position_is_swept(db_session):
+    """The gap the pumpfun 1.2.0 bump would have opened.
+
+    A version bump drops the old tournament out of `LIVE_SPEC_VERSIONS` — its
+    registry now reports the new version — while its book can still be open.
+    Those positions then get no fresh quote and are marked from the CPMM model
+    over reported liquidity, the condition that froze 72% of the Lab's book on
+    2026-08-26. It is not a stranding, because `resolve_membership` keeps the
+    mint in the priority lane regardless of tournament, but a modelled mark is
+    a worse number and the ratchet targets are TESTED against these marks.
+    """
+    import uuid as _uuid
+    from datetime import timedelta
+    from decimal import Decimal as D
+
+    from app.lab.scheduler import LIVE_SPEC_VERSIONS, _swept_versions
+    from app.models.lab import (LabDecision, LabPosition, LabStrategy,
+                                LabTournament)
+
+    now = datetime.now(UTC)
+    retired = "retired-9.9.9"
+    assert retired not in LIVE_SPEC_VERSIONS
+
+    t = LabTournament(spec_version=retired, spec_hash="dead" * 16,
+                      valid_from=now - timedelta(days=3), snapshot_at=now,
+                      status="active", protocol_note="superseded")
+    db_session.add(t)
+    await db_session.flush()
+    row = LabStrategy(tournament_id=t.id, strategy_id="OLD-01", name="OLD",
+                      version=retired, spec_hash="dead" * 16,
+                      checkpoint_minutes=30, size_usd=D("10"),
+                      max_concurrent=5, max_exposure_usd=D("100"), rules={},
+                      starting_equity=D("100"), cash=D("50"),
+                      peak_equity=D("100"), status="active")
+    db_session.add(row)
+    await db_session.flush()
+    d = LabDecision(strategy_row_id=row.id, strategy_id="OLD-01",
+                    mint_address="Old" + "1" * 41, checkpoint_at=now,
+                    checkpoint_minutes=30, decided_at=now, eligible=True)
+    db_session.add(d)
+    await db_session.flush()
+
+    # No open position yet -> the retired version is NOT swept.
+    assert retired not in await _swept_versions(db_session)
+
+    db_session.add(LabPosition(
+        decision_id=d.id, strategy_row_id=row.id, strategy_id="OLD-01",
+        mint_address=d.mint_address, opened_at=now, entry_price=D("0.001"),
+        entry_liquidity_usd=D("50000"), size_usd=D("10"), quantity=D("1000"),
+        quantity_remaining=D("1000"), banked_proceeds_usd=D("0"),
+        status="open", entry_source="test", peak_exec_multiple=D("1"),
+        last_exec_multiple=D("1"), last_open_value_usd=D("10")))
+    await db_session.flush()
+
+    swept = await _swept_versions(db_session)
+    assert retired in swept, "a superseded book holding a position must be quoted"
+    # And the live ones are never dropped in the process.
+    assert set(LIVE_SPEC_VERSIONS) <= set(swept)
