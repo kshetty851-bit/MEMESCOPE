@@ -4,9 +4,13 @@ Research simulation. This module reads production observations and writes ONLY
 `lab_*` tables — it imports no paper, karthik or real-wallet model, and a
 source-parsing test enforces that.
 
-**One authoritative scanner.** The admission stream is `radar_tokens`, and the
-market history is the common `token_market_snapshots` series every other
-subsystem already reads. For each (token, checkpoint) the observation is built
+**One authoritative observation.** The admission stream is `radar_tokens` for
+every registry that does not say otherwise; a registry may set
+`CANDIDATE_SOURCE = "graduations"` to be admitted from `pumpfun_graduations`
+instead (see `_due_candidates`). The market history is the common
+`token_market_snapshots` series every other subsystem already reads, whichever
+stream admitted the coin — so the observation and both PIT guarantees below are
+identical for either source. For each (token, checkpoint) the observation is built
 ONCE and handed to every strategy that acts at that checkpoint — twenty
 strategies, never twenty scanners and never twenty provider calls.
 
