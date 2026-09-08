@@ -1169,6 +1169,49 @@ describe("the furnished office", () => {
     );
   });
 
+  it("gives every node in the scene a unique key, on update as well as on mount", () => {
+    // This has bitten twice: the Execution Vault is both a zone and an
+    // employee (floor plates and the sorted cast are siblings under one
+    // <svg>), and later a plant was authored on a tile that already had one.
+    // React may DROP or DUPLICATE a child when keys collide, so it is a real
+    // defect and not a lint nag.
+    //
+    // It has to rerender. React only checks keys while reconciling an
+    // UPDATE — a single render, and a console read straight after page load,
+    // both come back clean while the collision is still there. That is
+    // exactly how both of these survived being "checked".
+    const seen: string[] = [];
+    const original = console.error;
+    console.error = (...args: unknown[]) => {
+      const text = args.map(String).join(" ");
+      if (text.includes("same key")) seen.push(text);
+      else original(...args);
+    };
+    try {
+      const props = {
+        focusedZone: null,
+        onFocusZone: noop,
+        onSelectEmployee: noop,
+        density: "full" as const,
+      };
+      const { rerender } = render(<HqStage {...props} frames={{}} />);
+      // Everyone somewhere other than home, so every anchor re-keys at once.
+      const away = Object.fromEntries(
+        [...EMPLOYEES.map((e) => e.id), ...SUPPORT_STAFF.map((n) => n.id)].map(
+          (id, index) => [
+            id,
+            { pose: "standing", tile: { col: 6 + (index % 8), row: 5 }, hold: 5 },
+          ],
+        ),
+      );
+      rerender(<HqStage {...props} frames={away} />);
+      rerender(<HqStage {...props} frames={{}} />);
+    } finally {
+      console.error = original;
+    }
+    expect(seen, seen.join("\n")).toEqual([]);
+  });
+
   it("keeps the room free of status colour used as decoration", () => {
     // Green and amber mean something in this product. The reference's office
     // is full of bright green bins and plants; only one of those survived the

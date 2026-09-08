@@ -50,7 +50,13 @@ export function Desk({ x, y, theme }: DeskProps) {
   const legTop = y + H * 0.35;
   return (
     <g className="hq-desk" data-desk={theme}>
-      <ellipse className="hq-prop-shadow" cx={x} cy={y + H + 8} rx={W * 1.02} ry={H * 0.72} />
+      <ellipse
+        className="hq-prop-shadow"
+        cx={x}
+        cy={y + H + 8}
+        rx={W * 1.02}
+        ry={H * 0.72}
+      />
 
       {/* Pedestal, set back under the overhang. */}
       <polygon
@@ -85,10 +91,96 @@ export function Desk({ x, y, theme }: DeskProps) {
         points={`${x - 20},${y + 4} ${x + 2},${y + 15} ${x + 20},${y + 6} ${x - 2},${y - 5}`}
       />
       <ellipse className="hq-mouse" cx={x + 27} cy={y + 3} rx={5} ry={3.2} />
-      <polygon className="hq-paper" points={`${x - 34},${y - 4} ${x - 21},${y + 2.5} ${x - 30},${y + 7} ${x - 43},${y + 0.5}`} />
-      <polygon className="hq-paper" points={`${x - 31},${y - 7} ${x - 19},${y - 1} ${x - 27},${y + 3} ${x - 39},${y - 3}`} />
+      <polygon
+        className="hq-paper"
+        points={`${x - 34},${y - 4} ${x - 21},${y + 2.5} ${x - 30},${y + 7} ${x - 43},${y + 0.5}`}
+      />
+      <polygon
+        className="hq-paper"
+        points={`${x - 31},${y - 7} ${x - 19},${y - 1} ${x - 27},${y + 3} ${x - 39},${y - 3}`}
+      />
+      <DeskClutter x={x} y={y} theme={theme} />
     </g>
   );
+}
+
+/**
+ * One personal object per desk.
+ *
+ * The keyboard, mouse and papers say "somebody sits here"; this says WHO.
+ * A mug, a notebook, a bottle or a phone, chosen by the desk's theme so that
+ * no two neighbouring desks carry the same thing and the choice never
+ * changes between renders. On the near-right corner of the slab, in front of
+ * the mouse and clear of the keyboard, so it reads as set down by the person
+ * rather than placed by the furniture. No digits, no glyphs, no status hue.
+ */
+const CLUTTER = ["mug", "book", "bottle", "phone"] as const;
+
+function DeskClutter({ x, y, theme }: DeskProps) {
+  let hash = 0;
+  for (const char of theme) hash = (hash * 31 + char.charCodeAt(0)) % 1_000_003;
+  const kind = CLUTTER[hash % CLUTTER.length];
+  const cx = x + 38;
+  const cy = y + 9;
+  switch (kind) {
+    case "mug":
+      return (
+        <g className="hq-clutter" data-clutter="mug" aria-hidden="true">
+          <rect
+            className="hq-clutter-mug"
+            x={cx - 3}
+            y={cy - 8}
+            width={6}
+            height={7.5}
+            rx={1.4}
+          />
+          <path className="hq-clutter-handle" d={`M${cx + 3} ${cy - 6} q3.2 1.8 0 3.8`} />
+        </g>
+      );
+    case "book":
+      return (
+        <g className="hq-clutter" data-clutter="book" aria-hidden="true">
+          <polygon
+            className="hq-clutter-book"
+            points={`${cx - 9},${cy - 3} ${cx + 3},${cy + 3} ${cx + 9},${cy} ${cx - 3},${cy - 6}`}
+          />
+          <path
+            className="hq-clutter-spine"
+            d={`M${cx - 6} ${cy - 4.5} L${cx + 6} ${cy + 1.5}`}
+          />
+        </g>
+      );
+    case "bottle":
+      return (
+        <g className="hq-clutter" data-clutter="bottle" aria-hidden="true">
+          <rect
+            className="hq-clutter-bottle"
+            x={cx - 2.2}
+            y={cy - 14}
+            width={4.4}
+            height={13}
+            rx={2}
+          />
+          <rect
+            className="hq-clutter-cap"
+            x={cx - 1.5}
+            y={cy - 16}
+            width={3}
+            height={2.6}
+            rx={0.8}
+          />
+        </g>
+      );
+    case "phone":
+      return (
+        <g className="hq-clutter" data-clutter="phone" aria-hidden="true">
+          <polygon
+            className="hq-clutter-phone"
+            points={`${cx - 5},${cy - 1} ${cx + 1},${cy + 2} ${cx + 5},${cy} ${cx - 1},${cy - 3}`}
+          />
+        </g>
+      );
+  }
 }
 
 /**

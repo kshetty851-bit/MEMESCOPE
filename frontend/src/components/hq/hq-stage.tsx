@@ -169,6 +169,7 @@ export function HqStage({
               accessible name is already carried by `role="img"` +
               `aria-label` above, which is both richer and silent. */}
           <RigDefs />
+          {density === "full" ? <SkyDefs /> : null}
 
           {/* The planet in the void beyond the deck. Behind everything,
               including the floor: it is scenery outside the hull. */}
@@ -177,13 +178,28 @@ export function HqStage({
           {/* Walls first: they sit behind everything and never overlap. */}
           <BackWalls />
           {density === "full" ? <WallArt /> : null}
-          {density === "full" ? <StationWindow /> : null}
+          {density === "full" ? (
+            <>
+              <StationWindow />
+              {/* A second pane over the conference end, past its display.
+                  The same planet from the other side of the room: a view
+                  seen from two places is a place, not a backdrop. */}
+              <StationWindow from={20.0} to={21.75} id="hq-window-clip-east" />
+              <WallVines />
+            </>
+          ) : null}
           {density === "full" ? <SpaceTraffic /> : null}
 
           {/* Floor plates, one per department. */}
           {ZONES.map((zone) => (
             <polygon
-              key={zone.id}
+              // Prefixed so a zone id can never be confused with an actor
+              // id if these are ever merged into the sorted scene. NOT the
+              // fix for the Vault collision — React checks keys within one
+              // array, and this map and `scene` are two, so they could not
+              // have collided. That pair was `VaultDoor` against Vault's own
+              // anchor, both inside `scene`.
+              key={`plate-${zone.id}`}
               className={`hq-plate hq-plate--${zone.surface}`}
               points={rectPolygon(zone.rect)}
               data-zone={zone.id}
@@ -203,6 +219,7 @@ export function HqStage({
               <GridLines />
             </g>
           ) : null}
+          {density === "full" ? <Sunlight /> : null}
 
           {/* The deck's railing and airlock, and the conference room's glass.
               Architecture rather than furniture: they belong to the rooms, not
@@ -900,7 +917,10 @@ function buildScene(
     const vault = toScreen({ col: 13, row: 5.4 });
     items.push({
       depth: depthOf({ col: 13, row: 5 }, LAYER.overlay),
-      node: <VaultDoor key="vault" x={vault.x} y={vault.y} />,
+      // "vault-door", not "vault": Vault is also an EMPLOYEE, and his anchor
+      // lands in this same `scene` array, so the bare id collided with him.
+      // React may drop or duplicate a child when that happens.
+      node: <VaultDoor key="vault-door" x={vault.x} y={vault.y} />,
     });
   }
 
@@ -1409,7 +1429,7 @@ function WallArt() {
           separately), the company sign, then the Mission Board from col 9.3.
           Nova stands at col 8, in the gap between the sign and the board —
           her nameplate used to be printed straight across the board's title. */}
-      <WallDecor {...north(1.1, 58)} kind="art-space" facing="north" span={0.6} height={26} />
+      <WallDecor {...north(0.35, 58)} kind="art-space" facing="north" span={0.6} height={26} />
       <WallDecor {...north(5.3, 62)} kind="sign" facing="north" span={1.4} height={30} />
       <WallDecor {...north(13.6, 56)} kind="art-chart" facing="north" span={0.62} height={26} />
       {/* The conference room's own display, over the table. Dark panel, the
@@ -1427,41 +1447,229 @@ function WallArt() {
 /**
  * The station window.
  *
- * A frame with a handful of static stars. It deliberately does not reimplement
- * the starfield — `universe.css` already owns that, and a second one would be a
- * second thing to keep in sync. HQ-11 can place the existing space objects
- * behind this frame; for now the frame establishes the sightline.
+ * A panoramic pane on the north wall, in the wall's own plane — the same
+ * parallelogram `WallDecor` uses, so it sits in the wall rather than floating
+ * in front of it as the old axis-aligned rectangle did. Behind the glass: sky,
+ * a few stars, and the limb of the planet rising past the sill. It is the same
+ * view the stage paints beyond the floor, which is what makes it read as a
+ * hole in the wall and not as a picture hung on one.
+ *
+ * Every colour in it is a phase token, so the same geometry is a blue morning,
+ * an amber evening and a dark planet under stars at night with nothing
+ * re-drawn. `SpaceTraffic` still crosses above it.
  */
-function StationWindow() {
-  const anchor = toScreen({ col: 3, row: 0 });
+function StationWindow({
+  from = 1.3,
+  to = 4.9,
+  id = "hq-window-clip",
+}: {
+  /** Columns along the north wall the pane spans. */
+  from?: number;
+  to?: number;
+  /** Each pane clips to its own frame, so two need two ids. */
+  id?: string;
+}) {
+  const a = toScreen({ col: from, row: 0 });
+  const b = toScreen({ col: to, row: 0 });
+  const sill = 16;
+  const head = 84;
+  const frame = `${a.x},${a.y - sill} ${b.x},${b.y - sill} ${b.x},${b.y - head} ${a.x},${a.y - head}`;
+  const w = b.x - a.x;
+  const midX = (a.x + b.x) / 2;
+  const midY = (a.y + b.y) / 2;
   const stars: Array<readonly [number, number]> = [
-    [-52, -118],
-    [-18, -142],
-    [26, -110],
-    [58, -134],
-    [8, -96],
+    [-52, -74],
+    [-18, -88],
+    [26, -70],
+    [58, -84],
+    [8, -58],
+    [-38, -60],
+    [44, -56],
   ];
+  const mullions = [0.34, 0.67].map((t) => ({ x: a.x + w * t, y: a.y + (b.y - a.y) * t }));
   return (
-    <g>
-      <rect
-        className="hq-window"
-        x={anchor.x - 80}
-        y={anchor.y - 156}
-        width={160}
-        height={80}
-        rx={6}
-      />
-      {stars.map(([dx, dy], index) => (
-        <circle
+    <g className="hq-station-window" aria-hidden="true">
+      <clipPath id={id}>
+        <polygon points={frame} />
+      </clipPath>
+      <g clipPath={`url(#${id})`}>
+        <rect
+          className="hq-sky-fill"
+          x={a.x}
+          y={b.y - head - 4}
+          width={w}
+          height={head + (b.y - a.y) + 8}
+        />
+        {stars.map(([dx, dy], index) => (
+          <circle
+            key={index}
+            className="hq-star"
+            cx={midX + dx}
+            cy={midY + dy}
+            r={1.5}
+            style={{ animationDelay: `${index * 1.3}s` }}
+          />
+        ))}
+        {/* The planet's limb. Land masses are two soft shapes, deliberately
+            no coastline anyone could name: this is scenery, not a map. */}
+        <ellipse className="hq-earth" cx={midX} cy={midY + 26} rx={w * 0.78} ry={46} />
+        <ellipse
+          className="hq-earth-land"
+          cx={midX - w * 0.22}
+          cy={midY + 12}
+          rx={w * 0.2}
+          ry={13}
+        />
+        <ellipse
+          className="hq-earth-land"
+          cx={midX + w * 0.18}
+          cy={midY + 22}
+          rx={w * 0.15}
+          ry={9}
+        />
+        <ellipse className="hq-earth-rim" cx={midX} cy={midY + 26} rx={w * 0.78} ry={46} />
+        <ellipse
+          className="hq-cloud"
+          cx={midX - w * 0.28}
+          cy={midY - 2}
+          rx={w * 0.16}
+          ry={5}
+        />
+        <ellipse
+          className="hq-cloud"
+          cx={midX + w * 0.1}
+          cy={midY - 22}
+          rx={w * 0.2}
+          ry={6}
+        />
+        <ellipse
+          className="hq-cloud"
+          cx={midX + w * 0.3}
+          cy={midY + 6}
+          rx={w * 0.12}
+          ry={4}
+        />
+      </g>
+      {mullions.map((m, index) => (
+        <line
           key={index}
-          className="hq-star"
-          cx={anchor.x + dx}
-          cy={anchor.y + dy + 40}
-          r={1.6}
-          style={{ animationDelay: `${index * 1.3}s` }}
+          className="hq-window-mullion"
+          x1={m.x}
+          y1={m.y - sill}
+          x2={m.x}
+          y2={m.y - head}
         />
       ))}
+      <polygon className="hq-window" points={frame} />
     </g>
+  );
+}
+
+/**
+ * Vines along the wall tops.
+ *
+ * Three runs: two on the north wall, in the gaps the decor leaves, one on the
+ * west. Each is a stem that sags a little between its ends and a row of
+ * leaves hanging from it, alternating the two leaf tokens the potted plants
+ * already use — so they retone with the time of day and cost no new colour.
+ * Nothing about them is a status: they are the reference's greenery, which
+ * was the one thing that survived the port to a room where green means good.
+ */
+function WallVines() {
+  const height = TILE_H * 1.5;
+  const run = (points: Array<{ x: number; y: number }>, key: string) => {
+    const a = points[0];
+    const b = points[points.length - 1];
+    if (a === undefined || b === undefined) return null;
+    const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 + 9 };
+    const stem = `M${a.x} ${a.y} Q${mid.x} ${mid.y} ${b.x} ${b.y}`;
+    const leaves = points.map((point, index) => {
+      // Sag follows the stem's own curve at this fraction along it.
+      const t = index / (points.length - 1);
+      const sag = 9 * 4 * t * (1 - t);
+      const drop = 6 + (index % 3) * 4;
+      return (
+        <ellipse
+          key={`${key}-${index}`}
+          className={index % 2 === 0 ? "hq-leaf" : "hq-leaf-dark"}
+          cx={point.x + (index % 2 === 0 ? -1.5 : 1.5)}
+          cy={point.y + sag + drop}
+          rx={3.2}
+          ry={5}
+          transform={`rotate(${index % 2 === 0 ? -18 : 14} ${point.x} ${point.y + sag + drop})`}
+        />
+      );
+    });
+    return (
+      <g key={key} className="hq-vines" aria-hidden="true">
+        <path className="hq-vine" d={stem} />
+        {leaves}
+      </g>
+    );
+  };
+  const north = (fromCol: number, toCol: number, n: number) =>
+    Array.from({ length: n }, (_, index) => {
+      const col = fromCol + ((toCol - fromCol) * index) / (n - 1);
+      const point = toScreen({ col, row: 0 });
+      return { x: point.x, y: point.y - height + 2 };
+    });
+  const west = (fromRow: number, toRow: number, n: number) =>
+    Array.from({ length: n }, (_, index) => {
+      const row = fromRow + ((toRow - fromRow) * index) / (n - 1);
+      const point = toScreen({ col: 0, row });
+      return { x: point.x, y: point.y - height + 2 };
+    });
+  return (
+    <g>
+      {run(north(0.6, 4.9, 8), "vine-nw")}
+      {run(north(10.2, 16.4, 10), "vine-ne")}
+      {run(west(1.2, 6.8, 9), "vine-w")}
+    </g>
+  );
+}
+
+/**
+ * The gradients the window and the floor read. Vertical sky for the pane;
+ * a sun gradient in room coordinates that starts at the window's sill and
+ * fades toward the middle of the floor, so the light comes from where the
+ * window is. Stops are phase tokens, so both retone with the time of day.
+ */
+function SkyDefs() {
+  const sill = toScreen({ col: 3.1, row: 0 });
+  return (
+    <defs>
+      <linearGradient id="hq-sky-gradient" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" style={{ stopColor: "var(--hq-sky-top)" }} />
+        <stop offset="1" style={{ stopColor: "var(--hq-sky-horizon)" }} />
+      </linearGradient>
+      <linearGradient
+        id="hq-sun-gradient"
+        gradientUnits="userSpaceOnUse"
+        x1={sill.x}
+        y1={sill.y}
+        x2={sill.x + 520}
+        y2={sill.y + 430}
+      >
+        <stop offset="0" style={{ stopColor: "var(--hq-sun)", stopOpacity: 1 }} />
+        <stop offset="1" style={{ stopColor: "var(--hq-sun)", stopOpacity: 0 }} />
+      </linearGradient>
+    </defs>
+  );
+}
+
+/**
+ * Daylight on the floor. One polygon over every plate, clipped to them, with
+ * its opacity a phase token — so at night it costs an element and paints
+ * nothing, which is cheaper than mounting and unmounting it.
+ */
+function Sunlight() {
+  return (
+    <polygon
+      className="hq-sunlight"
+      clipPath="url(#hq-floor-clip)"
+      points={rectPolygon({ col: 0, row: 0, cols: GRID_COLS, rows: GRID_ROWS })}
+      aria-hidden="true"
+    />
   );
 }
 
