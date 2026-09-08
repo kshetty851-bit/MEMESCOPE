@@ -72,7 +72,7 @@ export function GraduationPanel() {
   if (error || !data) {
     return (
       <Panel density="compact">
-        <Label>"THE HOUR AFTER GRADUATION"</Label>
+        <Label>THE HOUR AFTER GRADUATION</Label>
         <p className="mt-2 text-xs text-muted">
           Not available. The measurement exists but its endpoint did not answer —
           usually the backend running an older build than this page.

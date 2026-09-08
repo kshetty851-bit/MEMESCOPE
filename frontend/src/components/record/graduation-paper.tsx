@@ -71,7 +71,7 @@ export function GraduationPaperPanel() {
   if (error || !data) {
     return (
       <Panel density="compact">
-        <Label>"SIMULATED $100 BOOK"</Label>
+        <Label>SIMULATED $100 BOOK</Label>
         <p className="mt-2 text-xs text-muted">
           Not available. The measurement exists but its endpoint did not answer —
           usually the backend running an older build than this page.
