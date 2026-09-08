@@ -103,7 +103,7 @@ export default function FiveMinLabPage() {
       <Toolbar
         eyebrow="Graduation Hold Lab"
         title="Buy the graduation. Sell at five minutes, or at fifteen."
-        description="Two $100 wallets, ten trades of $10 each, buying pump.fun graduations five minutes after they complete. Both take the same coin at the same instant, so the only thing that separates their records is the clock. The $100k liquidity floor is execution fidelity, not a signal. Nothing here is real money."
+        description="Two $100 wallets, ten trades of $10 each, buying pump.fun graduations two minutes after they complete. Both take the same coin at the same instant, so the only thing that separates their records is the clock. The $100k liquidity floor is execution fidelity, not a signal. Nothing here is real money."
       />
 
       {/* Deliberately above the numbers, and deliberately not collapsible. */}

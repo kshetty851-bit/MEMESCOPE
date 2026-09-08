@@ -26,9 +26,10 @@ class TestItCannotHaltAnotherTournament:
         assert len(hashes) == 3
 
     def test_the_rules_change_bumped_the_version(self) -> None:
-        """fivemin-2.0.0 was a live tournament on a different population.
-        Reusing its version would attach this book to that record."""
-        assert fivemin.SPEC_VERSION == "fivemin-3.0.0"
+        """Each predecessor was a live tournament with different rules —
+        3.0.0 entered at +5, which the operator never asked for. Reusing a
+        version would attach this book to that record."""
+        assert fivemin.SPEC_VERSION == "fivemin-3.1.0"
 
 
 class TestItTradesTheGraduationCohort:
@@ -64,7 +65,7 @@ class TestItTradesTheGraduationCohort:
         ):
             svc = LabService(_Session(), registry=registry)
             asyncio.run(svc._due_candidates(
-                t, minutes=5, ids=[], cutoff=datetime(2026, 9, 9, tzinfo=UTC),
+                t, minutes=2, ids=[], cutoff=datetime(2026, 9, 9, tzinfo=UTC),
                 limit=10,
             ))
             assert expected in sql_for["last"], registry.SPEC_VERSION
@@ -96,7 +97,13 @@ class TestTheTwoArmsDifferOnlyInTheClock:
         assert all(s.entry is first for s in fivemin.STRATEGIES)
 
     def test_they_enter_at_the_same_instant(self) -> None:
-        assert {s.checkpoint_minutes for s in fivemin.STRATEGIES} == {5}
+        assert {s.checkpoint_minutes for s in fivemin.STRATEGIES} == {2}
+
+    def test_entry_is_as_early_as_the_cohort_can_be_priced(self) -> None:
+        """2, not 5. The operator asked to buy within seconds; 2 minutes is
+        where 75% of graduates first have BOTH a price and a liquidity (23% at
+        the stamp itself), and the measured median drift to +3 is +0.06%."""
+        assert fivemin.CHECKPOINT_MINUTES == 2
 
     def test_the_clock_is_the_only_exit(self) -> None:
         for s in fivemin.STRATEGIES:

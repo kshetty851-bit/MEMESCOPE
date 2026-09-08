@@ -24,9 +24,13 @@ router = APIRouter(prefix="/fivemin", tags=["fivemin"])
 
 DISCLOSURE = (
     "Run as refutation, not expectation. This lab buys the pump.fun graduation "
-    "cohort five minutes after a coin completes — five minutes because only 48% "
-    "of graduates have any market data at graduation itself, while 99% do by "
-    "+5. The only entry condition is $100,000 of liquidity, and that is "
+    "cohort two minutes after a coin completes — two minutes because a lab "
+    "cannot buy what it cannot price, and only 23% of graduates have a price "
+    "and a liquidity at their graduation stamp against 75% by +2. The delay "
+    "was measured, not assumed: across 104 graduates with a new price print "
+    "between +1 and +3 minutes the median move was +0.06%, so there is no "
+    "systematic run-up being arrived late for. The only entry condition is "
+    "$100,000 of liquidity, and that is "
     "execution fidelity rather than a signal: below it, 7-8% of sells cannot "
     "route at all, and an exit that cannot happen on time would measure the "
     "delay instead of the clock. The FIFTEEN-minute hold has already measured "

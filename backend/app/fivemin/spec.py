@@ -20,22 +20,45 @@ Comparability with the wrong control is not worth trading the wrong population.
 `CANDIDATE_SOURCE = "graduations"` draws candidates from `pumpfun_graduations`
 rather than radar. That is the cohort the +$504.73 figure came from.
 
-## Why entry is at graduation + 5 minutes, not at graduation
+## Why entry is at graduation + 2 minutes
 
-The study bought at graduation. We cannot honestly judge there: of 349
-graduates over two days, only 167 — **48%** — had any non-suspect market
-snapshot at or before their graduation stamp. By +5 minutes 346 of 349 do
-(99%), which is also where the graduation collector takes its first mark.
+The operator's instruction was to buy within seconds — "or else we will lose
+the momentum" — and v3.0.0 shipped with a 5-minute checkpoint that was never
+asked for. This is the correction, and 2 rather than 0 for one reason only:
+**the lab cannot buy what it cannot price.** `_open` needs a price AND a
+liquidity from the market series, and over 362 graduates in two days those
+exist for:
 
-Judging at +0 would refuse half the cohort as `unknown_liq` and the refusals
-would not be random — they would be the coins nobody had priced yet. So the
-checkpoint is 5 minutes and the HOLD is measured from there.
+    at graduation   23%   (85)
+    +1 minute       32%   (117)
+    +2 minutes      75%   (271)
+    +3 minutes      86%   (311)
+
+Entering at +0 would trade under a quarter of the cohort, and not a random
+quarter — the coins already priced at their graduation stamp are the ones
+already trading actively. The record would then describe that slice while
+appearing to describe graduations.
+
+The momentum this costs was measured rather than assumed. Over 104 graduates
+with a genuinely new price print between +1 and +3 minutes, the multiple was:
+
+    p25 0.579   median 1.0006   p75 1.112   p95 2.017
+
+Violently two-sided, and the MEDIAN IS FLAT. There is no systematic run-up in
+the first minutes to arrive late for; waiting declines a coin-flip rather than
+missing a rally. So 2 minutes buys triple the coverage for no measurable
+median cost.
+
+(The graduation replay on `/graduations/paper` does enter at the stamp with
+100% coverage, because it prices from `mcap_usd_at_graduation` and never
+touches a route. That is exactly why it is a replay: it assumes the fill. This
+lab exists to find out whether the fill is real.)
 
 ## Why the only entry condition is liquidity
 
 The study bought EVERY graduate; it had no signal. FLOW cannot be the filter
 here either way, because `liqchg_15m` and `sell_share_15m` need fifteen minutes
-of history that does not exist five minutes after a coin graduates — under FLOW
+of history that does not exist two minutes after a coin graduates — under FLOW
 this lab would refuse nearly everything as `unknown_*`, which is already the
 second-largest refusal reason on CMP-01 at 15.1%.
 
@@ -85,7 +108,7 @@ from decimal import Decimal as D
 
 from app.lab.spec import Condition, Exits, Strategy, rules_json
 
-SPEC_VERSION = "fivemin-3.0.0"
+SPEC_VERSION = "fivemin-3.1.0"
 
 #: Draw candidates from the pump.fun graduation cohort, not from radar.
 #: Read by `LabService._due_candidates`; absent means radar, so no other
@@ -101,9 +124,9 @@ FAILURE_EQUITY_FLOOR = D("50")
 #: THE STAKE, and it never moves. Ten of these fill the book exactly.
 STAKE_USD = D("10")
 
-#: Minutes after graduation at which a coin is judged. 5 because that is where
-#: the market data actually exists — see the module docstring.
-CHECKPOINT_MINUTES = 5
+#: Minutes after graduation at which a coin is judged. See the module docstring:
+#: 2 is the earliest point at which most of the cohort can be PRICED at all.
+CHECKPOINT_MINUTES = 2
 
 #: The two horizons under test, in minutes, measured from the checkpoint.
 HOLD_MINUTES = (5, 15)
@@ -132,7 +155,7 @@ def _arm(minutes: int) -> Strategy:
         id=f"GRAD-{minutes:02d}",
         name=f"GRAD-{minutes}M",
         hypothesis=(
-            f"Buying pump.fun graduations five minutes after they complete and "
+            f"Buying pump.fun graduations two minutes after they complete and "
             f"selling {minutes} minutes later returns more than it costs."
         ),
         checkpoint_minutes=CHECKPOINT_MINUTES,
