@@ -12,6 +12,7 @@ import { Stat, StatRow } from "@/components/ui/stat";
 import { Toolbar } from "@/components/ui/toolbar";
 import { InfoTip } from "@/components/ui/tooltip";
 import { EmptyState, ErrorState } from "@/components/ui/states";
+import { CopyComparisonPanel } from "@/components/record/copy-comparison";
 import { HistoryFeed } from "@/components/record/history-feed";
 import { Journey } from "@/components/record/journey";
 import { usePaperPositions } from "@/hooks/use-paper";
@@ -516,6 +517,12 @@ export default function TrackRecordPage() {
           />
         }
       />
+
+      {/* The copy-trade experiment. Directly under the toolbar because it is
+          the only live thing on this platform with a control, and a record
+          without a control is the mistake this page exists to avoid. Renders
+          nothing until both arms exist. */}
+      <CopyComparisonPanel />
 
       {total === 0 && !performance.isPending ? (
         <EmptyState

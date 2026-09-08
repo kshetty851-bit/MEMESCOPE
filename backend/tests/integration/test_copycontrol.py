@@ -691,3 +691,144 @@ async def test_a_trimmed_signal_is_not_treated_as_a_close(db_session):
         "a `trimmed` signal closed the whole control position — the arm now "
         "exits while the leader is still holding"
     )
+
+
+# --------------------------------------------------------------------------
+# the comparison, and the bar it has to clear
+# --------------------------------------------------------------------------
+
+
+async def _arm_with_trades(db_session, spec_version, spec_hash, strategy_id,
+                           pnls, since):
+    """A closed book with the given per-trade P&Ls, opened after `since`."""
+    from app.models.lab import LabTournament
+
+    t = LabTournament(spec_version=spec_version, spec_hash=spec_hash,
+                      valid_from=since, snapshot_at=since, status="active",
+                      protocol_note="test")
+    db_session.add(t)
+    await db_session.flush()
+    row = LabStrategy(tournament_id=t.id, strategy_id=strategy_id, name=strategy_id,
+                      version=spec_version, spec_hash=spec_hash,
+                      checkpoint_minutes=0, size_usd=D("10"), max_concurrent=10,
+                      max_exposure_usd=D("100"), rules={}, starting_equity=D("100"),
+                      cash=D("100"), peak_equity=D("100"), status="active")
+    db_session.add(row)
+    await db_session.flush()
+    for i, pnl in enumerate(pnls):
+        d = LabDecision(strategy_row_id=row.id, strategy_id=strategy_id,
+                        mint_address=f"{strategy_id}{i:03d}" + "z" * 30,
+                        checkpoint_at=since, checkpoint_minutes=0,
+                        decided_at=since, eligible=True)
+        db_session.add(d)
+        await db_session.flush()
+        db_session.add(LabPosition(
+            decision_id=d.id, strategy_row_id=row.id, strategy_id=strategy_id,
+            mint_address=d.mint_address, opened_at=since + timedelta(minutes=i + 1),
+            entry_price=D("0.001"), entry_liquidity_usd=D("50000"),
+            size_usd=D("10"), quantity=D("1000"), quantity_remaining=D("0"),
+            banked_proceeds_usd=D("0"), status="closed", entry_source="test",
+            closed_at=since + timedelta(hours=1), exit_price=D("0.001"),
+            exit_proceeds_usd=D("10") + D(str(pnl)), exit_reason="test",
+            peak_exec_multiple=D("1"), last_exec_multiple=D("1"),
+            last_open_value_usd=D("0")))
+    await db_session.flush()
+    return row
+
+
+async def test_the_verdict_refuses_to_call_it_below_the_bar(db_session):
+    """25 closed trades, fixed before any data arrived. Below that there is no
+    verdict in EITHER direction — a control that looks like it is winning on
+    six trades is not winning either."""
+    from app.copycontrol.api import MIN_CLOSED_TRADES, comparison
+    from app.pumpfun import spec as pspec
+
+    await _arm_with_trades(db_session, ccspec.SPEC_VERSION, ccspec.SPEC_HASH,
+                           "CPY-02", [1] * 6, NOW)
+    await _arm_with_trades(db_session, pspec.SPEC_VERSION, pspec.SPEC_HASH,
+                           "CPY-01", [50] * 6, NOW)
+
+    out = await comparison(db_session)
+    assert out["verdict"] == "not_enough_data"
+    assert out["paired_closed_trades"] == 6
+    assert out["bar"]["min_closed_trades"] == MIN_CLOSED_TRADES == 25
+
+
+async def test_a_signal_carried_by_one_trade_is_not_called_a_win(db_session):
+    """THE test. CPY-01 showed +52% on four trades and -22.6% with its single
+    best removed. Every false edge on this platform has had that shape, so a
+    lead that vanishes without its best trade is reported as luck, not as a
+    finding."""
+    from app.copycontrol.api import comparison
+    from app.pumpfun import spec as pspec
+
+    # Control: 25 small losses. Signal: the same, plus one enormous winner.
+    await _arm_with_trades(db_session, ccspec.SPEC_VERSION, ccspec.SPEC_HASH,
+                           "CPY-02", [-1] * 25, NOW)
+    await _arm_with_trades(db_session, pspec.SPEC_VERSION, pspec.SPEC_HASH,
+                           "CPY-01", [-1] * 24 + [500], NOW)
+
+    out = await comparison(db_session)
+    assert out["verdict"] == "carried_by_one_trade", out["verdict_detail"]
+
+
+async def test_a_signal_that_survives_dropping_its_best_is_called_a_win(db_session):
+    from app.copycontrol.api import comparison
+    from app.pumpfun import spec as pspec
+
+    await _arm_with_trades(db_session, ccspec.SPEC_VERSION, ccspec.SPEC_HASH,
+                           "CPY-02", [-1] * 25, NOW)
+    await _arm_with_trades(db_session, pspec.SPEC_VERSION, pspec.SPEC_HASH,
+                           "CPY-01", [3] * 25, NOW)
+
+    out = await comparison(db_session)
+    assert out["verdict"] == "signal_beats_control"
+
+
+async def test_a_control_that_wins_is_reported_as_a_real_answer(db_session):
+    """The random arm has beaten the designed one three times here. That
+    outcome must read as a finding, not as a failure to find one."""
+    from app.copycontrol.api import comparison
+    from app.pumpfun import spec as pspec
+
+    await _arm_with_trades(db_session, ccspec.SPEC_VERSION, ccspec.SPEC_HASH,
+                           "CPY-02", [2] * 25, NOW)
+    await _arm_with_trades(db_session, pspec.SPEC_VERSION, pspec.SPEC_HASH,
+                           "CPY-01", [-2] * 25, NOW)
+
+    out = await comparison(db_session)
+    assert out["verdict"] == "control_matches_or_wins"
+    assert "real answer" in out["verdict_detail"]
+
+
+async def test_trades_from_before_the_control_existed_are_excluded(db_session):
+    """CPY-01 traded for days before CPY-02 existed, including the 4.8x. Those
+    have no control and never will; counting them would compare one arm's whole
+    life against the other's fraction of it."""
+    from app.copycontrol.api import comparison
+    from app.pumpfun import spec as pspec
+
+    await _arm_with_trades(db_session, ccspec.SPEC_VERSION, ccspec.SPEC_HASH,
+                           "CPY-02", [1] * 3, NOW)
+    signal = await _arm_with_trades(db_session, pspec.SPEC_VERSION,
+                                    pspec.SPEC_HASH, "CPY-01", [1] * 3, NOW)
+    # An older, enormous winner from before the control started.
+    d = LabDecision(strategy_row_id=signal.id, strategy_id="CPY-01",
+                    mint_address="OLDWIN" + "q" * 38, checkpoint_at=NOW,
+                    checkpoint_minutes=0, decided_at=NOW, eligible=True)
+    db_session.add(d)
+    await db_session.flush()
+    db_session.add(LabPosition(
+        decision_id=d.id, strategy_row_id=signal.id, strategy_id="CPY-01",
+        mint_address=d.mint_address, opened_at=NOW - timedelta(days=3),
+        entry_price=D("0.001"), entry_liquidity_usd=D("50000"), size_usd=D("20"),
+        quantity=D("1000"), quantity_remaining=D("0"), banked_proceeds_usd=D("0"),
+        status="closed", entry_source="test", closed_at=NOW - timedelta(days=2),
+        exit_price=D("0.004"), exit_proceeds_usd=D("75"), exit_reason="leader_sold",
+        peak_exec_multiple=D("1"), last_exec_multiple=D("1"), last_open_value_usd=D("0")))
+    await db_session.flush()
+
+    out = await comparison(db_session)
+    sig = next(a for a in out["arms"] if a["role"] == "signal")
+    assert sig["closed_trades"] == 3, "the pre-control trade must not be counted"
+    assert float(sig["realised_pnl"]) == pytest.approx(3.0)
