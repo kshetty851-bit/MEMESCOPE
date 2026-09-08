@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { fetchCompoundBoard } from "@/lib/compound";
 import { fetchDepthBoard } from "@/lib/depth";
+import { fetchSocialBoard } from "@/lib/social";
 import { fetchMomentumBoard } from "@/lib/momentum";
 import { fetchPumpfunBoard } from "@/lib/pumpfun";
 import {
@@ -103,6 +104,14 @@ export function useDepthBoard() {
   return useQuery({
     queryKey: ["depth", "board"],
     queryFn: fetchDepthBoard,
+    refetchInterval: LAB_POLL_MS,
+  });
+}
+
+export function useSocialBoard() {
+  return useQuery({
+    queryKey: ["social", "board"],
+    queryFn: fetchSocialBoard,
     refetchInterval: LAB_POLL_MS,
   });
 }

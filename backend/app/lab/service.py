@@ -42,6 +42,7 @@ from app.models.lab import (
 )
 from app.models.market import TokenMarketSnapshot, TradingStatus
 from app.models.radar import RadarToken
+from app.models.social import PumpfunSocialSnapshot
 from app.models.token import DiscoveredToken
 from app.models.research_data import ResearchQuote, WalletFlowSnapshot
 
@@ -176,6 +177,13 @@ class LabService:
         # Additive: SPEC_HASH is taken over the STRATEGIES, not over the feature
         # builder, so adding a key here cannot drift a running tournament.
         f["is_pumpfun"] = Decimal(1) if await self._is_pumpfun(token_id) else Decimal(0)
+        # SOCIAL: attention rather than price. Every other feature here is
+        # derived from the market; these two come from how many people are
+        # commenting on the coin, which is orthogonal to all of them.
+        seen, velocity = await self._social(mint)
+        f["social_seen"] = Decimal(1) if seen else Decimal(0)
+        if velocity is not None:
+            f["social_reply_velocity"] = velocity
         f["liq"] = last.liquidity_usd if last.liquidity_usd and last.liquidity_usd > 0 else None
         f["mcap"] = last.market_cap if last.market_cap and last.market_cap > 0 else None
         f["vol1h"] = last.volume_1h
@@ -628,6 +636,37 @@ class LabService:
             .where(DiscoveredToken.id == token_id)
         )
         return bool(src) and src in self._pumpfun_programs()
+
+    async def _social(self, mint: str) -> tuple[bool, Decimal | None]:
+        """(seen in the social feed, replies per hour) for this mint.
+
+        Velocity needs TWO readings and returns None until there are two, so a
+        rule that requires it simply does not fire rather than firing on a
+        guess. That is deliberate: `reply_count` is cumulative, so a single
+        reading measures a coin's AGE as much as its interest, and acting on
+        one would rediscover survivorship.
+
+        The two most recent readings, not the first and last: a coin's comment
+        rate now is the question, and averaging over its whole life would blur
+        a burst into the weeks around it.
+        """
+        rows = list((await self._session.execute(
+            select(PumpfunSocialSnapshot.reply_count,
+                   PumpfunSocialSnapshot.observed_at)
+            .where(PumpfunSocialSnapshot.mint_address == mint,
+                   PumpfunSocialSnapshot.reply_count.is_not(None))
+            .order_by(PumpfunSocialSnapshot.observed_at.desc())
+            .limit(2)
+        )).all())
+        if not rows:
+            return False, None
+        if len(rows) < 2:
+            return True, None
+        (new_count, new_at), (old_count, old_at) = rows
+        hours = Decimal(str((new_at - old_at).total_seconds() / 3600))
+        if hours <= 0:
+            return True, None
+        return True, (Decimal(new_count) - Decimal(old_count)) / hours
 
     async def _mark(
         self, pos: LabPosition, now: datetime

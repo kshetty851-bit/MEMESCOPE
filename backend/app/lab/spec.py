@@ -112,7 +112,16 @@ FEATURE_LABELS = {
     "buy_route_ok": "Jupiter BUY quote",
     "sell_route_ok": "Jupiter SELL quote",
     "buy_impact_pct": "quoted buy price impact",
+    "is_pumpfun": "launched on pump.fun",
+    "social_seen": "in pump.fun's social feed",
+    "social_reply_velocity": "comments per hour",
 }
+
+#: Features that are a FLAG, stored as 1/0 so the ordinary comparison machinery
+#: can read them. `>= 1` is how the engine asks the question and is meaningless
+#: to a reader, so `describe()` states the fact instead. Display only — the
+#: hash is taken over the conditions, never over their prose.
+_FLAGS = {"is_pumpfun", "social_seen"}
 
 #: Features denominated in dollars, percent, or a bare count.
 _USD = {"liq", "vol1h"}
@@ -166,6 +175,8 @@ class Condition:
     def describe(self) -> str:
         """The condition in words, for readers rather than for the engine."""
         name = FEATURE_LABELS.get(self.feature, self.feature)
+        if self.feature in _FLAGS and self.op == "gte" and self.value == 1:
+            return name
         if self.op == "is_true":
             return f"{name} succeeded"
         if self.op == "gt_field":

@@ -581,6 +581,9 @@ class Settings(BaseSettings):
     #: only — nothing trades on it, and nothing can until reply VELOCITY has
     #: been measured against forward returns, which needs consecutive readings.
     FEATURE_PUMPFUN_SOCIAL_ENABLED: bool = False
+    #: The Social Lab: two $100 wallets differing only in whether they require
+    #: a coin's comment rate to be RISING. Off by default.
+    FEATURE_SOCIAL_LAB_ENABLED: bool = False
     #: How long social readings are kept. Longer than the other telemetry
     #: windows on purpose: the question asked of this table is reply VELOCITY
     #: against forward returns, which needs weeks of consecutive readings, and

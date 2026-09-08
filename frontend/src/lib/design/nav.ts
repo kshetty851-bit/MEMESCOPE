@@ -120,6 +120,15 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: IconSpark,
         status: "ready",
       },
+      // Social: attention rather than price — the first non-market signal
+      // tested here, and the only lab whose control is half the experiment
+      // rather than a footnote inside it.
+      {
+        href: "/social-lab",
+        label: "Social Lab",
+        icon: IconSpark,
+        status: "ready",
+      },
       // Momentum V2: the entry-rule grid, with its controls inside it.
       {
         href: "/momentum-lab",

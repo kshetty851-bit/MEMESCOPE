@@ -248,17 +248,38 @@ def test_the_sweep_covers_every_registry_that_holds_positions():
     reported liquidity, the condition that froze 72% of the Lab's book on
     2026-08-26 — and for the ratchet labs it is worse than a wrong number,
     because the +10% target is TESTED against those marks.
-    """
-    from app.compound import spec as cspec
-    from app.depth import spec as dspec
-    from app.lab import scheduler
-    from app.momentum import spec as mspec
-    from app.pumpfun import spec as pspec
 
-    expected = {spec.SPEC_VERSION, cspec.SPEC_VERSION, mspec.SPEC_VERSION,
-                dspec.SPEC_VERSION, pspec.SPEC_VERSION}
-    assert set(scheduler.LIVE_SPEC_VERSIONS) == expected
-    assert len(scheduler.LIVE_SPEC_VERSIONS) == len(expected), "no duplicates"
+    DISCOVERED, not enumerated. The first version of this test listed the five
+    registries by hand and so had the same defect as the code it guards: adding
+    the Social Lab made the TEST wrong rather than catching anything. Anything
+    under `app/` that declares a `SPEC_VERSION` and a `STRATEGIES` is a
+    tournament, and a tournament that holds positions must be swept.
+    """
+    import importlib
+    import pkgutil
+
+    import app
+    from app.lab import scheduler
+
+    found = {}
+    for mod in pkgutil.iter_modules(app.__path__):
+        if not mod.ispkg:
+            continue
+        try:
+            registry = importlib.import_module(f"app.{mod.name}.spec")
+        except ModuleNotFoundError:
+            continue
+        if hasattr(registry, "SPEC_VERSION") and hasattr(registry, "STRATEGIES"):
+            found[registry.SPEC_VERSION] = f"app.{mod.name}.spec"
+
+    assert len(found) >= 6, "registry discovery found less than we know exists"
+    missing = {v: m for v, m in found.items()
+               if v not in set(scheduler.LIVE_SPEC_VERSIONS)}
+    assert not missing, (
+        f"these tournaments hold positions nothing re-quotes: {missing}"
+    )
+    assert len(set(scheduler.LIVE_SPEC_VERSIONS)) == len(
+        scheduler.LIVE_SPEC_VERSIONS), "no duplicates"
 
 
 def test_the_beat_sweeps_every_live_tournament():

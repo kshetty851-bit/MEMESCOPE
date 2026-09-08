@@ -35,6 +35,7 @@ celery_app = Celery(
         "app.pumpfun.social_scheduler",
         "app.momentum.scheduler",
         "app.depth.scheduler",
+        "app.social.scheduler",
         "app.hq_ops.tasks",
     ],
 )
@@ -269,6 +270,11 @@ celery_app.conf.beat_schedule = {
     "pumpfun-social-tick": {
         "task": "app.pumpfun.social_scheduler.pumpfun_social_tick",
         "schedule": crontab(minute="*/10"),
+    },
+    # The Social Lab: attention against its own control.
+    "social-tick": {
+        "task": "app.social.scheduler.social_tick",
+        "schedule": crontab(minute="*"),
     },
     # Re-quotes what the Lab holds open so `settle` marks it at what a seller
     # would actually be offered, rather than at a CPMM model over a reported
