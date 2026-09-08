@@ -126,7 +126,7 @@ class TaskOutcome(BaseSchema):
 
 
 class LabHealthRow(BaseSchema):
-    """Whether the Strategy Lab is still producing evidence, or only ticks.
+    """Whether a Lab is still producing evidence, or only ticks.
 
     Every field is nullable because unmeasurable is not zero: "no stale
     positions" and "the stale positions could not be counted" are opposite
@@ -136,6 +136,10 @@ class LabHealthRow(BaseSchema):
 
     measured: bool
     detail: str
+    #: Which experiment this row is about, in the words a reader uses. Without
+    #: it a list of rows is a list of anonymous numbers, and an incident naming
+    #: "the Lab" while meaning another one sends somebody to the wrong book.
+    label: str | None = None
     open_positions: int | None = None
     stale_positions: int | None = None
     stale_pct: float | None = None
@@ -191,6 +195,12 @@ class OperationsHealth(BaseSchema):
     #: The Strategy Lab's own evidence quality. Reported beside the components
     #: and, like `tasks`, deliberately outside `overall`: a Lab that has stopped
     #: measuring is not a sick database.
+    #: EVERY lab whose feature flag is on, measured the same way. Derived from
+    #: the flags rather than listed, so HQ cannot end up watching a tournament
+    #: that was switched off months ago while missing the one that replaced it
+    #: — which is exactly what it was doing on 2026-09-08: reporting on V7 and
+    #: Compound, both stopped, and on neither PumpFun nor its control.
+    labs: list[LabHealthRow] = []
     lab: LabHealthRow | None = None
     #: The Compound Lab, measured by the same rules under its own registry.
     #: Optional for the same reason `lab` is: a payload written before the

@@ -1065,58 +1065,74 @@ describe("Vault — the execution wallet custodian", () => {
 });
 
 describe("Karthik's Strategy Lab watch", () => {
-  const labLines = (over: Record<string, unknown> | undefined) => {
+  // Repointed 2026-09-08. These lines read `health.labs` — every lab whose
+  // feature flag is ON — rather than `health.lab`, which is pinned to V7.
+  // V7 was switched off that day, so the old lines reported on a stopped
+  // tournament while PumpFun and its control ran unwatched.
+  const labLines = (labs: unknown[] | undefined) => {
     const state = build({
       operations: at(
         operations({
-          health: { ...(operations() as never as { health: object }).health, lab: over },
+          health: { ...(operations() as never as { health: object }).health, labs },
         }) as never,
       ),
     });
-    const metrics = state.employees.karthik!.metrics;
     return Object.fromEntries(
-      metrics.filter((m) => m.label.startsWith("Lab ")).map((m) => [m.label, m.value]),
+      state.employees.karthik!.metrics.map((m) => [m.label, m.value]),
     );
   };
 
-  it("shows the tournament on the desk it was assigned to", () => {
-    const lines = labLines({
-      measured: true,
-      detail: "ok",
-      open_positions: 42,
-      quote_backed_pct: 96.4,
-      minutes_since_decision: 7.2,
-    });
-    expect(lines["Lab open positions"]).toBe("42");
-    expect(lines["Lab book priced"]).toBe("96% quote-backed");
-    expect(lines["Lab last decision"]).toBe("7 min ago");
+  it("names every lab that is actually running", () => {
+    const lines = labLines([
+      { measured: true, detail: "ok", label: "PumpFun", open_positions: 3,
+        quote_backed_pct: 96.4, minutes_since_decision: 7.2 },
+      { measured: true, detail: "ok", label: "Control CPY-02", open_positions: 2,
+        quote_backed_pct: 88.0, minutes_since_decision: 30.4 },
+    ]);
+    expect(lines["Labs running"]).toBe("PumpFun, Control CPY-02");
+    expect(lines["Lab positions"]).toBe("5 across 2 labs");
   });
 
-  it("reports an unread probe as unknown rather than as zero", () => {
+  it("reports the WORST book and the LONGEST silence, not an average", () => {
+    // One lab unable to price its positions is the thing worth knowing, and an
+    // average hides it behind the healthy ones.
+    const lines = labLines([
+      { measured: true, detail: "ok", label: "A", quote_backed_pct: 99,
+        minutes_since_decision: 2 },
+      { measured: true, detail: "ok", label: "B", quote_backed_pct: 40,
+        minutes_since_decision: 180 },
+    ]);
+    expect(lines["Worst book priced"]).toBe("40% quote-backed");
+    expect(lines["Longest silence"]).toBe("180 min ago");
+  });
+
+  it("says NONE rather than zero when no lab is running", () => {
+    // "0 positions" would read as a frozen book. An empty floor is different.
+    const lines = labLines([]);
+    expect(lines["Labs running"]).toBe("none");
+    // And no lab lines beyond that one — "0 positions" would read as a frozen
+    // book rather than an empty floor. Note Karthik's wallet screens have their
+    // OWN "Open positions" row, which is why the lab one is named differently.
+    expect(lines["Lab positions"]).toBeUndefined();
+  });
+
+  it("excludes a lab whose probe could not read it", () => {
     // The distinction the whole Lab health module exists for: "nothing is
-    // stalled" and "the probe could not read" must never render alike, or a
-    // broken probe reads as a healthy tournament.
-    expect(labLines({ measured: false, detail: "could not read" })).toEqual({
-      "Lab open positions": null,
-      "Lab book priced": null,
-      "Lab last decision": null,
-    });
+    // stalled" and "the probe could not read" must never render alike.
+    const lines = labLines([
+      { measured: false, detail: "probe failed", label: "PumpFun" },
+    ]);
+    expect(lines["Labs running"]).toBe("none");
   });
 
-  it("survives a payload from before the Lab probe existed", () => {
-    expect(labLines(undefined)["Lab open positions"]).toBeNull();
+  it("survives a payload from before the multi-lab probe existed", () => {
+    expect(labLines(undefined)["Labs running"]).toBe("none");
   });
 
   it("still leads with the wallet this desk is for", () => {
     const metrics = build().employees.karthik!.metrics;
     expect(metrics[0]!.label).toBe("Wallet");
-    expect(metrics.some((m) => m.label === "Lab open positions")).toBe(true);
-  });
-
-  it("distinguishes a genuinely empty book from an unread one", () => {
-    // 0 open positions is a real reading and must print as 0.
-    expect(labLines({ measured: true, detail: "ok", open_positions: 0 })[
-      "Lab open positions"
-    ]).toBe("0");
+    expect(metrics.some((m) => m.label === "Labs running")).toBe(true);
   });
 });
+

@@ -74,6 +74,9 @@ export interface QueueHealth {
 export interface LabHealthRow {
   measured: boolean;
   detail: string;
+  /** Which experiment this row is about. Absent on payloads predating the
+   *  multi-lab probe, which is why it is optional rather than required. */
+  label?: string | null;
   open_positions?: number | null;
   stale_positions?: number | null;
   stale_pct?: number | null;
@@ -91,6 +94,10 @@ export interface OperationsHealth {
   queues: QueueHealth;
   /** Optional: older payloads predate the Lab probe. */
   lab?: LabHealthRow;
+  /** EVERY lab whose feature flag is on. Derived server-side from the flags,
+   *  so HQ cannot end up watching a tournament switched off months ago while
+   *  missing the one that replaced it — which is what `lab` alone was doing. */
+  labs?: LabHealthRow[];
   overall: ComponentStatus;
   unmeasured: number;
   environment: string;

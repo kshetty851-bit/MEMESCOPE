@@ -1595,29 +1595,58 @@ function deriveActivity(
  * priced, and how long since anything was decided.
  */
 function karthikLabMetrics(operations: HqOperations | null): Metric[] {
-  const lab = operations?.health.lab;
-  const ok = lab?.measured ? lab : null;
+  // EVERY running lab, not the one this was written for. `health.lab` is
+  // pinned to V7, which was switched off on 2026-09-08 — so these three lines
+  // reported on a stopped tournament while PumpFun and its control ran
+  // unwatched. `health.labs` is derived from the feature flags and contains
+  // only what is actually running, so it cannot drift the same way again.
+  const labs = operations?.health.labs?.filter((l) => l.measured) ?? [];
   const mins = (v: number | null | undefined): string | null =>
     v === null || v === undefined ? null : `${Math.round(v)} min ago`;
+
+  if (labs.length === 0) {
+    // Not zero. No lab is running, and saying "0 positions" would read as a
+    // frozen book rather than as an empty floor.
+    return [
+      {
+        label: "Labs running",
+        value: operations ? "none" : null,
+        source: "GET /hq · health.labs",
+      },
+    ];
+  }
+
+  const open = labs.reduce((n, l) => n + (l.open_positions ?? 0), 0);
+  // The WORST book, not the average: one lab unable to price its positions is
+  // the thing worth knowing, and an average hides it behind the healthy ones.
+  const priced = labs
+    .map((l) => l.quote_backed_pct)
+    .filter((v): v is number => v !== null && v !== undefined);
+  // The longest silence, for the same reason.
+  const quiet = labs
+    .map((l) => l.minutes_since_decision)
+    .filter((v): v is number => v !== null && v !== undefined);
+
   return [
     {
-      label: "Lab open positions",
-      value: ok?.open_positions === null || ok?.open_positions === undefined
-        ? null
-        : String(ok.open_positions),
-      source: "GET /hq · health.lab.open_positions",
+      label: "Labs running",
+      value: labs.map((l) => l.label ?? "?").join(", "),
+      source: "GET /hq · health.labs[].label",
     },
     {
-      label: "Lab book priced",
-      value: ok?.quote_backed_pct === null || ok?.quote_backed_pct === undefined
-        ? null
-        : `${ok.quote_backed_pct.toFixed(0)}% quote-backed`,
-      source: "GET /hq · health.lab.quote_backed_pct",
+      label: "Lab positions",
+      value: `${open} across ${labs.length} lab${labs.length === 1 ? "" : "s"}`,
+      source: "GET /hq · health.labs[].open_positions",
     },
     {
-      label: "Lab last decision",
-      value: mins(ok?.minutes_since_decision),
-      source: "GET /hq · health.lab.minutes_since_decision",
+      label: "Worst book priced",
+      value: priced.length ? `${Math.min(...priced).toFixed(0)}% quote-backed` : null,
+      source: "GET /hq · health.labs[].quote_backed_pct",
+    },
+    {
+      label: "Longest silence",
+      value: quiet.length ? mins(Math.max(...quiet)) : null,
+      source: "GET /hq · health.labs[].minutes_since_decision",
     },
   ];
 }

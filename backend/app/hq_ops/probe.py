@@ -312,6 +312,65 @@ def _roll_up(statuses: list[ComponentStatus]) -> ComponentStatus:
     return max(measured, key=lambda status: _SEVERITY[status])
 
 
+#: Every lab HQ can watch, with the switch that says whether it is running.
+#:
+#: DERIVED, not listed at the call site. HQ spent 2026-09-08 reporting on V7
+#: and the Compound Lab — both deliberately stopped, both raising a permanent
+#: `no-decisions` condition — while watching neither PumpFun nor the control
+#: arm that had replaced them. A watch that has to be edited every time a lab
+#: changes will eventually be watching only history.
+#:
+#: Adding a lab means adding a line here, and the alternative — a probe per lab
+#: — is what produced the drift in the first place.
+LAB_REGISTRIES: tuple[tuple[str, str, str], ...] = (
+    ("V7", "app.lab.spec", "FEATURE_V7_LAB_ENABLED"),
+    ("Compound", "app.compound.spec", "FEATURE_COMPOUND_LAB_ENABLED"),
+    ("Momentum V2", "app.momentum.spec", "FEATURE_MOMENTUM_LAB_ENABLED"),
+    ("Depth", "app.depth.spec", "FEATURE_DEPTH_LAB_ENABLED"),
+    ("PumpFun", "app.pumpfun.spec", "FEATURE_PUMPFUN_LAB_ENABLED"),
+    ("Social", "app.social.spec", "FEATURE_SOCIAL_LAB_ENABLED"),
+    ("Control CPY-02", "app.copycontrol.spec", "FEATURE_COPYCONTROL_ENABLED"),
+)
+
+
+def _lab_is_running(flag: str) -> bool:
+    """A lab counts as running only if BOTH its own switch and the master are on."""
+    from app.core.config import settings
+
+    return bool(getattr(settings, "FEATURE_LAB_ENABLED", False)
+                and getattr(settings, flag, False))
+
+
+async def _probe_labs(now: datetime) -> list[LabHealthRow]:
+    """One row per RUNNING lab, measured by the Lab's own rules.
+
+    A stopped lab is absent rather than reported as quiet. That distinction is
+    the whole fix: a row for a switched-off tournament reads as silence where
+    there should be decisions, which is how `lab:no-decisions` became a
+    permanent alarm for something nobody wanted running.
+    """
+    import importlib
+
+    from app.db.session import SessionFactory
+    from app.lab.health import read as read_lab
+
+    rows: list[LabHealthRow] = []
+    for label, module, flag in LAB_REGISTRIES:
+        if not _lab_is_running(flag):
+            continue
+        try:
+            registry = importlib.import_module(module)
+            async with SessionFactory() as session:
+                reading = await read_lab(session, now=now, registry=registry)
+            rows.append(LabHealthRow(label=label, **reading.as_dict()))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("hq_lab_probe_failed", lab=label, error=str(exc))
+            rows.append(LabHealthRow(
+                measured=False, label=label,
+                detail=f"{label} health probe failed: {exc}"))
+    return rows
+
+
 async def _probe_lab(now: datetime) -> LabHealthRow:
     """The Strategy Lab's evidence quality, asked of the Lab itself.
 
@@ -328,10 +387,16 @@ async def _probe_lab(now: datetime) -> LabHealthRow:
     from app.db.session import SessionFactory
     from app.lab.health import read as read_lab
 
+    # A stopped lab is NOT measured-and-quiet. Returning a row for it makes
+    # every downstream silence check fire forever on a tournament somebody
+    # deliberately switched off.
+    if not _lab_is_running("FEATURE_V7_LAB_ENABLED"):
+        return LabHealthRow(measured=False, label="V7",
+                            detail="V7 is switched off; nothing to measure.")
     try:
         async with SessionFactory() as session:
             reading = await read_lab(session, now=now)
-        return LabHealthRow(**reading.as_dict())
+        return LabHealthRow(label="V7", **reading.as_dict())
     except Exception as exc:  # noqa: BLE001
         logger.warning("hq_lab_probe_failed", error=str(exc))
         return LabHealthRow(measured=False, detail=f"Lab health probe failed: {exc}")
@@ -352,10 +417,13 @@ async def _probe_compound(now: datetime) -> LabHealthRow:
     from app.db.session import SessionFactory
     from app.lab.health import read as read_lab
 
+    if not _lab_is_running("FEATURE_COMPOUND_LAB_ENABLED"):
+        return LabHealthRow(measured=False, label="Compound",
+                            detail="The Compound Lab is switched off; nothing to measure.")
     try:
         async with SessionFactory() as session:
             reading = await read_lab(session, now=now, registry=cspec)
-        return LabHealthRow(**reading.as_dict())
+        return LabHealthRow(label="Compound", **reading.as_dict())
     except Exception as exc:  # noqa: BLE001
         logger.warning("hq_compound_probe_failed", error=str(exc))
         return LabHealthRow(
@@ -389,7 +457,7 @@ async def snapshot(session: AsyncSession, *, now: datetime | None = None) -> Ope
     """
     moment = now or datetime.now(UTC)
     (disk, redis_health, database, worker, scheduler, queues, task_rows,
-     lab_row, compound_row, wallet_row) = await asyncio.gather(
+     lab_row, compound_row, wallet_row, lab_rows) = await asyncio.gather(
         _probe_disk(),
         _probe_redis(),
         _probe_database(session),
@@ -400,6 +468,7 @@ async def snapshot(session: AsyncSession, *, now: datetime | None = None) -> Ope
         _probe_lab(moment),
         _probe_compound(moment),
         _probe_wallet(moment),
+        _probe_labs(moment),
     )
 
     parts: list[ComponentStatus] = [
@@ -438,6 +507,7 @@ async def snapshot(session: AsyncSession, *, now: datetime | None = None) -> Ope
         tasks_failing=len(task_outcomes.failing(task_rows)),
         lab=lab_row,
         compound=compound_row,
+        labs=lab_rows,
         wallet=wallet_row,
         overall=_roll_up(parts),
         unmeasured=unmeasured,
