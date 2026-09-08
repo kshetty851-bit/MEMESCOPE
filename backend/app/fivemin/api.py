@@ -1,4 +1,4 @@
-"""The Hold-Horizon Lab's board — two arms, so a multi-wallet board.
+"""The Graduation Hold Lab's board — two arms, so a multi-wallet board.
 
 Serves `lab.board.build`, the same builder Depth, Momentum and Social use,
 rather than the Compound Lab's single-wallet `build_board`. That one selects
@@ -23,16 +23,19 @@ from app.lab.api import build_trades
 router = APIRouter(prefix="/fivemin", tags=["fivemin"])
 
 DISCLOSURE = (
-    "Run as refutation, not expectation. The FIFTEEN-minute hold has already "
-    "been measured on 1,348 real executed positions and returned about -8.5% "
-    "net per trade — the 9% with no price at the horizon were the rugs, not "
-    "missing data. The FIVE-minute figure that motivated this lab (+$504.73 on "
-    "a $100 book) came from a different population, pump.fun graduations, and "
-    "rested on ONE coin of 138 doing 47.97x: remove it and the same cohort "
-    "returns +$35.12, median trade 1.037x. What is new here is that both "
-    "horizons take the SAME entry at the SAME instant with the SAME $10 stake, "
-    "so the difference between the two arms is the clock and nothing else. "
-    "There is no wallet ratchet and the stake never scales."
+    "Run as refutation, not expectation. This lab buys the pump.fun graduation "
+    "cohort five minutes after a coin completes — five minutes because only 48% "
+    "of graduates have any market data at graduation itself, while 99% do by "
+    "+5. The only entry condition is $100,000 of liquidity, and that is "
+    "execution fidelity rather than a signal: below it, 7-8% of sells cannot "
+    "route at all, and an exit that cannot happen on time would measure the "
+    "delay instead of the clock. The FIFTEEN-minute hold has already measured "
+    "about -8.5% net per trade on 1,348 real positions. The FIVE-minute figure "
+    "that motivated this (+$504.73 on a $100 book) rested on ONE coin of 138 "
+    "doing 47.97x: remove it and the same cohort returns +$35.12, median trade "
+    "1.037x. What is new is that both arms now trade the population the number "
+    "actually came from, take the same entry at the same instant, and differ "
+    "only in the clock. No wallet ratchet, and the stake never scales."
 )
 
 
@@ -51,6 +54,9 @@ async def board(session: DbSession) -> dict[str, Any]:
     out["stake_usd"] = str(fmspec.STAKE_USD)
     out["sizing_scales"] = fmspec.SIZING_SCALES
     out["cycle_enabled"] = fmspec.CYCLE_ENABLED
+    out["candidate_source"] = fmspec.CANDIDATE_SOURCE
+    out["checkpoint_minutes"] = fmspec.CHECKPOINT_MINUTES
+    out["liquidity_floor"] = str(fmspec.LIQUIDITY_FLOOR)
     return out
 
 

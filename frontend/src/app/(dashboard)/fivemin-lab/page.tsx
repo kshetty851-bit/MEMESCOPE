@@ -7,12 +7,13 @@ import { useFiveMinBoard } from "@/hooks/use-fivemin";
 import type { FiveMinWallet } from "@/types/fivemin";
 
 /**
- * THE HOLD-HORIZON LAB.
+ * THE GRADUATION HOLD LAB.
  *
- * Two wallets, identical in every respect except when they sell: one at five
- * minutes, one at fifteen. They take the same entry object at the same instant
- * and stake the same flat $10, so the gap between their records is the clock
- * and nothing else.
+ * Two wallets buying the pump.fun graduation cohort — the population the
+ * five-minute number actually came from — identical in every respect except
+ * when they sell: one at five minutes, one at fifteen. They take the same
+ * entry object at the same instant and stake the same flat $10, so the gap
+ * between their records is the clock and nothing else.
  *
  * The disclosure is rendered FIRST and is not collapsible. The fifteen-minute
  * hold has already measured about -8.5% net per trade on 1,348 real positions,
@@ -100,9 +101,9 @@ export default function FiveMinLabPage() {
   return (
     <div className="flex flex-col gap-4 p-4 lg:p-6">
       <Toolbar
-        eyebrow="Hold-Horizon Lab"
-        title="Same entry, same stake. One sells at five minutes, one at fifteen."
-        description="Two $100 wallets, ten trades of $10 each. They buy the same token at the same instant, so the only thing that can separate their records is the clock. No wallet ratchet, and the stake never follows the balance. Nothing here is real money."
+        eyebrow="Graduation Hold Lab"
+        title="Buy the graduation. Sell at five minutes, or at fifteen."
+        description="Two $100 wallets, ten trades of $10 each, buying pump.fun graduations five minutes after they complete. Both take the same coin at the same instant, so the only thing that separates their records is the clock. The $100k liquidity floor is execution fidelity, not a signal. Nothing here is real money."
       />
 
       {/* Deliberately above the numbers, and deliberately not collapsible. */}

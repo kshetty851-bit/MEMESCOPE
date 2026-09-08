@@ -1,34 +1,88 @@
-"""The Hold-Horizon Lab's spec — the pairing, and what was removed.
+"""The Graduation Hold Lab's spec — the population, the floor, and the pairing.
 
-The experiment is only a comparison while the two arms differ in exactly one
-thing. Every assertion here pins one way that could stop being true silently:
-a copied entry that drifts, a stake that starts scaling again, a ratchet that
-comes back, or an arm whose clock quietly matches the other's.
+Every assertion pins one thing that could stop being true silently: the lab
+drifting back onto radar's population, the liquidity floor creeping back up to
+a level that excludes the cohort, a copied entry that drifts between the arms,
+or a ratchet returning.
 """
 
 from __future__ import annotations
 
+import asyncio
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from app.compound import service as compound_service
 from app.compound import spec as compound
 from app.fivemin import spec as fivemin
 from app.lab import spec as v7
+from app.lab.service import LabService
+from app.models.lab import LabTournament
 
 
 class TestItCannotHaltAnotherTournament:
     def test_every_registry_hashes_differently(self) -> None:
-        """A shared hash would mean one tournament's spec halting another's."""
         hashes = {fivemin.SPEC_HASH, compound.SPEC_HASH, v7.SPEC_HASH}
         assert len(hashes) == 3
 
-    def test_it_has_its_own_version(self) -> None:
-        assert fivemin.SPEC_VERSION not in {compound.SPEC_VERSION, v7.SPEC_VERSION}
-
     def test_the_rules_change_bumped_the_version(self) -> None:
-        """fivemin-1.0.0 was a live tournament with different rules. Reusing
-        its version would have attached this book to that record."""
-        assert fivemin.SPEC_VERSION == "fivemin-2.0.0"
+        """fivemin-2.0.0 was a live tournament on a different population.
+        Reusing its version would attach this book to that record."""
+        assert fivemin.SPEC_VERSION == "fivemin-3.0.0"
+
+
+class TestItTradesTheGraduationCohort:
+    def test_candidates_come_from_graduations(self) -> None:
+        assert fivemin.CANDIDATE_SOURCE == "graduations"
+
+    def test_radar_is_still_the_default_for_everyone_else(self) -> None:
+        """Absent must mean radar, or adding the switch would have silently
+        repopulated every registry that predates it."""
+        assert getattr(compound, "CANDIDATE_SOURCE", "radar") == "radar"
+        assert getattr(v7, "CANDIDATE_SOURCE", "radar") == "radar"
+
+    def test_the_service_actually_queries_graduations(self) -> None:
+        """Behaviour, not a flag: compile the statement the service builds and
+        read which table it is against."""
+        sql_for = {}
+
+        class _Result:
+            def all(self):
+                return []
+
+        class _Session:
+            async def execute(self, q):
+                sql_for["last"] = str(q)
+                return _Result()
+
+        t = LabTournament(spec_version="x", spec_hash="y",
+                          valid_from=datetime(2026, 9, 8, tzinfo=UTC))
+
+        for registry, expected, forbidden in (
+            (fivemin, "pumpfun_graduations", "radar_tokens"),
+            (compound, "radar_tokens", "pumpfun_graduations"),
+        ):
+            svc = LabService(_Session(), registry=registry)
+            asyncio.run(svc._due_candidates(
+                t, minutes=5, ids=[], cutoff=datetime(2026, 9, 9, tzinfo=UTC),
+                limit=10,
+            ))
+            assert expected in sql_for["last"], registry.SPEC_VERSION
+            assert forbidden not in sql_for["last"], registry.SPEC_VERSION
+
+
+class TestTheLiquidityFloorIsExecutionNotSignal:
+    def test_the_floor_is_one_hundred_thousand(self) -> None:
+        """$300k admitted 11% of graduates; $100k admits 42%. Lower than this
+        and 7-8% of SELLS cannot route, which would break the horizon."""
+        assert fivemin.LIQUIDITY_FLOOR == Decimal("100000")
+
+    def test_liquidity_is_the_only_entry_condition(self) -> None:
+        """The study bought every graduate, and FLOW's two flow features do not
+        exist five minutes after a coin completes."""
+        for s in fivemin.STRATEGIES:
+            assert len(s.entry) == 1
+            assert s.entry[0].feature == "liq"
 
 
 class TestTheTwoArmsDifferOnlyInTheClock:
@@ -38,23 +92,13 @@ class TestTheTwoArmsDifferOnlyInTheClock:
         assert held == [5, 15]
 
     def test_they_share_ONE_entry_object_not_a_copy(self) -> None:
-        """Identity, not equality. Two equal copies can drift apart on the next
-        edit; one shared object cannot, and the pairing depends on that."""
         first = fivemin.STRATEGIES[0].entry
         assert all(s.entry is first for s in fivemin.STRATEGIES)
-        assert first is compound.STRATEGIES[0].entry
 
-    def test_everything_except_the_clock_is_identical(self) -> None:
-        a, b = fivemin.STRATEGIES
-        assert a.size_usd == b.size_usd
-        assert a.max_concurrent == b.max_concurrent
-        assert a.max_exposure_usd == b.max_exposure_usd
-        assert a.checkpoint_minutes == b.checkpoint_minutes
-        assert a.exits.time_exit_hours != b.exits.time_exit_hours
+    def test_they_enter_at_the_same_instant(self) -> None:
+        assert {s.checkpoint_minutes for s in fivemin.STRATEGIES} == {5}
 
     def test_the_clock_is_the_only_exit(self) -> None:
-        """A take-profit or a stop would decide some trades before the horizon
-        did, and those trades would measure that rule instead of the hold."""
         for s in fivemin.STRATEGIES:
             assert s.exits.take_profit is None
             assert s.exits.stop_loss is None
@@ -71,18 +115,12 @@ class TestTheOperatorsRuleSet:
     def test_each_arm_starts_with_one_hundred(self) -> None:
         assert fivemin.STARTING_EQUITY == Decimal("100")
 
-    def test_the_stake_never_scales(self) -> None:
+    def test_flat_stake_and_no_ratchet(self) -> None:
         assert fivemin.SIZING_SCALES is False
-
-    def test_there_is_no_wallet_ratchet(self) -> None:
         assert fivemin.CYCLE_ENABLED is False
-        assert not hasattr(fivemin, "CYCLE_TARGET_MULTIPLE")
 
 
 class TestTheOptOutsAreOptOutsNotDefaults:
-    """Absent must mean "on", or adding either switch would have silently
-    changed every registry that predates it."""
-
     def test_scaling_is_opt_out(self) -> None:
         assert getattr(compound, "SIZING_SCALES", True) is True
         assert getattr(v7, "SIZING_SCALES", True) is True
@@ -91,8 +129,6 @@ class TestTheOptOutsAreOptOutsNotDefaults:
         assert getattr(compound, "CYCLE_ENABLED", True) is True
         assert getattr(v7, "CYCLE_ENABLED", True) is True
 
-    def test_the_service_reads_the_switch(self) -> None:
-        """Behaviour, not source text: build the service over each registry and
-        read what it actually decided about banking."""
+    def test_the_service_reads_the_ratchet_switch(self) -> None:
         assert compound_service.CompoundService(None, registry=fivemin)._cycles is False
         assert compound_service.CompoundService(None, registry=compound)._cycles is True

@@ -41,6 +41,7 @@ from app.models.lab import (
     LabTournament,
 )
 from app.models.market import TokenMarketSnapshot, TradingStatus
+from app.models.graduation import PumpfunGraduation
 from app.models.radar import RadarToken
 from app.models.social import PumpfunSocialSnapshot
 from app.models.token import DiscoveredToken
@@ -266,6 +267,74 @@ class LabService:
 
     # --- decisions ----------------------------------------------------------
 
+    async def _due_candidates(
+        self, tournament: LabTournament, *, minutes: int, ids: list,
+        cutoff: datetime, limit: int,
+    ) -> list:
+        """The (token_id, mint, detected_at) triples due at this checkpoint.
+
+        Radar is the default and every registry that predates this reads it, so
+        nothing changes for them. A registry may set
+
+            CANDIDATE_SOURCE = "graduations"
+
+        to draw from the pump.fun graduation cohort instead. That exists because
+        a hypothesis taken FROM the graduation study was being tested on radar's
+        population: only 3.6% of the tokens the Compound Lab judged had ever
+        graduated, so the lab was answering a question about a different set of
+        coins than the one its number came from.
+
+        Both branches apply the same two bounds. `<= cutoff` is the checkpoint
+        having arrived. `>= valid_from - minutes` keeps this forward evidence:
+        a coin whose checkpoint fell before the tournament was frozen is history
+        this program has already inspected (mission §15), and admitting it would
+        let a known outcome in through the back door.
+        """
+        source = getattr(self._spec, "CANDIDATE_SOURCE", "radar")
+        floor = tournament.valid_from - timedelta(minutes=minutes)
+
+        if source == "graduations":
+            # Joined to DiscoveredToken because the engine keys everything on
+            # token_id; a graduation we have never discovered has no market
+            # series to observe and so cannot be judged at all.
+            q = (
+                select(DiscoveredToken.id, PumpfunGraduation.mint_address,
+                       PumpfunGraduation.first_seen_complete_at)
+                .join(DiscoveredToken,
+                      DiscoveredToken.mint_address == PumpfunGraduation.mint_address)
+                .where(
+                    PumpfunGraduation.first_seen_complete_at <= cutoff,
+                    PumpfunGraduation.first_seen_complete_at >= floor,
+                    ~select(LabDecision.id).where(
+                        LabDecision.mint_address == PumpfunGraduation.mint_address,
+                        LabDecision.strategy_row_id.in_(ids),
+                    ).exists(),
+                )
+                .order_by(PumpfunGraduation.first_seen_complete_at)
+                .limit(limit)
+            )
+        elif source == "radar":
+            q = (
+                select(RadarToken.token_id, RadarToken.mint_address,
+                       RadarToken.first_detected_at)
+                .where(
+                    RadarToken.first_detected_at <= cutoff,
+                    RadarToken.first_detected_at >= floor,
+                    ~select(LabDecision.id).where(
+                        LabDecision.mint_address == RadarToken.mint_address,
+                        LabDecision.strategy_row_id.in_(ids),
+                    ).exists(),
+                )
+                .order_by(RadarToken.first_detected_at)
+                .limit(limit)
+            )
+        else:
+            # Loud, because a typo here would silently trade nothing at all and
+            # look identical to a quiet market.
+            raise ValueError(f"unknown CANDIDATE_SOURCE {source!r}")
+
+        return list((await self._session.execute(q)).all())
+
     async def evaluate_due(self, *, now: datetime, limit: int = 120) -> dict[str, Any]:
         """Judge every (token, checkpoint) that is due and unjudged.
 
@@ -295,24 +364,9 @@ class LabService:
         for minutes, rows in sorted(by_checkpoint.items()):
             cutoff = now - timedelta(minutes=minutes)
             ids = [r.id for r in rows]
-            due = list((await self._session.execute(
-                select(RadarToken.token_id, RadarToken.mint_address,
-                       RadarToken.first_detected_at)
-                .where(
-                    RadarToken.first_detected_at <= cutoff,
-                    # Only tokens whose checkpoint falls at or after the freeze
-                    # are V6 forward evidence; everything earlier is history
-                    # this program has already inspected (mission §15).
-                    RadarToken.first_detected_at >= tournament.valid_from
-                    - timedelta(minutes=minutes),
-                    ~select(LabDecision.id).where(
-                        LabDecision.mint_address == RadarToken.mint_address,
-                        LabDecision.strategy_row_id.in_(ids),
-                    ).exists(),
-                )
-                .order_by(RadarToken.first_detected_at)
-                .limit(limit)
-            )).all())
+            due = await self._due_candidates(
+                tournament, minutes=minutes, ids=ids, cutoff=cutoff, limit=limit
+            )
 
             for token_id, mint, detected_at in due:
                 checkpoint_at = detected_at + timedelta(minutes=minutes)

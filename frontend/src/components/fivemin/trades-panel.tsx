@@ -57,9 +57,13 @@ function sum(rows: LabTrade[]): number {
 
 /** Which arm a row belongs to. Both arms buy the SAME mints at the same
  *  instant, so without this column the record reads as every token duplicated
- *  for no visible reason. `HOLD-05` -> `5m`. */
+ *  for no visible reason. `GRAD-05` -> `5m`.
+ *
+ *  Matched on the trailing number rather than a prefix: the ids have already
+ *  moved once (HOLD- to GRAD-) and a prefix match would have gone silently
+ *  blank rather than failing. */
 function arm(t: LabTrade): string {
-  const m = /HOLD-(\d+)/.exec(t.strategy_id ?? "");
+  const m = /-(\d+)$/.exec(t.strategy_id ?? "");
   return m?.[1] ? `${Number(m[1])}m` : (t.strategy_id ?? "—");
 }
 

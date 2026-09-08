@@ -1,4 +1,4 @@
-/** The Hold-Horizon Lab board. Shapes mirror the server; accounting is server-side. */
+/** The Graduation Hold Lab board. Shapes mirror the server; accounting is server-side. */
 
 export interface FiveMinPosition {
   id: string;
@@ -53,4 +53,10 @@ export interface FiveMinBoard {
   sizing_scales?: boolean;
   /** False by design: the wallet ratchet was removed. */
   cycle_enabled?: boolean;
+  /** "graduations" — the cohort the hypothesis came from. */
+  candidate_source?: string;
+  /** Minutes after graduation at which a coin is judged. */
+  checkpoint_minutes?: number;
+  /** Execution fidelity, not a signal. */
+  liquidity_floor?: string;
 }
