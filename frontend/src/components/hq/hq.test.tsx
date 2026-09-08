@@ -57,9 +57,23 @@ describe("navigation", () => {
   });
 
   it("does not disturb the existing destinations", () => {
+    // The nav was deliberately cut back on 2026-09-08 to Scanner, Track record,
+    // Paper wallet, Real wallet and HQ. Trending, New launches, Watchlist and
+    // every lab page were removed with their routes. This list is the CURRENT
+    // intended set, so the test still catches an accidental deletion of what
+    // remains rather than pinning a nav that no longer exists.
     const hrefs = NAV_GROUPS.flatMap((group) => group.items).map((item) => item.href);
-    for (const existing of ["/command", "/trending", "/launches", "/record", "/watchlist", "/wallet"]) {
+    for (const existing of ["/command", "/record", "/wallet", "/real-wallet", "/hq"]) {
       expect(hrefs).toContain(existing);
+    }
+  });
+
+  it("does not resurrect the removed destinations", () => {
+    const hrefs = NAV_GROUPS.flatMap((group) => group.items).map((item) => item.href);
+    for (const gone of ["/trending", "/launches", "/watchlist", "/strategy-lab",
+                        "/compound-lab", "/depth-lab", "/social-lab",
+                        "/momentum-lab", "/pumpfun-lab"]) {
+      expect(hrefs).not.toContain(gone);
     }
   });
 });

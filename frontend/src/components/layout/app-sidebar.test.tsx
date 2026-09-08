@@ -91,13 +91,15 @@ describe("SidebarContent", () => {
     expect(screen.getByRole("link", { name: "Settings" })).toBeInTheDocument();
   });
 
-  it("renders the Phase 8 destinations as real links", () => {
+  it("renders the surviving destinations as real links", () => {
     render(<SidebarContent collapsed={false} />);
 
+    // Trending, New launches and Watchlist were removed on 2026-09-08 along
+    // with every lab page; what is left is what this must keep rendering.
     for (const [label, href] of [
-      ["Trending", "/trending"],
-      ["New launches", "/launches"],
-      ["Watchlist", "/watchlist"],
+      ["Scanner", "/command"],
+      ["Track record", "/record"],
+      ["Paper wallet", "/wallet"],
     ] as const) {
       expect(screen.getByRole("link", { name: label })).toHaveAttribute("href", href);
     }

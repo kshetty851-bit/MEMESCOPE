@@ -1,13 +1,10 @@
 import type { ComponentType, SVGProps } from "react";
 
 import {
-  IconBookmark,
   IconHq,
   IconLedger,
   IconScanner,
   IconSettings,
-  IconSpark,
-  IconTrend,
   IconWallet,
 } from "@/components/layout/nav-icons";
 
@@ -57,18 +54,6 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: IconScanner,
         status: "ready",
       },
-      {
-        href: "/trending",
-        label: "Trending",
-        icon: IconTrend,
-        status: "ready",
-      },
-      {
-        href: "/launches",
-        label: "New launches",
-        icon: IconSpark,
-        status: "ready",
-      },
     ],
   },
   {
@@ -80,98 +65,21 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: IconLedger,
         status: "ready",
       },
-      {
-        href: "/watchlist",
-        label: "Watchlist",
-        icon: IconBookmark,
-        status: "ready",
-      },
     ],
   },
   {
     label: "Strategy",
     items: [
       { href: "/wallet", label: "Paper wallet", icon: IconWallet, status: "ready" },
-      // The Arena sits beside the wallet because that is where a reader looks
-      // for it — but it is a research simulation, and the page says so above
-      // the fold. Its equity is not the Paper Wallet's equity.
-      // The V6 Lab is the live experiment; the Arena stays reachable because
-      // its record is evidence and a UI change must not bury it.
-      {
-        href: "/strategy-lab",
-        label: "Strategy Lab",
-        icon: IconSpark,
-        status: "ready",
-      },
-      // The Compound Lab is a SECOND tournament, not a view onto the first:
-      // its own frozen registry, its own hash, its own wallet. It sits beside
-      // the Lab because that is where a reader looks for an experiment.
-      {
-        href: "/compound-lab",
-        label: "Compound Lab",
-        icon: IconSpark,
-        status: "ready",
-      },
-      // Depth: the dose-response curve on the one variable ten experiments
-      // left standing. A curve, not a leaderboard.
-      {
-        href: "/depth-lab",
-        label: "Depth Curve",
-        icon: IconSpark,
-        status: "ready",
-      },
-      // Social: attention rather than price — the first non-market signal
-      // tested here, and the only lab whose control is half the experiment
-      // rather than a footnote inside it.
-      {
-        href: "/social-lab",
-        label: "Social Lab",
-        icon: IconSpark,
-        status: "ready",
-      },
-      // Momentum V2: the entry-rule grid, with its controls inside it.
-      {
-        href: "/momentum-lab",
-        label: "Momentum V2",
-        icon: IconSpark,
-        status: "ready",
-      },
-      // The copy lab. Beside the other tournaments because it is one — a
-      // separate frozen registry with its own wallet, not a view.
-      {
-        href: "/pumpfun-lab",
-        label: "PumpFun Lab",
-        icon: IconSpark,
-        status: "ready",
-      },
-      // The trades view exists so a reader can copy a contract address and
-      // check the token against the market rather than trusting the Lab.
-      {
-        href: "/strategy-lab/trades",
-        label: "Lab Trades",
-        icon: IconSpark,
-        status: "ready",
-      },
-      // The live board keeps moving, so by the time a boundary result is read
-      // it is no longer what that boundary said. These are the frozen copies.
-      {
-        href: "/strategy-lab/snapshots",
-        label: "Snapshots",
-        icon: IconSpark,
-        status: "ready",
-      },
     ],
   },
   {
-    // The execution wallet has its own group: it is the only surface in the
-    // product that could ever touch real money, and filing it under Strategy
-    // would put it beside twenty paper wallets it must never be confused with.
     label: "Execution",
     items: [
       {
         href: "/real-wallet",
         label: "Real wallet",
-        icon: IconWallet,
+        icon: IconLedger,
         status: "ready",
       },
     ],
@@ -179,15 +87,11 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: "Operations",
     items: [
-      // HQ renders system state as an organisation. Its own group rather than
-      // an entry under Strategy: it observes every subsystem, so filing it
-      // beneath one of them would misdescribe what it shows.
       { href: "/hq", label: "HQ", icon: IconHq, status: "ready" },
     ],
   },
 ];
 
-/** Pinned to the bottom of the rail, away from the working set. */
 export const NAV_FOOTER: NavItem[] = [
   { href: "/settings", label: "Settings", icon: IconSettings, status: "ready" },
 ];
