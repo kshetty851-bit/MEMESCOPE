@@ -110,10 +110,16 @@ check "landing" "${FRONTEND_URL}/"
 check "command centre" "${FRONTEND_URL}/command"
 check "track record" "${FRONTEND_URL}/record"
 check "paper wallet" "${FRONTEND_URL}/wallet"
-# `/lab` was deleted in 2b09263 and this line kept asserting it, so
-# verification could only ever fail. Replaced with a route that exists and is
-# worth watching: the launches feed is what discovery actually produces.
-check "launches" "${FRONTEND_URL}/launches"
+# This line has gone stale twice now: `/lab` was deleted in 2b09263, and
+# `/launches` in bb6c21c, which cut the navigation back to five destinations.
+# Both times the check outlived the page it named, so verification 404'd on
+# every deploy whatever the release contained — deploy.sh rolled back a
+# release that was fine, the rollback failed this same check, and the blame
+# read as the new code rather than as this list.
+#
+# Kept rather than deleted, because the intent still holds: prove the frontend
+# serves more than its landing page. If you delete a page, grep this file.
+check "graduation" "${FRONTEND_URL}/graduation"
 check "settings" "${FRONTEND_URL}/settings"
 
 echo
