@@ -68,6 +68,15 @@ describe("navigation", () => {
     }
   });
 
+  it("keeps the Five-Minute Lab, which is a deliberate exception", () => {
+    // Every other per-lab page was removed and the test below keeps them gone.
+    // This one was added back on the operator's instruction, so it is asserted
+    // rather than left to sit ambiguously between the two rules — a reader of
+    // the list below would otherwise reasonably delete it as an oversight.
+    const hrefs = NAV_GROUPS.flatMap((group) => group.items).map((item) => item.href);
+    expect(hrefs).toContain("/fivemin-lab");
+  });
+
   it("does not resurrect the removed destinations", () => {
     const hrefs = NAV_GROUPS.flatMap((group) => group.items).map((item) => item.href);
     for (const gone of ["/trending", "/launches", "/watchlist", "/strategy-lab",
