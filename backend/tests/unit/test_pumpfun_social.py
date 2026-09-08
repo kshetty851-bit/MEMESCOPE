@@ -134,3 +134,32 @@ def test_the_table_has_retention_from_the_day_it_shipped() -> None:
     # Long enough to outlast the question: velocity against forward returns
     # needs weeks, so a 7-day window would delete the history first.
     assert settings.PUMPFUN_SOCIAL_RETENTION_DAYS >= 30
+
+
+def test_an_impossible_market_cap_is_recorded_as_unknown_not_stored() -> None:
+    """The provider returned a value above 10^20 on the very first live poll.
+    It overflowed NUMERIC(24,4) and cost the entire batch.
+
+    Widening the column would have been the wrong fix — it would store a market
+    cap larger than every asset on earth as though it were a measurement. And
+    CLAMPING would be worse than either: a coin that returned nonsense would sit
+    at the top of any ranking by market cap, so the one bad row becomes the most
+    interesting one on the page.
+    """
+    r = social._reading(_row(usd_market_cap=1e21, ath_market_cap=1e21), "market_cap")
+    assert r is not None, "the coin is still observed"
+    assert r.usd_market_cap is None
+    assert r.ath_market_cap is None
+    # ...and a real one still goes through untouched.
+    ok = social._reading(_row(usd_market_cap=576_442_762.0), "market_cap")
+    assert ok.usd_market_cap == D("576442762.0")
+
+
+def test_a_bad_value_does_not_poison_the_rest_of_the_batch() -> None:
+    """One unusable coin must cost one coin, not the poll."""
+    rows = [_row(mint=f"M{i:043d}", usd_market_cap=(1e21 if i == 2 else 1000.0))
+            for i in range(4)]
+    readings = [social._reading(r, "market_cap") for r in rows]
+    assert all(x is not None for x in readings)
+    assert sum(1 for x in readings if x.usd_market_cap is None) == 1
+    assert sum(1 for x in readings if x.usd_market_cap == D("1000.0")) == 3

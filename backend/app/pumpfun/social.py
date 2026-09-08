@@ -71,13 +71,32 @@ class SocialReading:
     source_sort: str
 
 
+#: Above this a market cap is not a big coin, it is bad data.
+#:
+#: The provider returned a value above 10^20 on the first live poll, which
+#: overflowed NUMERIC(24,4) and lost the whole batch. Widening the column was
+#: the wrong fix: it would have stored a market cap larger than every asset on
+#: earth as though it were a measurement. $10 trillion is already an order of
+#: magnitude above anything real, so beyond it the honest value is "not known".
+IMPLAUSIBLE_USD = Decimal("1e13")
+
+
 def _dec(v: Any) -> Decimal | None:
+    """A USD figure, or None when it is missing OR unbelievable.
+
+    None rather than a clamp, deliberately. Clamping to the ceiling would put a
+    coin that returned nonsense at the very top of any ranking by market cap —
+    the bad row would become the most interesting one.
+    """
     if v is None:
         return None
     try:
-        return Decimal(str(round(float(v), 4)))
+        d = Decimal(str(round(float(v), 4)))
     except (TypeError, ValueError, ArithmeticError):
         return None
+    if not d.is_finite() or abs(d) >= IMPLAUSIBLE_USD:
+        return None
+    return d
 
 
 def _reading(row: dict[str, Any], sort: str) -> SocialReading | None:
