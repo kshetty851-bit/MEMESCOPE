@@ -472,3 +472,90 @@ async def test_a_leader_sell_closes_everything_the_control_holds_for_that_pair(d
     assert not still_open, (
         f"{len(still_open)} control position(s) left open after the pair closed"
     )
+
+
+async def test_a_scale_in_is_caught_up_even_if_its_signal_aged_out(db_session):
+    """The gap that killed the signal-driven version.
+
+    The scan looks back 48h, so a control down longer than that never sees the
+    `added` signal at all — and nothing later is guaranteed to correct it. The
+    arm would stay permanently under-sized against that pair, silently, and the
+    comparison it exists to support would be quietly wrong for that token.
+
+    Reconciliation reads the pair's size rather than the signal, so it has no
+    window: the difference is the answer however long ago it arose.
+    """
+    await _seed_candidates(db_session)
+    await _activate_control(db_session)
+    mint = "LeaderMint" + "y" * 34
+    _t, leader = await _leader_position(db_session, mint, size=D("10"))
+    svc = CopyControlService(db_session)
+
+    db_session.add(PumpfunSignal(
+        tournament_id=_t.id, signature="sig-age-" + "z" * 41,
+        mint_address=mint, side="buy", leader_at=NOW, seen_at=NOW,
+        acted=True, outcome="opened", position_id=leader.id))
+    await db_session.flush()
+    await svc.tick(now=NOW + timedelta(seconds=5))
+
+    mine = (await db_session.execute(
+        select(LabPosition).where(LabPosition.strategy_id == "CPY-02")
+    )).scalars().first()
+    assert mine is not None and mine.size_usd == D("10")
+
+    # The leader scales in. Its signal is NEVER given to the arm — this is the
+    # outage case, where the signal aged out of the window entirely.
+    leader.size_usd += D("10")
+    leader.quantity += D("1000")
+    leader.quantity_remaining += D("1000")
+    await db_session.flush()
+
+    # A fresh print far in the future, past the 48h window.
+    later = NOW + timedelta(hours=72)
+    db_session.add(TokenMarketSnapshot(
+        token_id=mine.token_id, mint_address=mine.mint_address,
+        captured_at=later, price_usd=D("0.002"), liquidity_usd=D("80000"),
+        market_cap=D("400000"), volume_1h=D("50000"), volume_5m=D("5000"),
+        buy_count_24h=100, sell_count_24h=50,
+        trading_status=TradingStatus.TRADING, provider="test", suspect=False))
+    await db_session.flush()
+
+    await svc.tick(now=later)
+    await db_session.refresh(mine)
+    assert mine.size_usd == leader.size_usd == D("20"), (
+        "an aged-out scale-in must still be caught up from state"
+    )
+    # And still ONE position — catching up must not open a second.
+    held = (await db_session.execute(
+        select(LabPosition).where(LabPosition.strategy_id == "CPY-02")
+    )).scalars().all()
+    assert len(held) == 1
+
+
+async def test_reconciliation_is_idempotent_across_repeated_ticks(db_session):
+    """It runs every tick on every open pair, so it must be a no-op once
+    matched — otherwise it is a capital leak that compounds by the minute."""
+    await _seed_candidates(db_session)
+    await _activate_control(db_session)
+    mint = "LeaderMint" + "A" * 34
+    _t, leader = await _leader_position(db_session, mint, size=D("10"))
+    svc = CopyControlService(db_session)
+    db_session.add(PumpfunSignal(
+        tournament_id=_t.id, signature="sig-idem-" + "B" * 40,
+        mint_address=mint, side="buy", leader_at=NOW, seen_at=NOW,
+        acted=True, outcome="opened", position_id=leader.id))
+    await db_session.flush()
+
+    row = (await db_session.execute(
+        select(LabStrategy).where(LabStrategy.spec_hash == ccspec.SPEC_HASH)
+    )).scalars().first()
+    for i in range(5):
+        await svc.tick(now=NOW + timedelta(seconds=5 + i * 60))
+
+    held = (await db_session.execute(
+        select(LabPosition).where(LabPosition.strategy_id == "CPY-02")
+    )).scalars().all()
+    await db_session.refresh(row)
+    assert len(held) == 1, f"{len(held)} positions after five ticks"
+    assert held[0].size_usd == D("10")
+    assert row.cash == D("90"), f"cash drifted to {row.cash}"

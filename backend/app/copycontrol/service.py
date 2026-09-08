@@ -45,8 +45,9 @@ SIGNAL_WINDOW_HOURS = 48
 
 #: A leader BUY that started a position. Mirrored by opening one.
 OPENED = ("opened",)
-#: A leader BUY that SCALED INTO a position already held. Mirrored by adding to
-#: the paired control position, never by opening a second one — see `_add`.
+#: A leader BUY that SCALED INTO a position already held. Deliberately NOT
+#: mirrored from the signal — `_reconcile` reads the resulting STATE instead,
+#: which has no window and therefore no way to miss one permanently.
 ADDED = ("added",)
 #: Outcomes on a leader SELL that mean CPY-01 took money off the table.
 CLOSED = ("closed", "trimmed")
@@ -264,13 +265,14 @@ class CopyControlService:
             .order_by(TokenMarketSnapshot.captured_at.desc())
         )).first()
 
-    async def _add(self, row: LabStrategy, sig: PumpfunSignal,
-                   now: datetime) -> str:
-        """Scale into the position already paired to this one — never open a
-        second.
+    async def _top_up(self, row: LabStrategy, mine: LabPosition,
+                      leader_pos: LabPosition, now: datetime) -> str:
+        """Bring one paired position up to the capital its pair now holds.
 
-        Mirroring an `added` as a fresh open was a real defect, and it broke the
-        design in both of the ways it is supposed to be impossible to break.
+        Driven by RECONCILIATION rather than by an `added` signal — see
+        `_reconcile`. Mirroring an `added` as a fresh open was a real defect,
+        and it broke the design in both of the ways it is supposed to be
+        impossible to break.
         `_add` on the pumpfun side grows `size_usd` CUMULATIVELY on one row, so
         by the time an `added` signal exists that field is the running total:
         opening at it deployed the total AGAIN on top of what was already there.
@@ -288,18 +290,6 @@ class CopyControlService:
         change to their unit, and self-corrects: a tick missed while the leader
         scaled in twice is caught up by the next one rather than lost.
         """
-        leader_pos = (await self._session.execute(
-            select(LabPosition).where(LabPosition.id == sig.position_id)
-        )).scalars().first()
-        if leader_pos is None:
-            return "leader_position_missing"
-        mine = await self._paired_position(sig.position_id)
-        if mine is None:
-            # The open was never mirrored — most likely it happened before this
-            # arm started. Scaling into a position we never took would deploy
-            # capital against a pair we are not actually holding.
-            return "no_paired_position"
-
         increment = (leader_pos.size_usd or Decimal(0)) - mine.size_usd
         if increment <= 0:
             return "already_matched"
@@ -346,6 +336,51 @@ class CopyControlService:
         )
         return "closed" if out.get("closed") else out.get("reason", "refused")
 
+    async def _reconcile(self, row: LabStrategy, now: datetime) -> dict[str, int]:
+        """Top up every open pair that its leader has since scaled into.
+
+        This REPLACES mirroring the `added` signal, and is strictly stronger
+        than it. A signal-driven add only ever fires while the signal is inside
+        the scan window, so a control that was down longer than the window
+        stayed permanently under-sized against that pair — silently, and with
+        no later signal guaranteed to correct it. The comparison the whole arm
+        exists to support would then be quietly wrong for that token, which is
+        the worst failure available to a control.
+
+        Reconciling from state has no window at all: the pair's `size_usd` and
+        this arm's are both facts, and their difference is the answer however
+        long ago it arose. It also deletes a code path rather than adding one —
+        `added` signals now need no handling, because the state they describe
+        is what is being read.
+
+        The cost is that a top-up after an outage happens at the CURRENT price
+        rather than the leader's. That is a real difference and it is the right
+        trade: an arm whose timing already slipped by an outage is better off
+        matching capital late than never matching it at all, because equity is
+        what the two arms are compared on.
+        """
+        pairs = (await self._session.execute(
+            select(LabPosition,
+                   LabDecision.features["leader_position_id"].astext)
+            .join(LabDecision, LabDecision.id == LabPosition.decision_id)
+            .where(LabPosition.strategy_row_id == row.id,
+                   LabPosition.status == "open")
+        )).all()
+        counts: dict[str, int] = {}
+        for mine, leader_id in pairs:
+            if not leader_id:
+                continue
+            leader_pos = (await self._session.execute(
+                select(LabPosition).where(LabPosition.id == uuid.UUID(leader_id))
+            )).scalars().first()
+            if leader_pos is None:
+                continue
+            if (leader_pos.size_usd or Decimal(0)) <= mine.size_usd:
+                continue
+            outcome = await self._top_up(row, mine, leader_pos, now)
+            counts[outcome] = counts.get(outcome, 0) + 1
+        return counts
+
     # --- the beat -----------------------------------------------------------
 
     async def tick(self, *, now: datetime | None = None) -> dict[str, Any]:
@@ -362,13 +397,16 @@ class CopyControlService:
         for sig in await self._unmirrored(t, now):
             if sig.outcome in OPENED and sig.side == "buy":
                 outcome = await self._open(row, sig, now)
-            elif sig.outcome in ADDED and sig.side == "buy":
-                outcome = await self._add(row, sig, now)
             elif sig.outcome in CLOSED and sig.side == "sell":
                 outcome = await self._close(sig, now)
             else:
                 outcome = "not_mirrorable"
             counts[outcome] = counts.get(outcome, 0) + 1
+
+        # AFTER the signals, so a pair opened this same tick is topped up in it
+        # rather than a minute later.
+        for k, v in (await self._reconcile(row, now)).items():
+            counts[k] = counts.get(k, 0) + v
 
         settled = await self._lab.settle(now=now)
         await self._lab.record_equity(now=now)
