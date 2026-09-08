@@ -370,3 +370,52 @@ async def test_the_cold_start_batch_is_excluded_from_the_book(db_session):
     five = next(h for h in out["horizons"] if h["minutes"] == 5)
     assert five["trades"] == 0
     assert float(five["final_equity_gross"]) == 100.0
+
+
+async def test_the_book_reports_itself_without_its_best_trade(db_session):
+    """The column that stops the page lying by omission.
+
+    On the real cohort these two numbers disagree completely: at 15 minutes the
+    book read +$82 and ONE coin doing 14.4x was that entire result — removed,
+    the same book read -$51. A strategy whose whole outcome is one trade has
+    not been shown to work.
+    """
+    from app.pumpfun.graduation_api import graduation_paper
+
+    cold = NOW
+    await _grad(db_session, "Cold" + "r" * 40, seen_at=cold, mcap=50000)
+    # Nine small losers and one enormous winner — the shape every false edge
+    # on this platform has had.
+    for i in range(9):
+        g = await _grad(db_session, f"Lose{i}" + "s" * 38,
+                        seen_at=cold + timedelta(minutes=1 + i), mcap=50000)
+        await _mark(db_session, g, minutes=5, mcap=45000)          # -10%
+    winner = await _grad(db_session, "Win" + "t" * 41,
+                         seen_at=cold + timedelta(minutes=20), mcap=50000)
+    await _mark(db_session, winner, minutes=5, mcap=50000 * 14)     # 14x
+
+    out = await graduation_paper(db_session)
+    five = next(h for h in out["horizons"] if h["minutes"] == 5)
+    assert five["trades"] == 10
+    assert float(five["best_trade_multiple"]) == 14.0
+    # With the winner: strongly up. Without it: down.
+    assert float(five["pnl_net"]) > 0
+    assert float(five["pnl_without_best"]) < 0
+    assert float(five["final_equity_without_best"]) < float(five["final_equity_net"])
+
+
+async def test_without_best_is_reported_even_for_a_single_trade(db_session):
+    """One trade minus its best trade is NO trades — the book, untouched. A
+    null here would render as "unknown" and read like missing data rather than
+    like the honest answer, which is that one trade proves nothing."""
+    from app.pumpfun.graduation_api import graduation_paper
+
+    cold = NOW
+    await _grad(db_session, "Cold" + "u" * 40, seen_at=cold, mcap=50000)
+    g = await _grad(db_session, "Solo" + "v" * 40,
+                    seen_at=cold + timedelta(minutes=1), mcap=50000)
+    await _mark(db_session, g, minutes=5, mcap=500000)  # 10x
+
+    out = await graduation_paper(db_session)
+    five = next(h for h in out["horizons"] if h["minutes"] == 5)
+    assert float(five["pnl_without_best"]) == 0.0

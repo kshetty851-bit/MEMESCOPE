@@ -158,6 +158,7 @@ async def graduation_paper(session: DbSession) -> dict[str, Any]:
         open_until: list[datetime] = []
         taken = skipped_capacity = no_mark = glitched = 0
 
+        multiples: list[Decimal] = []
         for g in rows:
             t0 = g.first_seen_complete_at
             open_until = [t for t in open_until if t > t0]
@@ -180,8 +181,27 @@ async def graduation_paper(session: DbSession) -> dict[str, Any]:
             proceeds = PAPER_POSITION_USD * mult
             cash += proceeds
             equity_realised += proceeds - PAPER_POSITION_USD
+            multiples.append(mult)
             open_until.append(t0 + timedelta(minutes=minutes))
             taken += 1
+
+        # THE SAME BOOK WITH ITS SINGLE BEST TRADE REMOVED.
+        #
+        # Reported beside the headline, never instead of it, because on this
+        # population they disagree completely: at 15 minutes the book reads
+        # +$82 and one coin doing 14.4x IS that entire result — remove it and
+        # the same book reads -$51. A strategy whose whole outcome is one trade
+        # has not been shown to work; it has been shown to have had a trade.
+        # Every false edge on this platform has had exactly this shape.
+        without_best = PAPER_BOOK_USD
+        if multiples:
+            trimmed = list(multiples)
+            trimmed.remove(max(trimmed))
+            for mult in trimmed:
+                without_best += PAPER_POSITION_USD * (mult - 1)
+            cost_trimmed = (PAPER_POSITION_USD * PAPER_EXECUTION_PCT
+                            * Decimal(len(trimmed)))
+            without_best -= cost_trimmed
 
         gross = cash
         # Execution charged on BOTH legs of every trade actually taken.
@@ -193,6 +213,9 @@ async def graduation_paper(session: DbSession) -> dict[str, Any]:
             "final_equity_net": round(gross - cost, 2),
             "pnl_gross": round(gross - PAPER_BOOK_USD, 2),
             "pnl_net": round(gross - PAPER_BOOK_USD - cost, 2),
+            "final_equity_without_best": round(without_best, 2),
+            "pnl_without_best": round(without_best - PAPER_BOOK_USD, 2),
+            "best_trade_multiple": (round(max(multiples), 2) if multiples else None),
             "execution_charged": round(cost, 2),
             "skipped_no_mark_yet": no_mark,
             "skipped_capacity": skipped_capacity,
