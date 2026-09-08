@@ -465,3 +465,85 @@ async def test_a_two_day_old_coin_is_marked_at_its_48h_age(db_session, monkeypat
         select(PumpfunGraduationMark).where(
             PumpfunGraduationMark.minutes_since == 2880))).scalars().all()
     assert len(rows) == 1 and rows[0].mcap_usd == D("5000")
+
+
+# --------------------------------------------------------------------------
+# hourly compounding cycles
+# --------------------------------------------------------------------------
+
+
+async def test_a_cycle_compounds_the_proceeds_into_the_next_hour(db_session):
+    """The whole point: what came back is the next hour's stake."""
+    from app.pumpfun.graduation_api import graduation_cycles
+
+    cold = NOW.replace(minute=0, second=0, microsecond=0)
+    await _grad(db_session, "Cold" + "x" * 40, seen_at=cold, mcap=50000)
+    # Hour 1: two coins, both doubling.
+    for i in range(2):
+        g = await _grad(db_session, f"H1{i}" + "y" * 40,
+                        seen_at=cold + timedelta(hours=1, minutes=5 + i), mcap=50000)
+        await _mark(db_session, g, minutes=60, mcap=100000)
+    # Hour 2: one coin, halving.
+    g = await _grad(db_session, "H2" + "z" * 41,
+                    seen_at=cold + timedelta(hours=2, minutes=5), mcap=50000)
+    await _mark(db_session, g, minutes=60, mcap=25000)
+
+    out = await graduation_cycles(db_session)
+    assert out["rounds_traded"] == 2
+    # $100 doubles to ~$200 (less execution), then halves to ~$100.
+    assert 95 < float(out["final_balance"]) < 101
+
+
+async def test_an_hour_with_nothing_tradeable_holds_the_balance(db_session):
+    """Idle is not growth. The round is still reported so a reader can see the
+    strategy sat out rather than being absent from the data."""
+    from app.pumpfun.graduation_api import graduation_cycles
+
+    cold = NOW.replace(minute=0, second=0, microsecond=0)
+    await _grad(db_session, "Cold" + "A" * 40, seen_at=cold, mcap=50000)
+    await _grad(db_session, "NoMk" + "B" * 40,
+                seen_at=cold + timedelta(hours=1), mcap=50000)  # no +60m mark
+
+    out = await graduation_cycles(db_session)
+    assert float(out["final_balance"]) == 100.0
+    idle = [r for r in out["rounds"] if r["traded"] == 0]
+    assert idle and idle[0]["no_mark"] == 1
+
+
+async def test_the_sequence_reports_itself_without_its_best_hour(db_session):
+    """Compounding lets ONE hour lift every hour after it. A final balance that
+    collapses without the best round is a single hour wearing a sequence's
+    clothes."""
+    from app.pumpfun.graduation_api import graduation_cycles
+
+    cold = NOW.replace(minute=0, second=0, microsecond=0)
+    await _grad(db_session, "Cold" + "C" * 40, seen_at=cold, mcap=50000)
+    # One enormous hour, then three losing ones.
+    g = await _grad(db_session, "Big" + "D" * 41,
+                    seen_at=cold + timedelta(hours=1), mcap=50000)
+    await _mark(db_session, g, minutes=60, mcap=50000 * 20)
+    for i in range(3):
+        g = await _grad(db_session, f"Lo{i}" + "E" * 40,
+                        seen_at=cold + timedelta(hours=2 + i), mcap=50000)
+        await _mark(db_session, g, minutes=60, mcap=40000)  # -20%
+
+    out = await graduation_cycles(db_session)
+    assert float(out["best_round_multiple"]) > 15
+    assert float(out["final_balance"]) > 100
+    assert float(out["final_balance_without_best_round"]) < 100, (
+        "without its best hour the sequence must show the loss it really is"
+    )
+
+
+async def test_a_glitch_cannot_enter_a_cycle(db_session):
+    from app.pumpfun.graduation_api import graduation_cycles
+
+    cold = NOW.replace(minute=0, second=0, microsecond=0)
+    await _grad(db_session, "Cold" + "F" * 40, seen_at=cold, mcap=50000)
+    g = await _grad(db_session, "Glit" + "G" * 40,
+                    seen_at=cold + timedelta(hours=1), mcap=50000)
+    await _mark(db_session, g, minutes=60, mcap=50000 * 11670)
+
+    out = await graduation_cycles(db_session)
+    assert float(out["final_balance"]) == 100.0
+    assert any(r["glitched"] == 1 for r in out["rounds"])

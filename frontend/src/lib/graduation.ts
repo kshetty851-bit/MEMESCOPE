@@ -1,6 +1,10 @@
 import { api } from "@/lib/api-client";
 
-import type { GraduationCohort, GraduationPaper } from "@/types/graduation";
+import type {
+  GraduationCohort,
+  GraduationCycles,
+  GraduationPaper,
+} from "@/types/graduation";
 
 /** The graduation cohort. Fetches and formats; the accounting is server-side. */
 export function fetchGraduations(): Promise<GraduationCohort> {
@@ -11,4 +15,9 @@ export function fetchGraduations(): Promise<GraduationCohort> {
  *  owns it and the page cannot disagree with a query run by hand. */
 export function fetchGraduationPaper(): Promise<GraduationPaper> {
   return api.get<GraduationPaper>("/pumpfun/graduations/paper");
+}
+
+/** The compounding hourly backtest. */
+export function fetchGraduationCycles(): Promise<GraduationCycles> {
+  return api.get<GraduationCycles>("/pumpfun/graduations/cycles");
 }

@@ -49,3 +49,31 @@ export interface GraduationPaper {
   cohort: number;
   horizons: PaperHorizon[];
 }
+
+
+/** One hourly round: buy everything that graduated, close all at +60m. */
+export interface CycleRound {
+  hour: string;
+  coins: number;
+  traded: number;
+  no_mark: number;
+  glitched: number;
+  stake_each?: number;
+  opened_with: number;
+  closed_with: number;
+  round_multiple: number | null;
+}
+
+export interface GraduationCycles {
+  disclosure: string;
+  start_usd: number;
+  horizon_minutes: number;
+  rounds_total: number;
+  rounds_traded: number;
+  final_balance: number;
+  /** Compounding lets one hour lift every hour after it, so this is the
+   *  sequence with its single best round removed. */
+  final_balance_without_best_round: number;
+  best_round_multiple: number | null;
+  rounds: CycleRound[];
+}

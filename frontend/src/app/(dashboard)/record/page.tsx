@@ -13,8 +13,6 @@ import { Toolbar } from "@/components/ui/toolbar";
 import { InfoTip } from "@/components/ui/tooltip";
 import { EmptyState, ErrorState } from "@/components/ui/states";
 import { CopyComparisonPanel } from "@/components/record/copy-comparison";
-import { GraduationPaperPanel } from "@/components/record/graduation-paper";
-import { GraduationPanel } from "@/components/record/graduation-panel";
 import { HistoryFeed } from "@/components/record/history-feed";
 import { Journey } from "@/components/record/journey";
 import { usePaperPositions } from "@/hooks/use-paper";
@@ -526,14 +524,6 @@ export default function TrackRecordPage() {
           nothing until both arms exist. */}
       <CopyComparisonPanel />
 
-      {/* The graduation cohort — an observation about the population, not a
-          strategy, which is why it sits beside the record rather than in a lab. */}
-      <GraduationPanel />
-
-      {/* The same cohort as a $100 book. Sits directly under the curve it is
-          derived from, so the returns are read beside the distribution that
-          produced them rather than on their own. */}
-      <GraduationPaperPanel />
 
       {total === 0 && !performance.isPending ? (
         <EmptyState

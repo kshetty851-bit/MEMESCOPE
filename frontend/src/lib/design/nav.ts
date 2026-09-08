@@ -71,6 +71,9 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "Strategy",
     items: [
       { href: "/wallet", label: "Paper wallet", icon: IconWallet, status: "ready" },
+      // Graduation: a measurement of the market rather than a record of what
+      // this platform did, which is why it is not on Track Record.
+      { href: "/graduation", label: "Graduation", icon: IconLedger, status: "ready" },
     ],
   },
   {

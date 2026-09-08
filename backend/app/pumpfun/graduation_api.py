@@ -240,3 +240,131 @@ async def graduation_paper(session: DbSession) -> dict[str, Any]:
         "cohort": len(rows),
         "horizons": horizons,
     })
+
+
+# --------------------------------------------------------------------------
+# Hourly cycles: buy the hour's graduations, close everything at +60m, compound
+# --------------------------------------------------------------------------
+
+#: The exit every position in a round uses. One hour, because the round IS an
+#: hour — a position bought at :50 and closed at the boundary would be held ten
+#: minutes and reported as an hour, which is a different strategy.
+CYCLE_HORIZON_MINUTES = 60
+
+
+@router.get("/graduations/cycles")
+async def graduation_cycles(session: DbSession) -> dict[str, Any]:
+    """$100, split equally across everything that graduates in an hour, all of
+    it closed at +60m, and whatever comes back is the next hour's stake.
+
+    Compounding is what makes this different from the fixed-size book, and it
+    is also what makes it fragile: one hour that multiplies the balance lifts
+    every hour after it, so the final figure can be a single round wearing a
+    sequence's clothes. `balance_without_best_round` is reported for exactly
+    that reason and the page shows both.
+
+    A coin with no +60m mark yet is dropped from its round and counted, never
+    treated as flat — an unpriced position is not a break-even one.
+    """
+    cold_start = await session.scalar(
+        select(func.min(PumpfunGraduation.first_seen_complete_at))
+    )
+    rows = list((await session.execute(
+        select(PumpfunGraduation)
+        .where(PumpfunGraduation.mcap_usd_at_graduation.is_not(None),
+               PumpfunGraduation.mcap_usd_at_graduation > 0,
+               PumpfunGraduation.first_seen_complete_at != cold_start)
+        .order_by(PumpfunGraduation.first_seen_complete_at)
+    )).scalars())
+
+    exits: dict[Any, Decimal] = {
+        m.graduation_id: m.mcap_usd
+        for m in (await session.execute(
+            select(PumpfunGraduationMark).where(
+                PumpfunGraduationMark.minutes_since == CYCLE_HORIZON_MINUTES,
+                PumpfunGraduationMark.mcap_usd.is_not(None))
+        )).scalars()
+    }
+
+    # Bucket by the hour the coin graduated in.
+    buckets: dict[datetime, list[PumpfunGraduation]] = {}
+    for g in rows:
+        hour = g.first_seen_complete_at.replace(minute=0, second=0, microsecond=0)
+        buckets.setdefault(hour, []).append(g)
+
+    balance = PAPER_BOOK_USD
+    rounds: list[dict[str, Any]] = []
+    for hour in sorted(buckets):
+        coins = buckets[hour]
+        usable, no_mark, glitched = [], 0, 0
+        for g in coins:
+            ex = exits.get(g.id)
+            if ex is None:
+                no_mark += 1
+                continue
+            mult = ex / g.mcap_usd_at_graduation
+            if mult > PAPER_GLITCH_MULTIPLE:
+                glitched += 1
+                continue
+            usable.append(mult)
+
+        if not usable:
+            # Nothing tradeable this hour. The balance sits out; it does not
+            # silently grow, and the round is still reported so a reader can
+            # see the strategy was idle rather than absent.
+            rounds.append({
+                "hour": hour.isoformat(), "coins": len(coins), "traded": 0,
+                "no_mark": no_mark, "glitched": glitched,
+                "opened_with": round(balance, 2), "closed_with": round(balance, 2),
+                "round_multiple": 1.0,
+            })
+            continue
+
+        stake = balance / Decimal(len(usable))
+        proceeds = sum((stake * m for m in usable), Decimal(0))
+        proceeds -= stake * PAPER_EXECUTION_PCT * Decimal(len(usable))
+        opened = balance
+        balance = proceeds
+        rounds.append({
+            "hour": hour.isoformat(), "coins": len(coins), "traded": len(usable),
+            "no_mark": no_mark, "glitched": glitched,
+            "stake_each": round(stake, 2),
+            "opened_with": round(opened, 2), "closed_with": round(balance, 2),
+            "round_multiple": round(balance / opened, 4) if opened > 0 else None,
+        })
+
+    # THE SAME SEQUENCE WITHOUT ITS BEST ROUND. Compounding means one hour can
+    # carry every hour after it, so a final balance that collapses when the
+    # best round is removed is a single hour wearing a sequence's clothes.
+    traded_rounds = [r for r in rounds if r["traded"] > 0]
+    best_mult = max((Decimal(str(r["round_multiple"])) for r in traded_rounds),
+                    default=None)
+    without_best = PAPER_BOOK_USD
+    dropped = False
+    for r in rounds:
+        mult = Decimal(str(r["round_multiple"] or 1))
+        if not dropped and best_mult is not None and mult == best_mult:
+            dropped = True
+            continue
+        without_best *= mult
+
+    return leaderboard._jsonable({
+        "disclosure": (
+            f"Simulated. ${PAPER_BOOK_USD:.0f} split equally across every coin "
+            "that graduated in an hour, all closed at +60 minutes, and whatever "
+            "came back staked on the next hour. Nothing was traded. Entry is our "
+            "first sighting of the completed curve, so a fill at that price is "
+            "assumed rather than demonstrated, and execution is charged at "
+            f"{PAPER_EXECUTION_PCT*100:.2f}% round trip — measured on pools at "
+            "$100k+ liquidity, which a coin at graduation is not, so the result "
+            "is a BEST CASE."
+        ),
+        "start_usd": PAPER_BOOK_USD,
+        "horizon_minutes": CYCLE_HORIZON_MINUTES,
+        "rounds_total": len(rounds),
+        "rounds_traded": len(traded_rounds),
+        "final_balance": round(balance, 2),
+        "final_balance_without_best_round": round(without_best, 2),
+        "best_round_multiple": (round(best_mult, 3) if best_mult else None),
+        "rounds": rounds,
+    })
