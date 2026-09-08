@@ -559,3 +559,135 @@ async def test_reconciliation_is_idempotent_across_repeated_ticks(db_session):
     assert len(held) == 1, f"{len(held)} positions after five ticks"
     assert held[0].size_usd == D("10")
     assert row.cash == D("90"), f"cash drifted to {row.cash}"
+
+
+async def test_a_leader_trim_does_not_close_the_whole_control_position(db_session):
+    """He sells a name in ~1.9 tranches, so CPY-01 TRIMS on all but the last.
+
+    Treating `trimmed` as a close exited this arm's entire position on his first
+    partial sell. That is exactly the bias pumpfun v1.1.0 was fixed to remove —
+    exiting while he is still holding penalises the position that RUNS — and
+    having it in the control rather than the strategy is worse than having it in
+    neither, because it hits the control systematically on the trades that
+    decide the comparison.
+    """
+    await _seed_candidates(db_session)
+    await _activate_control(db_session)
+    mint = "LeaderMint" + "C" * 34
+    _t, leader = await _leader_position(db_session, mint, size=D("10"))
+    svc = CopyControlService(db_session)
+    db_session.add(PumpfunSignal(
+        tournament_id=_t.id, signature="sig-trim-" + "D" * 40,
+        mint_address=mint, side="buy", leader_at=NOW, seen_at=NOW,
+        acted=True, outcome="opened", position_id=leader.id))
+    await db_session.flush()
+    await svc.tick(now=NOW + timedelta(seconds=5))
+
+    mine = (await db_session.execute(
+        select(LabPosition).where(LabPosition.strategy_id == "CPY-02")
+    )).scalars().first()
+    assert mine is not None and mine.status == "open"
+    opened_qty = mine.quantity_remaining
+
+    # He releases a QUARTER of the name — a trim, not an exit.
+    leader.quantity_remaining = leader.quantity * D("0.75")
+    await db_session.flush()
+    later = NOW + timedelta(minutes=30)
+    db_session.add(TokenMarketSnapshot(
+        token_id=mine.token_id, mint_address=mine.mint_address,
+        captured_at=later, price_usd=D("0.002"), liquidity_usd=D("80000"),
+        market_cap=D("400000"), volume_1h=D("50000"), volume_5m=D("5000"),
+        buy_count_24h=100, sell_count_24h=50,
+        trading_status=TradingStatus.TRADING, provider="test", suspect=False))
+    await db_session.flush()
+
+    await svc.tick(now=later)
+    await db_session.refresh(mine)
+
+    assert mine.status == "open", "a partial sell must not close the arm"
+    held = mine.quantity_remaining / mine.quantity
+    assert abs(held - D("0.75")) < D("0.02"), (
+        f"arm holds {held} of its position against the pair's 0.75"
+    )
+    assert mine.quantity_remaining < opened_qty, "it must actually have sold"
+
+
+async def test_the_arm_never_buys_back_a_slice_it_already_sold(db_session):
+    """A pair holding proportionally MORE than the arm is not a reason to buy.
+
+    Re-entering a slice already sold would invent a trade the leader never
+    made. Scaling in is `_top_up`'s job and is keyed on stake, not on quantity.
+    """
+    await _seed_candidates(db_session)
+    await _activate_control(db_session)
+    mint = "LeaderMint" + "E" * 34
+    _t, leader = await _leader_position(db_session, mint, size=D("10"))
+    svc = CopyControlService(db_session)
+    db_session.add(PumpfunSignal(
+        tournament_id=_t.id, signature="sig-nobuy-" + "F" * 39,
+        mint_address=mint, side="buy", leader_at=NOW, seen_at=NOW,
+        acted=True, outcome="opened", position_id=leader.id))
+    await db_session.flush()
+    await svc.tick(now=NOW + timedelta(seconds=5))
+
+    mine = (await db_session.execute(
+        select(LabPosition).where(LabPosition.strategy_id == "CPY-02")
+    )).scalars().first()
+    # The arm is somehow holding LESS than the pair.
+    mine.quantity_remaining = mine.quantity * D("0.5")
+    await db_session.flush()
+    before = mine.quantity_remaining
+
+    await svc.tick(now=NOW + timedelta(minutes=1))
+    await db_session.refresh(mine)
+    assert mine.quantity_remaining == before, "it must not re-enter"
+
+
+async def test_a_trimmed_signal_is_not_treated_as_a_close(db_session):
+    """The regression guard for `CLOSED = ("closed", "trimmed")`.
+
+    The reconciliation test above proves the arm CAN match a partial exit, but
+    it never sends a `trimmed` signal — so it passed even with the old routing
+    restored. Mutation testing caught that, which is the whole point of doing
+    it: a test that cannot fail against the bug it describes is decoration.
+
+    This one sends the signal itself.
+    """
+    await _seed_candidates(db_session)
+    await _activate_control(db_session)
+    mint = "LeaderMint" + "G" * 34
+    _t, leader = await _leader_position(db_session, mint, size=D("10"))
+    svc = CopyControlService(db_session)
+    db_session.add(PumpfunSignal(
+        tournament_id=_t.id, signature="sig-tsig1-" + "H" * 39,
+        mint_address=mint, side="buy", leader_at=NOW, seen_at=NOW,
+        acted=True, outcome="opened", position_id=leader.id))
+    await db_session.flush()
+    await svc.tick(now=NOW + timedelta(seconds=5))
+
+    mine = (await db_session.execute(
+        select(LabPosition).where(LabPosition.strategy_id == "CPY-02")
+    )).scalars().first()
+    assert mine is not None and mine.status == "open"
+
+    later = NOW + timedelta(minutes=30)
+    db_session.add(TokenMarketSnapshot(
+        token_id=mine.token_id, mint_address=mine.mint_address,
+        captured_at=later, price_usd=D("0.002"), liquidity_usd=D("80000"),
+        market_cap=D("400000"), volume_1h=D("50000"), volume_5m=D("5000"),
+        buy_count_24h=100, sell_count_24h=50,
+        trading_status=TradingStatus.TRADING, provider="test", suspect=False))
+    # He released one tranche; CPY-01 recorded it as `trimmed`, NOT `closed`.
+    leader.quantity_remaining = leader.quantity * D("0.75")
+    db_session.add(PumpfunSignal(
+        tournament_id=_t.id, signature="sig-tsig2-" + "I" * 39,
+        mint_address=mint, side="sell", leader_at=later, seen_at=later,
+        acted=True, outcome="trimmed", position_id=leader.id))
+    await db_session.flush()
+
+    await svc.tick(now=later + timedelta(seconds=5))
+    await db_session.refresh(mine)
+    assert mine.status == "open", (
+        "a `trimmed` signal closed the whole control position — the arm now "
+        "exits while the leader is still holding"
+    )

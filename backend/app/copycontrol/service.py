@@ -49,8 +49,13 @@ OPENED = ("opened",)
 #: mirrored from the signal — `_reconcile` reads the resulting STATE instead,
 #: which has no window and therefore no way to miss one permanently.
 ADDED = ("added",)
-#: Outcomes on a leader SELL that mean CPY-01 took money off the table.
-CLOSED = ("closed", "trimmed")
+#: A leader SELL that ENDED the position. Mirrored by closing the pair.
+CLOSED = ("closed",)
+
+#: A leader SELL that released only PART of a position. Deliberately NOT
+#: mirrored from the signal, for the same reason as `ADDED` — `_reconcile`
+#: matches the pair's remaining fraction from state instead.
+TRIMMED = ("trimmed",)
 
 
 class CopyControlService:
@@ -375,11 +380,54 @@ class CopyControlService:
             )).scalars().first()
             if leader_pos is None:
                 continue
-            if (leader_pos.size_usd or Decimal(0)) <= mine.size_usd:
+            if (leader_pos.size_usd or Decimal(0)) > mine.size_usd:
+                outcome = await self._top_up(row, mine, leader_pos, now)
+                counts[outcome] = counts.get(outcome, 0) + 1
                 continue
-            outcome = await self._top_up(row, mine, leader_pos, now)
-            counts[outcome] = counts.get(outcome, 0) + 1
+            outcome = await self._match_exposure(mine, leader_pos, now)
+            if outcome:
+                counts[outcome] = counts.get(outcome, 0) + 1
         return counts
+
+    async def _match_exposure(self, mine: LabPosition, leader_pos: LabPosition,
+                              now: datetime) -> str | None:
+        """Release the same FRACTION of the pair that the leader has released.
+
+        He sells a name in roughly 1.9 tranches, and CPY-01 mirrors that by
+        TRIMMING on every sell but the last. Treating a `trimmed` signal as a
+        close — which this arm did — exited the control's whole position on his
+        first partial sell.
+
+        That is not a small asymmetry. It is precisely the bias pumpfun v1.1.0
+        was fixed to remove: exiting while he is still holding biases the record
+        against the position that RUNS, which is the only outcome the experiment
+        is trying to catch. Having it in the control rather than the strategy is
+        worse than having it in neither, because it penalises the control
+        systematically on exactly the trades that decide the comparison.
+
+        Matched from state rather than from the signal, for the same reason as
+        the top-up: a fraction is a fact about the two positions, so no trim can
+        be missed by being outside a scan window.
+        """
+        if not leader_pos.quantity or not mine.quantity:
+            return None
+        theirs = leader_pos.quantity_remaining / leader_pos.quantity
+        ours = mine.quantity_remaining / mine.quantity
+        # Only ever SELL to catch up. A pair that holds proportionally more than
+        # this arm is not a reason to buy back in — the leader scaling in is
+        # handled by `_top_up`, and re-buying a slice already sold would invent
+        # a trade he never made.
+        if theirs >= ours:
+            return None
+        # Fraction OF WHAT REMAINS, so the arm lands on his remaining share.
+        fraction = (ours - theirs) / ours
+        if fraction <= 0:
+            return None
+        out = await self._lab.trim_manually(
+            position_id=mine.id, now=now, actor="cpy02_pair",
+            fraction=min(fraction, Decimal(1)),
+        )
+        return "trimmed" if out.get("trimmed") else out.get("reason", "trim_refused")
 
     # --- the beat -----------------------------------------------------------
 
