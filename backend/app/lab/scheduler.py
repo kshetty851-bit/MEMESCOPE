@@ -89,7 +89,14 @@ async def _lab_tick() -> dict[str, Any]:
             tournament = await service.activate(
                 valid_from=settings.lab_valid_from or now
             )
-            decided = await service.evaluate_due(now=now)
+            # V7's own switch gates the ENTRY side ONLY. A stopped tournament
+            # still has to settle what it is holding: skipping `settle` would
+            # leave open positions never closing and the final equity marked at
+            # whatever the last tick happened to see, which is a fiction rather
+            # than a result. Stopping an experiment means it opens nothing more,
+            # not that its book stops being honest.
+            decided = (await service.evaluate_due(now=now)
+                       if settings.FEATURE_V7_LAB_ENABLED else "stopped")
             settled = await service.settle(now=now)
             await service.record_equity(now=now)
             snapped = await _snapshots(session, tournament, now)

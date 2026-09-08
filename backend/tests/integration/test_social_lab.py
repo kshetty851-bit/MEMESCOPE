@@ -292,3 +292,152 @@ async def test_an_unactivated_board_says_so_rather_than_reporting_zeros(db_sessi
     out = await board(db_session)
     assert out["activated"] is False
     assert out["spec_version"] == sspec.SPEC_VERSION
+
+
+# --------------------------------------------------------------------------
+# stopping one lab must not stop the others
+# --------------------------------------------------------------------------
+
+
+def test_every_lab_has_a_switch_of_its_own() -> None:
+    """`FEATURE_LAB_ENABLED` is the master, and for a long time it was ALSO
+    V7's only switch — so "stop V7" and "stop every experiment here" were the
+    same action, which is why V7 kept trading through two tournaments that were
+    supposed to have replaced it."""
+    from app.core.config import settings
+
+    for flag in ("FEATURE_V7_LAB_ENABLED", "FEATURE_COMPOUND_LAB_ENABLED",
+                 "FEATURE_MOMENTUM_LAB_ENABLED", "FEATURE_DEPTH_LAB_ENABLED",
+                 "FEATURE_PUMPFUN_LAB_ENABLED", "FEATURE_SOCIAL_LAB_ENABLED"):
+        assert hasattr(settings, flag), flag
+    # Defaults True: turning an existing deployment's V7 off must be a
+    # deliberate act, never a side effect of shipping the flag.
+    assert settings.FEATURE_V7_LAB_ENABLED is True
+
+
+async def test_a_stopped_v7_still_settles_what_it_is_holding(monkeypatch):
+    """Stopping an experiment means it opens nothing MORE.
+
+    Gating the whole tick would leave open positions never closing and the
+    final equity marked at whatever the last tick happened to see — a frozen
+    book reported as a result. That is worse than leaving it running, because
+    it looks finished.
+
+    `_lab_tick` swallows its own exceptions by design, so a broken gate here
+    would show up as a silent `{"failed": True}` rather than a stack trace.
+    The assertions therefore check the CALLS, not just the return.
+    """
+    from contextlib import asynccontextmanager
+
+    from app.core.config import settings
+    from app.lab import scheduler
+
+    monkeypatch.setattr(settings, "FEATURE_LAB_ENABLED", True)
+    monkeypatch.setattr(settings, "FEATURE_V7_LAB_ENABLED", False)
+    calls: list[str] = []
+
+    class FakeSession:
+        async def scalar(self, *a, **k):
+            return True  # the advisory lock is ours
+
+        async def commit(self):
+            calls.append("commit")
+
+        async def rollback(self): ...
+
+    @asynccontextmanager
+    async def fake_factory():
+        yield FakeSession()
+
+    class Tournament:
+        id = uuid.uuid4()
+        valid_from = NOW
+        snapshot_taken_at = NOW
+
+    class Spy:
+        def __init__(self, *a, **k): ...
+
+        async def activate(self, **k):
+            calls.append("activate")
+            return Tournament()
+
+        async def evaluate_due(self, **k):
+            calls.append("evaluate_due")
+            return 0
+
+        async def settle(self, **k):
+            calls.append("settle")
+            return 0
+
+        async def record_equity(self, **k):
+            calls.append("record_equity")
+
+    async def no_snapshots(*a, **k):
+        return []
+
+    monkeypatch.setattr(scheduler, "SessionFactory", fake_factory)
+    monkeypatch.setattr(scheduler, "LabService", Spy)
+    monkeypatch.setattr(scheduler, "_snapshots", no_snapshots)
+
+    out = await scheduler._lab_tick()
+
+    assert out.get("failed") is not True, out
+    assert "evaluate_due" not in calls, "a stopped lab must open nothing"
+    assert "settle" in calls and "record_equity" in calls, calls
+    assert out["decided"] == "stopped"
+
+
+async def test_v7_still_opens_positions_while_its_switch_is_on(monkeypatch):
+    """The other half of the gate — a flag that stops everything is not a
+    switch, it is an outage."""
+    from contextlib import asynccontextmanager
+
+    from app.core.config import settings
+    from app.lab import scheduler
+
+    monkeypatch.setattr(settings, "FEATURE_LAB_ENABLED", True)
+    monkeypatch.setattr(settings, "FEATURE_V7_LAB_ENABLED", True)
+    calls: list[str] = []
+
+    class FakeSession:
+        async def scalar(self, *a, **k):
+            return True
+
+        async def commit(self): ...
+
+        async def rollback(self): ...
+
+    @asynccontextmanager
+    async def fake_factory():
+        yield FakeSession()
+
+    class Tournament:
+        id = uuid.uuid4()
+        valid_from = NOW
+        snapshot_taken_at = NOW
+
+    class Spy:
+        def __init__(self, *a, **k): ...
+
+        async def activate(self, **k):
+            return Tournament()
+
+        async def evaluate_due(self, **k):
+            calls.append("evaluate_due")
+            return 3
+
+        async def settle(self, **k):
+            return 0
+
+        async def record_equity(self, **k): ...
+
+    async def no_snapshots(*a, **k):
+        return []
+
+    monkeypatch.setattr(scheduler, "SessionFactory", fake_factory)
+    monkeypatch.setattr(scheduler, "LabService", Spy)
+    monkeypatch.setattr(scheduler, "_snapshots", no_snapshots)
+
+    out = await scheduler._lab_tick()
+    assert "evaluate_due" in calls
+    assert out["decided"] == 3

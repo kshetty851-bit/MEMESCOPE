@@ -584,6 +584,14 @@ class Settings(BaseSettings):
     #: The Social Lab: two $100 wallets differing only in whether they require
     #: a coin's comment rate to be RISING. Off by default.
     FEATURE_SOCIAL_LAB_ENABLED: bool = False
+    #: V7's own switch, so it can be stopped without stopping the labs that
+    #: came after it.
+    #:
+    #: Every later lab gates on `FEATURE_LAB_ENABLED` AND its own flag; V7 came
+    #: first and gated on the master alone, which made "stop V7" and "stop every
+    #: experiment on the platform" the same action. Defaults True — turning this
+    #: on for the first time must not change what any existing deployment does.
+    FEATURE_V7_LAB_ENABLED: bool = True
     #: How long social readings are kept. Longer than the other telemetry
     #: windows on purpose: the question asked of this table is reply VELOCITY
     #: against forward returns, which needs weeks of consecutive readings, and
