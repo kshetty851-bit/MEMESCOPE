@@ -48,12 +48,16 @@ DISCLOSURE = (
 )
 
 
-async def _tournament(session) -> LabTournament:
+async def _tournament(session, registry: Any = spec) -> LabTournament:
     row = (await session.execute(
-        select(LabTournament).where(LabTournament.spec_version == spec.SPEC_VERSION)
+        select(LabTournament).where(LabTournament.spec_version == registry.SPEC_VERSION)
     )).scalars().first()
     if row is None:
-        raise HTTPException(status_code=404, detail="V6 Strategy Lab is not activated")
+        raise HTTPException(
+            status_code=404,
+            detail=("V6 Strategy Lab is not activated" if registry is spec
+                    else f"{registry.SPEC_VERSION} is not activated"),
+        )
     return row
 
 
@@ -268,10 +272,22 @@ async def trades(session: DbSession,
     that a reader can copy the contract address and check the token against the
     market themselves, rather than taking the Lab's word for it.
     """
+    return await build_trades(session, strategy_id=strategy_id, status=status, limit=limit)
+
+
+async def build_trades(session, *, registry: Any = spec, disclosure: str = DISCLOSURE,
+                       strategy_id: str | None = None, status: str | None = None,
+                       limit: int = 500) -> dict[str, Any]:
+    """The trades view for ONE tournament, whichever registry is handed in.
+
+    Extracted for the same reason `build_board` was: the Five-Minute Lab wants
+    this exact list, and a second copy would be a second definition of
+    "realised" that drifts from this one without either looking wrong.
+    """
     # Scoped to the current record. Positions carry a bare `strategy_id`, so
     # without the join this listed V6's $1,000 trades alongside V6.1's $100 ones
     # under one heading, which is the same book twice at two different sizes.
-    t = await _tournament(session)
+    t = await _tournament(session, registry)
     q = (
         select(LabPosition, DiscoveredToken.symbol, DiscoveredToken.name)
         .join(LabStrategy, LabStrategy.id == LabPosition.strategy_row_id)
@@ -287,7 +303,9 @@ async def trades(session: DbSession,
     rows = list((await session.execute(q)).all())
 
     names = {r.strategy_id: r.name for r in
-             (await session.execute(select(LabStrategy))).scalars()}
+             (await session.execute(
+                 select(LabStrategy).where(LabStrategy.tournament_id == t.id)
+             )).scalars()}
 
     out = []
     for pos, symbol, token_name in rows:
@@ -327,7 +345,7 @@ async def trades(session: DbSession,
             "entry_source": pos.entry_source,
         })
     return leaderboard._jsonable({
-        "disclosure": DISCLOSURE,
+        "disclosure": disclosure,
         "total": len(out),
         "open": sum(1 for t in out if t["status"] == "open"),
         "closed": sum(1 for t in out if t["status"] == "closed"),

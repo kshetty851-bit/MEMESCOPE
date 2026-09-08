@@ -1,9 +1,10 @@
 "use client";
 
+import { FiveMinTradesPanel } from "@/components/fivemin/trades-panel";
 import { Label, Panel } from "@/components/ui/panel";
 import { Toolbar } from "@/components/ui/toolbar";
 import { useFiveMinBoard } from "@/hooks/use-fivemin";
-import type { FiveMinCycle, FiveMinPosition } from "@/types/fivemin";
+import type { FiveMinCycle } from "@/types/fivemin";
 
 /**
  * THE FIVE-MINUTE LAB.
@@ -45,24 +46,6 @@ function CycleRow({ c, base }: { c: FiveMinCycle; base: number }) {
       <td className="py-1.5 pr-3 text-right font-mono text-muted">{c.positions_closed ?? "—"}</td>
       <td className="py-1.5 font-mono text-[10px] text-muted">
         {c.reached_at ? when(c.reached_at) : "running"}
-      </td>
-    </tr>
-  );
-}
-
-function PositionRow({ p }: { p: FiveMinPosition }) {
-  return (
-    <tr className="border-t border-line">
-      <td className="py-1.5 pr-3 font-mono text-[10px] text-muted">{p.mint.slice(0, 10)}…</td>
-      <td className="py-1.5 pr-3 font-mono text-[10px] text-muted">{when(p.opened_at)}</td>
-      <td className="py-1.5 pr-3 text-right font-mono text-muted">{money(p.size_usd)}</td>
-      <td className={`py-1.5 pr-3 text-right font-mono ${tone(p.exec_multiple, 1)}`}>
-        {p.exec_multiple === null || p.exec_multiple === undefined
-          ? "—"
-          : `${Number(p.exec_multiple).toFixed(2)}x`}
-      </td>
-      <td className="py-1.5 font-mono text-[10px] text-muted">
-        {p.status === "open" ? "open" : (p.exit_reason ?? "closed")}
       </td>
     </tr>
   );
@@ -161,29 +144,9 @@ export default function FiveMinLabPage() {
             )}
           </Panel>
 
-          <Panel density="compact">
-            <Label>POSITIONS</Label>
-            {data.positions.length === 0 ? (
-              <p className="mt-2 text-xs text-muted">Nothing bought yet.</p>
-            ) : (
-              <table className="mt-2 w-full text-xs">
-                <thead>
-                  <tr className="text-[10px] uppercase text-muted">
-                    <th className="pb-1 pr-3 text-left font-normal">Mint</th>
-                    <th className="pb-1 pr-3 text-left font-normal">Opened</th>
-                    <th className="pb-1 pr-3 text-right font-normal">Size</th>
-                    <th className="pb-1 pr-3 text-right font-normal">Multiple</th>
-                    <th className="pb-1 text-left font-normal">State</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.positions.map((p) => (
-                    <PositionRow key={p.id} p={p} />
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </Panel>
+          {/* Every trade, open and closed, each with its own P&L. The board's
+              `positions` was a display window; this is the record. */}
+          <FiveMinTradesPanel />
         </>
       )}
     </div>

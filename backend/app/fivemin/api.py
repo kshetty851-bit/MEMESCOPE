@@ -10,11 +10,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 
 from app.api.deps import DbSession
 from app.compound.api import build_board
 from app.fivemin import spec as fmspec
+from app.lab.api import build_trades
 
 router = APIRouter(prefix="/fivemin", tags=["fivemin"])
 
@@ -39,3 +40,16 @@ async def board(session: DbSession) -> dict[str, Any]:
     out["time_exit_minutes"] = fmspec.TIME_EXIT_MINUTES
     out["sizing_scales"] = fmspec.SIZING_SCALES
     return out
+
+
+@router.get("/trades")
+async def trades(session: DbSession,
+                 status: str | None = Query(default=None, pattern="^(open|closed)$"),
+                 limit: int = Query(default=500, le=2000)) -> dict[str, Any]:
+    """Every position this lab holds or has closed, each with its own P&L and
+    its full mint. The board's `positions` is a display window, not the record;
+    this is the record, built by the same function `/lab/trades` uses so the
+    two cannot disagree about what "realised" means.
+    """
+    return await build_trades(session, registry=fmspec, disclosure=DISCLOSURE,
+                              status=status, limit=limit)
