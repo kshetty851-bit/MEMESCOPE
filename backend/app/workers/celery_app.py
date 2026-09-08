@@ -6,6 +6,8 @@ scoring jobs land here later as their own modules under `app/workers/`.
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 from celery import Celery
 from celery.schedules import crontab
 from celery.signals import task_postrun
@@ -247,13 +249,31 @@ celery_app.conf.beat_schedule = {
         "task": "app.compound.scheduler.compound_tick",
         "schedule": crontab(minute="*"),
     },
-    # The Five-Minute Lab. Every minute, because a five-minute hold cannot be
-    # settled on a slower beat than the hold itself — a position would be
-    # closed late by however long the beat waited, and the lateness would be
-    # counted as the strategy's result.
+    # The Graduation Hold Lab. EVERY TEN SECONDS, not every minute.
+    #
+    # A minute beat was measured doing real damage on 2026-09-08: the first
+    # five-minute position closed after 5.70 minutes, because the exit could
+    # only fire on the next tick after the horizon passed. The error is bounded
+    # by the beat, so it is a FIXED 60s against holds of different lengths —
+    # up to 20% of a five-minute hold but only 6.7% of a fifteen-minute one.
+    #
+    # That asymmetry falls exactly along the axis this lab measures. A beat
+    # that lengthens the short arm five times more than the long one is not
+    # noise between the arms, it is a bias in favour of one of them, and the
+    # whole experiment is the difference between those two numbers.
+    #
+    # Ten seconds puts it at 3.3% and 1.1%. It does NOT make the price fresher
+    # — snapshots for a held token refresh about every 65 seconds and the sell
+    # quote is stored, so the mark can still be a minute old either way. This
+    # fixes WHEN the position closes, not what it is worth when it does; the
+    # remaining staleness is a property of the market feed, not of the beat.
+    #
+    # Cheap enough to be uncontroversial: the tick runs in ~0.5s and takes a
+    # transaction-scoped advisory lock, so an overrun is skipped rather than
+    # overlapped.
     "fivemin-tick": {
         "task": "app.fivemin.scheduler.fivemin_tick",
-        "schedule": crontab(minute="*"),
+        "schedule": timedelta(seconds=10),
     },
     # The PumpFun Lab mirrors one on-chain wallet. Every minute, because the
     # leader's median hold is 8.5 minutes — a slower poll would copy trades he
