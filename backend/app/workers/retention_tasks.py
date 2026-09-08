@@ -124,14 +124,21 @@ async def _reclaim_radar_rank_events() -> int:
 
 
 async def _prune_market_snapshots(days: int) -> int:
-    """Prune ordinary tokens only. Admitted and traded mints are kept forever.
+    """Prune untraded tokens only. Traded mints are kept forever.
 
     The carve-out is the whole point: these rows are how an entry price, an
     exit price and every trailing-stop decision in between are explained. A
-    token that reached the Radar or the wallet keeps its complete series, and
+    token that entered a paper or lab wallet keeps its complete series, and
     so does any snapshot a paper or radar decision referenced — those foreign
     keys are ON DELETE SET NULL, so pruning one would not fail, it would
     silently blank the link from a decision to the observation it acted on.
+
+    Radar admission alone no longer protects a series. It did until
+    2026-09-08, and that carve-out was most of the table: 3.7M rows past
+    policy on a 38GB disk at 68%, for tokens nothing ever traded. Karthik
+    chose the disk. Lab positions are protected here for the first time — the
+    lab wallets are live, and before this a lab entry kept its evidence only
+    if the mint also happened to be a Radar token.
 
     **Both protected sets are inline CTEs, not temp tables.** A temp table
     belongs to one connection, and committing between batches hands the
@@ -149,9 +156,9 @@ async def _prune_market_snapshots(days: int) -> int:
     return await _delete_in_batches(
         """
         WITH prot_mints AS (
-            SELECT mint_address FROM radar_tokens
-            UNION
             SELECT mint_address FROM paper_positions
+            UNION
+            SELECT mint_address FROM lab_positions
         ),
         prot_snaps AS (
             SELECT market_snapshot_id AS id FROM paper_decision_snapshots

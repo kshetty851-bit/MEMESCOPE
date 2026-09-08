@@ -18,6 +18,7 @@ import pytest
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.lab import LabDecision, LabPosition, LabStrategy, LabTournament
 from app.models.market import TokenMarketSnapshot, TradingStatus
 from app.models.paper import PaperPosition, PaperWallet
 from app.models.radar import RadarToken
@@ -27,6 +28,7 @@ from app.workers.retention_tasks import _prune_market_snapshots, _prune_score_hi
 pytestmark = pytest.mark.integration
 
 MINT_PREFIX = "Retention"
+LAB_SPEC = "retention-test"  # lab_tournaments.spec_version is String(16)
 NOW = datetime.now(UTC)
 OLD = NOW - timedelta(days=30)
 
@@ -45,7 +47,9 @@ async def session(test_session_factory):
     async with test_session_factory() as s:
         yield s
         await s.rollback()
-        for table in ("token_market_snapshots", "paper_positions"):
+        for table in (
+            "token_market_snapshots", "paper_positions", "lab_positions", "lab_decisions",
+        ):
             await s.execute(
                 text(f"DELETE FROM {table} WHERE mint_address LIKE :p"),  # noqa: S608
                 {"p": f"{MINT_PREFIX}%"},
@@ -53,6 +57,16 @@ async def session(test_session_factory):
         await s.execute(
             text("DELETE FROM radar_tokens WHERE mint_address LIKE :p"),
             {"p": f"{MINT_PREFIX}%"},
+        )
+        await s.execute(
+            text(
+                "DELETE FROM lab_strategies WHERE tournament_id IN "
+                "(SELECT id FROM lab_tournaments WHERE spec_version = :v)"
+            ),
+            {"v": LAB_SPEC},
+        )
+        await s.execute(
+            text("DELETE FROM lab_tournaments WHERE spec_version = :v"), {"v": LAB_SPEC}
         )
         await s.execute(
             text("DELETE FROM paper_wallets WHERE strategy_id = 'retention_test'")
@@ -105,10 +119,15 @@ class TestMarketSnapshotCarveOut:
 
         assert await _count(session, token.mint_address) == 0
 
-    async def test_an_admitted_token_keeps_its_whole_series(
+    async def test_an_admitted_token_loses_old_snapshots_like_any_other(
         self, session: AsyncSession
     ) -> None:
-        """A Track Record token must stay explainable forever."""
+        """Radar admission alone no longer keeps a series.
+
+        Until 2026-09-08 it did, and that carve-out was 3.7M rows past policy
+        on a disk at 68% — for tokens nothing ever traded. Admission without
+        a trade is an observation, not evidence.
+        """
         token = await _token(session, "RetentionAdmitted" + "1" * 26)
         await _snapshot(session, token, at=OLD)
         session.add(
@@ -119,6 +138,54 @@ class TestMarketSnapshotCarveOut:
                 category="early_momentum", current_opportunity_score=Decimal("80"),
                 current_confidence=Decimal("50"), current_category="early_momentum",
                 is_active=True, model_version="test",
+            )
+        )
+        await session.commit()
+
+        await _prune_market_snapshots(7)
+
+        assert await _count(session, token.mint_address) == 0
+
+    async def test_a_lab_traded_token_keeps_its_whole_series(
+        self, session: AsyncSession
+    ) -> None:
+        """A lab entry is evidence too, and it was unprotected until now: a
+        lab position kept its series only if the mint also happened to be a
+        Radar token. Not admitted here, on purpose."""
+        token = await _token(session, "RetentionLab" + "1" * 32)
+        await _snapshot(session, token, at=OLD)
+        tournament = LabTournament(
+            spec_version=LAB_SPEC, spec_hash="retention", valid_from=OLD,
+            snapshot_at=OLD, status="active", protocol_note="retention test",
+        )
+        session.add(tournament)
+        await session.flush()
+        strategy = LabStrategy(
+            tournament_id=tournament.id, strategy_id="RET-01", name="RETENTION",
+            version=LAB_SPEC, spec_hash="retention", checkpoint_minutes=0,
+            size_usd=Decimal("10"), max_concurrent=1, max_exposure_usd=Decimal("10"),
+            rules={}, starting_equity=Decimal("100"), cash=Decimal("100"),
+            peak_equity=Decimal("100"), status="active",
+        )
+        session.add(strategy)
+        await session.flush()
+        decision = LabDecision(
+            strategy_row_id=strategy.id, strategy_id="RET-01",
+            mint_address=token.mint_address, checkpoint_at=OLD, checkpoint_minutes=0,
+            decided_at=OLD, eligible=True,
+        )
+        session.add(decision)
+        await session.flush()
+        session.add(
+            LabPosition(
+                decision_id=decision.id, strategy_row_id=strategy.id, strategy_id="RET-01",
+                mint_address=token.mint_address, token_id=token.id, opened_at=OLD,
+                entry_price=Decimal("0.001"), size_usd=Decimal("10"),
+                quantity=Decimal("10000"), quantity_remaining=Decimal("0"),
+                banked_proceeds_usd=Decimal("0"), entry_source="test",
+                # Closed, like the paper twin below: a finished trade is the
+                # one whose evidence gets read.
+                status="closed", closed_at=OLD, peak_exec_multiple=Decimal("1"),
             )
         )
         await session.commit()
