@@ -13,6 +13,7 @@ import { Toolbar } from "@/components/ui/toolbar";
 import { InfoTip } from "@/components/ui/tooltip";
 import { EmptyState, ErrorState } from "@/components/ui/states";
 import { CopyComparisonPanel } from "@/components/record/copy-comparison";
+import { GraduationPanel } from "@/components/record/graduation-panel";
 import { HistoryFeed } from "@/components/record/history-feed";
 import { Journey } from "@/components/record/journey";
 import { usePaperPositions } from "@/hooks/use-paper";
@@ -523,6 +524,10 @@ export default function TrackRecordPage() {
           without a control is the mistake this page exists to avoid. Renders
           nothing until both arms exist. */}
       <CopyComparisonPanel />
+
+      {/* The graduation cohort — an observation about the population, not a
+          strategy, which is why it sits beside the record rather than in a lab. */}
+      <GraduationPanel />
 
       {total === 0 && !performance.isPending ? (
         <EmptyState

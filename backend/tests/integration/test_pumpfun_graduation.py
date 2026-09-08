@@ -164,3 +164,100 @@ def test_the_targets_cover_the_question_being_asked():
     and 60 is the boundary of the claim."""
     assert graduation.TARGET_MINUTES == (5, 15, 30, 60)
     assert graduation.MARK_TOLERANCE_MINUTES > 1, "wider than the poll interval"
+
+
+# --------------------------------------------------------------------------
+# the cohort endpoint
+# --------------------------------------------------------------------------
+
+
+async def _grad(db_session, mint, *, seen_at, mcap):
+    from decimal import Decimal
+    g = PumpfunGraduation(mint_address=mint, first_seen_complete_at=seen_at,
+                          created_at_source=seen_at - timedelta(minutes=30),
+                          mcap_usd_at_graduation=Decimal(str(mcap)))
+    db_session.add(g)
+    await db_session.flush()
+    return g
+
+
+async def _mark(db_session, g, *, minutes, mcap):
+    from decimal import Decimal
+    db_session.add(PumpfunGraduationMark(
+        graduation_id=g.id, mint_address=g.mint_address,
+        observed_at=g.first_seen_complete_at + timedelta(minutes=minutes),
+        minutes_since=minutes, mcap_usd=Decimal(str(mcap))))
+    await db_session.flush()
+
+
+async def test_the_cold_start_batch_is_excluded(db_session):
+    """The collector's first pass stamped every coin ALREADY complete. Their
+    stamp is when we started watching, not when they graduated — including them
+    would reintroduce the exact error the collector was built to remove."""
+    from app.pumpfun.graduation_api import graduations
+
+    cold = NOW
+    for i in range(3):  # the cold-start batch: same instant
+        g = await _grad(db_session, f"Cold{i}" + "z" * 38, seen_at=cold, mcap=50000)
+        await _mark(db_session, g, minutes=5, mcap=50000)
+    real = await _grad(db_session, "Real" + "y" * 40,
+                       seen_at=cold + timedelta(minutes=2), mcap=50000)
+    await _mark(db_session, real, minutes=5, mcap=25000)
+
+    out = await graduations(db_session)
+    assert out["total_stamped"] == 4
+    assert out["cohort"] == 1, "only the coin we watched flip"
+    assert out["excluded_cold_start"] == 3
+    five = next(r for r in out["ages"] if r["minutes"] == 5)
+    assert five["n"] == 1 and five["median_pct"] == -50.0
+
+
+async def test_a_coin_without_a_graduation_price_is_excluded(db_session):
+    """Nothing can be measured against an unknown reference, and substituting a
+    curve-derived estimate would be an assumption dressed as an observation."""
+    from decimal import Decimal
+    from app.pumpfun.graduation_api import graduations
+
+    cold = NOW
+    await _grad(db_session, "Cold" + "a" * 40, seen_at=cold, mcap=50000)
+    g = PumpfunGraduation(mint_address="NoPx" + "b" * 40,
+                          first_seen_complete_at=cold + timedelta(minutes=3),
+                          mcap_usd_at_graduation=None)
+    db_session.add(g)
+    await db_session.flush()
+    await _mark(db_session, g, minutes=5, mcap=Decimal("10"))
+
+    out = await graduations(db_session)
+    assert out["cohort"] == 0
+    assert next(r for r in out["ages"] if r["minutes"] == 5)["n"] == 0
+
+
+async def test_returns_are_measured_against_the_stamped_graduation_price(db_session):
+    from app.pumpfun.graduation_api import graduations
+
+    cold = NOW
+    await _grad(db_session, "Cold" + "c" * 40, seen_at=cold, mcap=50000)
+    for i, (grad_mc, mc5) in enumerate([(40000, 20000), (50000, 75000)]):
+        g = await _grad(db_session, f"Coin{i}" + "d" * 38,
+                        seen_at=cold + timedelta(minutes=2 + i), mcap=grad_mc)
+        await _mark(db_session, g, minutes=5, mcap=mc5)
+
+    out = await graduations(db_session)
+    five = next(r for r in out["ages"] if r["minutes"] == 5)
+    assert five["n"] == 2
+    assert five["worst_pct"] == -50.0   # 20000/40000
+    assert five["best_pct"] == 50.0     # 75000/50000
+    assert five["pct_up"] == 50.0
+
+
+async def test_an_age_with_no_readings_reports_zero_rather_than_nothing(db_session):
+    """A missing age must be visibly empty, not silently absent — otherwise the
+    page implies the measurement was taken and came back flat."""
+    from app.pumpfun.graduation_api import graduations
+
+    out = await graduations(db_session)
+    assert [r["minutes"] for r in out["ages"]] == list(TARGET_MINUTES_FOR_TEST)
+    assert all(r["n"] == 0 for r in out["ages"])
+
+
+TARGET_MINUTES_FOR_TEST = graduation.TARGET_MINUTES
