@@ -224,6 +224,7 @@ async def _prune_telemetry() -> dict[str, Any]:
         "radar_decision_snapshots": 0,
         "wallet_flow_snapshots": 0,
         "radar_rank_events": 0,
+        "pumpfun_social": 0,
         "failures": [],
     }
 
@@ -244,6 +245,11 @@ async def _prune_telemetry() -> dict[str, Any]:
             "radar_rank_events",
             _prune_radar_rank_events,
             settings.RADAR_RANK_EVENT_RETENTION_DAYS,
+        ),
+        (
+            "pumpfun_social",
+            _prune_pumpfun_social,
+            settings.PUMPFUN_SOCIAL_RETENTION_DAYS,
         ),
     )
     for name, prune, days in jobs:
@@ -286,6 +292,30 @@ async def _prune_wallet_flow_snapshots(days: int) -> int:
         WHERE ctid IN (
             SELECT ctid FROM wallet_flow_snapshots
             WHERE captured_at < :cutoff
+            LIMIT :batch
+        )
+        """,
+        {"cutoff": datetime.now(UTC) - timedelta(days=days), "batch": _BATCH},
+    )
+
+
+async def _prune_pumpfun_social(days: int) -> int:
+    """Social readings: ~29k rows a day at two listings every ten minutes.
+
+    Given a retention policy from the day it shipped rather than after it grew.
+    `radar_rank_events` is the reason — it was the one table with no policy,
+    and it reached 1.27M rows and 865MB before anybody noticed. Bounded
+    telemetry is cheap; unbounded telemetry is only cheap for a while.
+
+    The window has to outlast the question being asked of it: reply VELOCITY
+    against forward returns needs weeks of consecutive readings, not days.
+    """
+    return await _delete_in_batches(
+        """
+        DELETE FROM pumpfun_social_snapshots
+        WHERE ctid IN (
+            SELECT ctid FROM pumpfun_social_snapshots
+            WHERE observed_at < :cutoff
             LIMIT :batch
         )
         """,

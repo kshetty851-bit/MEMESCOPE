@@ -32,6 +32,7 @@ celery_app = Celery(
         "app.lab.scheduler",
         "app.compound.scheduler",
         "app.pumpfun.scheduler",
+        "app.pumpfun.social_scheduler",
         "app.momentum.scheduler",
         "app.depth.scheduler",
         "app.hq_ops.tasks",
@@ -260,6 +261,14 @@ celery_app.conf.beat_schedule = {
     "depth-tick": {
         "task": "app.depth.scheduler.depth_tick",
         "schedule": crontab(minute="*"),
+    },
+    # Comment activity from pump.fun's own listing API — the first signal here
+    # that is not price, liquidity, volume or flow. Every ten minutes: it is a
+    # third-party API, and the derived quantity is a RATE whose denominator is
+    # this gap, so a wider one is less noisy rather than more stale.
+    "pumpfun-social-tick": {
+        "task": "app.pumpfun.social_scheduler.pumpfun_social_tick",
+        "schedule": crontab(minute="*/10"),
     },
     # Re-quotes what the Lab holds open so `settle` marks it at what a seller
     # would actually be offered, rather than at a CPMM model over a reported

@@ -577,6 +577,15 @@ class Settings(BaseSettings):
     #: beyond the floor — a dose-response curve on the one variable ten
     #: experiments have left standing. Off by default.
     FEATURE_DEPTH_LAB_ENABLED: bool = False
+    #: Collect comment activity from pump.fun's listing API. Data collection
+    #: only — nothing trades on it, and nothing can until reply VELOCITY has
+    #: been measured against forward returns, which needs consecutive readings.
+    FEATURE_PUMPFUN_SOCIAL_ENABLED: bool = False
+    #: How long social readings are kept. Longer than the other telemetry
+    #: windows on purpose: the question asked of this table is reply VELOCITY
+    #: against forward returns, which needs weeks of consecutive readings, and
+    #: a 7-day window would delete the history before it could answer.
+    PUMPFUN_SOCIAL_RETENTION_DAYS: int = Field(default=45, ge=7, le=365)
     #: The contamination boundary (mission §15): tokens whose checkpoint
     #: precedes this instant are never scored, because the historical dataset
     #: has already been inspected seven times. ISO-8601 UTC. Empty means "stamp
