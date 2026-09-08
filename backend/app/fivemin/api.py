@@ -1,9 +1,12 @@
-"""The Five-Minute Lab's board.
+"""The Hold-Horizon Lab's board — two arms, so a multi-wallet board.
 
-Reuses `build_board` rather than restating it: both tournaments run the same
-ratchet over the same tables, so a second copy would be a second definition of
-"cycles banked" and "equity", and the first edit to either would make the two
-pages disagree about the same arithmetic without either looking wrong.
+Serves `lab.board.build`, the same builder Depth, Momentum and Social use,
+rather than the Compound Lab's single-wallet `build_board`. That one selects
+ONE strategy row with `.first()`, which was right while this lab had one
+wallet and would silently have shown a single arm now that it has two.
+
+Nothing here recomputes a figure the engine owns: a second implementation is a
+second answer, and the first time either changed they would disagree.
 """
 
 from __future__ import annotations
@@ -13,32 +16,41 @@ from typing import Any
 from fastapi import APIRouter, Query
 
 from app.api.deps import DbSession
-from app.compound.api import build_board
 from app.fivemin import spec as fmspec
+from app.lab import board as lab_board
 from app.lab.api import build_trades
 
 router = APIRouter(prefix="/fivemin", tags=["fivemin"])
 
 DISCLOSURE = (
-    "A hypothesis, not a finding. The five-minute hold comes from the pump.fun "
-    "graduation cohort, where selling at five minutes returned +$504.73 on a "
-    "$100 book — and where ONE coin of 138 did 47.97x and produced 59.7% of "
-    "all gross profit. Remove that single trade and the same cohort returns "
-    "+$35.12. The median trade was 1.037x. That cohort is also a different "
-    "population from the one this wallet trades. The stake never scales with "
-    "the balance, so any compounding here is the wallet ratchet and nothing "
-    "else."
+    "Run as refutation, not expectation. The FIFTEEN-minute hold has already "
+    "been measured on 1,348 real executed positions and returned about -8.5% "
+    "net per trade — the 9% with no price at the horizon were the rugs, not "
+    "missing data. The FIVE-minute figure that motivated this lab (+$504.73 on "
+    "a $100 book) came from a different population, pump.fun graduations, and "
+    "rested on ONE coin of 138 doing 47.97x: remove it and the same cohort "
+    "returns +$35.12, median trade 1.037x. What is new here is that both "
+    "horizons take the SAME entry at the SAME instant with the SAME $10 stake, "
+    "so the difference between the two arms is the clock and nothing else. "
+    "There is no wallet ratchet and the stake never scales."
 )
 
 
 @router.get("/board")
 async def board(session: DbSession) -> dict[str, Any]:
-    out = await build_board(session, registry=fmspec)
-    # This lab's own disclosure replaces the Compound Lab's: the reason to
-    # distrust this one is specific to it.
-    out["disclosure"] = DISCLOSURE
-    out["time_exit_minutes"] = fmspec.TIME_EXIT_MINUTES
+    # Ordered by the horizon itself, shortest first, so the board reads as the
+    # comparison it is. Sorting by equity would put whichever arm is winning on
+    # top and destroy the only axis this experiment has.
+    out = await lab_board.build(
+        session, registry=fmspec, disclosure=DISCLOSURE,
+        order=lambda w: w.get("hold_minutes") or 0,
+        axis=lambda s_: {"hold_minutes": (
+            round((s_.exits.time_exit_hours or 0) * 60) if s_ else None)},
+    )
+    out["hold_minutes"] = list(fmspec.HOLD_MINUTES)
+    out["stake_usd"] = str(fmspec.STAKE_USD)
     out["sizing_scales"] = fmspec.SIZING_SCALES
+    out["cycle_enabled"] = fmspec.CYCLE_ENABLED
     return out
 
 

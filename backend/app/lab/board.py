@@ -31,6 +31,10 @@ async def build(
     axis: Callable[[Any], dict] | None = None,
     order: Callable[[dict], Any] | None = None,
 ) -> dict[str, Any]:
+    # `target_multiple` is read with a default because a registry may run no
+    # ratchet at all (fivemin-2.0.0 sets `CYCLE_ENABLED = False`). Absent means
+    # "this experiment has no target", which is not the same as a target of
+    # zero — so it is served as null and the page omits the column.
     t = (await session.execute(
         select(LabTournament).where(
             LabTournament.spec_version == registry.SPEC_VERSION)
@@ -39,7 +43,7 @@ async def build(
         return {"disclosure": disclosure, "activated": False,
                 "spec_version": registry.SPEC_VERSION, "spec_hash": registry.SPEC_HASH,
                 "starting_equity": registry.STARTING_EQUITY,
-                "target_multiple": registry.CYCLE_TARGET_MULTIPLE,
+                "target_multiple": getattr(registry, "CYCLE_TARGET_MULTIPLE", None),
                 "cycles": [], "positions": []}
 
     rows = list((await session.execute(
@@ -153,7 +157,7 @@ async def build(
         "spec_version": registry.SPEC_VERSION,
         "spec_hash": registry.SPEC_HASH,
         "starting_equity": registry.STARTING_EQUITY,
-        "target_multiple": registry.CYCLE_TARGET_MULTIPLE,
+        "target_multiple": getattr(registry, "CYCLE_TARGET_MULTIPLE", None),
         "failure_floor": registry.FAILURE_EQUITY_FLOOR,
         # No board-level `cycles_banked` or `current_cycle`. They were carried
         # here from the single-wallet Compound Lab, where they mean something,

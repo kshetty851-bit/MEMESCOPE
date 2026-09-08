@@ -63,12 +63,22 @@ class CompoundService:
 
     A registry supplies `SPEC_VERSION`, `SPEC_HASH`, `STRATEGIES`, `BY_ID`,
     `STARTING_EQUITY`, `FAILURE_EQUITY_FLOOR` and `CYCLE_TARGET_MULTIPLE`.
+
+    A registry may also set `CYCLE_ENABLED = False`, and then NO ratchet runs:
+    no cycle is opened, nothing is banked, and the wallet simply trades and
+    settles. `CYCLE_TARGET_MULTIPLE` is not required in that case. The rest of
+    the pass — activate, judge, settle, mark equity — is identical, which is
+    the point: a no-ratchet arm and a ratchet arm stay comparable because they
+    run through the same code rather than through a second implementation.
     """
 
     def __init__(self, session, registry: Any = cspec) -> None:
         self._session = session
         self._spec = registry
         self._lab = LabService(session, registry=registry)
+        #: False turns the ratchet off entirely. Absent means on, so every
+        #: registry that predates the opt-out keeps banking exactly as before.
+        self._cycles = getattr(registry, "CYCLE_ENABLED", True)
 
     async def _rows(self) -> tuple[LabTournament, list[LabStrategy]] | None:
         """This registry's tournament and EVERY wallet in it."""
@@ -152,13 +162,17 @@ class CompoundService:
             return {"skipped": "not_activated"}
         _t, rows = found
 
-        cycles = {row.id: await self._open_cycle(t, row, now=now) for row in rows}
+        cycles = ({row.id: await self._open_cycle(t, row, now=now)
+                   for row in rows} if self._cycles else {})
         decided = await self._lab.evaluate_due(now=now)
         settled = await self._lab.settle(now=now)
         await self._lab.record_equity(now=now)
 
         banked: list[dict[str, Any]] = []
-        for row in rows:
+        # A no-ratchet registry stops here. Judging, settling and equity have
+        # all already run above — turning the ratchet off must not turn the
+        # wallet off, only the banking.
+        for row in (rows if self._cycles else ()):
             cycle = cycles[row.id]
             equity = await self._lab.equity(row)
             if equity < cycle.target_usd:

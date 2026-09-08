@@ -1,16 +1,4 @@
-/** The Five-Minute Lab board. Shapes mirror the server; accounting is server-side. */
-
-export interface FiveMinCycle {
-  cycle_no: number;
-  base_usd: number | null;
-  target_usd: number | null;
-  started_at: string;
-  reached_at: string | null;
-  equity_at_target: number | null;
-  realised_equity: number | null;
-  positions_closed: number | null;
-  outcome: string | null;
-}
+/** The Hold-Horizon Lab board. Shapes mirror the server; accounting is server-side. */
 
 export interface FiveMinPosition {
   id: string;
@@ -21,6 +9,31 @@ export interface FiveMinPosition {
   open_value: number | null;
   exec_multiple: number | null;
   exit_reason: string | null;
+  pnl: number | null;
+}
+
+/** One arm. Both arms are identical except `hold_minutes`, which is the point. */
+export interface FiveMinWallet {
+  strategy_id: string;
+  name: string;
+  status: string;
+  hypothesis: string;
+  entry_text: string[];
+  exit_text: string[];
+  checkpoint_label: string;
+  size_usd: number | null;
+  max_concurrent: number | null;
+  cash: number | null;
+  open_value: number | null;
+  equity: number | null;
+  /** Counts, taken over every row rather than the display window. */
+  open_positions: number;
+  closed_positions: number;
+  realised_pnl: number | null;
+  trades: FiveMinPosition[];
+  /** Contributed by the board's `axis` — the horizon this arm sells at. */
+  hold_minutes: number | null;
+  rank?: number;
 }
 
 export interface FiveMinBoard {
@@ -28,27 +41,16 @@ export interface FiveMinBoard {
   activated: boolean;
   spec_version: string;
   spec_hash: string;
-  strategy_id?: string;
-  name?: string;
-  rules?: Record<string, unknown>;
   starting_equity: number | null;
-  target_multiple: number | null;
   failure_floor?: number | null;
-  cash?: number | null;
-  open_value?: number | null;
-  equity?: number | null;
-  status?: string;
-  cycles_banked?: number;
-  current_cycle?: {
-    cycle_no: number;
-    base_usd: number | null;
-    target_usd: number | null;
-    started_at: string;
-  } | null;
-  cycles: FiveMinCycle[];
-  positions: FiveMinPosition[];
-  /** The hold under test. */
-  time_exit_minutes?: number;
-  /** False by design: the stake never follows the balance. */
+  /** Null when the registry runs no ratchet, which this one does not. */
+  target_multiple: number | null;
+  wallets?: FiveMinWallet[];
+  /** The horizons under test, shortest first. */
+  hold_minutes?: number[];
+  /** Flat, and never follows the balance. */
+  stake_usd?: string;
   sizing_scales?: boolean;
+  /** False by design: the wallet ratchet was removed. */
+  cycle_enabled?: boolean;
 }

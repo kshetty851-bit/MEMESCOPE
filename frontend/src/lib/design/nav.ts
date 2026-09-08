@@ -78,7 +78,7 @@ export const NAV_GROUPS: NavGroup[] = [
       // against the pattern that removed the other per-lab pages — so it is
       // listed here deliberately rather than by drift, and the test below
       // records that this one is intended.
-      { href: "/fivemin-lab", label: "Five-Minute Lab", icon: IconWallet, status: "ready" },
+      { href: "/fivemin-lab", label: "Hold-Horizon Lab", icon: IconWallet, status: "ready" },
     ],
   },
   {

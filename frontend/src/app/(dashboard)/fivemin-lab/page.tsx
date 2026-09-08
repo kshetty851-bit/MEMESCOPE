@@ -4,19 +4,21 @@ import { FiveMinTradesPanel } from "@/components/fivemin/trades-panel";
 import { Label, Panel } from "@/components/ui/panel";
 import { Toolbar } from "@/components/ui/toolbar";
 import { useFiveMinBoard } from "@/hooks/use-fivemin";
-import type { FiveMinCycle } from "@/types/fivemin";
+import type { FiveMinWallet } from "@/types/fivemin";
 
 /**
- * THE FIVE-MINUTE LAB.
+ * THE HOLD-HORIZON LAB.
  *
- * One wallet testing two changes against the Compound Lab: a five-minute hold
- * instead of six hours, and a stake that never follows the balance.
+ * Two wallets, identical in every respect except when they sell: one at five
+ * minutes, one at fifteen. They take the same entry object at the same instant
+ * and stake the same flat $10, so the gap between their records is the clock
+ * and nothing else.
  *
- * The disclosure is rendered FIRST and is not collapsible. This lab exists
- * because one coin in a graduation cohort of 138 did 47.97x; without that
- * trade the observation it rests on returns +$35 rather than +$505. A reader
- * who meets the equity figure before that sentence has already been told what
- * to think about it.
+ * The disclosure is rendered FIRST and is not collapsible. The fifteen-minute
+ * hold has already measured about -8.5% net per trade on 1,348 real positions,
+ * and the five-minute figure that motivated the lab rests on one coin of 138
+ * doing 47.97x. A reader who meets the equity numbers before those sentences
+ * has already been told what to think about them.
  */
 
 function money(v: number | null | undefined): string {
@@ -25,41 +27,82 @@ function money(v: number | null | undefined): string {
     : `$${Number(v).toFixed(2)}`;
 }
 
+function signed(v: number | null | undefined): string {
+  if (v === null || v === undefined || !Number.isFinite(Number(v))) return "—";
+  const n = Number(v);
+  return `${n >= 0 ? "+" : "−"}$${Math.abs(n).toFixed(2)}`;
+}
+
 function tone(v: number | null | undefined, base: number): string {
   if (v === null || v === undefined || !Number.isFinite(Number(v))) return "text-muted";
   return Number(v) > base ? "text-up" : Number(v) < base ? "text-down" : "text-ink";
 }
 
-function when(iso: string): string {
-  return iso.slice(5, 16).replace("T", " ");
+function ArmCard({ w, base }: { w: FiveMinWallet; base: number }) {
+  return (
+    <Panel density="compact">
+      <div className="flex items-baseline justify-between gap-2">
+        <Label>{w.hold_minutes ? `SELLS AT ${w.hold_minutes} MIN` : w.name}</Label>
+        <span className="font-mono text-[10px] text-muted">{w.strategy_id}</span>
+      </div>
+
+      <div className="mt-2 grid grid-cols-2 gap-3">
+        <div>
+          <div className="text-[10px] uppercase text-muted">Equity</div>
+          <div className={`font-mono text-lg ${tone(w.equity, base)}`}>{money(w.equity)}</div>
+        </div>
+        <div>
+          <div className="text-[10px] uppercase text-muted">Realised P&amp;L</div>
+          <div className={`font-mono text-lg ${tone(w.realised_pnl, 0)}`}>
+            {signed(w.realised_pnl)}
+          </div>
+        </div>
+        <div>
+          <div className="text-[10px] uppercase text-muted">Cash</div>
+          <div className="font-mono text-sm text-ink">{money(w.cash)}</div>
+        </div>
+        <div>
+          <div className="text-[10px] uppercase text-muted">Open book</div>
+          <div className="font-mono text-sm text-ink">{money(w.open_value)}</div>
+        </div>
+      </div>
+
+      <p className="mt-3 text-[11px] text-muted">
+        {w.open_positions} open of {w.max_concurrent ?? "—"} · {w.closed_positions} closed ·
+        stake {money(w.size_usd)} flat · status {w.status ?? "—"}
+      </p>
+    </Panel>
+  );
 }
 
-function CycleRow({ c, base }: { c: FiveMinCycle; base: number }) {
+function GapPanel({ a, b, base }: { a: FiveMinWallet; b: FiveMinWallet; base: number }) {
+  const da = Number(a.equity ?? base) - base;
+  const db = Number(b.equity ?? base) - base;
+  const closed = a.closed_positions + b.closed_positions;
   return (
-    <tr className="border-t border-line">
-      <td className="py-1.5 pr-3 font-mono text-[10px] text-muted">#{c.cycle_no}</td>
-      <td className="py-1.5 pr-3 text-right font-mono text-muted">{money(c.base_usd)}</td>
-      <td className="py-1.5 pr-3 text-right font-mono text-muted">{money(c.target_usd)}</td>
-      <td className={`py-1.5 pr-3 text-right font-mono ${tone(c.realised_equity, base)}`}>
-        {money(c.realised_equity)}
-      </td>
-      <td className="py-1.5 pr-3 text-right font-mono text-muted">{c.positions_closed ?? "—"}</td>
-      <td className="py-1.5 font-mono text-[10px] text-muted">
-        {c.reached_at ? when(c.reached_at) : "running"}
-      </td>
-    </tr>
+    <Panel density="compact">
+      <Label>THE GAP</Label>
+      <p className="mt-2 text-xs text-ink-3">
+        {closed === 0
+          ? "Neither arm has closed a trade yet. Until both have, any difference between them is noise about which tokens happened to be open, not a result."
+          : `${a.hold_minutes} min is ${signed(da)} and ${b.hold_minutes} min is ${signed(db)}, a gap of $${Math.abs(da - db).toFixed(2)} across ${closed} closed trades. Both arms bought the same tokens, so the gap is the horizon — but it is not a finding until the sample can survive its own outliers.`}
+      </p>
+    </Panel>
   );
 }
 
 export default function FiveMinLabPage() {
   const { data, isLoading, isError } = useFiveMinBoard();
+  const base = Number(data?.starting_equity ?? 100);
+  const wallets = data?.wallets ?? [];
+  const [first, second] = [wallets[0], wallets[1]];
 
   return (
     <div className="flex flex-col gap-4 p-4 lg:p-6">
       <Toolbar
-        eyebrow="Five-Minute Lab"
-        title="The wallet ratchet, on a five-minute hold."
-        description="One $100 wallet. Same entry and same +10% wallet target as the Compound Lab; the hold is five minutes instead of six hours and the stake never follows the balance. Nothing here is real money."
+        eyebrow="Hold-Horizon Lab"
+        title="Same entry, same stake. One sells at five minutes, one at fifteen."
+        description="Two $100 wallets, ten trades of $10 each. They buy the same token at the same instant, so the only thing that can separate their records is the clock. No wallet ratchet, and the stake never follows the balance. Nothing here is real money."
       />
 
       {/* Deliberately above the numbers, and deliberately not collapsible. */}
@@ -67,7 +110,7 @@ export default function FiveMinLabPage() {
         <Label>WHY TO DISTRUST THIS</Label>
         <p className="mt-2 text-xs leading-relaxed text-ink-3">
           {data?.disclosure ??
-            "A hypothesis, not a finding. The five-minute hold comes from a graduation cohort where one coin of 138 produced most of the profit."}
+            "Run as refutation, not expectation. The fifteen-minute hold has already measured about -8.5% net per trade on 1,348 real positions."}
         </p>
       </Panel>
 
@@ -89,63 +132,17 @@ export default function FiveMinLabPage() {
         </Panel>
       ) : (
         <>
-          <Panel density="compact">
-            <Label>THE WALLET</Label>
-            <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <div>
-                <div className="text-[10px] uppercase text-muted">Equity</div>
-                <div className={`font-mono text-lg ${tone(data.equity, Number(data.starting_equity ?? 100))}`}>
-                  {money(data.equity)}
-                </div>
-              </div>
-              <div>
-                <div className="text-[10px] uppercase text-muted">Cash</div>
-                <div className="font-mono text-lg text-ink">{money(data.cash)}</div>
-              </div>
-              <div>
-                <div className="text-[10px] uppercase text-muted">Open book</div>
-                <div className="font-mono text-lg text-ink">{money(data.open_value)}</div>
-              </div>
-              <div>
-                <div className="text-[10px] uppercase text-muted">Cycles banked</div>
-                <div className="font-mono text-lg text-ink">{data.cycles_banked ?? 0}</div>
-              </div>
-            </div>
-            <p className="mt-3 text-[11px] text-muted">
-              Hold {data.time_exit_minutes ?? 5} minutes · stake{" "}
-              {data.sizing_scales === false ? "flat, never scales with the balance" : "scales with equity"} ·
-              cycle target {data.target_multiple ? `${Number(data.target_multiple).toFixed(2)}x` : "—"} ·
-              status {data.status ?? "—"}
-            </p>
-          </Panel>
+          <div className="grid gap-4 lg:grid-cols-2">
+            {wallets.map((w) => (
+              <ArmCard key={w.strategy_id} w={w} base={base} />
+            ))}
+          </div>
 
-          <Panel density="compact">
-            <Label>CYCLES</Label>
-            {data.cycles.length === 0 ? (
-              <p className="mt-2 text-xs text-muted">No cycle has been opened yet.</p>
-            ) : (
-              <table className="mt-2 w-full text-xs">
-                <thead>
-                  <tr className="text-[10px] uppercase text-muted">
-                    <th className="pb-1 pr-3 text-left font-normal">Cycle</th>
-                    <th className="pb-1 pr-3 text-right font-normal">Base</th>
-                    <th className="pb-1 pr-3 text-right font-normal">Target</th>
-                    <th className="pb-1 pr-3 text-right font-normal">Realised</th>
-                    <th className="pb-1 pr-3 text-right font-normal">Closed</th>
-                    <th className="pb-1 text-left font-normal">Reached</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.cycles.map((c) => (
-                    <CycleRow key={c.cycle_no} c={c} base={Number(c.base_usd ?? 100)} />
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </Panel>
+          {/* The comparison is the experiment, so it is stated rather than left
+              for the reader to do in their head from two cards. */}
+          {first && second ? <GapPanel a={first} b={second} base={base} /> : null}
 
-          {/* Every trade, open and closed, each with its own P&L. The board's
-              `positions` was a display window; this is the record. */}
+          {/* Every trade, open and closed, each with its own P&L. */}
           <FiveMinTradesPanel />
         </>
       )}
