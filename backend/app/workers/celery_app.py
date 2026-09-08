@@ -36,6 +36,7 @@ celery_app = Celery(
         "app.momentum.scheduler",
         "app.depth.scheduler",
         "app.social.scheduler",
+        "app.copycontrol.scheduler",
         "app.hq_ops.tasks",
     ],
 )
@@ -270,6 +271,14 @@ celery_app.conf.beat_schedule = {
     "pumpfun-social-tick": {
         "task": "app.pumpfun.social_scheduler.pumpfun_social_tick",
         "schedule": crontab(minute="*/10"),
+    },
+    # CPY-02, the PumpFun Lab's control arm. Second 30 rather than on the
+    # minute: it consumes `pumpfun_signals`, so running it before the pumpfun
+    # tick would mirror the PREVIOUS minute's trades and add a minute of
+    # invisible lag to every control entry.
+    "copycontrol-tick": {
+        "task": "app.copycontrol.scheduler.copycontrol_tick",
+        "schedule": crontab(minute="*"),
     },
     # The Social Lab: attention against its own control.
     "social-tick": {

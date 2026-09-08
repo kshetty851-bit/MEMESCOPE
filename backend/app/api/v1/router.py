@@ -30,6 +30,7 @@ from app.paper import api as paper
 from app.compound import api as compound
 from app.depth import api as depth
 from app.social import api as social
+from app.copycontrol import api as copycontrol
 from app.momentum import api as momentum
 from app.pumpfun import api as pumpfun
 from app.lab import api as lab
@@ -67,6 +68,7 @@ api_router.include_router(pumpfun.router)
 api_router.include_router(momentum.router)
 api_router.include_router(depth.router)
 api_router.include_router(social.router)
+api_router.include_router(copycontrol.router)
 # Exit Watch, the permanent record and the leaderboards. Additive; the Radar's
 # own routes and every pre-existing endpoint are unchanged.
 api_router.include_router(intelligence.router)

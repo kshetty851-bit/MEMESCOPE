@@ -584,6 +584,8 @@ class Settings(BaseSettings):
     #: The Social Lab: two $100 wallets differing only in whether they require
     #: a coin's comment rate to be RISING. Off by default.
     FEATURE_SOCIAL_LAB_ENABLED: bool = False
+    #: CPY-02: the control arm for the PumpFun Lab. Off by default.
+    FEATURE_COPYCONTROL_ENABLED: bool = False
     #: V7's own switch, so it can be stopped without stopping the labs that
     #: came after it.
     #:

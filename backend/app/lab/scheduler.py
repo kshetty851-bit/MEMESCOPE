@@ -20,6 +20,7 @@ from app.db.session import SessionFactory
 from app.compound import spec as cspec
 from app.depth import spec as dspec
 from app.momentum import spec as mspec
+from app.copycontrol import spec as ccspec
 from app.social import spec as socspec
 from app.pumpfun import spec as pspec
 from app.lab import leaderboard, sellability, spec
@@ -58,7 +59,8 @@ CALENDAR_SNAPSHOTS = (("24H", 24), ("48H", 48), ("72H", 72),
 #: without appearing here.
 LIVE_SPEC_VERSIONS = (spec.SPEC_VERSION, cspec.SPEC_VERSION,
                       mspec.SPEC_VERSION, dspec.SPEC_VERSION,
-                      pspec.SPEC_VERSION, socspec.SPEC_VERSION)
+                      pspec.SPEC_VERSION, socspec.SPEC_VERSION,
+                      ccspec.SPEC_VERSION)
 
 #: Closed-trade milestones. A strategy's record becomes worth reading at a
 #: sample size, not at a date, so these fire independently of the calendar.
