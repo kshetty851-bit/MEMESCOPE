@@ -65,14 +65,27 @@ async def board(session: DbSession) -> dict[str, Any]:
     # Counted in the database, not from the 150 rows above: the page shows a
     # window, and a coverage figure computed from a window is a figure about
     # the window.
-    by_outcome = dict((await session.execute(
-        select(PumpfunSignal.outcome, func.count())
+    rows_by_outcome = (await session.execute(
+        select(PumpfunSignal.outcome, PumpfunSignal.acted, func.count())
         .where(PumpfunSignal.tournament_id == t.id)
-        .group_by(PumpfunSignal.outcome)
-    )).all())
+        .group_by(PumpfunSignal.outcome, PumpfunSignal.acted)
+    )).all()
+    by_outcome: dict[str, int] = {}
+    refusals: dict[str, int] = {}
+    copied = 0
+    for outcome, acted, n in rows_by_outcome:
+        by_outcome[outcome] = by_outcome.get(outcome, 0) + n
+        # Split on the `acted` FLAG, never on a list of outcome names. The
+        # tranche rules added `added` and `trimmed` as successes, and a
+        # hardcoded ("opened", "closed") would have silently counted both as
+        # misses — understating coverage and printing them under "why we
+        # missed". The flag is written at the point of action and cannot drift.
+        if acted:
+            copied += n
+        else:
+            refusals[outcome] = refusals.get(outcome, 0) + n
     actionable = sum(v for k, v in by_outcome.items()
                      if k != "before_watch_start")
-    copied = by_outcome.get("opened", 0) + by_outcome.get("closed", 0)
     lag = (await session.execute(
         select(func.avg(func.extract(
             "epoch", PumpfunSignal.seen_at - PumpfunSignal.leader_at)))
@@ -96,6 +109,9 @@ async def board(session: DbSession) -> dict[str, Any]:
             "copied_pct": (round(100 * copied / actionable, 1)
                            if actionable else None),
             "by_outcome": by_outcome,
+            #: Only the refusals — what the "why we missed" panel renders, so
+            #: it never has to know which outcomes were successes.
+            "refusals": refusals,
             "mean_lag_seconds": round(float(lag), 1) if lag is not None else None,
         },
         "signals": [{

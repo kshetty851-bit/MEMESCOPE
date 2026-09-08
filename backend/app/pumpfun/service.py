@@ -28,7 +28,7 @@ never how much: a fixed $20, at most five open.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 from sqlalchemy import select
@@ -43,20 +43,38 @@ from app.models.lab import (
     LabStrategy,
     LabTournament,
 )
-from app.models.market import TokenMarketSnapshot, TradingStatus
+from app.models.market import (
+    LANE_DISPLAY,
+    TokenEnrichmentState,
+    TokenMarketSnapshot,
+    TradingStatus,
+)
 from app.models.pumpfun import PumpfunSignal
 from app.pumpfun import spec
 from app.pumpfun.follower import LeaderTrade, recent_trades
+from app.repositories.token import TokenRepository
+from app.services.market.providers.base import MarketDataProvider
+from app.services.market.providers.registry import get_provider
+from app.services.market.service import MarketEnrichmentService
 
 logger = get_logger(__name__)
 
 EXIT_REASON = "leader_sold"
 
+#: Provenance marker for a mint this lab registered because the leader traded
+#: it. Deliberately NOT the pump.fun program id: `_is_pumpfun`, the Universe
+#: rules and the real-wallet safety gate all read `source_program`, and writing
+#: a program id we did not observe would be claiming a discovery that never
+#: happened. Follows the `jupiter_verified` precedent in `app/universe`.
+SOURCE_PROGRAM = "pumpfun_copy"
+
 
 class PumpfunService:
-    def __init__(self, session) -> None:
+    def __init__(self, session, *, provider: MarketDataProvider | None = None) -> None:
         self._session = session
         self._lab = LabService(session, registry=spec)
+        self._provider = provider
+        self._owns_provider = False
 
     async def _row(self) -> tuple[LabTournament, LabStrategy] | None:
         t = (await self._session.execute(
@@ -98,6 +116,124 @@ class PumpfunService:
             return None
         return snap
 
+    async def _market(self) -> MarketDataProvider:
+        """The provider for this tick, started once and closed by `tick`.
+
+        ponytail: one instance per tick, so its circuit breaker is per tick
+        too. That is fine at this volume — he trades a handful of times a
+        minute and most of those need no call at all — but a lab that fetched
+        far more would want the worker's long-lived provider passed in, which
+        is why the constructor accepts one.
+        """
+        if self._provider is None:
+            self._provider = get_provider()
+            self._owns_provider = True
+            await self._provider.start()
+        return self._provider
+
+    async def _enrol(
+        self, trade: LeaderTrade, now: datetime
+    ) -> tuple[MarketEnrichmentService, TokenEnrichmentState] | None:
+        """Register a mint we cannot price, so the pipeline can price it.
+
+        The scanner subscribes to pump.fun's bonding curve; the leader trades
+        wherever he likes, so most of his names have no `discovered_tokens` row
+        at all and therefore no enrichment state, no snapshots and no price.
+        There is nothing wrong with those tokens — we simply never looked.
+
+        Registration is shallow, exactly as `app/universe/enrolment.py` does
+        it: a token row and an enrichment state, nothing else. No Radar
+        admission, no Track Record entry. It is a thing to observe because
+        somebody we are watching touched it, not an opportunity anyone
+        detected.
+
+        The provenance is HIS transaction — a real signature at a real slot —
+        rather than the synthetic pair the Universe has to invent, because
+        unlike a vendor list a swap genuinely is a chain observation.
+        """
+        tokens = TokenRepository(self._session)
+        token = await tokens.get_by_mint(trade.mint)
+        if token is None:
+            token = await tokens.insert_if_absent({
+                "mint_address": trade.mint,
+                "signature": trade.signature,
+                "slot": trade.slot,
+                "discovered_at": now,
+                "block_time": trade.at,
+                "source_program": SOURCE_PROGRAM,
+            })
+            if token is None:                     # lost the race; it exists now
+                token = await tokens.get_by_mint(trade.mint)
+            if token is None:
+                return None
+            logger.info("pumpfun_token_enrolled", mint=trade.mint,
+                        signature=trade.signature)
+
+        enrichment = MarketEnrichmentService(self._session, await self._market())
+        state = await enrichment.states.ensure_state(
+            token_id=token.id, mint_address=token.mint_address,
+            next_refresh_at=now,
+            # Straight into the display lane. A nursery token can be trimmed by
+            # the membership beat, and a mint we are about to hold must not be:
+            # HQ INC-056 was 61 of 108 Lab positions frozen unpriceable because
+            # their tokens fell out of the refresh rotation. Once a position is
+            # actually open `priority.resolve_membership` keeps it here on its
+            # own — this only covers the gap before that beat runs.
+            priority=LANE_DISPLAY,
+        )
+        if state is None:
+            state = await enrichment.states.get_by_mint(trade.mint)
+        if state is None:
+            return None
+        return enrichment, state
+
+    async def _price_now(
+        self, trade: LeaderTrade, now: datetime
+    ) -> TokenMarketSnapshot | str:
+        """Quote a mint on demand — or say precisely why we could not.
+
+        `enrich` and not a bare provider call: it is the one place that writes
+        a snapshot, and it carries the data-quality firewall with it — the
+        suspect annotation `_mark_price` filters on, the dead-letter
+        accounting, the refresh schedule. A private write here would produce a
+        row the rest of the platform does not trust and cannot audit.
+
+        Returns the snapshot, or the REFUSAL that explains its absence. Three
+        different facts used to arrive here as the single word `unpriceable`,
+        and they answer opposite questions:
+
+          * `no_market` — the provider answered and this mint has no indexed
+            pool. A fact about the token, and the interesting one: he holds a
+            median of 8.5 minutes and freshly launched mints are routinely
+            unindexed for their first minutes, so this is where "copying him is
+            structurally impossible" would show up.
+          * `quote_unavailable` — the provider errored, or the breaker was open
+            and it was never asked. **Not evidence about the token at all.**
+            Conflating a DexScreener outage with "this coin has no market"
+            would turn our bad afternoon into a finding about his strategy.
+          * `unpriceable` — a print exists but may not be acted on: suspect,
+            stale, off the glitch band, or not trading.
+
+        `without_market` is read BEFORE `snapshots_written` because they are
+        not exclusive: the dead-letter path writes an INACTIVE snapshot for a
+        token it has just counted as having no market.
+        """
+        found = await self._enrol(trade, now)
+        if found is None:
+            return "enrol_failed"
+        enrichment, state = found
+        outcome = await enrichment.enrich([state])
+        if outcome.deferred or outcome.failed:
+            logger.warning("pumpfun_quote_unavailable", mint=trade.mint,
+                           deferred=outcome.deferred, failed=outcome.failed)
+            return "quote_unavailable"
+        if outcome.without_market:
+            return "no_market"
+        if outcome.snapshots_written == 0:
+            return "quote_unavailable"
+        snap = await self._mark_price(trade.mint, now)
+        return snap if snap is not None else "unpriceable"
+
     async def _record(self, t, trade: LeaderTrade, outcome: str, *,
                       acted: bool = False, position_id=None,
                       now: datetime) -> None:
@@ -122,15 +258,31 @@ class PumpfunService:
             select(LabPosition).where(LabPosition.strategy_row_id == row.id,
                                       LabPosition.status == "open")
         )).scalars().all()
-        if any(p.mint_address == trade.mint for p in held):
-            return "already_held"
-        if len(held) >= s.max_concurrent:
+        mine = next((p for p in held if p.mint_address == trade.mint), None)
+
+        # Units, not positions. `uq_lab_position_once` allows one row per
+        # (strategy, mint) for the life of the tournament — an invariant every
+        # other lab depends on — so a scale-in adds to the row we already hold
+        # rather than opening a second one beside it.
+        units_open = sum(self._units_held(p, s.size_usd) for p in held)
+        if units_open >= s.max_concurrent:
             return "max_concurrent"
         if row.cash < s.size_usd:
             return "insufficient_cash"
+        if mine is not None:
+            if self._units_held(mine, s.size_usd) >= spec.MAX_UNITS_PER_MINT:
+                return "max_units_per_mint"
+            return await self._add(t, row, mine, trade, now)
         snap = await self._mark_price(trade.mint, now)
+        on_demand = snap is None
         if snap is None:
-            return "unpriceable"
+            # He trades names the scanner never subscribed to. Refusing them is
+            # not measuring his strategy, it is measuring our coverage of it —
+            # so ask the provider now instead of declining on our own ignorance.
+            got = await self._price_now(trade, now)
+            if isinstance(got, str):
+                return got
+            snap = got
         qty = execution.buy_quantity(s.size_usd, snap.price_usd, snap.liquidity_usd)
         if qty is None or qty <= 0:
             return "unpriceable"
@@ -151,7 +303,11 @@ class PumpfunService:
                       "signature": trade.signature,
                       "leader_sol": (round(trade.sol_amount, 4)
                                     if trade.sol_amount is not None else None),
-                      "lag_seconds": round((now - trade.at).total_seconds(), 1)},
+                      "lag_seconds": round((now - trade.at).total_seconds(), 1),
+                      # Whether this fill existed only because we went and
+                      # fetched a price. The v1.0.0 book could not have opened
+                      # it, so the two runs stay comparable.
+                      "priced_on_demand": on_demand},
             requested_size_usd=s.size_usd,
         )
         self._session.add(decision)
@@ -175,7 +331,78 @@ class PumpfunService:
                            now=now)
         return "opened"
 
+    @staticmethod
+    def _units_held(pos: LabPosition, unit: Decimal) -> int:
+        """Units still deployed in this position.
+
+        NOT `size_usd / unit`: that is what was BOUGHT. `size_usd` and
+        `quantity` are the original cost and the original quantity, immutable
+        once a unit is added, because `settle` defines the executable multiple
+        as `sell_proceeds(quantity) / size_usd` — the V6 frozen definition of a
+        2x. Decrementing them on a trim would inflate the multiple of every
+        position we scale out of. What a trim moves is `quantity_remaining`,
+        exactly as the registry's own PARTIAL exit does, so the units still at
+        risk are the bought units scaled by the fraction still held.
+        """
+        if not pos.quantity or pos.quantity <= 0:
+            return 0
+        bought = pos.size_usd / unit
+        return int((bought * (pos.quantity_remaining / pos.quantity))
+                   .quantize(Decimal(1), rounding=ROUND_HALF_UP))
+
+    async def _add(self, t, row, pos: LabPosition, trade: LeaderTrade,
+                   now: datetime) -> str:
+        """He bought a name we already hold. Add one unit to it.
+
+        The position averages: stake, quantity and entry price all move to the
+        blended figures, which is what makes `exec_multiple` — proceeds over
+        cost — stay meaningful across the adds. `peak_exec_multiple` is left
+        alone; it is only read by a trailing stop, and this registry declares
+        none, so rebasing it would be inventing a number nothing consumes.
+
+        `entry_liquidity_usd` keeps the FIRST entry's reading on purpose: it
+        records the conditions we entered under, and the liquidity exits that
+        would read it are not enabled here either.
+
+        No new `LabDecision`. A position has exactly one, and the ledger of
+        every leader trade — signature, side, position — is `pumpfun_signals`,
+        which is where the audit trail for an add already lives.
+        """
+        s = spec.BY_ID[row.strategy_id]
+        snap = await self._mark_price(trade.mint, now)
+        if snap is None:
+            got = await self._price_now(trade, now)
+            if isinstance(got, str):
+                return got
+            snap = got
+        qty = execution.buy_quantity(s.size_usd, snap.price_usd, snap.liquidity_usd)
+        if qty is None or qty <= 0:
+            return "unpriceable"
+
+        row.cash -= s.size_usd
+        pos.size_usd += s.size_usd
+        pos.quantity += qty
+        pos.quantity_remaining += qty
+        pos.entry_price = pos.size_usd / pos.quantity
+        await self._session.flush()
+        await self._record(t, trade, "added", acted=True, position_id=pos.id,
+                           now=now)
+        return "added"
+
     async def _close(self, t, row, trade: LeaderTrade, now: datetime) -> str:
+        """He sold. Release ONE unit of what we hold in that name.
+
+        v1.1.0 closed the whole position on his first sell, which exited while
+        he was still holding — he sells in ~1.9 tranches a name — and that
+        biases the record against the position that runs, the only outcome this
+        experiment is trying to catch.
+
+        The last unit closes the position; every earlier one trims it. The
+        fraction is of `quantity_remaining` rather than of the original stake,
+        so successive trims release successive units rather than shrinking
+        geometrically toward never selling out.
+        """
+        s = spec.BY_ID[row.strategy_id]
         pos = (await self._session.execute(
             select(LabPosition).where(LabPosition.strategy_row_id == row.id,
                                       LabPosition.mint_address == trade.mint,
@@ -183,6 +410,23 @@ class PumpfunService:
         )).scalars().first()
         if pos is None:
             return "not_held"
+
+        units = max(1, self._units_held(pos, s.size_usd))
+        if units > 1:
+            # 1/units of what REMAINS, so each trim releases the same slice of
+            # the original: with four units it is Q/4, then (3Q/4)/3, then
+            # (Q/2)/2 — never a geometric decay that would leave a tail nobody
+            # ever sells.
+            out = await self._lab.trim_manually(
+                position_id=pos.id, now=now, actor="pumpfun_copy",
+                fraction=Decimal(1) / Decimal(units),
+            )
+            if not out.get("trimmed"):
+                return out.get("reason", "trim_refused")
+            await self._record(t, trade, "trimmed", acted=True,
+                               position_id=pos.id, now=now)
+            return "trimmed"
+
         out = await self._lab.close_manually(
             position_id=pos.id, now=now, actor="pumpfun_copy",
             reason=EXIT_REASON,
@@ -203,23 +447,29 @@ class PumpfunService:
 
         trades = await recent_trades()
         counts: dict[str, int] = {}
-        # Oldest first: his own sequence is the one we replay, and a buy that
-        # arrives after its own sell would leave the book holding a position he
-        # has already exited.
-        for trade in sorted(trades, key=lambda x: x.at):
-            if await self._seen(trade.signature):
-                continue
-            if trade.at < t.valid_from:
-                outcome = "before_watch_start"
-            elif (now - trade.at).total_seconds() > spec.MAX_SIGNAL_AGE_SECONDS:
-                outcome = "stale_signal"
-            elif trade.side == "buy":
-                outcome = await self._open(t, row, trade, now)
-            else:
-                outcome = await self._close(t, row, trade, now)
-            if outcome not in ("opened", "closed"):
-                await self._record(t, trade, outcome, now=now)
-            counts[outcome] = counts.get(outcome, 0) + 1
+        try:
+            # Oldest first: his own sequence is the one we replay, and a buy that
+            # arrives after its own sell would leave the book holding a position he
+            # has already exited.
+            for trade in sorted(trades, key=lambda x: x.at):
+                if await self._seen(trade.signature):
+                    continue
+                if trade.at < t.valid_from:
+                    outcome = "before_watch_start"
+                elif (now - trade.at).total_seconds() > spec.MAX_SIGNAL_AGE_SECONDS:
+                    outcome = "stale_signal"
+                elif trade.side == "buy":
+                    outcome = await self._open(t, row, trade, now)
+                else:
+                    outcome = await self._close(t, row, trade, now)
+                if outcome not in ("opened", "added", "trimmed", "closed"):
+                    await self._record(t, trade, outcome, now=now)
+                counts[outcome] = counts.get(outcome, 0) + 1
+        finally:
+            if self._owns_provider and self._provider is not None:
+                await self._provider.close()
+                self._provider = None
+                self._owns_provider = False
 
         settled = await self._lab.settle(now=now)
         await self._lab.record_equity(now=now)

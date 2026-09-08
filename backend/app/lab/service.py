@@ -615,6 +615,68 @@ class LabService:
                 "pnl_usd": proceeds - pos.size_usd,
                 "exit_reason": pos.exit_reason}
 
+    async def trim_manually(
+        self, *, position_id: uuid.UUID, now: datetime, fraction: Decimal,
+        actor: str,
+    ) -> dict[str, Any]:
+        """Sell part of an open position by hand, banking the proceeds.
+
+        The scale-out counterpart to `close_manually`, and it exists because a
+        copy lab has to mirror a leader who sells in tranches. Closing the whole
+        book on his first trim exits while he is still holding, which biases the
+        record against exactly the position that runs.
+
+        Same fill discipline as `close_manually`: `_mark`, the stale guard, the
+        glitch band, impact against real depth. No `capped_fill_price`, because
+        there is no trigger to cap against.
+
+        **`partial_done` and `partial_at` are deliberately NOT set.** Those
+        belong to the frozen `partial_at` exit rule; a hand trim did not follow
+        the registry, and marking it as though it had would let a leaderboard
+        claim a rule fired that never did. The caller's own ledger is where a
+        trim is recorded.
+        """
+        if fraction <= 0 or fraction >= 1:
+            return {"trimmed": False, "reason": "fraction_out_of_range"}
+
+        pos = (await self._session.execute(
+            select(LabPosition).where(LabPosition.id == position_id)
+        )).scalars().first()
+        if pos is None:
+            return {"trimmed": False, "reason": "not_found"}
+        if pos.status != "open":
+            return {"trimmed": False, "reason": "already_closed"}
+
+        row = (await self._session.execute(
+            select(LabStrategy).where(LabStrategy.id == pos.strategy_row_id)
+        )).scalars().first()
+        if row is None:
+            return {"trimmed": False, "reason": "strategy_missing"}
+
+        mark = await self._mark(pos, now)
+        if mark is None:
+            return {"trimmed": False, "reason": "unmarkable"}
+        price, liq, is_dead, _sell_ok = mark
+        if is_dead:
+            # Nothing to bank and nothing to sell into. `settle` will close it
+            # at zero on its own terms; a trim must not pretend otherwise.
+            return {"trimmed": False, "reason": "dead"}
+
+        sell_qty = pos.quantity_remaining * fraction
+        if sell_qty <= 0:
+            return {"trimmed": False, "reason": "nothing_left"}
+        got = execution.sell_proceeds(sell_qty, price, liq)
+        pos.banked_proceeds_usd += got
+        pos.quantity_remaining -= sell_qty
+        row.cash += got
+        await self._session.flush()
+
+        logger.info("lab_position_trimmed", position=str(pos.id),
+                    strategy=pos.strategy_id, mint=pos.mint_address,
+                    actor=actor, fraction=str(fraction), proceeds=str(got))
+        return {"trimmed": True, "proceeds_usd": got,
+                "quantity_remaining": pos.quantity_remaining}
+
     #: pump.fun's bonding curve, and PumpSwap — its own AMM for direct pool
     #: launches. `SCANNER_WATCH_PROGRAMS` is the same pair the scanner listens
     #: to, so this cannot drift from what discovery actually admitted.

@@ -145,16 +145,19 @@ export default function PumpfunLabPage() {
           <div>
             <p className="text-[10px] uppercase tracking-wide text-muted">Why we missed</p>
             <ul className="mt-0.5 space-y-0.5 font-mono text-[10px] text-muted">
-              {Object.entries(cov.by_outcome ?? {})
-                .filter(([k]) => k !== "opened" && k !== "closed")
+              {Object.entries(cov.refusals ?? {})
                 .sort((a, b) => b[1] - a[1])
-                .slice(0, 4)
+                // Every bucket, not the top few. `no_market` and
+                // `quote_unavailable` are only meaningful read together — one
+                // is a fact about his coin, the other about our afternoon —
+                // and a cap that showed one while hiding the other would
+                // produce exactly the wrong conclusion.
                 .map(([k, n]) => (
                   <li key={k}>
                     {n} {k.replace(/_/g, " ")}
                   </li>
                 ))}
-              {Object.keys(cov.by_outcome ?? {}).length === 0 ? <li>—</li> : null}
+              {Object.keys(cov.refusals ?? {}).length === 0 ? <li>—</li> : null}
             </ul>
           </div>
         </div>

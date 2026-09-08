@@ -26,6 +26,11 @@ Side comes from the SOL leg, read from `accountData.nativeBalanceChange` for
 the leader's own account: SOL out means he bought the token, SOL in means he
 sold it. That figure is authoritative and already net of fees, unlike a sum of
 `nativeTransfers`.
+
+`slot` is carried alongside the signature because a mint the scanner has never
+seen has to be REGISTERED before anything can price it, and a registration
+records where on chain it was observed. His swap is that observation, so the
+provenance written is real rather than synthesised.
 """
 
 from __future__ import annotations
@@ -51,6 +56,7 @@ _BASE = "https://api.helius.xyz/v0/addresses"
 @dataclass(frozen=True, slots=True)
 class LeaderTrade:
     signature: str
+    slot: int
     mint: str
     side: str                  # "buy" | "sell"
     #: What HE staked, when it can be seen at all. Context only — we size from
@@ -171,7 +177,8 @@ async def recent_trades(*, limit: int = 100) -> list[LeaderTrade]:
             continue
         mint, side = traded
         out.append(LeaderTrade(
-            signature=tx["signature"], mint=mint, side=side,
+            signature=tx["signature"], slot=int(tx.get("slot") or 0),
+            mint=mint, side=side,
             sol_amount=_leader_sol(tx, spec.LEADER_ADDRESS),
             at=datetime.fromtimestamp(ts, tz=UTC),
         ))

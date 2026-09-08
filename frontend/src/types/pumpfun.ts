@@ -32,6 +32,9 @@ export interface PumpfunCoverage {
   copied?: number;
   copied_pct?: number | null;
   by_outcome?: Record<string, number>;
+  /** Refusals only — successes are excluded server-side, off the `acted`
+   *  flag, so this list cannot drift as outcomes are added. */
+  refusals?: Record<string, number>;
   mean_lag_seconds?: number | null;
 }
 
