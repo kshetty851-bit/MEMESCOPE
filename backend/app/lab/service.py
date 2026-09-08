@@ -423,21 +423,60 @@ class LabService:
         return int(got[0] or 0), Decimal(got[1] or 0)
 
     async def _my_strategy_rows(self) -> list[LabStrategy]:
-        """This registry's strategy rows, and only these.
+        """This registry's strategy rows — every VERSION of them, not just the live one.
 
-        Two tournaments now share these tables — V7 and the Compound Lab — so a
-        query for "every strategy" is a query for someone else's as well.
-        `settle` and `record_equity` both did exactly that, and the failure it
-        would have caused is not subtle: `settle` looks its strategy up with
-        `self._spec.BY_ID[pos.strategy_id]`, so the first Compound position
-        would have raised KeyError inside V7's tick and STOPPED the running
-        tournament.
+        Two tournaments share these tables, so a query for "every strategy" is a
+        query for someone else's as well. `settle` looks its strategy up in
+        `self._spec.BY_ID`, so the first Compound position inside V7's tick would
+        raise KeyError and STOP the running tournament. That is the failure this
+        scope exists to prevent and it still does.
+
+        **But scoping on `spec_hash` was too tight, and the way it failed was
+        silent.** A version bump changes the hash, so the moment a registry ships
+        a new spec its PREVIOUS tournament stops matching — and with it stops
+        being settled, marked, or re-quoted (`sellability.refresh` filters on
+        `LIVE_SPEC_VERSIONS`, which moves too). An open position in a superseded
+        book can then never be marked, never exited, and cannot even reach its
+        time exit, because that fires in `settle`. INC-056 by another road: a
+        position the platform will not re-price is a position it cannot sell.
+        It very nearly stranded a live 4.8x.
+
+        Scoping on `strategy_id` instead follows the registry across its own
+        versions. Ids are globally unique and prefix-namespaced — V7-, CMP-,
+        MOM-, DPT-, CPY-, SOC- — and `test_strategy_ids_are_globally_unique`
+        holds that true, which is what keeps a foreign row out.
+
+        A SUPERSEDED book is only settled while its frozen exits still match the
+        ones this spec would apply. `settle` reads `s.exits` from the live
+        registry, so winding down an old book under new rules would quietly
+        break the guarantee the whole platform rests on — that a tournament's
+        result followed the rules frozen at its start. When they differ the row
+        is skipped and said out loud: that book needs a person, not a default.
         """
-        return list((await self._session.execute(
+        rows = list((await self._session.execute(
             select(LabStrategy).where(
-                LabStrategy.spec_hash == self._spec.SPEC_HASH
+                LabStrategy.strategy_id.in_(list(self._spec.BY_ID))
             )
         )).scalars())
+
+        mine: list[LabStrategy] = []
+        for row in rows:
+            if row.spec_hash == self._spec.SPEC_HASH:
+                mine.append(row)
+                continue
+            frozen = (row.rules or {}).get("exits")
+            live = _rules_json(self._spec.BY_ID[row.strategy_id]).get("exits")
+            if frozen == live:
+                mine.append(row)
+            else:
+                logger.warning(
+                    "lab_superseded_exits_moved", strategy=row.strategy_id,
+                    row_spec_hash=row.spec_hash, live_spec_hash=self._spec.SPEC_HASH,
+                    detail="superseded book left unsettled: its frozen exits differ "
+                           "from the live registry's, and settling it under the new "
+                           "rules would misreport it",
+                )
+        return mine
 
     # --- settlement ---------------------------------------------------------
 
@@ -459,7 +498,13 @@ class LabService:
             row = rows.get(pos.strategy_row_id)
             if row is None:
                 continue
-            s = self._spec.BY_ID[pos.strategy_id]
+            s = self._spec.BY_ID.get(pos.strategy_id)
+            if s is None:
+                # Unreachable while ids stay unique — and a raw subscript here
+                # is what stops a whole tournament ticking, so it fails soft.
+                logger.warning("lab_settle_unknown_strategy",
+                               strategy=pos.strategy_id, position=str(pos.id))
+                continue
             mark = await self._mark(pos, now)
             pos.last_evaluated_at = now
             if mark is None:

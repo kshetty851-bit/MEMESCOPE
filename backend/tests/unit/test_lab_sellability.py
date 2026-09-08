@@ -239,6 +239,42 @@ def test_the_sweep_only_quotes_the_tournaments_that_are_running():
             .parameters["spec_versions"].default == (spec.SPEC_VERSION,))
 
 
+def test_strategy_ids_are_globally_unique():
+    """`LabService._my_strategy_rows` scopes on `strategy_id`, so this must hold.
+
+    It scopes that way so a registry follows its OWN book across version bumps
+    — a superseded tournament keeps settling instead of stranding its open
+    positions. The safety of that depends entirely on ids not colliding: a
+    shared id would let one registry settle another's position under its own
+    exit rules, which is worse than the KeyError the old `spec_hash` scope
+    prevented, because it is silent.
+
+    Ids are prefix-namespaced (V7-, CMP-, MOM-, DPT-, CPY-, SOC-) so this holds
+    by construction. This test is what keeps it true when someone adds a lab.
+    """
+    import importlib
+    import pkgutil
+
+    import app
+
+    owners: dict[str, list[str]] = {}
+    for mod in pkgutil.iter_modules(app.__path__):
+        if not mod.ispkg:
+            continue
+        try:
+            m = importlib.import_module(f"app.{mod.name}.spec")
+        except ModuleNotFoundError:
+            continue
+        if not hasattr(m, "BY_ID") or not hasattr(m, "SPEC_VERSION"):
+            continue
+        for sid in m.BY_ID:
+            owners.setdefault(sid, []).append(mod.name)
+
+    assert owners, "no registries discovered — the walk is broken, not the invariant"
+    collisions = {k: v for k, v in owners.items() if len(v) > 1}
+    assert not collisions, f"strategy ids shared across registries: {collisions}"
+
+
 def test_the_sweep_covers_every_registry_that_holds_positions():
     """The list of swept tournaments must not be able to fall behind the list
     of tournaments that exist.
