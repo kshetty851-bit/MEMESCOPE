@@ -223,3 +223,24 @@ def test_no_autonomous_action_can_reach_money_or_a_tournament():
         m.startswith("app.lab") or m.startswith("app.real_wallet")
         for m in imported
     ), "HQ's autonomous actions must not import the Lab or the wallet"
+
+
+def test_a_failed_COUNT_is_not_a_failed_TASK():
+    """`lab_sellability_refresh` returns `{"mints": 20, "quoted": 12,
+    "failed": 1}` — `failed` is how many mints could not be quoted, not a
+    verdict. A truthy test read that as a fault and reported the sweep failing
+    on EVERY run while it was working perfectly: 6 consecutive "failures" that
+    would have masked a real one.
+
+    A number is data. Only the boolean sentinel, or an error string, is a
+    verdict.
+    """
+    from app.hq_ops.task_outcomes import _verdict as verdict_for
+
+    assert verdict_for("SUCCESS", {"mints": 20, "quoted": 12, "failed": 1,
+                                   "skipped_fresh": 7})[0] == "ok"
+    assert verdict_for("SUCCESS", {"failed": 0})[0] == "ok"
+    # The real sentinel still reports.
+    assert verdict_for("SUCCESS", {"failed": True})[0] == "failed"
+    # And an error string is still a verdict, not data.
+    assert verdict_for("SUCCESS", {"failed": "boom"})[0] == "failed"

@@ -76,9 +76,17 @@ def _verdict(state: str, result: Any) -> tuple[str, str]:
     if state != "SUCCESS":
         return "error", f"raised: {state}"
     if isinstance(result, dict):
-        if result.get("failed"):
-            # The shape every contained task uses when it caught its own
-            # exception — the one that was invisible.
+        flag = result.get("failed")
+        # `failed` is a SENTINEL, not a count. Every contained task returns
+        # `{"failed": True}` when it caught its own exception — but
+        # `lab_sellability_refresh` returns `{"mints": 20, "quoted": 12,
+        # "failed": 1, ...}`, where `failed` is how many mints could not be
+        # quoted. A truthy test read that 1 as a fault and reported the sweep
+        # as failing on every single run: 6 consecutive "failures" for a task
+        # that was working perfectly, which is precisely the alarm fatigue this
+        # watch exists to avoid. A number here is DATA; only the boolean, or an
+        # error string, is a verdict.
+        if flag is True or (isinstance(flag, str) and flag):
             reason = str(result.get("reason") or result.get("error") or "failed")
             return "failed", reason[:MAX_REASON]
         if result.get("skipped"):
