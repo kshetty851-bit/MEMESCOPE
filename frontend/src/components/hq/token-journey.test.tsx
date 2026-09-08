@@ -178,9 +178,12 @@ describe("the physical room stays frozen", () => {
   });
 
   it("keeps every employee desk exactly where it already was", () => {
+    // Luna (8,3) and Dex (10,3) were retired on 2026-09-08. Their desks are
+    // gone; every SURVIVING desk is still exactly where it was, which is what
+    // this test is for — the room must not shuffle under a reader.
     expect(EMPLOYEE_BY_ID.get("radar")!.desk).toEqual({ col: 6, row: 3 });
-    expect(EMPLOYEE_BY_ID.get("luna")!.desk).toEqual({ col: 8, row: 3 });
-    expect(EMPLOYEE_BY_ID.get("dex")!.desk).toEqual({ col: 10, row: 3 });
+    expect(EMPLOYEE_BY_ID.get("nova")!.desk).toEqual({ col: 8, row: 1 });
+    expect(EMPLOYEE_BY_ID.get("echo")!.desk).toEqual({ col: 6, row: 8 });
     expect(EMPLOYEE_BY_ID.get("atlas")!.desk).toEqual({ col: 2, row: 4 });
     expect(EMPLOYEE_BY_ID.get("rex")!.desk).toEqual({ col: 12, row: 4 });
   });

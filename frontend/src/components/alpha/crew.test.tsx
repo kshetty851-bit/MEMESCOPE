@@ -40,7 +40,7 @@ describe("meet the MEMESCOPE team", () => {
   it("opens one profile at a time", () => {
     render(<Crew />);
     const radar = screen.getByTestId("crew-radar");
-    const luna = screen.getByTestId("crew-luna");
+    const luna = screen.getByTestId("crew-milo");
 
     expect(radar).toHaveAttribute("aria-expanded", "false");
     fireEvent.click(radar);

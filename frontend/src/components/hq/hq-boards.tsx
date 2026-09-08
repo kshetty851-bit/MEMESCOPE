@@ -198,15 +198,14 @@ export function ExecutionVault({ source, now }: { source: Source<ExecutionPostur
  * that could disagree with the room it sits under.
  */
 const MISSION_ROWS: Array<{ id: keyof HqState["employees"]; label: string }> = [
+  // Scanner, market data and scoring were three rows reading ONE source. They
+  // are one row now; splitting a single reading three ways was not depth.
   { id: "radar", label: "Scanner / discovery" },
-  { id: "dex", label: "Market data" },
   { id: "echo", label: "Enrichment queue" },
-  { id: "luna", label: "Scoring" },
   { id: "milo", label: "Paper Wallet" },
   { id: "atlas", label: "Security gate" },
   { id: "rex", label: "Paper execution" },
   { id: "byte", label: "Platform / stream" },
-  { id: "sage", label: "Track record" },
   { id: "sentinel", label: "Production watch" },
   { id: "patch", label: "Incidents" },
   { id: "quinn", label: "Verification" },

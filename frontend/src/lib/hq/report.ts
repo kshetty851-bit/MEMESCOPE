@@ -189,8 +189,10 @@ export function buildReport(state: HqState): HqReport {
       ],
     },
     { id: "discovery", title: "RADAR / DISCOVERY", owner: "radar", lines: lines(state, "radar") },
-    { id: "scoring", title: "SCORING", owner: "luna", lines: lines(state, "luna") },
-    { id: "market", title: "MARKET & LIQUIDITY", owner: "dex", lines: lines(state, "dex") },
+    // Scoring and market moved to Radar on 2026-09-08. The SECTIONS survive
+    // the people: all three read one `activity` source, so the report was
+    // three voices reading one number aloud.
+    { id: "scoring", title: "SCORING", owner: "radar", lines: lines(state, "radar") },
     { id: "security", title: "SECURITY / SEC-2", owner: "atlas", lines: lines(state, "atlas") },
     paperSection(state),
     { id: "execution", title: "EXECUTION / EXITS", owner: "rex", lines: lines(state, "rex") },
@@ -202,7 +204,7 @@ export function buildReport(state: HqState): HqReport {
     { id: "operations", title: "PRODUCTION WATCH", owner: "sentinel", lines: lines(state, "sentinel") },
     { id: "incidents", title: "INCIDENTS & AUTONOMOUS ACTIONS", owner: "patch", lines: lines(state, "patch") },
     { id: "verification", title: "VERIFICATION", owner: "quinn", lines: lines(state, "quinn") },
-    { id: "performance", title: "PERFORMANCE", owner: "sage", lines: lines(state, "sage") },
+    { id: "performance", title: "PERFORMANCE", owner: "milo", lines: lines(state, "milo") },
   ];
 
   const issues = issuesOf(state);
@@ -287,8 +289,6 @@ export function buildDialogue(report: HqReport): DialogueLine[] {
     // counts of what was reported — never with a verdict on it.
     { employee: "nova", text: `Office activity: ${report.activityLabel}`, section: "health" },
     speak("radar", "discovery"),
-    speak("luna", "scoring"),
-    speak("dex", "market"),
     speak("atlas", "security"),
     speak("milo", "paper"),
     speak("rex", "execution"),
@@ -299,7 +299,6 @@ export function buildDialogue(report: HqReport): DialogueLine[] {
     // whose evidence does not exist, and the one that will start carrying real
     // incidents the moment the operations surface does.
     speak("patch", "incidents"),
-    speak("sage", "performance"),
     {
       employee: "nova",
       text:

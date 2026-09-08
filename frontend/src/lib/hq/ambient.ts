@@ -1,6 +1,6 @@
 import type { Pose } from "./characters";
 import { EMPLOYEES, EMPLOYEE_BY_ID, type EmployeeId } from "./employees";
-import { CONFERENCE_SEATS, FURNITURE_BLOCKED, LOUNGE_CHAIR_SEAT, SOFA_SEAT } from "./furniture";
+import { CONFERENCE_SEATS, FURNITURE_BLOCKED, LOUNGE_CHAIR_SEAT } from "./furniture";
 import { GRID_COLS, isInsideRoom, type Tile } from "./geometry";
 import { ZONE_BY_ID } from "./zones";
 
@@ -282,22 +282,17 @@ export const AMBIENT_ROUTINES: AmbientRoutine[] = [
     ],
   },
   {
-    // Radar briefly shows Luna something. They sit two tiles apart, so this is
-    // a gesture and a glance rather than a walk.
-    id: "radar-luna",
+    // Was "radar shows Luna something". Luna was retired 2026-09-08; Radar
+    // keeps the beat alone rather than the floor losing a routine, because
+    // every employee needs at least two and a room where nobody moves reads
+    // as a freeze rather than as calm.
+    id: "radar-reads",
     employee: "radar",
     weight: 2,
     frames: [
       { pose: "talking_briefly", hold: 3600 },
       { pose: "looking_at_screen", hold: 2400 },
     ],
-    cast: [{
-      employee: "luna",
-      frames: [
-        { pose: "looking_at_screen", hold: 3600 },
-        { pose: "seated_reviewing", hold: 2400 },
-      ],
-    }],
   },
   {
     // Radar goes for water and comes straight back. Short on purpose.
@@ -329,55 +324,8 @@ export const AMBIENT_ROUTINES: AmbientRoutine[] = [
   },
 
   /* ---- Luna: slow chart review, notes, stylus ------------------------- */
-  { id: "luna-chart", employee: "luna", weight: 5, frames: [{ pose: "seated_reviewing", hold: 10000 }] },
-  { id: "luna-notes", employee: "luna", weight: 3, frames: [{ pose: "seated_working", hold: 6000 }] },
-  {
-    id: "luna-stylus",
-    employee: "luna",
-    weight: 3,
-    frames: [
-      { pose: "looking_at_screen", hold: 3000 },
-      { pose: "seated_working", hold: 3400 },
-      { pose: "looking_at_screen", hold: 3000 },
-    ],
-  },
 
   /* ---- Dex: switches monitors, coffee, quick head turns --------------- */
-  {
-    id: "dex-switch",
-    employee: "dex",
-    weight: 5,
-    frames: [
-      { pose: "looking_at_screen", hold: 1900 },
-      { pose: "seated_working", hold: 1900 },
-      { pose: "looking_at_screen", hold: 1900 },
-      { pose: "seated_working", hold: 1900 },
-    ],
-  },
-  { id: "dex-coffee", employee: "dex", weight: 3, frames: [{ pose: "coffee_idle", hold: 4200 }] },
-  {
-    id: "dex-turns",
-    employee: "dex",
-    weight: 3,
-    frames: [
-      { pose: "seated_reviewing", hold: 1800 },
-      { pose: "seated_working", hold: 2400 },
-    ],
-  },
-  {
-    id: "dex-water",
-    employee: "dex",
-    weight: 2,
-    frames: trip(
-      [
-        { col: 10, row: 6 },
-        { col: 7, row: 6 },
-        { col: 7, row: 11 },
-        { col: 6, row: 11 },
-      ],
-      { pose: "coffee_idle", hold: 8000 },
-    ),
-  },
 
   /* ---- Atlas: restrained. Heavy weight on stillness. ------------------ */
   { id: "atlas-checklist", employee: "atlas", weight: 8, frames: [{ pose: "seated_reviewing", hold: 14000 }] },
@@ -438,13 +386,6 @@ export const AMBIENT_ROUTINES: AmbientRoutine[] = [
       { pose: "standing", hold: 3000 },
       { pose: "talking_briefly", hold: 3600 },
     ],
-    cast: [{
-      employee: "sage",
-      frames: [
-        { pose: "seated_reviewing", hold: 3000 },
-        { pose: "talking_briefly", hold: 3600 },
-      ],
-    }],
   },
 
   /* ---- Rex: terminal input, wrist check, restrained confidence -------- */
@@ -570,38 +511,6 @@ export const AMBIENT_ROUTINES: AmbientRoutine[] = [
   },
 
   /* ---- Sage: slow, analytical, occasionally looks out ---------------- */
-  { id: "sage-charts", employee: "sage", weight: 5, frames: [{ pose: "seated_reviewing", hold: 11000 }] },
-  {
-    id: "sage-notes",
-    employee: "sage",
-    weight: 3,
-    frames: [
-      { pose: "seated_working", hold: 3400 },
-      { pose: "seated_reviewing", hold: 5000 },
-    ],
-  },
-  {
-    id: "sage-slow",
-    employee: "sage",
-    weight: 3,
-    frames: [
-      { pose: "looking_at_screen", hold: 4000 },
-      { pose: "seated_reviewing", hold: 5000 },
-    ],
-  },
-  {
-    id: "sage-window",
-    employee: "sage",
-    weight: 1,
-    frames: trip(
-      [
-        { col: 13, row: 9 },
-        { col: 13, row: 11 },
-        { col: 14, row: 11 },
-      ],
-      { pose: "standing", hold: 7000 },
-    ),
-  },
 ];
 
 /* ---------------------------------------------------------------------- */
@@ -629,13 +538,6 @@ function walkHome(tiles: Tile[]): AmbientFrame[] {
 }
 
 /** Column 9 southbound: the same clear line, walked the other way. */
-const SPINE_DOWN: Tile[] = [
-  { col: 9, row: 2 },
-  { col: 9, row: 3 },
-  { col: 9, row: 4 },
-  { col: 9, row: 5 },
-  { col: 9, row: 6 },
-];
 
 /** Column 9, the one clear north–south line through the trading floor. */
 const SPINE_UP: Tile[] = [
@@ -691,28 +593,10 @@ const TO_CONFERENCE: Partial<Record<EmployeeId, Tile[]>> = {
     ...ROW2_EAST,
     ...ROW1_TO_DOOR,
   ],
-  luna: [
-    { col: 8, row: 2 },
-    { col: 9, row: 2 },
-    ...ROW2_EAST,
-    ...ROW1_TO_DOOR,
-  ],
-  dex: [{ col: 10, row: 2 }, { col: 11, row: 2 }, { col: 12, row: 2 }, { col: 12, row: 1 }, ...ROW1_TO_DOOR],
   milo: [
     { col: 2, row: 7 },
     { col: 2, row: 6 },
     ...walkwayEast(3),
-    ...SPINE_UP,
-    ...ROW2_EAST,
-    ...ROW1_TO_DOOR,
-  ],
-  sage: [
-    { col: 13, row: 7 },
-    { col: 13, row: 6 },
-    { col: 12, row: 6 },
-    { col: 11, row: 6 },
-    { col: 10, row: 6 },
-    { col: 9, row: 6 },
     ...SPINE_UP,
     ...ROW2_EAST,
     ...ROW1_TO_DOOR,
@@ -887,17 +771,16 @@ export const MEETING_ROUTINES: AmbientRoutine[] = [
     ["nova", SEAT[0]!],
     ["radar", SEAT[1]!],
     ["milo", SEAT[2]!],
-    ["sage", SEAT[3]!],
   ]),
   meeting("meet-portfolio", 1.5, "Talking through the portfolio.", [
     ["nova", SEAT[0]!],
     ["milo", SEAT[1]!],
-    ["sage", SEAT[2]!],
   ]),
   meeting("meet-discovery", 1.5, "Reviewing discovery together.", [
     ["radar", SEAT[0]!],
-    ["luna", SEAT[1]!],
-    ["dex", SEAT[3]!],
+    // Luna and Dex retired 2026-09-08. Atlas takes the second chair: he is
+    // who acts on what discovery finds, and a one-person meeting is not one.
+    ["atlas", SEAT[1]!],
   ]),
   meeting("meet-ops", 1.5, "In the operations sync.", [
     ["echo", SEAT[0]!],
@@ -925,13 +808,6 @@ const DECK_TO_18: Tile[] = [
   { col: 18, row: 6 },
 ];
 
-const LOUNGE_FROM_LAB: Tile[] = [
-  { col: 13, row: 9 },
-  { col: 13, row: 11 },
-  { col: 12, row: 11 },
-  { col: 11, row: 11 },
-  { col: 10, row: 11 },
-];
 
 /** Milo's authored path to the lounge chair. */
 const MILO_TO_LOUNGE: Tile[] = [
@@ -1004,51 +880,6 @@ export const EXPANSION_ROUTINES: AmbientRoutine[] = [
     ],
   },
   {
-    // The sofa, at last. HQ-3 deferred proper sitting because the rig had no
-    // lounge stance; now it does, and the seat is the cushion the sofa was
-    // drawn with.
-    id: "sage-sofa",
-    employee: "sage",
-    weight: 1.5,
-    nightFactor: 0.6,
-    frames: [
-      ...walk(LOUNGE_FROM_LAB),
-      { pose: "seated_lounge", tile: SOFA_SEAT, hold: 16_000, detail: "Reading on the lounge sofa." },
-      ...walkHome(LOUNGE_FROM_LAB),
-    ],
-  },
-  {
-    id: "luna-sofa",
-    employee: "luna",
-    weight: 1,
-    nightFactor: 0.5,
-    frames: [
-      ...walk([
-        { col: 8, row: 4 },
-        { col: 8, row: 5 },
-        { col: 8, row: 6 },
-        { col: 8, row: 7 },
-        { col: 8, row: 8 },
-        { col: 8, row: 9 },
-        { col: 9, row: 9 },
-        { col: 10, row: 10 },
-        { col: 10, row: 11 },
-      ]),
-      { pose: "seated_lounge", tile: SOFA_SEAT, hold: 13_000, detail: "Reading notes away from the desk." },
-      ...walkHome([
-        { col: 8, row: 4 },
-        { col: 8, row: 5 },
-        { col: 8, row: 6 },
-        { col: 8, row: 7 },
-        { col: 8, row: 8 },
-        { col: 8, row: 9 },
-        { col: 9, row: 9 },
-        { col: 10, row: 10 },
-        { col: 10, row: 11 },
-      ]),
-    ],
-  },
-  {
     // Two colleagues in the lounge at once, talking — the deferred break-room
     // conversation. Both walk there on authored routes; nobody teleports.
     id: "lounge-chat",
@@ -1064,17 +895,6 @@ export const EXPANSION_ROUTINES: AmbientRoutine[] = [
       ...walkHome(MILO_TO_LOUNGE),
     ],
     cast: [
-      {
-        employee: "sage",
-        frames: [
-          { pose: "seated_reviewing", hold: STEP * 2 },
-          ...walk(LOUNGE_FROM_LAB),
-          { pose: "seated_talk", tile: SOFA_SEAT, hold: 6_500, detail: "A quiet chat in the lounge." },
-          { pose: "seated_lounge", tile: SOFA_SEAT, hold: 6_000, detail: "A quiet chat in the lounge." },
-          { pose: "seated_talk", tile: SOFA_SEAT, hold: 6_000, detail: "A quiet chat in the lounge." },
-          ...walkHome(LOUNGE_FROM_LAB),
-        ],
-      },
     ],
   },
   {
@@ -1189,21 +1009,6 @@ export const CEO_ROUTINES: AmbientRoutine[] = [
     "On it.",
   ),
   novaAssign(
-    "nova-assign-sage",
-    "sage",
-    [
-      { col: 9, row: 1 },
-      ...SPINE_DOWN,
-      { col: 10, row: 6 },
-      { col: 11, row: 6 },
-      { col: 12, row: 6 },
-      { col: 13, row: 6 },
-      { col: 13, row: 7 },
-    ],
-    "Sage, walk me through it.",
-    "Give me a moment.",
-  ),
-  novaAssign(
     "nova-assign-rex",
     "rex",
     [
@@ -1301,25 +1106,11 @@ function deckBreak(
 
 export const BREAK_ROUTINES: AmbientRoutine[] = [
   deckBreak(
-    "dex-smoke",
-    "dex",
-    [{ col: 10, row: 4 }, { col: 10, row: 5 }, ...walkwayToDeck(10, 18)],
-    "On a smoking break at the deck railing.",
-    0.6,
-  ),
-  deckBreak(
     "byte-smoke",
     "byte",
     [{ col: 9, row: 7 }, ...walkwayToDeck(9, 18), ...DECK_EAST],
     "On a smoking break at the deck railing.",
     0.6,
-  ),
-  deckBreak(
-    "luna-air",
-    "luna",
-    [{ col: 8, row: 2 }, { col: 9, row: 2 }, ...SPINE_DOWN.slice(1), ...walkwayToDeck(10, 17)],
-    "Out on the deck for some air.",
-    1,
   ),
   deckBreak(
     "milo-air",

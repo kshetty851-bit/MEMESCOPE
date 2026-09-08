@@ -147,7 +147,7 @@ const COSMO_TO_REX: Tile[] = [
   { col: 12.6, row: 4.7 },
 ];
 
-const MOCHI_TO_SAGE: Tile[] = [
+const MOCHI_TO_PATCH: Tile[] = [
   { col: 10.6, row: 10.6 },
   { col: 11.5, row: 10.9 },
   { col: 12.3, row: 10.4 },
@@ -317,14 +317,14 @@ export const CAT_ROUTINES: CatRoutine[] = [
     actor: "mochi",
     weight: 1.5,
     frames: [
-      ...slink(MOCHI_TO_SAGE),
+      ...slink(MOCHI_TO_PATCH),
       { pose: "cat_sit", tile: { col: 13.4, row: 8.7 }, hold: 10_000, detail: "Sitting with Sage." },
-      { pose: "cat_groom", tile: { col: 13.4, row: 8.7 }, hold: 5_000, detail: "Grooming, beside Sage's chair." },
-      ...slinkHome(MOCHI_TO_SAGE),
+      { pose: "cat_groom", tile: { col: 13.4, row: 8.7 }, hold: 5_000, detail: "Grooming, beside Patch's chair." },
+      ...slinkHome(MOCHI_TO_PATCH),
     ],
     cast: [
       {
-        actor: "sage",
+        actor: "patch",
         frames: [
           { pose: "seated_reviewing", hold: CAT_STEP_MS * 5 },
           { pose: "talking_briefly", hold: 4_000, detail: "Petting Mochi." },

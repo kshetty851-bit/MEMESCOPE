@@ -108,12 +108,12 @@ describe("reactions fire on observed change and never on a timer", () => {
   it("wakes the right desk for each kind of change", () => {
     const cases: Array<[Partial<HqWitness>, string]> = [
       [{ lastDiscovery: "2026-08-20T10:01:00Z" }, "radar"],
-      [{ lastScore: "2026-08-20T10:01:00Z" }, "luna"],
-      [{ lastSnapshot: "2026-08-20T10:01:00Z" }, "dex"],
+      [{ lastScore: "2026-08-20T10:01:00Z" }, "radar"],
+      [{ lastSnapshot: "2026-08-20T10:01:00Z" }, "radar"],
       [{ securityEvaluations: 6 }, "atlas"],
       [{ queueDepth: 21 }, "echo"],
       [{ pipelineOverall: "degraded" }, "byte"],
-      [{ radarOpportunities: 101 }, "sage"],
+      [{ radarOpportunities: 101 }, "milo"],
       [{ auditTotal: 11 }, "rex"],
     ];
     for (const [change, who] of cases) {

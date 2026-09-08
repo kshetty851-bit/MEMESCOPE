@@ -55,10 +55,15 @@ describe("the room actually holds them", () => {
     expect(new Set(tiles).size).toBe(tiles.length);
   });
 
-  it("seats six and stands five, because the table has six chairs", () => {
+  it("never seats more people than the table has chairs", () => {
     const seated = REPORT_STATIONS.filter((station) => station.seated);
-    expect(seated).toHaveLength(CONFERENCE_SEATS.length);
-    expect(REPORT_STATIONS.filter((station) => !station.seated)).toHaveLength(5);
+    // Was an equality. After the 2026-09-08 roster cut the table has spare
+    // chairs, and "every chair is filled" was never the property worth
+    // holding — "nobody is seated on a chair that does not exist" is.
+    expect(seated.length).toBeLessThanOrEqual(CONFERENCE_SEATS.length);
+    expect(seated.length).toBeGreaterThan(0);
+    expect(REPORT_STATIONS.filter((station) => !station.seated).length)
+      .toBeGreaterThan(0);
   });
 
   it("seats people only on real chairs", () => {

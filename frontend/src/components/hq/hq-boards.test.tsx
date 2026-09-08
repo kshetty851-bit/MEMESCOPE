@@ -119,9 +119,12 @@ describe("Execution Vault", () => {
 describe("Mission Board", () => {
   it("renders one row per subsystem", () => {
     render(<MissionBoard state={deriveHqState({ now: NOW })} />);
+    // "Market data", "Scoring" and "Track record" went with Luna, Dex and
+    // Sage on 2026-09-08: three rows reading one `activity` source between
+    // them. What each remaining row reports is a distinct measurement.
     for (const label of [
-      "Scanner / discovery", "Market data", "Enrichment queue", "Scoring",
-      "Paper Wallet", "Security gate", "Paper execution", "Track record",
+      "Scanner / discovery", "Enrichment queue",
+      "Paper Wallet", "Security gate", "Paper execution",
     ]) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }

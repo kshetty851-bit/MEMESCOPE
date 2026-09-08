@@ -51,14 +51,11 @@ export const MAX_CHATTER_LENGTH = 34;
 export const CHATTER: Chatter[] = [
   { actor: "nova", lines: ["Morning, all.", "How's it going?", "Good work.", "I'll be around."] },
   { actor: "radar", lines: ["Back in a sec.", "Long morning.", "Need a refill.", "Nearly there."] },
-  { actor: "luna", lines: ["One moment.", "Let me read that again.", "Noted.", "Mm-hmm."] },
-  { actor: "dex", lines: ["Four screens, one coffee.", "Give me a minute.", "Right, right.", "Busy one."] },
   { actor: "atlas", lines: ["Hm.", "Not yet.", "Let me check first.", "I'd rather be sure."] },
   { actor: "milo", lines: ["Thinking.", "Long game.", "Fair enough.", "Let's see."] },
   { actor: "rex", lines: ["Standing by.", "On it.", "Understood.", "Sure thing."] },
   { actor: "echo", lines: ["Two seconds.", "Coming through.", "Almost done.", "On my way."] },
   { actor: "byte", lines: ["Rebooting my brain.", "Coffee first.", "Yep.", "Give it a moment."] },
-  { actor: "sage", lines: ["Interesting.", "Let me plot that.", "Later, maybe.", "Hm, alright."] },
   // The reliability trio. Same rule as everyone else: nothing here may hint
   // that something is wrong, because these fire on a timer. "All quiet" would
   // be a claim; "Long shift" is a person.

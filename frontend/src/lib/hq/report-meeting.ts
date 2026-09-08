@@ -62,15 +62,12 @@ import type { EmployeeId } from "./employees";
 export const REPORT_ORDER: EmployeeId[] = [
   "nova",
   "radar",
-  "luna",
-  "dex",
   "atlas",
   "milo",
   "rex",
   "echo",
   "byte",
   "patch",
-  "sage",
 ];
 
 /**
@@ -117,8 +114,6 @@ export interface Station {
 export const REPORT_STATIONS: Station[] = [
   { employee: "nova", tile: CONFERENCE_SEATS[1]!, seated: true },
   { employee: "radar", tile: CONFERENCE_SEATS[0]!, seated: true },
-  { employee: "luna", tile: CONFERENCE_SEATS[2]!, seated: true },
-  { employee: "dex", tile: CONFERENCE_SEATS[3]!, seated: true },
   { employee: "atlas", tile: CONFERENCE_SEATS[4]!, seated: true },
   { employee: "milo", tile: CONFERENCE_SEATS[5]!, seated: true },
   // Standers, ordered deepest-first. The east pair are furthest from the door
@@ -127,7 +122,6 @@ export const REPORT_STATIONS: Station[] = [
   { employee: "echo", tile: { col: 21, row: 1 }, seated: false },
   { employee: "byte", tile: { col: 21, row: 2 }, seated: false },
   { employee: "rex", tile: { col: 17, row: 1 }, seated: false },
-  { employee: "sage", tile: { col: 17, row: 3 }, seated: false },
   { employee: "patch", tile: { col: 17, row: 2 }, seated: false },
 ];
 

@@ -38,8 +38,12 @@ import type { EmployeeId } from "@/lib/hq/employees";
 
 const STAGE_ANCHOR: Record<keyof TokenCaseFile["stages"], EmployeeId> = {
   discovery: "radar",
-  scoring: "luna",
-  market: "dex",
+  // Scoring and market both dock at Radar since 2026-09-08. Luna and Dex were
+  // retired because all three read the same `activity` source and nothing
+  // else; the STAGES still exist and still need a desk to travel to, so they
+  // travel to the desk that now owns discovery end to end.
+  scoring: "radar",
+  market: "radar",
   safety: "atlas",
   decision: "rex",
   execution: "rex",

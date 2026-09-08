@@ -348,7 +348,7 @@ describe("fail-closed", () => {
 
   it("turns a null pipeline into UNKNOWN and never into healthy", () => {
     const state = build({ pipeline: { data: null, observedAt: null } });
-    for (const id of ["radar", "luna", "dex", "echo", "byte", "nova"] as EmployeeId[]) {
+    for (const id of ["radar", "echo", "byte", "nova"] as EmployeeId[]) {
       expect(state.employees[id].state, id).toBe("unknown");
     }
     expect(state.activity).toBe("UNKNOWN");
@@ -375,10 +375,6 @@ describe("fail-closed", () => {
     expect(state.employees.milo.detail).toContain("could not be read");
   });
 
-  it("turns a failed track-record request into UNKNOWN for Sage", () => {
-    const state = build({ radarPerformance: { data: null, observedAt: null, failed: true } });
-    expect(state.employees.sage.state).toBe("unknown");
-  });
 
   it("never reports a healthy-looking state from an empty source", () => {
     // Exhaustive rather than representative: this is the property, and it has
@@ -411,7 +407,6 @@ describe("freshness", () => {
       radarPerformance: at(performance(), NOW - STALE_AFTER_MS.radar - 1),
     });
     expect(state.employees.milo.state).toBe("unknown");
-    expect(state.employees.sage.state).toBe("unknown");
   });
 
   it("gates on all four ways a source can be untrustworthy", () => {
@@ -466,61 +461,6 @@ describe("Radar — discovery", () => {
       activity: activity({ discovery: 200 }),
     });
     expect(state.employees.radar.state).toBe("alert");
-  });
-});
-
-describe("Luna — analysis", () => {
-  it("reviews rather than works when a backlog is queued but nothing scored", () => {
-    const state = build({ pipeline: at(pipeline({ scoring: { pending: 4 } })) });
-    expect(state.employees.luna.state).toBe("reviewing");
-  });
-
-  it("goes busy on a large scoring backlog", () => {
-    const state = build({
-      pipeline: at(pipeline({ scoring: { pending: THRESHOLDS.scoringBacklogBusy } })),
-    });
-    expect(state.employees.luna.state).toBe("busy");
-  });
-
-  it("alerts when scoring is degraded", () => {
-    const state = build({ pipeline: at(pipeline({ scoring: { status: "degraded" } })) });
-    expect(state.employees.luna.state).toBe("alert");
-  });
-
-  it("is idle when scoring is healthy and empty", () => {
-    expect(build().employees.luna.state).toBe("idle");
-  });
-});
-
-describe("Dex — market data", () => {
-  it("alerts on stale tracked tokens even while the stage reports healthy", () => {
-    // The load-bearing case. The backend classifies this stage purely on when
-    // anything last landed and publishes the stale count without letting it
-    // degrade the status — so a healthy stage can sit over hour-old prices.
-    // A stale quote must never look healthy.
-    const state = build({
-      pipeline: at(
-        pipeline({
-          market: { status: "healthy", tracked_stale_count: 7, tracked_freshness_worst_seconds: 3600 },
-        }),
-      ),
-    });
-    expect(state.employees.dex.state).toBe("alert");
-    expect(state.employees.dex.detail).toContain("7 tracked tokens");
-  });
-
-  it("works on ordinary market traffic", () => {
-    expect(build({ activity: activity({ market: 5 }) }).employees.dex.state).toBe("working");
-  });
-
-  it("goes busy under heavy market traffic", () => {
-    const state = build({ activity: activity({ market: THRESHOLDS.busyMarket + 1 }) });
-    expect(state.employees.dex.state).toBe("busy");
-  });
-
-  it("goes offline when enrichment is down", () => {
-    const state = build({ pipeline: at(pipeline({ market: { status: "down" } })) });
-    expect(state.employees.dex.state).toBe("offline");
   });
 });
 
@@ -762,7 +702,7 @@ describe("Byte — infrastructure", () => {
 
   it("does not treat a lost socket as a system outage anywhere else", () => {
     const state = build({ stream: "offline" });
-    for (const id of ["radar", "luna", "dex", "echo", "milo"] as EmployeeId[]) {
+    for (const id of ["radar", "echo", "milo"] as EmployeeId[]) {
       expect(state.employees[id].state, id).not.toBe("offline");
     }
     expect(state.activity).toBe("BUSY");
@@ -773,19 +713,6 @@ describe("Byte — infrastructure", () => {
     for (const label of ["Database latency", "Cache latency", "RPC health"]) {
       expect(byte.metrics.find((m) => m.label === label)?.value, label).toBeNull();
     }
-  });
-});
-
-describe("Sage — the track record", () => {
-  it("reports what the permanent record holds", () => {
-    expect(build().employees.sage.state).toBe("idle");
-    expect(build().employees.sage.detail).toContain("120 opportunities");
-  });
-
-  it("works briefly when the record changes", () => {
-    const before = witness({ radarPerformance: at(performance(120)) });
-    const after = witness({ radarPerformance: at(performance(121)) });
-    expect(react(before, after, NOW).sage?.state).toBe("working");
   });
 });
 
@@ -843,8 +770,23 @@ describe("office activity", () => {
   });
 
   it("is BUSY when several departments are busy", () => {
+    // `market` and `score` drove Dex's and Luna's desks, both retired on
+    // 2026-09-08. BUSY needs two busy readings, so the fixture now has to
+    // move two desks that still exist.
+    // `market` and `score` drove Dex's and Luna's desks, both retired on
+    // 2026-09-08. BUSY needs two busy readings, so the fixture has to move two
+    // desks that still exist — discovery (Radar) and the enrichment queue (Echo).
     const state = build({
-      activity: activity({ market: 200, discovery: 60, score: 60 }),
+      activity: activity({ discovery: THRESHOLDS.busyDiscovery + 5 }),
+      paperPositions: at(positions()),
+      pipeline: at(pipeline({
+        // Echo goes busy only when the queue has depth AND the oldest item has
+        // waited — depth alone is a queue being worked, not a backlog.
+        market: {
+          queue_depth: 40,
+          oldest_normal_wait_seconds: THRESHOLDS.enrichmentWaitBusySeconds + 10,
+        },
+      })),
     });
     expect(state.activity).toBe("BUSY");
   });
@@ -891,11 +833,14 @@ describe("state priority", () => {
   });
 
   it("never lets a reaction paint over a real problem", () => {
+    // Was asserted on Dex, retired 2026-09-08. The property is what matters —
+    // a cheerful transient must never mask a component that is actually down —
+    // so it moves to a desk that still exists rather than being deleted.
     const state = build({
       pipeline: at(pipeline({ market: { status: "down" } })),
-      transients: { dex: { state: "success", detail: "nonsense", until: NOW + 5_000 } },
+      transients: { echo: { state: "success", detail: "nonsense", until: NOW + 5_000 } },
     });
-    expect(state.employees.dex.state).toBe("offline");
+    expect(state.employees.echo.state).toBe("offline");
   });
 
   it("drops a reaction once it has expired", () => {

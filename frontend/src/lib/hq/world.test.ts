@@ -340,7 +340,9 @@ describe("meetings", () => {
     for (const routine of MEETING_ROUTINES) {
       expect(routine.meeting).toBe(true);
       const cast = 1 + (routine.cast?.length ?? 0);
-      expect(cast).toBeGreaterThanOrEqual(3);
+      // Two, not three: the roster shrank on 2026-09-08 and a two-person sync
+      // is a real one. One is not a meeting, and that floor still holds.
+      expect(cast).toBeGreaterThanOrEqual(2);
       expect(cast).toBeLessThanOrEqual(4);
       // Every participant ends up on a distinct conference seat.
       const seats = [routine.frames, ...(routine.cast ?? []).map((member) => member.frames)]

@@ -403,14 +403,11 @@ export function deriveHqState(sources: Partial<HqSources> = {}): HqState {
 
   const employees = {
     radar: deriveRadar(s, pipeline, pipelineGone, pipelineAt),
-    luna: deriveLuna(s, pipeline, pipelineGone, pipelineAt),
-    dex: deriveDex(s, pipeline, pipelineGone, pipelineAt),
     atlas: deriveAtlas(s),
     milo: deriveMilo(s),
     rex: deriveRex(s),
     echo: deriveEcho(pipeline, pipelineGone, pipelineAt),
     byte: deriveByte(s, pipeline, pipelineGone, pipelineAt),
-    sage: deriveSage(s),
     sentinel: deriveSentinel(operations, operationsGone, operationsAt),
     patch: derivePatch(operations, operationsGone, operationsAt),
     quinn: deriveQuinn(operations, operationsGone, operationsAt),
@@ -547,142 +544,6 @@ function radarMetrics(pipeline: PipelineHealth | null, activity: EventActivity):
       label: "Reconnect attempts",
       value: num(scanner?.reconnect_attempts),
       source: "health/pipeline.scanner",
-    },
-  ];
-}
-
-function deriveLuna(
-  s: HqSources,
-  pipeline: PipelineHealth | null,
-  gone: string,
-  at: number | null,
-): EmployeeReading {
-  if (!pipeline) return unknown(gone, lunaMetrics(null, s.activity));
-  const scoring = pipeline.scoring;
-  const metrics = lunaMetrics(pipeline, s.activity);
-
-  if (scoring.status === "down") {
-    return reading("offline", "Scoring has produced nothing for long enough to read as down.", metrics, at);
-  }
-  if (scoring.status === "degraded") {
-    return reading(
-      "alert",
-      `Scoring degraded — last score ${minutes(scoring.minutes_since_last_score) ?? "not reported"} ago.`,
-      metrics,
-      at,
-    );
-  }
-
-  const scores = rate(s.activity, "score");
-  if (
-    (scores !== null && scores >= THRESHOLDS.busyScore) ||
-    scoring.pending >= THRESHOLDS.scoringBacklogBusy
-  ) {
-    return reading(
-      "busy",
-      scores === null
-        ? `${scoring.pending} tokens are awaiting a score.`
-        : `${scoring.pending} tokens awaiting a score; ${scores} rescored in the last minute.`,
-      metrics,
-      at,
-    );
-  }
-  if (scores !== null && scores > 0) {
-    return reading("working", `${scores} scores changed in the last minute.`, metrics, at);
-  }
-  if (scoring.pending > 0) {
-    // Work is queued but nothing has been scored in the window. Reviewing, not
-    // working: something is in front of her that has not produced an answer.
-    return reading("reviewing", `${scoring.pending} tokens are awaiting a score.`, metrics, at);
-  }
-  return reading("idle", "Scoring healthy with nothing queued.", metrics, at);
-}
-
-function lunaMetrics(pipeline: PipelineHealth | null, activity: EventActivity): Metric[] {
-  const scoring = pipeline?.scoring;
-  return [
-    { label: "Scoring stage", value: scoring?.status ?? null, source: "health/pipeline.scoring" },
-    { label: "Awaiting a score", value: num(scoring?.pending), source: "health/pipeline.scoring" },
-    {
-      label: "Since last score",
-      value: minutes(scoring?.minutes_since_last_score),
-      source: "health/pipeline.scoring",
-    },
-    {
-      label: "Scores changed in the last minute",
-      value: num(rate(activity, "score")),
-      source: "live stream · score.changed",
-    },
-  ];
-}
-
-function deriveDex(
-  s: HqSources,
-  pipeline: PipelineHealth | null,
-  gone: string,
-  at: number | null,
-): EmployeeReading {
-  if (!pipeline) return unknown(gone, dexMetrics(null, s.activity));
-  const market = pipeline.market_enrichment;
-  const metrics = dexMetrics(pipeline, s.activity);
-
-  if (market.status === "down") {
-    return reading("offline", "Market enrichment has committed nothing for long enough to read as down.", metrics, at);
-  }
-  if (market.status === "degraded") {
-    return reading(
-      "alert",
-      `Market enrichment degraded — last snapshot ${minutes(market.minutes_since_last_snapshot) ?? "not reported"} ago.`,
-      metrics,
-      at,
-    );
-  }
-  // The stage can report healthy while the tokens on screen carry hour-old
-  // prices: the backend classifies this stage purely on when *anything* last
-  // landed, and publishes the stale count separately without letting it
-  // degrade the status. A stale quote must never look healthy, so HQ reads the
-  // count the backend already measured rather than inventing its own staleness.
-  if (market.tracked_stale_count > 0) {
-    return reading(
-      "alert",
-      `${market.tracked_stale_count} tracked tokens carry stale market data, worst ${seconds(market.tracked_freshness_worst_seconds) ?? "unknown"} old.`,
-      metrics,
-      at,
-    );
-  }
-
-  const updates = rate(s.activity, "market");
-  if (updates !== null && updates >= THRESHOLDS.busyMarket) {
-    return reading("busy", `${updates} market updates in the last minute.`, metrics, at);
-  }
-  if (updates !== null && updates > 0) {
-    return reading("working", `${updates} market updates in the last minute.`, metrics, at);
-  }
-  return reading("idle", "Market data fresh, nothing moving.", metrics, at);
-}
-
-function dexMetrics(pipeline: PipelineHealth | null, activity: EventActivity): Metric[] {
-  const market = pipeline?.market_enrichment;
-  return [
-    {
-      label: "Market stage",
-      value: market?.status ?? null,
-      source: "health/pipeline.market_enrichment",
-    },
-    {
-      label: "Stale tracked tokens",
-      value: num(market?.tracked_stale_count),
-      source: "health/pipeline.market_enrichment",
-    },
-    {
-      label: "Worst tracked freshness",
-      value: seconds(market?.tracked_freshness_worst_seconds),
-      source: "health/pipeline.market_enrichment",
-    },
-    {
-      label: "Market updates in the last minute",
-      value: num(rate(activity, "market")),
-      source: "live stream · market.changed",
     },
   ];
 }
@@ -1454,35 +1315,6 @@ function deriveQuinn(
   return reading("idle", "No repair awaiting verification.", metrics, at);
 }
 
-function deriveSage(s: HqSources): EmployeeReading {
-  const performance = fresh(s.radarPerformance, STALE_AFTER_MS.radar, s.now);
-  const wallet = fresh(s.paperWallet, STALE_AFTER_MS.paper, s.now);
-  const metrics = sageMetrics(performance, wallet);
-  const at = s.radarPerformance.observedAt;
-
-  if (!performance) {
-    return unknown(absence(s.radarPerformance, STALE_AFTER_MS.radar, s.now, "Track record"), metrics);
-  }
-  return reading(
-    "idle",
-    `${performance.total_opportunities} opportunities on the permanent record.`,
-    metrics,
-    at,
-  );
-}
-
-function sageMetrics(performance: RadarPerformance | null, wallet: PaperWallet | null): Metric[] {
-  const m = wallet?.metrics;
-  return [
-    { label: "Opportunities tracked", value: num(performance?.total_opportunities), source: "radar/performance" },
-    { label: "Active opportunities", value: num(performance?.active_opportunities), source: "radar/performance" },
-    { label: "Reached 2x", value: performance?.success_rate ?? null, source: "radar/performance" },
-    { label: "Paper win rate", value: m?.win_rate_pct ?? null, source: "paper.metrics" },
-    { label: "Profit factor", value: m?.profit_factor ?? null, source: "paper.metrics" },
-    { label: "Max drawdown", value: m?.max_drawdown_pct ?? null, source: "paper.metrics" },
-  ];
-}
-
 /**
  * NOVA — the roll-up, from the office rather than from the API.
  *
@@ -1956,7 +1788,8 @@ export function react(
     next.radarOpportunities !== previous.radarOpportunities;
 
   if (recorded) {
-    out.sage = {
+    // Sage retired 2026-09-08; the paper wallet's record is Milo's desk.
+    out.milo = {
       state: "working",
       detail: "The track record changed.",
       until,
@@ -1975,11 +1808,14 @@ export function react(
   if (moved("lastDiscovery")) {
     out.radar = { state: "working", detail: "A token was discovered.", until, speech: "New candidate." };
   }
+  // Scoring and market data were Luna's and Dex's desks. Both read the same
+  // `activity` source Radar reads, so the EVENTS survive on his desk rather
+  // than the office losing two reactions it genuinely has evidence for.
   if (moved("lastScore")) {
-    out.luna = { state: "working", detail: "A score was recorded.", until, speech: "Score recorded." };
+    out.radar = { state: "working", detail: "A score was recorded.", until, speech: "Score recorded." };
   }
   if (moved("lastSnapshot")) {
-    out.dex = { state: "working", detail: "Market data was refreshed.", until, speech: "Market data in." };
+    out.radar = { state: "working", detail: "Market data was refreshed.", until, speech: "Market data in." };
   }
   if (moved("securityEvaluations")) {
     // Says an evaluation *ran*, never that it passed. The verdict is Atlas's

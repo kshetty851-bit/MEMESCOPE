@@ -543,12 +543,12 @@ describe("ambient yields to real work", () => {
       if (frame) started.add(who);
     }, seeded(9));
 
-    scheduler.setOperational(["radar", "dex", "echo"]);
+    scheduler.setOperational(["radar", "echo"]);
     scheduler.start();
     vi.advanceTimersByTime(15 * 60 * 1000);
 
     expect(started.size).toBeGreaterThan(0);
-    for (const busy of ["radar", "dex", "echo"] as EmployeeId[]) {
+    for (const busy of ["radar", "echo"] as EmployeeId[]) {
       expect(started.has(busy), `${busy} was animated while working`).toBe(false);
     }
     scheduler.destroy();

@@ -24,15 +24,16 @@ import type { ZoneId } from "./zones";
 
 export type EmployeeId =
   | "nova"
+  // Discovery is ONE desk. Luna and Dex were retired on 2026-09-08: all three
+  // derived from the same `activity` source and nothing else, so the floor
+  // showed three people reacting to one number. Three desks watching one
+  // reading is not depth, it is an echo.
   | "radar"
-  | "luna"
-  | "dex"
   | "atlas"
   | "milo"
   | "rex"
   | "echo"
   | "byte"
-  | "sage"
   // The reliability trio. Added when HQ stopped being a window onto MEMESCOPE
   // and started being able to act on it: somebody has to notice a component
   // has failed, somebody has to diagnose it, and somebody has to prove the
@@ -154,7 +155,7 @@ export const EMPLOYEES: Employee[] = [
     systemResponsibility: "Overall system status, portfolio roll-up, daily brief",
     whatIDo:
       "Watches the whole platform, decides what needs attention, and pulls the team together when the picture has to be assembled in one place.",
-    worksWith: ["radar","atlas","milo","sage"],
+    worksWith: ["radar","atlas","milo"],
     personality: "Calm and observant. Patrols the floor, pauses at departments.",
     accessory: "tablet",
     palette: "indigo",
@@ -169,40 +170,10 @@ export const EMPLOYEES: Employee[] = [
     systemResponsibility: "Scanner, token discovery, Radar admission",
     whatIDo:
       "Watches the scanner for tokens that have just appeared, and keeps an eye on the ones that have started to move.",
-    worksWith: ["luna","dex"],
+    worksWith: ["atlas", "milo"],
     personality: "Energetic and fast. Leans into the feed, spins the dish.",
     accessory: "headset",
     palette: "cyan",
-  },
-  {
-    id: "luna",
-    name: "Luna",
-    role: "Senior Token Analyst",
-    zone: "floor",
-    department: "discovery",
-    desk: { col: 8, row: 3 },
-    systemResponsibility: "Scoring, analyst orchestration, candidate evaluation",
-    whatIDo:
-      "Reads the evidence behind every score — signals, components and the reasons a token was ranked where it was.",
-    worksWith: ["radar","dex","sage"],
-    personality: "Focused and analytical. Reads, annotates, nods slowly.",
-    accessory: "stylus",
-    palette: "violet",
-  },
-  {
-    id: "dex",
-    name: "Dex",
-    role: "Market Analyst",
-    zone: "floor",
-    department: "market",
-    desk: { col: 10, row: 3 },
-    systemResponsibility: "Market data, price, liquidity, volume, quote freshness",
-    whatIDo:
-      "Follows price, liquidity, volume and how fresh each quote is, so nothing is judged on a stale number.",
-    worksWith: ["luna","rex","echo"],
-    personality: "Fast multitasker. Head flicks between monitors. Coffee nearby.",
-    accessory: "visor",
-    palette: "amber",
   },
   {
     id: "atlas",
@@ -230,7 +201,7 @@ export const EMPLOYEES: Employee[] = [
     systemResponsibility: "Paper Wallet entries and exits; Real Wallet state display",
     whatIDo:
       "Watches Paper Wallet entries and exits, the execution quotes behind them and how each position actually closed.",
-    worksWith: ["atlas","milo","dex"],
+    worksWith: ["atlas","milo"],
     personality: "Confident and fast. Drums fingers, rolls the chair back.",
     accessory: "wrist-terminal",
     palette: "crimson",
@@ -245,7 +216,7 @@ export const EMPLOYEES: Employee[] = [
     systemResponsibility: "Open positions, exposure, holding period, capital efficiency",
     whatIDo:
       "Tracks what capital is doing: open positions, exposure, holding periods and which generation is trading.",
-    worksWith: ["rex","sage","nova"],
+    worksWith: ["rex","nova"],
     personality: "Patient and strategic. Steps back from the wall, arms folded.",
     accessory: "clipboard",
     palette: "forest",
@@ -260,7 +231,7 @@ export const EMPLOYEES: Employee[] = [
     systemResponsibility: "Workers, queues, enrichment backlog, priority lane",
     whatIDo:
       "Keeps the enrichment queues moving and watches the priority lane for anything waiting longer than it should.",
-    worksWith: ["dex","byte"],
+    worksWith: ["byte"],
     personality: "Organised and mobile. Walks between terminals, gestures at the board.",
     accessory: "tool-belt",
     palette: "orange",
@@ -279,21 +250,6 @@ export const EMPLOYEES: Employee[] = [
     personality: "Technical and slouched. Three mugs. Stretches, refills, occasionally naps.",
     accessory: "hoodie",
     palette: "lime",
-  },
-  {
-    id: "sage",
-    name: "Sage",
-    role: "Performance Analyst",
-    zone: "lab",
-    department: "research",
-    desk: { col: 13, row: 8 },
-    systemResponsibility: "Track record, P&L, win rate, drawdown, strategy comparison",
-    whatIDo:
-      "Measures what the strategy actually did: track record, realised P&L, win rate and drawdown.",
-    worksWith: ["milo","luna","nova"],
-    personality: "Calm and patient. Slow scroll, chin on hand.",
-    accessory: "glasses",
-    palette: "teal",
   },
   {
     id: "sentinel",
@@ -347,7 +303,7 @@ export const EMPLOYEES: Employee[] = [
       "Post-repair verification, protected-invariant checks, recovery confirmation",
     whatIDo:
       "Re-checks a component after a repair and confirms the protected trading rules are byte-for-byte what they were before it, so nothing is called fixed on hope.",
-    worksWith: ["patch", "sentinel", "sage"],
+    worksWith: ["patch", "sentinel"],
     personality: "Sceptical by trade. Asks for the second reading.",
     accessory: "glasses",
     palette: "mint",

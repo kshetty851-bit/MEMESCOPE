@@ -22,7 +22,6 @@ describe("a report with nothing behind it", () => {
       "health",
       "discovery",
       "scoring",
-      "market",
       "security",
       "paper",
       "execution",

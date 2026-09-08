@@ -875,8 +875,15 @@ describe("real state on the stage", () => {
   });
 
   it("carries an alert as text and as an attribute, never as colour alone", () => {
-    const state = liveState({ tracked_stale_count: 9, tracked_freshness_worst_seconds: 4000 });
-    expect(state.employees.dex.state).toBe("alert");
+    // Was Dex, retired 2026-09-08. The property under test is that an alert is
+    // carried as TEXT and as an attribute rather than by colour alone, which is
+    // about rendering and not about who is alerting. `liveState` drives
+    // `market_enrichment`, so the desk that reads it is Echo's.
+    // `tracked_stale_count` drove Dex's market-data alert and alerts nobody
+    // now, so the fixture moves to one Echo genuinely produces: tokens parked
+    // in the dead-letter set.
+    const state = liveState({ dead_lettered: 3 });
+    expect(state.employees.echo.state).toBe("alert");
 
     const { container } = render(
       <HqStage
@@ -887,13 +894,13 @@ describe("real state on the stage", () => {
         state={state}
       />,
     );
-    const dex = container.querySelector('[data-employee="dex"]')!;
-    expect(dex.getAttribute("data-state")).toBe("alert");
+    const desk = container.querySelector('[data-employee="echo"]')!;
+    expect(desk.getAttribute("data-state")).toBe("alert");
     // Three non-colour channels, any one of which carries the alert:
     // the attribute, the accessible name, and the state word inside it.
-    expect(dex.getAttribute("aria-label")).toContain(STATE_LABEL.alert);
-    expect(dex.getAttribute("aria-label")).toContain("stale market data");
-    expect(dex.querySelector(".hq-anchor-dot")).toBeTruthy();
+    expect(desk.getAttribute("aria-label")).toContain(STATE_LABEL.alert);
+    expect(desk.getAttribute("aria-label")).toContain("dead-letter");
+    expect(desk.querySelector(".hq-anchor-dot")).toBeTruthy();
   });
 
   it("still renders no numeric value in the room once state is live", () => {
@@ -1218,14 +1225,14 @@ describe("the expanded world on the stage", () => {
 
   it("sits a lounging employee on real furniture with no conjured chair", () => {
     const { container } = renderStage({
-      sage: { pose: "seated_lounge", tile: { col: 9.25, row: 11.05 }, hold: 1000 },
+      milo: { pose: "seated_lounge", tile: { col: 9.25, row: 11.05 }, hold: 1000 },
     });
-    const sage = container.querySelector('[data-employee="sage"] .hq-character')!;
-    expect(sage.getAttribute("data-stance")).toBe("lounge");
+    const lounger = container.querySelector('[data-employee="milo"] .hq-character')!;
+    expect(lounger.getAttribute("data-stance")).toBe("lounge");
     // Lounge legs, and no office chair drawn under them — the sofa at the
     // destination is the seat.
-    expect(sage.querySelector('[href="#hq-lounge-legs"]')).not.toBeNull();
-    expect(sage.querySelector('[href="#hq-chair"]')).toBeNull();
+    expect(lounger.querySelector('[href="#hq-lounge-legs"]')).not.toBeNull();
+    expect(lounger.querySelector('[href="#hq-chair"]')).toBeNull();
   });
 
   it("orders walkers against furniture by position, both ways", () => {

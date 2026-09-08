@@ -111,7 +111,9 @@ describe("floor plan", () => {
   it("reads the trading floor west to east in journey order", () => {
     // The room's geometry is meant to teach the pipeline. If someone reorders
     // the desks this fails, which is the point.
-    const order = ["radar", "luna", "dex", "rex"];
+    // Luna and Dex retired 2026-09-08; discovery is one desk now, so the
+    // journey the room teaches is shorter but still runs west to east.
+    const order = ["radar", "rex", "vault"];
     const columns = order.map(
       (id) => EMPLOYEES.find((employee) => employee.id === id)!.desk.col,
     );
