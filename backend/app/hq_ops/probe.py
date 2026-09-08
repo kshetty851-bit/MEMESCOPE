@@ -148,11 +148,33 @@ async def _probe_database(session: AsyncSession) -> ComponentHealth:
             measured=True,
         )
     elapsed = round((time.perf_counter() - started) * 1000, 1)
+
+    # Connection saturation, which `SELECT 1` above cannot see: this probe
+    # already HOLDS a connection, so it answers happily while other services
+    # are being refused. Nine services connect and each pool is
+    # DB_POOL_SIZE + DB_MAX_OVERFLOW, so the fleet ceiling is a multiple of the
+    # per-service setting and a simultaneous restart is what pushes it over.
+    used = cap = None
+    try:
+        row = (await session.execute(text(
+            "SELECT (SELECT count(*) FROM pg_stat_activity),"
+            " (SELECT setting::int FROM pg_settings WHERE name='max_connections')"
+        ))).first()
+        if row:
+            used, cap = int(row[0]), int(row[1])
+    except Exception as exc:
+        # Unreadable is UNKNOWN, not fine. Leaving them None says so.
+        logger.warning("hq_database_connections_unreadable", error=str(exc))
+
     return ComponentHealth(
         component="database",
         status="healthy",
-        detail="Database answered a query.",
+        detail=("Database answered a query."
+                if used is None
+                else f"Database answered a query. {used} of {cap} connections in use."),
         latency_ms=elapsed,
+        connections_used=used,
+        connections_max=cap,
     )
 
 

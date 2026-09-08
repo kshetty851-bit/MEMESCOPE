@@ -72,6 +72,21 @@ WALLET_STUCK_MINUTES = 5.0
 #: firing on three would report the system working.
 WALLET_REPEAT_COUNT = 10
 
+#: Postgres connections, as a PERCENTAGE of the server's own max_connections.
+#: A percentage rather than a count so the threshold survives someone raising
+#: max_connections and does not quietly become meaningless.
+#:
+#: 90% because that is where it actually broke: on 2026-09-08 a redeploy took
+#: it to 105 of 100 and roughly half of `/api/v1/radar` failed with "too many
+#: clients" while the health probe reported the database healthy — it holds a
+#: connection it already acquired, so saturation is invisible to it.
+#:
+#: Warning, not critical, and NO remediation. Nothing safe can be done
+#: automatically: terminating backends kills real queries, and the actual fix
+#: is a pool-size or max_connections decision a person has to make against the
+#: box's RAM.
+DB_CONNECTIONS_WARN_PCT = 90.0
+
 LAB_ENTRY_SILENCE_MINUTES = 60.0
 LAB_EXIT_SILENCE_MINUTES = 180.0
 from app.hq_ops.schemas import OperationsHealth
@@ -116,6 +131,29 @@ def detect(health: OperationsHealth) -> list[Condition]:
                 symptoms={"detail": health.worker.detail, "replies": health.worker.replies},
             )
         )
+
+    db = health.database
+    if db.connections_used is not None and db.connections_max:
+        pct = 100.0 * db.connections_used / db.connections_max
+        if pct >= DB_CONNECTIONS_WARN_PCT:
+            found.append(
+                Condition(
+                    signature="database:connections-high",
+                    component="database",
+                    severity="warning",
+                    summary=(f"Postgres at {db.connections_used} of "
+                             f"{db.connections_max} connections "
+                             f"({pct:.0f}%)."),
+                    # None, deliberately. See DB_CONNECTIONS_WARN_PCT.
+                    remediation=None,
+                    symptoms={
+                        "connections_used": db.connections_used,
+                        "connections_max": db.connections_max,
+                        "percent_used": round(pct, 1),
+                        "threshold_pct": DB_CONNECTIONS_WARN_PCT,
+                    },
+                )
+            )
 
     if health.disk.measured and health.disk.percent_used is not None:
         if health.disk.percent_used >= health.disk.critical_percent:

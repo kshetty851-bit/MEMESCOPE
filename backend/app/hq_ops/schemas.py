@@ -32,6 +32,13 @@ class ComponentHealth(BaseSchema):
     #: Round-trip of the probe itself, where a round trip is what was measured.
     #: `None` when the component is not probed by latency.
     latency_ms: float | None = None
+    #: Postgres connections in use, and the server's ceiling. Only the database
+    #: component sets these; `None` everywhere else means NOT MEASURED, never
+    #: zero. Saturation is invisible from a `SELECT 1` — the probe answered
+    #: fine on 2026-09-08 while half of `/api/v1/radar` was failing with "too
+    #: many clients", because the probe held a connection it had already got.
+    connections_used: int | None = None
+    connections_max: int | None = None
     #: False when the probe could not run at all. A reader has to be able to
     #: tell "we looked and it is fine" from "we could not look".
     measured: bool = True
