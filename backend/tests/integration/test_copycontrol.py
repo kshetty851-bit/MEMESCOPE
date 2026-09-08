@@ -358,3 +358,117 @@ async def test_a_paired_close_is_not_tagged_as_a_hand_sell(db_session):
     if mine.status == "closed":
         assert mine.exit_reason == "paired_close"
         assert mine.exit_reason != LabService.MANUAL_EXIT_REASON
+
+
+# --------------------------------------------------------------------------
+# scale-ins
+# --------------------------------------------------------------------------
+
+
+async def test_a_scale_in_does_not_deploy_more_capital_than_the_pair(db_session):
+    """CPY-01's `_add` grows `size_usd` CUMULATIVELY on the same row.
+
+    So by the time an `added` signal exists, the pair's `size_usd` is the
+    running total, and mirroring it as a fresh open deploys the total AGAIN on
+    top of what was already opened. The arms then differ in total capital AND
+    in position count — the exact "differ twice" failure the whole design is
+    built to avoid.
+
+    Left unfixed it compounds with depth: at a 4-unit cap the control reaches
+    $10+$20+$30+$40 = $100, the entire book, against the pair's $40.
+    """
+    await _seed_candidates(db_session)
+    await _activate_control(db_session)
+    mint = "LeaderMint" + "s" * 34
+    _t, leader = await _leader_position(db_session, mint, size=D("10"))
+
+    svc = CopyControlService(db_session)
+    db_session.add(PumpfunSignal(
+        tournament_id=_t.id, signature="sig-in1-" + "t" * 41,
+        mint_address=mint, side="buy", leader_at=NOW, seen_at=NOW,
+        acted=True, outcome="opened", position_id=leader.id))
+    await db_session.flush()
+    await svc.tick(now=NOW + timedelta(seconds=5))
+
+    # CPY-01 scales in: one more unit onto the SAME row.
+    leader.size_usd += D("10")
+    leader.quantity += D("1000")
+    leader.quantity_remaining += D("1000")
+    await db_session.flush()
+    db_session.add(PumpfunSignal(
+        tournament_id=_t.id, signature="sig-in2-" + "u" * 41,
+        mint_address=mint, side="buy", leader_at=NOW + timedelta(minutes=1),
+        seen_at=NOW + timedelta(minutes=1), acted=True, outcome="added",
+        position_id=leader.id))
+    await db_session.flush()
+    await svc.tick(now=NOW + timedelta(minutes=1, seconds=5))
+
+    mine = (await db_session.execute(
+        select(LabPosition).where(LabPosition.strategy_id == "CPY-02")
+    )).scalars().all()
+    deployed = sum(p.size_usd for p in mine)
+    assert deployed == leader.size_usd == D("20"), (
+        f"control deployed {deployed} against the pair's {leader.size_usd} "
+        f"in {len(mine)} position(s): {[str(p.size_usd) for p in mine]}"
+    )
+
+
+async def test_a_leader_sell_closes_everything_the_control_holds_for_that_pair(db_session):
+    """One CPY-01 position must map to a closable control holding.
+
+    `_paired_position` resolves by `leader_position_id` and takes `.first()`,
+    so if a scale-in ever produced SEVERAL control rows against one pair, the
+    leader's sell would close only one of them and leave the rest open with
+    nothing left to close them. That is the stranding shape again, inside the
+    control this time.
+    """
+    await _seed_candidates(db_session)
+    await _activate_control(db_session)
+    mint = "LeaderMint" + "v" * 34
+    _t, leader = await _leader_position(db_session, mint, size=D("10"))
+    svc = CopyControlService(db_session)
+
+    for i, (outcome, at) in enumerate((("opened", NOW),
+                                       ("added", NOW + timedelta(minutes=1)))):
+        if outcome == "added":
+            leader.size_usd += D("10")
+            leader.quantity += D("1000")
+            leader.quantity_remaining += D("1000")
+            await db_session.flush()
+        db_session.add(PumpfunSignal(
+            tournament_id=_t.id, signature=f"sig-cl{i}-" + "w" * 40,
+            mint_address=mint, side="buy", leader_at=at, seen_at=at,
+            acted=True, outcome=outcome, position_id=leader.id))
+        await db_session.flush()
+        await svc.tick(now=at + timedelta(seconds=5))
+
+    # A fresh print at close time, so this test measures PAIRING and not the
+    # 15-minute stale guard refusing an old snapshot.
+    held = (await db_session.execute(
+        select(LabPosition).where(LabPosition.strategy_id == "CPY-02")
+    )).scalars().all()
+    for p_ in held:
+        db_session.add(TokenMarketSnapshot(
+            token_id=p_.token_id, mint_address=p_.mint_address,
+            captured_at=NOW + timedelta(hours=1), price_usd=D("0.002"),
+            liquidity_usd=D("80000"), market_cap=D("400000"),
+            volume_1h=D("50000"), volume_5m=D("5000"), buy_count_24h=100,
+            sell_count_24h=50, trading_status=TradingStatus.TRADING,
+            provider="test", suspect=False))
+    await db_session.flush()
+
+    db_session.add(PumpfunSignal(
+        tournament_id=_t.id, signature="sig-clx-" + "x" * 41,
+        mint_address=mint, side="sell", leader_at=NOW + timedelta(hours=1),
+        seen_at=NOW + timedelta(hours=1), acted=True, outcome="closed",
+        position_id=leader.id))
+    await db_session.flush()
+    await svc.tick(now=NOW + timedelta(hours=1, seconds=5))
+
+    still_open = (await db_session.execute(
+        select(LabPosition).where(LabPosition.strategy_id == "CPY-02",
+                                  LabPosition.status == "open")
+    )).scalars().all()
+    assert not still_open, (
+        f"{len(still_open)} control position(s) left open after the pair closed"
+    )

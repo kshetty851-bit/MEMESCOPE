@@ -39,8 +39,15 @@ logger = get_logger(__name__)
 #: against, and a control that buys at a stale price flatters itself.
 CANDIDATE_FRESHNESS_MINUTES = 15
 
-#: Outcomes on a leader BUY that mean CPY-01 put money to work.
-OPENED = ("opened", "added")
+#: How far back the signal scan looks. Long enough that a worker outage cannot
+#: lose a leader trade, short enough that the scan stays small.
+SIGNAL_WINDOW_HOURS = 48
+
+#: A leader BUY that started a position. Mirrored by opening one.
+OPENED = ("opened",)
+#: A leader BUY that SCALED INTO a position already held. Mirrored by adding to
+#: the paired control position, never by opening a second one — see `_add`.
+ADDED = ("added",)
 #: Outcomes on a leader SELL that mean CPY-01 took money off the table.
 CLOSED = ("closed", "trimmed")
 
@@ -62,18 +69,34 @@ class CopyControlService:
         retroactively, so CPY-01's earlier trades are deliberately out of
         reach rather than back-filled at today's prices.
         """
-        mirrored = select(LabDecision.features["leader_signature"].astext).where(
-            LabDecision.strategy_id == "CPY-02"
-        )
+        # Windowed as well as watermarked. Re-examining an already-handled
+        # signal is harmless — every path is idempotent — but a fixed LIMIT
+        # over an unbounded history would eventually fill with old signals and
+        # starve the new ones, which fails silently as "the control stopped
+        # trading".
+        window = now - timedelta(hours=SIGNAL_WINDOW_HOURS)
+        floor = max(t.valid_from, window)
         rows = (await self._session.execute(
             select(PumpfunSignal)
             .where(PumpfunSignal.acted.is_(True),
-                   PumpfunSignal.seen_at >= t.valid_from,
-                   PumpfunSignal.signature.not_in(mirrored))
+                   PumpfunSignal.seen_at >= floor)
             .order_by(PumpfunSignal.leader_at)
-            .limit(50)
+            .limit(200)
         )).scalars().all()
         return list(rows)
+
+    async def _any_paired(self, leader_position_id) -> bool:
+        """Has this arm EVER answered that leader position, open or closed?"""
+        if leader_position_id is None:
+            return False
+        return (await self._session.execute(
+            select(LabPosition.id)
+            .join(LabDecision, LabDecision.id == LabPosition.decision_id)
+            .where(LabPosition.strategy_id == "CPY-02",
+                   LabDecision.features["leader_position_id"].astext
+                   == str(leader_position_id))
+            .limit(1)
+        )).first() is not None
 
     async def _paired_position(self, leader_position_id: uuid.UUID
                                ) -> LabPosition | None:
@@ -149,6 +172,19 @@ class CopyControlService:
 
     async def _open(self, row: LabStrategy, sig: PumpfunSignal,
                     now: datetime) -> str:
+        # IDEMPOTENT BY STATE, not by a ledger row.
+        #
+        # `uq_lab_decision_once` is on (strategy_row_id, mint_address), so a
+        # decision cannot serve as a per-signal ledger — a marker for the add
+        # and the close of one pair collide on the leader's mint. Deriving
+        # "already handled" from the book instead is stronger anyway: a ledger
+        # write that fails leaves capital spendable twice, whereas a position
+        # that exists is the fact itself. `_add` is idempotent for the same
+        # reason (its increment goes to zero) and so is `_close` (it looks for
+        # an OPEN pair).
+        if await self._any_paired(sig.position_id):
+            return "already_mirrored"
+
         leader_pos = (await self._session.execute(
             select(LabPosition).where(LabPosition.id == sig.position_id)
         )).scalars().first()
@@ -214,6 +250,81 @@ class CopyControlService:
         await self._session.flush()
         return "opened"
 
+    async def _price(self, mint: str, now: datetime):
+        """Latest fresh print for one mint, or None."""
+        cut = now - timedelta(minutes=CANDIDATE_FRESHNESS_MINUTES)
+        return (await self._session.execute(
+            select(TokenMarketSnapshot.price_usd,
+                   TokenMarketSnapshot.liquidity_usd)
+            .where(TokenMarketSnapshot.mint_address == mint,
+                   TokenMarketSnapshot.captured_at >= cut,
+                   TokenMarketSnapshot.suspect.is_not(True),
+                   TokenMarketSnapshot.price_usd > 0,
+                   TokenMarketSnapshot.liquidity_usd > 0)
+            .order_by(TokenMarketSnapshot.captured_at.desc())
+        )).first()
+
+    async def _add(self, row: LabStrategy, sig: PumpfunSignal,
+                   now: datetime) -> str:
+        """Scale into the position already paired to this one — never open a
+        second.
+
+        Mirroring an `added` as a fresh open was a real defect, and it broke the
+        design in both of the ways it is supposed to be impossible to break.
+        `_add` on the pumpfun side grows `size_usd` CUMULATIVELY on one row, so
+        by the time an `added` signal exists that field is the running total:
+        opening at it deployed the total AGAIN on top of what was already there.
+        Measured, at a $10 unit, CPY-01 held $20 in one position while this arm
+        held $30 across two — differing in capital AND in count, and reaching
+        the whole $100 book against the pair's $40 at a four-unit cap.
+
+        It also broke the pairing itself. `_paired_position` resolves one row
+        per pair, so several control rows against one leader position would
+        leave all but one of them with nothing able to close it.
+
+        The increment is the DIFFERENCE between what the pair now holds and what
+        this arm has already put against it — not a unit size read from
+        anywhere. That needs no import from `app.pumpfun`, survives any future
+        change to their unit, and self-corrects: a tick missed while the leader
+        scaled in twice is caught up by the next one rather than lost.
+        """
+        leader_pos = (await self._session.execute(
+            select(LabPosition).where(LabPosition.id == sig.position_id)
+        )).scalars().first()
+        if leader_pos is None:
+            return "leader_position_missing"
+        mine = await self._paired_position(sig.position_id)
+        if mine is None:
+            # The open was never mirrored — most likely it happened before this
+            # arm started. Scaling into a position we never took would deploy
+            # capital against a pair we are not actually holding.
+            return "no_paired_position"
+
+        increment = (leader_pos.size_usd or Decimal(0)) - mine.size_usd
+        if increment <= 0:
+            return "already_matched"
+        if row.cash < increment:
+            return "insufficient_cash"
+        got = await self._price(mine.mint_address, now)
+        if got is None:
+            return "unpriceable"
+        price, liq = got
+        qty = execution.buy_quantity(increment, price, liq)
+        if qty is None or qty <= 0:
+            return "unpriceable"
+
+        # Averages in, exactly as the pumpfun `_add` does: stake, quantity and
+        # entry price all move to the blended position. `uq_lab_position_once`
+        # allows one row per (strategy, mint) anyway.
+        row.cash -= increment
+        mine.size_usd += increment
+        mine.quantity += qty
+        mine.quantity_remaining += qty
+        mine.entry_price = mine.size_usd / mine.quantity
+        mine.last_open_value_usd = mine.size_usd
+        await self._session.flush()
+        return "added"
+
     async def _close(self, sig: PumpfunSignal, now: datetime) -> str:
         """Close this arm's paired position when the leader closes his.
 
@@ -251,6 +362,8 @@ class CopyControlService:
         for sig in await self._unmirrored(t, now):
             if sig.outcome in OPENED and sig.side == "buy":
                 outcome = await self._open(row, sig, now)
+            elif sig.outcome in ADDED and sig.side == "buy":
+                outcome = await self._add(row, sig, now)
             elif sig.outcome in CLOSED and sig.side == "sell":
                 outcome = await self._close(sig, now)
             else:
