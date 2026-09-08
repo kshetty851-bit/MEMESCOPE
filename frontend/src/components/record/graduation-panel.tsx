@@ -17,6 +17,11 @@ import type { GraduationAge } from "@/types/graduation";
  * almost no coin experienced.
  */
 
+/** "+15m" under an hour, "+6h" above it — 51 rows of "+2880m" is unreadable. */
+function ageLabel(minutes: number): string {
+  return minutes < 60 ? `+${minutes}m` : `+${minutes / 60}h`;
+}
+
 function pctText(v: number | undefined): string {
   if (v === undefined || !Number.isFinite(v)) return "—";
   return `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`;
@@ -31,7 +36,7 @@ function Row({ a }: { a: GraduationAge }) {
   const empty = a.n === 0;
   return (
     <tr className="border-t border-line">
-      <td className="py-1.5 pr-3 font-mono text-ink">+{a.minutes}m</td>
+      <td className="py-1.5 pr-3 font-mono text-ink">{ageLabel(a.minutes)}</td>
       <td className="py-1.5 pr-3 text-right font-mono text-muted">{a.n}</td>
       {empty ? (
         <td className="py-1.5 text-xs text-muted" colSpan={4}>
@@ -85,7 +90,10 @@ export function GraduationPanel() {
         </span>
       </div>
 
-      <div className="mt-3 overflow-x-auto">
+      {/* 51 rows: dense in the first hour, hourly to two days. Scrolled rather
+          than truncated — a hidden row is a measurement the reader cannot know
+          was taken. */}
+      <div className="mt-3 max-h-96 overflow-auto">
         <table className="w-full text-left text-[11px]">
           <thead className="text-[10px] uppercase tracking-wide text-muted">
             <tr>

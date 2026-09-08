@@ -16,6 +16,11 @@ import type { PaperHorizon } from "@/types/graduation";
  * Nothing here is traded.
  */
 
+/** "+15m" under an hour, "+6h" above it — 51 rows of "+2880m" is unreadable. */
+function ageLabel(minutes: number): string {
+  return minutes < 60 ? `+${minutes}m` : `+${minutes / 60}h`;
+}
+
 function money(v: number | null | undefined): string {
   return v === null || v === undefined || !Number.isFinite(Number(v))
     ? "—"
@@ -32,7 +37,7 @@ function Row({ h }: { h: PaperHorizon }) {
     h.trades > 0 && h.final_equity_net > 100 && h.final_equity_without_best <= 100;
   return (
     <tr className="border-t border-line">
-      <td className="py-1.5 pr-3 font-mono text-ink">+{h.minutes}m</td>
+      <td className="py-1.5 pr-3 font-mono text-ink">{ageLabel(h.minutes)}</td>
       <td className="py-1.5 pr-3 text-right font-mono text-muted">{h.trades}</td>
       <td className={`py-1.5 pr-3 text-right font-mono ${tone(h.final_equity_net)}`}>
         {money(h.final_equity_net)}
@@ -84,7 +89,7 @@ export function GraduationPaperPanel() {
         </span>
       </div>
 
-      <div className="mt-3 overflow-x-auto">
+      <div className="mt-3 max-h-96 overflow-auto">
         <table className="w-full text-left text-[11px]">
           <thead className="text-[10px] uppercase tracking-wide text-muted">
             <tr>

@@ -159,11 +159,6 @@ async def test_an_unreadable_response_writes_no_row(db_session, monkeypatch):
     assert (await db_session.execute(select(PumpfunGraduationMark))).first() is None
 
 
-def test_the_targets_cover_the_question_being_asked():
-    """The question is what the FIRST HOUR does, so the early targets are dense
-    and 60 is the boundary of the claim."""
-    assert graduation.TARGET_MINUTES == (5, 15, 30, 60)
-    assert graduation.MARK_TOLERANCE_MINUTES > 1, "wider than the poll interval"
 
 
 # --------------------------------------------------------------------------
@@ -419,3 +414,54 @@ async def test_without_best_is_reported_even_for_a_single_trade(db_session):
     out = await graduation_paper(db_session)
     five = next(h for h in out["horizons"] if h["minutes"] == 5)
     assert float(five["pnl_without_best"]) == 0.0
+
+
+# --------------------------------------------------------------------------
+# the 48-hour horizon
+# --------------------------------------------------------------------------
+
+
+def test_the_targets_run_hourly_to_two_days():
+    assert graduation.TARGET_MINUTES[:3] == (5, 15, 30)
+    hourly = graduation.TARGET_MINUTES[3:]
+    assert hourly[0] == 60 and hourly[-1] == 2880
+    assert all(b - a == 60 for a, b in zip(hourly, hourly[1:])), "hourly, no gaps"
+    assert len(graduation.TARGET_MINUTES) == 51
+
+
+def test_a_long_horizon_gets_a_wider_window():
+    """Four minutes either side of a 48-hour mark demands the collector be
+    alive at that exact minute two days later, and a missed window is not
+    recoverable — the age passes and that coin has no reading, ever."""
+    assert graduation._tolerance(5) == graduation.MARK_TOLERANCE_MINUTES
+    assert graduation._tolerance(60) == graduation.MARK_TOLERANCE_MINUTES
+    assert graduation._tolerance(2880) == graduation.LONG_MARK_TOLERANCE_MINUTES
+    assert graduation._tolerance(2880) > graduation._tolerance(60)
+
+
+def test_the_budget_covers_steady_state_with_room():
+    """52 targets at ~30 graduations an hour is 26 marks a minute. The budget
+    is spent in target order, so a tight one starves the LONGEST horizons —
+    the readings that took two days to earn and cannot be re-taken."""
+    marks_per_minute = (30 * (len(graduation.TARGET_MINUTES) - 3) + 30 * 3) / 60
+    assert graduation.MARK_BUDGET >= marks_per_minute * 4, (
+        f"budget {graduation.MARK_BUDGET} is thin against "
+        f"{marks_per_minute:.0f} marks/minute"
+    )
+
+
+async def test_a_two_day_old_coin_is_marked_at_its_48h_age(db_session, monkeypatch):
+    from datetime import timedelta as _td
+
+    g = await _stamp(db_session, "Old48" + "w" * 39, ago_min=2880)
+
+    async def fake_get(client, url, **params):
+        return {"usd_market_cap": 5000.0, "ath_market_cap": 90000.0}
+    monkeypatch.setattr(graduation, "_get", fake_get)
+
+    out = await graduation.mark(db_session, now=NOW)
+    assert out["written"] >= 1
+    rows = (await db_session.execute(
+        select(PumpfunGraduationMark).where(
+            PumpfunGraduationMark.minutes_since == 2880))).scalars().all()
+    assert len(rows) == 1 and rows[0].mcap_usd == D("5000")

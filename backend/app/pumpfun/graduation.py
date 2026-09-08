@@ -39,13 +39,32 @@ PAGE_LIMIT = 100
 #: its "first seen complete" would be a fact about US rather than about it.
 MAX_AGE_AT_DISCOVERY_MINUTES = 240
 
-#: The ages we want a reading at. The question is what the first hour does, so
-#: the early ones are dense and the last is the boundary of the claim.
-TARGET_MINUTES: tuple[int, ...] = (5, 15, 30, 60)
+#: The ages we want a reading at: dense in the first hour, then hourly to 48.
+#:
+#: The first hour answers "is there a pop", the two days answer "does anything
+#: survive". Both matter and neither substitutes for the other — the 60-minute
+#: median was -33% while a quarter of coins were still up, so where that split
+#: goes over a longer horizon is a real question rather than a decoration.
+TARGET_MINUTES: tuple[int, ...] = (5, 15, 30) + tuple(
+    60 * hour for hour in range(1, 49)
+)
 
-#: How late a reading may be and still count as that age. Wider than the poll
-#: interval so one slow pass does not silently drop a coin from the cohort.
+#: How late a reading may be and still count as that age.
+#:
+#: Wider than the poll interval so one slow pass does not silently drop a coin,
+#: and WIDER STILL for the long horizons: four minutes either side of a
+#: 48-hour mark demands the collector be alive at that exact minute two days
+#: later, and a missed window is not recoverable — the age passes and that coin
+#: has no 48h reading, ever. Twenty minutes at two days is 0.7% of the horizon,
+#: which is precision this measurement does not need.
 MARK_TOLERANCE_MINUTES = 4
+LONG_MARK_TOLERANCE_MINUTES = 20
+LONG_HORIZON_FROM_MINUTES = 120
+
+
+def _tolerance(minutes: int) -> int:
+    return (MARK_TOLERANCE_MINUTES if minutes < LONG_HORIZON_FROM_MINUTES
+            else LONG_MARK_TOLERANCE_MINUTES)
 
 #: Same guard the social collector uses: pump.fun has returned market caps
 #: above 10^20. An implausible number is UNKNOWN, never stored and never
@@ -54,7 +73,13 @@ IMPLAUSIBLE_USD = Decimal("1e13")
 
 #: Bound on per-coin lookups in one pass, so a backlog cannot turn into an
 #: unbounded burst of requests at somebody else's API.
-MARK_BUDGET = 60
+#:
+#: Steady state with 52 targets and ~30 graduations an hour is 26 marks a
+#: minute. The budget is spent in target order, so a burst against a tight
+#: budget starves the LONGEST horizons — the ones that took two days to earn
+#: and cannot be re-taken. Sized at roughly five times steady state for that
+#: reason, not for throughput.
+MARK_BUDGET = 150
 
 
 def _dec(v: Any) -> Decimal | None:
@@ -143,7 +168,7 @@ async def mark(session, *, now: datetime) -> dict[str, int]:
     for minutes in TARGET_MINUTES:
         if budget <= 0:
             break
-        lo = now - timedelta(minutes=minutes + MARK_TOLERANCE_MINUTES)
+        lo = now - timedelta(minutes=minutes + _tolerance(minutes))
         hi = now - timedelta(minutes=minutes)
         due = list((await session.execute(
             select(PumpfunGraduation)
