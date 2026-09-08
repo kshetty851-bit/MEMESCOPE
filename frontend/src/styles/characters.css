@@ -237,6 +237,67 @@
   stroke-width: 0.6;
 }
 
+/* ---------- form shading ------------------------------------------------
+   The rig paints a SECOND copy of the head, the hair and the garment over
+   the flat one, filled with a shared gradient in bounding-box units (see
+   `RigDefs`). Light from the upper left, shadow to the lower right — the
+   same direction the window's sunlight falls on the floor.
+
+   A copy, not a gradient on the original: the original's fill is a
+   per-character token, and a shared gradient cannot read it. The copy is
+   rendered by the same function as the part, so a new outfit or hairstyle
+   is shaded the day it is drawn. In a copy, everything is hidden except
+   fabric, skin and hair — a badge or a stroke-only detail must not be
+   painted twice, and a stroke-only shape must never be filled. */
+.hq-shade-layer *,
+.hq-light-layer * {
+  display: none;
+  stroke: none;
+  pointer-events: none;
+}
+.hq-shade-layer g,
+.hq-light-layer g {
+  display: inline;
+}
+.hq-shade-layer .hq-skin,
+.hq-shade-layer .hq-hair,
+.hq-shade-layer .hq-garment,
+.hq-shade-layer .hq-garment-dark,
+.hq-shade-layer .hq-garment-light {
+  display: inline;
+  fill: url(#hq-form-shade);
+}
+/* The highlight sweep, on hair only. Skin already has blush and a shadow
+   side; a gloss on it would read as sweat. */
+.hq-light-layer .hq-hair {
+  display: inline;
+  fill: url(#hq-form-light);
+}
+/* ---------- eyes ---------------------------------------------------------- */
+.hq-iris {
+  fill: oklch(0.38 0.070 250);
+}
+.hq-lid path {
+  fill: none;
+  stroke: oklch(0.22 0.020 265);
+  stroke-width: 0.9;
+  stroke-linecap: round;
+  opacity: 0.85;
+}
+/* ---------- posture -------------------------------------------------------
+   A seated figure at work leans into the screen a few degrees. The upper
+   body is one group and the pivot is its own base — the hips — so the lean
+   is a rotation about the chair, not a tilt of the whole figure. Static, so
+   it applies under reduced motion too: it is posture, not animation. */
+.hq-upper {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+}
+.hq-character[data-stance="seated"][data-pose="seated_working"] .hq-upper,
+.hq-character[data-stance="seated"][data-pose="seated_reviewing"] .hq-upper,
+.hq-character[data-stance="seated"][data-pose="looking_at_screen"] .hq-upper {
+  transform: rotate(-3.5deg);
+}
 /* ---------- portraits ---------------------------------------------------- */
 
 .hq-portrait {

@@ -70,6 +70,15 @@ export const FURNITURE: Placement[] = [
   { kind: "whiteboard", tile: { col: 21, row: 3 } },
   { kind: "plant-small", tile: { col: 17, row: 0 } },
   { kind: "plant-small", tile: { col: 21, row: 0 } },
+  /* ---- Under the windows and along the walls --------------------------
+     The reference office keeps something green on every sill. Row 0 and
+     column 0 are the wall-side tiles: no desk sits on them and no authored
+     route crosses them, which the furnished-office test holds true. */
+  { kind: "plant-small", tile: { col: 2, row: 0 } },
+  { kind: "plant-small", tile: { col: 7, row: 0 } },
+  { kind: "plant-small", tile: { col: 12, row: 0 } },
+  { kind: "plant-small", tile: { col: 15, row: 0 } },
+  { kind: "plant-small", tile: { col: 0, row: 3 } },
 
   /* ---- Outdoor Break Deck ---------------------------------------------
      Exterior: benches, tables and planters — nothing that needs air.

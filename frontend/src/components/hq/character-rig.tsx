@@ -95,7 +95,10 @@ export function RigDefs() {
           a near-black wedge the same value as the floor, so ten people
           appeared to be sitting on nothing at all. */}
       <symbol id="hq-chair" viewBox="-24 -40 48 52">
-        <path className="hq-chair-back" d="M-14 -4 L14 -4 L13 -30 Q13 -36 7 -36 L-7 -36 Q-13 -36 -13 -30 Z" />
+        <path
+          className="hq-chair-back"
+          d="M-14 -4 L14 -4 L13 -30 Q13 -36 7 -36 L-7 -36 Q-13 -36 -13 -30 Z"
+        />
         <path className="hq-chair" d="M-17 9 L17 9 L15 -4 L-15 -4 Z" />
         <path className="hq-chair" d="M-17 9 L17 9 L16 12 L-16 12 Z" opacity="0.75" />
         <path className="hq-chair-stem" d="M-2.5 12 L2.5 12 L3.5 19 L-3.5 19 Z" />
@@ -115,17 +118,47 @@ export function RigDefs() {
         <path className="hq-legs" d="M-11 -6 L11 -6 L14 6 L12 9 L-12 9 L-14 6 Z" />
         <path className="hq-legs" d="M-11 8 L-4 8 L-4 22 L-11 22 Z" />
         <path className="hq-legs" d="M4 8 L11 8 L11 22 L4 22 Z" />
-        <path className="hq-shoe" d="M-12 22 L-3.5 22 L-3 26.5 Q-3 28 -6 28 L-11 28 Q-13 28 -12.5 25 Z" />
-        <path className="hq-shoe" d="M3.5 22 L12 22 L12.5 25 Q13 28 11 28 L6 28 Q3 28 3 26.5 Z" />
+        <path
+          className="hq-shoe"
+          d="M-12 22 L-3.5 22 L-3 26.5 Q-3 28 -6 28 L-11 28 Q-13 28 -12.5 25 Z"
+        />
+        <path
+          className="hq-shoe"
+          d="M3.5 22 L12 22 L12.5 25 Q13 28 11 28 L6 28 Q3 28 3 26.5 Z"
+        />
       </symbol>
 
       <symbol id="hq-standing-legs" viewBox="-14 -4 28 42">
-        <path className="hq-legs" d="M-9 -4 L9 -4 L11 30 L4 30 L2 6 L-2 6 L-4 30 L-11 30 Z" />
+        <path
+          className="hq-legs"
+          d="M-9 -4 L9 -4 L11 30 L4 30 L2 6 L-2 6 L-4 30 L-11 30 Z"
+        />
         {/* Feet. Without them a standing figure looks pinned to the floor
             rather than stood on it, and every walk reads as a glide. */}
-        <path className="hq-shoe" d="M-11.5 30 L-3.5 30 L-3 36 Q-3 38 -6 38 L-11 38 Q-13 38 -12.5 35 Z" />
-        <path className="hq-shoe" d="M3.5 30 L11.5 30 L12.5 35 Q13 38 11 38 L6 38 Q3 38 3 36 Z" />
+        <path
+          className="hq-shoe"
+          d="M-11.5 30 L-3.5 30 L-3 36 Q-3 38 -6 38 L-11 38 Q-13 38 -12.5 35 Z"
+        />
+        <path
+          className="hq-shoe"
+          d="M3.5 30 L11.5 30 L12.5 35 Q13 38 11 38 L6 38 Q3 38 3 36 Z"
+        />
       </symbol>
+      {/* FORM SHADING. Two gradients in bounding-box units, so one pair
+          shades every head, every hairstyle and every garment without a
+          per-character drawing. Light comes from the upper left — the
+          station window — and the shadow side is the lower right, which is
+          the same direction the sunlight on the floor falls. Painted as a
+          second copy of the part over the flat one (see `Character`), so the
+          palette tokens keep doing exactly what they did. */}
+      <linearGradient id="hq-form-shade" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0.35" stopColor="black" stopOpacity="0" />
+        <stop offset="1" stopColor="black" stopOpacity="0.30" />
+      </linearGradient>
+      <linearGradient id="hq-form-light" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stopColor="white" stopOpacity="0.30" />
+        <stop offset="0.5" stopColor="white" stopOpacity="0" />
+      </linearGradient>
     </defs>
   );
 }
@@ -169,7 +202,9 @@ export function Character({ character, pose, stance, egg, emotion }: CharacterPr
           furniture that is already drawn at the destination — the sofa, a
           conference chair — and a second chair materialising under someone
           was exactly the fake this stance exists to avoid. */}
-      {mode === "seated" ? <use href="#hq-chair" x={-24} y={hipY - 12} width={48} height={52} /> : null}
+      {mode === "seated" ? (
+        <use href="#hq-chair" x={-24} y={hipY - 12} width={48} height={52} />
+      ) : null}
 
       {standing ? (
         <use href="#hq-standing-legs" x={-14} y={hipY - 4} width={28} height={42} />
@@ -179,26 +214,63 @@ export function Character({ character, pose, stance, egg, emotion }: CharacterPr
         <use href="#hq-seated-legs" x={-18} y={hipY - 6} width={36} height={30} />
       )}
 
-      <Torso build={build} hipY={hipY} shoulderY={shoulderY} />
-      <Garment outfit={character.outfit} build={build} shoulderY={shoulderY} hipY={hipY} />
-      <Arms pose={active} build={build} shoulderY={shoulderY} />
+      {/* The upper body is one group so a seated figure can lean into the
+          screen a few degrees: posture is what makes a cartoon person read as
+          working rather than parked. The lean is CSS, per pose. */}
+      <g className="hq-upper">
+        <Torso build={build} hipY={hipY} shoulderY={shoulderY} />
+        <Garment
+          outfit={character.outfit}
+          build={build}
+          shoulderY={shoulderY}
+          hipY={hipY}
+        />
+        {/* Shading, as a second copy of the part painted with the form
+          gradient. A copy rather than a gradient fill on the original,
+          because the original's fill is a per-character token and a shared
+          gradient cannot read it; and rendered from the same function, so a
+          new outfit or hairstyle is shaded on the day it is drawn. The CSS
+          hides everything in a copy except fabric, skin and hair. */}
+        <g className="hq-shade-layer" aria-hidden="true">
+          <Garment
+            outfit={character.outfit}
+            build={build}
+            shoulderY={shoulderY}
+            hipY={hipY}
+          />
+        </g>
+        <Arms pose={active} build={build} shoulderY={shoulderY} />
 
-      {/* Neck, then head, then hair — painted in that order so hair overlaps
+        {/* Neck, then head, then hair — painted in that order so hair overlaps
           the skull rather than being clipped by it. */}
-      <rect
-        className="hq-skin"
-        x={-4}
-        y={shoulderY - build.neck}
-        width={8}
-        height={build.neck + 2}
-        rx={3}
-      />
-      <Head shape={character.headShape} y={headY} />
-      <Face y={headY} pose={active} egg={egg} emotion={emotion} />
-      <Hair style={character.hair} shape={character.headShape} y={headY} />
-
-      <AccessoryPart accessory={character.accessory} pose={active} shoulderY={shoulderY} />
-      {egg === "telescope" ? <Telescope shoulderY={shoulderY} /> : null}
+        <rect
+          className="hq-skin"
+          x={-4}
+          y={shoulderY - build.neck}
+          width={8}
+          height={build.neck + 2}
+          rx={3}
+        />
+        <Head shape={character.headShape} y={headY} />
+        <g className="hq-shade-layer" aria-hidden="true">
+          <Head shape={character.headShape} y={headY} />
+        </g>
+        <Face y={headY} pose={active} egg={egg} emotion={emotion} />
+        <Hair style={character.hair} shape={character.headShape} y={headY} />
+        <g className="hq-shade-layer" aria-hidden="true">
+          <Hair style={character.hair} shape={character.headShape} y={headY} />
+        </g>
+        {/* The highlight sweep is what turns a hair silhouette into hair. */}
+        <g className="hq-light-layer" aria-hidden="true">
+          <Hair style={character.hair} shape={character.headShape} y={headY} />
+        </g>
+        <AccessoryPart
+          accessory={character.accessory}
+          pose={active}
+          shoulderY={shoulderY}
+        />
+        {egg === "telescope" ? <Telescope shoulderY={shoulderY} /> : null}
+      </g>
     </g>
   );
 }
@@ -590,6 +662,8 @@ function Face({
   // Surprise is a round mouth, like speech — the one emotion the curve cannot
   // express, because an open mouth is a shape rather than a bend.
   const roundMouth = speaking || emotion === "surprised";
+  // Eye height. Their default is 2.6; surprise opens it, anger narrows it.
+  const eyeH = emotion === "surprised" ? 3.2 : emotion === "angry" ? 2.0 : 2.6;
   // Smug is drawn asymmetric: one corner up. Symmetry reads as sincerity, and
   // this is the one expression that must not.
   const smug = emotion === "smug";
@@ -623,27 +697,24 @@ function Face({
         </g>
       ) : (
         <g>
-          {/* Surprise widens the eye; anger narrows it. One radius, so no pose
-              can end up with two differently-sized eyes. */}
-          <ellipse
-            className="hq-eye"
-            cx={-eyeX}
-            cy={eyeY}
-            rx={1.7}
-            ry={emotion === "surprised" ? 2.7 : emotion === "angry" ? 1.6 : 2.1}
-          />
-          <ellipse
-            className="hq-eye"
-            cx={eyeX}
-            cy={eyeY}
-            rx={1.7}
-            ry={emotion === "surprised" ? 2.7 : emotion === "angry" ? 1.6 : 2.1}
-          />
-          {/* One highlight each. The cheapest possible "there is somebody in
-              there", and it is the reason these read as alive rather than as
-              drilled holes. */}
-          <circle className="hq-eye-light" cx={-eyeX + 0.6} cy={eyeY - 0.7} r={0.55} />
-          <circle className="hq-eye-light" cx={eyeX + 0.6} cy={eyeY - 0.7} r={0.55} />
+          {/* A shade larger than they were, with an iris under the highlight
+              and a lid line over the top. At this size the eye is most of
+              what says "drawn person" rather than "figurine", and the iris
+              is what stops a bigger eye reading as a drilled hole.
+
+              The height is the one thing emotion touches: surprise opens the
+              eye, anger narrows it. Scaling the iris with it matters — a
+              fixed iris inside a shrinking eye pops out through the lid. */}
+          <ellipse className="hq-eye" cx={-eyeX} cy={eyeY} rx={2.1} ry={eyeH} />
+          <ellipse className="hq-eye" cx={eyeX} cy={eyeY} rx={2.1} ry={eyeH} />
+          <ellipse className="hq-iris" cx={-eyeX} cy={eyeY + 0.3} rx={1.25} ry={eyeH * 0.62} />
+          <ellipse className="hq-iris" cx={eyeX} cy={eyeY + 0.3} rx={1.25} ry={eyeH * 0.62} />
+          <circle className="hq-eye-light" cx={-eyeX + 0.7} cy={eyeY - 0.9} r={0.7} />
+          <circle className="hq-eye-light" cx={eyeX + 0.7} cy={eyeY - 0.9} r={0.7} />
+          <g className="hq-lid">
+            <path d={`M${-eyeX - 2.2} ${eyeY - 1.6} q2.2 -1.9 4.4 0`} />
+            <path d={`M${eyeX - 2.2} ${eyeY - 1.6} q2.2 -1.9 4.4 0`} />
+          </g>
         </g>
       )}
 

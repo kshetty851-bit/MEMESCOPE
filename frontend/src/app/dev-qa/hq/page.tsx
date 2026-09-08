@@ -17,7 +17,18 @@ import { CHARACTERS, type Emotion, type Pose } from "@/lib/hq/characters";
  * `/hq` sits behind the dashboard layout, which awaits `/alpha/session` — so
  * with no API running it redirects, and the room cannot be looked at at all.
  * That is the right behaviour for the product and useless for verifying a
- * change to the furniture.
+ * change to the furniture. Same pattern as `dev-qa/crew`, same reason: a
+ * headless browser needs the thing being verified in the first viewport.
+ *
+ * ── `operational` MUST BE EMPTY HERE ────────────────────────────────────
+ *
+ * It is the list of people whose *real* state outranks ambient, so the
+ * scheduler refuses an ambient routine to anyone in it
+ * (`ambient-scheduler.ts`, "core && operational.has(id)"). The version of this
+ * page on the Ghibli branch passed `EMPLOYEES.map(e => e.id)` — every single
+ * employee — which suppresses ambient for the entire cast and parks the office
+ * it was written to animate. `UNKNOWN_HQ_STATE.operational` is `[]`, because
+ * nothing measured means nobody is busy, which is exactly right.
  *
  * This mounts the identical `HqStage` over the identical stylesheets, driven
  * by the real ambient scheduler, so the games corner and the walks it plays
