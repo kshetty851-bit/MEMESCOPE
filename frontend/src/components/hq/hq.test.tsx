@@ -68,7 +68,7 @@ describe("navigation", () => {
     }
   });
 
-  it("keeps the Movers Lab, which is the current deliberate exception", () => {
+  it("keeps the Movers and KOL Labs, the current deliberate exceptions", () => {
     // Per-lab pages are removed by default and the test below keeps them gone.
     // The Movers Lab is asserted rather than left sitting ambiguously between
     // the two rules — a reader of the list below would otherwise reasonably
@@ -78,6 +78,7 @@ describe("navigation", () => {
     // when it was deleted on the operator's instruction after every arm lost.
     const hrefs = NAV_GROUPS.flatMap((group) => group.items).map((item) => item.href);
     expect(hrefs).toContain("/movers-lab");
+    expect(hrefs).toContain("/kol-lab");
   });
 
   it("does not resurrect the removed destinations", () => {

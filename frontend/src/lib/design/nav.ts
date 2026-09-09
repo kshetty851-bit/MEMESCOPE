@@ -78,6 +78,10 @@ export const NAV_GROUPS: NavGroup[] = [
       // Movers: the turnover filter against its own control. Named for the
       // pump.fun list it was built to anticipate, not for a result it has.
       { href: "/movers-lab", label: "Movers Lab", icon: IconWallet, status: "ready" },
+      // KOL: follows wallets that were repeatedly early into winners. Listed
+      // while it is still waiting for history — the page explains the wait,
+      // and a lab you cannot find is a lab nobody checks.
+      { href: "/kol-lab", label: "KOL Lab", icon: IconWallet, status: "ready" },
     ],
   },
   {
