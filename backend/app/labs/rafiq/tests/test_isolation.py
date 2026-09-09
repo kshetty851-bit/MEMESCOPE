@@ -128,9 +128,14 @@ def test_the_migration_is_purely_additive() -> None:
     """No ALTER, no DROP of anything that existed before it. A database that
     runs this migration and never enables the flag is byte-identical in every
     pre-existing table."""
-    migration = (PACKAGE.parents[2] / "alembic" / "versions"
-                 / "20260909_0056_rafiq_lab.py")
-    tree = ast.parse(migration.read_text())
+    # Found by glob, not by name. The revision number depends on which chain
+    # this branch sits on — it is 0056 where the lab was written and 0063 where
+    # it was replayed onto a diverged main — and a test that hardcodes one of
+    # them fails on the other branch for no reason anyone cares about.
+    matches = sorted((PACKAGE.parents[2] / "alembic" / "versions")
+                     .glob("*_rafiq_lab.py"))
+    assert len(matches) == 1, f"expected exactly one rafiq migration, got {matches}"
+    tree = ast.parse(matches[0].read_text())
     upgrade = next(n for n in tree.body
                    if isinstance(n, ast.FunctionDef) and n.name == "upgrade")
     ops = [n.func.attr for n in ast.walk(upgrade)

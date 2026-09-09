@@ -8,6 +8,12 @@ up in production.
 Purely additive: no ALTER, no DROP, no index on an existing table. A database
 that runs this migration and never enables `RAFIQ_LAB_ENABLED` is byte-identical
 in every table that existed before it, and a test asserts exactly that.
+
+Numbered 0063 on this branch and 0056 on `karthik-hq`, because the two chains
+forked at 0053 and this lab was written on the other side of the fork. The two
+files create the same three tables. **If `karthik-hq` is ever merged here, keep
+one and delete the other** — running both would try to create `rafiq_lab_*`
+twice.
 """
 
 from __future__ import annotations
@@ -16,8 +22,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision: str = "0056_rafiq_lab"
-down_revision: str = "0055_real_wallet_allocations"
+revision: str = "0063_rafiq_lab"
+down_revision: str = "0062_lab_decision_per_checkpoint"
 branch_labels = None
 depends_on = None
 
