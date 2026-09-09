@@ -33,6 +33,8 @@ export interface FiveMinWallet {
   trades: FiveMinPosition[];
   /** Contributed by the board's `axis` — the horizon this arm sells at. */
   hold_minutes: number | null;
+  /** Contributed by the board's `axis` — e.g. "$2 x 50". The axis under test. */
+  shape?: string | null;
   rank?: number;
 }
 
@@ -59,4 +61,6 @@ export interface FiveMinBoard {
   checkpoint_minutes?: number;
   /** Execution fidelity, not a signal. */
   liquidity_floor?: string;
+  /** The book shapes under test, smallest stake first. */
+  book_shapes?: string[];
 }

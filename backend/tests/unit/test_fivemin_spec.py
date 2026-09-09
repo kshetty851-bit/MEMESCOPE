@@ -27,9 +27,9 @@ class TestItCannotHaltAnotherTournament:
 
     def test_the_rules_change_bumped_the_version(self) -> None:
         """Each predecessor was a live tournament with different rules —
-        3.1.0 ran $10 x 10 across two horizons. Reusing a version would attach
-        this book to that record."""
-        assert fivemin.SPEC_VERSION == "fivemin-4.0.0"
+        4.0.0 ran a single $2 x 50 arm. Reusing a version would attach this
+        book to that record."""
+        assert fivemin.SPEC_VERSION == "fivemin-5.0.0"
 
 
 class TestItTradesTheGraduationCohort:
@@ -86,14 +86,21 @@ class TestTheLiquidityFloorIsExecutionNotSignal:
             assert s.entry[0].feature == "liq"
 
 
-class TestOneArmAtFiveMinutes:
-    def test_only_the_five_minute_horizon_remains(self) -> None:
-        """Fifteen was retired on measurement, not preference: same medians
-        (1.0308 vs 1.0282) but the share going to zero tripled, 4.3% to 14.6%."""
-        held = sorted(round(s.exits.time_exit_hours * 60)
-                      for s in fivemin.STRATEGIES)
-        assert held == [5]
+class TestTwoArmsDifferingOnlyInBookShape:
+    def test_both_arms_sell_on_the_same_clock(self) -> None:
+        """The axis is SIZE now. A difference in hold would confound it."""
+        held = {round(s.exits.time_exit_hours * 60) for s in fivemin.STRATEGIES}
+        assert held == {5}
         assert fivemin.HOLD_MINUTES == (5,)
+
+    def test_the_two_shapes_are_2x50_and_20x5(self) -> None:
+        shapes = {(s.size_usd, s.max_concurrent) for s in fivemin.STRATEGIES}
+        assert shapes == {(Decimal("2"), 50), (Decimal("20"), 5)}
+
+    def test_every_arm_deploys_the_whole_book(self) -> None:
+        """Otherwise the arms differ in capital too, not just in shape."""
+        for s in fivemin.STRATEGIES:
+            assert s.size_usd * s.max_concurrent == fivemin.STARTING_EQUITY
 
     def test_the_entry_is_shared_by_identity(self) -> None:
         """So a second arm added later cannot silently drift from this one."""
@@ -114,13 +121,8 @@ class TestOneArmAtFiveMinutes:
 
 
 class TestTheOperatorsRuleSet:
-    def test_fifty_trades_of_two_dollars_fill_the_book(self) -> None:
-        """$2 x 50, chosen on a sweep of 48 combinations: every loss here is
-        TOTAL, so bet size is the only lever, and minus its best trade $2x50
-        finished at $93.57 against $86.18 for $10x10 and $1.68 for $25x4."""
+    def test_each_arm_fills_its_book_exactly(self) -> None:
         for s in fivemin.STRATEGIES:
-            assert s.size_usd == Decimal("2")
-            assert s.max_concurrent == 50
             assert s.size_usd * s.max_concurrent == s.max_exposure_usd
             assert s.max_exposure_usd == fivemin.STARTING_EQUITY
 

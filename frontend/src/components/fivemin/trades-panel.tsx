@@ -57,14 +57,15 @@ function sum(rows: LabTrade[]): number {
 
 /** Which arm a row belongs to. Both arms buy the SAME mints at the same
  *  instant, so without this column the record reads as every token duplicated
- *  for no visible reason. `GRAD-05` -> `5m`.
+ *  for no visible reason.
  *
- *  Matched on the trailing number rather than a prefix: the ids have already
- *  moved once (HOLD- to GRAD-) and a prefix match would have gone silently
- *  blank rather than failing. */
+ *  Labelled by STAKE (`GRAD-S2` -> `$2`), because the arms now share a clock
+ *  and differ only in how the book is divided — the hold would label them
+ *  identically. Falls back to the raw id rather than going blank, which is how
+ *  the previous version failed silently when the ids changed shape. */
 function arm(t: LabTrade): string {
-  const m = /-(\d+)$/.exec(t.strategy_id ?? "");
-  return m?.[1] ? `${Number(m[1])}m` : (t.strategy_id ?? "—");
+  const m = /-S(\d+)$/.exec(t.strategy_id ?? "");
+  return m?.[1] ? `$${Number(m[1])}` : (t.strategy_id ?? "—");
 }
 
 function Row({ t }: { t: LabTrade }) {

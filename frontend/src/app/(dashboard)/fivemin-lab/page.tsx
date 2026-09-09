@@ -9,14 +9,14 @@ import type { FiveMinWallet } from "@/types/fivemin";
 /**
  * THE GRADUATION HOLD LAB.
  *
- * One wallet buying the pump.fun graduation cohort — the population the
- * five-minute number actually came from — at a flat $2 across fifty
- * concurrent positions, selling five minutes after entry.
+ * Two wallets buying the pump.fun graduation cohort — the population the
+ * five-minute number actually came from — at the same entry, on the same
+ * five-minute clock, differing ONLY in how each $100 book is divided: $2
+ * across fifty positions against $20 across five.
  *
- * The fifteen-minute arm was retired on measurement: same median, triple the
- * share going to zero. THE COST OF THAT is that this lab no longer carries a
- * control, so it can show what the five-minute hold did without showing
- * whether the hold was the reason. `GapPanel` is kept for a second arm.
+ * Every loss here is total, so bet size is the one lever a book has. Replay
+ * put $2 x 50 well ahead ($93.57 against $12.41 minus the best trade, neither
+ * profitable); this runs that ordering forward against real fills.
  *
  * The disclosure is rendered FIRST and is not collapsible. The fifteen-minute
  * hold has already measured about -8.5% net per trade on 1,348 real positions,
@@ -46,7 +46,7 @@ function ArmCard({ w, base }: { w: FiveMinWallet; base: number }) {
   return (
     <Panel density="compact">
       <div className="flex items-baseline justify-between gap-2">
-        <Label>{w.hold_minutes ? `SELLS AT ${w.hold_minutes} MIN` : w.name}</Label>
+        <Label>{w.shape ?? w.name}</Label>
         <span className="font-mono text-[10px] text-muted">{w.strategy_id}</span>
       </div>
 
@@ -105,8 +105,8 @@ export default function FiveMinLabPage() {
     <div className="flex flex-col gap-4 p-4 lg:p-6">
       <Toolbar
         eyebrow="Graduation Hold Lab"
-        title="Buy the graduation. Sell five minutes later."
-        description="One $100 wallet, fifty trades of $2 each, buying pump.fun graduations two minutes after they complete and selling five minutes on. Every loss in this population is total, so the stake is small enough that no single death decides the book. The $100k liquidity floor is execution fidelity, not a signal. Nothing here is real money."
+        title="Same coins, same clock. One splits the book fifty ways, one five."
+        description="Two $100 wallets buying pump.fun graduations two minutes after they complete and selling five minutes on. They take the same coin at the same instant and differ only in how the book is divided — $2 across fifty positions against $20 across five. Every loss here is total, so bet size is the one lever a book has. Nothing here is real money."
       />
 
       {/* Deliberately above the numbers, and deliberately not collapsible. */}

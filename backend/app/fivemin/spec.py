@@ -124,7 +124,7 @@ from decimal import Decimal as D
 
 from app.lab.spec import Condition, Exits, Strategy, rules_json
 
-SPEC_VERSION = "fivemin-4.0.0"
+SPEC_VERSION = "fivemin-5.0.0"
 
 #: Draw candidates from the pump.fun graduation cohort, not from radar.
 #: Read by `LabService._due_candidates`; absent means radar, so no other
@@ -137,7 +137,21 @@ STARTING_EQUITY = D("100")
 #: Below this an arm stops opening.
 FAILURE_EQUITY_FLOOR = D("50")
 
-#: THE STAKE, and it never moves. Fifty of these fill the book exactly.
+#: THE TWO BOOK SHAPES UNDER TEST — (stake, concurrent), each filling $100.
+#:
+#: This is the whole experiment now. Both arms take the SAME entry at the SAME
+#: instant on the SAME stream and sell on the SAME clock; the only thing that
+#: differs is how the hundred dollars is divided. Every loss in this population
+#: is TOTAL, so bet size is the one lever a book has, and a sweep over 465
+#: graduations put $2 x 50 ahead of $20 x 5 by a distance on the figure that
+#: matters — the book with its single best trade removed ($93.57 against $12.41).
+#:
+#: That was replay. This runs it forward, paired, which is the only way to find
+#: out whether the ordering survives real fills — and it restores the control
+#: the single-arm version gave up.
+BOOK_SHAPES: tuple[tuple[D, int], ...] = ((D("2"), 50), (D("20"), 5))
+
+#: The first shape's stake, kept for the API and page that already read it.
 #:
 #: $2 x 50 rather than $10 x 10 on the operator's instruction, after a sweep of
 #: 48 book-shape/exit combinations over 465 corrected graduations. Losses here
@@ -151,7 +165,7 @@ STAKE_USD = D("2")
 #: 2 is the earliest point at which most of the cohort can be PRICED at all.
 CHECKPOINT_MINUTES = 2
 
-#: The hold, in minutes, measured from the checkpoint. ONE arm now.
+#: The hold, in minutes, measured from the checkpoint. Shared by both arms.
 #:
 #: The fifteen-minute arm is retired. On the same 465 graduations the medians
 #: were nearly identical (1.0308 against 1.0282) while the share going to zero
@@ -179,20 +193,21 @@ _EXECUTABLE = (
 )
 
 
-def _arm(minutes: int) -> Strategy:
-    """One wallet. The horizon is the only argument, which is the design."""
+def _arm(stake: D, slots: int) -> Strategy:
+    """One wallet. The book SHAPE is the only argument, which is the design."""
+    minutes = HOLD_MINUTES[0]
     return Strategy(
-        id=f"GRAD-{minutes:02d}",
-        name=f"GRAD-{minutes}M",
+        id=f"GRAD-S{int(stake)}",
+        name=f"GRAD ${int(stake)} x {slots}",
         hypothesis=(
             f"Buying pump.fun graduations two minutes after they complete and "
             f"selling {minutes} minutes later returns more than it costs."
         ),
         checkpoint_minutes=CHECKPOINT_MINUTES,
         entry=_EXECUTABLE,
-        size_usd=STAKE_USD,
-        max_concurrent=50,
-        max_exposure_usd=STAKE_USD * 50,
+        size_usd=stake,
+        max_concurrent=slots,
+        max_exposure_usd=stake * slots,
         # The clock is the ONLY exit, because the clock is the variable. A
         # take-profit or a stop would decide some trades before the horizon
         # did, and those trades would measure that rule instead.
@@ -202,7 +217,7 @@ def _arm(minutes: int) -> Strategy:
     )
 
 
-STRATEGIES: tuple[Strategy, ...] = tuple(_arm(m) for m in HOLD_MINUTES)
+STRATEGIES: tuple[Strategy, ...] = tuple(_arm(k, n) for k, n in BOOK_SHAPES)
 
 BY_ID = {s.id: s for s in STRATEGIES}
 
@@ -233,7 +248,13 @@ SPEC_HASH = hashlib.sha256(_canonical().encode()).hexdigest()
 assert CANDIDATE_SOURCE == "graduations", (
     "this lab exists to trade the graduation cohort; radar is what it replaced"
 )
-assert len(STRATEGIES) == 1, "one arm: five minutes, by instruction"
+assert len(STRATEGIES) == 2, "two arms: one per book shape"
+assert len({s.exits.time_exit_hours for s in STRATEGIES}) == 1, (
+    "both arms must sell on the SAME clock, or the comparison is not about size"
+)
+assert len({s.size_usd for s in STRATEGIES}) == 2, (
+    "the arms must differ in stake, or there is nothing to compare"
+)
 assert all(s.entry is _EXECUTABLE for s in STRATEGIES), (
     "the entry is shared BY IDENTITY, so a second arm cannot drift from it"
 )

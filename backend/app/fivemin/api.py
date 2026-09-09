@@ -43,17 +43,23 @@ DISCLOSURE = (
 
 @router.get("/board")
 async def board(session: DbSession) -> dict[str, Any]:
-    # Ordered by the horizon itself, shortest first, so the board reads as the
-    # comparison it is. Sorting by equity would put whichever arm is winning on
-    # top and destroy the only axis this experiment has.
+    # Ordered by STAKE, smallest first, because the book shape is now the axis:
+    # both arms sell on the same clock and differ only in how $100 is divided.
+    # Sorting by equity would put whichever arm is winning on top and destroy
+    # the only axis this experiment has.
     out = await lab_board.build(
         session, registry=fmspec, disclosure=DISCLOSURE,
-        order=lambda w: w.get("hold_minutes") or 0,
-        axis=lambda s_: {"hold_minutes": (
-            round((s_.exits.time_exit_hours or 0) * 60) if s_ else None)},
+        order=lambda w: w.get("size_usd") or 0,
+        axis=lambda s_: {
+            "hold_minutes": (round((s_.exits.time_exit_hours or 0) * 60)
+                             if s_ else None),
+            "shape": (f"${int(s_.size_usd)} x {s_.max_concurrent}"
+                      if s_ else None),
+        },
     )
     out["hold_minutes"] = list(fmspec.HOLD_MINUTES)
     out["stake_usd"] = str(fmspec.STAKE_USD)
+    out["book_shapes"] = [f"${int(k)} x {n}" for k, n in fmspec.BOOK_SHAPES]
     out["sizing_scales"] = fmspec.SIZING_SCALES
     out["cycle_enabled"] = fmspec.CYCLE_ENABLED
     out["candidate_source"] = fmspec.CANDIDATE_SOURCE
