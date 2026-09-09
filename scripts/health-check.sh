@@ -12,7 +12,21 @@ set -uo pipefail
 
 BASE_URL="${BASE_URL:-http://localhost:8001}"
 FRONTEND_URL="${FRONTEND_URL:-http://localhost:3000}"
-TIMEOUT="${HEALTH_TIMEOUT:-10}"
+# 30s, not 10. This check runs at the END of a deploy — immediately after a
+# 2.4GB pg_dump, an image build and a container restart, on a box whose load
+# average is routinely above 10 at that moment. A data endpoint that answers
+# in under a second when idle can take longer than ten seconds there.
+#
+# On 2026-09-09 that failed `scores API` with a timeout (000), and one failure
+# of fourteen rolled a healthy release back — which ran ANOTHER dump and
+# build, raising the load further and making the retry likelier to fail. A
+# verification that cannot survive the load its own deploy creates rejects
+# good releases and calls it caution.
+#
+# This is a timeout, not a latency budget. If the endpoint is genuinely slow
+# for users that is a separate problem and this number will not hide it: the
+# check still fails at 30s, and `/ready` still has to answer promptly.
+TIMEOUT="${HEALTH_TIMEOUT:-30}"
 COOKIE_JAR="$(mktemp -t memescope-health-cookie.XXXXXX)"
 ALPHA_PAYLOAD="$(mktemp -t memescope-alpha-payload.XXXXXX)"
 
