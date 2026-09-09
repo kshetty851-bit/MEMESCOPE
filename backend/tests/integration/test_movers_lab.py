@@ -202,3 +202,46 @@ async def test_a_retired_arm_disappears_from_the_board_and_the_ledger(db_session
 
     trades = await build_trades(db_session, registry=mvspec, disclosure="x")
     assert "MOV-01" not in {t_["strategy_id"] for t_ in trades["trades"]}
+
+
+async def test_a_dead_coin_has_no_current_price(db_session):
+    """An INACTIVE snapshot carries a `price_usd` and it is not a price.
+
+    Found on production: 3rPtdowXdc collapsed 95% to 0.00000366 and went
+    inactive, the position closed correctly at dead_zero, and then the feed
+    reported 0.0001867 — 51x higher, still inactive, nothing trading. The
+    trades view read that as the current price and showed a written-off
+    position as up 174%.
+
+    The whole payoff research keeps hitting this from the other side: a dead
+    coin's last observed price is never zero, so anything that marks it there
+    invents a recovery nobody could have sold into.
+    """
+    from app.lab.api import build_trades
+    from app.models.market import TokenMarketSnapshot, TradingStatus
+
+    svc = CompoundService(db_session, registry=mvspec)
+    await svc._lab.activate(valid_from=NOW - timedelta(minutes=15))
+    tok = await _pumpfun_token(db_session, mint="M" + "z" * 20,
+                               detected=NOW - timedelta(minutes=11),
+                               liq=D("600000"), price=D("0.001"), pool="PMOVZ")
+    await svc.tick(now=NOW)
+    rows = await _rows(db_session, "MOV-04")
+    assert rows, "the control must have bought, or this tests nothing"
+
+    # The coin dies, then the feed reports a wild price while still inactive.
+    for at, px in ((NOW + timedelta(minutes=1), D("0.00001")),
+                   (NOW + timedelta(minutes=2), D("0.05"))):
+        db_session.add(TokenMarketSnapshot(
+            token_id=tok.id, mint_address=tok.mint_address, captured_at=at,
+            price_usd=px, liquidity_usd=D("600000"),
+            trading_status=TradingStatus.INACTIVE, provider="test",
+            suspect=False, pool_address="PMOVZ",
+        ))
+    await db_session.flush()
+
+    got = await build_trades(db_session, registry=mvspec, disclosure="x")
+    row = next(t for t in got["trades"] if t["mint"] == tok.mint_address)
+    # The last TRADING print stands; the inactive 0.05 must not be read as
+    # a fifty-fold recovery.
+    assert row["price_now"] is None or row["price_now"] < D("0.05")

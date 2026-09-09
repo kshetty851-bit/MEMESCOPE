@@ -16,7 +16,7 @@ from sqlalchemy import func, select
 from app.api.deps import AdminUser, DbSession
 from app.lab import leaderboard, projection, spec
 from app.lab.service import LabService
-from app.models.market import TokenMarketSnapshot
+from app.models.market import TokenMarketSnapshot, TradingStatus
 from app.models.token import DiscoveredToken
 from app.models.lab import (
     LabDecision,
@@ -333,6 +333,22 @@ async def build_trades(session, *, registry: Any = spec, disclosure: str = DISCL
         ).where(
             TokenMarketSnapshot.mint_address.in_(mints),
             TokenMarketSnapshot.price_usd.is_not(None),
+            TokenMarketSnapshot.price_usd > 0,
+            # ONLY A TRADING PRINT IS A PRICE.
+            #
+            # An INACTIVE snapshot still carries a `price_usd`, and it is not
+            # one: measured on 3rPtdowXdc, a coin collapsed 95% to 0.00000366
+            # and went inactive, then "jumped" to 0.0001867 — 51x — while
+            # still inactive, with nothing trading. Reading that as the
+            # current price told the page a position closed at dead_zero was
+            # somehow up 174%.
+            #
+            # This is the trap the payoff research kept hitting from the other
+            # side: a dead coin's last observed price is never zero, so
+            # anything that marks it at that price invents a recovery nobody
+            # could have sold into. Excluded rather than flagged, because a
+            # number that has to be explained will be read anyway.
+            TokenMarketSnapshot.trading_status != TradingStatus.INACTIVE,
         ).subquery()
         latest = {
             r.mint_address: (r.price_usd, r.captured_at)
