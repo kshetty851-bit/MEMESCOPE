@@ -120,11 +120,12 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import asdict
+from datetime import timedelta
 from decimal import Decimal as D
 
 from app.lab.spec import Condition, Exits, Strategy, rules_json
 
-SPEC_VERSION = "fivemin-6.0.0"
+SPEC_VERSION = "fivemin-7.0.0"
 
 #: Draw candidates from the pump.fun graduation cohort, not from radar.
 #: Read by `LabService._due_candidates`; absent means radar, so no other
@@ -158,6 +159,7 @@ ARMS: tuple[tuple[D, int, str], ...] = (
     (D("2"), 50, "GRAD"),
     (D("20"), 5, "GRAD"),
     (D("2"), 50, "PUMP"),
+    (D("2"), 50, "AMM"),
 )
 
 #: Which admission stream each arm reads. Read by `LabService._source_for`;
@@ -166,7 +168,31 @@ ARMS: tuple[tuple[D, int, str], ...] = (
 #: NOT a field on `Strategy`: that dataclass is shared by eight registries and
 #: `asdict` puts every field into the canonical JSON, so adding one would
 #: change all eight hashes and halt every live tournament at once.
-SOURCE_BY_STRATEGY = {"PUMP-S2": "pumpswap"}
+SOURCE_BY_STRATEGY = {"PUMP-S2": "pumpswap", "AMM-S2": "deepamm"}
+
+#: THE BASELINE ARM, and it is a baseline rather than a bet.
+#:
+#: Raydium, Orca, Meteora and MetaDAO carry $1.3m-$3.6m of median depth but
+#: almost no events: of 157 tokens at $100k depth in a measured day, FOUR had
+#: newly arrived. So this arm does not wait for an event — it SAMPLES, a token
+#: per tick, re-drawable after a cooldown, spreading draws across conditions
+#: instead of buying a whole universe inside one hour.
+#:
+#: It answers "what does a random established token do in five minutes", which
+#: is the number the graduation arms have to beat to mean anything. Established
+#: tokens have been measured here before and a breakout entry came in 2.73pp
+#: WORSE than a random bar in the same tokens, so nothing here expects it to
+#: win — it exists to make the other arms interpretable.
+DEEP_VENUES = ("raydium", "orca", "meteora", "metadao")
+
+#: Keyed by SOURCE, not by registry: a graduation is a one-time event and must
+#: never be re-drawn, a random established token is meant to be.
+REJUDGE_BY_SOURCE = {"deepamm": timedelta(hours=6)}
+
+#: One draw per tick. At a ten-second beat that is six a minute, so the arm
+#: reaches its fifty slots over minutes rather than seconds — the whole point
+#: being that its draws are not all taken in one market condition.
+SAMPLE_PER_TICK = 1
 
 #: Kept for the API and page, which already read it.
 BOOK_SHAPES: tuple[tuple[D, int], ...] = ((D("2"), 50), (D("20"), 5))
@@ -217,7 +243,7 @@ def _arm(stake: D, slots: int, pop: str) -> Strategy:
     """One wallet. Shape and population are the only arguments."""
     minutes = HOLD_MINUTES[0]
     grad = pop == "GRAD"
-    label = "Graduation" if grad else "PumpSwap"
+    label = {"GRAD": "Graduation", "PUMP": "PumpSwap", "AMM": "DeepAMM"}[pop]
     return Strategy(
         id=f"{pop}-S{int(stake)}",
         name=f"{label} ${int(stake)} x {slots}",
@@ -227,6 +253,9 @@ def _arm(stake: D, slots: int, pop: str) -> Strategy:
             if grad else
             f"Buying pump.swap markets as they first reach $100k of depth and "
             f"selling {minutes} minutes later returns more than it costs."
+            if pop == "PUMP" else
+            f"A BASELINE, not a bet: what a randomly drawn established AMM "
+            f"token does over {minutes} minutes, which the other arms must beat."
         ),
         # The graduation arms wait 2 minutes for a price to exist. The
         # pump.swap arm is admitted BY a priced snapshot, so it has one
@@ -276,7 +305,7 @@ SPEC_HASH = hashlib.sha256(_canonical().encode()).hexdigest()
 assert CANDIDATE_SOURCE == "graduations", (
     "this lab exists to trade the graduation cohort; radar is what it replaced"
 )
-assert len(STRATEGIES) == 3, "three arms: reference, shape variant, population variant"
+assert len(STRATEGIES) == 4, "reference, shape variant, population variant, baseline"
 assert len({s.exits.time_exit_hours for s in STRATEGIES}) == 1, (
     "both arms must sell on the SAME clock, or the comparison is not about size"
 )
@@ -286,7 +315,10 @@ assert len({s.size_usd for s in STRATEGIES}) == 2, (
 assert set(SOURCE_BY_STRATEGY) <= {s.id for s in STRATEGIES}, (
     "a source mapped to an id no arm carries is a silent no-op"
 )
-assert {s.id for s in STRATEGIES} == {"GRAD-S2", "GRAD-S20", "PUMP-S2"}
+assert {s.id for s in STRATEGIES} == {"GRAD-S2", "GRAD-S20", "PUMP-S2", "AMM-S2"}
+assert set(REJUDGE_BY_SOURCE) == {"deepamm"}, (
+    "only the sampling baseline may re-draw a token; an event must not repeat"
+)
 assert all(s.entry is _EXECUTABLE for s in STRATEGIES), (
     "the entry is shared BY IDENTITY, so a second arm cannot drift from it"
 )

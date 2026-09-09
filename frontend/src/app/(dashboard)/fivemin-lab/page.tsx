@@ -105,8 +105,8 @@ export default function FiveMinLabPage() {
     <div className="flex flex-col gap-4 p-4 lg:p-6">
       <Toolbar
         eyebrow="Graduation Hold Lab"
-        title="One reference, and two ways of being different from it."
-        description="Three $100 wallets on the same five-minute clock. Graduation $2 x 50 is the reference. Graduation $20 x 5 changes only the book shape. PumpSwap $2 x 50 changes only the population — pump.swap markets first reaching $100k of depth, with recent graduates excluded so the cohorts are not double-counted. Each varies one thing, so a difference has one candidate cause. Nothing here is real money."
+        title="One reference, three ways of being different from it."
+        description="Four $100 wallets on the same five-minute clock. Graduation $2 x 50 is the reference. Graduation $20 x 5 changes only the book shape. PumpSwap $2 x 50 changes only the population. DeepAMM $2 x 50 is the baseline — a randomly drawn established Raydium, Orca, Meteora or MetaDAO token, stablecoins and index-sized pools excluded, which is the number the other three have to beat to mean anything. Each varies one thing. Nothing here is real money."
       />
 
       {/* Deliberately above the numbers, and deliberately not collapsible. */}
@@ -146,6 +146,7 @@ export default function FiveMinLabPage() {
               for the reader to do in their head from two cards. */}
           {first && second ? <GapPanel a={first} b={second} base={base} /> : null}
           {first && wallets[2] ? <GapPanel a={first} b={wallets[2]} base={base} /> : null}
+          {first && wallets[3] ? <GapPanel a={first} b={wallets[3]} base={base} /> : null}
 
           {/* Every trade, open and closed, each with its own P&L. */}
           <FiveMinTradesPanel />

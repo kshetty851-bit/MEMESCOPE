@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
+from datetime import timedelta
 from decimal import Decimal
 
 from app.compound import service as compound_service
@@ -27,9 +28,9 @@ class TestItCannotHaltAnotherTournament:
 
     def test_the_rules_change_bumped_the_version(self) -> None:
         """Each predecessor was a live tournament with different rules —
-        5.0.0 ran two graduation arms and no pump.swap arm. Reusing a version
-        would attach this book to that record."""
-        assert fivemin.SPEC_VERSION == "fivemin-6.0.0"
+        6.0.0 ran three arms and no baseline. Reusing a version would attach
+        this book to that record."""
+        assert fivemin.SPEC_VERSION == "fivemin-7.0.0"
 
 
 class TestItTradesTheGraduationCohort:
@@ -49,6 +50,7 @@ class TestItTradesTheGraduationCohort:
         svc = LabService(None, registry=fivemin)
         assert svc._source_for("GRAD-S2") == "graduations"
         assert svc._source_for("PUMP-S2") == "pumpswap"
+        assert svc._source_for("AMM-S2") == "deepamm"
         assert LabService(None, registry=compound)._source_for("CMP-01") == "radar"
 
     def test_the_service_actually_queries_graduations(self) -> None:
@@ -115,6 +117,21 @@ class TestOneVariableAtATime:
         assert alt.max_concurrent == ref.max_concurrent
         assert alt.entry is ref.entry
         assert alt.exits.time_exit_hours == ref.exits.time_exit_hours
+
+    def test_the_baseline_arm_changes_only_the_population(self) -> None:
+        ref = fivemin.BY_ID["GRAD-S2"]
+        alt = fivemin.BY_ID["AMM-S2"]
+        assert fivemin.SOURCE_BY_STRATEGY["AMM-S2"] == "deepamm"
+        assert alt.size_usd == ref.size_usd
+        assert alt.max_concurrent == ref.max_concurrent
+        assert alt.exits.time_exit_hours == ref.exits.time_exit_hours
+
+    def test_only_the_baseline_may_redraw_a_token(self) -> None:
+        """An event must never repeat: re-drawing a graduation six hours later
+        would buy a stale launch. Keyed by SOURCE so a registry-wide switch
+        cannot hand the event arms the baseline's behaviour."""
+        assert set(fivemin.REJUDGE_BY_SOURCE) == {"deepamm"}
+        assert fivemin.REJUDGE_BY_SOURCE["deepamm"] == timedelta(hours=6)
 
     def test_the_pumpswap_arm_needs_no_pricing_delay(self) -> None:
         """It is admitted BY a priced snapshot, so waiting would add drift."""

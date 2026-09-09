@@ -50,6 +50,7 @@ from app.models.graduation import PumpfunGraduation
 from app.models.radar import RadarToken
 from app.models.social import PumpfunSocialSnapshot
 from app.models.token import DiscoveredToken
+from app.universe import rules as universe_rules
 from app.models.research_data import ResearchQuote, WalletFlowSnapshot
 
 logger = get_logger(__name__)
@@ -293,6 +294,7 @@ class LabService:
     async def _due_candidates(
         self, tournament: LabTournament, *, minutes: int, ids: list,
         cutoff: datetime, limit: int, source: str | None = None,
+        now: datetime | None = None,
     ) -> list:
         """The (token_id, mint, detected_at) triples due at this checkpoint.
 
@@ -318,6 +320,26 @@ class LabService:
         source = source or getattr(self._spec, "CANDIDATE_SOURCE", "radar")
         floor = tournament.valid_from - timedelta(minutes=minutes)
 
+        # A token is judged ONCE per arm, for ever — that is what makes a
+        # decision row a permanent record rather than a running opinion. A
+        # rolling CONTROL cannot work under that rule: it samples a fixed
+        # universe and would exhaust it in one burst.
+        #
+        # So a cooldown is keyed BY SOURCE, not by registry. A graduation is a
+        # one-time event and re-drawing it six hours later would buy a stale
+        # launch; a random established token has no event at all and is meant
+        # to be re-drawn. Registry-wide, this switch would have quietly given
+        # the graduation arms the control's behaviour.
+        cooldown = (getattr(self._spec, "REJUDGE_BY_SOURCE", {}) or {}).get(source)
+
+        def not_judged(mint_col):
+            clauses = [LabDecision.mint_address == mint_col,
+                       LabDecision.strategy_row_id.in_(ids)]
+            if cooldown is not None:
+                clauses.append(
+                    LabDecision.decided_at >= (now or cutoff) - cooldown)
+            return ~select(LabDecision.id).where(*clauses).exists()
+
         if source == "graduations":
             # Joined to DiscoveredToken because the engine keys everything on
             # token_id; a graduation we have never discovered has no market
@@ -330,10 +352,7 @@ class LabService:
                 .where(
                     PumpfunGraduation.first_seen_complete_at <= cutoff,
                     PumpfunGraduation.first_seen_complete_at >= floor,
-                    ~select(LabDecision.id).where(
-                        LabDecision.mint_address == PumpfunGraduation.mint_address,
-                        LabDecision.strategy_row_id.in_(ids),
-                    ).exists(),
+                    not_judged(PumpfunGraduation.mint_address),
                 )
                 .order_by(PumpfunGraduation.first_seen_complete_at)
                 .limit(limit)
@@ -380,15 +399,72 @@ class LabService:
                         PumpfunGraduation.first_seen_complete_at
                         >= TokenMarketSnapshot.captured_at - timedelta(hours=2),
                     ).exists(),
-                    ~select(LabDecision.id).where(
-                        LabDecision.mint_address == DiscoveredToken.mint_address,
-                        LabDecision.strategy_row_id.in_(ids),
-                    ).exists(),
+                    not_judged(DiscoveredToken.mint_address),
                 )
                 .order_by(TokenMarketSnapshot.token_id,
                           TokenMarketSnapshot.captured_at)
                 .limit(limit)
             )
+        elif source == "deepamm":
+            # A ROLLING BASELINE over the deep AMMs, not a strategy.
+            #
+            # Raydium, Orca, Meteora and MetaDAO carry $1.3m-$3.6m of median
+            # depth but almost no EVENTS: of 157 tokens at $100k depth in a
+            # measured day, FOUR had newly arrived. An event-driven arm there
+            # would take four trades a day, and admitting the other 153 at once
+            # would buy a whole universe inside one hour — 157 draws of a single
+            # market condition, which reads like a sample and is not one.
+            #
+            # So this samples: a few tokens per tick, re-drawable after
+            # `REJUDGE_AFTER`, spreading draws across conditions indefinitely.
+            # It answers "what does a random established token do in five
+            # minutes", which is the question the graduation arms must beat.
+            # `ORDER BY random()` is the point rather than an oversight.
+            floor_usd = getattr(self._spec, "LIQUIDITY_FLOOR", Decimal("100000"))
+            per_tick = min(limit, getattr(self._spec, "SAMPLE_PER_TICK", 1))
+            venues = list(getattr(
+                self._spec, "DEEP_VENUES",
+                ("raydium", "orca", "meteora", "metadao"),
+            ))
+            # A baseline of "established tokens" must be established tokens the
+            # other arms could plausibly have traded — NOT the index. Sampling
+            # the raw venue list drew USDC and JTO on the first attempt, and a
+            # stablecoin held five minutes returns zero with no variance, which
+            # would flatter the baseline into meaninglessness.
+            #
+            # Both bounds are the universe wallet's own, imported rather than
+            # restated so there is one definition of "on a peg" and one of
+            # "effectively an index" on this platform.
+            peg_clauses = [
+                func.abs(TokenMarketSnapshot.price_usd - lvl) / lvl
+                > universe_rules.PEG_TOLERANCE
+                for lvl in universe_rules.PEG_LEVELS
+            ]
+            newest = (
+                select(TokenMarketSnapshot.token_id,
+                       DiscoveredToken.mint_address,
+                       TokenMarketSnapshot.captured_at)
+                .distinct(TokenMarketSnapshot.token_id)
+                .join(DiscoveredToken,
+                      DiscoveredToken.id == TokenMarketSnapshot.token_id)
+                .where(
+                    TokenMarketSnapshot.suspect.is_not(True),
+                    TokenMarketSnapshot.dex_name.in_(venues),
+                    TokenMarketSnapshot.liquidity_usd >= floor_usd,
+                    TokenMarketSnapshot.liquidity_usd
+                    <= universe_rules.MAX_LIQUIDITY_USD,
+                    TokenMarketSnapshot.price_usd.is_not(None),
+                    TokenMarketSnapshot.price_usd > 0,
+                    *peg_clauses,
+                    TokenMarketSnapshot.captured_at <= cutoff,
+                    TokenMarketSnapshot.captured_at >= floor,
+                    not_judged(DiscoveredToken.mint_address),
+                )
+                .order_by(TokenMarketSnapshot.token_id,
+                          TokenMarketSnapshot.captured_at.desc())
+                .subquery()
+            )
+            q = select(newest).order_by(func.random()).limit(per_tick)
         elif source == "radar":
             q = (
                 select(RadarToken.token_id, RadarToken.mint_address,
@@ -396,10 +472,7 @@ class LabService:
                 .where(
                     RadarToken.first_detected_at <= cutoff,
                     RadarToken.first_detected_at >= floor,
-                    ~select(LabDecision.id).where(
-                        LabDecision.mint_address == RadarToken.mint_address,
-                        LabDecision.strategy_row_id.in_(ids),
-                    ).exists(),
+                    not_judged(RadarToken.mint_address),
                 )
                 .order_by(RadarToken.first_detected_at)
                 .limit(limit)
@@ -447,7 +520,7 @@ class LabService:
             ids = [r.id for r in rows]
             due = await self._due_candidates(
                 tournament, minutes=minutes, ids=ids, cutoff=cutoff,
-                limit=limit, source=source,
+                limit=limit, source=source, now=now,
             )
 
             for token_id, mint, detected_at in due:
