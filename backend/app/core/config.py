@@ -1222,6 +1222,16 @@ class Settings(BaseSettings):
         # invisible until it reached a compose file, at which point
         # `DAILY_REPORT_RECIPIENTS=one@example.com` stopped the backend booting.
         "DAILY_REPORT_RECIPIENTS",
+        # SIXTH occurrence, and this one got as far as a failed migration on
+        # 2026-09-09: `EVM_LAUNCH_NETWORKS: ${EVM_LAUNCH_NETWORKS:-base}` in the
+        # compose anchor hands Pydantic the string "base", and a `CsvList` that
+        # is not registered here refuses it — so every service, alembic
+        # included, dies at import.
+        #
+        # The trap is structural, not careless: a `CsvList` behaves perfectly
+        # until the day it appears in a compose file, and nothing fails before
+        # then. If you add a CsvList AND an anchor entry, add it here too.
+        "EVM_LAUNCH_NETWORKS",
         mode="before",
     )
     @classmethod
