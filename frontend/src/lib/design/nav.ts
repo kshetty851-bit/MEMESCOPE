@@ -81,6 +81,11 @@ export const NAV_GROUPS: NavGroup[] = [
       // KOL: follows wallets that were repeatedly early into winners. Listed
       // while it is still waiting for history — the page explains the wait,
       // and a lab you cannot find is a lab nobody checks.
+      // Matrix: two populations x four clocks x three book shapes, laid out
+      // as a grid so a difference between neighbours is attributable to the
+      // one thing that differs. Its own page because the operator asked to
+      // see both sections side by side.
+      { href: "/matrix-lab", label: "Matrix Lab", icon: IconWallet, status: "ready" },
       { href: "/kol-lab", label: "KOL Lab", icon: IconWallet, status: "ready" },
     ],
   },

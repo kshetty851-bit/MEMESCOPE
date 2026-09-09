@@ -259,6 +259,16 @@ class LabService:
         # convention, and a mint can be ground to end in anything — so it is
         # offered as a filter, never as a safety guarantee.
         f["mint_suffix_pump"] = Decimal(1) if mint.endswith("pump") else Decimal(0)
+        # AGE AT THE CHECKPOINT, in hours, from the chain's own creation time.
+        #
+        # Measured from `block_time` rather than from discovery or radar
+        # admission: those are when WE noticed, and a rule about how old a coin
+        # is should not move because the scanner was busy.
+        #
+        # None when the chain time is unknown, which a `gte` condition treats as
+        # a decline — the same way every UNKNOWN is treated here. "We could not
+        # tell how old it is" is not evidence that it is old enough.
+        f["age_hours"] = await self._age_hours(token_id, checkpoint_at)
         # SOCIAL: attention rather than price. Every other feature here is
         # derived from the market; these two come from how many people are
         # commenting on the coin, which is orthogonal to all of them.
@@ -1072,6 +1082,21 @@ class LabService:
         from app.core.config import settings
 
         return set(settings.SCANNER_WATCH_PROGRAMS)
+
+    async def _age_hours(self, token_id, at: datetime) -> Decimal | None:
+        """Hours between the token's on-chain creation and this checkpoint.
+
+        None rather than zero when `block_time` is unknown: zero would read as
+        "brand new" and pass every max-age rule while failing every min-age one,
+        which is a silent answer to a question nobody could answer.
+        """
+        created = await self._session.scalar(
+            select(DiscoveredToken.block_time)
+            .where(DiscoveredToken.id == token_id)
+        )
+        if created is None:
+            return None
+        return Decimal(str((at - created).total_seconds() / 3600.0))
 
     async def _is_pumpfun(self, token_id) -> bool:
         """Was this token discovered on pump.fun?

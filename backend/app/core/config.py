@@ -1009,6 +1009,9 @@ class Settings(BaseSettings):
     # §14a names as the unblock for Near Graduation. Off by default like every
     # other pipeline stage, and additionally blocked today by the Helius plan
     # quota — every RPC method returns `429 max usage reached`.
+    #: The Matrix Lab: 24 arms over two populations. Off by default like every
+    #: other lab; twenty-four books is a lot of judging to start by accident.
+    FEATURE_MATRIX_LAB_ENABLED: bool = False
     #: EVM launch collection (Base first). Off by default: it calls a public
     #: third-party API on a beat, so it is opt-in like every other collector.
     FEATURE_EVM_LAUNCHES_ENABLED: bool = False

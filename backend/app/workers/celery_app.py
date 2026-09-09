@@ -34,6 +34,7 @@ celery_app = Celery(
         "app.lab.scheduler",
         "app.compound.scheduler",
         "app.evmchain.scheduler",
+        "app.matrix.scheduler",
         "app.pumpfun.scheduler",
         "app.pumpfun.social_scheduler",
         "app.momentum.scheduler",
@@ -258,6 +259,13 @@ celery_app.conf.beat_schedule = {
     "evm-launch-tick": {
         "task": "app.evmchain.scheduler.evm_launch_tick",
         "schedule": crontab(minute="*/2"),
+    },
+    # The Matrix Lab: 24 arms, two populations, four clocks, three shapes.
+    # Every minute like the other compound labs — eight (checkpoint, source)
+    # buckets, one candidate query each, ~0.3s for the deep-AMM source.
+    "matrix-tick": {
+        "task": "app.matrix.scheduler.matrix_tick",
+        "schedule": crontab(minute="*"),
     },
     # The PumpFun Lab mirrors one on-chain wallet. Every minute, because the
     # leader's median hold is 8.5 minutes — a slower poll would copy trades he
