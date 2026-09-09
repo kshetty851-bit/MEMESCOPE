@@ -49,32 +49,32 @@ export interface Chatter {
 export const MAX_CHATTER_LENGTH = 34;
 
 export const CHATTER: Chatter[] = [
-  { actor: "nova", lines: ["Morning, all.", "How's it going?", "Good work.", "I'll be around."] },
-  { actor: "radar", lines: ["Back in a sec.", "Long morning.", "Need a refill.", "Nearly there."] },
-  { actor: "atlas", lines: ["Hm.", "Not yet.", "Let me check first.", "I'd rather be sure."] },
-  { actor: "milo", lines: ["Thinking.", "Long game.", "Fair enough.", "Let's see."] },
-  { actor: "rex", lines: ["Standing by.", "On it.", "Understood.", "Sure thing."] },
-  { actor: "echo", lines: ["Two seconds.", "Coming through.", "Almost done.", "On my way."] },
-  { actor: "byte", lines: ["Rebooting my brain.", "Coffee first.", "Yep.", "Give it a moment."] },
+  { actor: "nova", lines: ["Morning, all.", "How's it going?", "Good work.", "I'll be around.", "Keep at it.", "Anything you need?", "Nice one."] },
+  { actor: "radar", lines: ["Back in a sec.", "Long morning.", "Need a refill.", "Nearly there.", "One more pass.", "Where'd I put that.", "Right, again."] },
+  { actor: "atlas", lines: ["Hm.", "Not yet.", "Let me check first.", "I'd rather be sure.", "Slow down.", "Say that again.", "I want it in writing."] },
+  { actor: "milo", lines: ["Thinking.", "Long game.", "Fair enough.", "Let's see.", "Give it time.", "No rush.", "That'll keep."] },
+  { actor: "rex", lines: ["Standing by.", "On it.", "Understood.", "Sure thing.", "Ready when you are.", "Say the word.", "Clean."] },
+  { actor: "echo", lines: ["Two seconds.", "Coming through.", "Almost done.", "On my way.", "Behind you.", "Just squeezing past.", "Got it, got it."] },
+  { actor: "byte", lines: ["Rebooting my brain.", "Coffee first.", "Yep.", "Give it a moment.", "Kettle's on.", "Don't ask.", "It's a Monday thing."] },
   // The reliability trio. Same rule as everyone else: nothing here may hint
   // that something is wrong, because these fire on a timer. "All quiet" would
   // be a claim; "Long shift" is a person.
-  { actor: "sentinel", lines: ["Long shift.", "Still here.", "Mm.", "I'll keep watching."] },
-  { actor: "patch", lines: ["Give me a minute.", "Almost had it.", "Right then.", "Where'd that go?"] },
-  { actor: "quinn", lines: ["Run it again.", "Not convinced.", "Show me.", "Once more."] },
+  { actor: "sentinel", lines: ["Long shift.", "Still here.", "Mm.", "I'll keep watching.", "Quiet one.", "I'll take the late half.", "Go on, then."] },
+  { actor: "patch", lines: ["Give me a minute.", "Almost had it.", "Right then.", "Where'd that go?", "Nearly.", "Ah — there.", "Hand me that."] },
+  { actor: "quinn", lines: ["Run it again.", "Not convinced.", "Show me.", "Once more.", "Prove it.", "Twice, ideally.", "I'll wait."] },
   // Karthik. Neutral by the same rule as everybody else's: not one of these
   // mentions a wallet, a target, a position or a figure. "Target hit" is a
   // real reaction and lives in the event routines, where a reading is behind
   // it — saying it on a timer would be the exact fabrication §22 forbids.
-  { actor: "karthik", lines: ["One second.", "Bear with me.", "Almost.", "Not mine to change."] },
+  { actor: "karthik", lines: ["One second.", "Bear with me.", "Almost.", "Not mine to change.", "Two minutes.", "Let me look.", "Out of my hands."] },
   // Vault. Held to the same rule and it bites hardest here: these fire on a
   // timer, so not one of them may hint at a balance, a barrier, a signature or
   // a state. "Still sealed" would be a claim about the one thing this desk
   // exists to report, and a claim made by a clock is a fabrication however true
   // it happens to be. What is left is a person with a quiet job.
-  { actor: "vault", lines: ["Mm.", "Nothing from me.", "Door's shut.", "I'll be here."] },
-  { actor: "maya", lines: ["Won't be a minute.", "Nearly finished.", "Mind the floor."] },
-  { actor: "sam", lines: ["I'll fix it.", "Spare's in the back.", "That'll do it."] },
+  { actor: "vault", lines: ["Mm.", "Nothing from me.", "Door's shut.", "I'll be here.", "Long day.", "Same as ever.", "Carry on."] },
+  { actor: "maya", lines: ["Won't be a minute.", "Nearly finished.", "Mind the floor.", "Nearly done in here.", "Watch the cable."] },
+  { actor: "sam", lines: ["I'll fix it.", "Spare's in the back.", "That'll do it.", "Bit of tape'll do.", "Seen worse."] },
 ];
 
 export const CHATTER_BY_ACTOR = new Map<string, string[]>(

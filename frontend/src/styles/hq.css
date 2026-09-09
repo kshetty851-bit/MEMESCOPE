@@ -85,6 +85,20 @@
   --hq-sofa-dark: oklch(0.47 0.090 40);
   --hq-sofa-light: oklch(0.66 0.085 45);
 
+  /* The games corner. The felt is the only saturated green in the room, and
+     it is its own token rather than a status hue on purpose — a test forbids
+     the props block from touching --color-up/warn/down, because green means
+     something in this product and a pool table must not borrow it. */
+  --hq-felt: oklch(0.46 0.095 155);
+  --hq-felt-rail: oklch(0.38 0.085 155);
+  --hq-ball-solid: oklch(0.62 0.170 35);
+  --hq-ball-stripe: oklch(0.72 0.140 85);
+  --hq-ball-cue: oklch(0.94 0.010 90);
+  --hq-cue-wood: oklch(0.68 0.070 70);
+  --hq-rod: oklch(0.72 0.010 250);
+  --hq-foos-red: oklch(0.58 0.160 25);
+  --hq-foos-blue: oklch(0.58 0.130 250);
+
   /* The deck: exterior plating and hull. */
   --hq-deck: oklch(0.48 0.018 255);
   --hq-deck-dark: oklch(0.40 0.018 255);
@@ -355,6 +369,41 @@
 }
 .hq-prop-light {
   fill: var(--hq-wood-light);
+}
+.hq-prop-dark {
+  fill: var(--hq-wood-dark);
+}
+
+/* The games corner. */
+.hq-felt {
+  fill: var(--hq-felt);
+}
+.hq-pocket {
+  fill: oklch(0.18 0.010 250);
+}
+.hq-ball-solid {
+  fill: var(--hq-ball-solid);
+}
+.hq-ball-stripe {
+  fill: var(--hq-ball-stripe);
+}
+.hq-ball-cue {
+  fill: var(--hq-ball-cue);
+}
+.hq-cue {
+  stroke: var(--hq-cue-wood);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+.hq-rod {
+  stroke: var(--hq-rod);
+  stroke-width: 1.1;
+}
+.hq-foos-red {
+  fill: var(--hq-foos-red);
+}
+.hq-foos-blue {
+  fill: var(--hq-foos-blue);
 }
 .hq-cabinet {
   fill: var(--hq-cabinet);

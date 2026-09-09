@@ -36,6 +36,7 @@ import { CHARACTERS } from "@/lib/hq/characters";
 import { ZONE_BY_ID } from "@/lib/hq/zones";
 import { EMPLOYEE_BY_ID, type EmployeeId } from "@/lib/hq/employees";
 import type { ZoneId } from "@/lib/hq/zones";
+import { IdeasPanel } from "@/components/hq/ideas-panel";
 import { Panel } from "@/components/ui/panel";
 
 /**
@@ -490,6 +491,10 @@ function useViewport(): Viewport {
 function Boards({ state }: { state: HqState }) {
   return (
     <div className="flex flex-col gap-4">
+      {/* What the floor would build next. Above the health rows on purpose:
+          the boards below report what IS, and this is the only surface that
+          says what to do about it. */}
+      <IdeasPanel state={state} />
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <MissionBoard state={state} />
         <PerformanceLab

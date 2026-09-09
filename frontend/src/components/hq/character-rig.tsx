@@ -11,6 +11,7 @@ import type {
   HairStyle,
   HeadShape,
   Outfit,
+  Emotion,
   Pose,
 } from "@/lib/hq/characters";
 import type { EggId } from "@/lib/hq/ambient";
@@ -63,6 +64,15 @@ interface CharacterProps {
   character: CharacterLook;
   /** Overrides `defaultPose`. Driven by the ambient scheduler. */
   pose?: Pose;
+  /**
+   * How this person feels. Presentation only, and the one prop here with a
+   * rule attached: it says something about the *character*, never about
+   * MEMESCOPE. A frown must never be how a reader learns a subsystem is
+   * unhealthy — that is the state chip's job, and it is text with a reading
+   * behind it. Defaults to neutral, so a caller that has no opinion expresses
+   * none rather than picking one.
+   */
+  emotion?: Emotion;
   /**
    * Forces the stance. The stage sets `standing` for anyone away from their own
    * desk: a chair does not follow you to the break room, and a seated figure
@@ -120,7 +130,7 @@ export function RigDefs() {
   );
 }
 
-export function Character({ character, pose, stance, egg }: CharacterProps) {
+export function Character({ character, pose, stance, egg, emotion }: CharacterProps) {
   const active = pose ?? character.defaultPose;
   const mode: "seated" | "standing" | "lounge" =
     stance ??
@@ -184,7 +194,7 @@ export function Character({ character, pose, stance, egg }: CharacterProps) {
         rx={3}
       />
       <Head shape={character.headShape} y={headY} />
-      <Face y={headY} pose={active} egg={egg} />
+      <Face y={headY} pose={active} egg={egg} emotion={emotion} />
       <Hair style={character.hair} shape={character.headShape} y={headY} />
 
       <AccessoryPart accessory={character.accessory} pose={active} shoulderY={shoulderY} />
@@ -523,12 +533,66 @@ function Garment({
  * character must never be how a reader learns a subsystem is unhealthy; that
  * is what the state chip and the accessible name are for, and they are text.
  */
-function Face({ y, pose, egg }: { y: number; pose: Pose; egg?: EggId }) {
+function Face({
+  y,
+  pose,
+  egg,
+  emotion = "neutral",
+}: {
+  y: number;
+  pose: Pose;
+  egg?: EggId;
+  emotion?: Emotion;
+}) {
   const eyeX = 3.7;
   const eyeY = y + 0.6;
-  const closed = pose === "stretching" || egg === "doze";
+  const closed = pose === "stretching" || egg === "doze" || emotion === "tired";
   const focused = pose === "looking_at_screen" || pose === "seated_reviewing";
   const speaking = pose === "talking_briefly" || pose === "seated_talk";
+
+  /**
+   * Brow angle, in one number per side.
+   *
+   * The inner end of each brow moves and the outer end stays put, which is the
+   * whole of readable cartoon emotion: inner-down is anger, inner-up is
+   * sadness, both-up is surprise. Drawing it as a delta rather than as seven
+   * hand-authored paths means a new emotion is a row in this table, and means
+   * `focused` still composes with it instead of fighting it.
+   */
+  const brow: Record<Emotion, { inner: number; outer: number }> = {
+    neutral: { inner: 0, outer: 0 },
+    happy: { inner: 0.5, outer: -0.6 },
+    sad: { inner: -1.9, outer: 1.4 },
+    angry: { inner: 2.2, outer: -1.1 },
+    surprised: { inner: -1.6, outer: -1.6 },
+    smug: { inner: 0.9, outer: -1.3 },
+    tired: { inner: -0.4, outer: 1.2 },
+  };
+  const b = brow[emotion];
+  // `focused` lowers both ends. It is an attention cue, not a feeling, so it
+  // adds to whatever the emotion already did rather than replacing it.
+  const lift = focused ? 1.0 : 0;
+
+  /**
+   * Mouth, as a quadratic whose control point carries the whole expression.
+   * Positive bulges down (a smile in this coordinate system), negative up.
+   */
+  const mouthCurve: Record<Emotion, number> = {
+    neutral: 2,
+    happy: 4.2,
+    sad: -2.6,
+    angry: -2.2,
+    surprised: 0,
+    smug: 2.6,
+    tired: -0.6,
+  };
+  const curve = focused && emotion === "neutral" ? 1.1 : mouthCurve[emotion];
+  // Surprise is a round mouth, like speech — the one emotion the curve cannot
+  // express, because an open mouth is a shape rather than a bend.
+  const roundMouth = speaking || emotion === "surprised";
+  // Smug is drawn asymmetric: one corner up. Symmetry reads as sincerity, and
+  // this is the one expression that must not.
+  const smug = emotion === "smug";
 
   return (
     <g className="hq-face" aria-hidden="true">
@@ -539,13 +603,42 @@ function Face({ y, pose, egg }: { y: number; pose: Pose; egg?: EggId }) {
 
       {closed ? (
         <g className="hq-eye-line">
-          <path d={`M${-eyeX - 2} ${eyeY} q2 2 4 0`} />
-          <path d={`M${eyeX - 2} ${eyeY} q2 2 4 0`} />
+          {/* A tired eye closes downward, a stretching one upward. Same two
+              strokes, opposite bend, and it is the difference between somebody
+              resting and somebody wincing. */}
+          <path
+            d={
+              emotion === "tired"
+                ? `M${-eyeX - 2} ${eyeY} q2 -1.6 4 0`
+                : `M${-eyeX - 2} ${eyeY} q2 2 4 0`
+            }
+          />
+          <path
+            d={
+              emotion === "tired"
+                ? `M${eyeX - 2} ${eyeY} q2 -1.6 4 0`
+                : `M${eyeX - 2} ${eyeY} q2 2 4 0`
+            }
+          />
         </g>
       ) : (
         <g>
-          <ellipse className="hq-eye" cx={-eyeX} cy={eyeY} rx={1.7} ry={2.1} />
-          <ellipse className="hq-eye" cx={eyeX} cy={eyeY} rx={1.7} ry={2.1} />
+          {/* Surprise widens the eye; anger narrows it. One radius, so no pose
+              can end up with two differently-sized eyes. */}
+          <ellipse
+            className="hq-eye"
+            cx={-eyeX}
+            cy={eyeY}
+            rx={1.7}
+            ry={emotion === "surprised" ? 2.7 : emotion === "angry" ? 1.6 : 2.1}
+          />
+          <ellipse
+            className="hq-eye"
+            cx={eyeX}
+            cy={eyeY}
+            rx={1.7}
+            ry={emotion === "surprised" ? 2.7 : emotion === "angry" ? 1.6 : 2.1}
+          />
           {/* One highlight each. The cheapest possible "there is somebody in
               there", and it is the reason these read as alive rather than as
               drilled holes. */}
@@ -556,28 +649,33 @@ function Face({ y, pose, egg }: { y: number; pose: Pose; egg?: EggId }) {
 
       <g className="hq-brow">
         <path
-          d={
-            focused
-              ? `M${-eyeX - 2.4} ${eyeY - 3.2} L${-eyeX + 2.2} ${eyeY - 2.4}`
-              : `M${-eyeX - 2.4} ${eyeY - 3.6} L${-eyeX + 2.2} ${eyeY - 3.9}`
-          }
+          d={`M${-eyeX - 2.4} ${eyeY - 3.6 + b.outer + lift} L${-eyeX + 2.2} ${eyeY - 3.9 + b.inner + lift}`}
         />
         <path
-          d={
-            focused
-              ? `M${eyeX + 2.4} ${eyeY - 3.2} L${eyeX - 2.2} ${eyeY - 2.4}`
-              : `M${eyeX + 2.4} ${eyeY - 3.6} L${eyeX - 2.2} ${eyeY - 3.9}`
-          }
+          d={`M${eyeX + 2.4} ${eyeY - 3.6 + b.outer + lift} L${eyeX - 2.2} ${eyeY - 3.9 + b.inner + lift}`}
         />
       </g>
 
       {/* A nose is a single short stroke. Anything more is a blob. */}
       <path className="hq-nose" d={`M0 ${y + 2.6} l0 2.2`} />
 
-      {speaking ? (
-        <ellipse className="hq-mouth-open" cx={0} cy={y + 6.4} rx={1.8} ry={1.4} />
+      {roundMouth ? (
+        <ellipse
+          className="hq-mouth-open"
+          cx={0}
+          cy={y + 6.4}
+          rx={emotion === "surprised" ? 1.4 : 1.8}
+          ry={emotion === "surprised" ? 1.9 : 1.4}
+        />
       ) : (
-        <path className="hq-mouth" d={`M-2.2 ${y + 6} q2.2 ${focused ? 1.1 : 2} 4.4 0`} />
+        <path
+          className="hq-mouth"
+          d={
+            smug
+              ? `M-2.2 ${y + 6.4} q2.2 ${curve} 4.4 -1.2`
+              : `M-2.2 ${y + 6} q2.2 ${curve} 4.4 0`
+          }
+        />
       )}
     </g>
   );
@@ -753,6 +851,54 @@ function Arms({ pose, build, shoulderY }: { pose: Pose; build: Build; shoulderY:
           <path className="hq-garment" d={`M${s} ${y} q4 8 2 16 l-4 0 q1 -8 -2 -14 Z`} />
           <circle className="hq-hand" cx={s - 1} cy={y + 17} r={HAND} />
         </g>
+      </g>
+    );
+  }
+
+  if (pose === "playing_table") {
+    // Both hands down and forward, gripping bars at table height.
+    //
+    // The sleeves must sweep *outward* from the shoulder before they come
+    // back in. The first version curved inward from the start, which put the
+    // whole arm inside the torso silhouette — the figure rendered as a body
+    // with two hands floating in front of it and no arms at all. Every arm in
+    // this rig clears the body first for the same reason.
+    return (
+      <g className="hq-arms">
+        <path className="hq-garment" d={`M${-s} ${y} q-5 7 -3 13 l4 0 q-1 -6 2 -11 Z`} />
+        <path className="hq-garment" d={`M${s} ${y} q5 7 3 13 l-4 0 q1 -6 -2 -11 Z`} />
+        <circle className="hq-hand" cx={-s - 1} cy={y + 14} r={HAND} />
+        <circle className="hq-hand" cx={s + 1} cy={y + 14} r={HAND} />
+      </g>
+    );
+  }
+
+  if (pose === "cue_shot") {
+    // Asymmetric on purpose: the bridge hand is low and well out, the cueing
+    // hand is tucked in at the hip. Two hands at the same height would read as
+    // foosball, and the whole point of having two game poses is that they
+    // differ at a glance.
+    return (
+      <g className="hq-arms">
+        <path className="hq-garment" d={`M${-s} ${y} q-7 9 -5 16 l4 1 q-1 -7 4 -14 Z`} />
+        <path className="hq-garment" d={`M${s} ${y} q4 6 2 11 l-4 0 q1 -5 -2 -9 Z`} />
+        <circle className="hq-hand" cx={-s - 3} cy={y + 17} r={HAND} />
+        <circle className="hq-hand" cx={s - 1} cy={y + 12} r={HAND} />
+      </g>
+    );
+  }
+
+  if (pose === "cheering") {
+    // Both arms straight up. Deliberately a bigger, straighter shape than
+    // `stretching`, which bends back — at this size the two would otherwise be
+    // the same silhouette, and one means delight while the other means a long
+    // shift.
+    return (
+      <g className="hq-arms">
+        <path className="hq-garment" d={`M${-s} ${y} q-3 -10 -1 -19 l4 0 q-1 9 1 18 Z`} />
+        <path className="hq-garment" d={`M${s} ${y} q3 -10 1 -19 l-4 0 q1 9 -1 18 Z`} />
+        <circle className="hq-hand" cx={-s + 1} cy={y - 20} r={HAND} />
+        <circle className="hq-hand" cx={s - 1} cy={y - 20} r={HAND} />
       </g>
     );
   }

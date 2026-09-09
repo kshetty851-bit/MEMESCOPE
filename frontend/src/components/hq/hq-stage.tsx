@@ -569,7 +569,13 @@ function EmployeeAnchor({
           <SpeechBubble text={reading.speech} />
         ) : null}
         <g transform={`scale(${FIGURE_SCALE})`}>
-          <Character character={character} pose={pose} stance={stance} egg={(frame as { egg?: never } | undefined)?.egg} />
+          <Character
+            character={character}
+            pose={pose}
+            stance={stance}
+            egg={(frame as { egg?: never } | undefined)?.egg}
+            emotion={frame?.emotion}
+          />
         </g>
         {frame?.carry === "trolley" ? <Trolley /> : null}
         {frame?.carry === "box" ? <CarriedBox /> : null}
@@ -631,7 +637,7 @@ function SupportAnchor({
         style={away ? { transform: `translate(${away.x}px, ${away.y}px)` } : undefined}
       >
         <g transform={`scale(${FIGURE_SCALE})`}>
-          <Character character={npc.look} pose={pose} />
+          <Character character={npc.look} pose={pose} emotion={frame?.emotion} />
         </g>
         {frame?.carry === "trolley" ? <Trolley /> : null}
         {frame?.carry === "box" ? <CarriedBox /> : null}
@@ -900,7 +906,11 @@ function buildScene(
     const vault = toScreen({ col: 13, row: 5.4 });
     items.push({
       depth: depthOf({ col: 13, row: 5 }, LAYER.overlay),
-      node: <VaultDoor key="vault" x={vault.x} y={vault.y} />,
+      // `vault-door`, not `vault`. Vault is a zone AND an employee, and the
+      // employee's own anchor is pushed into this same `scene` array — so
+      // keying the door `vault` collided with it and React silently dropped
+      // one of the two on every reconcile.
+      node: <VaultDoor key="vault-door" x={vault.x} y={vault.y} />,
     });
   }
 

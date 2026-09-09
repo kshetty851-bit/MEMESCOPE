@@ -85,6 +85,13 @@ export const FURNITURE: Placement[] = [
   { kind: "bench", tile: { col: 20, row: 5 }, sittable: true },
   { kind: "standing-table", tile: { col: 19, row: 6 } },
   { kind: "plant-large", tile: { col: 21, row: 4 } },
+  /* Foosball on row 4, the deck's northern strip, which no routine has ever
+     used — the smoking and air breaks all stand at rows 5 and 6, and the
+     benches they use are untouched. Players face each other across it from
+     (16,4) and (18,4). Two games in two different rooms on purpose: one in
+     the lounge and one out here means a game is a reason to go somewhere,
+     which is the entire point of putting them in a building. */
+  { kind: "foosball-table", tile: { col: 17, row: 4 } },
 
   /* ---- Karthik Lab ------------------------------------------------------
      One desk, one wall display, a counter for the food and drink that keeps
@@ -145,6 +152,22 @@ export const FURNITURE: Placement[] = [
   { kind: "viewport", tile: { col: 15, row: 10.5 } },
   { kind: "plant-large", tile: { col: 8, row: 10 } },
   { kind: "plant-small", tile: { col: 15, row: 11 } },
+
+  /* ---- The games corner -------------------------------------------------
+     The lounge's east end, which was seven empty tiles between the reading
+     chair and the viewport.
+
+     The pool table sits on row 11 and the row above it stays completely
+     clear. That is not a composition choice: row 10 is how anyone crosses the
+     lounge to the viewport, and a table on both rows would wall the east end
+     off from the rest of the room. Players stand at (12,11) and (14,11) — the
+     long sides, because standing at the ends of a pool table is how you get
+     hit with a cue. */
+  { kind: "pool-table", tile: { col: 13, row: 11 } },
+  // East of the table, against the viewport wall. It started at (12,10),
+  // which is on the very lane the table was placed to keep clear — the
+  // test that pins that lane caught it immediately.
+  { kind: "cue-rack", tile: { col: 15, row: 10 } },
 
   /* ---- Facilities ------------------------------------------------------ */
   { kind: "supply-shelf", tile: { col: 0, row: 12 } },

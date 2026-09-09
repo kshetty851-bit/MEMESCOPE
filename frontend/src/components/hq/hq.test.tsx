@@ -1298,3 +1298,42 @@ describe("the expanded world on the stage", () => {
   });
 
 });
+
+describe("every node in the scene has its own key", () => {
+  /**
+   * React only warns about duplicate keys while reconciling an *update*.
+   *
+   * A single render comes back clean with the collision still live, and so
+   * does a console read straight after page load — which is how this survived
+   * being "checked" more than once. So this renders and then rerenders with
+   * somebody moved, because the rerender is what forces the reconcile.
+   *
+   * The collision that motivated it: Vault is a zone *and* an employee, so the
+   * vault door and Vault's own figure both land in the single `scene` array,
+   * and both were keyed `vault`. React was silently dropping one of the two on
+   * every update.
+   */
+  it("survives a rerender with the cast moved", () => {
+    const errors: string[] = [];
+    const spy = vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+      errors.push(args.map(String).join(" "));
+    });
+
+    const view = render(
+      <HqStage focusedZone={null} onFocusZone={noop} onSelectEmployee={noop} density="full" />,
+    );
+    view.rerender(
+      <HqStage
+        focusedZone={null}
+        onFocusZone={noop}
+        onSelectEmployee={noop}
+        density="full"
+        frames={{ nova: { pose: "walking_short", tile: { col: 8, row: 4 }, hold: 1000 } }}
+      />,
+    );
+    spy.mockRestore();
+
+    const duplicates = errors.filter((line) => line.includes("same key"));
+    expect(duplicates, duplicates[0] ?? "").toEqual([]);
+  });
+});
