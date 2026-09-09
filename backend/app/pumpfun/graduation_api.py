@@ -145,6 +145,28 @@ async def _our_mcaps(session) -> dict[str, Decimal]:
     )).all())
 
 
+def _walk(multiples: list[Decimal]) -> Decimal:
+    """Final cash from walking these trades in order, at a fixed stake.
+
+    CASH-CONSTRAINED, because a $100 book cannot buy what it cannot afford.
+    The headline figure has always been constrained this way — it comes from
+    the same running `cash` — but `without_best` used to be a plain sum of
+    fixed-stake P&L, which is unbounded below and duly printed a final equity
+    of -$22.54 for a long-only book that can lose at most $100.
+
+    Two figures on different accounting cannot be compared, and comparing them
+    is the entire point of showing the second one: it is this platform's guard
+    against a result that is one trade wearing a strategy's clothes.
+    """
+    cash = PAPER_BOOK_USD
+    for mult in multiples:
+        if cash < PAPER_POSITION_USD:
+            continue
+        cash -= PAPER_POSITION_USD
+        cash += PAPER_POSITION_USD * mult
+    return cash
+
+
 def _baseline_ok(g, ours: dict[str, Decimal]) -> bool:
     """True when our own market cap agrees with the API's, or is absent.
 
@@ -311,11 +333,9 @@ async def graduation_paper(session: DbSession) -> dict[str, Any]:
         if multiples:
             trimmed = list(multiples)
             trimmed.remove(max(trimmed))
-            for mult in trimmed:
-                without_best += PAPER_POSITION_USD * (mult - 1)
-            cost_trimmed = (PAPER_POSITION_USD * PAPER_EXECUTION_PCT
-                            * Decimal(len(trimmed)))
-            without_best -= cost_trimmed
+            without_best = _walk(trimmed) - (
+                PAPER_POSITION_USD * PAPER_EXECUTION_PCT * Decimal(len(trimmed))
+            )
 
         gross = cash
         # Execution charged on BOTH legs of every trade actually taken.
