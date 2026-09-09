@@ -14,9 +14,8 @@ from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import func, select
 
 from app.api.deps import AdminUser, DbSession
-from app.lab import leaderboard, projection, spec
+from app.lab import leaderboard, marks, projection, spec
 from app.lab.service import LabService
-from app.models.market import TokenMarketSnapshot, TradingStatus
 from app.models.token import DiscoveredToken
 from app.models.lab import (
     LabDecision,
@@ -314,49 +313,13 @@ async def build_trades(session, *, registry: Any = spec, disclosure: str = DISCL
 
     # WHERE THE COIN IS NOW — the answer to "did we sell too early".
     #
-    # One query for the latest price of every mint in the list, rather than a
-    # correlated subquery per row. `captured_at` comes with it because a mark
-    # is only worth reading if it is recent: a coin that stopped being priced
-    # an hour ago is not sitting at its last print, it is gone, and showing
-    # that number as "now" would invent a rally nobody could have sold into.
-    mints = {p.mint_address for p, _s, _n in rows}
-    latest: dict[str, tuple] = {}
-    if mints:
-        ranked = select(
-            TokenMarketSnapshot.mint_address,
-            TokenMarketSnapshot.price_usd,
-            TokenMarketSnapshot.captured_at,
-            func.row_number().over(
-                partition_by=TokenMarketSnapshot.mint_address,
-                order_by=TokenMarketSnapshot.captured_at.desc(),
-            ).label("rn"),
-        ).where(
-            TokenMarketSnapshot.mint_address.in_(mints),
-            TokenMarketSnapshot.price_usd.is_not(None),
-            TokenMarketSnapshot.price_usd > 0,
-            # ONLY A TRADING PRINT IS A PRICE.
-            #
-            # An INACTIVE snapshot still carries a `price_usd`, and it is not
-            # one: measured on 3rPtdowXdc, a coin collapsed 95% to 0.00000366
-            # and went inactive, then "jumped" to 0.0001867 — 51x — while
-            # still inactive, with nothing trading. Reading that as the
-            # current price told the page a position closed at dead_zero was
-            # somehow up 174%.
-            #
-            # This is the trap the payoff research kept hitting from the other
-            # side: a dead coin's last observed price is never zero, so
-            # anything that marks it at that price invents a recovery nobody
-            # could have sold into. Excluded rather than flagged, because a
-            # number that has to be explained will be read anyway.
-            TokenMarketSnapshot.trading_status != TradingStatus.INACTIVE,
-        ).subquery()
-        latest = {
-            r.mint_address: (r.price_usd, r.captured_at)
-            for r in (await session.execute(
-                select(ranked.c.mint_address, ranked.c.price_usd,
-                       ranked.c.captured_at).where(ranked.c.rn == 1)
-            )).all()
-        }
+    # Through `marks.latest_trading_price`, which is the ONLY place allowed to
+    # decide what a coin's current price is. An INACTIVE row carries a
+    # `price_usd` and it is not one; this view read those directly once and
+    # showed a position written off as dead sitting at +174%.
+    latest = await marks.latest_trading_price(
+        session, [p.mint_address for p, _s, _n in rows]
+    )
 
     now = datetime.now(UTC)
     out = []

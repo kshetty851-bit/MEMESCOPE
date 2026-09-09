@@ -83,3 +83,38 @@ def test_rules_and_spec_are_pure(name: str):
             raise AssertionError(f"{name} reads a clock")
         if isinstance(node, ast.Name) and node.id == "settings":
             raise AssertionError(f"{name} reads settings")
+
+
+# --- what counts as a price -------------------------------------------------
+
+#: Files allowed to decide a coin's current price from raw snapshots.
+#:
+#: `marks.py` owns the rule for views. `service.py` and `sellability.py` own it
+#: for the engine's own marking, which has always guarded INACTIVE via
+#: `live_print` and the INACTIVE branch of `_mark`.
+_PRICE_OWNERS = {"marks.py", "service.py", "sellability.py", "execution.py"}
+
+
+@pytest.mark.parametrize("path", _sources(), ids=lambda p: p.name)
+def test_only_the_mark_owners_read_a_raw_price(path: Path):
+    """Nothing else may read `TokenMarketSnapshot.price_usd`.
+
+    An INACTIVE snapshot carries a price and it is not one. On 2026-09-09 the
+    trades view read those directly and showed a position correctly written
+    off as dead sitting at +174%, because the provider reported 0.0001867 on a
+    pool that had collapsed to 0.00000366 and stopped trading — fifty-one
+    times higher, with nothing traded.
+
+    The rule was already known: the engine's marking has always excluded
+    INACTIVE, and the payoff research lost a whole population to the same
+    mistake from the other side. Knowing it was not enough, so this makes the
+    next raw read fail here instead of on the page.
+    """
+    if path.name in _PRICE_OWNERS:
+        return
+    text = path.read_text()
+    assert "TokenMarketSnapshot.price_usd" not in text, (
+        f"{path.name} reads a raw snapshot price. Use "
+        f"`app.lab.marks.latest_trading_price`, which excludes INACTIVE rows — "
+        f"see that module's docstring for why."
+    )
