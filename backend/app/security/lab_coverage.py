@@ -53,6 +53,19 @@ logger = get_logger(__name__)
 #: How far back to look for coins worth evaluating. Wide enough to cover a
 #: ten-minute checkpoint with room for a late tick, narrow enough that the
 #: pass does not keep re-offering the same stale population.
+#:
+#: APPLIED TO AGE, NOT TO SNAPSHOT RECENCY, and that distinction was the whole
+#: bug. Bounding `captured_at` alone selects "coins with a recent deep print",
+#: which on 2026-09-09 was 67 mints averaging 4.6 HOURS old and reaching 30
+#: hours — a coin discovered yesterday and still trading has a print from a
+#: minute ago. Ordered oldest-first, the 25-per-pass cap was spent entirely on
+#: coins judged hours earlier and never reached one approaching its checkpoint.
+#: 158 of 168 lab entries were bought with no evaluation on disk because of it.
+#:
+#: Bounded by `discovered_at` as well, the population is what the docstring
+#: always claimed: ~6 live candidates, ~9.3 per 20 minutes in steady state,
+#: comfortably inside the cap — so the cap stops binding and oldest-first
+#: genuinely means closest-to-its-checkpoint-first.
 LOOKBACK = timedelta(minutes=20)
 
 #: Only coins deep enough for a lab to buy. Matches the labs' own floor:
@@ -66,6 +79,12 @@ async def candidates(session: AsyncSession, *, now: datetime) -> list[str]:
     Ordered oldest first, so a coin approaching its checkpoint is evaluated
     before one that has only just appeared — the cap should be spent on the
     coins about to be judged, not on the newest arrivals.
+
+    Both bounds are on `LOOKBACK`: the snapshot must be recent (the coin is
+    still trading and still deep) AND the coin must itself be young (it has not
+    already been judged). Dropping the second turns "oldest first" into "coins
+    discovered furthest in the past first", which is the opposite of the
+    intent — see the constant.
     """
     programs = list(settings.SCANNER_WATCH_PROGRAMS)
     rows = await session.execute(
@@ -74,6 +93,7 @@ async def candidates(session: AsyncSession, *, now: datetime) -> list[str]:
         .join(DiscoveredToken,
               DiscoveredToken.mint_address == TokenMarketSnapshot.mint_address)
         .where(TokenMarketSnapshot.captured_at >= now - LOOKBACK,
+               DiscoveredToken.discovered_at >= now - LOOKBACK,
                TokenMarketSnapshot.liquidity_usd >= MIN_LIQUIDITY_USD,
                DiscoveredToken.source_program.in_(programs))
         .distinct()

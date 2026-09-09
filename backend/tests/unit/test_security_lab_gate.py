@@ -56,3 +56,99 @@ def test_the_board_is_the_pair_and_nothing_else() -> None:
     instruction. A third line on a two-arm board invites reading whichever is
     ahead as a result."""
     assert set(spec.BY_ID) == {"MOV-03", "MOV-04"}
+
+
+# --- the gate the LAB applies must be the gate the REAL WALLET applies ------
+#
+# Replayed on 2026-09-09 against all 80 movers entries: the real wallet would
+# have been allowed to buy 4 of them. MOV-03's entries were 2/2 allowed and
+# MOV-04's control 2/22, which is what a control that ignores security should
+# look like. These tests keep the gated arm at 2/2 by construction — a paper
+# record built on coins the real wallet refuses cannot be acted on, and the
+# divergence is invisible in the equity curve.
+
+import asyncio
+from datetime import UTC, datetime, timedelta
+
+import pytest
+
+from app.lab.service import LabService
+from app.models.token_security import TokenSecurityEvaluationRow
+from app.security import entry_policy
+from app.security.contract import EVALUATOR_VERSION, CheckName, CheckStatus
+
+_NOW = datetime(2026, 9, 9, 12, 0, tzinfo=UTC)
+_MINT = "So11111111111111111111111111111111111111112"
+
+
+def _row(**over) -> TokenSecurityEvaluationRow:
+    """A row that passes every mandatory check, unless a test breaks one."""
+    checks = [
+        {"name": str(n), "status": str(CheckStatus.PASS), "reason_codes": [],
+         "detail": "", "evidence": {}}
+        for n in entry_policy.MANDATORY_CHECKS
+    ]
+    fields = dict(
+        mint_address=_MINT, evaluated_at=_NOW - timedelta(minutes=3),
+        overall_status="VERIFIED", evaluator_version=EVALUATOR_VERSION,
+        reason_codes=[], checks=checks, evidence={}, market_snapshot_at=None,
+    )
+    fields.update(over)
+    return TokenSecurityEvaluationRow(**fields)
+
+
+class _OneRowSession:
+    """Returns `row` from any query, and records what was asked for."""
+
+    def __init__(self, row):
+        self._row = row
+        self.statements = []
+
+    async def execute(self, statement, *a, **kw):
+        self.statements.append(str(statement))
+        row = self._row
+
+        class _Result:
+            def scalar_one_or_none(self_inner):
+                return row
+
+        return _Result()
+
+
+def _verified(row) -> bool:
+    session = _OneRowSession(row)
+    allowed = asyncio.run(LabService(session)._security_verified(_MINT, _NOW))
+    # Point-in-time: a verdict the platform only reached AFTER the checkpoint
+    # must not decide the checkpoint. Lookahead here would make every backtest
+    # of this arm optimistic in a way no equity curve reveals.
+    assert "evaluated_at <=" in session.statements[0]
+    return allowed
+
+
+def test_a_fresh_complete_pass_is_tradeable() -> None:
+    assert _verified(_row()) is True
+
+
+def test_a_stale_verdict_is_not_tradeable() -> None:
+    """VERIFIED, every check passed — and 40 minutes old. The venue and
+    liquidity checks expire in 15, so the real wallet refuses it; the lab must
+    too. The old implementation read `overall_status` and had no clock."""
+    assert _verified(_row(evaluated_at=_NOW - timedelta(minutes=40))) is False
+
+
+def test_an_incomplete_evaluation_is_not_tradeable() -> None:
+    """`roll_up` returns VERIFIED when nothing among the checks PRESENT failed,
+    so a row missing mandatory checks stores as VERIFIED. `decide` refuses it."""
+    partial = [
+        {"name": str(CheckName.MINT_AUTHORITY), "status": str(CheckStatus.PASS),
+         "reason_codes": [], "detail": "", "evidence": {}}
+    ]
+    assert _verified(_row(checks=partial)) is False
+
+
+def test_a_foreign_evaluator_version_is_not_tradeable() -> None:
+    assert _verified(_row(evaluator_version="someone-elses-evaluator")) is False
+
+
+def test_never_evaluated_is_not_tradeable() -> None:
+    assert _verified(None) is False

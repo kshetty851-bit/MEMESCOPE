@@ -49,7 +49,8 @@ from app.models.market import TokenMarketSnapshot, TradingStatus
 from app.models.graduation import PumpfunGraduation
 from app.models.radar import RadarToken
 from app.models.social import PumpfunSocialSnapshot
-from app.models.token_security import TokenSecurityEvaluationRow
+from app.security import entry_policy
+from app.security.repository import TokenSecurityRepository
 from app.models.early_buyer import TokenEarlyBuyer
 from app.models.kol import KolWalletRank
 from app.models.token import DiscoveredToken
@@ -1068,20 +1069,37 @@ class LabService:
         return bool(src) and src in self._pumpfun_programs()
 
     async def _security_verified(self, mint: str, at: datetime) -> bool:
-        """Was this coin VERIFIED by the security evaluator, as of `at`?
+        """Would the REAL wallet be allowed to buy this coin at `at`?
 
-        Reads the most recent evaluation at or before the checkpoint. The
-        evaluator runs on its own pass (`security/lab_coverage.py`) so this is
-        a cheap indexed lookup rather than an RPC call in the decision path.
+        Not "is overall_status VERIFIED" — that was a third implementation of
+        a question `entry_policy.decide` already answers, and it was wrong in
+        three ways the replay found on 2026-09-09:
+
+        * **No freshness bound.** A VERIFIED verdict from six hours ago passed
+          here; the real gate requires evidence inside `MAX_EVIDENCE_AGE`
+          (15 minutes, the venue/liquidity window). Never actually bit — the
+          worst observed age at entry was 3.5 minutes — but unguarded.
+        * **`VERIFIED` does not mean every check ran.** `roll_up` returns
+          VERIFIED when nothing among the checks *present* failed, so a row
+          carrying four of the six mandatory checks rounds up to safe. `decide`
+          refuses it as incomplete.
+        * **No evaluator-version check.** A row written by a different
+          evaluator was read back as though this build had produced it.
+
+        So it calls `decide` instead. A paper wallet whose entries the real
+        wallet would refuse produces a track record that cannot be acted on,
+        which is the point of holding the two to one function.
+
+        Still a cheap indexed lookup, not an RPC: `evaluate_real_entry` calls
+        `TokenSecurityService` because a live buyer must re-read the chain at
+        time of use, while this runs on every candidate at every checkpoint and
+        reads only what the coverage pass has already stored. Same decision
+        function, same evidence, no chain traffic.
         """
-        status = await self._session.scalar(
-            select(TokenSecurityEvaluationRow.overall_status)
-            .where(TokenSecurityEvaluationRow.mint_address == mint,
-                   TokenSecurityEvaluationRow.evaluated_at <= at)
-            .order_by(TokenSecurityEvaluationRow.evaluated_at.desc())
-            .limit(1)
+        evaluation = await TokenSecurityRepository(self._session).latest_for_mint(
+            mint, as_of=at
         )
-        return status == "VERIFIED"
+        return entry_policy.decide(evaluation, now=at).allowed
 
     async def _kol_early_count(self, mint: str) -> int:
         """How many FOLLOWED wallets were among this coin's first buyers.

@@ -96,13 +96,24 @@ class TokenSecurityRepository:
             )
         )
 
-    async def latest_for_mint(self, mint: str) -> TokenSecurityEvaluation | None:
+    async def latest_for_mint(
+        self, mint: str, *, as_of: datetime | None = None
+    ) -> TokenSecurityEvaluation | None:
+        """The newest evaluation of this mint, optionally as of a past instant.
+
+        `as_of` exists for point-in-time callers: a lab deciding at a 10-minute
+        checkpoint must not read a verdict the platform only reached at minute
+        twelve. Without it the answer is simply the newest, which is what a
+        live buyer wants.
+        """
+        stmt = select(TokenSecurityEvaluationRow).where(
+            TokenSecurityEvaluationRow.mint_address == mint
+        )
+        if as_of is not None:
+            stmt = stmt.where(TokenSecurityEvaluationRow.evaluated_at <= as_of)
         row = (
             await self._session.execute(
-                select(TokenSecurityEvaluationRow)
-                .where(TokenSecurityEvaluationRow.mint_address == mint)
-                .order_by(TokenSecurityEvaluationRow.evaluated_at.desc())
-                .limit(1)
+                stmt.order_by(TokenSecurityEvaluationRow.evaluated_at.desc()).limit(1)
             )
         ).scalar_one_or_none()
         return _to_domain(row) if row else None

@@ -167,6 +167,21 @@ def _wallet(sid: str, name: str, entry: tuple[Condition, ...],
 #: UNKNOWN declines, the same as FAILED. The security module's own entry policy
 #: requires every check to positively pass, and "the platform could not look"
 #: is not evidence of safety. An unevaluated coin is therefore also a decline.
+#:
+#: THIS IS THE REAL WALLET'S OWN GATE, not a paper imitation of it. The feature
+#: calls `entry_policy.decide` — the same pure function `evaluate_real_entry`
+#: calls before spending real money — so a coin MOV-03 buys is a coin the real
+#: wallet would have been allowed to buy, by construction rather than review.
+#:
+#: Replayed 2026-09-09 over all 80 movers entries to date: the real gate would
+#: have allowed 4. MOV-03 was 2/2, the control 2/22, MOV-01/02 0/56 — because
+#: 75 of the 80 coins had never been security-evaluated at all. That was a
+#: coverage defect, not a policy one, and it is fixed in `lab_coverage`.
+#:
+#: WHAT THIS MEANS FOR THE CONTROL'S RESULT: MOV-04 buys coins the real wallet
+#: will refuse. If it wins, the finding is "the gate costs money", NOT an
+#: instruction to trade unverified coins with real funds — that trade cannot be
+#: placed. Only MOV-03's result is actionable.
 _SECURE = Condition(feature="security_verified", op="gte", value=D("1"),
                     reason="security_not_verified")
 
