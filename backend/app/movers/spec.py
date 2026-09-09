@@ -77,7 +77,7 @@ from decimal import Decimal as D
 
 from app.lab.spec import Condition, Exits, Strategy, rules_json
 
-SPEC_VERSION = "movers-3.0.0"
+SPEC_VERSION = "movers-4.0.0"
 
 STARTING_EQUITY = D("100")
 CYCLE_TARGET_MULTIPLE = D("1.10")
@@ -116,6 +116,28 @@ MIN_LIQUIDITY_USD = D("100000")
 #: comparison — a control free to buy shallower coins would differ in two ways
 #: at once and the result would be unattributable.
 _POOL: tuple[Condition, ...] = (
+    # THE MINT MUST CARRY THE LAUNCHPAD'S SUFFIX, on the operator's instruction
+    # and on this lab's own record.
+    #
+    # `is_pumpfun` below reads `source_program` and counts the whole pump.fun
+    # ecosystem, so a coin whose program is the PumpSwap AMM passes it without
+    # having been minted by the launchpad — and those are the coins with no
+    # "pump" suffix. Across every movers tournament to 2026-09-09:
+    #
+    #     suffixed      60 closed   +$54.68
+    #     unsuffixed    17 closed   -$43.52   (5 rugs)
+    #
+    # MOVERS-TURNOVER is the clearest case: all six of its trades were
+    # unsuffixed and they were its entire -$11.73.
+    #
+    # STATED PLAINLY, because it is a post-hoc split on a small sample: 17
+    # trades is not proof, the suffix is a mint-address convention rather than
+    # a safety property, and it correlates with bonding-curve custody, so this
+    # may be measuring the same thing the security gate measures. It is applied
+    # because the operator asked and the record points the same way, not
+    # because 17 trades settled anything.
+    Condition(feature="mint_suffix_pump", op="gte", value=D("1"),
+              reason="mint_not_pump_suffixed"),
     Condition(feature="is_pumpfun", op="gte", value=D("1"),
               reason="not_a_pumpfun_token"),
     Condition(feature="liq", op="gte", value=MIN_LIQUIDITY_USD,
@@ -273,7 +295,11 @@ SPEC_HASH = hashlib.sha256(_canonical().encode()).hexdigest()
 #: moment to ask whether SPEC_VERSION should move too.
 #:
 #: ADDING an arm is not safer than removing one. Both change the hash.
-PINNED_SPEC_HASH = "b14810af097924400307919359aee9a82e4ebd8e648fc40f76e64f75c920711b"
+#: Moved 2026-09-09 for movers-4.0.0, which added the `mint_suffix_pump`
+#: condition to BOTH arms. The pin did its job: the edit failed at import
+#: rather than reaching production with a stale hash, and the version was
+#: bumped rather than the running tournament's stored hash overwritten.
+PINNED_SPEC_HASH = "4bc66e0ed23c5c70451419467f17a9443361c04ed4990de05a0483e6448b11e5"
 
 assert SPEC_HASH == PINNED_SPEC_HASH, (
     f"STRATEGIES changed: hash is {SPEC_HASH[:16]}, pinned to "

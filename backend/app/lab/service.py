@@ -241,6 +241,22 @@ class LabService:
         # Additive: SPEC_HASH is taken over the STRATEGIES, not over the feature
         # builder, so adding a key here cannot drift a running tournament.
         f["is_pumpfun"] = Decimal(1) if await self._is_pumpfun(token_id) else Decimal(0)
+        # THE VANITY SUFFIX, which is a NARROWER claim than `is_pumpfun`.
+        #
+        # `is_pumpfun` reads `source_program` and counts the whole pump.fun
+        # ecosystem, so a coin whose program is the PumpSwap AMM passes it
+        # without ever having been minted by the launchpad. Those are the coins
+        # that carry no "pump" suffix, and on this platform's own record they
+        # are where the money went: across every movers tournament, 17 such
+        # trades returned -$43.52 with five rugs, while the 60 suffixed ones
+        # returned +$54.68.
+        #
+        # A separate feature rather than a stricter `is_pumpfun`, because the
+        # two are different questions and some registries want the wide one.
+        # The suffix is not proof of anything by itself — it is a mint-address
+        # convention, and a mint can be ground to end in anything — so it is
+        # offered as a filter, never as a safety guarantee.
+        f["mint_suffix_pump"] = Decimal(1) if mint.endswith("pump") else Decimal(0)
         # SOCIAL: attention rather than price. Every other feature here is
         # derived from the market; these two come from how many people are
         # commenting on the coin, which is orthogonal to all of them.
