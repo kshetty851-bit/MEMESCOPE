@@ -247,6 +247,13 @@ x-backend-env: &backend-env
   MAINNET_SIGNER_SOCKET: ${MAINNET_SIGNER_SOCKET:-}
   FEATURE_LAB_ENABLED: ${FEATURE_LAB_ENABLED:-false}
   LAB_VALID_FROM: ${LAB_VALID_FROM:-}
+  # Rafiq Lab. In the anchor rather than on `worker`, for the reason this
+  # anchor's comments give five times over: the beat runs it in `scheduler`,
+  # the worker executes it, and the API reads it, so all three have to agree
+  # about the flag or the lab ticks somewhere nobody can see it. Setting it in
+  # .env alone does nothing — this file enumerates every variable that reaches
+  # a container, and a value not named here never arrives.
+  RAFIQ_LAB_ENABLED: ${RAFIQ_LAB_ENABLED:-false}
   KARTHIK_CANDIDATE_LIMIT: ${KARTHIK_CANDIDATE_LIMIT:-250}
   KARTHIK_REVIEW_BATCH_LIMIT: ${KARTHIK_REVIEW_BATCH_LIMIT:-2000}
   KARTHIK_MAX_MARKET_AGE_SECONDS: ${KARTHIK_MAX_MARKET_AGE_SECONDS:-900}
