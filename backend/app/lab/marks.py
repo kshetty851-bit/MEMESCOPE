@@ -32,13 +32,26 @@ writing the obvious wrong thing again.
 from __future__ import annotations
 
 from collections.abc import Iterable
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.market import TokenMarketSnapshot, TradingStatus
+
+#: How long a token must read INACTIVE, with no live print at all, before it is
+#: called dead — by the engine, which closes the position, and by this module,
+#: which stops quoting a price for it. ONE constant, because they are one
+#: question: `service.DEATH_CONFIRMATION_WINDOW` re-exports this.
+#:
+#: Two minutes, and bounded by TIME rather than by a count of readings. "Two
+#: consecutive inactives" never confirms for a token that stops being polled at
+#: all, which is how this lab once froze its worst positions at their last
+#: healthy price and held them for ever. One inactive print is NOT a death: it
+#: cost $337 of live positions in a week — 56 of 806 `dead_zero` exits were
+#: written off at $0.00 while the token traded again within ten minutes.
+DEATH_CONFIRMATION_WINDOW = timedelta(minutes=2)
 
 
 async def latest_trading_price(
@@ -50,6 +63,24 @@ async def latest_trading_price(
     rather than carrying its last number. Absence is the honest answer — "this
     coin has no current price" — and a caller that renders it as a dash tells
     the reader something true, where a caller handed 0.0001867 would not.
+
+    A price is also absent once the pool has DIED UNDER IT. Skipping inactive
+    rows is not enough on its own: a coin whose last trading print was an hour
+    ago and has printed inactive ever since still had a trading print, and
+    returning it showed three closed `dead_zero` positions at +21.4%, +5.4% and
+    +0.9% — each on the same row as an exit reason meaning "written off at
+    zero". The mark predated its own close by two to four minutes.
+
+    So the trading print must be the CURRENT state of the pool, not a
+    superseded one: it is returned only when nothing has printed more than
+    `DEATH_CONFIRMATION_WINDOW` after it. That is the engine's death rule
+    exactly, and using it here means the view and the ledger cannot disagree
+    about whether a coin is alive.
+
+    It cannot blank a live coin — a live coin's newest print IS the trading
+    print, so the gap is zero — and a single spurious inactive reading does not
+    blank one either, which is the whole reason the rule is a window and not a
+    count.
 
     One windowed query for the whole set, not a subquery per row: the trades
     view asks about every position it lists.
@@ -79,8 +110,24 @@ async def latest_trading_price(
         )
         .subquery()
     )
+    # The newest print of ANY kind, inactive included. This is what says
+    # whether the trading print above is current or superseded.
+    newest_any = (
+        select(
+            TokenMarketSnapshot.mint_address,
+            func.max(TokenMarketSnapshot.captured_at).label("at"),
+        )
+        .where(TokenMarketSnapshot.mint_address.in_(wanted))
+        .group_by(TokenMarketSnapshot.mint_address)
+        .subquery()
+    )
     rows = await session.execute(
         select(ranked.c.mint_address, ranked.c.price_usd, ranked.c.captured_at)
-        .where(ranked.c.rn == 1)
+        .join(newest_any, newest_any.c.mint_address == ranked.c.mint_address)
+        .where(
+            ranked.c.rn == 1,
+            # THE SECOND HALF OF THE RULE. See the docstring.
+            newest_any.c.at - ranked.c.captured_at <= DEATH_CONFIRMATION_WINDOW,
+        )
     )
     return {r.mint_address: (r.price_usd, r.captured_at) for r in rows}

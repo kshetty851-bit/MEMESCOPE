@@ -49,6 +49,7 @@ from app.models.market import TokenMarketSnapshot, TradingStatus
 from app.models.graduation import PumpfunGraduation
 from app.models.radar import RadarToken
 from app.models.social import PumpfunSocialSnapshot
+from app.lab import marks
 from app.security import entry_policy
 from app.security.repository import TokenSecurityRepository
 from app.models.early_buyer import TokenEarlyBuyer
@@ -86,10 +87,11 @@ def live_print(rows, now: datetime):
     return None
 
 
-#: How long a token must read INACTIVE, with no live print at all, before the
-#: engine will call it dead. Death is the only irreversible exit, so it is the
-#: only one that requires more than a single observation.
-DEATH_CONFIRMATION_WINDOW = timedelta(minutes=2)
+#: Re-exported from `marks`, which owns it now. The death rule and the "what is
+#: this worth now" rule are the same question asked by two callers, and they
+#: were answered by two constants until the trades view showed a dead coin at
+#: +5.4%. Import site kept so existing callers and tests are unchanged.
+DEATH_CONFIRMATION_WINDOW = marks.DEATH_CONFIRMATION_WINDOW
 
 
 class LabService:
