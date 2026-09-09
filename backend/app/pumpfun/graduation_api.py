@@ -27,6 +27,8 @@ from sqlalchemy import func, select
 
 from app.api.deps import DbSession
 from app.models.graduation import PumpfunGraduation, PumpfunGraduationMark
+from app.models.market import TokenMarketSnapshot
+from app.models.token import DiscoveredToken
 from app.lab import leaderboard
 from app.pumpfun.graduation import TARGET_MINUTES
 
@@ -38,7 +40,13 @@ DISCLOSURE = (
     "re-read at 5, 15, 30 and 60 minutes. The return shown is what buying at "
     "that stamped market cap and selling at each age would have produced, "
     "before fees and before any price impact — so treat it as an upper bound. "
-    "pump.fun publishes no graduation timestamp; this is ours."
+    "pump.fun publishes no graduation timestamp; this is ours. "
+    "Every figure here is a RATIO over the market cap the API reported at the "
+    "stamp, and about 9% of those come back far too low — a baseline wrong by "
+    "500x invents a 500x winner out of a coin that did nothing. So each "
+    "baseline is now checked against our own market snapshot taken within "
+    "three minutes, and a coin we cannot corroborate is excluded and counted "
+    "rather than repaired. `excluded_bad_baseline` is that count."
 )
 
 
@@ -54,7 +62,14 @@ async def graduations(session: DbSession) -> dict[str, Any]:
     if cold_start is not None:
         base = base.where(PumpfunGraduation.first_seen_complete_at != cold_start)
 
-    cohort = {g.id: g for g in (await session.execute(base)).scalars()}
+    # The cohort is filtered to coins whose baseline our own market series can
+    # corroborate. Every figure below is a RATIO over that baseline, so an
+    # uncorroborated one does not add noise — it manufactures a winner. See
+    # MAX_BASELINE_DISAGREEMENT.
+    ours = await _our_mcaps(session)
+    everyone = list((await session.execute(base)).scalars())
+    cohort = {g.id: g for g in everyone if _baseline_ok(g, ours)}
+    dropped_baseline = len(everyone) - len(cohort)
     total_stamped = await session.scalar(
         select(func.count()).select_from(PumpfunGraduation)
     )
@@ -91,13 +106,67 @@ async def graduations(session: DbSession) -> dict[str, Any]:
         "disclosure": DISCLOSURE,
         "cohort": len(cohort),
         "total_stamped": total_stamped or 0,
-        "excluded_cold_start": (total_stamped or 0) - len(cohort),
+        "excluded_cold_start": (total_stamped or 0) - len(cohort) - dropped_baseline,
+        # Coins whose API baseline our own market series contradicted. Reported
+        # rather than folded into the cold-start number, because they are a
+        # DATA fault and the reader should be able to see it move.
+        "excluded_bad_baseline": dropped_baseline,
         "since": cold_start.isoformat() if cold_start else None,
         "ages": rows,
     }
 
 
 # --------------------------------------------------------------------------
+async def _our_mcaps(session) -> dict[str, Decimal]:
+    """OUR market cap for each graduation, from the snapshot nearest its stamp.
+
+    One query rather than one per coin: DISTINCT ON keeps the snapshot closest
+    in time. Used only to corroborate the API baseline — see
+    `MAX_BASELINE_DISAGREEMENT`.
+    """
+    gap = func.abs(func.extract(
+        "epoch", TokenMarketSnapshot.captured_at
+        - PumpfunGraduation.first_seen_complete_at))
+    return dict((await session.execute(
+        select(PumpfunGraduation.mint_address, TokenMarketSnapshot.market_cap)
+        .distinct(PumpfunGraduation.mint_address)
+        .join(DiscoveredToken,
+              DiscoveredToken.mint_address == PumpfunGraduation.mint_address)
+        .join(TokenMarketSnapshot,
+              TokenMarketSnapshot.token_id == DiscoveredToken.id)
+        .where(TokenMarketSnapshot.suspect.is_not(True),
+               TokenMarketSnapshot.market_cap.is_not(None),
+               TokenMarketSnapshot.market_cap > 0,
+               TokenMarketSnapshot.captured_at
+               >= PumpfunGraduation.first_seen_complete_at - timedelta(minutes=3),
+               TokenMarketSnapshot.captured_at
+               <= PumpfunGraduation.first_seen_complete_at + timedelta(minutes=3))
+        .order_by(PumpfunGraduation.mint_address, gap)
+    )).all())
+
+
+def _baseline_ok(g, ours: dict[str, Decimal]) -> bool:
+    """True when our own market cap agrees with the API's, or is absent.
+
+    Absent is treated as agreeing rather than as failing: a coin we never
+    priced is a gap in OUR series, not evidence against the API, and excluding
+    on it would quietly drop the thinnest coins — the population these figures
+    most need to keep.
+    """
+    if not g.mcap_usd_at_graduation:
+        return True
+    # Nonsense both sources agree on is still nonsense, so the floor is checked
+    # first and independently of any second opinion.
+    if g.mcap_usd_at_graduation < MIN_BASELINE_MCAP:
+        return False
+    mine = ours.get(g.mint_address)
+    if mine is None:
+        return True
+    hi = max(mine, g.mcap_usd_at_graduation)
+    lo = min(mine, g.mcap_usd_at_graduation)
+    return lo > 0 and hi / lo <= MAX_BASELINE_DISAGREEMENT
+
+
 # A simulated $100 book over the same cohort
 # --------------------------------------------------------------------------
 
@@ -113,6 +182,44 @@ PAPER_MAX_CONCURRENT = 10
 #: reported the book turning $100 into six figures. Excluded and COUNTED, never
 #: clamped — a clamped glitch is still a number somebody trusts.
 PAPER_GLITCH_MULTIPLE = Decimal("100")
+
+#: THE BASELINE MUST AGREE WITH OUR OWN EYES.
+#:
+#: `mcap_usd_at_graduation` is whatever pump.fun's API returned at the moment we
+#: stamped the coin, and it is the DENOMINATOR of every multiple on this page.
+#: It is usually right — against our own snapshot taken within three minutes the
+#: median ratio is 1.01 — but roughly 9% of rows come back far too low, and a
+#: baseline that is too low by 500x manufactures a 500x winner out of a coin
+#: that did nothing.
+#:
+#: Measured on 2026-09-08: of 523 graduations in twelve hours, 48 disagreed with
+#: our own market cap by more than 5x. Among the 78 coins the Graduation Hold
+#: Lab actually traded, EVERY replayed multiple above 2x was also above 100x —
+#: six unrelated coins all "graduating" at about $2,884 while our snapshots put
+#: them near $47,000 — and the lab, pricing the same coins from the same series,
+#: recorded them flat. There was not one real winner among them.
+#:
+#: So the baseline is cross-checked against the market series before it is used,
+#: exactly as the universe wallet cross-checks a quoted price against a second
+#: source. A row we cannot corroborate is EXCLUDED AND COUNTED, never repaired:
+#: guessing the denominator would put an invented number into the headline.
+MAX_BASELINE_DISAGREEMENT = Decimal("5")
+
+#: AND IT MUST BE A MARKET CAP A POSITION COULD ACTUALLY HAVE ENTERED.
+#:
+#: Cross-checking two sources catches a baseline that is wrong. It does not
+#: catch one that both sources agree is nonsense: on 2026-09-08 a coin was
+#: stamped at $0.70 by the API and by our own snapshot alike, and its $12,443
+#: mark five minutes later duly reported 17,756x — the single largest "winner"
+#: on the page. Among 539 corroborated baselines, 91 sat under $1,000 and 105
+#: under $10,000, against a median of $55,660 and a p25 of $29,590.
+#:
+#: The floor is not a data-quality guess, it is a tradeability fact: $10 cannot
+#: be deployed into a coin whose entire market cap is $0.70, so a ratio taken
+#: over such a baseline is not a return anybody could have earned. $10,000 is
+#: a thousand times the position and still far below the cluster where real
+#: graduations sit, so it removes the impossible without touching the real.
+MIN_BASELINE_MCAP = PAPER_POSITION_USD * 1000
 
 #: Round-trip execution assumed for the NET figure. Measured from real Jupiter
 #: quotes at >= $100k liquidity. A coin at graduation sits in a much thinner
@@ -151,12 +258,14 @@ async def graduation_paper(session: DbSession) -> dict[str, Any]:
     )).scalars():
         marks[(m.graduation_id, m.minutes_since)] = m.mcap_usd
 
+    ours = await _our_mcaps(session)
+
     horizons = []
     for minutes in TARGET_MINUTES:
         cash = PAPER_BOOK_USD
         equity_realised = Decimal(0)
         open_until: list[datetime] = []
-        taken = skipped_capacity = no_mark = glitched = 0
+        taken = skipped_capacity = no_mark = glitched = bad_baseline = 0
 
         multiples: list[Decimal] = []
         for g in rows:
@@ -164,6 +273,11 @@ async def graduation_paper(session: DbSession) -> dict[str, Any]:
             open_until = [t for t in open_until if t > t0]
             if len(open_until) >= PAPER_MAX_CONCURRENT:
                 skipped_capacity += 1
+                continue
+            if not _baseline_ok(g, ours):
+                # The denominator disagrees with our own eyes. Counted, never
+                # repaired — see MAX_BASELINE_DISAGREEMENT.
+                bad_baseline += 1
                 continue
             exit_mcap = marks.get((g.id, minutes))
             if exit_mcap is None:
@@ -220,6 +334,11 @@ async def graduation_paper(session: DbSession) -> dict[str, Any]:
             "skipped_no_mark_yet": no_mark,
             "skipped_capacity": skipped_capacity,
             "excluded_glitch": glitched,
+            # Rows whose API baseline our own market series could not
+            # corroborate. Reported beside the result, because a book that
+            # quietly drops what it cannot price reports the survivors as if
+            # they were the population.
+            "excluded_bad_baseline": bad_baseline,
         })
 
     return leaderboard._jsonable({
@@ -285,6 +404,7 @@ async def graduation_cycles(session: DbSession) -> dict[str, Any]:
                 PumpfunGraduationMark.mcap_usd.is_not(None))
         )).scalars()
     }
+    ours = await _our_mcaps(session)
 
     # Bucket by the hour the coin graduated in.
     buckets: dict[datetime, list[PumpfunGraduation]] = {}
@@ -296,11 +416,14 @@ async def graduation_cycles(session: DbSession) -> dict[str, Any]:
     rounds: list[dict[str, Any]] = []
     for hour in sorted(buckets):
         coins = buckets[hour]
-        usable, no_mark, glitched = [], 0, 0
+        usable, no_mark, glitched, bad_baseline = [], 0, 0, 0
         for g in coins:
             ex = exits.get(g.id)
             if ex is None:
                 no_mark += 1
+                continue
+            if not _baseline_ok(g, ours):
+                bad_baseline += 1
                 continue
             mult = ex / g.mcap_usd_at_graduation
             if mult > PAPER_GLITCH_MULTIPLE:
@@ -315,6 +438,7 @@ async def graduation_cycles(session: DbSession) -> dict[str, Any]:
             rounds.append({
                 "hour": hour.isoformat(), "coins": len(coins), "traded": 0,
                 "no_mark": no_mark, "glitched": glitched,
+                "bad_baseline": bad_baseline,
                 "opened_with": round(balance, 2), "closed_with": round(balance, 2),
                 "round_multiple": 1.0,
             })
@@ -328,6 +452,7 @@ async def graduation_cycles(session: DbSession) -> dict[str, Any]:
         rounds.append({
             "hour": hour.isoformat(), "coins": len(coins), "traded": len(usable),
             "no_mark": no_mark, "glitched": glitched,
+                "bad_baseline": bad_baseline,
             "stake_each": round(stake, 2),
             "opened_with": round(opened, 2), "closed_with": round(balance, 2),
             "round_multiple": round(balance / opened, 4) if opened > 0 else None,
