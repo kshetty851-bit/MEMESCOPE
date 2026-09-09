@@ -77,7 +77,7 @@ from decimal import Decimal as D
 
 from app.lab.spec import Condition, Exits, Strategy, rules_json
 
-SPEC_VERSION = "movers-4.0.0"
+SPEC_VERSION = "movers-5.0.0"
 
 STARTING_EQUITY = D("100")
 CYCLE_TARGET_MULTIPLE = D("1.10")
@@ -159,7 +159,8 @@ _POOL: tuple[Condition, ...] = (
 # was a redundant gate that happened to be crippling.
 
 def _wallet(sid: str, name: str, entry: tuple[Condition, ...],
-            hypothesis: str, evidence: str) -> Strategy:
+            hypothesis: str, evidence: str,
+            time_exit_hours: float | None = TIME_EXIT_HOURS) -> Strategy:
     return Strategy(
         id=sid, name=name, hypothesis=hypothesis,
         # Ten minutes, because that is where the measurement was taken. The
@@ -171,7 +172,7 @@ def _wallet(sid: str, name: str, entry: tuple[Condition, ...],
         entry=entry,
         size_usd=SIZE_USD, max_concurrent=MAX_CONCURRENT,
         max_exposure_usd=STARTING_EQUITY,
-        exits=Exits(take_profit=None, time_exit_hours=TIME_EXIT_HOURS),
+        exits=Exits(take_profit=None, time_exit_hours=time_exit_hours),
         evidence=evidence, overfit_risk="UNTESTED",
     )
 
@@ -256,6 +257,37 @@ STRATEGIES: tuple[Strategy, ...] = (
     _wallet("MOV-04", "SECURITY-CONTROL", _POOL,
             "The gate adds nothing: verified and unverified coins rug alike.",
             "CONTROL"),
+    # MOV-05: THE WALLET IS THE ONLY EXIT.
+    #
+    # On instruction: run the book to +10% on the WHOLE PORTFOLIO, sell
+    # everything, restart from what was banked, and repeat — with no holding
+    # period at all. The ratchet is not new; `CompoundService` already banks
+    # every wallet here at CYCLE_TARGET_MULTIPLE and compounds from REALISED
+    # equity rather than from the target, so $100 -> $110 -> $121. What is new
+    # is removing the clock.
+    #
+    # It is MOV-03's rules exactly, minus the thirty-minute exit, so MOV-03 is
+    # its control and the pair asks one question: does holding until the
+    # PORTFOLIO is up beat holding each position for half an hour?
+    #
+    # WHAT THIS RISKS, AND IT IS NOT SMALL. With no clock, a position is only
+    # released when the wallet banks or the token dies. Ten slots of $10 fill
+    # the $100 book completely, so a wallet that never reaches +10% never frees
+    # a dollar: it is fully deployed, indefinitely, in whatever it happened to
+    # buy. Neither existing arm has banked a cycle yet — MOV-04 is at $28.63
+    # and MOV-03 at $100.66 — so a lock-up is the likely first outcome, not a
+    # remote one. That is the rule as asked for, and the failure mode is
+    # recorded here rather than discovered later.
+    #
+    # `_SECURE` is carried because the instruction was that whatever this
+    # trades must be buyable by the REAL wallet later, and `security_verified`
+    # is exactly that question: would the real wallet have been allowed to buy
+    # this coin at this checkpoint.
+    _wallet("MOV-05", "RATCHET-NO-CLOCK", (*_POOL, _SECURE),
+            "Holding until the PORTFOLIO is up 10% beats holding each position "
+            "for thirty minutes.",
+            "OPERATOR_INSTRUCTION_NO_HOLD_TIME",
+            time_exit_hours=None),
 )
 
 BY_ID = {s.id: s for s in STRATEGIES}
@@ -295,11 +327,12 @@ SPEC_HASH = hashlib.sha256(_canonical().encode()).hexdigest()
 #: moment to ask whether SPEC_VERSION should move too.
 #:
 #: ADDING an arm is not safer than removing one. Both change the hash.
+#: Moved again for movers-5.0.0, which added MOV-05 (no holding period).
 #: Moved 2026-09-09 for movers-4.0.0, which added the `mint_suffix_pump`
 #: condition to BOTH arms. The pin did its job: the edit failed at import
 #: rather than reaching production with a stale hash, and the version was
 #: bumped rather than the running tournament's stored hash overwritten.
-PINNED_SPEC_HASH = "4bc66e0ed23c5c70451419467f17a9443361c04ed4990de05a0483e6448b11e5"
+PINNED_SPEC_HASH = "6bcc203526b37b4ae32c42442add7fe5dabb4eeb8708256e3ae350b1ceff31f2"
 
 assert SPEC_HASH == PINNED_SPEC_HASH, (
     f"STRATEGIES changed: hash is {SPEC_HASH[:16]}, pinned to "
@@ -307,7 +340,18 @@ assert SPEC_HASH == PINNED_SPEC_HASH, (
     f"(a live tournament halts otherwise) and then update PINNED_SPEC_HASH."
 )
 
-assert len(STRATEGIES) == 2, "the gated arm and its control, nothing else"
+assert len(STRATEGIES) == 3, "the security pair, and the no-clock ratchet arm"
+assert BY_ID["MOV-05"].exits.time_exit_hours is None, (
+    "MOV-05 exists to have NO holding period; a clock here would make it a "
+    "duplicate of MOV-03 and the comparison meaningless"
+)
+assert BY_ID["MOV-05"].entry == BY_ID["MOV-03"].entry, (
+    "MOV-05 must differ from MOV-03 in the CLOCK ALONE, or the pair measures "
+    "two things at once"
+)
+assert BY_ID["MOV-03"].exits.time_exit_hours is not None, (
+    "MOV-03 is MOV-05's control and must keep its clock"
+)
 assert "MOV-02" not in BY_ID, (
     "MOV-02 carried rules identical to the control and could tell you nothing "
     "it did not; removed on instruction 2026-09-09"
@@ -333,7 +377,14 @@ assert not any(c.feature == "turnover_5m"
 assert all(s.exits.take_profit is None for s in STRATEGIES), (
     "a take-profit would measure the exit rather than the entry"
 )
-assert all(s.exits.time_exit_hours == TIME_EXIT_HOURS for s in STRATEGIES)
+# Every arm shares the clock EXCEPT MOV-05, which exists to have none. Written
+# as an explicit exception rather than relaxed to `is not None`, so a fourth arm
+# cannot quietly acquire a different holding period and call itself comparable.
+assert all(s.exits.time_exit_hours == TIME_EXIT_HOURS
+           for s in STRATEGIES if s.id != "MOV-05"), (
+    "every arm but MOV-05 holds for TIME_EXIT_HOURS; a second clock would make "
+    "the arms differ in more than the thing under test"
+)
 assert all(s.size_usd * s.max_concurrent <= STARTING_EQUITY for s in STRATEGIES)
 
 __all__ = ["BY_ID", "CYCLE_TARGET_MULTIPLE", "FAILURE_EQUITY_FLOOR",

@@ -20,10 +20,13 @@ def test_the_turnover_arm_is_gone_entirely() -> None:
     lab's tick raises a KeyError on another lab's book."""
     assert "MOV-01" not in spec.BY_ID
     assert "MOV-02" not in spec.BY_ID
-    # Exactly the pair. Asserted so a third arm cannot appear unnoticed: an
-    # unpaired arm on a two-arm board invites reading the best line as a
-    # result, which is the failure this file exists to catch.
-    assert len(spec.STRATEGIES) == 2
+    # THREE arms now, and every one of them is inside a pair: MOV-03/MOV-04
+    # differ in the security gate alone, MOV-05/MOV-03 in the clock alone. The
+    # count is still asserted for the original reason — an UNPAIRED arm invites
+    # reading the best line as a result — so a fourth arm must arrive with its
+    # own control and update this deliberately.
+    assert len(spec.STRATEGIES) == 3
+    assert set(spec.BY_ID) == {"MOV-03", "MOV-04", "MOV-05"}
 
 
 def test_no_turnover_condition_survives_without_a_control() -> None:
@@ -49,12 +52,32 @@ def test_the_checkpoint_matches_where_the_signal_was_measured() -> None:
         assert s.checkpoint_minutes == 10
 
 
-def test_both_arms_hold_for_the_same_thirty_minutes() -> None:
-    """Median time from a fillable entry to a 2x was 19.7 minutes. If the arms
-    ever held for different periods the comparison would be about the clock."""
+def test_the_security_pair_holds_for_the_same_thirty_minutes() -> None:
+    """Median time from a fillable entry to a 2x was 19.7 minutes. If the
+    SECURITY pair ever held for different periods its comparison would be about
+    the clock rather than the gate.
+
+    MOV-05 is excluded deliberately: it exists to have no clock, and it is
+    paired against MOV-03 rather than against MOV-04 (see the test below)."""
     assert spec.TIME_EXIT_HOURS == 0.5
-    for s in spec.STRATEGIES:
-        assert s.exits.time_exit_hours == spec.TIME_EXIT_HOURS
+    for sid in ("MOV-03", "MOV-04"):
+        assert spec.BY_ID[sid].exits.time_exit_hours == spec.TIME_EXIT_HOURS
+
+
+def test_the_no_clock_arm_is_paired_and_differs_only_in_the_clock() -> None:
+    """MOV-05 runs the wallet ratchet with NO holding period, on instruction.
+
+    An unpaired arm invites reading the best line as a result, so it is pinned
+    to a control: MOV-03 carries identical entry conditions and keeps its
+    thirty-minute exit, which makes the pair ask exactly one question — does
+    holding until the PORTFOLIO is up beat holding each position for half an
+    hour?"""
+    assert spec.BY_ID["MOV-05"].exits.time_exit_hours is None
+    assert spec.BY_ID["MOV-03"].exits.time_exit_hours is not None
+    assert spec.BY_ID["MOV-05"].entry == spec.BY_ID["MOV-03"].entry
+    assert spec.BY_ID["MOV-05"].size_usd == spec.BY_ID["MOV-03"].size_usd
+    assert (spec.BY_ID["MOV-05"].max_concurrent
+            == spec.BY_ID["MOV-03"].max_concurrent)
 
 
 def test_the_measured_floor_is_kept_on_record() -> None:
