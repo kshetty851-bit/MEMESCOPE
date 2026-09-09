@@ -1,23 +1,22 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
-import { audioContextCtor, createSpaceAudio, type SpaceAudio } from "@/lib/space-audio";
+import { useSpaceAudio, spaceAudioSupported } from "@/hooks/use-space-audio";
 import { cn } from "@/lib/utils";
 
 /**
- * The switch for the drone in `lib/space-audio`.
+ * The switch for the drone in `lib/space-audio`. It owns no audio itself —
+ * `use-space-audio` holds the one instance at module scope so this can appear
+ * on the launch screen and in the dashboard topbar at once, agreeing with
+ * itself and playing through the navigation between them.
  *
- * OFF, ALWAYS, ON EVERY VISIT. Not a lapse — the browser will not start audio
- * without a gesture, so a remembered "on" could not be honoured on arrival
- * anyway, and the only way to make it appear to work would be to wait for the
- * visitor's first unrelated click and play sound at them then. One deliberate
- * click each visit is the honest version.
- *
- * The AudioContext is built on that first click rather than on mount: a
- * context created before a gesture is born suspended, Safari counts it against
- * the page either way, and a visitor who never touches this should not be
- * charged an audio graph for a page they are only reading.
+ * OFF ON EVERY VISIT, and nothing is persisted. Not a lapse: the browser will
+ * not start audio without a gesture, so a remembered "on" could not be
+ * honoured on arrival anyway. The only way to make it appear to work would be
+ * to wait for the visitor's first unrelated click and play sound at them then,
+ * which is precisely the behaviour the autoplay rules exist to prevent. One
+ * deliberate click per visit is the honest version.
  */
 
 function WaveIcon({ on }: { on: boolean }) {
@@ -25,7 +24,7 @@ function WaveIcon({ on }: { on: boolean }) {
     <svg
       viewBox="0 0 16 16"
       aria-hidden="true"
-      className="h-3.5 w-3.5"
+      className="h-3.5 w-3.5 shrink-0"
       fill="none"
       stroke="currentColor"
       strokeWidth="1.4"
@@ -46,51 +45,21 @@ function WaveIcon({ on }: { on: boolean }) {
   );
 }
 
-export function SpaceAudioToggle({ className }: { className?: string }) {
-  const [on, setOn] = useState(false);
-  const [available, setAvailable] = useState(true);
-  const audio = useRef<SpaceAudio | null>(null);
+export function SpaceAudioToggle({
+  className,
+  label = true,
+}: {
+  className?: string;
+  /** The topbar is tight on room; there the icon speaks for itself. */
+  label?: boolean;
+}) {
+  const { on, toggle } = useSpaceAudio();
+  // Checked after mount, never during render: `window` does not exist on the
+  // server and a mismatch here would be a hydration error on the landing page.
+  const [supported, setSupported] = useState(true);
+  useEffect(() => setSupported(spaceAudioSupported()), []);
 
-  // Never leave oscillators running behind a navigation.
-  useEffect(() => {
-    return () => {
-      audio.current?.dispose();
-      audio.current = null;
-    };
-  }, []);
-
-  useEffect(() => {
-    setAvailable(audioContextCtor() !== null);
-  }, []);
-
-  const toggle = useCallback(async () => {
-    if (on) {
-      audio.current?.stop();
-      setOn(false);
-      return;
-    }
-
-    if (!audio.current) {
-      const Ctor = audioContextCtor();
-      if (!Ctor) {
-        setAvailable(false);
-        return;
-      }
-      // Built inside the gesture, which is the only place it may be resumed.
-      audio.current = createSpaceAudio(new Ctor());
-    }
-
-    try {
-      await audio.current.start();
-      setOn(true);
-    } catch {
-      // A browser that refuses the resume: leave the control saying "off",
-      // because that is the truth of what the visitor can hear.
-      setOn(false);
-    }
-  }, [on]);
-
-  if (!available) return null;
+  if (!supported) return null;
 
   return (
     <button
@@ -100,7 +69,7 @@ export function SpaceAudioToggle({ className }: { className?: string }) {
       title={on ? "Sound on" : "Ambient sound"}
       onClick={() => void toggle()}
       className={cn(
-        "inline-flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-label uppercase",
+        "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2 text-label uppercase",
         "transition-colors duration-[var(--duration-instant)]",
         on
           ? "border-accent/40 bg-accent/10 text-accent"
@@ -110,7 +79,7 @@ export function SpaceAudioToggle({ className }: { className?: string }) {
     >
       <WaveIcon on={on} />
       {/* The icon carries the state; the word only says what the control is. */}
-      <span className="hidden sm:inline">Sound</span>
+      {label ? <span className="hidden sm:inline">Sound</span> : null}
     </button>
   );
 }

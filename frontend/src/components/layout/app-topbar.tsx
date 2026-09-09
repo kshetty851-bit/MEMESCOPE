@@ -4,6 +4,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { IconExit, IconMenu, IconSearch } from "@/components/layout/nav-icons";
+import { SpaceAudioToggle } from "@/components/space/space-audio-toggle";
 import { Tooltip } from "@/components/ui/tooltip";
 import { useDisplayMode } from "@/hooks/use-display-mode";
 import { useLiveUpdates } from "@/hooks/use-live-updates";
@@ -150,6 +151,11 @@ export function AppTopbar({ onOpenNav }: { onOpenNav: () => void }) {
         <StreamStatus />
 
         <span aria-hidden className="h-4 w-px bg-line" />
+
+        {/* Same control as the launch screen, same instance behind it, so the
+            drone carries through the door rather than stopping at it. Iconless
+            label here: the topbar is tight and `Dense` sits beside it. */}
+        <SpaceAudioToggle label={false} />
 
         <button
           type="button"
