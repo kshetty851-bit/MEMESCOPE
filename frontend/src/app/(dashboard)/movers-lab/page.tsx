@@ -1,6 +1,6 @@
 "use client";
 
-import { FiveMinTradesTable } from "@/components/fivemin/trades-panel";
+import { LabTradesTable } from "@/components/lab/trades-panel";
 import { Label, Panel } from "@/components/ui/panel";
 import { Toolbar } from "@/components/ui/toolbar";
 import { useMoversBoard, useMoversTrades } from "@/hooks/use-movers";
@@ -157,7 +157,7 @@ export default function MoversLabPage() {
           </div>
 
           {trades.data ? (
-            <FiveMinTradesTable trades={trades.data.trades} />
+            <LabTradesTable trades={trades.data.trades} />
           ) : (
             <Panel density="compact">
               <Label>TRADES</Label>

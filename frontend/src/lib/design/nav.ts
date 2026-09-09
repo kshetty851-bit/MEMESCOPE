@@ -71,14 +71,10 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "Strategy",
     items: [
       { href: "/wallet", label: "Paper wallet", icon: IconWallet, status: "ready" },
-      // Graduation: a measurement of the market rather than a record of what
-      // this platform did, which is why it is not on Track Record.
-      { href: "/graduation", label: "Graduation", icon: IconLedger, status: "ready" },
       // The Five-Minute Lab. Its own destination on the operator's instruction,
       // against the pattern that removed the other per-lab pages — so it is
       // listed here deliberately rather than by drift, and the test below
       // records that this one is intended.
-      { href: "/fivemin-lab", label: "Graduation Lab", icon: IconWallet, status: "ready" },
       // Movers: the turnover filter against its own control. Named for the
       // pump.fun list it was built to anticipate, not for a result it has.
       { href: "/movers-lab", label: "Movers Lab", icon: IconWallet, status: "ready" },

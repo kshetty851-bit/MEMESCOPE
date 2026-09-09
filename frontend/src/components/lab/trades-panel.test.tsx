@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import { FiveMinTradesTable, pnlOf, pnlPctOf } from "./trades-panel";
+import { LabTradesTable, pnlOf, pnlPctOf } from "./trades-panel";
 import type { LabTrade } from "@/types/lab";
 
 /**
@@ -44,10 +44,10 @@ function trade(overrides: Partial<LabTrade> = {}): LabTrade {
   };
 }
 
-describe("FiveMinTradesTable", () => {
+describe("LabTradesTable", () => {
   it("shows each trade's own P&L in dollars and percent, and the full mint", () => {
     render(
-      <FiveMinTradesTable
+      <LabTradesTable
         trades={[
           // +$0.50 on a $5 stake: +10%.
           trade(),

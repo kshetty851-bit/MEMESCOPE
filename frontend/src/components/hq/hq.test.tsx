@@ -68,19 +68,25 @@ describe("navigation", () => {
     }
   });
 
-  it("keeps the Five-Minute Lab, which is a deliberate exception", () => {
-    // Every other per-lab page was removed and the test below keeps them gone.
-    // This one was added back on the operator's instruction, so it is asserted
-    // rather than left to sit ambiguously between the two rules — a reader of
-    // the list below would otherwise reasonably delete it as an oversight.
+  it("keeps the Movers Lab, which is the current deliberate exception", () => {
+    // Per-lab pages are removed by default and the test below keeps them gone.
+    // The Movers Lab is asserted rather than left sitting ambiguously between
+    // the two rules — a reader of the list below would otherwise reasonably
+    // delete it as an oversight.
+    //
+    // The Five-Minute (Graduation) Lab held this exception until 2026-09-09,
+    // when it was deleted on the operator's instruction after every arm lost.
     const hrefs = NAV_GROUPS.flatMap((group) => group.items).map((item) => item.href);
-    expect(hrefs).toContain("/fivemin-lab");
+    expect(hrefs).toContain("/movers-lab");
   });
 
   it("does not resurrect the removed destinations", () => {
     const hrefs = NAV_GROUPS.flatMap((group) => group.items).map((item) => item.href);
     for (const gone of ["/trending", "/launches", "/watchlist", "/strategy-lab",
                         "/compound-lab", "/depth-lab", "/social-lab",
+                        // Deleted 2026-09-09: every arm lost, on an engine
+                        // that was inventing deaths and then on the fix.
+                        "/fivemin-lab", "/graduation",
                         "/momentum-lab", "/pumpfun-lab"]) {
       expect(hrefs).not.toContain(gone);
     }

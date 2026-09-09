@@ -33,7 +33,6 @@ celery_app = Celery(
         "app.workers.research_tasks",
         "app.lab.scheduler",
         "app.compound.scheduler",
-        "app.fivemin.scheduler",
         "app.evmchain.scheduler",
         "app.pumpfun.scheduler",
         "app.pumpfun.social_scheduler",
@@ -43,7 +42,6 @@ celery_app = Celery(
         "app.movers.scheduler",
         "app.social.scheduler",
         "app.copycontrol.scheduler",
-        "app.pumpfun.graduation_scheduler",
         "app.hq_ops.tasks",
     ],
 )
@@ -252,32 +250,6 @@ celery_app.conf.beat_schedule = {
         "task": "app.compound.scheduler.compound_tick",
         "schedule": crontab(minute="*"),
     },
-    # The Graduation Hold Lab. EVERY TEN SECONDS, not every minute.
-    #
-    # A minute beat was measured doing real damage on 2026-09-08: the first
-    # five-minute position closed after 5.70 minutes, because the exit could
-    # only fire on the next tick after the horizon passed. The error is bounded
-    # by the beat, so it is a FIXED 60s against holds of different lengths —
-    # up to 20% of a five-minute hold but only 6.7% of a fifteen-minute one.
-    #
-    # That asymmetry falls exactly along the axis this lab measures. A beat
-    # that lengthens the short arm five times more than the long one is not
-    # noise between the arms, it is a bias in favour of one of them, and the
-    # whole experiment is the difference between those two numbers.
-    #
-    # Ten seconds puts it at 3.3% and 1.1%. It does NOT make the price fresher
-    # — snapshots for a held token refresh about every 65 seconds and the sell
-    # quote is stored, so the mark can still be a minute old either way. This
-    # fixes WHEN the position closes, not what it is worth when it does; the
-    # remaining staleness is a property of the market feed, not of the beat.
-    #
-    # Cheap enough to be uncontroversial: the tick runs in ~0.5s and takes a
-    # transaction-scoped advisory lock, so an overrun is skipped rather than
-    # overlapped.
-    "fivemin-tick": {
-        "task": "app.fivemin.scheduler.fivemin_tick",
-        "schedule": timedelta(seconds=10),
-    },
     # EVM launch stamps. Every two minutes, because GeckoTerminal's new-pool
     # feed reaches back only ~70 minutes and a launch missed cannot be
     # recovered from any endpoint later. Prices are NOT collected here: minute
@@ -312,12 +284,6 @@ celery_app.conf.beat_schedule = {
     "pumpfun-social-tick": {
         "task": "app.pumpfun.social_scheduler.pumpfun_social_tick",
         "schedule": crontab(minute="*/10"),
-    },
-    # Graduation collector. Every minute: the stamp's accuracy IS the
-    # measurement, and the first follow-up target is at five minutes.
-    "pumpfun-graduation-tick": {
-        "task": "app.pumpfun.graduation_scheduler.pumpfun_graduation_tick",
-        "schedule": crontab(minute="*"),
     },
     # CPY-02, the PumpFun Lab's control arm. Second 30 rather than on the
     # minute: it consumes `pumpfun_signals`, so running it before the pumpfun

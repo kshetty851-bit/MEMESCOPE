@@ -566,7 +566,6 @@ class Settings(BaseSettings):
     #: The Five-Minute Lab: the wallet ratchet on a five-minute hold, flat
     #: stake. Default False — it is a hypothesis fitted to one 47x coin and
     #: should be switched on deliberately, not inherited.
-    FEATURE_FIVEMIN_LAB_ENABLED: bool = False
     #: The PumpFun Lab: a $100 wallet mirroring one on-chain trader's entries
     #: and exits, FORWARD ONLY — nothing he did before the lab started is ever
     #: actionable. Off by default: a copy lab that began at deploy time would
@@ -598,7 +597,6 @@ class Settings(BaseSettings):
     FEATURE_KOL_LAB_ENABLED: bool = False
     #: The graduation collector: stamps pump.fun graduations as they happen and
     #: follows each coin for an hour. Read-only research; it trades nothing.
-    FEATURE_PUMPFUN_GRADUATION_ENABLED: bool = False
     #: CPY-02: the control arm for the PumpFun Lab. Off by default.
     FEATURE_COPYCONTROL_ENABLED: bool = False
     #: V7's own switch, so it can be stopped without stopping the labs that

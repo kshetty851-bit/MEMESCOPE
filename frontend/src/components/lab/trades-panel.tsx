@@ -1,11 +1,10 @@
 "use client";
 
 import { Label, Panel } from "@/components/ui/panel";
-import { useFiveMinTrades } from "@/hooks/use-fivemin";
 import type { LabTrade } from "@/types/lab";
 
 /**
- * EVERY TRADE THE FIVE-MINUTE LAB HAS MADE, each with its own P&L.
+ * EVERY TRADE A LAB HAS MADE, each with its own P&L.
  *
  * The board's `positions` is a display window — the most recent few — and it
  * shows a multiple, not money. This is the record: open and closed, oldest to
@@ -127,7 +126,7 @@ function Table({ rows }: { rows: LabTrade[] }) {
 }
 
 /** Pure: renders whatever it is handed. The container below fetches. */
-export function FiveMinTradesTable({ trades }: { trades: LabTrade[] }) {
+export function LabTradesTable({ trades }: { trades: LabTrade[] }) {
   // Oldest first within each group: a record reads forward.
   const byOpen = (a: LabTrade, b: LabTrade) => a.opened_at.localeCompare(b.opened_at);
   const open = trades.filter((t) => t.status === "open").sort(byOpen);
@@ -163,26 +162,4 @@ export function FiveMinTradesTable({ trades }: { trades: LabTrade[] }) {
       </Panel>
     </>
   );
-}
-
-export function FiveMinTradesPanel() {
-  const { data, isLoading, isError } = useFiveMinTrades();
-  if (isLoading) {
-    return (
-      <Panel density="compact">
-        <Label>TRADES</Label>
-        <p className="mt-2 text-xs text-muted">Loading…</p>
-      </Panel>
-    );
-  }
-  if (isError || !data) {
-    // Visible on purpose: a panel that vanishes on error reads as "no trades".
-    return (
-      <Panel density="compact">
-        <Label>TRADES</Label>
-        <p className="mt-2 text-xs text-down">The trade list could not be read.</p>
-      </Panel>
-    );
-  }
-  return <FiveMinTradesTable trades={data.trades} />;
 }
