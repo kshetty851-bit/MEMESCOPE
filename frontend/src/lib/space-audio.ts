@@ -2,112 +2,85 @@
  * SPACE MUSIC, SYNTHESISED RATHER THAN SHIPPED.
  *
  * There is no audio file here and there deliberately isn't one. A few minutes
- * of ambient pad is several megabytes, it would have to be licensed, and this
- * project spent a whole day getting a 38GB disk back under control. The Web
- * Audio API can make this sound directly out of oscillators, so the entire
- * soundtrack costs a few kilobytes of JavaScript and nothing on disk.
+ * of ambient audio is several megabytes, it would have to be licensed, and
+ * this project spent a whole day getting a 38GB disk back under control. The
+ * Web Audio API can make this sound directly, so the entire soundtrack costs a
+ * few kilobytes of JavaScript and nothing on disk.
  *
- * WHAT IT PLAYS
+ * WHAT IT PLAYS — and what it used to
  *
- * A drone in A, and nothing else: a low root, a fifth, and three quiet upper
- * partials from the pentatonic scale, each swelling on its own slow cycle.
- * The cycle lengths are mutually prime (17, 23, 29, 31, 37 seconds), so the
- * voices drift in and out of alignment and the pattern does not audibly
- * repeat — the whole point of ambient music, and much cheaper than a long
- * sample. Two oscillators per voice detuned by a fraction of a hertz give the
- * slow beating that makes a synthesised pad sound wide rather than sterile.
+ * This was a continuous five-voice drone. Karthik didn't like it, and asked
+ * for sparse and quiet instead: mostly silence, with occasional soft bell
+ * tones that ring out and fade. So there is now NO CONTINUOUS TONE AT ALL. A
+ * single note is struck every few seconds, left to decay for as long as eight
+ * seconds through a generated reverb, and then nothing until the next one.
+ *
+ * If you are tempted to add a pad back underneath "just to fill the gaps":
+ * the gaps are the request. Silence is the majority of this piece.
+ *
+ * A struck metal tone is not a sine wave — its partials are inharmonic, which
+ * is exactly what makes a bell sound like a bell rather than an organ. The
+ * ratios in `PARTIALS` are the usual approximation, with the higher partials
+ * both quieter and shorter-lived, because real bells shed their upper
+ * partials first.
  *
  * WHY IT NEVER STARTS ON ITS OWN
  *
  * Every browser blocks audio until a real user gesture, and a site that plays
  * sound at someone unasked deserves the block. `start()` must be called from
  * a click handler. That is also why nothing here is persisted: a remembered
- * "on" could not be honoured on the next visit without a gesture anyway, so
- * remembering it would only create the expectation it cannot meet.
+ * "on" could not be honoured on the next visit without a gesture anyway.
  */
 
-/** One voice: a frequency in Hz, how loud it sits, and its swell period. */
-export interface Voice {
-  readonly hz: number;
-  readonly gain: number;
-  readonly periodSeconds: number;
-  readonly type: OscillatorType;
-}
-
-/**
- * A minor pentatonic drone on A. Root and fifth carry the weight; the three
- * upper voices are quiet enough to colour rather than play a tune.
- *
- * Periods are mutually prime ON PURPOSE — see the file docstring. If you edit
- * these, keep them coprime or the pad starts to loop audibly.
- */
-export const VOICES: readonly Voice[] = [
-  { hz: 55.0, gain: 0.5, periodSeconds: 31, type: "sine" }, // A1, the floor
-  { hz: 82.41, gain: 0.28, periodSeconds: 37, type: "sine" }, // E2, the fifth
-  { hz: 220.0, gain: 0.1, periodSeconds: 17, type: "triangle" }, // A3
-  { hz: 329.63, gain: 0.07, periodSeconds: 23, type: "sine" }, // E4
-  { hz: 493.88, gain: 0.05, periodSeconds: 29, type: "sine" }, // B4
+/** The scale struck notes are drawn from: A minor pentatonic, in Hz. */
+export const NOTES: readonly number[] = [
+  220.0, // A3
+  261.63, // C4
+  293.66, // D4
+  329.63, // E4
+  392.0, // G4
+  440.0, // A4
+  523.25, // C5
 ];
 
 /**
- * Detune between a voice's two oscillators, in CENTS rather than hertz.
+ * One partial of a struck tone: its frequency as a multiple of the note, how
+ * loud it starts, and how long it rings relative to the note's decay.
  *
- * This is not a stylistic choice, it is the fix for a bug worth remembering.
- * A fixed hertz offset gives every voice the SAME beat rate, and since all the
- * oscillators start on the same `start()` they also share a phase — so all
- * five voices reached their destructive null together and the entire pad
- * dropped to near silence every ~8 seconds. Measured in the browser: RMS fell
- * from 0.051 to 0.004 with the master gain still wide open at 0.16.
- *
- * Cents scale with pitch, the way real detuning does, so each voice beats at
- * its own rate (~0.13 Hz on the root, ~1.1 Hz on the top voice) and the sum
- * never nulls.
+ * The inharmonic ratios are what make this a bell. Equal-tempered multiples
+ * (1, 2, 3) would give an organ pipe.
  */
-const DETUNE_CENTS = 2.5;
+export const PARTIALS: readonly { ratio: number; gain: number; decay: number }[] = [
+  { ratio: 0.5, gain: 0.35, decay: 1.0 }, // hum tone, rings longest
+  { ratio: 1.0, gain: 1.0, decay: 0.85 }, // the note you hear
+  { ratio: 2.76, gain: 0.28, decay: 0.45 },
+  { ratio: 5.4, gain: 0.11, decay: 0.22 },
+];
 
-/**
- * The two oscillators of a pair are deliberately NOT equal in level. Equal
- * amplitudes cancel completely at the null; 62/38 leaves a quarter of the
- * amplitude standing, which is a gentle dip instead of a hole.
- */
-const PAIR_MIX = [0.62, 0.38] as const;
+/** How long the fundamental takes to fall away, in seconds. */
+export const DECAY_SECONDS = 8;
 
-/** Beat frequency produced by `DETUNE_CENTS` at a given pitch, in Hz. */
-export function beatHz(hz: number, cents: number = DETUNE_CENTS): number {
-  return hz * (2 ** (cents / 1200) - 2 ** (-cents / 1200));
-}
-
-/**
- * How deep each voice's slow swell goes. A voice sits at `SWELL_BASE` and its
- * LFO adds up to `SWELL_DEPTH`, so its level travels between base − depth and
- * base + depth.
- *
- * These were 0.55/0.45 — a swing down to a tenth of nominal, or 20dB. Measured
- * in the browser, that made the whole pad go thin for seconds at a time,
- * because the root voice carries most of the energy and takes the rest down
- * with it. 0.75/0.25 halves the level at the trough instead of gutting it: the
- * pad still breathes, it just never hollows out.
- */
-export const SWELL_BASE = 0.75;
-export const SWELL_DEPTH = 0.25;
+/** Silence between strikes, in seconds. The gaps are the point. */
+export const GAP_MIN_SECONDS = 5;
+export const GAP_MAX_SECONDS = 13;
 
 /**
  * The two fades are NOT the same length, and that asymmetry is the point.
  *
- * Both were 2.5s. Fading in over 2.5s is a pad arriving; fading OUT over 2.5s
- * is a broken button — Karthik pressed off, kept hearing music, and reported
- * it as still playing. Measured: 2.0s after the click it was still at RMS
- * 0.011, plainly audible. Off has to sound like off.
- *
- * The floor is set by the click: cutting a 55Hz drone dead puts a step in the
- * waveform you can hear as a thud. ~0.3s is short enough to read as immediate
- * and long enough to stay silent about it.
+ * Both were 2.5s. Fading in over 2.5s is fine; fading OUT over 2.5s is a
+ * broken button — Karthik pressed off, kept hearing music, and reported it as
+ * still playing. Measured: 2.0s after the click it was still at RMS 0.011,
+ * plainly audible. Off has to sound like off.
  */
-export const FADE_IN_SECONDS = 1.6;
+export const FADE_IN_SECONDS = 1.2;
 export const FADE_OUT_SECONDS = 0.3;
 
-/** Ceiling on the master gain. Background music, not a foreground event. */
-export const MASTER_GAIN = 0.16;
+/**
+ * Ceiling on the master gain. Lower than the drone's was: these are transients
+ * with a lot of high content, so they carry further than a steady tone at the
+ * same nominal level, and "very quiet" was the request.
+ */
+export const MASTER_GAIN = 0.11;
 
 type Ctor = typeof AudioContext;
 
@@ -125,11 +98,12 @@ export function audioContextCtor(win: Window & typeof globalThis = window): Ctor
 }
 
 /**
- * A short synthetic impulse response: white noise under an exponential decay,
+ * A long synthetic impulse response: white noise under an exponential decay,
  * which is the standard cheap way to get a plausible reverb tail without
- * shipping one. `decay` shapes how quickly the room dies away.
+ * shipping one. Long here on purpose — the reverb is most of what fills the
+ * space between strikes.
  */
-export function impulseResponse(ctx: BaseAudioContext, seconds = 3.5, decay = 2.4): AudioBuffer {
+export function impulseResponse(ctx: BaseAudioContext, seconds = 5, decay = 2.2): AudioBuffer {
   const rate = ctx.sampleRate;
   const length = Math.max(1, Math.floor(rate * seconds));
   const buffer = ctx.createBuffer(2, length, rate);
@@ -142,91 +116,98 @@ export function impulseResponse(ctx: BaseAudioContext, seconds = 3.5, decay = 2.
   return buffer;
 }
 
+/** Seconds until the next strike. Random, so no rhythm emerges. */
+export function nextGap(random: () => number = Math.random): number {
+  return GAP_MIN_SECONDS + random() * (GAP_MAX_SECONDS - GAP_MIN_SECONDS);
+}
+
+/**
+ * One note from the scale. The clamp and the fallback are for
+ * `noUncheckedIndexedAccess`, which types every array read as possibly
+ * undefined — and is right to, since `random()` returning exactly 1 would
+ * index past the end.
+ */
+export function pickNote(random: () => number = Math.random): number {
+  const i = Math.min(NOTES.length - 1, Math.floor(random() * NOTES.length));
+  return NOTES[i] ?? 440;
+}
+
 export interface SpaceAudio {
   /** Must be called from a user gesture. Resumes and fades in. */
   start(): Promise<void>;
-  /** Fades out and suspends. The graph is kept, so start() is cheap again. */
+  /** Fades out, stops scheduling, and suspends. start() is cheap again. */
   stop(): void;
   /** Tears the whole thing down. After this the instance is dead. */
   dispose(): void;
 }
 
-/**
- * Build the graph once and keep it. Starting and stopping only moves the
- * master gain and suspends the context — oscillators are never recreated,
- * because an `OscillatorNode` cannot be restarted after `stop()` and
- * rebuilding the graph on every toggle is how you get a click and a leak.
- */
 export function createSpaceAudio(ctx: AudioContext): SpaceAudio {
   const master = ctx.createGain();
   master.gain.value = 0;
+  master.connect(ctx.destination);
 
-  // Rolls the top off the oscillators so the pad is warm rather than glassy.
-  const tone = ctx.createBiquadFilter();
-  tone.type = "lowpass";
-  tone.frequency.value = 900;
-  tone.Q.value = 0.6;
+  // Strikes go to both the dry bus and a long reverb. The reverb is what makes
+  // the silence sound like a room rather than a mute.
+  const dry = ctx.createGain();
+  dry.gain.value = 0.55;
+  dry.connect(master);
 
   const reverb = ctx.createConvolver();
   reverb.buffer = impulseResponse(ctx);
   const wet = ctx.createGain();
-  wet.gain.value = 0.55;
-
-  tone.connect(master);
-  tone.connect(reverb);
+  wet.gain.value = 0.8;
   reverb.connect(wet);
   wet.connect(master);
-  master.connect(ctx.destination);
 
-  // A very slow sweep of the filter, so the timbre breathes.
-  const sweep = ctx.createOscillator();
-  sweep.frequency.value = 1 / 41; // once every 41s — coprime with the voices
-  const sweepDepth = ctx.createGain();
-  sweepDepth.gain.value = 260;
-  sweep.connect(sweepDepth);
-  sweepDepth.connect(tone.frequency);
-  sweep.start();
-
-  const started: OscillatorNode[] = [sweep];
-
-  for (const voice of VOICES) {
-    const swell = ctx.createGain();
-    swell.gain.value = voice.gain * SWELL_BASE;
-    swell.connect(tone);
-
-    // Each voice breathes on its own period, none of them together.
-    const lfo = ctx.createOscillator();
-    lfo.frequency.value = 1 / voice.periodSeconds;
-    const lfoDepth = ctx.createGain();
-    lfoDepth.gain.value = voice.gain * SWELL_DEPTH;
-    lfo.connect(lfoDepth);
-    lfoDepth.connect(swell.gain);
-    lfo.start();
-    started.push(lfo);
-
-    PAIR_MIX.forEach((mix, i) => {
-      const osc = ctx.createOscillator();
-      osc.type = voice.type;
-      osc.frequency.value = voice.hz;
-      osc.detune.value = i === 0 ? -DETUNE_CENTS : DETUNE_CENTS;
-
-      // The unequal half of the pair, so a null is a dip and not a hole.
-      const trim = ctx.createGain();
-      trim.gain.value = mix;
-      osc.connect(trim);
-      trim.connect(swell);
-
-      osc.start();
-      started.push(osc);
-    });
-  }
+  // Takes the glassiest edge off the upper partials.
+  const tone = ctx.createBiquadFilter();
+  tone.type = "lowpass";
+  tone.frequency.value = 2600;
+  tone.connect(dry);
+  tone.connect(reverb);
 
   let disposed = false;
+  let timer: number | null = null;
   // Every start/stop takes a ticket. A pending suspend only fires if it still
   // holds the current one — otherwise turning the sound back on during a
   // fade-out gets silently suspended a moment later by the old timer, which
   // looks exactly like the button failing.
   let ticket = 0;
+
+  /** One struck note: a stack of decaying inharmonic partials. */
+  function strike(hz: number): void {
+    const now = ctx.currentTime;
+    for (const partial of PARTIALS) {
+      const osc = ctx.createOscillator();
+      osc.type = "sine";
+      osc.frequency.value = hz * partial.ratio;
+
+      const env = ctx.createGain();
+      const decay = DECAY_SECONDS * partial.decay;
+      // Fast but not instant: a true step would click.
+      env.gain.setValueAtTime(0, now);
+      env.gain.linearRampToValueAtTime(partial.gain, now + 0.006);
+      // Exponential, because that is how a struck object actually decays. It
+      // cannot reach zero, so it is cut to zero once inaudible.
+      env.gain.exponentialRampToValueAtTime(0.0001, now + decay);
+      env.gain.setValueAtTime(0, now + decay + 0.01);
+
+      osc.connect(env);
+      env.connect(tone);
+      osc.start(now);
+      // Stopped and dropped: nothing accumulates between strikes.
+      osc.stop(now + decay + 0.05);
+    }
+  }
+
+  function scheduleNext(): void {
+    if (disposed) return;
+    timer = window.setTimeout(() => {
+      if (disposed) return;
+      strike(pickNote());
+      scheduleNext();
+    }, nextGap() * 1000);
+  }
 
   function ramp(to: number, seconds: number): void {
     const now = ctx.currentTime;
@@ -234,6 +215,13 @@ export function createSpaceAudio(ctx: AudioContext): SpaceAudio {
     master.gain.cancelScheduledValues(now);
     master.gain.setValueAtTime(master.gain.value, now);
     master.gain.linearRampToValueAtTime(to, now + seconds);
+  }
+
+  function clearTimer(): void {
+    if (timer !== null) {
+      window.clearTimeout(timer);
+      timer = null;
+    }
   }
 
   return {
@@ -244,11 +232,17 @@ export function createSpaceAudio(ctx: AudioContext): SpaceAudio {
       // resume() will run it.
       if (ctx.state !== "running") await ctx.resume();
       ramp(MASTER_GAIN, FADE_IN_SECONDS);
+      clearTimer();
+      // One note straight away, so pressing the button is answered rather than
+      // met with up to thirteen seconds of nothing.
+      strike(pickNote());
+      scheduleNext();
     },
     stop() {
       if (disposed) return;
       ticket += 1;
       const mine = ticket;
+      clearTimer();
       ramp(0, FADE_OUT_SECONDS);
       // Suspend only after the fade has finished, or it cuts itself off.
       window.setTimeout(() => {
@@ -258,13 +252,7 @@ export function createSpaceAudio(ctx: AudioContext): SpaceAudio {
     dispose() {
       if (disposed) return;
       disposed = true;
-      for (const node of started) {
-        try {
-          node.stop();
-        } catch {
-          // Already stopped; nothing to undo.
-        }
-      }
+      clearTimer();
       void ctx.close();
     },
   };
