@@ -493,6 +493,12 @@ class Settings(BaseSettings):
     #: Ceiling on the lane. Without it a bug that marks everything priority
     #: turns the lane back into the backlog it was built to escape.
     ENRICHMENT_PRIORITY_MAX_TOKENS: int = Field(default=200, ge=1, le=2000)
+    #: Established tokens kept on the lane for the Matrix Lab's AGED section.
+    #: Without this they sit on the six-hour tier and the section draws about
+    #: one token an hour (measured: 143 eligible, 1 printed in the last two
+    #: hours). Placed LAST in the lane's order, so the cap truncates these
+    #: before anything a person is looking at. 0 switches it off.
+    ENRICHMENT_PRIORITY_ESTABLISHED_TOKENS: int = Field(default=50, ge=0, le=200)
 
     # --- Ingest data-quality firewall (V4 Phase 2) -------------------------
     # Annotates incoming snapshots against their own 10-minute history; a

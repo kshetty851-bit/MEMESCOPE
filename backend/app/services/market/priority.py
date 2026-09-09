@@ -21,10 +21,11 @@ guard on the same failure.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import Any, cast
 
-from sqlalchemy import CursorResult, func, or_, select, update
+from sqlalchemy import CursorResult, func, or_, select, true, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -34,6 +35,7 @@ from app.models.market import (
     LANE_NURSERY,
     EnrichmentStatus,
     TokenEnrichmentState,
+    TokenMarketSnapshot,
 )
 from app.models.opportunity import LIVE_STATUSES, Opportunity
 from app.models.lab import LabPosition
@@ -42,6 +44,16 @@ from app.models.radar import RadarToken
 from app.models.research_data import NurseryAdmission
 from app.models.token import DiscoveredToken
 from app.paper.models import PositionStatus
+from app.universe import rules as universe_rules
+from app.universe.enrolment import SOURCE_PROGRAM as UNIVERSE_SOURCE_PROGRAM
+
+#: The liquidity floor the Matrix Lab's AGED arms buy at. Polling an
+#: established token nothing can trade would spend the lane on noise.
+ESTABLISHED_MIN_LIQUIDITY_USD = Decimal("100000")
+#: "Established" on the AGED section's own definition — the same 24 hours.
+ESTABLISHED_MIN_AGE = timedelta(hours=24)
+#: A token with no print at all in a day is not a market anybody is in.
+ESTABLISHED_PRINT_WINDOW = timedelta(hours=24)
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +68,9 @@ class PriorityMembership:
     promoted: int
     demoted: int
     capped: bool
+    #: Established tokens that actually made it in — they sit last in the
+    #: order, so this is the count the cap leaves rather than the count offered.
+    established: int = 0
 
     def as_dict(self) -> dict[str, int | bool]:
         return {
@@ -63,11 +78,76 @@ class PriorityMembership:
             "opportunities": self.opportunities,
             "paper": self.paper,
             "lab": self.lab,
+            "established": self.established,
             "total": self.total,
             "promoted": self.promoted,
             "demoted": self.demoted,
             "capped": self.capped,
         }
+
+
+async def established_candidates(
+    session: AsyncSession, *, now: datetime, limit: int
+) -> list[str]:
+    """Established markets for the Matrix Lab's AGED section to draw from.
+
+    The section samples deep-AMM tokens at least a day old, and a sample may
+    only be drawn from a token printed within two minutes (`SAMPLE_FRESHNESS`
+    in `app.lab.service`). Nothing put such tokens on this lane: the
+    `jupiter_verified` universe is enrolled on the normal tier, which for a
+    token older than a day means one print every six hours. Measured on
+    2026-09-09: 143 tokens eligible, ONE printed in the previous two hours,
+    and the section drawing about one token an hour.
+
+    Membership rotates DAILY rather than by liquidity rank: the deepest fifty
+    are the majors, and a five-minute hold on a top-ten token is a different
+    experiment from one on a $150k market. A hash of the mint and the date
+    gives a stable subset all day and a different one tomorrow, so over a week
+    the section sees the whole population rather than the same fifty coins.
+
+    One index lookup per universe token (measured 361 ms over 181), which is
+    why this reads the universe and not the snapshot table: the same question
+    asked of a day of snapshots is a fifteen-second sequential scan.
+    """
+    if limit <= 0:
+        return []
+    latest = (
+        select(
+            TokenMarketSnapshot.liquidity_usd,
+            TokenMarketSnapshot.dex_name,
+            TokenMarketSnapshot.price_usd,
+            TokenMarketSnapshot.suspect,
+            TokenMarketSnapshot.captured_at,
+        )
+        .where(TokenMarketSnapshot.token_id == DiscoveredToken.id)
+        .order_by(TokenMarketSnapshot.captured_at.desc())
+        .limit(1)
+        .lateral("latest")
+    )
+    # The universe wallet's own definition of "on a peg": a stablecoin held
+    # five minutes returns zero with no variance and would flatter any sample.
+    off_peg = [
+        func.abs(latest.c.price_usd - level) / level > universe_rules.PEG_TOLERANCE
+        for level in universe_rules.PEG_LEVELS
+    ]
+    rows = await session.scalars(
+        select(DiscoveredToken.mint_address)
+        .join(latest, true())
+        .where(
+            DiscoveredToken.source_program == UNIVERSE_SOURCE_PROGRAM,
+            DiscoveredToken.block_time <= now - ESTABLISHED_MIN_AGE,
+            latest.c.suspect.is_not(True),
+            latest.c.dex_name.in_(universe_rules.DEEP_AMM_VENUES),
+            latest.c.liquidity_usd >= ESTABLISHED_MIN_LIQUIDITY_USD,
+            latest.c.liquidity_usd <= universe_rules.MAX_LIQUIDITY_USD,
+            latest.c.price_usd > 0,
+            *off_peg,
+            latest.c.captured_at >= now - ESTABLISHED_PRINT_WINDOW,
+        )
+        .order_by(func.md5(DiscoveredToken.mint_address + now.strftime("%Y-%m-%d")))
+        .limit(limit)
+    )
+    return list(rows.all())
 
 
 async def resolve_membership(session: AsyncSession) -> tuple[set[str], PriorityMembership]:
@@ -132,9 +212,18 @@ async def resolve_membership(session: AsyncSession) -> tuple[set[str], PriorityM
     # rotation, their snapshots went stale, and 61 of 108 open positions could
     # not be marked or exited: HQ INC-056. A position the platform will not
     # re-price is a position it cannot sell.
+    # ESTABLISHED TOKENS COME LAST. Nobody is looking at them; they are here
+    # so a research section has a feed, and the cap must bite them before it
+    # bites anything a person or a position depends on.
+    established_mints = await established_candidates(
+        session, now=datetime.now(UTC),
+        limit=settings.ENRICHMENT_PRIORITY_ESTABLISHED_TOKENS,
+    )
+
     ordered: list[str] = []
     seen: set[str] = set()
-    for mint in [*paper_mints, *lab_mints, *radar_mints, *opportunity_mints]:
+    for mint in [*paper_mints, *lab_mints, *radar_mints, *opportunity_mints,
+                 *established_mints]:
         if mint not in seen:
             seen.add(mint)
             ordered.append(mint)
@@ -152,6 +241,7 @@ async def resolve_membership(session: AsyncSession) -> tuple[set[str], PriorityM
         promoted=0,
         demoted=0,
         capped=capped,
+        established=len(set(established_mints) & members),
     )
 
 
@@ -240,6 +330,7 @@ async def refresh_priority_lane(session: AsyncSession, *, now: datetime) -> Prio
         promoted=promoted,
         demoted=demoted,
         capped=membership.capped,
+        established=membership.established,
     )
 
 

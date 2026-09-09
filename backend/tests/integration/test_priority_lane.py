@@ -30,6 +30,8 @@ from app.models.market import (
     LANE_NURSERY,
     EnrichmentStatus,
     TokenEnrichmentState,
+    TokenMarketSnapshot,
+    TradingStatus,
 )
 from app.models.radar import RadarToken
 from app.models.token import DiscoveredToken as TokenTable
@@ -508,3 +510,119 @@ class TestTheLabsBookIsProtected:
 
         members, _ = await resolve_membership(db_session)
         assert mint not in members
+
+
+# --- established tokens: the Matrix Lab's AGED feed ---------------------------
+#
+# The AGED section samples deep-AMM tokens older than a day and may only draw
+# one printed within two minutes. The universe those tokens come from was on
+# the normal tier — one print every six hours — so the section drew about one
+# token an hour. These hold the lane to feeding it, and to feeding it LAST.
+
+
+async def _universe_token(
+    session: AsyncSession,
+    mint: str,
+    *,
+    age: timedelta = timedelta(days=7),
+    liquidity: int = 250_000,
+    dex: str = "raydium",
+    price: str = "0.5",
+) -> None:
+    from decimal import Decimal
+
+    token = await TokenRepository(session).insert_if_absent(
+        {
+            "mint_address": mint,
+            "signature": f"universe:{mint}",
+            "slot": 0,
+            "discovered_at": NOW - timedelta(days=1),
+            "block_time": NOW - age,
+            "symbol": mint[:6],
+            "source_program": "jupiter_verified",
+        }
+    )
+    assert token is not None
+    session.add(
+        TokenEnrichmentState(
+            token_id=token.id,
+            mint_address=mint,
+            status=EnrichmentStatus.ACTIVE,
+            next_refresh_at=NOW + timedelta(hours=6),
+            priority=LANE_NORMAL,
+        )
+    )
+    session.add(
+        TokenMarketSnapshot(
+            token_id=token.id,
+            mint_address=mint,
+            captured_at=NOW - timedelta(hours=1),
+            price_usd=Decimal(price),
+            liquidity_usd=Decimal(liquidity),
+            dex_name=dex,
+            trading_status=TradingStatus.TRADING,
+            provider="test",
+        )
+    )
+    await session.flush()
+
+
+class TestEstablishedTokens:
+    async def test_an_established_universe_token_joins_the_lane(
+        self, db_session: AsyncSession
+    ) -> None:
+        mint = "Established" + "1" * 33
+        await _universe_token(db_session, mint)
+
+        members, membership = await resolve_membership(db_session)
+
+        assert mint in members, "the AGED section has nothing to draw from otherwise"
+        assert membership.established >= 1
+
+    async def test_young_thin_pegged_or_launchpad_tokens_are_not_pulled_in(
+        self, db_session: AsyncSession
+    ) -> None:
+        """Each of these is a token the AGED section would decline anyway, so
+        polling it would spend the lane on noise."""
+        young = "Young" + "1" * 39
+        thin = "Thin" + "1" * 40
+        pegged = "Pegged" + "1" * 38
+        launchpad = "Launchpad" + "1" * 35
+        await _universe_token(db_session, young, age=timedelta(hours=1))
+        await _universe_token(db_session, thin, liquidity=50_000)
+        await _universe_token(db_session, pegged, price="1.001")
+        await _universe_token(db_session, launchpad, dex="pumpswap")
+
+        members, _ = await resolve_membership(db_session)
+
+        for mint in (young, thin, pegged, launchpad):
+            assert mint not in members, mint
+
+    async def test_established_tokens_are_the_first_to_lose_the_cap(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A person is looking at the Radar; nobody is looking at these."""
+        radar = "RadarFirst" + "1" * 34
+        established = "EstablishedLast" + "1" * 29
+        await _token_with_state(db_session, radar, due_in_seconds=5)
+        await _radar_entry(db_session, radar, score=90)
+        await _universe_token(db_session, established)
+        monkeypatch.setattr(settings, "ENRICHMENT_PRIORITY_MAX_TOKENS", 1)
+
+        members, membership = await resolve_membership(db_session)
+
+        assert members == {radar}
+        assert membership.established == 0
+        assert membership.capped is True
+
+    async def test_the_feed_can_be_switched_off(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        mint = "SwitchedOff" + "1" * 33
+        await _universe_token(db_session, mint)
+        monkeypatch.setattr(settings, "ENRICHMENT_PRIORITY_ESTABLISHED_TOKENS", 0)
+
+        members, membership = await resolve_membership(db_session)
+
+        assert mint not in members
+        assert membership.established == 0

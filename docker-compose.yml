@@ -180,6 +180,7 @@ x-backend-env: &backend-env
   ENRICHMENT_PRIORITY_INTERVAL_SECONDS: ${ENRICHMENT_PRIORITY_INTERVAL_SECONDS:-15}
   ENRICHMENT_PRIORITY_RADAR_RANKS: ${ENRICHMENT_PRIORITY_RADAR_RANKS:-25}
   ENRICHMENT_PRIORITY_MAX_TOKENS: ${ENRICHMENT_PRIORITY_MAX_TOKENS:-200}
+  ENRICHMENT_PRIORITY_ESTABLISHED_TOKENS: ${ENRICHMENT_PRIORITY_ESTABLISHED_TOKENS:-50}
   # Paper wallet. In the anchor because two services read it: the scheduler
   # runs the review beat and the API serves the wallet, and a starting balance
   # set on one service only would let them disagree about what every return is

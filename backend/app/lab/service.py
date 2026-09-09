@@ -548,8 +548,7 @@ class LabService:
             floor_usd = getattr(self._spec, "LIQUIDITY_FLOOR", Decimal("100000"))
             per_tick = min(limit, getattr(self._spec, "SAMPLE_PER_TICK", 1))
             venues = list(getattr(
-                self._spec, "DEEP_VENUES",
-                ("raydium", "orca", "meteora", "metadao"),
+                self._spec, "DEEP_VENUES", universe_rules.DEEP_AMM_VENUES,
             ))
             # A baseline of "established tokens" must be established tokens the
             # other arms could plausibly have traded — NOT the index. Sampling

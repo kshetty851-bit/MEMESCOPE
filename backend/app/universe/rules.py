@@ -40,6 +40,13 @@ MIN_LIQUIDITY_USD = Decimal("250000")
 #: what a 25% trailing stop is for.
 MAX_LIQUIDITY_USD = Decimal("50000000")
 
+#: The AMMs where an ESTABLISHED market lives. pump.swap is deliberately not
+#: one of them: it is where graduates trade in their first day, and the Matrix
+#: Lab's AGED section and the enrichment lane both use this tuple to mean
+#: "older than a launch". Defined once, here, because the lane polls what the
+#: lab draws from and the two must agree on the venues or the lane polls noise.
+DEEP_AMM_VENUES = ("raydium", "orca", "meteora", "metadao")
+
 #: Survivor filter, as requested: seven days of continuous existence.
 MIN_AGE_DAYS = 7
 
