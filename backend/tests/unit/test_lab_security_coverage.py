@@ -1,15 +1,21 @@
-"""The coverage pass must aim at coins that have NOT yet been judged.
+"""The coverage pass must aim at the clock the LABS judge by.
 
 It ran every minute, capped at 25, and still left 158 of 168 lab entries with
-no evaluation on disk. The pass was working; it was pointed at the wrong end
-of its own queue. `LOOKBACK` bounded `captured_at` — "has a recent deep print"
-— which on 2026-09-09 selected 67 mints averaging 4.6 hours old and reaching
-30, because a coin discovered yesterday and still trading prints every minute.
-Ordered oldest-first, the cap was spent on coins judged hours earlier.
+no evaluation on disk. The pass worked; it was pointed at the wrong population,
+twice on 2026-09-09:
 
-One assertion, on the query the function actually issues rather than on its
-source text: the age bound is there, or the cap silently starves the labs
-again and nothing in an equity curve says so.
+* `LOOKBACK` bounded `captured_at` — "has a recent deep print" — which selects
+  coins discovered yesterday and still trading: 67 mints averaging 4.6 hours
+  old, reaching 30. Oldest-first, the cap went to coins judged hours earlier.
+* Re-bounding on `discovered_at` looked right and was worse. The engine sets
+  `checkpoint_at = RadarToken.first_detected_at + checkpoint_minutes`, and
+  radar admits a coin 60-76 MINUTES after discovery — so that window held
+  coins an hour too YOUNG to be judged, and MOV-03 declined eight consecutive
+  candidates with zero evaluations on disk at their checkpoint.
+
+These assertions are on the query the function actually issues, not its source
+text. Aim it at the wrong clock again and the cap silently starves the labs
+while every dashboard looks healthy.
 """
 
 from __future__ import annotations
@@ -37,20 +43,26 @@ def _sql() -> str:
     return session.statements[0]
 
 
-def test_the_pass_bounds_how_OLD_a_candidate_may_BE() -> None:
-    """Not just how recently it printed."""
-    assert "discovered_tokens.discovered_at >=" in _sql()
+def test_the_pass_keys_on_RADAR_ADMISSION() -> None:
+    """The clock `_due_candidates` sets the checkpoint from. Keying on
+    `discovered_tokens.discovered_at` instead is an hour early and evaluates
+    coins no lab will judge for another sixty minutes."""
+    sql = _sql()
+    assert "radar_tokens.first_detected_at >=" in sql
+    assert "discovered_tokens.discovered_at" not in sql
 
 
-def test_the_pass_still_requires_a_recent_print() -> None:
-    """Both bounds, not one swapped for the other: a coin that stopped trading
-    an hour ago is young and worthless to evaluate."""
-    assert "token_market_snapshots.captured_at >=" in _sql()
+def test_the_pass_still_requires_a_recent_deep_print() -> None:
+    """Both bounds, not one swapped for the other: a coin admitted to radar but
+    no longer deep is not worth an RPC call."""
+    sql = _sql()
+    assert "token_market_snapshots.captured_at >=" in sql
+    assert "token_market_snapshots.liquidity_usd >=" in sql
 
 
 def test_the_lookback_covers_the_checkpoint_with_room() -> None:
-    """The labs judge at ten minutes. A lookback under that would drop coins
-    before the decision that needs them."""
+    """The labs judge ten minutes after ADMISSION. A lookback under that would
+    drop coins before the decision that needs them."""
     assert lab_coverage.LOOKBACK.total_seconds() / 60 >= 15
 
 

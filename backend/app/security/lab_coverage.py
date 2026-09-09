@@ -42,30 +42,33 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.market import TokenMarketSnapshot
-from app.models.token import DiscoveredToken
+from app.models.radar import RadarToken
 from app.security.service import capture_candidate_security
 
 logger = get_logger(__name__)
 
-#: How far back to look for coins worth evaluating. Wide enough to cover a
-#: ten-minute checkpoint with room for a late tick, narrow enough that the
-#: pass does not keep re-offering the same stale population.
+#: How far back to look, ON THE CLOCK THE LABS ACTUALLY JUDGE BY.
 #:
-#: APPLIED TO AGE, NOT TO SNAPSHOT RECENCY, and that distinction was the whole
-#: bug. Bounding `captured_at` alone selects "coins with a recent deep print",
-#: which on 2026-09-09 was 67 mints averaging 4.6 HOURS old and reaching 30
-#: hours — a coin discovered yesterday and still trading has a print from a
-#: minute ago. Ordered oldest-first, the 25-per-pass cap was spent entirely on
-#: coins judged hours earlier and never reached one approaching its checkpoint.
-#: 158 of 168 lab entries were bought with no evaluation on disk because of it.
+#: That clock is `RadarToken.first_detected_at`, not `DiscoveredToken
+#: .discovered_at`, and getting this wrong twice in one day cost every
+#: evaluation the labs needed:
 #:
-#: Bounded by `discovered_at` as well, the population is what the docstring
-#: always claimed: ~6 live candidates, ~9.3 per 20 minutes in steady state,
-#: comfortably inside the cap — so the cap stops binding and oldest-first
-#: genuinely means closest-to-its-checkpoint-first.
+#: * Bounding `captured_at` alone — "has a recent deep print" — selects coins
+#:   discovered yesterday and still trading. Measured: 67 candidates averaging
+#:   4.6 HOURS old, reaching 30 hours, fed oldest-first into a cap of 25. The
+#:   cap was spent on coins judged hours earlier. 158 of 168 lab entries were
+#:   bought with no evaluation on disk.
+#: * Bounding `discovered_at` instead looked right and was worse: the labs
+#:   judge at radar admission + 10 minutes, and radar admits a coin 60-76
+#:   MINUTES after discovery. So that window held coins an hour too YOUNG to
+#:   be judged, and MOV-03 declined eight consecutive candidates with zero
+#:   evaluations on disk at their checkpoint.
+#:
+#: On the radar clock the population is small and entirely relevant: 4 admitted
+#: in 20 minutes, all four already deep, ~24 an hour. Far inside the cap, so it
+#: stops binding and oldest-first genuinely means nearest-its-checkpoint-first.
 LOOKBACK = timedelta(minutes=20)
 
 #: Only coins deep enough for a lab to buy. Matches the labs' own floor:
@@ -74,31 +77,31 @@ MIN_LIQUIDITY_USD = 100_000
 
 
 async def candidates(session: AsyncSession, *, now: datetime) -> list[str]:
-    """Recently-seen pump.fun mints deep enough for a lab to buy.
+    """Newly RADAR-ADMITTED mints deep enough for a lab to buy.
 
-    Ordered oldest first, so a coin approaching its checkpoint is evaluated
-    before one that has only just appeared — the cap should be spent on the
-    coins about to be judged, not on the newest arrivals.
+    Keyed on `RadarToken.first_detected_at` because that is what the engine
+    keys on: `_due_candidates` selects radar rows and sets `checkpoint_at =
+    first_detected_at + checkpoint_minutes`. Evidence gathered on any other
+    clock arrives for the wrong coins — see `LOOKBACK`.
 
-    Both bounds are on `LOOKBACK`: the snapshot must be recent (the coin is
-    still trading and still deep) AND the coin must itself be young (it has not
-    already been judged). Dropping the second turns "oldest first" into "coins
-    discovered furthest in the past first", which is the opposite of the
-    intent — see the constant.
+    Ordered oldest first, which on this clock genuinely means nearest its
+    checkpoint: admission + 10 minutes is the moment being prepared for, so the
+    cap is spent on the coins about to be judged.
+
+    Still bounded by `captured_at` as well, so a coin must be currently deep
+    rather than merely admitted at some point — evaluating what nothing can
+    trade would spend the RPC budget on noise.
     """
-    programs = list(settings.SCANNER_WATCH_PROGRAMS)
     rows = await session.execute(
-        select(TokenMarketSnapshot.mint_address,
-               DiscoveredToken.discovered_at)
-        .join(DiscoveredToken,
-              DiscoveredToken.mint_address == TokenMarketSnapshot.mint_address)
-        .where(TokenMarketSnapshot.captured_at >= now - LOOKBACK,
-               DiscoveredToken.discovered_at >= now - LOOKBACK,
-               TokenMarketSnapshot.liquidity_usd >= MIN_LIQUIDITY_USD,
-               DiscoveredToken.source_program.in_(programs))
+        select(RadarToken.mint_address, RadarToken.first_detected_at)
+        .join(TokenMarketSnapshot,
+              TokenMarketSnapshot.mint_address == RadarToken.mint_address)
+        .where(RadarToken.first_detected_at >= now - LOOKBACK,
+               TokenMarketSnapshot.captured_at >= now - LOOKBACK,
+               TokenMarketSnapshot.liquidity_usd >= MIN_LIQUIDITY_USD)
         .distinct()
     )
-    seen = sorted({(r.discovered_at, r.mint_address) for r in rows})
+    seen = sorted({(r.first_detected_at, r.mint_address) for r in rows})
     return [mint for _at, mint in seen]
 
 
