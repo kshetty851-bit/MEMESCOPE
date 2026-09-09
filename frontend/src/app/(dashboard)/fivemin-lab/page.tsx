@@ -9,11 +9,14 @@ import type { FiveMinWallet } from "@/types/fivemin";
 /**
  * THE GRADUATION HOLD LAB.
  *
- * Two wallets buying the pump.fun graduation cohort — the population the
- * five-minute number actually came from — identical in every respect except
- * when they sell: one at five minutes, one at fifteen. They take the same
- * entry object at the same instant and stake the same flat $10, so the gap
- * between their records is the clock and nothing else.
+ * One wallet buying the pump.fun graduation cohort — the population the
+ * five-minute number actually came from — at a flat $2 across fifty
+ * concurrent positions, selling five minutes after entry.
+ *
+ * The fifteen-minute arm was retired on measurement: same median, triple the
+ * share going to zero. THE COST OF THAT is that this lab no longer carries a
+ * control, so it can show what the five-minute hold did without showing
+ * whether the hold was the reason. `GapPanel` is kept for a second arm.
  *
  * The disclosure is rendered FIRST and is not collapsible. The fifteen-minute
  * hold has already measured about -8.5% net per trade on 1,348 real positions,
@@ -102,8 +105,8 @@ export default function FiveMinLabPage() {
     <div className="flex flex-col gap-4 p-4 lg:p-6">
       <Toolbar
         eyebrow="Graduation Hold Lab"
-        title="Buy the graduation. Sell at five minutes, or at fifteen."
-        description="Two $100 wallets, ten trades of $10 each, buying pump.fun graduations two minutes after they complete. Both take the same coin at the same instant, so the only thing that separates their records is the clock. The $100k liquidity floor is execution fidelity, not a signal. Nothing here is real money."
+        title="Buy the graduation. Sell five minutes later."
+        description="One $100 wallet, fifty trades of $2 each, buying pump.fun graduations two minutes after they complete and selling five minutes on. Every loss in this population is total, so the stake is small enough that no single death decides the book. The $100k liquidity floor is execution fidelity, not a signal. Nothing here is real money."
       />
 
       {/* Deliberately above the numbers, and deliberately not collapsible. */}

@@ -1,4 +1,4 @@
-"""The Graduation Hold Lab — buy the graduation cohort, sell at 5 or 15 minutes.
+"""The Graduation Hold Lab — buy the graduation cohort, sell at five minutes.
 
 ## Why this replaces fivemin-2.0.0 after a day
 
@@ -78,25 +78,41 @@ clock. On a lab whose entire question is the clock, that is fatal. $100k is the
 lowest floor that keeps the exit honest, and it still admits 42% of graduates
 (87 of 205) against v2's 11%.
 
-## The pairing, stated honestly
+## Why fifty small bets and not ten larger ones
 
-Both arms read one stream and share ONE entry object by identity, so whenever
-both have capacity they buy the same coin at the same instant. They are not
-guaranteed to take identical trade sets: the five-minute arm returns its
-capital three times faster, so under a burst it can take a coin the fifteen
-holds no room for. At the measured rate — about 52 graduations an hour, 42%
-clearing the floor, so roughly 22 admissions an hour against the fifteen-minute
-arm's capacity of 40 — that should be rare rather than routine. Faster
-redeployment is a real property of the shorter hold and the operator asked for
-it explicitly ("retrade again with the remaining balance"), so it is measured
-rather than suppressed.
+Every loss in this population is TOTAL: the coin dies and the whole stake goes.
+Against that, the only lever a book has is how much rides on each bet. A sweep
+of 48 shape/exit combinations over 465 corrected graduations, judged on the
+figure that matters — the book with its single best trade removed:
+
+    $25 x 4     $1.68
+    $10 x 10   $86.18
+    $5  x 20   $81.01
+    $2  x 50   $93.57      <- least-bad, and this lab's shape
+
+None of them is profitable. That is the finding, and it is why the size was
+cut rather than the strategy declared good.
+
+## Why the fifteen-minute arm is gone
+
+Same 465 graduations. The medians of the two horizons are nearly identical —
+1.0308 at five minutes against 1.0282 at fifteen — but the share going to zero
+TRIPLES, 4.3% to 14.6%. Forty-nine coins alive at five minutes were dead by
+fifteen, and 46.5% were simply worse. The extra ten minutes bought almost no
+upside and a great deal of ruin.
+
+What that costs, said plainly: this lab no longer carries its own control. A
+paired second arm was what distinguished "the horizon is bad" from "the market
+was bad this week", and a single arm cannot make that distinction. The 5-vs-15
+question is settled on 465 coins of mark data; nothing else is.
 
 ## The honest prior
 
-Fifteen minutes has already measured about -8.5% net per trade on 1,348 real
-positions, and the five-minute figure rests on ONE coin of 138 doing 47.97x —
-remove it and +$504.73 becomes +$35.12, median trade 1.037x. Both arms run as
-REFUTATION. What is new is that this time the population is the right one.
+The five-minute figure that started this rests on ONE coin of 138 doing 47.97x
+— remove it and +$504.73 becomes +$35.12, median trade 1.037x. The page's own
++$566 headline turned out to be a corrupt denominator, not a return. This runs
+as REFUTATION: what is new is the population is right, the baseline is checked,
+and the stake is small enough that no single death decides the book.
 """
 
 from __future__ import annotations
@@ -108,7 +124,7 @@ from decimal import Decimal as D
 
 from app.lab.spec import Condition, Exits, Strategy, rules_json
 
-SPEC_VERSION = "fivemin-3.1.0"
+SPEC_VERSION = "fivemin-4.0.0"
 
 #: Draw candidates from the pump.fun graduation cohort, not from radar.
 #: Read by `LabService._due_candidates`; absent means radar, so no other
@@ -121,15 +137,28 @@ STARTING_EQUITY = D("100")
 #: Below this an arm stops opening.
 FAILURE_EQUITY_FLOOR = D("50")
 
-#: THE STAKE, and it never moves. Ten of these fill the book exactly.
-STAKE_USD = D("10")
+#: THE STAKE, and it never moves. Fifty of these fill the book exactly.
+#:
+#: $2 x 50 rather than $10 x 10 on the operator's instruction, after a sweep of
+#: 48 book-shape/exit combinations over 465 corrected graduations. Losses here
+#: are TOTAL — a coin dies and the whole stake goes — so the only lever that
+#: improved the record was cutting the size of each bet. Removing the single
+#: best trade, $25x4 finished at $1.68, $10x10 at $86.18 and $2x50 at $93.57:
+#: still a loss, but the least-bad by a distance.
+STAKE_USD = D("2")
 
 #: Minutes after graduation at which a coin is judged. See the module docstring:
 #: 2 is the earliest point at which most of the cohort can be PRICED at all.
 CHECKPOINT_MINUTES = 2
 
-#: The two horizons under test, in minutes, measured from the checkpoint.
-HOLD_MINUTES = (5, 15)
+#: The hold, in minutes, measured from the checkpoint. ONE arm now.
+#:
+#: The fifteen-minute arm is retired. On the same 465 graduations the medians
+#: were nearly identical (1.0308 against 1.0282) while the share going to zero
+#: TRIPLED, 4.3% to 14.6% — 49 coins alive at five minutes were dead by
+#: fifteen. The extra ten minutes bought almost no upside and a great deal of
+#: ruin, so it is not a horizon worth another book.
+HOLD_MINUTES = (5,)
 
 #: Execution fidelity, not a signal. Below this, 7-8% of sells cannot route.
 LIQUIDITY_FLOOR = D("100000")
@@ -140,9 +169,10 @@ SIZING_SCALES = False
 #: NO WALLET RATCHET.
 CYCLE_ENABLED = False
 
-#: ONE object, shared by both arms by identity so they cannot drift apart.
 #: Liquidity alone: the study bought every graduate, and the two flow features
-#: FLOW uses do not exist five minutes after graduation.
+#: FLOW uses do not exist two minutes after graduation. Kept as a module-level
+#: tuple so a second arm can be added later sharing it BY IDENTITY, which is
+#: what kept the retired pairing honest.
 _EXECUTABLE = (
     Condition(feature="liq", op="gte", value=LIQUIDITY_FLOOR,
               reason="liq_below_100k"),
@@ -161,15 +191,13 @@ def _arm(minutes: int) -> Strategy:
         checkpoint_minutes=CHECKPOINT_MINUTES,
         entry=_EXECUTABLE,
         size_usd=STAKE_USD,
-        max_concurrent=10,
-        max_exposure_usd=STAKE_USD * 10,
+        max_concurrent=50,
+        max_exposure_usd=STAKE_USD * 50,
         # The clock is the ONLY exit, because the clock is the variable. A
         # take-profit or a stop would decide some trades before the horizon
         # did, and those trades would measure that rule instead.
         exits=Exits(take_profit=None, time_exit_hours=minutes / 60),
-        evidence=("FIFTEEN_MIN_MEASURED_-8.5pct_NET_ON_1348_REAL_POSITIONS"
-                  if minutes == 15
-                  else "ONE_47x_COIN_IN_A_GRADUATION_COHORT_OF_138"),
+        evidence="ONE_47x_COIN_IN_A_GRADUATION_COHORT_OF_138",
         overfit_risk="HIGH",
     )
 
@@ -205,15 +233,12 @@ SPEC_HASH = hashlib.sha256(_canonical().encode()).hexdigest()
 assert CANDIDATE_SOURCE == "graduations", (
     "this lab exists to trade the graduation cohort; radar is what it replaced"
 )
-assert len(STRATEGIES) == 2, "two arms: one per horizon"
-assert len({s.exits.time_exit_hours for s in STRATEGIES}) == 2, (
-    "the two arms must differ in the clock, or there is nothing to compare"
-)
+assert len(STRATEGIES) == 1, "one arm: five minutes, by instruction"
 assert all(s.entry is _EXECUTABLE for s in STRATEGIES), (
-    "both arms share ONE entry object; a copy could drift and break the pairing"
+    "the entry is shared BY IDENTITY, so a second arm cannot drift from it"
 )
 assert all(s.checkpoint_minutes == CHECKPOINT_MINUTES for s in STRATEGIES), (
-    "both arms must enter at the same instant or they are not comparable"
+    "every arm must enter at the same instant or arms are not comparable"
 )
 assert all(s.exits.take_profit is None and s.exits.stop_loss is None
            for s in STRATEGIES), (
@@ -221,7 +246,10 @@ assert all(s.exits.take_profit is None and s.exits.stop_loss is None
 )
 assert all(s.size_usd * s.max_concurrent == s.max_exposure_usd
            for s in STRATEGIES), (
-    "ten trades of the stake must fill the book exactly"
+    "the concurrent trades must fill the book exactly"
+)
+assert all(s.max_exposure_usd == STARTING_EQUITY for s in STRATEGIES), (
+    "the book is fully deployable, or the stake sizing is not what it claims"
 )
 assert SIZING_SCALES is False and CYCLE_ENABLED is False, (
     "flat stake, no ratchet — both by instruction"

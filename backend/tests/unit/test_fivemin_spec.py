@@ -27,9 +27,9 @@ class TestItCannotHaltAnotherTournament:
 
     def test_the_rules_change_bumped_the_version(self) -> None:
         """Each predecessor was a live tournament with different rules —
-        3.0.0 entered at +5, which the operator never asked for. Reusing a
-        version would attach this book to that record."""
-        assert fivemin.SPEC_VERSION == "fivemin-3.1.0"
+        3.1.0 ran $10 x 10 across two horizons. Reusing a version would attach
+        this book to that record."""
+        assert fivemin.SPEC_VERSION == "fivemin-4.0.0"
 
 
 class TestItTradesTheGraduationCohort:
@@ -86,24 +86,25 @@ class TestTheLiquidityFloorIsExecutionNotSignal:
             assert s.entry[0].feature == "liq"
 
 
-class TestTheTwoArmsDifferOnlyInTheClock:
-    def test_both_horizons_are_present(self) -> None:
+class TestOneArmAtFiveMinutes:
+    def test_only_the_five_minute_horizon_remains(self) -> None:
+        """Fifteen was retired on measurement, not preference: same medians
+        (1.0308 vs 1.0282) but the share going to zero tripled, 4.3% to 14.6%."""
         held = sorted(round(s.exits.time_exit_hours * 60)
                       for s in fivemin.STRATEGIES)
-        assert held == [5, 15]
+        assert held == [5]
+        assert fivemin.HOLD_MINUTES == (5,)
 
-    def test_they_share_ONE_entry_object_not_a_copy(self) -> None:
-        first = fivemin.STRATEGIES[0].entry
-        assert all(s.entry is first for s in fivemin.STRATEGIES)
-
-    def test_they_enter_at_the_same_instant(self) -> None:
-        assert {s.checkpoint_minutes for s in fivemin.STRATEGIES} == {2}
+    def test_the_entry_is_shared_by_identity(self) -> None:
+        """So a second arm added later cannot silently drift from this one."""
+        assert all(s.entry is fivemin._EXECUTABLE for s in fivemin.STRATEGIES)
 
     def test_entry_is_as_early_as_the_cohort_can_be_priced(self) -> None:
         """2, not 5. The operator asked to buy within seconds; 2 minutes is
         where 75% of graduates first have BOTH a price and a liquidity (23% at
         the stamp itself), and the measured median drift to +3 is +0.06%."""
         assert fivemin.CHECKPOINT_MINUTES == 2
+        assert {s.checkpoint_minutes for s in fivemin.STRATEGIES} == {2}
 
     def test_the_clock_is_the_only_exit(self) -> None:
         for s in fivemin.STRATEGIES:
@@ -113,11 +114,15 @@ class TestTheTwoArmsDifferOnlyInTheClock:
 
 
 class TestTheOperatorsRuleSet:
-    def test_ten_trades_of_ten_dollars_fill_the_book(self) -> None:
+    def test_fifty_trades_of_two_dollars_fill_the_book(self) -> None:
+        """$2 x 50, chosen on a sweep of 48 combinations: every loss here is
+        TOTAL, so bet size is the only lever, and minus its best trade $2x50
+        finished at $93.57 against $86.18 for $10x10 and $1.68 for $25x4."""
         for s in fivemin.STRATEGIES:
-            assert s.size_usd == Decimal("10")
-            assert s.max_concurrent == 10
+            assert s.size_usd == Decimal("2")
+            assert s.max_concurrent == 50
             assert s.size_usd * s.max_concurrent == s.max_exposure_usd
+            assert s.max_exposure_usd == fivemin.STARTING_EQUITY
 
     def test_each_arm_starts_with_one_hundred(self) -> None:
         assert fivemin.STARTING_EQUITY == Decimal("100")

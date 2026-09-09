@@ -23,23 +23,21 @@ from app.lab.api import build_trades
 router = APIRouter(prefix="/fivemin", tags=["fivemin"])
 
 DISCLOSURE = (
-    "Run as refutation, not expectation. This lab buys the pump.fun graduation "
+    "Run as refutation, not expectation. This buys the pump.fun graduation "
     "cohort two minutes after a coin completes — two minutes because a lab "
     "cannot buy what it cannot price, and only 23% of graduates have a price "
-    "and a liquidity at their graduation stamp against 75% by +2. The delay "
-    "was measured, not assumed: across 104 graduates with a new price print "
-    "between +1 and +3 minutes the median move was +0.06%, so there is no "
-    "systematic run-up being arrived late for. The only entry condition is "
-    "$100,000 of liquidity, and that is "
-    "execution fidelity rather than a signal: below it, 7-8% of sells cannot "
-    "route at all, and an exit that cannot happen on time would measure the "
-    "delay instead of the clock. The FIFTEEN-minute hold has already measured "
-    "about -8.5% net per trade on 1,348 real positions. The FIVE-minute figure "
-    "that motivated this (+$504.73 on a $100 book) rested on ONE coin of 138 "
-    "doing 47.97x: remove it and the same cohort returns +$35.12, median trade "
-    "1.037x. What is new is that both arms now trade the population the number "
-    "actually came from, take the same entry at the same instant, and differ "
-    "only in the clock. No wallet ratchet, and the stake never scales."
+    "and a liquidity at their graduation stamp against 75% by +2. The only "
+    "entry condition is $100,000 of liquidity, and that is execution fidelity "
+    "rather than a signal: below it 7-8% of sells cannot route, and an exit "
+    "that cannot happen on time would measure the delay instead of the clock. "
+    "The stake is $2 across fifty concurrent positions because every loss in "
+    "this population is TOTAL, so bet size is the only lever that helped: over "
+    "465 corrected graduations and 48 shape/exit combinations, NONE was "
+    "profitable once its single best trade was removed, and $2 x 50 was merely "
+    "the least-bad at $93.57 from $100. The fifteen-minute arm was retired "
+    "because its median was the same while its share of total losses tripled. "
+    "This lab therefore no longer carries a control: it can show what the "
+    "five-minute hold did, not whether the five-minute hold was the reason."
 )
 
 
