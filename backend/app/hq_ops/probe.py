@@ -331,6 +331,7 @@ LAB_REGISTRIES: tuple[tuple[str, str, str], ...] = (
     ("Social", "app.social.spec", "FEATURE_SOCIAL_LAB_ENABLED"),
     ("Control CPY-02", "app.copycontrol.spec", "FEATURE_COPYCONTROL_ENABLED"),
     ("Movers", "app.movers.spec", "FEATURE_MOVERS_LAB_ENABLED"),
+    ("Matrix", "app.matrix.spec", "FEATURE_MATRIX_LAB_ENABLED"),
     ("KOL", "app.kol.spec", "FEATURE_KOL_LAB_ENABLED"),
 )
 

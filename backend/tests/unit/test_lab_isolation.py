@@ -19,6 +19,12 @@ FORBIDDEN_PREFIXES = ("app.paper", "app.karthik", "app.real_wallet",
                       "app.models.real_wallet", "app.universe")
 FORBIDDEN_NAMES = ("PaperWallet", "PaperPosition", "KarthikWallet",
                    "KarthikPosition", "RealWallet")
+#: Constants the Lab shares with the universe wallet, so "on a peg" and
+#: "effectively an index" have one definition on this platform. Allowed by
+#: exact name, never by prefix, and `test_the_allowed_modules_stay_pure` holds
+#: each one to constants: the day one of them imports a service, it is
+#: money-moving code again and this list is what fails.
+ALLOWED_PURE = ("app.universe.rules",)
 
 
 def _sources():
@@ -34,12 +40,30 @@ def test_no_money_moving_imports(path: Path):
     tree = ast.parse(path.read_text())
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and node.module:
+            # `from app.universe import rules` names the module in the alias;
+            # `from app.universe.rules import X` names it in `module`.
+            imported = {f"{node.module}.{a.name}" for a in node.names}
+            if node.module in ALLOWED_PURE or imported <= set(ALLOWED_PURE):
+                continue
             assert not node.module.startswith(FORBIDDEN_PREFIXES), \
                 f"{path.name} imports {node.module}"
         if isinstance(node, ast.Import):
             for alias in node.names:
                 assert not alias.name.startswith(FORBIDDEN_PREFIXES), \
                     f"{path.name} imports {alias.name}"
+
+
+@pytest.mark.parametrize("module", ALLOWED_PURE)
+def test_the_allowed_modules_stay_pure(module: str):
+    """An allowed module may import nothing from `app` at all."""
+    path = LAB.parent.joinpath(*module.split(".")[1:]).with_suffix(".py")
+    tree = ast.parse(path.read_text())
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            assert not node.module.startswith("app"), f"{module} imports {node.module}"
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                assert not alias.name.startswith("app"), f"{module} imports {alias.name}"
 
 
 @pytest.mark.parametrize("path", _sources(), ids=lambda p: p.name)

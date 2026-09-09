@@ -40,22 +40,30 @@ def test_a_fresh_version_starts_a_fresh_tournament() -> None:
     the old tournament keeps its record and this one starts clean, rather than
     the stored hash being overwritten to make an edited experiment look
     continuous."""
-    assert spec.SPEC_VERSION == "movers-3.0.0"
+    assert spec.SPEC_VERSION == "movers-6.0.0"
     assert len(spec.SPEC_VERSION) <= 16
 
 
-def test_all_three_arms_size_and_exit_identically() -> None:
+def test_all_three_arms_size_identically_and_the_pair_shares_its_clock() -> None:
     assert len({s.size_usd for s in spec.STRATEGIES}) == 1
     assert len({s.max_concurrent for s in spec.STRATEGIES}) == 1
-    assert len({s.exits.time_exit_hours for s in spec.STRATEGIES}) == 1
     assert all(s.exits.take_profit is None for s in spec.STRATEGIES)
+    # The security pair holds for the same thirty minutes; MOV-05 has no clock
+    # at all, which is the one thing that separates it from the control.
+    assert (spec.BY_ID["MOV-03"].exits.time_exit_hours
+            == spec.BY_ID["MOV-04"].exits.time_exit_hours
+            == spec.TIME_EXIT_HOURS)
+    assert spec.BY_ID["MOV-05"].exits.time_exit_hours is None
 
 
-def test_the_board_is_the_pair_and_nothing_else() -> None:
+def test_the_board_is_the_pair_and_the_no_clock_arm() -> None:
     """MOV-02 held rules identical to the control and was removed on
-    instruction. A third line on a two-arm board invites reading whichever is
-    ahead as a result."""
-    assert set(spec.BY_ID) == {"MOV-03", "MOV-04"}
+    instruction: a line that differs in nothing invites reading whichever is
+    ahead as a result. MOV-05 was added on instruction and is the opposite
+    case — it differs from the control in exactly one thing, the clock — so
+    it is a second comparison rather than a third horse."""
+    assert set(spec.BY_ID) == {"MOV-03", "MOV-04", "MOV-05"}
+    assert spec.BY_ID["MOV-05"].entry == spec.BY_ID["MOV-04"].entry
 
 
 # --- the gate the LAB applies must be the gate the REAL WALLET applies ------

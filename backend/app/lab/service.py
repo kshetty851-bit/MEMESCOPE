@@ -93,6 +93,12 @@ def live_print(rows, now: datetime):
 #: +5.4%. Import site kept so existing callers and tests are unchanged.
 DEATH_CONFIRMATION_WINDOW = marks.DEATH_CONFIRMATION_WINDOW
 
+#: How recent a sampled token's newest print must be for it to be drawn. One
+#: beat plus slack: the deep-AMM pool at any moment is the tokens being polled
+#: every minute, and this is what keeps it to those tokens rather than every
+#: token that was ever polled once since the tournament started.
+SAMPLE_FRESHNESS = timedelta(minutes=2)
+
 
 class LabService:
     """The tournament engine, over whichever frozen registry it is handed.
@@ -577,6 +583,16 @@ class LabService:
                     *peg_clauses,
                     TokenMarketSnapshot.captured_at <= cutoff,
                     TokenMarketSnapshot.captured_at >= floor,
+                    # Only tokens printed within a beat of the cutoff. The
+                    # sample's "event" is its own newest print, and the
+                    # position opens AT that print plus the checkpoint: a
+                    # token nobody has polled for three hours would open
+                    # three hours in the past, and every clock exit would
+                    # fire on the next settle against a three-hour move
+                    # dressed as a five-minute one. Radar never has this
+                    # problem because admission is a real moment; a rolling
+                    # sample has to manufacture one, and this is where.
+                    TokenMarketSnapshot.captured_at >= cutoff - SAMPLE_FRESHNESS,
                     not_judged(DiscoveredToken.mint_address),
                 )
                 .order_by(TokenMarketSnapshot.token_id,
