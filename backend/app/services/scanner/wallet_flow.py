@@ -57,6 +57,12 @@ class _MintState:
     seen: deque[str] = field(default_factory=deque)
     seen_set: set[str] = field(default_factory=set)
     overflowed: bool = False
+    #: The first distinct BUYERS of this mint, in the order first seen, with
+    #: the moment each bought. Capped and never evicted from the front — the
+    #: event ring drops its oldest entries as a hot mint trades, which is
+    #: exactly the wrong end to lose when the question is who was early.
+    early: list[tuple[str, datetime]] = field(default_factory=list)
+    early_set: set[str] = field(default_factory=set)
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,8 +112,13 @@ class WalletFlowTracker:
         capacity: int = 256,
         max_mints: int = 4000,
         ttl_seconds: float = 3600.0,
+        early_buyers: int = 20,
     ) -> None:
         self._capacity = capacity
+        #: How many distinct first BUYERS to remember per mint. Being early is
+        #: the signal, so the tail is uninformative as well as expensive, and
+        #: the capture stops dead once this many are held.
+        self._early_cap = early_buyers
         self._max_mints = max_mints
         self._ttl = timedelta(seconds=ttl_seconds)
         # OrderedDict, not dict: eviction is O(1) via popitem(last=False).
@@ -143,6 +154,15 @@ class WalletFlowTracker:
             while len(state.seen) > self._capacity:
                 state.seen_set.discard(state.seen.popleft())
 
+        # EARLY BUYERS, captured before the ring can lose them. Buys only: a
+        # seller is not a discoverer, and mixing the two would rank wallets
+        # for being present rather than for being right.
+        if (event.side == Side.BUY
+                and len(state.early) < self._early_cap
+                and event.user not in state.early_set):
+            state.early.append((event.user, event.observed_at))
+            state.early_set.add(event.user)
+
         state.events.append((event.observed_at, event.user, event.side, max(0, event.amount)))
         # Out-of-order arrivals are normal on a log stream; keeping the ring
         # ordered is what makes window filtering correct rather than merely
@@ -158,6 +178,17 @@ class WalletFlowTracker:
         state.last_seen = max(state.last_seen, event.observed_at)
         self.events_applied += 1
         return True
+
+    def early_buyers(self, key: str) -> list[tuple[str, datetime]]:
+        """The first distinct buyers of `key`, oldest first.
+
+        Empty when the mint is unknown or was evicted — which is a real
+        outcome, not an error: a mint the scanner stopped seeing an hour ago
+        has no early buyers to offer, and the caller must not read that as
+        "this token had none".
+        """
+        state = self._mints.get(key)
+        return list(state.early) if state is not None else []
 
     def _enforce_mint_cap(self, now: datetime) -> None:
         """Drop the least-recently-traded mints, one cheap pop at a time.

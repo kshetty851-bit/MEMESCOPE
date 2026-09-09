@@ -334,6 +334,19 @@ class TokenScanner:
                     logger.info(
                         "wallet_flow_flushed", rows=written, **self._flow.metrics()
                     )
+                # Early buyers of coins that reached real liquidity. Runs
+                # AFTER the aggregate flush and in its own try, because this
+                # is a research feed and the flow snapshots are not: a failure
+                # here must not cost the scanner its primary write.
+                if settings.FEATURE_EARLY_BUYERS_ENABLED:
+                    try:
+                        early = await flow_persistence.flush_early_buyers(
+                            self._flow, now=now
+                        )
+                        if early:
+                            logger.info("early_buyers_flushed", rows=early)
+                    except Exception:
+                        logger.exception("early_buyers_flush_failed")
             except Exception:
                 self._flow_decode_failures += 1
                 logger.exception("wallet_flow_flush_failed")

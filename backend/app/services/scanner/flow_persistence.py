@@ -18,9 +18,11 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.core.logging import get_logger
 from app.db.session import SessionFactory
+from app.models.early_buyer import TokenEarlyBuyer
 from app.models.market import TokenMarketSnapshot
 from app.models.radar import RadarToken
 from app.models.research_data import NurseryAdmission, WalletFlowSnapshot
@@ -32,6 +34,13 @@ logger = get_logger(__name__)
 #: deliberately not stored: two windows bound the row width and the 15m answer
 #: is reconstructable from consecutive 5m rows at this flush cadence.
 STORED = {"5m": "w5m", "1h": "w1h"}
+
+#: Liquidity a mint must have reached before its early buyers are worth disk.
+#: The capture is free and happens for everything the scanner sees; the WRITE
+#: is what costs, so it is spent only on coins that got somewhere. At $100k,
+#: roughly 690 mints a day qualify — about 14,000 rows — against the tens of
+#: millions of trades a day the scanner would otherwise be asked to remember.
+EARLY_BUYER_MIN_LIQUIDITY_USD = 100_000
 
 
 def _dec(value: float | None) -> Decimal | None:
@@ -127,3 +136,59 @@ async def flush(tracker: WalletFlowTracker, *, now: datetime | None = None) -> i
             session.add_all(rows)
             await session.commit()
     return len(rows)
+
+
+async def flush_early_buyers(
+    tracker: WalletFlowTracker, *, now: datetime | None = None
+) -> int:
+    """Persist the first buyers of mints that reached real liquidity.
+
+    Idempotent by construction: one row per (mint, wallet), conflicts ignored.
+    This runs on every flush over a mint that stays qualified, so anything
+    less would write the same wallet repeatedly and inflate every count later
+    taken over the table.
+
+    Silence here is expected and is not failure. A mint qualifies long after
+    its first trades, and the tracker evicts a mint an hour after it stops
+    trading — so a coin that took two hours to reach $100k has no early buyers
+    left to write. That is the honest outcome: we did not see them in time,
+    and inventing a later buyer as an early one would poison the ranking this
+    table exists to support.
+    """
+    moment = now or datetime.now(UTC)
+    async with SessionFactory() as session:
+        qualified = set(
+            (
+                await session.execute(
+                    select(TokenMarketSnapshot.mint_address)
+                    .distinct()
+                    .where(
+                        TokenMarketSnapshot.liquidity_usd
+                        >= EARLY_BUYER_MIN_LIQUIDITY_USD,
+                        TokenMarketSnapshot.captured_at >= moment - timedelta(hours=1),
+                    )
+                )
+            ).scalars()
+        )
+        if not qualified:
+            return 0
+
+        rows: list[dict] = []
+        for mint in qualified:
+            for rank, (wallet, bought_at) in enumerate(tracker.early_buyers(mint), 1):
+                rows.append({
+                    "mint_address": mint,
+                    "wallet_address": wallet,
+                    "bought_at": bought_at,
+                    "buy_rank": rank,
+                })
+        if not rows:
+            return 0
+
+        await session.execute(
+            pg_insert(TokenEarlyBuyer)
+            .values(rows)
+            .on_conflict_do_nothing(constraint="uq_early_buyer_once")
+        )
+        await session.commit()
+        return len(rows)

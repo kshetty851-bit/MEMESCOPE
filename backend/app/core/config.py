@@ -591,6 +591,9 @@ class Settings(BaseSettings):
     FEATURE_SOCIAL_LAB_ENABLED: bool = False
     #: The Movers Lab: turnover as a pre-move filter, against its control.
     FEATURE_MOVERS_LAB_ENABLED: bool = False
+    #: Persist the first buyers of coins that reach real liquidity. The raw
+    #: material for ranking wallets on what they DO; costs ~14k rows/day.
+    FEATURE_EARLY_BUYERS_ENABLED: bool = False
     #: The graduation collector: stamps pump.fun graduations as they happen and
     #: follows each coin for an hour. Read-only research; it trades nothing.
     FEATURE_PUMPFUN_GRADUATION_ENABLED: bool = False

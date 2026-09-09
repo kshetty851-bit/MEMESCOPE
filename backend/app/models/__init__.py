@@ -5,6 +5,7 @@ model that is never imported is invisible to it.
 """
 
 from app.db.base import Base
+from app.models.early_buyer import TokenEarlyBuyer
 from app.models.alpha_session import AlphaSession
 from app.models.curve import TokenCurveSnapshot  # noqa: F401
 from app.models.basechain import EvmLaunch  # noqa: F401
@@ -104,6 +105,7 @@ from app.models.token import DiscoveredToken, MetadataStatus
 from app.models.user import User, UserRole
 
 __all__ = [
+    "TokenEarlyBuyer",
     "AlphaSession",
     "Base",
     "DiscoveredToken",
