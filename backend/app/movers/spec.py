@@ -244,6 +244,28 @@ def _canonical() -> str:
 
 SPEC_HASH = hashlib.sha256(_canonical().encode()).hexdigest()
 
+#: The hash this VERSION is pinned to, asserted at import.
+#:
+#: Three times on 2026-09-09 a live tournament was halted by `spec_hash_drift`
+#: because STRATEGIES was edited without SPEC_VERSION moving — once removing an
+#: arm, once adding the security pair, once adding a wallet back. Each time the
+#: guard did its job and each time the lab stopped SILENTLY, and was only
+#: noticed when somebody asked why nothing was trading.
+#:
+#: The engine's guard fires at runtime, in production, hours later. This one
+#: fires at import, on the machine of whoever made the edit: change the arms
+#: and this assertion fails until the hash is updated, and updating it is the
+#: moment to ask whether SPEC_VERSION should move too.
+#:
+#: ADDING an arm is not safer than removing one. Both change the hash.
+PINNED_SPEC_HASH = "b14810af097924400307919359aee9a82e4ebd8e648fc40f76e64f75c920711b"
+
+assert SPEC_HASH == PINNED_SPEC_HASH, (
+    f"STRATEGIES changed: hash is {SPEC_HASH[:16]}, pinned to "
+    f"{PINNED_SPEC_HASH[:16]}. If the arms really changed, BUMP SPEC_VERSION "
+    f"(a live tournament halts otherwise) and then update PINNED_SPEC_HASH."
+)
+
 assert len(STRATEGIES) == 2, "the gated arm and its control, nothing else"
 assert "MOV-02" not in BY_ID, (
     "MOV-02 carried rules identical to the control and could tell you nothing "
