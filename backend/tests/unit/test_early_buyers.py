@@ -97,3 +97,26 @@ def test_capture_is_bounded_per_mint_regardless_of_traffic() -> None:
                 amount=1, observed_at=NOW + timedelta(seconds=i)))
     for m in range(3):
         assert len(tracker.early_buyers(f"mint{m}")) == 4
+
+
+# --- the persistence guards -------------------------------------------------
+# The capture is only honest for coins the scanner watched from launch. These
+# two rules are what make that explicit rather than a happy accident of how
+# fast the mint cap turns over.
+
+def test_the_age_guard_is_tight_enough_to_mean_early() -> None:
+    """A buy half an hour after discovery is a stretch; a buy a day later is
+    a different wallet population entirely, and ranking on it would measure
+    who was around when a process restarted."""
+    from app.services.scanner.flow_persistence import EARLY_BUYER_MAX_AGE
+
+    assert EARLY_BUYER_MAX_AGE <= timedelta(hours=1)
+    assert EARLY_BUYER_MAX_AGE >= timedelta(minutes=5)
+
+
+def test_only_liquid_coins_are_written() -> None:
+    """The write is what costs; the capture is free. Spending disk on coins
+    that went nowhere is how a research table becomes the disk problem."""
+    from app.services.scanner.flow_persistence import EARLY_BUYER_MIN_LIQUIDITY_USD
+
+    assert EARLY_BUYER_MIN_LIQUIDITY_USD >= 50_000

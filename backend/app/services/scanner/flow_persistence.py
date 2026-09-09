@@ -23,6 +23,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.core.logging import get_logger
 from app.db.session import SessionFactory
 from app.models.early_buyer import TokenEarlyBuyer
+from app.models.token import DiscoveredToken
 from app.models.market import TokenMarketSnapshot
 from app.models.radar import RadarToken
 from app.models.research_data import NurseryAdmission, WalletFlowSnapshot
@@ -41,6 +42,18 @@ STORED = {"5m": "w5m", "1h": "w1h"}
 #: roughly 690 mints a day qualify — about 14,000 rows — against the tens of
 #: millions of trades a day the scanner would otherwise be asked to remember.
 EARLY_BUYER_MIN_LIQUIDITY_USD = 100_000
+
+#: How long after a coin's discovery a buy may be and still count as EARLY.
+#:
+#: Without this the capture quietly lies. The tracker holds "the first buyers I
+#: have seen", which equals "the first buyers" only for coins the scanner
+#: watched from launch. A coin created last week and still trading gets its
+#: mid-life buyers recorded as discoverers, and every wallet ranking built on
+#: that is measuring who happened to be around when a process restarted.
+#:
+#: Today the mint cap evicts old coins fast enough to mostly hide this, which
+#: is protection by accident. This makes it a rule.
+EARLY_BUYER_MAX_AGE = timedelta(minutes=30)
 
 
 def _dec(value: float | None) -> Decimal | None:
@@ -173,9 +186,39 @@ async def flush_early_buyers(
         if not qualified:
             return 0
 
+        # Discovery times for the guard above, and pool addresses because the
+        # scanner keys PumpSwap coins by POOL — pump.fun names the mint in its
+        # log and PumpSwap does not. Looking up only by mint silently lost
+        # every pool-keyed coin: 10 of 60 in the first window measured.
+        meta = (await session.execute(
+            select(DiscoveredToken.mint_address, DiscoveredToken.discovered_at)
+            .where(DiscoveredToken.mint_address.in_(qualified))
+        )).all()
+        discovered = {m: d for m, d in meta}
+
+        pools = (await session.execute(
+            select(TokenMarketSnapshot.mint_address,
+                   TokenMarketSnapshot.pool_address)
+            .distinct()
+            .where(TokenMarketSnapshot.mint_address.in_(qualified),
+                   TokenMarketSnapshot.pool_address.is_not(None))
+        )).all()
+        pool_of: dict[str, str] = {m: p for m, p in pools}
+
         rows: list[dict] = []
         for mint in qualified:
-            for rank, (wallet, bought_at) in enumerate(tracker.early_buyers(mint), 1):
+            born = discovered.get(mint)
+            if born is None:
+                continue
+            seen = tracker.early_buyers(mint)
+            if not seen and mint in pool_of:
+                seen = tracker.early_buyers(pool_of[mint])
+            for rank, (wallet, bought_at) in enumerate(seen, 1):
+                # The guard: a buy long after discovery is not an early buy,
+                # whatever position it holds in what this process happened to
+                # observe.
+                if bought_at - born > EARLY_BUYER_MAX_AGE:
+                    continue
                 rows.append({
                     "mint_address": mint,
                     "wallet_address": wallet,
