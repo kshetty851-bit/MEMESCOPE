@@ -41,9 +41,11 @@ out what a rule can actually keep.
 
 ## The rules, and why each is what it is
 
-* **$10 x 10, flat.** Never scales with the balance. When size follows equity
-  the result confounds the entry rule with the sizing rule, and V6 could not
-  separate them afterwards.
+* **A tenth of the wallet, ten positions.** $10 each at $100, $20 at $200,
+  $30 at $300, capped at $100 once the wallet reaches $1,000. BOTH ARMS scale
+  identically, which is the part that matters: sizing that differed between
+  them would confound the entry rule with the stake, which is what left V6
+  unable to separate the two afterwards. Scaling in step confounds nothing.
 * **Liquidity >= $100k.** Measured from 142,479 Jupiter quotes, a round trip
   costs ~0.78% at that depth and is untradeable below $25k. Note this cuts
   against the signal: movers had LOWER median liquidity, so the floor is
@@ -83,6 +85,21 @@ FAILURE_EQUITY_FLOOR = D("50")
 
 SIZE_USD = D("10")
 MAX_CONCURRENT = 10
+
+#: Stake a fixed FRACTION of the wallet rather than a flat amount: $10 a
+#: position at $100, $20 at $200, $30 at $300, capped at $100 once the wallet
+#: reaches $1,000. Ten positions, each a tenth of the balance.
+#:
+#: Not the default ladder, which doubles at powers of two and would stake $20
+#: on that same $300 wallet. Straight proportion was the instruction and it is
+#: also the gentler rule — the ladder takes its largest step exactly when one
+#: good mark could have caused the crossing.
+#:
+#: BOTH ARMS SCALE IDENTICALLY, which is what keeps the pair readable. Sizing
+#: that differed between them would confound the entry rule with the stake and
+#: leave the result unattributable to either, which is what happened to V6.
+SIZING_MODE = "linear"
+SIZING_CAP_MULTIPLE = 10
 
 #: Hold, in hours. 30 minutes — see the docstring.
 TIME_EXIT_HOURS = 0.5

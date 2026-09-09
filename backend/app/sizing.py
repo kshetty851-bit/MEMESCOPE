@@ -92,3 +92,33 @@ def scaled(amount: Decimal, multiplier: Decimal, *, cap: Decimal | None = None) 
     """
     grown = amount * multiplier
     return min(grown, cap) if cap is not None else grown
+
+
+def linear_multiplier(
+    equity: Decimal | None, *, base: Decimal, cap_multiple: Decimal
+) -> Decimal:
+    """Stake a fixed FRACTION of the wallet, capped.
+
+    The rule as given: a $100 wallet stakes $10 a position, a $200 wallet $20,
+    a $300 wallet $30, and the stake stops growing at $100 once the wallet
+    reaches $1,000. That is simply "one tenth of the balance, capped" — so the
+    multiplier is the ratio of equity to the starting balance, bounded above.
+
+    DIFFERENT FROM `growth_multiplier`, and deliberately so. The doubling
+    ladder jumps 1x -> 2x -> 4x at powers of two, so a $300 wallet still
+    stakes $20 under it; here it stakes $30. Straight proportion is what was
+    asked for and it is also the gentler rule — the ladder doubles the stake
+    the instant equity crosses a threshold, which is the largest step change
+    an account takes, and it takes it at exactly the moment a single good mark
+    could have caused the crossing.
+
+    IT SCALES DOWN AS WELL AS UP, for the reason the module docstring gives:
+    a stake that only ratchets up keeps betting a doubled size out of a pot
+    that is no longer doubled. Proportion of the CURRENT balance is the whole
+    idea, and it is symmetric by construction.
+    """
+    if equity is None or base <= 0:
+        return Decimal(1)
+    if equity <= 0:
+        return Decimal(0)
+    return min(equity / base, cap_multiple)

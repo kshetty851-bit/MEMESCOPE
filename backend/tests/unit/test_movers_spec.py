@@ -111,3 +111,24 @@ def test_the_version_is_short_enough_for_the_column() -> None:
     """`lab_tournaments.spec_version` is String(16). A longer name is rejected
     at activation, which is a runtime failure for a naming decision."""
     assert len(spec.SPEC_VERSION) <= 16
+
+
+def test_the_stake_is_a_tenth_of_the_wallet_capped_at_a_hundred() -> None:
+    """The rule as given: $10 at $100, $20 at $200, $30 at $300, and no more
+    than $100 once the wallet reaches $1,000."""
+    from app.sizing import linear_multiplier
+
+    assert spec.SIZING_MODE == "linear"
+    cap = D(spec.SIZING_CAP_MULTIPLE)
+    for balance, expected in (("100", "10"), ("200", "20"), ("300", "30"),
+                              ("1000", "100"), ("5000", "100")):
+        m = linear_multiplier(D(balance), base=spec.STARTING_EQUITY,
+                              cap_multiple=cap)
+        assert spec.SIZE_USD * m == D(expected), balance
+
+
+def test_both_arms_scale_identically() -> None:
+    """Sizing that differed between the arms would confound the entry rule
+    with the stake and leave the result unattributable to either."""
+    assert len({s.size_usd for s in spec.STRATEGIES}) == 1
+    assert len({s.max_concurrent for s in spec.STRATEGIES}) == 1

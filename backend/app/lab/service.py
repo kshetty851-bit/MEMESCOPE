@@ -640,7 +640,17 @@ class LabService:
         # double at 2x equity runs two of them at once and makes a result
         # unattributable to either — the same argument the Compound spec makes
         # for refusing a per-position take-profit beside a wallet target.
-        if getattr(self._spec, "SIZING_SCALES", True):
+        # Three modes, and a registry says which. "linear" stakes a fixed
+        # FRACTION of the wallet — $10 at $100, $20 at $200, $30 at $300,
+        # capped — where the default ladder jumps 1x/2x/4x at powers of two
+        # and would stake $20 on that same $300 wallet.
+        mode = getattr(self._spec, "SIZING_MODE", None)
+        if mode == "linear":
+            multiplier = sizing.linear_multiplier(
+                await self.equity(row), base=row.starting_equity,
+                cap_multiple=Decimal(getattr(self._spec, "SIZING_CAP_MULTIPLE", 10)),
+            )
+        elif getattr(self._spec, "SIZING_SCALES", True):
             multiplier = sizing.growth_multiplier(
                 await self.equity(row), base=row.starting_equity
             )

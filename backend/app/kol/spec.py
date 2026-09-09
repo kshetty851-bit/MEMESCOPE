@@ -1,6 +1,7 @@
 """KOL — do the wallets that were early into winners keep being early?
 
-Two $100 wallets, $10 a position, ten open, held 30 minutes. They differ in
+Two $100 wallets, a tenth of the balance per position and ten open, held
+30 minutes. They differ in
 exactly ONE condition: KOL-01 requires that a followed wallet was among this
 coin's first buyers, KOL-02 does not.
 
@@ -74,6 +75,21 @@ FAILURE_EQUITY_FLOOR = D("50")
 
 SIZE_USD = D("10")
 MAX_CONCURRENT = 10
+
+#: Stake a fixed FRACTION of the wallet rather than a flat amount: $10 a
+#: position at $100, $20 at $200, $30 at $300, capped at $100 once the wallet
+#: reaches $1,000. Ten positions, each a tenth of the balance.
+#:
+#: Not the default ladder, which doubles at powers of two and would stake $20
+#: on that same $300 wallet. Straight proportion was the instruction and it is
+#: also the gentler rule — the ladder takes its largest step exactly when one
+#: good mark could have caused the crossing.
+#:
+#: BOTH ARMS SCALE IDENTICALLY, which is what keeps the pair readable. Sizing
+#: that differed between them would confound the entry rule with the stake and
+#: leave the result unattributable to either, which is what happened to V6.
+SIZING_MODE = "linear"
+SIZING_CAP_MULTIPLE = 10
 
 #: Same hold as the Movers Lab, for the same measured reason: the median time
 #: from a fillable entry to a 2x was 19.7 minutes.
