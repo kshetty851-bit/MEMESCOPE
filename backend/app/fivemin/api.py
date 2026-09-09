@@ -53,13 +53,20 @@ async def board(session: DbSession) -> dict[str, Any]:
         axis=lambda s_: {
             "hold_minutes": (round((s_.exits.time_exit_hours or 0) * 60)
                              if s_ else None),
-            "shape": (f"${int(s_.size_usd)} x {s_.max_concurrent}"
-                      if s_ else None),
+            # The label carries POPULATION as well as shape now, because two
+            # arms share a shape and only the population separates them.
+            "shape": (f"{s_.name}" if s_ else None),
+            "source": (fmspec.SOURCE_BY_STRATEGY.get(
+                s_.id, fmspec.CANDIDATE_SOURCE) if s_ else None),
         },
     )
     out["hold_minutes"] = list(fmspec.HOLD_MINUTES)
     out["stake_usd"] = str(fmspec.STAKE_USD)
     out["book_shapes"] = [f"${int(k)} x {n}" for k, n in fmspec.BOOK_SHAPES]
+    out["arm_sources"] = {
+        a.id: fmspec.SOURCE_BY_STRATEGY.get(a.id, fmspec.CANDIDATE_SOURCE)
+        for a in fmspec.STRATEGIES
+    }
     out["sizing_scales"] = fmspec.SIZING_SCALES
     out["cycle_enabled"] = fmspec.CYCLE_ENABLED
     out["candidate_source"] = fmspec.CANDIDATE_SOURCE

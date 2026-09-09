@@ -31,6 +31,7 @@ from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.core.logging import get_logger
 from app.lab import execution, sellability, spec
@@ -271,9 +272,27 @@ class LabService:
 
     # --- decisions ----------------------------------------------------------
 
+    def _source_for(self, strategy_id: str) -> str:
+        """Which admission stream this ARM reads.
+
+        A registry may hold arms on different populations — the point of the
+        pump.swap arm is to sit beside the graduation arms on one board — so the
+        source is resolved per strategy, falling back to the registry's own
+        `CANDIDATE_SOURCE` and then to radar.
+
+        Deliberately a registry-level MAPPING rather than a field on `Strategy`:
+        that dataclass is shared by eight registries and `asdict` puts every
+        field into the canonical JSON, so a new field with a null default would
+        change the hash of all of them and halt every live tournament at once.
+        """
+        by_id = getattr(self._spec, "SOURCE_BY_STRATEGY", {}) or {}
+        return by_id.get(strategy_id) or getattr(
+            self._spec, "CANDIDATE_SOURCE", "radar"
+        )
+
     async def _due_candidates(
         self, tournament: LabTournament, *, minutes: int, ids: list,
-        cutoff: datetime, limit: int,
+        cutoff: datetime, limit: int, source: str | None = None,
     ) -> list:
         """The (token_id, mint, detected_at) triples due at this checkpoint.
 
@@ -282,7 +301,9 @@ class LabService:
 
             CANDIDATE_SOURCE = "graduations"
 
-        to draw from the pump.fun graduation cohort instead. That exists because
+        to draw from the pump.fun graduation cohort instead, or "pumpswap" for
+        pump.swap markets newly reaching tradeable depth. The graduation source
+        exists because
         a hypothesis taken FROM the graduation study was being tested on radar's
         population: only 3.6% of the tokens the Compound Lab judged had ever
         graduated, so the lab was answering a question about a different set of
@@ -294,7 +315,7 @@ class LabService:
         this program has already inspected (mission §15), and admitting it would
         let a known outcome in through the back door.
         """
-        source = getattr(self._spec, "CANDIDATE_SOURCE", "radar")
+        source = source or getattr(self._spec, "CANDIDATE_SOURCE", "radar")
         floor = tournament.valid_from - timedelta(minutes=minutes)
 
         if source == "graduations":
@@ -315,6 +336,57 @@ class LabService:
                     ).exists(),
                 )
                 .order_by(PumpfunGraduation.first_seen_complete_at)
+                .limit(limit)
+            )
+        elif source == "pumpswap":
+            # NEWLY LIQUID pump.swap markets that are not fresh graduations.
+            #
+            # A different question from the graduation arms: those ask what a
+            # coin does in the minutes after its curve completes, this asks what
+            # one does when it first becomes a market deep enough to trade. The
+            # populations overlap by construction — a graduation lands on
+            # pump.swap — so recent graduates are excluded rather than counted
+            # twice, and what is left is the ~19/hour that reach depth without
+            # having just graduated (457 of 731 crossings in a measured day).
+            #
+            # "Newly" is load-bearing. Without the `prior` clause every token
+            # already above the floor would be admitted at activation, and the
+            # arm would open fifty arbitrary established positions in its first
+            # minute and then go quiet — a one-off snapshot of the universe
+            # wearing a strategy's clothes. The clause asks for the FIRST time
+            # this token was ever seen at depth.
+            floor_usd = getattr(self._spec, "LIQUIDITY_FLOOR", Decimal("100000"))
+            prior = aliased(TokenMarketSnapshot)
+            q = (
+                select(TokenMarketSnapshot.token_id, DiscoveredToken.mint_address,
+                       TokenMarketSnapshot.captured_at)
+                .distinct(TokenMarketSnapshot.token_id)
+                .join(DiscoveredToken,
+                      DiscoveredToken.id == TokenMarketSnapshot.token_id)
+                .where(
+                    TokenMarketSnapshot.suspect.is_not(True),
+                    TokenMarketSnapshot.dex_name == "pumpswap",
+                    TokenMarketSnapshot.liquidity_usd >= floor_usd,
+                    TokenMarketSnapshot.captured_at <= cutoff,
+                    TokenMarketSnapshot.captured_at >= floor,
+                    ~select(prior.id).where(
+                        prior.token_id == TokenMarketSnapshot.token_id,
+                        prior.suspect.is_not(True),
+                        prior.liquidity_usd >= floor_usd,
+                        prior.captured_at < floor,
+                    ).exists(),
+                    ~select(PumpfunGraduation.id).where(
+                        PumpfunGraduation.mint_address == DiscoveredToken.mint_address,
+                        PumpfunGraduation.first_seen_complete_at
+                        >= TokenMarketSnapshot.captured_at - timedelta(hours=2),
+                    ).exists(),
+                    ~select(LabDecision.id).where(
+                        LabDecision.mint_address == DiscoveredToken.mint_address,
+                        LabDecision.strategy_row_id.in_(ids),
+                    ).exists(),
+                )
+                .order_by(TokenMarketSnapshot.token_id,
+                          TokenMarketSnapshot.captured_at)
                 .limit(limit)
             )
         elif source == "radar":
@@ -358,18 +430,24 @@ class LabService:
         strategies = list((await self._session.execute(
             select(LabStrategy).where(LabStrategy.tournament_id == tournament.id)
         )).scalars())
-        by_checkpoint: dict[int, list[LabStrategy]] = {}
+        # Grouped by (checkpoint, SOURCE): the observation is built once and
+        # shared by every strategy acting there, and two arms reading different
+        # admission streams are not looking at the same tokens, so they cannot
+        # share one.
+        by_group: dict[tuple[int, str], list[LabStrategy]] = {}
         for row in strategies:
             if row.checkpoint_minutes is None:
                 continue
-            by_checkpoint.setdefault(row.checkpoint_minutes, []).append(row)
+            key = (row.checkpoint_minutes, self._source_for(row.strategy_id))
+            by_group.setdefault(key, []).append(row)
 
         decided = opened = 0
-        for minutes, rows in sorted(by_checkpoint.items()):
+        for (minutes, source), rows in sorted(by_group.items()):
             cutoff = now - timedelta(minutes=minutes)
             ids = [r.id for r in rows]
             due = await self._due_candidates(
-                tournament, minutes=minutes, ids=ids, cutoff=cutoff, limit=limit
+                tournament, minutes=minutes, ids=ids, cutoff=cutoff,
+                limit=limit, source=source,
             )
 
             for token_id, mint, detected_at in due:

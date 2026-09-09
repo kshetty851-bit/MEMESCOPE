@@ -124,7 +124,7 @@ from decimal import Decimal as D
 
 from app.lab.spec import Condition, Exits, Strategy, rules_json
 
-SPEC_VERSION = "fivemin-5.0.0"
+SPEC_VERSION = "fivemin-6.0.0"
 
 #: Draw candidates from the pump.fun graduation cohort, not from radar.
 #: Read by `LabService._due_candidates`; absent means radar, so no other
@@ -149,6 +149,26 @@ FAILURE_EQUITY_FLOOR = D("50")
 #: That was replay. This runs it forward, paired, which is the only way to find
 #: out whether the ordering survives real fills — and it restores the control
 #: the single-arm version gave up.
+#: (stake, concurrent, population). Three arms, each filling $100.
+#:
+#: GRAD-S2 is the reference. GRAD-S20 varies ONE thing against it, the book
+#: shape. PUMP-S2 varies ONE thing against it, the population. Neither varies
+#: two, so a difference from the reference has exactly one candidate cause.
+ARMS: tuple[tuple[D, int, str], ...] = (
+    (D("2"), 50, "GRAD"),
+    (D("20"), 5, "GRAD"),
+    (D("2"), 50, "PUMP"),
+)
+
+#: Which admission stream each arm reads. Read by `LabService._source_for`;
+#: anything absent falls back to `CANDIDATE_SOURCE` below.
+#:
+#: NOT a field on `Strategy`: that dataclass is shared by eight registries and
+#: `asdict` puts every field into the canonical JSON, so adding one would
+#: change all eight hashes and halt every live tournament at once.
+SOURCE_BY_STRATEGY = {"PUMP-S2": "pumpswap"}
+
+#: Kept for the API and page, which already read it.
 BOOK_SHAPES: tuple[tuple[D, int], ...] = ((D("2"), 50), (D("20"), 5))
 
 #: The first shape's stake, kept for the API and page that already read it.
@@ -193,17 +213,25 @@ _EXECUTABLE = (
 )
 
 
-def _arm(stake: D, slots: int) -> Strategy:
-    """One wallet. The book SHAPE is the only argument, which is the design."""
+def _arm(stake: D, slots: int, pop: str) -> Strategy:
+    """One wallet. Shape and population are the only arguments."""
     minutes = HOLD_MINUTES[0]
+    grad = pop == "GRAD"
+    label = "Graduation" if grad else "PumpSwap"
     return Strategy(
-        id=f"GRAD-S{int(stake)}",
-        name=f"GRAD ${int(stake)} x {slots}",
+        id=f"{pop}-S{int(stake)}",
+        name=f"{label} ${int(stake)} x {slots}",
         hypothesis=(
             f"Buying pump.fun graduations two minutes after they complete and "
             f"selling {minutes} minutes later returns more than it costs."
+            if grad else
+            f"Buying pump.swap markets as they first reach $100k of depth and "
+            f"selling {minutes} minutes later returns more than it costs."
         ),
-        checkpoint_minutes=CHECKPOINT_MINUTES,
+        # The graduation arms wait 2 minutes for a price to exist. The
+        # pump.swap arm is admitted BY a priced snapshot, so it has one
+        # already and waiting would only add drift.
+        checkpoint_minutes=CHECKPOINT_MINUTES if grad else 0,
         entry=_EXECUTABLE,
         size_usd=stake,
         max_concurrent=slots,
@@ -217,7 +245,7 @@ def _arm(stake: D, slots: int) -> Strategy:
     )
 
 
-STRATEGIES: tuple[Strategy, ...] = tuple(_arm(k, n) for k, n in BOOK_SHAPES)
+STRATEGIES: tuple[Strategy, ...] = tuple(_arm(k, n, p) for k, n, p in ARMS)
 
 BY_ID = {s.id: s for s in STRATEGIES}
 
@@ -248,18 +276,23 @@ SPEC_HASH = hashlib.sha256(_canonical().encode()).hexdigest()
 assert CANDIDATE_SOURCE == "graduations", (
     "this lab exists to trade the graduation cohort; radar is what it replaced"
 )
-assert len(STRATEGIES) == 2, "two arms: one per book shape"
+assert len(STRATEGIES) == 3, "three arms: reference, shape variant, population variant"
 assert len({s.exits.time_exit_hours for s in STRATEGIES}) == 1, (
     "both arms must sell on the SAME clock, or the comparison is not about size"
 )
 assert len({s.size_usd for s in STRATEGIES}) == 2, (
-    "the arms must differ in stake, or there is nothing to compare"
+    "a shape variant must exist, or there is nothing to compare size against"
 )
+assert set(SOURCE_BY_STRATEGY) <= {s.id for s in STRATEGIES}, (
+    "a source mapped to an id no arm carries is a silent no-op"
+)
+assert {s.id for s in STRATEGIES} == {"GRAD-S2", "GRAD-S20", "PUMP-S2"}
 assert all(s.entry is _EXECUTABLE for s in STRATEGIES), (
     "the entry is shared BY IDENTITY, so a second arm cannot drift from it"
 )
-assert all(s.checkpoint_minutes == CHECKPOINT_MINUTES for s in STRATEGIES), (
-    "every arm must enter at the same instant or arms are not comparable"
+assert all(s.checkpoint_minutes == CHECKPOINT_MINUTES
+           for s in STRATEGIES if s.id.startswith("GRAD")), (
+    "the graduation arms must enter at the same instant to be comparable"
 )
 assert all(s.exits.take_profit is None and s.exits.stop_loss is None
            for s in STRATEGIES), (

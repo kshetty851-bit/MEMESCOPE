@@ -33,8 +33,10 @@ export interface FiveMinWallet {
   trades: FiveMinPosition[];
   /** Contributed by the board's `axis` — the horizon this arm sells at. */
   hold_minutes: number | null;
-  /** Contributed by the board's `axis` — e.g. "$2 x 50". The axis under test. */
+  /** Contributed by the board's `axis` — e.g. "Graduation $2 x 50". */
   shape?: string | null;
+  /** Which admission stream this arm reads: "graduations" or "pumpswap". */
+  source?: string | null;
   rank?: number;
 }
 

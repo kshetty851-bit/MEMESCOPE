@@ -105,8 +105,8 @@ export default function FiveMinLabPage() {
     <div className="flex flex-col gap-4 p-4 lg:p-6">
       <Toolbar
         eyebrow="Graduation Hold Lab"
-        title="Same coins, same clock. One splits the book fifty ways, one five."
-        description="Two $100 wallets buying pump.fun graduations two minutes after they complete and selling five minutes on. They take the same coin at the same instant and differ only in how the book is divided — $2 across fifty positions against $20 across five. Every loss here is total, so bet size is the one lever a book has. Nothing here is real money."
+        title="One reference, and two ways of being different from it."
+        description="Three $100 wallets on the same five-minute clock. Graduation $2 x 50 is the reference. Graduation $20 x 5 changes only the book shape. PumpSwap $2 x 50 changes only the population — pump.swap markets first reaching $100k of depth, with recent graduates excluded so the cohorts are not double-counted. Each varies one thing, so a difference has one candidate cause. Nothing here is real money."
       />
 
       {/* Deliberately above the numbers, and deliberately not collapsible. */}
@@ -145,6 +145,7 @@ export default function FiveMinLabPage() {
           {/* The comparison is the experiment, so it is stated rather than left
               for the reader to do in their head from two cards. */}
           {first && second ? <GapPanel a={first} b={second} base={base} /> : null}
+          {first && wallets[2] ? <GapPanel a={first} b={wallets[2]} base={base} /> : null}
 
           {/* Every trade, open and closed, each with its own P&L. */}
           <FiveMinTradesPanel />

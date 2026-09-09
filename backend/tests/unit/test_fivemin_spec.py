@@ -27,9 +27,9 @@ class TestItCannotHaltAnotherTournament:
 
     def test_the_rules_change_bumped_the_version(self) -> None:
         """Each predecessor was a live tournament with different rules —
-        4.0.0 ran a single $2 x 50 arm. Reusing a version would attach this
-        book to that record."""
-        assert fivemin.SPEC_VERSION == "fivemin-5.0.0"
+        5.0.0 ran two graduation arms and no pump.swap arm. Reusing a version
+        would attach this book to that record."""
+        assert fivemin.SPEC_VERSION == "fivemin-6.0.0"
 
 
 class TestItTradesTheGraduationCohort:
@@ -41,6 +41,15 @@ class TestItTradesTheGraduationCohort:
         repopulated every registry that predates it."""
         assert getattr(compound, "CANDIDATE_SOURCE", "radar") == "radar"
         assert getattr(v7, "CANDIDATE_SOURCE", "radar") == "radar"
+        assert not getattr(compound, "SOURCE_BY_STRATEGY", {})
+        assert not getattr(v7, "SOURCE_BY_STRATEGY", {})
+
+    def test_the_service_resolves_a_source_per_arm(self) -> None:
+        """Behaviour, not a mapping literal: ask the service what each arm reads."""
+        svc = LabService(None, registry=fivemin)
+        assert svc._source_for("GRAD-S2") == "graduations"
+        assert svc._source_for("PUMP-S2") == "pumpswap"
+        assert LabService(None, registry=compound)._source_for("CMP-01") == "radar"
 
     def test_the_service_actually_queries_graduations(self) -> None:
         """Behaviour, not a flag: compile the statement the service builds and
@@ -86,14 +95,41 @@ class TestTheLiquidityFloorIsExecutionNotSignal:
             assert s.entry[0].feature == "liq"
 
 
-class TestTwoArmsDifferingOnlyInBookShape:
+class TestOneVariableAtATime:
+    """GRAD-S2 is the reference. Each other arm varies exactly ONE thing
+    against it, so a difference has exactly one candidate cause."""
+
+    def test_the_shape_variant_changes_only_the_shape(self) -> None:
+        ref = fivemin.BY_ID["GRAD-S2"]
+        alt = fivemin.BY_ID["GRAD-S20"]
+        assert alt.size_usd != ref.size_usd
+        assert alt.entry is ref.entry
+        assert alt.exits.time_exit_hours == ref.exits.time_exit_hours
+        assert alt.checkpoint_minutes == ref.checkpoint_minutes
+
+    def test_the_population_variant_changes_only_the_population(self) -> None:
+        ref = fivemin.BY_ID["GRAD-S2"]
+        alt = fivemin.BY_ID["PUMP-S2"]
+        assert fivemin.SOURCE_BY_STRATEGY["PUMP-S2"] == "pumpswap"
+        assert alt.size_usd == ref.size_usd
+        assert alt.max_concurrent == ref.max_concurrent
+        assert alt.entry is ref.entry
+        assert alt.exits.time_exit_hours == ref.exits.time_exit_hours
+
+    def test_the_pumpswap_arm_needs_no_pricing_delay(self) -> None:
+        """It is admitted BY a priced snapshot, so waiting would add drift."""
+        assert fivemin.BY_ID["PUMP-S2"].checkpoint_minutes == 0
+        assert fivemin.BY_ID["GRAD-S2"].checkpoint_minutes == 2
+
+
+class TestArmsDifferingOnlyInBookShape:
     def test_both_arms_sell_on_the_same_clock(self) -> None:
         """The axis is SIZE now. A difference in hold would confound it."""
         held = {round(s.exits.time_exit_hours * 60) for s in fivemin.STRATEGIES}
         assert held == {5}
         assert fivemin.HOLD_MINUTES == (5,)
 
-    def test_the_two_shapes_are_2x50_and_20x5(self) -> None:
+    def test_the_shapes_are_2x50_and_20x5(self) -> None:
         shapes = {(s.size_usd, s.max_concurrent) for s in fivemin.STRATEGIES}
         assert shapes == {(Decimal("2"), 50), (Decimal("20"), 5)}
 
@@ -111,7 +147,10 @@ class TestTwoArmsDifferingOnlyInBookShape:
         where 75% of graduates first have BOTH a price and a liquidity (23% at
         the stamp itself), and the measured median drift to +3 is +0.06%."""
         assert fivemin.CHECKPOINT_MINUTES == 2
-        assert {s.checkpoint_minutes for s in fivemin.STRATEGIES} == {2}
+        # Scoped to the GRADUATION arms: the pump.swap arm is admitted by an
+        # already-priced snapshot and enters at 0, which this delay is not about.
+        assert {s.checkpoint_minutes for s in fivemin.STRATEGIES
+                if s.id.startswith("GRAD")} == {2}
 
     def test_the_clock_is_the_only_exit(self) -> None:
         for s in fivemin.STRATEGIES:
