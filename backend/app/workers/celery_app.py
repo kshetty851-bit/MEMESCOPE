@@ -39,6 +39,7 @@ celery_app = Celery(
         "app.pumpfun.social_scheduler",
         "app.momentum.scheduler",
         "app.depth.scheduler",
+        "app.movers.scheduler",
         "app.social.scheduler",
         "app.copycontrol.scheduler",
         "app.pumpfun.graduation_scheduler",
@@ -323,6 +324,14 @@ celery_app.conf.beat_schedule = {
     # invisible lag to every control entry.
     "copycontrol-tick": {
         "task": "app.copycontrol.scheduler.copycontrol_tick",
+        "schedule": crontab(minute="*"),
+    },
+    # The Movers Lab: turnover as a pre-move filter, against its control.
+    # Every minute rather than every five: the signal is a five-minute
+    # measurement against a thirty-minute hold, so a slower beat would resolve
+    # exits a fifth of a position's life late.
+    "movers-tick": {
+        "task": "app.movers.scheduler.movers_tick",
         "schedule": crontab(minute="*"),
     },
     # The Social Lab: attention against its own control.

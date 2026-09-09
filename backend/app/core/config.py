@@ -589,6 +589,8 @@ class Settings(BaseSettings):
     #: The Social Lab: two $100 wallets differing only in whether they require
     #: a coin's comment rate to be RISING. Off by default.
     FEATURE_SOCIAL_LAB_ENABLED: bool = False
+    #: The Movers Lab: turnover as a pre-move filter, against its control.
+    FEATURE_MOVERS_LAB_ENABLED: bool = False
     #: The graduation collector: stamps pump.fun graduations as they happen and
     #: follows each coin for an hour. Read-only research; it trades nothing.
     FEATURE_PUMPFUN_GRADUATION_ENABLED: bool = False

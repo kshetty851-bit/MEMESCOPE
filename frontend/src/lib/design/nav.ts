@@ -79,6 +79,9 @@ export const NAV_GROUPS: NavGroup[] = [
       // listed here deliberately rather than by drift, and the test below
       // records that this one is intended.
       { href: "/fivemin-lab", label: "Graduation Lab", icon: IconWallet, status: "ready" },
+      // Movers: the turnover filter against its own control. Named for the
+      // pump.fun list it was built to anticipate, not for a result it has.
+      { href: "/movers-lab", label: "Movers Lab", icon: IconWallet, status: "ready" },
     ],
   },
   {

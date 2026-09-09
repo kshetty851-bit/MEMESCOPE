@@ -100,6 +100,7 @@ FEATURE_LABELS = {
     "liqchg_15m": "liquidity change over 15 min",
     "ret_15m": "price return over 15 min",
     "vol_accel": "volume acceleration (5m vs previous 5m)",
+    "turnover_5m": "5-minute volume ÷ liquidity",
     "vol1h": "volume over 1 hour",
     "sell_share_15m": "sell share of trades over 15 min",
     "dd_from_peak_det": "drawdown from peak since detection",
