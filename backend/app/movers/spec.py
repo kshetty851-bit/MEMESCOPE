@@ -77,7 +77,7 @@ from decimal import Decimal as D
 
 from app.lab.spec import Condition, Exits, Strategy, rules_json
 
-SPEC_VERSION = "movers-1.0.0"
+SPEC_VERSION = "movers-2.0.0"
 
 STARTING_EQUITY = D("100")
 CYCLE_TARGET_MULTIPLE = D("1.10")
@@ -170,7 +170,7 @@ def _wallet(sid: str, name: str, entry: tuple[Condition, ...],
 _SECURE = Condition(feature="security_verified", op="gte", value=D("1"),
                     reason="security_not_verified")
 
-#: THREE wallets now: the incumbent, and a fresh PAIR testing the gate.
+#: TWO wallets, starting together at $100.
 #:
 #: MOV-01 required turnover >= 1.0 and was retired on 2026-09-09 on
 #: instruction, with 3 closed trades to its name (2 of them winners). It is
@@ -184,16 +184,20 @@ _SECURE = Condition(feature="security_verified", op="gte", value=D("1"),
 #: what buying every liquid pump.fun coin and banking the wallet at +10%
 #: returns — and it has no benchmark, so a good result cannot be distinguished
 #: from a hot week.
-#: MOV-03 and MOV-04 start together and differ by exactly ONE condition, which
-#: is what makes them readable. MOV-02 is the incumbent and is NOT part of that
-#: pair — it has been running since 07:54 with a different history, so
-#: comparing either new arm against it would confound the gate with the start
-#: date. It is left alone rather than reset.
+#: A FRESH TOURNAMENT, and why the old one could not simply continue.
+#:
+#: `movers-1.0.0` ran from 07:54 to 11:21 on 2026-09-09 and is frozen with its
+#: record intact: 56 closed trades, MOV-01 retired mid-run, MOV-02 finishing at
+#: $135. It stopped because editing a live registry changes SPEC_HASH and the
+#: engine halts entries the moment the stored hash and the running one disagree
+#: — a tournament scored against rules edited underneath it is not the
+#: experiment it claims to be, and the guard was right to stop it.
+#:
+#: So the security question gets its own clean run. Both arms start at $100 at
+#: the same moment and differ by exactly ONE condition, which is the only shape
+#: that can answer it. There is no third "incumbent" arm: on a fresh start it
+#: would carry identical rules to the control and simply be a duplicate.
 STRATEGIES: tuple[Strategy, ...] = (
-    _wallet("MOV-02", "MOVERS-ALL", _POOL,
-            "Buying every pump.fun coin deep enough to fill, holding thirty "
-            "minutes and banking the wallet at +10%, returns something.",
-            "INCUMBENT_NO_CONTROL_SINCE_2026_09_09"),
     _wallet("MOV-03", "SECURITY-GATED", (*_POOL, _SECURE),
             "A coin the security evaluator has positively VERIFIED rugs less "
             "often than one from the same pool that it has not.",
@@ -226,7 +230,7 @@ def _canonical() -> str:
 
 SPEC_HASH = hashlib.sha256(_canonical().encode()).hexdigest()
 
-assert len(STRATEGIES) == 3, "the incumbent, the gated arm and its control"
+assert len(STRATEGIES) == 2, "the gated arm and its control, nothing else"
 # THE property, for the PAIR: MOV-03 and MOV-04 differ by exactly one
 # condition. MOV-02 is deliberately outside the comparison.
 _g = {str(c) for c in BY_ID["MOV-03"].entry}
@@ -234,8 +238,9 @@ _c = {str(c) for c in BY_ID["MOV-04"].entry}
 assert _g - _c == {str(_SECURE)} and _c - _g == set(), (
     "the security pair must differ in the security condition ALONE"
 )
-assert BY_ID["MOV-04"].entry == BY_ID["MOV-02"].entry, (
-    "the fresh control must draw from the same pool as the incumbent"
+assert BY_ID["MOV-04"].entry == _POOL, (
+    "the control must be the pool alone — any extra condition and the pair "
+    "differs in two ways"
 )
 # No turnover condition survives anywhere in the registry. Asserted so that
 # reinstating the filter cannot happen by half: putting it back means putting

@@ -20,10 +20,9 @@ def test_the_pair_differs_by_the_security_condition_alone() -> None:
     assert control - gated == set()
 
 
-def test_the_control_draws_from_the_same_pool_as_the_incumbent() -> None:
-    """Otherwise the fresh control differs from MOV-02 in two ways and neither
-    comparison means anything."""
-    assert spec.BY_ID["MOV-04"].entry == spec.BY_ID["MOV-02"].entry
+def test_the_control_is_the_pool_alone() -> None:
+    """Any extra condition on the control and the pair differs in two ways."""
+    assert spec.BY_ID["MOV-04"].entry == spec._POOL
 
 
 def test_the_gate_demands_a_positive_verdict() -> None:
@@ -35,11 +34,14 @@ def test_the_gate_demands_a_positive_verdict() -> None:
     assert c.op == "gte" and c.value == D("1")
 
 
-def test_the_incumbent_is_not_gated() -> None:
-    """MOV-02 has been running since 07:54 and must keep running unchanged;
-    gating it would silently restart the thing it is a record of."""
-    assert not any(c.feature == "security_verified"
-                   for c in spec.BY_ID["MOV-02"].entry)
+def test_a_fresh_version_starts_a_fresh_tournament() -> None:
+    """The previous run halted on `spec_hash_drift` when its registry was
+    edited underneath it. A new SPEC_VERSION is how that is resolved honestly:
+    the old tournament keeps its record and this one starts clean, rather than
+    the stored hash being overwritten to make an edited experiment look
+    continuous."""
+    assert spec.SPEC_VERSION == "movers-2.0.0"
+    assert len(spec.SPEC_VERSION) <= 16
 
 
 def test_all_three_arms_size_and_exit_identically() -> None:

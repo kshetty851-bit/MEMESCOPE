@@ -82,13 +82,14 @@ async def test_the_turnover_feature_is_actually_computed(db_session):
     assert features["turnover_5m"] == pytest.approx(D("10000") / D("600000"))
 
 
-async def test_the_sole_arm_buys_a_quiet_coin_now_that_the_filter_is_gone(db_session):
-    """The turnover arm was retired on 2026-09-09, so a coin at 0.017
-    turnover — far below the floor that used to reject it — is now bought.
+async def test_the_control_buys_an_unverified_coin_and_the_gated_arm_does_not(db_session):
+    """The whole experiment, as behaviour.
 
-    This is the behavioural record of what the deletion changed, and it is
-    the test that would fail loudest if the filter were ever half-reinstated
-    on the surviving wallet without its control.
+    The fixture's coin has no security evaluation at all, which is the common
+    case: the evaluator reaches a coin minutes after it appears, and a lab
+    judges at ten. An unevaluated coin must be a DECLINE for the gated arm —
+    "we could not look" is not evidence of safety — while the control takes
+    it, so the pair differs exactly where it claims to.
     """
     svc = CompoundService(db_session, registry=mvspec)
     await svc._lab.activate(valid_from=NOW - timedelta(minutes=15))
@@ -97,11 +98,13 @@ async def test_the_sole_arm_buys_a_quiet_coin_now_that_the_filter_is_gone(db_ses
                          price=D("0.001"), pool="PMOVQ")
     await svc.tick(now=NOW)
 
-    assert await _rows(db_session, "MOV-02"), (
-        "the surviving wallet has no turnover condition and must take it"
+    assert await _rows(db_session, "MOV-04"), (
+        "the control has no security condition and must take it"
     )
-    assert "turnover_below_floor" not in await _skips(db_session, "MOV-02")
-    assert not await _rows(db_session, "MOV-01"), "MOV-01 no longer exists"
+    assert not await _rows(db_session, "MOV-03"), (
+        "an unevaluated coin must not pass the gate"
+    )
+    assert "security_not_verified" in await _skips(db_session, "MOV-03")
 
 
 async def test_the_turnover_feature_still_computes_though_nothing_reads_it(db_session):

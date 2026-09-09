@@ -68,11 +68,21 @@ function RunningFor({ since }: { since: string }) {
 }
 
 function WalletCard({ w, starting }: { w: MoversWallet; starting: number }) {
-  // No Signal/Control badge any more: there is one wallet, and labelling it
-  // either would claim a comparison this lab no longer runs.
+  const control = w.strategy_id === "MOV-04";
   return (
     <Panel density="compact">
-      <Label>{w.name}</Label>
+      <div className="flex items-baseline justify-between gap-2">
+        <Label>{w.name}</Label>
+        <span
+          className={`rounded-sm border px-1.5 py-0.5 text-[10px] uppercase ${
+            control
+              ? "border-line-control text-ink-3"
+              : "border-accent/40 bg-accent/10 text-accent"
+          }`}
+        >
+          {control ? "Control" : "Gated"}
+        </span>
+      </div>
 
       <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <div>
@@ -121,8 +131,8 @@ export default function MoversLabPage() {
     <div className="flex flex-col gap-4 p-4 lg:p-6">
       <Toolbar
         eyebrow="Movers Lab"
-        title="What buying every liquid pump.fun coin returns."
-        description="One $100 wallet, a tenth of the balance per position and ten at a time, each held 30 minutes with no take-profit and no stop, banking whenever the wallet is up 10%. The turnover-filtered arm it was paired against was retired, so there is no benchmark here any more. Nothing is real money."
+        title="Does the security check keep us out of the rugs?"
+        description="Two $100 wallets started together, a tenth of the balance per position and ten at a time, each held 30 minutes with no take-profit and no stop. They differ in one condition: one only buys coins the security evaluator has positively verified. In the previous run every loss was a coin going to zero. Nothing is real money."
       />
 
       {/* Above the numbers, and deliberately not collapsible. */}
@@ -159,7 +169,7 @@ export default function MoversLabPage() {
           <Panel density="compact">
             <Label>THE RULE</Label>
             <p className="mt-2 text-xs text-muted">
-              No entry filter · liquidity at least{" "}
+              Security VERIFIED required (gated arm) · liquidity at least{" "}
               <span className="font-mono text-ink">
                 {money(data.min_liquidity_usd)}
               </span>{" "}
