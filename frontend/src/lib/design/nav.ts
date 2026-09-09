@@ -5,6 +5,7 @@ import {
   IconLedger,
   IconScanner,
   IconSettings,
+  IconSpark,
   IconWallet,
 } from "@/components/layout/nav-icons";
 
@@ -85,7 +86,7 @@ export const NAV_GROUPS: NavGroup[] = [
       // as a grid so a difference between neighbours is attributable to the
       // one thing that differs. Its own page because the operator asked to
       // see both sections side by side.
-      { href: "/matrix-lab", label: "Matrix Lab", icon: IconWallet, status: "ready" },
+      { href: "/matrix-lab", label: "Matrix Lab", icon: IconSpark, status: "ready" },
       { href: "/kol-lab", label: "KOL Lab", icon: IconWallet, status: "ready" },
     ],
   },

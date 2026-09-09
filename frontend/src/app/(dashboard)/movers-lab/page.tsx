@@ -1,10 +1,14 @@
 "use client";
 
+import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+
+import { AGED_BLURB, FRESH_BLURB, MatrixSection } from "@/components/lab/matrix-grid";
 import { LabTradesTable } from "@/components/lab/trades-panel";
 import { Label, Panel } from "@/components/ui/panel";
 import { Toolbar } from "@/components/ui/toolbar";
-import { useEffect, useState } from "react";
 
+import { useMatrixBoard } from "@/hooks/use-matrix";
 import { useMoversBoard, useMoversTrades } from "@/hooks/use-movers";
 import type { MoversWallet } from "@/types/movers";
 
@@ -122,6 +126,56 @@ function WalletCard({ w, starting }: { w: MoversWallet; starting: number }) {
   );
 }
 
+/**
+ * THE OTHER TWENTY-FOUR. The Matrix Lab's two sections, shown here beneath the
+ * movers arms because the operator asked to see every strategy in one place.
+ * Picking a cell opens that arm's trades on the Matrix Lab page; this page's
+ * own trade list stays the movers' list.
+ */
+function MatrixSections() {
+  const router = useRouter();
+  const { data, isLoading, isError } = useMatrixBoard();
+  const starting = Number(data?.starting_equity ?? 100);
+  const fresh = (data?.wallets ?? []).filter((w) => w.section === "FRESH");
+  const aged = (data?.wallets ?? []).filter((w) => w.section === "AGED");
+
+  if (isLoading || isError || !data?.activated) {
+    return (
+      <Panel density="compact">
+        <Label>MATRIX LAB</Label>
+        <p className="mt-2 text-xs text-muted">
+          {isLoading
+            ? "Loading…"
+            : isError
+              ? "The matrix board could not be read."
+              : `The registry exists (${data?.spec_version ?? "?"}) but no tournament has been opened.`}
+        </p>
+      </Panel>
+    );
+  }
+  const open = (id: string) => router.push(`/matrix-lab#${id}`);
+  return (
+    <>
+      <MatrixSection
+        title="MATRIX · FRESH — pump.fun launches"
+        blurb={FRESH_BLURB}
+        wallets={fresh}
+        starting={starting}
+        selected={null}
+        onSelect={open}
+      />
+      <MatrixSection
+        title={`MATRIX · AGED — established markets, at least ${data.min_age_hours ?? "24"}h old`}
+        blurb={AGED_BLURB}
+        wallets={aged}
+        starting={starting}
+        selected={null}
+        onSelect={open}
+      />
+    </>
+  );
+}
+
 export default function MoversLabPage() {
   const { data, isLoading, isError } = useMoversBoard();
   const trades = useMoversTrades();
@@ -132,7 +186,7 @@ export default function MoversLabPage() {
       <Toolbar
         eyebrow="Movers Lab"
         title="Does the security check keep us out of the rugs?"
-        description="Two $100 wallets started together, a tenth of the balance per position and ten at a time, each held 30 minutes with no take-profit and no stop. They differ in one condition: one only buys coins the security evaluator has positively verified. In the previous run every loss was a coin going to zero. Nothing is real money."
+        description="Three $100 movers wallets and, beneath them, the Matrix Lab's twenty-four. Two $100 wallets started together, a tenth of the balance per position and ten at a time, each held 30 minutes with no take-profit and no stop. They differ in one condition: one only buys coins the security evaluator has positively verified. In the previous run every loss was a coin going to zero. Nothing is real money."
       />
 
       {/* Above the numbers, and deliberately not collapsible. */}
@@ -207,6 +261,11 @@ export default function MoversLabPage() {
           )}
         </>
       )}
+
+      {/* The Matrix Lab's twenty-four arms, in their two sections. Rendered
+          whatever the movers board's state: the two tournaments are
+          independent and one being down says nothing about the other. */}
+      <MatrixSections />
     </div>
   );
 }
