@@ -11,6 +11,7 @@ import { HeroMascot, type MascotState } from "@/components/alpha/hero-mascot";
 import { HomepageIntelligence } from "@/components/alpha/homepage-intelligence";
 import { LaunchOverlay, useLaunchSequence } from "@/components/alpha/launch-sequence";
 import { HomeUniverse } from "@/components/space/home-universe";
+import { SpaceAudioToggle } from "@/components/space/space-audio-toggle";
 import { useReducedMotion } from "@/hooks/use-reduced-motion";
 import { ALPHA_ACCESS } from "@/lib/env";
 import { atOrAfter, type GatePhase, type ScenePhase } from "@/lib/launch";
@@ -104,6 +105,10 @@ export function LandingPage() {
           <span className="ml-3 rounded-sm border border-line-control px-1.5 py-0.5 text-label font-medium uppercase text-ink-3">
             Private alpha
           </span>
+          {/* Off until asked for, every visit — see the component. It sits in
+              the header rather than over the scene so it cannot be mistaken
+              for part of the launch sequence. */}
+          <SpaceAudioToggle className="ml-auto" />
         </header>
 
         {/* The mascot lives behind the grid, not beside it. Below `lg` it is out
