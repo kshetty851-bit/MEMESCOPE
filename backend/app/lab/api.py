@@ -293,7 +293,11 @@ async def build_trades(session, *, registry: Any = spec, disclosure: str = DISCL
         select(LabPosition, DiscoveredToken.symbol, DiscoveredToken.name)
         .join(LabStrategy, LabStrategy.id == LabPosition.strategy_row_id)
         .outerjoin(DiscoveredToken, DiscoveredToken.id == LabPosition.token_id)
-        .where(LabStrategy.tournament_id == t.id)
+        # Registry-scoped for the same reason the board is: a retired arm's
+        # closed trades are kept as the record but must not go on appearing in
+        # a ledger that reads as the current book.
+        .where(LabStrategy.tournament_id == t.id,
+               LabStrategy.strategy_id.in_(registry.BY_ID))
         .order_by(LabPosition.opened_at.desc())
         .limit(limit)
     )

@@ -47,7 +47,12 @@ async def build(
                 "cycles": [], "positions": []}
 
     rows = list((await session.execute(
-        select(LabStrategy).where(LabStrategy.tournament_id == t.id)
+        # Scoped to the REGISTRY, not just the tournament. A retired arm keeps
+        # its rows — they are the record of what it did — but a board that
+        # showed them would present a wallet the spec no longer defines, still
+        # trading in the reader's mind long after it stopped.
+        select(LabStrategy).where(LabStrategy.tournament_id == t.id,
+                                  LabStrategy.strategy_id.in_(registry.BY_ID))
         .order_by(LabStrategy.strategy_id)
     )).scalars())
     ids = [r.id for r in rows]
