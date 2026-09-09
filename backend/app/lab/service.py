@@ -64,6 +64,30 @@ def _frac_change(now: Decimal | None, then: Decimal | None) -> Decimal | None:
     return now / then - 1
 
 
+def live_print(rows, now: datetime):
+    """The most recent TRADING print inside the confirmation window, or None.
+
+    Pure and module-level so the death rule can be tested without a database:
+    it is the only irreversible exit the engine has, and it wrote off $337 of
+    live positions in a week before it was corroborated.
+
+    `rows` are newest-first, as `_mark` selects them.
+    """
+    for r in rows:
+        if now - r.captured_at > DEATH_CONFIRMATION_WINDOW:
+            return None          # ordered, so nothing later can be in window
+        if r.trading_status != TradingStatus.INACTIVE and r.price_usd \
+                and r.price_usd > 0:
+            return r
+    return None
+
+
+#: How long a token must read INACTIVE, with no live print at all, before the
+#: engine will call it dead. Death is the only irreversible exit, so it is the
+#: only one that requires more than a single observation.
+DEATH_CONFIRMATION_WINDOW = timedelta(minutes=2)
+
+
 class LabService:
     """The tournament engine, over whichever frozen registry it is handed.
 
@@ -1019,7 +1043,33 @@ class LabService:
             return None
         latest = rows[0]
         if latest.trading_status == TradingStatus.INACTIVE:
-            return Decimal(0), Decimal(0), True, None
+            # ONE inactive reading is not a death, and treating it as one cost
+            # real money. Measured over seven days and 806 `dead_zero` exits,
+            # 56 of them — 6.9% — were written off at $0.00 while the token was
+            # trading again within ten minutes at more than half the entry
+            # price: $337 of stake booked as total losses on positions actually
+            # worth $860. One was closed at zero seventeen seconds before the
+            # same token printed 7.4% ABOVE its entry.
+            #
+            # The provider drops to `inactive` for a poll or two — a pool
+            # re-index, a missed round — and the old code took the first such
+            # reading as final and irreversible. Death is the one exit that
+            # cannot be revised, so it is the one that must be corroborated.
+            #
+            # A live print inside the window is used to mark AGAINST, not merely
+            # to veto the death: skipping the tick would leave the position
+            # unmarked on the very cycle a good price existed.
+            #
+            # Bounded by TIME rather than by a count of readings, deliberately.
+            # "Two consecutive inactives" never confirms for a token that stops
+            # being polled at all, and that is precisely how this lab once froze
+            # its worst positions at their last healthy price and held them for
+            # ever. A genuinely dead pool has no live print and closes here,
+            # about two minutes later than before.
+            live = live_print(rows, now)
+            if live is None:
+                return Decimal(0), Decimal(0), True, None
+            latest = live
 
         # A fresh SELL QUOTE outranks a fresh snapshot, and is consulted before
         # the staleness guard rather than after it.
