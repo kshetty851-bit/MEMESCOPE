@@ -380,6 +380,9 @@ x-backend-env: &backend-env
   # worker collects and the API reads what it wrote, so both must agree on
   # whether curve data exists. Blocked today by the Helius plan quota.
   FEATURE_CURVE_COLLECTION_ENABLED: ${FEATURE_CURVE_COLLECTION_ENABLED:-false}
+  FEATURE_EVM_LAUNCHES_ENABLED: ${FEATURE_EVM_LAUNCHES_ENABLED:-false}
+  EVM_LAUNCH_NETWORKS: ${EVM_LAUNCH_NETWORKS:-base}
+  EVM_LAUNCH_PAGES: ${EVM_LAUNCH_PAGES:-5}
   # Must stay >= ENRICHMENT_BATCH_LIMIT: the collector chunks for the RPC on
   # its own, so a lower value here silently drops the tail of every full batch.
   CURVE_COLLECTION_BATCH_LIMIT: ${CURVE_COLLECTION_BATCH_LIMIT:-120}

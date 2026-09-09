@@ -7,6 +7,7 @@ model that is never imported is invisible to it.
 from app.db.base import Base
 from app.models.alpha_session import AlphaSession
 from app.models.curve import TokenCurveSnapshot  # noqa: F401
+from app.models.basechain import EvmLaunch  # noqa: F401
 from app.models.discovery import (
     DiscoveryObservationSource,
     DiscoverySourceObservation,

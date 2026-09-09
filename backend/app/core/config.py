@@ -1004,6 +1004,17 @@ class Settings(BaseSettings):
     # §14a names as the unblock for Near Graduation. Off by default like every
     # other pipeline stage, and additionally blocked today by the Helius plan
     # quota — every RPC method returns `429 max usage reached`.
+    #: EVM launch collection (Base first). Off by default: it calls a public
+    #: third-party API on a beat, so it is opt-in like every other collector.
+    FEATURE_EVM_LAUNCHES_ENABLED: bool = False
+    #: GeckoTerminal network ids, stored verbatim. A second chain is a config
+    #: change, not a schema one.
+    EVM_LAUNCH_NETWORKS: CsvList = Field(default_factory=lambda: ["base"])
+    #: Pages of `new_pools` per pass. Five is ~35 minutes of the feed against a
+    #: two-minute beat, so a failed pass has fifteen passes of overlap before
+    #: anything leaves the ~70-minute discovery window.
+    EVM_LAUNCH_PAGES: int = Field(default=5, ge=1, le=10)
+
     FEATURE_CURVE_COLLECTION_ENABLED: bool = False
     #: Tokens per collection pass. The collector chunks to whatever
     #: `getMultipleAccounts` accepts (100 addresses) on its own, so this is a

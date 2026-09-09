@@ -34,6 +34,7 @@ celery_app = Celery(
         "app.lab.scheduler",
         "app.compound.scheduler",
         "app.fivemin.scheduler",
+        "app.evmchain.scheduler",
         "app.pumpfun.scheduler",
         "app.pumpfun.social_scheduler",
         "app.momentum.scheduler",
@@ -274,6 +275,14 @@ celery_app.conf.beat_schedule = {
     "fivemin-tick": {
         "task": "app.fivemin.scheduler.fivemin_tick",
         "schedule": timedelta(seconds=10),
+    },
+    # EVM launch stamps. Every two minutes, because GeckoTerminal's new-pool
+    # feed reaches back only ~70 minutes and a launch missed cannot be
+    # recovered from any endpoint later. Prices are NOT collected here: minute
+    # OHLCV is retroactive per pool, so the stamp is the only perishable thing.
+    "evm-launch-tick": {
+        "task": "app.evmchain.scheduler.evm_launch_tick",
+        "schedule": crontab(minute="*/2"),
     },
     # The PumpFun Lab mirrors one on-chain wallet. Every minute, because the
     # leader's median hold is 8.5 minutes — a slower poll would copy trades he
