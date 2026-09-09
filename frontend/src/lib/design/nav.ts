@@ -88,6 +88,17 @@ export const NAV_GROUPS: NavGroup[] = [
       // see both sections side by side.
       { href: "/matrix-lab", label: "Matrix Lab", icon: IconSpark, status: "ready" },
       { href: "/kol-lab", label: "KOL Lab", icon: IconWallet, status: "ready" },
+      // A collaborator's five strategies, on five separate $1,000 paper books
+      // over their own tables. Named for whose rules it runs so it can never be
+      // read as another generation of the labs above it, and listed beside them
+      // because that is where a reader looks for a lab.
+      {
+        href: "/rafiq-lab",
+        label: "Rafiq Lab",
+        icon: IconSpark,
+        status: "ready",
+        note: "Research simulation. Five supplied strategies, $1,000 each.",
+      },
     ],
   },
   {
