@@ -39,6 +39,7 @@ celery_app = Celery(
         "app.momentum.scheduler",
         "app.depth.scheduler",
         "app.kol.scheduler",
+        "app.security.lab_scheduler",
         "app.movers.scheduler",
         "app.social.scheduler",
         "app.copycontrol.scheduler",
@@ -291,6 +292,13 @@ celery_app.conf.beat_schedule = {
     # invisible lag to every control entry.
     "copycontrol-tick": {
         "task": "app.copycontrol.scheduler.copycontrol_tick",
+        "schedule": crontab(minute="*"),
+    },
+    # Security evidence for coins the labs are about to judge. Every minute:
+    # a lab judges a coin ten minutes after first sight, so a slower pass would
+    # leave the verdict arriving after the decision it exists to inform.
+    "security-lab-coverage": {
+        "task": "app.security.lab_scheduler.cover_lab_candidates_tick",
         "schedule": crontab(minute="*"),
     },
     # The KOL Lab: wallets that were early into winners, against their control.

@@ -154,7 +154,23 @@ def _wallet(sid: str, name: str, entry: tuple[Condition, ...],
     )
 
 
-#: ONE wallet, and it is no longer a control.
+#: The security gate: the platform's own contract/mint/liquidity verdict must
+#: have positively said VERIFIED at or before the checkpoint.
+#:
+#: This is the one lever the trade record actually pointed at. Over 50 closed
+#: trades, partial losses averaged FOURTEEN CENTS and the entire loss was five
+#: coins going to zero: -$76 against +$113 from everything else. No exit rule
+#: reaches a coin that rugs inside its holding period, deeper liquidity did not
+#: help (the rugs averaged $423k at entry against $258k for survivors, one
+#: rugged from $1.1M), and a faster clock would not have caught them.
+#:
+#: UNKNOWN declines, the same as FAILED. The security module's own entry policy
+#: requires every check to positively pass, and "the platform could not look"
+#: is not evidence of safety. An unevaluated coin is therefore also a decline.
+_SECURE = Condition(feature="security_verified", op="gte", value=D("1"),
+                    reason="security_not_verified")
+
+#: THREE wallets now: the incumbent, and a fresh PAIR testing the gate.
 #:
 #: MOV-01 required turnover >= 1.0 and was retired on 2026-09-09 on
 #: instruction, with 3 closed trades to its name (2 of them winners). It is
@@ -168,11 +184,23 @@ def _wallet(sid: str, name: str, entry: tuple[Condition, ...],
 #: what buying every liquid pump.fun coin and banking the wallet at +10%
 #: returns — and it has no benchmark, so a good result cannot be distinguished
 #: from a hot week.
+#: MOV-03 and MOV-04 start together and differ by exactly ONE condition, which
+#: is what makes them readable. MOV-02 is the incumbent and is NOT part of that
+#: pair — it has been running since 07:54 with a different history, so
+#: comparing either new arm against it would confound the gate with the start
+#: date. It is left alone rather than reset.
 STRATEGIES: tuple[Strategy, ...] = (
     _wallet("MOV-02", "MOVERS-ALL", _POOL,
             "Buying every pump.fun coin deep enough to fill, holding thirty "
             "minutes and banking the wallet at +10%, returns something.",
-            "NO_CONTROL_SINCE_2026_09_09"),
+            "INCUMBENT_NO_CONTROL_SINCE_2026_09_09"),
+    _wallet("MOV-03", "SECURITY-GATED", (*_POOL, _SECURE),
+            "A coin the security evaluator has positively VERIFIED rugs less "
+            "often than one from the same pool that it has not.",
+            "RUGS_WERE_5_OF_50_TRADES_AND_ALL_OF_THE_LOSS"),
+    _wallet("MOV-04", "SECURITY-CONTROL", _POOL,
+            "The gate adds nothing: verified and unverified coins rug alike.",
+            "CONTROL"),
 )
 
 BY_ID = {s.id: s for s in STRATEGIES}
@@ -198,7 +226,17 @@ def _canonical() -> str:
 
 SPEC_HASH = hashlib.sha256(_canonical().encode()).hexdigest()
 
-assert len(STRATEGIES) == 1, "one wallet, no control — see the note above"
+assert len(STRATEGIES) == 3, "the incumbent, the gated arm and its control"
+# THE property, for the PAIR: MOV-03 and MOV-04 differ by exactly one
+# condition. MOV-02 is deliberately outside the comparison.
+_g = {str(c) for c in BY_ID["MOV-03"].entry}
+_c = {str(c) for c in BY_ID["MOV-04"].entry}
+assert _g - _c == {str(_SECURE)} and _c - _g == set(), (
+    "the security pair must differ in the security condition ALONE"
+)
+assert BY_ID["MOV-04"].entry == BY_ID["MOV-02"].entry, (
+    "the fresh control must draw from the same pool as the incumbent"
+)
 # No turnover condition survives anywhere in the registry. Asserted so that
 # reinstating the filter cannot happen by half: putting it back means putting
 # the control back with it, or the lab claims a comparison it is not running.

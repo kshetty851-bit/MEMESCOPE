@@ -49,6 +49,7 @@ from app.models.market import TokenMarketSnapshot, TradingStatus
 from app.models.graduation import PumpfunGraduation
 from app.models.radar import RadarToken
 from app.models.social import PumpfunSocialSnapshot
+from app.models.token_security import TokenSecurityEvaluationRow
 from app.models.early_buyer import TokenEarlyBuyer
 from app.models.kol import KolWalletRank
 from app.models.token import DiscoveredToken
@@ -123,6 +124,35 @@ class LabService:
             )
         ).scalars().first()
         if existing is not None:
+            # BACKFILL a registry that has gained a strategy. Without this, a
+            # new arm added to a live tournament silently never trades: the
+            # tournament exists, so activation returns early, and no wallet row
+            # is ever written for it.
+            #
+            # Only ever ADDS. A strategy removed from the registry keeps its
+            # row and its history — the board and ledger stop showing it, they
+            # do not erase it.
+            have = set((await self._session.execute(
+                select(LabStrategy.strategy_id)
+                .where(LabStrategy.tournament_id == existing.id)
+            )).scalars())
+            missing = [x for x in self._spec.STRATEGIES if x.id not in have]
+            for s_ in missing:
+                self._session.add(LabStrategy(
+                    tournament_id=existing.id, strategy_id=s_.id, name=s_.name,
+                    version=self._spec.SPEC_VERSION, spec_hash=self._spec.SPEC_HASH,
+                    checkpoint_minutes=s_.checkpoint_minutes, size_usd=s_.size_usd,
+                    max_concurrent=s_.max_concurrent,
+                    max_exposure_usd=s_.max_exposure_usd,
+                    rules=_rules_json(s_), starting_equity=STARTING_EQUITY,
+                    cash=STARTING_EQUITY, peak_equity=STARTING_EQUITY,
+                    status="active",
+                ))
+            if missing:
+                await self._session.flush()
+                logger.info("lab_strategies_added",
+                            added=[s_.id for s_ in missing],
+                            spec_version=self._spec.SPEC_VERSION)
             return existing
 
         tournament = LabTournament(
@@ -225,6 +255,18 @@ class LabService:
         # for this simply never fires until one has been taken, which is the
         # correct behaviour rather than a silent pass.
         f["kol_early"] = Decimal(await self._kol_early_count(mint))
+        # SECURITY: the platform's own contract/mint/liquidity verdict, as it
+        # stood AT OR BEFORE this checkpoint. Nothing later can reach it, so a
+        # coin that was only evaluated after we would have bought it counts as
+        # unevaluated rather than as safe.
+        #
+        # 1 only for VERIFIED. UNKNOWN means the platform could not establish
+        # safety, and the entry policy this borrows from requires every check
+        # to positively PASS — so "we could not look" declines rather than
+        # guesses, and an absent evaluation is 0 for the same reason.
+        f["security_verified"] = Decimal(
+            1 if await self._security_verified(mint, checkpoint_at) else 0
+        )
         f["liq"] = last.liquidity_usd if last.liquidity_usd and last.liquidity_usd > 0 else None
         f["mcap"] = last.market_cap if last.market_cap and last.market_cap > 0 else None
         f["vol1h"] = last.volume_1h
@@ -1024,6 +1066,22 @@ class LabService:
             .where(DiscoveredToken.id == token_id)
         )
         return bool(src) and src in self._pumpfun_programs()
+
+    async def _security_verified(self, mint: str, at: datetime) -> bool:
+        """Was this coin VERIFIED by the security evaluator, as of `at`?
+
+        Reads the most recent evaluation at or before the checkpoint. The
+        evaluator runs on its own pass (`security/lab_coverage.py`) so this is
+        a cheap indexed lookup rather than an RPC call in the decision path.
+        """
+        status = await self._session.scalar(
+            select(TokenSecurityEvaluationRow.overall_status)
+            .where(TokenSecurityEvaluationRow.mint_address == mint,
+                   TokenSecurityEvaluationRow.evaluated_at <= at)
+            .order_by(TokenSecurityEvaluationRow.evaluated_at.desc())
+            .limit(1)
+        )
+        return status == "VERIFIED"
 
     async def _kol_early_count(self, mint: str) -> int:
         """How many FOLLOWED wallets were among this coin's first buyers.
