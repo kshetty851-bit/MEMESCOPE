@@ -28,23 +28,21 @@ router = APIRouter(prefix="/movers", tags=["movers"])
 PER_CELL_TRADES = 60
 
 DISCLOSURE = (
-    "Research simulation. Two virtual $100 wallets, pump.fun tokens only, $10 a "
-    "position and up to ten at once, each held for exactly 30 minutes with NO "
-    "take-profit and no stop. They differ in ONE condition: MOVERS-TURNOVER "
-    "requires five-minute volume of at least 1.0x the coin's liquidity, "
-    "MOVERS-CONTROL does not. Everything else — the pool, the $100k liquidity "
-    "floor, the size, the clock — is identical, which is what makes the pair "
-    "readable. "
-    "The rule comes from a measurement, not a hunch: over 4,130 tokens, those "
-    "that later doubled were sitting at 0.63 turnover beforehand against 0.11 "
-    "for those that did not. But that same measurement showed turnover is a "
-    "FLOOR and not a score — above the threshold the hit rate is flat and "
-    "non-monotonic across every decile — so nothing here ranks or sizes by it. "
-    "'Doubled' there meant the price TOUCHED 2x at some later moment, which no "
-    "seller necessarily got: every payoff study on this platform has found "
-    "peaks are not realisable and every exit level tested came out negative. "
-    "If the two wallets finish level, turnover is not a signal, and that is a "
-    "real answer. The control has beaten the designed arm here before. "
+    "Research simulation, and NO LONGER A CONTROLLED ONE. One virtual $100 "
+    "wallet buying every pump.fun coin with at least $100k of liquidity, a "
+    "tenth of the balance per position and up to ten at once, each held 30 "
+    "minutes with no take-profit and no stop, banking and compounding "
+    "whenever the wallet is up 10%. "
+    "It began as a pair: MOVERS-TURNOVER required five-minute volume of at "
+    "least 1.0x the coin's liquidity and this arm did not, so the difference "
+    "between them measured whether that filter was worth anything. The "
+    "filtered arm was retired on 2026-09-09 with three closed trades, so that "
+    "question is now unanswered and cannot be answered from this page. "
+    "What remains has NO BENCHMARK. A good number here cannot be told apart "
+    "from a good week, which matters because the measurement this lab was "
+    "built on found turnover to be a floor rather than a score, and because "
+    "every payoff study on this platform has found peaks are not realisable "
+    "and every exit level negative. "
     "No real order was ever placed."
 )
 
@@ -54,7 +52,6 @@ async def board(session: DbSession) -> dict[str, Any]:
     out = await shared.build(
         session, registry=mvspec, disclosure=DISCLOSURE,
         per_cell=PER_CELL_TRADES,
-        axis=lambda s_: {"is_control": bool(s_ and s_.evidence == "CONTROL")},
         # Signal, then control. Never by outcome — see the module docstring.
         order=lambda w: w["strategy_id"],
     )

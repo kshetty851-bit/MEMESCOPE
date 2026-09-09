@@ -357,6 +357,14 @@ async def build_trades(session, *, registry: Any = spec, disclosure: str = DISCL
                        if mark and pos.entry_price else None)
         out.append({
             "price_now": mark,
+            # What the stake would be worth now if it had never been sold.
+            # Gross, like the percentage beside it: selling this would cost
+            # fees and impact, and `value` (what we actually got) already has
+            # those taken out — so the two are not a like-for-like pair and
+            # the difference is an upper bound on what holding would have
+            # added, never the figure itself.
+            "value_if_held_usd": ((pos.size_usd * mark / pos.entry_price)
+                                  if mark and pos.entry_price else None),
             "price_now_age_minutes": (round((now - mark_at).total_seconds() / 60, 1)
                                       if mark_at else None),
             "pct_since_entry_now": (round(since_entry, 1)

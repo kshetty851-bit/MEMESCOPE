@@ -70,6 +70,32 @@ function arm(t: LabTrade): string {
 /** Where the coin sits now, against our entry. Closed rows only — for an open
  *  position the P&L column already IS the current mark, and repeating it in a
  *  second column would read as corroboration from a second source. */
+/** What the stake would be worth now if it had never been sold. Closed rows
+ *  only: for an open position the Value column already is that number. */
+function IfHeldCell({ t }: { t: LabTrade }) {
+  if (t.status !== "closed") return <td className="py-1.5 pr-3" />;
+  const held = t.value_if_held_usd;
+  if (held === null || held === undefined) {
+    return <td className="py-1.5 pr-3 text-right font-mono text-muted">—</td>;
+  }
+  const got = Number(t.exit_proceeds_usd ?? 0);
+  const stale = (t.price_now_age_minutes ?? 0) > 30;
+  return (
+    <td
+      className={`py-1.5 pr-3 text-right font-mono ${
+        stale ? "text-muted" : tone(Number(held) - got)
+      }`}
+      title={
+        stale
+          ? `Last priced ${t.price_now_age_minutes} min ago — probably dead`
+          : "Gross value of the stake if never sold. Not comparable pound-for-pound with what we got, which has fees and impact removed."
+      }
+    >
+      {money(held)}
+    </td>
+  );
+}
+
 function NowCell({ t }: { t: LabTrade }) {
   if (t.status !== "closed") return <td className="py-1.5 pr-3" />;
   const v = t.pct_since_entry_now;
@@ -130,6 +156,7 @@ function Row({ t }: { t: LabTrade }) {
       </td>
       <td className={`py-1.5 pr-3 text-right font-mono ${tone(p)}`}>{money(p)}</td>
       <td className={`py-1.5 pr-3 text-right font-mono ${tone(p)}`}>{pct(pnlPctOf(t))}</td>
+      <IfHeldCell t={t} />
       <NowCell t={t} />
       <td className="py-1.5 font-mono text-[10px] text-muted">
         {t.status === "open" ? "open" : (t.exit_reason ?? "closed")}
@@ -154,6 +181,12 @@ function Table({ rows }: { rows: LabTrade[] }) {
             <th className="pb-1 pr-3 text-right font-normal">Value</th>
             <th className="pb-1 pr-3 text-right font-normal">P&amp;L</th>
             <th className="pb-1 pr-3 text-right font-normal">P&amp;L %</th>
+            <th
+              className="pb-1 pr-3 text-right font-normal"
+              title="What the stake would be worth now if it had never been sold. Gross: selling it would cost fees and impact, which the Value column already has removed."
+            >
+              If held
+            </th>
             <th
               className="pb-1 pr-3 text-right font-normal"
               title="Gross move from our entry to the latest mark, and how long since we sold. Compare it against the P&L % beside it: the difference is what holding would have added or cost. Raw price, not a sellable value."

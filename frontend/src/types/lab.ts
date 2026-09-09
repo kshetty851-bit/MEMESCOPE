@@ -206,6 +206,9 @@ export interface LabTrade {
   exit_proceeds_usd: number | null;
   /** Where the coin is NOW, gross. See `pct_since_entry_now`. */
   price_now: number | null;
+  /** What the stake would be worth now had it never been sold. Gross — not
+   *  a like-for-like pair with `value`, which has fees and impact removed. */
+  value_if_held_usd: number | null;
   /** Age of that mark. A stale one is a dead coin, not a standing price. */
   price_now_age_minutes: number | null;
   /** Gross % from OUR entry to the latest mark — "what if we had held".

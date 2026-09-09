@@ -82,64 +82,44 @@ async def test_the_turnover_feature_is_actually_computed(db_session):
     assert features["turnover_5m"] == pytest.approx(D("10000") / D("600000"))
 
 
-async def test_the_floor_keeps_the_signal_arm_out_of_a_quiet_coin(db_session):
-    """The whole hypothesis, tested as behaviour.
+async def test_the_sole_arm_buys_a_quiet_coin_now_that_the_filter_is_gone(db_session):
+    """The turnover arm was retired on 2026-09-09, so a coin at 0.017
+    turnover — far below the floor that used to reject it — is now bought.
 
-    The fixture's coin is deep and well-routed but quiet — turnover 0.017,
-    below the 1.0 floor. The control must buy it and the signal must not, and
-    the signal's refusal must name the turnover condition rather than some
-    other gate it happened to fail first.
+    This is the behavioural record of what the deletion changed, and it is
+    the test that would fail loudest if the filter were ever half-reinstated
+    on the surviving wallet without its control.
     """
     svc = CompoundService(db_session, registry=mvspec)
-    # Activate FIRST, then present a coin whose 5-minute checkpoint falls after
-    # the freeze: the engine excludes any checkpoint older than the tournament
-    # on purpose, so a two-hour-old fixture is history and buys nothing in
-    # either arm — which would pass this test for entirely the wrong reason.
     await svc._lab.activate(valid_from=NOW - timedelta(minutes=15))
     await _pumpfun_token(db_session, mint="M" + "q" * 20,
-                       detected=NOW - timedelta(minutes=11), liq=D("600000"),
-                       price=D("0.001"), pool="PMOVQ")
+                         detected=NOW - timedelta(minutes=11), liq=D("600000"),
+                         price=D("0.001"), pool="PMOVQ")
     await svc.tick(now=NOW)
 
-    signal = await _rows(db_session, "MOV-01")
-    control = await _rows(db_session, "MOV-02")
+    assert await _rows(db_session, "MOV-02"), (
+        "the surviving wallet has no turnover condition and must take it"
+    )
+    assert "turnover_below_floor" not in await _skips(db_session, "MOV-02")
+    assert not await _rows(db_session, "MOV-01"), "MOV-01 no longer exists"
 
-    assert control, "the control must take the coin the signal declines"
-    assert not signal, "turnover 0.017 is far below the 1.0 floor"
-    assert "turnover_below_floor" in await _skips(db_session, "MOV-01")
 
-
-async def test_both_arms_take_a_coin_that_clears_the_floor(db_session):
-    """The mirror of the test above, and the one that makes it mean something.
-
-    Without this, a signal arm that never traded at all would pass the test
-    above for entirely the wrong reason.
+async def test_the_turnover_feature_still_computes_though_nothing_reads_it(db_session):
+    """`turnover_5m` stays in the engine after the arm that used it was
+    retired. Keeping the measurement alive is deliberate — it is the one
+    number this lab established (0.63 before a double against 0.11) — and a
+    feature that quietly stopped being computed would make reinstating the
+    filter look easy and be wrong.
     """
-    svc = CompoundService(db_session, registry=mvspec)
-    await svc._lab.activate(valid_from=NOW - timedelta(minutes=15))
-    tok = await _pumpfun_token(db_session, mint="M" + "h" * 20,
-                             detected=NOW - timedelta(minutes=11), liq=D("600000"),
-                             price=D("0.001"), pool="PMOVH")
-    # Lift ONLY the volume, on the rows the engine actually reads. Appending a
-    # fresh snapshot does not work: the fixture already writes one at every
-    # whole minute including the checkpoint itself, and `observe` reads the
-    # last row at-or-before it — so a row added after that is invisible and a
-    # row added before it is shadowed. Turnover becomes 1000000/600000 = 1.67.
-    from sqlalchemy import update
-    from app.models.market import TokenMarketSnapshot
-    await db_session.execute(
-        update(TokenMarketSnapshot)
-        .where(TokenMarketSnapshot.token_id == tok.id)
-        .values(volume_5m=D("1000000"))
+    tok = await _pumpfun_token(db_session, mint="M" + "t" * 20,
+                               detected=NOW - timedelta(minutes=11),
+                               liq=D("600000"), price=D("0.001"), pool="PMOVT")
+    svc = LabService(db_session, registry=mvspec)
+    features, _ctx = await svc.observe(
+        token_id=tok.id, mint=tok.mint_address,
+        detected_at=NOW - timedelta(minutes=11), checkpoint_at=NOW,
     )
-    await db_session.flush()
-
-    await svc.tick(now=NOW)
-
-    assert await _rows(db_session, "MOV-01"), (
-        "a coin at 1.67 turnover clears the 1.0 floor and must be bought"
-    )
-    assert await _rows(db_session, "MOV-02")
+    assert features["turnover_5m"] == pytest.approx(D("10000") / D("600000"))
 
 
 async def test_the_movers_tick_leaves_other_tournaments_alone(db_session):

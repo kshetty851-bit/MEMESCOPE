@@ -136,11 +136,6 @@ _POOL: tuple[Condition, ...] = (
 # and above $250k not at all. Depth is the execution guarantee here; the quote
 # was a redundant gate that happened to be crippling.
 
-#: The whole hypothesis, in one line.
-_TURNOVER = Condition(feature="turnover_5m", op="gte", value=TURNOVER_FLOOR,
-                      reason="turnover_below_floor")
-
-
 def _wallet(sid: str, name: str, entry: tuple[Condition, ...],
             hypothesis: str, evidence: str) -> Strategy:
     return Strategy(
@@ -159,15 +154,25 @@ def _wallet(sid: str, name: str, entry: tuple[Condition, ...],
     )
 
 
+#: ONE wallet, and it is no longer a control.
+#:
+#: MOV-01 required turnover >= 1.0 and was retired on 2026-09-09 on
+#: instruction, with 3 closed trades to its name (2 of them winners). It is
+#: kept out of `STRATEGIES` rather than merely disabled so the engine cannot
+#: reach a strategy id its registry no longer defines.
+#:
+#: WHAT THIS COSTS, STATED: MOV-02 was only ever a control, and a control with
+#: nothing to control against is just a book. Nothing here can now answer
+#: whether the turnover filter helped or hurt, because the comparison that
+#: would have answered it no longer exists. What is left measures one thing —
+#: what buying every liquid pump.fun coin and banking the wallet at +10%
+#: returns — and it has no benchmark, so a good result cannot be distinguished
+#: from a hot week.
 STRATEGIES: tuple[Strategy, ...] = (
-    _wallet("MOV-01", "MOVERS-TURNOVER", (*_POOL, _TURNOVER),
-            "A coin trading heavily against its own liquidity goes on to "
-            "outrun one from the same pool that is not.",
-            "PRE_MOVE_SEPARATION_0.63_VS_0.11_MEASURED_2026_09_09"),
-    _wallet("MOV-02", "MOVERS-CONTROL", _POOL,
-            "Depth and a working route are the whole effect, and turnover "
-            "adds nothing.",
-            "CONTROL"),
+    _wallet("MOV-02", "MOVERS-ALL", _POOL,
+            "Buying every pump.fun coin deep enough to fill, holding thirty "
+            "minutes and banking the wallet at +10%, returns something.",
+            "NO_CONTROL_SINCE_2026_09_09"),
 )
 
 BY_ID = {s.id: s for s in STRATEGIES}
@@ -193,14 +198,13 @@ def _canonical() -> str:
 
 SPEC_HASH = hashlib.sha256(_canonical().encode()).hexdigest()
 
-assert len(STRATEGIES) == 2, "the signal and its control"
-assert sum(1 for s in STRATEGIES if s.evidence == "CONTROL") == 1
-# THE property: the two wallets differ by exactly one condition. Asserted at
-# import, because a comparison that quietly differs in two ways answers a
-# question nobody asked.
-_a, _b = (set(str(c) for c in s.entry) for s in STRATEGIES)
-assert _a - _b == {str(_TURNOVER)} and _b - _a == set(), (
-    "the control must differ from the signal in the turnover condition ALONE"
+assert len(STRATEGIES) == 1, "one wallet, no control — see the note above"
+# No turnover condition survives anywhere in the registry. Asserted so that
+# reinstating the filter cannot happen by half: putting it back means putting
+# the control back with it, or the lab claims a comparison it is not running.
+assert not any(c.feature == "turnover_5m"
+               for st in STRATEGIES for c in st.entry), (
+    "a turnover condition without a control arm measures nothing"
 )
 assert all(s.exits.take_profit is None for s in STRATEGIES), (
     "a take-profit would measure the exit rather than the entry"

@@ -13,20 +13,20 @@ from decimal import Decimal as D
 from app.movers import spec
 
 
-def test_the_pair_differs_by_exactly_one_condition() -> None:
-    """The whole experiment. Two differences and the result is unattributable."""
-    signal, control = spec.STRATEGIES
-    a = {str(c) for c in signal.entry}
-    b = {str(c) for c in control.entry}
-    assert a - b == {str(spec._TURNOVER)}
-    assert b - a == set()
+def test_the_turnover_arm_is_gone_entirely() -> None:
+    """MOV-01 was retired on 2026-09-09 after 3 closed trades. It is removed
+    from the registry rather than disabled, so the engine cannot reach a
+    strategy id its own spec no longer defines — that mismatch is how one
+    lab's tick raises a KeyError on another lab's book."""
+    assert "MOV-01" not in spec.BY_ID
+    assert len(spec.STRATEGIES) == 1
 
 
-def test_the_control_is_the_one_without_the_filter() -> None:
-    control = spec.BY_ID["MOV-02"]
-    assert control.evidence == "CONTROL"
-    assert not any(c.feature == "turnover_5m" for c in control.entry)
-    assert any(c.feature == "turnover_5m" for c in spec.BY_ID["MOV-01"].entry)
+def test_no_turnover_condition_survives_without_a_control() -> None:
+    """Reinstating the filter must mean reinstating the control with it.
+    A filtered arm with nothing to compare against measures nothing."""
+    assert not any(c.feature == "turnover_5m"
+                   for st in spec.STRATEGIES for c in st.entry)
 
 
 def test_neither_arm_takes_profit() -> None:
@@ -53,15 +53,12 @@ def test_both_arms_hold_for_the_same_thirty_minutes() -> None:
         assert s.exits.time_exit_hours == spec.TIME_EXIT_HOURS
 
 
-def test_the_turnover_floor_sits_well_above_the_measured_cliff() -> None:
-    """Below ~0.02 turnover, 10-24% of tokens doubled; above it, 30-47%. The
-    floor must clear that cliff by a wide margin, because the cliff is where
-    the dead coins stop rather than where the movers start."""
+def test_the_measured_floor_is_kept_on_record() -> None:
+    """The constant outlives the arm on purpose. It is the one number this
+    lab actually measured — below ~0.02 turnover 10-24% of coins doubled and
+    above it 30-47% — and anyone reinstating the filter should start from the
+    measurement rather than from a fresh guess."""
     assert spec.TURNOVER_FLOOR >= D("0.5")
-    condition = next(c for c in spec.BY_ID["MOV-01"].entry
-                     if c.feature == "turnover_5m")
-    assert condition.op == "gte"
-    assert condition.value == spec.TURNOVER_FLOOR
 
 
 def test_the_book_cannot_be_overcommitted() -> None:
@@ -127,8 +124,8 @@ def test_the_stake_is_a_tenth_of_the_wallet_capped_at_a_hundred() -> None:
         assert spec.SIZE_USD * m == D(expected), balance
 
 
-def test_both_arms_scale_identically() -> None:
-    """Sizing that differed between the arms would confound the entry rule
-    with the stake and leave the result unattributable to either."""
+def test_sizing_is_declared_on_every_arm() -> None:
+    """One arm today, but the moment a second exists the two must size
+    identically or the comparison confounds the entry rule with the stake."""
     assert len({s.size_usd for s in spec.STRATEGIES}) == 1
     assert len({s.max_concurrent for s in spec.STRATEGIES}) == 1

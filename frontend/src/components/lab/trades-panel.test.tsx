@@ -33,6 +33,10 @@ function trade(overrides: Partial<LabTrade> = {}): LabTrade {
     exec_multiple: 1.1,
     peak_exec_multiple: 1.2,
     exit_reason: "time_exit",
+    price_now: 0.0018,
+    price_now_age_minutes: 2,
+    pct_since_entry_now: 80,
+    value_if_held_usd: 9,
     exit_proceeds_usd: 5.5,
     route_state: "ok",
     reached_125: false,
@@ -82,5 +86,43 @@ describe("LabTradesTable", () => {
     const unpriced = trade({ status: "open", realised_pnl: null, unrealised_pnl: null });
     expect(pnlOf(unpriced)).toBeNull();
     expect(pnlPctOf(unpriced)).toBeNull();
+  });
+});
+
+
+describe("what holding would have been worth", () => {
+  it("shows the held value and the move, and marks a dead price stale", () => {
+    render(
+      <LabTradesTable
+        trades={[
+          // Sold for $5.50 on a $5 stake; the coin then ran to $9 of stake.
+          trade({ id: "h1" }),
+          // Priced two hours ago: the coin is gone, not sitting at $40.
+          trade({
+            id: "h2",
+            value_if_held_usd: 40,
+            pct_since_entry_now: 700,
+            price_now_age_minutes: 120,
+          }),
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("$9.00")).toBeInTheDocument();
+    expect(screen.getByText("+80.0%")).toBeInTheDocument();
+    // The stale row still shows its numbers — "we cannot see it" and "it went
+    // nowhere" are different facts — but flags that they are not a price.
+    expect(screen.getByText("$40.00")).toBeInTheDocument();
+    expect(screen.getAllByText("·stale").length).toBe(1);
+  });
+
+  it("shows nothing for an open row, where Value is already that number", () => {
+    render(
+      <LabTradesTable
+        trades={[trade({ id: "o1", status: "open", closed_at: null,
+                        realised_pnl: null, unrealised_pnl: -0.2 })]}
+      />,
+    );
+    expect(screen.queryByText("$9.00")).not.toBeInTheDocument();
   });
 });

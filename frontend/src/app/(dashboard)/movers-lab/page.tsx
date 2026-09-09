@@ -68,21 +68,11 @@ function RunningFor({ since }: { since: string }) {
 }
 
 function WalletCard({ w, starting }: { w: MoversWallet; starting: number }) {
-  const control = w.is_control || w.strategy_id === "MOV-02";
+  // No Signal/Control badge any more: there is one wallet, and labelling it
+  // either would claim a comparison this lab no longer runs.
   return (
     <Panel density="compact">
-      <div className="flex items-baseline justify-between gap-2">
-        <Label>{w.name}</Label>
-        <span
-          className={`rounded-sm border px-1.5 py-0.5 text-[10px] uppercase ${
-            control
-              ? "border-line-control text-ink-3"
-              : "border-accent/40 bg-accent/10 text-accent"
-          }`}
-        >
-          {control ? "Control" : "Signal"}
-        </span>
-      </div>
+      <Label>{w.name}</Label>
 
       <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <div>
@@ -131,8 +121,8 @@ export default function MoversLabPage() {
     <div className="flex flex-col gap-4 p-4 lg:p-6">
       <Toolbar
         eyebrow="Movers Lab"
-        title="Does heavy turnover mark a coin before it runs?"
-        description="Two $100 wallets, $10 a position, ten at a time, each held exactly 30 minutes with no take-profit and no stop. They differ in one condition only: one requires five-minute volume of at least 1.0x the coin's liquidity, the other does not. Nothing here is real money."
+        title="What buying every liquid pump.fun coin returns."
+        description="One $100 wallet, a tenth of the balance per position and ten at a time, each held 30 minutes with no take-profit and no stop, banking whenever the wallet is up 10%. The turnover-filtered arm it was paired against was retired, so there is no benchmark here any more. Nothing is real money."
       />
 
       {/* Above the numbers, and deliberately not collapsible. */}
@@ -169,11 +159,7 @@ export default function MoversLabPage() {
           <Panel density="compact">
             <Label>THE RULE</Label>
             <p className="mt-2 text-xs text-muted">
-              Turnover floor{" "}
-              <span className="font-mono text-ink">
-                {data.turnover_floor ?? "—"}x
-              </span>{" "}
-              · liquidity at least{" "}
+              No entry filter · liquidity at least{" "}
               <span className="font-mono text-ink">
                 {money(data.min_liquidity_usd)}
               </span>{" "}
@@ -191,7 +177,8 @@ export default function MoversLabPage() {
             </p>
           </Panel>
 
-          {/* Signal first, control second, never sorted by outcome. */}
+          {/* One wallet. The grid survives so a second arm would sit beside
+              it rather than under it if the comparison is ever restored. */}
           <div className="grid gap-4 lg:grid-cols-2">
             {data.wallets.map((w) => (
               <WalletCard key={w.strategy_id} w={w} starting={starting} />
