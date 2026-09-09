@@ -139,6 +139,17 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: IconSpark,
         status: "ready",
       },
+      // A collaborator's five strategies, on five separate $1,000 paper books
+      // over their own tables. Filed under Strategy because that is where a
+      // reader looks for it, and named for whose rules it runs so it can never
+      // be read as another generation of the wallet above it.
+      {
+        href: "/rafiq-lab",
+        label: "Rafiq Lab",
+        icon: IconSpark,
+        status: "ready",
+        note: "Research simulation. Five supplied strategies, $1,000 each.",
+      },
     ],
   },
   {

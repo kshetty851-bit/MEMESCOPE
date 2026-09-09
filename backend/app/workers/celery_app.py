@@ -33,6 +33,7 @@ celery_app = Celery(
         "app.lab.scheduler",
         "app.hq_ops.tasks",
         "app.strategy_lab.scheduler",
+        "app.labs.rafiq.scheduler",
     ],
 )
 
@@ -245,6 +246,16 @@ celery_app.conf.beat_schedule = {
     "lab-sellability-refresh": {
         "task": "app.lab.scheduler.lab_sellability_refresh",
         "schedule": crontab(minute="*/3"),
+    },
+    # Rafiq Lab: five collaborator strategies on five $1,000 paper books. Every
+    # minute, like the Lab and the Arena, because Strategy B's exits are
+    # measured in a two-hour box and a five-minute beat would blur it. Gated by
+    # RAFIQ_LAB_ENABLED, which ships off: with the flag down the task returns
+    # `{"skipped": "rafiq_lab_disabled"}` before opening a session, so
+    # registering it here does not start anything.
+    "rafiq-lab-tick": {
+        "task": "app.labs.rafiq.scheduler.rafiq_lab_tick",
+        "schedule": crontab(minute="*"),
     },
     # The real wallet's heartbeat. Beside the Lab's and at the same cadence,
     # because it acts on Lab decisions and those are actionable for ten minutes.

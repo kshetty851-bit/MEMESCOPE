@@ -5,6 +5,16 @@ model that is never imported is invisible to it.
 """
 
 from app.db.base import Base
+
+# Rafiq Lab's three `rafiq_lab_*` tables. Imported here for one reason: without
+# it they exist in the database and not in this metadata, and autogenerate
+# emits `drop_table` for each of them. Additive — it declares tables, it does
+# not change any.
+from app.labs.rafiq.models import (  # noqa: F401
+    RafiqLabDailyState,
+    RafiqLabPosition,
+    RafiqLabStrategy,
+)
 from app.models.alpha_session import AlphaSession
 from app.models.curve import TokenCurveSnapshot  # noqa: F401
 from app.models.discovery import (
