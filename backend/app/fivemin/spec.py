@@ -106,6 +106,27 @@ paired second arm was what distinguished "the horizon is bad" from "the market
 was bad this week", and a single arm cannot make that distinction. The 5-vs-15
 question is settled on 465 coins of mark data; nothing else is.
 
+## Why 8.0.0 exists: every arm restarts on code that no longer invents deaths
+
+7.0.0 ran under two false-death bugs, both found on 2026-09-09 and both fixed
+the same day. A single `inactive` reading closed a position at $0.00 for ever
+(6060ae4), and sell quotes guessed six decimals for every token, which is right
+for pump.fun and wrong for the established AMMs (327decf) — JTO carries nine, so
+a live position on a $1.29m-liquidity Orca market was written off as worthless.
+
+The damage was uneven and that is the point. The graduation arms trade pump.fun
+lineage, where the six-decimal guess happens to be correct, and finished 7.0.0
+with sixteen paired trades and no deaths. AMM-S2 took THREE zeros in FIVE trades
+on million-dollar-liquidity tokens, which is not a market event. PUMP-S2 took
+one, and 68.5% of pump.swap tokens carry null decimals.
+
+Only two arms needed resetting, but resetting two would have meant mutating
+strategy rows directly and deleting the positions that record what the bug did.
+A version bump costs the graduation arms sixteen low-value trades, keeps every
+row queryable under fivemin-7.0.0, and buys something better than either: all
+four arms starting at the SAME INSTANT on the same corrected engine, which is
+what the pairing was always for.
+
 ## The honest prior
 
 The five-minute figure that started this rests on ONE coin of 138 doing 47.97x
@@ -125,7 +146,7 @@ from decimal import Decimal as D
 
 from app.lab.spec import Condition, Exits, Strategy, rules_json
 
-SPEC_VERSION = "fivemin-7.0.0"
+SPEC_VERSION = "fivemin-8.0.0"
 
 #: Draw candidates from the pump.fun graduation cohort, not from radar.
 #: Read by `LabService._due_candidates`; absent means radar, so no other

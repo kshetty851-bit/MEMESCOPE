@@ -28,9 +28,9 @@ class TestItCannotHaltAnotherTournament:
 
     def test_the_rules_change_bumped_the_version(self) -> None:
         """Each predecessor was a live tournament with different rules —
-        6.0.0 ran three arms and no baseline. Reusing a version would attach
-        this book to that record."""
-        assert fivemin.SPEC_VERSION == "fivemin-7.0.0"
+        7.0.0 ran under two false-death bugs that wrote off live positions.
+        Reusing a version would attach this book to that record."""
+        assert fivemin.SPEC_VERSION == "fivemin-8.0.0"
 
 
 class TestItTradesTheGraduationCohort:
