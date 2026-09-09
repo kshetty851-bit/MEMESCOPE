@@ -49,6 +49,8 @@ from app.models.market import TokenMarketSnapshot, TradingStatus
 from app.models.graduation import PumpfunGraduation
 from app.models.radar import RadarToken
 from app.models.social import PumpfunSocialSnapshot
+from app.models.early_buyer import TokenEarlyBuyer
+from app.models.kol import KolWalletRank
 from app.models.token import DiscoveredToken
 from app.universe import rules as universe_rules
 from app.models.research_data import ResearchQuote, WalletFlowSnapshot
@@ -215,6 +217,14 @@ class LabService:
         f["social_seen"] = Decimal(1) if seen else Decimal(0)
         if velocity is not None:
             f["social_reply_velocity"] = velocity
+        # KOL: was a followed wallet among this coin's first buyers?
+        #
+        # Reads the FROZEN ranking (`kol_wallet_ranks`), never a live one — a
+        # ranking recomputed at decision time would include the very trades
+        # being judged. Zero when no ranking exists, so a registry that asks
+        # for this simply never fires until one has been taken, which is the
+        # correct behaviour rather than a silent pass.
+        f["kol_early"] = Decimal(await self._kol_early_count(mint))
         f["liq"] = last.liquidity_usd if last.liquidity_usd and last.liquidity_usd > 0 else None
         f["mcap"] = last.market_cap if last.market_cap and last.market_cap > 0 else None
         f["vol1h"] = last.volume_1h
@@ -1004,6 +1014,25 @@ class LabService:
             .where(DiscoveredToken.id == token_id)
         )
         return bool(src) and src in self._pumpfun_programs()
+
+    async def _kol_early_count(self, mint: str) -> int:
+        """How many FOLLOWED wallets were among this coin's first buyers.
+
+        Scoped to this registry's own `spec_version`, so two KOL tournaments
+        with different frozen rankings cannot read each other's wallets — the
+        same scoping bug that once let one lab settle another's book.
+        """
+        version = getattr(self._spec, "SPEC_VERSION", None)
+        if not version:
+            return 0
+        return int(await self._session.scalar(
+            select(func.count())
+            .select_from(TokenEarlyBuyer)
+            .join(KolWalletRank,
+                  KolWalletRank.wallet_address == TokenEarlyBuyer.wallet_address)
+            .where(TokenEarlyBuyer.mint_address == mint,
+                   KolWalletRank.spec_version == version)
+        ) or 0)
 
     async def _social(self, mint: str) -> tuple[bool, Decimal | None]:
         """(seen in the social feed, replies per hour) for this mint.

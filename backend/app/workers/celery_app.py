@@ -39,6 +39,7 @@ celery_app = Celery(
         "app.pumpfun.social_scheduler",
         "app.momentum.scheduler",
         "app.depth.scheduler",
+        "app.kol.scheduler",
         "app.movers.scheduler",
         "app.social.scheduler",
         "app.copycontrol.scheduler",
@@ -325,6 +326,13 @@ celery_app.conf.beat_schedule = {
     "copycontrol-tick": {
         "task": "app.copycontrol.scheduler.copycontrol_tick",
         "schedule": crontab(minute="*"),
+    },
+    # The KOL Lab: wallets that were early into winners, against their control.
+    # Every five minutes, not every minute: it freezes a ranking once and then
+    # judges a ten-minute checkpoint, so a faster beat buys nothing.
+    "kol-tick": {
+        "task": "app.kol.scheduler.kol_tick",
+        "schedule": crontab(minute="*/5"),
     },
     # The Movers Lab: turnover as a pre-move filter, against its control.
     # Every minute rather than every five: the signal is a five-minute
