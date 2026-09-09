@@ -249,6 +249,11 @@ export default function MoversLabPage() {
             ))}
           </div>
 
+          {/* The Matrix Lab's twenty-four arms, in their two sections — above
+              the trade list, because on a phone anything below forty rows of
+              trades is a section nobody reaches. */}
+          <MatrixSections />
+
           {trades.data ? (
             <LabTradesTable trades={trades.data.trades} />
           ) : (
@@ -261,11 +266,6 @@ export default function MoversLabPage() {
           )}
         </>
       )}
-
-      {/* The Matrix Lab's twenty-four arms, in their two sections. Rendered
-          whatever the movers board's state: the two tournaments are
-          independent and one being down says nothing about the other. */}
-      <MatrixSections />
     </div>
   );
 }
