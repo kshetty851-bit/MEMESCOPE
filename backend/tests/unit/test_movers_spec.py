@@ -68,16 +68,28 @@ def test_the_no_clock_arm_is_paired_and_differs_only_in_the_clock() -> None:
     """MOV-05 runs the wallet ratchet with NO holding period, on instruction.
 
     An unpaired arm invites reading the best line as a result, so it is pinned
-    to a control: MOV-03 carries identical entry conditions and keeps its
+    to a control: MOV-04 carries identical entry conditions and keeps its
     thirty-minute exit, which makes the pair ask exactly one question — does
     holding until the PORTFOLIO is up beat holding each position for half an
-    hour?"""
+    hour?
+
+    Paired with MOV-04 rather than MOV-03 on correction: MOV-05 carries no
+    security gate, and MOV-04 is also the arm that actually trades — MOV-03
+    took none of the two candidates movers-4.0.0 judged while MOV-04 took
+    both."""
     assert spec.BY_ID["MOV-05"].exits.time_exit_hours is None
-    assert spec.BY_ID["MOV-03"].exits.time_exit_hours is not None
-    assert spec.BY_ID["MOV-05"].entry == spec.BY_ID["MOV-03"].entry
-    assert spec.BY_ID["MOV-05"].size_usd == spec.BY_ID["MOV-03"].size_usd
+    assert spec.BY_ID["MOV-04"].exits.time_exit_hours is not None
+    assert spec.BY_ID["MOV-05"].entry == spec.BY_ID["MOV-04"].entry
+    assert spec.BY_ID["MOV-05"].size_usd == spec.BY_ID["MOV-04"].size_usd
     assert (spec.BY_ID["MOV-05"].max_concurrent
-            == spec.BY_ID["MOV-03"].max_concurrent)
+            == spec.BY_ID["MOV-04"].max_concurrent)
+
+def test_the_no_clock_arm_carries_no_security_gate() -> None:
+    """It is the CONTROL's rules with the clock removed, so it must not quietly
+    acquire the gate — that would make it differ from MOV-04 in two ways."""
+    from app.movers.spec import _SECURE
+    assert _SECURE not in spec.BY_ID["MOV-05"].entry
+    assert _SECURE in spec.BY_ID["MOV-03"].entry
 
 
 def test_the_measured_floor_is_kept_on_record() -> None:

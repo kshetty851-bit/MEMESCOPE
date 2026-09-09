@@ -77,7 +77,7 @@ from decimal import Decimal as D
 
 from app.lab.spec import Condition, Exits, Strategy, rules_json
 
-SPEC_VERSION = "movers-5.0.0"
+SPEC_VERSION = "movers-6.0.0"
 
 STARTING_EQUITY = D("100")
 CYCLE_TARGET_MULTIPLE = D("1.10")
@@ -266,9 +266,20 @@ STRATEGIES: tuple[Strategy, ...] = (
     # equity rather than from the target, so $100 -> $110 -> $121. What is new
     # is removing the clock.
     #
-    # It is MOV-03's rules exactly, minus the thirty-minute exit, so MOV-03 is
+    # It is MOV-04's rules exactly, minus the thirty-minute exit, so MOV-04 is
     # its control and the pair asks one question: does holding until the
     # PORTFOLIO is up beat holding each position for half an hour?
+    #
+    # PAIRED WITH MOV-04, NOT MOV-03, on correction. It first shipped against
+    # MOV-03 because the original instruction said whatever this trades must be
+    # buyable by the real wallet later, and `security_verified` is that
+    # question. The correction drops the gate, so this arm may hold coins the
+    # real wallet would refuse — recorded because it reverses an earlier
+    # instruction rather than merely adding to it.
+    #
+    # It also pairs against the arm that actually trades: MOV-03 took ZERO of
+    # the two candidates movers-4.0.0 judged while MOV-04 took both, so a
+    # comparison anchored on MOV-03 would have produced almost no data.
     #
     # WHAT THIS RISKS, AND IT IS NOT SMALL. With no clock, a position is only
     # released when the wallet banks or the token dies. Ten slots of $10 fill
@@ -279,11 +290,7 @@ STRATEGIES: tuple[Strategy, ...] = (
     # remote one. That is the rule as asked for, and the failure mode is
     # recorded here rather than discovered later.
     #
-    # `_SECURE` is carried because the instruction was that whatever this
-    # trades must be buyable by the REAL wallet later, and `security_verified`
-    # is exactly that question: would the real wallet have been allowed to buy
-    # this coin at this checkpoint.
-    _wallet("MOV-05", "RATCHET-NO-CLOCK", (*_POOL, _SECURE),
+    _wallet("MOV-05", "RATCHET-NO-CLOCK", _POOL,
             "Holding until the PORTFOLIO is up 10% beats holding each position "
             "for thirty minutes.",
             "OPERATOR_INSTRUCTION_NO_HOLD_TIME",
@@ -327,12 +334,13 @@ SPEC_HASH = hashlib.sha256(_canonical().encode()).hexdigest()
 #: moment to ask whether SPEC_VERSION should move too.
 #:
 #: ADDING an arm is not safer than removing one. Both change the hash.
-#: Moved again for movers-5.0.0, which added MOV-05 (no holding period).
+#: Moved for movers-6.0.0, which re-paired MOV-05 against MOV-04 (no gate).
+#: Moved for movers-5.0.0, which added MOV-05 (no holding period).
 #: Moved 2026-09-09 for movers-4.0.0, which added the `mint_suffix_pump`
 #: condition to BOTH arms. The pin did its job: the edit failed at import
 #: rather than reaching production with a stale hash, and the version was
 #: bumped rather than the running tournament's stored hash overwritten.
-PINNED_SPEC_HASH = "6bcc203526b37b4ae32c42442add7fe5dabb4eeb8708256e3ae350b1ceff31f2"
+PINNED_SPEC_HASH = "e866da2ec4fa210d82e2737594c27a621decef080155a39034dfcaab4bca637c"
 
 assert SPEC_HASH == PINNED_SPEC_HASH, (
     f"STRATEGIES changed: hash is {SPEC_HASH[:16]}, pinned to "
@@ -345,12 +353,12 @@ assert BY_ID["MOV-05"].exits.time_exit_hours is None, (
     "MOV-05 exists to have NO holding period; a clock here would make it a "
     "duplicate of MOV-03 and the comparison meaningless"
 )
-assert BY_ID["MOV-05"].entry == BY_ID["MOV-03"].entry, (
-    "MOV-05 must differ from MOV-03 in the CLOCK ALONE, or the pair measures "
+assert BY_ID["MOV-05"].entry == BY_ID["MOV-04"].entry == _POOL, (
+    "MOV-05 must differ from MOV-04 in the CLOCK ALONE, or the pair measures "
     "two things at once"
 )
-assert BY_ID["MOV-03"].exits.time_exit_hours is not None, (
-    "MOV-03 is MOV-05's control and must keep its clock"
+assert BY_ID["MOV-04"].exits.time_exit_hours is not None, (
+    "MOV-04 is MOV-05's control and must keep its clock"
 )
 assert "MOV-02" not in BY_ID, (
     "MOV-02 carried rules identical to the control and could tell you nothing "
