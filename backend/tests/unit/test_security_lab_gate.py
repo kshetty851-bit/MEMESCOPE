@@ -49,3 +49,12 @@ def test_all_three_arms_size_and_exit_identically() -> None:
     assert len({s.max_concurrent for s in spec.STRATEGIES}) == 1
     assert len({s.exits.time_exit_hours for s in spec.STRATEGIES}) == 1
     assert all(s.exits.take_profit is None for s in spec.STRATEGIES)
+
+
+def test_the_continuing_book_is_not_gated_and_not_a_second_control() -> None:
+    """MOV-02 carries the control's rules EXACTLY. If it ever drifted it would
+    become a third unpaired arm wearing the clothes of a record, and a reader
+    comparing three lines would take the best of them for a result."""
+    assert spec.BY_ID["MOV-02"].entry == spec.BY_ID["MOV-04"].entry
+    assert not any(c.feature == "security_verified"
+                   for c in spec.BY_ID["MOV-02"].entry)

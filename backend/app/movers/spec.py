@@ -198,6 +198,22 @@ _SECURE = Condition(feature="security_verified", op="gte", value=D("1"),
 #: that can answer it. There is no third "incumbent" arm: on a fresh start it
 #: would carry identical rules to the control and simply be a duplicate.
 STRATEGIES: tuple[Strategy, ...] = (
+    # THE CONTINUING BOOK, carried across the version bump on instruction with
+    # its balance intact. It is NOT part of the experiment: its rules are
+    # identical to MOV-04's, so it can tell you nothing the control does not.
+    # What it gives you is continuity — the same wallet that has been running
+    # since 07:54, still running, rather than a record that stops because the
+    # registry around it was edited.
+    #
+    # Its trade HISTORY stays in movers-1.0.0 where it happened. This row
+    # carries the money forward, not the fifty closed trades, so a reader
+    # comparing its cash against its closed count here will find them
+    # inconsistent — deliberately, because inventing the history into a new
+    # tournament would be worse than the gap.
+    _wallet("MOV-02", "MOVERS-ALL", _POOL,
+            "The continuing book: every pump.fun coin deep enough to fill, "
+            "held thirty minutes, banking the wallet at +10%.",
+            "CONTINUING_BOOK_NOT_AN_EXPERIMENT_ARM"),
     _wallet("MOV-03", "SECURITY-GATED", (*_POOL, _SECURE),
             "A coin the security evaluator has positively VERIFIED rugs less "
             "often than one from the same pool that it has not.",
@@ -230,7 +246,11 @@ def _canonical() -> str:
 
 SPEC_HASH = hashlib.sha256(_canonical().encode()).hexdigest()
 
-assert len(STRATEGIES) == 2, "the gated arm and its control, nothing else"
+assert len(STRATEGIES) == 3, "the continuing book, the gated arm and its control"
+assert BY_ID["MOV-02"].entry == BY_ID["MOV-04"].entry, (
+    "the continuing book must carry the control's rules exactly — if it ever "
+    "differs it becomes a third unpaired arm pretending to be a record"
+)
 # THE property, for the PAIR: MOV-03 and MOV-04 differ by exactly one
 # condition. MOV-02 is deliberately outside the comparison.
 _g = {str(c) for c in BY_ID["MOV-03"].entry}

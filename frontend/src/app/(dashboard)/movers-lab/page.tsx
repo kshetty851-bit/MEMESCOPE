@@ -69,18 +69,22 @@ function RunningFor({ since }: { since: string }) {
 
 function WalletCard({ w, starting }: { w: MoversWallet; starting: number }) {
   const control = w.strategy_id === "MOV-04";
+  // MOV-02 is neither: it carries the control's rules and exists to keep
+  // running, so labelling it "Control" would imply a second benchmark and
+  // labelling it "Gated" would be false.
+  const book = w.strategy_id === "MOV-02";
   return (
     <Panel density="compact">
       <div className="flex items-baseline justify-between gap-2">
         <Label>{w.name}</Label>
         <span
           className={`rounded-sm border px-1.5 py-0.5 text-[10px] uppercase ${
-            control
+            book || control
               ? "border-line-control text-ink-3"
               : "border-accent/40 bg-accent/10 text-accent"
           }`}
         >
-          {control ? "Control" : "Gated"}
+          {book ? "Book" : control ? "Control" : "Gated"}
         </span>
       </div>
 
@@ -108,6 +112,13 @@ function WalletCard({ w, starting }: { w: MoversWallet; starting: number }) {
       </div>
 
       <p className="mt-3 text-[11px] leading-relaxed text-ink-3">{w.hypothesis}</p>
+      {book ? (
+        <p className="mt-2 text-[10px] leading-relaxed text-muted">
+          Carried forward from the previous run with its balance intact. Its
+          earlier 50 trades stay in that record, so the closed count here
+          starts from zero while the money does not.
+        </p>
+      ) : null}
 
       {w.entry_text.length > 0 ? (
         <ul className="mt-2 space-y-0.5">
