@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  FADE_SECONDS,
+  FADE_IN_SECONDS,
+  FADE_OUT_SECONDS,
   MASTER_GAIN,
   SWELL_BASE,
   SWELL_DEPTH,
@@ -39,8 +40,14 @@ describe("the drone", () => {
     expect(summed * MASTER_GAIN).toBeLessThan(1);
   });
 
-  it("fades slowly enough that a toggle is not a click", () => {
-    expect(FADE_SECONDS).toBeGreaterThanOrEqual(1);
+  it("fades out fast enough that off sounds like off", () => {
+    // Both fades were 2.5s and the off button was reported as not working:
+    // 2.0s after the click the drone was still plainly audible. Out must be
+    // near-immediate; in may take its time.
+    expect(FADE_OUT_SECONDS).toBeLessThanOrEqual(0.5);
+    // ...but not so abrupt that cutting a 55Hz drone thuds.
+    expect(FADE_OUT_SECONDS).toBeGreaterThanOrEqual(0.15);
+    expect(FADE_IN_SECONDS).toBeGreaterThan(FADE_OUT_SECONDS);
   });
 
   it("swells without hollowing out at the trough", () => {

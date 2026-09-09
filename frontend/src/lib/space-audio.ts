@@ -91,8 +91,20 @@ export function beatHz(hz: number, cents: number = DETUNE_CENTS): number {
 export const SWELL_BASE = 0.75;
 export const SWELL_DEPTH = 0.25;
 
-/** Fade length. Long, because an abrupt gain change is an audible click. */
-export const FADE_SECONDS = 2.5;
+/**
+ * The two fades are NOT the same length, and that asymmetry is the point.
+ *
+ * Both were 2.5s. Fading in over 2.5s is a pad arriving; fading OUT over 2.5s
+ * is a broken button — Karthik pressed off, kept hearing music, and reported
+ * it as still playing. Measured: 2.0s after the click it was still at RMS
+ * 0.011, plainly audible. Off has to sound like off.
+ *
+ * The floor is set by the click: cutting a 55Hz drone dead puts a step in the
+ * waveform you can hear as a thud. ~0.3s is short enough to read as immediate
+ * and long enough to stay silent about it.
+ */
+export const FADE_IN_SECONDS = 1.6;
+export const FADE_OUT_SECONDS = 0.3;
 
 /** Ceiling on the master gain. Background music, not a foreground event. */
 export const MASTER_GAIN = 0.16;
@@ -210,30 +222,38 @@ export function createSpaceAudio(ctx: AudioContext): SpaceAudio {
   }
 
   let disposed = false;
+  // Every start/stop takes a ticket. A pending suspend only fires if it still
+  // holds the current one — otherwise turning the sound back on during a
+  // fade-out gets silently suspended a moment later by the old timer, which
+  // looks exactly like the button failing.
+  let ticket = 0;
 
-  function ramp(to: number): void {
+  function ramp(to: number, seconds: number): void {
     const now = ctx.currentTime;
     // Pin the curve to where the gain actually is, or a toggle mid-fade jumps.
     master.gain.cancelScheduledValues(now);
     master.gain.setValueAtTime(master.gain.value, now);
-    master.gain.linearRampToValueAtTime(to, now + FADE_SECONDS);
+    master.gain.linearRampToValueAtTime(to, now + seconds);
   }
 
   return {
     async start() {
       if (disposed) return;
+      ticket += 1;
       // Autoplay policy: the context starts suspended and only a gesture-borne
       // resume() will run it.
       if (ctx.state !== "running") await ctx.resume();
-      ramp(MASTER_GAIN);
+      ramp(MASTER_GAIN, FADE_IN_SECONDS);
     },
     stop() {
       if (disposed) return;
-      ramp(0);
+      ticket += 1;
+      const mine = ticket;
+      ramp(0, FADE_OUT_SECONDS);
       // Suspend only after the fade has finished, or it cuts itself off.
       window.setTimeout(() => {
-        if (!disposed && ctx.state === "running") void ctx.suspend();
-      }, FADE_SECONDS * 1000 + 100);
+        if (!disposed && mine === ticket && ctx.state === "running") void ctx.suspend();
+      }, FADE_OUT_SECONDS * 1000 + 80);
     },
     dispose() {
       if (disposed) return;
