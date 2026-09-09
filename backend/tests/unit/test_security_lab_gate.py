@@ -40,7 +40,7 @@ def test_a_fresh_version_starts_a_fresh_tournament() -> None:
     the old tournament keeps its record and this one starts clean, rather than
     the stored hash being overwritten to make an edited experiment look
     continuous."""
-    assert spec.SPEC_VERSION == "movers-2.0.0"
+    assert spec.SPEC_VERSION == "movers-3.0.0"
     assert len(spec.SPEC_VERSION) <= 16
 
 
@@ -51,10 +51,8 @@ def test_all_three_arms_size_and_exit_identically() -> None:
     assert all(s.exits.take_profit is None for s in spec.STRATEGIES)
 
 
-def test_the_continuing_book_is_not_gated_and_not_a_second_control() -> None:
-    """MOV-02 carries the control's rules EXACTLY. If it ever drifted it would
-    become a third unpaired arm wearing the clothes of a record, and a reader
-    comparing three lines would take the best of them for a result."""
-    assert spec.BY_ID["MOV-02"].entry == spec.BY_ID["MOV-04"].entry
-    assert not any(c.feature == "security_verified"
-                   for c in spec.BY_ID["MOV-02"].entry)
+def test_the_board_is_the_pair_and_nothing_else() -> None:
+    """MOV-02 held rules identical to the control and was removed on
+    instruction. A third line on a two-arm board invites reading whichever is
+    ahead as a result."""
+    assert set(spec.BY_ID) == {"MOV-03", "MOV-04"}

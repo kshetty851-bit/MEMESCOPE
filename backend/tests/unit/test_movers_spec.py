@@ -19,10 +19,11 @@ def test_the_turnover_arm_is_gone_entirely() -> None:
     strategy id its own spec no longer defines — that mismatch is how one
     lab's tick raises a KeyError on another lab's book."""
     assert "MOV-01" not in spec.BY_ID
-    # Three rows: the continuing book MOV-02, plus the security PAIR. The
-    # count is asserted so a fourth cannot appear unnoticed — an unpaired arm
-    # that is not explicitly the continuing book is the failure this catches.
-    assert len(spec.STRATEGIES) == 3
+    assert "MOV-02" not in spec.BY_ID
+    # Exactly the pair. Asserted so a third arm cannot appear unnoticed: an
+    # unpaired arm on a two-arm board invites reading the best line as a
+    # result, which is the failure this file exists to catch.
+    assert len(spec.STRATEGIES) == 2
 
 
 def test_no_turnover_condition_survives_without_a_control() -> None:
