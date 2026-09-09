@@ -76,6 +76,18 @@ function NowCell({ t }: { t: LabTrade }) {
   if (v === null || v === undefined) {
     return <td className="py-1.5 pr-3 text-right font-mono text-muted">—</td>;
   }
+  // How long ago we sold. Without it the Now figure is unreadable: a coin
+  // 30 points above our exit seven minutes later and one that took a day to
+  // get there are completely different facts about the exit rule.
+  const soldMinsAgo = t.closed_at
+    ? Math.max(0, Math.round((Date.now() - Date.parse(t.closed_at)) / 60000))
+    : null;
+  const ago =
+    soldMinsAgo === null ? null
+      : soldMinsAgo < 60 ? `${soldMinsAgo}m`
+      : soldMinsAgo < 1440 ? `${Math.floor(soldMinsAgo / 60)}h`
+      : `${Math.floor(soldMinsAgo / 1440)}d`;
+
   // A mark nobody has refreshed in half an hour is a dead coin, not a price.
   // Shown greyed with an age rather than hidden: "we cannot see it" and "it
   // went nowhere" are different facts and the row should not conflate them.
@@ -91,6 +103,7 @@ function NowCell({ t }: { t: LabTrade }) {
     >
       {pct(v)}
       {stale ? <span className="ml-0.5 text-[9px]">·stale</span> : null}
+      {ago ? <span className="ml-1 text-[9px] text-muted">{ago} on</span> : null}
     </td>
   );
 }
@@ -143,7 +156,7 @@ function Table({ rows }: { rows: LabTrade[] }) {
             <th className="pb-1 pr-3 text-right font-normal">P&amp;L %</th>
             <th
               className="pb-1 pr-3 text-right font-normal"
-              title="Gross move from our entry to the latest mark — what holding would have shown. Raw price, not a sellable value."
+              title="Gross move from our entry to the latest mark, and how long since we sold. Compare it against the P&L % beside it: the difference is what holding would have added or cost. Raw price, not a sellable value."
             >
               Now
             </th>
