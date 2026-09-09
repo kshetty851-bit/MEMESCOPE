@@ -3,6 +3,8 @@
 import { LabTradesTable } from "@/components/lab/trades-panel";
 import { Label, Panel } from "@/components/ui/panel";
 import { Toolbar } from "@/components/ui/toolbar";
+import { useEffect, useState } from "react";
+
 import { useMoversBoard, useMoversTrades } from "@/hooks/use-movers";
 import type { MoversWallet } from "@/types/movers";
 
@@ -29,6 +31,40 @@ function money(v: number | null | undefined): string {
 function tone(v: number | null | undefined, base: number): string {
   if (v === null || v === undefined || !Number.isFinite(Number(v))) return "text-muted";
   return Number(v) > base ? "text-up" : Number(v) < base ? "text-down" : "text-ink";
+}
+
+/** How long this tournament has been running, ticking live.
+ *
+ *  Rendered only after mount and from a state clock rather than `Date.now()`
+ *  during render: the server would otherwise produce one elapsed time, the
+ *  client another a moment later, and React would report a hydration
+ *  mismatch on a value that is correct in both.
+ */
+function RunningFor({ since }: { since: string }) {
+  const [now, setNow] = useState<number | null>(null);
+  useEffect(() => {
+    setNow(Date.now());
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  if (now === null) return null;
+  const started = Date.parse(since);
+  if (!Number.isFinite(started)) return null;
+
+  const secs = Math.max(0, Math.floor((now - started) / 1000));
+  const d = Math.floor(secs / 86400);
+  const h = Math.floor((secs % 86400) / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s_ = secs % 60;
+  const pad = (n: number) => String(n).padStart(2, "0");
+
+  return (
+    <span className="font-mono text-ink" title={`Started ${since}`}>
+      {d > 0 ? `${d}d ` : ""}
+      {pad(h)}:{pad(m)}:{pad(s_)}
+    </span>
+  );
 }
 
 function WalletCard({ w, starting }: { w: MoversWallet; starting: number }) {
@@ -146,6 +182,12 @@ export default function MoversLabPage() {
                 {data.hold_minutes ?? 30} min
               </span>{" "}
               · no take-profit, no stop
+              {data.valid_from ? (
+                <>
+                  {" "}
+                  · running for <RunningFor since={data.valid_from} />
+                </>
+              ) : null}
             </p>
           </Panel>
 

@@ -11,11 +11,12 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.api.deps import AdminUser, DbSession
 from app.lab import leaderboard, projection, spec
 from app.lab.service import LabService
+from app.models.market import TokenMarketSnapshot
 from app.models.token import DiscoveredToken
 from app.models.lab import (
     LabDecision,
@@ -307,6 +308,37 @@ async def build_trades(session, *, registry: Any = spec, disclosure: str = DISCL
                  select(LabStrategy).where(LabStrategy.tournament_id == t.id)
              )).scalars()}
 
+    # WHERE THE COIN IS NOW — the answer to "did we sell too early".
+    #
+    # One query for the latest price of every mint in the list, rather than a
+    # correlated subquery per row. `captured_at` comes with it because a mark
+    # is only worth reading if it is recent: a coin that stopped being priced
+    # an hour ago is not sitting at its last print, it is gone, and showing
+    # that number as "now" would invent a rally nobody could have sold into.
+    mints = {p.mint_address for p, _s, _n in rows}
+    latest: dict[str, tuple] = {}
+    if mints:
+        ranked = select(
+            TokenMarketSnapshot.mint_address,
+            TokenMarketSnapshot.price_usd,
+            TokenMarketSnapshot.captured_at,
+            func.row_number().over(
+                partition_by=TokenMarketSnapshot.mint_address,
+                order_by=TokenMarketSnapshot.captured_at.desc(),
+            ).label("rn"),
+        ).where(
+            TokenMarketSnapshot.mint_address.in_(mints),
+            TokenMarketSnapshot.price_usd.is_not(None),
+        ).subquery()
+        latest = {
+            r.mint_address: (r.price_usd, r.captured_at)
+            for r in (await session.execute(
+                select(ranked.c.mint_address, ranked.c.price_usd,
+                       ranked.c.captured_at).where(ranked.c.rn == 1)
+            )).all()
+        }
+
+    now = datetime.now(UTC)
     out = []
     for pos, symbol, token_name in rows:
         realised = ((pos.exit_proceeds_usd - pos.size_usd)
@@ -314,7 +346,21 @@ async def build_trades(session, *, registry: Any = spec, disclosure: str = DISCL
         value = (pos.exit_proceeds_usd if pos.status == "closed"
                  else (pos.last_open_value_usd if pos.last_open_value_usd is not None
                        else pos.size_usd))
+
+        # Gross, and labelled as such. The exit was execution-modelled — fees
+        # and impact taken out — so this is NOT what a later sale would have
+        # returned, and subtracting one from the other would overstate what
+        # was missed. It answers a narrower question: did the coin keep going
+        # after we left.
+        mark, mark_at = latest.get(pos.mint_address, (None, None))
+        since_entry = (float(mark / pos.entry_price - 1) * 100
+                       if mark and pos.entry_price else None)
         out.append({
+            "price_now": mark,
+            "price_now_age_minutes": (round((now - mark_at).total_seconds() / 60, 1)
+                                      if mark_at else None),
+            "pct_since_entry_now": (round(since_entry, 1)
+                                    if since_entry is not None else None),
             "id": str(pos.id),
             "strategy_id": pos.strategy_id,
             "strategy_name": names.get(pos.strategy_id),

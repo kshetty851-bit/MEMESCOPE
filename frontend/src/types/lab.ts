@@ -152,6 +152,7 @@ export interface LabPositionRow {
   closed_at: string | null;
   exit_reason: string | null;
   exit_proceeds_usd: number | null;
+
   pnl: number | null;
   route_state: string | null;
   reached_125: boolean;
@@ -203,6 +204,14 @@ export interface LabTrade {
   peak_exec_multiple: number;
   exit_reason: string | null;
   exit_proceeds_usd: number | null;
+  /** Where the coin is NOW, gross. See `pct_since_entry_now`. */
+  price_now: number | null;
+  /** Age of that mark. A stale one is a dead coin, not a standing price. */
+  price_now_age_minutes: number | null;
+  /** Gross % from OUR entry to the latest mark — "what if we had held".
+   *  Not comparable to realised P&L: the exit was execution-modelled and this
+   *  is a raw mark, so the difference overstates what was missed. */
+  pct_since_entry_now: number | null;
   route_state: string | null;
   reached_125: boolean;
   reached_150: boolean;

@@ -156,6 +156,10 @@ async def build(
         "wallets": wallets,
         "spec_version": registry.SPEC_VERSION,
         "spec_hash": registry.SPEC_HASH,
+        # When this tournament was frozen. Served so a page can show how long
+        # it has been running: a result is unreadable without knowing whether
+        # it took two hours or two weeks to happen.
+        "valid_from": t.valid_from.isoformat(),
         "starting_equity": registry.STARTING_EQUITY,
         "target_multiple": getattr(registry, "CYCLE_TARGET_MULTIPLE", None),
         "failure_floor": registry.FAILURE_EQUITY_FLOOR,

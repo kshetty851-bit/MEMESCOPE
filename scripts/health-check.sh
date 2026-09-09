@@ -110,16 +110,20 @@ check "landing" "${FRONTEND_URL}/"
 check "command centre" "${FRONTEND_URL}/command"
 check "track record" "${FRONTEND_URL}/record"
 check "paper wallet" "${FRONTEND_URL}/wallet"
-# This line has gone stale twice now: `/lab` was deleted in 2b09263, and
-# `/launches` in bb6c21c, which cut the navigation back to five destinations.
-# Both times the check outlived the page it named, so verification 404'd on
-# every deploy whatever the release contained — deploy.sh rolled back a
-# release that was fine, the rollback failed this same check, and the blame
-# read as the new code rather than as this list.
+# THREE TIMES NOW. `/lab` went in 2b09263, `/launches` in bb6c21c, and
+# `/graduation` on 2026-09-09 — each time the check outlived the page it
+# named, so verification 404'd on every deploy whatever the release contained.
+# deploy.sh then rolled back a release that was fine, the rollback failed this
+# same check, and the blame read as the new code rather than as this list.
 #
-# Kept rather than deleted, because the intent still holds: prove the frontend
-# serves more than its landing page. If you delete a page, grep this file.
-check "graduation" "${FRONTEND_URL}/graduation"
+# The third one happened despite the previous version of this comment saying
+# "if you delete a page, grep this file", so the instruction is clearly not
+# enough on its own.
+#
+# The list is now only pages with no plausible reason to be deleted: the
+# terminal, the record, the wallet and settings are the product. LAB PAGES
+# ARE NOT CHECKED HERE — they are experiments and experiments get retired,
+# which is exactly the thing that keeps breaking this.
 check "settings" "${FRONTEND_URL}/settings"
 
 echo

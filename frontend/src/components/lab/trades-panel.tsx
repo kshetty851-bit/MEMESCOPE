@@ -67,6 +67,34 @@ function arm(t: LabTrade): string {
   return m?.[1] ? `$${Number(m[1])}` : (t.strategy_id ?? "—");
 }
 
+/** Where the coin sits now, against our entry. Closed rows only — for an open
+ *  position the P&L column already IS the current mark, and repeating it in a
+ *  second column would read as corroboration from a second source. */
+function NowCell({ t }: { t: LabTrade }) {
+  if (t.status !== "closed") return <td className="py-1.5 pr-3" />;
+  const v = t.pct_since_entry_now;
+  if (v === null || v === undefined) {
+    return <td className="py-1.5 pr-3 text-right font-mono text-muted">—</td>;
+  }
+  // A mark nobody has refreshed in half an hour is a dead coin, not a price.
+  // Shown greyed with an age rather than hidden: "we cannot see it" and "it
+  // went nowhere" are different facts and the row should not conflate them.
+  const stale = (t.price_now_age_minutes ?? 0) > 30;
+  return (
+    <td
+      className={`py-1.5 pr-3 text-right font-mono ${stale ? "text-muted" : tone(v)}`}
+      title={
+        stale
+          ? `Last priced ${t.price_now_age_minutes} min ago — probably dead`
+          : "Gross move from our entry to the latest mark. Not what a later sale would have returned."
+      }
+    >
+      {pct(v)}
+      {stale ? <span className="ml-0.5 text-[9px]">·stale</span> : null}
+    </td>
+  );
+}
+
 function Row({ t }: { t: LabTrade }) {
   const p = pnlOf(t);
   return (
@@ -89,6 +117,7 @@ function Row({ t }: { t: LabTrade }) {
       </td>
       <td className={`py-1.5 pr-3 text-right font-mono ${tone(p)}`}>{money(p)}</td>
       <td className={`py-1.5 pr-3 text-right font-mono ${tone(p)}`}>{pct(pnlPctOf(t))}</td>
+      <NowCell t={t} />
       <td className="py-1.5 font-mono text-[10px] text-muted">
         {t.status === "open" ? "open" : (t.exit_reason ?? "closed")}
       </td>
@@ -112,6 +141,12 @@ function Table({ rows }: { rows: LabTrade[] }) {
             <th className="pb-1 pr-3 text-right font-normal">Value</th>
             <th className="pb-1 pr-3 text-right font-normal">P&amp;L</th>
             <th className="pb-1 pr-3 text-right font-normal">P&amp;L %</th>
+            <th
+              className="pb-1 pr-3 text-right font-normal"
+              title="Gross move from our entry to the latest mark — what holding would have shown. Raw price, not a sellable value."
+            >
+              Now
+            </th>
             <th className="pb-1 text-left font-normal">Exit</th>
           </tr>
         </thead>

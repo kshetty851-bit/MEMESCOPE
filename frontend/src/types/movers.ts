@@ -39,6 +39,8 @@ export interface MoversBoard {
   disclosure: string;
   activated: boolean;
   spec_version: string;
+  /** When the tournament was frozen; the page shows elapsed time from it. */
+  valid_from?: string;
   spec_hash?: string;
   status?: string;
   starting_equity?: number;
