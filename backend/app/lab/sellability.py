@@ -40,6 +40,7 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.lab import spec
 from app.models.lab import LabPosition, LabStrategy, LabTournament
@@ -148,24 +149,44 @@ async def refresh(session: AsyncSession, *, now: datetime | None = None,
     }
     pending = [m for m in largest if m not in already][:limit]
 
-    decimals = {
-        m: d for m, d in (await session.execute(
-            select(DiscoveredToken.mint_address, DiscoveredToken.decimals)
+    # Decimals AND lineage, because the fallback below is only safe for one of
+    # them. `decimals` is null for most rows, and pump.fun mints are reliably
+    # 6, so assuming 6 has always worked for that population — and silently
+    # broken every other one.
+    known = {
+        m: (d, prog) for m, d, prog in (await session.execute(
+            select(DiscoveredToken.mint_address, DiscoveredToken.decimals,
+                   DiscoveredToken.source_program)
             .where(DiscoveredToken.mint_address.in_(pending))
         )).all()
     } if pending else {}
 
     client = JupiterExecutionClient()
-    quoted = failed = 0
+    quoted = failed = skipped_decimals = 0
     for mint in pending:
         token_id, qty, size = largest[mint]
+        dec, program = known.get(mint, (None, None))
+        if dec is None and program != settings.PUMPFUN_PROGRAM_ID:
+            # NEVER GUESS THE DENOMINATION OF A TOKEN YOU ARE ABOUT TO CALL
+            # DEAD. This defaulted to 6 for everything, which is right for
+            # pump.fun and wrong for the established AMMs: JTO carries 9, so a
+            # 4.4-token position was quoted as 0.0044 of one, came back worth
+            # $0.002, and `_mark` duly wrote off a live position holding a
+            # token with $1.29m of liquidity that never stopped trading.
+            #
+            # Skipping is safe by construction — `realisable_price` returns
+            # None when no quote exists, and its caller "keeps its existing
+            # model rather than inventing a death". A missing quote costs a
+            # sharper mark; a wrong one costs the whole position.
+            skipped_decimals += 1
+            continue
         record = dict(mint_address=mint, token_id=token_id,
                       requested_at=datetime.now(UTC), size_usd=size,
                       context=CONTEXT)
         try:
             sell = await client.sell_quote(
                 input_mint=mint, quantity=qty,
-                input_decimals=int(decimals.get(mint) or 6), now=now,
+                input_decimals=int(dec if dec is not None else 6), now=now,
             )
             session.add(ResearchQuote(
                 **record, side="sell", ok=True,
@@ -184,8 +205,11 @@ async def refresh(session: AsyncSession, *, now: datetime | None = None,
             failed += 1
         await asyncio.sleep(QUOTE_INTERVAL_SECONDS)
 
+    if skipped_decimals:
+        logger.info("lab_sellability_unknown_decimals", skipped=skipped_decimals)
     return {"mints": len(largest), "quoted": quoted, "failed": failed,
-            "skipped_fresh": len(already)}
+            "skipped_fresh": len(already),
+            "skipped_unknown_decimals": skipped_decimals}
 
 
 async def realisable_price(
