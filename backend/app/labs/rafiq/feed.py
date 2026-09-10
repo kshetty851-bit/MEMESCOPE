@@ -220,3 +220,30 @@ class RafiqFeed:
         return (await self._session.execute(
             select(RadarToken.token_id).where(RadarToken.mint_address == mint)
         )).scalar_one_or_none()
+
+    async def latest_marks(self, mints: set[str]) -> dict[str, tuple[Decimal, Decimal | None]]:
+        """The freshest usable (price, liquidity) for each mint, or absent.
+
+        `suspect` prints are excluded for the same reason the runner excludes
+        them: a glitch is not a price, and an "if held" figure built on one
+        would invent a recovery that never happened. A mint nothing has priced
+        is simply missing from the mapping — the caller reports null, never
+        zero, because "we cannot see it" and "it went to zero" are different
+        claims and this project has already published one as the other.
+        """
+        if not mints:
+            return {}
+        rows = (await self._session.execute(
+            select(TokenMarketSnapshot.mint_address, TokenMarketSnapshot.price_usd,
+                   TokenMarketSnapshot.liquidity_usd)
+            .where(TokenMarketSnapshot.mint_address.in_(mints),
+                   TokenMarketSnapshot.price_usd.is_not(None),
+                   TokenMarketSnapshot.price_usd > 0,
+                   TokenMarketSnapshot.suspect.is_not(True))
+            .order_by(TokenMarketSnapshot.mint_address,
+                      TokenMarketSnapshot.captured_at.desc())
+        )).all()
+        out: dict[str, tuple[Decimal, Decimal | None]] = {}
+        for mint, price, liquidity in rows:
+            out.setdefault(mint, (price, liquidity))
+        return out
