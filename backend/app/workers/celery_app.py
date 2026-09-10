@@ -34,6 +34,7 @@ celery_app = Celery(
         "app.hq_ops.tasks",
         "app.strategy_lab.scheduler",
         "app.labs.rafiq.scheduler",
+        "app.labs.crypto_trend.scheduler",
     ],
 )
 
@@ -255,6 +256,15 @@ celery_app.conf.beat_schedule = {
     # registering it here does not start anything.
     "rafiq-lab-tick": {
         "task": "app.labs.rafiq.scheduler.rafiq_lab_tick",
+        "schedule": crontab(minute="*"),
+    },
+    # Crypto Trend Lab: candles and funding for the top-20 by market cap. Every
+    # minute so a closed hourly candle is stored within a minute of closing; a
+    # quiet minute sends no candle request at all. Gated by
+    # CRYPTO_TREND_LAB_ENABLED, which ships off: the task returns before it
+    # opens a session or a socket, so registering it here starts nothing.
+    "crypto-trend-lab-tick": {
+        "task": "app.labs.crypto_trend.scheduler.crypto_trend_lab_tick",
         "schedule": crontab(minute="*"),
     },
     # The real wallet's heartbeat. Beside the Lab's and at the same cadence,

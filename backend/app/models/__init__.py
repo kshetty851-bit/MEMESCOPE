@@ -15,6 +15,13 @@ from app.labs.rafiq.models import (  # noqa: F401
     RafiqLabPosition,
     RafiqLabStrategy,
 )
+# Crypto Trend Lab's four `ct_*` tables, for the same reason.
+from app.labs.crypto_trend.models import (  # noqa: F401
+    CtCandle,
+    CtFunding,
+    CtRun,
+    CtUniverseMember,
+)
 from app.models.alpha_session import AlphaSession
 from app.models.curve import TokenCurveSnapshot  # noqa: F401
 from app.models.discovery import (
