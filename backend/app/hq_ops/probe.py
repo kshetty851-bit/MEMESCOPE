@@ -333,6 +333,7 @@ LAB_REGISTRIES: tuple[tuple[str, str, str], ...] = (
     ("Movers", "app.movers.spec", "FEATURE_MOVERS_LAB_ENABLED"),
     ("Matrix", "app.matrix.spec", "FEATURE_MATRIX_LAB_ENABLED"),
     ("KOL", "app.kol.spec", "FEATURE_KOL_LAB_ENABLED"),
+    ("Dex", "app.dexlab.spec", "FEATURE_DEX_LAB_ENABLED"),
 )
 
 

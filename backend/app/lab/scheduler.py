@@ -22,6 +22,7 @@ from app.depth import spec as dspec
 from app.momentum import spec as mspec
 from app.copycontrol import spec as ccspec
 from app.kol import spec as kolspec
+from app.dexlab import spec as dxspec
 from app.matrix import spec as mxspec
 from app.movers import spec as mvspec
 from app.social import spec as socspec
@@ -70,7 +71,7 @@ LIVE_SPEC_VERSIONS = (spec.SPEC_VERSION, cspec.SPEC_VERSION,
                       pspec.SPEC_VERSION, socspec.SPEC_VERSION,
                       ccspec.SPEC_VERSION,
                       mvspec.SPEC_VERSION, kolspec.SPEC_VERSION,
-                      mxspec.SPEC_VERSION)
+                      mxspec.SPEC_VERSION, dxspec.SPEC_VERSION)
 
 #: Closed-trade milestones. A strategy's record becomes worth reading at a
 #: sample size, not at a date, so these fire independently of the calendar.

@@ -1018,6 +1018,7 @@ class Settings(BaseSettings):
     #: The Matrix Lab: 24 arms over two populations. Off by default like every
     #: other lab; twenty-four books is a lot of judging to start by accident.
     FEATURE_MATRIX_LAB_ENABLED: bool = False
+    FEATURE_DEX_LAB_ENABLED: bool = False
     #: EVM launch collection (Base first). Off by default: it calls a public
     #: third-party API on a beat, so it is opt-in like every other collector.
     FEATURE_EVM_LAUNCHES_ENABLED: bool = False

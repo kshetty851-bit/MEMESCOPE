@@ -87,6 +87,10 @@ export const NAV_GROUPS: NavGroup[] = [
       // one thing that differs. Its own page because the operator asked to
       // see both sections side by side.
       { href: "/matrix-lab", label: "Matrix Lab", icon: IconSpark, status: "ready" },
+      // Dex: hourly turnover as a pre-gainer filter, against a control drawn
+      // from the same pool. Named for the board it rebuilds — DexScreener
+      // publishes no gainers endpoint — not for a result it has.
+      { href: "/dex-lab", label: "Dex Lab", icon: IconSpark, status: "ready" },
       { href: "/kol-lab", label: "KOL Lab", icon: IconWallet, status: "ready" },
       // A collaborator's five strategies, on five separate $1,000 paper books
       // over their own tables. Named for whose rules it runs so it can never be

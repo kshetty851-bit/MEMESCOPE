@@ -338,6 +338,24 @@ class LabService:
         # token; the honest use is a floor.
         if f["liq"] is not None and last.volume_5m is not None:
             f["turnover_5m"] = Decimal(last.volume_5m) / f["liq"]
+        # TURNOVER OVER AN HOUR: the same ratio read over the window that
+        # DexScreener's own gainers board is computed on.
+        #
+        # A separate feature rather than a wider `turnover_5m`, because the two
+        # answer different questions and the evidence behind each was taken on
+        # its own window. Measured 2026-09-10 over 66 hours of the wide capture
+        # (2026-08-21..23), tokens at or above $100k of liquidity, features read
+        # BEFORE the outcome window and the outcome only after it:
+        #
+        #     later touched 2x       1-hour turnover 20.7
+        #     did not                1-hour turnover  0.05
+        #
+        # Like the five-minute version it behaves as a FLOOR and not a ranking:
+        # the mean six-hour multiple is 1.51 at a floor of 1.0, 1.47 at 2.0,
+        # 1.51 at 10.0 and 1.42 at 20.0 — flat, so a bigger number is not a
+        # better token. Read it as a threshold or not at all.
+        if f["liq"] is not None and last.volume_1h is not None:
+            f["turnover_1h"] = Decimal(last.volume_1h) / f["liq"]
         if prev15 is not None:
             f["liqchg_15m"] = _frac_change(f["liq"], prev15.liquidity_usd)
             if priced and prev15.price_usd:
@@ -445,8 +463,10 @@ class LabService:
 
             CANDIDATE_SOURCE = "graduations"
 
-        to draw from the pump.fun graduation cohort instead, or "pumpswap" for
-        pump.swap markets newly reaching tradeable depth. The graduation source
+        to draw from the pump.fun graduation cohort instead, "pumpswap" for
+        pump.swap markets newly reaching tradeable depth, "deepamm" for a
+        rolling sample of the deep AMMs, or "dexboard" for the same rolling
+        sample with no venue restriction at all. The graduation source
         exists because
         a hypothesis taken FROM the graduation study was being tested on radar's
         population: only 3.6% of the tokens the Compound Lab judged had ever
@@ -547,7 +567,24 @@ class LabService:
                           TokenMarketSnapshot.captured_at)
                 .limit(limit)
             )
-        elif source == "deepamm":
+        elif source in ("deepamm", "dexboard"):
+            # A ROLLING SAMPLE of an already-liquid universe. Two sources share
+            # this branch because they differ in ONE clause — `deepamm` keeps
+            # `DEEP_VENUES`, `dexboard` sets it empty and takes any venue.
+            #
+            # `dexboard` exists for the Dex Lab, whose question is about
+            # DexScreener's gainers board and therefore has no venue in it: of
+            # 152,913 Solana mints seen over three days only 7,852 report pool
+            # liquidity at all and 619 ever reach $100k, and those 619 sit
+            # mostly on pump.swap, which `DEEP_AMM_VENUES` excludes. Restricting
+            # by venue "to match the other labs" would have changed the
+            # population under test — the Graduation Hold Lab's mistake.
+            #
+            # A SEPARATE SOURCE NAME rather than a flag on `deepamm`, because
+            # `REJUDGE_BY_SOURCE` and the judged-once cooldown are keyed by
+            # source: sharing the name would have coupled the Dex Lab's hourly
+            # re-judge to the Matrix Lab's six-hourly one.
+            #
             # A ROLLING BASELINE over the deep AMMs, not a strategy.
             #
             # Raydium, Orca, Meteora and MetaDAO carry $1.3m-$3.6m of median
@@ -590,7 +627,8 @@ class LabService:
                       DiscoveredToken.id == TokenMarketSnapshot.token_id)
                 .where(
                     TokenMarketSnapshot.suspect.is_not(True),
-                    TokenMarketSnapshot.dex_name.in_(venues),
+                    # Empty venue list means every venue — see the branch head.
+                    *([TokenMarketSnapshot.dex_name.in_(venues)] if venues else []),
                     TokenMarketSnapshot.liquidity_usd >= floor_usd,
                     TokenMarketSnapshot.liquidity_usd
                     <= universe_rules.MAX_LIQUIDITY_USD,
