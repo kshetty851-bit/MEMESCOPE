@@ -56,6 +56,18 @@ from app.labs.rafiq.models import RafiqLabPosition, RafiqLabStrategy
 #: analysts say so rather than reporting a percentage that reads as a fact.
 MIN_CONCLUSIVE_N = 30
 
+#: Below this many trades in common, two arms have not been compared often
+#: enough for "they agree" to mean anything. 20 rather than MIN_CONCLUSIVE_N
+#: because this is a paired comparison — the same tokens, the same ticks — so
+#: it needs far fewer observations than an unpaired win rate does.
+MIN_SHARED_TRADES = 20
+
+#: At or above this fraction of identical outcomes, the two arms are reported
+#: as indistinguishable. Not 1.0: one differing trade in fifty is noise, and a
+#: check that only fired on perfect equality would miss the case this exists
+#: for by a single row.
+INDISTINGUISHABLE = Decimal("0.9")
+
 #: A peak within this fraction of the target counts as "approached it". Loose
 #: on purpose — the question is whether the target was ever in reach at all,
 #: not whether it was touched.
@@ -104,6 +116,85 @@ def _pct(numerator: int, denominator: int) -> str:
 
 def _money(value: Decimal) -> str:
     return f"${value:,.2f}"
+
+
+@dataclass(frozen=True, slots=True)
+class Overlap:
+    """How one arm's closed book compares with a neighbour's, trade for trade."""
+
+    peer: str
+    shared: int
+    #: Same token, same realised P&L to the cent.
+    identical: int
+    #: Of the shared trades, how many were entered under a DIFFERENT rule
+    #: parameter. This is the number that turns "they agree" from a tautology
+    #: into a finding: two arms with the same stop SHOULD agree.
+    different_rule: int
+
+
+async def _overlaps(session: AsyncSession, strategy_id, mine: list) -> list[Overlap]:
+    """Compare this arm's settled trades against every other arm's, by token.
+
+    ── WHY THIS EXISTS ──────────────────────────────────────────────────
+
+    Strategy C's entire purpose is a volatility-derived stop instead of A's
+    flat one, and on the live book it produced a different stop level on all
+    55 shared trades and the same realised P&L on 54 of them. Every stop that
+    fired closed at the same tick, at the same observed price, in both arms —
+    because the price record is sampled coarsely enough that a move jumps past
+    both levels between two snapshots.
+
+    That is not a bug in either rule. It is the experiment failing to resolve:
+    running C alongside A is currently buying no information, and no amount of
+    reading C's own book on its own could ever reveal it. A desk that only
+    looks at its own trades cannot see that its neighbour got the same answer.
+
+    The comparison is paired — same token, same ticks — which is why it needs
+    so few observations to be worth stating.
+    """
+    peer_rows = (
+        await session.execute(
+            select(
+                RafiqLabStrategy.code,
+                RafiqLabPosition.mint_address,
+                RafiqLabPosition.exit_proceeds_usd,
+                RafiqLabPosition.cost_basis,
+                RafiqLabPosition.stop_price,
+            )
+            .join(RafiqLabPosition, RafiqLabPosition.strategy_id == RafiqLabStrategy.id)
+            .where(
+                RafiqLabPosition.strategy_id != strategy_id,
+                RafiqLabPosition.closed_at.is_not(None),
+                RafiqLabPosition.exit_proceeds_usd.is_not(None),
+            )
+        )
+    ).all()
+
+    books: dict[str, dict[str, tuple[Decimal, Decimal]]] = {}
+    for peer_code, mint, proceeds, basis, stop in peer_rows:
+        books.setdefault(peer_code, {})[mint] = (proceeds - basis, stop)
+
+    ours = {
+        row.mint_address: (row.exit_proceeds_usd - row.cost_basis, row.stop_price)
+        for row in mine
+    }
+
+    out: list[Overlap] = []
+    for peer_code, book in sorted(books.items()):
+        shared = identical = different_rule = 0
+        for mint, (our_pnl, our_stop) in ours.items():
+            theirs = book.get(mint)
+            if theirs is None:
+                continue
+            their_pnl, their_stop = theirs
+            shared += 1
+            if our_pnl == their_pnl:
+                identical += 1
+            if our_stop != their_stop:
+                different_rule += 1
+        if shared:
+            out.append(Overlap(peer_code, shared, identical, different_rule))
+    return out
 
 
 async def analyse(session: AsyncSession, code: str, *, now: datetime | None = None) -> Analysis:
@@ -377,6 +468,57 @@ async def analyse(session: AsyncSession, code: str, *, now: datetime | None = No
         median_delay = sorted(delays)[len(delays) // 2]
         figures.append(
             Figure("Median entry delay", f"{median_delay:.0f}s", "opened_at − detected_at")
+        )
+
+    # ---- is this arm telling us anything the others do not? --------------
+    #
+    # Placed last among the per-book findings and first in importance when it
+    # fires: if an arm cannot be distinguished from its neighbour, every other
+    # finding about it is a finding about the neighbour too, and the reader
+    # needs to know that before acting on any of them.
+    for overlap in await _overlaps(session, strategy.id, settled):
+        if overlap.shared < MIN_SHARED_TRADES:
+            continue
+        agreement = Decimal(overlap.identical) / Decimal(overlap.shared)
+        if agreement < INDISTINGUISHABLE:
+            continue
+        differed = overlap.different_rule
+        findings.append(
+            Finding(
+                key=f"indistinguishable_from_{overlap.peer.lower()}",
+                headline=(
+                    f"This arm and Strategy {overlap.peer} cannot be told apart"
+                ),
+                evidence=(
+                    f"They took {overlap.shared} of the same tokens and returned the "
+                    f"same realised P&L on {overlap.identical} of them "
+                    f"({agreement * 100:.0f}%)"
+                    + (
+                        f", despite entering {differed} of those under a different "
+                        "stop level."
+                        if differed
+                        else " — and they were entered under the same stop level, so "
+                        "agreeing is what they should do."
+                    )
+                ),
+                lever=(
+                    (
+                        "The two rules genuinely differ and the record cannot show it. "
+                        "That is a property of the price sampling, not of either rule: "
+                        "the gap between snapshots is wider than the gap between the "
+                        "two levels, so a move crosses both between one observation "
+                        "and the next. Until that gap narrows, running both arms "
+                        "measures one rule twice."
+                    )
+                    if differed
+                    else (
+                        "Nothing to separate here — the arms were configured alike on "
+                        "these trades, so this is a description of the setup rather "
+                        "than a result."
+                    )
+                ),
+                source="paired on mint_address: exit_proceeds_usd − cost_basis, stop_price",
+            )
         )
 
     # ---- sample adequacy, which outranks every other finding -------------

@@ -41,6 +41,8 @@ def _position(**kw):
         opened_at=datetime(2026, 9, 1, tzinfo=UTC),
         closed_at=datetime(2026, 9, 1, 0, 10, tzinfo=UTC),
         entry_liquidity_usd=Decimal("10000"),
+        mint_address="MINT",
+        stop_price=Decimal("0.88"),
     )
     base.update(kw)
     return SimpleNamespace(**base)
@@ -63,8 +65,10 @@ class _Result:
 class _Session:
     """Records every call, so 'read-only' is proven rather than asserted."""
 
-    def __init__(self, strategy, rows):
-        self._answers = [_Result(strategy), _Result(rows)]
+    def __init__(self, strategy, rows, peers=()):
+        # In call order: the strategy row, this arm's positions, then every
+        # OTHER arm's settled trades for the cross-arm comparison.
+        self._answers = [_Result(strategy), _Result(rows), _Result(list(peers))]
         self.calls: list[str] = []
 
     async def execute(self, *_a, **_kw):
@@ -78,8 +82,19 @@ class _Session:
 _STRATEGY = SimpleNamespace(id="s-1", code="A", lane="hard_stop_guard")
 
 
-async def _run(rows, strategy=_STRATEGY):
-    return await analyst.analyse(_Session(strategy, rows), "A")
+async def _run(rows, strategy=_STRATEGY, peers=()):
+    return await analyst.analyse(_Session(strategy, rows, peers), "A")
+
+
+def _peer(code, position, *, pnl=None, stop=None):
+    """A row shaped like the cross-arm SELECT: (code, mint, proceeds, basis, stop)."""
+    return (
+        code,
+        position.mint_address,
+        position.cost_basis + pnl if pnl is not None else position.exit_proceeds_usd,
+        position.cost_basis,
+        stop if stop is not None else position.stop_price,
+    )
 
 
 @pytest.mark.asyncio
@@ -178,3 +193,94 @@ async def test_the_desk_only_ever_reads():
     # __getattr__ raises on anything but execute(), so reaching here means no
     # add / flush / commit / delete was attempted.
     assert set(session.calls) == {"execute"}
+
+
+class TestCrossArm:
+    """The check that no amount of reading one book on its own could produce.
+
+    Strategy C exists to test a volatility-derived stop against A's flat one.
+    On the live lab it set a different stop on all 55 shared trades and got the
+    same realised P&L on 54 of them, because the price record is sampled too
+    coarsely to resolve the difference. Every finding here is about noticing
+    that an arm has stopped buying information.
+    """
+
+    @staticmethod
+    def _book(n, *, pnl=Decimal("5")):
+        return [
+            _position(mint_address=f"MINT{i}", exit_proceeds_usd=Decimal("50") + pnl)
+            for i in range(n)
+        ]
+
+    @pytest.mark.asyncio
+    async def test_names_an_arm_that_has_stopped_telling_us_anything(self):
+        mine = self._book(30)
+        # Same tokens, same result, DIFFERENT stop level — the live case.
+        peers = [_peer("C", p, stop=Decimal("0.91")) for p in mine]
+        result = await _run(mine, peers=peers)
+
+        finding = next(f for f in result.findings if f.key == "indistinguishable_from_c")
+        assert "cannot be told apart" in finding.headline
+        assert "30 of the same tokens" in finding.evidence
+        assert "different" in finding.evidence
+        # The lever must point at the price record, not at either rule.
+        assert "sampling" in finding.lever
+        assert "measures one rule twice" in finding.lever
+
+    @pytest.mark.asyncio
+    async def test_does_not_dress_up_two_arms_configured_alike(self):
+        """Same stop, same answer, is a tautology and must be said as one."""
+        mine = self._book(30)
+        peers = [_peer("C", p) for p in mine]  # stop copied from ours
+        result = await _run(mine, peers=peers)
+
+        finding = next(f for f in result.findings if f.key == "indistinguishable_from_c")
+        assert "should do" in finding.evidence
+        assert "sampling" not in finding.lever
+        assert "description of the setup" in finding.lever
+
+    @pytest.mark.asyncio
+    async def test_stays_quiet_when_the_arms_genuinely_diverge(self):
+        mine = self._book(30)
+        # Half of them returned something else entirely.
+        peers = [
+            _peer("C", p, pnl=Decimal("5") if i % 2 else Decimal("-20"), stop=Decimal("0.91"))
+            for i, p in enumerate(mine)
+        ]
+        keys = [f.key for f in (await _run(mine, peers=peers)).findings]
+        assert "indistinguishable_from_c" not in keys
+
+    @pytest.mark.asyncio
+    async def test_will_not_call_two_arms_identical_on_a_handful_of_trades(self):
+        """A paired comparison needs fewer observations, not none."""
+        mine = self._book(analyst.MIN_SHARED_TRADES - 1)
+        peers = [_peer("C", p, stop=Decimal("0.91")) for p in mine]
+        keys = [f.key for f in (await _run(mine, peers=peers)).findings]
+        assert "indistinguishable_from_c" not in keys
+
+    @pytest.mark.asyncio
+    async def test_only_pairs_trades_the_two_arms_actually_share(self):
+        """An arm that traded different tokens is not being compared at all."""
+        mine = self._book(30)
+        peers = [_peer("C", p, stop=Decimal("0.91")) for p in self._book(30)]
+        for i, row in enumerate(peers):
+            peers[i] = ("C", f"OTHER{i}", row[2], row[3], row[4])
+        keys = [f.key for f in (await _run(mine, peers=peers)).findings]
+        assert "indistinguishable_from_c" not in keys
+
+    @pytest.mark.asyncio
+    async def test_the_cross_arm_finding_is_not_a_forecast_either(self):
+        mine = self._book(30)
+        peers = [_peer("C", p, stop=Decimal("0.91")) for p in mine]
+        result = await _run(mine, peers=peers)
+        finding = next(f for f in result.findings if f.key == "indistinguishable_from_c")
+        for field in (finding.headline, finding.evidence, finding.lever):
+            assert not FORTUNE.search(field), f"cross-arm finding predicts: {field!r}"
+
+    @pytest.mark.asyncio
+    async def test_still_only_reads(self):
+        mine = self._book(30)
+        peers = [_peer("C", p, stop=Decimal("0.91")) for p in mine]
+        session = _Session(_STRATEGY, mine, peers)
+        await analyst.analyse(session, "A")
+        assert set(session.calls) == {"execute"}
