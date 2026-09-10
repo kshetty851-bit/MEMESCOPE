@@ -77,7 +77,11 @@ from decimal import Decimal as D
 
 from app.lab.spec import Condition, Exits, Strategy, rules_json
 
-SPEC_VERSION = "movers-6.0.0"
+SPEC_VERSION = "movers-7.0.0"
+# 6.0.0 -> 7.0.0 (2026-09-10): a fresh start on instruction. All three
+# 6.0.0 arms fell below the $50 floor inside ten hours (MOV-03 $31, MOV-04
+# $31, MOV-05 $4) — rugs in the pool, not a fault — and the record stands as
+# history. The rules are unchanged; only the wallets start again.
 
 STARTING_EQUITY = D("100")
 CYCLE_TARGET_MULTIPLE = D("1.10")
@@ -334,13 +338,14 @@ SPEC_HASH = hashlib.sha256(_canonical().encode()).hexdigest()
 #: moment to ask whether SPEC_VERSION should move too.
 #:
 #: ADDING an arm is not safer than removing one. Both change the hash.
+#: Moved for movers-7.0.0, a fresh start with the rules unchanged.
 #: Moved for movers-6.0.0, which re-paired MOV-05 against MOV-04 (no gate).
 #: Moved for movers-5.0.0, which added MOV-05 (no holding period).
 #: Moved 2026-09-09 for movers-4.0.0, which added the `mint_suffix_pump`
 #: condition to BOTH arms. The pin did its job: the edit failed at import
 #: rather than reaching production with a stale hash, and the version was
 #: bumped rather than the running tournament's stored hash overwritten.
-PINNED_SPEC_HASH = "e866da2ec4fa210d82e2737594c27a621decef080155a39034dfcaab4bca637c"
+PINNED_SPEC_HASH = "a40e4d2fac4ead64d4670a04b1f2c3763956f44b31c85b6b04dd6a59ec047f86"
 
 assert SPEC_HASH == PINNED_SPEC_HASH, (
     f"STRATEGIES changed: hash is {SPEC_HASH[:16]}, pinned to "

@@ -22,7 +22,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,6 +30,9 @@ from app.core.logging import get_logger
 from app.models.market import LANE_NORMAL, EnrichmentStatus, TokenEnrichmentState
 from app.models.research_data import JupiterUniverseSnapshot
 from app.models.token import DiscoveredToken
+from app.security.mint import decode_mint_account
+from app.services.rpc.base import SolanaRPC
+from app.services.rpc.registry import get_rpc
 from app.universe import rules
 from app.universe.rules import UniverseRow
 
@@ -47,6 +50,70 @@ _SYNTHETIC_SLOT = 0
 
 def _synthetic_signature(mint: str) -> str:
     return f"universe:{mint}"
+
+
+#: `getMultipleAccounts` takes at most 100 addresses; one call per pass.
+DECIMALS_BATCH = 100
+
+
+async def backfill_decimals(
+    session: AsyncSession, *, rpc: SolanaRPC | None = None, limit: int = DECIMALS_BATCH
+) -> int:
+    """Read `decimals` off the mint account for universe tokens that lack it.
+
+    A sell quote sizes its input in base units, so `sellability` skips quoting
+    a non-launchpad token whose decimals are unknown. That left 147 of 185
+    universe tokens with NO independent price source: on 2026-09-09 a provider
+    printed ORE at $974,720 against a real $58, nothing existed to contradict
+    it, and a $2 position banked $33,295. The metadata path that would
+    normally fill this sits behind a 35,000-token backlog on an exhausted
+    Helius quota, so the universe reads its own mints here — the same decoder
+    the security evaluator uses, one standard RPC call per hundred.
+
+    Best-effort by construction: a failed read is logged and leaves decimals
+    NULL, which keeps quoting skipped for that token — the safe direction —
+    and never stops the enrolment that called it.
+    """
+    mints = list((await session.scalars(
+        select(DiscoveredToken.mint_address)
+        .where(DiscoveredToken.source_program == SOURCE_PROGRAM,
+               DiscoveredToken.decimals.is_(None))
+        .order_by(DiscoveredToken.discovered_at.desc())
+        .limit(limit)
+    )).all())
+    if not mints:
+        return 0
+
+    client = rpc or get_rpc()
+    try:
+        await client.start()
+        try:
+            accounts = await client.get_multiple_accounts(mints, encoding="base64")
+        finally:
+            await client.close()
+    except Exception as exc:  # noqa: BLE001 — observation must not stop enrolment
+        logger.warning("universe_decimals_unavailable", mints=len(mints), error=str(exc))
+        return 0
+
+    filled = 0
+    for mint, account in zip(mints, accounts, strict=True):
+        if not isinstance(account, dict):
+            continue  # no such account: not a mint we can size
+        try:
+            decimals = decode_mint_account(account).decimals
+        except ValueError:
+            continue
+        if decimals is None:
+            continue
+        await session.execute(
+            update(DiscoveredToken)
+            .where(DiscoveredToken.mint_address == mint, DiscoveredToken.decimals.is_(None))
+            .values(decimals=decimals)
+        )
+        filled += 1
+    if filled:
+        logger.info("universe_decimals_filled", filled=filled, asked=len(mints))
+    return filled
 
 
 async def enrol(session: AsyncSession, *, now: datetime | None = None,
@@ -139,9 +206,13 @@ async def enrol(session: AsyncSession, *, now: datetime | None = None,
         newly_enrolled=enrolled,
         refusals=refusals,
     )
+    # After the inserts, so a token enrolled this pass gets its decimals in
+    # the same pass rather than an hour later.
+    decimals_filled = await backfill_decimals(session)
     return {
         "considered": len(rows),
         "admitted": len(admitted),
         "enrolled": enrolled,
         "refusals": refusals,
+        "decimals_filled": decimals_filled,
     }
