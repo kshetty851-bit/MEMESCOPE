@@ -5,7 +5,9 @@
     health                                 data_health() as JSON
     trend                                  the engine once, as a table
     backfill --tf 1h --to-match 4h         deep-fill one timeframe back to another's start
+    backfill --tf 1d --from 2021-01-01     deep-fill a timeframe from a fixed date
     universe snapshot --as-of DATE --name N   freeze the top-20 as of DATE
+    universe from-daily --since DATE --name N  freeze a universe from stored coverage
 
 Exists so the lab is runnable without registering anything in the platform's
 Celery beat.
@@ -72,20 +74,45 @@ async def _trend() -> str:
     return "\n".join(lines)
 
 
-async def _backfill(timeframe: str, reference: str) -> dict:
-    """One-off: extend `timeframe` back to the earliest stored `reference`
-    candle for every live-universe symbol. Idempotent; logs requests used."""
+async def _backfill(timeframe: str, reference: str | None, start: str | None) -> dict:
+    """One-off, idempotent, logs the requests used.
+
+    With `--to-match`, extends `timeframe` back to the earliest stored
+    reference candle for every live-universe symbol. With `--from`, fills
+    from a fixed date for every symbol the lab knows — the live universe,
+    every stored snapshot, and BTC and ETH.
+    """
     from app.labs.crypto_trend.service import CryptoTrendService
+    from app.labs.crypto_trend.snapshots import known_symbols
     from app.labs.crypto_trend.sources import MarketSource
 
     if not config.enabled():
         return {"skipped": "crypto_trend_lab_disabled"}
+    now = datetime.now(UTC)
     async with MarketSource() as source, SessionFactory() as session:
-        symbols = [c.binance_symbol for c in await get_universe(session)]
-        result = await CryptoTrendService(session, source).backfill_to_match(
-            symbols, timeframe=timeframe, reference=reference, now=datetime.now(UTC))
+        service = CryptoTrendService(session, source)
+        if start is not None:
+            symbols = await known_symbols(session, extra=("BTCUSDT", "ETHUSDT"))
+            result = await service.backfill_from(
+                symbols, timeframe=timeframe,
+                start=datetime.fromisoformat(start).replace(tzinfo=UTC), now=now)
+        else:
+            symbols = [c.binance_symbol for c in await get_universe(session)]
+            result = await service.backfill_to_match(
+                symbols, timeframe=timeframe, reference=reference, now=now)
         await session.commit()
     result["http_requests"] = source.requests
+    return result
+
+
+async def _from_daily(name: str, since: str, timeframe: str) -> dict:
+    from app.labs.crypto_trend.snapshots import snapshot_from_coverage
+
+    async with SessionFactory() as session:
+        result = await snapshot_from_coverage(
+            session, name=name, timeframe=timeframe,
+            since=datetime.fromisoformat(since).replace(tzinfo=UTC))
+        await session.commit()
     return result
 
 
@@ -109,12 +136,15 @@ def main(argv: list[str] | None = None) -> int:
     for name in ("tick", "run", "health", "trend"):
         sub.add_parser(name)
     backfill = sub.add_parser("backfill")
-    backfill.add_argument("--tf", default="1h", choices=config.TIMEFRAMES)
-    backfill.add_argument("--to-match", dest="reference", default="4h",
-                          choices=config.TIMEFRAMES)
+    backfill.add_argument("--tf", default="1h", choices=("1h", "4h", "1d"))
+    backfill.add_argument("--to-match", dest="reference", choices=("1h", "4h", "1d"))
+    backfill.add_argument("--from", dest="start", metavar="YYYY-MM-DD",
+                          help=f"default {config.DAILY_BACKFILL_START} for --tf 1d")
     universe = sub.add_parser("universe")
-    universe.add_argument("action", choices=["snapshot"])
-    universe.add_argument("--as-of", dest="as_of", required=True, help="YYYY-MM-DD, UTC")
+    universe.add_argument("action", choices=["snapshot", "from-daily"])
+    universe.add_argument("--as-of", dest="as_of", help="snapshot: YYYY-MM-DD, UTC")
+    universe.add_argument("--since", help="from-daily: YYYY-MM-DD, UTC")
+    universe.add_argument("--tf", default="1d", choices=("1h", "4h", "1d"))
     universe.add_argument("--name", required=True)
     args = parser.parse_args(argv)
 
@@ -127,13 +157,26 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "trend":
         sys.stdout.write(asyncio.run(_trend()) + "\n")
     elif args.command == "backfill":
-        if args.tf == args.reference:
+        start, reference = args.start, args.reference
+        if start is None and reference is None:
+            start = config.DAILY_BACKFILL_START if args.tf == "1d" else None
+            reference = "4h" if start is None else None
+        if start is not None and reference is not None:
+            parser.error("pass either --from or --to-match, not both")
+        if reference is not None and args.tf == reference:
             parser.error("--tf and --to-match must differ")
-        sys.stdout.write(json.dumps(asyncio.run(_backfill(args.tf, args.reference)),
+        sys.stdout.write(json.dumps(asyncio.run(_backfill(args.tf, reference, start)),
                                     indent=2) + "\n")
     elif args.command == "universe":
-        sys.stdout.write(json.dumps(asyncio.run(_snapshot(args.name, args.as_of)),
-                                    indent=2) + "\n")
+        if args.action == "snapshot":
+            if not args.as_of:
+                parser.error("snapshot needs --as-of")
+            out = asyncio.run(_snapshot(args.name, args.as_of))
+        else:
+            if not args.since:
+                parser.error("from-daily needs --since")
+            out = asyncio.run(_from_daily(args.name, args.since, args.tf))
+        sys.stdout.write(json.dumps(out, indent=2) + "\n")
     return 0
 
 

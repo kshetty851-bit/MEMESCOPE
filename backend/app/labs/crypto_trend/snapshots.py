@@ -28,7 +28,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.logging import get_logger
 from app.labs.crypto_trend import config
 from app.labs.crypto_trend.candles import to_ms
-from app.labs.crypto_trend.models import CtCandle, CtUniverseSnapshot
+from app.labs.crypto_trend.models import (
+    CtCandle,
+    CtUniverseMember,
+    CtUniverseSnapshot,
+)
 from app.labs.crypto_trend.service import CryptoTrendService
 from app.labs.crypto_trend.sources import MarketSource
 from app.labs.crypto_trend.universe import is_excluded, map_symbol
@@ -137,3 +141,55 @@ class SnapshotService:
                 "symbols": [c.symbol for c in coins], "skipped": skipped,
                 "new_symbols": new, "backfill_requests": backfill["requests"],
                 "requests": self._source.requests}
+
+
+# --- a universe from stored coverage (Phase 3.2) ----------------------------------
+
+async def known_symbols(session: AsyncSession, extra: Sequence[str] = ()) -> list[str]:
+    """Every symbol the lab knows: the live universe, every stored snapshot,
+    and whatever `extra` names."""
+    live = list((await session.execute(
+        select(CtUniverseMember.binance_symbol).distinct())).scalars())
+    snapshots = (await session.execute(select(CtUniverseSnapshot.symbols))).scalars()
+    frozen = [entry["symbol"] for row in snapshots for entry in row]
+    return sorted({*live, *frozen, *extra})
+
+
+async def coverage(session: AsyncSession, timeframe: str) -> dict[str, datetime]:
+    """The first stored candle per symbol on `timeframe`."""
+    rows = (await session.execute(
+        select(CtCandle.symbol, func.min(CtCandle.open_time))
+        .where(CtCandle.timeframe == timeframe).group_by(CtCandle.symbol))).all()
+    return dict(rows)
+
+
+async def snapshot_from_coverage(
+    session: AsyncSession, *, name: str, since: datetime, timeframe: str = "1d",
+) -> dict[str, Any]:
+    """Freeze a universe from what is STORED rather than from a ranking:
+    every symbol whose `timeframe` history reaches back to `since`.
+
+    This is how the Phase 3.2 daily universe is built, and its membership
+    rule is coverage, not market cap — see the README's caveat.
+    """
+    first_seen = await coverage(session, timeframe)
+    qualifying = sorted(s for s, first in first_seen.items() if first <= since)
+    if not qualifying:
+        raise RuntimeError(f"no symbol has {timeframe} history back to {since.date()}")
+    entries = [{"symbol": s, "coingecko_id": None, "ticker": s.removesuffix("USDT"),
+                "name": s, "market_cap_usd": None, "rank": i + 1,
+                "first_candle": first_seen[s].isoformat()}
+               for i, s in enumerate(qualifying)]
+    stmt = pg_insert(CtUniverseSnapshot).values(name=name, as_of=since, symbols=entries)
+    await session.execute(stmt.on_conflict_do_update(
+        constraint="uq_ct_universe_snapshots_name",
+        set_={"as_of": stmt.excluded.as_of, "symbols": stmt.excluded.symbols}))
+    await session.flush()
+    excluded = {s: first_seen[s].date().isoformat()
+                for s in sorted(first_seen) if first_seen[s] > since}
+    logger.info("crypto_trend_coverage_snapshot", name=name, size=len(entries),
+                since=since.isoformat())
+    return {"name": name, "since": since.isoformat(), "timeframe": timeframe,
+            "size": len(entries),
+            "symbols": {e["symbol"]: e["first_candle"][:10] for e in entries},
+            "excluded_too_short": excluded}

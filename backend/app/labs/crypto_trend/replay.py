@@ -37,8 +37,9 @@ import sys
 from bisect import bisect_right
 from collections.abc import Iterable, Mapping, Sequence
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime, timedelta
+from importlib import import_module
 from itertools import product
 from pathlib import Path
 from statistics import mean
@@ -47,7 +48,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.labs.crypto_trend import config
-from app.labs.crypto_trend.candles import Candle, from_ms, to_ms
+from app.labs.crypto_trend.candles import INTERVAL_MS, Candle, from_ms, to_ms
 from app.labs.crypto_trend.data import (
     get_candles,
     get_funding_history,
@@ -64,13 +65,14 @@ from app.labs.crypto_trend.strategy import (
     Position,
     Snapshot,
     StrategyConfig,
-    advance,
-    decide,
-    verdict_of,
 )
-from app.labs.crypto_trend.trend import TrendState, compute_trend_states
 
 FUNDING_INTERVAL_MS = 8 * 3_600_000
+#: The rule sets the replay can drive. Each is a module exposing the eight
+#: names `strategy.py` documents; the harness below names no timeframe of its
+#: own, so a new rule set needs no change here.
+STRATEGIES = {"default": "app.labs.crypto_trend.strategy",
+              "slow_daily": "app.labs.crypto_trend.slow_daily"}
 OUTPUT_DIR = Path(__file__).resolve().parent / "output"
 DEFAULT_GRID: dict[str, list[Any]] = {
     "STOP_ATR": [1.5, 2.0, 3.0], "STRENGTH_MIN": [30, 40, 50], "ADX_MIN": [20, 25],
@@ -117,6 +119,7 @@ class ReplayResult:
     funding_total: float
     universe_name: str = "live"
     coins: int = 0
+    strategy: str = "default"
     summary: dict[str, Any] = field(default_factory=dict)
 
 
@@ -132,6 +135,15 @@ def _coerce(raw: Any, like: Any) -> Any:
     if isinstance(like, float):
         return float(raw)
     return type(like)(raw)
+
+
+def load_strategy(name: str | None = None):
+    """The module named by `config.STRATEGY`, read at call time so a
+    `--param STRATEGY=...` override reaches it."""
+    name = name or config.STRATEGY
+    if name not in STRATEGIES:
+        raise ValueError(f"unknown strategy {name!r}; known: {', '.join(sorted(STRATEGIES))}")
+    return import_module(STRATEGIES[name])
 
 
 @contextmanager
@@ -189,12 +201,14 @@ def run_replay(dataset: Dataset, *, start: datetime, end: datetime,
                params: Mapping[str, Any] | None = None) -> ReplayResult:
     params = dict(params or {})
     with overrides(params):
-        cfg = StrategyConfig.from_module()
+        sm = load_strategy()
+        cfg = replace(StrategyConfig.from_module(), timeframe=sm.DECISION_TIMEFRAME)
         tf = cfg.timeframe
         start_ms, end_ms = to_ms(start), to_ms(end)
         symbols = [s for s in dataset.universe if (s, tf) in dataset.candles]
-        series = {(sym, tf_): compute_trend_states(sym, tf_, cands, computed_at=start)
-                  for (sym, tf_), cands in dataset.candles.items()}
+        series = {(sym, tf_): sm.compute_states(sym, tf_, cands, computed_at=start)
+                  for (sym, tf_), cands in dataset.candles.items()
+                  if tf_ in sm.TIMEFRAMES}
         close_ms = {key: [to_ms(c.close_time) for c in cands]
                     for key, cands in dataset.candles.items()}
         funding_by_symbol: dict[str, list[tuple[int, float]]] = {}
@@ -204,12 +218,12 @@ def run_replay(dataset: Dataset, *, start: datetime, end: datetime,
         def index_at(symbol: str, tf_: str, t_ms: int) -> int:
             return bisect_right(close_ms.get((symbol, tf_), []), t_ms) - 1
 
-        def state_at(symbol: str, tf_: str, t_ms: int) -> TrendState | None:
+        def state_at(symbol: str, tf_: str, t_ms: int):
             i = index_at(symbol, tf_, t_ms)
             return series[(symbol, tf_)][i] if i >= 0 else None
 
-        def states_at(t_ms: int) -> dict[str, dict[str, TrendState | None]]:
-            return {s: {"4h": state_at(s, "4h", t_ms), "1h": state_at(s, "1h", t_ms)}
+        def states_at(t_ms: int) -> dict[str, dict[str, Any]]:
+            return {s: {tf_: state_at(s, tf_, t_ms) for tf_ in sm.TIMEFRAMES}
                     for s in symbols}
 
         def funding_at(symbol: str, boundary_ms: int) -> float:
@@ -228,6 +242,9 @@ def run_replay(dataset: Dataset, *, start: datetime, end: datetime,
         unfilled: list[str] = []
         previous = states_at(times[0] - 1) if times else {}
         marks: dict[str, float] = {}
+        #: The close this bar's carry is measured from. Seeded one bar back so
+        #: the first bar charges only the settlements inside itself.
+        previous_close_ms = (times[0] - INTERVAL_MS[tf]) if times else 0
 
         for t in times:
             now = from_ms(t)
@@ -238,16 +255,21 @@ def run_replay(dataset: Dataset, *, start: datetime, end: datetime,
                 if i >= 0:
                     marks[s] = float(dataset.candles[(s, tf)][i].close)
 
-            # Funding at the boundary this bar's close runs into, on positions
-            # held across it — before this bar's fills, which open AT it.
-            if (t + 1) % FUNDING_INTERVAL_MS == 0:
+            # Every 8h funding settlement this bar ran through, on positions
+            # held across it — before this bar's fills, which open AT its
+            # close. A 4h bar crosses one settlement every other bar; a DAILY
+            # bar crosses three, and charging once a bar would understate the
+            # carry threefold.
+            for boundary in boundaries_in(previous_close_ms, t):
                 for s in list(account.positions):
                     if s in marks:
-                        account.charge_funding(s, funding_at(s, t + 1), marks[s])
+                        account.charge_funding(s, funding_at(s, boundary), marks[s])
+            previous_close_ms = t
 
             account.positions = {p.symbol: p
-                                 for p in advance(account.positions.values(), states, cfg)}
-            directions = {s: st["4h"].direction for s, st in states.items() if st["4h"]}
+                                 for p in sm.advance(account.positions.values(), states, cfg)}
+            directions = {s: d for s, st in states.items()
+                          if (d := sm.breadth_direction(st)) is not None}
             regime = compute_regime(directions, bar_close_time=now, computed_at=now) \
                 if directions else None
             funding_now = {s: r for s in symbols if (r := funding_known(s, t)) is not None}
@@ -256,7 +278,7 @@ def run_replay(dataset: Dataset, *, start: datetime, end: datetime,
 
             snapshot = Snapshot(now=now, states=states, previous=previous, regime=regime,
                                 funding=funding_now, universe=frozenset(symbols))
-            orders = decide(snapshot, list(account.positions.values()), equity, cfg)
+            orders = sm.decide(snapshot, list(account.positions.values()), equity, cfg)
             filled: list[str] = []
             for order in sorted(orders, key=lambda o: o.action != CLOSE):
                 i = index_at(order.symbol, tf, t)
@@ -279,7 +301,7 @@ def run_replay(dataset: Dataset, *, start: datetime, end: datetime,
             bars.append(BarLog(
                 time=now, regime=regime.regime if regime else None,
                 breadth_up=regime.breadth_up if regime else None,
-                verdicts={s: verdict_of(st, s).verdict for s, st in states.items()},
+                verdicts={s: sm.verdict_of(st, s).verdict for s, st in states.items()},
                 equity=equity, open_positions=len(account.positions), orders=filled))
             previous = states
 
@@ -289,12 +311,26 @@ def run_replay(dataset: Dataset, *, start: datetime, end: datetime,
             open_positions=list(account.positions.values()), equity_curve=curve, bars=bars,
             unfilled=unfilled, final_equity=final_equity, fees_total=account.fees_total,
             funding_total=account.funding_total, universe_name=dataset.universe_name,
-            coins=len(symbols))
+            coins=len(symbols), strategy=config.STRATEGY)
         result.summary = summarise(result, cfg, marks)
         return result
 
 
 # --- the summary --------------------------------------------------------------------------
+
+def boundaries_in(previous_close_ms: int, close_ms: int) -> list[int]:
+    """Every 8h funding settlement this bar ran through.
+
+    A settlement lands on a multiple of 8h, and a Binance `close_time` is one
+    millisecond before the instant it names — so the bar closing at
+    `close_ms` has run through the settlement at `close_ms + 1`. The window
+    is half-open on the left: the settlement the PREVIOUS bar closed into was
+    charged by that bar and must not be charged twice.
+    """
+    after = previous_close_ms + 1
+    first = (after // FUNDING_INTERVAL_MS + 1) * FUNDING_INTERVAL_MS
+    return list(range(first, close_ms + 2, FUNDING_INTERVAL_MS))
+
 
 def _r(x: float | None, places: int = 4) -> float | None:
     return None if x is None else round(x, places)
@@ -331,7 +367,7 @@ def summarise(result: ReplayResult, cfg: StrategyConfig, marks: Mapping[str, flo
     return {
         "window": {"start": result.start.isoformat(), "end": result.end.isoformat(),
                    "bars": len(result.bars), "universe": result.universe_name,
-                   "coins": result.coins},
+                   "coins": result.coins, "strategy": result.strategy},
         "params": result.params,
         "starting_equity": start_eq, "final_equity": _r(result.final_equity, 2),
         "net_pnl": _r(net, 2), "return_pct": _r(net / start_eq * 100.0, 2),
@@ -370,8 +406,8 @@ def format_summary(s: Mapping[str, Any]) -> str:
 
     lines = [
         f"window          {s['window']['start'][:10]} .. {s['window']['end'][:10]}  "
-        f"({s['window']['bars']} 4h bars)   universe {s['window']['universe']} "
-        f"({s['window']['coins']} coins)",
+        f"({s['window']['bars']} bars)   strategy {s['window']['strategy']}   "
+        f"universe {s['window']['universe']} ({s['window']['coins']} coins)",
         f"params          {json.dumps(s['params']) if s['params'] else 'defaults'}",
         f"equity          {s['starting_equity']:.2f} -> {f(s['final_equity'])}   "
         f"net {f(s['net_pnl'])}  return {f(s['return_pct'], '%')}  max drawdown "
@@ -418,9 +454,11 @@ def write_outputs(result: ReplayResult, run_dir: Path) -> Path:
 
 
 async def load_dataset(session: AsyncSession, *, end: datetime,
-                       universe: str | None = None) -> Dataset:
+                       universe: str | None = None,
+                       timeframes: Sequence[str] | None = None) -> Dataset:
     """Candles and funding for the live universe, or for a frozen snapshot
-    by name."""
+    by name, on the timeframes the active rule set needs."""
+    timeframes = timeframes or load_strategy().TIMEFRAMES
     if universe is None:
         symbols = [c.binance_symbol for c in await get_universe(session)]
         name = "live"
@@ -432,7 +470,7 @@ async def load_dataset(session: AsyncSession, *, end: datetime,
         name = snapshot.name
     candles: dict[tuple[str, str], list[Candle]] = {}
     for symbol in symbols:
-        for tf in config.TIMEFRAMES:
+        for tf in timeframes:
             rows = await get_candles(session, symbol, tf)
             candles[(symbol, tf)] = [c for c in rows if c.close_time <= end]
     funding = {(s, to_ms(t)): r for s, t, r in await get_funding_history(session, symbols)}
@@ -481,11 +519,12 @@ async def _main(args: argparse.Namespace) -> int:
     start, end = _window(args.from_date, args.to_date)
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     async with SessionFactory() as session:
-        dataset = await load_dataset(session, end=end, universe=args.universe)
+        base = parse_params(args.param or [])
+        with overrides(base):  # STRATEGY decides which timeframes to load
+            dataset = await load_dataset(session, end=end, universe=args.universe)
         if not dataset.universe:
             sys.stderr.write("no universe stored; run the data tick first\n")
             return 1
-        base = parse_params(args.param or [])
         if args.grid is None:
             result = run_replay(dataset, start=start, end=end, params=base)
             run_dir = write_outputs(result, OUTPUT_DIR / f"replay_{stamp}")

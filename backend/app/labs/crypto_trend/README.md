@@ -50,6 +50,14 @@ cd backend && python -m app.labs.crypto_trend backfill --tf 1h --to-match 4h
 cd backend && python -m app.labs.crypto_trend universe snapshot --as-of 2026-03-28 --name oos_march
 ```
 
+```bash
+cd backend && python -m app.labs.crypto_trend backfill --tf 1d --from 2021-01-01
+```
+
+```bash
+cd backend && python -m app.labs.crypto_trend universe from-daily --since 2022-01-01 --name daily_2022
+```
+
 In Docker the same, inside the backend container:
 
 ```bash
@@ -413,6 +421,92 @@ Three honest limits of the snapshot:
 positions one close can open, strongest first, so a broad rally cannot
 fill the whole book on a single bar.
 
+### The `slow_daily` rule set (Phase 3.2)
+
+A **pre-registered** test of a slower hypothesis, run once and reported.
+`STRATEGY=slow_daily` selects it; `strategy.py` and `slow_daily.py` are two
+modules exposing the same eight names, and `replay.py` names no timeframe
+of its own, so the harness, the account and the cost model drive both
+unchanged.
+
+| | `default` | `slow_daily` |
+|---|---|---|
+| decision bars | 4h, with 1h in the verdict | 1d only |
+| direction | close vs EMA50, EMA20 vs EMA50, ADX ≥ 20, structure veto | close vs EMA100 and EMA20 vs EMA100 |
+| entry | verdict flip, strength ≥ 40, funding gate, no trade against BTC | close beyond the PRIOR 20-day Donchian channel, ADX(14) ≥ 20, **no BTC rule** |
+| stop | 2.0 × ATR(14) | 3.0 × ATR(20) |
+| trail | 2.5 × current ATR off the best close, ratcheted | the 10-day Donchian opposite channel, recomputed |
+| exits | universe, regime, verdict, stop, trail, 60-bar time stop | universe, direction flip, stop, trail |
+| sizing | 1% risk, 20% notional cap, 5 positions, 2 per bar | identical |
+
+Both Donchian channels are read at the **previous** bar, so the level a
+close is compared against never contains that close; a test asserts it on
+every bar of a synthetic series, and another asserts the per-bar states are
+identical to a fresh computation on every prefix.
+
+Three things the brief left open, decided before the run and recorded
+rather than tuned:
+
+* the trail is **not ratcheted** — a Donchian exit channel is normally
+  defined as the current channel, so it can loosen as well as tighten;
+* the per-bar entry cap breaks ties by **ADX**, descending, because this
+  rule set has no `strength`;
+* there is **no same-side cap** — the brief names the position cap and the
+  per-bar cap, and a trend system that may not hold five longs in a bull
+  market is a different hypothesis.
+
+### What the pre-registered run found
+
+Run once, on defaults, with no grid and no tuning: 17 coins with daily
+history back to 2022, 2022-01-01 to 2026-09-10.
+
+| | bar | result |
+|---|---|---|
+| profit factor, full window | ≥ 1.30 | **1.63** |
+| years with positive net | ≥ 4 of 5 | **4 of 5** (2023 lost) |
+
+**The bar was met, and the result is still not evidence of an edge.** One
+position — a ZEC long held 76 days in late 2025, +45R — is **88% of the
+realised profit**. Without that single trade the profit factor is 1.08;
+without ZEC altogether, 1.12. The short side, 114 of the 196 trades, has a
+profit factor of 1.08 and an expectancy of 0.00R, so what the rule set
+earns is a long-only trend-follow, and nearly all of that is one holding.
+
+The universe is the reason to distrust it. `daily_2022` is built from
+coverage among coins that are in **today's** top-20 or March's, so a coin
+that was large in 2022 and collapsed is absent, and ZEC is present because
+it rallied. The construction that was supposed to control survivorship does
+not: it selects on the outcome. A universe frozen at the start of each year
+would test the rule properly, and the public CoinGecko tier cannot serve
+the market caps to build one (365 days of history, `days=max` is paid).
+
+Two smaller qualifications, both visible in the summaries: each yearly run
+restarts at $1,000 with no open positions, so a holding spanning a year end
+is cut and re-entered and the years do not sum to the full window; and net
+includes the mark-to-market on positions still open at the end, which is
+what turns 2023's realised −$252 into a reported −$58.
+
+### Daily data and the coverage universe
+
+`backfill --tf 1d --from 2021-01-01` pages forward from a fixed date for
+every symbol the lab knows: the live universe, every stored snapshot, and
+BTC and ETH. Binance returns nothing before a contract was listed, so a
+start earlier than every listing is safe — each symbol fills from its own
+first candle. `CANDLE_WINDOW_1D` (2,200) bounds the table, and the prune
+now works over the timeframes actually **present** rather than the tick's
+own, so daily candles are kept and bounded even though the tick never
+fetches one.
+
+A symbol listed after the start date re-pages its history on a re-run,
+because nothing stored can prove no earlier candle exists. That costs about
+two requests per symbol on daily data; a symbol already covered from the
+start date resumes at its tail instead.
+
+`universe from-daily --since DATE --name NAME` then freezes a universe from
+what is stored: every symbol whose daily history reaches back to `DATE`.
+**Its membership rule is coverage, not market cap** — see the caveat in the
+run below.
+
 ## The read interface — `data.py`
 
 | Function | Returns |
@@ -425,6 +519,7 @@ fill the whole book on a single bar.
 | `get_regime(session, limit=1)` | `list[Regime]`, newest first |
 | `get_funding_history(session, symbols)` | every stored funding row for the replay |
 | `get_universe_snapshot(session, name)` | a frozen universe by name, or None |
+| `snapshots.snapshot_from_coverage(...)` | a universe frozen from stored daily coverage |
 
 Every function takes the session, as every read in this repo does. Candles
 come back as a list of frozen dataclasses with `Decimal` prices, not a
@@ -493,7 +588,7 @@ it would need renumbering and re-parenting, as the Rafiq lab's 0056 became
 cd backend && pytest app/labs/crypto_trend/tests -q
 ```
 
-203 pass. Phase 2 adds indicator tests against hand-computed values and
+235 pass. Phase 2 adds indicator tests against hand-computed values and
 analytic identities, trend-state tests on synthetic uptrend, downtrend and
 sideways series, regime tests for all three outcomes and their boundaries,
 and route tests against a seeded database; Phase 2.1 adds the veto's
@@ -504,7 +599,11 @@ accounting, a three-coin synthetic replay whose every fill is reconciled
 from first principles, and the hindsight test. Phase 3.1 adds backfill
 paging against a fake exchange, snapshot ranking on fixed fixtures, the
 actual-versus-intended risk maths, the per-bar entry cap and the
-per-timeframe window. Phase 1's cover stablecoin
+per-timeframe window. Phase 3.2 adds the daily backfill's paging and
+re-run behaviour and the `slow_daily` rule set — its direction rule, both
+Donchian channels, the ADX floor, the regime gate, the absence of a BTC
+rule, the entry cap, the four exits and the two it does not have. Phase 1's
+cover stablecoin
 filtering, symbol mapping, the forming-candle cut, gap detection, retry and
 backoff, weight tiers; integration tests (skipped without Postgres, run in
 a rolled-back transaction) cover upsert idempotency for candles and funding,
@@ -540,12 +639,13 @@ app/labs/crypto_trend/
 ├── strategy.py     entries, sizing, exits — pure
 ├── sim.py          the replay account: fills at cost, funding, P&L — not the paper wallet
 ├── replay.py       the harness and its CLI; writes output/ and ct_replay_runs
-├── snapshots.py    a universe frozen at a past date (ct_universe_snapshots)
+├── snapshots.py    a universe frozen at a past date, or from stored coverage
+├── slow_daily.py   the pre-registered daily rule set (STRATEGY=slow_daily)
 ├── output/         replay results, git-ignored
 ├── api.py          GET /labs/crypto-trend/health | /trend | /regime
 ├── scheduler.py    the beat task, and the engine task it enqueues
 ├── __main__.py     python -m app.labs.crypto_trend tick|run|health|trend|backfill|universe
-└── tests/          203 tests; fakes.py holds the network stand-in and the synthetic series
+└── tests/          235 tests; fakes.py holds the network stand-in and the synthetic series
 alembic/versions/20260910_0057_crypto_trend_lab.py
 alembic/versions/20260910_0058_crypto_trend_engine.py
 alembic/versions/20260910_0059_crypto_trend_structure_veto.py

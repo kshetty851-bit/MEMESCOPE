@@ -189,9 +189,15 @@ class CryptoTrendService:
         return len(candles)
 
     async def prune_candles(self) -> int:
-        """Keep the newest `candle_window(timeframe)` per symbol, per timeframe."""
+        """Keep the newest `candle_window(timeframe)` per symbol, per timeframe.
+
+        Over the timeframes actually PRESENT, not the tick's own, so a daily
+        backfill is bounded by `CANDLE_WINDOW_1D` even though the tick never
+        fetches a daily candle."""
+        present = list((await self._session.execute(
+            select(CtCandle.timeframe).distinct())).scalars())
         pruned = 0
-        for timeframe in config.TIMEFRAMES:
+        for timeframe in present:
             ranked = select(
                 CtCandle.id,
                 func.row_number().over(
@@ -260,6 +266,39 @@ class CryptoTrendService:
         logger.info("crypto_trend_backfill_done", timeframe=timeframe, reference=reference,
                     requests=total)
         return {"timeframe": timeframe, "reference": reference, "requests": total,
+                "symbols": report}
+
+    async def backfill_from(self, symbols: Sequence[str], *, timeframe: str,
+                            start: datetime, now: datetime) -> dict[str, Any]:
+        """Fill `timeframe` from `start` forward, for each symbol.
+
+        Binance returns nothing before a contract was listed, so a start
+        earlier than every listing is safe: each symbol backfills from its
+        own first candle. Already-stored candles are re-upserted rather than
+        skipped, which costs requests but keeps the code one path; a symbol
+        already covered from `start` is detected and skipped outright.
+        """
+        now_ms, start_ms = to_ms(now), to_ms(start)
+        total, report = 0, []
+        for symbol in symbols:
+            first = await self._session.scalar(
+                select(func.min(CtCandle.open_time))
+                .where(CtCandle.symbol == symbol, CtCandle.timeframe == timeframe))
+            latest = await self._session.scalar(
+                select(func.max(CtCandle.close_time))
+                .where(CtCandle.symbol == symbol, CtCandle.timeframe == timeframe))
+            cursor = start_ms if first is None else min(start_ms, to_ms(first))
+            if first is not None and to_ms(first) <= start_ms and latest is not None:
+                # Covered from `start` already: only the tail can be missing.
+                cursor = to_ms(latest) + 1
+            r = await self.backfill_candles(symbol, timeframe, from_ms=cursor,
+                                            until_ms=now_ms, now_ms=now_ms)
+            total += r["requests"]
+            report.append(r)
+            logger.info("crypto_trend_backfill", **r)
+        logger.info("crypto_trend_backfill_done", timeframe=timeframe,
+                    start=start.isoformat(), requests=total)
+        return {"timeframe": timeframe, "start": start.isoformat(), "requests": total,
                 "symbols": report}
 
     # --- funding ------------------------------------------------------------

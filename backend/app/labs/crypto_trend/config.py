@@ -79,10 +79,19 @@ KLINES_LIMIT = 1000
 #: than 1,000 4h candles (~166) — so a deep 1h backfill survives the prune.
 CANDLE_WINDOW_1H = 5000
 CANDLE_WINDOW_4H = 1000
+#: 2,200 daily candles is ~6 years — the whole Binance perp history of most
+#: of these contracts, and more than the 2021 backfill start needs.
+CANDLE_WINDOW_1D = 2200
 
 
 def candle_window(timeframe: str) -> int:
-    return {"1h": CANDLE_WINDOW_1H, "4h": CANDLE_WINDOW_4H}.get(timeframe, CANDLE_WINDOW_4H)
+    return {"1h": CANDLE_WINDOW_1H, "4h": CANDLE_WINDOW_4H,
+            "1d": CANDLE_WINDOW_1D}.get(timeframe, CANDLE_WINDOW_4H)
+
+
+#: Where `backfill --tf 1d` starts paging from. Earlier than any of these
+#: contracts exists, so each one backfills from its own listing date.
+DAILY_BACKFILL_START = "2021-01-01"
 
 
 #: Frozen historical universes (`universe snapshot --as-of DATE`).
@@ -155,6 +164,27 @@ MAX_POSITIONS = 5
 MAX_SAME_SIDE = 4
 #: A single rally must not open the whole book on one close.
 MAX_NEW_ENTRIES_PER_BAR = 2
+
+#: Which rule set the replay runs: `default` (the 4h flip strategy above) or
+#: `slow_daily`. The engine, the tick and the routes are unaffected — this
+#: selects a module inside the replay only.
+STRATEGY = "default"
+
+# --- the `slow_daily` variant (Phase 3.2) -----------------------------------------
+# A pre-registered test of a slower hypothesis: daily bars, a Donchian
+# breakout in the direction of a long-term average, a wide stop and a
+# channel trail. Its constants are separate from the 4h strategy's so that
+# running it changes nothing about the other.
+SLOW_DAILY_EMA_FAST = 20
+SLOW_DAILY_EMA_SLOW = 100
+SLOW_DAILY_ADX_PERIOD = 14
+SLOW_DAILY_ADX_MIN = 20.0
+SLOW_DAILY_ATR_PERIOD = 20
+SLOW_DAILY_ENTRY_DONCHIAN = 20
+SLOW_DAILY_EXIT_DONCHIAN = 10
+SLOW_DAILY_STOP_ATR = 3.0
+#: EMA_SLOW needs 100 bars and ADX needs 2 x its period; 120 clears both.
+SLOW_DAILY_MIN_BARS = 120
 #: Sizing: risk this fraction of equity per position, with the stop at
 #: STOP_ATR x the 4h ATR at entry; notional is capped at MAX_NOTIONAL_PCT.
 RISK_PER_TRADE = 0.01

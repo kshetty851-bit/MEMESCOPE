@@ -3,13 +3,14 @@ stored candle is filled, against a fake exchange with a long history."""
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from itertools import pairwise
 
 import pytest
 from sqlalchemy import func, select
 
 from app.labs.crypto_trend import config
-from app.labs.crypto_trend.candles import INTERVAL_MS, parse_klines, to_ms
+from app.labs.crypto_trend.candles import INTERVAL_MS, from_ms, parse_klines, to_ms
 from app.labs.crypto_trend.models import CtCandle
 from app.labs.crypto_trend.service import CryptoTrendService
 from app.labs.crypto_trend.tests.fakes import NOW, NOW_MS, FakeSource, klines_ending_at
@@ -104,3 +105,90 @@ async def test_the_prune_keeps_the_deep_window(lab_session) -> None:
     assert await service.prune_candles() == 0
     _, _, n1 = await span(lab_session, "1h")
     assert n1 == 3200 <= config.CANDLE_WINDOW_1H
+
+
+# --- the daily backfill from a fixed date (Phase 3.2) ------------------------------
+
+def daily_exchange(closed: int = 1800) -> FakeSource:
+    rows = klines_ending_at("1d", NOW_MS, closed=closed)
+    return FakeSource(klines={("BTCUSDT", "1d"): rows})
+
+
+async def test_backfill_from_pages_forward_from_the_start_date(lab_session) -> None:
+    source = daily_exchange()
+    service = CryptoTrendService(lab_session, source)
+    start = datetime(2021, 1, 1, tzinfo=UTC)
+
+    result = await service.backfill_from(["BTCUSDT"], timeframe="1d", start=start, now=NOW)
+
+    # 1,800 daily candles exist; the fake serves 1,000 a page.
+    (report,) = result["symbols"]
+    assert report["requests"] == 2 and result["requests"] == 2
+    _, _, n = await span(lab_session, "1d")
+    assert n == 1800
+    starts = [c[3] for c in source.calls if c[0] == "klines"]
+    assert starts[0] == to_ms(start)
+    assert all(b > a for a, b in pairwise(starts))
+
+
+async def test_a_start_before_the_listing_is_harmless(lab_session) -> None:
+    """Binance returns nothing before a contract existed, so each symbol
+    backfills from its own first candle."""
+    service = CryptoTrendService(lab_session, daily_exchange(closed=40))
+    result = await service.backfill_from(["BTCUSDT"], timeframe="1d",
+                                         start=datetime(2019, 1, 1, tzinfo=UTC), now=NOW)
+    assert result["symbols"][0]["candles"] == 40
+    lo, _, n = await span(lab_session, "1d")
+    assert n == 40 and lo > to_ms(datetime(2019, 1, 1, tzinfo=UTC))
+
+
+async def test_a_re_run_adds_nothing_and_re_verifies_from_the_start(lab_session) -> None:
+    """The contract was listed AFTER `start`, and nothing stored can prove
+    that no earlier candle exists — so a re-run asks again from `start`
+    rather than assuming. It costs the same requests and stores no new row.
+    """
+    source = daily_exchange()
+    service = CryptoTrendService(lab_session, source)
+    start = datetime(2021, 1, 1, tzinfo=UTC)
+    first_run = await service.backfill_from(["BTCUSDT"], timeframe="1d", start=start, now=NOW)
+    _, _, before = await span(lab_session, "1d")
+    source.calls.clear()
+
+    again = await service.backfill_from(["BTCUSDT"], timeframe="1d", start=start, now=NOW)
+
+    assert again["requests"] == first_run["requests"]
+    assert next(c[3] for c in source.calls if c[0] == "klines") == to_ms(start)
+    _, _, after = await span(lab_session, "1d")
+    assert after == before == 1800
+
+
+async def test_a_symbol_covered_from_the_start_resumes_at_the_tail(lab_session) -> None:
+    """When the stored history already reaches `start`, only the tail can be
+    missing, and that is all that is asked for."""
+    source = daily_exchange()
+    service = CryptoTrendService(lab_session, source)
+    await service.backfill_from(["BTCUSDT"], timeframe="1d",
+                                start=datetime(2021, 1, 1, tzinfo=UTC), now=NOW)
+    lo, hi, before = await span(lab_session, "1d")
+    source.calls.clear()
+
+    again = await service.backfill_from(["BTCUSDT"], timeframe="1d",
+                                        start=from_ms(lo), now=NOW)
+
+    assert again["requests"] == 1
+    (call,) = [c for c in source.calls if c[0] == "klines"]
+    assert call[3] == hi + 1
+    _, _, after = await span(lab_session, "1d")
+    assert after == before
+
+
+async def test_the_daily_window_bounds_the_table(lab_session, monkeypatch) -> None:
+    monkeypatch.setattr(config, "CANDLE_WINDOW_1D", 1500)
+    service = CryptoTrendService(lab_session, daily_exchange())
+    await service.backfill_from(["BTCUSDT"], timeframe="1d",
+                                start=datetime(2021, 1, 1, tzinfo=UTC), now=NOW)
+    # The prune reads the timeframes PRESENT, so it bounds 1d without the
+    # tick ever fetching one.
+    assert await service.prune_candles() == 300
+    _, _, n = await span(lab_session, "1d")
+    assert n == 1500

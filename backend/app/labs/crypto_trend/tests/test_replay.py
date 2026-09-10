@@ -16,6 +16,7 @@ from app.labs.crypto_trend.models import CtReplayRun
 from app.labs.crypto_trend.replay import (
     FUNDING_INTERVAL_MS,
     Dataset,
+    boundaries_in,
     grid_combos,
     overrides,
     parse_grid,
@@ -225,3 +226,22 @@ async def test_a_run_is_stored(lab_session, result) -> None:
     assert stored.summary["net_pnl"] == result.summary["net_pnl"]
     assert stored.window_start == START and stored.label == "test"
     assert from_ms(to_ms(stored.window_end)) == END
+
+
+# --- funding settlements per bar (Phase 3.2) -------------------------------------
+
+def test_a_bar_charges_every_settlement_it_ran_through_and_none_twice() -> None:
+    """A 4h bar crosses a settlement every other bar; a daily bar crosses
+    three. Charging once a bar would understate a daily carry threefold."""
+    h4, day = INTERVAL_MS["4h"], INTERVAL_MS["1d"]
+    eight = FUNDING_INTERVAL_MS
+
+    def hours(bs):
+        return [b // 3_600_000 for b in bs]
+
+    assert hours(boundaries_in(eight - 1 - h4, eight - 1)) == [8]
+    assert boundaries_in(h4 - 1 - h4, h4 - 1) == []
+    assert hours(boundaries_in(day - 1 - day, day - 1)) == [8, 16, 24]
+    # a full day of 4h bars charges three settlements, each exactly once
+    charged = [b for i in range(6) for b in boundaries_in((i * h4) - 1, ((i + 1) * h4) - 1)]
+    assert len(charged) == len(set(charged)) == 3

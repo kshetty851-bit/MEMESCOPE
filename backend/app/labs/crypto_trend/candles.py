@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from itertools import pairwise
 
-INTERVAL_MS: dict[str, int] = {"1h": 3_600_000, "4h": 14_400_000}
+INTERVAL_MS: dict[str, int] = {"1h": 3_600_000, "4h": 14_400_000, "1d": 86_400_000}
 
 
 @dataclass(frozen=True, slots=True)

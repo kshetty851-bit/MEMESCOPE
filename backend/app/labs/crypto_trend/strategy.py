@@ -27,10 +27,30 @@ from app.labs.crypto_trend.trend import (
     TrendState,
     Verdict,
     coin_verdict,
+    compute_trend_states,
 )
 
 LONG, SHORT = "LONG", "SHORT"
 OPEN, CLOSE = "OPEN", "CLOSE"
+
+# --- the interface the replay drives ---------------------------------------------
+#
+# A rule set is a MODULE exposing these eight names. `replay.py` resolves one
+# by `config.STRATEGY` and never mentions a timeframe of its own, which is
+# what lets `slow_daily` reuse the harness, the account and the costs
+# unchanged. This module is the `default` rule set.
+#
+#   TIMEFRAMES          the states to compute, decision timeframe first
+#   DECISION_TIMEFRAME  the bars the replay steps and fills on
+#   compute_states      (symbol, tf, candles, computed_at) -> list[state | None]
+#   breadth_direction   the per-coin direction the regime counts
+#   verdict_of          (states, symbol) -> Verdict
+#   advance             positions, one bar later
+#   exit_reason         the first exit rule that fires, or None
+#   decide              the orders for this bar
+
+TIMEFRAMES: tuple[str, ...] = ("4h", "1h")
+DECISION_TIMEFRAME = "4h"
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,6 +154,17 @@ class Snapshot:
     #: Latest known funding rate per symbol, per 8h.
     funding: Mapping[str, float]
     universe: frozenset[str]
+
+
+def compute_states(symbol: str, timeframe: str, candles, *, computed_at: datetime):
+    """Every bar's state, causally. The replay indexes this."""
+    return compute_trend_states(symbol, timeframe, candles, computed_at=computed_at)
+
+
+def breadth_direction(states: Mapping[str, TrendState | None]) -> str | None:
+    """The direction this coin contributes to the regime's breadth."""
+    state = states.get(DECISION_TIMEFRAME)
+    return None if state is None else state.direction
 
 
 def atr_of(state: TrendState) -> float:
