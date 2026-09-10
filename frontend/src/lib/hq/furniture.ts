@@ -118,6 +118,37 @@ export const FURNITURE: Placement[] = [
   { kind: "bin", tile: { col: 20, row: 11 } },
   { kind: "plant-small", tile: { col: 21, row: 11 } },
 
+  /* ---- Rafiq Analytics --------------------------------------------------
+     Five desks in a row at cols 2, 6, 10, 14 and 18 on row 16, and everything
+     here is placed in the gaps between and behind them.
+
+     THE TILE DIRECTLY NORTH OF EACH DESK IS LEFT EMPTY. Cols 2, 6, 10, 14 and
+     18 on row 15 carry nothing. That is the same rule Karthik Lab follows one
+     wing up: a prop north of a seated figure walls them in against the back
+     wall, and it is the tile every route into the room has to arrive on.
+
+     What an analyst bullpen actually needs, which is what is here: somewhere
+     to put a printed chart (the board and the printer), somewhere to keep the
+     records (two cabinets and a shelf), a shared screen the whole row can
+     read at once, and the water and coffee that a desk nobody leaves all day
+     runs on. */
+  { kind: "whiteboard", tile: { col: 1, row: 15 } },
+  { kind: "cabinet", tile: { col: 3, row: 15 } },
+  // The shared wall of screens the row faces, set between the first two desks
+  // so it sits inside the row rather than at one end of it. The same prop as
+  // Karthik's, and for the same reason: a display big enough for a room to
+  // read together is the whole architecture of a bullpen.
+  { kind: "wall-display", tile: { col: 7, row: 15 } },
+  { kind: "printer", tile: { col: 13, row: 15 } },
+  { kind: "water-cooler", tile: { col: 17, row: 15 } },
+  { kind: "plant-large", tile: { col: 20, row: 15 } },
+
+  { kind: "plant-small", tile: { col: 1, row: 16 } },
+  { kind: "bin", tile: { col: 3, row: 16 } },
+  { kind: "bookshelf", tile: { col: 21, row: 15 } },
+  { kind: "coffee-machine", tile: { col: 20, row: 16 } },
+  { kind: "side-table", tile: { col: 21, row: 16 } },
+
   /* ---- Portfolio ------------------------------------------------------ */
   { kind: "bookshelf", tile: { col: 0, row: 7 } },
   { kind: "cabinet", tile: { col: 3, row: 7 } },

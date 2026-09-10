@@ -24,7 +24,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
-from app.labs.rafiq import config, registry
+from app.labs.rafiq import analyst, config, registry
 from app.labs.rafiq.adapters import costs
 from app.labs.rafiq.feed import RafiqFeed
 from app.labs.rafiq.models import (
@@ -131,6 +131,39 @@ class BreakerOut(BaseModel):
     halted: bool
     halted_reason: str | None
     halted_at: datetime | None
+
+
+class FigureOut(BaseModel):
+    label: str
+    value: str
+    #: The columns the figure was computed from. Published so a reader can
+    #: check the arithmetic rather than take it.
+    source: str
+
+
+class FindingOut(BaseModel):
+    key: str
+    headline: str
+    evidence: str
+    #: A quantity that would have to move, never an outcome that would follow.
+    #: Empty when the record does not point anywhere yet, which is a finding.
+    lever: str
+    source: str
+
+
+class AnalysisOut(BaseModel):
+    code: str
+    lane: str
+    #: False when the strategy has no trades to read. The reason is in
+    #: `detail`, and there is nothing behind it to render as a zero.
+    measured: bool
+    detail: str
+    observed_at: datetime
+    verdict: str
+    open_positions: int
+    closed_positions: int
+    figures: list[FigureOut]
+    findings: list[FindingOut]
 
 
 class StatusOut(BaseModel):
@@ -297,3 +330,26 @@ async def breaker(session: AsyncSession = Depends(get_db)) -> list[BreakerOut]:
         realised_today=str(s.realised_today), halted=s.halted,
         halted_reason=s.halted_reason, halted_at=s.halted_at,
     ) for code, s in sorted(latest.items())]
+
+
+@router.get("/analysis", response_model=list[AnalysisOut])
+async def analysis(session: AsyncSession = Depends(get_db)) -> list[AnalysisOut]:
+    """One reading per strategy, computed from that strategy's own trades.
+
+    The desk that a person would ask "why is this losing money?". It answers
+    with arithmetic over rows and stops there: nothing here projects a return,
+    ranks the strategies against each other, or proposes a rule. Those are the
+    claims eight recorded no-edge findings on this platform were unable to
+    support, and a page that made them anyway would be the least trustworthy
+    thing in the product.
+
+    Answers for every registered strategy including ones that have never
+    traded, because "no trades yet" and "trades that found nothing" must not
+    render identically.
+    """
+    if not config.enabled():
+        return []
+    return [
+        AnalysisOut(**analyst.as_dict(await analyst.analyse(session, code)))
+        for code in sorted(registry.BY_CODE)
+    ]

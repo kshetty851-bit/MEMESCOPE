@@ -50,7 +50,16 @@ export type HairStyle =
   // Vault. Pulled back and tied low — the only style in the cast with mass
   // BEHIND the skull rather than on top of it, so the profile is different
   // before any colour is read.
-  | "low-tie";
+  | "low-tie"
+  // Rafiq Analytics. The only silhouette in the cast that is substantially
+  // WIDER than the skull on both sides — every other style either hugs the
+  // head or hangs below it. Width at the temples is a cue nothing else uses,
+  // so it survives at 64px in a row of five analysts.
+  | "halo"
+  // Rafiq Analytics. Two tails, one either side. `braid` and `ponytail` both
+  // hang on ONE side; a symmetric pair reads as a different shape entirely
+  // rather than as a mirror of an existing one.
+  | "twin-braid";
 
 /** Outfit silhouette, drawn as a distinct torso overlay. */
 export type Outfit =
@@ -74,7 +83,15 @@ export type Outfit =
   // Vault. A closed double-breasted coat: two vertical seams instead of the
   // single centre line every other garment uses, and a hem that stops square
   // rather than flaring. Reads as somebody who does not open the jacket.
-  | "sealed-coat";
+  | "sealed-coat"
+  // Rafiq Analytics. Quilted and bulky: the only garment in the cast that is
+  // WIDER at the waist than at the shoulder. Every other outfit tapers, so an
+  // outline that swells downward is unmistakable.
+  | "puffer"
+  // Rafiq Analytics. Draped over both shoulders and closing to a point at the
+  // hem — a triangle where every other garment is a rectangle or a column,
+  // and the only one with no shoulder seam at all.
+  | "shawl";
 
 export type Accessory =
   | "duster"
@@ -100,7 +117,15 @@ export type Accessory =
   // waist, so it never competes with the fourteen held at chest height or worn
   // on the head. Literal for a custodian, and the silhouette is unmistakable
   // even as three dots on a loop.
-  | "keyring";
+  | "keyring"
+  // Rafiq Analytics. A magnifier held UP at eye level. `glasses` and `visor`
+  // sit on the face and `stylus` is held low; a lens on a handle raised beside
+  // the head occupies a position nothing else does — and for a desk whose
+  // whole job is looking closely at a record, it is also just literal.
+  | "loupe"
+  // Rafiq Analytics. A rolled chart carried under the arm. The only accessory
+  // held horizontally: every other one is vertical or worn.
+  | "chart-roll";
 
 /**
  * Every pose the rig can draw.
@@ -221,7 +246,13 @@ export type DeskTheme =
   // Karthik's six-monitor wall. The only desk in the office with a screen
   // count as its identity, because a six-screen bench is what the job looks
   // like from across a room.
-  | "wallet-ops";
+  | "wallet-ops"
+  // Rafiq Analytics. Two more benches so all five analysts get their own desk.
+  // `drawdown` carries a printed equity curve pinned above it; `consensus`
+  // carries five small screens rather than one large one, because the strategy
+  // it watches is the one that has to agree with the other four.
+  | "drawdown"
+  | "consensus";
 
 /**
  * The visual half of a character, without the operational identity.
@@ -463,6 +494,94 @@ export const CHARACTERS: Record<EmployeeId, CharacterDefinition> = {
     defaultPose: "seated_working",
     deskTheme: "wallet-ops",
     personalityLine: "Moves quickly inside a small remit, and says where its edge is.",
+  },
+
+  /* ── RAFIQ ANALYTICS ──────────────────────────────────────────────────
+   *
+   * Five desks, one per strategy, in their own room. Deliberately built as
+   * five *individuals* rather than five instances of an "analyst" template:
+   * the whole point of the room is that each person answers for one book and
+   * can be told apart from across the floor, and a template would have made
+   * the row read as wallpaper.
+   *
+   * All five are seated. Four people in this office already stand, which is
+   * the cap the posture test enforces, and it is the right cap — a fifth
+   * standing figure tips the room from "a working floor" into "a meeting".
+   * The job is a seated one anyway.
+   */
+
+  anchor: {
+    id: "anchor",
+    // Broad + square, with a halo. No other broad figure has width at the
+    // temples too, so this is the widest silhouette in the cast by some way —
+    // which is the read for the desk that watches the hardest stop.
+    bodyType: "broad",
+    headShape: "square",
+    skinTone: "s4",
+    hair: "halo",
+    hairTone: "h1",
+    outfit: "vest",
+    accessory: "glasses",
+    palette: "brass",
+    defaultPose: "seated_reviewing",
+    deskTheme: "analysis",
+    personalityLine: "Asks what the stop actually cost before asking anything else.",
+  },
+  tempo: {
+    id: "tempo",
+    bodyType: "slim",
+    headShape: "oval",
+    skinTone: "s2",
+    hair: "bun",
+    hairTone: "h3",
+    outfit: "turtleneck",
+    accessory: "stylus",
+    palette: "violet",
+    defaultPose: "seated_working",
+    deskTheme: "market",
+    personalityLine: "Talks in elapsed time. Everything on this desk is a clock.",
+  },
+  sigma: {
+    id: "sigma",
+    bodyType: "tall",
+    headShape: "round",
+    skinTone: "s5",
+    hair: "twin-braid",
+    hairTone: "h2",
+    outfit: "long-coat",
+    accessory: "loupe",
+    palette: "cobalt",
+    defaultPose: "seated_reviewing",
+    deskTheme: "performance",
+    personalityLine: "Will not quote a number without the spread around it.",
+  },
+  halt: {
+    id: "halt",
+    bodyType: "compact",
+    headShape: "square",
+    skinTone: "s1",
+    hair: "wavy",
+    hairTone: "h4",
+    outfit: "puffer",
+    accessory: "chart-roll",
+    palette: "plum",
+    defaultPose: "seated_working",
+    deskTheme: "drawdown",
+    personalityLine: "Watches one line and the day it belongs to. Says stop, or says nothing.",
+  },
+  chorus: {
+    id: "chorus",
+    bodyType: "slim",
+    headShape: "round",
+    skinTone: "s3",
+    hair: "long-straight",
+    hairTone: "h5",
+    outfit: "shawl",
+    accessory: "visor",
+    palette: "clay",
+    defaultPose: "seated_reviewing",
+    deskTheme: "consensus",
+    personalityLine: "Reads the other four desks before reading their own.",
   },
 };
 

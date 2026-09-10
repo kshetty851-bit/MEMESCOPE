@@ -577,6 +577,53 @@ function Garment({
           />
         </g>
       );
+    case "puffer":
+      return (
+        <g>
+          {/* The only garment in the cast that gets WIDER going down. Every
+              other outfit either holds the body's taper or falls straight, so
+              a torso that swells past the shoulder line is unambiguous at
+              64px — no colour, no interior detail required. */}
+          <path
+            className="hq-garment"
+            d={`M${-s + 1} ${shoulderY} L${s - 1} ${shoulderY} Q${s + 3} ${(shoulderY + hipY) / 2} ${h + 3} ${hipY} L${-h - 3} ${hipY} Q${-s - 3} ${(shoulderY + hipY) / 2} ${-s + 1} ${shoulderY} Z`}
+          />
+          {/* Quilting: three horizontal seams. Horizontal banding appears
+              nowhere else on a torso in this cast — every other seam in the
+              room runs vertically or diagonally. */}
+          {[0, 1, 2].map((i) => (
+            <rect
+              key={i}
+              className="hq-garment-dark"
+              x={-s - 1}
+              y={shoulderY + 4 + i * 5}
+              width={s * 2 + 2}
+              height={1.4}
+              rx={0.7}
+            />
+          ))}
+        </g>
+      );
+    case "shawl":
+      return (
+        <g>
+          {/* Draped, and closing to a point. The cast is otherwise all
+              rectangles and columns, so a triangle is a shape nothing else
+              occupies — and it is the only garment here with no shoulder seam
+              at all, which is what makes it read as *draped* rather than as a
+              differently-cut jacket. */}
+          <path className="hq-skin" d={body} />
+          <path
+            className="hq-garment"
+            d={`M${-s - 1} ${shoulderY + 1} Q0 ${shoulderY - 3} ${s + 1} ${shoulderY + 1} L0 ${hipY + 6} Z`}
+          />
+          {/* The fold along the near edge, so the drape has a thickness. */}
+          <path
+            className="hq-garment-light"
+            d={`M${-s - 1} ${shoulderY + 1} L0 ${hipY + 6} L1.5 ${hipY + 4} L${-s + 1} ${shoulderY + 2} Z`}
+          />
+        </g>
+      );
   }
 }
 
@@ -891,6 +938,46 @@ function Hair({ style, shape, y }: { style: HairStyle; shape: HeadShape; y: numb
             className="hq-hair"
             d={`M${-r + 2.5} ${y - 4} Q${-r + 1} ${top - 7} 1 ${top - 8} Q${r - 1} ${top - 7} ${r - 2.5} ${y - 4} Z`}
           />
+        </g>
+      );
+    case "halo":
+      return (
+        <g>
+          {/* The only silhouette in the cast that is meaningfully WIDER than
+              the skull. Every other style hugs the head or hangs below it, so
+              width at the temples is a cue nothing else competes for — which
+              is exactly what a row of five analysts needs. Drawn as one closed
+              round mass rather than clustered circles: `curly-short` already
+              owns the clustered read, and at 64px two textured styles would
+              collapse into each other. */}
+          <path
+            className="hq-hair"
+            d={`M${-r - 5} ${y - 1} Q${-r - 5} ${top - 8} 0 ${top - 8} Q${r + 5} ${top - 8} ${r + 5} ${y - 1} Q${r} ${y - 3} 0 ${y - 4} Q${-r} ${y - 3} ${-r - 5} ${y - 1} Z`}
+          />
+        </g>
+      );
+    case "twin-braid":
+      return (
+        <g>
+          <path className="hq-hair" d={`M${-r} ${y - 1} Q0 ${top - 3} ${r} ${y - 1} L${r} ${y - 5} Q0 ${top - 5} ${-r} ${y - 5} Z`} />
+          {/* Two tails, one either side. `braid` and `ponytail` both hang on
+              ONE side, so the symmetry is the whole differentiation: a pair
+              reads as its own shape rather than as a mirrored version of a
+              style already in the room. */}
+          {[-1, 1].map((side) => (
+            <g key={side}>
+              {[0, 1, 2].map((i) => (
+                <ellipse
+                  key={i}
+                  className="hq-hair"
+                  cx={side * (r + 1)}
+                  cy={y + 1 + i * 3.6}
+                  rx={2.3}
+                  ry={2.2}
+                />
+              ))}
+            </g>
+          ))}
         </g>
       );
   }
@@ -1229,6 +1316,45 @@ function AccessoryPart({
           />
           <rect className="hq-device" x={-10.5} y={shoulderY} width={5} height={7} rx={2.2} />
           <rect className="hq-device" x={5.5} y={shoulderY} width={5} height={7} rx={2.2} />
+        </g>
+      );
+    case "loupe":
+      return (
+        <g className="hq-accessory">
+          {/* Raised beside the head, which is a position nothing else in the
+              cast occupies: `glasses` and `visor` sit ON the face, `stylus`
+              and every held device sit at chest height. A lens up at eye level
+              breaks the outline where there is otherwise only hair. */}
+          <rect
+            className="hq-device"
+            x={10}
+            y={headY + 2}
+            width={2}
+            height={9}
+            rx={1}
+            transform={`rotate(20 11 ${headY + 6})`}
+          />
+          <circle className="hq-device-stroke" cx={13} cy={headY - 1} r={4} fill="none" />
+        </g>
+      );
+    case "chart-roll":
+      return (
+        <g className="hq-accessory">
+          {/* Carried under the arm, horizontally. Every other accessory in the
+              room stands upright or is worn; a bar lying across the ribs is
+              the only horizontal held object, so it survives the silhouette
+              test on orientation alone. */}
+          <rect
+            className="hq-device"
+            x={-14}
+            y={shoulderY + 7}
+            width={17}
+            height={3.4}
+            rx={1.7}
+            transform={`rotate(-8 -6 ${shoulderY + 9})`}
+          />
+          {/* The open end, so it reads as rolled paper rather than a baton. */}
+          <ellipse className="hq-device-stroke" cx={2.6} cy={shoulderY + 7.6} rx={1.3} ry={1.9} />
         </g>
       );
   }

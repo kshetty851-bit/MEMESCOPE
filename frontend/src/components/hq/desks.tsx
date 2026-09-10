@@ -560,6 +560,67 @@ function renderTheme(theme: DeskTheme, x: number, y: number) {
           <rect className="hq-notebook" x={x - 9} y={y + 1} width={18} height={5} rx={1} />
         </g>
       );
+
+    /* Halt — one screen and a printed curve pinned above it.
+       Strategy D is the arm that stops itself when a day goes badly enough,
+       so the desk's identity is a single line being watched against a level
+       rather than a wall of feeds. The pinned sheet is deliberately paper:
+       this is the one desk whose record is a day that already closed. */
+    case "drawdown":
+      return (
+        <g>
+          <Panel x={x - 24} y={y - 30} w={34} h={26} />
+          {/* The day's line, falling to a floor it does not cross. */}
+          <polyline
+            className="hq-ink"
+            fill="none"
+            points={`${x - 20},${y - 24} ${x - 14},${y - 20} ${x - 8},${y - 25} ${x - 2},${y - 14} ${x + 4},${y - 12}`}
+          />
+          {/* The breaker level. Drawn as a rule, uncoloured — a red line here
+              would be furniture asserting that a limit had been hit. */}
+          <line className="hq-ink" x1={x - 21} y1={y - 10} x2={x + 7} y2={y - 10} />
+          {/* The pinned sheet, tacked at one corner and slightly askew. */}
+          <g transform={`rotate(-5 ${x + 18} ${y - 20})`}>
+            <rect className="hq-notebook" x={x + 12} y={y - 28} width={13} height={17} rx={0.5} />
+            {[0, 1, 2].map((i) => (
+              <line key={i} className="hq-ink" x1={x + 14} y1={y - 24 + i * 4} x2={x + 23} y2={y - 24 + i * 4} />
+            ))}
+          </g>
+        </g>
+      );
+
+    /* Chorus — five small screens, one per arm.
+       Strategy E only enters when the arms agree, so this desk has to see all
+       five books at once. Five equal panels rather than one large one: the
+       job is comparison, and a comparison desk that gave one book more glass
+       than the others would be pre-judging it. */
+    case "consensus":
+      return (
+        <g>
+          {[0, 1, 2, 3, 4].map((i) => {
+            const dx = x - 26 + i * 11;
+            return (
+              <g key={i}>
+                <Panel x={dx} y={y - 26} w={9} h={14} />
+                {/* Each screen carries a two-line reading. Identical on every
+                    panel on purpose — the desk shows five books being watched,
+                    never five different verdicts about them. */}
+                {[0, 1].map((b) => (
+                  <line
+                    key={b}
+                    className="hq-ink"
+                    x1={dx + 2}
+                    y1={y - 22 + b * 4}
+                    x2={dx + 7}
+                    y2={y - 22 + b * 4}
+                  />
+                ))}
+              </g>
+            );
+          })}
+          <rect className="hq-notebook" x={x - 9} y={y + 1} width={18} height={5} rx={1} />
+        </g>
+      );
   }
 }
 

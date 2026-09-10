@@ -128,9 +128,13 @@ const UNAVAILABLE_CASE = caseFile("MintGhost11111111111111111111111111111", null
 /* ---------------------------------------------------------------------- */
 
 describe("the physical room stays frozen", () => {
-  it("keeps the world-expansion 22×14 geometry, untouched by HQ-5", () => {
+  it("keeps the world-expansion geometry, untouched by HQ-5", () => {
+    // 22×17 since the Rafiq Analytics wing took rows 14-17. The width is the
+    // number that matters to everything in this file: the token journey runs
+    // west to east across the trading floor, and the wing was added to the
+    // SOUTH precisely so no route in this test crosses it.
     expect(GRID_COLS).toBe(22);
-    expect(GRID_ROWS).toBe(14);
+    expect(GRID_ROWS).toBe(17);
   });
 
   it("keeps every working department's rectangle where it was", () => {
@@ -246,7 +250,14 @@ describe("visible packets in the room", () => {
     expect(container.querySelectorAll('[data-packet-stage]')).toHaveLength(4);
   });
 
-  it("shows a real overflow count and nothing when none exists", () => {
+  // 15s, not the 5s default. This renders the WHOLE office at `density="full"`
+  // — every tile, every prop and every figure — and the Rafiq Analytics wing
+  // grew the room by three rows and the cast from twelve to seventeen. One
+  // such render is ~1.8s on its own; under the suite's parallel load it was
+  // clearing 5s. The assertion is unchanged and this is not a hidden
+  // performance bug: production never draws this, because the stage picks a
+  // density tier and the room is drawn once rather than per test.
+  it("shows a real overflow count and nothing when none exists", { timeout: 15_000 }, () => {
     const withOverflow = render(
       <HqStage
         focusedZone={null}

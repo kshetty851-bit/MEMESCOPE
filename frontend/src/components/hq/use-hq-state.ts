@@ -6,12 +6,14 @@ import { useQuery } from "@tanstack/react-query";
 import { useLiveUpdates } from "@/hooks/use-live-updates";
 import { usePaperAudit, usePaperPositions, usePaperWallet } from "@/hooks/use-paper";
 import { useRadarPerformance } from "@/hooks/use-radar";
+import { api } from "@/lib/api-client";
 import {
   deriveHqState,
   react,
   witness,
   type HqState,
   type HqWitness,
+  type RafiqAnalysis,
   type Source,
   type Transient,
 } from "@/lib/hq/adapter";
@@ -112,6 +114,11 @@ const OPERATIONS_POLL_MS = 45_000;
  * precisely so this does not become eleven.
  */
 const KARTHIK_POLL_MS = 60_000;
+// The Rafiq Lab trades on its own slow tick and closes a handful of positions
+// an hour. Two minutes is already far faster than the record changes; polling
+// it at the wallets' rate would be five figures of work an hour to redraw the
+// same five desks.
+const RAFIQ_POLL_MS = 120_000;
 
 interface QueryLike<T> {
   data: T | undefined;
@@ -192,6 +199,13 @@ export function useHqState(): HqState {
     return () => writeLastVisit(new Date().toISOString());
   }, []);
 
+  const rafiqAnalysis = useQuery({
+    queryKey: ["labs", "rafiq", "analysis"],
+    queryFn: () => api.get<RafiqAnalysis[]>("/labs/rafiq/analysis"),
+    refetchInterval: RAFIQ_POLL_MS,
+    staleTime: RAFIQ_POLL_MS / 2,
+  });
+
   const paperWallet = usePaperWallet();
   const paperPositions = usePaperPositions();
   const paperAudit = usePaperAudit();
@@ -238,6 +252,7 @@ export function useHqState(): HqState {
       executionPosture: sourceOf(executionPosture),
       operations: sourceOf(operations),
       karthik: sourceOf(karthik),
+      rafiqAnalysis: sourceOf(rafiqAnalysis),
     }),
     // Identity of the query objects changes on every render; their update
     // stamps do not. Keying on the stamps is what stops this from rebuilding
@@ -263,6 +278,8 @@ export function useHqState(): HqState {
       operations.isError,
       karthik.dataUpdatedAt,
       karthik.isError,
+      rafiqAnalysis.dataUpdatedAt,
+      rafiqAnalysis.isError,
     ],
   );
 

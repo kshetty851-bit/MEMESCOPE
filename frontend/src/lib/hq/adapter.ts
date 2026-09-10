@@ -122,6 +122,11 @@ export const STALE_AFTER_MS = {
    * misses every other wallet source gets.
    */
   karthik: 180_000,
+  // The lab evaluates on its own slow tick and closes a handful of trades an
+  // hour. Ten minutes rather than the three the wallets use: a shorter window
+  // would report an analyst as having no data during the ordinary gaps
+  // between that lab's own ticks, which is a false alarm, not a reading.
+  rafiqAnalysis: 600_000,
 } as const;
 
 export interface HqSources {
@@ -144,6 +149,15 @@ export interface HqSources {
    * them would put the Original Paper Wallet's numbers on Karthik's screens.
    */
   karthik: Source<KarthikState>;
+  /**
+   * `GET /labs/rafiq/analysis`. The five analysts' only source.
+   *
+   * Kept separate from every wallet source above for the same reason
+   * `karthik` is: the Rafiq Lab is an isolated experiment with its own books,
+   * and a figure crossing from a wallet into this room would put a number on
+   * an analyst's screen that their strategy never traded.
+   */
+  rafiqAnalysis: Source<RafiqAnalysis[]>;
   /** Aggregated stream pressure. Never individual events. */
   activity: EventActivity;
   /**
@@ -382,6 +396,7 @@ export function deriveHqState(sources: Partial<HqSources> = {}): HqState {
     executionPosture: NO_SOURCE,
     operations: NO_SOURCE,
     karthik: NO_SOURCE,
+    rafiqAnalysis: NO_SOURCE,
     activity: emptyActivity(EVENT_WINDOW_MS),
     stream: "offline",
     transients: {},
@@ -413,6 +428,7 @@ export function deriveHqState(sources: Partial<HqSources> = {}): HqState {
     quinn: deriveQuinn(operations, operationsGone, operationsAt),
     vault: deriveVault(s),
     karthik: deriveKarthik(karthik, karthikGone, karthikAt, operations),
+    ...deriveAnalysts(s),
     // Filled in below: Nova reads the others rather than the backend.
     nova: unknown("Waiting on the rest of the office."),
   } as Record<EmployeeId, EmployeeReading>;
@@ -1007,6 +1023,111 @@ function sentinelMetrics(operations: HqOperations | null): Metric[] {
  * "healthy" about a wallet that can spend — he says what is true and lets the
  * reader decide whether that is what they intended.
  */
+/* ── Rafiq Analytics ──────────────────────────────────────────────────── */
+
+/** One strategy's reading, exactly as `/labs/rafiq/analysis` publishes it. */
+export interface RafiqAnalysis {
+  code: string;
+  lane: string;
+  measured: boolean;
+  detail: string;
+  verdict: string;
+  open_positions: number;
+  closed_positions: number;
+  figures: Array<{ label: string; value: string; source: string }>;
+  findings: Array<{
+    key: string;
+    headline: string;
+    evidence: string;
+    lever: string;
+    source: string;
+  }>;
+}
+
+/** Which analyst answers for which strategy. The room's whole org chart. */
+export const ANALYST_STRATEGY: Record<string, string> = {
+  anchor: "A",
+  tempo: "B",
+  sigma: "C",
+  halt: "D",
+  chorus: "E",
+};
+
+/**
+ * The five analysts, derived from one payload.
+ *
+ * WHAT THE STATE MEANS HERE, WHICH IS NOT WHAT IT MEANS ELSEWHERE.
+ *
+ * Everywhere else in this adapter a state describes whether a *subsystem* is
+ * healthy. These five desks do not own a subsystem — they read a record. So
+ * the state says what the desk is watching right now, and nothing else:
+ *
+ *   unknown   the endpoint did not answer, or this strategy has no trades
+ *   reviewing the strategy is holding open positions
+ *   idle      the book is flat and the reading is current
+ *
+ * NOT KEYED TO THE FINDINGS, DELIBERATELY. The obvious mapping — "findings
+ * exist, so the desk is reviewing" — is wrong twice over. A finding is a
+ * standing property of a record rather than an event, so every desk would sit
+ * in `reviewing` permanently and the state would stop carrying information;
+ * and because `deriveActivity` counts `reviewing`, five analysts would peg the
+ * whole office to NORMAL for ever. What actually changes hour to hour is
+ * whether the arm is holding anything, and that is what the floor shows. The
+ * findings are the desk's OUTPUT and they live in the panel.
+ *
+ * There is no `success` and no `alert`. A losing strategy is not an incident —
+ * the lab exists precisely to find out whether these rules lose money, and a
+ * red desk would be the office asserting a verdict the experiment has not
+ * reached. Equally there is no green: a profitable arm at n=40 is a sample,
+ * not an achievement.
+ */
+function deriveAnalysts(s: HqSources): Record<string, EmployeeReading> {
+  const rows = fresh(s.rafiqAnalysis, STALE_AFTER_MS.rafiqAnalysis, s.now);
+  const gone = absence(s.rafiqAnalysis, STALE_AFTER_MS.rafiqAnalysis, s.now, "Rafiq Lab analysis");
+  const at = rows ? s.rafiqAnalysis.observedAt : null;
+
+  const out: Record<string, EmployeeReading> = {};
+  for (const [id, code] of Object.entries(ANALYST_STRATEGY)) {
+    if (!rows) {
+      out[id] = unknown(gone);
+      continue;
+    }
+    const row = rows.find((r) => r.code === code);
+    if (!row) {
+      // The endpoint answered and this strategy was not in it. Said plainly
+      // rather than smoothed into "no data": a missing arm is a different
+      // fact from an unreachable lab, and only one of them is a bug.
+      out[id] = unknown(`The lab answered without Strategy ${code} in it.`);
+      continue;
+    }
+
+    // `measured: false` carries the backend's own sentence. It is rendered
+    // verbatim rather than restated, so there is exactly one wording of "this
+    // strategy has not traded yet" in the product.
+    if (!row.measured) {
+      out[id] = unknown(row.detail);
+      continue;
+    }
+
+    const metrics: Metric[] = row.figures.map((figure) => ({
+      label: figure.label,
+      value: figure.value,
+      source: figure.source,
+    }));
+
+    out[id] = reading(
+      row.open_positions > 0 ? "reviewing" : "idle",
+      // The sentence is the verdict — which at a small sample is literally
+      // "No conclusion available", and that is the reading the desk should be
+      // carrying rather than the most dramatic finding it happens to hold.
+      row.verdict,
+      metrics,
+      at,
+    );
+  }
+  return out;
+}
+
 function deriveVault(s: HqSources): EmployeeReading {
   const posture = fresh(s.executionPosture, STALE_AFTER_MS.executionPosture, s.now);
   const metrics = vaultMetrics(posture);

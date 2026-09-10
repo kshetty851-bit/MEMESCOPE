@@ -30,7 +30,9 @@ export type ZoneId =
   | "facilities"
   | "restrooms"
   | "reception"
-  | "walkway";
+  | "rafiq"
+  | "walkway"
+  | "southhall";
 
 export interface Zone {
   id: ZoneId;
@@ -214,9 +216,42 @@ export const ZONES: Zone[] = [
     rect: { col: 6, row: 12, cols: 16, rows: 2 },
     surface: "plate",
   },
+  {
+    // The corridor the analytics wing hangs off. One row deep and the full
+    // width, so the new room is reached THROUGH something rather than being
+    // welded to the back of reception. A room with no approach reads as an
+    // extension; a room down a corridor reads as a room.
+    id: "southhall",
+    label: "South Hall",
+    summary: "Connective floor to the analytics wing.",
+    rect: { col: 0, row: 14, cols: 22, rows: 1 },
+    surface: "walkway",
+  },
+  {
+    // RAFIQ ANALYTICS.
+    //
+    // A separate room, which is the requirement and also the right answer.
+    // These five read one lab's books and nothing else; seating them among
+    // the desks that run the published track record would put five people
+    // analysing an isolated experiment inside the room whose numbers the
+    // experiment is isolated FROM. The floor plan should be readable as the
+    // org chart — a separate mandate gets a separate room, the same argument
+    // that gave Karthik Lab its own four walls one row up.
+    //
+    // Long and shallow on purpose: five desks in one row, west to east in
+    // strategy order, all facing the same wall of screens. That is what an
+    // analyst bullpen actually looks like, and it means a reader can see all
+    // five books at once without the camera moving.
+    id: "rafiq",
+    label: "Rafiq Analytics",
+    summary: "One analyst per Rafiq Lab strategy: open trades, closed trades and execution cost.",
+    rect: { col: 0, row: 15, cols: 22, rows: 2 },
+    surface: "plate",
+  },
 ];
 
 export const ZONE_BY_ID = new Map<ZoneId, Zone>(ZONES.map((zone) => [zone.id, zone]));
 
-/** Zones a reader can focus. The walkway is floor, not a department. */
-export const FOCUSABLE_ZONES = ZONES.filter((zone) => zone.id !== "walkway");
+/** Zones a reader can focus. Connective floor is floor, not a department. */
+const CONNECTIVE: ZoneId[] = ["walkway", "southhall"];
+export const FOCUSABLE_ZONES = ZONES.filter((zone) => !CONNECTIVE.includes(zone.id));

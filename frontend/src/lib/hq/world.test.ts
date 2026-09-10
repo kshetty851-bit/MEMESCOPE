@@ -65,7 +65,11 @@ function setReducedMotion(reduced: boolean) {
 describe("the expanded floor plan", () => {
   it("expanded the grid without moving anything that existed", () => {
     expect(GRID_COLS).toBe(22);
-    expect(GRID_ROWS).toBe(14);
+    // 17 since the Rafiq Analytics wing. Rows rather than columns because
+    // GRID_ROWS drives X_ORIGIN, so growing them shifts the whole room as one
+    // piece and nothing inside it moves relative to anything else — which is
+    // precisely what the rest of this test asserts.
+    expect(GRID_ROWS).toBe(17);
     // Every pre-expansion department keeps its exact rectangle. The walk
     // routes were authored against these coordinates; a moved zone is a
     // silently broken office.
@@ -90,6 +94,8 @@ describe("the expanded floor plan", () => {
       "facilities",
       "restrooms",
       "karthik",
+      "rafiq",
+      "southhall",
     ] as const) {
       const zone = ZONE_BY_ID.get(id);
       expect(zone, id).toBeDefined();
@@ -98,6 +104,32 @@ describe("the expanded floor plan", () => {
     }
     // The old break room is gone, split into its two successors.
     expect(ZONE_BY_ID.get("break" as never)).toBeUndefined();
+  });
+
+  it("hangs the analytics wing off a corridor below the old south edge", () => {
+    // The pre-expansion room ended at row 14. Both new zones must start there
+    // or later: an analytics wing that reached up into reception would have
+    // moved a room the test above just asserted had not moved.
+    const hall = ZONE_BY_ID.get("southhall")!;
+    const rafiq = ZONE_BY_ID.get("rafiq")!;
+    expect(hall.rect.row).toBe(14);
+    expect(rafiq.rect.row).toBeGreaterThanOrEqual(hall.rect.row + hall.rect.rows);
+
+    // Five analysts, all inside their own room, all on distinct tiles, and in
+    // strategy order west to east so the row reads A-B-C-D-E.
+    const analysts = EMPLOYEES.filter((e) => e.zone === "rafiq");
+    expect(analysts).toHaveLength(5);
+    expect(analysts.map((e) => e.id)).toEqual(["anchor", "tempo", "sigma", "halt", "chorus"]);
+    expect(new Set(analysts.map((e) => `${e.desk.col},${e.desk.row}`)).size).toBe(5);
+    for (const analyst of analysts) {
+      expect(isInsideRoom(analyst.desk), analyst.id).toBe(true);
+      expect(analyst.desk.col, analyst.id).toBeGreaterThanOrEqual(rafiq.rect.col);
+      expect(analyst.desk.col, analyst.id).toBeLessThan(rafiq.rect.col + rafiq.rect.cols);
+      expect(analyst.desk.row, analyst.id).toBeGreaterThanOrEqual(rafiq.rect.row);
+      expect(analyst.desk.row, analyst.id).toBeLessThan(rafiq.rect.row + rafiq.rect.rows);
+    }
+    const cols = analysts.map((e) => e.desk.col);
+    expect([...cols].sort((a, b) => a - b)).toEqual(cols);
   });
 
   it("keeps the conference seats distinct, at the table, and reachable", () => {

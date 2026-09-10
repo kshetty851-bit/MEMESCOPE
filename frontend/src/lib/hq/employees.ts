@@ -47,7 +47,17 @@ export type EmployeeId =
   // a *separate experiment* with a separate mandate: nobody already on this
   // roster may touch it, and nobody on it may touch anything else. A desk that
   // exists precisely to be isolated is a desk, not a second hat on Sentinel.
-  | "karthik";
+  | "karthik"
+  // RAFIQ ANALYTICS. Five desks, one per strategy in the Rafiq Lab, in a room
+  // of their own. Five people rather than one "lab analyst" because the lab
+  // runs five *separate books* with five separate rules and one shared feed:
+  // a single desk covering all five would average them, and averaging is
+  // precisely the mistake that makes five arms look like one result.
+  | "anchor"
+  | "tempo"
+  | "sigma"
+  | "halt"
+  | "chorus";
 
 /**
  * The normalised states from the plan. Declared now so the shell's types are
@@ -92,7 +102,8 @@ export type DepartmentId =
   | "research"
   | "karthik_lab"
   | "execution"
-  | "qa";
+  | "qa"
+  | "rafiq_analytics";
 
 export const DEPARTMENT_LABEL: Record<DepartmentId, string> = {
   command: "Command",
@@ -106,6 +117,7 @@ export const DEPARTMENT_LABEL: Record<DepartmentId, string> = {
   qa: "Quality Assurance",
   karthik_lab: "Karthik Lab",
   execution: "Execution",
+  rafiq_analytics: "Rafiq Analytics",
 };
 
 export interface Employee {
@@ -377,6 +389,151 @@ export const EMPLOYEES: Employee[] = [
     personality: "Fast hands, narrow remit. Reads the evidence, then says what he cannot do.",
     accessory: "headphones",
     palette: "magenta",
+  },
+
+  /* ── RAFIQ ANALYTICS ──────────────────────────────────────────────────
+   *
+   * One analyst per Rafiq Lab strategy, assigned by Nova on 2026-09-10.
+   *
+   * WHY FIVE PEOPLE AND NOT ONE.
+   *
+   * The lab runs five books with five different rules over one shared feed.
+   * A single desk covering all five would have to speak about them in
+   * aggregate, and the aggregate is meaningless here — the arms disagree by
+   * design, which is the entire experiment. Strategy B wins 64% of its trades
+   * and still loses money while Strategy A wins 30%; averaged together those
+   * two facts vanish, and the vanishing is the failure.
+   *
+   * WHAT THESE DESKS MAY SAY.
+   *
+   * They read `/labs/rafiq/analysis`, which computes arithmetic over the
+   * lab's own position rows and nothing else. They report figures with the
+   * columns behind them, and where a finding points anywhere it names a
+   * measurable quantity rather than an outcome. None of them proposes a rule
+   * change, ranks the arms, or forecasts a return — those are the claims eight
+   * recorded no-edge findings on this platform were unable to support, and a
+   * cartoon analyst asserting them anyway would be the least trustworthy thing
+   * in the product.
+   */
+  {
+    id: "anchor",
+    name: "Anchor",
+    role: "Strategy A Analyst",
+    zone: "rafiq",
+    department: "rafiq_analytics",
+    // The five desks run west to east in strategy order, so the row reads
+    // A-B-C-D-E left to right and a reader never has to hunt for an arm.
+    // Three tiles apart, which is close enough that the five read as one
+    // row shared by a team. They were four apart first and the room looked
+    // like five people who happened to be in the same postcode.
+    desk: { col: 6, row: 16 },
+    systemResponsibility:
+      "Rafiq Lab Strategy A (hard stop guard): open positions, closed trades, exit reasons and execution cost",
+    whatIDo:
+      "I read Strategy A's closed trades and ask one question of every loser: was the stop the thing that cost it, or was the entry? The peak price each position reached answers that, and I do not guess when it does not.",
+    // Every analyst works with the other four. Strategy E only enters when the
+    // arms agree, so the room's readings genuinely depend on each other rather
+    // than five people sitting near one another.
+    worksWith: ["tempo", "sigma", "halt", "chorus"],
+    personality: "Deliberate and blunt. Rereads a trade before saying anything about it.",
+    accessory: "glasses",
+    palette: "brass",
+  },
+  {
+    id: "tempo",
+    name: "Tempo",
+    role: "Strategy B Analyst",
+    zone: "rafiq",
+    department: "rafiq_analytics",
+    // The five desks run west to east in strategy order, so the row reads
+    // A-B-C-D-E left to right and a reader never has to hunt for an arm.
+    // Three tiles apart, which is close enough that the five read as one
+    // row shared by a team. They were four apart first and the room looked
+    // like five people who happened to be in the same postcode.
+    desk: { col: 9, row: 16 },
+    systemResponsibility:
+      "Rafiq Lab Strategy B (time boxed exit): open positions, closed trades, exit reasons and execution cost",
+    whatIDo:
+      "I read Strategy B's holds. It is the arm that exits on time rather than on price, so my whole record is about what the clock caught and what it cut short.",
+    // Every analyst works with the other four. Strategy E only enters when the
+    // arms agree, so the room's readings genuinely depend on each other rather
+    // than five people sitting near one another.
+    worksWith: ["anchor", "sigma", "halt", "chorus"],
+    personality: "Quick and precise. Speaks in elapsed minutes and taps a rhythm on the desk.",
+    accessory: "stylus",
+    palette: "violet",
+  },
+  {
+    id: "sigma",
+    name: "Sigma",
+    role: "Strategy C Analyst",
+    zone: "rafiq",
+    department: "rafiq_analytics",
+    // The five desks run west to east in strategy order, so the row reads
+    // A-B-C-D-E left to right and a reader never has to hunt for an arm.
+    // Three tiles apart, which is close enough that the five read as one
+    // row shared by a team. They were four apart first and the room looked
+    // like five people who happened to be in the same postcode.
+    desk: { col: 12, row: 16 },
+    systemResponsibility:
+      "Rafiq Lab Strategy C (volatility adjusted risk): open positions, closed trades, exit reasons and execution cost",
+    whatIDo:
+      "I read Strategy C, the arm that sets its own stop from the volatility it measured at entry. My job is to check the measurement against what the position then did.",
+    // Every analyst works with the other four. Strategy E only enters when the
+    // arms agree, so the room's readings genuinely depend on each other rather
+    // than five people sitting near one another.
+    worksWith: ["anchor", "tempo", "halt", "chorus"],
+    personality: "Careful and slow to commit. Will not give a figure without saying how wide it is.",
+    accessory: "loupe",
+    palette: "cobalt",
+  },
+  {
+    id: "halt",
+    name: "Halt",
+    role: "Strategy D Analyst",
+    zone: "rafiq",
+    department: "rafiq_analytics",
+    // The five desks run west to east in strategy order, so the row reads
+    // A-B-C-D-E left to right and a reader never has to hunt for an arm.
+    // Three tiles apart, which is close enough that the five read as one
+    // row shared by a team. They were four apart first and the room looked
+    // like five people who happened to be in the same postcode.
+    desk: { col: 15, row: 16 },
+    systemResponsibility:
+      "Rafiq Lab Strategy D (daily drawdown breaker): open positions, closed trades, exit reasons and execution cost",
+    whatIDo:
+      "I read Strategy D, the arm that stops itself when a day goes badly enough. Most of my record is days where nothing happened, and that is the point of it.",
+    // Every analyst works with the other four. Strategy E only enters when the
+    // arms agree, so the room's readings genuinely depend on each other rather
+    // than five people sitting near one another.
+    worksWith: ["anchor", "tempo", "sigma", "chorus"],
+    personality: "Watchful and quiet. Keeps one eye on the day's line and says little until it moves.",
+    accessory: "chart-roll",
+    palette: "plum",
+  },
+  {
+    id: "chorus",
+    name: "Chorus",
+    role: "Strategy E Analyst",
+    zone: "rafiq",
+    department: "rafiq_analytics",
+    // The five desks run west to east in strategy order, so the row reads
+    // A-B-C-D-E left to right and a reader never has to hunt for an arm.
+    // Three tiles apart, which is close enough that the five read as one
+    // row shared by a team. They were four apart first and the room looked
+    // like five people who happened to be in the same postcode.
+    desk: { col: 18, row: 16 },
+    systemResponsibility:
+      "Rafiq Lab Strategy E (ensemble guarded): open positions, closed trades, exit reasons and execution cost",
+    whatIDo:
+      "I read Strategy E. It waits for consensus before it enters, so I spend more time reading the other four desks' books than my own — and when mine is empty, that is a reading and not a gap.",
+    // Every analyst works with the other four. Strategy E only enters when the
+    // arms agree, so the room's readings genuinely depend on each other rather
+    // than five people sitting near one another.
+    worksWith: ["anchor", "tempo", "sigma", "halt"],
+    personality: "Attentive to everyone else's screen. Rolls the chair down the row to check a number.",
+    accessory: "visor",
+    palette: "clay",
   },
 ];
 

@@ -123,6 +123,63 @@ export function DeskPanel({
               </table>
             ) : null}
 
+            {(data.findings?.length ?? 0) > 0 ? (
+              <div className="mt-1 flex flex-col gap-2" data-testid="desk-findings">
+                <p className="text-[10px] uppercase tracking-wide text-[var(--color-ink-3,var(--color-ink))]">
+                  What this desk can say
+                </p>
+                {data.findings!.map((finding) => (
+                  <article
+                    key={finding.headline}
+                    className="border-l-2 border-[var(--color-line)] pl-2"
+                  >
+                    <h3 className="text-xs font-semibold text-[var(--color-ink)]">
+                      {finding.headline}
+                    </h3>
+                    <p className="mt-0.5 text-[11px] leading-snug text-[var(--color-ink)]">
+                      {finding.evidence}
+                    </p>
+                    {/* The lever, visually subordinate to the evidence above
+                        it — deliberately. The measurement is the finding; what
+                        would have to move is a consequence of it, and styling
+                        the two equally would invite a reader to act on the
+                        second without checking the first. */}
+                    {finding.lever ? (
+                      <p className="mt-1 text-[11px] leading-snug text-[var(--color-ink-3,var(--color-ink))]">
+                        {finding.lever}
+                      </p>
+                    ) : null}
+                    <p className="mt-0.5 font-mono text-[10px] text-[var(--color-ink-3,var(--color-ink))] opacity-70">
+                      {finding.source}
+                    </p>
+                  </article>
+                ))}
+              </div>
+            ) : null}
+
+            {(data.readings?.length ?? 0) > 0 ? (
+              <table className="w-full text-left text-xs" data-testid="desk-readings">
+                <tbody>
+                  {data.readings!.map((reading) => (
+                    <tr key={reading.label} className="border-t border-[var(--color-line)]">
+                      <th
+                        scope="row"
+                        className="py-1 pr-3 font-normal text-[var(--color-ink-3,var(--color-ink))]"
+                      >
+                        {reading.label}
+                      </th>
+                      <td className="py-1 pr-3 font-mono text-[var(--color-ink)]">
+                        {reading.value}
+                      </td>
+                      <td className="py-1 text-[10px] text-[var(--color-ink-3,var(--color-ink))] opacity-70">
+                        {reading.source}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : null}
+
             {data.timeline.length > 0 ? (
               <div className="mt-1">
                 <p className="pb-1 text-[10px] uppercase tracking-wide text-[var(--color-ink-3,var(--color-ink))]">

@@ -31,6 +31,29 @@ export interface DeskEvent {
   kind: "action" | "incident" | "trade" | "admission";
 }
 
+/** A figure whose value is not a count: money, a percentage, a duration. */
+export interface DeskReading {
+  label: string;
+  value: string;
+  source: string;
+}
+
+/**
+ * What a desk has to say about its own record.
+ *
+ * `lever` is the field that carries this feature's whole discipline: it names
+ * a quantity that would have to MOVE, never an outcome that would follow.
+ * "Execution costs 54% of the available move" is a lever; "widen the stop and
+ * it turns positive" is a forecast, and the backend's tests refuse to emit
+ * one. Rendered as given — the panel restates nothing.
+ */
+export interface DeskFinding {
+  headline: string;
+  evidence: string;
+  lever: string;
+  source: string;
+}
+
 export interface DeskDossier {
   employee: string;
   since: string;
@@ -41,6 +64,9 @@ export interface DeskDossier {
   sources: string[];
   counts: DeskCount[];
   timeline: DeskEvent[];
+  /** Absent on desks that predate the analysts; defaulted at the use site. */
+  readings?: DeskReading[];
+  findings?: DeskFinding[];
 }
 
 /** `GET /api/v1/hq/desk/{employee}`. Read on demand — nobody needs fourteen

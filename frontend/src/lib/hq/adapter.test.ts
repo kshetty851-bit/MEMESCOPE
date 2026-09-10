@@ -312,6 +312,22 @@ function posture(over: Record<string, unknown> = {}) {
   } as never;
 }
 
+/** Five settled, flat books. Overridden per test where a book matters. */
+function analysis(over: Partial<Record<string, unknown>> = {}) {
+  return ["A", "B", "C", "D", "E"].map((code) => ({
+    code,
+    lane: `lane_${code.toLowerCase()}`,
+    measured: true,
+    detail: "Computed from this strategy's own position rows.",
+    verdict: "$-10.00 realised over 40 settled trades, 30% of them profitable.",
+    open_positions: 0,
+    closed_positions: 40,
+    figures: [{ label: "Closed trades", value: "40", source: "closed_at" }],
+    findings: [],
+    ...over,
+  }));
+}
+
 function build(overrides: Partial<HqSources> = {}) {
   return deriveHqState({
     operations: at(operations() as never),
@@ -327,6 +343,12 @@ function build(overrides: Partial<HqSources> = {}) {
     // would leave Vault permanently unread, which Nova correctly reports as a
     // department with no reading and which would make QUIET unreachable.
     executionPosture: at(posture()),
+    // Rafiq Analytics. Present by default for the same reason as the posture
+    // above: five desks with no source are five departments with no reading,
+    // which Nova correctly reports and which would make QUIET unreachable.
+    // Flat books, so the default office is quiet — the arms hold positions in
+    // production and the analysts read `reviewing` there, which is true.
+    rafiqAnalysis: at(analysis() as never),
     activity: activity(),
     stream: "live",
     transients: {},

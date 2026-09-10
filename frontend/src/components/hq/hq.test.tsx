@@ -99,7 +99,14 @@ describe("navigation", () => {
 });
 
 describe("the stage", () => {
-  it("renders every department and every member of staff", () => {
+  // 15s, not the 5s default. This renders the WHOLE office at `density="full"`
+  // — every tile, every prop and every figure — and the Rafiq Analytics wing
+  // grew the room by three rows and the cast from twelve to seventeen. One
+  // such render is ~1.8s on its own; under the suite's parallel load it was
+  // clearing 5s. The assertion is unchanged and this is not a hidden
+  // performance bug: production never draws this, because the stage picks a
+  // density tier and the room is drawn once rather than per test.
+  it("renders every department and every member of staff", { timeout: 15_000 }, () => {
     const { container } = render(
       <HqStage focusedZone={null} onFocusZone={noop} onSelectEmployee={noop} density="full" />,
     );
@@ -1111,11 +1118,21 @@ describe("adapter isolation", () => {
     // aggregates all of it server-side. Eleven surfaces, one fetch. A version
     // that polled per screen would have needed six.
     //
+    // Raised from nine to ten for Rafiq Analytics, and the argument is the
+    // one this comment demands: `/labs/rafiq/analysis` is a single request
+    // that carries all FIVE analysts — every figure, every finding and the
+    // per-strategy verdict behind each of the five desks — because the
+    // endpoint computes the whole lab server-side and returns one row per
+    // arm. The obvious alternative, one fetch per analyst, would have been
+    // five, and a per-desk panel fetch on top of that would have been ten on
+    // its own. It also polls at two minutes rather than the wallets' one,
+    // because the lab it reads closes a handful of trades an hour.
+    //
     // The cap is the point: it is what stops a future panel from quietly
     // adding a fetch per employee. Raising it should require reading this.
     const source = fs.readFileSync(path.join(root, "components/hq/use-hq-state.ts"), "utf8");
     const queries = source.match(/useQuery\(|usePaper\w+\(|useRadar\w+\(/g) ?? [];
-    expect(queries.length).toBeLessThanOrEqual(9);
+    expect(queries.length).toBeLessThanOrEqual(10);
     expect(source).toContain("usePaperWallet");
     expect(source).toContain("useRadarPerformance");
   });

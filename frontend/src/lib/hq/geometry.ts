@@ -56,7 +56,14 @@ export const TILE_H = 64;
  * over the same void.
  */
 export const GRID_COLS = 22;
-export const GRID_ROWS = 14;
+// 14 → 17 on 2026-09-10, for the Rafiq Analytics wing along the south edge.
+// Rows rather than columns was the deliberate choice: `X_ORIGIN` below is
+// derived from GRID_ROWS, so growing rows shifts the WHOLE room east by a
+// uniform amount and nothing inside it moves relative to anything else. Every
+// position in the office is computed from these constants — there is not one
+// hardcoded screen coordinate in the stage, the props or the desks — so the
+// expansion is a change to two numbers rather than a re-layout.
+export const GRID_ROWS = 17;
 
 /** Room extents in logical units, before the stage's fit-scale. */
 export const ROOM_W = (GRID_COLS + GRID_ROWS) * (TILE_W / 2);
