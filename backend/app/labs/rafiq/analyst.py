@@ -513,7 +513,8 @@ async def analyse(session: AsyncSession, code: str, *, now: datetime | None = No
                         "stop level."
                         if rules_differ
                         else (
-                            f" — and only {differed} of those were entered under a "
+                            f" — and only {differed} of those "
+                            f"{'was' if differed == 1 else 'were'} entered under a "
                             "different stop level, so agreeing is what they should do."
                         )
                     )

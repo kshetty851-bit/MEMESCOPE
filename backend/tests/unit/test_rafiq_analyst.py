@@ -261,6 +261,8 @@ class TestCrossArm:
         )
         assert "despite" not in finding.evidence
         assert "should do" in finding.evidence
+        # Reads as English for the n=1 case, which is the common one here.
+        assert "only 1 of those was entered" in finding.evidence
         # And crucially: it must not accuse the price record.
         assert "sampling" not in finding.lever
         assert "arithmetic rather than a result" in finding.lever
