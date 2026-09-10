@@ -10,6 +10,7 @@ symbol this tick and nothing else.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
@@ -169,7 +170,7 @@ class CryptoTrendService:
             # open is exactly one millisecond after the last close.
             start_ms = last_close_ms + 1
         rows = await self._source.klines(symbol, timeframe, start_ms=start_ms,
-                                         limit=config.CANDLE_WINDOW)
+                                         limit=config.KLINES_LIMIT)
         return await self.upsert_candles(parse_klines(symbol, timeframe, rows, now_ms=now_ms))
 
     async def upsert_candles(self, candles: list[Candle]) -> int:
@@ -188,17 +189,78 @@ class CryptoTrendService:
         return len(candles)
 
     async def prune_candles(self) -> int:
-        """Keep the newest `CANDLE_WINDOW` per symbol and timeframe."""
-        ranked = select(
-            CtCandle.id,
-            func.row_number().over(
-                partition_by=(CtCandle.symbol, CtCandle.timeframe),
-                order_by=CtCandle.open_time.desc(),
-            ).label("rn"),
-        ).subquery()
-        stale = select(ranked.c.id).where(ranked.c.rn > config.CANDLE_WINDOW)
-        result = await self._session.execute(delete(CtCandle).where(CtCandle.id.in_(stale)))
-        return result.rowcount or 0
+        """Keep the newest `candle_window(timeframe)` per symbol, per timeframe."""
+        pruned = 0
+        for timeframe in config.TIMEFRAMES:
+            ranked = select(
+                CtCandle.id,
+                func.row_number().over(
+                    partition_by=CtCandle.symbol, order_by=CtCandle.open_time.desc(),
+                ).label("rn"),
+            ).where(CtCandle.timeframe == timeframe).subquery()
+            stale = select(ranked.c.id).where(ranked.c.rn > config.candle_window(timeframe))
+            result = await self._session.execute(
+                delete(CtCandle).where(CtCandle.id.in_(stale)))
+            pruned += result.rowcount or 0
+        return pruned
+
+    # --- deep backfill (Phase 3.1) ------------------------------------------
+
+    async def backfill_candles(self, symbol: str, timeframe: str, *, from_ms: int,
+                               until_ms: int, now_ms: int) -> dict[str, Any]:
+        """Page FORWARD from `from_ms` in `KLINES_LIMIT`-sized requests until a
+        batch reaches `until_ms` or comes back short. Every batch is upserted,
+        so a re-run repeats nothing and an interrupted run resumes."""
+        cursor, requests, stored = from_ms, 0, 0
+        while cursor < until_ms:
+            rows = await self._source.klines(symbol, timeframe, start_ms=cursor,
+                                             limit=config.KLINES_LIMIT)
+            requests += 1
+            if not rows:
+                break
+            stored += await self.upsert_candles(
+                parse_klines(symbol, timeframe, rows, now_ms=now_ms))
+            last_close = int(rows[-1][6])
+            if last_close < cursor:  # no progress: never spin
+                break
+            cursor = last_close + 1
+            if len(rows) < config.KLINES_LIMIT:
+                break
+        return {"symbol": symbol, "timeframe": timeframe, "requests": requests,
+                "candles": stored}
+
+    async def backfill_to_match(self, symbols: Sequence[str], *, timeframe: str,
+                                reference: str, now: datetime) -> dict[str, Any]:
+        """Extend `timeframe` coverage back to the earliest stored `reference`
+        candle, symbol by symbol. Only the gap before the earliest stored
+        `timeframe` candle is fetched; a symbol already covered costs nothing."""
+        now_ms = to_ms(now)
+        total, report = 0, []
+        for symbol in symbols:
+            first_ref = await self._session.scalar(
+                select(func.min(CtCandle.open_time))
+                .where(CtCandle.symbol == symbol, CtCandle.timeframe == reference))
+            if first_ref is None:
+                report.append({"symbol": symbol, "skipped": f"no {reference} candles"})
+                continue
+            first_own = await self._session.scalar(
+                select(func.min(CtCandle.open_time))
+                .where(CtCandle.symbol == symbol, CtCandle.timeframe == timeframe))
+            from_ms = to_ms(first_ref)
+            until_ms = now_ms if first_own is None else to_ms(first_own) - 1
+            if from_ms >= until_ms:
+                report.append({"symbol": symbol, "timeframe": timeframe, "requests": 0,
+                               "candles": 0, "covered": True})
+                continue
+            r = await self.backfill_candles(symbol, timeframe, from_ms=from_ms,
+                                            until_ms=until_ms, now_ms=now_ms)
+            total += r["requests"]
+            report.append(r)
+            logger.info("crypto_trend_backfill", **r)
+        logger.info("crypto_trend_backfill_done", timeframe=timeframe, reference=reference,
+                    requests=total)
+        return {"timeframe": timeframe, "reference": reference, "requests": total,
+                "symbols": report}
 
     # --- funding ------------------------------------------------------------
 

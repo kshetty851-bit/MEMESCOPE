@@ -49,6 +49,8 @@ class MarketSource:
         self._client = client
         self._owns_client = client is None
         self._budget = budget or CallBudget(config.WEIGHT_PER_MINUTE, window_seconds=60.0)
+        #: CoinGecko limits by request count, on a much smaller allowance.
+        self._cg_budget = CallBudget(config.COINGECKO_CALLS_PER_MINUTE, window_seconds=60.0)
         self._backoff = backoff or BackoffPolicy(initial_seconds=1.0, max_seconds=30.0)
         self._sleep = sleep
         #: Every request actually sent, retries included. Reported per tick.
@@ -72,13 +74,15 @@ class MarketSource:
             await self._client.aclose()
             self._client = None
 
-    async def _get(self, url: str, params: dict[str, Any] | None, *, weight: int) -> Any:
+    async def _get(self, url: str, params: dict[str, Any] | None, *, weight: int,
+                   budget: CallBudget | None = None) -> Any:
         if self._client is None:
             raise RuntimeError("MarketSource used outside `async with`")
+        bucket = budget or self._budget
         for attempt in range(1, config.MAX_ATTEMPTS + 1):
             # ponytail: poll the bucket rather than compute the exact wait;
             # a tick spends ~200 weight an hour against a 1,200/min budget.
-            while not self._budget.try_acquire(weight):
+            while not bucket.try_acquire(weight):
                 await self._sleep(0.5)
             response = await self._client.get(url, params=params)
             self.requests += 1
@@ -96,12 +100,21 @@ class MarketSource:
 
     # --- CoinGecko ----------------------------------------------------------
 
-    async def coingecko_markets(self) -> list[dict[str, Any]]:
-        """Top `UNIVERSE_FETCH` by market cap. Once a day; no weight budget applies."""
+    async def coingecko_markets(self, per_page: int | None = None) -> list[dict[str, Any]]:
+        """Top `per_page` (default `UNIVERSE_FETCH`) by market cap today."""
         return await self._get(config.COINGECKO_MARKETS_URL, {
             "vs_currency": "usd", "order": "market_cap_desc",
-            "per_page": config.UNIVERSE_FETCH, "page": 1,
-        }, weight=0)
+            "per_page": per_page or config.UNIVERSE_FETCH, "page": 1,
+        }, weight=1, budget=self._cg_budget)
+
+    async def coingecko_market_chart(self, coin_id: str, *, days: int) -> list[list[float]]:
+        """Daily `[timestamp_ms, market_cap_usd]` points for the last `days`
+        days. The public API refuses more than 365; `days=max` is paid."""
+        body = await self._get(f"{config.COINGECKO_COIN_URL}/{coin_id}/market_chart",
+                               {"vs_currency": "usd", "days": days},
+                               weight=1, budget=self._cg_budget)
+        return [[float(ts), float(cap)] for ts, cap in body.get("market_caps", ())
+                if cap is not None]
 
     # --- Binance Futures ----------------------------------------------------
 
@@ -118,7 +131,7 @@ class MarketSource:
 
     async def klines(
         self, symbol: str, interval: str, *, start_ms: int | None = None,
-        limit: int = config.CANDLE_WINDOW,
+        limit: int = config.KLINES_LIMIT,
     ) -> list[list[Any]]:
         params: dict[str, Any] = {"symbol": symbol, "interval": interval, "limit": limit}
         if start_ms is not None:

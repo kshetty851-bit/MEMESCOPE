@@ -1,4 +1,6 @@
-"""The read interface. Everything a later phase reads comes through here.
+"""The read interface. Everything downstream reads comes through here — the
+trend engine included, which is how "reads candles from the DB via data.py
+only" is held.
 
 Every function takes the session, as every read in this repo does; the
 caller owns the transaction boundary. `data_health()` returns plain JSON
@@ -8,6 +10,7 @@ caller owns the transaction boundary. `data_health()` returns plain JSON
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
@@ -16,7 +19,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.labs.crypto_trend import config
 from app.labs.crypto_trend.candles import INTERVAL_MS, Candle, find_gaps, from_ms, to_ms
-from app.labs.crypto_trend.models import CtCandle, CtFunding, CtRun, CtUniverseMember
+from app.labs.crypto_trend.models import (
+    CtCandle,
+    CtFunding,
+    CtRegime,
+    CtRun,
+    CtTrendState,
+    CtUniverseMember,
+    CtUniverseSnapshot,
+)
+from app.labs.crypto_trend.regime import Regime
+from app.labs.crypto_trend.trend import TrendState
 from app.labs.crypto_trend.universe import Coin
 
 
@@ -32,9 +45,11 @@ async def get_universe(session: AsyncSession) -> list[Coin]:
 
 
 async def get_candles(
-    session: AsyncSession, symbol: str, timeframe: str, limit: int = config.CANDLE_WINDOW,
+    session: AsyncSession, symbol: str, timeframe: str, limit: int | None = None,
 ) -> list[Candle]:
-    """The newest `limit` closed candles, oldest first."""
+    """The newest `limit` closed candles (default: the timeframe's window),
+    oldest first."""
+    limit = config.candle_window(timeframe) if limit is None else limit
     rows = (await session.execute(
         select(CtCandle)
         .where(CtCandle.symbol == symbol, CtCandle.timeframe == timeframe)
@@ -143,3 +158,65 @@ async def data_health(session: AsyncSession, *, now: datetime | None = None) -> 
             "errors": run.errors or [],
         },
     }
+
+
+# --- Phase 2: trend state and regime -------------------------------------------
+
+def _state_from_row(r: CtTrendState) -> TrendState:
+    return TrendState(
+        symbol=r.symbol, timeframe=r.timeframe, bar_close_time=r.bar_close_time,
+        computed_at=r.computed_at, direction=r.direction, strength=r.strength,
+        slope=float(r.slope), atr_pct=float(r.atr_pct), bars_in_state=r.bars_in_state,
+        ema_fast=float(r.ema_fast), ema_slow=float(r.ema_slow),
+        ema_trend=None if r.ema_trend is None else float(r.ema_trend),
+        adx=float(r.adx), structure=r.structure, structure_veto=r.structure_veto,
+        close=float(r.close),
+    )
+
+
+async def get_trend_state(
+    session: AsyncSession, symbol: str | None = None, timeframe: str | None = None,
+) -> list[TrendState]:
+    """The latest state per (symbol, timeframe), optionally narrowed."""
+    stmt = (
+        select(CtTrendState)
+        .distinct(CtTrendState.symbol, CtTrendState.timeframe)
+        .order_by(CtTrendState.symbol, CtTrendState.timeframe,
+                  CtTrendState.bar_close_time.desc())
+    )
+    if symbol is not None:
+        stmt = stmt.where(CtTrendState.symbol == symbol)
+    if timeframe is not None:
+        stmt = stmt.where(CtTrendState.timeframe == timeframe)
+    return [_state_from_row(r) for r in (await session.execute(stmt)).scalars()]
+
+
+async def get_regime(session: AsyncSession, limit: int = 1) -> list[Regime]:
+    """The newest `limit` regime rows, newest first."""
+    rows = (await session.execute(
+        select(CtRegime).order_by(CtRegime.bar_close_time.desc()).limit(limit)
+    )).scalars()
+    return [Regime(
+        bar_close_time=r.bar_close_time, computed_at=r.computed_at, coins=r.coins,
+        breadth_up=float(r.breadth_up), breadth_down=float(r.breadth_down),
+        btc_direction=r.btc_direction, eth_direction=r.eth_direction, regime=r.regime,
+    ) for r in rows]
+
+
+async def get_funding_history(
+    session: AsyncSession, symbols: Sequence[str],
+) -> list[tuple[str, datetime, float]]:
+    """Every stored funding row for `symbols`: (symbol, settlement time, rate)."""
+    rows = (await session.execute(
+        select(CtFunding.symbol, CtFunding.next_funding_time, CtFunding.funding_rate)
+        .where(CtFunding.symbol.in_(list(symbols)))
+        .order_by(CtFunding.symbol, CtFunding.next_funding_time)
+    )).all()
+    return [(s, t, float(r)) for s, t, r in rows]
+
+
+async def get_universe_snapshot(session: AsyncSession, name: str) -> CtUniverseSnapshot | None:
+    """A frozen historical universe by name, or None."""
+    return (await session.execute(
+        select(CtUniverseSnapshot).where(CtUniverseSnapshot.name == name)
+    )).scalar_one_or_none()

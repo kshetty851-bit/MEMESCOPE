@@ -36,6 +36,12 @@ async def lab_engine() -> AsyncGenerator:
         engine = create_async_engine(TEST_DATABASE_URI, poolclass=None, future=True)
         async with engine.begin() as conn:
             await conn.exec_driver_sql("CREATE EXTENSION IF NOT EXISTS pgcrypto")
+            # The lab's OWN tables are rebuilt so they always match the models
+            # (`create_all` never alters a table that exists, and a column
+            # added since the test database was last built would be missing).
+            # Nothing else is dropped: the platform's schema is left alone.
+            own = [t for t in Base.metadata.sorted_tables if t.name.startswith("ct_")]
+            await conn.run_sync(lambda c: Base.metadata.drop_all(c, tables=own))
             await conn.run_sync(Base.metadata.create_all)
     except Exception as exc:  # pragma: no cover - environment, not logic
         pytest.skip(f"no test database available: {exc}")

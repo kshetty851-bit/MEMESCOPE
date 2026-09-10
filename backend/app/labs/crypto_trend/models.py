@@ -140,3 +140,114 @@ class CtRun(Base):
     #: Coins in the top-30 with no Binance perp, as `{coingecko_id, ticker, tried}`.
     skipped: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB)
     errors: Mapped[list[str] | None] = mapped_column(JSONB)
+
+
+class CtTrendState(Base):
+    """Per-coin trend state on one timeframe, ONE ROW PER CLOSED BAR.
+
+    Keyed on the bar it was computed from, so the every-minute recompute
+    between closes rewrites the same row instead of adding one: 24 rows a
+    day on 1h, 6 on 4h, per symbol. `computed_at` says when it was last
+    written; `bar_close_time` says what it describes.
+    """
+
+    __tablename__ = "ct_trend_state"
+    __table_args__ = (
+        UniqueConstraint("symbol", "timeframe", "bar_close_time",
+                         name="uq_ct_trend_state_symbol_timeframe_bar_close_time"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    symbol: Mapped[str] = mapped_column(String(24), nullable=False)
+    timeframe: Mapped[str] = mapped_column(String(4), nullable=False)
+    bar_close_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    #: `UP` | `DOWN` | `FLAT`
+    direction: Mapped[str] = mapped_column(String(5), nullable=False)
+    strength: Mapped[int] = mapped_column(Integer, nullable=False)
+    #: EMA_slow's change over SLOPE_BARS bars, percent, signed.
+    slope: Mapped[Decimal] = mapped_column(Numeric(12, 6), nullable=False)
+    #: ATR as a percentage of the close.
+    atr_pct: Mapped[Decimal] = mapped_column(Numeric(12, 6), nullable=False)
+    bars_in_state: Mapped[int] = mapped_column(Integer, nullable=False)
+    ema_fast: Mapped[Decimal] = mapped_column(_PRICE, nullable=False)
+    ema_slow: Mapped[Decimal] = mapped_column(_PRICE, nullable=False)
+    #: Null until EMA_TREND bars exist for the contract.
+    ema_trend: Mapped[Decimal | None] = mapped_column(_PRICE)
+    adx: Mapped[Decimal] = mapped_column(Numeric(10, 4), nullable=False)
+    #: `HH_HL` | `LH_LL` | `MIXED`
+    structure: Mapped[str] = mapped_column(String(8), nullable=False)
+    #: True when the averages and ADX read a trend that the most recent swing
+    #: refused — the state is FLAT because of structure, not despite it.
+    structure_veto: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
+    close: Mapped[Decimal] = mapped_column(_PRICE, nullable=False)
+
+
+class CtRegime(Base):
+    """Market-wide regime, one row per bar close across the universe."""
+
+    __tablename__ = "ct_regime"
+    __table_args__ = (
+        UniqueConstraint("bar_close_time", name="uq_ct_regime_bar_close_time"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    bar_close_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    #: Coins with a 4h state — the breadth denominator.
+    coins: Mapped[int] = mapped_column(Integer, nullable=False)
+    breadth_up: Mapped[Decimal] = mapped_column(Numeric(6, 4), nullable=False)
+    breadth_down: Mapped[Decimal] = mapped_column(Numeric(6, 4), nullable=False)
+    btc_direction: Mapped[str | None] = mapped_column(String(5))
+    eth_direction: Mapped[str | None] = mapped_column(String(5))
+    #: `RISK_ON` | `RISK_OFF` | `CHOP`
+    regime: Mapped[str] = mapped_column(String(8), nullable=False)
+
+
+class CtReplayRun(Base):
+    """One replay: its window, its parameters and its summary, so a result
+    survives the shell it was printed in. Trade lists go to the lab's
+    output folder, not here."""
+
+    __tablename__ = "ct_replay_runs"
+    __table_args__ = (Index("ix_ct_replay_runs_created_at", "created_at"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    window_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    window_end: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    label: Mapped[str | None] = mapped_column(String(64))
+    #: The overrides applied on top of `config.py`; empty for a default run.
+    params: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    summary: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    trades: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class CtUniverseSnapshot(Base):
+    """A universe frozen at a past date, for out-of-sample replays: the
+    top-20 by market cap AS OF `as_of`, among coins with a Binance perp
+    today. `symbols` is a list of `{symbol, coingecko_id, ticker, name,
+    market_cap_usd, rank}`."""
+
+    __tablename__ = "ct_universe_snapshots"
+    __table_args__ = (UniqueConstraint("name", name="uq_ct_universe_snapshots_name"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    symbols: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )

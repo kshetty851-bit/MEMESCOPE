@@ -91,7 +91,8 @@ async def test_a_quiet_minute_sends_no_candle_request(lab_session) -> None:
     await service.tick(now=NOW + timedelta(minutes=1))
 
     assert len([c for c in source.calls if c[0] == "klines"]) == before
-    assert source.calls.count("markets") == 1  # the universe is a minute old, not a day
+    markets_calls = [c for c in source.calls if c[0] == "markets"]
+    assert len(markets_calls) == 1  # the universe is a minute old, not a day
     assert await count(lab_session, CtCandle) == 12
     assert await count(lab_session, CtRun) == 2
 
@@ -119,9 +120,9 @@ async def test_the_universe_is_re_ranked_once_a_day(lab_session) -> None:
     service = CryptoTrendService(lab_session, source)
     await service.tick(now=NOW)
     await service.tick(now=NOW + timedelta(hours=23, minutes=59))
-    assert source.calls.count("markets") == 1
+    assert len([c for c in source.calls if c[0] == "markets"]) == 1
     result = await service.tick(now=NOW + timedelta(hours=24))
-    assert source.calls.count("markets") == 2
+    assert len([c for c in source.calls if c[0] == "markets"]) == 2
     assert result["universe_refreshed"] is True
 
 
@@ -238,7 +239,7 @@ async def test_one_symbol_failing_costs_only_that_symbol(lab_session) -> None:
 
 
 async def test_the_rolling_window_keeps_the_newest(lab_session, monkeypatch) -> None:
-    monkeypatch.setattr(config, "CANDLE_WINDOW", 5)
+    monkeypatch.setattr(config, "CANDLE_WINDOW_1H", 5)
     service = CryptoTrendService(lab_session, FakeSource())
     candles = [Candle("BTCUSDT", "1h", from_ms(i * H), Decimal(1), Decimal(1), Decimal(1),
                       Decimal(i), Decimal(1), from_ms(i * H + H - 1)) for i in range(8)]
@@ -314,3 +315,17 @@ async def test_health_marks_a_symbol_the_poll_has_lost(lab_session, lab_enabled)
     health = await data_health(lab_session, now=NOW + timedelta(hours=3))
     assert health["candles"]["BTCUSDT"]["1h"]["stale"] is True
     assert health["candles"]["BTCUSDT"]["4h"]["stale"] is False
+
+
+async def test_the_window_is_per_timeframe(lab_session, monkeypatch) -> None:
+    monkeypatch.setattr(config, "CANDLE_WINDOW_1H", 5)
+    monkeypatch.setattr(config, "CANDLE_WINDOW_4H", 3)
+    service = CryptoTrendService(lab_session, FakeSource())
+    for tf, n in (("1h", 8), ("4h", 8)):
+        step = INTERVAL_MS[tf]
+        await service.upsert_candles([
+            Candle("BTCUSDT", tf, from_ms(i * step), Decimal(1), Decimal(1), Decimal(1),
+                   Decimal(i), Decimal(1), from_ms(i * step + step - 1)) for i in range(n)])
+    assert await service.prune_candles() == 3 + 5
+    assert await count(lab_session, CtCandle, timeframe="1h") == 5
+    assert await count(lab_session, CtCandle, timeframe="4h") == 3

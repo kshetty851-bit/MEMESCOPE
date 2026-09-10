@@ -12,10 +12,29 @@ import pathlib
 import subprocess
 import sys
 
+import pytest
+
 PACKAGE = pathlib.Path(__file__).resolve().parent.parent
 BACKEND = PACKAGE.parents[2]
 SOURCES = sorted(p for p in PACKAGE.rglob("*.py") if "tests" not in p.parts)
-MIGRATION = BACKEND / "alembic" / "versions" / "20260910_0057_crypto_trend_lab.py"
+#: Every migration this lab owns, the tables it creates, and the operations
+#: it is allowed: creating its own tables, or adding a column to one of them.
+MIGRATIONS = {
+    BACKEND / "alembic" / "versions" / "20260910_0057_crypto_trend_lab.py":
+        ["ct_candles", "ct_funding", "ct_runs", "ct_universe"],
+    BACKEND / "alembic" / "versions" / "20260910_0058_crypto_trend_engine.py":
+        ["ct_regime", "ct_trend_state"],
+    BACKEND / "alembic" / "versions" / "20260910_0059_crypto_trend_structure_veto.py":
+        [],
+    BACKEND / "alembic" / "versions" / "20260910_0060_crypto_trend_replay_runs.py":
+        ["ct_replay_runs"],
+    BACKEND / "alembic" / "versions" / "20260910_0061_crypto_trend_snapshots.py":
+        ["ct_universe_snapshots"],
+}
+#: The engine reads candles through `data.py` and computes. Nothing in it may
+#: know a network exists.
+ENGINE_MODULES = ("indicators.py", "trend.py", "regime.py", "engine.py",
+                  "strategy.py", "sim.py", "replay.py")
 
 FORBIDDEN_MODULES = (
     "app.paper", "app.paper_v2", "app.karthik", "app.karthik_ops",
@@ -56,23 +75,29 @@ def test_every_lab_table_carries_the_prefix_and_sits_on_the_platform_base() -> N
     declared = {m for m in vars(models).values()
                 if isinstance(m, type) and hasattr(m, "__tablename__")}
     assert {m.__tablename__ for m in declared} == {
-        "ct_universe", "ct_candles", "ct_funding", "ct_runs"}
+        "ct_universe", "ct_candles", "ct_funding", "ct_runs", "ct_trend_state", "ct_regime",
+        "ct_replay_runs", "ct_universe_snapshots"}
     assert all(m.metadata is PlatformBase.metadata for m in declared)
 
 
-def test_the_migration_is_purely_additive() -> None:
-    tree = ast.parse(MIGRATION.read_text())
+@pytest.mark.parametrize("migration", list(MIGRATIONS), ids=lambda p: p.stem[-20:])
+def test_the_migration_is_purely_additive(migration) -> None:
+    tree = ast.parse(migration.read_text())
     upgrade = next(n for n in tree.body
                    if isinstance(n, ast.FunctionDef) and n.name == "upgrade")
     ops = [n.func.attr for n in ast.walk(upgrade)
            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
            and isinstance(n.func.value, ast.Name) and n.func.value.id == "op"]
     assert ops, "expected the migration to do something"
-    assert set(ops) <= {"create_table", "create_index"}, ops
+    assert set(ops) <= {"create_table", "create_index", "add_column"}, ops
     targets = [n.args[0].value for n in ast.walk(upgrade)
                if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+               and n.func.attr in ("create_table", "add_column")]
+    assert all(t.startswith("ct_") for t in targets), targets
+    created = [n.args[0].value for n in ast.walk(upgrade)
+               if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
                and n.func.attr == "create_table"]
-    assert sorted(targets) == ["ct_candles", "ct_funding", "ct_runs", "ct_universe"]
+    assert sorted(created) == MIGRATIONS[migration]
 
 
 def test_the_migration_matches_the_models() -> None:
@@ -93,13 +118,19 @@ def test_the_migration_matches_the_models() -> None:
         def create_index(self, *a, **kw):
             pass
 
-    namespace: dict = {}
-    exec(compile(MIGRATION.read_text(), str(MIGRATION), "exec"), namespace)  # noqa: S102
-    namespace["op"] = Recorder()
-    namespace["upgrade"]()
+        def add_column(self, name, column, **kw):
+            created[name][column.name] = column.nullable
+
+    for migration in MIGRATIONS:
+        namespace: dict = {}
+        exec(compile(migration.read_text(), str(migration), "exec"), namespace)  # noqa: S102
+        namespace["op"] = Recorder()
+        namespace["upgrade"]()
     assert alembic_op  # imported only to prove the module is loadable here
 
-    for model in (models.CtUniverseMember, models.CtCandle, models.CtFunding, models.CtRun):
+    for model in (models.CtUniverseMember, models.CtCandle, models.CtFunding, models.CtRun,
+                  models.CtTrendState, models.CtRegime, models.CtReplayRun,
+                  models.CtUniverseSnapshot):
         expected = {c.name: c.nullable for c in model.__table__.columns}
         assert created[model.__tablename__] == expected, model.__tablename__
 
@@ -108,7 +139,49 @@ def test_the_api_is_read_only() -> None:
     from app.labs.crypto_trend.api import router
     methods = {m for route in router.routes for m in getattr(route, "methods", ())}
     assert methods <= {"GET", "HEAD", "OPTIONS"}, methods
-    assert [r.path for r in router.routes] == ["/labs/crypto-trend/health"]
+    assert [r.path for r in router.routes] == [
+        "/labs/crypto-trend/health", "/labs/crypto-trend/trend", "/labs/crypto-trend/regime"]
+
+
+def test_the_engine_never_learns_a_network_exists() -> None:
+    """Phases 2 and 3 are pure computation over `data.py`: no `sources`, no
+    httpx, no provider module, in any of their modules."""
+    for name in ENGINE_MODULES:
+        imported = imported_modules(ast.parse((PACKAGE / name).read_text()))
+        leaked = {m for m in imported
+                  if m.startswith(("httpx", "app.services", "app.labs.crypto_trend.sources",
+                                   "app.labs.crypto_trend.service"))}
+        assert not leaked, f"{name} imports {leaked}"
+
+
+def test_the_trend_task_exists_and_is_chained_not_scheduled() -> None:
+    """The engine runs after the data tick by being enqueued from it. It has
+    no beat entry of its own, so nothing outside this package changed."""
+    from app.labs.crypto_trend.scheduler import crypto_trend_trend_tick
+    from app.workers.celery_app import celery_app
+
+    celery_app.loader.import_default_modules()
+    assert crypto_trend_trend_tick.name in celery_app.tasks
+    assert not [k for k, e in celery_app.conf.beat_schedule.items()
+                if e["task"] == crypto_trend_trend_tick.name]
+
+
+async def test_the_trend_tick_is_inert_while_the_flag_is_off(monkeypatch) -> None:
+    from app.labs.crypto_trend import scheduler
+
+    monkeypatch.delenv("CRYPTO_TREND_LAB_ENABLED", raising=False)
+    assert await scheduler.trend_tick() == {"skipped": "crypto_trend_lab_disabled"}
+
+
+def test_nothing_is_enqueued_while_the_flag_is_off(monkeypatch) -> None:
+    from app.labs.crypto_trend import scheduler
+
+    def boom(*a, **k):
+        raise AssertionError("enqueued the trend task with the flag off")
+
+    monkeypatch.setattr(scheduler.crypto_trend_trend_tick, "delay", boom)
+    monkeypatch.delenv("CRYPTO_TREND_LAB_ENABLED", raising=False)
+    scheduler.enqueue_trend()
 
 
 def test_the_flag_defaults_off(monkeypatch) -> None:

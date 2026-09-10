@@ -1,0 +1,3 @@
+# Replay outputs are results, not source. Everything here stays local.
+*
+!.gitignore
