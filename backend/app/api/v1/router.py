@@ -26,6 +26,7 @@ from app.health import api as pipeline_health
 from app.hq_ops import api as hq_ops
 from app.karthik import api as karthik
 from app.karthik_ops import api as karthik_ops
+from app.labs.rafiq import api as rafiq_lab
 from app.paper import api as paper
 from app.compound import api as compound
 from app.depth import api as depth
@@ -121,3 +122,8 @@ api_router.include_router(hq_ops.router)
 # able to shadow the other on a route table. Read-only — there is no POST, PUT,
 # PATCH or DELETE on this router — and additive: no existing route changes.
 api_router.include_router(karthik_ops.router)
+# Rafiq Lab. A collaborator's five strategies on their own $1,000 books, over
+# their own `rafiq_lab_*` tables, behind their own `RAFIQ_LAB_ENABLED` flag.
+# Read-only and additive: no existing route changes shape, and with the flag
+# off every route here answers `running: false` rather than an empty book.
+api_router.include_router(rafiq_lab.router)
