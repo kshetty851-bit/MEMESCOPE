@@ -195,3 +195,32 @@ async def test_the_beat_task_is_inert_while_the_flag_is_off(monkeypatch) -> None
 
     monkeypatch.delenv("RAFIQ_LAB_ENABLED", raising=False)
     assert await tick() == {"skipped": "rafiq_lab_disabled"}
+
+
+def test_safety_mapping_covers_the_real_enum() -> None:
+    """The feed's safety mapping must use the platform's actual spellings.
+
+    This is the one place the lab hard-codes a string it does not own. It got
+    it wrong once — it looked for "PASSED" where MEMESCOPE emits "VERIFIED" —
+    and the failure was silent in the worst way: every verdict fell through to
+    UNKNOWN, which the consensus gate treats as absent, so Strategy E's
+    mandatory safety stream could never confirm and E entered nothing at all.
+    Nothing crashed and no test failed. Hence this one.
+    """
+    import re
+
+    from app.security.contract import SecurityStatus
+
+    source = (PACKAGE / FEED).read_text()
+    mapping = re.search(r'safety = \{(.*?)\}\.get', source, re.S)
+    assert mapping, "the safety mapping moved; update this test with it"
+    mapped = set(re.findall(r'"([A-Z_]+)"', mapping.group(1)))
+
+    members = {m.value for m in SecurityStatus}
+    # Every status the platform can emit is either mapped or is the one that
+    # deliberately falls through.
+    assert mapped <= members, f"maps statuses that do not exist: {mapped - members}"
+    assert SecurityStatus.VERIFIED.value in mapped, "the pass state must be mapped"
+    assert SecurityStatus.FAILED.value in mapped, "the fail state must be mapped"
+    assert members - mapped == {SecurityStatus.UNKNOWN.value}, (
+        "only UNKNOWN may fall through to the default")

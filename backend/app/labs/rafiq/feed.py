@@ -182,10 +182,17 @@ class RafiqFeed:
             .limit(1)
         )).first()
         if row is not None:
-            # An unrecognised status is UNKNOWN, which this lab treats as
-            # absent — never as a pass.
+            # `VERIFIED` is MEMESCOPE's pass state, and its own contract is
+            # explicit that it "means every applicable check was actually
+            # performed and passed — it is never reachable by silence". An
+            # earlier version of this mapping looked for "PASSED", which the
+            # platform never emits, so every verdict fell through to UNKNOWN
+            # and Strategy E's mandatory safety stream could never confirm.
+            # `test_safety_mapping_covers_the_real_enum` now pins these
+            # spellings to the platform's enum, so a rename breaks a test
+            # instead of silently switching E off.
             safety = {
-                "PASSED": SafetyVerdict.PASSED, "FAILED": SafetyVerdict.FAILED,
+                "VERIFIED": SafetyVerdict.PASSED, "FAILED": SafetyVerdict.FAILED,
             }.get(str(row.overall_status), SafetyVerdict.UNKNOWN)
             safety_at = row.evaluated_at
 
