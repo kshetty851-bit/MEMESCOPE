@@ -22,9 +22,11 @@ from sqlalchemy import select
 
 from app.api.deps import DbSession
 from app.hq_ops import invariants as invariant_guard
+from app.hq_ops import desk as desk_log
 from app.hq_ops.probe import snapshot
 from app.hq_ops.remediation import REMEDIATIONS, autonomy_enabled
 from app.hq_ops.schemas import (
+    DeskDossier,
     HqOperations,
     Incident,
     IncidentAction,
@@ -205,3 +207,23 @@ async def operations_state(session: DbSession) -> HqOperations:
         autonomy_enabled=autonomy_enabled(),
         invariants=invariant_guard.capture(),
     )
+
+
+@router.get(
+    "/desk/{employee}",
+    response_model=DeskDossier,
+    summary="What one desk did over the last 24 hours",
+)
+async def desk_dossier(employee: str, session: DbSession) -> DeskDossier:
+    """A day of one character's work, from that character's own log.
+
+    Its own route rather than a field on `/hq` for two reasons. It is read on
+    demand — nobody needs fourteen dossiers to draw the room — and the window is
+    a day, where `/hq`'s activity trail is the last fifty rows across every
+    agent. Karthik alone logged 566 actions in a day, so the aggregate on the
+    main surface is a tail, not a history.
+
+    Read-only, like everything else on this router: it selects over rows other
+    subsystems write and adds no schema of its own.
+    """
+    return DeskDossier(**desk_log.as_dict(await desk_log.build(session, employee)))

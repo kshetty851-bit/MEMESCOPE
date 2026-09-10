@@ -5,6 +5,8 @@ import { useEffect, useState } from "react";
 
 import { Character, RigDefs } from "@/components/hq/character-rig";
 import { HqStage } from "@/components/hq/hq-stage";
+import { ROOM } from "@/lib/hq/camera";
+import { EMPLOYEE_BY_ID, type EmployeeId } from "@/lib/hq/employees";
 import { useAmbient } from "@/components/hq/use-ambient";
 import { useDayPhase, useHqMotion } from "@/components/hq/use-hq-env";
 import { IdeasPanel } from "@/components/hq/ideas-panel";
@@ -90,12 +92,21 @@ function PoseGrid() {
 }
 
 function Room() {
+  // `?desk=byte` frames one character. Dev-only, and the same code path the
+  // product uses on a click — a framing that looks wrong here looks wrong
+  // in the office.
+  const [desk, setDesk] = useState<EmployeeId | null>(null);
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search).get("desk");
+    setDesk(q && EMPLOYEE_BY_ID.has(q as EmployeeId) ? (q as EmployeeId) : null);
+  }, []);
   const motion = useHqMotion();
   const phase = useDayPhase();
   const ambient = useAmbient(motion, UNKNOWN_HQ_STATE.operational, UNKNOWN_HQ_STATE.activity, phase);
   return (
     <main style={{ padding: "1rem", background: "var(--color-bg)" }}>
       <HqStage
+        camera={desk ? { kind: "desk", employee: desk } : ROOM}
         focusedZone={null}
         onFocusZone={() => {}}
         onSelectEmployee={() => {}}

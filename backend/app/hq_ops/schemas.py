@@ -288,3 +288,40 @@ class HqOperations(BaseSchema):
     autonomy_enabled: bool
     #: The protected trading rules, as currently read.
     invariants: dict[str, object]
+
+
+class DeskCount(BaseSchema):
+    """One figure in a desk's day, with the field it came from."""
+
+    label: str
+    value: int
+    source: str
+
+
+class DeskEvent(BaseSchema):
+    at: datetime
+    label: str
+    detail: str
+    #: `action` | `incident` | `trade` | `admission`. Styles the row, never a verdict.
+    kind: str
+
+
+class DeskDossier(BaseSchema):
+    """What one desk did over the last 24 hours.
+
+    `measured` is the field that keeps this honest, and it is false more often
+    than true: most desks report a sampled gauge rather than an event stream,
+    and there is no history to replay. When it is false, `detail` says what
+    would have to exist for that desk to have a log — which distinguishes "this
+    desk was quiet" from "nobody was writing anything down".
+    """
+
+    employee: str
+    since: datetime
+    until: datetime
+    measured: bool
+    detail: str
+    headline: str = ""
+    sources: list[str] = Field(default_factory=list)
+    counts: list[DeskCount] = Field(default_factory=list)
+    timeline: list[DeskEvent] = Field(default_factory=list)

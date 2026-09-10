@@ -36,7 +36,9 @@ import { CHARACTERS } from "@/lib/hq/characters";
 import { ZONE_BY_ID } from "@/lib/hq/zones";
 import { EMPLOYEE_BY_ID, type EmployeeId } from "@/lib/hq/employees";
 import type { ZoneId } from "@/lib/hq/zones";
+import { DeskPanel } from "@/components/hq/desk-panel";
 import { IdeasPanel } from "@/components/hq/ideas-panel";
+import { useCamera } from "@/components/hq/use-camera";
 import { Panel } from "@/components/ui/panel";
 
 /**
@@ -110,6 +112,10 @@ export default function HqPage() {
   const [selected, setSelected] = useState<ActorId | null>(null);
   const [selectedMint, setSelectedMint] = useState<string | null>(null);
   const { packets, overflow } = useVisiblePackets();
+  // The camera follows real reactions and obeys a click. `follow` is off
+  // under reduced motion: an unrequested camera move is exactly the motion
+  // that setting exists to suppress.
+  const camera = useCamera(state, motion && viewport !== "mobile");
 
   // Exactly as many case-file fetches as §29 allows: one per visible packet
   // slot (a fixed count, so these stay legal hook calls regardless of how
@@ -133,11 +139,16 @@ export default function HqPage() {
 
   function openCase(mint: string) {
     setSelected(null);
+    camera.select(null);
     setSelectedMint(mint);
   }
   function openActor(id: ActorId) {
     setSelectedMint(null);
     setSelected(id);
+    // Only employees have a desk to frame — the cats and the support staff
+    // are people the adapter has never heard of, and `useCamera` types the
+    // target as an EmployeeId for exactly that reason.
+    camera.select(EMPLOYEE_BY_ID.has(id as EmployeeId) ? (id as EmployeeId) : null);
   }
 
   // The office's staged life. The page owns it so the panels can say what a
@@ -197,6 +208,7 @@ export default function HqPage() {
       ) : (
         <>
           <HqStage
+            camera={camera.target}
             focusedZone={focusedZone}
             onFocusZone={setFocusedZone}
             onSelectEmployee={openActor}
@@ -321,6 +333,14 @@ export default function HqPage() {
           sentence about what the drawing is doing. The one structural rule is
           that "Currently:" reads from the same ambient frames the room draws,
           so the panel can never claim an activity the reader cannot see. */}
+      {/* What this desk actually did today, from that desk's own log.
+          Under the standard panel rather than instead of it: the panel
+          above is the latest reading, and this is the history that reading
+          has no room for. */}
+      {employee ? (
+        <DeskPanel employee={employee.id} onClose={() => { setSelected(null); camera.select(null); }} />
+      ) : null}
+
       {/* §14. Karthik's own surface, below the standard employee panel rather
           than instead of it: the panel above is the room's convention — a
           portrait, a status sentence and a sourced metrics table — and this is

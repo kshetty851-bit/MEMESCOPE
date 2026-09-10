@@ -26,6 +26,7 @@ import { SUPPORT_STAFF } from "@/lib/hq/support";
 import { DOOR, VISITORS } from "@/lib/hq/visitors";
 import { PacketOverflowBadge, TokenPacket, packetDockTile } from "@/components/hq/token-packet";
 import type { TokenCaseFile } from "@/lib/hq/case-file";
+import { ROOM, frame, type CameraTarget } from "@/lib/hq/camera";
 import { ZONES, ZONE_BY_ID, type ZoneId } from "@/lib/hq/zones";
 import type { ActorId } from "@/lib/hq/ambient-scheduler";
 import type { ActorFrame } from "@/lib/hq/ambient";
@@ -89,6 +90,12 @@ const HEADROOM = 130;
 interface HqStageProps {
   /** Which department is focused, or null for the overview. */
   focusedZone: ZoneId | null;
+  /**
+   * Where the camera is pointed. Owned by the page, because the same
+   * selection drives the dossier panel below the room — one piece of state
+   * for "who are we looking at" rather than two that can disagree.
+   */
+  camera?: CameraTarget;
   onFocusZone: (zone: ZoneId | null) => void;
   /**
    * Any resident of the office: an employee, Maya, Sam, or a cat. The page
@@ -116,6 +123,7 @@ interface HqStageProps {
 
 export function HqStage({
   focusedZone,
+  camera = ROOM,
   onFocusZone,
   onSelectEmployee,
   density,
@@ -125,6 +133,7 @@ export function HqStage({
   caseOverflow = null,
   onSelectCase = () => {},
 }: HqStageProps) {
+  const framing = frame(camera);
   const motion = useHqMotion();
   const paused = useHqPaused();
   const phase = useDayPhase();
@@ -170,6 +179,21 @@ export function HqStage({
               `aria-label` above, which is both richer and silent. */}
           <RigDefs />
           {density === "full" ? <SkyDefs /> : null}
+
+          {/* THE CAMERA.
+
+              Everything the reader looks at lives inside this one group, so
+              the framing is a single transform rather than a property of each
+              node. Outside it sit only the defs, which do not render.
+
+              `will-change: transform` is deliberate and narrow: this group is
+              the one thing in the scene that moves as a whole, and promoting
+              it keeps a zoom from relaying out four hundred polygons. */}
+          <g
+            className="hq-camera"
+            transform={framing.transform}
+            data-camera={camera.kind}
+          >
 
           {/* The planet in the void beyond the deck. Behind everything,
               including the floor: it is scenery outside the hull. */}
@@ -342,6 +366,7 @@ export function HqStage({
               }}
             />
           ))}
+          </g>
         </svg>
       </div>
     </div>
