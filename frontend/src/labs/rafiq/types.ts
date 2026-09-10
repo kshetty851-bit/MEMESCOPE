@@ -21,6 +21,7 @@ export interface RafiqStrategy {
   daily_breaker: boolean;
   consensus_gate: boolean;
   starting_equity: string;
+  execution_cost_usd: string;
   cash: string;
   equity: string;
   realised_pnl: string;
@@ -76,6 +77,8 @@ export interface RafiqTrade {
   return_pct: string;
   exit_reason: string;
   exit_evidence: string | null;
+  if_held_value: string | null;
+  if_held_pct: string | null;
 }
 
 export interface RafiqBreaker {

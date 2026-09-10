@@ -25,6 +25,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.labs.rafiq import config, registry
+from app.labs.rafiq.adapters import costs
+from app.labs.rafiq.feed import RafiqFeed
 from app.labs.rafiq.models import (
     RafiqLabDailyState,
     RafiqLabPosition,
@@ -50,6 +52,12 @@ class StrategyOut(BaseModel):
     consensus_gate: bool
 
     starting_equity: str
+    #: What execution has cost this book so far: the gap between what its
+    #: trades would have been worth filled at the observed mid price, and what
+    #: they actually returned after fee and price impact. Published because
+    #: "would a real wallet see this number?" is the first question anyone
+    #: asks of a paper book, and the honest answer is "yes, minus this".
+    execution_cost_usd: str
     cash: str
     #: Cash plus the CURRENT mark of every open position. Never a cost basis.
     equity: str
@@ -104,6 +112,12 @@ class TradeOut(BaseModel):
     return_pct: str
     exit_reason: str
     exit_evidence: str | None
+    #: What the position would fetch now had it never been closed — sold
+    #: through the same fee-and-impact model as the exit above, so the two are
+    #: comparable. Null when nothing prices the mint any more, which is not
+    #: the same claim as zero.
+    if_held_value: str | None
+    if_held_pct: str | None
 
 
 class BreakerOut(BaseModel):
@@ -127,6 +141,24 @@ class StatusOut(BaseModel):
 
 def _q(v: Decimal | None) -> str | None:
     return None if v is None else str(v)
+
+
+def _execution_cost(positions) -> Decimal:
+    """Fee and price impact already deducted from this book.
+
+    Entry drag is what the fill cost above the observed price; exit drag is
+    what the sale returned below it. Both are computed from columns written at
+    the time, so this is a measurement rather than an assumed slippage figure.
+    """
+    total = Decimal(0)
+    for p in positions:
+        if p.entry_observed_price and p.entry_observed_price > 0:
+            ideal = p.cost_basis / p.entry_observed_price
+            total += (ideal - p.quantity) * p.entry_observed_price
+        if p.status == "closed" and p.exit_observed_price is not None:
+            gross = p.quantity * p.exit_observed_price
+            total += gross - (p.exit_proceeds_usd or Decimal(0))
+    return total
 
 
 async def _rows(session: AsyncSession):
@@ -168,7 +200,8 @@ async def status(session: AsyncSession = Depends(get_db)) -> StatusOut:
             entry_threshold=str(spec.profile.entry_threshold),
             liquidity_derived_risk=spec.liquidity_derived_risk,
             daily_breaker=spec.daily_breaker, consensus_gate=spec.consensus_gate,
-            starting_equity=str(row.starting_equity), cash=str(cash),
+            starting_equity=str(row.starting_equity),
+            execution_cost_usd=str(_execution_cost(mine)), cash=str(cash),
             equity=str(cash + marked), realised_pnl=str(sum(pnl, Decimal(0))),
             unrealised_pnl=str(marked - sum((p.cost_basis for p in openp), Decimal(0))),
             open_positions=len(openp), closed_trades=len(closed),
@@ -213,8 +246,20 @@ async def trades(session: AsyncSession = Depends(get_db)) -> list[TradeOut]:
     codes = {r.id: r.code for r in rows}
     closed = sorted([p for p in all_positions if p.status == "closed"],
                     key=lambda p: p.closed_at, reverse=True)
+    # One query for every mint, not one per trade: the freshest price each
+    # still has. A mint nothing has priced recently is simply absent, and the
+    # rows built from it report null rather than zero.
+    marks = await RafiqFeed(session).latest_marks({p.mint_address for p in closed})
     out = []
     for p in closed:
+        mark = marks.get(p.mint_address)
+        # Priced through the SAME execution model as the exit it sits beside:
+        # fee and price impact against the pool as it stands now. A naive
+        # `quantity x price` here would flatter every row, and worst exactly
+        # where it misleads most — a pool whose liquidity has collapsed shows a
+        # handsome paper mark and cannot absorb a sale at all.
+        held_value = (None if mark is None
+                      else costs.sell_proceeds(p.quantity, mark[0], mark[1]))
         proceeds = p.exit_proceeds_usd or Decimal(0)
         out.append(TradeOut(
             strategy_code=codes[p.strategy_id], mint_address=p.mint_address,
@@ -225,7 +270,10 @@ async def trades(session: AsyncSession = Depends(get_db)) -> list[TradeOut]:
             cost_basis=str(p.cost_basis), proceeds_usd=str(proceeds),
             realised_pnl=str(proceeds - p.cost_basis),
             return_pct=str((proceeds / p.cost_basis - 1) * 100),
-            exit_reason=p.exit_reason or "", exit_evidence=p.exit_evidence))
+            exit_reason=p.exit_reason or "", exit_evidence=p.exit_evidence,
+            if_held_value=_q(held_value),
+            if_held_pct=(None if held_value is None
+                         else str((held_value / p.cost_basis - 1) * 100))))
     return out
 
 

@@ -1,16 +1,17 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { Label, Panel, PanelHeader, PanelTitle } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/states";
-import { shortenAddress } from "@/lib/format";
 
 import { EXIT_LABELS } from "./api";
 import { EquityCurve } from "./equity-curve";
 import {
+  dexscreener,
   duration,
+  elapsed,
   pct,
   plainPct,
   price,
@@ -54,6 +55,43 @@ const RULE_ROWS: { key: keyof RafiqStrategy; label: string }[] = [
   { key: "entry_threshold", label: "Entry score" },
 ];
 
+/**
+ * The mint, in full, linked to its pool.
+ *
+ * Full and not truncated: the point of putting it on the row is that a reader
+ * can check the trade against the market, and a shortened address cannot be
+ * copied into anything. It wraps rather than clipping, and the symbol sits
+ * above it because that is what a reader scans by.
+ */
+function Mint({ mint, symbol }: { mint: string; symbol: string | null }) {
+  return (
+    <div className="flex min-w-0 flex-col gap-0.5">
+      <span className="text-ink">{symbol ?? "—"}</span>
+      <a
+        href={dexscreener(mint)}
+        target="_blank"
+        rel="noopener noreferrer"
+        title="Open this pool on DexScreener"
+        className="break-all font-mono text-[0.6875rem] leading-tight text-ink-3 underline decoration-line underline-offset-2 transition-colors hover:text-accent focus-visible:text-accent"
+      >
+        {mint}
+      </a>
+    </div>
+  );
+}
+
+/** Elapsed time since the books opened, ticking once a second. */
+function RunningFor({ since }: { since: string }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+  return (
+    <span className="font-mono tabular-nums text-ink-2">{elapsed(since, now)}</span>
+  );
+}
+
 function Stat({
   label,
   value,
@@ -83,12 +121,14 @@ function StrategyCard({
   onSelect,
   halted,
   haltReason,
+  leading,
 }: {
   strategy: RafiqStrategy;
   selected: boolean;
   onSelect: () => void;
   halted: boolean;
   haltReason: string | null;
+  leading: boolean;
 }) {
   const returnPct =
     (Number(strategy.equity) / Number(strategy.starting_equity) - 1) * 100;
@@ -110,11 +150,21 @@ function StrategyCard({
             <span className="font-mono text-sm text-accent">{strategy.code}</span>
             <span className="truncate text-sm text-ink">{strategy.name}</span>
           </div>
-          {halted ? (
-            <span className="shrink-0 rounded bg-raised px-1.5 py-0.5 text-label uppercase text-warn">
-              Halted
-            </span>
-          ) : null}
+          <span className="flex shrink-0 items-center gap-1.5">
+            {leading ? (
+              <span
+                title="Highest equity right now — not a verdict, the sample is tiny"
+                className="rounded border border-up px-1.5 py-0.5 text-label uppercase text-up"
+              >
+                Leading
+              </span>
+            ) : null}
+            {halted ? (
+              <span className="rounded bg-raised px-1.5 py-0.5 text-label uppercase text-warn">
+                Halted
+              </span>
+            ) : null}
+          </span>
         </div>
 
         <div className="mt-2 flex items-end justify-between gap-3">
@@ -145,6 +195,14 @@ function StrategyCard({
             className="h-8 w-28"
           />
         </div>
+
+        <p className="mt-2 text-xs text-ink-3">
+          Already net of{" "}
+          <span className="font-mono tabular-nums text-ink-2">
+            {usd(strategy.execution_cost_usd)}
+          </span>{" "}
+          in fees and price impact — this is what a real wallet would hold.
+        </p>
 
         <div className="mt-3 grid grid-cols-3 gap-2 border-t border-line pt-2">
           <Stat label="Open" value={String(strategy.open_positions)} />
@@ -184,6 +242,23 @@ export function RafiqLabPage() {
     }
     return map;
   }, [breaker.data]);
+
+  // The leader is whoever holds the most equity **among books that have
+  // actually traded**. A strategy sitting untouched at its starting $1,000
+  // outranks every book that has taken a loss, and badging that as leading
+  // would reward not playing.
+  //
+  // Deliberately "leading" and not "winner": a few dozen closed trades is not
+  // a result, and the word winner invites a reader to treat it as one.
+  const leader = useMemo(() => {
+    const traded = (status.data?.strategies ?? []).filter(
+      (s) => s.closed_trades > 0,
+    );
+    if (traded.length === 0) return null;
+    return traded.reduce((best, s) =>
+      Number(s.equity) > Number(best.equity) ? s : best,
+    ).code;
+  }, [status.data]);
 
   const visiblePositions = useMemo(
     () =>
@@ -240,6 +315,15 @@ export function RafiqLabPage() {
           <PanelTitle>Rafiq Lab</PanelTitle>
           <Label>Research simulation — not the Paper Wallet, not real money</Label>
         </PanelHeader>
+        <p className="mt-2 text-sm text-ink-3">
+          Running for{" "}
+          {status.data.strategies[0] ? (
+            <RunningFor since={status.data.strategies[0].activated_at} />
+          ) : (
+            "—"
+          )}{" "}
+          · every book opened together, so the clock is the same for all five.
+        </p>
         <p className="mt-2 max-w-3xl text-sm text-ink-2">
           Five strategies supplied by a collaborator, each on its own{" "}
           {usd(status.data.starting_equity)} book, fed by the same token stream
@@ -249,6 +333,42 @@ export function RafiqLabPage() {
           nothing bounds the other direction.
         </p>
       </Panel>
+
+      <div
+        role="group"
+        aria-label="Filter by strategy"
+        className="flex flex-wrap items-center gap-1.5"
+      >
+        <span className="mr-1 text-label uppercase text-ink-4">Show</span>
+        <button
+          type="button"
+          onClick={() => setSelected(null)}
+          aria-pressed={selected === null}
+          className={`rounded border px-2.5 py-1 font-mono text-xs transition-colors ${
+            selected === null
+              ? "border-accent bg-accent-deep/20 text-accent"
+              : "border-line text-ink-3 hover:border-line-strong hover:text-ink-2"
+          }`}
+        >
+          All
+        </button>
+        {status.data.strategies.map((s) => (
+          <button
+            key={s.code}
+            type="button"
+            onClick={() => setSelected(selected === s.code ? null : s.code)}
+            aria-pressed={selected === s.code}
+            title={s.name}
+            className={`rounded border px-2.5 py-1 font-mono text-xs transition-colors ${
+              selected === s.code
+                ? "border-accent bg-accent-deep/20 text-accent"
+                : "border-line text-ink-3 hover:border-line-strong hover:text-ink-2"
+            }`}
+          >
+            {s.code}
+          </button>
+        ))}
+      </div>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {status.data.strategies.map((s) => {
@@ -261,6 +381,7 @@ export function RafiqLabPage() {
               onSelect={() => setSelected(selected === s.code ? null : s.code)}
               halted={Boolean(halt?.halted)}
               haltReason={halt?.reason ?? null}
+              leading={leader === s.code}
             />
           );
         })}
@@ -377,11 +498,13 @@ export function RafiqLabPage() {
               <tbody>
                 {visiblePositions.map((p) => (
                   <tr key={`${p.strategy_code}-${p.mint_address}`} className="border-b border-line">
-                    <td className="p-2 font-mono text-accent">{p.strategy_code}</td>
-                    <td className="p-2 text-ink">
-                      {p.symbol ?? shortenAddress(p.mint_address)}
+                    <td className="p-2 align-top font-mono text-accent">
+                      {p.strategy_code}
                     </td>
-                    <td className="p-2 text-right font-mono tabular-nums text-ink-2">
+                    <td className="max-w-[18rem] p-2">
+                      <Mint mint={p.mint_address} symbol={p.symbol} />
+                    </td>
+                    <td className="p-2 text-right align-top font-mono tabular-nums text-ink-2">
                       {duration(p.age_seconds)}
                     </td>
                     <td className="p-2 text-right font-mono tabular-nums text-ink-2">
@@ -429,6 +552,12 @@ export function RafiqLabPage() {
                   <th className="p-2 text-right font-medium">Proceeds</th>
                   <th className="p-2 text-right font-medium">P&amp;L</th>
                   <th className="p-2 text-right font-medium">Return</th>
+                  <th
+                    className="p-2 text-right font-medium"
+                    title="What the position would be worth now had it never been closed"
+                  >
+                    If held
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -437,9 +566,11 @@ export function RafiqLabPage() {
                     key={`${t.strategy_code}-${t.mint_address}-${t.closed_at}`}
                     className="border-b border-line"
                   >
-                    <td className="p-2 font-mono text-accent">{t.strategy_code}</td>
-                    <td className="p-2 text-ink">
-                      {t.symbol ?? shortenAddress(t.mint_address)}
+                    <td className="p-2 align-top font-mono text-accent">
+                      {t.strategy_code}
+                    </td>
+                    <td className="max-w-[18rem] p-2">
+                      <Mint mint={t.mint_address} symbol={t.symbol} />
                     </td>
                     <td className="p-2 text-ink-2" title={t.exit_evidence ?? undefined}>
                       {EXIT_LABELS[t.exit_reason] ?? t.exit_reason}
@@ -459,9 +590,23 @@ export function RafiqLabPage() {
                       {signedUsd(t.realised_pnl)}
                     </td>
                     <td
-                      className={`p-2 text-right font-mono tabular-nums ${TONE_CLASS[tone(t.return_pct)]}`}
+                      className={`p-2 text-right align-top font-mono tabular-nums ${TONE_CLASS[tone(t.return_pct)]}`}
                     >
                       {pct(t.return_pct)}
+                    </td>
+                    <td className="p-2 text-right align-top font-mono tabular-nums">
+                      {t.if_held_value === null ? (
+                        <span className="text-ink-4" title="Nothing prices this mint any more — not the same as zero">
+                          —
+                        </span>
+                      ) : (
+                        <>
+                          <span className="text-ink-2">{usd(t.if_held_value)}</span>{" "}
+                          <span className={TONE_CLASS[tone(t.if_held_pct)]}>
+                            {pct(t.if_held_pct)}
+                          </span>
+                        </>
+                      )}
                     </td>
                   </tr>
                 ))}

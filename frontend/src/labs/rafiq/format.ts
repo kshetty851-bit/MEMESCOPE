@@ -65,3 +65,25 @@ export const TONE_CLASS: Record<"up" | "down" | "flat", string> = {
   down: "text-down",
   flat: "text-ink-3",
 };
+
+/** `1725900000` → `2d 14h 03m`, ticking. For elapsed time, not durations. */
+export function elapsed(fromIso: string, now: number): string {
+  const start = Date.parse(fromIso);
+  if (!Number.isFinite(start)) return "—";
+  const secs = Math.max(0, Math.floor((now - start) / 1000));
+  const d = Math.floor(secs / 86400);
+  const h = Math.floor((secs % 86400) / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = secs % 60;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return d > 0 ? `${d}d ${pad(h)}h ${pad(m)}m` : `${pad(h)}h ${pad(m)}m ${pad(s)}s`;
+}
+
+/**
+ * Where to go to check a mint against the market.
+ *
+ * DexScreener rather than an explorer: the question a reader has about one of
+ * these rows is "did that price really happen", and DexScreener answers it
+ * with the pool's own chart. An explorer answers a different question.
+ */
+export const dexscreener = (mint: string) => `https://dexscreener.com/solana/${mint}`;
