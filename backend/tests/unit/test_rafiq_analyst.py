@@ -237,7 +237,33 @@ class TestCrossArm:
         finding = next(f for f in result.findings if f.key == "indistinguishable_from_c")
         assert "should do" in finding.evidence
         assert "sampling" not in finding.lever
-        assert "description of the setup" in finding.lever
+        assert "arithmetic rather than a result" in finding.lever
+
+    @pytest.mark.asyncio
+    async def test_does_not_blame_the_price_record_for_a_shared_configuration(self):
+        """The live A-vs-D case, which the first version of this check got wrong.
+
+        A and D both run a flat 12% stop. They agreed on 46 of 47 trades and
+        differed in stop level on exactly ONE. The check said "despite entering
+        1 of those under a different stop level" and pointed the lever at the
+        price sampling — an overclaim about a pair whose geometry is identical.
+        """
+        mine = self._book(30)
+        peers = [
+            # One trade in thirty entered differently. Everything else alike.
+            _peer("C", p, stop=Decimal("0.91") if i == 0 else None)
+            for i, p in enumerate(mine)
+        ]
+        finding = next(
+            f
+            for f in (await _run(mine, peers=peers)).findings
+            if f.key == "indistinguishable_from_c"
+        )
+        assert "despite" not in finding.evidence
+        assert "should do" in finding.evidence
+        # And crucially: it must not accuse the price record.
+        assert "sampling" not in finding.lever
+        assert "arithmetic rather than a result" in finding.lever
 
     @pytest.mark.asyncio
     async def test_stays_quiet_when_the_arms_genuinely_diverge(self):

@@ -62,6 +62,18 @@ MIN_CONCLUSIVE_N = 30
 #: it needs far fewer observations than an unpaired win rate does.
 MIN_SHARED_TRADES = 20
 
+#: How much of the shared book must have been entered under a DIFFERENT rule
+#: parameter before "they agree anyway" is a finding about the price record
+#: rather than about the configuration.
+#:
+#: Learned from the live lab the hour this shipped. A and D agree on 46 of 47
+#: trades and differ in stop level on exactly ONE of them — they both run a
+#: flat 12% stop, so agreeing is arithmetic. Without this threshold the check
+#: said "despite entering 1 of those under a different stop level" and blamed
+#: the price sampling, which was an overclaim on a pair whose stops are the
+#: same. A and C, by contrast, differ on all 55.
+RULE_DIVERGENCE = Decimal("0.5")
+
 #: At or above this fraction of identical outcomes, the two arms are reported
 #: as indistinguishable. Not 1.0: one differing trade in fifty is noise, and a
 #: check that only fired on perfect equality would miss the case this exists
@@ -483,6 +495,9 @@ async def analyse(session: AsyncSession, code: str, *, now: datetime | None = No
         if agreement < INDISTINGUISHABLE:
             continue
         differed = overlap.different_rule
+        # Does the pair actually differ in the geometry, or are they configured
+        # alike? Only the first case says anything about the price record.
+        rules_differ = Decimal(differed) / Decimal(overlap.shared) >= RULE_DIVERGENCE
         findings.append(
             Finding(
                 key=f"indistinguishable_from_{overlap.peer.lower()}",
@@ -496,9 +511,11 @@ async def analyse(session: AsyncSession, code: str, *, now: datetime | None = No
                     + (
                         f", despite entering {differed} of those under a different "
                         "stop level."
-                        if differed
-                        else " — and they were entered under the same stop level, so "
-                        "agreeing is what they should do."
+                        if rules_differ
+                        else (
+                            f" — and only {differed} of those were entered under a "
+                            "different stop level, so agreeing is what they should do."
+                        )
                     )
                 ),
                 lever=(
@@ -510,11 +527,13 @@ async def analyse(session: AsyncSession, code: str, *, now: datetime | None = No
                         "and the next. Until that gap narrows, running both arms "
                         "measures one rule twice."
                     )
-                    if differed
+                    if rules_differ
                     else (
-                        "Nothing to separate here — the arms were configured alike on "
-                        "these trades, so this is a description of the setup rather "
-                        "than a result."
+                        "Nothing to separate here: the two arms entered these trades "
+                        "under the same geometry, so an identical outcome is "
+                        "arithmetic rather than a result. Whatever distinguishes them "
+                        "is not visible in the entry conditions, and this comparison "
+                        "cannot speak to it."
                     )
                 ),
                 source="paired on mint_address: exit_proceeds_usd − cost_basis, stop_price",
