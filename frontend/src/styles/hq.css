@@ -23,8 +23,8 @@
      ===================================================================== */
 
   /* ---- architecture --------------------------------------------------- */
-  --hq-wall: oklch(0.80 0.030 88);
-  --hq-wall-side: oklch(0.72 0.032 86);
+  --hq-wall: oklch(0.87 0.042 84);
+  --hq-wall-side: oklch(0.79 0.046 82);
   --hq-baseboard: oklch(0.94 0.008 90);
   --hq-edge: oklch(0.58 0.020 85 / 0.55);
   --hq-edge-strong: oklch(0.48 0.024 82 / 0.7);
@@ -33,10 +33,10 @@
      Four surfaces, and they are genuinely different materials rather than one
      grey at four opacities. A department you can identify by its floor is a
      department that survives its label being hidden. */
-  --hq-carpet: oklch(0.70 0.010 250);
-  --hq-carpet-warm: oklch(0.73 0.014 90);
-  --hq-walkway: oklch(0.64 0.008 250);
-  --hq-wood-floor: oklch(0.68 0.060 66);
+  --hq-carpet: oklch(0.74 0.024 80);
+  --hq-carpet-warm: oklch(0.77 0.034 82);
+  --hq-walkway: oklch(0.68 0.020 80);
+  --hq-wood-floor: oklch(0.70 0.078 62);
   --hq-rug: oklch(0.58 0.075 238);
   --hq-rug-pale: oklch(0.80 0.045 232);
 
@@ -52,8 +52,8 @@
   --hq-bin: oklch(0.58 0.010 250);
 
   /* ---- plants. The only green in the room that is not a status. -------- */
-  --hq-leaf: oklch(0.55 0.115 145);
-  --hq-leaf-dark: oklch(0.44 0.105 148);
+  --hq-leaf: oklch(0.58 0.125 140);
+  --hq-leaf-dark: oklch(0.46 0.115 143);
   --hq-pot: oklch(0.58 0.105 45);
 
   /* ---- technology ----------------------------------------------------- */
@@ -85,6 +85,20 @@
   --hq-sofa-dark: oklch(0.47 0.090 40);
   --hq-sofa-light: oklch(0.66 0.085 45);
 
+  /* The games corner. The felt is the only saturated green in the room, and
+     it is its own token rather than a status hue on purpose — a test forbids
+     the props block from touching --color-up/warn/down, because green means
+     something in this product and a pool table must not borrow it. */
+  --hq-felt: oklch(0.46 0.095 155);
+  --hq-felt-rail: oklch(0.38 0.085 155);
+  --hq-ball-solid: oklch(0.62 0.170 35);
+  --hq-ball-stripe: oklch(0.72 0.140 85);
+  --hq-ball-cue: oklch(0.94 0.010 90);
+  --hq-cue-wood: oklch(0.68 0.070 70);
+  --hq-rod: oklch(0.72 0.010 250);
+  --hq-foos-red: oklch(0.58 0.160 25);
+  --hq-foos-blue: oklch(0.58 0.130 250);
+
   /* The deck: exterior plating and hull. */
   --hq-deck: oklch(0.48 0.018 255);
   --hq-deck-dark: oklch(0.40 0.018 255);
@@ -104,6 +118,21 @@
   --hq-star-alpha: 0.55;
   --hq-sky: oklch(0.55 0.070 250 / 0.10);
   --hq-glass-glow: 1.5px;
+  /* ---- the world outside the hull ------------------------------------
+     The station is in orbit and, since this pass, the room says so: the void
+     beyond the floor is sky and the limb of a planet, the window frames the
+     same view, and daylight from it lies across the floor. All gradients —
+     the universe's performance contract forbids blur filters, and a soft
+     radial reads the same at zero cost. Nothing here is a status hue. */
+  --hq-void: oklch(0.34 0.045 255);
+  --hq-sky-top: oklch(0.72 0.090 235);
+  --hq-sky-horizon: oklch(0.90 0.055 80);
+  --hq-earth: oklch(0.50 0.105 232);
+  --hq-earth-land: oklch(0.58 0.090 130);
+  --hq-earth-rim: oklch(0.86 0.070 215 / 0.70);
+  --hq-cloud: oklch(0.97 0.008 90 / 0.85);
+  --hq-sun: oklch(0.92 0.090 82);
+  --hq-sun-alpha: 0.20;
   /* ---- text and status on a pale room ---------------------------------
      The app's ink is light because every other screen is dark. Reusing it
      here would have printed pale grey names onto a pale grey floor, which is
@@ -130,6 +159,10 @@
 .hq[data-hq-phase="day"] {
   --hq-star-alpha: 0.20;
   --hq-sky: oklch(0.70 0.060 230 / 0.14);
+  --hq-void: oklch(0.42 0.065 243);
+  --hq-sky-top: oklch(0.74 0.095 232);
+  --hq-sky-horizon: oklch(0.92 0.050 85);
+  --hq-sun-alpha: 0.36;
 }
 
 /* Evening: the interior lighting takes over and warms everything. */
@@ -143,6 +176,12 @@
   --hq-rug: oklch(0.54 0.070 250);
   --hq-star-alpha: 0.55;
   --hq-sky: oklch(0.62 0.085 60 / 0.14);
+  --hq-void: oklch(0.32 0.060 285);
+  --hq-sky-top: oklch(0.55 0.110 290);
+  --hq-sky-horizon: oklch(0.78 0.140 55);
+  --hq-earth-rim: oklch(0.80 0.120 45 / 0.75);
+  --hq-sun: oklch(0.80 0.150 55);
+  --hq-sun-alpha: 0.42;
 }
 
 /* Night: dimmer room, brighter instruments. Still unmistakably staffed. */
@@ -171,6 +210,14 @@
   --hq-star-alpha: 0.95;
   --hq-sky: oklch(0.40 0.060 265 / 0.16);
   --hq-glass-glow: 2.2px;
+  --hq-void: oklch(0.16 0.035 268);
+  --hq-sky-top: oklch(0.18 0.045 270);
+  --hq-sky-horizon: oklch(0.30 0.060 265);
+  --hq-earth: oklch(0.22 0.055 240);
+  --hq-earth-land: oklch(0.26 0.040 140);
+  --hq-earth-rim: oklch(0.62 0.080 220 / 0.28);
+  --hq-cloud: oklch(0.60 0.010 250 / 0.35);
+  --hq-sun-alpha: 0;
 }
 
 /* ---------- stage ------------------------------------------------------- */
@@ -181,9 +228,14 @@
   overflow: hidden;
   border: 1px solid var(--hq-edge);
   border-radius: 0.75rem;
+  /* Sky above, the limb of a planet below. The room floats over it the way
+     the deck already implied it did; the corners the floor never covers now
+     show where the station is instead of nothing. */
   background:
-    radial-gradient(120% 90% at 50% 0%, var(--hq-sky), transparent 62%),
-    oklch(0.30 0.020 265);
+    radial-gradient(150% 62% at 50% 121%, var(--hq-earth-rim) 0 57%, transparent 59.5%),
+    radial-gradient(150% 62% at 50% 123%, var(--hq-earth) 0 56.5%, transparent 57.5%),
+    radial-gradient(120% 55% at 50% 98%, var(--hq-sky-horizon) 0%, transparent 60%),
+    linear-gradient(180deg, var(--hq-void) 0%, var(--hq-sky-top) 48%, var(--hq-sky-horizon) 100%);
 }
 
 /* The room scales to fit its container rather than the tiles changing size —
@@ -280,9 +332,44 @@
 }
 
 .hq-window {
-  fill: oklch(0.18 0.045 275);
+  fill: none;
   stroke: var(--hq-metal);
   stroke-width: 2.5;
+  stroke-linejoin: round;
+}
+.hq-window-mullion {
+  stroke: var(--hq-metal);
+  stroke-width: 1.6;
+  opacity: 0.85;
+}
+/* What the window looks out on. Sky, then the planet rising past the sill;
+   the same view the stage paints behind the room, so the glass reads as a
+   hole in the wall and not as a picture hung on it. */
+.hq-sky-fill {
+  fill: url(#hq-sky-gradient);
+}
+.hq-earth {
+  fill: var(--hq-earth);
+}
+.hq-earth-land {
+  fill: var(--hq-earth-land);
+  opacity: 0.85;
+}
+.hq-earth-rim {
+  fill: none;
+  stroke: var(--hq-earth-rim);
+  stroke-width: 5;
+}
+.hq-cloud {
+  fill: var(--hq-cloud);
+}
+/* Daylight through that window, lying across the floor. One polygon, clipped
+   to the floor plates, whose opacity is a phase token: day and evening pour
+   it in, night switches it off. */
+.hq-sunlight {
+  fill: url(#hq-sun-gradient);
+  opacity: var(--hq-sun-alpha);
+  pointer-events: none;
 }
 
 .hq-star {
@@ -355,6 +442,41 @@
 }
 .hq-prop-light {
   fill: var(--hq-wood-light);
+}
+.hq-prop-dark {
+  fill: var(--hq-wood-dark);
+}
+
+/* The games corner. */
+.hq-felt {
+  fill: var(--hq-felt);
+}
+.hq-pocket {
+  fill: oklch(0.18 0.010 250);
+}
+.hq-ball-solid {
+  fill: var(--hq-ball-solid);
+}
+.hq-ball-stripe {
+  fill: var(--hq-ball-stripe);
+}
+.hq-ball-cue {
+  fill: var(--hq-ball-cue);
+}
+.hq-cue {
+  stroke: var(--hq-cue-wood);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+.hq-rod {
+  stroke: var(--hq-rod);
+  stroke-width: 1.1;
+}
+.hq-foos-red {
+  fill: var(--hq-foos-red);
+}
+.hq-foos-blue {
+  fill: var(--hq-foos-blue);
 }
 .hq-cabinet {
   fill: var(--hq-cabinet);
@@ -1170,6 +1292,46 @@
    on the contact shadow, the breathing animation), never a base colour. */
 
 /* ---------- desk instruments --------------------------------------------- */
+/* One personal object per desk. Warm household colours, none of them a
+   status hue: a mug is the colour of a mug. */
+.hq-clutter-mug {
+  fill: oklch(0.90 0.040 80);
+  stroke: oklch(0.62 0.045 75);
+  stroke-width: 0.6;
+}
+.hq-clutter-handle {
+  fill: none;
+  stroke: oklch(0.62 0.045 75);
+  stroke-width: 1.1;
+  stroke-linecap: round;
+}
+.hq-clutter-book {
+  fill: oklch(0.62 0.100 40);
+}
+.hq-clutter-spine {
+  fill: none;
+  stroke: oklch(0.46 0.090 38);
+  stroke-width: 0.9;
+}
+.hq-clutter-bottle {
+  fill: oklch(0.82 0.050 215 / 0.85);
+  stroke: oklch(0.62 0.050 215);
+  stroke-width: 0.6;
+}
+.hq-clutter-cap {
+  fill: oklch(0.40 0.020 250);
+}
+.hq-clutter-phone {
+  fill: oklch(0.24 0.012 260);
+}
+/* Vines along the wall tops. The stem is the dark leaf tone; the leaves are
+   the two leaf tokens the plants already use, so they retone with the room. */
+.hq-vine {
+  fill: none;
+  stroke: var(--hq-leaf-dark);
+  stroke-width: 1.4;
+  stroke-linecap: round;
+}
 
 /* Abstract shapes only. Nothing here renders a value, and nothing should ever
    be added that does — a number drawn as decoration is indistinguishable from
@@ -1477,17 +1639,18 @@
 /* ---- the planet beyond the hull -------------------------------------------- */
 
 .hq-planet-body {
-  fill: oklch(0.55 0.095 55);
+  fill: var(--hq-earth);
 }
 
 .hq-planet-band {
-  fill: oklch(0.62 0.085 70);
-  opacity: 0.7;
+  fill: var(--hq-cloud);
+  opacity: 0.55;
 }
 
 .hq-planet-ring {
   fill: none;
-  stroke: oklch(0.75 0.045 90 / 0.55);
+  /* No ring: it is the planet the window shows, and that one has none. */
+  stroke: none;
   stroke-width: 3;
 }
 

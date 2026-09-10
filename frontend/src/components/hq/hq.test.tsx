@@ -1177,6 +1177,49 @@ describe("the furnished office", () => {
     );
   });
 
+  it("gives every node in the scene a unique key, on update as well as on mount", () => {
+    // This has bitten twice: the Execution Vault is both a zone and an
+    // employee (floor plates and the sorted cast are siblings under one
+    // <svg>), and later a plant was authored on a tile that already had one.
+    // React may DROP or DUPLICATE a child when keys collide, so it is a real
+    // defect and not a lint nag.
+    //
+    // It has to rerender. React only checks keys while reconciling an
+    // UPDATE — a single render, and a console read straight after page load,
+    // both come back clean while the collision is still there. That is
+    // exactly how both of these survived being "checked".
+    const seen: string[] = [];
+    const original = console.error;
+    console.error = (...args: unknown[]) => {
+      const text = args.map(String).join(" ");
+      if (text.includes("same key")) seen.push(text);
+      else original(...args);
+    };
+    try {
+      const props = {
+        focusedZone: null,
+        onFocusZone: noop,
+        onSelectEmployee: noop,
+        density: "full" as const,
+      };
+      const { rerender } = render(<HqStage {...props} frames={{}} />);
+      // Everyone somewhere other than home, so every anchor re-keys at once.
+      const away = Object.fromEntries(
+        [...EMPLOYEES.map((e) => e.id), ...SUPPORT_STAFF.map((n) => n.id)].map(
+          (id, index) => [
+            id,
+            { pose: "standing", tile: { col: 6 + (index % 8), row: 5 }, hold: 5 },
+          ],
+        ),
+      );
+      rerender(<HqStage {...props} frames={away} />);
+      rerender(<HqStage {...props} frames={{}} />);
+    } finally {
+      console.error = original;
+    }
+    expect(seen, seen.join("\n")).toEqual([]);
+  });
+
   it("keeps the room free of status colour used as decoration", () => {
     // Green and amber mean something in this product. The reference's office
     // is full of bright green bins and plants; only one of those survived the
@@ -1298,4 +1341,43 @@ describe("the expanded world on the stage", () => {
     expect(cleaning.container.querySelector(".hq-trolley")).not.toBeNull();
   });
 
+});
+
+describe("every node in the scene has its own key", () => {
+  /**
+   * React only warns about duplicate keys while reconciling an *update*.
+   *
+   * A single render comes back clean with the collision still live, and so
+   * does a console read straight after page load — which is how this survived
+   * being "checked" more than once. So this renders and then rerenders with
+   * somebody moved, because the rerender is what forces the reconcile.
+   *
+   * The collision that motivated it: Vault is a zone *and* an employee, so the
+   * vault door and Vault's own figure both land in the single `scene` array,
+   * and both were keyed `vault`. React was silently dropping one of the two on
+   * every update.
+   */
+  it("survives a rerender with the cast moved", () => {
+    const errors: string[] = [];
+    const spy = vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+      errors.push(args.map(String).join(" "));
+    });
+
+    const view = render(
+      <HqStage focusedZone={null} onFocusZone={noop} onSelectEmployee={noop} density="full" />,
+    );
+    view.rerender(
+      <HqStage
+        focusedZone={null}
+        onFocusZone={noop}
+        onSelectEmployee={noop}
+        density="full"
+        frames={{ nova: { pose: "walking_short", tile: { col: 8, row: 4 }, hold: 1000 } }}
+      />,
+    );
+    spy.mockRestore();
+
+    const duplicates = errors.filter((line) => line.includes("same key"));
+    expect(duplicates, duplicates[0] ?? "").toEqual([]);
+  });
 });

@@ -1,4 +1,4 @@
-import type { Pose } from "./characters";
+import type { Emotion, Pose } from "./characters";
 import { EMPLOYEES, EMPLOYEE_BY_ID, type EmployeeId } from "./employees";
 import { CONFERENCE_SEATS, FURNITURE_BLOCKED, LOUNGE_CHAIR_SEAT } from "./furniture";
 import { GRID_COLS, isInsideRoom, type Tile } from "./geometry";
@@ -61,6 +61,19 @@ export interface ActorFrame {
   /** Something visibly carried — Maya's trolley, Sam's box. */
   carry?: "trolley" | "box";
   detail?: string;
+  /**
+   * How this actor feels during this frame. Presentation only.
+   *
+   * On the same footing as `pose`: it describes the person, never the system.
+   * The distinction matters more here than it looks, because these frames fire
+   * on a timer — an angry face scheduled by a clock is exactly as unfounded as
+   * a chatter line claiming the queue is deep. So the emotions that appear in
+   * ambient routines are the ones a *social* situation motivates: losing a
+   * frame of pool, winning one, being interrupted. Emotions that would read as
+   * a verdict on MEMESCOPE reach the face only through `Transient`, which the
+   * adapter owns and which has a reading behind it.
+   */
+  emotion?: Emotion;
   /**
    * A short line to show in a speech bubble above this actor.
    *
@@ -1526,6 +1539,372 @@ export const KARTHIK_EVENT_ROUTINES: Record<string, AmbientRoutine> = {
   },
 };
 
+/* ---- the games corner ---------------------------------------------------
+ *
+ * Two tables, two rooms, and every match is two people. That is the point: a
+ * game is the only thing in this office that *requires* a colleague, so it is
+ * the only routine where the room shows a relationship rather than a person
+ * with a job.
+ *
+ * ── WHAT THE EMOTIONS HERE ARE ALLOWED TO MEAN ──────────────────────────
+ *
+ * A match is a complete, self-contained reason to be pleased or annoyed. That
+ * is what makes these the one place ambient routines may carry `happy`, `smug`
+ * or `angry`: the frame that motivates the feeling is in the same timeline the
+ * reader is watching. Nobody has to infer why Byte is grinning — he just won.
+ *
+ * The rule this must never cross is the one every ambient routine lives under:
+ * these fire on a timer, so nothing here may be *about MEMESCOPE*. Losing at
+ * pool is a person. Looking annoyed because the queue is deep would be a claim
+ * a clock made up, and a test asserts no line or detail in this block mentions
+ * the system.
+ *
+ * ── WHY NOBODY WINS ON THE SCOREBOARD ───────────────────────────────────
+ *
+ * There is no score anywhere — not on the table, not in a bubble. A displayed
+ * 3-2 would be a fabricated fact of exactly the kind the rest of the room
+ * refuses. What the routines show is the *shape* of a match: two people at a
+ * table, a reaction, and back to work. Who won is left to the drawing.
+ */
+
+/** Beside the pool table, on its long sides. The ends stay clear — that is
+ *  where a cue goes, and it is also the lane to the viewport. */
+const POOL_NEAR: Tile = { col: 12, row: 11 };
+const POOL_FAR: Tile = { col: 14, row: 11 };
+
+/** Across the foosball table on the deck's northern strip. */
+const FOOS_WEST: Tile = { col: 16, row: 4 };
+const FOOS_EAST: Tile = { col: 18, row: 4 };
+
+/**
+ * One player's half of a match: walk over, play, react, walk back.
+ *
+ * Built rather than written out because a match is symmetric and a
+ * hand-written second half is where the two players drift out of step — one
+ * still swinging while the other has already walked away is the tell that a
+ * "game" is two unrelated animations that happen to be adjacent.
+ */
+function match(
+  approach: Tile[],
+  at: Tile,
+  play: Pose,
+  outcome: { pose: Pose; emotion: Emotion; detail: string },
+  playingDetail: string,
+): AmbientFrame[] {
+  return [
+    ...walk(approach),
+    { pose: play, tile: at, hold: 7_600, emotion: "neutral", detail: playingDetail },
+    { pose: play, tile: at, hold: 6_800, emotion: "neutral", detail: playingDetail },
+    { pose: outcome.pose, tile: at, hold: 4_200, emotion: outcome.emotion, detail: outcome.detail },
+    ...walkHome(approach),
+  ];
+}
+
+/**
+ * Every route below was produced by breadth-first search over `isWalkable`
+ * from the walker's own desk, not written by hand.
+ *
+ * Hand-authoring is what the rest of this file does and it is right for short
+ * hops, but the games corner is in the far south-east and the first four
+ * routes I wrote by eye each broke a different rule — one stood a player
+ * inside the Performance Lab's bookshelf, one jumped two tiles because I had
+ * misremembered which column Quinn sits in. The tests caught all of them,
+ * which is the system working; searching the floor plan instead of guessing at
+ * it is cheaper than being caught.
+ */
+const POOL_FROM_BYTE: Tile[] = [
+  { col: 9, row: 9 },
+  { col: 9, row: 10 },
+  { col: 9, row: 11 },
+  { col: 10, row: 11 },
+  { col: 11, row: 11 },
+  POOL_NEAR,
+];
+
+const POOL_FROM_PATCH: Tile[] = [
+  { col: 13, row: 9 },
+  { col: 13, row: 10 },
+  { col: 14, row: 10 },
+  POOL_FAR,
+];
+
+const POOL_FROM_QUINN: Tile[] = [
+  { col: 15, row: 6 },
+  { col: 14, row: 6 },
+  { col: 13, row: 6 },
+  { col: 13, row: 7 },
+  { col: 13, row: 8 },
+  { col: 13, row: 9 },
+  { col: 13, row: 10 },
+  { col: 14, row: 10 },
+  POOL_FAR,
+];
+
+const FOOS_FROM_ECHO: Tile[] = [
+  { col: 6, row: 7 },
+  { col: 6, row: 6 },
+  { col: 7, row: 6 },
+  { col: 8, row: 6 },
+  { col: 9, row: 6 },
+  { col: 10, row: 6 },
+  { col: 11, row: 6 },
+  { col: 12, row: 6 },
+  { col: 13, row: 6 },
+  { col: 14, row: 6 },
+  { col: 15, row: 6 },
+  { col: 16, row: 6 },
+  { col: 16, row: 5 },
+  FOOS_WEST,
+];
+
+const FOOS_FROM_KARTHIK: Tile[] = [
+  { col: 18, row: 8 },
+  { col: 18, row: 7 },
+  { col: 18, row: 6 },
+  { col: 18, row: 5 },
+  FOOS_EAST,
+];
+
+export const GAME_ROUTINES: AmbientRoutine[] = [
+  {
+    // Pool: Byte against Patch. Both are infrastructure, both are already in
+    // the south of the building, and neither is somebody whose desk being
+    // empty for four minutes would read as a subsystem going quiet.
+    id: "pool-byte-patch",
+    employee: "byte",
+    weight: 1.1,
+    suppressOnAlert: true,
+    nightFactor: 1.3,
+    frames: match(
+      POOL_FROM_BYTE,
+      POOL_NEAR,
+      "cue_shot",
+      { pose: "cheering", emotion: "happy", detail: "Won a frame of pool." },
+      "Playing pool in the lounge.",
+    ),
+    cast: [
+      {
+        employee: "patch",
+        frames: match(
+          POOL_FROM_PATCH,
+          POOL_FAR,
+          "cue_shot",
+          { pose: "standing", emotion: "sad", detail: "Lost a frame of pool." },
+          "Playing pool in the lounge.",
+        ),
+      },
+    ],
+  },
+  {
+    // Quinn alone at the table between passes. The counterexample to "a game
+    // needs two people": one person practising is a different, quieter picture
+    // and it is the one that makes the corner look used rather than staged.
+    id: "pool-quinn-practice",
+    employee: "quinn",
+    weight: 0.9,
+    suppressOnAlert: true,
+    nightFactor: 1.4,
+    frames: [
+      ...walk(POOL_FROM_QUINN),
+      { pose: "cue_shot", tile: POOL_FAR, hold: 7_000, emotion: "neutral", detail: "Practising at the pool table." },
+      { pose: "standing", tile: POOL_FAR, hold: 3_000, emotion: "smug", detail: "Potted it." },
+      { pose: "cue_shot", tile: POOL_FAR, hold: 5_400, emotion: "neutral", detail: "Practising at the pool table." },
+      ...walkHome(POOL_FROM_QUINN),
+    ],
+  },
+  {
+    // Foosball on the deck. Faster, noisier, and the only routine in the
+    // office where two people are both moving at speed at the same time.
+    id: "foosball-echo-karthik",
+    employee: "echo",
+    weight: 1.1,
+    suppressOnAlert: true,
+    frames: match(
+      FOOS_FROM_ECHO,
+      FOOS_WEST,
+      "playing_table",
+      { pose: "cheering", emotion: "happy", detail: "Won at foosball." },
+      "Playing foosball on the deck.",
+    ),
+    cast: [
+      {
+        employee: "karthik",
+        frames: match(
+          FOOS_FROM_KARTHIK,
+          FOOS_EAST,
+          "playing_table",
+          { pose: "standing", emotion: "angry", detail: "Lost at foosball, narrowly." },
+          "Playing foosball on the deck.",
+        ),
+      },
+    ],
+  },
+];
+
+/* ---- people talking to each other ----------------------------------------
+ *
+ * The office already had micro-interactions, and every one of them was one
+ * person walking somewhere and a colleague nodding. These are conversations
+ * with a *shape*: somebody arrives with something, the other reacts, and the
+ * feeling changes between the first frame and the last.
+ *
+ * ── THE ARGUMENT, AND WHY IT IS SAFE ────────────────────────────────────
+ *
+ * `atlas-rex-disagree` is the one routine in the building where two people are
+ * angry at each other. It is also the most carefully bounded, for a reason
+ * that is easy to miss: Atlas is the desk that refuses trades and Rex is the
+ * desk that places them, so a reader who saw them arguing could reasonably
+ * conclude something had gone wrong with a trade.
+ *
+ * Three things stop that. It is `suppressOnAlert`, so it can never play while
+ * the office is actually in trouble — an argument during a real incident is
+ * exactly the coincidence that would read as causation. It resolves: the last
+ * two frames are both `neutral` and the detail says so, so nobody is left
+ * frozen mid-row. And not one line or detail mentions a trade, a token, a
+ * wallet or a number, which a test enforces across this whole block.
+ *
+ * What is left is two colleagues who disagree about something and get over it,
+ * which is what an office looks like.
+ */
+
+/** Two people facing each other at a tile each, for the length of a talk. */
+function conversation(
+  at: Tile,
+  beats: Array<{ pose: Pose; emotion: Emotion; hold: number; detail: string; speech?: string }>,
+): AmbientFrame[] {
+  return beats.map((beat) => ({
+    pose: beat.pose,
+    tile: at,
+    hold: beat.hold,
+    emotion: beat.emotion,
+    detail: beat.detail,
+    speech: beat.speech,
+  }));
+}
+
+/** Rex's desk to the Risk Room's edge. BFS-verified, like the games routes. */
+const REX_TO_RISK: Tile[] = [
+  { col: 11, row: 4 },
+  { col: 10, row: 4 },
+  { col: 10, row: 5 },
+  { col: 9, row: 5 },
+  { col: 8, row: 5 },
+  { col: 7, row: 5 },
+  { col: 6, row: 5 },
+  { col: 5, row: 5 },
+  { col: 4, row: 5 },
+  { col: 4, row: 4 },
+];
+
+const MILO_TO_SENTINEL: Tile[] = [
+  { col: 3, row: 8 },
+  { col: 4, row: 8 },
+  { col: 5, row: 8 },
+];
+
+const NOVA_TO_BYTE: Tile[] = [
+  { col: 8, row: 2 },
+  { col: 8, row: 3 },
+  { col: 8, row: 4 },
+  { col: 8, row: 5 },
+  { col: 8, row: 6 },
+  { col: 8, row: 7 },
+  { col: 9, row: 7 },
+];
+
+export const SOCIAL_ROUTINES: AmbientRoutine[] = [
+  {
+    // Rex walks to Atlas, and not the other way round.
+    //
+    // I wrote it the other way first and a test failed: Atlas is the stillest
+    // figure in the office — `keeps Atlas still and Echo mobile` measures the
+    // fraction of his frames that stay at his desk — and sending him across
+    // the building to argue dropped him under the floor. The fix is also the
+    // better scene. Atlas is the desk that refuses; people come to *him* to be
+    // told no, and he does not chase anyone to say it.
+    id: "rex-atlas-disagree",
+    employee: "rex",
+    weight: 0.7,
+    suppressOnAlert: true,
+    nightFactor: 0.3,
+    frames: [
+      ...walk(REX_TO_RISK),
+      ...conversation({ col: 4, row: 4 }, [
+        { pose: "talking_briefly", emotion: "angry", hold: 3_400, detail: "Arguing a call with Atlas.", speech: "It held last time." },
+        { pose: "standing", emotion: "angry", hold: 2_600, detail: "Arguing a call with Atlas." },
+        { pose: "talking_briefly", emotion: "neutral", hold: 3_200, detail: "Talking it through with Atlas.", speech: "Alright. Show me." },
+        { pose: "standing", emotion: "happy", hold: 2_400, detail: "Sorted it out with Atlas." },
+      ]),
+      ...walkHome(REX_TO_RISK),
+    ],
+    cast: [
+      {
+        employee: "atlas",
+        frames: [
+          { pose: "seated_reviewing", hold: STEP * REX_TO_RISK.length, emotion: "neutral" },
+          { pose: "standing", hold: 3_400, emotion: "neutral", detail: "Hearing Rex out." },
+          { pose: "talking_briefly", hold: 2_600, emotion: "angry", detail: "Not persuaded.", speech: "No. Not like that." },
+          { pose: "standing", hold: 3_200, emotion: "neutral", detail: "Hearing Rex out." },
+          { pose: "seated_reviewing", hold: 2_400, emotion: "neutral", detail: "Back to the review." },
+        ],
+      },
+    ],
+  },
+  {
+    // Milo cheers Sentinel up. The counterweight to the argument: the office
+    // needs somebody being kind in it or the only relationship on show is
+    // conflict.
+    id: "milo-sentinel-check-in",
+    employee: "milo",
+    weight: 1,
+    suppressOnAlert: true,
+    frames: [
+      ...walk(MILO_TO_SENTINEL),
+      ...conversation({ col: 5, row: 8 }, [
+        { pose: "talking_briefly", emotion: "happy", hold: 3_800, detail: "Checking in on Sentinel.", speech: "Long one today?" },
+        { pose: "standing", emotion: "happy", hold: 3_000, detail: "Checking in on Sentinel." },
+      ]),
+      ...walkHome(MILO_TO_SENTINEL),
+    ],
+    cast: [
+      {
+        employee: "sentinel",
+        frames: [
+          { pose: "standing", hold: STEP * MILO_TO_SENTINEL.length, emotion: "tired" },
+          { pose: "standing", hold: 3_800, emotion: "tired", detail: "Halfway through a long shift." },
+          { pose: "talking_briefly", hold: 3_000, emotion: "happy", detail: "Cheered up by Milo.", speech: "Getting there." },
+        ],
+      },
+    ],
+  },
+  {
+    // Nova notices somebody flagging. A director who only ever inspects is a
+    // manager; one who occasionally just asks is a person.
+    id: "nova-checks-on-byte",
+    employee: "nova",
+    weight: 0.9,
+    suppressOnAlert: true,
+    frames: [
+      ...walk(NOVA_TO_BYTE),
+      ...conversation({ col: 9, row: 7 }, [
+        { pose: "talking_briefly", emotion: "happy", hold: 3_600, detail: "Asking Byte how it is going.", speech: "You alright?" },
+        { pose: "standing", emotion: "neutral", hold: 2_800, detail: "Listening to Byte." },
+      ]),
+      ...walkHome(NOVA_TO_BYTE),
+    ],
+    cast: [
+      {
+        employee: "byte",
+        frames: [
+          { pose: "seated_working", hold: STEP * NOVA_TO_BYTE.length, emotion: "tired" },
+          { pose: "talking_briefly", hold: 3_600, emotion: "tired", detail: "Third mug of the shift.", speech: "Third mug." },
+          { pose: "seated_working", hold: 2_800, emotion: "happy", detail: "Back at it." },
+        ],
+      },
+    ],
+  },
+];
+
 AMBIENT_ROUTINES.push(
   ...RELIABILITY_ROUTINES,
   ...EXPANSION_ROUTINES,
@@ -1534,6 +1913,8 @@ AMBIENT_ROUTINES.push(
   ...BREAK_ROUTINES,
   ...VAULT_ROUTINES,
   ...KARTHIK_ROUTINES,
+  ...GAME_ROUTINES,
+  ...SOCIAL_ROUTINES,
 );
 
 export const ROUTINES_BY_EMPLOYEE = new Map<EmployeeId, AmbientRoutine[]>(

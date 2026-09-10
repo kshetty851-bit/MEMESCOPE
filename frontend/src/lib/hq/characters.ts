@@ -128,11 +128,59 @@ export type Pose =
   // support staff's working stance: leaning slightly into a task.
   | "seated_lounge"
   | "seated_talk"
-  | "tidying";
+  | "tidying"
+  // Games. `playing_table` is the two-handed crouch over a foosball bar;
+  // `cue_shot` is bent to the line of a pool cue; `cheering` is both arms up.
+  // All three are drawn standing and all three are social — nobody plays a
+  // table alone, so every routine that uses them casts a second person.
+  | "playing_table"
+  | "cue_shot"
+  | "cheering";
+
+/**
+ * HOW SOMEBODY FEELS, WHICH IS NEVER HOW THE SYSTEM IS.
+ *
+ * The office had one expression axis and it was `pose`: a focused brow when
+ * somebody leans at a screen, a closed eye mid-stretch. That covers
+ * *attention* and nothing else, so the room could show a person concentrating
+ * and could not show a person pleased, irritated or flat.
+ *
+ * ── THE RULE THIS LIVES UNDER, RESTATED BECAUSE IT IS EASY TO BREAK HERE ──
+ *
+ * An emotion is a fact about a *character*, never about MEMESCOPE. A scowling
+ * Byte must not be how a reader learns the queue is deep — that is what the
+ * state chip and the accessible name are for, and they are text with a reading
+ * behind them. The specific trap: an ambient routine fires on a timer, so an
+ * emotion attached to one is as unfounded as a chatter line claiming "all
+ * quiet". Angry-because-losing-at-pool is a person. Angry-because-the-worker-
+ * died would be a fabrication unless a reading said so, and readings reach the
+ * face only through `Transient`, which the adapter owns.
+ *
+ * A test asserts no ambient routine carries `angry` or `sad` outside the
+ * social routines that motivate them.
+ */
+export type Emotion =
+  | "neutral"
+  | "happy"
+  | "sad"
+  | "angry"
+  | "surprised"
+  | "smug"
+  | "tired";
+
+/** Emotions that read as a person having a bad time. Kept as a set because
+ *  two tests and the scheduler all need the same membership. */
+export const NEGATIVE_EMOTIONS: ReadonlySet<Emotion> = new Set<Emotion>([
+  "sad",
+  "angry",
+]);
 
 /** Poses that are drawn on two feet rather than in a chair. */
 export const STANDING_POSES: ReadonlySet<Pose> = new Set<Pose>([
   "standing",
+  "playing_table",
+  "cue_shot",
+  "cheering",
   "holding_tablet",
   "walking_short",
   "returning_to_desk",

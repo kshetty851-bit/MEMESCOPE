@@ -65,7 +65,11 @@ export type FloorProp =
   | "floor-mat"
   // Karthik Lab.
   | "wall-display"
-  | "cat-bed";
+  | "cat-bed"
+  // The games corner.
+  | "pool-table"
+  | "cue-rack"
+  | "foosball-table";
 
 /** Props that hang on a back wall. Drawn flat, in the wall's plane. */
 export type WallProp = "art-space" | "art-chart" | "clock" | "sign" | "board";
@@ -422,6 +426,156 @@ function renderProp(kind: FloorProp, x: number, y: number) {
           <circle className="hq-star" cx={x + 23} cy={y - 53} r={1.8} />
         </g>
       );
+
+    /* ---- The games corner ---------------------------------------------------
+
+       Both tables are drawn wider than they are deep and lower than a desk,
+       which is most of what makes a games table read as one at this size. The
+       felt is the only saturated green in the room; nothing else competes with
+       it, so the eye finds the corner immediately.
+
+       Neither carries a score. A number on a games table would be the same
+       fabrication as a number on a monitor — nobody is counting, and a room
+       that displayed 3–2 would be claiming a match nobody played. */
+    case "pool-table":
+      return (
+        <g>
+          <Grounded x={x} y={y} w={40} />
+          {/* The body, on a plinth. Wider than a desk on purpose — a pool
+              table that reads as furniture-sized reads as a coffee table with
+              a green top, which is what the first attempt looked like. */}
+          <IsoBox x={x} y={y} w={40} h={13} top="hq-felt" left="hq-prop-wood" right="hq-prop-wood-dark" />
+          {/* Cushion rail: the wood lip around the felt, drawn as a slightly
+              larger diamond behind a slightly smaller one. */}
+          <polygon
+            className="hq-prop-wood"
+            points={`${x},${y - 33} ${x + 40},${y - 13} ${x},${y + 7} ${x - 40},${y - 13}`}
+          />
+          <polygon
+            className="hq-felt"
+            points={`${x},${y - 29} ${x + 33},${y - 13} ${x},${y + 3} ${x - 33},${y - 13}`}
+          />
+          {/* Six pockets: four corners of the playing surface and the middle
+              of each long rail. Drawn on the rail line, not inside the felt,
+              which is the difference between a pocket and a stain. */}
+          {(
+            [
+              [0, -31],
+              [36.5, -13],
+              [0, 5],
+              [-36.5, -13],
+              // Two middles, not four. A pool table has six pockets; eight
+              // read as studs round the rail rather than as holes in it.
+              [-18, -22],
+              [18, -4],
+            ] as Array<readonly [number, number]>
+          ).map(([dx, dy], i) => (
+            <ellipse key={i} className="hq-pocket" cx={x + dx} cy={y + dy} rx={3.4} ry={2} />
+          ))}
+          {/* A broken rack and the cue ball apart from it. Six balls, not
+              fifteen: at this size fifteen is a smudge. */}
+          {(
+            [
+              [7, -15],
+              [11, -13],
+              [15, -11],
+              [9, -18],
+              [13, -16],
+              [17, -14],
+            ] as Array<readonly [number, number]>
+          ).map(([dx, dy], i) => (
+            <circle
+              key={`b${i}`}
+              className={i % 2 ? "hq-ball-solid" : "hq-ball-stripe"}
+              cx={x + dx}
+              cy={y + dy}
+              r={2.1}
+            />
+          ))}
+          <circle className="hq-ball-cue" cx={x - 15} cy={y - 14} r={2.2} />
+        </g>
+      );
+
+    case "cue-rack":
+      // Wall-side, so it is tall and thin — three cues stood on end in a
+      // block. The cheapest possible cue that the table across the room is for
+      // pool and not for table tennis.
+      return (
+        <g>
+          <Grounded x={x} y={y} w={9} />
+          <IsoBox x={x} y={y} w={9} h={6} top="hq-prop-light" left="hq-prop-wood" right="hq-prop-wood-dark" />
+          {[-4, 0, 4].map((dx, i) => (
+            <line key={i} className="hq-cue" x1={x + dx} y1={y - 6} x2={x + dx + 1.5} y2={y - 40} />
+          ))}
+          <polygon
+            className="hq-prop-wood-dark"
+            points={`${x - 7},${y - 40} ${x + 7},${y - 40} ${x + 7},${y - 36} ${x - 7},${y - 36}`}
+          />
+        </g>
+      );
+
+    case "foosball-table": {
+      /**
+       * The rods have to cross the playing surface, which means interpolating
+       * along the two opposite edges of the top diamond rather than drawing
+       * horizontal lines above it.
+       *
+       * The first version did the latter and the men floated over the table
+       * like a row of pins. `edge` walks the north-west edge and `far` the
+       * south-east one; a rod is the segment between the same `t` on each, and
+       * the handles are that segment extended a little past both.
+       */
+      const w = 34;
+      const h = 15;
+      const top = y - h;
+      const d = w / 2;
+      // Corners of the top face, clockwise from north.
+      const N = [x, top - d] as const;
+      const E = [x + w, top] as const;
+      const S = [x, top + d] as const;
+      const W = [x - w, top] as const;
+      const lerp = (a: readonly [number, number], b: readonly [number, number], t: number) =>
+        [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t] as const;
+
+      return (
+        <g>
+          <Grounded x={x} y={y} w={w} />
+          <IsoBox x={x} y={y} w={w} h={h} top="hq-felt" left="hq-prop" right="hq-prop-dark" />
+          {[0.16, 0.3, 0.44, 0.58, 0.72, 0.86].map((t, i) => {
+            const a = lerp(W, N, t);
+            const b = lerp(S, E, t);
+            // Handles: the rod, pushed a little past each end.
+            const dx = b[0] - a[0];
+            const dy = b[1] - a[1];
+            const ax = a[0] - dx * 0.12;
+            const ay = a[1] - dy * 0.12;
+            const bx = b[0] + dx * 0.12;
+            const by = b[1] + dy * 0.12;
+            const mx = (a[0] + b[0]) / 2;
+            const my = (a[1] + b[1]) / 2;
+            return (
+              <g key={i}>
+                <line className="hq-rod" x1={ax} y1={ay} x2={bx} y2={by} />
+                {/* Two men per rod, either side of the middle. */}
+                {[-0.16, 0.16].map((off, j) => (
+                  <rect
+                    key={j}
+                    className={i % 2 ? "hq-foos-red" : "hq-foos-blue"}
+                    x={mx + dx * off - 1.3}
+                    y={my + dy * off - 4.5}
+                    width={2.6}
+                    height={5.5}
+                    rx={1.2}
+                  />
+                ))}
+              </g>
+            );
+          })}
+          {/* The ball, on the felt. */}
+          <circle className="hq-ball-cue" cx={x - 4} cy={top + 3} r={1.8} />
+        </g>
+      );
+    }
 
     /* ---- Karthik Lab ------------------------------------------------------- */
     case "wall-display":
