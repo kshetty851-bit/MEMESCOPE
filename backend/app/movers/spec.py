@@ -77,7 +77,10 @@ from decimal import Decimal as D
 
 from app.lab.spec import Condition, Exits, Strategy, rules_json
 
-SPEC_VERSION = "movers-7.0.0"
+SPEC_VERSION = "movers-8.0.0"
+# 7.0.0 -> 8.0.0 (2026-09-10): the book is $1 x 100 on instruction — one
+# percent of the wallet a position, a hundred at a time — in place of
+# $10 x 10. Fresh wallets; 7.0.0 ran minutes and stands as history.
 # 6.0.0 -> 7.0.0 (2026-09-10): a fresh start on instruction. All three
 # 6.0.0 arms fell below the $50 floor inside ten hours (MOV-03 $31, MOV-04
 # $31, MOV-05 $4) — rugs in the pool, not a fault — and the record stands as
@@ -87,8 +90,8 @@ STARTING_EQUITY = D("100")
 CYCLE_TARGET_MULTIPLE = D("1.10")
 FAILURE_EQUITY_FLOOR = D("50")
 
-SIZE_USD = D("10")
-MAX_CONCURRENT = 10
+SIZE_USD = D("1")
+MAX_CONCURRENT = 100
 
 #: Stake a fixed FRACTION of the wallet rather than a flat amount: $10 a
 #: position at $100, $20 at $200, $30 at $300, capped at $100 once the wallet
@@ -338,6 +341,7 @@ SPEC_HASH = hashlib.sha256(_canonical().encode()).hexdigest()
 #: moment to ask whether SPEC_VERSION should move too.
 #:
 #: ADDING an arm is not safer than removing one. Both change the hash.
+#: Moved for movers-8.0.0, which set the book to $1 x 100.
 #: Moved for movers-7.0.0, a fresh start with the rules unchanged.
 #: Moved for movers-6.0.0, which re-paired MOV-05 against MOV-04 (no gate).
 #: Moved for movers-5.0.0, which added MOV-05 (no holding period).
@@ -345,7 +349,7 @@ SPEC_HASH = hashlib.sha256(_canonical().encode()).hexdigest()
 #: condition to BOTH arms. The pin did its job: the edit failed at import
 #: rather than reaching production with a stale hash, and the version was
 #: bumped rather than the running tournament's stored hash overwritten.
-PINNED_SPEC_HASH = "a40e4d2fac4ead64d4670a04b1f2c3763956f44b31c85b6b04dd6a59ec047f86"
+PINNED_SPEC_HASH = "dac962e7490a1cf043b586f3d839b0d159eec33fc926a697eff317ec80fab37a"
 
 assert SPEC_HASH == PINNED_SPEC_HASH, (
     f"STRATEGIES changed: hash is {SPEC_HASH[:16]}, pinned to "

@@ -40,7 +40,7 @@ def test_a_fresh_version_starts_a_fresh_tournament() -> None:
     the old tournament keeps its record and this one starts clean, rather than
     the stored hash being overwritten to make an edited experiment look
     continuous."""
-    assert spec.SPEC_VERSION == "movers-7.0.0"
+    assert spec.SPEC_VERSION == "movers-8.0.0"
     assert len(spec.SPEC_VERSION) <= 16
 
 

@@ -109,7 +109,11 @@ def test_size_is_flat_and_identical_across_arms() -> None:
     """Size following equity would confound the entry rule with the sizing
     rule, which is what left V6 unable to separate them afterwards."""
     assert len({s.size_usd for s in spec.STRATEGIES}) == 1
-    assert spec.SIZE_USD == D("10")
+    # $1 x 100 since movers-8.0.0: one percent of the wallet a position, a
+    # hundred at a time, and the book still exactly the starting equity.
+    assert spec.SIZE_USD == D("1")
+    assert spec.MAX_CONCURRENT == 100
+    assert spec.SIZE_USD * spec.MAX_CONCURRENT == spec.STARTING_EQUITY
 
 
 def test_the_liquidity_floor_is_where_fills_were_measured() -> None:
@@ -149,18 +153,21 @@ def test_the_version_is_short_enough_for_the_column() -> None:
     assert len(spec.SPEC_VERSION) <= 16
 
 
-def test_the_stake_is_a_tenth_of_the_wallet_capped_at_a_hundred() -> None:
-    """The rule as given: $10 at $100, $20 at $200, $30 at $300, and no more
-    than $100 once the wallet reaches $1,000."""
+def test_the_stake_is_one_percent_of_the_wallet_capped_at_ten_times() -> None:
+    """The rule as given, in multiples of the base stake so it survives a
+    change of shape: 1x at $100, 2x at $200, 3x at $300, and no more than the
+    cap once the wallet reaches ten times its start. At $1 x 100 that is $1,
+    $2, $3 and a $10 ceiling."""
     from app.sizing import linear_multiplier
 
     assert spec.SIZING_MODE == "linear"
     cap = D(spec.SIZING_CAP_MULTIPLE)
-    for balance, expected in (("100", "10"), ("200", "20"), ("300", "30"),
-                              ("1000", "100"), ("5000", "100")):
+    for balance, expected in (("100", "1"), ("200", "2"), ("300", "3"),
+                              ("1000", str(cap)), ("5000", str(cap))):
         m = linear_multiplier(D(balance), base=spec.STARTING_EQUITY,
                               cap_multiple=cap)
-        assert spec.SIZE_USD * m == D(expected), balance
+        assert m == D(expected), balance
+        assert spec.SIZE_USD * m == spec.SIZE_USD * D(expected), balance
 
 
 def test_sizing_is_declared_on_every_arm() -> None:

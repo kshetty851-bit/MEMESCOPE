@@ -186,7 +186,7 @@ export default function MoversLabPage() {
       <Toolbar
         eyebrow="Movers Lab"
         title="Does the security check keep us out of the rugs?"
-        description="Three $100 movers wallets and, beneath them, the Matrix Lab's twenty-four. Two $100 wallets started together, a tenth of the balance per position and ten at a time, each held 30 minutes with no take-profit and no stop. They differ in one condition: one only buys coins the security evaluator has positively verified. In the previous run every loss was a coin going to zero. Nothing is real money."
+        description="Three $100 movers wallets and, beneath them, the Matrix Lab's twenty-four. Three $100 wallets started together, one percent of the balance per position and a hundred at a time, each held 30 minutes with no take-profit and no stop. They differ in one condition: one only buys coins the security evaluator has positively verified. In the previous run every loss was a coin going to zero. Nothing is real money."
       />
 
       {/* Above the numbers, and deliberately not collapsible. */}
