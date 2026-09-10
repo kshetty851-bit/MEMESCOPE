@@ -595,12 +595,10 @@ class Settings(BaseSettings):
     #: a coin's comment rate to be RISING. Off by default.
     FEATURE_SOCIAL_LAB_ENABLED: bool = False
     #: The Movers Lab: turnover as a pre-move filter, against its control.
-    FEATURE_MOVERS_LAB_ENABLED: bool = False
     #: Persist the first buyers of coins that reach real liquidity. The raw
     #: material for ranking wallets on what they DO; costs ~14k rows/day.
     FEATURE_EARLY_BUYERS_ENABLED: bool = False
     #: The KOL Lab: follow wallets that were repeatedly early into winners.
-    FEATURE_KOL_LAB_ENABLED: bool = False
     #: The graduation collector: stamps pump.fun graduations as they happen and
     #: follows each coin for an hour. Read-only research; it trades nothing.
     #: CPY-02: the control arm for the PumpFun Lab. Off by default.
@@ -1017,7 +1015,6 @@ class Settings(BaseSettings):
     # quota — every RPC method returns `429 max usage reached`.
     #: The Matrix Lab: 24 arms over two populations. Off by default like every
     #: other lab; twenty-four books is a lot of judging to start by accident.
-    FEATURE_MATRIX_LAB_ENABLED: bool = False
     FEATURE_DEX_LAB_ENABLED: bool = False
     #: EVM launch collection (Base first). Off by default: it calls a public
     #: third-party API on a beat, so it is opt-in like every other collector.

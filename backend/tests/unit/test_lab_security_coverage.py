@@ -67,6 +67,10 @@ def test_the_lookback_covers_the_checkpoint_with_room() -> None:
 
 
 def test_the_floor_matches_what_a_lab_can_buy() -> None:
-    from app.movers import spec
+    """Re-pointed at the Dex Lab on 2026-09-10, when the Movers Lab that used
+    to anchor this was deleted. The invariant is unchanged — the coverage pass
+    must evaluate everything a lab is allowed to buy, or the gated arm sits
+    idle waiting for verdicts nobody is collecting."""
+    from app.dexlab import spec
 
     assert lab_coverage.MIN_LIQUIDITY_USD == int(spec.MIN_LIQUIDITY_USD)

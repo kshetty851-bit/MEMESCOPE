@@ -119,14 +119,13 @@ def test_the_floor_sits_in_the_flat_region_not_on_the_cliff() -> None:
 
 def test_it_is_a_separate_registry_from_every_other_tournament() -> None:
     from app.compound import spec as cspec
+    from app.depth import spec as dspec
     from app.lab import spec as v7
-    from app.matrix import spec as mxspec
-    from app.movers import spec as mvspec
     from app.social import spec as sspec
 
     hashes = {dxspec.SPEC_HASH, cspec.SPEC_HASH, v7.SPEC_HASH,
-              mxspec.SPEC_HASH, mvspec.SPEC_HASH, sspec.SPEC_HASH}
-    assert len(hashes) == 6
+              dspec.SPEC_HASH, sspec.SPEC_HASH}
+    assert len(hashes) == 5
 
 
 # --------------------------------------------------------------------------
@@ -225,11 +224,23 @@ async def test_a_declined_token_may_be_judged_again_after_the_cooldown(db_sessio
     SAME `volume_1h` reading would be judged twice and counted as two draws.
     """
     assert dxspec.REJUDGE_BY_SOURCE == {"dexboard": timedelta(hours=1)}
-    from app.matrix import spec as mxspec
-    assert "dexboard" not in mxspec.REJUDGE_BY_SOURCE, (
-        "the cooldown is keyed by SOURCE; sharing a source name would couple "
-        "this lab's hourly re-judge to the Matrix Lab's six-hourly one"
-    )
+    # The cooldown is keyed by SOURCE, so no other registry may claim
+    # "dexboard" — a shared source name would silently share this window.
+    # Discovered rather than listed: a registry added later must not be able
+    # to make this test wrong instead of failing it.
+    import importlib
+    import pkgutil
+
+    import app
+    for mod in pkgutil.walk_packages(app.__path__, prefix="app."):
+        if not mod.name.endswith(".spec"):
+            continue
+        reg = importlib.import_module(mod.name)
+        if reg is dxspec:
+            continue
+        assert "dexboard" not in (getattr(reg, "REJUDGE_BY_SOURCE", {}) or {}), (
+            f"{mod.name} also claims the 'dexboard' source"
+        )
 
     mint = "D" + "6" * 20
     tok = await _priced_token(db_session, mint=mint, dex="pumpswap",

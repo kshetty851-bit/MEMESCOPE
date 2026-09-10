@@ -34,15 +34,12 @@ celery_app = Celery(
         "app.lab.scheduler",
         "app.compound.scheduler",
         "app.evmchain.scheduler",
-        "app.matrix.scheduler",
         "app.pumpfun.scheduler",
         "app.pumpfun.social_scheduler",
         "app.momentum.scheduler",
         "app.depth.scheduler",
-        "app.kol.scheduler",
         "app.security.lab_scheduler",
         "app.dexlab.scheduler",
-        "app.movers.scheduler",
         "app.social.scheduler",
         "app.copycontrol.scheduler",
         "app.labs.rafiq.scheduler",
@@ -262,13 +259,6 @@ celery_app.conf.beat_schedule = {
         "task": "app.evmchain.scheduler.evm_launch_tick",
         "schedule": crontab(minute="*/2"),
     },
-    # The Matrix Lab: 24 arms, two populations, four clocks, three shapes.
-    # Every minute like the other compound labs — eight (checkpoint, source)
-    # buckets, one candidate query each, ~0.3s for the deep-AMM source.
-    "matrix-tick": {
-        "task": "app.matrix.scheduler.matrix_tick",
-        "schedule": crontab(minute="*"),
-    },
     # The PumpFun Lab mirrors one on-chain wallet. Every minute, because the
     # leader's median hold is 8.5 minutes — a slower poll would copy trades he
     # had already closed.
@@ -309,21 +299,6 @@ celery_app.conf.beat_schedule = {
     # leave the verdict arriving after the decision it exists to inform.
     "security-lab-coverage": {
         "task": "app.security.lab_scheduler.cover_lab_candidates_tick",
-        "schedule": crontab(minute="*"),
-    },
-    # The KOL Lab: wallets that were early into winners, against their control.
-    # Every five minutes, not every minute: it freezes a ranking once and then
-    # judges a ten-minute checkpoint, so a faster beat buys nothing.
-    "kol-tick": {
-        "task": "app.kol.scheduler.kol_tick",
-        "schedule": crontab(minute="*/5"),
-    },
-    # The Movers Lab: turnover as a pre-move filter, against its control.
-    # Every minute rather than every five: the signal is a five-minute
-    # measurement against a thirty-minute hold, so a slower beat would resolve
-    # exits a fifth of a position's life late.
-    "movers-tick": {
-        "task": "app.movers.scheduler.movers_tick",
         "schedule": crontab(minute="*"),
     },
     # The Dex Lab: hourly turnover as a pre-gainer filter, against its

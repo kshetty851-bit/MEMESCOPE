@@ -30,10 +30,7 @@ from app.labs.rafiq import api as rafiq_lab
 from app.paper import api as paper
 from app.compound import api as compound
 from app.depth import api as depth
-from app.kol import api as kol
-from app.matrix import api as matrix
 from app.dexlab import api as dexlab
-from app.movers import api as movers
 from app.social import api as social
 from app.copycontrol import api as copycontrol
 from app.momentum import api as momentum
@@ -72,9 +69,6 @@ api_router.include_router(compound.router)
 api_router.include_router(pumpfun.router)
 api_router.include_router(momentum.router)
 api_router.include_router(depth.router)
-api_router.include_router(kol.router)
-api_router.include_router(matrix.router)
-api_router.include_router(movers.router)
 api_router.include_router(dexlab.router)
 api_router.include_router(social.router)
 api_router.include_router(copycontrol.router)

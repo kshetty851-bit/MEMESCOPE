@@ -125,7 +125,7 @@ function IdeasPreview() {
           scheduler: { status: "healthy", last_beat: null, seconds_since_beat: 12, expected_within_seconds: 300, measured: true, detail: "" },
           queues: { status: "degraded", depths: { enrichment: 812, scoring: 140 }, total: 952, measured: true, detail: "" },
           labs: [
-            { measured: true, detail: "", label: "Matrix Lab", stale_pct: 61, minutes_since_decision: 74 },
+            { measured: true, detail: "", label: "Dex Lab", stale_pct: 61, minutes_since_decision: 74 },
           ],
           overall: "degraded",
           unmeasured: 0,

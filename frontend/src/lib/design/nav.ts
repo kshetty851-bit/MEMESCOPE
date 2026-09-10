@@ -72,26 +72,18 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "Strategy",
     items: [
       { href: "/wallet", label: "Paper wallet", icon: IconWallet, status: "ready" },
-      // The Five-Minute Lab. Its own destination on the operator's instruction,
-      // against the pattern that removed the other per-lab pages — so it is
-      // listed here deliberately rather than by drift, and the test below
-      // records that this one is intended.
-      // Movers: the turnover filter against its own control. Named for the
-      // pump.fun list it was built to anticipate, not for a result it has.
-      { href: "/movers-lab", label: "Movers Lab", icon: IconWallet, status: "ready" },
-      // KOL: follows wallets that were repeatedly early into winners. Listed
-      // while it is still waiting for history — the page explains the wait,
-      // and a lab you cannot find is a lab nobody checks.
-      // Matrix: two populations x four clocks x three book shapes, laid out
-      // as a grid so a difference between neighbours is attributable to the
-      // one thing that differs. Its own page because the operator asked to
-      // see both sections side by side.
-      { href: "/matrix-lab", label: "Matrix Lab", icon: IconSpark, status: "ready" },
+      // Per-lab pages are removed by default. The Dex Lab is the one current
+      // exception, listed deliberately rather than by drift — the test in
+      // hq.test.tsx records that it is intended.
+      //
+      // The Movers, Matrix and KOL Labs held the same exception until
+      // 2026-09-10, when all three were deleted on the operator's instruction,
+      // code and records together.
+      //
       // Dex: hourly turnover as a pre-gainer filter, against a control drawn
       // from the same pool. Named for the board it rebuilds — DexScreener
       // publishes no gainers endpoint — not for a result it has.
       { href: "/dex-lab", label: "Dex Lab", icon: IconSpark, status: "ready" },
-      { href: "/kol-lab", label: "KOL Lab", icon: IconWallet, status: "ready" },
       // A collaborator's five strategies, on five separate $1,000 paper books
       // over their own tables. Named for whose rules it runs so it can never be
       // read as another generation of the labs above it, and listed beside them
