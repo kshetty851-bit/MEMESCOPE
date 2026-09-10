@@ -103,7 +103,10 @@ class TestTheRulesAsInstructed:
 class TestItCannotHaltAnotherTournament:
     def test_it_has_its_own_version_and_hash(self) -> None:
         from app.movers import spec as movers
-        assert spec.SPEC_VERSION == "matrix-1.0.0"
+        # The version moves when a rule does (1.1.0 switched the growth ladder
+        # off); the family prefix is what keeps it apart from every other lab.
+        assert spec.SPEC_VERSION.startswith("matrix-")
+        assert len(spec.SPEC_VERSION) <= 16
         assert spec.SPEC_HASH != movers.SPEC_HASH
         assert spec.SPEC_VERSION != movers.SPEC_VERSION
 

@@ -78,3 +78,37 @@ class TestTheWindowIsBounded:
         """Long enough to outlast a provider hiccup, short enough that a real
         death closes on the same beat it would have before, plus two minutes."""
         assert DEATH_CONFIRMATION_WINDOW == timedelta(minutes=2)
+
+
+# --- a mark too good to believe -------------------------------------------
+#
+# ORE printed 16,648x its entry after a pair switch and a $2 position banked
+# $33,295. Nothing this platform has ever held reached 10x, so a mark past
+# IMPLAUSIBLE_MULTIPLE with no sell quote behind it is a provider fault until
+# proven otherwise, and `_mark` holds rather than believes it.
+
+from app.lab.service import IMPLAUSIBLE_MULTIPLE, implausible_without_quote
+
+
+def test_a_twenty_x_print_with_no_quote_is_not_a_mark() -> None:
+    assert implausible_without_quote(Decimal("974720.93"), Decimal("58.11"), None)
+    assert implausible_without_quote(
+        Decimal("58.11") * IMPLAUSIBLE_MULTIPLE + Decimal("0.01"), Decimal("58.11"), None)
+
+
+def test_a_quote_makes_any_multiple_believable() -> None:
+    """A Jupiter sell quote is independent evidence; the guard steps aside."""
+    assert not implausible_without_quote(
+        Decimal("974720.93"), Decimal("58.11"), Decimal("974000"))
+
+
+def test_ordinary_marks_are_untouched() -> None:
+    assert not implausible_without_quote(Decimal("60"), Decimal("58.11"), None)
+    assert not implausible_without_quote(Decimal("0.01"), Decimal("58.11"), None)
+    assert not implausible_without_quote(
+        Decimal("58.11") * IMPLAUSIBLE_MULTIPLE, Decimal("58.11"), None)
+
+
+def test_no_entry_price_means_no_judgement() -> None:
+    assert not implausible_without_quote(Decimal("1000"), None, None)
+    assert not implausible_without_quote(Decimal("1000"), Decimal("0"), None)

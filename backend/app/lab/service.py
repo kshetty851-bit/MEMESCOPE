@@ -93,6 +93,23 @@ def live_print(rows, now: datetime):
 #: +5.4%. Import site kept so existing callers and tests are unchanged.
 DEATH_CONFIRMATION_WINDOW = marks.DEATH_CONFIRMATION_WINDOW
 
+#: A mark this many times the ENTRY price is not a mark without a sell quote
+#: behind it. Nothing this platform has ever held reached 10x — V6 measured
+#: 0% of positions at 10x across every exit level — so a 20x print with no
+#: quote is a provider fault until proven otherwise, and holding is the honest
+#: response. It exists because ORE printed 16,648x its entry after a pair
+#: switch, the ingest firewall accepted the level once it had persisted, the
+#: rolling median then WAS the glitch, and a $2 position banked $33,295.
+IMPLAUSIBLE_MULTIPLE = Decimal("20")
+
+
+def implausible_without_quote(price, entry_price, realisable) -> bool:
+    """True when a snapshot mark is too good to be believed on its own."""
+    if realisable is not None or not entry_price or entry_price <= 0:
+        return False
+    return bool(price and price > entry_price * IMPLAUSIBLE_MULTIPLE)
+
+
 #: How recent a sampled token's newest print must be for it to be drawn. One
 #: beat plus slack: the deep-AMM pool at any moment is the tokens being polled
 #: every minute, and this is what keeps it to those tokens rather than every
@@ -1289,6 +1306,13 @@ class LabService:
             return None
         if not latest.price_usd or latest.price_usd <= 0 or not latest.liquidity_usd \
                 or latest.liquidity_usd <= 0:
+            return None
+        # Before the band, not after: a glitch that has persisted long enough
+        # to become the rolling median passes the band by construction.
+        if implausible_without_quote(latest.price_usd, pos.entry_price, realisable):
+            logger.warning("lab_mark_implausible", mint=pos.mint_address,
+                           position=str(pos.id), price=str(latest.price_usd),
+                           entry=str(pos.entry_price))
             return None
         median = execution.rolling_median(
             [(r.captured_at, r.price_usd) for r in rows if r.price_usd and r.price_usd > 0],

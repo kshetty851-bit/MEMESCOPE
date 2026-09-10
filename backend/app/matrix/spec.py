@@ -64,7 +64,14 @@ from decimal import Decimal as D
 
 from app.lab.spec import Condition, Exits, Strategy, rules_json
 
-SPEC_VERSION = "matrix-1.0.0"
+SPEC_VERSION = "matrix-1.1.0"
+# 1.0.0 -> 1.1.0 (2026-09-10): the engine's growth ladder was never switched
+# off here, so a wallet that grew had its STAKE doubled at every power of two
+# of equity — on top of the ratchet, which is already the compounding this
+# board measures. A single provider glitch (ORE printed at $974,720 against a
+# real $58) marked one $2 position at $33,295, banked it, and the ladder then
+# staked $512 a trade. The 1.0.0 record is kept as history; 1.1.0 starts
+# every wallet again at $100 with the stake fixed at the shape's figure.
 
 STARTING_EQUITY = D("100")
 CYCLE_TARGET_MULTIPLE = D("1.10")
@@ -110,6 +117,11 @@ SOURCE_BY_POPULATION = {"F": "radar", "A": "deepamm"}
 #: event — can never redraw.
 REJUDGE_BY_SOURCE = {"deepamm": __import__("datetime").timedelta(hours=6)}
 SAMPLE_PER_TICK = 1
+
+#: The stake is the shape's figure and NOTHING else. "$2 x 50" is the rule as
+#: given; a stake that doubles with equity is a second compounding on top of
+#: the wallet ratchet, and a result would then be attributable to neither.
+SIZING_SCALES = False
 DEEP_VENUES = ("raydium", "orca", "meteora", "metadao")
 
 

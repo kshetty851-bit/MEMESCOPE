@@ -134,7 +134,12 @@ class LabDecision(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     requested_size_usd: Mapped[Decimal | None] = mapped_column(MONEY, nullable=True)
 
     __table_args__ = (
-        UniqueConstraint("strategy_row_id", "mint_address", name="uq_lab_decision_once"),
+        # Per CHECKPOINT, not per mint: a launch has one checkpoint per arm and
+        # is still judged once; a rolling sample (the Matrix Lab's AGED
+        # section) has a new checkpoint on every re-draw, and the per-mint
+        # version of this rule rolled back every tick that drew a token twice.
+        UniqueConstraint("strategy_row_id", "mint_address", "checkpoint_at",
+                         name="uq_lab_decision_per_checkpoint"),
         CheckConstraint(
             "route_state IS NULL OR route_state IN "
             "('BUY_OK_SELL_OK','BUY_OK_SELL_FAILED','BUY_FAILED','ROUTE_UNKNOWN')",

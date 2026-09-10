@@ -180,8 +180,8 @@ class CopyControlService:
                     now: datetime) -> str:
         # IDEMPOTENT BY STATE, not by a ledger row.
         #
-        # `uq_lab_decision_once` is on (strategy_row_id, mint_address), so a
-        # decision cannot serve as a per-signal ledger — a marker for the add
+        # `uq_lab_decision_per_checkpoint` keys a decision on the arm, the mint
+        # and the checkpoint, so a decision cannot serve as a per-signal ledger — a marker for the add
         # and the close of one pair collide on the leader's mint. Deriving
         # "already handled" from the book instead is stronger anyway: a ledger
         # write that fails leaves capital spendable twice, whereas a position

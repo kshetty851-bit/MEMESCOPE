@@ -107,8 +107,26 @@ def classify(
     if out_of_band_high or out_of_band_low:
         # Persistence check: if the most recent `min_prior` prints (flagged or
         # not) already sit at this level, the move is real — accept it.
+        #
+        # UNLESS the level arrived with a POOL CHANGE. Persistence is evidence
+        # when the same market keeps printing the same number; it is nothing
+        # when the provider has re-resolved the mint to a different pool and
+        # keeps reporting that pool. ORE, 2026-09-09: DexScreener switched
+        # pools, printed $974,720 against a real $58, the fourth identical
+        # print was accepted by this rule, the labs' rolling median became the
+        # glitch, and a $2 position banked $33,295. In the following 24 hours
+        # this rule accepted 68 upward jumps of a thousandfold or more. A
+        # switched pool earns acceptance only by printing INSIDE the band of
+        # the pool the baseline was built on — which a genuine migration does,
+        # because a migration does not move the price.
+        baseline_pool = next(
+            (p.pool_address for p in reversed(prior)
+             if not p.suspect and p.pool_address and p.price_usd and p.price_usd > 0),
+            None,
+        )
+        switched = bool(pool_address and baseline_pool and pool_address != baseline_pool)
         recent = [p.price_usd for p in prior[-min_prior:] if p.price_usd and p.price_usd > 0]
-        if len(recent) >= min_prior and all(
+        if not switched and len(recent) >= min_prior and all(
             r / band <= price_usd <= r * band for r in recent
         ):
             return Verdict(False, None, baseline)

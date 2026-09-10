@@ -29,16 +29,18 @@ JUMP = Decimal("10.0")
 
 
 def prior(prices, *, liq="10000", pool="pool-A", suspect=None):
+    """`pool` is one address for every point, or one address per point."""
     suspect = suspect or [False] * len(prices)
+    pools = [pool] * len(prices) if isinstance(pool, str) else list(pool)
     return [
         PriorPoint(
             captured_at=T0 + timedelta(seconds=10 * i),
             price_usd=Decimal(p),
             liquidity_usd=Decimal(liq),
-            pool_address=pool,
+            pool_address=pl,
             suspect=s,
         )
-        for i, (p, s) in enumerate(zip(prices, suspect, strict=True))
+        for i, (p, s, pl) in enumerate(zip(prices, suspect, pools, strict=True))
     ]
 
 
@@ -115,4 +117,47 @@ def test_suspect_priors_do_not_poison_the_baseline():
         suspect=[False, False, False, True],
     )
     v = judge("1.01", history)
+    assert not v.suspect
+
+
+# --- a switched pool is not a market that moved ----------------------------
+#
+# ORE, 2026-09-09: the provider re-resolved the mint to a different pool that
+# printed $974,720 against a real $58. The first three prints were flagged;
+# the fourth was accepted by the persistence rule, the labs' rolling median
+# became the glitch, and a $2 position banked $33,295. In the following day
+# the same rule accepted 68 upward jumps of a thousandfold or more.
+
+
+def test_a_switched_pool_cannot_be_accepted_by_persistence():
+    history = prior(
+        ["1.00", "1.02", "0.98", "5.10", "5.00", "4.90"],
+        suspect=[False, False, False, True, True, True],
+        pool=["pool-A", "pool-A", "pool-A", "pool-B", "pool-B", "pool-B"],
+    )
+    v = judge("5.05", history, pool="pool-B")
+    assert v.suspect and v.reason == REASON_PRICE_HIGH, (
+        "the same provider repeating the same wrong pool is not evidence"
+    )
+
+
+def test_a_switched_pool_inside_the_band_is_accepted_at_once():
+    """A genuine migration does not move the price; it needs no quarantine."""
+    history = prior(
+        ["1.00", "1.01", "0.99", "1.02"],
+        suspect=[False, False, False, True],  # the switch print itself
+        pool=["pool-A", "pool-A", "pool-A", "pool-B"],
+    )
+    v = judge("1.01", history, pool="pool-B")
+    assert not v.suspect
+
+
+def test_once_the_new_pool_has_an_accepted_print_persistence_works_again():
+    """The rule quarantines a switched LEVEL, not a switched pool for ever."""
+    history = prior(
+        ["1.00", "1.01", "0.99", "1.02", "1.01", "5.00", "5.10", "4.90"],
+        suspect=[False, False, False, True, False, True, True, True],
+        pool=["pool-A"] * 3 + ["pool-B"] * 5,
+    )
+    v = judge("5.05", history, pool="pool-B")
     assert not v.suspect
