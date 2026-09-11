@@ -61,24 +61,37 @@ async def _backfill_all(slice_days: int) -> dict:
 
     Each slice commits, so this is safe to interrupt: the next run picks up
     from whatever `bt_ingest_days` says is still pending.
+
+    **It stops when a pass stops making progress, not when a pass does no
+    work.** Those differ, and the difference cost a hot loop in production:
+    once only today's unpublished bhavcopy was left, every pass "walked one
+    day" — the day count was 1, the pending count stayed 1, and a condition
+    written on the day count spun at one NSE request per second. `remaining`
+    not falling is the only honest definition of no progress, and it covers
+    every case that produces one: a day too early to settle, a day that has
+    exhausted its retries, a slice stopped by its own deadline.
     """
     started = time.monotonic()
     days = rows = 0
+    previous_remaining: int | None = None
     while True:
         result = await backfill_tick(limit=slice_days)
         if result.get("error") or result.get("skipped"):
             return {"stopped": result, "days": days, "rows": rows}
         days += result["days"]
         rows += result["rows"]
+        remaining = result["remaining_days"]
         sys.stdout.write(
             f"[{time.monotonic() - started:7.0f}s] +{result['days']}d "
             f"ok={result['ok']} rows={result['rows']} "
-            f"remaining={result['remaining_days']}\n")
+            f"remaining={remaining}\n")
         sys.stdout.flush()
-        if not result["remaining_days"] or not result["days"]:
+        if not remaining or remaining == previous_remaining:
             return {"days": days, "rows": rows,
                     "seconds": round(time.monotonic() - started, 1),
-                    "remaining_days": result["remaining_days"]}
+                    "remaining_days": remaining,
+                    "stalled": bool(remaining)}
+        previous_remaining = remaining
 
 
 async def _replay_all() -> dict:
@@ -86,20 +99,25 @@ async def _replay_all() -> dict:
     marker is `bt_universe.replayed_at`, written per symbol as it goes."""
     started = time.monotonic()
     symbols = episodes = 0
+    previous_remaining: int | None = None
     while True:
         result = await replay_tick()
         if result.get("error") or result.get("skipped"):
             return {"stopped": result, "symbols": symbols, "episodes": episodes}
         symbols += result["symbols"]
         episodes += result["episodes"]
+        remaining = result["remaining"]
         sys.stdout.write(
             f"[{time.monotonic() - started:7.0f}s] +{result['symbols']} symbols "
-            f"episodes={result['episodes']} remaining={result['remaining']}\n")
+            f"episodes={result['episodes']} remaining={remaining}\n")
         sys.stdout.flush()
-        if not result["remaining"] or not result["symbols"]:
+        # Same rule as the backfill: progress, not work done. A symbol the
+        # walk skips still counts as a symbol.
+        if not remaining or remaining == previous_remaining:
             return {"symbols": symbols, "episodes": episodes,
                     "seconds": round(time.monotonic() - started, 1),
-                    "remaining": result["remaining"]}
+                    "remaining": remaining, "stalled": bool(remaining)}
+        previous_remaining = remaining
 
 
 async def _outcomes_all() -> dict:
