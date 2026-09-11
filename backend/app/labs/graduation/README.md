@@ -4,8 +4,8 @@ Records pump.fun tokens approaching the top of the bonding curve, and their
 trading either side of migration, so that a graduation strategy can be
 backtested later against data that was captured live.
 
-It is a **recorder and nothing else**. No backtester, no paper trader, no
-scoring, no frontend. Six tables, three loops, one beat task.
+It is a **recorder and a feature engine**. No backtester, no paper trader, no
+strategy, no frontend. Seven tables, three loops, two beat tasks.
 
 **Everything it reads is free.** An earlier version of this lab bought
 per-trade data from PumpPortal's `subscribeTokenTrade` at 0.01 SOL per 10,000
@@ -223,6 +223,59 @@ together without knowing which is which**: a candle carries a price and one
 minute's volume, and leaves the rolling windows and the buy/sell counts null,
 because it cannot know them.
 
+### `grad_features` — one row per graduated token
+
+Built by `features.py` from the five tables above. **Phase 3 reads this; nothing
+in this lab does.** Wide rather than long: four checkpoint blocks of nine
+columns, so an entry level is a column prefix rather than a join and a filter
+like "velocity at 90 above x, for tokens that also cleared 80" is one ordinary
+`WHERE`. There will never be a fifth block — 100 is graduation itself.
+
+**Features, at each of 70/80/90/95** (`f70_*` … `f95_*`):
+
+| column | meaning |
+|---|---|
+| `_at` | when the checkpoint was observed |
+| `_minutes_since_launch` | from `grad_tokens.first_seen_at` |
+| `_minutes_from_70` | from crossing 70%; 0 at the 70 block |
+| `_velocity_5m`, `_velocity_15m` | progress **points per minute**, both ends forward-filled |
+| `_changes_15m` | reserve changes in the preceding 15 minutes |
+| `_stall_count` | quiet runs of ≥ 5 min between crossing 70% and here |
+| `_market_cap_quote` | from the checkpoint row |
+| `_retrace_flag` | progress fell ≥ 5 points from a running peak between here and graduation |
+
+**Outcomes, relative to the pool open** — the first post-graduation price
+sample, and the earliest price anything could actually have been bought at:
+`open_at`, `open_price_usd`, `return_2m/5m/15m/30m/60m`, `max_return_60m`,
+`max_drawdown_60m`, `minutes_to_peak`, `migration_lag_min`,
+`postgrad_minutes_covered`, `sample_gap_flag`, `backfilled_samples`,
+`outcome_ok`.
+
+Returns are **fractions of the open**: `0.25` is +25%, `1.0` is a 2x.
+`max_drawdown_60m` is peak-to-trough from a *running* peak, not versus the
+open — a token that doubles and halves has drawn down 50%, and measuring
+against the open would call it flat.
+
+#### Three rules that decide what a null means
+
+* **A checkpoint never reached nulls its whole block, and the token is still
+  written.** "Reached 80 and died" is the row Phase 3 most needs; dropping it
+  would condition the sample on success.
+* **Outcomes null together when coverage is thin** — under
+  `OUTCOME_MIN_COVERAGE_MIN` (55) of the 60 minutes. A return computed over a
+  series with holes in it is a number with no error bar.
+  `postgrad_minutes_covered` is written either way, so a null always says why.
+* **A graduate this lab never watched still gets a row**: outcomes, and null
+  features (`launch_at IS NULL` marks them). Those are a useful control, not a
+  defect.
+
+Everything time-based reads a **forward-filled** curve, because
+`grad_curve_samples` is change-only. `progress_at(t)` is the progress of the
+last sample at or before `t`. There is one honest extrapolation: before the
+first sample but at or after the launch, progress reads **0** — a pump.fun
+curve holds its full allocation the instant it is created, which is the
+protocol and not a guess. Before the launch it reads null.
+
 ### `grad_trades` — empty, and kept on purpose
 
 Per-trade detail came from the metered stream. A Phase 2 backfill may fill this
@@ -340,7 +393,54 @@ python -m app.labs.graduation record
 
 SIGINT/SIGTERM flush the buffers and exit cleanly.
 
-### 4. Diagnostics
+### 4. Build the features
+
+```bash
+python -m app.labs.graduation features
+```
+
+Processes graduates whose 60-minute outcome window has closed (plus 5 minutes
+of slack), skipping any that already have a row. `--recompute` rewrites
+existing rows — use it after a post-graduation backfill has filled gaps that
+made outcomes null. It also runs on Celery beat every 10 minutes.
+
+### 5. The summary Phase 3 is judged against
+
+```bash
+python -m app.labs.graduation summary
+```
+
+```
+coverage
+--------
+  graduates                5
+  with a usable outcome    4
+  dropped, thin coverage   1
+  had at least one gap     1
+  never watched pre-grad   1
+  reached 70/80/90/95      4/4/3/2
+  mean minutes covered     54.0
+
+metric               n      mean       p10       p25    median       p75  ...
+return_5m            4    0.3875    0.1850    0.3875    0.5000    0.5000  ...
+max_return_60m       4    1.2725    0.8630    1.2725    1.5000    1.5000  ...
+```
+
+It ships with its own denominator on purpose. A percentile table over the rows
+that happened to have clean coverage, with no count of the rows that did not,
+is the shape of every fake edge this platform has already found — so
+`dropped, thin coverage` and `never watched pre-grad` are printed above the
+distribution, not below it.
+
+`features.SUMMARY_SQL` and `features.COVERAGE_SQL` are plain strings meant to
+be pasted into `psql`. A query nobody can paste is a query nobody checks.
+
+**Read `max_return_60m` carefully.** It is the best price in the window, which
+nothing can systematically capture. It is the *ceiling* on any exit rule, not a
+result — treating it as achievable is how a strategy gets built on a number
+that was never available.
+
+### 6. Diagnostics
 
 ```bash
 python -m app.labs.graduation curve --mint <MINT>
@@ -363,25 +463,37 @@ the fastest way to tell a bad endpoint from a bad mint from a changed layout:
 Also `health` (counters as JSON), `prune` (one pass), and
 `progress --tokens N`.
 
-### 5. The beat task
+### 7. The beat tasks
 
-Pruning runs on Celery beat every 15 minutes.
-`app.labs.graduation.scheduler` is in `celery_app.py`'s `include` list and the
-schedule registers itself with `setdefault`, so an operator who prefers an
-explicit entry wins and there is never a duplicate. With the flag down the task
-returns before it opens a session.
+Two: pruning every 15 minutes, feature building every 10.
+`app.labs.graduation.scheduler` is in `celery_app.py`'s `include` list and both
+schedules register themselves with `setdefault`, so an operator who prefers an
+explicit entry wins and there is never a duplicate. With the flag down both
+return before opening a session.
 
-### 6. Tests
+They are deliberately **not** chained: they touch disjoint rows — the pruner
+only ever deletes non-graduates, the feature engine only ever reads graduates —
+so ordering them would buy nothing and a failure in one would delay the other.
+
+### 8. Tests
 
 ```bash
 python -m pytest app/labs/graduation/tests -q
 ```
 
-134 tests, no database and no network required.
+174 tests, no database and no network required.
 
 ---
 
 ## Known limitations
+
+**0. Between two polls, the path is not recorded — and features inherit that.**
+Fifteen seconds is long enough for a curve to go from 68% to 94%. Checkpoints
+handle it correctly (all three levels written from the one reading that
+revealed them), but a checkpoint's timestamp is *when it was seen*, not when it
+happened, so `minutes_from_70` and both velocities carry up to one poll
+interval of slack. A strategy tuned to differences finer than that is tuned to
+noise.
 
 **1. There is no per-trade detail, and there cannot be.** The curve account
 reports *reserves*, not who moved them. Buyer counts, unique traders and
@@ -420,7 +532,9 @@ counts it rather than hiding it.
 **7. Coverage is bounded by `MAX_WATCH_SET`.** At a high enough launch rate the
 least-progressed candidate is evicted, so some tokens are never followed.
 `unsubscribe_reason = 'evicted'` marks them, and any analysis of "what fraction
-of launches reach 70%" must exclude them or it is measuring the cap.
+of launches reach 70%" must exclude them or it is measuring the cap. The same
+caution applies to `grad_features`: it holds graduates, so **any rate computed
+from it alone is conditioned on graduating**.
 
 **8. There is no backfill and no history.** A token is only known if this
 process was running when it launched, and a restart loses the in-memory state.
@@ -459,5 +573,6 @@ to drift — exactly the failure the platform's curve module exists to prevent.
 `tests/test_isolation.py` pins that allow-list, fails on any other `app.`
 import, asserts that `curve.py`, `parse.py` and `watchset.py` never learn a
 network exists, and fails if `subscribeTokenTrade` reappears anywhere in
-executable code. Deleting this directory plus its two migrations removes the
-lab entirely.
+executable code. It also pins the table names `features.py` is allowed to name
+in raw SQL. Deleting this directory plus its three migrations removes the lab
+entirely.

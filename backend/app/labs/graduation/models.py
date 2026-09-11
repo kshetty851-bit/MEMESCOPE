@@ -67,6 +67,14 @@ _PCT = Numeric(6, 3)
 #: A share of 1, to six places.
 _SHARE = Numeric(9, 6)
 _USD = Numeric(24, 8)
+#: Minutes, to a thousandth. Every duration in `grad_features`.
+_MIN = Numeric(10, 3)
+#: Progress POINTS per minute. A curve can cross 70 points in one poll, so this
+#: needs room above 100 as well as precision below 1.
+_VEL = Numeric(12, 6)
+#: A return as a FRACTION of the open: 0.25 is +25%, 99 is a 100x. Ten integer
+#: digits, because a memecoin's first hour is not bounded by good sense.
+_RET = Numeric(18, 8)
 
 #: `grad_tokens.status`.
 STATUS_WATCHING = "watching"
@@ -404,3 +412,163 @@ class GradMigration(Base):
         Boolean, nullable=False, server_default=false()
     )
     raw: Mapped[dict | None] = mapped_column(JSONB)
+
+
+class GradFeature(Base):
+    """One graduated token: what the curve did on the way up, what the price did
+    after. Written by `features.py`; read by Phase 3 and nothing else here.
+
+    Wide on purpose. Four checkpoint blocks of nine columns each, so an entry
+    level is a column prefix rather than a join, and a Phase 3 filter like
+    "velocity at 90 above x" is an ordinary WHERE.
+
+    **Null means not measured, never zero.** A checkpoint never reached nulls
+    its whole block. Outcomes null together when post-graduation coverage falls
+    under `OUTCOME_MIN_COVERAGE_MIN`, and `postgrad_minutes_covered` is written
+    either way so a null outcome always says why.
+    """
+
+    __tablename__ = "grad_features"
+    __table_args__ = (
+        Index("ix_grad_features_graduated_at", "graduated_at"),
+        Index("ix_grad_features_outcome_ok", "outcome_ok"),
+    )
+
+    mint: Mapped[str] = mapped_column(_ADDRESS, primary_key=True)
+    computed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    #: The EARLIER of the two independent graduation signals: the websocket
+    #: migration message, and the chain's own `complete` flag.
+    graduated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    #: `grad_tokens.first_seen_at`. Null for a token the migration feed
+    #: reported that this lab never watched — those rows carry outcomes and no
+    #: features, which makes them a useful control rather than a defect.
+    launch_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    quote_currency: Mapped[str | None] = mapped_column(String(8))
+    #: How many reserve changes were ever recorded. A low number next to a full
+    #: feature block is a token that moved rarely, not one that was watched
+    #: badly — `grad_tokens.sample_count` tells them apart.
+    curve_sample_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+
+    # --- the 70% checkpoint ---
+    #: All nine are NULL together when this level was never reached. The token
+    #: is still written: "got to 70 and died" is the row Phase 3 most needs.
+    f70_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    f70_minutes_since_launch: Mapped[Decimal | None] = mapped_column(_MIN)
+    f70_minutes_from_70: Mapped[Decimal | None] = mapped_column(_MIN)
+    #: Progress points per minute over the 5 and 15 minutes before the
+    #: checkpoint, both ends FORWARD-FILLED — a quiet stretch is zero velocity,
+    #: not a gap.
+    f70_velocity_5m: Mapped[Decimal | None] = mapped_column(_VEL)
+    f70_velocity_15m: Mapped[Decimal | None] = mapped_column(_VEL)
+    #: Reserve changes in the 15 minutes before. Every curve sample IS a
+    #: change, so this is the closest thing to a trade count this lab has.
+    f70_changes_15m: Mapped[int | None] = mapped_column(Integer)
+    #: Quiet runs of >= STALL_MIN between crossing 70% and this checkpoint.
+    f70_stall_count: Mapped[int | None] = mapped_column(Integer)
+    f70_market_cap_quote: Mapped[Decimal | None] = mapped_column(_QUOTE)
+    #: Progress fell >= RETRACE_DROP_PTS from a running peak between this
+    #: checkpoint and graduation.
+    f70_retrace_flag: Mapped[bool | None] = mapped_column(Boolean)
+
+    # --- the 80% checkpoint ---
+    #: All nine are NULL together when this level was never reached. The token
+    #: is still written: "got to 70 and died" is the row Phase 3 most needs.
+    f80_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    f80_minutes_since_launch: Mapped[Decimal | None] = mapped_column(_MIN)
+    f80_minutes_from_70: Mapped[Decimal | None] = mapped_column(_MIN)
+    #: Progress points per minute over the 5 and 15 minutes before the
+    #: checkpoint, both ends FORWARD-FILLED — a quiet stretch is zero velocity,
+    #: not a gap.
+    f80_velocity_5m: Mapped[Decimal | None] = mapped_column(_VEL)
+    f80_velocity_15m: Mapped[Decimal | None] = mapped_column(_VEL)
+    #: Reserve changes in the 15 minutes before. Every curve sample IS a
+    #: change, so this is the closest thing to a trade count this lab has.
+    f80_changes_15m: Mapped[int | None] = mapped_column(Integer)
+    #: Quiet runs of >= STALL_MIN between crossing 70% and this checkpoint.
+    f80_stall_count: Mapped[int | None] = mapped_column(Integer)
+    f80_market_cap_quote: Mapped[Decimal | None] = mapped_column(_QUOTE)
+    #: Progress fell >= RETRACE_DROP_PTS from a running peak between this
+    #: checkpoint and graduation.
+    f80_retrace_flag: Mapped[bool | None] = mapped_column(Boolean)
+
+    # --- the 90% checkpoint ---
+    #: All nine are NULL together when this level was never reached. The token
+    #: is still written: "got to 70 and died" is the row Phase 3 most needs.
+    f90_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    f90_minutes_since_launch: Mapped[Decimal | None] = mapped_column(_MIN)
+    f90_minutes_from_70: Mapped[Decimal | None] = mapped_column(_MIN)
+    #: Progress points per minute over the 5 and 15 minutes before the
+    #: checkpoint, both ends FORWARD-FILLED — a quiet stretch is zero velocity,
+    #: not a gap.
+    f90_velocity_5m: Mapped[Decimal | None] = mapped_column(_VEL)
+    f90_velocity_15m: Mapped[Decimal | None] = mapped_column(_VEL)
+    #: Reserve changes in the 15 minutes before. Every curve sample IS a
+    #: change, so this is the closest thing to a trade count this lab has.
+    f90_changes_15m: Mapped[int | None] = mapped_column(Integer)
+    #: Quiet runs of >= STALL_MIN between crossing 70% and this checkpoint.
+    f90_stall_count: Mapped[int | None] = mapped_column(Integer)
+    f90_market_cap_quote: Mapped[Decimal | None] = mapped_column(_QUOTE)
+    #: Progress fell >= RETRACE_DROP_PTS from a running peak between this
+    #: checkpoint and graduation.
+    f90_retrace_flag: Mapped[bool | None] = mapped_column(Boolean)
+
+    # --- the 95% checkpoint ---
+    #: All nine are NULL together when this level was never reached. The token
+    #: is still written: "got to 70 and died" is the row Phase 3 most needs.
+    f95_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    f95_minutes_since_launch: Mapped[Decimal | None] = mapped_column(_MIN)
+    f95_minutes_from_70: Mapped[Decimal | None] = mapped_column(_MIN)
+    #: Progress points per minute over the 5 and 15 minutes before the
+    #: checkpoint, both ends FORWARD-FILLED — a quiet stretch is zero velocity,
+    #: not a gap.
+    f95_velocity_5m: Mapped[Decimal | None] = mapped_column(_VEL)
+    f95_velocity_15m: Mapped[Decimal | None] = mapped_column(_VEL)
+    #: Reserve changes in the 15 minutes before. Every curve sample IS a
+    #: change, so this is the closest thing to a trade count this lab has.
+    f95_changes_15m: Mapped[int | None] = mapped_column(Integer)
+    #: Quiet runs of >= STALL_MIN between crossing 70% and this checkpoint.
+    f95_stall_count: Mapped[int | None] = mapped_column(Integer)
+    f95_market_cap_quote: Mapped[Decimal | None] = mapped_column(_QUOTE)
+    #: Progress fell >= RETRACE_DROP_PTS from a running peak between this
+    #: checkpoint and graduation.
+    f95_retrace_flag: Mapped[bool | None] = mapped_column(Boolean)
+
+    # --- outcomes, relative to the pool open --------------------------------
+    #: The FIRST post-graduation price sample: the earliest price anything
+    #: could actually have been bought at, and the denominator of every return.
+    open_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    open_price_usd: Mapped[Decimal | None] = mapped_column(_USD)
+    #: Distinct whole minutes of the 60-minute window carrying a sample.
+    #: Written even when the outcomes are null, so a null always says why.
+    postgrad_minutes_covered: Mapped[int | None] = mapped_column(Integer)
+    #: A minute of the window that NOTHING filled — not a live poll and not a
+    #: GeckoTerminal backfill.
+    sample_gap_flag: Mapped[bool | None] = mapped_column(Boolean)
+    #: How many of the samples were backfilled candles rather than live polls.
+    #: They are not the same measurement; this is how a reader can exclude them.
+    backfilled_samples: Mapped[int | None] = mapped_column(Integer)
+    #: Minutes from the chain saying `complete` to the first price. Null when
+    #: the chain never said it — only the websocket did.
+    migration_lag_min: Mapped[Decimal | None] = mapped_column(_MIN)
+    #: False when coverage was too thin to measure. Every return below is null.
+    outcome_ok: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=false()
+    )
+
+    return_2m: Mapped[Decimal | None] = mapped_column(_RET)
+    return_5m: Mapped[Decimal | None] = mapped_column(_RET)
+    return_15m: Mapped[Decimal | None] = mapped_column(_RET)
+    return_30m: Mapped[Decimal | None] = mapped_column(_RET)
+    return_60m: Mapped[Decimal | None] = mapped_column(_RET)
+    max_return_60m: Mapped[Decimal | None] = mapped_column(_RET)
+    #: Worst peak-to-trough fall inside the window, as a negative fraction.
+    #: From a RUNNING peak, not from the open: a token that doubles and halves
+    #: has drawn down 50%, and measuring against the open would call it flat.
+    max_drawdown_60m: Mapped[Decimal | None] = mapped_column(_RET)
+    minutes_to_peak: Mapped[Decimal | None] = mapped_column(_MIN)
