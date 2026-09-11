@@ -1,10 +1,19 @@
 # Breakout Lab
 
 Momentum into daily resistance on **established** Solana tokens — pools older
-than a week, with real liquidity and real volume, on real DEXes. **Phase 1 is
-the data layer and nothing else**: a universe and its candles. There is no
-setup detection, no score, no position, no paper wallet and no UI, and none of
-those is a small addition away.
+than a week, with real liquidity and real volume, on real DEXes.
+
+| Phase | What it is |
+|---|---|
+| 1 | the universe and its candles — `bo_universe`, `bo_candles`, `bo_runs` |
+| 2 | resistance levels, a momentum score, the setup state machine and the episode record — `bo_levels`, `bo_setup_snapshots`, `bo_episodes` |
+| 3 | the paper trader: ten slots of equity/10 from $1,000 with a 25% trailing stop — `bo_account`, `bo_positions`, `bo_trades`, `bo_equity` |
+| 4 | the tab at `/breakout-lab` |
+
+**It is paper.** Its own ledger, no key, no signer, and no route that can move
+the book. Nothing here imports the platform paper wallet, the Karthik wallet,
+the real wallet or another lab, and a source-parsing test holds that on every
+module including the ones no test exercises.
 
 Isolated the way the Crypto Trend lab is: its own `bo_*` tables, its own flag,
 its own config, its own tests, and no import of any paper wallet, real wallet,
@@ -409,3 +418,293 @@ app/labs/breakout/
 └── tests/          93 tests; fakes.py holds the network stand-in and both payload shapes
 alembic/versions/20260911_0063_breakout_lab.py
 ```
+
+---
+
+# Phase 2 — setup detection
+
+## Resistance levels — `levels.py`
+
+Pure, from daily candles, for tokens with at least `MIN_DAILY_BARS` (14) of
+them. Fewer and the token is **skipped, not an error** — a pool a fortnight
+old has no resistance history worth the name.
+
+1. **Confirmed swing highs.** Bar `i` is a swing high when its high is
+   strictly above every high within `SWING_LOOKBACK` (3) bars on **each**
+   side. The right side must have closed, so the last three bars of a series
+   can never produce one.
+2. **Clusters.** Swing highs within `CLUSTER_PCT` (3%) of the group's running
+   volume-weighted mean are one level, and the level is that mean. A level
+   carries its touch count and its first and last touch.
+3. **Broken.** A level is broken when a daily bar closed above it **after the
+   cluster's last touch**.
+4. **Nearest resistance** is the lowest unbroken level above the close. None
+   means no setup — there is nothing above to break.
+
+Plus daily ATR(14) — Wilder, because every reference implementation is — the
+5- and 20-day ATRs the compression component compares, the 20-day mean volume
+and the 10-day high and low.
+
+### The property that makes the record worth keeping
+
+**Nothing in `levels.py` may look forward**, and a test asserts it on every
+prefix bar of a synthetic series at four lookbacks: the swing set computed
+over bars 0..i must equal the swing set the full series had at bar i. If that
+ever stops being true, every row in `bo_episodes` was written with knowledge
+of the future and the table is worthless as a backtest. It is one `range()`
+bound, and it is very easy to lose.
+
+## The momentum score — `momentum.py`
+
+Five components, each clamped to `[0, 1]`, weighted by
+`config.MOMENTUM_WEIGHTS` (0.30 / 0.15 / 0.25 / 0.15 / 0.15, summing to one):
+
+| Component | What it reads |
+|---|---|
+| `volume` | today + yesterday against twice the 20-day mean, capped at `VOLUME_RATIO_CAP` (3×) |
+| `structure` | the share of the last 3 daily bars whose low is above the one before it |
+| `position` | where the close sits in the 10-day range, 0 at the low and 1 at the high |
+| `compression` | `1 − ATR(5)/ATR(20)`; a coil scores high, an expansion zero |
+| `hourly` | half the sign of the 12-hour slope, half the share of green bars |
+
+Every component comes back with the score. A score nobody can take apart is a
+number nobody can argue with — and the point of `bo_episodes` is to find out
+later which of these five, if any, predicted anything.
+
+**Missing hourly data drops the hourly weight, renormalises the other four,
+and caps the result at `HOURLY_MISSING_SCORE_CAP` (80)** with
+`hourly_missing` set. Scoring the absent component zero would punish us for
+our own data gap; leaving the weights alone would quietly score the token out
+of 85. The cap is what stops a half-seen token outranking a fully-seen one.
+
+## The state machine — `setups.py`
+
+Evaluated on every closed hourly bar, against the nearest unbroken
+resistance. `distance_pct` is how far **below** resistance the price is;
+negative means above.
+
+| State | Rule |
+|---|---|
+| `BROKE_OUT` | close more than `BREAK_CONFIRM_PCT` (1%) above resistance — whatever the score says |
+| `FAILED` | the episode **had** reached `PRE_BREAKOUT` and price is now more than `FAIL_PCT` (12%) below resistance, or the score fell under the watch floor |
+| `PRE_BREAKOUT` | score ≥ `PRE_SCORE` (65) and 0 ≤ distance ≤ `PRE_ZONE_PCT` (6%) |
+| `WATCHING` | score ≥ `WATCH_SCORE` (50) and 0 ≤ distance ≤ `WATCH_ZONE_PCT` (15%) |
+| `NONE` | anything else |
+
+Checked in that order, and the order is not arbitrary: failure is tested
+before the entry zones so a setup cannot re-arm on the same bar it fails.
+
+**The band between resistance and resistance + 1% is deliberately `NONE`** —
+`PRE_BREAKOUT` is strictly below resistance and a break needs a 1% close above
+it, so a price inside that sliver is neither. It does not close an episode: a
+lull is not an answer.
+
+### Episodes
+
+One open episode per token, enforced by a **partial** unique index so closed
+ones accumulate freely. It opens on the first `WATCHING` or `PRE_BREAKOUT`,
+and closes on `BROKE_OUT`, `FAILED`, `MAX_EPISODE_HOURS` (168) → `EXPIRED`, or
+the token leaving the universe → `universe_exit`.
+
+`first_pre_breakout_at` and `entry_ref_price` are set the first hour it
+reaches `PRE_BREAKOUT` — the moment Phase 3 buys, and the reference every
+outcome is measured from. `peak_price` and `min_price` are tracked **only
+after** that reference exists: a high reached before we would have bought is
+not a gain we would have had.
+
+### Outcomes, 72 hours later
+
+A separate daily pass fills `max_gain_pct_from_ref`, `max_loss_pct_from_ref`,
+`pct_at_24h`, `pct_at_72h`, `trail25_result_pct` and `outcome_gappy`, marking
+`outcome_at` so it never runs twice. **The separation is the point**: if the
+outcome were written by the same pass that wrote the setup, the record would
+be worthless. Gaps in the hourly bars are treated as no movement and flagged,
+so the number can be excluded later rather than silently trusted.
+
+`trail25_result_pct` is what a $100 position with a $25 trailing stop would
+have returned — and it is computed with the **same function the live trader
+uses**, not a second implementation. See Phase 3.
+
+---
+
+# Phase 3 — the paper trader
+
+Behind **its own second flag**, `BREAKOUT_TRADING_ENABLED`, default off.
+Detection and recording are safe to run anywhere; opening positions is a
+separate decision, and one switch for both would mean you could not have the
+watchlist without the book.
+
+```bash
+BREAKOUT_LAB_ENABLED=true BREAKOUT_TRADING_ENABLED=true \
+  python -m app.labs.breakout trader status
+```
+
+## Entry
+
+A token whose episode **transitions** into `PRE_BREAKOUT` — not one that has
+been sitting in it for six hours. Entering a stale state every hour would be a
+different strategy from the one being recorded.
+
+**Decide on one bar, fill on the next.** The trader takes the transition that
+happened on the *previous* closed bar and fills at the **open** of the bar that
+has just closed. That is the brief's "fill at the next hourly open" with no
+pending-order state, because by tick time that open is a stored number rather
+than a guess.
+
+| Gate | Rule |
+|---|---|
+| slots | `SLOTS` (10); slot size is `equity / SLOTS` **at the moment of entry**, so it compounds and shrinks with the book |
+| liquidity | `liquidity_usd ≥ MIN_LIQ_FOR_ENTRY` ($50,000); an unknown liquidity is refused, not assumed deep |
+| pool share | the position may not exceed `MAX_POOL_SHARE_PCT` (0.5%) of pool liquidity — the honest limit on a memecoin order is the pool, not the wallet |
+| one per token | never two positions in the same mint |
+| ranking | more candidates than slots → highest score, ties broken by 24h volume, then by mint so the order is total |
+
+Costs on every fill: `SLIPPAGE_BPS` (100 = 1%) and `FEE_BPS` (30). A round
+trip at a flat price loses about **2.6%**, so the number to beat is not zero.
+
+**There is no floor under the slot size.** Below $100 of equity the lab carries
+on at equity/10 — pre-decided, because the kill switch is the only thing
+allowed to halt trading.
+
+## Exit — first rule wins
+
+| Reason | Rule |
+|---|---|
+| `forced_exit` | the token left the universe; we can no longer price it honestly |
+| `trail_stop` | value fell `TRAIL_PCT` (25%) of the slot below its high-water value |
+| `failed_setup` | the episode closed `FAILED` **and** the position is under water |
+| `time_stop` | held `MAX_HOLD_HOURS` (168) **and** still under water |
+
+The last two only close losers on purpose: a winner keeps its trailing stop,
+which is the exit that knows what the price is actually doing.
+
+### The line that decides whether any of this means anything
+
+`rules.trail_step` takes **the low before the high**. A bar that would both
+take the stop out and set a new high exits at the stop — we cannot see the
+order within a bar, so we assume the order that costs us. The high-water mark
+is raised only after the low has been checked, so a stop can never be lifted
+by a high the price reached after it would already have been hit.
+
+**That function is shared.** Phase 2's `trail_result` folds it over a series;
+the trader calls it once per tick. One rule, not two implementations — so
+`bo_episodes.trail25_result_pct` and the live book cannot drift apart. A test
+runs the same hourly series through both and requires them equal net of
+costs, and a second, structural test asserts `trail_result` really does call
+`trail_step` rather than reimplementing it.
+
+## The kill switch
+
+Drawdown from peak equity beyond `MAX_DRAWDOWN_PCT` (40%) closes every
+position, sets `halted`, and refuses entries until a human runs:
+
+```bash
+python -m app.labs.breakout trader reset-halt --yes
+```
+
+The reset also **re-bases the peak to current equity** — leaving the old peak
+would re-trip the switch on the next tick, which is not a reset, it is a loop.
+
+```bash
+python -m app.labs.breakout trader flatten --yes
+```
+
+Both destructive commands require `--yes`.
+
+---
+
+# The routes
+
+All eleven are **read-only**. There is no POST, PUT, PATCH or DELETE on this
+router and no endpoint that can open, close or size a position — trading is
+driven by the scheduled tick and the CLI, and two tests hold it.
+
+| Route | Answers |
+|---|---|
+| `GET /api/v1/labs/breakout/health` | flag, universe size, candle coverage, `starved_tokens`, budget, last run per phase |
+| `GET .../universe` | active tokens with their stats |
+| `GET .../setups` | open episodes, `PRE_BREAKOUT` first then by score |
+| `GET .../setups/{mint}` | the token panel: universe row, levels, latest snapshot, episode, and both candle series |
+| `GET .../episodes?limit&offset` | the closed record, with every outcome column |
+| `GET .../stats` | open by state, closed by reason, **outcomes by score decile** |
+| `GET .../account` | equity, cash, unrealised, drawdown, slots, halted, trading flag |
+| `GET .../positions` | open positions with mark, high-water and trailing-stop value |
+| `GET .../trades?limit&offset` | closed round trips with their exit reason |
+| `GET .../equity?hours` | the curve |
+| `GET .../trade_stats` | win rate, expectancy, profit factor, drawdown, split by exit reason |
+
+With either flag off the routes answer `running: false` — or the starting
+account — **without touching the database**, because "not running" and "ran
+and found nothing" are different facts.
+
+---
+
+# Phase 4 — the tab
+
+`/breakout-lab`, from `frontend/src/labs/breakout/`. One nav entry and one
+route file outside that folder, and nothing else.
+
+* **Header** — equity, unrealised, drawdown, slots used/free, slot size,
+  universe size, last tick, a red `HALTED` banner in an `alert` role, and a
+  `paper` tag that is always visible.
+* **Setups watchlist** — open episodes, `PRE_BREAKOUT` first and badged, then
+  by score. A row opens the token panel.
+* **Token panel** — SVG candles with a daily/hourly toggle, resistance
+  clusters drawn as horizontal lines (**unbroken solid, broken dashed**), the
+  pre-breakout zone shaded under the nearest resistance, entry and trailing-stop
+  markers when a position is open, and the five score components beside it.
+* **Positions + equity curve** with a 24h / 7d / 30d selector.
+* **Trades + two verdict cards** — the trading statistics, and *"Does the
+  score work?"*: completed episodes by the score they were recorded at
+  against what the trailing stop returned. If the score predicts anything, the
+  top deciles beat the bottom ones.
+
+**No charting library.** There is none in this repo and this lab may not add
+one, so the chart is plain SVG on a **logarithmic** price axis — a memecoin
+that ran 40× over 180 days is a vertical wall on a linear axis with every
+level formed months ago squashed into the floor, which is exactly what the
+chart exists to show.
+
+Mock mode is `NEXT_PUBLIC_BREAKOUT_MOCK=true`, served from `mock.ts`. The
+fixtures are **typed against `types.ts`**, which mirrors the backend response
+models, so a field renamed on the server fails the build rather than rendering
+a blank column nobody notices for a week.
+
+---
+
+# Decisions made unattended
+
+Each of these was ambiguous in the brief. The conservative reading was taken
+and recorded here rather than asked about.
+
+* **A level breaks only on a close above it AFTER the cluster's last touch.**
+  Read literally, "any daily close above it" lets a cluster break itself: the
+  level is a volume-weighted mean, so a constituent swing can have closed above
+  it. Restricting the search is also the conservative reading — fewer levels
+  are called broken, so more stand as resistance and fewer breakouts are
+  claimed.
+* **No cluster-merge pass, because none is reachable.** The decision list asks
+  for duplicate clusters to be merged after rounding. With this grouping they
+  cannot arise — a new group opens only when the previous group's mean is
+  final and already more than `CLUSTER_PCT` away — so a fold over them would
+  never fire. A parametrised test asserts the invariant directly instead,
+  which is what the decision was for.
+* **The `position` component is continuous, not a 30% threshold.** A threshold
+  would throw away the difference between a close at the 31st percentile and
+  one at the 99th, which is the difference that matters. A close in the top
+  30% is simply one scoring above 0.7.
+* **Only the BASE token of a pool is considered.** A token that appears only
+  as the quote side is invisible to the lab; on Solana that is effectively the
+  stables and wrapped SOL, which are excluded anyway.
+* **`failed_setup` and `time_stop` only close losing positions.** A failed
+  setup that is nonetheless in profit keeps its trailing stop.
+* **The kill-switch reset re-bases the peak**, or it would re-trip next tick.
+* **A position with no bar on this tick is held, not guessed at** — unless the
+  token has also left the universe, in which case it is closed at its entry,
+  the only number still defensible.
+* **Drawdown is read off the stored equity curve**, not off the trade
+  sequence: open positions are part of a drawdown anyone lived through.
+* **`profit_factor` is null, not infinity, when nothing has lost yet.**
+* **Mock mode reads `process.env.NEXT_PUBLIC_BREAKOUT_MOCK` directly** rather
+  than going through `src/lib/env.ts`, which is shared and outside this lab's
+  permitted edits.

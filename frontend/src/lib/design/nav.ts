@@ -95,6 +95,16 @@ export const NAV_GROUPS: NavGroup[] = [
         status: "ready",
         note: "Research simulation. Five supplied strategies, $1,000 each.",
       },
+      // Established tokens, not launches — the only lab here that looks at
+      // pools older than a week. Named for what it watches so it cannot be
+      // read as another generation of the wallets above it.
+      {
+        href: "/breakout-lab",
+        label: "Breakout Lab",
+        icon: IconSpark,
+        status: "ready",
+        note: "Research simulation. Daily resistance, $1,000 paper book.",
+      },
     ],
   },
   {
