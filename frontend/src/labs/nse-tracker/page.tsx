@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 
 import { Panel, PanelHeader, PanelTitle } from "@/components/ui/panel";
-import { prefersReducedMotion } from "@/lib/motion";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/states";
 
@@ -52,18 +51,6 @@ const BREAKOUT_WINDOWS = [7, 30, 90];
 export function NseTrackerPage() {
   const [selected, setSelected] = useState<string | null>(null);
   const [window, setWindow] = useState(BREAKOUT_WINDOWS[1]!);
-  const panelRef = useRef<HTMLDivElement>(null);
-
-  // The panel renders BELOW the board, and the board is a hundred rows long.
-  // Without this, clicking a stock opens a chart the reader cannot see and the
-  // click reads as broken — which is exactly how it was reported.
-  useEffect(() => {
-    if (!selected) return;
-    panelRef.current?.scrollIntoView({
-      behavior: prefersReducedMotion() ? "auto" : "smooth",
-      block: "start",
-    });
-  }, [selected]);
 
   const health = useHealth();
   const running = health.data?.running ?? false;
@@ -246,13 +233,11 @@ export function NseTrackerPage() {
 
       {/* 3 — the stock view */}
       {selected && (
-        <div ref={panelRef} className="scroll-mt-4">
-          <StockPanel
-            symbol={selected}
-            nearPct={nearPct}
-            onClose={() => setSelected(null)}
-          />
-        </div>
+        <StockPanel
+          symbol={selected}
+          nearPct={nearPct}
+          onClose={() => setSelected(null)}
+        />
       )}
 
       {/* 4 — recent breakouts */}

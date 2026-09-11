@@ -180,6 +180,22 @@ describe("the stock view", () => {
       expect(screen.getAllByTestId("episode-row").length).toBe(3));
   });
 
+  it("waits for the data before scrolling, so it does not land mid-chart", async () => {
+    // Scrolling to the loading skeleton and letting taller content replace it
+    // leaves the reader in the middle of the chart with the heading above them.
+    const scrollIntoView = window.HTMLElement.prototype
+      .scrollIntoView as ReturnType<typeof vi.fn>;
+    stub();
+    render(<NseTrackerPage />, { wrapper });
+    await waitFor(() => expect(screen.getAllByTestId("near-row").length).toBe(5));
+    fireEvent.click(screen.getAllByTestId("near-row")[0]!);
+
+    // The chart is the proof the fetch resolved.
+    await waitFor(() =>
+      expect(screen.getByTestId("tracker-chart")).toBeInTheDocument());
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+  });
+
   it("scrolls the panel into view, because it opens below a long board", async () => {
     // The board runs to a hundred rows and the panel renders under it. Without
     // the scroll the click opens a chart nobody can see, and reads as broken —
@@ -193,7 +209,10 @@ describe("the stock view", () => {
     expect(scrollIntoView).not.toHaveBeenCalled();
     fireEvent.click(screen.getAllByTestId("near-row")[0]!);
     await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
-    expect(scrollIntoView.mock.calls[0]![0]).toMatchObject({ block: "start" });
+    // No `behavior: "smooth"`: it is silently dropped in some browsers and
+    // embedded views, and a scroll that sometimes does nothing is the bug this
+    // exists to fix.
+    expect(scrollIntoView.mock.calls[0]![0]).toEqual({ block: "start" });
   });
 
   it("closes again", async () => {
