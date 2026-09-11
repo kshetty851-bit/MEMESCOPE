@@ -109,6 +109,10 @@ async def status(db: AsyncSession = Depends(get_db)) -> GraduationStatus:
     complete_mints = (select(GradCurveSample.mint)
                       .where(GradCurveSample.complete.is_(True)).distinct())
     feed_mints = select(GradMigration.mint)
+    # Materialised ONCE. Calling `.subquery()` twice builds two independent
+    # subqueries and SQLAlchemy joins them as a cartesian product — it warns,
+    # and the count it returns is the product rather than the difference.
+    complete_sub = complete_mints.subquery()
 
     base.funnel = Funnel(
         seen=await count(select(func.count()).select_from(GradToken)),
@@ -124,8 +128,8 @@ async def status(db: AsyncSession = Depends(get_db)) -> GraduationStatus:
         feed_only=await count(select(func.count()).select_from(GradMigration)
                               .where(GradMigration.mint.not_in(complete_mints))),
         chain_only=await count(
-            select(func.count()).select_from(complete_mints.subquery())
-            .where(complete_mints.subquery().c.mint.not_in(feed_mints))),
+            select(func.count()).select_from(complete_sub)
+            .where(complete_sub.c.mint.not_in(feed_mints))),
     )
     base.watch_set = await count(
         select(func.count()).select_from(GradToken)
