@@ -26,6 +26,7 @@ from app.health import api as pipeline_health
 from app.hq_ops import api as hq_ops
 from app.karthik import api as karthik
 from app.karthik_ops import api as karthik_ops
+from app.labs.breakout import api as breakout_lab
 from app.labs.rafiq import api as rafiq_lab
 from app.paper import api as paper
 from app.compound import api as compound
@@ -123,3 +124,7 @@ api_router.include_router(karthik_ops.router)
 # Read-only and additive: no existing route changes shape, and with the flag
 # off every route here answers `running: false` rather than an empty book.
 api_router.include_router(rafiq_lab.router)
+# Breakout Lab. Established Solana tokens coiling into a daily resistance, and
+# a paper book that buys the pre-breakout zone. Read-only over its own `bo_*`
+# tables; flag-gated. Additive: no existing route changes shape.
+api_router.include_router(breakout_lab.router)

@@ -257,6 +257,13 @@ x-backend-env: &backend-env
   # .env alone does nothing — this file enumerates every variable that reaches
   # a container, and a value not named here never arrives.
   RAFIQ_LAB_ENABLED: ${RAFIQ_LAB_ENABLED:-false}
+  BREAKOUT_LAB_ENABLED: ${BREAKOUT_LAB_ENABLED:-false}
+  # The paper book's OWN flag, separate from the lab's: detection and recording
+  # are safe to run anywhere, opening positions is a different decision. In the
+  # anchor for the reason above — the beat runs it in `scheduler`, the worker
+  # executes it and the API reads it, so all three have to agree about the flag
+  # or the book trades where nobody can see it.
+  BREAKOUT_TRADING_ENABLED: ${BREAKOUT_TRADING_ENABLED:-false}
   KARTHIK_CANDIDATE_LIMIT: ${KARTHIK_CANDIDATE_LIMIT:-250}
   KARTHIK_REVIEW_BATCH_LIMIT: ${KARTHIK_REVIEW_BATCH_LIMIT:-2000}
   KARTHIK_MAX_MARKET_AGE_SECONDS: ${KARTHIK_MAX_MARKET_AGE_SECONDS:-900}

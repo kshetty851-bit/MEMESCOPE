@@ -43,6 +43,7 @@ celery_app = Celery(
         "app.social.scheduler",
         "app.copycontrol.scheduler",
         "app.labs.rafiq.scheduler",
+        "app.labs.breakout.scheduler",
         "app.hq_ops.tasks",
     ],
 )
@@ -333,6 +334,17 @@ celery_app.conf.beat_schedule = {
     "rafiq-lab-tick": {
         "task": "app.labs.rafiq.scheduler.rafiq_lab_tick",
         "schedule": crontab(minute="*"),
+    },
+    # Breakout Lab: the universe of established Solana tokens, its candles,
+    # its setup detection and its paper book. Every 15 minutes — the universe's
+    # own cadence. The candle pass is chained behind it and sends no request
+    # for a timeframe whose bar has not closed, so the hourly sweep happens
+    # once an hour and the daily one once a day whatever the beat's period.
+    # Gated by BREAKOUT_LAB_ENABLED, which ships off: the task returns before
+    # it opens a session or a socket, so registering it here starts nothing.
+    "breakout-lab-tick": {
+        "task": "app.labs.breakout.scheduler.breakout_lab_tick",
+        "schedule": crontab(minute="*/15"),
     },
     # The real wallet's heartbeat. Beside the Lab's and at the same cadence,
     # because it acts on Lab decisions and those are actionable for ten minutes.
