@@ -242,11 +242,12 @@ export function GraduationLabPage() {
               </div>
               <div className="flex justify-between">
                 <dt className="text-ink-dim">Checkpoints</dt>
+                <dd className="tabular-nums">{data.checkpoints}</dd>
+              </div>
+              <div className="flex justify-between">
+                <dt className="text-ink-dim">…of those, with reserves</dt>
                 <dd className="tabular-nums">
-                  {data.checkpoints}
-                  <span className="ml-2 text-xs text-ink-dim">
-                    {data.checkpoints_with_reserves} with reserves
-                  </span>
+                  {data.checkpoints_with_reserves}
                 </dd>
               </div>
               <div className="flex justify-between">

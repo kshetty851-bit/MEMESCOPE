@@ -24,6 +24,7 @@ from app.labs.graduation.models import (
     GradCheckpoint,
     GradCurveSample,
     GradMigration,
+    GradPostgradSample,
     GradToken,
 )
 
@@ -136,6 +137,11 @@ async def status(db: AsyncSession = Depends(get_db)) -> GraduationStatus:
     base.checkpoints_with_reserves = await count(
         select(func.count()).select_from(GradCheckpoint)
         .where(GradCheckpoint.v_token_reserves.is_not(None)))
+    base.postgrad_samples = await count(
+        select(func.count()).select_from(GradPostgradSample))
+    # Stated, not left to the model default: this is a claim the page renders
+    # a warning from, and a default is not a claim.
+    base.quote_side_trusted = False
     base.samples_last_hour = await count(
         select(func.count()).select_from(GradCurveSample)
         .where(GradCurveSample.ts >= hour_ago))
