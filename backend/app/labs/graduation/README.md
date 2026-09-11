@@ -764,7 +764,38 @@ That was wrong: it confused DexScreener's reported pool liquidity with curve
 depth. A curve at 70% has ~62 SOL of virtual reserves behind it and a $100 buy
 moves it 1.2%.
 
-**11. Even with perfect data, the trade may not exist.** Measured on 738
+**11. THE QUOTE SIDE OF THE CURVE IS NOT TRUSTWORTHY. Observed in production
+2026-09-11, unresolved.** On the first live run the token side decoded
+perfectly — `real_token_reserves` equals `v_token_reserves − 279,900,000`
+exactly, on every sample, and moves monotonically — but the SOL side does not
+behave:
+
+* `v_quote_reserves` for one token read 51 → 114 → 50 → 308 → 61 → 8.65 SOL
+  across ten polls while `v_token_reserves` moved 1.3%;
+* it moves **down** as tokens are sold, which is the wrong direction;
+* a fresh read of that account gave `virtual_sol_reserves` = 3.096 SOL against
+  a seeded 30, and `real_sol_reserves` ≈ 0 on a curve that had demonstrably
+  sold 6.3M tokens;
+* the implied constant product `v_sol × v_token` ranges from 0.0006× to 33× the
+  seeded value across 537 samples, and **drifts within a single token** — 
+  impossible for a genuine constant product. The tokens where it is stable at
+  exactly 1.0000 are the untouched ones, where nothing has moved at all.
+
+The original layout verification was done against an **untouched** curve, where
+every field happens to equal its seeded constant — so it could not have caught
+this. What follows:
+
+* `progress_pct`, the checkpoints and `grad_curve_samples`' token columns are
+  sound, and they are what the lab exists to record.
+* `v_quote_reserves`, `real_quote_reserves` and `market_cap_quote` should be
+  treated as **unreliable** until the layout is re-verified against a curve
+  that has actually traded.
+* **This reaches the backtester.** `curve_fill_buy` / `curve_fill_sell` price a
+  pre-graduation leg from `v_sol`, so pre-graduation fills on real data inherit
+  the problem. The synthetic tests are unaffected — they construct reserves
+  from the constants — which is exactly why they passed.
+
+**12. Even with perfect data, the trade may not exist.** Measured on 738
 graduates in 24h: only 94 had any pre-graduation liquidity reading, **median
 pre-grad liquidity $4,112**, and only 29 would clear a $100k floor. At that
 depth Jupiter routing showed ~99% buy impact and **37% of sells had no route**.
