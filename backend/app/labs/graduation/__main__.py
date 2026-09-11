@@ -2,6 +2,8 @@
 
     record                  hold the socket open, poll the chain, fill the tables
     poll                    one curve poll pass over the current watch set
+    features [--recompute]  build grad_features for graduates whose hour is up
+    summary                 the distribution Phase 3 is judged against
     prune                   one prune pass
     health                  recorder_health() as JSON
     curve --mint MINT       derive the PDA, read the account, decode it
@@ -28,8 +30,9 @@ from decimal import Decimal, InvalidOperation
 
 from app.db.session import SessionFactory
 from app.labs.graduation import config, curve
+from app.labs.graduation.features import format_summary, summary
 from app.labs.graduation.recorder import GraduationRecorder, recorder_health
-from app.labs.graduation.scheduler import prune_tick
+from app.labs.graduation.scheduler import features_tick, prune_tick
 from app.labs.graduation.sources import CurveRPC
 
 
@@ -50,6 +53,11 @@ async def _record() -> int:
                      f"watch set <= {config.MAX_WATCH_SET}\n")
     await recorder.run()
     return 0
+
+
+async def _summary() -> str:
+    async with SessionFactory() as session:
+        return format_summary(await summary(session))
 
 
 async def _health() -> dict:
@@ -104,6 +112,10 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("record", help="hold the socket open and poll the chain")
     sub.add_parser("poll", help="one curve poll pass")
+    feats = sub.add_parser("features", help="build grad_features")
+    feats.add_argument("--recompute", action="store_true",
+                       help="rewrite rows that already exist, not just new ones")
+    sub.add_parser("summary", help="the return distribution, with its denominator")
     sub.add_parser("prune", help="one prune pass")
     sub.add_parser("health", help="recorder_health() as JSON")
     one = sub.add_parser("curve", help="derive, fetch and decode one mint's curve")
@@ -112,7 +124,8 @@ def main(argv: list[str] | None = None) -> int:
     progress.add_argument("--tokens", required=True)
     args = parser.parse_args(argv)
 
-    if not config.enabled() and args.command in ("record", "prune", "poll"):
+    if not config.enabled() and args.command in ("record", "prune", "poll",
+                                                 "features"):
         sys.stderr.write("LAB_GRADUATION_ENABLED is not set — nothing will run.\n")
         return 1
 
@@ -124,6 +137,12 @@ def main(argv: list[str] | None = None) -> int:
             return 0
     if args.command == "poll":
         _emit(asyncio.run(_poll_once()))
+        return 0
+    if args.command == "features":
+        _emit(asyncio.run(features_tick(recompute=args.recompute)))
+        return 0
+    if args.command == "summary":
+        sys.stdout.write(asyncio.run(_summary()) + "\n")
         return 0
     if args.command == "prune":
         _emit(asyncio.run(prune_tick()))

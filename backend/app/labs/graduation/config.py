@@ -217,5 +217,37 @@ PRUNE_AFTER_HOURS = 24
 PRUNE_MAX_TOKENS_PER_RUN = 500
 PRUNE_INTERVAL_SECONDS = 15 * 60
 
+# --- features -----------------------------------------------------------------
+#: Checkpoint levels features are computed at. 100 is excluded: it IS the
+#: graduation, so a feature measured there could not be used to decide an entry
+#: before it. Phase 3 tests entry levels, and an entry at 100 is not an entry.
+FEATURE_LEVELS: tuple[Decimal, ...] = tuple(Decimal(x) for x in (70, 80, 90, 95))
+#: Velocity look-backs, in minutes.
+VELOCITY_WINDOWS: tuple[int, ...] = (5, 15)
+#: The activity-proxy window: samples-with-change in the last this-many minutes.
+ACTIVITY_WINDOW_MIN = 15
+#: A quiet run of at least this long between two reserve changes is one stall.
+STALL_MIN = 5
+#: A fall of this many progress POINTS from a running peak, after a checkpoint
+#: and before graduation, sets that checkpoint's retrace flag.
+RETRACE_DROP_PTS = _dec("LAB_GRADUATION_RETRACE_PTS", "5")
+
+#: Outcome offsets from the pool open, in minutes.
+RETURN_OFFSETS_MIN: tuple[int, ...] = (2, 5, 15, 30, 60)
+#: The outcome window.
+OUTCOME_WINDOW_MIN = 60
+#: Outcomes are NULL unless at least this many distinct minutes of the window
+#: carry a post-graduation sample. A return computed over a series with holes
+#: in it is a number with no error bar, and Phase 3 would be judged on it.
+OUTCOME_MIN_COVERAGE_MIN = _int("LAB_GRADUATION_MIN_COVERAGE_MIN", 55)
+#: A graduate is not processed until its whole outcome window has closed, plus
+#: this much slack for the last poll and its flush to land.
+FEATURES_SETTLE_MIN = 5
+#: Never compute more tokens in one beat than this: the worker's soft time
+#: limit is 540s and it kills a task BEFORE it commits.
+FEATURES_MAX_PER_RUN = _int("LAB_GRADUATION_FEATURES_MAX_PER_RUN", 500)
+#: How often the beat recomputes.
+FEATURES_INTERVAL_SECONDS = 10 * 60
+
 # --- health -------------------------------------------------------------------
 HEALTH_WINDOW_SECONDS = 600

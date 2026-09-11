@@ -28,9 +28,11 @@ SOURCES = sorted(p for p in PACKAGE.rglob("*.py") if "tests" not in p.parts)
 MIGRATIONS = (
     BACKEND / "alembic" / "versions" / "20260911_0066_graduation_lab.py",
     BACKEND / "alembic" / "versions" / "20260911_0067_graduation_rpc_polling.py",
+    BACKEND / "alembic" / "versions" / "20260911_0068_graduation_features.py",
 )
-TABLES = ["grad_checkpoints", "grad_curve_samples", "grad_migrations",
-          "grad_postgrad_samples", "grad_tokens", "grad_trades"]
+TABLES = ["grad_checkpoints", "grad_curve_samples", "grad_features",
+          "grad_migrations", "grad_postgrad_samples", "grad_tokens",
+          "grad_trades"]
 
 FORBIDDEN_MODULES = (
     "app.paper", "app.paper_v2", "app.karthik", "app.karthik_ops",
@@ -55,8 +57,8 @@ ALLOWED_PLATFORM = (
 PURE_MODULES = ("curve.py", "parse.py", "watchset.py")
 #: Every module the package ships.
 MODULES = ("config.py", "curve.py", "parse.py", "watchset.py", "sources.py",
-           "postgrad.py", "recorder.py", "scheduler.py", "models.py",
-           "__main__.py")
+           "postgrad.py", "recorder.py", "features.py", "scheduler.py",
+           "models.py", "__main__.py")
 
 
 def imported_modules(tree: ast.AST) -> set[str]:
@@ -181,10 +183,24 @@ def test_migrations_touch_only_this_lab(path: pathlib.Path) -> None:
     assert len(indexes) == body.count("op.create_index("), "unbalanced parse"
 
 
-def test_the_new_tables_are_created_by_the_new_migration() -> None:
-    body = MIGRATIONS[1].read_text()
-    created = re.findall(r'op\.create_table\(\s*"([^"]+)"', body)
-    assert sorted(created) == ["grad_curve_samples", "grad_postgrad_samples"]
+def test_each_migration_creates_the_tables_it_claims() -> None:
+    by_migration = {
+        "0066": ["grad_checkpoints", "grad_migrations", "grad_tokens",
+                 "grad_trades"],
+        "0067": ["grad_curve_samples", "grad_postgrad_samples"],
+        "0068": ["grad_features"],
+    }
+    for path, expected in zip(MIGRATIONS, by_migration.values(), strict=True):
+        created = re.findall(r'op\.create_table\(\s*"([^"]+)"', path.read_text())
+        assert sorted(created) == expected, path.name
+
+
+def test_the_feature_engine_reads_and_never_writes_another_labs_table() -> None:
+    """`features.py` is the one module here that issues arbitrary SQL, so the
+    table names it mentions are worth pinning."""
+    body = (PACKAGE / "features.py").read_text()
+    mentioned = set(re.findall(r"\bgrad_[a-z_]+\b", body))
+    assert mentioned <= set(TABLES), mentioned - set(TABLES)
 
 
 @pytest.mark.parametrize("path", MIGRATIONS, ids=lambda p: p.name)

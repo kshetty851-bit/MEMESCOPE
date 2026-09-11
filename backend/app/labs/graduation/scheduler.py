@@ -1,4 +1,4 @@
-"""The lab's beat task: prune tokens that never graduated.
+"""The lab's beat tasks: build features, and prune tokens that never graduated.
 
 The RECORDER is not a beat task — it is a long-lived process that holds a
 websocket open, and Celery is the wrong shape for that. Run it with
@@ -23,12 +23,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.logging import get_logger
 from app.db.session import SessionFactory
 from app.labs.graduation import config
+from app.labs.graduation.features import FeatureEngine
 from app.labs.graduation.models import GradCurveSample, GradToken
 from app.workers.celery_app import celery_app
 
 logger = get_logger(__name__)
 
 TASK_NAME = "app.labs.graduation.scheduler.graduation_prune_tick"
+FEATURES_TASK = "app.labs.graduation.scheduler.graduation_features_tick"
 
 
 @celery_app.task(name=TASK_NAME)
@@ -52,6 +54,34 @@ async def prune_tick() -> dict[str, Any]:
         return {"error": "graduation_prune_failed"}
 
 
+@celery_app.task(name=FEATURES_TASK)
+def graduation_features_tick() -> dict[str, Any]:
+    from app.workers.runtime import run_async
+
+    return run_async(features_tick())
+
+
+async def features_tick(*, recompute: bool = False) -> dict[str, Any]:
+    """One feature pass over graduates whose outcome window has closed.
+
+    Deliberately NOT chained behind the pruner: they touch disjoint rows (the
+    pruner only ever deletes non-graduates, and this only ever reads
+    graduates), so ordering them would buy nothing and a failure in one would
+    delay the other.
+    """
+    if not config.enabled():
+        return {"skipped": "graduation_disabled"}
+    try:
+        async with SessionFactory() as session:
+            result = await FeatureEngine(session).run(
+                now=datetime.now(UTC), recompute=recompute)
+            await session.commit()
+            return result
+    except Exception:  # containment is the point: never raise into the beat
+        logger.exception("graduation_features_failed")
+        return {"error": "graduation_features_failed"}
+
+
 async def prune(session: AsyncSession, *, now: datetime) -> dict[str, int]:
     """Delete the curve samples of tokens that never graduated, keeping the row.
 
@@ -63,7 +93,8 @@ async def prune(session: AsyncSession, *, now: datetime) -> dict[str, int]:
     survive, and it is the only thing that grows without bound.
 
     `grad_postgrad_samples` is never touched: it only exists for tokens that
-    DID graduate, and a graduate is never pruned.
+    DID graduate, and a graduate is never pruned — by EITHER graduation signal,
+    which is the subtlety this query gets right.
 
     Bounded to `PRUNE_MAX_TOKENS_PER_RUN` per pass. The worker's soft time
     limit is 540 seconds and it kills a task BEFORE it commits, so an unbounded
@@ -73,11 +104,24 @@ async def prune(session: AsyncSession, *, now: datetime) -> dict[str, int]:
     # binds a type from the LEFT operand, so `GradToken.first_seen_at -
     # timedelta(...)` compiles, runs, raises nothing and matches zero rows.
     cutoff = now - timedelta(hours=config.PRUNE_AFTER_HOURS)
+    # "Never graduated" must mean what the rest of the lab means by it. There
+    # are TWO independent graduation signals — the websocket migration message
+    # (`migrated_at`) and the chain's own `complete` flag — and either may
+    # arrive first, or alone. Testing only `migrated_at` would prune the curve
+    # series of a token that demonstrably filled its curve, just because the
+    # feed never mentioned it. That series is the whole input to `features.py`.
+    graduated_on_chain = (
+        select(GradCurveSample.mint)
+        .where(GradCurveSample.mint == GradToken.mint,
+               GradCurveSample.complete.is_(True))
+        .exists()
+    )
     mints = (await session.scalars(
         select(GradToken.mint)
         .where(
             GradToken.first_seen_at < cutoff,
             GradToken.migrated_at.is_(None),
+            ~graduated_on_chain,
             GradToken.pruned_at.is_(None),
         )
         .order_by(GradToken.first_seen_at)
@@ -97,8 +141,13 @@ async def prune(session: AsyncSession, *, now: datetime) -> dict[str, int]:
     return {"tokens": len(mints), "samples_deleted": deleted}
 
 
-#: `setdefault`, so an operator who names it in `celery_app.py` wins over this.
+#: `setdefault`, so an operator who names either in `celery_app.py` wins over
+#: this and there is never a second entry for the same task.
 celery_app.conf.beat_schedule.setdefault("graduation-lab-prune", {
     "task": TASK_NAME,
     "schedule": float(config.PRUNE_INTERVAL_SECONDS),
+})
+celery_app.conf.beat_schedule.setdefault("graduation-lab-features", {
+    "task": FEATURES_TASK,
+    "schedule": float(config.FEATURES_INTERVAL_SECONDS),
 })

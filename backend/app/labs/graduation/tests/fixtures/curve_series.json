@@ -1,0 +1,53 @@
+{
+ "_note": "Synthetic curve sample series. Offsets are MINUTES from the token's first_seen_at; progress is progress_pct. These are CHANGE-ONLY series, exactly as grad_curve_samples stores them: a gap means no reserve moved, not that nothing was looked at. Every expected value in test_features.py was worked out by hand from these numbers.",
+
+ "sparse": {
+  "_note": "The change-only case the whole engine has to get right. Long quiet stretches, including a 45-minute one between 91% and 96%. A reader that did not forward-fill would compute velocity from the wrong end of each gap.",
+  "samples": [
+   [0,  "0.000",   false],
+   [20, "45.000",  false],
+   [30, "70.000",  false],
+   [48, "82.000",  false],
+   [50, "91.000",  false],
+   [95, "96.000",  false],
+   [96, "100.000", true]
+  ],
+  "checkpoints": [[70, 30, "70.000"], [80, 50, "91.000"], [90, 50, "91.000"], [95, 95, "96.000"]]
+ },
+
+ "retrace": {
+  "_note": "Rises to 88%, falls back to 80.5% — a 7.5-point give-back from a running peak — then recovers and graduates. The 70 and 80 checkpoints must flag it; the 90 checkpoint comes AFTER the fall and must not. 95 is never reached, so its whole block is null.",
+  "samples": [
+   [0,  "0.000",   false],
+   [10, "72.000",  false],
+   [20, "88.000",  false],
+   [30, "80.500",  false],
+   [40, "92.000",  false],
+   [50, "100.000", true]
+  ],
+  "checkpoints": [[70, 10, "72.000"], [80, 20, "88.000"], [90, 40, "92.000"]]
+ },
+
+ "never_reached_90": {
+  "_note": "Crosses 70 and 80 and then graduates without ever being SEEN at 90 — the curve filled between two polls. The 90 and 95 blocks are null and the token is still written, because 'reached 80 and died' is the row Phase 3 most needs.",
+  "samples": [
+   [0,  "0.000",  false],
+   [5,  "71.000", false],
+   [9,  "83.000", false],
+   [12, "100.000", true]
+  ],
+  "checkpoints": [[70, 5, "71.000"], [80, 9, "83.000"]]
+ },
+
+ "_price_note": "Post-graduation prices as [minute_after_graduation, price_usd]. One a minute, as a live 60s poll would produce.",
+ "prices_full": {
+  "_note": "Opens at 1.0 two minutes after graduation, peaks at 2.5 ten minutes in, bottoms at 0.8, closes at 1.1. Full 60-minute coverage.",
+  "open_offset_min": 2,
+  "shape": [[0,"1.0"],[2,"1.2"],[5,"1.5"],[10,"2.5"],[15,"2.0"],[30,"1.4"],[40,"0.8"],[59,"1.1"]]
+ },
+ "prices_thin": {
+  "_note": "Only 30 of the 60 minutes carry a sample. Under the 55-minute floor, so every return must be NULL and postgrad_minutes_covered must say why.",
+  "open_offset_min": 1,
+  "shape": [[0,"1.0"],[29,"3.0"]]
+ }
+}
