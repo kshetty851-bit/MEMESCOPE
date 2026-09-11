@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.labs.graduation import config
+from app.labs.graduation.paper import PaperBook, positions
 from app.labs.graduation.models import (
     GradCheckpoint,
     GradCurveSample,
@@ -60,6 +61,36 @@ class Recent(BaseModel):
     sample_count: int = 0
 
 
+class PaperPosition(BaseModel):
+    mint: str
+    symbol: str | None = None
+    opened_at: datetime
+    open_fill: Decimal
+    last_quote: Decimal | None = None
+    peak_quote: Decimal
+    closed_at: datetime | None = None
+    close_reason: str | None = None
+    net_return: Decimal | None = None
+
+
+class PaperBookOut(BaseModel):
+    """The forward book. Rules frozen in advance; nothing here is tunable."""
+
+    running: bool = False
+    starting_quote: Decimal = Decimal(0)
+    equity_quote: Decimal = Decimal(0)
+    realised_quote: Decimal = Decimal(0)
+    unrealised_quote: Decimal = Decimal(0)
+    open_positions: int = 0
+    closed_positions: int = 0
+    wins: int = 0
+    max_slots: int = 0
+    notional_quote: Decimal = Decimal(0)
+    trailing_pct: Decimal = Decimal(0)
+    max_hold_minutes: int = 0
+    positions: list[PaperPosition] = []
+
+
 class GraduationStatus(BaseModel):
     running: bool
     rpc_host: str
@@ -80,6 +111,7 @@ class GraduationStatus(BaseModel):
     recent: list[Recent] = []
     #: Surfaced because the page must not imply the quote side is sound.
     quote_side_trusted: bool = False
+    paper: PaperBookOut = PaperBookOut()
 
     # --- is the chain actually being read? ----------------------------------
     #: When the poller last successfully read ANY curve. `last_sample_at`
@@ -185,6 +217,8 @@ async def status(db: AsyncSession = Depends(get_db)) -> GraduationStatus:
     polls_per_minute = max(1, 60 // max(1, config.POLL_INTERVAL_S))
     base.rpc_calls_per_minute = calls_per_poll * polls_per_minute
 
+    base.paper = await _paper(db)
+
     rows = (await db.execute(
         select(GradToken.mint, GradToken.symbol, GradToken.max_progress_pct,
                GradToken.tracked_at, GradToken.migrated_at,
@@ -200,3 +234,31 @@ async def status(db: AsyncSession = Depends(get_db)) -> GraduationStatus:
         for r in rows
     ]
     return base
+
+
+async def _paper(db: AsyncSession) -> PaperBookOut:
+    """The book's state. Read-only: this endpoint never ticks it."""
+    book = PaperBook(db)
+    account = await book.account()
+    return PaperBookOut(
+        running=config.paper_enabled(),
+        starting_quote=account.starting,
+        equity_quote=account.equity,
+        realised_quote=account.realised,
+        unrealised_quote=account.unrealised,
+        open_positions=account.open_positions,
+        closed_positions=account.closed_positions,
+        wins=account.wins,
+        max_slots=config.PAPER_MAX_SLOTS,
+        notional_quote=config.PAPER_NOTIONAL_QUOTE,
+        trailing_pct=config.PAPER_TRAILING_PCT,
+        max_hold_minutes=config.PAPER_MAX_HOLD_MINUTES,
+        positions=[
+            PaperPosition(
+                mint=p.mint, symbol=p.symbol, opened_at=p.opened_at,
+                open_fill=p.open_fill, last_quote=p.last_quote,
+                peak_quote=p.peak_quote, closed_at=p.closed_at,
+                close_reason=p.close_reason, net_return=p.net_return)
+            for p in await positions(db, limit=20)
+        ],
+    )

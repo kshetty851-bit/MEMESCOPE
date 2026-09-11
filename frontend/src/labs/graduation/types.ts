@@ -52,4 +52,35 @@ export interface GraduationStatus {
   seconds_since_chain_read: number | null;
   recorder_stalled: boolean;
   stall_threshold_s: number;
+  paper: PaperBook;
+}
+
+
+export interface PaperPosition {
+  mint: string;
+  symbol: string | null;
+  opened_at: string;
+  open_fill: string;
+  last_quote: string | null;
+  peak_quote: string;
+  closed_at: string | null;
+  close_reason: string | null;
+  net_return: string | null;
+}
+
+/** The forward paper book. Rules frozen in advance; nothing here is tunable. */
+export interface PaperBook {
+  running: boolean;
+  starting_quote: string;
+  equity_quote: string;
+  realised_quote: string;
+  unrealised_quote: string;
+  open_positions: number;
+  closed_positions: number;
+  wins: number;
+  max_slots: number;
+  notional_quote: string;
+  trailing_pct: string;
+  max_hold_minutes: number;
+  positions: PaperPosition[];
 }

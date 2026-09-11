@@ -25,12 +25,14 @@ from app.db.session import SessionFactory
 from app.labs.graduation import config
 from app.labs.graduation.features import FeatureEngine
 from app.labs.graduation.models import GradCurveSample, GradToken
+from app.labs.graduation.paper import PaperBook
 from app.workers.celery_app import celery_app
 
 logger = get_logger(__name__)
 
 TASK_NAME = "app.labs.graduation.scheduler.graduation_prune_tick"
 FEATURES_TASK = "app.labs.graduation.scheduler.graduation_features_tick"
+PAPER_TASK = "app.labs.graduation.scheduler.graduation_paper_tick"
 
 
 @celery_app.task(name=TASK_NAME)
@@ -80,6 +82,31 @@ async def features_tick(*, recompute: bool = False) -> dict[str, Any]:
     except Exception:  # containment is the point: never raise into the beat
         logger.exception("graduation_features_failed")
         return {"error": "graduation_features_failed"}
+
+
+@celery_app.task(name=PAPER_TASK)
+def graduation_paper_tick() -> dict[str, Any]:
+    from app.workers.runtime import run_async
+
+    return run_async(paper_tick())
+
+
+async def paper_tick() -> dict[str, Any]:
+    """One pass of the forward paper book.
+
+    Gated by `LAB_GRADUATION_PAPER_ENABLED` **on top of** the lab flag, so the
+    recorder can run for weeks before anything opens a position.
+    """
+    if not config.paper_enabled():
+        return {"skipped": "graduation_paper_disabled"}
+    try:
+        async with SessionFactory() as session:
+            result = await PaperBook(session).tick()
+            await session.commit()
+            return result
+    except Exception:  # containment: never raise into the beat
+        logger.exception("graduation_paper_failed")
+        return {"error": "graduation_paper_failed"}
 
 
 async def prune(session: AsyncSession, *, now: datetime) -> dict[str, int]:
@@ -150,4 +177,8 @@ celery_app.conf.beat_schedule.setdefault("graduation-lab-prune", {
 celery_app.conf.beat_schedule.setdefault("graduation-lab-features", {
     "task": FEATURES_TASK,
     "schedule": float(config.FEATURES_INTERVAL_SECONDS),
+})
+celery_app.conf.beat_schedule.setdefault("graduation-lab-paper", {
+    "task": PAPER_TASK,
+    "schedule": float(config.PAPER_INTERVAL_SECONDS),
 })

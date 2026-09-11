@@ -572,3 +572,57 @@ class GradFeature(Base):
     #: has drawn down 50%, and measuring against the open would call it flat.
     max_drawdown_60m: Mapped[Decimal | None] = mapped_column(_RET)
     minutes_to_peak: Mapped[Decimal | None] = mapped_column(_MIN)
+
+
+class GradPaperPosition(Base):
+    """One forward paper position. **Paper only — there is no key, no signer,
+    no route to a real wallet from this package.**
+
+    Deliberately forward-only and append-once: a position is opened, marked
+    each tick, and closed. Nothing rewrites a closed row, because the whole
+    value of a forward run is that its rules were fixed before the outcome was
+    known — a book that can be edited afterwards is a backtest with extra
+    steps, and this platform has already found eight edges that way that were
+    not there.
+
+    One row per mint, ever. The book never re-enters a token it has traded.
+    """
+
+    __tablename__ = "grad_paper_positions"
+    __table_args__ = (
+        UniqueConstraint("mint", name="uq_grad_paper_positions_mint"),
+        Index("ix_grad_paper_positions_open", "closed_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    mint: Mapped[str] = mapped_column(_ADDRESS, nullable=False)
+    symbol: Mapped[str | None] = mapped_column(String(32))
+
+    opened_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+    #: The quoted price at entry, before costs.
+    open_quote: Mapped[Decimal] = mapped_column(_USD, nullable=False)
+    #: What was actually paid per token, costs included.
+    open_fill: Mapped[Decimal] = mapped_column(_USD, nullable=False)
+    #: Quote spent, and the token balance it bought.
+    notional_quote: Mapped[Decimal] = mapped_column(_QUOTE, nullable=False)
+    tokens: Mapped[Decimal] = mapped_column(_TOKENS, nullable=False)
+
+    #: Highest price SEEN SO FAR — a running peak, updated each tick. The
+    #: trailing stop reads this, never the window's eventual high, which
+    #: nothing could have known at the time.
+    peak_quote: Mapped[Decimal] = mapped_column(_USD, nullable=False)
+    #: The most recent mark, so an open position has a value between ticks.
+    last_quote: Mapped[Decimal | None] = mapped_column(_USD)
+    marked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    close_quote: Mapped[Decimal | None] = mapped_column(_USD)
+    close_fill: Mapped[Decimal | None] = mapped_column(_USD)
+    #: `trailing_stop`, `max_hold`, `end_of_data`.
+    close_reason: Mapped[str | None] = mapped_column(String(24))
+    pnl_quote: Mapped[Decimal | None] = mapped_column(_QUOTE)
+    net_return: Mapped[Decimal | None] = mapped_column(Numeric(18, 8))

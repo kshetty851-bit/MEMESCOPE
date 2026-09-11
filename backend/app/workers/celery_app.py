@@ -370,6 +370,13 @@ celery_app.conf.beat_schedule = {
         "task": "app.labs.graduation.scheduler.graduation_features_tick",
         "schedule": crontab(minute="*/10"),
     },
+    # The lab's forward paper book. Gated by LAB_GRADUATION_PAPER_ENABLED on
+    # top of the lab flag, so turning the recorder on does not start a book.
+    # Paper only — nothing in that package can reach a signer or a key.
+    "graduation-lab-paper": {
+        "task": "app.labs.graduation.scheduler.graduation_paper_tick",
+        "schedule": crontab(minute="*"),
+    },
     # NSE Breakout Tracker. The exchange publishes the day's bhavcopy after
     # the close, so ingest runs at 13:00 UTC (18:30 IST) and retries hourly to
     # 14:00 UTC, then again at 02:00 UTC (07:30 IST) if the file was late.

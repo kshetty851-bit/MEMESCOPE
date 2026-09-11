@@ -29,10 +29,11 @@ MIGRATIONS = (
     BACKEND / "alembic" / "versions" / "20260911_0069_graduation_lab.py",
     BACKEND / "alembic" / "versions" / "20260911_0070_graduation_rpc_polling.py",
     BACKEND / "alembic" / "versions" / "20260911_0071_graduation_features.py",
+    BACKEND / "alembic" / "versions" / "20260911_0073_graduation_paper_book.py",
 )
 TABLES = ["grad_checkpoints", "grad_curve_samples", "grad_features",
-          "grad_migrations", "grad_postgrad_samples", "grad_tokens",
-          "grad_trades"]
+          "grad_migrations", "grad_paper_positions", "grad_postgrad_samples",
+          "grad_tokens", "grad_trades"]
 
 FORBIDDEN_MODULES = (
     "app.paper", "app.paper_v2", "app.karthik", "app.karthik_ops",
@@ -58,7 +59,7 @@ PURE_MODULES = ("curve.py", "parse.py", "watchset.py", "backtest.py")
 #: Every module the package ships.
 MODULES = ("config.py", "curve.py", "parse.py", "watchset.py", "sources.py",
            "postgrad.py", "recorder.py", "features.py", "backtest.py",
-           "scheduler.py", "models.py", "api.py", "__main__.py")
+           "scheduler.py", "models.py", "api.py", "paper.py", "__main__.py")
 
 
 def imported_modules(tree: ast.AST) -> set[str]:
@@ -189,6 +190,7 @@ def test_each_migration_creates_the_tables_it_claims() -> None:
                  "grad_trades"],
         "0070": ["grad_curve_samples", "grad_postgrad_samples"],
         "0071": ["grad_features"],
+        "0073": ["grad_paper_positions"],
     }
     for path, expected in zip(MIGRATIONS, by_migration.values(), strict=True):
         created = re.findall(r'op\.create_table\(\s*"([^"]+)"', path.read_text())

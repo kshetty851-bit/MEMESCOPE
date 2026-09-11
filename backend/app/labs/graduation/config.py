@@ -322,6 +322,31 @@ PRE_GRAD_DEAD_HAIRCUT = _dec("LAB_GRADUATION_DEAD_HAIRCUT", "0")
 #: How long a pre-graduation entry waits for a migration before it is dead.
 PRE_GRAD_DEAD_HOURS = _int("LAB_GRADUATION_DEAD_HOURS", 24)
 
+# --- the forward paper book ---------------------------------------------------
+#: Its OWN flag, on top of the lab's. The recorder can run for weeks before
+#: anything opens a position, and turning the lab on must not start a book.
+def paper_enabled() -> bool:
+    return enabled() and _flag("LAB_GRADUATION_PAPER_ENABLED")
+
+
+#: Starting capital, in quote. 5 SOL ~ $1,000 at $200/SOL.
+PAPER_CAPITAL_QUOTE = _dec("LAB_GRADUATION_PAPER_CAPITAL", "5.0")
+#: Per position. 0.5 SOL ~ $100, ten of them.
+PAPER_NOTIONAL_QUOTE = _dec("LAB_GRADUATION_PAPER_NOTIONAL", "0.5")
+PAPER_MAX_SLOTS = _int("LAB_GRADUATION_PAPER_SLOTS", 10)
+#: Trailing stop, as a fraction off the running peak.
+PAPER_TRAILING_PCT = _dec("LAB_GRADUATION_PAPER_TRAILING_PCT", "0.30")
+#: A hard backstop, because the post-graduation price series ENDS at
+#: POST_MIGRATION_SECONDS. Past that there is no mark and no exit price, so a
+#: position left open would simply hang. This is a property of the data, not a
+#: strategy choice.
+PAPER_MAX_HOLD_MINUTES = _int("LAB_GRADUATION_PAPER_MAX_HOLD_MIN", 60)
+#: A position is only opened on a token whose pool opened within this long, so
+#: the book enters near the open rather than halfway through a window.
+PAPER_ENTRY_GRACE_MINUTES = _int("LAB_GRADUATION_PAPER_ENTRY_GRACE_MIN", 3)
+#: How often the book ticks.
+PAPER_INTERVAL_SECONDS = 60
+
 # --- the gate, stated before any result is looked at --------------------------
 #: Out-of-sample profit factor. 1.5 and not 1.0: a strategy that merely clears
 #: break-even on one sample has not cleared the next sample's costs.
