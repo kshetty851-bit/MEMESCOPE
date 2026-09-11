@@ -22,6 +22,15 @@ from app.labs.crypto_trend.models import (  # noqa: F401
     CtRun,
     CtUniverseMember,
 )
+# Breakout Lab's six `bo_*` tables, for the same reason.
+from app.labs.breakout.models import (  # noqa: F401
+    BoCandle,
+    BoEpisode,
+    BoLevels,
+    BoRun,
+    BoSetupSnapshot,
+    BoUniverseMember,
+)
 from app.models.alpha_session import AlphaSession
 from app.models.curve import TokenCurveSnapshot  # noqa: F401
 from app.models.discovery import (

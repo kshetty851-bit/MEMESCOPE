@@ -27,6 +27,7 @@ from app.health import api as pipeline_health
 from app.hq_ops import api as hq_ops
 from app.karthik import api as karthik
 from app.karthik_ops import api as karthik_ops
+from app.labs.breakout import api as breakout_lab
 from app.labs.crypto_trend import api as crypto_trend_lab
 from app.labs.rafiq import api as rafiq_lab
 from app.paper import api as paper
@@ -124,3 +125,6 @@ api_router.include_router(karthik_ops.router)
 api_router.include_router(rafiq_lab.router)
 # Crypto Trend Lab. Read-only health over its own `ct_*` tables; flag-gated.
 api_router.include_router(crypto_trend_lab.router)
+# Breakout Lab. Read-only health and universe over its own `bo_*` tables;
+# flag-gated. Additive: no existing route changes shape.
+api_router.include_router(breakout_lab.router)
