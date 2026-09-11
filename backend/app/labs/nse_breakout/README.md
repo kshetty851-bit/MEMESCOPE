@@ -219,6 +219,37 @@ market, not the code.
 
 ---
 
+## Running it in production
+
+Deployed 2026-09-11 (`a7c0e4f`). Three things have to agree or the tracker runs
+where nobody can see it: the **flag** in `.env.production`, the **worker** that
+executes the beat, and the **API** that reads the tables.
+
+```bash
+ssh ubuntu@51.79.166.133
+cd ~/MEMESCOPE && ./scripts/deploy.sh      # deploys origin/main
+```
+
+The health check deliberately does **not** assert this page — lab routes are
+excluded there, because three separate deploys have been rolled back by a check
+that outlived the page it named.
+
+**The box is 2 cores and 3 GB, shared with the armed real wallet.** A backfill
+slice costs ~4 minutes there against ~90s on a laptop, and the replay is a
+~30-minute CPU burn. Both are bounded and resumable precisely so the beat can
+do them at its own pace: check `uptime` before running either by hand.
+
+Production fetches the archive itself. If you want to test that access, invoke
+the lab's OWN client inside the container —
+
+```bash
+docker exec memescope-backend-1 python -m app.labs.nse_breakout health
+```
+
+— because `curl` from the server's shell returns **403** for the same URL the
+application fetches successfully. httpx sends headers curl does not and the
+exchange's WAF keys on them. That probe cost an hour and a wrong conclusion.
+
 ## Registration
 
 Four lines outside this folder, all additive:
