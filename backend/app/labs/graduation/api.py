@@ -260,13 +260,17 @@ async def _paper(db: AsyncSession) -> PaperBookOut:
         return (p.notional_usd * (value / p.notional_quote - 1)).quantize(
             Decimal("0.01"))
 
+    cents = Decimal("0.01")
     return PaperBookOut(
         running=config.paper_enabled(),
-        starting_usd=account.starting,
-        equity_usd=account.equity,
-        realised_usd=account.realised,
-        unrealised_usd=account.unrealised,
-        pnl_usd=account.pnl,
+        # Quantised HERE, not left to the renderer: an unrounded Decimal
+        # serialises as 1023.223558651711844672524598 and reads as false
+        # precision on a figure that is only ever dollars and cents.
+        starting_usd=account.starting.quantize(cents),
+        equity_usd=account.equity.quantize(cents),
+        realised_usd=account.realised.quantize(cents),
+        unrealised_usd=account.unrealised.quantize(cents),
+        pnl_usd=account.pnl.quantize(cents),
         return_pct=account.return_pct,
         open_positions=account.open_positions,
         closed_positions=account.closed_positions,

@@ -161,7 +161,11 @@ class PaperBook:
         """
         positions = (await self._session.scalars(
             select(GradPaperPosition)
-            .where(GradPaperPosition.closed_at.is_(None)))).all()
+            .where(GradPaperPosition.closed_at.is_(None),
+                   # Rows written before the book was denominated in dollars
+                   # carry no size and cannot be marked. They are excluded
+                   # rather than counted as zero-value positions.
+                   GradPaperPosition.notional_usd > 0))).all()
         rule = TrailingStop(config.PAPER_TRAILING_PCT)
         closed = 0
 
@@ -300,13 +304,15 @@ class PaperBook:
             .where(GradPaperPosition.closed_at.is_not(None)))
         closed = await self._session.scalar(
             select(func.count()).select_from(GradPaperPosition)
-            .where(GradPaperPosition.closed_at.is_not(None)))
+            .where(GradPaperPosition.closed_at.is_not(None),
+                   GradPaperPosition.notional_usd > 0))
         wins = await self._session.scalar(
             select(func.count()).select_from(GradPaperPosition)
             .where(GradPaperPosition.pnl_usd > 0))
         open_rows = (await self._session.scalars(
             select(GradPaperPosition)
-            .where(GradPaperPosition.closed_at.is_(None)))).all()
+            .where(GradPaperPosition.closed_at.is_(None),
+                   GradPaperPosition.notional_usd > 0))).all()
 
         unrealised = Decimal(0)
         for position in open_rows:
