@@ -15,19 +15,20 @@ the book. Nothing here imports the platform paper wallet, the Karthik wallet,
 the real wallet or another lab, and a source-parsing test holds that on every
 module including the ones no test exercises.
 
-Isolated the way the Crypto Trend lab is: its own `bo_*` tables, its own flag,
-its own config, its own tests, and no import of any paper wallet, real wallet,
-radar, or other lab. It reads two keyless public APIs and writes only its own
-tables. A source-parsing test holds every one of those claims.
+Isolated the way the Crypto Trend lab is: its own tables, its own flags, its
+own config, its own tests. It reads two keyless public APIs — GeckoTerminal
+and DexScreener — and writes only its own tables.
 
 ---
 
 ## How to enable it
 
-Off by default. One environment variable:
+Off by default, behind **two** flags. The first runs detection and recording;
+the second, separately, lets it open paper positions.
 
 ```bash
 BREAKOUT_LAB_ENABLED=true
+BREAKOUT_TRADING_ENABLED=true
 ```
 
 Apply the migration, then drive a tick:
