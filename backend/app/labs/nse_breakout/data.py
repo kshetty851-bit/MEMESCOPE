@@ -7,18 +7,20 @@ the CLI print it unchanged.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.labs.nse_breakout import config
+from app.labs.nse_breakout import config, states, stats
 from app.labs.nse_breakout.models import (
     BtCandle,
+    BtEpisode,
     BtIndexClose,
     BtIngestDay,
     BtRun,
+    BtState,
     BtUniverseMember,
 )
 
@@ -147,3 +149,182 @@ async def health(session: AsyncSession, *, now: datetime | None = None,
                   "last": nifty_last.isoformat() if nifty_last else None},
         "last_run": runs,
     }
+
+
+# --- phase 2 ------------------------------------------------------------------
+
+def _f(value: Any) -> float | None:
+    return None if value is None else float(value)
+
+
+async def get_near(session: AsyncSession, limit: int = 200) -> list[dict[str, Any]]:
+    """Stocks currently NEAR or WATCH. **NEAR first, then by score.**
+
+    Sorted in SQL rather than in Python so the ordering the frontend is built
+    against cannot drift with a slice.
+    """
+    rows = (await session.execute(
+        select(BtState, BtUniverseMember.name, BtUniverseMember.turnover_20d)
+        .join(BtUniverseMember, BtUniverseMember.symbol == BtState.symbol)
+        # Active only. A name that leaves the universe — delisted, or revealed
+        # to be an ETF — keeps its last state row, and without this filter it
+        # would sit on the board for ever.
+        .where(BtUniverseMember.active.is_(True),
+               BtState.state.in_((states.NEAR, states.WATCH)))
+        .order_by(case((BtState.state == states.NEAR, 0), else_=1),
+                  BtState.score.desc(), BtState.symbol)
+        .limit(limit))).all()
+    return [{
+        "symbol": s.symbol, "name": name, "state": s.state, "score": s.score,
+        "close": _f(s.close), "resistance": _f(s.resistance),
+        "distance_pct": _f(s.distance_pct), "tightness": s.tightness,
+        "is_52w_high": s.is_52w_high, "days_in_state": s.days_in_state,
+        "turnover_20d": _f(turnover), "bar_date": s.bar_date.isoformat(),
+        # Sector is deliberately absent: no keyless source exists for NSE
+        # sector classification, and the paid ones may not be scraped.
+    } for s, name, turnover in rows]
+
+
+async def get_breakouts(session: AsyncSession, days: int = 30,
+                        source: str = "live") -> list[dict[str, Any]]:
+    """Episodes whose breakout confirmed in the last `days` calendar days."""
+    cutoff = datetime.now(UTC).date() - timedelta(days=days)
+    rows = (await session.execute(
+        select(BtEpisode, BtState.close, BtState.state)
+        .outerjoin(BtState, BtState.symbol == BtEpisode.symbol)
+        .where(BtEpisode.source == source, BtEpisode.breakout_date.is_not(None),
+               BtEpisode.breakout_date >= cutoff)
+        .order_by(BtEpisode.breakout_date.desc()))).all()
+    today = datetime.now(UTC).date()
+    out = []
+    for episode, last_close, live_state in rows:
+        entry = _f(episode.breakout_price)
+        close = _f(last_close)
+        out.append({
+            "symbol": episode.symbol,
+            "breakout_date": episode.breakout_date.isoformat(),
+            "breakout_price": entry, "resistance": _f(episode.resistance),
+            "volume_mult": _f(episode.breakout_volume_mult),
+            # Measured against the latest stored close, so it moves with the
+            # data rather than being frozen at the outcome window.
+            "ret_since_pct": (round((close - entry) / entry * 100, 4)
+                              if entry and close else None),
+            "max_gain_pct": _f(episode.mfe_bo_20),
+            "max_drawdown_pct": _f(episode.mae_bo_20),
+            "state": episode.state, "live_state": live_state,
+            "false_breakout": episode.close_reason == states.FALSE_BREAKOUT,
+            "days_since": (today - episode.breakout_date).days,
+        })
+    return out
+
+
+async def get_stock(session: AsyncSession, symbol: str,
+                    candles: int = 750) -> dict[str, Any] | None:
+    """Everything `/stock/{symbol}` draws, from what is STORED.
+
+    The clusters come out of `bt_states` rather than being recomputed here: a
+    route that recomputes can disagree with the state that was recorded, and
+    then the chart shows a level the machine never saw.
+    """
+    member = (await session.execute(
+        select(BtUniverseMember).where(BtUniverseMember.symbol == symbol))
+    ).scalar_one_or_none()
+    if member is None:
+        return None
+    state = (await session.execute(
+        select(BtState).where(BtState.symbol == symbol))).scalar_one_or_none()
+    episodes = list((await session.execute(
+        select(BtEpisode).where(BtEpisode.symbol == symbol)
+        .order_by(BtEpisode.opened.desc()).limit(50))).scalars())
+    bars = await get_candles(session, symbol, limit=candles)
+    live_open = next((e for e in episodes
+                      if e.source == "live" and e.closed is None), None)
+    return {
+        "stock": {"symbol": member.symbol, "name": member.name,
+                  "series": member.series, "active": member.active,
+                  "bars": member.bars, "turnover_20d": _f(member.turnover_20d),
+                  "first_seen": member.first_seen.isoformat(),
+                  "last_seen": member.last_seen.isoformat()},
+        "levels": ({"clusters": state.clusters or [],
+                    "nearest_resistance": _f(state.resistance),
+                    "is_52w_high": state.is_52w_high,
+                    "week52_high": _f(state.week52_high),
+                    "atr": _f(state.atr), "range_pct": _f(state.range_pct),
+                    "tightness": state.tightness} if state else None),
+        "score": ({"score": state.score, "components": state.components or {},
+                   "state": state.state, "days_in_state": state.days_in_state,
+                   "distance_pct": _f(state.distance_pct),
+                   "bar_date": state.bar_date.isoformat()} if state else None),
+        "episode": episode_json(live_open) if live_open else None,
+        "history": [episode_json(e) for e in episodes],
+        "candles": [{"d": b.date.isoformat(), "o": _f(b.open), "h": _f(b.high),
+                     "l": _f(b.low), "c": _f(b.close), "v": b.volume,
+                     "suspect": b.suspect_gap} for b in bars],
+    }
+
+
+def episode_json(episode: BtEpisode) -> dict[str, Any]:
+    """One episode in the shape Phase 3 is built against."""
+    return {
+        "id": str(episode.id), "symbol": episode.symbol,
+        "source": episode.source, "opened": episode.opened.isoformat(),
+        "first_near_date": (episode.first_near_date.isoformat()
+                            if episode.first_near_date else None),
+        "ref_price": _f(episode.ref_price), "resistance": _f(episode.resistance),
+        "score_at_open": episode.score_at_open, "max_score": episode.max_score,
+        "breakout_date": (episode.breakout_date.isoformat()
+                          if episode.breakout_date else None),
+        "breakout_price": _f(episode.breakout_price),
+        "volume_mult": _f(episode.breakout_volume_mult),
+        "days_to_breakout": episode.days_to_breakout,
+        "state": episode.state,
+        "closed": episode.closed.isoformat() if episode.closed else None,
+        "close_reason": episode.close_reason,
+        "ret_ref_5": _f(episode.ret_ref_5), "ret_ref_10": _f(episode.ret_ref_10),
+        "ret_ref_20": _f(episode.ret_ref_20), "ret_ref_40": _f(episode.ret_ref_40),
+        "ret_bo_5": _f(episode.ret_bo_5), "ret_bo_10": _f(episode.ret_bo_10),
+        "ret_bo_20": _f(episode.ret_bo_20), "ret_bo_40": _f(episode.ret_bo_40),
+        "mfe_20": _f(episode.mfe_20), "mae_20": _f(episode.mae_20),
+        "held_20d_pct": _f(episode.held_20d_pct),
+        "trail10_pct": _f(episode.trail10_pct),
+        "trail10_stopped": episode.trail10_stopped,
+        "rel_nifty_20": _f(episode.rel_nifty_20),
+        "outcomes_filled": episode.outcomes_filled_at is not None,
+    }
+
+
+async def get_episodes(session: AsyncSession, source: str = "replay",
+                       limit: int = 100, offset: int = 0) -> dict[str, Any]:
+    total = await session.scalar(
+        select(func.count()).select_from(BtEpisode)
+        .where(BtEpisode.source == source)) or 0
+    rows = list((await session.execute(
+        select(BtEpisode).where(BtEpisode.source == source)
+        .order_by(BtEpisode.opened.desc(), BtEpisode.symbol)
+        .limit(limit).offset(offset))).scalars())
+    return {"total": total, "limit": limit, "offset": offset,
+            "items": [episode_json(e) for e in rows]}
+
+
+async def get_stats(session: AsyncSession, source: str = "replay",
+                    ) -> dict[str, Any]:
+    """The whole aggregate for one source, plus the thresholds it was produced
+    under — so a number can never be read against the wrong rules."""
+    rows = list((await session.execute(
+        select(BtEpisode).where(BtEpisode.source == source))).scalars())
+    payload = stats.summarise(rows)
+    payload["source"] = source
+    payload["config"] = stats.config_snapshot()
+    payload["caveats"] = [
+        # Survivorship: the universe is derived from names trading TODAY, so a
+        # company delisted in 2025 is absent from a replay that covers 2024.
+        # Its setups — disproportionately the ones that went to zero — are not
+        # in these numbers.
+        "survivorship: delisted names are absent from the universe, so the "
+        "replay cannot see setups that ended in delisting",
+        "the score's thresholds were fixed before this replay ran and were "
+        "not adjusted afterwards",
+        "bhavcopy is unadjusted; bars across a corporate action are flagged "
+        "suspect_gap, not corrected",
+    ]
+    return payload

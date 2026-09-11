@@ -88,6 +88,11 @@ class BtUniverseMember(Base):
     #: `pending` is the identity pass's placeholder, replaced by
     #: `rebuild_universe` inside the same transaction.
     inactive_reason: Mapped[str | None] = mapped_column(String(16))
+    #: When the historical replay last walked this symbol. The resumption
+    #: marker for `Detector.replay`: a symbol that produced no episodes has
+    #: still been replayed, and without this it would be walked again on
+    #: every pass for ever.
+    replayed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
@@ -199,3 +204,180 @@ class BtRun(Base):
     )
     detail: Mapped[dict[str, Any] | None] = mapped_column(_JSONB)
     errors: Mapped[list[str] | None] = mapped_column(_JSONB)
+
+
+# --- phase 2 ------------------------------------------------------------------
+
+#: A percentage. Room for a stock that went up 50x and for four decimals.
+_PCT = Numeric(12, 4)
+
+
+class BtState(Base):
+    """The latest daily read for one symbol: levels, score and state.
+
+    **One row per symbol, not one per day.** `/near` wants today, and the
+    history that matters is in `bt_episode_events` — which records transitions
+    rather than 1,600 unchanged rows a day. A daily snapshot table would be
+    ~400k rows a year to answer a question nothing asks.
+    """
+
+    __tablename__ = "bt_states"
+    __table_args__ = (
+        UniqueConstraint("symbol", name="uq_bt_states_symbol"),
+        Index("ix_bt_states_state_score", "state", "score"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    symbol: Mapped[str] = mapped_column(_SYMBOL, nullable=False)
+    #: The bar this was computed on — NOT when the job ran.
+    bar_date: Mapped[date] = mapped_column(Date, nullable=False)
+    #: `NONE` | `WATCH` | `NEAR` | `BREAKOUT` | `FALSE_BREAKOUT` | `FAILED` | `EXPIRED`
+    state: Mapped[str] = mapped_column(String(16), nullable=False)
+    score: Mapped[int] = mapped_column(Integer, nullable=False)
+    components: Mapped[dict[str, Any] | None] = mapped_column(_JSONB)
+    close: Mapped[Decimal] = mapped_column(_PRICE, nullable=False)
+    #: None when nothing unbroken sits above the close. That is a stock at an
+    #: all-time high, not a missing value.
+    resistance: Mapped[Decimal | None] = mapped_column(_PRICE)
+    distance_pct: Mapped[Decimal | None] = mapped_column(_PCT)
+    range_pct: Mapped[Decimal | None] = mapped_column(_PCT)
+    tightness: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
+    is_52w_high: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
+    week52_high: Mapped[Decimal | None] = mapped_column(_PRICE)
+    atr: Mapped[Decimal | None] = mapped_column(_PRICE)
+    volume_mult: Mapped[Decimal | None] = mapped_column(_PCT)
+    #: Every cluster, so `/stock/{symbol}` can draw the whole ladder without
+    #: recomputing it and risking a different answer from the one stored.
+    clusters: Mapped[list[dict[str, Any]] | None] = mapped_column(_JSONB)
+    days_in_state: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default=text("1")
+    )
+    bars: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class BtEpisode(Base):
+    """One setup from the first WATCH/NEAR to whatever ended it, with what
+    happened afterwards filled in later by a separate pass.
+
+    **The separation is what makes this a backtest.** Outcome columns are
+    written by `outcomes_tick` once the window has elapsed, never by the pass
+    that detects the setup — so nothing that decides a state can see a return.
+
+    `source` is `live` or `replay`. They are never mixed in a statistic: the
+    replay is one causal walk over history with today's rules, the live rows
+    accumulate one bar at a time, and averaging them together would hide which
+    is which.
+    """
+
+    __tablename__ = "bt_episodes"
+    __table_args__ = (
+        # One OPEN episode per symbol per source. Partial, so closed episodes
+        # accumulate freely — which is the whole record.
+        Index("uq_bt_episodes_open", "symbol", "source", unique=True,
+              postgresql_where=text("closed IS NULL")),
+        Index("ix_bt_episodes_source_opened", "source", "opened"),
+        Index("ix_bt_episodes_breakout", "source", "breakout_date"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    symbol: Mapped[str] = mapped_column(_SYMBOL, nullable=False)
+    #: `live` | `replay`
+    source: Mapped[str] = mapped_column(String(8), nullable=False)
+    opened: Mapped[date] = mapped_column(Date, nullable=False)
+    first_near_date: Mapped[date | None] = mapped_column(Date)
+    #: Close on `first_near_date`: what buying the setup would have paid.
+    ref_price: Mapped[Decimal | None] = mapped_column(_PRICE)
+    #: The level this episode is about, fixed at open.
+    resistance: Mapped[Decimal | None] = mapped_column(_PRICE)
+    score_at_open: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    max_score: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    breakout_date: Mapped[date | None] = mapped_column(Date)
+    breakout_price: Mapped[Decimal | None] = mapped_column(_PRICE)
+    breakout_volume_mult: Mapped[Decimal | None] = mapped_column(_PCT)
+    days_to_breakout: Mapped[int | None] = mapped_column(Integer)
+    state: Mapped[str] = mapped_column(String(16), nullable=False)
+    #: Bars the episode has been open, and bars since the breakout. Stored
+    #: because the live pass sees one bar a day: without them `EXPIRED` and
+    #: the false-breakout window could never fire, since the counters would
+    #: reset every morning.
+    bars_open: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    bars_since_breakout: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    #: Consecutive bars under `WATCH_SCORE`, for the same reason.
+    weak_bars: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    closed: Mapped[date | None] = mapped_column(Date)
+    #: `FALSE_BREAKOUT` | `FAILED` | `EXPIRED` | `no_volume` | `fell_away` |
+    #: `score_faded` | `window_complete`
+    close_reason: Mapped[str | None] = mapped_column(String(24))
+
+    # --- outcomes, filled later ------------------------------------------------
+    #: Percent returns. Absent (NULL) means "not measurable yet", NEVER zero.
+    ret_ref_5: Mapped[Decimal | None] = mapped_column(_PCT)
+    ret_ref_10: Mapped[Decimal | None] = mapped_column(_PCT)
+    ret_ref_20: Mapped[Decimal | None] = mapped_column(_PCT)
+    ret_ref_40: Mapped[Decimal | None] = mapped_column(_PCT)
+    mfe_20: Mapped[Decimal | None] = mapped_column(_PCT)
+    mae_20: Mapped[Decimal | None] = mapped_column(_PCT)
+    ret_bo_5: Mapped[Decimal | None] = mapped_column(_PCT)
+    ret_bo_10: Mapped[Decimal | None] = mapped_column(_PCT)
+    ret_bo_20: Mapped[Decimal | None] = mapped_column(_PCT)
+    ret_bo_40: Mapped[Decimal | None] = mapped_column(_PCT)
+    mfe_bo_20: Mapped[Decimal | None] = mapped_column(_PCT)
+    mae_bo_20: Mapped[Decimal | None] = mapped_column(_PCT)
+    #: From `breakout_price` to the close 20 trading days later.
+    held_20d_pct: Mapped[Decimal | None] = mapped_column(_PCT)
+    #: The same entry with a 10% trailing stop, evaluated LOW BEFORE HIGH.
+    trail10_pct: Mapped[Decimal | None] = mapped_column(_PCT)
+    trail10_bars: Mapped[int | None] = mapped_column(Integer)
+    trail10_stopped: Mapped[bool | None] = mapped_column(Boolean)
+    #: Return minus Nifty 50 over the same window. NULL when the index is
+    #: missing for that window — pre-decided: null, never zero.
+    rel_nifty_20: Mapped[Decimal | None] = mapped_column(_PCT)
+    rel_nifty_bo_20: Mapped[Decimal | None] = mapped_column(_PCT)
+    outcomes_filled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),
+                                                 nullable=False)
+
+
+class BtEpisodeEvent(Base):
+    """One state transition inside an episode. Append-only."""
+
+    __tablename__ = "bt_episode_events"
+    __table_args__ = (
+        Index("ix_bt_episode_events_episode", "episode_id", "date"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    #: No ForeignKey: the episode table is written by a replay that rewrites
+    #: whole symbols at a time, and a cascade would be a delete this lab has
+    #: no reason to own. Events are pruned with their episodes explicitly.
+    episode_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    date: Mapped[date] = mapped_column(Date, nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False)
+    close: Mapped[Decimal | None] = mapped_column(_PRICE)
+    resistance: Mapped[Decimal | None] = mapped_column(_PRICE)
+    score: Mapped[int | None] = mapped_column(Integer)
+    note: Mapped[str | None] = mapped_column(Text)

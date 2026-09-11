@@ -306,14 +306,19 @@ class Ingest:
             recent = series_rows[-config.TURNOVER_WINDOW_DAYS:]
             last_close = recent[-1][1]
             turnover = median_turnover([t for _, _, t in recent])
+            name, isin, stored_series = meta.get(symbol, (None, None, "EQ"))
             reason = None
             if recent[-1][0] < latest:
                 reason = "absent"          # did not trade on the latest day
+            elif isin and not isin.startswith(config.ALLOWED_ISIN_PREFIX):
+                # An ETF. Its "resistance" is the index's, its volume is the
+                # market maker's, and a breakout in it is not a fact about a
+                # company — so it is not what this tracker is for.
+                reason = "etf"
             elif float(last_close) < config.MIN_PRICE_INR:
                 reason = "price"
             elif turnover is None or float(turnover) < config.MIN_TURNOVER_INR:
                 reason = "turnover"
-            name, isin, stored_series = meta.get(symbol, (None, None, "EQ"))
             is_active = reason is None
             active += int(is_active)
             inactive += int(not is_active)

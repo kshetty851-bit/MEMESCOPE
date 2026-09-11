@@ -60,6 +60,12 @@ PUBLISH_CUTOFF_HOURS_UTC = 18
 ALLOWED_SERIES: frozenset[str] = frozenset({"EQ", "BE"})
 #: `STK` excludes index futures and anything else that is not a share.
 ALLOWED_INSTRUMENT = "STK"
+#: Indian ISINs encode what the instrument IS: `INE` is company equity, `INF`
+#: is mutual-fund units — which is what every NSE ETF is. They trade in series
+#: EQ with `FinInstrmTp` STK, so the series filter cannot see them, and the
+#: brief excludes ETFs. This is the exact, keyless rule. A symbol whose ISIN is
+#: not yet known is NOT excluded: unknown is not disqualifying.
+ALLOWED_ISIN_PREFIX = "INE"
 MIN_PRICE_INR = 20.0
 #: 20-day MEDIAN turnover, not mean: one block deal must not qualify a name
 #: that is otherwise untradeable.
@@ -99,3 +105,97 @@ MAX_DAY_FAILURES = 5
 #: A 1:2 split halves the price overnight; a genuine one-day -30% move in a
 #: liquid Indian equity is rare enough to be worth looking at either way.
 SPLIT_GAP_PCT = 30.0
+
+# --- levels (phase 2) ---------------------------------------------------------
+#: Bars each side of a high before it counts as a confirmed swing. The RIGHT
+#: side is the no-hindsight guarantee: the last `SWING_LOOKBACK` bars of any
+#: series can never produce a swing, because the bars that would confirm them
+#: have not closed yet.
+SWING_LOOKBACK = 5
+#: Swing highs within this much of a group's volume-weighted mean are one
+#: level. One swing high is a price somebody sold at once; three within 2% is
+#: a price somebody sells at, and that is what a breakout has to get through.
+CLUSTER_PCT = 2.0
+#: A close must clear a level by this much to break it. A close one paisa
+#: above a level is noise, and calling it a break would manufacture breakouts.
+BREAK_CONFIRM_PCT = 1.0
+ATR_PERIOD = 14
+VOLUME_MEAN_DAYS = 20
+VOLUME_SLOW_DAYS = 50
+#: Window for the range used by `tightness` and for MFE/MAE.
+RANGE_DAYS = 20
+#: A 20-day range narrower than this is a coil. Tight before a break is the
+#: setup; wide before a break is just a stock that moves.
+TIGHT_RANGE_PCT = 12.0
+#: Trading days in a year, for the 52-week high.
+WEEK52_DAYS = 250
+
+# --- the readiness score ------------------------------------------------------
+#: The brief said to reuse the existing 0-100 pre-breakout score. Discovery
+#: found no such score anywhere on this machine (logged in RUN_LOG step 0), so
+#: it is built here. Five components, each clamped to [0, 1], each returned
+#: alongside the score — a score nobody can take apart is a number nobody can
+#: argue with, and the whole point of the episode table is to find out later
+#: which of the five, if any, predicted anything.
+SCORE_WEIGHTS = {
+    "proximity": 0.30,    # how close the close sits under resistance
+    "compression": 0.20,  # a narrow 20-day range: a coil, not a drift
+    "trend": 0.20,        # above a rising 50-day mean
+    "volume": 0.20,       # participation showing up before the break
+    "touches": 0.10,      # a level tested four times is a real level
+}
+#: Touches at which the `touches` component saturates.
+SCORE_TOUCH_CAP = 4
+#: Days in the trend component's moving average.
+SCORE_TREND_DAYS = 50
+#: Volume ratio (recent mean / 20-day mean) at which `volume` saturates.
+SCORE_VOLUME_CAP = 2.0
+#: Days averaged for the recent side of that ratio. Two, not one: a single
+#: day's volume is one block deal as often as it is a crowd.
+SCORE_VOLUME_DAYS = 2
+
+# --- the state machine --------------------------------------------------------
+#: WATCH: in the neighbourhood. NEAR: close to breaking.
+WATCH_SCORE = 60
+WATCH_PCT = 10.0
+NEAR_SCORE = 70
+NEAR_PCT = 4.0
+#: A breakout needs volume. A close through a level on no volume is a drift,
+#: and the thing being tested is whether anybody showed up.
+BREAK_VOL_MULT = 1.5
+#: A close back below the level within this many days un-makes the breakout.
+FALSE_WINDOW_DAYS = 5
+#: How far below resistance a watched name falls before the setup is dead.
+FAIL_PCT = 8.0
+#: Consecutive bars under `WATCH_SCORE` that also end an episode.
+FAIL_SCORE_BARS = 5
+#: An episode that has done nothing for this long expires.
+MAX_EPISODE_DAYS = 60
+
+# --- outcomes -----------------------------------------------------------------
+#: Trading-day horizons every return is measured at.
+OUTCOME_HORIZONS = (5, 10, 20, 40)
+#: Window for max favourable and max adverse excursion, and for `held_20d_pct`.
+OUTCOME_WINDOW_DAYS = 20
+#: The trailing stop recorded beside the raw hold, as a percentage of the high
+#: water mark. Evaluated LOW BEFORE HIGH — see `outcomes.trail_result`.
+TRAIL_PCT = 10.0
+#: A trailed position is closed at the market after this many days either way,
+#: so an outcome always has an answer.
+TRAIL_MAX_DAYS = 60
+#: Longest horizon: an episode cannot have its outcomes filled until this many
+#: trading days have passed since the measurement point.
+OUTCOME_MAX_HORIZON = 40
+
+# --- replay -------------------------------------------------------------------
+#: Symbols replayed per pass, so the historical replay is resumable and never
+#: outruns the worker's time limit. See `BACKFILL_DEADLINE_SECONDS`.
+REPLAY_SYMBOLS_PER_RUN = 200
+REPLAY_DEADLINE_SECONDS = 420
+
+# --- the outcome pass ---------------------------------------------------------
+#: Symbols whose outcomes are filled per pass. Batched by SYMBOL, not by
+#: episode: filling the whole replay touches ~1,300 symbols with ~600 bars
+#: each, and holding all of those at once would put the candle table in memory.
+OUTCOME_SYMBOLS_PER_RUN = 400
+OUTCOME_DEADLINE_SECONDS = 420

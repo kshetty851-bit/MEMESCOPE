@@ -152,6 +152,19 @@ async def test_a_day_that_keeps_failing_is_eventually_given_up_on(
     assert day not in await job.pending_days(50), "should stop being retried"
 
 
+async def _seed_more(session, symbol: str, *, days: int = 25) -> None:
+    """Enough bars for the turnover window, keeping whatever is already there."""
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+    rows = [{"symbol": symbol, "date": D10 - timedelta(days=i),
+             "open": Decimal("500"), "high": Decimal("505"), "low": Decimal("495"),
+             "close": Decimal("500"), "volume": 1000,
+             "turnover": Decimal("50000000"), "adjusted": False,
+             "suspect_gap": False} for i in range(1, days)]
+    await session.execute(pg_insert(BtCandle).values(rows)
+                          .on_conflict_do_nothing())
+    await session.flush()
+
+
 # --- the universe ----------------------------------------------------------------
 
 async def _seed(session, symbol: str, *, days: int, close: float, turnover: float,
@@ -392,3 +405,43 @@ async def test_first_seen_is_the_real_first_bar_not_the_turnover_window(
     assert member.first_seen == D10 - timedelta(days=299)
     assert member.last_seen == D10
     assert member.bars == 300
+
+
+@pytest.mark.integration
+async def test_an_etf_is_excluded_by_its_isin(tracker_session) -> None:
+    """NSE ETFs trade in series EQ with `FinInstrmTp` STK, so the series filter
+    cannot see them — but their ISIN says what they are: `INF` is mutual-fund
+    units, `INE` is company equity. The brief excludes ETFs, and an ETF's
+    "resistance" is the index's while its volume is the market maker's, so a
+    breakout in one is not a fact about a company.
+    """
+    job = Ingest(tracker_session, FakeArchive({D10: [
+        row("REALCO", D10, name="Real Company Ltd"),
+        row("NIFTYBEES", D10, name="NIP IND ETF NIFTY BEES"),
+    ]}))
+    # `row()` derives the ISIN from the symbol; give the ETF a fund ISIN.
+    await job.day(D10, now=NOW)
+    await tracker_session.execute(
+        BtUniverseMember.__table__.update()
+        .where(BtUniverseMember.symbol == "NIFTYBEES")
+        .values(isin="INF204KB14I2"))
+    for symbol in ("REALCO", "NIFTYBEES"):
+        await _seed_more(tracker_session, symbol)
+    await job.rebuild_universe(now=NOW)
+
+    rows = {m.symbol: m for m in (await tracker_session.execute(
+        select(BtUniverseMember))).scalars()}
+    assert rows["REALCO"].active is True
+    assert rows["NIFTYBEES"].active is False
+    assert rows["NIFTYBEES"].inactive_reason == "etf"
+
+
+@pytest.mark.integration
+async def test_an_unknown_isin_is_not_disqualifying(tracker_session) -> None:
+    """Unknown is not the same as wrong. A name ingested before the identity
+    pass filled it in must not be dropped from the universe for it."""
+    await _seed(tracker_session, "NOISIN", days=25, close=500.0,
+                turnover=5_00_00_000.0)
+    await Ingest(tracker_session, FakeArchive()).rebuild_universe(now=NOW)
+    member = (await tracker_session.execute(select(BtUniverseMember))).scalar_one()
+    assert member.isin is None and member.active is True

@@ -362,6 +362,19 @@ celery_app.conf.beat_schedule = {
         "task": "app.labs.nse_breakout.scheduler.nse_tracker_backfill",
         "schedule": crontab(minute=20),
     },
+    # Outcomes: what the episodes whose window has closed actually did. A
+    # separate task from detection on purpose — the pass that records the
+    # return must not be the pass that decides the state.
+    "nse-tracker-outcomes": {
+        "task": "app.labs.nse_breakout.scheduler.nse_tracker_outcomes",
+        "schedule": crontab(minute=40, hour="15"),
+    },
+    # The historical replay. Bounded and resumable; does nothing once every
+    # symbol has been walked.
+    "nse-tracker-replay": {
+        "task": "app.labs.nse_breakout.scheduler.nse_tracker_replay",
+        "schedule": crontab(minute=50),
+    },
     # The real wallet's heartbeat. Beside the Lab's and at the same cadence,
     # because it acts on Lab decisions and those are actionable for ten minutes.
     # It creates at most one BUY intent per tick and only while the operator's

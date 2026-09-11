@@ -28,6 +28,7 @@ from typing import Any
 from app.core.logging import get_logger
 from app.db.session import SessionFactory
 from app.labs.nse_breakout import config
+from app.labs.nse_breakout.episodes import Detector, OutcomeFiller
 from app.labs.nse_breakout.ingest import Ingest
 from app.labs.nse_breakout.sources import NseArchive
 from app.workers.celery_app import celery_app
@@ -65,8 +66,14 @@ async def ingest_tick() -> dict[str, Any]:
             gaps = await job.flag_suspect_gaps()
             await job.prune_runs()
             await session.commit()
-            return {"phase": "ingest", "day": day, "universe": universe,
-                    "suspect_gaps": gaps, "requests": archive.requests}
+        # Chained, not scheduled beside: a state evaluated against a bar the
+        # ingest has not stored yet would record yesterday's answer as today's.
+        # Enqueued rather than awaited so one long pass cannot push the other
+        # past the worker's soft limit.
+        if day.get("status") == "ok":
+            nse_tracker_detect.delay()
+        return {"phase": "ingest", "day": day, "universe": universe,
+                "suspect_gaps": gaps, "requests": archive.requests}
     except Exception:  # containment: never raise into the beat
         logger.exception("nse_tracker_ingest_failed")
         return {"error": "nse_tracker_ingest_failed"}
@@ -87,3 +94,79 @@ async def backfill_tick(limit: int = config.BACKFILL_DAYS_PER_RUN) -> dict[str, 
     except Exception:  # containment
         logger.exception("nse_tracker_backfill_failed")
         return {"error": "nse_tracker_backfill_failed"}
+
+
+DETECT_TASK = "app.labs.nse_breakout.scheduler.nse_tracker_detect"
+OUTCOMES_TASK = "app.labs.nse_breakout.scheduler.nse_tracker_outcomes"
+REPLAY_TASK = "app.labs.nse_breakout.scheduler.nse_tracker_replay"
+
+
+@celery_app.task(name=DETECT_TASK)
+def nse_tracker_detect() -> dict[str, Any]:
+    from app.workers.runtime import run_async
+
+    return run_async(detect_tick())
+
+
+@celery_app.task(name=OUTCOMES_TASK)
+def nse_tracker_outcomes() -> dict[str, Any]:
+    from app.workers.runtime import run_async
+
+    return run_async(outcomes_tick())
+
+
+@celery_app.task(name=REPLAY_TASK)
+def nse_tracker_replay() -> dict[str, Any]:
+    from app.workers.runtime import run_async
+
+    return run_async(replay_tick())
+
+
+async def detect_tick() -> dict[str, Any]:
+    """Levels, score and state for every scorable name, on the newest bar.
+
+    Runs AFTER the ingest, not beside it: evaluating a state against a bar the
+    ingest has not stored yet would record yesterday's answer as today's.
+    """
+    if not config.enabled():
+        return {"skipped": "nse_breakout_disabled"}
+    try:
+        async with SessionFactory() as session:
+            result = await Detector(session).daily()
+            await session.commit()
+            return result
+    except Exception:  # containment: never raise into the beat
+        logger.exception("nse_tracker_detect_failed")
+        return {"error": "nse_tracker_detect_failed"}
+
+
+async def outcomes_tick() -> dict[str, Any]:
+    """Fill outcomes for episodes whose window has closed.
+
+    Separate from detection on purpose — the pass that records what happened
+    must not be the pass that decides what happens.
+    """
+    if not config.enabled():
+        return {"skipped": "nse_breakout_disabled"}
+    try:
+        async with SessionFactory() as session:
+            result = await OutcomeFiller(session).fill()
+            await session.commit()
+            return result
+    except Exception:  # containment
+        logger.exception("nse_tracker_outcomes_failed")
+        return {"error": "nse_tracker_outcomes_failed"}
+
+
+async def replay_tick(limit: int = config.REPLAY_SYMBOLS_PER_RUN) -> dict[str, Any]:
+    """One bounded slice of the historical replay. Does nothing once complete."""
+    if not config.enabled():
+        return {"skipped": "nse_breakout_disabled"}
+    try:
+        async with SessionFactory() as session:
+            result = await Detector(session).replay(limit=limit)
+            await session.commit()
+            return result
+    except Exception:  # containment
+        logger.exception("nse_tracker_replay_failed")
+        return {"error": "nse_tracker_replay_failed"}

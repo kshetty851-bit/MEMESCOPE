@@ -45,6 +45,11 @@ cd backend && NSE_BREAKOUT_ENABLED=true python -m app.labs.nse_breakout backfill
 | `ingest --date 2026-09-10` | one specific day (re-running a day rewrites it) |
 | `backfill` | one bounded slice — the same work the hourly beat does |
 | `backfill --all` | loop the slice until nothing is pending, with progress on stdout |
+| `detect` | levels, score and state on the newest bar |
+| `near` | the current NEAR/WATCH board as a table |
+| `replay [--all]` | the causal walk over the whole history; resumable |
+| `outcomes` | fill outcomes whose window has closed |
+| `stats [--source live]` | the aggregate payload as JSON |
 | `universe` | the active universe as a table |
 | `health` | the health route's payload as JSON |
 
@@ -105,6 +110,7 @@ somebody maintains.
 | Last close | ≥ ₹20 | below that, a tick is a percent |
 | **Median** 20-day turnover | ≥ ₹1 crore | the median, not the mean: one block deal cannot qualify an illiquid name |
 | Bars | *(none)* | short histories stay in the universe and are excluded from levels |
+| ISIN | starts `INE` | `INE` is company equity, `INF` is mutual-fund units — which is what every NSE **ETF** is. They trade in series EQ with `FinInstrmTp` STK, so no other filter can see them. An ETF's resistance is the index's and its volume is the market maker's. 106 of 1,604 names. A symbol whose ISIN is not yet known is **not** excluded. |
 
 A symbol that stops appearing goes **inactive with a reason**, never deleted —
 `price`, `turnover` or `absent`. The exchange file carries no linkage between a
@@ -142,6 +148,13 @@ Celery runs in UTC and changing that would move every other lab's schedule.
 | 14:00 | 19:30 | again, because it is occasionally late |
 | 02:00 | 07:30 | again next morning, for the day it was very late |
 | `:20` hourly | — | one bounded backfill slice; does nothing once complete |
+| `:50` hourly | — | one bounded replay slice; does nothing once complete |
+| 15:40 | 21:10 | fill outcomes whose window has closed |
+
+Detection is **chained to the ingest**, not given a slot of its own: a state
+evaluated against a bar the ingest has not stored yet would record yesterday's
+answer as today's. It is enqueued rather than awaited, so one long pass cannot
+push the other past the worker's soft limit.
 
 A day the archive never published (a holiday, a weekend) is recorded `missing`
 and **never asked about again** — but only once the file is actually overdue.
@@ -258,6 +271,264 @@ rather than failing.
 
 ---
 
+# Phase 2 — detection, episodes and outcomes
+
+## Levels — `levels.py`
+
+A level is a **cluster of confirmed swing highs** within `CLUSTER_PCT` (2%) of
+each other, priced at their volume-weighted mean. One swing high is a price
+somebody sold at once; three within two percent is a price somebody sells at,
+and that is what a breakout has to get through.
+
+A swing high is a bar whose high is **strictly above** every high within
+`SWING_LOOKBACK` (5) bars on each side. Strictly, because two equal highs
+inside one window are a range rather than a peak, and admitting both would put
+the same level in the ladder twice with twice the weight.
+
+A cluster is **broken** when a close after its last touch clears it by more
+than `BREAK_CONFIRM_PCT` (1%). Two things are deliberate there: a bare "close
+above" would let a cluster be broken by one of its own constituent bars, since
+the level is a mean and a swing above that mean usually closed above it; and
+the 1% is the same margin the state machine needs for a BREAKOUT, so a level
+cannot be broken by a move too small to be a breakout.
+
+### The property that makes the record worth keeping
+
+**Levels computed over bars 0..i are exactly the levels the full series gives
+for bar i.** The right-hand confirmation window is what guarantees it: the last
+five bars of any series can never produce a swing, because the bars that would
+confirm them have not closed. `test_levels.py` asserts it on every prefix, and
+again in the sharper form — that no longer series ever moves, adds or removes a
+swing already confirmed.
+
+Without that property every replayed episode was decided with information from
+its own future, and the statistics below are fiction.
+
+## The readiness score — `score.py`
+
+The brief said to reuse the existing 0–100 pre-breakout score. **There is no
+such score** anywhere on this machine (see `RUN_LOG.md`, step 0), so it is
+built here: five components, each clamped to `[0, 1]`, each stored beside the
+score.
+
+| Component | Weight | What it asks |
+|---|---|---|
+| `proximity` | 0.30 | how close the close sits under the level |
+| `compression` | 0.20 | is the 20-day range a coil or a drift |
+| `trend` | 0.20 | above a **rising** 50-day mean — half each |
+| `volume` | 0.20 | is participation arriving before the break |
+| `touches` | 0.10 | a level tested four times is a real level |
+
+A stock with nothing above it scores **zero** for proximity, not one: it is not
+ready to break out, it has already broken out of everything, and that must not
+be the top of the board.
+
+The score says "coiled under a real level with participation". It does **not**
+say the breakout will happen — the episode record exists to find that out, and
+the decile table in `/stats` is the question being asked.
+
+## The state machine — `states.py`
+
+Evaluated on each new daily bar. **Every window is counted in BARS, not
+calendar days**: the outcome horizons are trading days, a stock that does not
+trade produces no bar, and a long weekend must not age a setup.
+
+| State | Rule |
+|---|---|
+| `WATCH` | score ≥ 60 and distance ≤ 10% |
+| `NEAR` | score ≥ 70 and distance ≤ 4%, close not above the level |
+| `BREAKOUT` | close clears the level by > 1% **on ≥ 1.5x** the 20-day mean volume |
+| `FALSE_BREAKOUT` | was BREAKOUT, closed back under the level within 5 bars |
+| `FAILED` | fell > 8% below the level, or 5 bars in a row under `WATCH_SCORE`, or went through the level on no volume |
+| `EXPIRED` | 60 bars open with none of the above |
+| `NONE` | otherwise |
+
+**The level is fixed when the episode opens.** After that the episode is about
+that price, not whatever is nearest today. Without it a stock drifting upward
+has its target quietly raised every bar and can never break out — and a
+breakout would immediately re-target the next level up, so the episode would
+never record the thing it was opened to record.
+
+**NONE does not close an episode.** It means "no new state this bar". The ways
+out are FAILED, FALSE_BREAKOUT and EXPIRED; a run of NONE bars turns into
+FAILED through the weak-bar count. Closing on NONE would split one setup into
+two half-episodes with a `ref_price` from the wrong day.
+
+### Episodes
+
+Opened on the first WATCH or NEAR, recording `first_near_date` and `ref_price`
+(the close that day). A stock that gaps through a level nobody was watching is
+reported as BREAKOUT and records **no episode** — there is no ref_price for it,
+and inventing one would be inventing an entry. The **first** confirmed breakout
+is the breakout; later closes through the level are events.
+
+One open episode per symbol per source, enforced by a partial unique index — so
+a bug that opened a second one fails loudly rather than double-counting every
+statistic.
+
+## Outcomes — `outcomes.py`
+
+Filled by a **separate pass** once the window has elapsed. Nothing that decides
+a state can see a return, and a test asserts `states.py` does not import
+`outcomes` or `stats`. That separation is the only reason any of the numbers
+below are a backtest rather than a description.
+
+Measured from two points, because they answer different questions: buying at
+NEAR is buying an expectation and eats the false breakouts; buying the
+confirmed breakout is buying a fact and pays a worse price for it.
+
+| Column | From |
+|---|---|
+| `ret_ref_5/10/20/40` | `ref_price` — what buying the setup would have done |
+| `ret_bo_5/10/20/40` | `breakout_price` — what buying the confirmation would have done |
+| `mfe_20` / `mae_20` | best and worst excursion in the 20 bars after each point |
+| `held_20d_pct` | breakout price to the close 20 bars later |
+| `trail10_pct` | the same entry with a 10% trailing stop |
+| `rel_nifty_20` | the 20-bar return minus Nifty 50 over the same sessions |
+
+A horizon the series does not reach is **absent, never zero** — the difference
+between "it went nowhere" and "we cannot know yet" is the whole point of a
+record like this, and a zero would be averaged in as a flat trade.
+
+### The line that decides whether any of this means anything
+
+`trail_result` takes **the low before the high**. A bar that would both take
+the stop out and set a new high exits at the stop, because we cannot see the
+order within a daily bar and so assume the one that costs us. The high-water
+mark rises only after the low has been checked, so a stop can never be lifted
+by a high the price reached after it would already have been hit.
+
+Getting that backwards is how a backtest invents money.
+
+## The historical replay
+
+`Detector.walk` is one function with two callers: the daily pass folds it over
+the newest bar, the replay folds it over every bar from the start. A test walks
+the same series both ways — once in a sweep, once one bar at a time carrying
+the episode through the database as the daily job does — and asserts the
+episodes match field for field. **That test found a real bug in the live path**
+that no single-path test could have: the daily pass was storing the bar's state
+on the episode row, so a dull day abandoned the setup and a second episode
+opened when it recovered.
+
+```bash
+cd backend && NSE_BREAKOUT_ENABLED=true python -m app.labs.nse_breakout replay --all
+```
+
+Resumable and deadline-bounded like the backfill. The marker is
+`bt_universe.replayed_at`, not the presence of episodes: a symbol that produced
+none has still been replayed.
+
+### What the replay cannot see
+
+* **Survivorship.** The universe is derived from names trading today, so a
+  company delisted in 2025 is absent from a replay covering 2024. Its setups —
+  disproportionately the ones that ended badly — are not in these numbers.
+* **Unadjusted prices.** Bars across a split or bonus are flagged
+  `suspect_gap`, not corrected, so a level computed across one is wrong. 425
+  bars of 1.45M are flagged (0.03%).
+* The thresholds were fixed before the replay ran and were **not** adjusted
+  afterwards. The payload carries them so a number can never be read against
+  the wrong rules.
+
+### The replay result
+
+Run 2026-09-11 over **1,300 symbols, 608 sessions (2024-03-26 to 2026-09-10)**,
+producing **8,484 episodes**, of which 7,281 had complete outcome windows. The
+thresholds in `config` were fixed before this ran and were not touched
+afterwards.
+
+| | |
+|---|---|
+| Episodes | **8,484** |
+| Reached a confirmed breakout | **30.0%** |
+| Of those, closed back under the level within 5 bars | **45.3%** |
+| Median bars from the setup opening to the breakout | 3 |
+
+**From `ref_price`** (buying the setup at NEAR), 20 trading days:
+
+| mean | median | win rate | mean MFE | mean MAE |
+|---|---|---|---|---|
+| **−0.07%** | −1.13% | 44.97% | +8.88% | −7.61% |
+
+**From `breakout_price`** (buying the confirmation), 20 trading days:
+
+| mean | median | win rate | mean MFE | mean MAE |
+|---|---|---|---|---|
+| **+0.09%** | −1.08% | 44.91% | +9.84% | −8.37% |
+
+With a 10% trailing stop from the breakout: mean **−0.26%**, win rate 34.5%,
+**profit factor 0.93**, and **93% of positions were stopped out** — a 10% trail
+is inside the ordinary daily noise of these names. Relative to Nifty 50 over
+the same sessions: **−0.03%**.
+
+| Score decile | n | reached breakout | mean ret from breakout | mean ret from ref |
+|---|---|---|---|---|
+| 60–69 | 4,612 | **17.5%** | −0.31% | −1.03% |
+| 70–79 | 2,652 | **38.2%** | −0.25% | +0.27% |
+| 80–89 | 1,079 | **58.1%** | +1.22% | +2.78% |
+| 90–99 | 141 | **70.2%** | −0.45% | +4.65% |
+
+| Year | episodes | reached breakout | mean ret from breakout | vs Nifty |
+|---|---|---|---|---|
+| 2025 | 4,495 | 28.9% | −0.44% | −1.05% |
+| 2026 | 3,989 | 31.3% | +0.87% | +1.62% |
+
+### What that says — no tuning
+
+**The score predicts the breakout and does not predict the return.** The reach
+rate climbs monotonically across the deciles, 17.5% → 38.2% → 58.1% → 70.2%: a
+four-fold spread, on 8,484 episodes, from a score whose thresholds were fixed
+before the test. That part works — the score ranks which setups clear their
+level, which is the event it was built to rank.
+
+What follows the breakout is noise. The mean 20-day return from the breakout
+price is +0.09% with a 45% win rate, the decile column is not monotone and its
+top bucket is **negative**, and the whole thing is −0.03% against the Nifty over
+the same sessions. Mean MFE +9.8% against mean MAE −8.4% is a symmetric
+distribution with no drift, which is what a coin looks like. The two years
+disagree on the sign (−1.05% vs +1.62% relative), which is the signature of a
+result that exists in one sample and not in the other. The ref-side decile
+column *is* monotone (−1.03% → +4.65%) but most of that is mechanical: a higher
+score means a closer level, so the ref price is nearer the breakout that
+follows and the same move is measured from lower down.
+
+Add costs and it is worse: 45% of confirmed breakouts close back under the
+level within five bars, and the 10% trailing stop — the only exit rule tested —
+returns a profit factor of **0.93** while stopping out 93% of the time.
+
+**So: a good level-clearing predictor, and no tradeable edge in this record.**
+The subject matter was never the return; the record exists to say whether the
+score was worth computing, and the answer is "for the event, yes; for the
+money, no". Nothing was adjusted to improve any of these numbers, and the
+thresholds that produced them travel with them in the `config` block of
+`/stats`.
+
+## The routes
+
+Read-only, all six, all under `/api/v1/tracker`. **These shapes are the
+contract Phase 3 is built against** — `test_routes.py` asserts the field names
+explicitly rather than by round-tripping a model, because a rename that the
+fixtures do not follow is exactly the mismatch the Phase 3 definition of done
+forbids.
+
+| Route | Returns |
+|---|---|
+| `GET /health` | universe size, coverage, last bhavcopy, failures, corporate actions |
+| `GET /near?limit=` | `[{symbol, name, state, score, close, resistance, distance_pct, tightness, is_52w_high, days_in_state, turnover_20d, bar_date}]` — **NEAR first, then by score**, sorted in SQL |
+| `GET /breakouts?days=30&source=live` | `[{symbol, breakout_date, breakout_price, resistance, volume_mult, ret_since_pct, max_gain_pct, max_drawdown_pct, state, live_state, false_breakout, days_since}]` |
+| `GET /stock/{symbol}?candles=750` | `{stock, levels:{clusters, nearest_resistance, is_52w_high, week52_high, atr, range_pct, tightness}, score:{score, components, state, days_in_state, distance_pct}, episode, history[], candles[]}` |
+| `GET /episodes?source=&limit=&offset=` | `{total, limit, offset, items:[episode]}` |
+| `GET /stats?source=replay` | the aggregate below, plus `config` and `caveats` |
+
+`sector` is **absent** from `/near`, not null: there is no keyless source for
+NSE sector classification and the paid ones may not be scraped.
+
+With the flag off, every route answers empty. `/stock` is the exception — it
+returns 503, because an empty body there would read as "no such stock".
+
+---
+
 ## Layout
 
 | File | What |
@@ -267,6 +538,12 @@ rather than failing.
 | `sources.py` | the archive client: retries, spacing, 404-is-an-answer |
 | `ingest.py` | days, upserts, resumption, the universe, the gap flag |
 | `data.py` | the read side |
+| `levels.py` | swing highs, clusters, ATR, 52-week high. Pure |
+| `score.py` | the five components and the 0-100 score. Pure |
+| `states.py` | the state machine. Pure, and cannot see a return |
+| `outcomes.py` | the return arithmetic, low-before-high. Pure |
+| `stats.py` | the aggregate, including the decile table. Pure |
+| `episodes.py` | the walk, the writers, and the outcome filler |
 | `api.py` | `/tracker` — read-only |
 | `scheduler.py` | the beat tasks |
 | `__main__.py` | the CLI |
