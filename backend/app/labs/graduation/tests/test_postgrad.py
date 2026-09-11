@@ -95,13 +95,19 @@ def test_a_backfilled_candle_fills_only_what_it_can_know() -> None:
 
 # --- the window ---------------------------------------------------------------
 
-async def test_a_window_opens_on_migration_and_closes_after_an_hour() -> None:
+async def test_a_window_opens_on_migration_and_closes_an_hour_after_the_open() -> None:
+    """It used to close an hour after the MIGRATION, which silently truncated
+    every window by however long DexScreener took to answer — about nine
+    minutes, and enough that no outcome could ever clear the coverage floor."""
     sampler = PostGradSampler(market=FakeMarket())
     sampler.start(MINT, NOW)
     assert len(sampler) == 1
 
-    assert sampler.expire(NOW + timedelta(minutes=59)) == []
-    assert sampler.expire(NOW + timedelta(minutes=61)) == [MINT]
+    # With a pool open recorded, the hour runs from there.
+    opened = NOW + timedelta(minutes=9)
+    sampler.states[MINT].opened_at = opened
+    assert sampler.expire(NOW + timedelta(minutes=61)) == []
+    assert sampler.expire(opened + timedelta(minutes=61)) == [MINT]
     assert len(sampler) == 0
 
 
@@ -195,3 +201,54 @@ async def test_candles_predating_the_graduation_are_dropped() -> None:
                        1.0, 1.0, 1.0, 1.0, 5.0]]
 
     assert await sampler.poll(NOW + timedelta(minutes=5)) == []
+
+
+# --- the window runs from the open, not the migration -------------------------
+
+async def test_the_window_runs_a_full_hour_from_the_pool_open() -> None:
+    """The bug this closes, found in production.
+
+    DexScreener first answers about nine minutes after the migration. Closing
+    the window sixty minutes after the MIGRATION therefore collected only ~51
+    minutes of prices — while the outcome floor needs 55 of 60 counted from
+    the open. No outcome could ever qualify; every graduate was rejected.
+    """
+    sampler = PostGradSampler(market=FakeMarket())
+    sampler.start(MINT, NOW)
+    state = sampler.states[MINT]
+
+    # The pool appears nine minutes late.
+    opened = NOW + timedelta(minutes=9)
+    state.opened_at = opened
+
+    # An hour after the MIGRATION is no longer the end of the window.
+    assert state.window_open(NOW + timedelta(minutes=61)) is True
+    # An hour after the OPEN is.
+    assert state.window_open(opened + timedelta(minutes=59)) is True
+    assert state.window_open(opened + timedelta(minutes=61)) is False
+
+
+async def test_a_graduate_whose_pair_never_appears_is_given_up_on() -> None:
+    """Otherwise a token with no pool would be polled for ever, because the
+    clock it runs on would never start."""
+    sampler = PostGradSampler(market=FakeMarket())
+    sampler.start(MINT, NOW)
+    state = sampler.states[MINT]
+    assert state.opened_at is None
+
+    grace = config.POSTGRAD_OPEN_GRACE_SECONDS
+    assert state.window_open(NOW + timedelta(seconds=grace - 60)) is True
+    assert state.window_open(NOW + timedelta(seconds=grace + 60)) is False
+
+
+async def test_the_open_is_recorded_from_the_first_accepted_sample() -> None:
+    market = FakeMarket()
+    sampler = PostGradSampler(market=market)
+    sampler.start(MINT, NOW)
+    late = NOW + timedelta(minutes=9)
+
+    await sampler.poll(late)
+    assert sampler.states[MINT].opened_at == late
+    # And it does not move on later samples.
+    await sampler.poll(late + timedelta(minutes=5))
+    assert sampler.states[MINT].opened_at == late

@@ -192,8 +192,17 @@ SILENT_MIN = _int("LAB_GRADUATION_SILENT_MIN", 30)
 #: graduates (plus the post-graduation window) or when it has been stale this
 #: long, which is the backstop against a curve that parks at 94% for ever.
 STALE_HOURS = _int("LAB_GRADUATION_STALE_HOURS", 24)
-#: Trades keep being sampled for this long after the migration event.
+#: How long a graduated token is sampled FROM ITS POOL OPEN — the first price
+#: DexScreener answers with, not the migration.
+#:
+#: The two are ~9 minutes apart in practice, and measuring from the migration
+#: loses that off the end: the sampler stopped at ~51 minutes of prices while
+#: the outcome floor needs 55 of 60 counted from the open, so NO outcome could
+#: ever qualify. Both sides now run on the same clock.
 POST_MIGRATION_SECONDS = 60 * 60
+#: How long to wait for a pool to appear at all before giving up on a
+#: graduate. Bounds the wait for a token whose pair never gets indexed.
+POSTGRAD_OPEN_GRACE_SECONDS = _int("LAB_GRADUATION_OPEN_GRACE_S", 15 * 60)
 
 # --- post-graduation market data ----------------------------------------------
 DEXSCREENER_URL = "https://api.dexscreener.com"

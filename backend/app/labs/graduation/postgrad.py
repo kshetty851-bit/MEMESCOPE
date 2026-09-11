@@ -53,13 +53,28 @@ class PostGradState:
     migrated_at: datetime
     pair_address: str | None = None
     dex_id: str | None = None
+    #: The POOL OPEN: the first price this token ever answered with. The
+    #: outcome window runs from here, not from the migration — they are about
+    #: nine minutes apart and measuring from the migration loses that off the
+    #: end of every window.
+    opened_at: datetime | None = None
     last_sample_at: datetime | None = None
     samples: int = 0
     #: Timestamps already written, so a backfill cannot duplicate a live poll.
     seen_ts: set[datetime] = field(default_factory=set)
 
     def window_open(self, now: datetime) -> bool:
-        return (now - self.migrated_at).total_seconds() < config.POST_MIGRATION_SECONDS
+        """Open for a full hour from the POOL OPEN once there is one.
+
+        Before the first price there is nothing to measure from, so the token
+        waits `POSTGRAD_OPEN_GRACE_SECONDS` for a pair to be indexed and is
+        then given up on — otherwise a graduate whose pair never appears would
+        be polled for ever.
+        """
+        if self.opened_at is None:
+            return (now - self.migrated_at).total_seconds() < (
+                config.POSTGRAD_OPEN_GRACE_SECONDS)
+        return (now - self.opened_at).total_seconds() < config.POST_MIGRATION_SECONDS
 
     def due(self, now: datetime) -> bool:
         if self.last_sample_at is None:
@@ -218,6 +233,7 @@ class PostGradSampler:
         if row["ts"] in state.seen_ts:
             return False
         state.seen_ts.add(row["ts"])
+        state.opened_at = state.opened_at or row["ts"]
         state.last_sample_at = row["ts"]
         state.samples += 1
         # The pool address is learned here and nowhere else. Without it the
