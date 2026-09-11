@@ -105,6 +105,17 @@ export const NAV_GROUPS: NavGroup[] = [
         status: "ready",
         note: "Research simulation. Daily resistance, $1,000 paper book.",
       },
+      // Indian equities, not Solana, and the only destination here with no
+      // book at all — it watches and records. Listed beside the labs because
+      // that is where a reader looks for one, and named for the market so it
+      // cannot be confused with the Solana Breakout Lab above it.
+      {
+        href: "/breakouts",
+        label: "NSE Breakouts",
+        icon: IconSpark,
+        status: "ready",
+        note: "Watch only. NSE equities into daily resistance; no book.",
+      },
     ],
   },
   {

@@ -529,6 +529,53 @@ returns 503, because an empty body there would read as "no such stock".
 
 ---
 
+# Phase 3 — the tab
+
+`/breakouts`, built beside the existing screens rather than into them:
+`frontend/src/labs/nse-tracker/` is the whole thing, plus one route re-export
+and **one nav line**. No new dependency, no new UI library, no charting
+library — the existing panel, skeleton and empty-state components, and an SVG
+chart this lab draws itself.
+
+| Panel | What it answers |
+|---|---|
+| Header strip | is the tracker running, how much of the universe is scorable, when was the last bar, did anything fail |
+| Near breakout | which stocks are close to a level today — **NEAR first, then by score**, with the tight-range and 52-week-high markers |
+| Stock view | the ladder and the NEAR band on a log axis, the score taken apart into its five components, and every episode this stock has had |
+| Recent breakouts | what confirmed lately, coloured by the move since, with the false ones flagged |
+| Outcomes | replay and live side by side, and the decile table |
+
+**Nothing on the page computes anything.** Every figure arrives already
+computed — a threshold applied in the client would be a second, unpublished
+rule competing with the one the tracker followed, and the two would disagree
+the first time either changed. The only exception is the board's sort, and that
+reads the same state order the backend publishes.
+
+**`null` is drawn as `—`, never as `0`.** An episode whose 40-bar window is
+still open has no return; the live column says "no outcome windows have closed
+yet" rather than showing a row of zeros that would read as a flat result.
+
+The chart's price axis is **logarithmic**: these names run from ₹20 to ₹24,000
+and one chart spans two and a half years, so on a linear axis a stock that
+trebled squashes its own base into the floor — and the base is where the levels
+were formed. Unbroken levels are solid, broken ones dashed; a bar sitting
+across a corporate action is shaded, because its price is unadjusted and known
+to be wrong relative to its neighbours.
+
+### Mock mode
+
+```bash
+cd frontend && NEXT_PUBLIC_NSE_TRACKER_MOCK=true npm run dev
+```
+
+Serves `mock.ts` instead of the network. The fixtures are shaped from the
+**real** replay payload — including the negative top decile and an episode
+whose window has not closed — so mock mode shows what the page looks like with
+honest data in it. A fixture that only shows winners teaches you to build a
+page that cannot render a loss.
+
+---
+
 ## Layout
 
 | File | What |
