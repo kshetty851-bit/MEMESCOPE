@@ -22,13 +22,16 @@ def state(price: str, *, entry: str = "1.0", peak: str = "1.0") -> ExitState:
 # --- the frozen rules ---------------------------------------------------------
 
 def test_the_book_ships_with_the_rules_that_were_asked_for() -> None:
-    """$1,000 over ten $100 slots with a 30% trailing stop, in quote terms at
-    roughly $200/SOL. Pinned so a later edit to the defaults is a visible
-    change to a stated rule rather than a quiet one."""
-    assert D("5.0") == config.PAPER_CAPITAL_QUOTE      # ~$1,000
-    assert D("0.5") == config.PAPER_NOTIONAL_QUOTE     # ~$100
+    """$1,000 over ten $100 slots with a 30% trailing stop. Pinned so a later
+    edit to the defaults is a visible change to a stated rule, not a quiet
+    one — the whole value of a forward run is that its rules were fixed
+    before the outcome was known."""
+    assert D("1000") == config.PAPER_CAPITAL_USD
+    assert D("100") == config.PAPER_NOTIONAL_USD
     assert config.PAPER_MAX_SLOTS == 10
     assert D("0.30") == config.PAPER_TRAILING_PCT
+    # Ten slots at $100 is exactly the book, so it can be fully deployed.
+    assert config.PAPER_NOTIONAL_USD * config.PAPER_MAX_SLOTS == config.PAPER_CAPITAL_USD
 
 
 def test_the_trailing_stop_fires_at_thirty_percent_off_the_peak() -> None:
@@ -55,7 +58,7 @@ def test_the_book_uses_the_backtester_cost_model() -> None:
     both."""
     assert costs().pump_fee_bps == Costs().pump_fee_bps
     assert costs().slip_bps == Costs().slip_bps
-    assert costs().notional_quote == config.PAPER_NOTIONAL_QUOTE
+    assert costs().priority_fee_quote == Costs().priority_fee_quote
 
 
 def test_a_flat_round_trip_still_loses_the_spread() -> None:
@@ -66,18 +69,43 @@ def test_a_flat_round_trip_still_loses_the_spread() -> None:
 
 # --- the account --------------------------------------------------------------
 
+def test_the_sol_usd_rate_is_observed_or_refused() -> None:
+    """DexScreener answers with price_usd AND price_native for the same pair
+    at the same instant, so the rate is a measurement. When either side is
+    missing it is refused: a position sized at an invented rate would report a
+    dollar P&L that never existed."""
+    from app.labs.graduation.paper import _rate
+
+    assert _rate(D("200.0"), D("1.0")) == D("200")
+    assert _rate(None, D("1.0")) is None
+    assert _rate(D("200"), None) is None
+    assert _rate(D("200"), D("0")) is None
+    assert _rate(D("0"), D("1")) is None
+
+
+def test_dollar_pnl_comes_from_size_and_return_not_a_live_rate() -> None:
+    """A closed trade's dollars must not move when SOL does. Size and return
+    are both exact and fixed at the time; re-converting the SOL proceeds later
+    would let a move in SOL rewrite what the trade earned."""
+    notional, net = D("100"), D("0.25")
+    assert (notional * net).quantize(D("0.01")) == D("25.00")
+
+
 def test_equity_is_derived_never_stored() -> None:
     """Storing equity would be a second source of truth for something the
     positions already say, and the two would disagree the first time either
     changed."""
-    a = Account(starting=D("5.0"), realised=D("-0.4"), unrealised=D("0.1"),
+    a = Account(starting=D("1000"), realised=D("-40"), unrealised=D("10"),
                 open_positions=3, closed_positions=7, wins=2)
-    assert a.equity == D("4.7")
+    assert a.equity == D("970")
+    assert a.pnl == D("-30")
+    assert a.return_pct == D("-0.0300")
     assert a.free_slots == config.PAPER_MAX_SLOTS - 3
+    assert a.as_dict()["equity_usd"] == "970.00"
 
 
 def test_a_full_book_has_no_free_slots() -> None:
-    a = Account(starting=D("5.0"), realised=D(0), unrealised=D(0),
+    a = Account(starting=D("1000"), realised=D(0), unrealised=D(0),
                 open_positions=config.PAPER_MAX_SLOTS, closed_positions=0, wins=0)
     assert a.free_slots == 0
 

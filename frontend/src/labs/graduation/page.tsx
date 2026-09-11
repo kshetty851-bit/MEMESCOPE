@@ -102,8 +102,22 @@ function signed(value: string | null): string {
   return `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
 }
 
+function usd(value: string | number | null): string {
+  if (value === null) return "—";
+  const n = Number(value);
+  return `${n < 0 ? "-" : ""}$${Math.abs(n).toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+function signedUsd(value: string | null): string {
+  if (value === null) return "—";
+  return `${Number(value) >= 0 ? "+" : ""}${usd(value)}`;
+}
+
 function PaperPanel({ book }: { book: PaperBook }) {
-  const pnl = Number(book.equity_quote) - Number(book.starting_quote);
+  const pnl = Number(book.pnl_usd);
   const tone = pnl > 0 ? "text-up" : pnl < 0 ? "text-down" : "";
   return (
     <Panel>
@@ -113,19 +127,25 @@ function PaperPanel({ book }: { book: PaperBook }) {
       <div className="flex flex-col gap-4 p-4">
         <p className="max-w-[65ch] text-xs text-ink-dim">
           Rules fixed before the outcome was known: buy the pool open,{" "}
-          {book.notional_quote} quote a position, {book.max_slots} at once,
-          exit on a {(Number(book.trailing_pct) * 100).toFixed(0)}% trailing
-          stop off the running peak, and out at {book.max_hold_minutes}{" "}
-          minutes because the price series ends there. Nothing is tuned after
-          the fact — that is the whole point of running it forward.
+          {usd(book.notional_usd)} a position, {book.max_slots} at once, exit
+          on a {(Number(book.trailing_pct) * 100).toFixed(0)}% trailing stop
+          off the running peak, and out at {book.max_hold_minutes} minutes
+          because the price series ends there. Nothing is tuned after the
+          fact — that is the whole point of running it forward. Positions are
+          sized in dollars and converted at the SOL/USD rate observed when
+          each one opened.
         </p>
         <div className="grid grid-cols-2 gap-6 sm:grid-cols-4">
           <Stat
             label="Equity"
-            value={Number(book.equity_quote).toFixed(4)}
-            note={`from ${book.starting_quote} start`}
+            value={usd(book.equity_usd)}
+            note={`from ${usd(book.starting_usd)} start`}
           />
-          <Stat label="Realised" value={Number(book.realised_quote).toFixed(4)} />
+          <Stat
+            label="Realised"
+            value={signedUsd(book.realised_usd)}
+            note={`${signedUsd(book.unrealised_usd)} open`}
+          />
           <Stat
             label="Open"
             value={`${book.open_positions}/${book.max_slots}`}
@@ -142,8 +162,9 @@ function PaperPanel({ book }: { book: PaperBook }) {
           />
         </div>
         <p className={`text-sm font-semibold tabular-nums ${tone}`}>
-          {pnl >= 0 ? "+" : ""}
-          {pnl.toFixed(4)} quote against the starting book
+          {signedUsd(book.pnl_usd)} ({Number(book.return_pct) >= 0 ? "+" : ""}
+          {(Number(book.return_pct) * 100).toFixed(2)}%) against the{" "}
+          {usd(book.starting_usd)} book
         </p>
         {book.positions.length ? (
           <div className="overflow-x-auto">
@@ -151,9 +172,8 @@ function PaperPanel({ book }: { book: PaperBook }) {
               <thead>
                 <tr className="text-left text-[11px] uppercase tracking-wider text-ink-dim">
                   <th className="pb-2 pr-3 font-medium">Token</th>
-                  <th className="pb-2 pr-3 text-right font-medium">Entry</th>
-                  <th className="pb-2 pr-3 text-right font-medium">Peak</th>
-                  <th className="pb-2 pr-3 text-right font-medium">Now</th>
+                  <th className="pb-2 pr-3 text-right font-medium">Size</th>
+                  <th className="pb-2 pr-3 text-right font-medium">P&amp;L</th>
                   <th className="pb-2 pr-3 text-right font-medium">Return</th>
                   <th className="pb-2 text-right font-medium">State</th>
                 </tr>
@@ -165,13 +185,18 @@ function PaperPanel({ book }: { book: PaperBook }) {
                       {p.symbol ?? shortenAddress(p.mint)}
                     </td>
                     <td className="py-2 pr-3 text-right tabular-nums">
-                      {Number(p.open_fill).toExponential(2)}
+                      {usd(p.notional_usd)}
                     </td>
-                    <td className="py-2 pr-3 text-right tabular-nums">
-                      {Number(p.peak_quote).toExponential(2)}
-                    </td>
-                    <td className="py-2 pr-3 text-right tabular-nums">
-                      {p.last_quote ? Number(p.last_quote).toExponential(2) : "—"}
+                    <td
+                      className={`py-2 pr-3 text-right tabular-nums ${
+                        p.pnl_usd && Number(p.pnl_usd) > 0
+                          ? "text-up"
+                          : p.pnl_usd && Number(p.pnl_usd) < 0
+                            ? "text-down"
+                            : ""
+                      }`}
+                    >
+                      {signedUsd(p.pnl_usd)}
                     </td>
                     <td
                       className={`py-2 pr-3 text-right tabular-nums ${

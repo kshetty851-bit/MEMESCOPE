@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from typing import Any
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
@@ -27,7 +28,7 @@ from app.labs.graduation.models import (
     GradPostgradSample,
     GradToken,
 )
-from app.labs.graduation.paper import PaperBook, positions
+from app.labs.graduation.paper import PaperBook, costs, positions
 
 router = APIRouter(prefix="/labs/graduation", tags=["graduation-lab"])
 
@@ -65,11 +66,14 @@ class PaperPosition(BaseModel):
     mint: str
     symbol: str | None = None
     opened_at: datetime
+    notional_usd: Decimal
     open_fill: Decimal
     last_quote: Decimal | None = None
     peak_quote: Decimal
     closed_at: datetime | None = None
     close_reason: str | None = None
+    #: Realised for a closed position; marked-to-market for an open one.
+    pnl_usd: Decimal | None = None
     net_return: Decimal | None = None
 
 
@@ -77,15 +81,17 @@ class PaperBookOut(BaseModel):
     """The forward book. Rules frozen in advance; nothing here is tunable."""
 
     running: bool = False
-    starting_quote: Decimal = Decimal(0)
-    equity_quote: Decimal = Decimal(0)
-    realised_quote: Decimal = Decimal(0)
-    unrealised_quote: Decimal = Decimal(0)
+    starting_usd: Decimal = Decimal(0)
+    equity_usd: Decimal = Decimal(0)
+    realised_usd: Decimal = Decimal(0)
+    unrealised_usd: Decimal = Decimal(0)
+    pnl_usd: Decimal = Decimal(0)
+    return_pct: Decimal = Decimal(0)
     open_positions: int = 0
     closed_positions: int = 0
     wins: int = 0
     max_slots: int = 0
-    notional_quote: Decimal = Decimal(0)
+    notional_usd: Decimal = Decimal(0)
     trailing_pct: Decimal = Decimal(0)
     max_hold_minutes: int = 0
     positions: list[PaperPosition] = []
@@ -240,25 +246,42 @@ async def _paper(db: AsyncSession) -> PaperBookOut:
     """The book's state. Read-only: this endpoint never ticks it."""
     book = PaperBook(db)
     account = await book.account()
+    book_costs = costs()
+    rows = await positions(db, limit=20)
+
+    def mark(p: Any) -> Decimal | None:
+        """Closed positions carry their realised dollars; open ones are
+        marked to the last price, using the rate captured at entry."""
+        if p.pnl_usd is not None:
+            return p.pnl_usd
+        if p.last_quote is None or p.notional_quote <= 0:
+            return None
+        value = p.tokens * book_costs.sell_price(p.last_quote)
+        return (p.notional_usd * (value / p.notional_quote - 1)).quantize(
+            Decimal("0.01"))
+
     return PaperBookOut(
         running=config.paper_enabled(),
-        starting_quote=account.starting,
-        equity_quote=account.equity,
-        realised_quote=account.realised,
-        unrealised_quote=account.unrealised,
+        starting_usd=account.starting,
+        equity_usd=account.equity,
+        realised_usd=account.realised,
+        unrealised_usd=account.unrealised,
+        pnl_usd=account.pnl,
+        return_pct=account.return_pct,
         open_positions=account.open_positions,
         closed_positions=account.closed_positions,
         wins=account.wins,
         max_slots=config.PAPER_MAX_SLOTS,
-        notional_quote=config.PAPER_NOTIONAL_QUOTE,
+        notional_usd=config.PAPER_NOTIONAL_USD,
         trailing_pct=config.PAPER_TRAILING_PCT,
         max_hold_minutes=config.PAPER_MAX_HOLD_MINUTES,
         positions=[
             PaperPosition(
                 mint=p.mint, symbol=p.symbol, opened_at=p.opened_at,
-                open_fill=p.open_fill, last_quote=p.last_quote,
-                peak_quote=p.peak_quote, closed_at=p.closed_at,
-                close_reason=p.close_reason, net_return=p.net_return)
-            for p in await positions(db, limit=20)
+                notional_usd=p.notional_usd, open_fill=p.open_fill,
+                last_quote=p.last_quote, peak_quote=p.peak_quote,
+                closed_at=p.closed_at, close_reason=p.close_reason,
+                pnl_usd=mark(p), net_return=p.net_return)
+            for p in rows
         ],
     )

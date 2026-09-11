@@ -63,9 +63,26 @@ _Q = Decimal("0.000000001")
 _P = Decimal("0.00000001")
 
 
-def costs() -> Costs:
-    """The book's cost model: the backtester's, at the book's position size."""
-    return Costs(notional_quote=config.PAPER_NOTIONAL_QUOTE)
+def costs(notional_quote: Decimal | None = None) -> Costs:
+    """The book's cost model: the backtester's, at the book's position size.
+
+    The flat priority fee is a fraction of the position, so it needs a quote
+    size. A nominal one is fine — it moves the fee by a basis point or two,
+    not the shape of anything.
+    """
+    return Costs(notional_quote=notional_quote or Decimal("0.5"))
+
+
+def _rate(price_usd: Decimal | None, price_native: Decimal | None) -> Decimal | None:
+    """SOL/USD, observed from one sample that carries both prices.
+
+    Refused rather than guessed when either side is missing: a position sized
+    at an invented rate would report a dollar P&L that never existed.
+    """
+    if not price_usd or not price_native or price_native <= 0:
+        return None
+    rate = price_usd / price_native
+    return rate if rate > 0 else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,15 +102,29 @@ class Account:
         return self.starting + self.realised + self.unrealised
 
     @property
+    def pnl(self) -> Decimal:
+        return self.realised + self.unrealised
+
+    @property
+    def return_pct(self) -> Decimal:
+        if self.starting <= 0:
+            return Decimal(0)
+        return (self.pnl / self.starting).quantize(Decimal("0.0001"))
+
+    @property
     def free_slots(self) -> int:
         return max(0, config.PAPER_MAX_SLOTS - self.open_positions)
 
     def as_dict(self) -> dict[str, Any]:
+        """All USD. The book was specified in dollars and reports in them."""
+        cents = Decimal("0.01")
         return {
-            "starting_quote": str(self.starting),
-            "realised_quote": str(self.realised.quantize(_Q)),
-            "unrealised_quote": str(self.unrealised.quantize(_Q)),
-            "equity_quote": str(self.equity.quantize(_Q)),
+            "starting_usd": str(self.starting.quantize(cents)),
+            "realised_usd": str(self.realised.quantize(cents)),
+            "unrealised_usd": str(self.unrealised.quantize(cents)),
+            "equity_usd": str(self.equity.quantize(cents)),
+            "pnl_usd": str(self.pnl.quantize(cents)),
+            "return_pct": str(self.return_pct),
             "open_positions": self.open_positions,
             "closed_positions": self.closed_positions,
             "wins": self.wins,
@@ -170,9 +201,13 @@ class PaperBook:
         position.close_fill = fill.quantize(_P)
         position.close_reason = reason
         position.pnl_quote = (proceeds - position.notional_quote).quantize(_Q)
-        position.net_return = (
-            (proceeds / position.notional_quote - 1)
-            if position.notional_quote > 0 else Decimal(0)).quantize(Decimal("0.00000001"))
+        net = ((proceeds / position.notional_quote - 1)
+               if position.notional_quote > 0 else Decimal(0))
+        position.net_return = net.quantize(Decimal("0.00000001"))
+        # Dollars come from the size and the return, both of which are exact.
+        # Re-converting the SOL proceeds at today's rate would let a move in
+        # SOL rewrite what a closed trade earned.
+        position.pnl_usd = (position.notional_usd * net).quantize(Decimal("0.01"))
         logger.info("graduation_paper_closed", mint=position.mint,
                     reason=reason, net=float(position.net_return))
 
@@ -203,7 +238,7 @@ class PaperBook:
 
         rows = (await self._session.execute(
             select(opens.c.mint, opens.c.open_at,
-                   GradPostgradSample.price_native)
+                   GradPostgradSample.price_native, GradPostgradSample.price_usd)
             .join(GradPostgradSample,
                   (GradPostgradSample.mint == opens.c.mint)
                   & (GradPostgradSample.ts == opens.c.open_at)))).all()
@@ -212,22 +247,32 @@ class PaperBook:
         for row in rows:
             if row.price_native is None or row.price_native <= 0:
                 continue
+            rate = _rate(row.price_usd, row.price_native)
+            if rate is None:
+                # No observed SOL/USD for this token. Sizing it at an invented
+                # rate would report a dollar P&L that never existed.
+                logger.warning("graduation_paper_no_rate", mint=row.mint)
+                continue
             fill = self._costs.buy_price(row.price_native)
             if fill <= 0:
                 continue
+            notional_quote = (config.PAPER_NOTIONAL_USD / rate).quantize(_Q)
             self._session.add(GradPaperPosition(
                 mint=row.mint,
                 opened_at=row.open_at,
                 open_quote=row.price_native.quantize(_P),
                 open_fill=fill.quantize(_P),
-                notional_quote=config.PAPER_NOTIONAL_QUOTE,
-                tokens=(config.PAPER_NOTIONAL_QUOTE / fill).quantize(_Q),
+                notional_usd=config.PAPER_NOTIONAL_USD,
+                sol_usd_at_open=rate.quantize(Decimal("0.000001")),
+                notional_quote=notional_quote,
+                tokens=(notional_quote / fill).quantize(_Q),
                 peak_quote=row.price_native.quantize(_P),
                 last_quote=row.price_native.quantize(_P),
                 marked_at=self._now,
             ))
             opened += 1
-            logger.info("graduation_paper_opened", mint=row.mint)
+            logger.info("graduation_paper_opened", mint=row.mint,
+                        usd=float(config.PAPER_NOTIONAL_USD))
         return opened
 
     # --- reads ---------------------------------------------------------------
@@ -251,27 +296,30 @@ class PaperBook:
 
     async def account(self) -> Account:
         realised = await self._session.scalar(
-            select(func.coalesce(func.sum(GradPaperPosition.pnl_quote), 0))
+            select(func.coalesce(func.sum(GradPaperPosition.pnl_usd), 0))
             .where(GradPaperPosition.closed_at.is_not(None)))
         closed = await self._session.scalar(
             select(func.count()).select_from(GradPaperPosition)
             .where(GradPaperPosition.closed_at.is_not(None)))
         wins = await self._session.scalar(
             select(func.count()).select_from(GradPaperPosition)
-            .where(GradPaperPosition.pnl_quote > 0))
+            .where(GradPaperPosition.pnl_usd > 0))
         open_rows = (await self._session.scalars(
             select(GradPaperPosition)
             .where(GradPaperPosition.closed_at.is_(None)))).all()
 
         unrealised = Decimal(0)
         for position in open_rows:
-            if position.last_quote is None:
+            if position.last_quote is None or position.notional_quote <= 0:
                 continue
             value = position.tokens * self._costs.sell_price(position.last_quote)
-            unrealised += value - position.notional_quote
+            # The unrealised move is a RATIO, so it converts to dollars with
+            # the position's own entry rate and needs no live SOL/USD.
+            unrealised += position.notional_usd * (
+                value / position.notional_quote - 1)
 
         return Account(
-            starting=config.PAPER_CAPITAL_QUOTE,
+            starting=config.PAPER_CAPITAL_USD,
             realised=Decimal(realised or 0),
             unrealised=unrealised,
             open_positions=len(open_rows),

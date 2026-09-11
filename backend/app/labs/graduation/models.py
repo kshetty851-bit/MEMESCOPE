@@ -607,6 +607,12 @@ class GradPaperPosition(Base):
     open_quote: Mapped[Decimal] = mapped_column(_USD, nullable=False)
     #: What was actually paid per token, costs included.
     open_fill: Mapped[Decimal] = mapped_column(_USD, nullable=False)
+    #: What the position was sized at, in dollars — the stated size.
+    notional_usd: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    #: The SOL/USD rate OBSERVED at entry, from the same sample that priced
+    #: the fill. Stored so a later move in SOL cannot rewrite what a past
+    #: trade was worth.
+    sol_usd_at_open: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
     #: Quote spent, and the token balance it bought.
     notional_quote: Mapped[Decimal] = mapped_column(_QUOTE, nullable=False)
     tokens: Mapped[Decimal] = mapped_column(_TOKENS, nullable=False)
@@ -625,4 +631,8 @@ class GradPaperPosition(Base):
     #: `trailing_stop`, `max_hold`, `end_of_data`.
     close_reason: Mapped[str | None] = mapped_column(String(24))
     pnl_quote: Mapped[Decimal | None] = mapped_column(_QUOTE)
+    #: The dollar result: size x return, both exact. NOT the SOL proceeds
+    #: re-converted at today's rate, which would let a move in SOL rewrite
+    #: what a closed trade earned.
+    pnl_usd: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
     net_return: Mapped[Decimal | None] = mapped_column(Numeric(18, 8))

@@ -329,10 +329,20 @@ def paper_enabled() -> bool:
     return enabled() and _flag("LAB_GRADUATION_PAPER_ENABLED")
 
 
-#: Starting capital, in quote. 5 SOL ~ $1,000 at $200/SOL.
-PAPER_CAPITAL_QUOTE = _dec("LAB_GRADUATION_PAPER_CAPITAL", "5.0")
-#: Per position. 0.5 SOL ~ $100, ten of them.
-PAPER_NOTIONAL_QUOTE = _dec("LAB_GRADUATION_PAPER_NOTIONAL", "0.5")
+#: The book is denominated in DOLLARS, because that is how it was specified.
+#:
+#: Each position is sized in USD and converted to quote at the SOL/USD rate
+#: OBSERVED when it opens — DexScreener answers with `price_usd` and
+#: `price_native` for the same pair at the same instant, so the rate is a
+#: measurement rather than an assumption, and it is stored on the position so
+#: a later move in SOL cannot rewrite what a past trade was worth. That is
+#: also how a real $100 order behaves.
+PAPER_CAPITAL_USD = _dec("LAB_GRADUATION_PAPER_CAPITAL_USD", "1000")
+PAPER_NOTIONAL_USD = _dec("LAB_GRADUATION_PAPER_NOTIONAL_USD", "100")
+#: Only used when a token answers with one price and not the other, which
+#: should not happen on the DexScreener path and is refused rather than
+#: guessed — see `paper._rate`.
+PAPER_QUOTE_FALLBACK = _dec("LAB_GRADUATION_PAPER_QUOTE_FALLBACK", "0")
 PAPER_MAX_SLOTS = _int("LAB_GRADUATION_PAPER_SLOTS", 10)
 #: Trailing stop, as a fraction off the running peak.
 PAPER_TRAILING_PCT = _dec("LAB_GRADUATION_PAPER_TRAILING_PCT", "0.30")
