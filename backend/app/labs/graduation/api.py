@@ -20,7 +20,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.labs.graduation import config
-from app.labs.graduation.paper import PaperBook, positions
 from app.labs.graduation.models import (
     GradCheckpoint,
     GradCurveSample,
@@ -28,6 +27,7 @@ from app.labs.graduation.models import (
     GradPostgradSample,
     GradToken,
 )
+from app.labs.graduation.paper import PaperBook, positions
 
 router = APIRouter(prefix="/labs/graduation", tags=["graduation-lab"])
 
