@@ -17,15 +17,17 @@ import pytest
 PACKAGE = pathlib.Path(__file__).resolve().parent.parent
 BACKEND = PACKAGE.parents[2]
 SOURCES = sorted(p for p in PACKAGE.rglob("*.py") if "tests" not in p.parts)
-MIGRATIONS = {
-    BACKEND / "alembic" / "versions" / "20260911_0063_breakout_lab.py":
-        ["bo_candles", "bo_runs", "bo_universe"],
-    BACKEND / "alembic" / "versions" / "20260911_0064_breakout_setups.py":
-        ["bo_episodes", "bo_levels", "bo_setup_snapshots"],
-    BACKEND / "alembic" / "versions" / "20260911_0065_breakout_trader.py":
-        ["bo_account", "bo_equity", "bo_positions", "bo_trades"],
-}
-TABLES = sorted(t for tables in MIGRATIONS.values() for t in tables)
+#: Discovered, not hard-coded. This lab's migrations get RENUMBERED whenever
+#: it moves between branches whose alembic chains have diverged — which is
+#: exactly what happened carrying it from `karthik-hq` to `main` — and a test
+#: that names the files breaks on the rename rather than on anything real.
+MIGRATIONS = sorted((BACKEND / "alembic" / "versions").glob("*_breakout_*.py"))
+#: Every table the lab owns, across all of them. Asserted as a union below, so
+#: a table moving between migrations is fine and a table going missing is not.
+TABLES = sorted([
+    "bo_account", "bo_candles", "bo_episodes", "bo_equity", "bo_levels",
+    "bo_positions", "bo_runs", "bo_setup_snapshots", "bo_trades", "bo_universe",
+])
 #: Levels, momentum and the state machine are pure computation over `data.py`.
 #: Nothing in them may know a network exists — a rate-limited candle pass must
 #: never stop setups being evaluated on the bars that ARE stored.
@@ -92,7 +94,7 @@ def test_every_lab_table_carries_the_prefix_and_sits_on_the_platform_base() -> N
     assert all(m.metadata is PlatformBase.metadata for m in declared)
 
 
-@pytest.mark.parametrize("migration", list(MIGRATIONS), ids=lambda p: p.stem[-18:])
+@pytest.mark.parametrize("migration", MIGRATIONS, ids=lambda p: p.stem[-18:])
 def test_the_migration_is_purely_additive(migration) -> None:
     tree = ast.parse(migration.read_text())
     upgrade = next(n for n in tree.body
@@ -108,10 +110,41 @@ def test_the_migration_is_purely_additive(migration) -> None:
     created = [n.args[0].value for n in ast.walk(upgrade)
                if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
                and n.func.attr == "create_table"]
-    assert sorted(created) == MIGRATIONS[migration]
+    assert created, "a breakout migration that creates no table is not one"
     # create_index's first argument is the index name, which also carries the
     # prefix, so one check covers both shapes.
     assert all(t.startswith(("bo_", "ix_bo_", "uq_bo_")) for t in targets), targets
+
+
+def test_the_migrations_between_them_create_every_table_the_lab_owns() -> None:
+    created: list[str] = []
+    for migration in MIGRATIONS:
+        tree = ast.parse(migration.read_text())
+        upgrade = next(n for n in tree.body
+                       if isinstance(n, ast.FunctionDef) and n.name == "upgrade")
+        created += [n.args[0].value for n in ast.walk(upgrade)
+                    if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                    and n.func.attr == "create_table"]
+    assert sorted(created) == TABLES
+
+
+def test_the_migrations_form_one_unbroken_chain() -> None:
+    """Each one's `down_revision` is the previous one's `revision`, and the
+    first hangs off something outside this lab. A renumber that forgets a
+    parent shows up here rather than on the production database."""
+    import re
+    from itertools import pairwise
+
+    chain = []
+    for migration in MIGRATIONS:
+        text = migration.read_text()
+        rev = re.search(r'^revision: str = "([^"]+)"', text, re.M)
+        down = re.search(r'^down_revision: str = "([^"]+)"', text, re.M)
+        assert rev and down, migration.name
+        chain.append((rev.group(1), down.group(1)))
+    for (rev, _), (_, down) in pairwise(chain):
+        assert down == rev, f"{down} should be {rev}"
+    assert not chain[0][1].endswith("breakout"), "the first must hang off this lab"
 
 
 def test_the_migration_matches_the_models() -> None:
