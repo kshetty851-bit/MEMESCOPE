@@ -55,6 +55,7 @@ from app.labs.graduation.backtest import Costs, ExitState, Tick, TrailingStop
 from app.labs.graduation.models import (
     GradPaperPosition,
     GradPostgradSample,
+    GradToken,
 )
 
 logger = get_logger(__name__)
@@ -83,6 +84,25 @@ def _rate(price_usd: Decimal | None, price_native: Decimal | None) -> Decimal | 
         return None
     rate = price_usd / price_native
     return rate if rate > 0 else None
+
+
+def net_return(position: Any, quote: Decimal | None,
+               book_costs: Costs) -> Decimal | None:
+    """What the position has returned at `quote`, after the cost of getting out.
+
+    THE one definition, used by the close, by the equity mark and by the API
+    row, because three copies of this formula is three chances for the page to
+    disagree with the book about what a position is worth.
+
+    Note what is absent: the SOL/USD rate. The quote cancels — `tokens` was
+    bought with `notional_quote` — so this is a pure price ratio, and the
+    dollar figure derived from it is `notional_usd * net`. A move in SOL
+    therefore cannot rewrite what a trade earned.
+    """
+    if quote is None or position.notional_quote <= 0:
+        return None
+    return (position.tokens * book_costs.sell_price(quote)
+            / position.notional_quote - 1)
 
 
 @dataclass(frozen=True, slots=True)
@@ -199,14 +219,12 @@ class PaperBook:
     def _close(self, position: GradPaperPosition, quote: Decimal,
                reason: str) -> None:
         fill = self._costs.sell_price(quote)
-        proceeds = position.tokens * fill
+        net = net_return(position, quote, self._costs) or Decimal(0)
         position.closed_at = self._now
         position.close_quote = quote.quantize(_P)
         position.close_fill = fill.quantize(_P)
         position.close_reason = reason
-        position.pnl_quote = (proceeds - position.notional_quote).quantize(_Q)
-        net = ((proceeds / position.notional_quote - 1)
-               if position.notional_quote > 0 else Decimal(0))
+        position.pnl_quote = (position.notional_quote * net).quantize(_Q)
         position.net_return = net.quantize(Decimal("0.00000001"))
         # Dollars come from the size and the return, both of which are exact.
         # Re-converting the SOL proceeds at today's rate would let a move in
@@ -308,7 +326,9 @@ class PaperBook:
                    GradPaperPosition.notional_usd > 0))
         wins = await self._session.scalar(
             select(func.count()).select_from(GradPaperPosition)
-            .where(GradPaperPosition.pnl_usd > 0))
+            .where(GradPaperPosition.closed_at.is_not(None),
+                   GradPaperPosition.notional_usd > 0,
+                   GradPaperPosition.pnl_usd > 0))
         open_rows = (await self._session.scalars(
             select(GradPaperPosition)
             .where(GradPaperPosition.closed_at.is_(None),
@@ -316,13 +336,9 @@ class PaperBook:
 
         unrealised = Decimal(0)
         for position in open_rows:
-            if position.last_quote is None or position.notional_quote <= 0:
-                continue
-            value = position.tokens * self._costs.sell_price(position.last_quote)
-            # The unrealised move is a RATIO, so it converts to dollars with
-            # the position's own entry rate and needs no live SOL/USD.
-            unrealised += position.notional_usd * (
-                value / position.notional_quote - 1)
+            net = net_return(position, position.last_quote, self._costs)
+            if net is not None:
+                unrealised += position.notional_usd * net
 
         return Account(
             starting=config.PAPER_CAPITAL_USD,
@@ -334,11 +350,31 @@ class PaperBook:
         )
 
 
-async def positions(session: AsyncSession, *, limit: int = 25
-                    ) -> Sequence[GradPaperPosition]:
-    """Open first, then the most recently closed."""
-    return (await session.scalars(
-        select(GradPaperPosition)
-        .order_by(GradPaperPosition.closed_at.is_not(None),
-                  GradPaperPosition.opened_at.desc())
-        .limit(limit))).all()
+async def positions(session: AsyncSession, *, limit: int = 20
+                    ) -> tuple[Sequence[Any], Sequence[Any]]:
+    """Open and closed, separately.
+
+    They answer different questions — what the book is exposed to now, versus
+    what it has actually banked — and a single list buries the closed ones
+    behind the open ones as soon as there are a few of each.
+
+    Joined to `grad_tokens` for a name, because `GradPaperPosition.symbol` was
+    never populated by the filler. Joining fixes every row that already exists;
+    writing the symbol at fill time would only fix the ones opened from here on.
+    """
+
+    def rows(closed: bool):
+        return (select(GradPaperPosition, GradToken.symbol, GradToken.name)
+                .outerjoin(GradToken, GradToken.mint == GradPaperPosition.mint)
+                .where(GradPaperPosition.notional_usd > 0,
+                       GradPaperPosition.closed_at.is_not(None) if closed
+                       else GradPaperPosition.closed_at.is_(None)))
+
+    # Open needs no limit: the slot count caps it.
+    return (
+        (await session.execute(
+            rows(False).order_by(GradPaperPosition.opened_at.desc()))).all(),
+        (await session.execute(
+            rows(True).order_by(GradPaperPosition.closed_at.desc())
+            .limit(limit))).all(),
+    )

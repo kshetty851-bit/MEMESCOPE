@@ -57,8 +57,12 @@ export interface GraduationStatus {
 
 
 export interface PaperPosition {
+  /** The FULL mint address. Shown in full and linked, because a truncated
+   * address cannot be pasted into an explorer and an unverifiable P&L number
+   * is worth less than no number. */
   mint: string;
   symbol: string | null;
+  name: string | null;
   opened_at: string;
   notional_usd: string;
   open_fill: string;
@@ -68,6 +72,7 @@ export interface PaperPosition {
   close_reason: string | null;
   /** Realised for a closed position; marked to market for an open one. */
   pnl_usd: string | null;
+  /** Likewise, so an open position shows a return rather than a dash. */
   net_return: string | null;
 }
 
@@ -87,5 +92,8 @@ export interface PaperBook {
   notional_usd: string;
   trailing_pct: string;
   max_hold_minutes: number;
-  positions: PaperPosition[];
+  /** One leg's modelled cost: pump fee + assumed slippage + priority fee. */
+  cost_pct_per_side: string;
+  open_trades: PaperPosition[];
+  closed_trades: PaperPosition[];
 }

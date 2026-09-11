@@ -116,9 +116,132 @@ function signedUsd(value: string | null): string {
   return `${Number(value) >= 0 ? "+" : ""}${usd(value)}`;
 }
 
+const dexscreener = (mint: string) =>
+  `https://dexscreener.com/solana/${mint}`;
+
+/**
+ * One trade. The mint is rendered in FULL and linked to the very feed the
+ * marks come from, so every figure in the row can be checked against its
+ * source rather than taken on trust.
+ */
+function TradeRow({ p, closed }: { p: PaperPosition; closed: boolean }) {
+  const pnl = p.pnl_usd === null ? null : Number(p.pnl_usd);
+  const tone =
+    pnl === null ? "" : pnl > 0 ? "text-up" : pnl < 0 ? "text-down" : "";
+  const held = closed
+    ? Math.round(
+        (new Date(p.closed_at!).getTime() - new Date(p.opened_at).getTime()) /
+          60000,
+      )
+    : null;
+  return (
+    <tr className="border-t border-line align-top">
+      <td className="py-2 pr-3">
+        <a
+          href={dexscreener(p.mint)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="hover:text-accent"
+        >
+          <span className="font-medium">
+            {p.name ?? p.symbol ?? "unnamed"}
+            {p.name && p.symbol ? (
+              <span className="ml-1 text-ink-dim">{p.symbol}</span>
+            ) : null}
+          </span>
+          <span className="block break-all font-mono text-[10px] leading-tight text-ink-dim">
+            {p.mint}
+          </span>
+        </a>
+      </td>
+      <td className="py-2 pr-3 text-right tabular-nums">
+        {usd(p.notional_usd)}
+      </td>
+      <td className={`py-2 pr-3 text-right font-medium tabular-nums ${tone}`}>
+        {signedUsd(p.pnl_usd)}
+      </td>
+      <td className={`py-2 pr-3 text-right tabular-nums ${tone}`}>
+        {signed(p.net_return)}
+      </td>
+      <td className="py-2 text-right text-[11px] text-ink-dim">
+        {closed ? (
+          <>
+            {p.close_reason}
+            <span className="block">{held}m held</span>
+          </>
+        ) : (
+          <span className="rounded-full bg-accent/15 px-2 py-0.5 text-accent">
+            open
+          </span>
+        )}
+      </td>
+    </tr>
+  );
+}
+
+function TradeTable({
+  rows,
+  closed,
+  empty,
+}: {
+  rows: PaperPosition[];
+  closed: boolean;
+  empty: string;
+}) {
+  if (!rows.length) return <p className="text-xs text-ink-dim">{empty}</p>;
+  const total = rows.reduce((a, p) => a + Number(p.pnl_usd ?? 0), 0);
+  // Summed, not `count x rows[0]`: the sizes are equal today and the sum
+  // stays right if they ever are not.
+  const deployed = rows.reduce((a, p) => a + Number(p.notional_usd), 0);
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[520px] text-sm">
+        <thead>
+          <tr className="text-left text-[11px] uppercase tracking-wider text-ink-dim">
+            <th className="pb-2 pr-3 font-medium">Token / mint</th>
+            <th className="pb-2 pr-3 text-right font-medium">Size</th>
+            <th className="pb-2 pr-3 text-right font-medium">
+              {closed ? "Realised P&L" : "Unrealised P&L"}
+            </th>
+            <th className="pb-2 pr-3 text-right font-medium">Return</th>
+            <th className="pb-2 text-right font-medium">
+              {closed ? "Exit" : "State"}
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((p: PaperPosition) => (
+            <TradeRow key={p.mint} p={p} closed={closed} />
+          ))}
+        </tbody>
+        <tfoot>
+          <tr className="border-t border-line text-[11px] text-ink-dim">
+            <td className="pt-2 pr-3">
+              {rows.length} {closed ? "closed" : "open"}
+            </td>
+            <td className="pt-2 pr-3 text-right tabular-nums">
+              {usd(String(deployed))}
+            </td>
+            <td
+              className={`pt-2 pr-3 text-right font-medium tabular-nums ${
+                total > 0 ? "text-up" : total < 0 ? "text-down" : ""
+              }`}
+            >
+              {signedUsd(String(total))}
+            </td>
+            <td colSpan={2} />
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  );
+}
+
 function PaperPanel({ book }: { book: PaperBook }) {
   const pnl = Number(book.pnl_usd);
   const tone = pnl > 0 ? "text-up" : pnl < 0 ? "text-down" : "";
+  const side = (Number(book.cost_pct_per_side) * 100).toFixed(2);
+  const round = (Number(book.cost_pct_per_side) * 200).toFixed(2);
   return (
     <Panel>
       <PanelHeader>
@@ -166,69 +289,66 @@ function PaperPanel({ book }: { book: PaperBook }) {
           {(Number(book.return_pct) * 100).toFixed(2)}%) against the{" "}
           {usd(book.starting_usd)} book
         </p>
-        {book.positions.length ? (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[520px] text-sm">
-              <thead>
-                <tr className="text-left text-[11px] uppercase tracking-wider text-ink-dim">
-                  <th className="pb-2 pr-3 font-medium">Token</th>
-                  <th className="pb-2 pr-3 text-right font-medium">Size</th>
-                  <th className="pb-2 pr-3 text-right font-medium">P&amp;L</th>
-                  <th className="pb-2 pr-3 text-right font-medium">Return</th>
-                  <th className="pb-2 text-right font-medium">State</th>
-                </tr>
-              </thead>
-              <tbody>
-                {book.positions.map((p: PaperPosition) => (
-                  <tr key={p.mint} className="border-t border-line">
-                    <td className="py-2 pr-3">
-                      {p.symbol ?? shortenAddress(p.mint)}
-                    </td>
-                    <td className="py-2 pr-3 text-right tabular-nums">
-                      {usd(p.notional_usd)}
-                    </td>
-                    <td
-                      className={`py-2 pr-3 text-right tabular-nums ${
-                        p.pnl_usd && Number(p.pnl_usd) > 0
-                          ? "text-up"
-                          : p.pnl_usd && Number(p.pnl_usd) < 0
-                            ? "text-down"
-                            : ""
-                      }`}
-                    >
-                      {signedUsd(p.pnl_usd)}
-                    </td>
-                    <td
-                      className={`py-2 pr-3 text-right tabular-nums ${
-                        p.net_return && Number(p.net_return) > 0
-                          ? "text-up"
-                          : p.net_return
-                            ? "text-down"
-                            : ""
-                      }`}
-                    >
-                      {signed(p.net_return)}
-                    </td>
-                    <td className="py-2 text-right text-[11px]">
-                      {p.closed_at ? (
-                        <span className="text-ink-dim">{p.close_reason}</span>
-                      ) : (
-                        <span className="rounded-full bg-accent/15 px-2 py-0.5 text-accent">
-                          open
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <p className="text-xs text-ink-dim">
-            No positions yet. The book opens one per graduating token as pools
-            appear.
+
+        <div className="flex flex-col gap-2">
+          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-ink-dim">
+            Open trades — marked to the last price, nothing banked
+          </h3>
+          <TradeTable
+            rows={book.open_trades}
+            closed={false}
+            empty="No open positions. The book opens one per graduating token as pools appear."
+          />
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-ink-dim">
+            Closed trades — banked, and the only figures that count
+          </h3>
+          <TradeTable
+            rows={book.closed_trades}
+            closed
+            empty="Nothing closed yet. Until a position exits, this book has proved nothing."
+          />
+        </div>
+
+        {/* The question this page will be asked is "would a real wallet have
+            made this?", so it is answered here rather than left implied. */}
+        <div className="max-w-[65ch] rounded-md border border-line p-3 text-xs text-ink-dim">
+          <p className="mb-1 font-semibold text-ink">
+            Would a real wallet have made this?
           </p>
-        )}
+          <p>
+            Close, but not to the cent, and the difference cuts both ways.
+            Every price above is a real trade printed on-chain and read from
+            the same DexScreener feed the rest of this site uses — nothing is
+            simulated — and each leg is charged {side}% ({round}% round trip)
+            for the pump fee, assumed slippage and priority fee. What a live
+            wallet would hit differently:
+          </p>
+          <ul className="mt-1 list-disc pl-4">
+            <li>
+              Slippage here is <em>assumed</em>, not measured. These pools run
+              deep enough that a {usd(book.notional_usd)} order moves the price
+              well under the assumption, so the charge is more likely too harsh
+              than too kind.
+            </li>
+            <li>
+              The stop is checked once a minute against a sampled price, so an
+              exit fills at the next price seen, not at the stop level. A token
+              that collapses between samples fills far below the stop — which
+              is what both closed losses did.
+            </li>
+            <li>
+              Nothing here can fail, get sandwiched, or miss a block. A real
+              buy at a pool open competes with bots for the same slot.
+            </li>
+          </ul>
+          <p className="mt-1">
+            So treat these as what the rules would have earned at the prices
+            the market actually printed — honest, and not a promise.
+          </p>
+        </div>
       </div>
     </Panel>
   );

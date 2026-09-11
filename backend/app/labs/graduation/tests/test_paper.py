@@ -7,7 +7,7 @@ from decimal import Decimal
 
 from app.labs.graduation import config
 from app.labs.graduation.backtest import Costs, ExitState, Tick, TrailingStop
-from app.labs.graduation.paper import Account, costs
+from app.labs.graduation.paper import Account, costs, net_return
 
 D = Decimal
 NOW = datetime(2026, 9, 11, 12, 0, tzinfo=UTC)
@@ -187,3 +187,69 @@ def test_the_book_is_gated_on_its_own_flag_as_well_as_the_lab() -> None:
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = value
+
+
+# --- the P&L arithmetic -------------------------------------------------------
+
+class _Position:
+    """Just the fields `net_return` reads. A real row would need a database and
+    would test SQLAlchemy rather than the formula."""
+
+    def __init__(self, quote: str, tokens: str) -> None:
+        self.notional_quote = D(quote)
+        self.tokens = D(tokens)
+
+
+def _bought(price: str, quote: str = "1.0") -> _Position:
+    """A position opened at `price`, sized at `quote`, costs included — the
+    same two lines `_fill` uses."""
+    fill = costs().buy_price(D(price))
+    return _Position(quote, str(D(quote) / fill))
+
+
+def test_a_position_marked_at_its_own_entry_shows_exactly_the_round_trip_cost() -> None:
+    """The opening mark is not zero and must not be: buying and selling at one
+    unchanged price costs both legs. If this figure ever comes out at 0 the
+    book has stopped charging for execution."""
+    side = costs().side_fraction
+    expected = (1 - side) / (1 + side) - 1
+    net = net_return(_bought("0.00000048"), D("0.00000048"), costs())
+    assert net is not None
+    assert abs(net - expected) < D("0.000001")
+    # Concretely: a $100 position opens showing about -$5.64.
+    assert D("-5.7") < D("100") * net < D("-5.5")
+
+
+def test_the_formula_reproduces_a_trade_the_live_book_actually_closed() -> None:
+    """29KvBXvMpB..., closed on a trailing stop 2026-09-11: entered at a quoted
+    0.00000048 SOL, exited at a quoted 0.00000060, and the book recorded
+    +0.17954325 / +$17.95.
+
+    Pinned against the ROW, not against this code, so a change to the cost
+    model or the formula shows up as a trade that would no longer have earned
+    what it earned.
+    """
+    net = net_return(_bought("0.00000048"), D("0.00000060"), costs())
+    assert net is not None
+    assert net.quantize(D("0.00000001")) == D("0.17954325")
+    assert (D("100") * net).quantize(D("0.01")) == D("17.95")
+
+
+def test_the_percentage_does_not_depend_on_the_position_size() -> None:
+    """Dollars are `notional_usd * net`, and `net` is a pure price ratio. If
+    size leaked into the ratio, the same market move would report a different
+    percentage on a different-sized book."""
+    move = (D("0.00000048"), D("0.00000060"))
+    small = net_return(_bought(str(move[0])), move[1], costs())
+    large = net_return(_bought(str(move[0]), quote="2.0"), move[1], costs())
+    assert small is not None and large is not None
+    # Decimal division is not exact, so agree to the cent on $100, not to the
+    # last of twenty-seven digits.
+    assert abs(small - large) < D("0.00000001")
+
+
+def test_a_net_return_needs_a_price_and_refuses_without_one() -> None:
+    """An unmarked position contributes NOTHING to equity. Treating a missing
+    mark as a zero return would quietly value it at cost."""
+    assert net_return(_bought("0.00000048"), None, costs()) is None
+    assert net_return(_Position("0", "0"), D("1"), costs()) is None

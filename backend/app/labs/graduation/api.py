@@ -28,7 +28,7 @@ from app.labs.graduation.models import (
     GradPostgradSample,
     GradToken,
 )
-from app.labs.graduation.paper import PaperBook, costs, positions
+from app.labs.graduation.paper import PaperBook, costs, net_return, positions
 
 router = APIRouter(prefix="/labs/graduation", tags=["graduation-lab"])
 
@@ -63,8 +63,13 @@ class Recent(BaseModel):
 
 
 class PaperPosition(BaseModel):
+    """One trade. The mint is published in FULL, not shortened: a truncated
+    address cannot be pasted into an explorer, and an unverifiable number on a
+    P&L page is worth less than no number."""
+
     mint: str
     symbol: str | None = None
+    name: str | None = None
     opened_at: datetime
     notional_usd: Decimal
     open_fill: Decimal
@@ -74,6 +79,7 @@ class PaperPosition(BaseModel):
     close_reason: str | None = None
     #: Realised for a closed position; marked-to-market for an open one.
     pnl_usd: Decimal | None = None
+    #: Likewise — so an open position shows a return, not a dash.
     net_return: Decimal | None = None
 
 
@@ -94,7 +100,13 @@ class PaperBookOut(BaseModel):
     notional_usd: Decimal = Decimal(0)
     trailing_pct: Decimal = Decimal(0)
     max_hold_minutes: int = 0
-    positions: list[PaperPosition] = []
+    #: What the cost model charges on ONE leg: pump fee + assumed slippage +
+    #: the priority fee as a share of the position. Published because "would a
+    #: real wallet have made this?" is a question about exactly this number.
+    cost_pct_per_side: Decimal = Decimal(0)
+    #: Split, because exposure and results are different questions.
+    open_trades: list[PaperPosition] = []
+    closed_trades: list[PaperPosition] = []
 
 
 class GraduationStatus(BaseModel):
@@ -247,20 +259,30 @@ async def _paper(db: AsyncSession) -> PaperBookOut:
     book = PaperBook(db)
     account = await book.account()
     book_costs = costs()
-    rows = await positions(db, limit=20)
-
-    def mark(p: Any) -> Decimal | None:
-        """Closed positions carry their realised dollars; open ones are
-        marked to the last price, using the rate captured at entry."""
-        if p.pnl_usd is not None:
-            return p.pnl_usd
-        if p.last_quote is None or p.notional_quote <= 0:
-            return None
-        value = p.tokens * book_costs.sell_price(p.last_quote)
-        return (p.notional_usd * (value / p.notional_quote - 1)).quantize(
-            Decimal("0.01"))
-
+    open_rows, closed_rows = await positions(db)
     cents = Decimal("0.01")
+
+    def out(row: Any) -> PaperPosition:
+        """Closed rows carry their realised figures; open ones are marked to
+        the last price, at the SOL/USD rate captured when they opened.
+
+        Both the dollars and the percentage come from the same ratio, so they
+        cannot disagree with each other.
+        """
+        p, symbol, name = row
+        pnl, net = p.pnl_usd, p.net_return
+        if p.closed_at is None:
+            live = net_return(p, p.last_quote, book_costs)
+            if live is not None:
+                pnl = (p.notional_usd * live).quantize(cents)
+                net = live.quantize(Decimal("0.00000001"))
+        return PaperPosition(
+            mint=p.mint, symbol=symbol or p.symbol, name=name,
+            opened_at=p.opened_at, notional_usd=p.notional_usd,
+            open_fill=p.open_fill, last_quote=p.last_quote,
+            peak_quote=p.peak_quote, closed_at=p.closed_at,
+            close_reason=p.close_reason, pnl_usd=pnl, net_return=net)
+
     return PaperBookOut(
         running=config.paper_enabled(),
         # Quantised HERE, not left to the renderer: an unrounded Decimal
@@ -279,13 +301,7 @@ async def _paper(db: AsyncSession) -> PaperBookOut:
         notional_usd=config.PAPER_NOTIONAL_USD,
         trailing_pct=config.PAPER_TRAILING_PCT,
         max_hold_minutes=config.PAPER_MAX_HOLD_MINUTES,
-        positions=[
-            PaperPosition(
-                mint=p.mint, symbol=p.symbol, opened_at=p.opened_at,
-                notional_usd=p.notional_usd, open_fill=p.open_fill,
-                last_quote=p.last_quote, peak_quote=p.peak_quote,
-                closed_at=p.closed_at, close_reason=p.close_reason,
-                pnl_usd=mark(p), net_return=p.net_return)
-            for p in rows
-        ],
+        cost_pct_per_side=book_costs.side_fraction.quantize(Decimal("0.0001")),
+        open_trades=[out(r) for r in open_rows],
+        closed_trades=[out(r) for r in closed_rows],
     )
