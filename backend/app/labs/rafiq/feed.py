@@ -104,12 +104,29 @@ class RafiqFeed:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def candidates(self, *, since: datetime, limit: int = 200) -> list[Candidate]:
-        """Radar admissions first detected after `since`, oldest first.
+    async def candidates(self, *, since: datetime, not_before: datetime | None = None,
+                         limit: int = 200) -> list[Candidate]:
+        """Radar admissions the lab may still act on, NEWEST first.
 
         `since` is the lab's activation instant. An admission that predates it
         is never entered: the historical record has been inspected many times
         and trading it would be a backtest wearing a forward run's clothes.
+
+        `not_before` is the freshness cutoff, and it is applied HERE rather than
+        only in the caller. Both halves of that matter, and the first version
+        got both wrong:
+
+        * it ordered OLDEST first, so once more than `limit` admissions had
+          accumulated the window froze over the oldest ones and never moved. The
+          lab went blind after 200 admissions — every candidate it could see was
+          by then hours old and rejected on age, while fresh ones it could have
+          traded were never fetched. It stopped entering and looked idle rather
+          than broken;
+        * filtering for freshness only in the caller cannot fix that, because
+          the rows are already lost to `LIMIT` by the time the caller sees them.
+
+        Newest-first plus a SQL-side cutoff means the limit can only ever clip
+        admissions that are already too old to trade.
         """
         # `symbol` lives on `discovered_tokens`, not on the Radar row, so it
         # is joined rather than assumed — an outer join, because a Radar
@@ -119,13 +136,17 @@ class RafiqFeed:
                    DiscoveredToken.symbol, RadarToken.first_detected_at,
                    RadarToken.current_opportunity_score)
             .outerjoin(DiscoveredToken, DiscoveredToken.id == RadarToken.token_id)
-            .where(RadarToken.first_detected_at > since)
-            .order_by(RadarToken.first_detected_at)
+            .where(RadarToken.first_detected_at > since,
+                   *([RadarToken.first_detected_at >= not_before]
+                     if not_before is not None else []))
+            .order_by(RadarToken.first_detected_at.desc())
             .limit(limit)
         )).all()
+        # Handed back oldest-first so entries are taken in the order they were
+        # admitted; only the FETCH is newest-first.
         return [Candidate(r.token_id, r.mint_address, r.symbol,
                           r.first_detected_at, r.current_opportunity_score)
-                for r in rows]
+                for r in reversed(rows)]
 
     async def observe(self, *, token_id: uuid.UUID, mint: str,
                       at: datetime) -> Observation | None:

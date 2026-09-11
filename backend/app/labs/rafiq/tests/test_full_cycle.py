@@ -23,6 +23,7 @@ import pytest
 from sqlalchemy import select, text
 
 from app.labs.rafiq import config
+from app.labs.rafiq.feed import RafiqFeed
 from app.labs.rafiq.models import RafiqLabPosition, RafiqLabStrategy
 from app.labs.rafiq.service import RafiqLabService
 from app.models.karthik import KarthikPosition, KarthikWallet
@@ -76,13 +77,14 @@ async def seed_existing_wallet(session, now) -> None:
     await session.flush()
 
 
-async def seed_candidate(session, now) -> str:
+async def seed_candidate(session, now, tag: str | None = None) -> str:
     """One fresh Radar admission with a deep, healthy market behind it, so
     every one of the five strategies can price and size it."""
-    mint = "Rafiq" + "2" * 39
+    suffix = (tag or uuid.uuid4().hex)[:12]
+    mint = ("Rafiq" + suffix).ljust(44, "2")[:44]
     token = DiscoveredToken(
         id=uuid.uuid4(), mint_address=mint, symbol="RFQ", name="Rafiq Test",
-        signature="sig" + "4" * 60, slot=1,
+        signature=("sig" + uuid.uuid4().hex).ljust(64, "4")[:64], slot=1,
         discovered_at=now - timedelta(minutes=5))
     session.add(token)
     await session.flush()
@@ -102,7 +104,7 @@ async def seed_candidate(session, now) -> str:
             market_cap=Decimal(2_000_000), volume_5m=Decimal(5_000),
             volume_1h=Decimal(50_000), buy_count_24h=800, sell_count_24h=400,
             trading_status=TradingStatus.TRADING, provider="test",
-            pool_address="Pool" + "3" * 40))
+            pool_address=("Pool" + suffix).ljust(44, "3")[:44]))
     await session.flush()
     return mint
 
@@ -213,3 +215,38 @@ async def test_the_lab_never_force_closes_on_a_halt(lab_session, monkeypatch) ->
             RafiqLabPosition.strategy_id == rows["D"].id,
             RafiqLabPosition.status == "open"))).scalars())
     assert len(still_open) == len(d_positions), "a halt force-closed a position"
+
+
+async def test_a_backlog_of_admissions_does_not_hide_the_fresh_ones(
+    lab_session, monkeypatch
+) -> None:
+    """The candidate window must follow the market, not freeze on its start.
+
+    The first version fetched `LIMIT 200` ordered OLDEST first, so once more
+    than 200 admissions had accumulated since activation the window sat over
+    the oldest ones for ever. Every candidate the lab could see was by then
+    hours old and rejected on age, while the fresh ones it could have traded
+    were never fetched at all. Production went fifteen hours without an entry
+    and looked idle rather than broken.
+
+    This seeds a backlog larger than the fetch limit and asserts the fresh
+    admission is still returned.
+    """
+    monkeypatch.setenv("RAFIQ_LAB_ENABLED", "true")
+    now = datetime.now(UTC)
+    activated = now - timedelta(days=2)
+
+    limit = 25
+    for i in range(limit + 10):
+        await seed_candidate(lab_session, now - timedelta(hours=20) + timedelta(minutes=i))
+    fresh = await seed_candidate(lab_session, now)
+
+    feed = RafiqFeed(lab_session)
+    got = await feed.candidates(since=activated, limit=limit)
+    assert fresh in {c.mint_address for c in got}, (
+        "the freshest admission fell outside the fetch window — the lab is blind")
+
+    # And with the freshness cutoff applied, the backlog is gone entirely.
+    only_fresh = await feed.candidates(
+        since=activated, not_before=now - timedelta(minutes=15), limit=limit)
+    assert {c.mint_address for c in only_fresh} == {fresh}
