@@ -15,10 +15,14 @@ import pytest
 
 from app.labs.breakout import api, config
 from app.labs.breakout.models import (
+    BoAccount,
     BoCandle,
     BoEpisode,
+    BoEquity,
     BoLevels,
+    BoPosition,
     BoSetupSnapshot,
+    BoTrade,
     BoUniverseMember,
 )
 
@@ -306,3 +310,223 @@ def test_the_state_order_the_watchlist_sorts_by_is_declared_once() -> None:
     assert STATE_ORDER["PRE_BREAKOUT"] < STATE_ORDER["WATCHING"]
     assert set(STATE_ORDER) >= {"PRE_BREAKOUT", "WATCHING", "BROKE_OUT", "FAILED", "NONE"}
     assert config.PRE_SCORE > config.WATCH_SCORE
+
+
+# ============================================================================
+# Phase 3 — the ledger routes, on a seeded book
+# ============================================================================
+
+def position(mint="A", qty=10.0, entry=10.0, slot=100.0, high_water=100.0,
+             opened=T0) -> BoPosition:
+    return BoPosition(
+        mint=mint, qty=Decimal(str(qty)), entry_price=Decimal(str(entry)),
+        slot_size=Decimal(str(slot)), high_water_value=Decimal(str(high_water)),
+        entry_fees=Decimal("0.3"), opened_at=opened, entry_bar=opened)
+
+
+def trade(mint="A", pnl=10.0, reason="trail_stop", closed=None) -> BoTrade:
+    return BoTrade(
+        mint=mint, symbol="AAA", qty=Decimal("10"), entry_price=Decimal("10"),
+        exit_price=Decimal("11"), slot_size=Decimal("100"),
+        pnl_usd=Decimal(str(pnl)), pnl_pct=Decimal(str(pnl)), fees_usd=Decimal("0.6"),
+        opened_at=T0, closed_at=closed or T0 + timedelta(hours=2),
+        entry_bar=T0, exit_bar=T0 + timedelta(hours=2), exit_reason=reason)
+
+
+async def seed_book(session, *, cash=900.0, equity=1000.0, peak=1000.0, halted=False):
+    session.add(BoAccount(
+        scope="default", equity=Decimal(str(equity)), cash=Decimal(str(cash)),
+        peak_equity=Decimal(str(peak)), halted=halted,
+        halted_reason="drawdown 45.0% > 40.0%" if halted else None,
+        updated_at=T0))
+    await session.flush()
+
+
+async def test_the_ledger_routes_answer_without_a_database_while_off(disabled) -> None:
+    account = await api.account(session=None)          # type: ignore[arg-type]
+    assert account.equity == config.STARTING_EQUITY and account.slots_used == 0
+    assert await api.positions(session=None) == []     # type: ignore[arg-type]
+    assert (await api.trades(session=None)).total == 0  # type: ignore[arg-type]
+    assert await api.equity(session=None) == []        # type: ignore[arg-type]
+    assert await api.trade_stats(session=None) == {"running": False}  # type: ignore[arg-type]
+
+
+@pytest.mark.integration
+async def test_account_reports_the_book_before_anything_has_traded(
+    lab_session, enabled,
+) -> None:
+    """A fresh lab must render a header, not a crash."""
+    out = await api.account(session=lab_session)
+    assert out.equity == 1000.0 and out.slots == 10 and out.slots_used == 0
+    assert out.slot_size == 100.0 and out.halted is False and out.drawdown_pct == 0.0
+
+
+@pytest.mark.integration
+async def test_account_carries_every_field_the_header_draws(
+    lab_session, enabled,
+) -> None:
+    await seed_book(lab_session, cash=900.0, equity=950.0, peak=1000.0)
+    lab_session.add(member("A", "AAA"))
+    lab_session.add(position())
+    lab_session.add(BoCandle(
+        mint="A", pool_address="PA", timeframe="hour", open_time=T0,
+        open=Decimal("10"), high=Decimal("10"), low=Decimal("10"), close=Decimal("9"),
+        volume_usd=Decimal("100"), close_time=T0 + timedelta(hours=1)))
+    await lab_session.flush()
+
+    out = (await api.account(session=lab_session)).model_dump()
+    assert set(out) == {"equity", "cash", "unrealised", "peak_equity", "drawdown_pct",
+                        "halted", "trading_enabled", "slots", "slots_used",
+                        "slot_size", "updated_at"}
+    assert out["slots_used"] == 1
+    assert out["drawdown_pct"] == pytest.approx(5.0)
+    assert out["unrealised"] == pytest.approx(-10.0), "10 qty x (9 - 10)"
+
+
+@pytest.mark.integration
+async def test_account_reports_the_halt(lab_session, enabled) -> None:
+    await seed_book(lab_session, equity=550.0, peak=1000.0, halted=True)
+    out = await api.account(session=lab_session)
+    assert out.halted is True
+    assert out.drawdown_pct == pytest.approx(45.0)
+
+
+@pytest.mark.integration
+async def test_a_position_row_carries_its_trail_stop_value(
+    lab_session, enabled,
+) -> None:
+    """The line the chart draws. A position at a $150 high-water with a $100
+    slot stops at $125."""
+    lab_session.add(member("A", "AAA"))
+    lab_session.add(position(high_water=150.0))
+    lab_session.add(BoCandle(
+        mint="A", pool_address="PA", timeframe="hour", open_time=T0,
+        open=Decimal("10"), high=Decimal("15"), low=Decimal("10"), close=Decimal("14"),
+        volume_usd=Decimal("100"), close_time=T0 + timedelta(hours=1)))
+    await lab_session.flush()
+
+    (row,) = await api.positions(session=lab_session)
+    assert set(row.model_dump()) == {
+        "mint", "symbol", "qty", "entry", "mark", "value", "high_water_value",
+        "trail_stop_value", "unrealised_usd", "unrealised_pct", "opened_at",
+        "hours_held", "episode_id"}
+    assert row.trail_stop_value == pytest.approx(125.0)
+    assert row.mark == pytest.approx(14.0)
+    assert row.value == pytest.approx(140.0)
+    assert row.unrealised_usd == pytest.approx(40.0)
+    assert row.unrealised_pct == pytest.approx(40.0)
+
+
+@pytest.mark.integration
+async def test_a_position_with_no_candle_marks_at_its_entry(
+    lab_session, enabled,
+) -> None:
+    lab_session.add(member("A", "AAA"))
+    lab_session.add(position())
+    await lab_session.flush()
+    (row,) = await api.positions(session=lab_session)
+    assert row.mark == pytest.approx(10.0) and row.unrealised_usd == 0.0
+
+
+@pytest.mark.integration
+async def test_trades_paginate_newest_first_with_every_field(
+    lab_session, enabled,
+) -> None:
+    for i in range(4):
+        lab_session.add(trade(mint=f"M{i}", pnl=i - 1.0,
+                              closed=T0 + timedelta(hours=i + 2)))
+    await lab_session.flush()
+
+    page = await api.trades(limit=2, session=lab_session)
+    assert page.total == 4 and len(page.items) == 2
+    assert page.items[0].closed_at > page.items[1].closed_at
+    dumped = page.items[0].model_dump(by_alias=True)
+    assert set(dumped) == {"id", "mint", "symbol", "entry", "exit", "qty", "slot_size",
+                           "pnl_usd", "pnl_pct", "fees", "opened_at", "closed_at",
+                           "exit_reason", "episode_id"}
+    assert dumped["exit"] == 11.0, "serialised as `exit`, not `exit_`"
+
+
+@pytest.mark.integration
+async def test_the_equity_curve_comes_back_oldest_first(lab_session, enabled) -> None:
+    now = datetime.now(UTC)
+    for i in range(5):
+        lab_session.add(BoEquity(
+            bar_close_time=now - timedelta(hours=5 - i), equity=Decimal(1000 + i),
+            cash=Decimal("500"), unrealised=Decimal("10"), positions=i))
+    # And one outside the window.
+    lab_session.add(BoEquity(
+        bar_close_time=now - timedelta(days=40), equity=Decimal("900"),
+        cash=Decimal("900"), unrealised=Decimal("0"), positions=0))
+    await lab_session.flush()
+
+    points = await api.equity(hours=24, session=lab_session)
+    assert len(points) == 5
+    assert [p.t for p in points] == sorted(p.t for p in points)
+    assert set(points[0].model_dump()) == {"t", "equity", "unrealised", "positions"}
+
+
+@pytest.mark.integration
+async def test_trade_stats_are_honest_with_an_empty_book(
+    lab_session, enabled,
+) -> None:
+    """Nulls where there is no data. A win rate of zero and no trades at all
+    are different claims."""
+    out = await api.trade_stats(session=lab_session)
+    assert out["trades"] == 0
+    assert out["win_rate"] is None and out["profit_factor"] is None
+    assert out["by_exit_reason"] == {} and out["fees_total"] == 0.0
+
+
+@pytest.mark.integration
+async def test_trade_stats_computes_expectancy_and_splits_by_exit_reason(
+    lab_session, enabled,
+) -> None:
+    await seed_book(lab_session, equity=1100.0)
+    lab_session.add_all([
+        trade("A", pnl=20.0, reason="trail_stop"),
+        trade("B", pnl=10.0, reason="trail_stop"),
+        trade("C", pnl=-25.0, reason="failed_setup"),
+    ])
+    await lab_session.flush()
+
+    out = await api.trade_stats(session=lab_session)
+    assert out["trades"] == 3
+    assert out["win_rate"] == pytest.approx(2 / 3, abs=1e-4)
+    assert out["avg_win_pct"] == pytest.approx(15.0)
+    assert out["avg_loss_pct"] == pytest.approx(-25.0)
+    assert out["expectancy_pct"] == pytest.approx(5.0 / 3, abs=1e-3)
+    assert out["profit_factor"] == pytest.approx(30 / 25)
+    assert out["return_pct"] == pytest.approx(10.0)
+    assert out["fees_total"] == pytest.approx(1.8)
+    assert out["by_exit_reason"]["trail_stop"]["n"] == 2
+    assert out["by_exit_reason"]["failed_setup"]["pnl_usd"] == pytest.approx(-25.0)
+
+
+@pytest.mark.integration
+async def test_profit_factor_is_null_rather_than_infinite_when_nothing_has_lost(
+    lab_session, enabled,
+) -> None:
+    lab_session.add(trade("A", pnl=20.0))
+    await lab_session.flush()
+    out = await api.trade_stats(session=lab_session)
+    assert out["profit_factor"] is None
+    assert out["avg_loss_pct"] is None
+
+
+@pytest.mark.integration
+async def test_max_drawdown_is_read_off_the_equity_curve_not_the_trades(
+    lab_session, enabled,
+) -> None:
+    """A drawdown that only counts closed trades is not a drawdown anyone
+    lived through — open positions are part of it."""
+    now = datetime.now(UTC)
+    for i, equity in enumerate([1000, 1200, 800, 900]):
+        lab_session.add(BoEquity(
+            bar_close_time=now - timedelta(hours=4 - i), equity=Decimal(equity),
+            cash=Decimal("100"), unrealised=Decimal("0"), positions=1))
+    lab_session.add(trade("A", pnl=5.0))
+    await lab_session.flush()
+    out = await api.trade_stats(session=lab_session)
+    # Peak 1200 -> trough 800 is 33.33%.
+    assert out["max_drawdown_pct"] == pytest.approx(33.3333, abs=1e-3)

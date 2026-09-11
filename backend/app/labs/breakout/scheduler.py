@@ -7,10 +7,11 @@ rather than given a beat entry of its own so the candles can never race the
 universe they are fetched for; enqueued rather than run inline so a candle
 failure cannot roll back a completed universe refresh.
 
-The chain is universe -> candles -> setups, each enqueued by the one before
-it so a later pass can never read data an earlier one has not written yet, and
-so a failure in one cannot roll back another's transaction. The outcomes pass
-rides on the setups task once a day, behind the daily candles.
+The chain is universe -> candles -> setups -> trader, each enqueued by the
+one before it so a later pass can never read data an earlier one has not
+written yet, and so a failure in one cannot roll back another's transaction.
+The outcomes pass rides on the setups task once a day, behind the daily
+candles. The trader is gated by its OWN flag on top of the lab's.
 
 `breakout-lab-tick` has one explicit beat entry in `app/workers/celery_app.py`
 (every 15 minutes) and the module is in that file's `include`, exactly as the
@@ -39,6 +40,7 @@ from app.labs.breakout import config
 from app.labs.breakout.candles import BreakoutCandles, due_timeframes
 from app.labs.breakout.setups import OutcomeEngine, SetupEngine
 from app.labs.breakout.sources import BreakoutSource
+from app.labs.breakout.trader import BreakoutTrader
 from app.labs.breakout.universe import BreakoutUniverse
 from app.workers.celery_app import celery_app
 
@@ -47,6 +49,7 @@ logger = get_logger(__name__)
 TICK_TASK = "app.labs.breakout.scheduler.breakout_lab_tick"
 CANDLES_TASK = "app.labs.breakout.scheduler.breakout_candles_tick"
 SETUPS_TASK = "app.labs.breakout.scheduler.breakout_setups_tick"
+TRADER_TASK = "app.labs.breakout.scheduler.breakout_trader_tick"
 
 
 @celery_app.task(name=TICK_TASK)
@@ -73,7 +76,17 @@ def breakout_setups_tick() -> dict[str, Any]:
     outcomes pass when its own window has come round."""
     from app.workers.runtime import run_async
 
-    return run_async(setups_tick())
+    result = run_async(setups_tick())
+    enqueue(breakout_trader_tick)
+    return result
+
+
+@celery_app.task(name=TRADER_TASK)
+def breakout_trader_tick() -> dict[str, Any]:
+    """The paper book. Gated by BOTH flags — the lab's and trading's own."""
+    from app.workers.runtime import run_async
+
+    return run_async(trader_tick())
 
 
 def enqueue(task: Any) -> None:
@@ -147,6 +160,26 @@ async def setups_tick() -> dict[str, Any]:
         return {"error": "breakout_setups_tick_failed"}
 
 
+async def trader_tick() -> dict[str, Any]:
+    """One paper-trading pass, on the bar the setups pass just evaluated.
+
+    Gated by `BREAKOUT_TRADING_ENABLED` **as well as** the lab flag, so the
+    watchlist can run for weeks before anything opens a position.
+    """
+    if not config.enabled():
+        return {"skipped": "breakout_lab_disabled"}
+    if not config.trading_enabled():
+        return {"skipped": "breakout_trading_disabled"}
+    try:
+        async with SessionFactory() as session:
+            result = await BreakoutTrader(session).run(datetime.now(UTC))
+            await session.commit()
+            return result
+    except Exception:  # containment is the point
+        logger.exception("breakout_trader_tick_failed")
+        return {"error": "breakout_trader_tick_failed"}
+
+
 async def outcomes_tick() -> dict[str, Any]:
     """The outcomes pass on its own — what the CLI runs."""
     if not config.enabled():
@@ -164,4 +197,4 @@ async def tick() -> dict[str, Any]:
     if not config.enabled():
         return {"skipped": "breakout_lab_disabled"}
     return {"universe": await universe_tick(), "candles": await candles_tick(),
-            "setups": await setups_tick()}
+            "setups": await setups_tick(), "trader": await trader_tick()}

@@ -315,25 +315,28 @@ class TrailResult:
 
 
 def trail_result(
-    bars: Sequence[Candle], entry: float, *, notional: float = config.TRAIL_NOTIONAL_USD,
-    trail_usd: float = config.TRAIL_USD, interval_hours: int = 1,
+    bars: Sequence[Candle], entry: float, *, notional: float | None = None,
+    trail_usd: float | None = None, interval_hours: int = 1,
 ) -> TrailResult:
     """A `notional` position opened at `entry` and closed when its value falls
     `trail_usd` below its high-water value. Returns the percent result.
 
-    **Conservative on every bar: the LOW is treated as happening before the
-    high.** A bar that would both trigger the stop and set a new high exits at
-    the stop. Getting this backwards is how a backtest invents money.
-
-    The high-water mark is raised on the bar's HIGH, but only after that bar's
-    low has been checked — so a stop can never be lifted by a high the price
-    reached after it would already have been taken out.
+    The per-bar rule is `rules.trail_step`, the same function the live trader
+    calls once per tick: the low before the high, and the high-water mark
+    raised only after the low has been checked. See its docstring for why
+    that ordering is the line that decides whether these numbers mean
+    anything.
 
     `gappy` is set when the bars are not contiguous at `interval_hours`. A gap
     is treated as no movement (the pre-decided rule), which understates both
     directions; the flag is there so the number can be excluded later rather
     than silently trusted.
     """
+    from app.labs.breakout.rules import trail_step
+
+    # Read at call time, not bound as defaults — see `rules.py`.
+    notional = config.TRAIL_NOTIONAL_USD if notional is None else notional
+    trail_usd = config.TRAIL_USD if trail_usd is None else trail_usd
     if entry <= 0 or not bars:
         return TrailResult(0.0, True)
 
@@ -344,17 +347,19 @@ def trail_result(
 
     for bar in bars:
         if previous is not None:
-            step = (bar.open_time - previous.open_time).total_seconds() / 3600.0
-            if abs(step - interval_hours) > 1e-6:
+            elapsed = (bar.open_time - previous.open_time).total_seconds() / 3600.0
+            if abs(elapsed - interval_hours) > 1e-6:
                 gappy = True
         previous = bar
 
-        stop_value = high_water - trail_usd
-        low_value = qty * float(bar.low)
-        if low_value <= stop_value:
-            return TrailResult((stop_value - notional) / notional * 100.0, gappy)
-        high_value = qty * float(bar.high)
-        high_water = max(high_water, high_value)
+        # The SAME function the live trader calls once per tick. Folded here,
+        # called singly there — one rule, not two implementations to keep in
+        # step. `test_consistency.py` asserts the two agree end to end.
+        step = trail_step(qty=qty, low=float(bar.low), high=float(bar.high),
+                          high_water=high_water, trail=trail_usd)
+        if step.stopped:
+            return TrailResult((step.exit_value - notional) / notional * 100.0, gappy)
+        high_water = step.high_water
 
     final = qty * float(bars[-1].close)
     return TrailResult((final - notional) / notional * 100.0, gappy)

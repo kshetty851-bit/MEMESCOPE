@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Sequence
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import func, select
@@ -18,11 +18,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.labs.breakout import config
 from app.labs.breakout.candles import Candle, find_gaps, interval, last_closed_open
 from app.labs.breakout.models import (
+    BoAccount,
     BoCandle,
     BoEpisode,
+    BoEquity,
     BoLevels,
+    BoPosition,
     BoRun,
     BoSetupSnapshot,
+    BoTrade,
     BoUniverseMember,
 )
 
@@ -372,3 +376,109 @@ def _median(values: Sequence[float]) -> float:
 
 def _f(value: Any) -> float | None:
     return None if value is None else float(value)
+
+
+# ============================================================================
+# Phase 3 — the paper ledger
+# ============================================================================
+
+async def get_account(session: AsyncSession) -> BoAccount | None:
+    """The one account row, or None before the first trading tick."""
+    return (await session.execute(
+        select(BoAccount).where(BoAccount.scope == "default"))).scalar_one_or_none()
+
+
+async def get_positions(session: AsyncSession) -> list[BoPosition]:
+    return list((await session.execute(
+        select(BoPosition).order_by(BoPosition.opened_at))).scalars())
+
+
+async def get_trades(
+    session: AsyncSession, limit: int = 50, offset: int = 0,
+) -> tuple[int, list[BoTrade]]:
+    """`(total, page)` of closed trades, newest first."""
+    total = await session.scalar(select(func.count()).select_from(BoTrade)) or 0
+    rows = (await session.execute(
+        select(BoTrade).order_by(BoTrade.closed_at.desc()).limit(limit).offset(offset)
+    )).scalars().all()
+    return total, list(rows)
+
+
+async def get_equity_curve(session: AsyncSession, hours: int = 168) -> list[BoEquity]:
+    """The curve, oldest first — the order a chart draws in."""
+    cutoff = datetime.now(UTC) - timedelta(hours=hours)
+    return list((await session.execute(
+        select(BoEquity).where(BoEquity.bar_close_time >= cutoff)
+        .order_by(BoEquity.bar_close_time))).scalars())
+
+
+async def get_trade_stats(session: AsyncSession) -> dict[str, Any]:
+    """Win rate, expectancy, profit factor, drawdown and the split by exit
+    reason.
+
+    Every figure is net of fees and slippage, because `pnl_usd` is. Drawdown
+    is read off the stored equity curve rather than off the trade sequence —
+    the curve includes open positions, and a drawdown that only counts closed
+    trades is not a drawdown anyone lived through.
+    """
+    trades = list((await session.execute(select(BoTrade))).scalars())
+    account = await get_account(session)
+    curve = list((await session.execute(
+        select(BoEquity).order_by(BoEquity.bar_close_time))).scalars())
+
+    if not trades:
+        return {"trades": 0, "win_rate": None, "avg_win_pct": None,
+                "avg_loss_pct": None, "expectancy_pct": None, "profit_factor": None,
+                "max_drawdown_pct": _curve_drawdown(curve),
+                "return_pct": _return_pct(account), "by_exit_reason": {},
+                "fees_total": 0.0}
+
+    pcts = [float(t.pnl_pct) for t in trades]
+    wins = [p for p in pcts if p > 0]
+    losses = [p for p in pcts if p <= 0]
+    gross_win = sum(float(t.pnl_usd) for t in trades if t.pnl_usd > 0)
+    gross_loss = -sum(float(t.pnl_usd) for t in trades if t.pnl_usd <= 0)
+
+    by_reason: dict[str, dict[str, Any]] = {}
+    for trade in trades:
+        bucket = by_reason.setdefault(
+            trade.exit_reason, {"n": 0, "pnl_usd": 0.0, "mean_pct": 0.0})
+        bucket["n"] += 1
+        bucket["pnl_usd"] += float(trade.pnl_usd)
+        bucket["mean_pct"] += float(trade.pnl_pct)
+    for bucket in by_reason.values():
+        bucket["mean_pct"] = round(bucket["mean_pct"] / bucket["n"], 4)
+        bucket["pnl_usd"] = round(bucket["pnl_usd"], 4)
+
+    return {
+        "trades": len(trades),
+        "win_rate": round(len(wins) / len(trades), 4),
+        "avg_win_pct": round(sum(wins) / len(wins), 4) if wins else None,
+        "avg_loss_pct": round(sum(losses) / len(losses), 4) if losses else None,
+        "expectancy_pct": round(sum(pcts) / len(pcts), 4),
+        # None, not infinity, when nothing has lost yet — a profit factor with
+        # no denominator is not a very good profit factor, it is no data.
+        "profit_factor": round(gross_win / gross_loss, 4) if gross_loss > 0 else None,
+        "max_drawdown_pct": _curve_drawdown(curve),
+        "return_pct": _return_pct(account),
+        "by_exit_reason": by_reason,
+        "fees_total": round(sum(float(t.fees_usd) for t in trades), 4),
+    }
+
+
+def _curve_drawdown(curve: Sequence[BoEquity]) -> float:
+    """The deepest peak-to-trough on the stored equity curve, in percent."""
+    peak = worst = 0.0
+    for point in curve:
+        equity = float(point.equity)
+        peak = max(peak, equity)
+        if peak > 0:
+            worst = max(worst, (peak - equity) / peak * 100)
+    return round(worst, 4)
+
+
+def _return_pct(account: BoAccount | None) -> float:
+    if account is None:
+        return 0.0
+    return round((float(account.equity) - config.STARTING_EQUITY)
+                 / config.STARTING_EQUITY * 100, 4)
