@@ -11,6 +11,7 @@ clears the flag.
 
 from __future__ import annotations
 
+import time
 from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -252,23 +253,64 @@ class BreakoutUniverse:
         self._session = session
         self._source = source
 
-    async def gather(self) -> list[Candidate]:
-        """Every candidate both sources will give, errors contained per call.
+    async def gather(self) -> tuple[list[Candidate], bool]:
+        """`(candidates, complete)` — everything both sources will give, with
+        errors contained per call.
 
         One source failing costs that source's candidates, not the refresh:
         GeckoTerminal alone is a working universe and so is DexScreener alone.
+
+        **`complete` is False when the sweep was cut short** — by the deadline
+        or by a failing list. It matters because `refresh` marks absent tokens
+        INACTIVE, and a truncated candidate list would retire members that are
+        perfectly healthy and simply were not reached. A partial sweep may add
+        tokens; only a complete one may remove them.
+
+        The deadline exists because discovery now costs ~61 calls at 2.4s
+        spacing, and Celery kills the task at `task_soft_time_limit`. The
+        candle pass learned that the expensive way.
         """
+        stop_at = time.monotonic() + config.TICK_DEADLINE_SECONDS
+        complete = True
         candidates: list[Candidate] = []
-        for page in range(1, config.UNIVERSE_PAGES + 1):
-            try:
-                candidates += gecko_candidates(await self._source.gecko_pools(page))
-            except Exception as exc:
-                logger.warning("breakout_pools_page_failed", page=page, error=repr(exc))
-                break  # a failing page means the next one fails too
+
+        # The network-wide ranked list, once per sort. Volume and transaction
+        # count order the same 200-pool window differently.
+        for sort in config.UNIVERSE_SORTS:
+            for page in range(1, config.UNIVERSE_PAGES + 1):
+                if time.monotonic() >= stop_at:
+                    logger.info("breakout_gather_deadline", at=f"sort:{sort}", page=page)
+                    return candidates, False
+                try:
+                    candidates += gecko_candidates(
+                        await self._source.gecko_pools(page, sort=sort))
+                except Exception as exc:
+                    logger.warning("breakout_pools_page_failed", sort=sort, page=page,
+                                   error=repr(exc))
+                    complete = False
+                    break  # a failing page means the next one fails too
+
+        # Each venue's own list. This is what lifts the candidate count off
+        # the 200-pool ceiling the combined ranking imposes.
+        for dex in config.UNIVERSE_DEXES:
+            for page in range(1, config.UNIVERSE_DEX_PAGES + 1):
+                if time.monotonic() >= stop_at:
+                    logger.info("breakout_gather_deadline", at=f"dex:{dex}", page=page)
+                    return candidates, False
+                try:
+                    candidates += gecko_candidates(
+                        await self._source.gecko_dex_pools(dex, page))
+                except Exception as exc:
+                    logger.warning("breakout_dex_page_failed", dex=dex, page=page,
+                                   error=repr(exc))
+                    complete = False
+                    break
+
         try:
             candidates += gecko_candidates(await self._source.gecko_trending())
         except Exception as exc:
             logger.warning("breakout_trending_failed", error=repr(exc))
+            complete = False
 
         mints: list[str] = []
         for fetch in (self._source.dex_boosts, self._source.dex_profiles):
@@ -278,24 +320,27 @@ class BreakoutUniverse:
             except Exception as exc:
                 logger.warning("breakout_dex_list_failed", call=fetch.__name__,
                                error=repr(exc))
+                complete = False
         unique = list(dict.fromkeys(mints))
         for start in range(0, len(unique), 30):
             try:
                 pairs = await self._source.dex_pairs(unique[start:start + 30])
             except Exception as exc:
                 logger.warning("breakout_dex_pairs_failed", error=repr(exc))
+                complete = False
                 break
             candidates += [c for c in map(from_dex_pair, pairs) if c is not None]
-        return candidates
+        return candidates, complete
 
     async def refresh(self, now: datetime) -> dict[str, Any]:
         """One universe pass. Persists, marks drops inactive, records the run."""
         started, errors = now, []
+        complete = True
         try:
-            candidates = await self.gather()
+            candidates, complete = await self.gather()
         except Exception as exc:  # BudgetExhaustedError, or a client-level failure
             logger.exception("breakout_universe_gather_failed")
-            candidates, errors = [], [f"gather: {exc!r}"]
+            candidates, complete, errors = [], False, [f"gather: {exc!r}"]
 
         selected, rejected = select_universe(candidates, now)
         if not selected:
@@ -310,17 +355,28 @@ class BreakoutUniverse:
         after = {s.candidate.mint for s in selected}
         for item in selected:
             await self._upsert(item, now)
-        dropped = before - after
+        # **Only a COMPLETE sweep may retire a token.** A truncated candidate
+        # list is missing tokens that are perfectly healthy and simply were not
+        # reached; marking those inactive would drop them out of the candle
+        # sweep and close their episodes as `universe_exit`. A partial sweep
+        # adds; it never removes.
+        unreached = before - after
+        dropped: set[str] = unreached if complete else set()
         if dropped:
             await self._session.execute(
                 update(BoUniverseMember)
                 .where(BoUniverseMember.mint.in_(dropped), BoUniverseMember.active.is_(True))
                 .values(active=False, inactive_reason="filtered_out")
             )
+        elif unreached:
+            logger.info("breakout_universe_partial_sweep", unreached=len(unreached))
+            errors.append(
+                f"partial sweep: {len(unreached)} member(s) not seen, none retired")
         added = after - before
         logger.info("breakout_universe_refreshed", size=len(selected),
-                    candidates=len(candidates), added=sorted(added),
-                    dropped=sorted(dropped), rejected=dict(rejected))
+                    candidates=len(candidates), complete=complete,
+                    added=sorted(added), dropped=sorted(dropped),
+                    rejected=dict(rejected))
         return await self._record(started, now, len(selected), len(added), len(dropped),
                                   errors, rejected=dict(rejected))
 

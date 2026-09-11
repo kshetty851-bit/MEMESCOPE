@@ -67,9 +67,12 @@ def evaluate(
     2. A close more than `BREAK_CONFIRM_PCT` above resistance is `BROKE_OUT`,
        whatever the score says. The question this episode asked is answered.
     3. An episode that HAS reached `PRE_BREAKOUT` fails when price falls more
-       than `FAIL_PCT` below resistance or the score drops under the watch
-       floor. Checked before the entry states so a setup cannot re-arm on the
-       same bar it fails.
+       than `FAIL_PCT` below resistance or the score drops under `FAIL_SCORE`.
+       Checked before the entry states so a setup cannot re-arm on the same
+       bar it fails. `FAIL_SCORE` is deliberately NOT `WATCH_SCORE`: the
+       watch floor answers "is this worth looking at", this one answers "is
+       this setup finished", and widening the first must not quietly make the
+       trader hold losers longer.
     4. Then the two entry zones, tightest first.
 
     The band between resistance and `resistance * (1 + BREAK_CONFIRM_PCT)` is
@@ -84,7 +87,7 @@ def evaluate(
     distance_pct = (resistance - price) / resistance * 100.0
     if -distance_pct > config.BREAK_CONFIRM_PCT:
         return Evaluation(BROKE_OUT, distance_pct)
-    if had_pre_breakout and (distance_pct > config.FAIL_PCT or score < config.WATCH_SCORE):
+    if had_pre_breakout and (distance_pct > config.FAIL_PCT or score < config.FAIL_SCORE):
         return Evaluation(FAILED, distance_pct)
     if score >= config.PRE_SCORE and 0 <= distance_pct <= config.PRE_ZONE_PCT:
         return Evaluation(PRE_BREAKOUT, distance_pct)

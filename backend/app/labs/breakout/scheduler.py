@@ -107,12 +107,29 @@ def enqueue_candles() -> None:
 
 
 async def universe_tick() -> dict[str, Any]:
-    """One universe pass. Returns what it did, so a beat log is readable."""
+    """One universe pass, but only when the universe is actually stale.
+
+    The beat runs every 15 minutes because that is the CANDLE cadence.
+    Discovery costs ~61 GeckoTerminal calls — two sorts of the ranked list,
+    four venues, ten pages each — which at 2.4s spacing is about two and a
+    half minutes. Running that four times an hour would spend ten minutes of
+    the hour on tokens whose membership cannot change that fast, and starve
+    the candle sweep that has to keep up with closing bars.
+
+    So the pass checks `UNIVERSE_REFRESH_SECONDS` first and returns without
+    opening a socket the other three times in four. `stale()` existed for
+    `data_health` and nothing called it here, which meant the interval was a
+    number that did nothing.
+    """
     if not config.enabled():
         return {"skipped": "breakout_lab_disabled"}
     try:
+        now = datetime.now(UTC)
+        async with SessionFactory() as session:
+            if not await BreakoutUniverse(session, None).stale(now):  # type: ignore[arg-type]
+                return {"phase": "universe", "skipped": "fresh"}
         async with BreakoutSource() as source, SessionFactory() as session:
-            result = await BreakoutUniverse(session, source).refresh(datetime.now(UTC))
+            result = await BreakoutUniverse(session, source).refresh(now)
             await session.commit()
             return result
     except Exception:  # containment is the point: never raise into the beat

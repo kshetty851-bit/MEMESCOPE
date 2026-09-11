@@ -95,8 +95,41 @@ def test_a_setup_fails_only_after_it_reached_pre_breakout() -> None:
 
 
 def test_a_setup_also_fails_when_its_momentum_dies_in_the_zone() -> None:
-    assert evaluate(config.WATCH_SCORE - 1, at(3), RESIST,
+    assert evaluate(config.FAIL_SCORE - 1, at(3), RESIST,
                     had_pre_breakout=True).state == FAILED
+
+
+def test_the_failure_floor_is_not_the_watch_floor() -> None:
+    """**The coupling that would have changed trading silently.**
+
+    `FAILED` is one of the paper trader's exits. While the failure rule read
+    `WATCH_SCORE`, widening the watchlist would have lowered the bar at which
+    a live position is declared dead — holding losers longer — without
+    anything in the diff saying so. They are two questions and now two
+    constants.
+    """
+    assert config.FAIL_SCORE >= config.WATCH_SCORE, (
+        "a setup must not be declared dead while still worth watching")
+    score = config.WATCH_SCORE          # worth watching, not worth holding
+    assert score < config.FAIL_SCORE, "pick a score between the two to test this"
+    # Fresh setup at that score: watched.
+    assert evaluate(score, at(3), RESIST, had_pre_breakout=False).state == WATCHING
+    # Same score on a setup that already armed: dead.
+    assert evaluate(score, at(3), RESIST, had_pre_breakout=True).state == FAILED
+
+
+def test_the_widened_watch_gate_did_not_move_the_trading_gate() -> None:
+    """Pre-registered: WATCH_SCORE and WATCH_ZONE_PCT were relaxed to grow the
+    watchlist. PRE_SCORE and PRE_ZONE_PCT — the only two the trader reads —
+    were not, so the episode record stays comparable across the change."""
+    assert config.PRE_SCORE == 65
+    assert config.PRE_ZONE_PCT == 6.0
+    assert config.PRE_SCORE > config.WATCH_SCORE
+    assert config.PRE_ZONE_PCT < config.WATCH_ZONE_PCT
+    # A token inside the watch zone but outside the pre zone is watched, never
+    # bought, whatever its score.
+    outside = at((config.PRE_ZONE_PCT + config.WATCH_ZONE_PCT) / 2)
+    assert evaluate(100, outside, RESIST, had_pre_breakout=False).state == WATCHING
 
 
 def test_failure_is_checked_before_the_entry_states_so_it_cannot_re_arm() -> None:

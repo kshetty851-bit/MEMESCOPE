@@ -86,8 +86,11 @@ class FakeSource:
     test drive a 429 storm through the real budget code instead of this."""
 
     def __init__(self, *, pages=None, trending=None, boosts=None, profiles=None,
-                 pairs=None, ohlcv_by=None, fail_pools=(), max_calls=10_000) -> None:
+                 pairs=None, ohlcv_by=None, fail_pools=(), max_calls=10_000,
+                 dex_pages=None) -> None:
         self.pages = pages or {}
+        #: (dex, page) -> a `/dexes/{dex}/pools` body.
+        self.dex_pages: dict[tuple[str, int], Any] = dex_pages or {}
         self.trending = trending or {"data": [], "included": []}
         self.boosts = boosts or []
         self.profiles = profiles or []
@@ -110,10 +113,18 @@ class FakeSource:
             raise BudgetExhaustedError("fake budget spent")
         self.requests[host] += 1
 
-    async def gecko_pools(self, page):
+    async def gecko_pools(self, page, sort="h24_volume_usd_desc"):
         self._spend("geckoterminal")
         self.calls.append(("pools", page))
+        # Keyed by page only: a test that wants two sorts to differ can pass
+        # `dex_pages`, and every existing test reads the same page whichever
+        # sort asked for it.
         return self.pages.get(page, {"data": [], "included": []})
+
+    async def gecko_dex_pools(self, dex, page):
+        self._spend("geckoterminal")
+        self.calls.append(("dex_pools", dex, page))
+        return self.dex_pages.get((dex, page), {"data": [], "included": []})
 
     async def gecko_trending(self):
         self._spend("geckoterminal")

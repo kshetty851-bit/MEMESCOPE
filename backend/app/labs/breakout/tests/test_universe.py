@@ -311,17 +311,162 @@ async def test_one_source_failing_does_not_cost_the_other(lab_session=None) -> N
 
     source = HalfBroken(boosts=[{"chainId": "solana", "tokenAddress": "M9"}],
                         pairs=[dex_pair(mint="M9", pool="P9")])
-    found = await BreakoutUniverse.gather(BreakoutUniverse(None, source))  # type: ignore[arg-type]
+    found, complete = await BreakoutUniverse.gather(
+        BreakoutUniverse(None, source))  # type: ignore[arg-type]
     assert [c.mint for c in found] == ["M9"]
+    assert complete is False, "GeckoTerminal failing makes the sweep partial"
 
 
 async def test_the_gather_stops_paging_after_a_failed_page() -> None:
+    """Per SORT, not globally: a 429 on page 2 abandons that ranking and moves
+    on to the next one, because the next page of a list that just refused is
+    going to refuse too."""
     class BreakOnTwo(FakeSource):
-        async def gecko_pools(self, page):
+        async def gecko_pools(self, page, sort="h24_volume_usd_desc"):
             if page == 2:
                 raise RuntimeError("429 storm")
-            return await super().gecko_pools(page)
+            return await super().gecko_pools(page, sort)
 
     source = BreakOnTwo(pages={1: gecko_body(gecko_pool(mint="M1", pool="P1"))})
-    await BreakoutUniverse.gather(BreakoutUniverse(None, source))  # type: ignore[arg-type]
-    assert [c for c in source.calls if c[0] == "pools"] == [("pools", 1)]
+    _, _ = await BreakoutUniverse.gather(
+        BreakoutUniverse(None, source))  # type: ignore[arg-type]
+    # Page 2 raises before the fake records it, so what is recorded is page 1
+    # of each sort and nothing after it — the break did its job both times.
+    pages = [c[1] for c in source.calls if c[0] == "pools"]
+    assert pages == [1] * len(config.UNIVERSE_SORTS), pages
+
+
+async def test_the_gather_reads_every_venue_s_own_pool_list() -> None:
+    """The network-wide ranking is capped at 200 pools however it is sorted,
+    and that cap was what bounded the universe. Each venue keeps its own."""
+    source = FakeSource(
+        dex_pages={(dex, 1): gecko_body(gecko_pool(mint=f"M-{dex}", pool=f"P-{dex}"))
+                   for dex in config.UNIVERSE_DEXES})
+    found, complete = await BreakoutUniverse.gather(
+        BreakoutUniverse(None, source))  # type: ignore[arg-type]
+    asked = {c[1] for c in source.calls if c[0] == "dex_pools"}
+    assert asked == set(config.UNIVERSE_DEXES)
+    assert complete is True, "every list answered"
+    assert {c.mint for c in found} == {f"M-{d}" for d in config.UNIVERSE_DEXES}
+
+
+async def test_a_venue_that_fails_costs_that_venue_and_no_other() -> None:
+    class OrcaDown(FakeSource):
+        async def gecko_dex_pools(self, dex, page):
+            if dex == "orca":
+                raise RuntimeError("venue down")
+            return await super().gecko_dex_pools(dex, page)
+
+    source = OrcaDown(
+        dex_pages={(dex, 1): gecko_body(gecko_pool(mint=f"M-{dex}", pool=f"P-{dex}"))
+                   for dex in config.UNIVERSE_DEXES})
+    found, complete = await BreakoutUniverse.gather(
+        BreakoutUniverse(None, source))  # type: ignore[arg-type]
+    mints = {c.mint for c in found}
+    assert "M-orca" not in mints
+    assert mints == {f"M-{d}" for d in config.UNIVERSE_DEXES if d != "orca"}
+    assert complete is False, "a venue that failed makes the sweep partial"
+
+
+# --- the refresh interval actually gates the pass -------------------------------
+
+@pytest.mark.integration
+async def test_stale_answers_the_interval_question(lab_session) -> None:
+    """An empty universe is always stale, or a lab that has never run would
+    wait an hour to start."""
+    universe = BreakoutUniverse(lab_session, None)  # type: ignore[arg-type]
+    assert await universe.stale(NOW) is True, "nothing stored yet"
+
+    await BreakoutUniverse(lab_session, FakeSource(
+        pages={1: gecko_body(gecko_pool(mint="M1", pool="P1"))})).refresh(NOW)
+    assert await universe.stale(NOW) is False, "just refreshed"
+    assert await universe.stale(
+        NOW + timedelta(seconds=config.UNIVERSE_REFRESH_SECONDS - 1)) is False
+    assert await universe.stale(
+        NOW + timedelta(seconds=config.UNIVERSE_REFRESH_SECONDS)) is True
+
+
+async def test_a_fresh_universe_opens_no_socket(monkeypatch) -> None:
+    """**`stale()` was dead code.** The tick refreshed unconditionally, so
+    `UNIVERSE_REFRESH_SECONDS` was a number that did nothing and discovery ran
+    four times an hour — ~61 GeckoTerminal calls each, starving the candle
+    sweep it shares a budget with.
+    """
+    from app.labs.breakout import scheduler
+    from app.labs.breakout.sources import BreakoutSource
+
+    monkeypatch.setenv("BREAKOUT_LAB_ENABLED", "true")
+
+    async def fresh(self, now):
+        return False
+
+    async def boom(self):
+        raise AssertionError("opened a network client for a fresh universe")
+
+    monkeypatch.setattr(BreakoutUniverse, "stale", fresh)
+    monkeypatch.setattr(BreakoutSource, "__aenter__", boom)
+    assert await scheduler.universe_tick() == {"phase": "universe", "skipped": "fresh"}
+
+
+async def test_a_stale_universe_does_open_one(monkeypatch) -> None:
+    """The other half: the gate must not be a permanent off switch."""
+    from app.labs.breakout import scheduler
+    from app.labs.breakout.sources import BreakoutSource
+
+    monkeypatch.setenv("BREAKOUT_LAB_ENABLED", "true")
+    opened = []
+
+    async def is_stale(self, now):
+        return True
+
+    async def record(self):
+        opened.append(True)
+        raise RuntimeError("stop here — the socket is the assertion")
+
+    monkeypatch.setattr(BreakoutUniverse, "stale", is_stale)
+    monkeypatch.setattr(BreakoutSource, "__aenter__", record)
+    await scheduler.universe_tick()
+    assert opened, "a stale universe must actually refresh"
+
+
+@pytest.mark.integration
+async def test_a_partial_sweep_adds_but_never_retires(lab_session) -> None:
+    """**The risk widening discovery introduced.** Discovery now costs ~61
+    calls; a deadline or a failing venue can cut the sweep short. The
+    candidate list is then missing tokens that are perfectly healthy and were
+    simply not reached — and retiring those would pull them out of the candle
+    sweep and close their episodes as `universe_exit`.
+    """
+    full = gecko_body(gecko_pool(mint="M1", pool="P1"),
+                      gecko_pool(mint="M2", pool="P2"))
+    await BreakoutUniverse(lab_session, FakeSource(pages={1: full})).refresh(NOW)
+    assert {m.mint for m in (await lab_session.execute(
+        select(BoUniverseMember))).scalars()} == {"M1", "M2"}
+
+    class Truncated(FakeSource):
+        async def gecko_trending(self):
+            raise RuntimeError("cut short")
+
+    partial = gecko_body(gecko_pool(mint="M1", pool="P1"))   # M2 not reached
+    result = await BreakoutUniverse(
+        lab_session, Truncated(pages={1: partial})).refresh(NOW)
+
+    assert result["dropped"] == 0, "a partial sweep must not retire anything"
+    assert any("partial sweep" in e for e in result["errors"])
+    rows = {m.mint: m for m in (await lab_session.execute(
+        select(BoUniverseMember))).scalars()}
+    assert rows["M2"].active is True, "M2 was never seen, not delisted"
+
+
+@pytest.mark.integration
+async def test_a_complete_sweep_does_still_retire(lab_session) -> None:
+    """The other half: the guard must not become a permanent off switch."""
+    await BreakoutUniverse(lab_session, FakeSource(pages={1: gecko_body(
+        gecko_pool(mint="M1", pool="P1"), gecko_pool(mint="M2", pool="P2"))})
+    ).refresh(NOW)
+    result = await BreakoutUniverse(lab_session, FakeSource(
+        pages={1: gecko_body(gecko_pool(mint="M1", pool="P1"))})).refresh(NOW)
+    assert result["dropped"] == 1
+    rows = {m.mint: m for m in (await lab_session.execute(
+        select(BoUniverseMember))).scalars()}
+    assert rows["M2"].active is False

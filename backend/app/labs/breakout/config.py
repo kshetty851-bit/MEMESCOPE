@@ -29,6 +29,24 @@ NETWORK = "solana"
 #: GeckoTerminal serves 20 pools per page and refuses page 11 with a 401 —
 #: measured, not assumed. Ten pages is the whole ranked list it will give.
 UNIVERSE_PAGES = 10
+#: The ranked list is only 200 pools, and that was the binding constraint on
+#: the universe: 242 candidates in, 18 tokens out. GeckoTerminal also serves a
+#: SEPARATE ranked list per DEX, 20 a page and paging just as deep, so asking
+#: each venue directly multiplies the supply instead of re-reading the same
+#: 200 rows. Measured: 4 venues x 10 pages = 800 more candidates.
+UNIVERSE_DEXES: tuple[str, ...] = ("raydium", "orca", "meteora", "pumpswap")
+#: FIVE, not ten. Measured against the live API: four venues at ten pages
+#: each produced 73 retries and had not finished after six minutes — the free
+#: tier will not sustain it. At five the sweep is ~35 calls, finishes inside
+#: the deadline, and still adds 400 candidates to the 242 the ranked list
+#: gives. A sweep that FINISHES also matters beyond speed: only a complete one
+#: is allowed to retire a token, so a permanently-truncated sweep would mean
+#: nothing ever leaves the universe. Raise it once the real cost is observed.
+UNIVERSE_DEX_PAGES = 5
+#: A second sort of the main list. Volume and transaction count rank the same
+#: 200-pool window differently, so the overlap is partial and the union is
+#: wider than either. `pool_created_at_desc` is NOT here — it 400s.
+UNIVERSE_SORTS: tuple[str, ...] = ("h24_volume_usd_desc", "h24_tx_count_desc")
 #: A pool younger than this is not an established token.
 MIN_AGE_DAYS = 7
 MIN_LIQUIDITY_USD = 50_000
@@ -46,7 +64,11 @@ DEX_DENYLIST: tuple[str, ...] = ("pumpfun",)
 #: Most active tokens kept, by 24h volume. Measured against the live top-200
 #: pools this does not bind — about 30 pools a refresh clear the filters.
 MAX_UNIVERSE = 300
-UNIVERSE_REFRESH_SECONDS = 15 * 60
+#: HOURLY, not every 15 minutes. Widening discovery costs ~90 GeckoTerminal
+#: calls a refresh, and at 2.4s spacing four refreshes an hour would spend 15
+#: minutes of the budget the candle sweep needs. An established token's
+#: membership does not change in fifteen minutes; its candles do.
+UNIVERSE_REFRESH_SECONDS = 60 * 60
 
 #: Stablecoins, wrapped SOL, liquid-staking tokens and bridged majors: things
 #: that trade but do not break out. By MINT, because a mint cannot be renamed.
@@ -242,12 +264,34 @@ HOURLY_CONFIRM_BARS = 12
 HOURLY_MISSING_SCORE_CAP = 80
 
 # --- the state machine (`setups.py`) ------------------------------------------
-#: Momentum floors.
-WATCH_SCORE = 50
+# --- the watch gate, widened 2026-09-11 (pre-registered; see the README) ----
+#
+# WATCHING is a WATCHLIST. PRE_BREAKOUT is what the trader buys. Widening the
+# first grows what you can see without changing a single trade, which is why
+# these two moved and the two below them did not.
+#
+#   WATCH_SCORE      50 -> 35
+#   WATCH_ZONE_PCT   15 -> 30
+#
+WATCH_SCORE = 35
+#: How far below the nearest resistance the watchlist reaches, in percent.
+WATCH_ZONE_PCT = 30.0
+
+# --- the trading gate: UNCHANGED -------------------------------------------
+#
+# Every entry the paper book takes still needs the same score and the same
+# distance it needed on the first day. The episode record therefore stays
+# comparable across the change: only the population being WATCHED grew.
 PRE_SCORE = 65
-#: How far below the nearest resistance each state reaches, in percent.
-WATCH_ZONE_PCT = 15.0
 PRE_ZONE_PCT = 6.0
+
+#: The score below which a setup that HAS reached PRE_BREAKOUT is declared
+#: dead. It was `WATCH_SCORE`, which coupled two different questions to one
+#: number: "is this worth watching?" and "is this setup finished?". Lowering
+#: the watch floor to 35 would silently have held losing positions longer,
+#: because `FAILED` is one of the trader's exits. Split, and left at the value
+#: the failure rule has always used.
+FAIL_SCORE = 50
 #: An hourly close this far ABOVE resistance is a confirmed break.
 BREAK_CONFIRM_PCT = 1.0
 #: A setup that reached PRE_BREAKOUT and then fell this far below resistance

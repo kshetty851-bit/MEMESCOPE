@@ -150,17 +150,34 @@ class BreakoutSource:
 
     # --- GeckoTerminal ------------------------------------------------------
 
-    async def gecko_pools(self, page: int) -> dict[str, Any]:
-        """One page of Solana pools by 24h volume, newest data, with the base
-        token included so a symbol and a name come back in the same call.
+    async def gecko_pools(self, page: int,
+                          sort: str = "h24_volume_usd_desc") -> dict[str, Any]:
+        """One page of the network-wide ranked pool list, with the base token
+        included so a symbol and a name come back in the same call.
 
         Twenty pools a page, and page 11 answers 401 — measured. That is why
         `UNIVERSE_PAGES` defaults to the API's own ceiling rather than to a
-        number someone liked.
+        number someone liked. `sort` selects the ranking; volume and
+        transaction count order the same window differently, so reading both
+        widens the union.
         """
         return await self._get(
             f"{config.GECKOTERMINAL_URL}/networks/{config.NETWORK}/pools",
-            {"page": page, "sort": "h24_volume_usd_desc", "include": "base_token"},
+            {"page": page, "sort": sort, "include": "base_token"},
+            host=GECKO,
+        )
+
+    async def gecko_dex_pools(self, dex: str, page: int) -> dict[str, Any]:
+        """One page of a SINGLE venue's ranked pool list.
+
+        The network-wide list is capped at 200 pools however you sort it, and
+        that cap was what bounded the universe. Each venue keeps its own list
+        of the same depth, so asking Raydium, Orca, Meteora and PumpSwap
+        directly reaches pools the combined ranking never shows.
+        """
+        return await self._get(
+            f"{config.GECKOTERMINAL_URL}/networks/{config.NETWORK}/dexes/{dex}/pools",
+            {"page": page, "include": "base_token"},
             host=GECKO,
         )
 

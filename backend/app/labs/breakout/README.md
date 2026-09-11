@@ -487,9 +487,9 @@ negative means above.
 | State | Rule |
 |---|---|
 | `BROKE_OUT` | close more than `BREAK_CONFIRM_PCT` (1%) above resistance — whatever the score says |
-| `FAILED` | the episode **had** reached `PRE_BREAKOUT` and price is now more than `FAIL_PCT` (12%) below resistance, or the score fell under the watch floor |
+| `FAILED` | the episode **had** reached `PRE_BREAKOUT` and price is now more than `FAIL_PCT` (12%) below resistance, or the score fell under `FAIL_SCORE` (50) — deliberately *not* the watch floor |
 | `PRE_BREAKOUT` | score ≥ `PRE_SCORE` (65) and 0 ≤ distance ≤ `PRE_ZONE_PCT` (6%) |
-| `WATCHING` | score ≥ `WATCH_SCORE` (50) and 0 ≤ distance ≤ `WATCH_ZONE_PCT` (15%) |
+| `WATCHING` | score ≥ `WATCH_SCORE` (35) and 0 ≤ distance ≤ `WATCH_ZONE_PCT` (30%) |
 | `NONE` | anything else |
 
 Checked in that order, and the order is not arbitrary: failure is tested
@@ -670,6 +670,83 @@ Mock mode is `NEXT_PUBLIC_BREAKOUT_MOCK=true`, served from `mock.ts`. The
 fixtures are **typed against `types.ts`**, which mirrors the backend response
 models, so a field renamed on the server fails the build rather than rendering
 a blank column nobody notices for a week.
+
+---
+
+# Pre-registered change — 2026-09-11, the widened watch gate
+
+Recorded **before** the change ran, so `bo_episodes` can be split on it
+afterwards rather than argued about.
+
+## What was observed first
+
+The first production tick, on real data:
+
+```
+242 candidates
+ −173  pool younger than 7 days        (71% of everything)
+ − 27  excluded mint
+ − 11  wrong DEX
+=  31 qualifying pools → 18 tokens → 13 scorable → 1 WATCHING
+```
+
+One token on the watchlist. Two separate causes, both measured:
+
+* **The ranked list is capped.** GeckoTerminal's network-wide `/pools` serves
+  200 pools however it is sorted, and that was the whole candidate supply.
+* **The tokens with momentum had no resistance left.** RAY scored 77 with
+  every cluster broken — nothing above to break. The one token sitting under
+  resistance (SOLCEX, 0.15% below) scored 62 against a PRE floor of 65.
+
+## What changed
+
+| | Before | After | Touches trading? |
+|---|---|---|---|
+| `UNIVERSE_SORTS` | 1 sort | volume **and** tx count | no |
+| `UNIVERSE_DEXES` | — | raydium, orca, meteora, pumpswap, 5 pages each | no |
+| `UNIVERSE_REFRESH_SECONDS` | 900 | 3600 | no |
+| `WATCH_SCORE` | 50 | **35** | no |
+| `WATCH_ZONE_PCT` | 15 | **30** | no |
+| `FAIL_SCORE` | *was `WATCH_SCORE`* | **50**, its own constant | **prevented** a change |
+| `PRE_SCORE` | 65 | 65 | — |
+| `PRE_ZONE_PCT` | 6 | 6 | — |
+| `MIN_AGE_DAYS` | 7 | 7 | — |
+
+**The trading gate did not move.** `WATCHING` is a watchlist; `PRE_BREAKOUT`
+is what the book buys. Widening the first grows what can be seen without
+changing a single entry, so episodes before and after this date remain
+comparable on the only thing the trader reads.
+
+**`FAIL_SCORE` is the part worth reading twice.** `FAILED` is one of the
+trader's exits, and the failure rule read `WATCH_SCORE`. Lowering the watch
+floor to 35 would therefore have lowered the bar at which a *live position* is
+declared dead — holding losers longer — with nothing in the diff saying so.
+The two questions now have two constants, and a test asserts a setup can never
+be declared dead while it is still worth watching.
+
+## Why five pages per venue and not ten
+
+Measured against the live API before shipping: four venues at ten pages each
+produced **81 retries and had not finished after six minutes**. The free tier
+will not sustain it. At five the sweep is ~35 calls and finishes inside the
+deadline — which matters beyond speed, because **only a complete sweep is
+allowed to retire a token**, so a permanently-truncated one would mean nothing
+ever leaves the universe. Raise it once the real cost is observed in
+`bo_runs.requests`.
+
+## What this is expected to do, and what would falsify it
+
+Expected: candidates ~242 → ~640, universe ~18 → 80–150, watchlist into the
+tens. **Not into the hundreds** — 6% of the universe reached WATCHING at the
+old gate, and the arithmetic for hundreds of setups needs either a universe in
+the thousands or a change to `MIN_AGE_DAYS`, which is the lab's premise.
+
+The honest risk is that a wider gate is simply a noisier one. The test is
+`GET /stats` → `outcomes.by_score_decile`: if the low deciles this change
+admits perform like the high ones, the score never carried information and the
+widening only made that visible sooner. That is a useful answer either way,
+and it is the reason the outcome columns are filled by a separate pass 72
+hours later.
 
 ---
 
