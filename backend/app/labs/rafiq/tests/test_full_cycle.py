@@ -156,17 +156,33 @@ async def test_a_full_cycle_leaves_the_existing_wallet_byte_identical(
     positions = list((await lab_session.execute(
         select(RafiqLabPosition))).scalars())
     assert positions, f"no strategy entered anything: {result}"
-    # Exactly-once: the second tick did not double any book.
-    assert len({(p.strategy_id, p.mint_address) for p in positions}) == len(positions)
+    # Exactly-once: the second tick did not double any book. Keyed on the LEG
+    # as well, because C2 opens two rows per token on purpose and the plain
+    # (strategy, mint) key would read that deliberate pair as a duplicate.
+    assert len({(p.strategy_id, p.mint_address, p.leg)
+                for p in positions}) == len(positions)
 
-    # E is absent from that list, and its absence is the gap, not a bug. With
+    # E2 is absent from that list, and its absence is the gap, not a bug. With
     # no wallet-flow row and no security evaluation, only the DEX stream can
-    # confirm — one stream, and not the mandatory one. E cannot trade a market
+    # confirm — one stream, and not the mandatory one. E2 cannot trade a market
     # this platform can only half-observe, and it declines rather than
-    # treating "unmeasured" as "fine".
+    # treating "unmeasured" as "fine". Its entry gate is not what stops it:
+    # the seeded market (k liquidity, $2m cap) clears even STRICT.
     by_code = {r.id: r.code for r in strategies}
     entered = {by_code[p.strategy_id] for p in positions}
-    assert entered == {"A", "B", "C", "D"}, entered
+    assert entered == {"A2", "B2", "C2", "D2"}, entered
+
+    # C2 is the only book that splits, and the split is its whole question.
+    c2 = [p for p in positions if by_code[p.strategy_id] == "C2"]
+    assert {p.leg for p in c2} == {1, 2}, c2
+    assert sum(p.cost_basis for p in c2) == pytest.approx(
+        sum(p.cost_basis for p in positions
+            if by_code[p.strategy_id] == "A2"), rel=Decimal("0.001")),         "C2's two legs must stake the same whole position A2 stakes"
+    leg1 = next(p for p in c2 if p.leg == 1)
+    leg2 = next(p for p in c2 if p.leg == 2)
+    assert leg1.target_price is not None, "C2 leg 1 takes a fixed +30%"
+    assert leg2.target_price is None, "C2 leg 2 has no target at all"
+    assert leg2.trailing_frac is not None, "C2 leg 2 can only leave on the trail"
 
 
 async def test_a_disabled_lab_writes_nothing_at_all(lab_session, monkeypatch) -> None:
@@ -185,8 +201,16 @@ async def test_a_disabled_lab_writes_nothing_at_all(lab_session, monkeypatch) ->
 
 
 async def test_the_lab_never_force_closes_on_a_halt(lab_session, monkeypatch) -> None:
-    """Strategy D halts NEW entries. An open position keeps running under its
-    own exit rules — panic-liquidating is a risk D's docstring refuses."""
+    """A halt stops NEW entries. Open positions keep running under their own
+    exit rules — panic-liquidating into a bad market is a risk the breaker's
+    docstring explicitly refuses to take on.
+
+    Asserted across every book rather than only the breaker-gated one. E2 is
+    the only v2 book the breaker gates, and E2 declines a market this platform
+    can only half-observe, so a test pinned to E2 would skip forever and assert
+    nothing. The invariant belongs to `_settle`, which never consults the
+    breaker at all, and it holds for all five books.
+    """
     monkeypatch.setenv("RAFIQ_LAB_ENABLED", "true")
     now = datetime.now(UTC)
     service = RafiqLabService(lab_session)
@@ -194,27 +218,24 @@ async def test_the_lab_never_force_closes_on_a_halt(lab_session, monkeypatch) ->
     await seed_candidate(lab_session, now)
     await service.tick(now=now)
 
-    rows = {r.code: r for r in (await lab_session.execute(
-        select(RafiqLabStrategy))).scalars()}
-    d_positions = list((await lab_session.execute(
+    open_before = {p.id for p in (await lab_session.execute(
         select(RafiqLabPosition).where(
-            RafiqLabPosition.strategy_id == rows["D"].id))).scalars())
-    if not d_positions:
-        pytest.skip("D did not enter; nothing to hold open")
+            RafiqLabPosition.status == "open"))).scalars()}
+    assert open_before, "nothing entered; the assertion below would be vacuous"
 
-    # Force the halt by collapsing the day's baseline equity underneath it.
-    state = (await lab_session.execute(text(
-        "UPDATE rafiq_lab_daily_state SET day_open_equity = 100000 "
-        "WHERE strategy_id = :sid RETURNING halted"),
-        {"sid": rows["D"].id})).first()
-    assert state is not None
+    # Force the halt by collapsing every book's day baseline underneath it.
+    await lab_session.execute(text(
+        "UPDATE rafiq_lab_daily_state SET day_open_equity = 100000"))
     await service.tick(now=now + timedelta(minutes=1))
 
-    still_open = list((await lab_session.execute(
+    halted = list((await lab_session.execute(text(
+        "SELECT halted FROM rafiq_lab_daily_state WHERE halted"))).scalars())
+    assert halted, "the breaker never actually halted; the test proves nothing"
+
+    still_open = {p.id for p in (await lab_session.execute(
         select(RafiqLabPosition).where(
-            RafiqLabPosition.strategy_id == rows["D"].id,
-            RafiqLabPosition.status == "open"))).scalars())
-    assert len(still_open) == len(d_positions), "a halt force-closed a position"
+            RafiqLabPosition.status == "open"))).scalars()}
+    assert still_open == open_before, "a halt force-closed a position"
 
 
 async def test_a_backlog_of_admissions_does_not_hide_the_fresh_ones(

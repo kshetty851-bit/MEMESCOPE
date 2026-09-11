@@ -8,6 +8,10 @@ ORDER, AND WHY IT IS THIS ORDER
 -------------------------------
     glitch guard -> stop -> take profit -> trailing -> max hold
 
+A position with no `target_price` simply skips the take-profit rung; the order
+of the rest is unchanged, so a no-target book and a capped one are still the
+same evaluator seen from two configurations.
+
 The stop is checked first because it is the worst case, and a print that
 satisfies both the stop and the target is not a market, it is a glitch. Take
 profit precedes the trail because a position AT its target took its target;
@@ -39,7 +43,8 @@ class Geometry:
 
     entry_price: Decimal
     stop_price: Decimal
-    target_price: Decimal
+    #: None for a book with no take profit (D2, and C2's second leg).
+    target_price: Decimal | None
     trailing_frac: Decimal | None
     max_hold: timedelta
     opened_at: datetime
@@ -113,7 +118,7 @@ def evaluate(geometry: Geometry, mark: Mark | None, *, peak_price: Decimal,
                     f"price {price:.10f} at or below stop {geometry.stop_price:.10f}"
                     + (" (gapped through)" if gapped else ""))
 
-    if price >= geometry.target_price:
+    if geometry.target_price is not None and price >= geometry.target_price:
         capped = min(price, geometry.target_price * FILL_DRIFT_CAP)
         return Exit("take_profit", capped, price,
                     f"price {price:.10f} at or above target "

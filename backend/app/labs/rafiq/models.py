@@ -1,4 +1,4 @@
-"""The Rafiq Lab's own three tables. Prefix `rafiq_lab_`.
+"""The Rafiq Lab's own four tables. Prefix `rafiq_lab_`.
 
 WHY `rafiq_lab_` AND NOT `rafiq_`
 ---------------------------------
@@ -81,8 +81,8 @@ class RafiqLabStrategy(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
     )
-    #: `A` | `B` | `C` | `D` | `E`.
-    code: Mapped[str] = mapped_column(String(2), nullable=False)
+    #: `A2` | `B2` | `C2` | `D2` | `E2`.
+    code: Mapped[str] = mapped_column(String(4), nullable=False)
     #: Rafiq's own `StrategyProfile.lane`, copied verbatim.
     lane: Mapped[str] = mapped_column(String(48), nullable=False)
     starting_equity: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
@@ -111,10 +111,12 @@ class RafiqLabPosition(Base):
 
     __tablename__ = "rafiq_lab_positions"
     __table_args__ = (
-        # One position per token per strategy, ever. Exactly-once held by the
-        # database, so a retried task and two concurrent ticks collapse to one.
-        UniqueConstraint("strategy_id", "mint_address",
-                         name="uq_rafiq_lab_positions_strategy_mint"),
+        # One position per token per strategy PER LEG, ever. Exactly-once held
+        # by the database, so a retried task and two concurrent ticks collapse
+        # to one. `leg` is in the key because C2 deliberately opens two rows
+        # per token — without it the second leg would silently not exist.
+        UniqueConstraint("strategy_id", "mint_address", "leg",
+                         name="uq_rafiq_lab_positions_strategy_mint_leg"),
         Index("ix_rafiq_lab_positions_open", "strategy_id", "last_evaluated_at",
               postgresql_where="status = 'open'"),
         Index("ix_rafiq_lab_positions_closed_at", "strategy_id", "closed_at"),
@@ -130,6 +132,11 @@ class RafiqLabPosition(Base):
     )
     mint_address: Mapped[str] = mapped_column(String(44), nullable=False)
     symbol: Mapped[str | None] = mapped_column(String(32))
+    #: 1-based slice of the position. 1 for every book but C2, which opens
+    #: leg 1 (half, +30% target) and leg 2 (half, no target, trails).
+    leg: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default=text("1")
+    )
 
     detected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -142,10 +149,18 @@ class RafiqLabPosition(Base):
     quantity: Mapped[Decimal] = mapped_column(_QUANTITY, nullable=False)
     cost_basis: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
     entry_liquidity_usd: Mapped[Decimal | None] = mapped_column(_MONEY)
-    #: The geometry, frozen. `stop_price` is C's liquidity-derived level for C
-    #: and E, and the profile's flat `stop_mult` for A, B and D.
+    #: Market cap at entry. Recorded because the gate is decided on it, and a
+    #: read-out that cannot see the entry reading cannot check the gate.
+    entry_market_cap_usd: Mapped[Decimal | None] = mapped_column(_MONEY)
+    #: Modelled impact for the WHOLE position at entry, and for this leg at
+    #: exit. Stored rather than re-derived: the cost model is calibration, and
+    #: a recalibration must not silently restate a trade that already happened.
+    entry_price_impact_pct: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))
+    #: The geometry, frozen. `stop_price` is C's liquidity-derived level for
+    #: E2, and the profile's flat `stop_mult` for A2, B2, C2 and D2.
     stop_price: Mapped[Decimal] = mapped_column(_PRICE, nullable=False)
-    target_price: Mapped[Decimal] = mapped_column(_PRICE, nullable=False)
+    #: None for a leg with no take profit — D2 and C2's second leg.
+    target_price: Mapped[Decimal | None] = mapped_column(_PRICE)
     stop_pct: Mapped[Decimal] = mapped_column(Numeric(10, 4), nullable=False)
     trailing_frac: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))
     max_hold_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -171,6 +186,7 @@ class RafiqLabPosition(Base):
     exit_price: Mapped[Decimal | None] = mapped_column(_PRICE)
     exit_observed_price: Mapped[Decimal | None] = mapped_column(_PRICE)
     exit_proceeds_usd: Mapped[Decimal | None] = mapped_column(_MONEY)
+    exit_price_impact_pct: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))
     #: `stop` | `take_profit` | `trailing` | `max_hold`. There are no others:
     #: these are the four ways out Rafiq's `ExitRules` defines.
     exit_reason: Mapped[str | None] = mapped_column(String(16))
@@ -216,6 +232,49 @@ class RafiqLabDailyState(Base):
     )
     halted_reason: Mapped[str | None] = mapped_column(Text)
     halted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class RafiqLabGateRejection(Base):
+    """How often each book's entry gate refused, and for which condition.
+
+    A counter per (strategy, reason) rather than a row per rejection: the gate
+    refuses most of the stream on most ticks, and a row each would be a table
+    of millions that nobody reads. What the read-out actually needs is "A2
+    rejected 4,812 candidates, 51% of them for liquidity" — which is this.
+
+    The counters are cumulative since activation and never reset, so a rate can
+    always be derived against the book's own age. `last_at` is kept so a reader
+    can tell a condition that stopped firing from one that never fired.
+    """
+
+    __tablename__ = "rafiq_lab_gate_rejections"
+    __table_args__ = (
+        UniqueConstraint("strategy_id", "reason",
+                         name="uq_rafiq_lab_gate_rejections_strategy_reason"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    strategy_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("rafiq_lab_strategies.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    #: One of `entry_gate.REASONS`. Not an enum in the database: a new reason
+    #: must not need a migration before it can be counted.
+    reason: Mapped[str] = mapped_column(String(48), nullable=False)
+    rejections: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    last_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
