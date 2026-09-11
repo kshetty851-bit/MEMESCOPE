@@ -44,6 +44,7 @@ celery_app = Celery(
         "app.copycontrol.scheduler",
         "app.labs.rafiq.scheduler",
         "app.labs.breakout.scheduler",
+        "app.labs.nse_breakout.scheduler",
         "app.hq_ops.tasks",
     ],
 )
@@ -345,6 +346,21 @@ celery_app.conf.beat_schedule = {
     "breakout-lab-tick": {
         "task": "app.labs.breakout.scheduler.breakout_lab_tick",
         "schedule": crontab(minute="*/15"),
+    },
+    # NSE Breakout Tracker. The exchange publishes the day's bhavcopy after
+    # the close, so ingest runs at 13:00 UTC (18:30 IST) and retries hourly to
+    # 14:00 UTC, then again at 02:00 UTC (07:30 IST) if the file was late.
+    # Celery here runs on UTC; writing IST times as UTC is cheaper than moving
+    # the app timezone, which would shift every other lab's schedule.
+    "nse-tracker-ingest": {
+        "task": "app.labs.nse_breakout.scheduler.nse_tracker_ingest",
+        "schedule": crontab(minute=0, hour="13,14,2"),
+    },
+    # The archive walk. Bounded per run and resumable, so it simply does
+    # nothing once the history is complete.
+    "nse-tracker-backfill": {
+        "task": "app.labs.nse_breakout.scheduler.nse_tracker_backfill",
+        "schedule": crontab(minute=20),
     },
     # The real wallet's heartbeat. Beside the Lab's and at the same cadence,
     # because it acts on Lab decisions and those are actionable for ten minutes.

@@ -32,6 +32,14 @@ from app.labs.breakout.models import (  # noqa: F401
     BoTrade,
     BoUniverseMember,
 )
+# NSE Breakout Tracker's five `bt_*` tables, for the same reason.
+from app.labs.nse_breakout.models import (  # noqa: F401
+    BtCandle,
+    BtIndexClose,
+    BtIngestDay,
+    BtRun,
+    BtUniverseMember,
+)
 from app.models.alpha_session import AlphaSession
 from app.models.curve import TokenCurveSnapshot  # noqa: F401
 from app.models.basechain import EvmLaunch  # noqa: F401

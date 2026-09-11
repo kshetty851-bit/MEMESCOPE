@@ -264,6 +264,7 @@ x-backend-env: &backend-env
   # executes it and the API reads it, so all three have to agree about the flag
   # or the book trades where nobody can see it.
   BREAKOUT_TRADING_ENABLED: ${BREAKOUT_TRADING_ENABLED:-false}
+  NSE_BREAKOUT_ENABLED: ${NSE_BREAKOUT_ENABLED:-false}
   KARTHIK_CANDIDATE_LIMIT: ${KARTHIK_CANDIDATE_LIMIT:-250}
   KARTHIK_REVIEW_BATCH_LIMIT: ${KARTHIK_REVIEW_BATCH_LIMIT:-2000}
   KARTHIK_MAX_MARKET_AGE_SECONDS: ${KARTHIK_MAX_MARKET_AGE_SECONDS:-900}
