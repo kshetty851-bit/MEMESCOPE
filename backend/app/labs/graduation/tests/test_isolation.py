@@ -250,6 +250,35 @@ def test_the_flag_defaults_off() -> None:
             os.environ["LAB_GRADUATION_ENABLED"] = original
 
 
+def test_the_rpc_url_is_never_surfaced_with_its_credential() -> None:
+    """A provider endpoint carries the key IN the URL. Printing the endpoint
+    prints the secret, and the recorder's startup banner did exactly that on
+    its first production start — a live Helius key into the container log.
+
+    Nothing that a human or a log sees may call `rpc_url()` directly.
+    """
+    import os
+
+    from app.labs.graduation import config
+
+    original = os.environ.get("SOLANA_RPC_URL")
+    os.environ["SOLANA_RPC_URL"] = "https://mainnet.helius-rpc.com/?api-key=SEKRIT"
+    try:
+        assert "SEKRIT" in config.rpc_url()
+        assert "SEKRIT" not in config.safe_rpc_url()
+        assert config.safe_rpc_url().startswith("https://mainnet.helius-rpc.com")
+    finally:
+        if original is None:
+            os.environ.pop("SOLANA_RPC_URL", None)
+        else:
+            os.environ["SOLANA_RPC_URL"] = original
+
+    # The two modules a person reads output from must use the safe form.
+    for name in ("__main__.py", "recorder.py"):
+        body = (PACKAGE / name).read_text()
+        assert "config.rpc_url()" not in body, name
+
+
 def test_the_rpc_url_defaults_to_public_mainnet_and_is_overridable() -> None:
     import os
 

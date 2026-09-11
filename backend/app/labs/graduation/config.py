@@ -83,6 +83,23 @@ def rpc_url() -> str:
     return os.getenv("SOLANA_RPC_URL", "").strip() or "https://api.mainnet-beta.solana.com"
 
 
+def safe_rpc_url() -> str:
+    """`rpc_url()` with any credential stripped. Use this for ANYTHING a human
+    or a log will see.
+
+    Provider endpoints carry the key in the URL — Helius is
+    `https://mainnet.helius-rpc.com/?api-key=<secret>` — so printing the
+    endpoint prints the secret. This was learned the hard way: the recorder's
+    startup banner wrote the full URL to stderr and put a live Helius key into
+    the container log on the first production start.
+    """
+    raw = rpc_url()
+    scheme, _, rest = raw.partition("://")
+    host = rest.split("/", 1)[0].split("?", 1)[0]
+    tail = raw[len(scheme) + 3 + len(host):]
+    return f"{scheme}://{host}" + (" (credential redacted)" if tail.strip("/") else "")
+
+
 #: pump.fun's program. The curve account is the PDA of
 #: `["bonding-curve", mint]` under it.
 PUMP_PROGRAM_ID = os.getenv("LAB_GRADUATION_PUMP_PROGRAM", "").strip() \

@@ -60,7 +60,7 @@ async def _record() -> int:
     for sig in (signal.SIGINT, signal.SIGTERM):
         with contextlib.suppress(NotImplementedError):  # not on Windows
             loop.add_signal_handler(sig, recorder.stream.stop)
-    sys.stderr.write(f"polling {config.rpc_url()} every {config.POLL_INTERVAL_S}s, "
+    sys.stderr.write(f"polling {config.safe_rpc_url()} every {config.POLL_INTERVAL_S}s, "
                      f"watch set <= {config.MAX_WATCH_SET}\n")
     await recorder.run()
     return 0
@@ -109,7 +109,7 @@ async def _curve(mint: str) -> dict:
         readings = await rpc.fetch([mint])
         if mint not in readings:
             return {"mint": mint, "curve_address": address,
-                    "error": "the RPC read did not happen", "rpc": config.rpc_url()}
+                    "error": "the RPC read did not happen", "rpc": config.safe_rpc_url()}
         state = readings[mint]
         if state is None:
             return {"mint": mint, "curve_address": address,
