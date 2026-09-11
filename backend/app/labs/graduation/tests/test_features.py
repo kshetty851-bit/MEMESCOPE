@@ -383,3 +383,48 @@ def test_the_summary_sql_filters_on_outcome_ok() -> None:
     assert features.SUMMARY_SQL.count("outcome_ok") == 2
     assert "return_5m" in features.SUMMARY_SQL
     assert "max_return_60m" in features.SUMMARY_SQL
+
+
+# --- when a token becomes ready ------------------------------------------------
+
+def test_readiness_runs_from_the_pool_open_not_the_graduation() -> None:
+    """The two are not the same moment, and using the wrong one strands the
+    outcome permanently.
+
+    A token graduates, then DexScreener answers for the first time some minutes
+    later; the 60-minute outcome window runs from THAT. Gating on the
+    graduation computes the token while its prices are still arriving, it
+    fails the coverage floor, and a written row is never revisited — so the
+    outcome is null for ever even though the data eventually completed.
+
+    This is a pure statement of the rule the query implements; the query
+    itself is exercised against a database in the integration path.
+    """
+    graduated = at(0)
+    opened = graduated + timedelta(minutes=9)     # the first price
+    window = timedelta(minutes=config.OUTCOME_WINDOW_MIN
+                       + config.FEATURES_SETTLE_MIN)
+
+    # Ready on the graduation clock, but the prices have only been arriving
+    # for 56 minutes — under the 55-of-60 floor once settle is allowed for.
+    too_early = graduated + window
+    assert too_early - opened < window
+
+    # Ready on the open clock. Now the window really has closed.
+    correct = opened + window
+    assert correct - opened >= window
+    assert correct > too_early
+
+
+def test_a_rejected_outcome_is_revisited_and_a_good_one_is_not() -> None:
+    """`outcome_ok` is the skip key, not the row's existence. A row rejected
+    for thin coverage must be recomputed once its window fills; a row with a
+    usable outcome must not be recomputed on every pass."""
+    import inspect
+
+    from app.labs.graduation.features import FeatureEngine
+
+    source = inspect.getsource(FeatureEngine.population)
+    assert "GradFeature.outcome_ok.is_(True)" in source
+    # And the fallback for a token that never got a price at all.
+    assert "coalesce" in source

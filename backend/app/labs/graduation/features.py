@@ -282,30 +282,56 @@ class FeatureEngine:
 
     async def population(self, now: datetime, *, recompute: bool = False,
                          limit: int = 500) -> list[str]:
-        """Graduated tokens whose outcome window has closed.
+        """Graduated tokens whose OUTCOME window has closed.
 
         A token counts as graduated on EITHER signal — the websocket migration
         message or the chain's own `complete` flag — because they are
-        independent and either may arrive alone. Using only one would silently
-        drop a whole class of graduate.
+        independent and either may arrive alone.
+
+        Readiness is measured from the POOL OPEN, not from the graduation. The
+        two are not the same moment: the first post-graduation price lands
+        whenever DexScreener first answers, which is minutes later, and the
+        outcome window runs from there. Gating on the graduation computes a
+        token while its prices are still arriving — it then fails the coverage
+        floor and, because a written row is never revisited, stays null for
+        ever. That is how a lab ends up with no usable outcomes at all.
+
+        Tokens with no post-graduation prices fall back to the graduation
+        time, so a token that never got a single price still ages out instead
+        of waiting for an open that will never come.
         """
-        deadline = now - timedelta(
+        ready_after = timedelta(
             minutes=config.OUTCOME_WINDOW_MIN + config.FEATURES_SETTLE_MIN)
+        deadline = now - ready_after
+
+        opened = (select(GradPostgradSample.mint.label("mint"),
+                         func.min(GradPostgradSample.ts).label("open_at"))
+                  .group_by(GradPostgradSample.mint).subquery())
+
         from_feed = select(GradMigration.mint.label("mint"),
-                           GradMigration.ts.label("at")).where(
-            GradMigration.ts <= deadline)
+                           GradMigration.ts.label("at"))
         from_chain = select(GradCurveSample.mint.label("mint"),
                             func.min(GradCurveSample.ts).label("at")).where(
             GradCurveSample.complete.is_(True)).group_by(GradCurveSample.mint)
         union = from_feed.union(from_chain).subquery()
 
-        query = (select(union.c.mint, func.min(union.c.at).label("at"))
+        graduated_at = func.min(union.c.at)
+        # The clock the window actually runs on.
+        starts_at = func.coalesce(func.min(opened.c.open_at), graduated_at)
+
+        query = (select(union.c.mint)
+                 .select_from(union.outerjoin(
+                     opened, opened.c.mint == union.c.mint))
                  .group_by(union.c.mint)
-                 .having(func.min(union.c.at) <= deadline))
+                 .having(starts_at <= deadline))
         if not recompute:
-            known = select(GradFeature.mint)
-            query = query.where(union.c.mint.not_in(known))
-        query = query.order_by(func.min(union.c.at)).limit(limit)
+            # Rows already written are skipped — UNLESS their outcome was
+            # rejected for thin coverage and the window has since filled. Those
+            # are exactly the rows this gate used to strand.
+            stale = select(GradFeature.mint).where(
+                GradFeature.outcome_ok.is_(True))
+            query = query.where(union.c.mint.not_in(stale))
+        query = query.order_by(starts_at).limit(limit)
         return [row.mint for row in (await self._session.execute(query)).all()]
 
     async def compute(self, mint: str) -> dict[str, Any] | None:
