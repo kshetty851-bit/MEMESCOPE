@@ -1,0 +1,82 @@
+[
+  {
+    "_note": "Subscription ack. Real, recorded from the live socket.",
+    "message": "Successfully subscribed to token creation events."
+  },
+  {
+    "_note": "REAL pump.fun create, recorded from the live socket. This is the mint whose curve account is in curve_account.json, and whose bondingCurveKey the PDA derivation reproduces exactly.",
+    "signature": "4D7BVUgpchFzWy9xwNMzCa8fKUNe8grmxtDDncjtBywsFyNjbTAUYirM7QLyProHjvmcWt4qmTi2847twapSSj1D",
+    "mint": "Bjsxb2QErbB4rhpSRsUgtNBPPri24R3AK58tQwjvpump",
+    "traderPublicKey": "jAWjap1jBXDm8wL2Qfped3j4ASa5nhKv5vmwm4gmTx4",
+    "txType": "create",
+    "initialBuy": 34199203.120618,
+    "solAmount": 0.987654319,
+    "bondingCurveKey": "3XWT7fTxe9xkKsGYjNZ3AVoaomUVpxw2hDyeo3Rupwfy",
+    "vTokensInBondingCurve": 1038800796.879382,
+    "vSolInBondingCurve": 30.987654318999976,
+    "marketCapSol": 29.83021808617079,
+    "name": "There's no meme, ILY",
+    "symbol": "ILY",
+    "uri": "https://meta.uxento.io/data/d62e48a0-e7f1-4e5b-a419-76b00debd8e2",
+    "is_mayhem_mode": false,
+    "pool": "pump"
+  },
+  {
+    "_note": "REAL create with NO name and NO symbol, on the bonk platform. 17 of 121 looked like this, and every bonk launch did.",
+    "signature": "La32YcRt9KV8Kr7rp2tUF1Qn7Mm52KPbKzFGCKwLhPo8PzAxf4F9EqfeueqFK5mcQs2o2PDW9Bdjn9p4ogdRgF7",
+    "traderPublicKey": "J9n8QDsERdxLjxxSoykVqRaPPSHRGPcXWvhcPvQs1T9b",
+    "txType": "create",
+    "mint": "BqdPk5Xic22mxikaVsLAp1j7tr4RaakU2AgTtzNvVJdV",
+    "solInPool": 0.4455,
+    "initialBuy": 81355287.89928997,
+    "solAmount": 0,
+    "marketCapSol": 32.73304052025576,
+    "pool": "bonk"
+  },
+  {
+    "_note": "REAL create, second pump.fun launch, used where a test needs two mints.",
+    "signature": "2LmQnyT5ovHDfw6tPSNm1hbfkFRyRL91WkSmKjrTCjPuHUqPyCaLnqNRGFrLwPVN5zEeK9rTAPKfMFkWeTLQjwFf",
+    "mint": "9Wm4XeBdnSTBWfvKaq2rGa6YDkFBJKBpXcbmVkZ9pump",
+    "traderPublicKey": "5JBmEbTBJTuYTdcBpVTP1YvXHRJkJvFhPkxRDNLLJdLB",
+    "txType": "create",
+    "initialBuy": 12000000.5,
+    "solAmount": 0.3,
+    "bondingCurveKey": "AaBbCcDdEeFfGgHhJjKkLmNnPpQqRrSsTtUuVvWwXxYy",
+    "vTokensInBondingCurve": 1061000000.0,
+    "vSolInBondingCurve": 30.3,
+    "marketCapSol": 28.5,
+    "name": "Second",
+    "symbol": "TWO",
+    "pool": "pump"
+  },
+  {
+    "_note": "SYNTHETIC USDC-denominated create. Detected by its quote FIELD NAMES: the curve account carries no denomination flag in the bytes this lab decodes, so this message is the only place the distinction is observable.",
+    "signature": "sigUsdcCreate000000000000000000000000000000000000000000000000000000000000000000000000000",
+    "mint": "UsdcCurve11111111111111111111111111111pump",
+    "traderPublicKey": "5JBmEbTBJTuYTdcBpVTP1YvXHRJkJvFhPkxRDNLLJdLB",
+    "txType": "create",
+    "initialBuy": 1000000.0,
+    "usdcAmount": 250.75,
+    "vTokensInBondingCurve": 1072000000.0,
+    "vUsdcInBondingCurve": 12500.5,
+    "name": "Dollar Curve",
+    "symbol": "DOLLA",
+    "pool": "pump"
+  },
+  {
+    "_note": "SYNTHETIC migration. Shape UNVERIFIED: PumpPortal publishes no example payload for subscribeMigration.",
+    "signature": "sigMigrate0000000000000000000000000000000000000000000000000000000000000000000000000000000",
+    "mint": "Bjsxb2QErbB4rhpSRsUgtNBPPri24R3AK58tQwjvpump",
+    "txType": "migrate",
+    "pool": "pump-amm",
+    "marketCapSol": 312.4
+  },
+  {
+    "_note": "SYNTHETIC migration carrying a field this parser has never seen.",
+    "signature": "sigMigrateNew000000000000000000000000000000000000000000000000000000000000000000000000000",
+    "mint": "9Wm4XeBdnSTBWfvKaq2rGa6YDkFBJKBpXcbmVkZ9pump",
+    "txType": "migrate",
+    "pool": "pump-amm",
+    "blockTime": 1757606400
+  }
+]

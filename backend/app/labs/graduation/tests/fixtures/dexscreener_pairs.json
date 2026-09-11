@@ -1,0 +1,40 @@
+[
+ {
+  "_note": "SHAPE taken from the endpoint this repo's Breakout lab already parses (/tokens/v1/{chain}/{mints}); the numbers are illustrative.",
+  "chainId": "solana",
+  "dexId": "pumpswap",
+  "pairAddress": "8QKJHcXiVfo7jY9mY8kpoZgJMG4F9JM2mPY243VALjMB",
+  "baseToken": {
+   "address": "Bjsxb2QErbB4rhpSRsUgtNBPPri24R3AK58tQwjvpump",
+   "name": "There's no meme, ILY",
+   "symbol": "ILY"
+  },
+  "priceUsd": "0.00006889",
+  "priceNative": "0.0000003412",
+  "liquidity": {"usd": 41230.55, "base": 300000000, "quote": 102.4},
+  "fdv": 68890.0,
+  "volume": {"m5": 1204.5, "h1": 18903.25, "h24": 152000.0},
+  "txns": {"m5": {"buys": 14, "sells": 9}, "h1": {"buys": 231, "sells": 188}},
+  "pairCreatedAt": 1757606400000
+ },
+ {
+  "_note": "A pair on the WRONG CHAIN. Must be refused: the mint would collide with nothing here, but a chain filter that is not applied is one that is not there.",
+  "chainId": "base",
+  "dexId": "uniswap",
+  "pairAddress": "0xdeadbeef",
+  "baseToken": {"address": "Bjsxb2QErbB4rhpSRsUgtNBPPri24R3AK58tQwjvpump", "symbol": "ILY"},
+  "priceUsd": "99.0",
+  "volume": {"m5": 1.0},
+  "txns": {"m5": {"buys": 1, "sells": 0}}
+ },
+ {
+  "_note": "A bonding-curve pair: DexScreener's documented gap is that `liquidity` is ABSENT. Must read as null, never as zero.",
+  "chainId": "solana",
+  "dexId": "pumpfun",
+  "pairAddress": "CurvePair111111111111111111111111111111111",
+  "baseToken": {"address": "9Wm4XeBdnSTBWfvKaq2rGa6YDkFBJKBpXcbmVkZ9pump", "symbol": "TWO"},
+  "priceUsd": "0.0000041",
+  "volume": {"h1": 55.0},
+  "txns": {"h1": {"buys": 3, "sells": 1}}
+ }
+]

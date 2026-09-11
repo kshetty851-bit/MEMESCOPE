@@ -36,6 +36,9 @@ celery_app = Celery(
         "app.labs.rafiq.scheduler",
         "app.labs.crypto_trend.scheduler",
         "app.labs.breakout.scheduler",
+        # Graduation Lab. Gated by LAB_GRADUATION_ENABLED (default off):
+        # with the flag down its beat task returns before opening a session.
+        "app.labs.graduation.scheduler",
     ],
 )
 
