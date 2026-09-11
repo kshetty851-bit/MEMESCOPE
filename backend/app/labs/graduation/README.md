@@ -491,12 +491,68 @@ visible edit rather than a quiet one. Out-of-sample is the **second half of the
 ISO weeks** — split on weeks and not on trade count, which would put part of a
 week on each side.
 
-#### Costs, and what they are denominated in
+#### Costs: exact on the curve, assumed on the AMM
 
-Per side: 1% pump fee + `SLIP_BPS` (150) + a flat `PRIORITY_FEE_QUOTE`
-(0.002 SOL), which on the default 0.5 SOL position is another 40 bps.
-**290 bps a side, 5.8% round trip** — so a trade that closes at the price it
-opened at loses 5.64%.
+The two venues are priced differently because they *are* different.
+
+**Bonding-curve legs are exact.** A fill is the constant product over the
+checkpoint's own reserves — the real fee and the real price impact of this size
+at this point on this curve, with no slippage assumption anywhere:
+
+```
+buy:   to_curve   = sol_in * 10000 / (10000 + fee_bps)
+       tokens_out = to_curve * v_tok / (v_sol + to_curve)
+sell:  raw        = tokens_in * v_sol / (v_tok + tokens_in)
+       sol_out    = raw * (10000 - fee_bps) / 10000
+```
+
+**AMM legs keep the assumption**, because nothing here records pool depth:
+1% fee + `SLIP_BPS` (150) + a flat `PRIORITY_FEE_QUOTE` (0.002 SOL, another
+40 bps on a 0.5 SOL position) = **290 bps a side, 5.8% round trip**.
+
+##### Where the fee sits — verified, because the two sides differ
+
+The fee is taken from the **SOL** on both sides, confirming the premise. But
+the arithmetic is *not* symmetric, and using one form for both is wrong:
+
+| | how the fee applies | form |
+|---|---|---|
+| buy | a **markup** on the curve cost | `sol_in / (1 + fee)` reaches the curve |
+| sell | a **deduction** from the proceeds | `raw × (1 − fee)` reaches you |
+
+Verified against pump.fun's program README (`fee_basis_points` = 100 bps,
+`creator_fee` = 0 and unused) and the community decoder, whose buy path is
+`inputAmount = ((solAmount − 1) × 10000) / (feeBps + 10000)` — a divide, not
+`× (1 − fee)`. The naive form differs by just under a basis point at 100 bps,
+always in the trader's favour. `services/curve/state.py` was no help here: it
+decodes reserves and knows nothing about fees.
+
+**The default understates the live take.** pump.fun's public fee page puts the
+current bonding-curve fee at **1.25% total** (0.95% protocol + 0.30% creator).
+`BACKTEST_CURVE_FEE_BPS` defaults to 100 because that is the documented program
+constant; set it to 125 to price what a trader pays today.
+
+##### What the exact model actually changed
+
+It made pre-graduation entries **cheaper**, not dearer — the opposite of what
+this README previously claimed. For the default 0.5 SOL position:
+
+| level | v_sol | all-in premium over spot | of which impact | progress moved |
+|---|---|---|---|---|
+| 70% | 62.16 | 2.21% | 1.21% | 0.514 pt |
+| 95% | 100.73 | 1.90% | 0.90% | 0.196 pt |
+
+An immediate round trip on the curve at 70% costs **3.90%**, against the 5.64%
+the flat AMM model charges. The curve gets *deeper* as it fills — there is more
+SOL backing it at 95% than at 70% — so the same size moves it less near the
+top, which is the reverse of the usual intuition about a nearly-full curve.
+
+A $100 buy does **not** move a 95% curve by a point: it moves it 0.196 pt, and
+it takes about 2.6 SOL (~$520) to shift a point from there. Roughly 14.5 SOL
+completes the curve outright from 95%; a buy that large is flagged
+`self_graduated` and exited on the pool, never priced on a curve it just ended.
+
+##### Denomination
 
 Everything is in the **quote currency (SOL)**, because that is the only unit
 both legs of a pre-graduation trade exist in: the curve prices in SOL, and
@@ -515,14 +571,26 @@ fill point. Those tokens are counted in the funnel, never silently dropped.
 A pre-graduation strategy tested only on tokens that went on to graduate is
 conditioned on the outcome it is trying to predict. So the population is every
 token that **reached the entry checkpoint**, graduate or not, and one that
-never migrates within `PRE_GRAD_DEAD_HOURS` (24) is written off at
-`PRE_GRAD_DEAD_HAIRCUT` (0.5) of its last observed curve price — no pool, no
-route out, no bid.
+never migrates within `PRE_GRAD_DEAD_HOURS` (24) is closed by **selling its
+actual token balance back into the last observed reserves** — arithmetic, not a
+guess.
+
+`PRE_GRAD_DEAD_HAIRCUT` survives as an *optional extra*, now defaulting to
+**0**. It used to be 0.5 and used to be the whole model. It remains for the one
+thing arithmetic cannot see: that a stalled curve may have no bid at any size,
+and the sell may simply not land.
+
+> **This exit dominates any pre-graduation result, so check it before trusting
+> one.** On the synthetic seed used to exercise the harness, every dead curve's
+> last sample sat at its high — no decay at all — so all 21 dead exits lost the
+> same 3.83%, the cost of a round trip against an unmoved curve. Repricing just
+> those 21 moved B1's profit factor from 4.13 to 86.45. The arithmetic is
+> right; the sample was silent on the thing that actually kills you. On real
+> data, confirm curves in the sample do fall before reading anything into a PF.
 
 Note the interaction with pruning: a non-graduate's curve series is deleted
-after 24h and its checkpoints are kept, so for an older dead token the "last
-observed price" *is* the entry and the loss is exactly the haircut. That is the
-intended reading, not an accident.
+after 24h and its checkpoints are kept, so for an older dead token the last
+observed state *is* the entry, and the exit is a flat round trip.
 
 ### 7. Diagnostics
 
@@ -631,15 +699,18 @@ aggregates and *all* of its checkpoints — "how many tokens reached 90% and die
 there" stays answerable for ever at five rows a token. Raise
 `PRUNE_AFTER_HOURS` before a study that needs the reserve series on failures.
 
-**10. The backtester's cost model understates a pre-graduation entry, and
-cannot fix it.** `SLIP_BPS` is a flat assumption. On the curve it is far too
-kind: median pre-graduation liquidity was **$4,112**, making a $100 buy ~2.5%
-of the pool, with measured Jupiter impact near 99% and **no sell route at all
-for 37% of tokens**. The reserve series records what the curve *quoted*, not
-what a taker would have been *filled* at, so nothing in the harness can correct
-this. A pre-graduation strategy that clears the gate has cleared a bar that is
-too low; the next step is a depth model, not a deployment. Post-graduation
-paths do not carry this caveat.
+**10. `SLIP_BPS` is an assumption, and it now applies to the AMM legs only.**
+Curve fills are exact. Post-graduation fills are not: nothing here records pool
+depth, so 150 bps is a guess, and the measured evidence says it is a kind one —
+median pre-graduation liquidity was **$4,112**, and Jupiter routing at that
+depth showed impact near 99% with **no sell route at all for 37% of tokens**.
+A pool minutes old is thin in a way a flat 150 bps does not capture. That is
+where a depth model is still needed.
+
+An earlier version of this README made the same claim about the *curve* legs.
+That was wrong: it confused DexScreener's reported pool liquidity with curve
+depth. A curve at 70% has ~62 SOL of virtual reserves behind it and a $100 buy
+moves it 1.2%.
 
 **11. Even with perfect data, the trade may not exist.** Measured on 738
 graduates in 24h: only 94 had any pre-graduation liquidity reading, **median

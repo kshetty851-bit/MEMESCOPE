@@ -262,8 +262,17 @@ FEATURES_INTERVAL_SECONDS = 10 * 60
 #: differ by however much SOL/USD moved during the hold. Minutes, so usually
 #: fractions of a percent — but not zero.
 BACKTEST_NOTIONAL_QUOTE = _dec("LAB_GRADUATION_NOTIONAL_QUOTE", "0.5")
-#: pump.fun / PumpSwap take, per side.
+#: pump.fun / PumpSwap take, per side, on the POST-graduation AMM legs.
 BACKTEST_PUMP_FEE_BPS = _int("LAB_GRADUATION_PUMP_FEE_BPS", 100)
+#: The fee inside the bonding-curve fill maths. Separate from the one above so
+#: the curve and the AMM can be priced differently, because they are.
+#:
+#: 100 bps is `fee_basis_points` in pump.fun's own program README. Their
+#: public fee page states the LIVE bonding-curve schedule as **1.25% total**
+#: (0.95% protocol + 0.30% creator), so the default here understates the real
+#: take by 25 bps a side. Left at 100 because that is the documented program
+#: constant; set it to 125 to price what a trader actually pays today.
+BACKTEST_CURVE_FEE_BPS = _int("LAB_GRADUATION_CURVE_FEE_BPS", 100)
 #: Assumed slippage per side. The brief's default.
 BACKTEST_SLIP_BPS = _int("LAB_GRADUATION_SLIP_BPS", 150)
 #: A flat priority fee per side, in quote. At the default notional this is
@@ -274,15 +283,16 @@ BACKTEST_PRIORITY_FEE_QUOTE = _dec("LAB_GRADUATION_PRIORITY_FEE_QUOTE", "0.002")
 #: capital it did not have.
 BACKTEST_MAX_SLOTS = _int("LAB_GRADUATION_MAX_SLOTS", 10)
 
-#: A pre-graduation entry whose token never migrates is closed at its last
-#: observed curve price times (1 - this). Near-total loss by default, because a
-#: curve that stalls below 100% has no pool, no route out and no bid.
+#: An OPTIONAL extra haircut on a dead-curve exit, on top of the exact
+#: constant-product sell the position is already closed at.
 #:
-#: NOTE: the pruner deletes a non-graduate's curve samples after
-#: `PRUNE_AFTER_HOURS` and keeps its checkpoints, so for an older dead token
-#: the "last observed price" IS the entry price and the loss is exactly this
-#: haircut. That is the intended reading, not an accident.
-PRE_GRAD_DEAD_HAIRCUT = _dec("LAB_GRADUATION_DEAD_HAIRCUT", "0.5")
+#: Default 0. It used to be 0.5 and used to be the whole model — the position
+#: was written off at half its last observed PRICE, which is a guess. It is now
+#: priced by selling the actual token balance back into the actual reserves,
+#: which is arithmetic. This knob remains for the part arithmetic cannot see:
+#: that a stalled curve may have no bid at any size, and that the sell may
+#: simply not land. Set it above 0 to charge for that.
+PRE_GRAD_DEAD_HAIRCUT = _dec("LAB_GRADUATION_DEAD_HAIRCUT", "0")
 #: How long a pre-graduation entry waits for a migration before it is dead.
 PRE_GRAD_DEAD_HOURS = _int("LAB_GRADUATION_DEAD_HOURS", 24)
 

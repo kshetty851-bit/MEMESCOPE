@@ -98,7 +98,11 @@ class CurveTick:
 
     ts: datetime
     progress_pct: Decimal | None
+    #: The SPOT price the curve quoted. Kept for reporting; a fill is computed
+    #: from the reserves below, never from this.
     price: Decimal | None
+    v_quote: Decimal | None
+    v_token: Decimal | None
     market_cap_quote: Decimal | None
     complete: bool
 
@@ -116,7 +120,10 @@ class Tick:
 class Checkpoint:
     level: Decimal
     ts: datetime
+    #: Spot, for reporting. Fills come from the reserves.
     price: Decimal | None
+    v_quote: Decimal | None
+    v_token: Decimal | None
     market_cap_quote: Decimal | None
 
 
@@ -135,6 +142,61 @@ class Replay:
     @property
     def graduated(self) -> bool:
         return self.graduated_at is not None
+
+
+def curve_fill_buy(v_sol: Decimal, v_tok: Decimal, sol_in: Decimal, *,
+                   fee_bps: int | None = None) -> Decimal:
+    """Tokens received for `sol_in` against the constant product. Exact.
+
+    `sol_in` is the GROSS amount leaving the wallet. The fee is taken from the
+    SOL side, as a MARKUP on the curve cost rather than a slice of the input:
+
+        to_curve   = sol_in * 10000 / (10000 + fee_bps)
+        tokens_out = to_curve * v_tok / (v_sol + to_curve)
+
+    That `10000 / (10000 + fee_bps)` is the form pump.fun's own program uses,
+    and it is NOT the same as `sol_in * (1 - fee)`. At 100 bps the two differ
+    by about 1 bp (0.990099 against 0.990000) — small, and still a systematic
+    bias in the trader's favour if you take the naive form.
+    """
+    fee = config.BACKTEST_CURVE_FEE_BPS if fee_bps is None else fee_bps
+    if v_sol <= 0 or v_tok <= 0 or sol_in <= 0:
+        return Decimal(0)
+    to_curve = sol_in * _BPS / (_BPS + Decimal(fee))
+    return (to_curve * v_tok / (v_sol + to_curve)).quantize(_Q)
+
+
+def curve_fill_sell(v_sol: Decimal, v_tok: Decimal, tokens_in: Decimal, *,
+                    fee_bps: int | None = None) -> Decimal:
+    """SOL received for `tokens_in`. Exact, and the fee is taken from the SOL.
+
+        raw     = tokens_in * v_sol / (v_tok + tokens_in)
+        sol_out = raw * (10000 - fee_bps) / 10000
+
+    Note the asymmetry with the buy: a sell's fee is a DEDUCTION from the
+    proceeds, a buy's is a MARKUP on the cost. Same side of the trade — always
+    the SOL — but not the same arithmetic, and using one form for both is
+    wrong in a direction that flatters the strategy.
+    """
+    fee = config.BACKTEST_CURVE_FEE_BPS if fee_bps is None else fee_bps
+    if v_sol <= 0 or v_tok <= 0 or tokens_in <= 0:
+        return Decimal(0)
+    raw = tokens_in * v_sol / (v_tok + tokens_in)
+    return (raw * (_BPS - Decimal(fee)) / _BPS).quantize(_Q)
+
+
+def completes_curve(v_tok: Decimal, tokens_out: Decimal) -> bool:
+    """Whether a buy of `tokens_out` would empty the curve's sellable supply.
+
+    The sellable remainder is `v_tok - floor`, the floor being the 279,900,000
+    virtual tokens still in the account when the curve is exactly full. A buy
+    at or past it graduates the token by itself, and pricing the rest of that
+    position on a curve that no longer exists would be inventing a fill.
+    """
+    remaining = v_tok - (config.INITIAL_VIRTUAL_TOKEN_RESERVES
+                         - config.INITIAL_REAL_TOKEN_RESERVES) / (
+        Decimal(10) ** config.TOKEN_DECIMALS)
+    return tokens_out >= remaining > 0
 
 
 def curve_price(v_quote: Decimal | None, v_token: Decimal | None) -> Decimal | None:
@@ -209,13 +271,17 @@ def view_at(replay: Replay, now: datetime) -> View:
 
 @dataclass(frozen=True, slots=True)
 class Costs:
-    """Per-side cost model. Every term is charged on BOTH legs.
+    """The POST-graduation cost model, plus the priority fee both paths pay.
 
-    Expressed as a fraction of notional so the whole backtest stays unit-free:
-    the pump fee and slippage are fractions already, and the flat priority fee
-    becomes one by dividing by the position size. At the defaults that is
-    100 + 150 + 40 = 290 bps a side, 5.8% round trip — which is meant to sting,
-    because the real thing does.
+    `buy_price` / `sell_price` are the AMM legs: a flat fee plus an assumed
+    `slip_bps`, because nothing here records pool depth and an assumption is
+    the only thing available.
+
+    The bonding-curve legs do NOT use them. A curve fill is computed exactly
+    from the reserves by `curve_fill_buy` / `curve_fill_sell`, which produce
+    the real impact and the real fee rather than an assumption about them. All
+    a curve leg takes from this object is `priority_fraction`, which is paid
+    whatever is being traded.
     """
 
     pump_fee_bps: int = config.BACKTEST_PUMP_FEE_BPS
@@ -224,11 +290,18 @@ class Costs:
     notional_quote: Decimal = config.BACKTEST_NOTIONAL_QUOTE
 
     @property
+    def priority_fraction(self) -> Decimal:
+        """The flat priority fee as a share of the position. Paid on both
+        paths, because a transaction costs what it costs."""
+        if self.notional_quote <= 0:
+            return Decimal(0)
+        return self.priority_fee_quote / self.notional_quote
+
+    @property
     def side_fraction(self) -> Decimal:
-        fees = (Decimal(self.pump_fee_bps) + Decimal(self.slip_bps)) / _BPS
-        if self.notional_quote > 0:
-            fees += self.priority_fee_quote / self.notional_quote
-        return fees
+        """AMM legs only."""
+        return ((Decimal(self.pump_fee_bps) + Decimal(self.slip_bps)) / _BPS
+                + self.priority_fraction)
 
     def buy_price(self, price: Decimal) -> Decimal:
         """A buy fills WORSE than the quote."""
@@ -360,6 +433,12 @@ class Trade:
     pnl_quote: Decimal
     entry_progress_pct: Decimal | None
     graduated: bool
+    #: The simulated buy was large enough to fill the curve by itself. Its exit
+    #: is priced on the post-graduation path, never on a curve it just ended.
+    self_graduated: bool = False
+    #: Tokens the position held. Pre-graduation fills are computed in tokens,
+    #: so this is the quantity the exit sells back.
+    tokens: Decimal | None = None
 
     @property
     def iso_week(self) -> str:
@@ -381,6 +460,8 @@ class Trade:
             "net_return": str(self.net_return.quantize(_PCT)),
             "pnl_quote": str(self.pnl_quote.quantize(_Q)),
             "graduated": str(self.graduated).lower(),
+            "self_graduated": str(self.self_graduated).lower(),
+            "tokens": "" if self.tokens is None else str(self.tokens),
         }
 
 
@@ -388,10 +469,17 @@ class Trade:
 
 @dataclass(frozen=True, slots=True)
 class EntrySignal:
-    """What a strategy returns. The harness fills it; the strategy never does."""
+    """A strategy's INTENT. The harness fills it; the strategy never does.
 
-    price: Decimal
+    A post-graduation signal names the quoted `price` it wants to cross. A
+    pre-graduation one names the `reserves` it wants to buy against, and the
+    harness runs the constant product over them — so a strategy cannot
+    accidentally price its own fill, and every strategy pays the same costs.
+    """
+
     path: str
+    price: Decimal | None = None
+    reserves: tuple[Decimal, Decimal] | None = None
     progress_pct: Decimal | None = None
 
 
@@ -443,7 +531,7 @@ class OpenThenTimeBox(Strategy):
     def entry(self, view: View) -> EntrySignal | None:
         if not view.ticks:
             return None
-        return EntrySignal(price=view.ticks[-1].price, path=POST_GRAD,
+        return EntrySignal(path=POST_GRAD, price=view.ticks[-1].price,
                            progress_pct=Decimal(100))
 
 
@@ -473,9 +561,11 @@ class CheckpointThenOpen(Strategy):
 
     def entry(self, view: View) -> EntrySignal | None:
         checkpoint = view.checkpoint(self.level)
-        if checkpoint is None or checkpoint.price is None:
+        if checkpoint is None or checkpoint.v_quote is None \
+                or checkpoint.v_token is None:
             return None
-        return EntrySignal(price=checkpoint.price, path=PRE_GRAD,
+        return EntrySignal(path=PRE_GRAD,
+                           reserves=(checkpoint.v_quote, checkpoint.v_token),
                            progress_pct=view.progress())
 
 
@@ -486,6 +576,17 @@ BASELINES: dict[str, Strategy] = {
 
 
 # --- the harness --------------------------------------------------------------
+
+def _usable(signal: EntrySignal) -> bool:
+    """Whether a signal names something fillable on its own path.
+
+    Checked per path, because the two carry different things: a
+    post-graduation signal names a price, a pre-graduation one names reserves.
+    """
+    if signal.path == PRE_GRAD:
+        return (signal.reserves is not None
+                and all(x > 0 for x in signal.reserves))
+    return signal.price is not None and signal.price > 0
 
 @dataclass(slots=True)
 class Position:
@@ -571,7 +672,7 @@ class Backtester:
             open_positions = [p for p in open_positions if p.exit_at > when]
 
             signal = self._strategy.entry(view_at(replay, when))
-            if signal is None or signal.price <= 0:
+            if signal is None or not _usable(signal):
                 result.no_signal += 1
                 continue
             if len(open_positions) >= self._max_slots:
@@ -593,44 +694,92 @@ class Backtester:
 
     def _close(self, replay: Replay, entry_at: datetime, signal: EntrySignal,
                result: RunResult) -> Trade | None:
-        entry_fill = self._costs.buy_price(signal.price)
         if signal.path == PRE_GRAD:
-            closed = self._exit_pre_grad(replay, entry_at, entry_fill, result)
-        else:
-            closed = self._exit_post_grad(replay, entry_at, entry_fill)
+            return self._close_pre_grad(replay, entry_at, signal, result)
+        return self._close_post_grad(replay, entry_at, signal)
+
+    def _close_post_grad(self, replay: Replay, entry_at: datetime,
+                         signal: EntrySignal) -> Trade | None:
+        """An AMM leg both ways: the assumed cost model applies at both ends."""
+        if signal.price is None or signal.price <= 0:
+            return None
+        entry_fill = self._costs.buy_price(signal.price)
+        closed = self._walk(replay.ticks, entry_at, entry_at, entry_fill)
         if closed is None:
             return None
         exit_at, exit_quote, reason = closed
-        return self._settle(replay, signal, entry_at, entry_fill, exit_at,
-                            exit_quote, reason)
+        exit_fill = self._costs.sell_price(exit_quote)
+        notional = self._costs.notional_quote
+        return self._trade(
+            replay, signal, entry_at, entry_fill, exit_at, exit_fill, reason,
+            gross=(exit_quote / signal.price - 1),
+            net=(exit_fill / entry_fill - 1) if entry_fill > 0 else Decimal(0),
+            tokens=(notional / entry_fill if entry_fill > 0 else None))
 
-    def _exit_post_grad(self, replay: Replay, entry_at: datetime,
-                        entry_fill: Decimal
-                        ) -> tuple[datetime, Decimal, str] | None:
-        """Walk ticks forward from the entry, first rule to fire wins."""
-        return self._walk(replay.ticks, entry_at, entry_at, entry_fill)
+    def _close_pre_grad(self, replay: Replay, entry_at: datetime,
+                        signal: EntrySignal, result: RunResult) -> Trade | None:
+        """Bought against the curve exactly, sold on whichever venue exists.
 
-    def _exit_pre_grad(self, replay: Replay, entry_at: datetime,
-                       entry_fill: Decimal, result: RunResult
-                       ) -> tuple[datetime, Decimal, str] | None:
-        """Held on the curve until the pool opens, then walked like any other.
-
-        A token that never migrates inside `PRE_GRAD_DEAD_HOURS` is written
-        off: no pool, no route out, no bid. It closes at its last observed
-        curve price times `(1 - haircut)` — and when the pruner has already
-        taken that series away, the last observed price IS the entry, so the
-        loss is exactly the haircut.
+        The entry is a constant-product fill over the checkpoint's own
+        reserves, so its cost is the real fee plus the real price impact of
+        this size at this point on this curve — not an assumption about them.
         """
+        if signal.reserves is None:
+            return None
+        v_sol, v_tok = signal.reserves
+        notional = self._costs.notional_quote
+        # The priority fee leaves the wallet before anything reaches the curve.
+        spend = notional - self._costs.priority_fee_quote
+        tokens = curve_fill_buy(v_sol, v_tok, spend)
+        if tokens <= 0 or v_tok <= 0:
+            return None
+
+        entry_spot = v_sol / v_tok
+        entry_fill = notional / tokens          # all-in cost per token
+        self_grad = completes_curve(v_tok, tokens)
+
         deadline = entry_at + timedelta(hours=self._dead_hours)
         opens = [t for t in replay.ticks if t.ts >= entry_at]
-        if not opens or opens[0].ts > deadline:
+        alive = bool(opens) and opens[0].ts <= deadline
+
+        if self_grad and not alive:
+            # The buy filled the curve, so the curve cannot price the exit and
+            # there is no pool recorded either. Nothing here can fill this.
+            return None
+
+        if alive:
+            closed = self._walk(replay.ticks, entry_at, opens[0].ts, entry_fill)
+            if closed is None:
+                return None
+            exit_at, exit_quote, reason = closed
+            proceeds = tokens * self._costs.sell_price(exit_quote)
+            exit_spot = exit_quote
+        else:
             result.dead_curve_exits += 1
-            last = next((c.price for c in reversed(replay.curve)
-                         if c.ts >= entry_at and c.price is not None), None)
-            reference = last if last is not None else entry_fill
-            return deadline, reference * (1 - self._haircut), "dead_curve"
-        # The exit clock starts at the pool open, not at the entry.
-        return self._walk(replay.ticks, entry_at, opens[0].ts, entry_fill)
+            exit_at, reason = deadline, "dead_curve"
+            # Sold back into whatever reserves were last observed. When the
+            # pruner has already taken the series away, that is the entry
+            # state — a round trip against an unmoved curve, which loses the
+            # fee twice and the impact twice, and nothing more.
+            out_sol, out_tok = v_sol, v_tok
+            for sample in reversed(replay.curve):
+                if (sample.ts >= entry_at and sample.v_quote is not None
+                        and sample.v_token is not None and sample.v_token > 0):
+                    out_sol, out_tok = sample.v_quote, sample.v_token
+                    break
+            raw = curve_fill_sell(out_sol, out_tok, tokens)
+            proceeds = max(Decimal(0),
+                           (raw - self._costs.priority_fee_quote)
+                           * (1 - self._haircut))
+            exit_spot = out_sol / out_tok if out_tok > 0 else Decimal(0)
+
+        exit_fill = proceeds / tokens if tokens > 0 else Decimal(0)
+        return self._trade(
+            replay, signal, entry_at, entry_fill, exit_at, exit_fill, reason,
+            gross=((exit_spot / entry_spot - 1) if entry_spot > 0
+                   else Decimal(0)),
+            net=((proceeds / notional - 1) if notional > 0 else Decimal(0)),
+            tokens=tokens, self_graduated=self_grad)
 
     def _walk(self, ticks: Sequence[Tick], after: datetime, clock_at: datetime,
               entry_fill: Decimal) -> tuple[datetime, Decimal, str] | None:
@@ -652,12 +801,11 @@ class Backtester:
         last = window[-1]
         return last.ts, last.price, "end_of_data"
 
-    def _settle(self, replay: Replay, signal: EntrySignal, entry_at: datetime,
-                entry_fill: Decimal, exit_at: datetime, exit_quote: Decimal,
-                reason: str) -> Trade:
-        exit_fill = self._costs.sell_price(exit_quote)
-        gross = (exit_quote / signal.price - 1) if signal.price > 0 else Decimal(0)
-        net = (exit_fill / entry_fill - 1) if entry_fill > 0 else Decimal(0)
+    def _trade(self, replay: Replay, signal: EntrySignal, entry_at: datetime,
+               entry_fill: Decimal, exit_at: datetime, exit_fill: Decimal,
+               reason: str, *, gross: Decimal, net: Decimal,
+               tokens: Decimal | None = None,
+               self_graduated: bool = False) -> Trade:
         return Trade(
             mint=replay.mint, strategy=self._strategy.name, path=signal.path,
             entry_at=entry_at, entry_price=entry_fill,
@@ -665,8 +813,8 @@ class Backtester:
             gross_return=gross, net_return=net,
             pnl_quote=(net * self._costs.notional_quote),
             entry_progress_pct=signal.progress_pct,
-            graduated=replay.graduated,
-        )
+            graduated=replay.graduated, self_graduated=self_graduated,
+            tokens=tokens)
 
 
 # --- walk-forward -------------------------------------------------------------
@@ -805,7 +953,8 @@ def evaluate_gate(trades: Sequence[Trade],
 def trades_csv(trades: Sequence[Trade]) -> str:
     fields = ["mint", "strategy", "path", "iso_week", "entry_at", "entry_price",
               "entry_progress_pct", "exit_at", "exit_price", "exit_reason",
-              "gross_return", "net_return", "pnl_quote", "graduated"]
+              "gross_return", "net_return", "pnl_quote", "graduated",
+              "self_graduated", "tokens"]
     buffer = io.StringIO()
     writer = csv.DictWriter(buffer, fieldnames=fields, lineterminator="\n")
     writer.writeheader()
@@ -890,12 +1039,28 @@ def format_report(result: RunResult, *, coverage: dict[str, Any] | None = None
               f"  gross before costs:        {gross:+.4%}",
               ""]
     lines.append(format_gate(evaluate_gate(result.trades, weeks)))
+    costs = Costs()
+    dead = sum(1 for t in result.trades if t.exit_reason == "dead_curve")
+    selfgrad = sum(1 for t in result.trades if t.self_graduated)
     lines += ["",
               "Denominated in the QUOTE currency (SOL), not USD — a pre-grad",
               "entry and a post-grad exit only share a unit there. So these do",
               "not equal grad_features.return_*, which are USD.",
-              f"Costs charged per side: {float(Costs().side_fraction) * 10000:.0f} bps "
-              f"({float(Costs().side_fraction) * 2 * 100:.2f}% round trip)."]
+              f"AMM legs: {float(costs.side_fraction) * 10000:.0f} bps a side "
+              f"({float(costs.pump_fee_bps)} fee + {float(costs.slip_bps)} assumed "
+              f"slippage + {float(costs.priority_fraction) * 10000:.0f} priority).",
+              f"Curve legs: EXACT constant-product fills at "
+              f"{config.BACKTEST_CURVE_FEE_BPS} bps — real fee, real impact, no "
+              f"slippage assumption."]
+    if dead:
+        lines.append(
+            f"{dead} position(s) closed on a dead curve. That exit is an exact "
+            "sell into the\nlast observed reserves, so it is only as harsh as "
+            "the recorded decay — check\nthat curves in this sample actually "
+            "fall before reading anything into the PF.")
+    if selfgrad:
+        lines.append(f"{selfgrad} buy(s) filled the curve themselves and were "
+                     "exited on the pool.")
     return "\n".join(lines)
 
 
@@ -944,6 +1109,7 @@ async def load_replays(session: AsyncSession, *, limit: int = 5000
         replay.curve.append(CurveTick(
             ts=sample.ts, progress_pct=sample.progress_pct,
             price=curve_price(sample.v_quote_reserves, sample.v_token_reserves),
+            v_quote=sample.v_quote_reserves, v_token=sample.v_token_reserves,
             market_cap_quote=sample.market_cap_quote, complete=sample.complete))
         if sample.complete and replay.graduated_at is None:
             replay.graduated_at = sample.ts
@@ -957,6 +1123,7 @@ async def load_replays(session: AsyncSession, *, limit: int = 5000
         replays[mark.mint].checkpoints[mark.level_pct] = Checkpoint(
             level=mark.level_pct, ts=mark.ts,
             price=curve_price(mark.v_quote_reserves, mark.v_token_reserves),
+            v_quote=mark.v_quote_reserves, v_token=mark.v_token_reserves,
             market_cap_quote=mark.market_cap_quote)
 
     # `price_native` and not `price_usd`: see the module docstring. A backfilled

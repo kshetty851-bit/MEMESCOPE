@@ -32,6 +32,9 @@ from app.labs.graduation.backtest import (
     Trade,
     TrailingStop,
     by_week,
+    completes_curve,
+    curve_fill_buy,
+    curve_fill_sell,
     curve_price,
     evaluate_gate,
     split_halves,
@@ -53,6 +56,18 @@ def ticks(*pairs: tuple[float, str], source: str = "dexscreener") -> list[Tick]:
     return [Tick(ts=at(m), price=D(p), source=source) for m, p in pairs]
 
 
+#: The real seeded constants, so every fixture curve is a curve that could
+#: exist. `K` is the constant product the account is seeded with.
+V0, R0 = D("1073000000"), D("793100000")
+K = D(30) * V0
+
+
+def reserves_at(progress: str) -> tuple[Decimal, Decimal]:
+    """(v_sol, v_tok) at a given progress, from the constant product."""
+    v_tok = V0 - D(progress) / 100 * R0
+    return (K / v_tok).quantize(D("0.000000001")), v_tok
+
+
 def replay(mint: str = "M1", *, curve=None, checkpoints=None, tick_list=None,
            launch=T0, graduated=None) -> Replay:
     r = Replay(mint=mint, launch_at=launch, graduated_at=graduated,
@@ -63,9 +78,17 @@ def replay(mint: str = "M1", *, curve=None, checkpoints=None, tick_list=None,
     return r
 
 
-def curve_tick(minute: float, progress: str, price: str, complete: bool = False):
-    return CurveTick(ts=at(minute), progress_pct=D(progress), price=D(price),
+def curve_tick(minute: float, progress: str, complete: bool = False):
+    v_sol, v_tok = reserves_at(progress)
+    return CurveTick(ts=at(minute), progress_pct=D(progress),
+                     price=(v_sol / v_tok), v_quote=v_sol, v_token=v_tok,
                      market_cap_quote=None, complete=complete)
+
+
+def checkpoint(level: int, minute: float, progress: str | None = None):
+    v_sol, v_tok = reserves_at(progress or str(level))
+    return Checkpoint(level=D(level), ts=at(minute), price=(v_sol / v_tok),
+                      v_quote=v_sol, v_token=v_tok, market_cap_quote=None)
 
 
 class Greedy(Strategy):
@@ -100,9 +123,8 @@ class Greedy(Strategy):
 
 def test_a_view_holds_nothing_past_its_own_clock() -> None:
     r = replay(
-        curve=[curve_tick(0, "10", "0.001"), curve_tick(30, "90", "0.009")],
-        checkpoints={D(70): Checkpoint(D(70), at(20), D("0.007"), None),
-                     D(90): Checkpoint(D(90), at(30), D("0.009"), None)},
+        curve=[curve_tick(0, "10"), curve_tick(30, "90")],
+        checkpoints={D(70): checkpoint(70, 20), D(90): checkpoint(90, 30)},
         tick_list=ticks((40, "1.0"), (41, "9.9")))
     view = view_at(r, at(25))
 
@@ -129,7 +151,7 @@ def test_a_greedy_strategy_cannot_reach_a_price_it_has_not_reached() -> None:
 def test_the_view_forward_fills_progress_rather_than_looking_ahead() -> None:
     """Curve samples are change-only, so the progress at a quiet moment is the
     last one OBSERVED — never the next one."""
-    r = replay(curve=[curve_tick(0, "10", "0.001"), curve_tick(50, "95", "0.01")])
+    r = replay(curve=[curve_tick(0, "10"), curve_tick(50, "95")])
     assert view_at(r, at(30)).progress() == D("10")
     assert view_at(r, at(50)).progress() == D("95")
 
@@ -255,54 +277,232 @@ def test_a_window_where_nothing_fires_says_so() -> None:
     assert trade.exit_at == at(41)
 
 
+# --- the exact fill maths -----------------------------------------------------
+
+def test_buy_fill_at_70_percent_matches_the_hand_computation() -> None:
+    """Worked by hand from the seeded constants.
+
+        v_tok    = 1,073,000,000 - 0.70 x 793,100,000 = 517,830,000
+        v_sol    = (30 x 1,073,000,000) / 517,830,000 = 62.163258212
+        to_curve = 0.498 x 10000 / 10100                (the 1% fee, as a markup)
+        tokens   = to_curve x v_tok / (v_sol + to_curve)
+    """
+    v_sol, v_tok = reserves_at("70")
+    assert v_tok == D("517830000")
+    assert v_sol == D("62.163258212")
+
+    out = curve_fill_buy(v_sol, v_tok, D("0.498"))
+    assert out == D("4075024.651433293009")
+    # All-in cost per token against the curve's spot, for the default 0.5 SOL
+    # position: 2.21%, of which 1% is the fee and the rest is real impact.
+    premium = (D("0.5") / out) / (v_sol / v_tok) - 1
+    assert round(premium, 4) == D("0.0221")
+    # And the buy itself moves the curve half a point.
+    assert round(out / R0 * 100, 4) == D("0.5138")
+
+
+def test_buy_fill_at_95_percent_is_cheaper_because_the_curve_is_deeper() -> None:
+    """Later on the curve there is MORE sol backing it, so the same size moves
+    it less — the opposite of the intuition that a nearly-full curve is thin.
+
+        v_tok = 319,555,000   v_sol = 100.733832986
+    """
+    v_sol, v_tok = reserves_at("95")
+    assert v_tok == D("319555000")
+    assert v_sol == D("100.733832986")
+
+    out = curve_fill_buy(v_sol, v_tok, D("0.498"))
+    assert out == D("1556530.515181449109")
+    premium = (D("0.5") / out) / (v_sol / v_tok) - 1
+    assert round(premium, 4) == D("0.0190")      # against 0.0221 at 70%
+    assert round(out / R0 * 100, 4) == D("0.1963")
+
+
+def test_a_100_dollar_buy_does_not_move_95_percent_by_a_point() -> None:
+    """Worth pinning because it is easy to assume otherwise. At the default
+    0.5 SOL (~$100) the move at 95% is a fifth of a point; it takes about 2.6
+    SOL (~$520) to shift the curve a full point from there."""
+    v_sol, v_tok = reserves_at("95")
+    assert curve_fill_buy(v_sol, v_tok, D("0.498")) / R0 * 100 < 1
+    assert curve_fill_buy(v_sol, v_tok, D("2.6")) / R0 * 100 >= 1
+
+
+def test_the_fee_is_a_markup_on_a_buy_and_a_deduction_on_a_sell() -> None:
+    """Same side of the trade — always the SOL — but not the same arithmetic.
+
+    A buy divides by (1 + fee); `sol_in x (1 - fee)` is the naive form and is
+    wrong by about a basis point at 100 bps, always in the trader's favour.
+    """
+    v_sol, v_tok = reserves_at("70")
+    naive = curve_fill_buy(v_sol, v_tok, D("0.498") * D("0.99"), fee_bps=0)
+    exact = curve_fill_buy(v_sol, v_tok, D("0.498"))
+    assert exact > naive                      # dividing keeps slightly more
+    # Just under a basis point, and always the same direction.
+    assert round(exact / naive - 1, 5) == D("0.0001")
+
+    # A sell simply loses the fee off the proceeds.
+    gross = curve_fill_sell(v_sol, v_tok, D("1000000"), fee_bps=0)
+    net = curve_fill_sell(v_sol, v_tok, D("1000000"), fee_bps=100)
+    assert round(net / gross, 6) == D("0.99")
+
+
+def test_a_zero_or_negative_fill_returns_zero_rather_than_raising() -> None:
+    v_sol, v_tok = reserves_at("70")
+    assert curve_fill_buy(v_sol, v_tok, D(0)) == 0
+    assert curve_fill_buy(D(0), v_tok, D(1)) == 0
+    assert curve_fill_sell(v_sol, v_tok, D(0)) == 0
+    assert curve_fill_sell(v_sol, D(0), D(1)) == 0
+
+
+def test_an_immediate_round_trip_loses_the_fee_twice_and_the_impact_twice() -> None:
+    """The exact model's answer to "what does a flat trade cost". At 70% it is
+    3.90%, against the 5.64% the flat AMM model charges — so the flat model was
+    OVERstating a curve entry, not understating it."""
+    v_sol, v_tok = reserves_at("70")
+    out = curve_fill_buy(v_sol, v_tok, D("0.498"))
+    back = curve_fill_sell(v_sol, v_tok, out)
+    assert round(back / D("0.5") - 1, 4) == D("-0.0390")
+
+
+# --- self-graduation ----------------------------------------------------------
+
+def test_completes_curve_knows_the_sellable_remainder() -> None:
+    """The remainder is `v_tok - 279,900,000`: at 95% that is 39,655,000
+    tokens, which takes about 14.5 SOL to clear."""
+    _, v_tok = reserves_at("95")
+    assert completes_curve(v_tok, D("39655000")) is True
+    assert completes_curve(v_tok, D("39654999")) is False
+
+
+def test_a_buy_that_fills_the_curve_is_flagged_and_exits_post_grad() -> None:
+    """Pricing the rest of that position on a curve the buy just ended would
+    be inventing a fill."""
+    r = replay(curve=[curve_tick(30, "95")],
+               checkpoints={D(95): checkpoint(95, 30)},
+               tick_list=ticks((60, "0.0000004"), (65, "0.0000006")),
+               graduated=at(59))
+
+    class Big(Strategy):
+        name = "big"
+        level = D(95)
+
+        @property
+        def exits(self): return ExitPolicy((TimeBox(5),))
+
+        def decision_times(self, rep): return [at(30)]
+
+        def entry(self, view):
+            mark = view.checkpoint(D(95))
+            return EntrySignal(path=PRE_GRAD,
+                               reserves=(mark.v_quote, mark.v_token))
+
+    # 20 SOL clears the 39.6M remaining at 95%.
+    big = Backtester(Big(), costs=Costs(notional_quote=D(20),
+                                        priority_fee_quote=D(0)))
+    trade_ = big.run([r]).trades[0]
+    assert trade_.self_graduated is True
+    assert trade_.exit_reason == "time_box"          # priced on the pool
+    assert trade_.exit_at == at(65)
+
+    # The default size does not, and is not flagged.
+    small = Backtester(Big()).run([r]).trades[0]
+    assert small.self_graduated is False
+
+
+def test_a_self_graduating_buy_with_no_pool_data_is_skipped() -> None:
+    """The buy filled the curve, so the curve cannot price the exit, and no
+    pool was recorded either. Nothing can fill this."""
+    r = replay(curve=[curve_tick(30, "95")],
+               checkpoints={D(95): checkpoint(95, 30)}, tick_list=[])
+
+    class Big(Strategy):
+        name = "big"
+
+        @property
+        def exits(self): return ExitPolicy((TimeBox(5),))
+
+        def decision_times(self, rep): return [at(30)]
+
+        def entry(self, view):
+            mark = view.checkpoint(D(95))
+            return EntrySignal(path=PRE_GRAD,
+                               reserves=(mark.v_quote, mark.v_token))
+
+    result = Backtester(Big(), costs=Costs(notional_quote=D(20),
+                                           priority_fee_quote=D(0))).run([r])
+    assert result.trades == []
+    assert result.skipped_no_exit_data == 1
+
+
 # --- the dead curve -----------------------------------------------------------
 
-def test_a_pre_grad_entry_that_never_migrates_takes_the_haircut() -> None:
-    """No pool, no route out, no bid. The default writes off half."""
-    r = replay(
-        curve=[curve_tick(0, "50", "0.001"), curve_tick(30, "90", "0.002"),
-               curve_tick(40, "88", "0.0018")],
-        checkpoints={D(90): Checkpoint(D(90), at(30), D("0.002"), None)},
-        tick_list=[])   # never migrated
+def test_a_dead_curve_is_sold_back_into_its_own_reserves() -> None:
+    """No haircut guess: the position is closed by selling the tokens it holds
+    against the last reserves observed. A curve that never moved gives back the
+    fee twice and the impact twice, and nothing more."""
+    r = replay(curve=[curve_tick(30, "90")],
+               checkpoints={D(90): checkpoint(90, 30)},
+               tick_list=[])   # never migrated
     result = Backtester(BASELINES["B1_f90_then_open_5m"],
-                        costs=Costs(pump_fee_bps=0, slip_bps=0,
-                                    priority_fee_quote=D(0))).run([r])
+                        costs=Costs(priority_fee_quote=D(0))).run([r])
 
-    trade = result.trades[0]
+    trade_ = result.trades[0]
     assert result.dead_curve_exits == 1
-    assert trade.exit_reason == "dead_curve"
-    assert trade.graduated is False
-    # Last observed curve price 0.0018, halved.
-    assert trade.exit_price == D("0.0009")
-    assert trade.exit_at == at(30) + timedelta(hours=config.PRE_GRAD_DEAD_HOURS)
+    assert trade_.exit_reason == "dead_curve"
+    assert trade_.graduated is False
+    v_sol, v_tok = reserves_at("90")
+    expected = curve_fill_sell(v_sol, v_tok,
+                               curve_fill_buy(v_sol, v_tok, D("0.5")))
+    assert round(trade_.net_return, 6) == round(expected / D("0.5") - 1, 6)
+    assert trade_.exit_at == at(30) + timedelta(hours=config.PRE_GRAD_DEAD_HOURS)
 
 
-def test_the_haircut_is_configurable() -> None:
-    r = replay(curve=[curve_tick(30, "90", "0.002")],
-               checkpoints={D(90): Checkpoint(D(90), at(30), D("0.002"), None)})
-    trade = Backtester(BASELINES["B1_f90_then_open_5m"], dead_haircut=D("0.9"),
-                       costs=Costs(pump_fee_bps=0, slip_bps=0,
-                                   priority_fee_quote=D(0))).run([r]).trades[0]
-    assert trade.exit_price == D("0.0002")
+def test_a_dead_curve_that_fell_sells_into_the_worse_reserves() -> None:
+    """The exit reads the LAST observed state, so a curve that gave ground
+    between the entry and the write-off is sold into that."""
+    high = replay("HIGH", curve=[curve_tick(30, "90")],
+                  checkpoints={D(90): checkpoint(90, 30)})
+    fell = replay("FELL", curve=[curve_tick(30, "90"), curve_tick(90, "74")],
+                  checkpoints={D(90): checkpoint(90, 30)})
+    run = Backtester(BASELINES["B1_f90_then_open_5m"])
+    flat = run.run([high]).trades[0]
+    down = run.run([fell]).trades[0]
+    assert down.net_return < flat.net_return
 
 
-def test_a_pruned_dead_token_loses_exactly_the_haircut() -> None:
-    """The pruner deletes a non-graduate's curve series after 24h and keeps its
-    checkpoints, so the last observed price IS the entry. That is the intended
-    reading, not an accident."""
+def test_the_optional_extra_haircut_defaults_to_nothing() -> None:
+    """It used to be the whole model and a guess. It is now a knob for the part
+    arithmetic cannot see — that a stalled curve may have no bid at all."""
+    assert config.PRE_GRAD_DEAD_HAIRCUT == 0
+    r = replay(curve=[curve_tick(30, "90")],
+               checkpoints={D(90): checkpoint(90, 30)})
+    run = Backtester(BASELINES["B1_f90_then_open_5m"],
+                     costs=Costs(priority_fee_quote=D(0)))
+    plain = run.run([r]).trades[0]
+    charged = Backtester(BASELINES["B1_f90_then_open_5m"], dead_haircut=D("0.5"),
+                         costs=Costs(priority_fee_quote=D(0))).run([r]).trades[0]
+    assert round(charged.net_return, 6) == round(
+        (plain.net_return + 1) / 2 - 1, 6)
+
+
+def test_a_pruned_dead_token_round_trips_against_its_entry_state() -> None:
+    """The pruner deletes a non-graduate's curve series and keeps its
+    checkpoints, so the last observed state IS the entry."""
     r = replay(curve=[],   # pruned away
-               checkpoints={D(90): Checkpoint(D(90), at(30), D("0.002"), None)})
-    trade = Backtester(BASELINES["B1_f90_then_open_5m"],
-                       costs=Costs(pump_fee_bps=0, slip_bps=0,
-                                   priority_fee_quote=D(0))).run([r]).trades[0]
-    assert trade.net_return == D("-0.5")
+               checkpoints={D(90): checkpoint(90, 30)})
+    trade_ = Backtester(BASELINES["B1_f90_then_open_5m"],
+                        costs=Costs(priority_fee_quote=D(0))).run([r]).trades[0]
+    v_sol, v_tok = reserves_at("90")
+    expected = curve_fill_sell(v_sol, v_tok,
+                               curve_fill_buy(v_sol, v_tok, D("0.5")))
+    assert round(trade_.net_return, 6) == round(expected / D("0.5") - 1, 6)
 
 
 def test_a_migration_after_the_deadline_is_still_dead() -> None:
     r = replay(
-        curve=[curve_tick(30, "90", "0.002")],
-        checkpoints={D(90): Checkpoint(D(90), at(30), D("0.002"), None)},
-        tick_list=ticks((60 * 48, "0.01")))   # opens two days later
+        curve=[curve_tick(30, "90")],
+        checkpoints={D(90): checkpoint(90, 30)},
+        tick_list=ticks((60 * 48, "0.00001")))   # opens two days later
     result = Backtester(BASELINES["B1_f90_then_open_5m"]).run([r])
     assert result.trades[0].exit_reason == "dead_curve"
 
@@ -472,9 +672,9 @@ def test_b1_enters_on_the_curve_and_times_out_after_the_open() -> None:
     """Its clock starts at the pool open: a pre-graduation entry sits on a
     curve with no ticks to evaluate a time box against."""
     r = replay(
-        curve=[curve_tick(30, "90", "0.002", complete=False)],
-        checkpoints={D(90): Checkpoint(D(90), at(30), D("0.002"), None)},
-        tick_list=ticks((60, "0.004"), (65, "0.006")), graduated=at(59))
+        curve=[curve_tick(30, "90")],
+        checkpoints={D(90): checkpoint(90, 30)},
+        tick_list=ticks((60, "0.0000004"), (65, "0.0000006")), graduated=at(59))
     trade_ = Backtester(BASELINES["B1_f90_then_open_5m"]).run([r]).trades[0]
     assert trade_.path == PRE_GRAD
     assert trade_.entry_at == at(30)
