@@ -1,0 +1,26 @@
+{
+ "_note": "REAL getMultipleAccounts response, mainnet, 2026-09-11. The mint is Bjsxb2QErbB4rhpSRsUgtNBPPri24R3AK58tQwjvpump and this account is the PDA of ['bonding-curve', mint] under 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P. Untouched curve: every reserve is at its seeded value.",
+ "mint": "Bjsxb2QErbB4rhpSRsUgtNBPPri24R3AK58tQwjvpump",
+ "curve_address": "3XWT7fTxe9xkKsGYjNZ3AVoaomUVpxw2hDyeo3Rupwfy",
+ "rpc_value": {
+  "data": [
+   "F7f4N2DYrGAAENhH488DAAasI/wGAAAAAHjF+1HRAgAGAAAAAAAAAACAxqR+jQMAAJ4gxfxOtJqpaRRJGeBOKa7NJOyUiPNevdLOtjWd8ZcjAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+   "base64"
+  ],
+  "executable": false,
+  "lamports": 1766913,
+  "owner": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+  "rentEpoch": 18446744073709551615,
+  "space": 151
+ },
+ "decoded": {
+  "virtual_token_reserves": 1073000000000000,
+  "virtual_sol_reserves": 30000000006,
+  "real_token_reserves": 793100000000000,
+  "real_sol_reserves": 6,
+  "token_total_supply": 1000000000000000,
+  "complete": false
+ },
+ "account_length": 151,
+ "discriminator_hex": "17b7f83760d8ac60"
+}
