@@ -291,14 +291,18 @@ def test_buy_fill_at_70_percent_matches_the_hand_computation() -> None:
     assert v_tok == D("517830000")
     assert v_sol == D("62.163258212")
 
+    # At the shipped 125 bps (pump.fun's live schedule).
     out = curve_fill_buy(v_sol, v_tok, D("0.498"))
-    assert out == D("4075024.651433293009")
+    assert out == D("4065041.848699714908")
     # All-in cost per token against the curve's spot, for the default 0.5 SOL
-    # position: 2.21%, of which 1% is the fee and the rest is real impact.
+    # position: 2.46%, of which 1.25% is the fee and the rest is real impact.
     premium = (D("0.5") / out) / (v_sol / v_tok) - 1
-    assert round(premium, 4) == D("0.0221")
+    assert round(premium, 4) == D("0.0246")
     # And the buy itself moves the curve half a point.
-    assert round(out / R0 * 100, 4) == D("0.5138")
+    assert round(out / R0 * 100, 4) == D("0.5126")
+    # The program README's older 100 bps, for comparison.
+    assert curve_fill_buy(v_sol, v_tok, D("0.498"),
+                          fee_bps=100) == D("4075024.651433293009")
 
 
 def test_buy_fill_at_95_percent_is_cheaper_because_the_curve_is_deeper() -> None:
@@ -312,10 +316,10 @@ def test_buy_fill_at_95_percent_is_cheaper_because_the_curve_is_deeper() -> None
     assert v_sol == D("100.733832986")
 
     out = curve_fill_buy(v_sol, v_tok, D("0.498"))
-    assert out == D("1556530.515181449109")
+    assert out == D("1552705.904339268295")
     premium = (D("0.5") / out) / (v_sol / v_tok) - 1
-    assert round(premium, 4) == D("0.0190")      # against 0.0221 at 70%
-    assert round(out / R0 * 100, 4) == D("0.1963")
+    assert round(premium, 4) == D("0.0215")      # against 0.0246 at 70%
+    assert round(out / R0 * 100, 4) == D("0.1958")
 
 
 def test_a_100_dollar_buy_does_not_move_95_percent_by_a_point() -> None:
@@ -334,16 +338,16 @@ def test_the_fee_is_a_markup_on_a_buy_and_a_deduction_on_a_sell() -> None:
     wrong by about a basis point at 100 bps, always in the trader's favour.
     """
     v_sol, v_tok = reserves_at("70")
-    naive = curve_fill_buy(v_sol, v_tok, D("0.498") * D("0.99"), fee_bps=0)
+    naive = curve_fill_buy(v_sol, v_tok, D("0.498") * D("0.9875"), fee_bps=0)
     exact = curve_fill_buy(v_sol, v_tok, D("0.498"))
     assert exact > naive                      # dividing keeps slightly more
-    # Just under a basis point, and always the same direction.
-    assert round(exact / naive - 1, 5) == D("0.0001")
+    # About 1.6 bp at 125, and always the same direction.
+    assert round(exact / naive - 1, 5) == D("0.00016")
 
     # A sell simply loses the fee off the proceeds.
     gross = curve_fill_sell(v_sol, v_tok, D("1000000"), fee_bps=0)
-    net = curve_fill_sell(v_sol, v_tok, D("1000000"), fee_bps=100)
-    assert round(net / gross, 6) == D("0.99")
+    net = curve_fill_sell(v_sol, v_tok, D("1000000"))
+    assert round(net / gross, 6) == D("0.9875")
 
 
 def test_a_zero_or_negative_fill_returns_zero_rather_than_raising() -> None:
@@ -355,13 +359,14 @@ def test_a_zero_or_negative_fill_returns_zero_rather_than_raising() -> None:
 
 
 def test_an_immediate_round_trip_loses_the_fee_twice_and_the_impact_twice() -> None:
-    """The exact model's answer to "what does a flat trade cost". At 70% it is
-    3.90%, against the 5.64% the flat AMM model charges — so the flat model was
-    OVERstating a curve entry, not understating it."""
+    """The exact model's answer to "what does a flat trade cost". At 70% and
+    the live 125 bps it is 4.37%, against the 5.64% the flat AMM model charges
+    — so the flat model still OVERstates a curve entry, even at the higher
+    fee."""
     v_sol, v_tok = reserves_at("70")
     out = curve_fill_buy(v_sol, v_tok, D("0.498"))
     back = curve_fill_sell(v_sol, v_tok, out)
-    assert round(back / D("0.5") - 1, 4) == D("-0.0390")
+    assert round(back / D("0.5") - 1, 4) == D("-0.0437")
 
 
 # --- self-graduation ----------------------------------------------------------
@@ -402,7 +407,9 @@ def test_a_buy_that_fills_the_curve_is_flagged_and_exits_post_grad() -> None:
     trade_ = big.run([r]).trades[0]
     assert trade_.self_graduated is True
     assert trade_.exit_reason == "time_box"          # priced on the pool
-    assert trade_.exit_at == at(65)
+    # The box runs from the ENTRY, so it is already long expired by the time
+    # the pool opens: the first pool quote is the exit.
+    assert trade_.exit_at == at(60)
 
     # The default size does not, and is not flagged.
     small = Backtester(Big()).run([r]).trades[0]
@@ -443,7 +450,7 @@ def test_a_dead_curve_is_sold_back_into_its_own_reserves() -> None:
     r = replay(curve=[curve_tick(30, "90")],
                checkpoints={D(90): checkpoint(90, 30)},
                tick_list=[])   # never migrated
-    result = Backtester(BASELINES["B1_f90_then_open_5m"],
+    result = Backtester(BASELINES["B1_f90_timebox_5m"],
                         costs=Costs(priority_fee_quote=D(0))).run([r])
 
     trade_ = result.trades[0]
@@ -464,7 +471,7 @@ def test_a_dead_curve_that_fell_sells_into_the_worse_reserves() -> None:
                   checkpoints={D(90): checkpoint(90, 30)})
     fell = replay("FELL", curve=[curve_tick(30, "90"), curve_tick(90, "74")],
                   checkpoints={D(90): checkpoint(90, 30)})
-    run = Backtester(BASELINES["B1_f90_then_open_5m"])
+    run = Backtester(BASELINES["B1_f90_timebox_5m"])
     flat = run.run([high]).trades[0]
     down = run.run([fell]).trades[0]
     assert down.net_return < flat.net_return
@@ -476,10 +483,10 @@ def test_the_optional_extra_haircut_defaults_to_nothing() -> None:
     assert config.PRE_GRAD_DEAD_HAIRCUT == 0
     r = replay(curve=[curve_tick(30, "90")],
                checkpoints={D(90): checkpoint(90, 30)})
-    run = Backtester(BASELINES["B1_f90_then_open_5m"],
+    run = Backtester(BASELINES["B1_f90_timebox_5m"],
                      costs=Costs(priority_fee_quote=D(0)))
     plain = run.run([r]).trades[0]
-    charged = Backtester(BASELINES["B1_f90_then_open_5m"], dead_haircut=D("0.5"),
+    charged = Backtester(BASELINES["B1_f90_timebox_5m"], dead_haircut=D("0.5"),
                          costs=Costs(priority_fee_quote=D(0))).run([r]).trades[0]
     assert round(charged.net_return, 6) == round(
         (plain.net_return + 1) / 2 - 1, 6)
@@ -490,7 +497,7 @@ def test_a_pruned_dead_token_round_trips_against_its_entry_state() -> None:
     checkpoints, so the last observed state IS the entry."""
     r = replay(curve=[],   # pruned away
                checkpoints={D(90): checkpoint(90, 30)})
-    trade_ = Backtester(BASELINES["B1_f90_then_open_5m"],
+    trade_ = Backtester(BASELINES["B1_f90_timebox_5m"],
                         costs=Costs(priority_fee_quote=D(0))).run([r]).trades[0]
     v_sol, v_tok = reserves_at("90")
     expected = curve_fill_sell(v_sol, v_tok,
@@ -503,7 +510,7 @@ def test_a_migration_after_the_deadline_is_still_dead() -> None:
         curve=[curve_tick(30, "90")],
         checkpoints={D(90): checkpoint(90, 30)},
         tick_list=ticks((60 * 48, "0.00001")))   # opens two days later
-    result = Backtester(BASELINES["B1_f90_then_open_5m"]).run([r])
+    result = Backtester(BASELINES["B1_f90_timebox_5m"]).run([r])
     assert result.trades[0].exit_reason == "dead_curve"
 
 
@@ -656,8 +663,9 @@ def test_the_gate_thresholds_come_from_config() -> None:
 def test_both_baselines_ship_and_neither_is_tuned() -> None:
     """They exist to be beaten. If one ever passes the gate on real data, the
     first suspicion should be the harness, not the edge."""
-    assert set(BASELINES) == {"B0_open_timebox_5m", "B1_f90_then_open_5m"}
+    assert set(BASELINES) == {"B0_open_timebox_5m", "B1_f90_timebox_5m"}
     assert BASELINES["B0_open_timebox_5m"].exits.rules == (TimeBox(5),)
+    assert BASELINES["B1_f90_timebox_5m"].exits.rules == (TimeBox(5),)
 
 
 def test_b0_enters_at_the_pool_open() -> None:
@@ -668,18 +676,77 @@ def test_b0_enters_at_the_pool_open() -> None:
     assert trade_.exit_at == at(45)
 
 
-def test_b1_enters_on_the_curve_and_times_out_after_the_open() -> None:
-    """Its clock starts at the pool open: a pre-graduation entry sits on a
-    curve with no ticks to evaluate a time box against."""
+def test_b1_enters_on_the_curve_and_its_box_runs_from_the_entry() -> None:
+    """The box is evaluated on the CURVE too, so it fires at the first curve
+    sample five minutes past the entry — it no longer waits for a pool."""
     r = replay(
-        curve=[curve_tick(30, "90")],
+        curve=[curve_tick(30, "90"), curve_tick(36, "91"),
+               curve_tick(50, "93")],
         checkpoints={D(90): checkpoint(90, 30)},
         tick_list=ticks((60, "0.0000004"), (65, "0.0000006")), graduated=at(59))
-    trade_ = Backtester(BASELINES["B1_f90_then_open_5m"]).run([r]).trades[0]
+    trade_ = Backtester(BASELINES["B1_f90_timebox_5m"]).run([r]).trades[0]
     assert trade_.path == PRE_GRAD
     assert trade_.entry_at == at(30)
-    assert trade_.exit_at == at(65)        # open at t+60, plus five
+    assert trade_.exit_at == at(36)        # the first curve sample past +5m
+    assert trade_.exit_reason == "time_box"
     assert trade_.entry_progress_pct == D("90")
+
+
+def test_a_stop_can_now_fire_while_the_token_is_still_on_the_curve() -> None:
+    """The gap this closes. A hard stop used to be unable to fire until a pool
+    existed, which on a token that never graduates is never — the position sat
+    for 24 hours however far the curve fell."""
+    r = replay(
+        curve=[curve_tick(30, "90"), curve_tick(40, "78"), curve_tick(50, "60")],
+        checkpoints={D(90): checkpoint(90, 30)},
+        tick_list=[])
+
+    class Stopped(Strategy):
+        name = "stopped"
+
+        @property
+        def exits(self): return ExitPolicy((HardStop(D("0.25")),))
+
+        def decision_times(self, rep): return [at(30)]
+
+        def entry(self, view):
+            mark = view.checkpoint(D(90))
+            return EntrySignal(path=PRE_GRAD,
+                               reserves=(mark.v_quote, mark.v_token))
+
+    result = Backtester(Stopped(), costs=Costs(priority_fee_quote=D(0))).run([r])
+    trade_ = result.trades[0]
+    assert trade_.exit_reason == "hard_stop"
+    assert trade_.exit_at in (at(40), at(50))
+    assert result.dead_curve_exits == 0      # it exited, it did not rot
+    assert trade_.net_return > D("-0.5")
+
+
+def test_the_trailing_peak_carries_across_the_curve_into_the_pool() -> None:
+    """One running peak over both venues. Resetting it at migration would be a
+    stop reading a high it had already seen."""
+    r = replay(
+        curve=[curve_tick(30, "90"), curve_tick(35, "97")],
+        checkpoints={D(90): checkpoint(90, 30)},
+        tick_list=ticks((40, "0.0000009"), (41, "0.0000002")),
+        graduated=at(39))
+
+    class Trail(Strategy):
+        name = "trail"
+
+        @property
+        def exits(self): return ExitPolicy((TrailingStop(D("0.5")),))
+
+        def decision_times(self, rep): return [at(30)]
+
+        def entry(self, view):
+            mark = view.checkpoint(D(90))
+            return EntrySignal(path=PRE_GRAD,
+                               reserves=(mark.v_quote, mark.v_token))
+
+    trade_ = Backtester(Trail(), costs=Costs(priority_fee_quote=D(0))) \
+        .run([r]).trades[0]
+    assert trade_.exit_reason == "trailing_stop"
 
 
 def test_curve_price_is_the_constant_products_own_price() -> None:
