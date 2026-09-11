@@ -202,6 +202,13 @@ services:
       SOLANA_RPC_URL: ${LAB_GRADUATION_RPC_URL:-${SOLANA_RPC_URL:-https://api.mainnet-beta.solana.com}}
     volumes: !reset []
     restart: on-failure
+    # The image's default probe curls http://localhost:8000/live, which is the
+    # HTTP backend's. This process serves no HTTP, so it would sit permanently
+    # `unhealthy` — a false red that trains people to ignore the column.
+    # ponytail: disabled rather than replaced; a real probe should assert a
+    # curve sample was written recently, the way the scanner's does.
+    healthcheck:
+      disable: true
     deploy:
       resources:
         limits: { cpus: "0.5", memory: 512M }
