@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as api from "./api";
 import { TrackerChart } from "./chart";
@@ -48,6 +48,13 @@ function stub(overrides: {
         ? (overrides.live ?? mock.MOCK_STATS_LIVE)
         : (overrides.replay ?? mock.MOCK_STATS)));
 }
+
+beforeEach(() => {
+  // jsdom implements no layout, so it has no `scrollIntoView`. Stubbed HERE
+  // rather than in the shared `vitest.setup.ts`, which belongs to the whole
+  // repo — this lab edits nothing outside its own folder.
+  window.HTMLElement.prototype.scrollIntoView = vi.fn();
+});
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -137,9 +144,11 @@ describe("the stock view", () => {
     await waitFor(() =>
       expect(screen.getByTestId("tracker-chart")).toBeInTheDocument());
 
-    // Two unbroken clusters and one broken one, from the fixture.
-    expect(screen.getAllByTestId("level-unbroken")).toHaveLength(2);
+    // Three clusters in the fixture: one broken, and of the two unbroken the
+    // NEAREST is drawn as its own thing.
     expect(screen.getAllByTestId("level-broken")).toHaveLength(1);
+    expect(screen.getAllByTestId("level-nearest")).toHaveLength(1);
+    expect(screen.getAllByTestId("level-unbroken")).toHaveLength(1);
     expect(screen.getByTestId("near-zone")).toBeInTheDocument();
     expect(screen.getByTestId("breakout-marker")).toBeInTheDocument();
   });
@@ -169,6 +178,22 @@ describe("the stock view", () => {
     fireEvent.click(screen.getAllByTestId("near-row")[0]!);
     await waitFor(() =>
       expect(screen.getAllByTestId("episode-row").length).toBe(3));
+  });
+
+  it("scrolls the panel into view, because it opens below a long board", async () => {
+    // The board runs to a hundred rows and the panel renders under it. Without
+    // the scroll the click opens a chart nobody can see, and reads as broken —
+    // which is how it was reported on the live site.
+    const scrollIntoView = window.HTMLElement.prototype
+      .scrollIntoView as ReturnType<typeof vi.fn>;
+    stub();
+    render(<NseTrackerPage />, { wrapper });
+    await waitFor(() => expect(screen.getAllByTestId("near-row").length).toBe(5));
+
+    expect(scrollIntoView).not.toHaveBeenCalled();
+    fireEvent.click(screen.getAllByTestId("near-row")[0]!);
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
+    expect(scrollIntoView.mock.calls[0]![0]).toMatchObject({ block: "start" });
   });
 
   it("closes again", async () => {
@@ -256,6 +281,17 @@ describe("the chart on its own", () => {
         nearPct={4} />,
     );
     expect(screen.getByText(/no bars yet/i)).toBeInTheDocument();
+  });
+
+  it("labels the nearest level with its price", () => {
+    // "Show me the resistance line" should be answered by the chart, not by
+    // cross-referencing the panel beside it.
+    render(
+      <TrackerChart candles={mock.MOCK_STOCK.candles}
+        clusters={mock.MOCK_STOCK.levels!.clusters}
+        nearestResistance={2229.5} nearPct={4} />,
+    );
+    expect(screen.getByTestId("nearest-label")).toHaveTextContent("2230");
   });
 
   it("omits the zone when nothing unbroken sits above the close", () => {

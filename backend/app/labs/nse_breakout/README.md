@@ -572,7 +572,7 @@ chart this lab draws itself.
 |---|---|
 | Header strip | is the tracker running, how much of the universe is scorable, when was the last bar, did anything fail |
 | Near breakout | which stocks are close to a level today — **NEAR first, then by score**, with the tight-range and 52-week-high markers |
-| Stock view | the ladder and the NEAR band on a log axis, the score taken apart into its five components, and every episode this stock has had |
+| Stock view | the ladder and the NEAR band on a log axis, the score taken apart into its five components, and every episode this stock has had. **The nearest unbroken level is drawn heavier and carries its price** — it is the only line the reader came for, and hunting for it among a dozen alike is not reading a chart. Opening it **scrolls it into view**: it renders below a hundred-row board, and a click that opens something off-screen reads as a click that did nothing. |
 | Recent breakouts | what confirmed lately, coloured by the move since, with the false ones flagged |
 | Outcomes | replay and live side by side, and the decile table |
 

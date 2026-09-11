@@ -173,26 +173,53 @@ export function TrackerChart({
       </g>
 
       {/* The ladder. Unbroken solid, broken dashed — a level price has already
-          closed through is history, not a wall. */}
-      {clusters.map((cluster) => (
-        <g key={`level-${cluster.level}`}>
-          <line
-            data-testid={cluster.broken ? "level-broken" : "level-unbroken"}
-            x1={PAD.left}
-            x2={W - PAD.right}
-            y1={y(cluster.level)}
-            y2={y(cluster.level)}
-            stroke={cluster.broken ? "var(--color-ink-4)" : "var(--color-warn)"}
-            strokeWidth={cluster.broken ? 0.75 : 1.25}
-            strokeDasharray={cluster.broken ? "3 3" : undefined}
-            opacity={cluster.broken ? 0.5 : 0.9}
-          />
-          <text x={PAD.left + 2} y={y(cluster.level) - 3}
-            className="fill-ink-4 font-mono" fontSize="8">
-            {`${cluster.touches}×`}
-          </text>
-        </g>
-      ))}
+          closed through is history, not a wall.
+
+          THE NEAREST unbroken level is drawn heavier and carries its price. It
+          is the only line on the chart the reader actually came for: the one
+          the stock has to get through next. Every level looking alike makes
+          the reader hunt for it, and the answer to "where is the resistance"
+          should be legible without cross-referencing the panel beside it. */}
+      {clusters.map((cluster) => {
+        const isNearest = !cluster.broken && cluster.level === nearestResistance;
+        return (
+          <g key={`level-${cluster.level}`}>
+            <line
+              data-testid={
+                isNearest
+                  ? "level-nearest"
+                  : cluster.broken
+                    ? "level-broken"
+                    : "level-unbroken"
+              }
+              x1={PAD.left}
+              x2={W - PAD.right}
+              y1={y(cluster.level)}
+              y2={y(cluster.level)}
+              stroke={cluster.broken ? "var(--color-ink-4)" : "var(--color-warn)"}
+              strokeWidth={cluster.broken ? 0.75 : isNearest ? 2 : 1.25}
+              strokeDasharray={cluster.broken ? "3 3" : undefined}
+              opacity={cluster.broken ? 0.5 : isNearest ? 1 : 0.65}
+            />
+            <text x={PAD.left + 2} y={y(cluster.level) - 3}
+              className="fill-ink-4 font-mono" fontSize="8">
+              {`${cluster.touches}×`}
+            </text>
+            {isNearest && (
+              <text
+                data-testid="nearest-label"
+                x={W - PAD.right + 4}
+                y={y(cluster.level) + 3}
+                className="fill-warn font-mono"
+                fontSize="9"
+                fontWeight="600"
+              >
+                {fmt(cluster.level)}
+              </text>
+            )}
+          </g>
+        );
+      })}
 
       {/* Where the setup was marked, and where it confirmed. */}
       {episode?.ref_price ? (
