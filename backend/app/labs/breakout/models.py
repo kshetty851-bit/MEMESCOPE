@@ -298,3 +298,113 @@ class BoEpisode(Base):
     )
     #: When the outcome columns were filled. NULL means not yet.
     outcome_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+# ============================================================================
+# Phase 3 — the paper trader's own ledger
+# ============================================================================
+#
+# ITS OWN. Not the platform paper wallet, not the Karthik wallet, not another
+# lab's book. Nothing in this package imports any of them and a test parses
+# every module to hold that. $1,000, ten slots, no key and no signer.
+
+class BoAccount(Base):
+    """One row. `scope` exists only to carry the unique constraint that makes
+    "one row" a schema fact rather than a convention someone breaks later."""
+
+    __tablename__ = "bo_account"
+    __table_args__ = (UniqueConstraint("scope", name="uq_bo_account_scope"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    scope: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default=text("'default'")
+    )
+    #: Cash plus the mark-to-market value of every open position.
+    equity: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
+    cash: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
+    #: The high-water mark the kill switch measures drawdown against.
+    peak_equity: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
+    halted: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
+    halted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    halted_reason: Mapped[str | None] = mapped_column(String(64))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class BoPosition(Base):
+    """An OPEN position. Closing one deletes this row and writes a `bo_trades`
+    row — the trade is the permanent record, and keeping a closed position in
+    both places would be two sources of truth for one fill."""
+
+    __tablename__ = "bo_positions"
+    __table_args__ = (UniqueConstraint("mint", name="uq_bo_positions_mint"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    mint: Mapped[str] = mapped_column(_ADDRESS, nullable=False)
+    episode_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    qty: Mapped[Decimal] = mapped_column(Numeric(38, 12), nullable=False)
+    entry_price: Mapped[Decimal] = mapped_column(_PRICE, nullable=False)
+    #: Equity / SLOTS at the moment of entry. The trail is a percentage of it,
+    #: so the stop scales with the account rather than staying $25 for ever.
+    slot_size: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
+    #: The highest mark-to-market VALUE this position has reached. The stop
+    #: hangs `TRAIL_PCT` of `slot_size` below it and only ever ratchets up.
+    high_water_value: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
+    entry_fees: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
+    opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    #: The bar this position was opened ON — what makes a re-run idempotent.
+    entry_bar: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class BoTrade(Base):
+    """One closed round trip. The permanent record."""
+
+    __tablename__ = "bo_trades"
+    __table_args__ = (
+        UniqueConstraint("mint", "entry_bar", name="uq_bo_trades_mint_entry_bar"),
+        Index("ix_bo_trades_closed_at", "closed_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    mint: Mapped[str] = mapped_column(_ADDRESS, nullable=False)
+    symbol: Mapped[str | None] = mapped_column(String(32))
+    episode_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    qty: Mapped[Decimal] = mapped_column(Numeric(38, 12), nullable=False)
+    entry_price: Mapped[Decimal] = mapped_column(_PRICE, nullable=False)
+    exit_price: Mapped[Decimal] = mapped_column(_PRICE, nullable=False)
+    slot_size: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
+    #: Net of both sides' fees and slippage. This is the only P&L number.
+    pnl_usd: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
+    pnl_pct: Mapped[Decimal] = mapped_column(Numeric(16, 4), nullable=False)
+    fees_usd: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
+    opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    closed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    entry_bar: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    exit_bar: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    #: `trail_stop` | `failed_setup` | `time_stop` | `forced_exit` | `halt` | `flatten`
+    exit_reason: Mapped[str] = mapped_column(String(24), nullable=False)
+
+
+class BoEquity(Base):
+    """One row per hourly tick — the curve the frontend draws."""
+
+    __tablename__ = "bo_equity"
+    __table_args__ = (
+        UniqueConstraint("bar_close_time", name="uq_bo_equity_bar"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    bar_close_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    equity: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
+    cash: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
+    unrealised: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
+    positions: Mapped[int] = mapped_column(Integer, nullable=False)

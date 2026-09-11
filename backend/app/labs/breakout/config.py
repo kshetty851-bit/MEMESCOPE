@@ -249,3 +249,41 @@ OUTCOME_WINDOW_HOURS = 72
 #: value. Phase 3's live trader uses the same rule at its own slot size.
 TRAIL_NOTIONAL_USD = 100.0
 TRAIL_USD = 25.0
+
+
+# ============================================================================
+# Phase 3 — the paper trader
+# ============================================================================
+
+def trading_enabled() -> bool:
+    """A SECOND flag, separate from the lab's. Detection and recording are
+    safe to run anywhere; opening positions is a different decision, and one
+    switch for both would mean you could not have the watchlist without the
+    book. Read at call time, like the other."""
+    return _flag("BREAKOUT_TRADING_ENABLED")
+
+
+#: Paper only. There is no key, no signer and no route that could execute.
+STARTING_EQUITY = 1000.0
+SLOTS = 10
+#: Memecoin-realistic, and deliberately pessimistic: 1% of slippage on a
+#: $100 order into a $50k pool is generous to us, not to the model.
+SLIPPAGE_BPS = 100
+FEE_BPS = 30
+#: A pool thinner than this is not entered at all.
+MIN_LIQ_FOR_ENTRY = 50_000.0
+#: And a position may not be more than this share of the pool's liquidity —
+#: the honest limit on a $100 order is the pool, not the wallet.
+MAX_POOL_SHARE_PCT = 0.5
+#: The trailing stop, as a PERCENTAGE of the slot size at entry rather than a
+#: fixed $25. At the starting equity a slot is $100 and 25% is exactly the
+#: $25 the brief asks for; storing it as a percentage means it still is 25%
+#: of the position after the account has grown or shrunk.
+TRAIL_PCT = 25.0
+#: A position still under water after this many hours is closed.
+MAX_HOLD_HOURS = 168
+#: Drawdown from peak equity that trips the kill switch. Only a CLI reset
+#: clears it.
+MAX_DRAWDOWN_PCT = 40.0
+#: Equity points kept.
+EQUITY_HISTORY_HOURS = 24 * 90

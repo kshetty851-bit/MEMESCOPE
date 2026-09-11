@@ -5,6 +5,9 @@
     setups                  one setup pass, then the watchlist as a table
     levels --mint MINT      the resistance clusters for one token
     outcomes                fill outcome columns for episodes past their window
+    trader status           the paper book: account, positions, stats
+    trader reset-halt --yes clear the kill switch and re-base the peak
+    trader flatten --yes    close every open position at the last mark
     backfill --mint MINT    fill both timeframes for one token, ignoring the
                             per-tick page cap
     health                  data_health() as JSON
@@ -24,7 +27,7 @@ from datetime import UTC, datetime
 from app.db.session import SessionFactory
 from app.labs.breakout import config
 from app.labs.breakout.data import data_health, get_levels, get_setups, get_universe
-from app.labs.breakout.scheduler import outcomes_tick, setups_tick, tick
+from app.labs.breakout.scheduler import outcomes_tick, setups_tick, tick, trader_tick
 
 
 async def _health() -> dict:
@@ -120,6 +123,58 @@ async def _levels(mint: str) -> str:
         return "\n".join(lines)
 
 
+async def _trader(action: str) -> str:
+    from app.labs.breakout.data import (
+        get_account,
+        get_positions,
+        get_trade_stats,
+    )
+    from app.labs.breakout.trader import BreakoutTrader
+
+    if not config.enabled():
+        return json.dumps({"skipped": "breakout_lab_disabled"})
+    now = datetime.now(UTC)
+
+    if action in ("reset-halt", "flatten"):
+        async with SessionFactory() as session:
+            engine = BreakoutTrader(session)
+            out = (await engine.reset_halt(now) if action == "reset-halt"
+                   else await engine.flatten(now))
+            await session.commit()
+        return json.dumps(out, indent=2, default=str)
+
+    summary = await trader_tick()
+    async with SessionFactory() as session:
+        account = await get_account(session)
+        positions = await get_positions(session)
+        stats = await get_trade_stats(session)
+    if account is None:
+        return json.dumps({"account": None, "tick": summary}, indent=2, default=str)
+
+    lines = [
+        f"equity {float(account.equity):>10.2f}   cash {float(account.cash):>10.2f}   "
+        f"peak {float(account.peak_equity):>10.2f}   "
+        f"slots {len(positions)}/{config.SLOTS}   "
+        f"{'HALTED: ' + (account.halted_reason or '') if account.halted else 'running'}",
+        f"trading_enabled={config.trading_enabled()}",
+        "",
+    ]
+    if positions:
+        header = (f"{'mint':<46}{'qty':>16}{'entry':>14}{'slot$':>10}"
+                  f"{'high_water':>12}{'stop$':>10}")
+        lines += [header, "-" * len(header)]
+        for p in positions:
+            slot = float(p.slot_size)
+            high = float(p.high_water_value)
+            lines.append(
+                f"{p.mint:<46}{float(p.qty):>16.4f}{float(p.entry_price):>14.8f}"
+                f"{slot:>10.2f}{high:>12.2f}"
+                f"{high - slot * config.TRAIL_PCT / 100:>10.2f}")
+        lines.append("")
+    lines.append(json.dumps({"stats": stats, "tick": summary}, default=str))
+    return "\n".join(lines)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m app.labs.breakout")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -127,6 +182,12 @@ def main(argv: list[str] | None = None) -> int:
         sub.add_parser(name)
     levels = sub.add_parser("levels")
     levels.add_argument("--mint", required=True)
+    trader = sub.add_parser("trader")
+    trader.add_argument("action", choices=["status", "reset-halt", "flatten"])
+    # `--yes` on the two destructive actions, exactly as the brief asks: a
+    # flatten or a halt reset is an operator decision, never a default.
+    trader.add_argument("--yes", action="store_true",
+                        help="required for reset-halt and flatten")
     backfill = sub.add_parser("backfill")
     backfill.add_argument("--mint", required=True)
     args = parser.parse_args(argv)
@@ -141,6 +202,10 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write(asyncio.run(_setups()) + "\n")
     elif args.command == "levels":
         sys.stdout.write(asyncio.run(_levels(args.mint)) + "\n")
+    elif args.command == "trader":
+        if args.action in ("reset-halt", "flatten") and not args.yes:
+            parser.error(f"{args.action} needs --yes")
+        sys.stdout.write(asyncio.run(_trader(args.action)) + "\n")
     elif args.command == "outcomes":
         sys.stdout.write(json.dumps(asyncio.run(outcomes_tick()), indent=2) + "\n")
     elif args.command == "backfill":

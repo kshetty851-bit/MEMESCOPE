@@ -22,12 +22,14 @@ MIGRATIONS = {
         ["bo_candles", "bo_runs", "bo_universe"],
     BACKEND / "alembic" / "versions" / "20260911_0064_breakout_setups.py":
         ["bo_episodes", "bo_levels", "bo_setup_snapshots"],
+    BACKEND / "alembic" / "versions" / "20260911_0065_breakout_trader.py":
+        ["bo_account", "bo_equity", "bo_positions", "bo_trades"],
 }
 TABLES = sorted(t for tables in MIGRATIONS.values() for t in tables)
 #: Levels, momentum and the state machine are pure computation over `data.py`.
 #: Nothing in them may know a network exists — a rate-limited candle pass must
 #: never stop setups being evaluated on the bars that ARE stored.
-PURE_MODULES = ("levels.py", "momentum.py", "setups.py")
+PURE_MODULES = ("levels.py", "momentum.py", "setups.py", "rules.py")
 
 FORBIDDEN_MODULES = (
     "app.paper", "app.paper_v2", "app.karthik", "app.karthik_ops",
@@ -139,7 +141,9 @@ def test_the_migration_matches_the_models() -> None:
         namespace["upgrade"]()
 
     for model in (models.BoUniverseMember, models.BoCandle, models.BoRun,
-                  models.BoLevels, models.BoSetupSnapshot, models.BoEpisode):
+                  models.BoLevels, models.BoSetupSnapshot, models.BoEpisode,
+                  models.BoAccount, models.BoPosition, models.BoTrade,
+                  models.BoEquity):
         expected = {c.name: c.nullable for c in model.__table__.columns}
         assert created[model.__tablename__] == expected, model.__tablename__
 
@@ -152,7 +156,19 @@ def test_the_api_is_read_only() -> None:
     assert [r.path for r in router.routes] == [
         "/labs/breakout/health", "/labs/breakout/universe", "/labs/breakout/setups",
         "/labs/breakout/setups/{mint}", "/labs/breakout/episodes",
-        "/labs/breakout/stats"]
+        "/labs/breakout/stats", "/labs/breakout/account", "/labs/breakout/positions",
+        "/labs/breakout/trades", "/labs/breakout/equity",
+        "/labs/breakout/trade_stats"]
+
+
+def test_the_book_cannot_be_moved_over_http() -> None:
+    """The read-only assertion above already proves it, but say it explicitly:
+    there is no route that opens, closes or sizes a position. Trading is
+    driven by the scheduled tick and the CLI, and nothing else."""
+    from app.labs.breakout.api import router
+
+    names = {getattr(r, "name", "") for r in router.routes}
+    assert not (names & {"open", "close", "buy", "sell", "flatten", "reset_halt"})
 
 
 def test_the_detection_modules_never_learn_a_network_exists() -> None:
@@ -171,6 +187,31 @@ def test_the_detection_modules_never_learn_a_network_exists() -> None:
 
 
 # --- the flag -------------------------------------------------------------------
+
+def test_trading_has_its_own_flag_and_it_defaults_off(monkeypatch) -> None:
+    """Two flags, not one. Detection and recording are safe to run anywhere;
+    opening positions is a separate decision, and a single switch would mean
+    you could not have the watchlist without the book."""
+    from app.labs.breakout import config
+
+    monkeypatch.setenv("BREAKOUT_LAB_ENABLED", "true")
+    monkeypatch.delenv("BREAKOUT_TRADING_ENABLED", raising=False)
+    assert config.enabled() is True
+    assert config.trading_enabled() is False
+    monkeypatch.setenv("BREAKOUT_TRADING_ENABLED", "true")
+    assert config.trading_enabled() is True
+
+
+async def test_the_trader_tick_is_inert_while_either_flag_is_off(monkeypatch) -> None:
+    from app.labs.breakout import scheduler
+
+    monkeypatch.setenv("BREAKOUT_LAB_ENABLED", "true")
+    monkeypatch.delenv("BREAKOUT_TRADING_ENABLED", raising=False)
+    assert await scheduler.trader_tick() == {"skipped": "breakout_trading_disabled"}
+    monkeypatch.delenv("BREAKOUT_LAB_ENABLED", raising=False)
+    monkeypatch.setenv("BREAKOUT_TRADING_ENABLED", "true")
+    assert await scheduler.trader_tick() == {"skipped": "breakout_lab_disabled"}
+
 
 def test_the_flag_defaults_off(monkeypatch) -> None:
     from app.labs.breakout import config
@@ -268,7 +309,8 @@ def test_alembic_can_see_the_lab_tables() -> None:
     database and none in the model tree, and emits `drop_table` for each."""
     code = ("import app.models; from app.db.base import Base; import sys; "
             "sys.exit(0 if {'bo_candles', 'bo_episodes', 'bo_levels', "
-            "'bo_setup_snapshots'} <= set(Base.metadata.tables) else 1)")
+            "'bo_setup_snapshots', 'bo_account', 'bo_positions', 'bo_trades', "
+            "'bo_equity'} <= set(Base.metadata.tables) else 1)")
     proc = subprocess.run([sys.executable, "-c", code], cwd=BACKEND, check=False)  # noqa: S603
     assert proc.returncode == 0
 
