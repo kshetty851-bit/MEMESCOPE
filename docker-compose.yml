@@ -65,6 +65,12 @@ x-backend-env: &backend-env
   SOLANA_RPC_URL: ${SOLANA_RPC_URL:-https://api.mainnet-beta.solana.com}
   # Graduation Lab. Default off; the recorder exits immediately when it is.
   LAB_GRADUATION_ENABLED: ${LAB_GRADUATION_ENABLED:-false}
+  # Its forward paper book, gated separately so turning the recorder on does
+  # not start a book. Declared HERE and not only in .env.production: a value
+  # that exists in the env file but not in this anchor never reaches a
+  # container, and the beat task then reports "disabled" for ever while
+  # looking perfectly healthy.
+  LAB_GRADUATION_PAPER_ENABLED: ${LAB_GRADUATION_PAPER_ENABLED:-false}
   SOLANA_WS_URL: ${SOLANA_WS_URL:-wss://api.mainnet-beta.solana.com}
   HELIUS_API_KEY: ${HELIUS_API_KEY:-}
   FEATURE_SCANNER_ENABLED: ${FEATURE_SCANNER_ENABLED:-false}

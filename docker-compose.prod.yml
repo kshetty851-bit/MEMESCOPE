@@ -199,6 +199,7 @@ services:
       # Only this lab's endpoint; see the base file for why it is not the
       # shared SOLANA_RPC_URL.
       LAB_GRADUATION_ENABLED: ${LAB_GRADUATION_ENABLED:-false}
+      LAB_GRADUATION_PAPER_ENABLED: ${LAB_GRADUATION_PAPER_ENABLED:-false}
       SOLANA_RPC_URL: ${LAB_GRADUATION_RPC_URL:-${SOLANA_RPC_URL:-https://api.mainnet-beta.solana.com}}
     volumes: !reset []
     restart: on-failure
