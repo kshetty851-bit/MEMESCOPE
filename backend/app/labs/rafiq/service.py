@@ -118,7 +118,8 @@ class RafiqLabService:
         now = now or datetime.now(UTC)
         rows = await self.activate(now=now)
         candidates = await self._feed.candidates(
-            since=min(r.activated_at for r in rows))
+            since=min(r.activated_at for r in rows),
+            not_before=now - timedelta(seconds=config.MAX_CANDIDATE_AGE_SECONDS))
         # One observation per token per tick, shared by all five strategies:
         # five scanners would be five different markets.
         seen: dict[str, Observation | None] = {}
