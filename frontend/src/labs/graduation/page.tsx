@@ -428,8 +428,9 @@ export function GraduationLabPage() {
         <h1 className="text-xl font-semibold">Graduation Lab</h1>
         <p className="max-w-[65ch] text-sm text-ink-dim">
           pump.fun tokens climbing the bonding curve, recorded from the free
-          launch feed and a {data.poll_interval_s}s chain poll. Watching only —
-          there is no book and nothing is ranked.
+          launch feed and a {data.poll_interval_s}s chain poll. The recorder
+          ranks nothing; the paper book below trades every graduation it sees
+          on rules fixed in advance, and holds no real funds.
         </p>
       </header>
 
