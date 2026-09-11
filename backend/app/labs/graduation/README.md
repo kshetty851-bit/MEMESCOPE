@@ -463,11 +463,35 @@ Two baselines ship, and **neither is tuned**:
 | | entry | exit |
 |---|---|---|
 | `B0_open_timebox_5m` | the pool open | +5 minutes |
-| `B1_f90_then_open_5m` | the 90% checkpoint, on the curve | pool open +5 minutes |
+| `B1_f90_timebox_5m` | the 90% checkpoint, on the curve | +5 minutes, on whichever venue exists |
 
 They exist to be beaten. A harness that arrives with a winner already in it is
 a harness nobody audits — and if a baseline ever passes the gate on real data,
 the first suspicion should be the harness, not the edge.
+
+#### Exits are evaluated on the curve as well as the pool
+
+A pre-graduation position is walked over **one stream**: its curve samples
+while the curve lasts, then the pool ticks. Curve prices in that stream are the
+*realizable* per-token value for the size actually held —
+`curve_fill_sell(reserves, tokens) / tokens` — not the curve's spot, because a
+stop has to fire on what the position could get out at.
+
+The exit clock runs from the **entry**, and the trailing peak is one running
+peak across both venues (resetting it at migration would be a stop reading a
+high it had already seen).
+
+This was not true before: the loop saw only post-graduation samples, so a hard
+stop could not fire until a pool existed — on a token that never graduates,
+never. Positions sat unmanaged for up to `PRE_GRAD_DEAD_HOURS` however far the
+curve fell. On the synthetic seed, turning the curve phase on cut
+`dead_curve` exits from **21 to 11** with the shipped 5-minute box: ten
+positions now exit on a rule instead of rotting to the deadline.
+
+**Box length decides whether a dying position is managed at all.** With a
+30-minute box none of those 21 are caught, because those tokens have no curve
+sample 30 minutes past the f90 crossing — the curve stops updating when nobody
+trades. Match the box to the sample density, not to intuition.
 
 #### Causality is structural
 
@@ -527,10 +551,11 @@ Verified against pump.fun's program README (`fee_basis_points` = 100 bps,
 always in the trader's favour. `services/curve/state.py` was no help here: it
 decodes reserves and knows nothing about fees.
 
-**The default understates the live take.** pump.fun's public fee page puts the
-current bonding-curve fee at **1.25% total** (0.95% protocol + 0.30% creator).
-`BACKTEST_CURVE_FEE_BPS` defaults to 100 because that is the documented program
-constant; set it to 125 to price what a trader pays today.
+**The default is the live take, not the program constant.**
+`BACKTEST_CURVE_FEE_BPS` defaults to **125** — pump.fun's public fee page puts
+the current bonding-curve fee at 1.25% total (0.95% protocol + 0.30% creator).
+Their program README still documents `fee_basis_points = 100`; set it to 100 to
+reproduce that.
 
 ##### What the exact model actually changed
 
@@ -539,11 +564,11 @@ this README previously claimed. For the default 0.5 SOL position:
 
 | level | v_sol | all-in premium over spot | of which impact | progress moved |
 |---|---|---|---|---|
-| 70% | 62.16 | 2.21% | 1.21% | 0.514 pt |
-| 95% | 100.73 | 1.90% | 0.90% | 0.196 pt |
+| 70% | 62.16 | 2.46% | 1.21% | 0.513 pt |
+| 95% | 100.73 | 2.15% | 0.90% | 0.196 pt |
 
-An immediate round trip on the curve at 70% costs **3.90%**, against the 5.64%
-the flat AMM model charges. The curve gets *deeper* as it fills — there is more
+An immediate round trip on the curve at 70% costs **4.37%**, against the 5.64%
+the flat AMM model charges — still cheaper, even at the higher live fee. The curve gets *deeper* as it fills — there is more
 SOL backing it at 95% than at 70% — so the same size moves it less near the
 top, which is the reverse of the usual intuition about a nearly-full curve.
 

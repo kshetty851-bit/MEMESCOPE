@@ -267,12 +267,12 @@ BACKTEST_PUMP_FEE_BPS = _int("LAB_GRADUATION_PUMP_FEE_BPS", 100)
 #: The fee inside the bonding-curve fill maths. Separate from the one above so
 #: the curve and the AMM can be priced differently, because they are.
 #:
-#: 100 bps is `fee_basis_points` in pump.fun's own program README. Their
-#: public fee page states the LIVE bonding-curve schedule as **1.25% total**
-#: (0.95% protocol + 0.30% creator), so the default here understates the real
-#: take by 25 bps a side. Left at 100 because that is the documented program
-#: constant; set it to 125 to price what a trader actually pays today.
-BACKTEST_CURVE_FEE_BPS = _int("LAB_GRADUATION_CURVE_FEE_BPS", 100)
+#: 125 bps: pump.fun's public fee page states the LIVE bonding-curve schedule
+#: as 1.25% total (0.95% protocol + 0.30% creator). Their program README still
+#: documents `fee_basis_points = 100`, which is the older constant — set this
+#: to 100 to reproduce that instead. The live number is the default because a
+#: backtest should charge what a trader actually pays.
+BACKTEST_CURVE_FEE_BPS = _int("LAB_GRADUATION_CURVE_FEE_BPS", 125)
 #: Assumed slippage per side. The brief's default.
 BACKTEST_SLIP_BPS = _int("LAB_GRADUATION_SLIP_BPS", 150)
 #: A flat priority fee per side, in quote. At the default notional this is

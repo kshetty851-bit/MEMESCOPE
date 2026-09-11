@@ -216,7 +216,7 @@ def test_the_backtester_ships_no_tuned_strategy() -> None:
     is a harness nobody audits."""
     from app.labs.graduation.backtest import BASELINES
 
-    assert set(BASELINES) == {"B0_open_timebox_5m", "B1_f90_then_open_5m"}
+    assert set(BASELINES) == {"B0_open_timebox_5m", "B1_f90_timebox_5m"}
 
 
 @pytest.mark.parametrize("path", MIGRATIONS, ids=lambda p: p.name)

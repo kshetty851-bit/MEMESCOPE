@@ -116,6 +116,27 @@ class Tick:
     source: str
 
 
+#: Where a fill would happen.
+CURVE_VENUE = "curve"
+POOL_VENUE = "pool"
+
+
+@dataclass(frozen=True, slots=True)
+class Quote:
+    """One moment a position could be closed at, and where.
+
+    `price` is the REALIZABLE price per token for the size actually held — on
+    the curve that means `curve_fill_sell` over that sample's reserves divided
+    by the token balance, not the curve's spot. A stop has to fire on what the
+    position could get out at, not on what the curve is quoting to nobody.
+    """
+
+    ts: datetime
+    price: Decimal
+    venue: str
+    reserves: tuple[Decimal, Decimal] | None = None
+
+
 @dataclass(frozen=True, slots=True)
 class Checkpoint:
     level: Decimal
@@ -536,24 +557,27 @@ class OpenThenTimeBox(Strategy):
 
 
 @dataclass(frozen=True, slots=True)
-class CheckpointThenOpen(Strategy):
-    """**B1** — buy on the curve at a checkpoint, sell N minutes after the open.
+class CheckpointThenTimeBox(Strategy):
+    """**B1** — buy on the curve at a checkpoint, hold N minutes, sell.
 
     Deliberately naive in the way that matters: it buys every token that
-    touches the level, including the ones that never graduate. Those exit at
-    `PRE_GRAD_DEAD_HAIRCUT`, which is what makes this an honest baseline rather
-    than a flattering one.
+    touches the level, including the ones that never graduate.
+
+    **The box runs from the ENTRY**, and is evaluated on the curve as well as
+    on the pool. It used to run from the pool open, because the harness could
+    only see pool ticks — so the position sat unmanaged for however long the
+    curve took, or until the 24-hour write-off. That was a property of the
+    harness, not a design, and it is gone; the old name said `then_open` and
+    no longer would have been true.
     """
 
     level: Decimal = Decimal(90)
-    minutes_after_open: int = 5
-    name: str = "B1_f90_then_open_5m"
+    minutes: int = 5
+    name: str = "B1_f90_timebox_5m"
 
     @property
     def exits(self) -> ExitPolicy:
-        # The time box is measured from the ENTRY, and the entry is pre-
-        # graduation, so the harness converts it: see `_exit_pre_grad`.
-        return ExitPolicy((TimeBox(self.minutes_after_open),))
+        return ExitPolicy((TimeBox(self.minutes),))
 
     def decision_times(self, replay: Replay) -> list[datetime]:
         checkpoint = replay.checkpoints.get(self.level)
@@ -571,7 +595,7 @@ class CheckpointThenOpen(Strategy):
 
 #: The two that ship. Neither is tuned, and neither is expected to pass.
 BASELINES: dict[str, Strategy] = {
-    s.name: s for s in (OpenThenTimeBox(), CheckpointThenOpen())
+    s.name: s for s in (OpenThenTimeBox(), CheckpointThenTimeBox())
 }
 
 
@@ -747,13 +771,29 @@ class Backtester:
             # there is no pool recorded either. Nothing here can fill this.
             return None
 
-        if alive:
-            closed = self._walk(replay.ticks, entry_at, opens[0].ts, entry_fill)
-            if closed is None:
-                return None
-            exit_at, exit_quote, reason = closed
-            proceeds = tokens * self._costs.sell_price(exit_quote)
-            exit_spot = exit_quote
+        # One stream: the curve while it lasts, then the pool. Rules evaluate
+        # over BOTH, from one clock that starts at the entry. Before this the
+        # curve phase was invisible to them, so a hard stop could not fire for
+        # up to `PRE_GRAD_DEAD_HOURS` no matter how far the curve fell.
+        quotes = self._pre_grad_quotes(replay, entry_at, tokens, deadline,
+                                       alive=alive)
+        closed = self._walk_quotes(quotes, entry_at, entry_fill)
+
+        if closed is not None:
+            quote, reason = closed
+            exit_at = quote.ts
+            if quote.venue == CURVE_VENUE and quote.reserves is not None:
+                proceeds = self._curve_proceeds(quote.reserves, tokens)
+                exit_spot = quote.reserves[0] / quote.reserves[1]
+            else:
+                proceeds = tokens * self._costs.sell_price(quote.price)
+                exit_spot = quote.price
+        elif alive:
+            # Ran out of pool ticks without a rule firing.
+            last = quotes[-1]
+            exit_at, reason = last.ts, "end_of_data"
+            proceeds = tokens * self._costs.sell_price(last.price)
+            exit_spot = last.price
         else:
             result.dead_curve_exits += 1
             exit_at, reason = deadline, "dead_curve"
@@ -767,10 +807,7 @@ class Backtester:
                         and sample.v_token is not None and sample.v_token > 0):
                     out_sol, out_tok = sample.v_quote, sample.v_token
                     break
-            raw = curve_fill_sell(out_sol, out_tok, tokens)
-            proceeds = max(Decimal(0),
-                           (raw - self._costs.priority_fee_quote)
-                           * (1 - self._haircut))
+            proceeds = self._curve_proceeds((out_sol, out_tok), tokens)
             exit_spot = out_sol / out_tok if out_tok > 0 else Decimal(0)
 
         exit_fill = proceeds / tokens if tokens > 0 else Decimal(0)
@@ -780,6 +817,59 @@ class Backtester:
                    else Decimal(0)),
             net=((proceeds / notional - 1) if notional > 0 else Decimal(0)),
             tokens=tokens, self_graduated=self_grad)
+
+    def _curve_proceeds(self, reserves: tuple[Decimal, Decimal],
+                        tokens: Decimal) -> Decimal:
+        """What selling `tokens` back into these reserves actually returns."""
+        raw = curve_fill_sell(reserves[0], reserves[1], tokens)
+        return max(Decimal(0),
+                   (raw - self._costs.priority_fee_quote) * (1 - self._haircut))
+
+    def _pre_grad_quotes(self, replay: Replay, entry_at: datetime,
+                         tokens: Decimal, deadline: datetime, *,
+                         alive: bool) -> list[Quote]:
+        """The curve samples the position lives through, then the pool ticks.
+
+        Curve prices are per-token REALIZABLE values for this size, so a
+        trailing stop on the curve trails what the position could get out at.
+        The curve phase stops where the pool begins: once a pool exists it is
+        the better venue and the curve account is emptied anyway.
+        """
+        pool = [t for t in replay.ticks if t.ts >= entry_at] if alive else []
+        horizon = pool[0].ts if pool else deadline
+        quotes = [
+            Quote(ts=sample.ts,
+                  price=(self._curve_proceeds(
+                      (sample.v_quote, sample.v_token), tokens) / tokens),
+                  venue=CURVE_VENUE,
+                  reserves=(sample.v_quote, sample.v_token))
+            for sample in replay.curve
+            if entry_at <= sample.ts < horizon
+            and sample.v_quote is not None and sample.v_token is not None
+            and sample.v_token > 0 and tokens > 0
+        ]
+        quotes += [Quote(ts=t.ts, price=t.price, venue=POOL_VENUE)
+                   for t in pool]
+        return quotes
+
+    def _walk_quotes(self, quotes: Sequence[Quote], clock_at: datetime,
+                     entry_fill: Decimal) -> tuple[Quote, str] | None:
+        """First rule to fire over the whole stream, or None if none does.
+
+        The peak is a RUNNING peak across BOTH venues — a trailing stop that
+        reset at migration would be reading a high it had already seen.
+        """
+        peak: Decimal | None = None
+        for quote in quotes:
+            peak = quote.price if peak is None else max(peak, quote.price)
+            state = ExitState(
+                clock_at=clock_at, entry_price=entry_fill,
+                tick=Tick(ts=quote.ts, price=quote.price, source=quote.venue),
+                peak=peak)
+            reason = self._strategy.exits.fires(state)
+            if reason is not None:
+                return quote, reason
+        return None
 
     def _walk(self, ticks: Sequence[Tick], after: datetime, clock_at: datetime,
               entry_fill: Decimal) -> tuple[datetime, Decimal, str] | None:
