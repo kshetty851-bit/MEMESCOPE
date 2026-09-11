@@ -181,6 +181,31 @@ services:
       resources:
         limits: { cpus: "1", memory: 768M }
 
+  # Graduation Lab recorder. Production image, no source mount, like every
+  # other long-lived worker here. Without this override the service would fall
+  # through to the base file's development target and bind-mount ./backend,
+  # which on this host is a git working tree — code would come from whatever
+  # branch happened to be checked out rather than from the built image.
+  graduation:
+    build:
+      context: ./backend
+      target: production
+    environment:
+      ENVIRONMENT: production
+      LOG_FORMAT: json
+      RUN_MIGRATIONS: "false"
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      BUILD_SHA: ${BUILD_SHA:-unknown}
+      # Only this lab's endpoint; see the base file for why it is not the
+      # shared SOLANA_RPC_URL.
+      LAB_GRADUATION_ENABLED: ${LAB_GRADUATION_ENABLED:-false}
+      SOLANA_RPC_URL: ${LAB_GRADUATION_RPC_URL:-${SOLANA_RPC_URL:-https://api.mainnet-beta.solana.com}}
+    volumes: !reset []
+    restart: on-failure
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 512M }
+
   enrichment-fast:
     build:
       context: ./backend
