@@ -58,7 +58,7 @@ PURE_MODULES = ("curve.py", "parse.py", "watchset.py", "backtest.py")
 #: Every module the package ships.
 MODULES = ("config.py", "curve.py", "parse.py", "watchset.py", "sources.py",
            "postgrad.py", "recorder.py", "features.py", "backtest.py",
-           "scheduler.py", "models.py", "__main__.py")
+           "scheduler.py", "models.py", "api.py", "__main__.py")
 
 
 def imported_modules(tree: ast.AST) -> set[str]:
@@ -201,6 +201,15 @@ def test_raw_sql_names_only_this_labs_tables(name: str) -> None:
     worth pinning."""
     mentioned = set(re.findall(r"\bgrad_[a-z_]+\b", (PACKAGE / name).read_text()))
     assert mentioned <= set(TABLES), mentioned - set(TABLES)
+
+
+def test_the_api_is_read_only() -> None:
+    """A status board must not be able to change what it reports. The router
+    has no non-GET route, and this fails if one is ever added."""
+    from app.labs.graduation.api import router
+
+    methods = {m for route in router.routes for m in route.methods}
+    assert methods == {"GET"}, methods
 
 
 def test_the_backtester_writes_nothing() -> None:

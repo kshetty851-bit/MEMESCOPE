@@ -105,6 +105,16 @@ export const NAV_GROUPS: NavGroup[] = [
         status: "ready",
         note: "Research simulation. Daily resistance, $1,000 paper book.",
       },
+      // pump.fun launches climbing the bonding curve. Watch only, like the
+      // NSE tracker below — no book, nothing ranked — so it is named for what
+      // it records rather than for a strategy it does not have.
+      {
+        href: "/graduation-lab",
+        label: "Graduation Lab",
+        icon: IconSpark,
+        status: "ready",
+        note: "Watch only. pump.fun curves into graduation; no book.",
+      },
       // Indian equities, not Solana, and the only destination here with no
       // book at all — it watches and records. Listed beside the labs because
       // that is where a reader looks for one, and named for the market so it

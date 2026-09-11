@@ -21,27 +21,28 @@ from app.api.v1.endpoints import (
     users,
     watchlists,
 )
+from app.compound import api as compound
+from app.copycontrol import api as copycontrol
+from app.depth import api as depth
+from app.dexlab import api as dexlab
 from app.exit_signals import api as intelligence
 from app.health import api as pipeline_health
 from app.hq_ops import api as hq_ops
 from app.karthik import api as karthik
 from app.karthik_ops import api as karthik_ops
+from app.lab import api as lab
 from app.labs.breakout import api as breakout_lab
+from app.labs.graduation import api as graduation_lab
 from app.labs.nse_breakout import api as nse_tracker
 from app.labs.rafiq import api as rafiq_lab
-from app.paper import api as paper
-from app.compound import api as compound
-from app.depth import api as depth
-from app.dexlab import api as dexlab
-from app.social import api as social
-from app.copycontrol import api as copycontrol
 from app.momentum import api as momentum
+from app.paper import api as paper
 from app.pumpfun import api as pumpfun
-from app.lab import api as lab
 from app.radar import api as radar
 from app.real_wallet import api as real_wallet
 from app.real_wallet_safety import api as real_wallet_safety
 from app.security import api as token_security
+from app.social import api as social
 
 api_router = APIRouter()
 api_router.include_router(health.router)
@@ -132,3 +133,6 @@ api_router.include_router(breakout_lab.router)
 # NSE Breakout Tracker. Indian equities, not Solana: its own `bt_*` tables and
 # its own flag. Read-only and additive.
 api_router.include_router(nse_tracker.router)
+# Graduation Lab. Read-only status board; every route answers
+# `running: false` without a query when LAB_GRADUATION_ENABLED is off.
+api_router.include_router(graduation_lab.router)
