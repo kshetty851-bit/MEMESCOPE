@@ -26,9 +26,9 @@ PACKAGE = pathlib.Path(__file__).resolve().parent.parent
 BACKEND = PACKAGE.parents[2]
 SOURCES = sorted(p for p in PACKAGE.rglob("*.py") if "tests" not in p.parts)
 MIGRATIONS = (
-    BACKEND / "alembic" / "versions" / "20260911_0066_graduation_lab.py",
-    BACKEND / "alembic" / "versions" / "20260911_0067_graduation_rpc_polling.py",
-    BACKEND / "alembic" / "versions" / "20260911_0068_graduation_features.py",
+    BACKEND / "alembic" / "versions" / "20260911_0069_graduation_lab.py",
+    BACKEND / "alembic" / "versions" / "20260911_0070_graduation_rpc_polling.py",
+    BACKEND / "alembic" / "versions" / "20260911_0071_graduation_features.py",
 )
 TABLES = ["grad_checkpoints", "grad_curve_samples", "grad_features",
           "grad_migrations", "grad_postgrad_samples", "grad_tokens",
@@ -185,10 +185,10 @@ def test_migrations_touch_only_this_lab(path: pathlib.Path) -> None:
 
 def test_each_migration_creates_the_tables_it_claims() -> None:
     by_migration = {
-        "0066": ["grad_checkpoints", "grad_migrations", "grad_tokens",
+        "0069": ["grad_checkpoints", "grad_migrations", "grad_tokens",
                  "grad_trades"],
-        "0067": ["grad_curve_samples", "grad_postgrad_samples"],
-        "0068": ["grad_features"],
+        "0070": ["grad_curve_samples", "grad_postgrad_samples"],
+        "0071": ["grad_features"],
     }
     for path, expected in zip(MIGRATIONS, by_migration.values(), strict=True):
         created = re.findall(r'op\.create_table\(\s*"([^"]+)"', path.read_text())

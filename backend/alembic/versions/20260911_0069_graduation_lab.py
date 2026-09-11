@@ -15,10 +15,11 @@ PumpPortal feed forced it:
   its trade amount in USDC, and a column called `sol_amount` holding USDC is a
   silent unit error waiting for whoever queries this in six months.
 
-Parented to 0065 on `karthik-hq`. Other branches carry their own 0066; the
-revision ids differ, so the chains do not collide — but on `main` this lab's
-migration needs renumbering and re-parenting, as the Rafiq lab's 0056 became
-0063 there.
+Parented to `0068_nse_bt_phase2`, the head of `main` when this lab landed.
+Authored as 0066 on `karthik-hq`, where 0065 was the Breakout trader; on `main`
+that same migration is 0066 and 0067/0068 are the NSE tracker, so this lab was
+renumbered 0069-0071 on the way across. The Rafiq lab's 0056 became 0063 the
+same way.
 """
 
 from __future__ import annotations
@@ -28,8 +29,8 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 # 32 characters at most: alembic_version.version_num is varchar(32).
-revision: str = "0066_graduation_lab"
-down_revision: str = "0065_breakout_trader"
+revision: str = "0069_graduation_lab"
+down_revision: str = "0068_nse_bt_phase2"
 branch_labels = None
 depends_on = None
 

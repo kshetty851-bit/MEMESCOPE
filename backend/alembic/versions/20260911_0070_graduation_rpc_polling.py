@@ -27,7 +27,7 @@ same reason. A reader must treat 0 and null there as "not collected", never as
 "none": the account reports reserves, not who moved them, so a poller cannot
 count buyers at any price.
 
-Parented to 0066 on `karthik-hq`.
+Parented to 0069.
 """
 
 from __future__ import annotations
@@ -37,8 +37,8 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 # 32 characters at most: alembic_version.version_num is varchar(32).
-revision: str = "0067_graduation_rpc"
-down_revision: str = "0066_graduation_lab"
+revision: str = "0070_graduation_rpc"
+down_revision: str = "0069_graduation_lab"
 branch_labels = None
 depends_on = None
 

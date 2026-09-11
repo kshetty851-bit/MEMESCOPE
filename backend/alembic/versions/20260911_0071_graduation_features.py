@@ -23,7 +23,7 @@ would condition the sample on success. Outcomes null together when
 post-graduation coverage falls under the floor, and
 `postgrad_minutes_covered` is written either way so a null always says why.
 
-Parented to 0067 on `karthik-hq`.
+Parented to 0070.
 """
 
 from __future__ import annotations
@@ -32,8 +32,8 @@ import sqlalchemy as sa
 from alembic import op
 
 # 32 characters at most: alembic_version.version_num is varchar(32).
-revision: str = "0068_graduation_features"
-down_revision: str = "0067_graduation_rpc"
+revision: str = "0071_graduation_features"
+down_revision: str = "0070_graduation_rpc"
 branch_labels = None
 depends_on = None
 

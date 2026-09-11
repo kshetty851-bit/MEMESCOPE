@@ -385,13 +385,40 @@ No API key is needed for anything.
 ### 3. Run the recorder
 
 A long-lived process holding a websocket and a poll loop, so **not** a Celery
-task:
+task. In compose it is its own service:
+
+```bash
+docker compose up -d graduation          # the recorder
+docker compose restart scheduler worker  # the prune + features beat tasks
+```
+
+or directly:
 
 ```bash
 python -m app.labs.graduation record
 ```
 
 SIGINT/SIGTERM flush the buffers and exit cleanly.
+
+> **The beat tasks are not the lab.** `scheduler` runs the prune and the
+> feature engine; neither of them records anything. Without the `graduation`
+> service the tables stay empty however the flag is set — there is no Celery
+> task that opens the websocket, because a task is the wrong shape for a
+> process that has to stay connected.
+
+The service is `restart: on-failure`, not `unless-stopped`: with
+`LAB_GRADUATION_ENABLED` unset the recorder logs one line and exits 0 on
+purpose, and `unless-stopped` would turn that into a restart loop against a
+lab nobody switched on.
+
+### Migration numbering
+
+The three migrations are `0069_graduation_lab`, `0070_graduation_rpc` and
+`0071_graduation_features`, chained off `0068_nse_bt_phase2`. They were
+authored as 0066-0068 on `karthik-hq`, where 0065 was the Breakout trader; on
+`main` those numbers belong to the Breakout trader and the NSE tracker, so the
+lab was renumbered on the way across. If you see 0066-0068 in an older
+checkout, that is the pre-port lineage.
 
 ### 4. Build the features
 
