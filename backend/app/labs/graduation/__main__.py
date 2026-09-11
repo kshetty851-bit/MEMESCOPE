@@ -4,6 +4,7 @@
     poll                    one curve poll pass over the current watch set
     features [--recompute]  build grad_features for graduates whose hour is up
     summary                 the distribution Phase 3 is judged against
+    backtest [--strategy N] replay the baselines, per-week table and gate
     prune                   one prune pass
     health                  recorder_health() as JSON
     curve --mint MINT       derive the PDA, read the account, decode it
@@ -24,12 +25,22 @@ import argparse
 import asyncio
 import contextlib
 import json
+import pathlib
 import signal
 import sys
 from decimal import Decimal, InvalidOperation
+from typing import Any
 
 from app.db.session import SessionFactory
 from app.labs.graduation import config, curve
+from app.labs.graduation.backtest import (
+    BASELINES,
+    Backtester,
+    coverage_line,
+    format_report,
+    load_replays,
+    trades_csv,
+)
 from app.labs.graduation.features import format_summary, summary
 from app.labs.graduation.recorder import GraduationRecorder, recorder_health
 from app.labs.graduation.scheduler import features_tick, prune_tick
@@ -58,6 +69,30 @@ async def _record() -> int:
 async def _summary() -> str:
     async with SessionFactory() as session:
         return format_summary(await summary(session))
+
+
+async def _backtest(names: list[str], limit: int) -> tuple[str, str]:
+    """Replay each named strategy over one load of the recorded series.
+
+    Returns the report and the CSV rather than writing the file: the caller is
+    synchronous, and a blocking disk write inside the event loop is the kind of
+    thing that is invisible here and not invisible under a scheduler.
+    """
+    async with SessionFactory() as session:
+        coverage = await coverage_line(session)
+        replays = await load_replays(session, limit=limit)
+    if not replays:
+        return "no recorded tokens to replay — run `record` first", ""
+
+    blocks: list[str] = []
+    rows: list[Any] = []
+    printed: dict[str, Any] | None = coverage
+    for name in names:
+        result = Backtester(BASELINES[name]).run(replays)
+        rows.extend(result.trades)
+        blocks.append(format_report(result, coverage=printed))
+        printed = None  # printed once, above everything
+    return "\n\n".join(blocks), trades_csv(rows)
 
 
 async def _health() -> dict:
@@ -116,6 +151,12 @@ def main(argv: list[str] | None = None) -> int:
     feats.add_argument("--recompute", action="store_true",
                        help="rewrite rows that already exist, not just new ones")
     sub.add_parser("summary", help="the return distribution, with its denominator")
+    back = sub.add_parser("backtest", help="replay the baselines")
+    back.add_argument("--strategy", action="append", choices=sorted(BASELINES),
+                      help="repeatable; default is every baseline")
+    back.add_argument("--csv", help="write the per-trade rows here")
+    back.add_argument("--limit", type=int, default=5000,
+                      help="maximum tokens to load")
     sub.add_parser("prune", help="one prune pass")
     sub.add_parser("health", help="recorder_health() as JSON")
     one = sub.add_parser("curve", help="derive, fetch and decode one mint's curve")
@@ -143,6 +184,14 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "summary":
         sys.stdout.write(asyncio.run(_summary()) + "\n")
+        return 0
+    if args.command == "backtest":
+        report, rows = asyncio.run(
+            _backtest(args.strategy or sorted(BASELINES), args.limit))
+        if args.csv and rows:
+            pathlib.Path(args.csv).write_text(rows)
+            report += f"\n\n{len(rows.splitlines()) - 1} trades -> {args.csv}"
+        sys.stdout.write(report + "\n")
         return 0
     if args.command == "prune":
         _emit(asyncio.run(prune_tick()))

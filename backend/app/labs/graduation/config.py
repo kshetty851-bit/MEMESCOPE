@@ -249,5 +249,51 @@ FEATURES_MAX_PER_RUN = _int("LAB_GRADUATION_FEATURES_MAX_PER_RUN", 500)
 #: How often the beat recomputes.
 FEATURES_INTERVAL_SECONDS = 10 * 60
 
+# --- the replay backtester ----------------------------------------------------
+#: Everything in the backtester is denominated in the QUOTE currency, because
+#: that is the only unit both sides of a pre-graduation trade exist in: the
+#: curve prices in SOL, and DexScreener's `price_native` is SOL too. Converting
+#: the curve leg to USD would need a SOL/USD rate this lab does not record, and
+#: taking one from the token's own post-graduation samples would be reading the
+#: future to price a decision made before it.
+#:
+#: The consequence, written down because it will surprise someone:
+#: `grad_features.return_*` is computed in USD and these are in SOL, so the two
+#: differ by however much SOL/USD moved during the hold. Minutes, so usually
+#: fractions of a percent — but not zero.
+BACKTEST_NOTIONAL_QUOTE = _dec("LAB_GRADUATION_NOTIONAL_QUOTE", "0.5")
+#: pump.fun / PumpSwap take, per side.
+BACKTEST_PUMP_FEE_BPS = _int("LAB_GRADUATION_PUMP_FEE_BPS", 100)
+#: Assumed slippage per side. The brief's default.
+BACKTEST_SLIP_BPS = _int("LAB_GRADUATION_SLIP_BPS", 150)
+#: A flat priority fee per side, in quote. At the default notional this is
+#: another 40 bps, which is why it is not ignorable on a 0.5 SOL position.
+BACKTEST_PRIORITY_FEE_QUOTE = _dec("LAB_GRADUATION_PRIORITY_FEE_QUOTE", "0.002")
+#: Concurrent positions. A signal arriving with every slot full is SKIPPED and
+#: counted, never queued: a backtest that queues signals is quietly assuming
+#: capital it did not have.
+BACKTEST_MAX_SLOTS = _int("LAB_GRADUATION_MAX_SLOTS", 10)
+
+#: A pre-graduation entry whose token never migrates is closed at its last
+#: observed curve price times (1 - this). Near-total loss by default, because a
+#: curve that stalls below 100% has no pool, no route out and no bid.
+#:
+#: NOTE: the pruner deletes a non-graduate's curve samples after
+#: `PRUNE_AFTER_HOURS` and keeps its checkpoints, so for an older dead token
+#: the "last observed price" IS the entry price and the loss is exactly this
+#: haircut. That is the intended reading, not an accident.
+PRE_GRAD_DEAD_HAIRCUT = _dec("LAB_GRADUATION_DEAD_HAIRCUT", "0.5")
+#: How long a pre-graduation entry waits for a migration before it is dead.
+PRE_GRAD_DEAD_HOURS = _int("LAB_GRADUATION_DEAD_HOURS", 24)
+
+# --- the gate, stated before any result is looked at --------------------------
+#: Out-of-sample profit factor. 1.5 and not 1.0: a strategy that merely clears
+#: break-even on one sample has not cleared the next sample's costs.
+GATE_MIN_PF = _dec("LAB_GRADUATION_GATE_MIN_PF", "1.5")
+GATE_MIN_TRADES = _int("LAB_GRADUATION_GATE_MIN_TRADES", 100)
+#: No one token may contribute more than this share of gross profit. Every
+#: no-edge finding on this platform so far has had one token carrying it.
+GATE_MAX_TOKEN_SHARE = _dec("LAB_GRADUATION_GATE_MAX_TOKEN_SHARE", "0.20")
+
 # --- health -------------------------------------------------------------------
 HEALTH_WINDOW_SECONDS = 600

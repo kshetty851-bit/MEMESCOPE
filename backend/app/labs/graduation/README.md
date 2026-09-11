@@ -4,8 +4,8 @@ Records pump.fun tokens approaching the top of the bonding curve, and their
 trading either side of migration, so that a graduation strategy can be
 backtested later against data that was captured live.
 
-It is a **recorder and a feature engine**. No backtester, no paper trader, no
-strategy, no frontend. Seven tables, three loops, two beat tasks.
+It is a **recorder, a feature engine and a replay harness**. No paper trader,
+no tuned strategy, no frontend. Seven tables, three loops, two beat tasks.
 
 **Everything it reads is free.** An earlier version of this lab bought
 per-trade data from PumpPortal's `subscribeTokenTrade` at 0.01 SOL per 10,000
@@ -440,7 +440,91 @@ nothing can systematically capture. It is the *ceiling* on any exit rule, not a
 result — treating it as achievable is how a strategy gets built on a number
 that was never available.
 
-### 6. Diagnostics
+### 6. Replay a strategy
+
+```bash
+python -m app.labs.graduation backtest --csv /tmp/trades.csv
+```
+
+Runs every baseline over the recorded series and prints, in order: the
+coverage line, the funnel, a per-ISO-week table, the walk-forward split, and
+the gate verdict.
+
+**Strategies are pluggable classes.** A `Strategy` names `decision_times` — the
+moments it wants to be asked — and returns an `EntrySignal` from a `View`. Exit
+rules are composable objects (`TimeBox`, `TrailingStop`, `HardStop`,
+`TakeProfit`) combined into an `ExitPolicy`, where the **first rule to fire on
+a tick wins** and the order is the caller's to state: a stop and a take-profit
+can both be true on one 60-second bar, and which one filled is not knowable
+from minute data.
+
+Two baselines ship, and **neither is tuned**:
+
+| | entry | exit |
+|---|---|---|
+| `B0_open_timebox_5m` | the pool open | +5 minutes |
+| `B1_f90_then_open_5m` | the 90% checkpoint, on the curve | pool open +5 minutes |
+
+They exist to be beaten. A harness that arrives with a winner already in it is
+a harness nobody audits — and if a baseline ever passes the gate on real data,
+the first suspicion should be the harness, not the edge.
+
+#### Causality is structural
+
+A strategy never receives the whole series. It receives a `View` the harness
+built from rows with `ts <= now`, and the slicing happens *before* the strategy
+is called — there is no future in the object to peek at.
+`test_backtest.py` drives a deliberately greedy strategy past a 9x spike and
+asserts it fills at the price it had actually reached.
+
+#### The pre-stated gate
+
+| criterion | threshold |
+|---|---|
+| out-of-sample profit factor | ≥ 1.5 |
+| trades | ≥ 100 |
+| max single token's share of gross profit | ≤ 20% |
+| every out-of-sample week | net positive |
+
+Thresholds live in `config.py`, so raising the bar after seeing a result is a
+visible edit rather than a quiet one. Out-of-sample is the **second half of the
+ISO weeks** — split on weeks and not on trade count, which would put part of a
+week on each side.
+
+#### Costs, and what they are denominated in
+
+Per side: 1% pump fee + `SLIP_BPS` (150) + a flat `PRIORITY_FEE_QUOTE`
+(0.002 SOL), which on the default 0.5 SOL position is another 40 bps.
+**290 bps a side, 5.8% round trip** — so a trade that closes at the price it
+opened at loses 5.64%.
+
+Everything is in the **quote currency (SOL)**, because that is the only unit
+both legs of a pre-graduation trade exist in: the curve prices in SOL, and
+DexScreener's `price_native` is SOL. Converting the curve leg to USD would need
+a SOL/USD rate this lab does not record — and taking one from the token's own
+post-graduation samples would be reading the future to price a decision made
+before it. The consequence: **these returns do not equal
+`grad_features.return_*`**, which are USD, and differ by however much SOL/USD
+moved during the hold.
+
+A backfilled GeckoTerminal candle carries no native price and so cannot be a
+fill point. Those tokens are counted in the funnel, never silently dropped.
+
+#### The population is not just graduates
+
+A pre-graduation strategy tested only on tokens that went on to graduate is
+conditioned on the outcome it is trying to predict. So the population is every
+token that **reached the entry checkpoint**, graduate or not, and one that
+never migrates within `PRE_GRAD_DEAD_HOURS` (24) is written off at
+`PRE_GRAD_DEAD_HAIRCUT` (0.5) of its last observed curve price — no pool, no
+route out, no bid.
+
+Note the interaction with pruning: a non-graduate's curve series is deleted
+after 24h and its checkpoints are kept, so for an older dead token the "last
+observed price" *is* the entry and the loss is exactly the haircut. That is the
+intended reading, not an accident.
+
+### 7. Diagnostics
 
 ```bash
 python -m app.labs.graduation curve --mint <MINT>
@@ -463,7 +547,7 @@ the fastest way to tell a bad endpoint from a bad mint from a changed layout:
 Also `health` (counters as JSON), `prune` (one pass), and
 `progress --tokens N`.
 
-### 7. The beat tasks
+### 8. The beat tasks
 
 Two: pruning every 15 minutes, feature building every 10.
 `app.labs.graduation.scheduler` is in `celery_app.py`'s `include` list and both
@@ -475,13 +559,13 @@ They are deliberately **not** chained: they touch disjoint rows — the pruner
 only ever deletes non-graduates, the feature engine only ever reads graduates —
 so ordering them would buy nothing and a failure in one would delay the other.
 
-### 8. Tests
+### 9. Tests
 
 ```bash
 python -m pytest app/labs/graduation/tests -q
 ```
 
-174 tests, no database and no network required.
+218 tests, no database and no network required.
 
 ---
 
@@ -547,7 +631,17 @@ aggregates and *all* of its checkpoints — "how many tokens reached 90% and die
 there" stays answerable for ever at five rows a token. Raise
 `PRUNE_AFTER_HOURS` before a study that needs the reserve series on failures.
 
-**10. Even with perfect data, the trade may not exist.** Measured on 738
+**10. The backtester's cost model understates a pre-graduation entry, and
+cannot fix it.** `SLIP_BPS` is a flat assumption. On the curve it is far too
+kind: median pre-graduation liquidity was **$4,112**, making a $100 buy ~2.5%
+of the pool, with measured Jupiter impact near 99% and **no sell route at all
+for 37% of tokens**. The reserve series records what the curve *quoted*, not
+what a taker would have been *filled* at, so nothing in the harness can correct
+this. A pre-graduation strategy that clears the gate has cleared a bar that is
+too low; the next step is a depth model, not a deployment. Post-graduation
+paths do not carry this caveat.
+
+**11. Even with perfect data, the trade may not exist.** Measured on 738
 graduates in 24h: only 94 had any pre-graduation liquidity reading, **median
 pre-grad liquidity $4,112**, and only 29 would clear a $100k floor. At that
 depth Jupiter routing showed ~99% buy impact and **37% of sells had no route**.

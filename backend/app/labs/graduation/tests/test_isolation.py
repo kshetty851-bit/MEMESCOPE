@@ -54,11 +54,11 @@ ALLOWED_PLATFORM = (
 )
 #: Nothing in these may know a network exists. `sources.py` is the only module
 #: in the package allowed to.
-PURE_MODULES = ("curve.py", "parse.py", "watchset.py")
+PURE_MODULES = ("curve.py", "parse.py", "watchset.py", "backtest.py")
 #: Every module the package ships.
 MODULES = ("config.py", "curve.py", "parse.py", "watchset.py", "sources.py",
-           "postgrad.py", "recorder.py", "features.py", "scheduler.py",
-           "models.py", "__main__.py")
+           "postgrad.py", "recorder.py", "features.py", "backtest.py",
+           "scheduler.py", "models.py", "__main__.py")
 
 
 def imported_modules(tree: ast.AST) -> set[str]:
@@ -195,12 +195,28 @@ def test_each_migration_creates_the_tables_it_claims() -> None:
         assert sorted(created) == expected, path.name
 
 
-def test_the_feature_engine_reads_and_never_writes_another_labs_table() -> None:
-    """`features.py` is the one module here that issues arbitrary SQL, so the
-    table names it mentions are worth pinning."""
-    body = (PACKAGE / "features.py").read_text()
-    mentioned = set(re.findall(r"\bgrad_[a-z_]+\b", body))
+@pytest.mark.parametrize("name", ("features.py", "backtest.py"))
+def test_raw_sql_names_only_this_labs_tables(name: str) -> None:
+    """These two issue arbitrary SQL, so the table names they mention are
+    worth pinning."""
+    mentioned = set(re.findall(r"\bgrad_[a-z_]+\b", (PACKAGE / name).read_text()))
     assert mentioned <= set(TABLES), mentioned - set(TABLES)
+
+
+def test_the_backtester_writes_nothing() -> None:
+    """It is a replay. A backtester that can INSERT is one that will, and the
+    recorded series is the only asset this lab has."""
+    body = (PACKAGE / "backtest.py").read_text()
+    for banned in ("insert(", "session.commit", "update(", "delete("):
+        assert banned not in body, banned
+
+
+def test_the_backtester_ships_no_tuned_strategy() -> None:
+    """B0 and B1 exist to be beaten. A harness that arrives with a winner in it
+    is a harness nobody audits."""
+    from app.labs.graduation.backtest import BASELINES
+
+    assert set(BASELINES) == {"B0_open_timebox_5m", "B1_f90_then_open_5m"}
 
 
 @pytest.mark.parametrize("path", MIGRATIONS, ids=lambda p: p.name)
