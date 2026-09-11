@@ -44,6 +44,13 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
 
+#: Nullable JSONB columns use `none_as_null` so a Python `None` becomes SQL
+#: NULL rather than the JSON scalar `null`. Without it `jsonb_array_length(
+#: errors)` fails on every run that had no errors — the app reads the column
+#: through `or []` and never notices, so the first person to hurt is whoever
+#: opens psql to ask a question of this table.
+_JSONB = JSONB(none_as_null=True)
+
 #: Solana tokens are quoted far below a cent — a memecoin at 6.3e-9 is
 #: ordinary. `Numeric(24, 8)` would round that to zero, so prices carry 18
 #: decimals. USD aggregates do not need them.
@@ -90,7 +97,7 @@ class BoUniverseMember(Base):
     #: The token's OTHER qualifying pools, shallower than `pool_address`:
     #: `[{"pool_address", "dex", "liquidity_usd", "volume_24h_usd"}]`. Kept
     #: for reference — nothing in this phase reads it.
-    alt_pools: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB)
+    alt_pools: Mapped[list[dict[str, Any]] | None] = mapped_column(_JSONB)
     #: Which source produced the winning pool, `geckoterminal` or `dexscreener`.
     source: Mapped[str] = mapped_column(String(16), nullable=False)
     first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -172,8 +179,8 @@ class BoRun(Base):
     )
     #: `{"geckoterminal": n, "dexscreener": n}` — requests actually sent,
     #: retries included.
-    requests: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
-    errors: Mapped[list[str] | None] = mapped_column(JSONB)
+    requests: Mapped[dict[str, Any] | None] = mapped_column(_JSONB)
+    errors: Mapped[list[str] | None] = mapped_column(_JSONB)
 
 
 # ============================================================================

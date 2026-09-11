@@ -308,6 +308,42 @@ def test_both_tasks_exist_and_only_the_tick_is_scheduled() -> None:
                 if e["task"] == breakout_candles_tick.name]
 
 
+def test_the_candle_deadline_stays_under_celery_s_soft_time_limit() -> None:
+    """**The bug that made the lab silently store nothing in production.**
+
+    The candle pass stops itself at `TICK_DEADLINE_SECONDS` and only THEN
+    writes its run row and commits. Celery kills the task at
+    `task_soft_time_limit`. With the deadline at 600 and the limit at 540 the
+    kill always won: the pass was terminated before it could commit, every
+    candle it had fetched was rolled back, and `task_acks_late` handed the
+    task straight back to be redone. It looked healthy standalone, where
+    nothing imposes a limit.
+
+    The margin is for the work that happens after the loop stops — the final
+    upsert, the prune, the run row, the commit.
+    """
+    from app.labs.breakout import config
+    from app.workers.celery_app import celery_app
+
+    soft = celery_app.conf.task_soft_time_limit
+    hard = celery_app.conf.task_time_limit
+    assert soft, "the platform must declare a soft limit for this to mean anything"
+    assert soft > config.TICK_DEADLINE_SECONDS, (
+        f"deadline {config.TICK_DEADLINE_SECONDS}s is not under the soft limit {soft}s")
+    assert soft - config.TICK_DEADLINE_SECONDS >= 60, (
+        "leave at least a minute to flush, prune, record and commit")
+    assert (hard or soft) > config.TICK_DEADLINE_SECONDS
+
+
+def test_the_tick_fits_inside_its_own_beat_period() -> None:
+    """Universe pass plus candle pass must finish before the next beat, or two
+    candle sweeps overlap and each spends its own rate-limit budget against
+    the same host."""
+    from app.labs.breakout import config
+
+    assert config.TICK_SECONDS > config.TICK_DEADLINE_SECONDS
+
+
 def test_the_beat_entry_runs_every_fifteen_minutes() -> None:
     from app.workers.celery_app import celery_app
 

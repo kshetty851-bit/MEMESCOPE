@@ -149,7 +149,23 @@ def call_spacing_seconds(calls_per_minute: int) -> float:
 #: reach 240. The DEADLINE is the candle pass's alone — the universe pass
 #: is bounded by having a fixed number of calls to make.
 MAX_CALLS_PER_TICK = 240
-TICK_DEADLINE_SECONDS = 600
+
+#: **This must stay under Celery's soft time limit, and by a real margin.**
+#:
+#: `app/workers/celery_app.py` sets `task_soft_time_limit=540` and
+#: `task_time_limit=600`. The deadline was 600, so on the first production
+#: tick the candle pass was killed by `SoftTimeLimitExceeded` at 540s —
+#: BEFORE it reached its own stopping point, which meant it never wrote its
+#: run row and never committed. Every candle it had fetched was rolled back,
+#: and because `task_acks_late=True` the task was redelivered to do it again.
+#: The lab looked perfectly healthy standalone, where nothing imposes a limit,
+#: and silently stored nothing under the worker.
+#:
+#: 420 leaves two full minutes for the final upsert, the prune, the run row
+#: and the commit — all of which happen AFTER the deadline stops the loop.
+#: A deadline at or above the soft limit is the bug; anything comfortably
+#: below it is not.
+TICK_DEADLINE_SECONDS = 420
 HTTP_TIMEOUT_SECONDS = 15.0
 #: **GeckoTerminal's free tier is far tighter than its documented 30/min, and
 #: it throttles rather than refusing outright.** Measured at three fixed
