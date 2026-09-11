@@ -45,6 +45,9 @@ celery_app = Celery(
         "app.labs.rafiq.scheduler",
         "app.labs.breakout.scheduler",
         "app.labs.nse_breakout.scheduler",
+        # Graduation Lab. Gated by LAB_GRADUATION_ENABLED (default off):
+        # with the flag down its beat tasks return before opening a session.
+        "app.labs.graduation.scheduler",
         "app.hq_ops.tasks",
     ],
 )
@@ -346,6 +349,26 @@ celery_app.conf.beat_schedule = {
     "breakout-lab-tick": {
         "task": "app.labs.breakout.scheduler.breakout_lab_tick",
         "schedule": crontab(minute="*/15"),
+    },
+    # Graduation Lab. Both gated by LAB_GRADUATION_ENABLED, which ships off:
+    # each task returns before it opens a session, so registering them here
+    # starts nothing.
+    #
+    # Declared HERE and not only by the lab's own `setdefault`. That
+    # self-registration runs when `app.labs.graduation.scheduler` is imported,
+    # which the WORKER does via `include` — but beat does not import those
+    # modules, so it never saw the schedule and neither task ever fired. The
+    # other labs declare their entries here for the same reason.
+    #
+    # Neither of these records anything: the recorder is the `graduation`
+    # compose service, a long-lived websocket and poll process.
+    "graduation-lab-prune": {
+        "task": "app.labs.graduation.scheduler.graduation_prune_tick",
+        "schedule": crontab(minute="*/15"),
+    },
+    "graduation-lab-features": {
+        "task": "app.labs.graduation.scheduler.graduation_features_tick",
+        "schedule": crontab(minute="*/10"),
     },
     # NSE Breakout Tracker. The exchange publishes the day's bhavcopy after
     # the close, so ingest runs at 13:00 UTC (18:30 IST) and retries hourly to

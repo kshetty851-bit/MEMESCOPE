@@ -20,9 +20,14 @@ class ExitRules:
     0.20 means a position that reached +50% exits if it surrenders a fifth of
     that gain. It only ever protects profit that already exists — it never
     widens `stop_mult`, and it never removes it.
+
+    `take_profit_mult` is None for a book with NO target — D2, and the second
+    leg of C2. That is a real rule, not a missing value: the position can then
+    only leave on the stop, the trail or the hold, which is the whole question
+    those two books ask. It is never read as "unlimited upside with no exit".
     """
 
-    take_profit_mult: Decimal
+    take_profit_mult: Decimal | None
     stop_mult: Decimal
     trailing_frac: Decimal | None
     max_hold: timedelta

@@ -12,7 +12,10 @@ export interface RafiqStrategy {
   code: string;
   name: string;
   lane: string;
-  take_profit_mult: string;
+  /** The one-line question this book exists to answer. */
+  question: string;
+  /** Null for a book with no take profit at all — D2, and C2's second leg. */
+  take_profit_mult: string | null;
   stop_mult: string;
   trailing_frac: string | null;
   max_hold_hours: string;
@@ -20,6 +23,8 @@ export interface RafiqStrategy {
   liquidity_derived_risk: boolean;
   daily_breaker: boolean;
   consensus_gate: boolean;
+  /** The v2 entry gate's thresholds, as published. */
+  gate: Record<string, string>;
   starting_equity: string;
   execution_cost_usd: string;
   cash: string;
@@ -30,6 +35,13 @@ export interface RafiqStrategy {
   closed_trades: number;
   wins: number;
   losses: number;
+  /** Realised P&L before fee and price impact — the gross-vs-net pair is what
+   *  separates "everything loses" from "this book is dying to friction". */
+  gross_pnl_ex_fees: string;
+  mean_pnl_per_trade_net: string | null;
+  mean_pnl_per_trade_gross: string | null;
+  entries_rejected_by_gate: number;
+  rejection_reason_counts: Record<string, number>;
   equity_curve: string[];
   activated_at: string;
 }
@@ -41,6 +53,8 @@ export interface RafiqStatus {
 }
 
 export interface RafiqPosition {
+  /** 1 for every book but C2, which opens two legs per token. */
+  leg: number;
   strategy_code: string;
   mint_address: string;
   symbol: string | null;
@@ -51,7 +65,8 @@ export interface RafiqPosition {
   cost_basis: string;
   stop_price: string;
   stop_pct: string;
-  target_price: string;
+  /** Null when this leg has no take profit. */
+  target_price: string | null;
   trailing_frac: string | null;
   max_hold_hours: string;
   peak_price: string;
@@ -62,6 +77,8 @@ export interface RafiqPosition {
 }
 
 export interface RafiqTrade {
+  /** 1 for every book but C2, which opens two legs per token. */
+  leg: number;
   strategy_code: string;
   mint_address: string;
   symbol: string | null;

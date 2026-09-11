@@ -1,0 +1,826 @@
+# Graduation Lab
+
+Records pump.fun tokens approaching the top of the bonding curve, and their
+trading either side of migration, so that a graduation strategy can be
+backtested later against data that was captured live.
+
+It is a **recorder, a feature engine and a replay harness**. No paper trader,
+no tuned strategy, no frontend. Seven tables, three loops, two beat tasks.
+
+**Everything it reads is free.** An earlier version of this lab bought
+per-trade data from PumpPortal's `subscribeTokenTrade` at 0.01 SOL per 10,000
+events — roughly 0.7 SOL a day. The chain reports the same curve state for the
+price of an RPC call, so that stream is gone. What went with it is per-trade
+detail; see [Known limitations](#known-limitations).
+
+## Why it exists
+
+The platform already has a bonding-curve collector that polls the chain over
+RPC. Measured on 2026-09-09, it cannot see this state: of **218 curves observed
+complete, 217 were never once observed incomplete**. The maximum incomplete
+progress ever caught was 79.23%, and the 80–100% band — the band that matters —
+was empty.
+
+That is not a limit of RPC polling. It is a limit of *that* collector, which
+piggybacks on the enrichment cycle and is dominated by brand-new tokens nobody
+has bought. A dedicated poll of a small, bounded watch set on a fifteen-second
+interval sees the approach; a whole-universe sweep on an enrichment cadence
+does not.
+
+---
+
+## Where each number comes from
+
+| source | what it gives | cost |
+|---|---|---|
+| PumpPortal `subscribeNewToken` | candidate mints | free |
+| PumpPortal `subscribeMigration` | graduation timestamps | free |
+| `getMultipleAccounts` on derived PDAs | reserves, progress, `complete` | one call per 100 tokens |
+| DexScreener `/tokens/v1` | post-graduation price, volume, buy/sell counts | free, 300 rpm |
+| GeckoTerminal minute OHLCV | backfill for a missed post-grad poll | free, 30 rpm |
+
+Three loops run in one process and fail separately: a rate-limited market API
+must not stop the curve poll, and a websocket reconnect must not pause either.
+
+---
+
+## The curve arithmetic
+
+pump.fun mints 1,000,000,000 tokens and puts **793,100,000** of them on the
+curve. The curve account is seeded with a virtual token reserve of
+**1,073,000,000** — the 793,100,000 for sale plus a 279,900,000 offset that
+makes the constant product quote a sane opening price before anyone has bought.
+
+```
+tokens_sold = 1_073_000_000 - virtual_token_reserves
+progress    = tokens_sold / 793_100_000
+```
+
+The curve is **complete when the virtual reserve reaches 279,900,000**. In the
+account these are raw base units (6 decimals), so the constants in `config` are
+those figures times 10⁶.
+
+### The 206,900,000 correction
+
+An earlier statement of this lab's brief said the curve completes when
+"~206.9M tokens remain of the 793.1M curve allocation". That is wrong, and it
+is wrong in the direction that matters.
+
+`206,900,000` is `1,000,000,000 − 793,100,000`: the supply **held back to seed
+the AMM pool at migration**. Those tokens are never in the curve account, so
+they can never be "remaining in the curve". Using them as the floor reads a
+*full* curve as **91.57%**, which would make the 95% and 100% checkpoints
+unreachable and understate every reading near the top by about eight points.
+`tests/test_curve.py` asserts the 91.57% misreading directly, so the mistake
+cannot come back quietly.
+
+### Verified, not assumed
+
+A live read of an untouched curve on 2026-09-11:
+
+```
+owner          6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P
+length         151 bytes
+discriminator  17b7f83760d8ac60      == the community decoder's signature
+v_token        1,073,000,000,000,000
+real_token       793,100,000,000,000
+v_sol             30,000,000,006      (30 SOL, 9 decimals)
+total          1,000,000,000,000,000
+```
+
+That response is saved verbatim as `tests/fixtures/curve_account.json` and the
+tests decode it.
+
+**On the account layout.** `app/services/curve/state.py` declares
+`ACCOUNT_SIZE = 49` and the live account is 151 bytes. That is not a bug: the
+check is a *minimum*, and the five reserves and the `complete` flag all live in
+the 49-byte prefix. The 102 bytes past it are **not decoded** — the account has
+grown since that module was written, and reading a field this lab has never
+verified would be inventing data.
+
+### Why the constants are environment variables
+
+They are **not compiled into the pump.fun program**. They live in a mutable
+on-chain global-config account (`4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf`)
+and pump.fun can change them. Override with `LAB_GRADUATION_V_TOKENS_0`,
+`LAB_GRADUATION_REAL_TOKENS_0`, `LAB_GRADUATION_V_SOL_0`.
+
+`tests/test_curve.py` also asserts that this module's progress agrees with
+`CurveState.progress` from the platform's own curve service, so a join between
+`grad_curve_samples` and the platform's curve snapshots is guaranteed to be
+comparing the same quantity.
+
+### USDC-denominated curves
+
+A USDC curve holds USDC in the reserve the SOL field normally carries. Progress
+is a pure function of the **token** side, so the same expression is correct in
+both denominations and there is no special case in the maths.
+
+What does differ is the label, and a column called `sol_amount` holding USDC is
+a silent unit error. So every quote column is named `..._quote` and
+`grad_tokens.quote_currency` says which it is. **The denomination is detected
+from the launch message**, not from the account: the bytes this lab decodes
+carry no denomination flag, and the launch message's field names
+(`vSolInBondingCurve` versus `vUsdcInBondingCurve`) are the only signal there
+is.
+
+---
+
+## The PDA, and why the feed's own answer is not used
+
+The curve account is the program-derived address of `["bonding-curve", mint]`
+under `6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P`. Deriving it locally is what
+makes the whole watch set one call per hundred tokens: there is no address
+lookup to do first.
+
+The launch feed also *reports* a `bondingCurveKey`, on 102 of 121 messages. It
+is recorded and **never used**, because it is not reliable. Measured on 15
+consecutive launches on 2026-09-11:
+
+* 12 agreed with the derived PDA;
+* **3 carried the same key — `BwWK17cbHxwWBKZkUYvzxLcNQ1YVyaFezduWbtm2de6s` —
+  for three unrelated mints**, and that address is a zero-length account owned
+  by the System Program, not a curve at all.
+
+A lab that polled the reported key would read nothing for those tokens for ever
+and never know why. `grad_tokens` stores both `bonding_curve_key` and the
+derived `curve_address` so the disagreement stays findable.
+
+---
+
+## Schema
+
+Six tables, all prefixed `grad_`. Created by
+`20260911_0066_graduation_lab.py` and extended by
+`20260911_0067_graduation_rpc_polling.py` (revision `0067_graduation_rpc`).
+Neither touches a table outside this lab; `tests/test_isolation.py` parses both
+and fails if one does.
+
+### `grad_tokens` — one row per mint ever watched
+
+Never deleted; this is what survives pruning. Carries identity (`mint`,
+`symbol`, `name`, `creator`, `launch_pool`, `quote_currency`), addresses
+(`bonding_curve_key` as reported, `curve_address` as derived and polled),
+lifecycle (`first_seen_at`, `tracked_at`, `migrated_at`, `unsubscribed_at`,
+`unsubscribe_reason`, `status`, `pruned_at`) and aggregates
+(`max_progress_pct`, `last_progress_pct`, `last_progress_change_at`,
+`first_sample_at`, `last_sample_at`, `sample_count`, `peak_market_cap_quote`).
+
+`max_progress_pct` is the **highest ever seen**, not the last: progress falls
+when somebody sells, and "did it reach 90" is the question this lab is for.
+
+`last_progress_change_at` moves only when a **reserve actually moves**, which
+is what silence is measured against — see [the watch set](#the-watch-set).
+
+### `grad_curve_samples` — the reserve series
+
+`ts`, `mint`, both token reserves and both quote reserves (in whole units),
+`quote_currency`, `token_total_supply`, `progress_pct`, `complete`,
+`market_cap_quote`.
+
+**Written only when a reserve moved.** Storing every poll of every watched
+token would be ~2.88 million rows a day, the great majority byte-identical to
+the row before — two thirds of live curves have never had a single token
+bought. An unchanged reserve says nothing the previous row and the poll cadence
+do not already say. Set `LAB_GRADUATION_SAMPLE_EVERY_POLL=true` to store all of
+them.
+
+> **Reading this table:** a gap between two rows is **not** a gap in coverage.
+> It means nothing happened. `grad_tokens.last_sample_at` says when the token
+> was last actually looked at, and `sample_count` how many times.
+
+### `grad_checkpoints` — one row per token per level
+
+Written once per `(mint, level_pct)` at **70 / 80 / 90 / 95 / 100** and never
+revised. Carries both reserves, `quote_currency`, `market_cap_quote`, and the
+`progress_pct` *actually observed*, which is `>= level_pct`: a token can cross
+three levels between two polls and owes three rows at once.
+
+A level that was **observed** carries its reserves. A level only **inferred**
+from a migration event carries null — a graduated curve zeroes every reserve,
+so there is nothing truthful to put there, and a zero would read as a
+measurement nobody made.
+
+### `grad_migrations` — the graduation event
+
+`mint`, `ts`, `pool`, `signature`, `progress_pct_before`,
+`seen_complete_on_chain`, and `raw` (JSONB). The feed is **global**: it reports
+graduations of tokens this lab never watched, and those are recorded too with a
+null `progress_pct_before`.
+
+`seen_complete_on_chain` says whether the chain's own `complete` flag beat the
+websocket to it. The two signals are independent and either may arrive first.
+
+### `grad_postgrad_samples` — the hour after
+
+`ts`, `mint`, `source`, `pair_address`, `dex_id`, `price_usd`, `price_native`,
+`liquidity_usd`, `fdv`, `volume_m5_usd`, `volume_h1_usd`, `volume_m1_usd`, and
+`txns_{m5,h1}_{buys,sells}`.
+
+`source` is `dexscreener` (a live poll) or `geckoterminal` (a backfilled
+candle). **They are not the same measurement and must never be averaged
+together without knowing which is which**: a candle carries a price and one
+minute's volume, and leaves the rolling windows and the buy/sell counts null,
+because it cannot know them.
+
+### `grad_features` — one row per graduated token
+
+Built by `features.py` from the five tables above. **Phase 3 reads this; nothing
+in this lab does.** Wide rather than long: four checkpoint blocks of nine
+columns, so an entry level is a column prefix rather than a join and a filter
+like "velocity at 90 above x, for tokens that also cleared 80" is one ordinary
+`WHERE`. There will never be a fifth block — 100 is graduation itself.
+
+**Features, at each of 70/80/90/95** (`f70_*` … `f95_*`):
+
+| column | meaning |
+|---|---|
+| `_at` | when the checkpoint was observed |
+| `_minutes_since_launch` | from `grad_tokens.first_seen_at` |
+| `_minutes_from_70` | from crossing 70%; 0 at the 70 block |
+| `_velocity_5m`, `_velocity_15m` | progress **points per minute**, both ends forward-filled |
+| `_changes_15m` | reserve changes in the preceding 15 minutes |
+| `_stall_count` | quiet runs of ≥ 5 min between crossing 70% and here |
+| `_market_cap_quote` | from the checkpoint row |
+| `_retrace_flag` | progress fell ≥ 5 points from a running peak between here and graduation |
+
+**Outcomes, relative to the pool open** — the first post-graduation price
+sample, and the earliest price anything could actually have been bought at:
+`open_at`, `open_price_usd`, `return_2m/5m/15m/30m/60m`, `max_return_60m`,
+`max_drawdown_60m`, `minutes_to_peak`, `migration_lag_min`,
+`postgrad_minutes_covered`, `sample_gap_flag`, `backfilled_samples`,
+`outcome_ok`.
+
+Returns are **fractions of the open**: `0.25` is +25%, `1.0` is a 2x.
+`max_drawdown_60m` is peak-to-trough from a *running* peak, not versus the
+open — a token that doubles and halves has drawn down 50%, and measuring
+against the open would call it flat.
+
+#### Three rules that decide what a null means
+
+* **A checkpoint never reached nulls its whole block, and the token is still
+  written.** "Reached 80 and died" is the row Phase 3 most needs; dropping it
+  would condition the sample on success.
+* **Outcomes null together when coverage is thin** — under
+  `OUTCOME_MIN_COVERAGE_MIN` (55) of the 60 minutes. A return computed over a
+  series with holes in it is a number with no error bar.
+  `postgrad_minutes_covered` is written either way, so a null always says why.
+* **A graduate this lab never watched still gets a row**: outcomes, and null
+  features (`launch_at IS NULL` marks them). Those are a useful control, not a
+  defect.
+
+Everything time-based reads a **forward-filled** curve, because
+`grad_curve_samples` is change-only. `progress_at(t)` is the progress of the
+last sample at or before `t`. There is one honest extrapolation: before the
+first sample but at or after the launch, progress reads **0** — a pump.fun
+curve holds its full allocation the instant it is created, which is the
+protocol and not a guess. Before the launch it reads null.
+
+### `grad_trades` — empty, and kept on purpose
+
+Per-trade detail came from the metered stream. A Phase 2 backfill may fill this
+for **graduates only** — a few hundred tokens a day rather than the ~36,000
+that launch — from transaction history. The table stays so that work needs no
+migration.
+
+---
+
+## The watch set
+
+A candidate enters from `subscribeNewToken`; that is the only door. A token at
+or above `TRACK_PROGRESS_PCT` (70%) is **tracked**, and tracked tokens are
+treated differently:
+
+| rule | applies to | window |
+|---|---|---|
+| `silent` | below 70% | no reserve movement for `SILENT_MIN` (30 min) |
+| `evicted` | below 70% | the set is full; lowest progress goes first |
+| `post_migration` | migrated | `POST_MIGRATION_SECONDS` (60 min) |
+| `stale` | **anything** | `STALE_HOURS` (24) since first seen |
+
+A tracked token is never evicted for silence and never evicted for room. A
+curve parked at 94% for three hours is not a mistake to clean up; it is the
+observation. `stale` is the only backstop, so the set cannot silt up.
+
+**Silence is measured on the reserves, not the clock.** A poll happens whether
+or not anybody traded. Measuring from the last *poll* would make every dead
+token look permanently alive and the set would fill with curves nobody has ever
+bought.
+
+`bonk` launches are refused outright: a bonk curve has no PDA under the
+pump.fun program at all, so polling one would read a nonexistent account every
+fifteen seconds for ever.
+
+---
+
+## RPC rate math
+
+At the defaults — `MAX_WATCH_SET=500`, `POLL_INTERVAL_S=15`,
+`getMultipleAccounts` capped at 100 addresses:
+
+```
+calls per poll     ceil(500 / 100)      =  5
+polls per minute   60 / 15              =  4
+calls per minute   5 x 4                = 20     (0.33 / second)
+```
+
+Against the public endpoint's published allowance of 100 requests per 10
+seconds (600/minute), that is **about 3% of budget**. The token bucket
+(`CallBudget`, continuous refill) is set to `RPC_CALLS_PER_MINUTE=100` — five
+times what the poller needs and a sixth of what the node allows, so a bug
+cannot turn into a ban.
+
+Scaling is linear and easy to reason about: doubling the watch set doubles the
+calls; halving the interval doubles them.
+
+| watch set | interval | calls/min | % of public allowance |
+|---|---|---|---|
+| 500 | 15s | 20 | 3% |
+| 1,000 | 15s | 40 | 7% |
+| 500 | 5s | 60 | 10% |
+| 2,000 | 5s | 240 | 40% |
+
+**The public endpoint is a default, not a recommendation.** It is shared with
+the whole world, rate-limited per IP, and this platform's own
+`services/rpc/registry.py` refuses to let research collectors near it — written
+after one quietly leaned on it and produced "sixty failure rows and one datum".
+Point `SOLANA_RPC_URL` at a real endpoint before running near `MAX_WATCH_SET`.
+
+**Market APIs.** Roughly 31 tokens graduate an hour (738 in 24h, measured), so
+a 60-minute window holds ~31 open at once. Batched 30 mints to a call, that is
+**2 DexScreener calls a minute** against an allowance of 300. GeckoTerminal is
+only touched to backfill a gap, capped at 25/minute against a free tier of 30.
+Both honour `Retry-After` as a *floor*, never a ceiling — GeckoTerminal answers
+a 429 with `Retry-After: 0` and then refuses for about thirty-five seconds.
+
+**Row volume** depends entirely on how many curves move, which is the one
+number that has not been measured. The ceiling is every token moving every poll
+(~2.88M rows/day); the floor is nothing moving (~500 rows/day, one per token on
+first sight). Measure it on the first day and set `PRUNE_AFTER_HOURS`
+accordingly.
+
+---
+
+## How to run
+
+### 1. Migrate
+
+```bash
+cd backend && alembic upgrade head
+```
+
+### 2. Configure
+
+```bash
+LAB_GRADUATION_ENABLED=true
+SOLANA_RPC_URL=https://your-endpoint    # optional; defaults to public mainnet
+```
+
+Optional: `LAB_GRADUATION_POLL_INTERVAL_S` (15), `LAB_GRADUATION_MAX_WATCH_SET`
+(500), `LAB_GRADUATION_SILENT_MIN` (30), `LAB_GRADUATION_STALE_HOURS` (24),
+`LAB_GRADUATION_TRACK_PCT` (70), `LAB_GRADUATION_RPC_CALLS_PER_MINUTE` (100),
+`LAB_GRADUATION_SAMPLE_EVERY_POLL` (off), and the three curve constants.
+No API key is needed for anything.
+
+### 3. Run the recorder
+
+A long-lived process holding a websocket and a poll loop, so **not** a Celery
+task. In compose it is its own service:
+
+```bash
+docker compose up -d graduation          # the recorder
+docker compose restart scheduler worker  # the prune + features beat tasks
+```
+
+or directly:
+
+```bash
+python -m app.labs.graduation record
+```
+
+SIGINT/SIGTERM flush the buffers and exit cleanly.
+
+> **The beat tasks are not the lab.** `scheduler` runs the prune and the
+> feature engine; neither of them records anything. Without the `graduation`
+> service the tables stay empty however the flag is set — there is no Celery
+> task that opens the websocket, because a task is the wrong shape for a
+> process that has to stay connected.
+
+The service is `restart: on-failure`, not `unless-stopped`: with
+`LAB_GRADUATION_ENABLED` unset the recorder logs one line and exits 0 on
+purpose, and `unless-stopped` would turn that into a restart loop against a
+lab nobody switched on.
+
+### Migration numbering
+
+The three migrations are `0069_graduation_lab`, `0070_graduation_rpc` and
+`0071_graduation_features`, chained off `0068_nse_bt_phase2`. They were
+authored as 0066-0068 on `karthik-hq`, where 0065 was the Breakout trader; on
+`main` those numbers belong to the Breakout trader and the NSE tracker, so the
+lab was renumbered on the way across. If you see 0066-0068 in an older
+checkout, that is the pre-port lineage.
+
+### 4. Build the features
+
+```bash
+python -m app.labs.graduation features
+```
+
+Processes graduates whose 60-minute outcome window has closed (plus 5 minutes
+of slack), skipping any that already have a row. `--recompute` rewrites
+existing rows — use it after a post-graduation backfill has filled gaps that
+made outcomes null. It also runs on Celery beat every 10 minutes.
+
+### 5. The summary Phase 3 is judged against
+
+```bash
+python -m app.labs.graduation summary
+```
+
+```
+coverage
+--------
+  graduates                5
+  with a usable outcome    4
+  dropped, thin coverage   1
+  had at least one gap     1
+  never watched pre-grad   1
+  reached 70/80/90/95      4/4/3/2
+  mean minutes covered     54.0
+
+metric               n      mean       p10       p25    median       p75  ...
+return_5m            4    0.3875    0.1850    0.3875    0.5000    0.5000  ...
+max_return_60m       4    1.2725    0.8630    1.2725    1.5000    1.5000  ...
+```
+
+It ships with its own denominator on purpose. A percentile table over the rows
+that happened to have clean coverage, with no count of the rows that did not,
+is the shape of every fake edge this platform has already found — so
+`dropped, thin coverage` and `never watched pre-grad` are printed above the
+distribution, not below it.
+
+`features.SUMMARY_SQL` and `features.COVERAGE_SQL` are plain strings meant to
+be pasted into `psql`. A query nobody can paste is a query nobody checks.
+
+**Read `max_return_60m` carefully.** It is the best price in the window, which
+nothing can systematically capture. It is the *ceiling* on any exit rule, not a
+result — treating it as achievable is how a strategy gets built on a number
+that was never available.
+
+### 6. Replay a strategy
+
+```bash
+python -m app.labs.graduation backtest --csv /tmp/trades.csv
+```
+
+Runs every baseline over the recorded series and prints, in order: the
+coverage line, the funnel, a per-ISO-week table, the walk-forward split, and
+the gate verdict.
+
+**Strategies are pluggable classes.** A `Strategy` names `decision_times` — the
+moments it wants to be asked — and returns an `EntrySignal` from a `View`. Exit
+rules are composable objects (`TimeBox`, `TrailingStop`, `HardStop`,
+`TakeProfit`) combined into an `ExitPolicy`, where the **first rule to fire on
+a tick wins** and the order is the caller's to state: a stop and a take-profit
+can both be true on one 60-second bar, and which one filled is not knowable
+from minute data.
+
+Two baselines ship, and **neither is tuned**:
+
+| | entry | exit |
+|---|---|---|
+| `B0_open_timebox_5m` | the pool open | +5 minutes |
+| `B1_f90_timebox_5m` | the 90% checkpoint, on the curve | +5 minutes, on whichever venue exists |
+
+They exist to be beaten. A harness that arrives with a winner already in it is
+a harness nobody audits — and if a baseline ever passes the gate on real data,
+the first suspicion should be the harness, not the edge.
+
+#### Exits are evaluated on the curve as well as the pool
+
+A pre-graduation position is walked over **one stream**: its curve samples
+while the curve lasts, then the pool ticks. Curve prices in that stream are the
+*realizable* per-token value for the size actually held —
+`curve_fill_sell(reserves, tokens) / tokens` — not the curve's spot, because a
+stop has to fire on what the position could get out at.
+
+The exit clock runs from the **entry**, and the trailing peak is one running
+peak across both venues (resetting it at migration would be a stop reading a
+high it had already seen).
+
+This was not true before: the loop saw only post-graduation samples, so a hard
+stop could not fire until a pool existed — on a token that never graduates,
+never. Positions sat unmanaged for up to `PRE_GRAD_DEAD_HOURS` however far the
+curve fell. On the synthetic seed, turning the curve phase on cut
+`dead_curve` exits from **21 to 11** with the shipped 5-minute box: ten
+positions now exit on a rule instead of rotting to the deadline.
+
+**Box length decides whether a dying position is managed at all.** With a
+30-minute box none of those 21 are caught, because those tokens have no curve
+sample 30 minutes past the f90 crossing — the curve stops updating when nobody
+trades. Match the box to the sample density, not to intuition.
+
+#### Causality is structural
+
+A strategy never receives the whole series. It receives a `View` the harness
+built from rows with `ts <= now`, and the slicing happens *before* the strategy
+is called — there is no future in the object to peek at.
+`test_backtest.py` drives a deliberately greedy strategy past a 9x spike and
+asserts it fills at the price it had actually reached.
+
+#### The pre-stated gate
+
+| criterion | threshold |
+|---|---|
+| out-of-sample profit factor | ≥ 1.5 |
+| trades | ≥ 100 |
+| max single token's share of gross profit | ≤ 20% |
+| every out-of-sample week | net positive |
+
+Thresholds live in `config.py`, so raising the bar after seeing a result is a
+visible edit rather than a quiet one. Out-of-sample is the **second half of the
+ISO weeks** — split on weeks and not on trade count, which would put part of a
+week on each side.
+
+#### Costs: exact on the curve, assumed on the AMM
+
+The two venues are priced differently because they *are* different.
+
+**Bonding-curve legs are exact.** A fill is the constant product over the
+checkpoint's own reserves — the real fee and the real price impact of this size
+at this point on this curve, with no slippage assumption anywhere:
+
+```
+buy:   to_curve   = sol_in * 10000 / (10000 + fee_bps)
+       tokens_out = to_curve * v_tok / (v_sol + to_curve)
+sell:  raw        = tokens_in * v_sol / (v_tok + tokens_in)
+       sol_out    = raw * (10000 - fee_bps) / 10000
+```
+
+**AMM legs keep the assumption**, because nothing here records pool depth:
+1% fee + `SLIP_BPS` (150) + a flat `PRIORITY_FEE_QUOTE` (0.002 SOL, another
+40 bps on a 0.5 SOL position) = **290 bps a side, 5.8% round trip**.
+
+##### Where the fee sits — verified, because the two sides differ
+
+The fee is taken from the **SOL** on both sides, confirming the premise. But
+the arithmetic is *not* symmetric, and using one form for both is wrong:
+
+| | how the fee applies | form |
+|---|---|---|
+| buy | a **markup** on the curve cost | `sol_in / (1 + fee)` reaches the curve |
+| sell | a **deduction** from the proceeds | `raw × (1 − fee)` reaches you |
+
+Verified against pump.fun's program README (`fee_basis_points` = 100 bps,
+`creator_fee` = 0 and unused) and the community decoder, whose buy path is
+`inputAmount = ((solAmount − 1) × 10000) / (feeBps + 10000)` — a divide, not
+`× (1 − fee)`. The naive form differs by just under a basis point at 100 bps,
+always in the trader's favour. `services/curve/state.py` was no help here: it
+decodes reserves and knows nothing about fees.
+
+**The default is the live take, not the program constant.**
+`BACKTEST_CURVE_FEE_BPS` defaults to **125** — pump.fun's public fee page puts
+the current bonding-curve fee at 1.25% total (0.95% protocol + 0.30% creator).
+Their program README still documents `fee_basis_points = 100`; set it to 100 to
+reproduce that.
+
+##### What the exact model actually changed
+
+It made pre-graduation entries **cheaper**, not dearer — the opposite of what
+this README previously claimed. For the default 0.5 SOL position:
+
+| level | v_sol | all-in premium over spot | of which impact | progress moved |
+|---|---|---|---|---|
+| 70% | 62.16 | 2.46% | 1.21% | 0.513 pt |
+| 95% | 100.73 | 2.15% | 0.90% | 0.196 pt |
+
+An immediate round trip on the curve at 70% costs **4.37%**, against the 5.64%
+the flat AMM model charges — still cheaper, even at the higher live fee. The curve gets *deeper* as it fills — there is more
+SOL backing it at 95% than at 70% — so the same size moves it less near the
+top, which is the reverse of the usual intuition about a nearly-full curve.
+
+A $100 buy does **not** move a 95% curve by a point: it moves it 0.196 pt, and
+it takes about 2.6 SOL (~$520) to shift a point from there. Roughly 14.5 SOL
+completes the curve outright from 95%; a buy that large is flagged
+`self_graduated` and exited on the pool, never priced on a curve it just ended.
+
+##### Denomination
+
+Everything is in the **quote currency (SOL)**, because that is the only unit
+both legs of a pre-graduation trade exist in: the curve prices in SOL, and
+DexScreener's `price_native` is SOL. Converting the curve leg to USD would need
+a SOL/USD rate this lab does not record — and taking one from the token's own
+post-graduation samples would be reading the future to price a decision made
+before it. The consequence: **these returns do not equal
+`grad_features.return_*`**, which are USD, and differ by however much SOL/USD
+moved during the hold.
+
+A backfilled GeckoTerminal candle carries no native price and so cannot be a
+fill point. Those tokens are counted in the funnel, never silently dropped.
+
+#### The population is not just graduates
+
+A pre-graduation strategy tested only on tokens that went on to graduate is
+conditioned on the outcome it is trying to predict. So the population is every
+token that **reached the entry checkpoint**, graduate or not, and one that
+never migrates within `PRE_GRAD_DEAD_HOURS` (24) is closed by **selling its
+actual token balance back into the last observed reserves** — arithmetic, not a
+guess.
+
+`PRE_GRAD_DEAD_HAIRCUT` survives as an *optional extra*, now defaulting to
+**0**. It used to be 0.5 and used to be the whole model. It remains for the one
+thing arithmetic cannot see: that a stalled curve may have no bid at any size,
+and the sell may simply not land.
+
+> **This exit dominates any pre-graduation result, so check it before trusting
+> one.** On the synthetic seed used to exercise the harness, every dead curve's
+> last sample sat at its high — no decay at all — so all 21 dead exits lost the
+> same 3.83%, the cost of a round trip against an unmoved curve. Repricing just
+> those 21 moved B1's profit factor from 4.13 to 86.45. The arithmetic is
+> right; the sample was silent on the thing that actually kills you. On real
+> data, confirm curves in the sample do fall before reading anything into a PF.
+
+Note the interaction with pruning: a non-graduate's curve series is deleted
+after 24h and its checkpoints are kept, so for an older dead token the last
+observed state *is* the entry, and the exit is a flat round trip.
+
+### 7. Diagnostics
+
+```bash
+python -m app.labs.graduation curve --mint <MINT>
+```
+
+Does the whole chain for one mint — derive, fetch, decode, compute — which is
+the fastest way to tell a bad endpoint from a bad mint from a changed layout:
+
+```json
+{
+  "mint": "Bjsxb2QErbB4rhpSRsUgtNBPPri24R3AK58tQwjvpump",
+  "curve_address": "3XWT7fTxe9xkKsGYjNZ3AVoaomUVpxw2hDyeo3Rupwfy",
+  "progress_pct": "0.000",
+  "complete": false,
+  "real_token_reserves": "793100000",
+  "market_cap_quote": "27.958993482"
+}
+```
+
+Also `health` (counters as JSON), `prune` (one pass), and
+`progress --tokens N`.
+
+### 8. The beat tasks
+
+Two: pruning every 15 minutes, feature building every 10.
+`app.labs.graduation.scheduler` is in `celery_app.py`'s `include` list and both
+schedules register themselves with `setdefault`, so an operator who prefers an
+explicit entry wins and there is never a duplicate. With the flag down both
+return before opening a session.
+
+They are deliberately **not** chained: they touch disjoint rows — the pruner
+only ever deletes non-graduates, the feature engine only ever reads graduates —
+so ordering them would buy nothing and a failure in one would delay the other.
+
+### 9. Tests
+
+```bash
+python -m pytest app/labs/graduation/tests -q
+```
+
+218 tests, no database and no network required.
+
+---
+
+## Known limitations
+
+**0. Between two polls, the path is not recorded — and features inherit that.**
+Fifteen seconds is long enough for a curve to go from 68% to 94%. Checkpoints
+handle it correctly (all three levels written from the one reading that
+revealed them), but a checkpoint's timestamp is *when it was seen*, not when it
+happened, so `minutes_from_70` and both velocities carry up to one poll
+interval of slack. A strategy tuned to differences finer than that is tuned to
+noise.
+
+**1. There is no per-trade detail, and there cannot be.** The curve account
+reports *reserves*, not who moved them. Buyer counts, unique traders and
+holder concentration are not computable from a poller at any price. Those
+columns are kept for a Phase 2 graduate-only backfill and are **0 or null
+today**: a reader must treat that as "not collected", never as "none". This is
+the real cost of coming off the metered stream, and it is the one thing that
+got worse.
+
+**2. Between two polls, nothing is known.** Fifteen seconds is long enough for
+a token to go from 68% to 94%, and the intermediate path is simply not
+recorded. Checkpoints handle this correctly — all three levels are written from
+the one reading that revealed them — but a checkpoint's timestamp is *when it
+was seen*, not when it happened, and the two can differ by up to a poll
+interval. Nothing here can reconstruct intra-poll ordering.
+
+**3. Every timestamp is observation time.** No PumpPortal message carries a
+timestamp or a slot, and `getMultipleAccounts` at this encoding carries no slot
+either. So `ts` is when the process read the response.
+
+**4. A gap in `grad_curve_samples` is not a gap in coverage.** It means nothing
+moved. Use `grad_tokens.last_sample_at` and `sample_count` to tell "not
+looked at" from "looked at, unchanged".
+
+**5. The migration payload shape is unverified.** PumpPortal publishes no
+example for `subscribeMigration`. The field names here are the documented ones;
+`unexpected_fields()` reports anything new on the first live run — logged once
+and surfaced in `health` — rather than letting a renamed field become a column
+of nulls discovered months later.
+
+**6. A token whose first DexScreener poll fails can never be backfilled.**
+GeckoTerminal addresses a *pool*, and the pool address is only ever learned
+from a DexScreener response. That gap is permanent, and `backfill_impossible`
+counts it rather than hiding it.
+
+**7. Coverage is bounded by `MAX_WATCH_SET`.** At a high enough launch rate the
+least-progressed candidate is evicted, so some tokens are never followed.
+`unsubscribe_reason = 'evicted'` marks them, and any analysis of "what fraction
+of launches reach 70%" must exclude them or it is measuring the cap. The same
+caution applies to `grad_features`: it holds graduates, so **any rate computed
+from it alone is conditioned on graduating**.
+
+**8. There is no backfill and no history.** A token is only known if this
+process was running when it launched, and a restart loses the in-memory state.
+**Any study over this data is survivorship-affected** in the same way as the
+Phase 9.5 historical dataset: it records what was watched, not what existed.
+
+**9. Pruning is lossy on purpose.** After 24 hours a token that never migrated
+loses every `grad_curve_samples` row. What survives is the `grad_tokens`
+aggregates and *all* of its checkpoints — "how many tokens reached 90% and died
+there" stays answerable for ever at five rows a token. Raise
+`PRUNE_AFTER_HOURS` before a study that needs the reserve series on failures.
+
+**10. `SLIP_BPS` is an assumption, and it now applies to the AMM legs only.**
+Curve fills are exact. Post-graduation fills are not: nothing here records pool
+depth, so 150 bps is a guess, and the measured evidence says it is a kind one —
+median pre-graduation liquidity was **$4,112**, and Jupiter routing at that
+depth showed impact near 99% with **no sell route at all for 37% of tokens**.
+A pool minutes old is thin in a way a flat 150 bps does not capture. That is
+where a depth model is still needed.
+
+An earlier version of this README made the same claim about the *curve* legs.
+That was wrong: it confused DexScreener's reported pool liquidity with curve
+depth. A curve at 70% has ~62 SOL of virtual reserves behind it and a $100 buy
+moves it 1.2%.
+
+**11. THE QUOTE SIDE OF THE CURVE IS NOT TRUSTWORTHY. Observed in production
+2026-09-11, unresolved.** On the first live run the token side decoded
+perfectly — `real_token_reserves` equals `v_token_reserves − 279,900,000`
+exactly, on every sample, and moves monotonically — but the SOL side does not
+behave:
+
+* `v_quote_reserves` for one token read 51 → 114 → 50 → 308 → 61 → 8.65 SOL
+  across ten polls while `v_token_reserves` moved 1.3%;
+* it moves **down** as tokens are sold, which is the wrong direction;
+* a fresh read of that account gave `virtual_sol_reserves` = 3.096 SOL against
+  a seeded 30, and `real_sol_reserves` ≈ 0 on a curve that had demonstrably
+  sold 6.3M tokens;
+* the implied constant product `v_sol × v_token` ranges from 0.0006× to 33× the
+  seeded value across 537 samples, and **drifts within a single token** — 
+  impossible for a genuine constant product. The tokens where it is stable at
+  exactly 1.0000 are the untouched ones, where nothing has moved at all.
+
+The original layout verification was done against an **untouched** curve, where
+every field happens to equal its seeded constant — so it could not have caught
+this. What follows:
+
+* `progress_pct`, the checkpoints and `grad_curve_samples`' token columns are
+  sound, and they are what the lab exists to record.
+* `v_quote_reserves`, `real_quote_reserves` and `market_cap_quote` should be
+  treated as **unreliable** until the layout is re-verified against a curve
+  that has actually traded.
+* **This reaches the backtester.** `curve_fill_buy` / `curve_fill_sell` price a
+  pre-graduation leg from `v_sol`, so pre-graduation fills on real data inherit
+  the problem. The synthetic tests are unaffected — they construct reserves
+  from the constants — which is exactly why they passed.
+
+**12. Even with perfect data, the trade may not exist.** Measured on 738
+graduates in 24h: only 94 had any pre-graduation liquidity reading, **median
+pre-grad liquidity $4,112**, and only 29 would clear a $100k floor. At that
+depth Jupiter routing showed ~99% buy impact and **37% of sells had no route**.
+This lab is built to *measure* the approach to graduation. Nothing here asserts
+it is tradeable, and the liquidity evidence so far says the pre-graduation side
+is not.
+
+---
+
+## Isolation
+
+Its own `grad_*` tables, its own flag, its own config module, its own tests.
+It imports no paper wallet, no real wallet, no radar and no sibling lab.
+
+It **does** import four platform modules, deliberately and by name:
+`app.services.curve.pda` (PDA derivation), `app.services.curve.state` (the
+mainnet-verified account decoder), `app.services.rpc.standard` (plain JSON-RPC)
+and `app.services.market.providers.rate_budget` (the token bucket). All are
+pure or transport; none trades, scores or holds a wallet. Re-implementing the
+curve layout inside the lab would mean two definitions of the same bytes, free
+to drift — exactly the failure the platform's curve module exists to prevent.
+
+`tests/test_isolation.py` pins that allow-list, fails on any other `app.`
+import, asserts that `curve.py`, `parse.py` and `watchset.py` never learn a
+network exists, and fails if `subscribeTokenTrade` reappears anywhere in
+executable code. It also pins the table names `features.py` is allowed to name
+in raw SQL. Deleting this directory plus its three migrations removes the lab
+entirely.

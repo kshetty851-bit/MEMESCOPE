@@ -26,12 +26,13 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
-from app.labs.rafiq import config, registry
+from app.labs.rafiq import config, entry_gate, registry
 from app.labs.rafiq.adapters import costs, evidence
 from app.labs.rafiq.engine import Geometry, Mark, evaluate
 from app.labs.rafiq.feed import Candidate, Observation, RafiqFeed
 from app.labs.rafiq.models import (
     RafiqLabDailyState,
+    RafiqLabGateRejection,
     RafiqLabPosition,
     RafiqLabStrategy,
 )
@@ -75,6 +76,15 @@ class RafiqLabService:
         rows = list((await self._session.execute(
             select(RafiqLabStrategy).order_by(RafiqLabStrategy.code)
         )).scalars())
+
+        unknown = [r.code for r in rows if r.code not in registry.BY_CODE]
+        if unknown:
+            # The ledger holds a book this build does not define — v1's A-E
+            # under a v2 image, for instance. Refuse: the old rows are somebody
+            # else's record and this code cannot manage them.
+            raise RuntimeError(
+                f"rafiq lab ledger holds unknown strategy codes {unknown} — "
+                "archive and remove them before running this build")
 
         drifted = [r.code for r in rows
                    if r.profile_digest != registry.BY_CODE[r.code].digest]
@@ -182,6 +192,8 @@ class RafiqLabService:
             pos.exit_observed_price = decision.observed_price
             pos.exit_proceeds_usd = costs.sell_proceeds(
                 pos.quantity, decision.fill_price, liquidity)
+            pos.exit_price_impact_pct = entry_gate.impact_pct(
+                pos.quantity * decision.fill_price, liquidity)
             pos.exit_reason = decision.reason
             pos.exit_evidence = decision.evidence
             closed += 1
@@ -278,28 +290,71 @@ class RafiqLabService:
                                              stop_pct=stop_pct)
             if notional <= 0 or notional > cash:
                 continue
+
+            # THE v2 ENTRY GATE. Priced on the WHOLE position, before anything
+            # is bought — C2 splitting into two halves must not buy it an
+            # easier gate than A2 gets, or the four books stop being
+            # comparable on the one rule they are supposed to share.
+            #
+            # It runs after sizing because it needs the notional, and after the
+            # cash check so that a book which simply ran out of money does not
+            # record a gate rejection it never actually made.
+            verdict = entry_gate.check_entry(
+                liquidity_usd=obs.liquidity_usd, market_cap_usd=obs.market_cap,
+                notional_usd=notional, thresholds=spec.gate)
+            if not verdict.allowed:
+                await self._count_rejection(row.id, verdict.reason, now=now)
+                continue
+
             quantity = costs.buy_quantity(notional, obs.price_usd, obs.liquidity_usd)
             if quantity is None or quantity <= 0:
                 continue
 
+            # One buy, then split. Sizing each leg separately would have this
+            # book pay two small impacts instead of the one large one it really
+            # pays, which is a cost advantage the experiment never granted it.
             exits = spec.profile.exits
             entry_price = notional / quantity
-            self._session.add(RafiqLabPosition(
-                strategy_id=row.id, mint_address=cand.mint_address,
-                symbol=cand.symbol, detected_at=cand.detected_at, opened_at=now,
-                entry_price=entry_price, entry_observed_price=obs.price_usd,
-                quantity=quantity, cost_basis=notional,
-                entry_liquidity_usd=obs.liquidity_usd,
-                stop_price=entry_price * (Decimal(100) - stop_pct) / 100,
-                target_price=entry_price * exits.take_profit_mult,
-                stop_pct=stop_pct, trailing_frac=exits.trailing_frac,
-                max_hold_seconds=int(exits.max_hold.total_seconds()),
-                status="open", peak_price=obs.price_usd,
-                last_mark_price=obs.price_usd, last_evaluated_at=now))
+            for index, leg in enumerate(spec.legs, start=1):
+                self._session.add(RafiqLabPosition(
+                    strategy_id=row.id, mint_address=cand.mint_address,
+                    symbol=cand.symbol, detected_at=cand.detected_at, opened_at=now,
+                    leg=index,
+                    entry_price=entry_price, entry_observed_price=obs.price_usd,
+                    quantity=quantity * leg.fraction,
+                    cost_basis=notional * leg.fraction,
+                    entry_liquidity_usd=obs.liquidity_usd,
+                    entry_market_cap_usd=obs.market_cap,
+                    entry_price_impact_pct=verdict.entry_impact_pct,
+                    stop_price=entry_price * (Decimal(100) - stop_pct) / 100,
+                    target_price=(None if leg.take_profit_mult is None
+                                  else entry_price * leg.take_profit_mult),
+                    stop_pct=stop_pct, trailing_frac=leg.trailing_frac,
+                    max_hold_seconds=int(exits.max_hold.total_seconds()),
+                    status="open", peak_price=obs.price_usd,
+                    last_mark_price=obs.price_usd, last_evaluated_at=now))
+                opened += 1
             held.add(cand.mint_address)
             cash -= notional
-            opened += 1
         return opened
+
+    async def _count_rejection(self, strategy_id: uuid.UUID, reason: str, *,
+                               now: datetime) -> None:
+        """Increment one book's counter for one gate reason.
+
+        A counter, not a row per rejection: the gate refuses most of the stream
+        on most ticks, and a row each would be a table nobody could read. What
+        a read-out needs is the rate and the breakdown, which is what this is.
+        """
+        await self._session.execute(
+            pg_insert(RafiqLabGateRejection)
+            .values(strategy_id=strategy_id, reason=reason, rejections=1,
+                    last_at=now)
+            .on_conflict_do_update(
+                index_elements=["strategy_id", "reason"],
+                set_={"rejections": RafiqLabGateRejection.rejections + 1,
+                      "last_at": now})
+        )
 
     @staticmethod
     def _admitted_by_e(obs: Observation, *, now: datetime) -> bool:

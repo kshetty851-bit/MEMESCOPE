@@ -102,14 +102,15 @@ def test_lab_tables_are_visible_to_the_platform_metadata() -> None:
 
     This reads backwards for an isolation test and is the most important
     assertion in the file. A separate metadata was tried first; it meant
-    autogenerate saw three tables in the database and none in the model tree,
+    autogenerate saw the lab's tables in the database and none in the model tree,
     and emitted `drop_table` for each. A schema tool that would delete the
     ledger is not isolation, it is a loaded gun.
     """
     from app.models import Base as PlatformBase
 
     assert {t for t in PlatformBase.metadata.tables if t.startswith("rafiq")} == {
-        "rafiq_lab_strategies", "rafiq_lab_positions", "rafiq_lab_daily_state"}
+        "rafiq_lab_strategies", "rafiq_lab_positions", "rafiq_lab_daily_state",
+        "rafiq_lab_gate_rejections"}
 
 
 def test_every_lab_table_carries_the_prefix() -> None:

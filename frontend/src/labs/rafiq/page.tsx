@@ -56,6 +56,23 @@ const RULE_ROWS: { key: keyof RafiqStrategy; label: string }[] = [
 ];
 
 /**
+ * The condition the gate refused most often, and its share of all refusals.
+ *
+ * One reason rather than all seven: the breakdown is a long tail with two
+ * entries that can never fire, and the question a reader is actually asking of
+ * this cell is "what is this book mostly turning away?". The full counts are
+ * on the endpoint for anyone who wants them.
+ */
+function topRejection(counts: Record<string, number>): string | null {
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+  if (total === 0) return null;
+  const [reason, n] = Object.entries(counts).reduce((best, entry) =>
+    entry[1] > best[1] ? entry : best,
+  );
+  return `${reason.replace(/_/g, " ")} ${Math.round((100 * n) / total)}%`;
+}
+
+/**
  * The mint, in full, linked to its pool.
  *
  * Full and not truncated: the point of putting it on the row is that a reader
@@ -713,11 +730,76 @@ export function RafiqLabPage() {
                   </td>
                 ))}
               </tr>
-              <tr>
+              <tr className="border-b border-line">
                 <td className="p-2 text-ink-2">Consensus gate</td>
                 {status.data.strategies.map((s) => (
                   <td key={s.code} className="p-2 text-right text-ink">
                     {s.consensus_gate ? "yes" : "—"}
+                  </td>
+                ))}
+              </tr>
+              <tr className="border-b border-line">
+                <td className="p-2 text-ink-2">Entry gate</td>
+                {status.data.strategies.map((s) => (
+                  <td
+                    key={s.code}
+                    className="p-2 text-right font-mono tabular-nums text-ink"
+                  >
+                    {usd(s.gate.min_liquidity_usd, 0)} liq
+                    <span className="block text-ink-3">
+                      {usd(s.gate.min_market_cap_usd, 0)} cap ·{" "}
+                      {s.gate.max_entry_price_impact_pct}% impact
+                    </span>
+                  </td>
+                ))}
+              </tr>
+              <tr className="border-b border-line">
+                <td className="p-2 text-ink-2">
+                  Rejected by gate
+                  <span className="block text-ink-3">
+                    cumulative, since activation
+                  </span>
+                </td>
+                {status.data.strategies.map((s) => (
+                  <td
+                    key={s.code}
+                    className="p-2 text-right font-mono tabular-nums text-ink"
+                  >
+                    {s.entries_rejected_by_gate.toLocaleString()}
+                    <span className="block text-ink-3">
+                      {topRejection(s.rejection_reason_counts) ?? "—"}
+                    </span>
+                  </td>
+                ))}
+              </tr>
+              {/* Gross beside net is the pair that turned "everything loses"
+                  into "B is nearly breakeven and dying to friction". Shown
+                  together, never apart, because either alone misleads. */}
+              <tr className="border-b border-line">
+                <td className="p-2 text-ink-2">Realised, gross of costs</td>
+                {status.data.strategies.map((s) => (
+                  <td
+                    key={s.code}
+                    className={`p-2 text-right font-mono tabular-nums ${
+                      TONE_CLASS[tone(s.gross_pnl_ex_fees)]
+                    }`}
+                  >
+                    {signedUsd(s.gross_pnl_ex_fees)}
+                  </td>
+                ))}
+              </tr>
+              <tr>
+                <td className="p-2 text-ink-2">Mean per trade, net</td>
+                {status.data.strategies.map((s) => (
+                  <td
+                    key={s.code}
+                    className={`p-2 text-right font-mono tabular-nums ${
+                      TONE_CLASS[tone(s.mean_pnl_per_trade_net)]
+                    }`}
+                  >
+                    {s.mean_pnl_per_trade_net === null
+                      ? "—"
+                      : signedUsd(s.mean_pnl_per_trade_net)}
                   </td>
                 ))}
               </tr>

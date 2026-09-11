@@ -63,6 +63,8 @@ x-backend-env: &backend-env
   # token; never printed). The router (provider "auto") reads it everywhere.
   CHAINSTACK_RPC_URL: ${CHAINSTACK_RPC_URL:-}
   SOLANA_RPC_URL: ${SOLANA_RPC_URL:-https://api.mainnet-beta.solana.com}
+  # Graduation Lab. Default off; the recorder exits immediately when it is.
+  LAB_GRADUATION_ENABLED: ${LAB_GRADUATION_ENABLED:-false}
   SOLANA_WS_URL: ${SOLANA_WS_URL:-wss://api.mainnet-beta.solana.com}
   HELIUS_API_KEY: ${HELIUS_API_KEY:-}
   FEATURE_SCANNER_ENABLED: ${FEATURE_SCANNER_ENABLED:-false}
@@ -657,6 +659,37 @@ services:
       timeout: 20s
       retries: 3
       start_period: 300s
+
+  # Graduation Lab recorder: pump.fun tokens on their way up the bonding curve.
+  #
+  # A SERVICE and not a Celery task because it is a long-lived process — it
+  # holds one websocket open for discovery and polls the chain every
+  # POLL_INTERVAL_S. The lab's two beat tasks (prune, features) run in
+  # `scheduler`; nothing there fills the tables, so without this service the
+  # lab records nothing however the flag is set.
+  #
+  # `on-failure` and not `unless-stopped`: with LAB_GRADUATION_ENABLED unset
+  # the recorder logs one line and exits 0 on purpose, and `unless-stopped`
+  # would turn that into a restart loop against a lab nobody switched on.
+  graduation:
+    build:
+      context: ./backend
+      target: development
+    restart: on-failure
+    command: python -m app.labs.graduation record
+    environment:
+      <<: *backend-env
+      RUN_MIGRATIONS: "false"
+      # This lab's RPC endpoint, and ONLY this lab's. Overriding the shared
+      # SOLANA_RPC_URL would repoint every standard-RPC caller on the platform
+      # at the same node, which is a quota and cost decision nobody made while
+      # switching on a recorder. Falls back to whatever the anchor has.
+      SOLANA_RPC_URL: ${LAB_GRADUATION_RPC_URL:-${SOLANA_RPC_URL:-https://api.mainnet-beta.solana.com}}
+    volumes:
+      - ./backend:/app
+    depends_on:
+      backend:
+        condition: service_healthy
 
   # Isolated Yellowstone gRPC observer. Phase 1 never writes discovered_tokens
   # and cannot block or replace the primary RPC scanner.
