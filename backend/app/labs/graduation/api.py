@@ -99,6 +99,8 @@ class PaperBookOut(BaseModel):
     max_slots: int = 0
     notional_usd: Decimal = Decimal(0)
     trailing_pct: Decimal = Decimal(0)
+    #: Take profit as a multiple of the price paid: 2 is "sell at 2x".
+    take_profit_x: Decimal = Decimal(0)
     max_hold_minutes: int = 0
     #: What the cost model charges on ONE leg: pump fee + assumed slippage +
     #: the priority fee as a share of the position. Published because "would a
@@ -300,6 +302,7 @@ async def _paper(db: AsyncSession) -> PaperBookOut:
         max_slots=config.PAPER_MAX_SLOTS,
         notional_usd=config.PAPER_NOTIONAL_USD,
         trailing_pct=config.PAPER_TRAILING_PCT,
+        take_profit_x=config.PAPER_TAKE_PROFIT_X,
         max_hold_minutes=config.PAPER_MAX_HOLD_MINUTES,
         cost_pct_per_side=book_costs.side_fraction.quantize(Decimal("0.0001")),
         open_trades=[out(r) for r in open_rows],

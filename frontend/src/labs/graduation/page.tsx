@@ -257,13 +257,16 @@ function PaperPanel({ book }: { book: PaperBook }) {
       <div className="flex flex-col gap-4 p-4">
         <p className="max-w-[65ch] text-xs text-ink-dim">
           Rules fixed before the outcome was known: buy the pool open,{" "}
-          {usd(book.notional_usd)} a position, {book.max_slots} at once, exit
-          on a {(Number(book.trailing_pct) * 100).toFixed(0)}% trailing stop
-          off the running peak, and out at {book.max_hold_minutes} minutes
-          because the price series ends there. Nothing is tuned after the
-          fact — that is the whole point of running it forward. Positions are
-          sized in dollars and converted at the SOL/USD rate observed when
-          each one opened.
+          {usd(book.notional_usd)} a position, up to {book.max_slots} at once,
+          and leave on whichever comes first — a{" "}
+          {(Number(book.trailing_pct) * 100).toFixed(0)}% trailing stop off
+          the running peak, a {Number(book.take_profit_x)}x target, or{" "}
+          {book.max_hold_minutes} minutes, because the price series ends
+          there. The stop is checked before the target: both can be true on
+          one sample and minute data cannot say which filled, so the loss is
+          taken. Nothing is tuned after the fact — that is the whole point of
+          running it forward. Positions are sized in dollars and converted at
+          the SOL/USD rate observed when each one opened.
         </p>
         <div className="grid grid-cols-2 gap-6 sm:grid-cols-4">
           <Stat
@@ -358,6 +361,18 @@ function PaperPanel({ book }: { book: PaperBook }) {
             <li>
               Nothing here can fail, get sandwiched, or miss a block. A real
               buy at a pool open competes with bots for the same slot.
+            </li>
+            <li>
+              The {Number(book.take_profit_x)}x target is measured against the
+              price paid, and the exit pays its own cost, so it banks about{" "}
+              {(
+                (Number(book.take_profit_x) *
+                  (1 - Number(book.cost_pct_per_side)) -
+                  1) *
+                100
+              ).toFixed(0)}
+              %, not{" "}
+              {((Number(book.take_profit_x) - 1) * 100).toFixed(0)}%.
             </li>
           </ul>
           <p className="mt-1">

@@ -23,7 +23,12 @@ as much whether it wins or loses.
 * `PAPER_NOTIONAL_QUOTE` per position, `PAPER_MAX_SLOTS` at once, a signal
   arriving with every slot full is SKIPPED and never queued;
 * exit on a `PAPER_TRAILING_PCT` trailing stop off the RUNNING peak;
+* exit at `PAPER_TAKE_PROFIT_X` times the price paid;
 * exit at `PAPER_MAX_HOLD_MINUTES` regardless.
+
+The stop is checked BEFORE the target. Both can be true on one 60-second
+sample and minute data cannot say which filled first, so the loss is taken —
+the conservative reading, and the same order the backtester uses.
 
 That last one is not a strategy choice. The post-graduation price series ends
 `POST_MIGRATION_SECONDS` after the open, so past it there is no mark and no
@@ -51,7 +56,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.labs.graduation import config
-from app.labs.graduation.backtest import Costs, ExitState, Tick, TrailingStop
+from app.labs.graduation.backtest import (
+    Costs,
+    ExitPolicy,
+    ExitState,
+    TakeProfit,
+    Tick,
+    TrailingStop,
+)
 from app.labs.graduation.models import (
     GradPaperPosition,
     GradPostgradSample,
@@ -72,6 +84,18 @@ def costs(notional_quote: Decimal | None = None) -> Costs:
     not the shape of anything.
     """
     return Costs(notional_quote=notional_quote or Decimal("0.5"))
+
+
+def exit_policy() -> ExitPolicy:
+    """The book's exits, in priority order: stop first, then target.
+
+    Built from the backtester's rules rather than reimplemented, so the
+    forward run and the replay cannot disagree about when a position leaves.
+    """
+    return ExitPolicy((
+        TrailingStop(config.PAPER_TRAILING_PCT),
+        TakeProfit(config.PAPER_TAKE_PROFIT_X - 1),
+    ))
 
 
 def _rate(price_usd: Decimal | None, price_native: Decimal | None) -> Decimal | None:
@@ -186,7 +210,7 @@ class PaperBook:
                    # carry no size and cannot be marked. They are excluded
                    # rather than counted as zero-value positions.
                    GradPaperPosition.notional_usd > 0))).all()
-        rule = TrailingStop(config.PAPER_TRAILING_PCT)
+        rule = exit_policy()
         closed = 0
 
         for position in positions:
@@ -199,11 +223,15 @@ class PaperBook:
                 position.marked_at = self._now
                 state = ExitState(
                     clock_at=position.opened_at,
-                    entry_price=position.open_fill,
+                    # The EXACT fill, not the 8-decimal column: on a token
+                    # quoted at 0.00000048 the stored figure is two
+                    # significant digits, and the take-profit is a comparison
+                    # against it. The tokens bought were priced at this.
+                    entry_price=position.notional_quote / position.tokens,
                     tick=Tick(ts=self._now, price=price, source="paper"),
                     peak=position.peak_quote)
-                if rule.fires(state):
-                    self._close(position, price, "trailing_stop")
+                if (fired := rule.fires(state)) is not None:
+                    self._close(position, price, fired)
                     closed += 1
                     continue
 

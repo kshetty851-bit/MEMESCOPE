@@ -6,8 +6,19 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 from app.labs.graduation import config
-from app.labs.graduation.backtest import Costs, ExitState, Tick, TrailingStop
-from app.labs.graduation.paper import Account, costs, net_return
+from app.labs.graduation.backtest import (
+    Costs,
+    ExitState,
+    TakeProfit,
+    Tick,
+    TrailingStop,
+)
+from app.labs.graduation.paper import (
+    Account,
+    costs,
+    exit_policy,
+    net_return,
+)
 
 D = Decimal
 NOW = datetime(2026, 9, 11, 12, 0, tzinfo=UTC)
@@ -22,15 +33,17 @@ def state(price: str, *, entry: str = "1.0", peak: str = "1.0") -> ExitState:
 # --- the frozen rules ---------------------------------------------------------
 
 def test_the_book_ships_with_the_rules_that_were_asked_for() -> None:
-    """$1,000 over ten $100 slots with a 30% trailing stop. Pinned so a later
-    edit to the defaults is a visible change to a stated rule, not a quiet
-    one — the whole value of a forward run is that its rules were fixed
-    before the outcome was known."""
+    """$1,000 over a hundred $10 slots, a 30% trailing stop and a 2x target.
+    Pinned so a later edit to the defaults is a visible change to a stated
+    rule, not a quiet one — the whole value of a forward run is that its
+    rules were fixed before the outcome was known."""
     assert D("1000") == config.PAPER_CAPITAL_USD
-    assert D("100") == config.PAPER_NOTIONAL_USD
-    assert config.PAPER_MAX_SLOTS == 10
+    assert D("10") == config.PAPER_NOTIONAL_USD
+    assert config.PAPER_MAX_SLOTS == 100
     assert D("0.30") == config.PAPER_TRAILING_PCT
-    # Ten slots at $100 is exactly the book, so it can be fully deployed.
+    assert D("2") == config.PAPER_TAKE_PROFIT_X
+    # The slots at that size are exactly the book, so it can be fully
+    # deployed and no candidate is skipped for want of capital that exists.
     assert config.PAPER_NOTIONAL_USD * config.PAPER_MAX_SLOTS == config.PAPER_CAPITAL_USD
 
 
@@ -253,3 +266,34 @@ def test_a_net_return_needs_a_price_and_refuses_without_one() -> None:
     mark as a zero return would quietly value it at cost."""
     assert net_return(_bought("0.00000048"), None, costs()) is None
     assert net_return(_Position("0", "0"), D("1"), costs()) is None
+
+
+# --- the 2x target ------------------------------------------------------------
+
+def test_the_target_fires_at_twice_the_price_paid() -> None:
+    """2x is measured against the FILL, not the quote. A target measured
+    against the quoted price would trigger before the position was actually
+    up 2x on what it cost."""
+    policy = exit_policy()
+    assert policy.fires(state("1.99", entry="1.0", peak="1.99")) is None
+    assert policy.fires(state("2.00", entry="1.0", peak="2.00")) == "take_profit"
+
+
+def test_the_stop_is_checked_before_the_target() -> None:
+    """A 60-second sample can satisfy both — up 2x from entry and 30% off a
+    higher peak. Minute data cannot say which filled first, so the loss is
+    taken. If this ever flips, the book has quietly become optimistic."""
+    both = state("2.00", entry="1.0", peak="4.0")
+    assert TrailingStop(config.PAPER_TRAILING_PCT).fires(both) is True
+    assert TakeProfit(config.PAPER_TAKE_PROFIT_X - 1).fires(both) is True
+    assert exit_policy().fires(both) == "trailing_stop"
+
+
+def test_a_two_x_target_banks_less_than_two_x() -> None:
+    """The exit pays its own cost, so the stated target is not the realised
+    return. Asserted because the page says so."""
+    position = _bought("1.0")
+    entry = position.notional_quote / position.tokens
+    net = net_return(position, entry * config.PAPER_TAKE_PROFIT_X, costs())
+    assert net is not None
+    assert D("0.93") < net < D("0.95")   # about +94%, not +100%

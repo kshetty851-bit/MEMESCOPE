@@ -91,6 +91,8 @@ export interface PaperBook {
   max_slots: number;
   notional_usd: string;
   trailing_pct: string;
+  /** Take profit as a multiple of the price paid: 2 is "sell at 2x". */
+  take_profit_x: string;
   max_hold_minutes: number;
   /** One leg's modelled cost: pump fee + assumed slippage + priority fee. */
   cost_pct_per_side: string;

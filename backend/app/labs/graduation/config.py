@@ -336,16 +336,28 @@ def paper_enabled() -> bool:
 #: `price_native` for the same pair at the same instant, so the rate is a
 #: measurement rather than an assumption, and it is stored on the position so
 #: a later move in SOL cannot rewrite what a past trade was worth. That is
-#: also how a real $100 order behaves.
+#: also how a real order behaves.
 PAPER_CAPITAL_USD = _dec("LAB_GRADUATION_PAPER_CAPITAL_USD", "1000")
-PAPER_NOTIONAL_USD = _dec("LAB_GRADUATION_PAPER_NOTIONAL_USD", "100")
+PAPER_NOTIONAL_USD = _dec("LAB_GRADUATION_PAPER_NOTIONAL_USD", "10")
 #: Only used when a token answers with one price and not the other, which
 #: should not happen on the DexScreener path and is refused rather than
 #: guessed — see `paper._rate`.
 PAPER_QUOTE_FALLBACK = _dec("LAB_GRADUATION_PAPER_QUOTE_FALLBACK", "0")
-PAPER_MAX_SLOTS = _int("LAB_GRADUATION_PAPER_SLOTS", 10)
+#: A hundred $10 slots, so the book is exactly deployable and every
+#: graduation in the window gets a position instead of being skipped for want
+#: of a slot. The old ten-slot book skipped candidates whenever it was full,
+#: which silently made the population "graduations that happened while the
+#: book had room" rather than "graduations".
+PAPER_MAX_SLOTS = _int("LAB_GRADUATION_PAPER_SLOTS", 100)
 #: Trailing stop, as a fraction off the running peak.
 PAPER_TRAILING_PCT = _dec("LAB_GRADUATION_PAPER_TRAILING_PCT", "0.30")
+#: Take profit, as a MULTIPLE of the price paid. 2 means "sell at 2x".
+#:
+#: It is measured against the fill, not the quote, so the target is 2x what
+#: the position actually cost — and the exit then pays its own cost, so a 2x
+#: trigger banks about +94%, not +100%. Stated here because a target that
+#: quietly means something else is worse than no target.
+PAPER_TAKE_PROFIT_X = _dec("LAB_GRADUATION_PAPER_TAKE_PROFIT_X", "2")
 #: A hard backstop, because the post-graduation price series ENDS at
 #: POST_MIGRATION_SECONDS. Past that there is no mark and no exit price, so a
 #: position left open would simply hang. This is a property of the data, not a
