@@ -212,6 +212,23 @@ def test_the_api_is_read_only() -> None:
     assert methods == {"GET"}, methods
 
 
+def test_the_status_endpoint_can_report_a_stalled_recorder() -> None:
+    """A row count cannot show a dead RPC — the stored rows stay exactly where
+    they were and every other figure on the page still reads normally. The
+    pulse has to come from a timestamp that advances on every successful read.
+
+    `grad_tokens.last_sample_at` is that timestamp: the poller sets it whether
+    or not the reserves moved, so it stops the moment reads stop. It also
+    crosses processes, which matters — the API runs in the backend container
+    and cannot see the recorder's in-memory counters at all.
+    """
+    body = (PACKAGE / "api.py").read_text()
+    assert "GradToken.last_sample_at" in body
+    assert "recorder_stalled" in body
+    # A stall is only a stall when there is something to read.
+    assert "base.watch_set > 0" in body
+
+
 def test_the_backtester_writes_nothing() -> None:
     """It is a replay. A backtester that can INSERT is one that will, and the
     recorded series is the only asset this lab has."""

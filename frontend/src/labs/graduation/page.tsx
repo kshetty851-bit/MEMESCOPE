@@ -139,6 +139,25 @@ export function GraduationLabPage() {
         </p>
       </header>
 
+      {data.recorder_stalled ? (
+        <div className="rounded border border-danger/50 bg-danger/10 p-4">
+          <p className="text-sm font-semibold text-danger">
+            The recorder is not reading the chain
+          </p>
+          <p className="mt-1 max-w-[65ch] text-xs text-danger">
+            {data.watch_set} tokens are being watched but nothing has been read
+            for{" "}
+            {data.seconds_since_chain_read === null
+              ? "any recorded time"
+              : `${data.seconds_since_chain_read}s`}
+            , against a {data.stall_threshold_s}s threshold. The counts below
+            are what was already stored — they will look normal while nothing
+            new arrives. Usual causes: a revoked or wrong RPC key, an
+            unreachable node, or a stopped recorder.
+          </p>
+        </div>
+      ) : null}
+
       <Panel>
         <PanelHeader>
           <PanelTitle>Right now</PanelTitle>
@@ -163,6 +182,15 @@ export function GraduationLabPage() {
             label="Curve samples / hr"
             value={`${data.samples_last_hour}`}
             note="written only when reserves move"
+          />
+          <Stat
+            label="Last chain read"
+            value={
+              data.seconds_since_chain_read === null
+                ? "never"
+                : `${data.seconds_since_chain_read}s ago`
+            }
+            note={data.recorder_stalled ? "STALLED" : "polling normally"}
           />
         </div>
       </Panel>

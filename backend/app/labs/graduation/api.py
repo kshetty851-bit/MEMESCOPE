@@ -81,6 +81,20 @@ class GraduationStatus(BaseModel):
     #: Surfaced because the page must not imply the quote side is sound.
     quote_side_trusted: bool = False
 
+    # --- is the chain actually being read? ----------------------------------
+    #: When the poller last successfully read ANY curve. `last_sample_at`
+    #: advances on every poll a token is read, whether or not its reserves
+    #: moved, so this is the RPC's pulse — and it works from the backend
+    #: container, which cannot see the recorder's in-process counters.
+    last_chain_read_at: datetime | None = None
+    seconds_since_chain_read: int | None = None
+    #: True when there is a watch set but nothing has been read for several
+    #: poll intervals. This is the case a row count cannot show: a revoked
+    #: key, a dead node, a crashed loop — the tables simply stop growing while
+    #: everything else on the page still reads normally.
+    recorder_stalled: bool = False
+    stall_threshold_s: int = 0
+
 
 @router.get("/status", response_model=GraduationStatus)
 async def status(db: AsyncSession = Depends(get_db)) -> GraduationStatus:
@@ -152,6 +166,20 @@ async def status(db: AsyncSession = Depends(get_db)) -> GraduationStatus:
     base.tokens_last_hour = await count(
         select(func.count()).select_from(GradToken)
         .where(GradToken.first_seen_at >= hour_ago))
+
+    base.last_chain_read_at = await db.scalar(
+        select(func.max(GradToken.last_sample_at)))
+    # Five poll intervals. A healthy poller refreshes every one of them, so
+    # five is slack for a slow flush without being slow to notice a stall.
+    base.stall_threshold_s = config.POLL_INTERVAL_S * 5
+    if base.last_chain_read_at is not None:
+        age = (datetime.now(UTC) - base.last_chain_read_at).total_seconds()
+        base.seconds_since_chain_read = int(age)
+        base.recorder_stalled = (base.watch_set > 0
+                                 and age > base.stall_threshold_s)
+    else:
+        # Nothing has ever been read. Only a stall if there is something to read.
+        base.recorder_stalled = base.watch_set > 0
 
     calls_per_poll = -(-base.watch_set // config.MAX_ACCOUNTS_PER_CALL)
     polls_per_minute = max(1, 60 // max(1, config.POLL_INTERVAL_S))

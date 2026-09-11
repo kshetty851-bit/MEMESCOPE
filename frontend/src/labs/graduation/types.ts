@@ -45,4 +45,11 @@ export interface GraduationStatus {
   tokens_last_hour: number;
   recent: RecentToken[];
   quote_side_trusted: boolean;
+  /** The RPC's pulse. `last_sample_at` advances on every successful chain
+   * read, so a stall here means the poller is not reading — a revoked key, a
+   * dead node, a crashed loop — none of which a row count can show. */
+  last_chain_read_at: string | null;
+  seconds_since_chain_read: number | null;
+  recorder_stalled: boolean;
+  stall_threshold_s: number;
 }
