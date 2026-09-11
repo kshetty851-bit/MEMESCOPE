@@ -680,6 +680,11 @@ services:
     environment:
       <<: *backend-env
       RUN_MIGRATIONS: "false"
+      # This lab's RPC endpoint, and ONLY this lab's. Overriding the shared
+      # SOLANA_RPC_URL would repoint every standard-RPC caller on the platform
+      # at the same node, which is a quota and cost decision nobody made while
+      # switching on a recorder. Falls back to whatever the anchor has.
+      SOLANA_RPC_URL: ${LAB_GRADUATION_RPC_URL:-${SOLANA_RPC_URL:-https://api.mainnet-beta.solana.com}}
     volumes:
       - ./backend:/app
     depends_on:
