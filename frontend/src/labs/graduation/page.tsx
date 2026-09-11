@@ -242,6 +242,13 @@ function PaperPanel({ book }: { book: PaperBook }) {
   const tone = pnl > 0 ? "text-up" : pnl < 0 ? "text-down" : "";
   const side = (Number(book.cost_pct_per_side) * 100).toFixed(2);
   const round = (Number(book.cost_pct_per_side) * 200).toFixed(2);
+  // Derived, not written down: a hardcoded "both closed losses" was wrong
+  // within the hour, and a stale number in a paragraph about honesty is
+  // worse than no number.
+  const worst = book.closed_trades.reduce(
+    (w, p) => Math.min(w, Number(p.net_return ?? 0)),
+    0,
+  );
   return (
     <Panel>
       <PanelHeader>
@@ -336,8 +343,17 @@ function PaperPanel({ book }: { book: PaperBook }) {
             <li>
               The stop is checked once a minute against a sampled price, so an
               exit fills at the next price seen, not at the stop level. A token
-              that collapses between samples fills far below the stop — which
-              is what both closed losses did.
+              that collapses between samples fills far below the stop
+              {worst < -Number(book.trailing_pct) ? (
+                <>
+                  {" "}
+                  — the worst exit here landed at {(worst * 100).toFixed(0)}%
+                  against a{" "}
+                  {(Number(book.trailing_pct) * 100).toFixed(0)}% stop
+                </>
+              ) : null}
+              . A live stop order would not have waited for the next sample,
+              but on a pool draining that fast it may not have filled either.
             </li>
             <li>
               Nothing here can fail, get sandwiched, or miss a block. A real
