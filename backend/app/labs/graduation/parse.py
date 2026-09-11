@@ -46,6 +46,20 @@ _CREATE = "create"
 #: spellings; `unexpected_fields` reports whatever actually turns up.
 _MIGRATION_TYPES = frozenset({"migrate", "migration", "migrated"})
 
+#: Mints that cannot be a pump.fun launch or graduate, whatever the feed says.
+#:
+#: Observed 2026-09-11: PumpPortal sent `{"txType": "migrate", "mint":
+#: "EPjFW…Dt1v", "pool": "pump-amm"}` — USDC's own mint. Nothing downstream
+#: could tell it apart from a real graduation, so the sampler priced it at
+#: $1.00 and the paper book spent a slot on it. The parse was right and the
+#: message was wrong, so the guard goes where the message enters.
+NOT_A_LAUNCH = frozenset({
+    "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",  # USDC
+    "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",  # USDT
+    "So11111111111111111111111111111111111111112",   # wSOL
+    "So11111111111111111111111111111111111111111",   # SOL
+})
+
 #: How a launch's quote denomination is read. A USDC-denominated curve holds
 #: USDC in the reserve the SOL field normally carries; the account itself
 #: carries no denomination flag in the bytes this lab decodes, so this message
@@ -111,7 +125,7 @@ def parse_token(msg: dict, *, received_at: datetime) -> TokenRow | None:
     if msg.get("txType") != _CREATE:
         return None
     mint = _text(msg.get("mint"), 64)
-    if not mint:
+    if not mint or mint in NOT_A_LAUNCH:
         return None
     return TokenRow(
         mint=mint,
@@ -136,7 +150,7 @@ def parse_migration(msg: dict, *, received_at: datetime) -> MigrationRow | None:
     if msg.get("txType") not in _MIGRATION_TYPES:
         return None
     mint = _text(msg.get("mint"), 64)
-    if not mint:
+    if not mint or mint in NOT_A_LAUNCH:
         return None
     return MigrationRow(
         mint=mint,

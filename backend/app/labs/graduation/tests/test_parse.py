@@ -130,3 +130,19 @@ def test_unknown_fields_are_reported_not_swallowed() -> None:
     assert parse.unexpected_fields(by_signature("sigMigrate0")) == frozenset()
     # A create is not checked: its shape IS verified.
     assert parse.unexpected_fields(by_signature("4D7BVU")) == frozenset()
+
+
+def test_a_migration_naming_usdc_is_not_a_graduation() -> None:
+    """The live feed sent exactly this on 2026-09-11. Nothing downstream could
+    tell it from a real graduation: the sampler priced USDC at $1.00 for an
+    hour and the paper book spent a $100 slot on it. Rejected at the parse,
+    which is the one place every path runs through."""
+    msg = {"txType": "migrate", "pool": "pump-amm",
+           "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+           "signature": "3bcLnw55hi7qhownNGFqyTwVCJ128uXzm5dWKaAJSyix"}
+    assert parse.parse_migration(msg, received_at=NOW) is None
+    # And the same mint arriving as a launch is not a launch either.
+    assert parse.parse_token({**msg, "txType": "create"}, received_at=NOW) is None
+    # A real graduation still parses — the guard is a denylist, not a filter.
+    real = {**msg, "mint": "H4TqHhLbCqmcpV8GZqtv9XJhWiWhJrc4XVksKbjApump"}
+    assert parse.parse_migration(real, received_at=NOW) is not None
