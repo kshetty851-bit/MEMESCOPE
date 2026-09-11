@@ -764,32 +764,43 @@ That was wrong: it confused DexScreener's reported pool liquidity with curve
 depth. A curve at 70% has ~62 SOL of virtual reserves behind it and a $100 buy
 moves it 1.2%.
 
-**11. SAMPLES RECORDED BEFORE 2026-09-11 ~19:40Z MAY BE THE WRONG TOKEN'S.**
-`CurveRPC.fetch` took its window into the address list from `len(out)` — the
-number of results accumulated so far — rather than from the loop index. When a
-batch failed, `out` did not grow, so every later window started in the previous
-window's position and each mint was paired with **another token's account**.
-Nothing raised. The rows looked healthy because they *were* healthy curves,
-just somebody else's.
+**11. THE SOL SIDE OF THE CURVE IS NOT MODELLED CORRECTLY. OPEN.**
 
-How it was found, and the shape to recognise it by: `v_token − real_token` is
-`279,900,000,000,000` on every sample of every token, and `v_sol − real_sol` is
-the curve's seeded virtual SOL, which **cannot change within a token**. It
-changed for **508 of 1,391 tokens** — one read 0.87 SOL to 307.65. A constant
-that moves is not a curve variant; it is a mis-attribution.
+What is certain, from direct reads of live accounts:
 
-Consequences for data recorded before the fix:
+* the TOKEN side is sound. `v_token − real_token` is
+  `279,900,000,000,000` on essentially every account sampled, and
+  `progress_pct` derives from `real_token_reserves`, so **progress and the
+  checkpoints are trustworthy** — they are what this lab exists to record;
+* the SOL side is not. `v_sol − real_sol` should be the curve's seeded virtual
+  SOL and therefore fixed per token. It is 30.0000 for roughly half of live
+  accounts and something else for the rest, the "something else" forms a
+  CONTINUUM (0.15, 0.59, 2.44, 3.80, 5.32, 7.15, 18.58, 19.61 …) rather than
+  tiers, and it **moves within a single token**, which no constant can do.
 
-* affected tokens carry another token's `progress_pct`, reserves and market
-  cap, so their **checkpoints are suspect too** — this was never only a quote
-  side problem, which is what an earlier version of this note wrongly said;
-* the tell is per-token: `SELECT mint FROM grad_curve_samples GROUP BY mint
-  HAVING min(v_quote_reserves - real_quote_reserves) <> max(...)`. Tokens where
-  it is constant were never mis-attributed.
+Two hypotheses were tested and both are wrong, so neither should be tried
+again:
 
-Fixed by taking the window by index and refusing a response whose length does
-not match the request — a gap is recoverable, a wrong reading is not.
-`tests/test_sources.py` reproduces the failure and fails against the old code.
+1. *Batch misalignment.* `CurveRPC.fetch` really did take its window from
+   `len(out)` rather than the loop index, so a failed batch would have paired
+   every later mint with another token's account. Real bug, fixed, and
+   `tests/test_sources.py` reproduces it against the old code — but it was
+   NOT the cause here: `graduation_rpc_failed` was 0 for the whole run, so
+   that path never executed. The rate of anomalies was unchanged after the
+   fix (52.9% before, 47.1% after).
+2. *Multiple account layouts.* Live accounts really are both 124 and 151
+   bytes, but both lengths show the same mix of correct and incorrect seeds,
+   so the length does not explain it.
+
+What this costs until it is understood: `market_cap_quote`, both quote-reserve
+columns, and the backtester's `curve_fill_buy` / `curve_fill_sell` — which
+price a pre-graduation leg from `v_sol`. **Pre-graduation strategies cannot be
+evaluated on real data yet.** Post-graduation paths read DexScreener and are
+unaffected.
+
+The next step is not more probing of account bytes — that has now been taken
+as far as it goes. It is the pump.fun program's IDL or source, to learn what
+`virtual_sol_reserves` actually means in the current program version.
 
 **12. Even with perfect data, the trade may not exist.** Measured on 738
 graduates in 24h: only 94 had any pre-graduation liquidity reading, **median
