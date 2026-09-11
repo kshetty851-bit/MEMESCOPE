@@ -764,36 +764,32 @@ That was wrong: it confused DexScreener's reported pool liquidity with curve
 depth. A curve at 70% has ~62 SOL of virtual reserves behind it and a $100 buy
 moves it 1.2%.
 
-**11. THE QUOTE SIDE OF THE CURVE IS NOT TRUSTWORTHY. Observed in production
-2026-09-11, unresolved.** On the first live run the token side decoded
-perfectly — `real_token_reserves` equals `v_token_reserves − 279,900,000`
-exactly, on every sample, and moves monotonically — but the SOL side does not
-behave:
+**11. SAMPLES RECORDED BEFORE 2026-09-11 ~19:40Z MAY BE THE WRONG TOKEN'S.**
+`CurveRPC.fetch` took its window into the address list from `len(out)` — the
+number of results accumulated so far — rather than from the loop index. When a
+batch failed, `out` did not grow, so every later window started in the previous
+window's position and each mint was paired with **another token's account**.
+Nothing raised. The rows looked healthy because they *were* healthy curves,
+just somebody else's.
 
-* `v_quote_reserves` for one token read 51 → 114 → 50 → 308 → 61 → 8.65 SOL
-  across ten polls while `v_token_reserves` moved 1.3%;
-* it moves **down** as tokens are sold, which is the wrong direction;
-* a fresh read of that account gave `virtual_sol_reserves` = 3.096 SOL against
-  a seeded 30, and `real_sol_reserves` ≈ 0 on a curve that had demonstrably
-  sold 6.3M tokens;
-* the implied constant product `v_sol × v_token` ranges from 0.0006× to 33× the
-  seeded value across 537 samples, and **drifts within a single token** — 
-  impossible for a genuine constant product. The tokens where it is stable at
-  exactly 1.0000 are the untouched ones, where nothing has moved at all.
+How it was found, and the shape to recognise it by: `v_token − real_token` is
+`279,900,000,000,000` on every sample of every token, and `v_sol − real_sol` is
+the curve's seeded virtual SOL, which **cannot change within a token**. It
+changed for **508 of 1,391 tokens** — one read 0.87 SOL to 307.65. A constant
+that moves is not a curve variant; it is a mis-attribution.
 
-The original layout verification was done against an **untouched** curve, where
-every field happens to equal its seeded constant — so it could not have caught
-this. What follows:
+Consequences for data recorded before the fix:
 
-* `progress_pct`, the checkpoints and `grad_curve_samples`' token columns are
-  sound, and they are what the lab exists to record.
-* `v_quote_reserves`, `real_quote_reserves` and `market_cap_quote` should be
-  treated as **unreliable** until the layout is re-verified against a curve
-  that has actually traded.
-* **This reaches the backtester.** `curve_fill_buy` / `curve_fill_sell` price a
-  pre-graduation leg from `v_sol`, so pre-graduation fills on real data inherit
-  the problem. The synthetic tests are unaffected — they construct reserves
-  from the constants — which is exactly why they passed.
+* affected tokens carry another token's `progress_pct`, reserves and market
+  cap, so their **checkpoints are suspect too** — this was never only a quote
+  side problem, which is what an earlier version of this note wrongly said;
+* the tell is per-token: `SELECT mint FROM grad_curve_samples GROUP BY mint
+  HAVING min(v_quote_reserves - real_quote_reserves) <> max(...)`. Tokens where
+  it is constant were never mis-attributed.
+
+Fixed by taking the window by index and refusing a response whose length does
+not match the request — a gap is recoverable, a wrong reading is not.
+`tests/test_sources.py` reproduces the failure and fails against the old code.
 
 **12. Even with perfect data, the trade may not exist.** Measured on 738
 graduates in 24h: only 94 had any pre-graduation liquidity reading, **median

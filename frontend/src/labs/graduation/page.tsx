@@ -257,10 +257,10 @@ export function GraduationLabPage() {
             </dl>
             {!data.quote_side_trusted ? (
               <p className="max-w-[60ch] rounded border border-warn/40 bg-warn/10 p-3 text-xs text-warn">
-                The curve&rsquo;s quote side is under review: reserve and market-cap
-                figures move inconsistently against the token side on live data
-                and should not be relied on. Progress and the checkpoints are
-                unaffected.
+                Samples recorded before 11 Sep ~19:40 UTC may belong to another
+                token. A batching fault paired some mints with the wrong
+                account, so their progress, reserves and market cap are
+                suspect. Fixed; everything recorded since is sound.
               </p>
             ) : null}
           </div>

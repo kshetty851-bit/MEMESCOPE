@@ -232,22 +232,42 @@ class CurveRPC:
         """
         out: dict[str, CurveState | None] = {}
         addressed = [(m, a) for m in mints if (a := self.address_for(m))]
-        for batch in chunked([a for _, a in addressed], config.MAX_ACCOUNTS_PER_CALL):
-            offset = len(out)
+        size = config.MAX_ACCOUNTS_PER_CALL
+        # The window is taken by INDEX, never by how many results have already
+        # accumulated. Deriving it from `len(out)` is what broke this before: a
+        # single failed batch left `out` short, so every later window started
+        # in the wrong place and each mint was paired with ANOTHER TOKEN'S
+        # account. Nothing raised — the rows looked like real curves, because
+        # they were real curves belonging to somebody else.
+        for start in range(0, len(addressed), size):
+            window = addressed[start:start + size]
             if not await self._acquire():
-                logger.warning("graduation_rpc_budget_exhausted", pending=len(batch))
+                logger.warning("graduation_rpc_budget_exhausted",
+                               pending=len(window))
                 self.rate_limited += 1
                 break
             try:
-                values = await self._rpc.get_multiple_accounts(batch)
+                values = await self._rpc.get_multiple_accounts(
+                    [a for _, a in window])
                 self.calls += 1
             except Exception as exc:
                 self.failures += 1
                 self.last_failure = f"{type(exc).__name__}: {exc}"
-                logger.warning("graduation_rpc_failed", size=len(batch),
+                logger.warning("graduation_rpc_failed", size=len(window),
                                error=repr(exc))
                 continue
-            for (mint, _), value in zip(addressed[offset:], values, strict=False):
+            if len(values) != len(window):
+                # Positional pairing is only sound when the lengths match.
+                # Refuse the whole window rather than attribute some of it
+                # wrongly: a gap is recoverable, a wrong reading is not.
+                self.failures += 1
+                self.last_failure = (
+                    f"getMultipleAccounts returned {len(values)} for "
+                    f"{len(window)} addresses")
+                logger.error("graduation_rpc_length_mismatch",
+                             asked=len(window), got=len(values))
+                continue
+            for (mint, _), value in zip(window, values, strict=True):
                 out[mint] = _decode_account(value)
         return out
 
