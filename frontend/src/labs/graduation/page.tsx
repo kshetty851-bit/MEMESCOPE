@@ -350,6 +350,9 @@ function PaperPanel({ book }: { book: PaperBook }) {
   const onSort = (key: SortKey) =>
     setSort((s) => ({ key, desc: s.key === key ? !s.desc : true }));
   const allClosed = history?.closed_trades ?? book.closed_trades;
+  const tookProfit = allClosed.filter(
+    (p) => !p.voided && p.close_reason === "take_profit",
+  );
   const pnl = Number(book.pnl_usd);
   const tone = pnl > 0 ? "text-up" : pnl < 0 ? "text-down" : "";
   const side = (Number(book.cost_pct_per_side) * 100).toFixed(2);
@@ -357,7 +360,7 @@ function PaperPanel({ book }: { book: PaperBook }) {
   // Derived, not written down: a hardcoded "both closed losses" was wrong
   // within the hour, and a stale number in a paragraph about honesty is
   // worse than no number.
-  const worst = book.closed_trades.reduce(
+  const worst = allClosed.reduce(
     (w, p) => Math.min(w, Number(p.net_return ?? 0)),
     0,
   );
@@ -500,16 +503,35 @@ function PaperPanel({ book }: { book: PaperBook }) {
               buy at a pool open competes with bots for the same slot.
             </li>
             <li>
-              The {Number(book.take_profit_x)}x target is measured against the
-              price paid, and the exit pays its own cost, so it banks about{" "}
+              The {Number(book.take_profit_x)}x target should bank about{" "}
               {(
                 (Number(book.take_profit_x) *
                   (1 - Number(book.cost_pct_per_side)) -
                   1) *
                 100
               ).toFixed(0)}
-              %, not{" "}
-              {((Number(book.take_profit_x) - 1) * 100).toFixed(0)}%.
+              % — 2x the price paid, less the cost of the exit.
+              {tookProfit.length ? (
+                <>
+                  {" "}
+                  It has averaged{" "}
+                  <strong className="text-ink">
+                    {(
+                      (tookProfit.reduce(
+                        (a, p) => a + Number(p.net_return ?? 0),
+                        0,
+                      ) /
+                        tookProfit.length) *
+                      100
+                    ).toFixed(0)}
+                    %
+                  </strong>{" "}
+                  over {tookProfit.length} exits, for the same reason the stop
+                  overshoots: the fill is the next price sampled, not the
+                  target. A live limit order would have filled at the target,
+                  so this flatters the book.
+                </>
+              ) : null}
             </li>
           </ul>
           <p className="mt-1">
