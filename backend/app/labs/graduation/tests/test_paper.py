@@ -298,4 +298,19 @@ def test_a_tiny_price_survives_being_stored() -> None:
     assert tiny.quantize(_P) == tiny
 
     # And the quantum must not be coarser than the column that holds it.
-    assert _P <= D("1E-18")
+    assert D("1E-18") >= _P
+
+
+def test_the_book_ticks_often_enough_to_honour_its_own_exit() -> None:
+    """A position is only closed on a tick, so the tick interval is the
+    book's exit accuracy.
+
+    At a 60-second tick against a 5-minute hold, 104 closed trades averaged
+    5.77 minutes — 15% more exposure than the rule allows, worth -$186.78 of
+    a +$408.23 book. The rule was frozen in advance; overshooting it is not a
+    different strategy, it is a failure to run the one written down.
+    """
+    hold_s = config.PAPER_MAX_HOLD_MINUTES * 60
+    assert hold_s / 10 >= config.PAPER_INTERVAL_SECONDS, (
+        f"a {config.PAPER_INTERVAL_SECONDS}s tick cannot honour a "
+        f"{config.PAPER_MAX_HOLD_MINUTES}-minute hold")

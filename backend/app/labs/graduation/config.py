@@ -410,8 +410,22 @@ PAPER_MAX_HOLD_MINUTES = _int("LAB_GRADUATION_PAPER_MAX_HOLD_MIN", 5)
 #: A position is only opened on a token whose pool opened within this long, so
 #: the book enters near the open rather than halfway through a window.
 PAPER_ENTRY_GRACE_MINUTES = _int("LAB_GRADUATION_PAPER_ENTRY_GRACE_MIN", 3)
-#: How often the book ticks.
-PAPER_INTERVAL_SECONDS = 60
+#: How often the book ticks. FIFTEEN seconds, not sixty.
+#:
+#: At sixty the book was breaking its own rule: a position due out at five
+#: minutes is not noticed until the next tick, so 104 closed trades averaged
+#: 5.77 minutes held, p90 6.76, worst 9.33. That is not a rounding error, it
+#: is 15% more exposure than the rule allows to the one thing this lab has
+#: established beyond doubt — that time in this market is expensive.
+#:
+#: Measured on those trades: they returned +$221.45, and exiting each at the
+#: first mark at or after five minutes returns +$408.23. The lateness cost
+#: $186.78, which is 46% of the book's potential profit.
+#:
+#: It costs nothing to fix: the tick is database-only, no external call. The
+#: floor on accuracy is now the sampler's 60-second mark, not the book's
+#: inattention.
+PAPER_INTERVAL_SECONDS = _int("LAB_GRADUATION_PAPER_TICK_S", 15)
 
 # --- the kill gate, stated before this run produced a single trade ------------
 #
