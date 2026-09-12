@@ -318,3 +318,39 @@ def test_the_outcome_cadence_fires_every_hour() -> None:
     from app.labs.rafiq import scheduler
 
     assert 60 % scheduler.OUTCOMES_EVERY_MINUTES == 0
+
+
+async def test_the_final_return_comes_from_the_last_priced_print(
+    lab_session, monkeypatch
+) -> None:
+    """A snapshot with no price still produces a row. Reading the price off
+    that row would report a null final return for a token that was priced
+    thirty seconds earlier."""
+    monkeypatch.setenv("RAFIQ_LAB_ENABLED", "true")
+    now = datetime.now(UTC) - timedelta(hours=2)
+    mint = await seed_candidate(lab_session, now, tag="lastpriced")
+    service = RafiqLabService(lab_session)
+    await service.activate(now=now - timedelta(hours=1))
+    await service.tick(now=now)
+    row = (await _rows(lab_session, mint))[0]
+
+    token_id = (await lab_session.execute(
+        select(DiscoveredToken.id).where(DiscoveredToken.mint_address == mint)
+    )).scalar_one()
+    # Priced at 20 minutes, then an unpriced row with a live liquidity reading.
+    for minutes, price, liq in ((20, Decimal("0.002"), Decimal(50_000)),
+                                (40, None, Decimal(600))):
+        lab_session.add(TokenMarketSnapshot(
+            token_id=token_id, mint_address=mint,
+            captured_at=now + timedelta(minutes=minutes),
+            price_usd=price, liquidity_usd=liq, market_cap=Decimal(500_000),
+            volume_5m=Decimal(10), volume_1h=Decimal(100),
+            buy_count_24h=1, sell_count_24h=1, provider="test"))
+    await lab_session.flush()
+
+    await outcomes.record(lab_session, now=now + timedelta(hours=1))
+    await lab_session.refresh(row)
+
+    assert row.final_return_1h == Decimal("1.000000")   # 0.002 / 0.001 - 1
+    assert row.max_return_1h == Decimal("1.000000")
+    assert row.dead_1h is True                           # $600 from the last row

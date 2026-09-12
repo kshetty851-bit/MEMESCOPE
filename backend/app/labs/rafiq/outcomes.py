@@ -62,6 +62,7 @@ async def record(session: AsyncSession, *, now: datetime | None = None,
                  batch: int = BATCH) -> dict[str, Any]:
     """Fill in every horizon that has closed and has not been attempted."""
     moment = (now or datetime.now(UTC)).astimezone(UTC)
+    feed = RafiqFeed(session)
     written: dict[str, int] = {}
 
     for label, span in HORIZONS:
@@ -82,7 +83,6 @@ async def record(session: AsyncSession, *, now: datetime | None = None,
             .limit(batch)
         )).scalars())
 
-        feed = RafiqFeed(session)
         for row in rows:
             await _settle(feed, row, label=label, span=span)
         # Flushed per horizon so the next horizon's selection sees this one's
@@ -107,17 +107,23 @@ async def _settle(feed: RafiqFeed, row: RafiqCandidate, *, label: str,
         row.outcomes_attempted = attempted
         return
 
-    prices = [r.price_usd for r in window if r.price_usd and r.price_usd > 0]
-    last = window[-1]
+    # The last PRICED print, not the last print. A venue that reports a
+    # snapshot with no price still produces a row, and reading the price off
+    # that row would leave `final_return` null for a token that was priced
+    # thirty seconds earlier. Same for liquidity: the last reading that exists
+    # is the one that says whether the pool is gone.
+    priced = [r for r in window if r.price_usd and r.price_usd > 0]
+    funded = [r for r in window if r.liquidity_usd is not None]
     base = row.price_usd
-    if prices and base and base > 0:
-        setattr(row, f"max_return_{label}", max(prices) / base - 1)
-    if last.price_usd is not None and base and base > 0:
-        setattr(row, f"final_return_{label}", last.price_usd / base - 1)
-    if last.liquidity_usd is not None:
-        setattr(row, f"dead_{label}", last.liquidity_usd < DEAD_LIQUIDITY_USD)
+    if priced and base and base > 0:
+        setattr(row, f"max_return_{label}",
+                max(r.price_usd for r in priced) / base - 1)
+        setattr(row, f"final_return_{label}", priced[-1].price_usd / base - 1)
+    if funded:
+        setattr(row, f"dead_{label}",
+                funded[-1].liquidity_usd < DEAD_LIQUIDITY_USD)
 
-    attempted[label] = last.captured_at.isoformat()
+    attempted[label] = window[-1].captured_at.isoformat()
     row.outcomes_attempted = attempted
 
 
