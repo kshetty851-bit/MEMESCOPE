@@ -31,6 +31,7 @@ from app.labs.rafiq.adapters import costs, evidence
 from app.labs.rafiq.engine import Geometry, Mark, evaluate
 from app.labs.rafiq.feed import Candidate, Observation, RafiqFeed
 from app.labs.rafiq.models import (
+    RafiqCandidate,
     RafiqLabDailyState,
     RafiqLabGateRejection,
     RafiqLabPosition,
@@ -276,48 +277,83 @@ class RafiqLabService:
         equity = cash + sum((self._value(p) for p in positions
                              if p.status == "open"), Decimal(0))
         opened = 0
+        # Which mints this book has already filed a decision on. Loaded once
+        # per tick so a candidate the gate refuses on every tick for an hour
+        # costs one row and one feature read, not 3,600 of each.
+        filed = await self._filed(row.id)
         for cand in candidates:
             if cand.mint_address in held:
                 continue
+
+            # Every `continue` below is a decision, and a decision nobody
+            # recorded is the reason `FINDINGS.md` cannot evaluate a filter:
+            # "we never looked at it" and "we looked and the pool was thin"
+            # are different rejections and both have to be on disk.
+            obs: Observation | None = None
+            stop_pct = notional = None
+            verdict = None
+            reason: str | None = None
+
             if (now - cand.detected_at).total_seconds() > config.MAX_CANDIDATE_AGE_SECONDS:
-                continue
-            if cand.opportunity_score < spec.profile.entry_threshold:
-                continue
-            obs = await self._mark(cand.mint_address, cand.token_id, seen, now=now)
-            if obs is None or not obs.is_priceable:
-                continue
-            if (now - obs.observed_at).total_seconds() > config.STALE_GUARD_SECONDS:
+                reason = "candidate_too_old"
+            elif cand.opportunity_score < spec.profile.entry_threshold:
+                reason = "score_below_threshold"
+            else:
+                obs = await self._mark(cand.mint_address, cand.token_id, seen, now=now)
+                if obs is None:
+                    reason = "no_observation"
+                elif not obs.is_priceable:
+                    reason = "not_priceable"
+                elif (now - obs.observed_at).total_seconds() > config.STALE_GUARD_SECONDS:
+                    reason = "observation_stale"
+                elif spec.consensus_gate and not self._admitted_by_e(obs, now=now):
+                    reason = "consensus_refused"
+                else:
+                    stop_pct = registry.stop_pct_for(spec, obs.liquidity_usd)
+                    if stop_pct is None:
+                        reason = "no_stop_available"
+                    else:
+                        notional = registry.notional_for(
+                            spec, equity=equity, liquidity_usd=obs.liquidity_usd,
+                            stop_pct=stop_pct)
+                        if notional <= 0:
+                            reason = "size_is_zero"
+                        elif notional > cash:
+                            reason = "insufficient_cash"
+                        else:
+                            verdict = entry_gate.check_entry(
+                                liquidity_usd=obs.liquidity_usd,
+                                market_cap_usd=obs.market_cap,
+                                notional_usd=notional, thresholds=spec.gate)
+                            if not verdict.allowed:
+                                reason = verdict.reason
+                                await self._count_rejection(row.id, verdict.reason,
+                                                            now=now)
+
+            if reason is not None:
+                # First rejection wins: its feature snapshot is the one the
+                # forward window is measured from.
+                if cand.mint_address not in filed:
+                    await self._file(spec, row, cand, obs, now=now,
+                                     reason=reason, notional=notional,
+                                     stop_pct=stop_pct, verdict=verdict)
+                    filed.add(cand.mint_address)
                 continue
 
-            if spec.consensus_gate and not self._admitted_by_e(obs, now=now):
-                continue
-
-            stop_pct = registry.stop_pct_for(spec, obs.liquidity_usd)
-            if stop_pct is None:
-                continue
-            notional = registry.notional_for(spec, equity=equity,
-                                             liquidity_usd=obs.liquidity_usd,
-                                             stop_pct=stop_pct)
-            if notional <= 0 or notional > cash:
-                continue
-
-            # THE v2 ENTRY GATE. Priced on the WHOLE position, before anything
-            # is bought — C2 splitting into two halves must not buy it an
-            # easier gate than A2 gets, or the four books stop being
-            # comparable on the one rule they are supposed to share.
-            #
-            # It runs after sizing because it needs the notional, and after the
-            # cash check so that a book which simply ran out of money does not
-            # record a gate rejection it never actually made.
-            verdict = entry_gate.check_entry(
-                liquidity_usd=obs.liquidity_usd, market_cap_usd=obs.market_cap,
-                notional_usd=notional, thresholds=spec.gate)
-            if not verdict.allowed:
-                await self._count_rejection(row.id, verdict.reason, now=now)
-                continue
-
+            # THE v2 ENTRY GATE ran above, priced on the WHOLE position before
+            # anything is bought — C2 splitting into two halves must not buy it
+            # an easier gate than A2 gets, or the books stop being comparable
+            # on the one rule they are supposed to share. It runs after sizing
+            # because it needs the notional, and after the cash check so that a
+            # book which simply ran out of money does not record a gate
+            # rejection it never actually made.
             quantity = costs.buy_quantity(notional, obs.price_usd, obs.liquidity_usd)
             if quantity is None or quantity <= 0:
+                if cand.mint_address not in filed:
+                    await self._file(spec, row, cand, obs, now=now,
+                                     reason="unquantifiable", notional=notional,
+                                     stop_pct=stop_pct, verdict=verdict)
+                    filed.add(cand.mint_address)
                 continue
 
             # Read AFTER the decision is settled and BEFORE the row exists, so
@@ -334,8 +370,14 @@ class RafiqLabService:
             # pays, which is a cost advantage the experiment never granted it.
             exits = spec.profile.exits
             entry_price = notional / quantity
-            for index, leg in enumerate(spec.legs, start=1):
+            # Ids assigned here rather than by the server default, so leg 1's
+            # id is known before the row is flushed and the candidate row can
+            # name it without reading anything back.
+            leg_ids = [uuid.uuid4() for _ in spec.legs]
+            for index, (leg, leg_id) in enumerate(
+                    zip(spec.legs, leg_ids, strict=True), start=1):
                 self._session.add(RafiqLabPosition(
+                    id=leg_id,
                     strategy_id=row.id, mint_address=cand.mint_address,
                     symbol=cand.symbol, detected_at=cand.detected_at, opened_at=now,
                     leg=index,
@@ -359,9 +401,94 @@ class RafiqLabService:
                     status="open", peak_price=obs.price_usd,
                     last_mark_price=obs.price_usd, last_evaluated_at=now))
                 opened += 1
+            # Flushed before the candidate row is written, because that row
+            # carries a foreign key to leg 1 and `_file` issues a Core INSERT
+            # that does not wait for the session's pending adds.
+            await self._session.flush()
+            # An entry supersedes any earlier rejection of the same mint: one
+            # decision matters and it is this one.
+            await self._file(spec, row, cand, obs, now=now, reason=None,
+                             notional=notional, stop_pct=stop_pct,
+                             verdict=verdict, features=features,
+                             position_id=leg_ids[0])
+            filed.add(cand.mint_address)
             held.add(cand.mint_address)
             cash -= notional
         return opened
+
+    async def _filed(self, strategy_id: uuid.UUID) -> set[str]:
+        """Mints this book has already filed a decision on."""
+        return set((await self._session.execute(
+            select(RafiqCandidate.mint_address)
+            .where(RafiqCandidate.strategy_id == strategy_id)
+        )).scalars())
+
+    async def _file(self, spec: LabStrategy, row: RafiqLabStrategy,
+                    cand: Candidate, obs: Observation | None, *, now: datetime,
+                    reason: str | None, notional: Decimal | None,
+                    stop_pct: Decimal | None, verdict=None, features=None,
+                    position_id: uuid.UUID | None = None) -> None:
+        """Record one decision — entered or refused — with its features.
+
+        The features are read here for a rejection and passed in for an entry,
+        because the entry already read them for the position row and reading
+        them twice could return two different answers for one decision.
+
+        `ON CONFLICT DO UPDATE` is guarded on the stored outcome, so an entry
+        can overwrite an earlier rejection of the same mint and a later
+        rejection can never overwrite anything. The caller's `filed` set
+        already skips repeated rejections; this makes the rule hold even if
+        two ticks run concurrently.
+        """
+        if features is None:
+            features = await self._feed.entry_features(mint=cand.mint_address,
+                                                        at=now)
+        values = {
+            "strategy_id": row.id,
+            "mint_address": cand.mint_address,
+            "symbol": cand.symbol,
+            "detected_at": cand.detected_at,
+            "decided_at": now,
+            "outcome": "rejected" if reason else "entered",
+            "reject_reason": reason,
+            "position_id": position_id,
+            "observed_at": obs.observed_at if obs else None,
+            "price_usd": obs.price_usd if obs else None,
+            "liquidity_usd": obs.liquidity_usd if obs else None,
+            "market_cap_usd": obs.market_cap if obs else None,
+            "volume_m5": obs.volume_m5 if obs else None,
+            "liquidity_change_15m": obs.liquidity_change_15m if obs else None,
+            "opportunity_score": cand.opportunity_score,
+            "flow": ({"buyers": obs.buyers, "sellers": obs.sellers,
+                      "buys": obs.buys, "sells": obs.sells,
+                      "top10_tx_share": (None if obs.top10_tx_share is None
+                                         else str(obs.top10_tx_share))}
+                     if obs is not None else None),
+            "notional_usd": notional,
+            "stop_pct": stop_pct,
+            "entry_impact_pct": verdict.entry_impact_pct if verdict else None,
+            "safety_status": (obs.safety.value if obs and obs.safety else None),
+            "safety_observed_at": obs.safety_observed_at if obs else None,
+            "top10_holder_pct": features.top10_holder_pct,
+            "top10_captured_at": features.top10_captured_at,
+            "lp_status": features.lp_status,
+            "lp_reason_codes": features.lp_reason_codes,
+            "lp_checked_at": features.lp_checked_at,
+            "features_error": features.error,
+        }
+        stmt = pg_insert(RafiqCandidate).values(**values)
+        await self._session.execute(stmt.on_conflict_do_update(
+            constraint="uq_rafiq_candidates_strategy_mint",
+            set_={k: v for k, v in values.items()
+                  if k not in ("strategy_id", "mint_address")},
+            # Only an entry may overwrite, and only a rejection may be
+            # overwritten. Both halves are needed: the first stops a stored
+            # entry being replaced, the second stops a later rejection
+            # replacing an earlier one whose forward window has already
+            # started being measured.
+            where=(RafiqCandidate.outcome != "entered")
+                  & (stmt.excluded.outcome == "entered"),
+        ))
 
     async def _count_rejection(self, strategy_id: uuid.UUID, reason: str, *,
                                now: datetime) -> None:

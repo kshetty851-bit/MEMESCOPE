@@ -97,6 +97,16 @@ class Observation:
 
 
 @dataclass(frozen=True, slots=True)
+class Mark:
+    """One print, for a forward window. Not the engine's `Mark` — that one
+    carries a decision's worth of derived state, this is three columns."""
+
+    captured_at: datetime
+    price_usd: Decimal | None
+    liquidity_usd: Decimal | None
+
+
+@dataclass(frozen=True, slots=True)
 class EntryFeatures:
     """Holder concentration and LP custody as of one entry decision.
 
@@ -334,6 +344,27 @@ class RafiqFeed:
             top10_captured_at=holder.captured_at if holder is not None else None,
             lp_status=status, lp_reason_codes=codes, lp_checked_at=checked,
             error=",".join(missing) or None)
+
+    async def forward_window(self, *, mint: str, after: datetime,
+                             until: datetime) -> list[Mark]:
+        """Every clean print in `(after, until]`, oldest first.
+
+        Strictly open at the start, so a decision's own observation is never
+        part of its forward return. `suspect` rows are excluded here exactly
+        as they are for a live mark — a glitch print would otherwise become a
+        token's recorded maximum.
+        """
+        rows = (await self._session.execute(
+            select(TokenMarketSnapshot.captured_at, TokenMarketSnapshot.price_usd,
+                   TokenMarketSnapshot.liquidity_usd)
+            .where(TokenMarketSnapshot.mint_address == mint,
+                   TokenMarketSnapshot.captured_at > after,
+                   TokenMarketSnapshot.captured_at <= until,
+                   TokenMarketSnapshot.suspect.is_not(True))
+            .order_by(TokenMarketSnapshot.captured_at)
+        )).all()
+        return [Mark(captured_at=r.captured_at, price_usd=r.price_usd,
+                     liquidity_usd=r.liquidity_usd) for r in rows]
 
     async def latest_marks(self, mints: set[str]) -> dict[str, tuple[Decimal, Decimal | None]]:
         """The freshest usable (price, liquidity) for each mint, or absent.
