@@ -39,6 +39,7 @@ from app.labs.rafiq.models import (
 )
 from app.labs.rafiq.registry import LabStrategy
 from app.labs.rafiq.strategies import strategy_e_ensemble as ensemble
+from app.labs.rafiq.strategies import strategy_f2
 from app.labs.rafiq.strategies.strategy_d_daily_breaker import (
     DailyState,
 )
@@ -243,9 +244,27 @@ class RafiqLabService:
                                    open_position_values=open_values,
                                    policy=ensemble.DAILY_POLICY)
         state_row.realised_today = state.realised_today
-        if verdict.halted and not state_row.halted:
+
+        # F2's hard equity floor, checked through Rafiq's own `EquityFloor` so
+        # the boundary condition and the wording are his, not a re-spelling of
+        # them here. It is a SEPARATE halt from the daily breaker: the breaker
+        # is a loss rate inside one day and resets tomorrow, this is a level
+        # the book does not come back from, and a book that has fallen through
+        # it must not be restarted by a new calendar day.
+        floor_halt, floor_reason = False, None
+        if spec.equity_floor is not None:
+            equity = cash + sum(open_values, Decimal(0))
+            floor_halt, floor_reason = strategy_f2.EquityFloor(
+                floor_usd=spec.equity_floor).check(equity)
+
+        if (verdict.halted or floor_halt) and not state_row.halted:
             state_row.halted, state_row.halted_at = True, now
-            state_row.halted_reason = verdict.reason
+            state_row.halted_reason = floor_reason or verdict.reason
+        # The floor binds whether or not this book is gated on the daily
+        # breaker. `daily_breaker` says "consult E's loss policy"; the floor is
+        # a property of the book's own capital.
+        if floor_halt:
+            return True, floor_reason
         return (bool(verdict.halted) and spec.daily_breaker), verdict.reason
 
     @staticmethod
@@ -281,6 +300,18 @@ class RafiqLabService:
         # per tick so a candidate the gate refuses on every tick for an hour
         # costs one row and one feature read, not 3,600 of each.
         filed = await self._filed(row.id)
+
+        # Rafiq's `MAX_TRADES_PER_DAY`, counted against what was actually
+        # opened today rather than an in-process counter: a worker restart
+        # would reset the counter and the cap would silently stop binding.
+        # Distinct mints, so a book that splits into legs is not charged twice
+        # for one decision.
+        remaining = None
+        if spec.max_trades_per_day is not None:
+            today = len({p.mint_address for p in positions
+                         if p.opened_at.date() == now.date()})
+            remaining = spec.max_trades_per_day - today
+
         for cand in candidates:
             if cand.mint_address in held:
                 continue
@@ -294,7 +325,9 @@ class RafiqLabService:
             verdict = None
             reason: str | None = None
 
-            if (now - cand.detected_at).total_seconds() > config.MAX_CANDIDATE_AGE_SECONDS:
+            if remaining is not None and remaining <= 0:
+                reason = "daily_trade_cap"
+            elif (now - cand.detected_at).total_seconds() > config.MAX_CANDIDATE_AGE_SECONDS:
                 reason = "candidate_too_old"
             elif cand.opportunity_score < spec.profile.entry_threshold:
                 reason = "score_below_threshold"
@@ -414,6 +447,8 @@ class RafiqLabService:
             filed.add(cand.mint_address)
             held.add(cand.mint_address)
             cash -= notional
+            if remaining is not None:
+                remaining -= 1
         return opened
 
     async def _filed(self, strategy_id: uuid.UUID) -> set[str]:

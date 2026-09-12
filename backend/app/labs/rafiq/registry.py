@@ -142,6 +142,21 @@ class LabStrategy:
     #: its record was opened under, or the runner halts on drift it caused
     #: itself. Verified: A2-E2's digests are unchanged by this field.
     enters: bool = True
+    #: F2 only. Rafiq's own `EquityFloor` level: at or below this the book
+    #: stops OPENING positions. It never force-closes — selling into a drained
+    #: pool is what produces the 0.0003x fills, so the floor deliberately
+    #: exposes no liquidate path and `test_floor_does_not_expose_a_force_close`
+    #: keeps it that way.
+    #:
+    #: $900 and not $1,000 on Karthik's explicit instruction. At $1,000 on a
+    #: $1,000 book the first losing trade halts it permanently and the sample
+    #: is one trade; $900 gives F2 room for about ninety $10 losses, which is
+    #: the smallest floor that can still collect a testable sample.
+    equity_floor: Decimal | None = None
+    #: F2 only. Rafiq's `MAX_TRADES_PER_DAY`. Counted per calendar day in UTC
+    #: against positions actually opened, because an in-memory counter would
+    #: reset on every worker restart and the cap would quietly stop binding.
+    max_trades_per_day: int | None = None
 
     @property
     def digest(self) -> str:
@@ -173,6 +188,14 @@ class LabStrategy:
             ),
             "breaker_policy": _breaker_canonical() if self.daily_breaker else None,
         }
+        # Added only when set, so a book that has neither hashes exactly as it
+        # did before these fields existed. They ARE rules — they change which
+        # candidates become positions — so for the book that has them they
+        # belong in the hash, unlike `enters`.
+        if self.equity_floor is not None:
+            canonical["equity_floor"] = str(self.equity_floor)
+        if self.max_trades_per_day is not None:
+            canonical["max_trades_per_day"] = self.max_trades_per_day
         return hashlib.sha256(
             json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
@@ -261,7 +284,9 @@ STRATEGIES: tuple[LabStrategy, ...] = (
                 "to collect a testable sample?",
                 strategy_f2.LOSS_BOUNDED,
                 legs=(Leg(_WHOLE, Decimal("1.30"), Decimal("0.20")),),
-                gate=entry_gate.F2, daily_breaker=True),
+                gate=entry_gate.F2, daily_breaker=True,
+                equity_floor=strategy_f2.FLOOR_WITH_ROOM.floor_usd,
+                max_trades_per_day=strategy_f2.MAX_TRADES_PER_DAY),
 )
 
 BY_CODE = {s.code: s for s in STRATEGIES}
