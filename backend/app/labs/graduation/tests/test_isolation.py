@@ -323,3 +323,24 @@ def test_the_rpc_url_defaults_to_public_mainnet_and_is_overridable() -> None:
             os.environ.pop("SOLANA_RPC_URL", None)
         else:
             os.environ["SOLANA_RPC_URL"] = original
+
+
+def test_every_migration_id_fits_the_version_column() -> None:
+    """`alembic_version.version_num` is varchar(32).
+
+    A longer id does not fail at review time or at import time — it fails on
+    the LAST statement of the upgrade, after the DDL has run, and every
+    service that migrates on startup then crash-loops. Cost an outage on
+    2026-09-12 for a 34-character id.
+    """
+    import pathlib
+    import re
+
+    versions = pathlib.Path(__file__).resolve().parents[4] / "alembic" / "versions"
+    long_ids = []
+    for path in versions.glob("*.py"):
+        found = re.search(r"^revision(?::\s*str)?\s*=\s*[\"']([^\"']+)",
+                          path.read_text(), re.M)
+        if found and len(found.group(1)) > 32:
+            long_ids.append((path.name, found.group(1), len(found.group(1))))
+    assert not long_ids, f"revision ids over 32 chars: {long_ids}"

@@ -12,14 +12,19 @@ voiding any trade whose `close_quote` is zero. A legitimate trade on a cheap
 token was therefore being dropped from the book on the strength of a rounding
 artefact in a column that was never read for the P&L.
 
-Revision ID: 0076_graduation_position_precision
+`alembic_version.version_num` is varchar(32) and the obvious id for this
+migration is 34 characters, so it is abbreviated. Anything longer fails at
+the very last statement, AFTER the DDL, and the backend crash-loops because
+it migrates on startup.
+
+Revision ID: 0076_grad_position_precision
 Revises: 0075_graduation_price_precision
 """
 
 from alembic import op
 import sqlalchemy as sa
 
-revision = "0076_graduation_position_precision"
+revision = "0076_grad_position_precision"
 down_revision = "0075_graduation_price_precision"
 branch_labels = None
 depends_on = None
