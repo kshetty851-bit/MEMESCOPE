@@ -74,6 +74,9 @@ export interface PaperPosition {
   pnl_usd: string | null;
   /** Likewise, so an open position shows a return rather than a dash. */
   net_return: string | null;
+  /** The recorded price series for this mint crossed pools, so the trade is
+   * shown and counts for nothing. */
+  voided: boolean;
 }
 
 /** The forward paper book. Rules frozen in advance; nothing here is tunable. */
@@ -88,6 +91,9 @@ export interface PaperBook {
   open_positions: number;
   closed_positions: number;
   wins: number;
+  /** Closed trades excluded from every figure above because their
+   * price series crossed pools. */
+  voided: number;
   max_slots: number;
   notional_usd: string;
   trailing_pct: string;

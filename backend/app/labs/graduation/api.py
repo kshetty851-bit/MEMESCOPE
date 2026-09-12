@@ -81,6 +81,9 @@ class PaperPosition(BaseModel):
     pnl_usd: Decimal | None = None
     #: Likewise — so an open position shows a return, not a dash.
     net_return: Decimal | None = None
+    #: The recorded price series for this mint crossed pools, so the trade is
+    #: shown but counts for nothing. See `paper.switched_mints`.
+    voided: bool = False
 
 
 class PaperBookOut(BaseModel):
@@ -96,6 +99,9 @@ class PaperBookOut(BaseModel):
     open_positions: int = 0
     closed_positions: int = 0
     wins: int = 0
+    #: Closed trades excluded from every figure above because their price
+    #: series crossed pools. Published rather than silently dropped.
+    voided: int = 0
     max_slots: int = 0
     notional_usd: Decimal = Decimal(0)
     trailing_pct: Decimal = Decimal(0)
@@ -106,7 +112,9 @@ class PaperBookOut(BaseModel):
     #: the priority fee as a share of the position. Published because "would a
     #: real wallet have made this?" is a question about exactly this number.
     cost_pct_per_side: Decimal = Decimal(0)
-    #: Split, because exposure and results are different questions.
+    #: Split, because exposure and results are different questions. The
+    #: closed list here is the most recent few; `/paper/trades` has all of
+    #: them, so a 30-second poll does not carry the whole history each time.
     open_trades: list[PaperPosition] = []
     closed_trades: list[PaperPosition] = []
 
@@ -256,12 +264,12 @@ async def status(db: AsyncSession = Depends(get_db)) -> GraduationStatus:
     return base
 
 
-async def _paper(db: AsyncSession) -> PaperBookOut:
+async def _paper(db: AsyncSession, *, limit: int | None = 10) -> PaperBookOut:
     """The book's state. Read-only: this endpoint never ticks it."""
     book = PaperBook(db)
     account = await book.account()
     book_costs = costs()
-    open_rows, closed_rows = await positions(db)
+    open_rows, closed_rows = await positions(db, limit=limit)
     cents = Decimal("0.01")
 
     def out(row: Any) -> PaperPosition:
@@ -271,7 +279,7 @@ async def _paper(db: AsyncSession) -> PaperBookOut:
         Both the dollars and the percentage come from the same ratio, so they
         cannot disagree with each other.
         """
-        p, symbol, name = row
+        p, symbol, name, voided = row
         pnl, net = p.pnl_usd, p.net_return
         if p.closed_at is None:
             live = net_return(p, p.last_quote, book_costs)
@@ -283,7 +291,8 @@ async def _paper(db: AsyncSession) -> PaperBookOut:
             opened_at=p.opened_at, notional_usd=p.notional_usd,
             open_fill=p.open_fill, last_quote=p.last_quote,
             peak_quote=p.peak_quote, closed_at=p.closed_at,
-            close_reason=p.close_reason, pnl_usd=pnl, net_return=net)
+            close_reason=p.close_reason, pnl_usd=pnl, net_return=net,
+            voided=bool(voided))
 
     return PaperBookOut(
         running=config.paper_enabled(),
@@ -299,6 +308,7 @@ async def _paper(db: AsyncSession) -> PaperBookOut:
         open_positions=account.open_positions,
         closed_positions=account.closed_positions,
         wins=account.wins,
+        voided=account.voided,
         max_slots=config.PAPER_MAX_SLOTS,
         notional_usd=config.PAPER_NOTIONAL_USD,
         trailing_pct=config.PAPER_TRAILING_PCT,
@@ -308,3 +318,17 @@ async def _paper(db: AsyncSession) -> PaperBookOut:
         open_trades=[out(r) for r in open_rows],
         closed_trades=[out(r) for r in closed_rows],
     )
+
+
+@router.get("/paper/trades", response_model=PaperBookOut)
+async def paper_trades(db: AsyncSession = Depends(get_db)) -> PaperBookOut:
+    """Every closed trade, not just the recent ones.
+
+    Its own route rather than a bigger `/status`, because the board polls
+    status every thirty seconds and the trade history only grows. Sorting is
+    the page's job: the whole list is here, so it can order without asking
+    again.
+    """
+    if not config.enabled():
+        return PaperBookOut()
+    return await _paper(db, limit=None)

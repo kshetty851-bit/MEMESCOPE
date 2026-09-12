@@ -1,11 +1,13 @@
 "use client";
 
+import { useState } from "react";
+
 import { Panel, PanelHeader, PanelTitle } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/states";
 import { shortenAddress } from "@/lib/format";
 
-import { useGraduationStatus } from "./hooks";
+import { useGraduationStatus, useGraduationTrades } from "./hooks";
 import type {
   Funnel,
   PaperBook,
@@ -124,18 +126,42 @@ const dexscreener = (mint: string) =>
  * marks come from, so every figure in the row can be checked against its
  * source rather than taken on trust.
  */
+/** Minutes a closed position was held. */
+function held(p: PaperPosition): number | null {
+  if (!p.closed_at) return null;
+  return Math.round(
+    (new Date(p.closed_at).getTime() - new Date(p.opened_at).getTime()) / 60000,
+  );
+}
+
+type SortKey = "closed_at" | "pnl_usd" | "net_return" | "held";
+
+const SORTS: Record<SortKey, (p: PaperPosition) => number> = {
+  closed_at: (p) => new Date(p.closed_at ?? p.opened_at).getTime(),
+  pnl_usd: (p) => Number(p.pnl_usd ?? 0),
+  net_return: (p) => Number(p.net_return ?? 0),
+  held: (p) => held(p) ?? 0,
+};
+
+/**
+ * One trade. The mint is rendered in FULL and linked to the very feed the
+ * marks come from, so every figure in the row can be checked against its
+ * source rather than taken on trust.
+ */
 function TradeRow({ p, closed }: { p: PaperPosition; closed: boolean }) {
   const pnl = p.pnl_usd === null ? null : Number(p.pnl_usd);
-  const tone =
-    pnl === null ? "" : pnl > 0 ? "text-up" : pnl < 0 ? "text-down" : "";
-  const held = closed
-    ? Math.round(
-        (new Date(p.closed_at!).getTime() - new Date(p.opened_at).getTime()) /
-          60000,
-      )
-    : null;
+  const tone = p.voided
+    ? "text-ink-dim"
+    : pnl === null
+      ? ""
+      : pnl > 0
+        ? "text-up"
+        : pnl < 0
+          ? "text-down"
+          : "";
+  const minutes = held(p);
   return (
-    <tr className="border-t border-line align-top">
+    <tr className={`border-t border-line align-top ${p.voided ? "opacity-60" : ""}`}>
       <td className="py-2 pr-3">
         <a
           href={dexscreener(p.mint)}
@@ -158,16 +184,31 @@ function TradeRow({ p, closed }: { p: PaperPosition; closed: boolean }) {
         {usd(p.notional_usd)}
       </td>
       <td className={`py-2 pr-3 text-right font-medium tabular-nums ${tone}`}>
-        {signedUsd(p.pnl_usd)}
+        {p.voided ? (
+          <span className="line-through">{signedUsd(p.pnl_usd)}</span>
+        ) : (
+          signedUsd(p.pnl_usd)
+        )}
       </td>
       <td className={`py-2 pr-3 text-right tabular-nums ${tone}`}>
-        {signed(p.net_return)}
+        {p.voided ? (
+          <span className="line-through">{signed(p.net_return)}</span>
+        ) : (
+          signed(p.net_return)
+        )}
       </td>
       <td className="py-2 text-right text-[11px] text-ink-dim">
-        {closed ? (
+        {p.voided ? (
+          <span
+            className="rounded-full bg-down/15 px-2 py-0.5 text-down"
+            title="The recorded price series for this token crossed pools, so this trade is not counted."
+          >
+            voided
+          </span>
+        ) : closed ? (
           <>
             {p.close_reason}
-            <span className="block">{held}m held</span>
+            <span className="block">{minutes}m held</span>
           </>
         ) : (
           <span className="rounded-full bg-accent/15 px-2 py-0.5 text-accent">
@@ -179,45 +220,105 @@ function TradeRow({ p, closed }: { p: PaperPosition; closed: boolean }) {
   );
 }
 
+/** A sortable column heading. Clicking the active one flips the direction. */
+function SortHead({
+  label,
+  sortKey,
+  sort,
+  onSort,
+  align = "right",
+}: {
+  label: string;
+  sortKey?: SortKey;
+  sort: { key: SortKey; desc: boolean } | null;
+  onSort?: (key: SortKey) => void;
+  align?: "left" | "right";
+}) {
+  const active = sort && sortKey && sort.key === sortKey;
+  const base = `pb-2 pr-3 font-medium ${align === "right" ? "text-right" : "text-left"}`;
+  if (!sortKey || !onSort) return <th className={base}>{label}</th>;
+  return (
+    <th
+      className={base}
+      aria-sort={active ? (sort.desc ? "descending" : "ascending") : "none"}
+    >
+      <button
+        type="button"
+        onClick={() => onSort(sortKey)}
+        className={`uppercase tracking-wider hover:text-ink ${
+          active ? "text-ink" : ""
+        }`}
+      >
+        {label}
+        <span className="ml-1">{active ? (sort.desc ? "\u2193" : "\u2191") : ""}</span>
+      </button>
+    </th>
+  );
+}
+
 function TradeTable({
   rows,
   closed,
   empty,
+  sort = null,
+  onSort,
 }: {
   rows: PaperPosition[];
   closed: boolean;
   empty: string;
+  sort?: { key: SortKey; desc: boolean } | null;
+  onSort?: (key: SortKey) => void;
 }) {
   if (!rows.length) return <p className="text-xs text-ink-dim">{empty}</p>;
-  const total = rows.reduce((a, p) => a + Number(p.pnl_usd ?? 0), 0);
-  // Summed, not `count x rows[0]`: the sizes are equal today and the sum
-  // stays right if they ever are not.
-  const deployed = rows.reduce((a, p) => a + Number(p.notional_usd), 0);
+  const ordered = sort
+    ? [...rows].sort(
+        (a, b) => (SORTS[sort.key](a) - SORTS[sort.key](b)) * (sort.desc ? -1 : 1),
+      )
+    : rows;
+  // Voided trades are shown but never summed: their prices came from two
+  // different pools, so the figure would be a number about nothing.
+  const counted = ordered.filter((p) => !p.voided);
+  const total = counted.reduce((a, p) => a + Number(p.pnl_usd ?? 0), 0);
+  const deployed = counted.reduce((a, p) => a + Number(p.notional_usd), 0);
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[520px] text-sm">
         <thead>
           <tr className="text-left text-[11px] uppercase tracking-wider text-ink-dim">
-            <th className="pb-2 pr-3 font-medium">Token / mint</th>
-            <th className="pb-2 pr-3 text-right font-medium">Size</th>
-            <th className="pb-2 pr-3 text-right font-medium">
-              {closed ? "Realised P&L" : "Unrealised P&L"}
-            </th>
-            <th className="pb-2 pr-3 text-right font-medium">Return</th>
-            <th className="pb-2 text-right font-medium">
-              {closed ? "Exit" : "State"}
-            </th>
+            <SortHead label="Token / mint" sort={sort} align="left" />
+            <SortHead label="Size" sort={sort} />
+            <SortHead
+              label={closed ? "Realised P&L" : "Unrealised P&L"}
+              sortKey="pnl_usd"
+              sort={sort}
+              onSort={onSort}
+            />
+            <SortHead
+              label="Return"
+              sortKey="net_return"
+              sort={sort}
+              onSort={onSort}
+            />
+            <SortHead
+              label={closed ? "Exit" : "State"}
+              sortKey={closed ? "closed_at" : undefined}
+              sort={sort}
+              onSort={onSort}
+            />
           </tr>
         </thead>
         <tbody>
-          {rows.map((p: PaperPosition) => (
+          {ordered.map((p: PaperPosition) => (
             <TradeRow key={p.mint} p={p} closed={closed} />
           ))}
         </tbody>
         <tfoot>
           <tr className="border-t border-line text-[11px] text-ink-dim">
             <td className="pt-2 pr-3">
-              {rows.length} {closed ? "closed" : "open"}
+              {counted.length} counted
+              {counted.length < ordered.length
+                ? `, ${ordered.length - counted.length} voided`
+                : ""}
             </td>
             <td className="pt-2 pr-3 text-right tabular-nums">
               {usd(String(deployed))}
@@ -238,6 +339,17 @@ function TradeTable({
 }
 
 function PaperPanel({ book }: { book: PaperBook }) {
+  // The full history, fetched apart from the board. While it loads the panel
+  // shows the handful `/status` already carried, so the table is never empty
+  // just because a second request is in flight.
+  const { data: history } = useGraduationTrades();
+  const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({
+    key: "closed_at",
+    desc: true,
+  });
+  const onSort = (key: SortKey) =>
+    setSort((s) => ({ key, desc: s.key === key ? !s.desc : true }));
+  const allClosed = history?.closed_trades ?? book.closed_trades;
   const pnl = Number(book.pnl_usd);
   const tone = pnl > 0 ? "text-up" : pnl < 0 ? "text-down" : "";
   const side = (Number(book.cost_pct_per_side) * 100).toFixed(2);
@@ -282,7 +394,11 @@ function PaperPanel({ book }: { book: PaperBook }) {
           <Stat
             label="Open"
             value={`${book.open_positions}/${book.max_slots}`}
-            note={`${book.closed_positions} closed`}
+            note={
+              book.voided
+                ? `${book.closed_positions} closed, ${book.voided} voided`
+                : `${book.closed_positions} closed`
+            }
           />
           <Stat
             label="Wins"
@@ -311,13 +427,34 @@ function PaperPanel({ book }: { book: PaperBook }) {
           />
         </div>
 
+        {book.voided ? (
+          <p className="max-w-[65ch] rounded-md border border-down/40 p-3 text-xs text-ink-dim">
+            <span className="font-semibold text-ink">
+              {book.voided} closed{" "}
+              {book.voided === 1 ? "trade is" : "trades are"} voided and count
+              for nothing above.
+            </span>{" "}
+            DexScreener answers with every pool a token trades in, and the
+            recorder took whichever was listed first — so for these tokens the
+            price series crossed from one pool to another mid-position. ORE&apos;s
+            marks moved from its SOL pair to a USD-quoted one and &ldquo;rose&rdquo;
+            100x in a minute with no trade behind it. That is not a price
+            change, it is a change of instrument, so these trades are shown and
+            excluded. The sampler now pins the pool it first saw, so it cannot
+            happen again — but the rows already written still say what they
+            say.
+          </p>
+        ) : null}
+
         <div className="flex flex-col gap-2">
           <h3 className="text-[11px] font-semibold uppercase tracking-wider text-ink-dim">
-            Closed trades — banked, and the only figures that count
+            Closed trades — all {allClosed.length}, banked, sortable
           </h3>
           <TradeTable
-            rows={book.closed_trades}
+            rows={allClosed}
             closed
+            sort={sort}
+            onSort={onSort}
             empty="Nothing closed yet. Until a position exits, this book has proved nothing."
           />
         </div>

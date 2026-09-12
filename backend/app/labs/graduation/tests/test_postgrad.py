@@ -252,3 +252,41 @@ async def test_the_open_is_recorded_from_the_first_accepted_sample() -> None:
     # And it does not move on later samples.
     await sampler.poll(late + timedelta(minutes=5))
     assert sampler.states[MINT].opened_at == late
+
+
+# --- the pair is pinned -------------------------------------------------------
+
+def _pair(address: str, *, price: str, liq: float) -> dict:
+    return {"chainId": config.NETWORK, "pairAddress": address, "dexId": "pumpswap",
+            "baseToken": {"address": MINT}, "priceNative": price,
+            "priceUsd": price, "liquidity": {"usd": liq}}
+
+
+async def test_a_second_pool_cannot_reprice_a_position() -> None:
+    """`/tokens/v1` answers with EVERY pool a mint trades in and the order is
+    not stable, so without a pin the series hops between them.
+
+    Live on 2026-09-11 that turned ORE's marks from its SOL pair into a
+    USD-quoted pair's — a 100x "gain" in one minute with no trade behind it —
+    and did the same to a pump.fun token at 162x. Forty-five of 349 paper
+    trades were priced across two pools and produced +$2,414 of a +$1,712
+    book. A position is opened against one pool; marking it against another
+    is not a price change, it is a change of instrument.
+    """
+    deep = _pair("POOL_DEEP", price="0.5617", liq=90_000)
+    shallow = _pair("POOL_OTHER", price="59.99", liq=400)
+    market = FakeMarket(pairs=[shallow, deep])
+    sampler = PostGradSampler(market=market)
+    sampler.start(MINT, NOW)
+
+    # First poll: the DEEPEST pool wins, whatever order the API listed them.
+    rows = await sampler.poll(NOW)
+    assert [r["pair_address"] for r in rows] == ["POOL_DEEP"]
+    assert sampler.states[MINT].pair_address == "POOL_DEEP"
+
+    # Later polls take nothing from the other pool, even when it is listed
+    # first and even though its timestamp is new.
+    rows = await sampler.poll(NOW + timedelta(minutes=1))
+    assert [r["pair_address"] for r in rows] == ["POOL_DEEP"]
+    assert [r["price_native"] for r in rows] == [D("0.5617")]
+    assert sampler.pair_rejected == 2

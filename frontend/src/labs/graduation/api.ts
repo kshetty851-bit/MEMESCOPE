@@ -1,6 +1,6 @@
 import { api } from "@/lib/api-client";
 
-import type { GraduationStatus } from "./types";
+import type { GraduationStatus, PaperBook } from "./types";
 
 /**
  * GRADUATION LAB CLIENT
@@ -11,4 +11,12 @@ import type { GraduationStatus } from "./types";
  */
 export function fetchStatus(): Promise<GraduationStatus> {
   return api.get<GraduationStatus>("/labs/graduation/status");
+}
+
+/**
+ * Every closed trade, not the handful `/status` carries. Its own call because
+ * the board polls status every thirty seconds and this list only grows.
+ */
+export function fetchPaperTrades(): Promise<PaperBook> {
+  return api.get<PaperBook>("/labs/graduation/paper/trades");
 }

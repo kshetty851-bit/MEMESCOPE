@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 
-import { fetchStatus } from "./api";
+import { fetchPaperTrades, fetchStatus } from "./api";
 
 /**
  * The recorder polls the chain every fifteen seconds and the launch feed runs
@@ -16,5 +16,18 @@ export function useGraduationStatus() {
     queryKey: ["graduation", "status"],
     queryFn: fetchStatus,
     refetchInterval: REFRESH_MS,
+  });
+}
+
+/**
+ * The full trade history. Slower than the board on purpose: a closed trade
+ * never changes, so the only new information is the odd exit, and the book
+ * ticks once a minute.
+ */
+export function useGraduationTrades() {
+  return useQuery({
+    queryKey: ["graduation", "paper-trades"],
+    queryFn: fetchPaperTrades,
+    refetchInterval: 60_000,
   });
 }

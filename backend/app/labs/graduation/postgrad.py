@@ -191,6 +191,9 @@ class PostGradSampler:
         self.samples_written = 0
         self.backfilled = 0
         self.backfill_impossible = 0
+        #: Samples refused because they came from a pool the position was not
+        #: opened against. A non-zero count here is the sampler working.
+        self.pair_rejected = 0
 
     def __len__(self) -> int:
         return len(self.states)
@@ -220,15 +223,38 @@ class PostGradSampler:
             for pair in await self._market.dex_pairs(batch):
                 if (row := parse_pair(pair, ts=now)) is not None:
                     rows.append(row)
+        # Deepest pool first, so a mint's FIRST sample pins the pair a real
+        # order would actually have hit rather than whichever row DexScreener
+        # happened to list first.
+        rows.sort(key=lambda r: r.get("liquidity_usd") or 0, reverse=True)
         rows = [r for r in rows if self._accept(r)]
         rows.extend(await self._backfill(now))
         self.samples_written += len(rows)
         return rows
 
     def _accept(self, row: dict[str, Any]) -> bool:
-        """Record what a live sample taught us, and refuse a duplicate ts."""
+        """Record what a live sample taught us, and refuse a duplicate ts.
+
+        The PAIR IS PINNED on the first sample and every later row from a
+        different pair is refused. `/tokens/v1` answers with every pool a mint
+        trades in, and the order is not stable, so without this the series
+        silently hops between pools: observed 2026-09-11, ORE's marks moved
+        from its SOL pair to a USD-quoted one and "rose" 100x in a minute
+        without trading, and a pump.fun token jumped 162x the same way. 45 of
+        349 paper trades were affected and they accounted for +$2,414 of a
+        +$1,712 book.
+
+        A position is opened against one pool. Marking it against another is
+        not a price change, it is a change of instrument.
+        """
         state = self.states.get(row["mint"])
         if state is None:
+            return False
+        pair = row.get("pair_address")
+        if state.pair_address is None:
+            state.pair_address = pair
+        elif pair != state.pair_address:
+            self.pair_rejected += 1
             return False
         if row["ts"] in state.seen_ts:
             return False
@@ -236,9 +262,6 @@ class PostGradSampler:
         state.opened_at = state.opened_at or row["ts"]
         state.last_sample_at = row["ts"]
         state.samples += 1
-        # The pool address is learned here and nowhere else. Without it the
-        # GeckoTerminal fallback has nothing to address.
-        state.pair_address = row.get("pair_address") or state.pair_address
         state.dex_id = row.get("dex_id") or state.dex_id
         return True
 

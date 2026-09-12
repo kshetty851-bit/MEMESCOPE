@@ -86,6 +86,25 @@ def costs(notional_quote: Decimal | None = None) -> Costs:
     return Costs(notional_quote=notional_quote or Decimal("0.5"))
 
 
+def switched_mints():
+    """Mints whose recorded price series hops between pools.
+
+    A position is opened against ONE pool and marking it against another is
+    not a price move, it is a change of instrument — ORE's series crossed from
+    a SOL-quoted pair to a USD-quoted one and "rose" 100x in a minute without
+    trading. `postgrad._accept` now pins the pair so this cannot recur, but
+    the rows already written still say what they say, so the book refuses to
+    count them.
+
+    Derived rather than stamped on the position: it is a property of the
+    price series, it can only be known after the fact, and a column would be
+    a second copy of something the samples already state.
+    """
+    return (select(GradPostgradSample.mint)
+            .group_by(GradPostgradSample.mint)
+            .having(func.count(func.distinct(GradPostgradSample.pair_address)) > 1))
+
+
 def exit_policy() -> ExitPolicy:
     """The book's exits, in priority order: stop first, then target.
 
@@ -140,6 +159,9 @@ class Account:
     open_positions: int
     closed_positions: int
     wins: int
+    #: Closed trades refused because their price series crossed pools. Shown,
+    #: never summed — a count of what is NOT in the figures above.
+    voided: int = 0
 
     @property
     def equity(self) -> Decimal:
@@ -172,6 +194,7 @@ class Account:
             "open_positions": self.open_positions,
             "closed_positions": self.closed_positions,
             "wins": self.wins,
+            "voided": self.voided,
             "free_slots": self.free_slots,
         }
 
@@ -345,22 +368,27 @@ class PaperBook:
             .order_by(GradPostgradSample.ts.desc()).limit(1))
 
     async def account(self) -> Account:
+        bad = switched_mints()
+        sound = (GradPaperPosition.notional_usd > 0,
+                 GradPaperPosition.mint.not_in(bad))
         realised = await self._session.scalar(
             select(func.coalesce(func.sum(GradPaperPosition.pnl_usd), 0))
-            .where(GradPaperPosition.closed_at.is_not(None)))
+            .where(GradPaperPosition.closed_at.is_not(None), *sound))
         closed = await self._session.scalar(
             select(func.count()).select_from(GradPaperPosition)
-            .where(GradPaperPosition.closed_at.is_not(None),
-                   GradPaperPosition.notional_usd > 0))
+            .where(GradPaperPosition.closed_at.is_not(None), *sound))
         wins = await self._session.scalar(
             select(func.count()).select_from(GradPaperPosition)
             .where(GradPaperPosition.closed_at.is_not(None),
+                   GradPaperPosition.pnl_usd > 0, *sound))
+        voided = await self._session.scalar(
+            select(func.count()).select_from(GradPaperPosition)
+            .where(GradPaperPosition.closed_at.is_not(None),
                    GradPaperPosition.notional_usd > 0,
-                   GradPaperPosition.pnl_usd > 0))
+                   GradPaperPosition.mint.in_(bad)))
         open_rows = (await self._session.scalars(
             select(GradPaperPosition)
-            .where(GradPaperPosition.closed_at.is_(None),
-                   GradPaperPosition.notional_usd > 0))).all()
+            .where(GradPaperPosition.closed_at.is_(None), *sound))).all()
 
         unrealised = Decimal(0)
         for position in open_rows:
@@ -375,10 +403,11 @@ class PaperBook:
             open_positions=len(open_rows),
             closed_positions=int(closed or 0),
             wins=int(wins or 0),
+            voided=int(voided or 0),
         )
 
 
-async def positions(session: AsyncSession, *, limit: int = 20
+async def positions(session: AsyncSession, *, limit: int | None = None
                     ) -> tuple[Sequence[Any], Sequence[Any]]:
     """Open and closed, separately.
 
@@ -391,18 +420,21 @@ async def positions(session: AsyncSession, *, limit: int = 20
     writing the symbol at fill time would only fix the ones opened from here on.
     """
 
+    bad = switched_mints()
+
     def rows(closed: bool):
-        return (select(GradPaperPosition, GradToken.symbol, GradToken.name)
+        return (select(GradPaperPosition, GradToken.symbol, GradToken.name,
+                       GradPaperPosition.mint.in_(bad).label("voided"))
                 .outerjoin(GradToken, GradToken.mint == GradPaperPosition.mint)
                 .where(GradPaperPosition.notional_usd > 0,
                        GradPaperPosition.closed_at.is_not(None) if closed
                        else GradPaperPosition.closed_at.is_(None)))
 
+    closed = rows(True).order_by(GradPaperPosition.closed_at.desc())
     # Open needs no limit: the slot count caps it.
     return (
         (await session.execute(
             rows(False).order_by(GradPaperPosition.opened_at.desc()))).all(),
         (await session.execute(
-            rows(True).order_by(GradPaperPosition.closed_at.desc())
-            .limit(limit))).all(),
+            closed.limit(limit) if limit else closed)).all(),
     )
