@@ -288,8 +288,12 @@ FEATURES_INTERVAL_SECONDS = 10 * 60
 #: differ by however much SOL/USD moved during the hold. Minutes, so usually
 #: fractions of a percent — but not zero.
 BACKTEST_NOTIONAL_QUOTE = _dec("LAB_GRADUATION_NOTIONAL_QUOTE", "0.5")
-#: pump.fun / PumpSwap take, per side, on the POST-graduation AMM legs.
-BACKTEST_PUMP_FEE_BPS = _int("LAB_GRADUATION_PUMP_FEE_BPS", 100)
+#: PumpSwap's take, per side, on the POST-graduation AMM legs.
+#:
+#: 25 bps, which is PumpSwap's published swap fee. It was 100 — the
+#: bonding-curve constant — which is the wrong schedule for an AMM leg and
+#: overcharged every post-graduation trade fourfold.
+BACKTEST_PUMP_FEE_BPS = _int("LAB_GRADUATION_PUMP_FEE_BPS", 25)
 #: The fee inside the bonding-curve fill maths. Separate from the one above so
 #: the curve and the AMM can be priced differently, because they are.
 #:
@@ -299,8 +303,20 @@ BACKTEST_PUMP_FEE_BPS = _int("LAB_GRADUATION_PUMP_FEE_BPS", 100)
 #: to 100 to reproduce that instead. The live number is the default because a
 #: backtest should charge what a trader actually pays.
 BACKTEST_CURVE_FEE_BPS = _int("LAB_GRADUATION_CURVE_FEE_BPS", 125)
-#: Assumed slippage per side. The brief's default.
-BACKTEST_SLIP_BPS = _int("LAB_GRADUATION_SLIP_BPS", 150)
+#: Slippage per side, in bps. 25.
+#:
+#: Was 150, inherited from the brief, and it was an assumption nobody had
+#: checked. Measured on 405 recorded graduations: median pool depth at the
+#: open is $97,770, and constant-product impact for an order of S into a pool
+#: of depth L is about S/L — so a $100 order moves the price 0.10%, and even
+#: the shallowest quartile (pools near $17,000) costs 0.58%. 150 bps was
+#: charging fifteen times the median.
+#:
+#: 25 bps rather than the 10 the median implies, because depth varies and the
+#: error that matters is the one that flatters the book: this sits near the
+#: 75th percentile of impact at $100. It is a stated approximation of a real
+#: quantity, which the 150 never was.
+BACKTEST_SLIP_BPS = _int("LAB_GRADUATION_SLIP_BPS", 25)
 #: A flat priority fee per side, in quote. At the default notional this is
 #: another 40 bps, which is why it is not ignorable on a 0.5 SOL position.
 BACKTEST_PRIORITY_FEE_QUOTE = _dec("LAB_GRADUATION_PRIORITY_FEE_QUOTE", "0.002")
@@ -338,36 +354,72 @@ def paper_enabled() -> bool:
 #: a later move in SOL cannot rewrite what a past trade was worth. That is
 #: also how a real order behaves.
 PAPER_CAPITAL_USD = _dec("LAB_GRADUATION_PAPER_CAPITAL_USD", "1000")
-PAPER_NOTIONAL_USD = _dec("LAB_GRADUATION_PAPER_NOTIONAL_USD", "10")
+#: $100, not $10. The priority fee is FIXED in SOL — about $0.21 a
+#: transaction — so as a share of the position it explodes as the position
+#: shrinks: 2.06% a side at $10 against 0.21% at $100. Execution cost is a
+#: U-curve (fixed fee at the bottom, price impact at the top) and it bottoms
+#: out between $100 and $250 at roughly 0.56% a side. The $10 book was paying
+#: 4.65% round trip against a break-even of about 2%, so it could not have won
+#: whatever its rules were.
+PAPER_NOTIONAL_USD = _dec("LAB_GRADUATION_PAPER_NOTIONAL_USD", "100")
 #: Only used when a token answers with one price and not the other, which
 #: should not happen on the DexScreener path and is refused rather than
 #: guessed — see `paper._rate`.
 PAPER_QUOTE_FALLBACK = _dec("LAB_GRADUATION_PAPER_QUOTE_FALLBACK", "0")
-#: A hundred $10 slots, so the book is exactly deployable and every
-#: graduation in the window gets a position instead of being skipped for want
-#: of a slot. The old ten-slot book skipped candidates whenever it was full,
-#: which silently made the population "graduations that happened while the
-#: book had room" rather than "graduations".
-PAPER_MAX_SLOTS = _int("LAB_GRADUATION_PAPER_SLOTS", 100)
-#: Trailing stop, as a fraction off the running peak.
-PAPER_TRAILING_PCT = _dec("LAB_GRADUATION_PAPER_TRAILING_PCT", "0.30")
-#: Take profit, as a MULTIPLE of the price paid. 2 means "sell at 2x".
+PAPER_MAX_SLOTS = _int("LAB_GRADUATION_PAPER_SLOTS", 10)
+#: Trailing stop, off the running peak. ZERO DISABLES IT.
 #:
-#: It is measured against the fill, not the quote, so the target is 2x what
-#: the position actually cost — and the exit then pays its own cost, so a 2x
-#: trigger banks about +94%, not +100%. Stated here because a target that
-#: quietly means something else is worse than no target.
-PAPER_TAKE_PROFIT_X = _dec("LAB_GRADUATION_PAPER_TAKE_PROFIT_X", "2")
-#: A hard backstop, because the post-graduation price series ENDS at
-#: POST_MIGRATION_SECONDS. Past that there is no mark and no exit price, so a
-#: position left open would simply hang. This is a property of the data, not a
-#: strategy choice.
-PAPER_MAX_HOLD_MINUTES = _int("LAB_GRADUATION_PAPER_MAX_HOLD_MIN", 60)
+#: Disabled deliberately. Replayed over 430 recorded graduations a trailing
+#: stop made every hold worse, at every level tested (20/30/50%) and at every
+#: cost: it exits into the gap rather than at the stop, so it converts a
+#: drawdown into a realised loss without avoiding one.
+PAPER_TRAILING_PCT = _dec("LAB_GRADUATION_PAPER_TRAILING_PCT", "0")
+#: Take profit, as a multiple of the price paid. ANYTHING <= 1 DISABLES IT.
+#:
+#: Disabled deliberately. Only 7.4% of graduations ever trade at 2x, and a
+#: target cannot be reached without first surviving the hold — so in replay
+#: every take-profit level tested (1.5x, 2x, 4x, 10x) left a 60-minute hold
+#: negative. What the live book's 2x "achieved" was an artefact of filling at
+#: the next sample rather than at the target: +157% average against a +94%
+#: target, which flatters the book and would not happen to a limit order.
+PAPER_TAKE_PROFIT_X = _dec("LAB_GRADUATION_PAPER_TAKE_PROFIT_X", "0")
+#: FIVE MINUTES, and now the only exit there is.
+#:
+#: This stopped being a backstop and became the strategy. Replayed over 430
+#: graduations, holds of 1-5 minutes are the only ones that are positive at
+#: any execution cost; from 10 minutes out the mean is negative even at a zero
+#: fee, which is a property of the asset and not something better execution
+#: can fix. Against controls the five-minute exit returns +1.23% where a
+#: random exit time returns -12.82% and holding to the end of the series
+#: returns -14.47%.
+#:
+#: It is still ALSO the data's limit: the price series ends at
+#: POST_MIGRATION_SECONDS, past which there is no mark and no exit price.
+PAPER_MAX_HOLD_MINUTES = _int("LAB_GRADUATION_PAPER_MAX_HOLD_MIN", 5)
 #: A position is only opened on a token whose pool opened within this long, so
 #: the book enters near the open rather than halfway through a window.
 PAPER_ENTRY_GRACE_MINUTES = _int("LAB_GRADUATION_PAPER_ENTRY_GRACE_MIN", 3)
 #: How often the book ticks.
 PAPER_INTERVAL_SECONDS = 60
+
+# --- the kill gate, stated before this run produced a single trade ------------
+#
+# Written down on 2026-09-12, the day the book was re-armed, so that a good
+# week cannot talk anyone out of it later. The lab has produced nine no-edge
+# results; the tenth is the expected outcome and the gate is what makes that
+# outcome cost nothing.
+#
+# Below ANY of these at the end of the run, the book closes. Not "reconsider".
+PAPER_GATE_STARTED = "2026-09-12"
+PAPER_GATE_WEEKS = 4
+#: Profit factor: gross profit over gross loss. 1.5 is the same bar the
+#: backtester's `evaluate_gate` uses, so the two agree on what passing means.
+PAPER_GATE_MIN_PF = _dec("LAB_GRADUATION_PAPER_GATE_PF", "1.5")
+#: At least this many closed trades, or the profit factor means nothing.
+PAPER_GATE_MIN_TRADES = _int("LAB_GRADUATION_PAPER_GATE_TRADES", 100)
+#: No single token may be more than this share of gross profit. Every
+#: apparent edge this platform has found died on exactly this test.
+PAPER_GATE_MAX_TOKEN_SHARE = _dec("LAB_GRADUATION_PAPER_GATE_SHARE", "0.20")
 
 # --- the gate, stated before any result is looked at --------------------------
 #: Out-of-sample profit factor. 1.5 and not 1.0: a strategy that merely clears

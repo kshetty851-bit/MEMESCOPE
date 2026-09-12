@@ -100,6 +100,14 @@ export interface PaperBook {
   /** Take profit as a multiple of the price paid: 2 is "sell at 2x". */
   take_profit_x: string;
   max_hold_minutes: number;
+  /** The gate this run was given before it produced a trade. */
+  gate_started: string;
+  gate_weeks: number;
+  gate_min_pf: string;
+  gate_min_trades: number;
+  gate_max_token_share: string;
+  profit_factor: string | null;
+  top_token_share: string | null;
   /** One leg's modelled cost: pump fee + assumed slippage + priority fee. */
   cost_pct_per_side: string;
   open_trades: PaperPosition[];

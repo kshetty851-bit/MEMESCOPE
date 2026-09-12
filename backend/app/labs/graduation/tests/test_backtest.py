@@ -158,21 +158,27 @@ def test_the_view_forward_fills_progress_rather_than_looking_ahead() -> None:
 
 # --- cost maths ---------------------------------------------------------------
 
-def test_the_default_cost_model_is_290_bps_a_side() -> None:
-    """1% pump fee + 150 bps slippage + a flat 0.002 quote priority fee, which
-    on a 0.5 quote position is another 40 bps."""
+def test_the_default_cost_model_is_90_bps_a_side() -> None:
+    """25 bps PumpSwap fee + 25 bps slippage + a flat 0.002 quote priority
+    fee, which on the nominal 0.5 quote position is another 40 bps.
+
+    Was 290. The 100 bps fee was the BONDING CURVE's schedule applied to an
+    AMM leg, and the 150 bps slippage was an unchecked default: measured on
+    405 recorded graduations, median pool depth at the open is $97,770, where
+    a $100 order moves the price about 0.10%.
+    """
     costs = Costs()
-    assert costs.side_fraction == D("0.029")
-    assert costs.buy_price(D(100)) == D("102.9")
-    assert costs.sell_price(D(100)) == D("97.1")
+    assert costs.side_fraction == D("0.009")
+    assert costs.buy_price(D(100)) == D("100.9")
+    assert costs.sell_price(D(100)) == D("99.1")
 
 
 def test_costs_turn_a_flat_move_into_a_loss() -> None:
     """The whole reason the model exists: a round trip at the same price loses
-    5.64%, not nothing."""
+    1.78%, not nothing."""
     costs = Costs()
     entry, exit_ = costs.buy_price(D(1)), costs.sell_price(D(1))
-    assert round(exit_ / entry - 1, 4) == D("-0.0564")
+    assert round(exit_ / entry - 1, 4) == D("-0.0178")
 
 
 def test_the_priority_fee_scales_with_position_size() -> None:
@@ -196,7 +202,7 @@ def test_net_and_gross_are_both_reported() -> None:
     r = replay(tick_list=ticks((40, "1.0"), (45, "2.0")), graduated=at(39))
     trade = Backtester(BASELINES["B0_open_timebox_5m"]).run([r]).trades[0]
     assert trade.gross_return == D("1")                    # a clean 2x
-    assert D("0.88") < trade.net_return < D("0.89")        # after 290 bps a side
+    assert D("0.96") < trade.net_return < D("0.97")        # after 90 bps a side
     assert trade.pnl_quote == (trade.net_return * config.BACKTEST_NOTIONAL_QUOTE)
 
 

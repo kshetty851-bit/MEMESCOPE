@@ -350,9 +350,6 @@ function PaperPanel({ book }: { book: PaperBook }) {
   const onSort = (key: SortKey) =>
     setSort((s) => ({ key, desc: s.key === key ? !s.desc : true }));
   const allClosed = history?.closed_trades ?? book.closed_trades;
-  const tookProfit = allClosed.filter(
-    (p) => !p.voided && p.close_reason === "take_profit",
-  );
   const pnl = Number(book.pnl_usd);
   const tone = pnl > 0 ? "text-up" : pnl < 0 ? "text-down" : "";
   const side = (Number(book.cost_pct_per_side) * 100).toFixed(2);
@@ -371,17 +368,14 @@ function PaperPanel({ book }: { book: PaperBook }) {
       </PanelHeader>
       <div className="flex flex-col gap-4 p-4">
         <p className="max-w-[65ch] text-xs text-ink-dim">
-          Rules fixed before the outcome was known: buy the pool open,{" "}
-          {usd(book.notional_usd)} a position, up to {book.max_slots} at once,
-          and leave on whichever comes first — a{" "}
-          {(Number(book.trailing_pct) * 100).toFixed(0)}% trailing stop off
-          the running peak, a {Number(book.take_profit_x)}x target, or{" "}
-          {book.max_hold_minutes} minutes, because the price series ends
-          there. The stop is checked before the target: both can be true on
-          one sample and minute data cannot say which filled, so the loss is
-          taken. Nothing is tuned after the fact — that is the whole point of
-          running it forward. Positions are sized in dollars and converted at
-          the SOL/USD rate observed when each one opened.
+          Buy the pool open, {usd(book.notional_usd)} a position,{" "}
+          {book.max_slots} at once, sell at {book.max_hold_minutes} minutes.
+          No stop, no target — both were replayed against 430 recorded
+          graduations and each made every hold worse. The size is where
+          execution is cheapest: the priority fee is flat in SOL, so it is
+          2.06% a side on a $10 position and 0.21% on a $100 one. Five
+          minutes is the longest hold that is positive at any cost; past ten
+          the average is negative even at a zero fee.
         </p>
         <div className="grid grid-cols-2 gap-6 sm:grid-cols-4">
           <Stat
@@ -413,6 +407,55 @@ function PaperPanel({ book }: { book: PaperBook }) {
             note={`${book.wins} of ${book.closed_positions}`}
           />
         </div>
+        <div className="flex flex-col gap-2 rounded-md border border-line p-3">
+          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-ink-dim">
+            The gate, written down {book.gate_started} before a single trade
+          </h3>
+          <p className="max-w-[65ch] text-xs text-ink-dim">
+            {book.gate_weeks} weeks. Below any of these at the end, the book
+            closes — not &ldquo;reconsider&rdquo;. This lab has produced nine
+            no-edge results; a tenth is the expected outcome, and the gate is
+            what makes that outcome cost nothing.
+          </p>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            {[
+              {
+                label: "Profit factor",
+                need: `>= ${Number(book.gate_min_pf).toFixed(2)}`,
+                got: book.profit_factor,
+                ok: book.profit_factor !== null
+                  && Number(book.profit_factor) >= Number(book.gate_min_pf),
+                fmt: (v: string) => Number(v).toFixed(2),
+              },
+              {
+                label: "Closed trades",
+                need: `>= ${book.gate_min_trades}`,
+                got: String(book.closed_positions),
+                ok: book.closed_positions >= book.gate_min_trades,
+                fmt: (v: string) => v,
+              },
+              {
+                label: "Biggest token's share of profit",
+                need: `<= ${(Number(book.gate_max_token_share) * 100).toFixed(0)}%`,
+                got: book.top_token_share,
+                ok: book.top_token_share !== null
+                  && Number(book.top_token_share) <= Number(book.gate_max_token_share),
+                fmt: (v: string) => `${(Number(v) * 100).toFixed(1)}%`,
+              },
+            ].map((g) => (
+              <div key={g.label} className="flex flex-col">
+                <span className="text-[11px] text-ink-dim">{g.label}</span>
+                <span className="text-sm tabular-nums">
+                  <span className={g.got === null ? "text-ink-dim" : g.ok ? "text-up" : "text-down"}>
+                    {g.got === null ? "—" : g.fmt(g.got)}
+                  </span>
+                  <span className="text-ink-dim"> / need {g.need}</span>
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+
         <p className={`text-sm font-semibold tabular-nums ${tone}`}>
           {signedUsd(book.pnl_usd)} ({Number(book.return_pct) >= 0 ? "+" : ""}
           {(Number(book.return_pct) * 100).toFixed(2)}%) against the{" "}
@@ -503,35 +546,14 @@ function PaperPanel({ book }: { book: PaperBook }) {
               buy at a pool open competes with bots for the same slot.
             </li>
             <li>
-              The {Number(book.take_profit_x)}x target should bank about{" "}
-              {(
-                (Number(book.take_profit_x) *
-                  (1 - Number(book.cost_pct_per_side)) -
-                  1) *
-                100
-              ).toFixed(0)}
-              % — 2x the price paid, less the cost of the exit.
-              {tookProfit.length ? (
-                <>
-                  {" "}
-                  It has averaged{" "}
-                  <strong className="text-ink">
-                    {(
-                      (tookProfit.reduce(
-                        (a, p) => a + Number(p.net_return ?? 0),
-                        0,
-                      ) /
-                        tookProfit.length) *
-                      100
-                    ).toFixed(0)}
-                    %
-                  </strong>{" "}
-                  over {tookProfit.length} exits, for the same reason the stop
-                  overshoots: the fill is the next price sampled, not the
-                  target. A live limit order would have filled at the target,
-                  so this flatters the book.
-                </>
-              ) : null}
+              Costs here are modelled, not measured per trade:{" "}
+              {(Number(book.cost_pct_per_side) * 100).toFixed(2)}% a side is
+              PumpSwap&apos;s 25bp fee, 25bp of assumed slippage, and the flat
+              priority fee at this position size. Median pool depth at the
+              open is about $98,000, where a {usd(book.notional_usd)} order
+              moves the price roughly 0.10% — so the slippage term is
+              deliberately set above what the median implies, because the
+              error that matters is the one that flatters the book.
             </li>
           </ul>
           <p className="mt-1">

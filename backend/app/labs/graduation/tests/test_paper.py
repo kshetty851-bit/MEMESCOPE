@@ -9,9 +9,7 @@ from app.labs.graduation import config
 from app.labs.graduation.backtest import (
     Costs,
     ExitState,
-    TakeProfit,
     Tick,
-    TrailingStop,
 )
 from app.labs.graduation.paper import (
     Account,
@@ -32,28 +30,31 @@ def state(price: str, *, entry: str = "1.0", peak: str = "1.0") -> ExitState:
 
 # --- the frozen rules ---------------------------------------------------------
 
-def test_the_book_ships_with_the_rules_that_were_asked_for() -> None:
-    """$1,000 over a hundred $10 slots, a 30% trailing stop and a 2x target.
-    Pinned so a later edit to the defaults is a visible change to a stated
-    rule, not a quiet one — the whole value of a forward run is that its
-    rules were fixed before the outcome was known."""
+def test_the_book_ships_with_the_rules_the_replay_supports() -> None:
+    """$1,000 over ten $100 slots, out at five minutes, nothing else.
+
+    Every number here was chosen by replaying 430 recorded graduations, and
+    is pinned so a later edit is a visible change to a stated rule. $100 is
+    the size at which execution is cheapest (the flat priority fee dominates
+    below it, price impact above it); five minutes is the longest hold that
+    is positive at any cost.
+    """
     assert D("1000") == config.PAPER_CAPITAL_USD
-    assert D("10") == config.PAPER_NOTIONAL_USD
-    assert config.PAPER_MAX_SLOTS == 100
-    assert D("0.30") == config.PAPER_TRAILING_PCT
-    assert D("2") == config.PAPER_TAKE_PROFIT_X
+    assert D("100") == config.PAPER_NOTIONAL_USD
+    assert config.PAPER_MAX_SLOTS == 10
+    assert config.PAPER_MAX_HOLD_MINUTES == 5
+    # Both disabled: each made every hold worse at every level replayed.
+    assert D("0") == config.PAPER_TRAILING_PCT
+    assert D("0") == config.PAPER_TAKE_PROFIT_X
     # The slots at that size are exactly the book, so it can be fully
     # deployed and no candidate is skipped for want of capital that exists.
     assert config.PAPER_NOTIONAL_USD * config.PAPER_MAX_SLOTS == config.PAPER_CAPITAL_USD
 
 
-def test_the_trailing_stop_fires_at_thirty_percent_off_the_peak() -> None:
-    rule = TrailingStop(config.PAPER_TRAILING_PCT)
-    assert rule.fires(state("0.70", peak="1.0")) is True
-    assert rule.fires(state("0.71", peak="1.0")) is False
-    # It trails the PEAK, not the entry: a position that doubled and gave back
-    # 30% of the high is closed even though it is still up on the entry.
-    assert rule.fires(state("1.40", entry="1.0", peak="2.0")) is True
+def test_a_disabled_rule_is_not_in_the_policy_at_all() -> None:
+    """Zero means absent, not "fires at zero". A `TrailingStop(0)` would exit
+    the instant a position ticked down from its own entry."""
+    assert exit_policy().rules == ()
 
 
 def test_the_max_hold_is_the_data_not_a_strategy_choice() -> None:
@@ -77,7 +78,7 @@ def test_the_book_uses_the_backtester_cost_model() -> None:
 def test_a_flat_round_trip_still_loses_the_spread() -> None:
     c = costs()
     entry, exit_ = c.buy_price(D(1)), c.sell_price(D(1))
-    assert round(exit_ / entry - 1, 4) == D("-0.0564")
+    assert round(exit_ / entry - 1, 4) == D("-0.0178")
 
 
 # --- the account --------------------------------------------------------------
@@ -229,8 +230,8 @@ def test_a_position_marked_at_its_own_entry_shows_exactly_the_round_trip_cost() 
     net = net_return(_bought("0.00000048"), D("0.00000048"), costs())
     assert net is not None
     assert abs(net - expected) < D("0.000001")
-    # Concretely: a $100 position opens showing about -$5.64.
-    assert D("-5.7") < D("100") * net < D("-5.5")
+    # Concretely: a $100 position opens showing about -$1.78.
+    assert D("-1.8") < D("100") * net < D("-1.7")
 
 
 def test_the_formula_reproduces_a_trade_the_live_book_actually_closed() -> None:
@@ -238,11 +239,15 @@ def test_the_formula_reproduces_a_trade_the_live_book_actually_closed() -> None:
     0.00000048 SOL, exited at a quoted 0.00000060, and the book recorded
     +0.17954325 / +$17.95.
 
-    Pinned against the ROW, not against this code, so a change to the cost
-    model or the formula shows up as a trade that would no longer have earned
-    what it earned.
+    Pinned against the ROW, so the FORMULA cannot drift. The costs of that day
+    are supplied explicitly because the book no longer charges them — 290 bps
+    a side was the bonding curve's fee on an AMM leg plus an unchecked
+    slippage default. Reproducing the row means using the model it was closed
+    under, not today's.
     """
-    net = net_return(_bought("0.00000048"), D("0.00000060"), costs())
+    then = Costs(pump_fee_bps=100, slip_bps=150, notional_quote=D("0.5"))
+    position = _Position("1.0", str(D("1.0") / then.buy_price(D("0.00000048"))))
+    net = net_return(position, D("0.00000060"), then)
     assert net is not None
     assert net.quantize(D("0.00000001")) == D("0.17954325")
     assert (D("100") * net).quantize(D("0.01")) == D("17.95")
@@ -270,30 +275,3 @@ def test_a_net_return_needs_a_price_and_refuses_without_one() -> None:
 
 # --- the 2x target ------------------------------------------------------------
 
-def test_the_target_fires_at_twice_the_price_paid() -> None:
-    """2x is measured against the FILL, not the quote. A target measured
-    against the quoted price would trigger before the position was actually
-    up 2x on what it cost."""
-    policy = exit_policy()
-    assert policy.fires(state("1.99", entry="1.0", peak="1.99")) is None
-    assert policy.fires(state("2.00", entry="1.0", peak="2.00")) == "take_profit"
-
-
-def test_the_stop_is_checked_before_the_target() -> None:
-    """A 60-second sample can satisfy both — up 2x from entry and 30% off a
-    higher peak. Minute data cannot say which filled first, so the loss is
-    taken. If this ever flips, the book has quietly become optimistic."""
-    both = state("2.00", entry="1.0", peak="4.0")
-    assert TrailingStop(config.PAPER_TRAILING_PCT).fires(both) is True
-    assert TakeProfit(config.PAPER_TAKE_PROFIT_X - 1).fires(both) is True
-    assert exit_policy().fires(both) == "trailing_stop"
-
-
-def test_a_two_x_target_banks_less_than_two_x() -> None:
-    """The exit pays its own cost, so the stated target is not the realised
-    return. Asserted because the page says so."""
-    position = _bought("1.0")
-    entry = position.notional_quote / position.tokens
-    net = net_return(position, entry * config.PAPER_TAKE_PROFIT_X, costs())
-    assert net is not None
-    assert D("0.93") < net < D("0.95")   # about +94%, not +100%

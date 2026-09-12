@@ -22,9 +22,11 @@ as much whether it wins or loses.
   entry available while the curve's SOL side is unresolved;
 * `PAPER_NOTIONAL_QUOTE` per position, `PAPER_MAX_SLOTS` at once, a signal
   arriving with every slot full is SKIPPED and never queued;
-* exit on a `PAPER_TRAILING_PCT` trailing stop off the RUNNING peak;
-* exit at `PAPER_TAKE_PROFIT_X` times the price paid;
-* exit at `PAPER_MAX_HOLD_MINUTES` regardless.
+* exit at `PAPER_MAX_HOLD_MINUTES` — which is now the WHOLE strategy, not a
+  backstop;
+* a trailing stop and a take-profit exist and are both set to zero, because
+  replaying 430 recorded graduations found each of them made every hold
+  worse at every level tested.
 
 The stop is checked BEFORE the target. Both can be true on one 60-second
 sample and minute data cannot say which filled first, so the loss is taken —
@@ -77,13 +79,18 @@ _P = Decimal("0.00000001")
 
 
 def costs(notional_quote: Decimal | None = None) -> Costs:
-    """The book's cost model: the backtester's, at the book's position size.
+    """The book's cost model: the backtester's, at the POSITION's size.
 
-    The flat priority fee is a fraction of the position, so it needs a quote
-    size. A nominal one is fine — it moves the fee by a basis point or two,
-    not the shape of anything.
+    Pass the real `notional_quote`. The priority fee is flat in SOL, so its
+    share of the position is entirely a function of size — 0.21% on $100 and
+    2.06% on $10 — and the nominal 0.5 SOL this used to fall back on was not
+    "a basis point or two" out, as the docstring here used to claim. It was
+    the difference between a book that could win and one that could not.
+
+    The fallback remains only for callers with no position in hand, such as a
+    page rendering the headline cost.
     """
-    return Costs(notional_quote=notional_quote or Decimal("0.5"))
+    return Costs(notional_quote=notional_quote or config.BACKTEST_NOTIONAL_QUOTE)
 
 
 def switched_mints():
@@ -111,10 +118,14 @@ def exit_policy() -> ExitPolicy:
     Built from the backtester's rules rather than reimplemented, so the
     forward run and the replay cannot disagree about when a position leaves.
     """
-    return ExitPolicy((
-        TrailingStop(config.PAPER_TRAILING_PCT),
-        TakeProfit(config.PAPER_TAKE_PROFIT_X - 1),
-    ))
+    rules: list[TrailingStop | TakeProfit] = []
+    if config.PAPER_TRAILING_PCT > 0:
+        rules.append(TrailingStop(config.PAPER_TRAILING_PCT))
+    if config.PAPER_TAKE_PROFIT_X > 1:
+        rules.append(TakeProfit(config.PAPER_TAKE_PROFIT_X - 1))
+    # An empty policy is a real configuration, not a mistake: it leaves the
+    # hold as the only exit, which is what the replay says works.
+    return ExitPolicy(tuple(rules))
 
 
 def _rate(price_usd: Decimal | None, price_native: Decimal | None) -> Decimal | None:
@@ -130,12 +141,15 @@ def _rate(price_usd: Decimal | None, price_native: Decimal | None) -> Decimal | 
 
 
 def net_return(position: Any, quote: Decimal | None,
-               book_costs: Costs) -> Decimal | None:
+               book_costs: Costs | None = None) -> Decimal | None:
     """What the position has returned at `quote`, after the cost of getting out.
 
     THE one definition, used by the close, by the equity mark and by the API
     row, because three copies of this formula is three chances for the page to
     disagree with the book about what a position is worth.
+
+    Costs come from the POSITION unless a caller supplies them, so the flat
+    priority fee is charged against what was actually traded.
 
     Note what is absent: the SOL/USD rate. The quote cancels — `tokens` was
     bought with `notional_quote` — so this is a pure price ratio, and the
@@ -144,7 +158,8 @@ def net_return(position: Any, quote: Decimal | None,
     """
     if quote is None or position.notional_quote <= 0:
         return None
-    return (position.tokens * book_costs.sell_price(quote)
+    leg = book_costs or costs(position.notional_quote)
+    return (position.tokens * leg.sell_price(quote)
             / position.notional_quote - 1)
 
 
@@ -162,6 +177,11 @@ class Account:
     #: Closed trades refused because their price series crossed pools. Shown,
     #: never summed — a count of what is NOT in the figures above.
     voided: int = 0
+    #: Gross profit over gross loss, and the single biggest winner's share of
+    #: gross profit. Both are gate terms, so the page can show the run against
+    #: the bar it was given rather than against a feeling.
+    profit_factor: Decimal | None = None
+    top_token_share: Decimal | None = None
 
     @property
     def equity(self) -> Decimal:
@@ -195,6 +215,8 @@ class Account:
             "closed_positions": self.closed_positions,
             "wins": self.wins,
             "voided": self.voided,
+            "profit_factor": (str(self.profit_factor)
+                              if self.profit_factor is not None else None),
             "free_slots": self.free_slots,
         }
 
@@ -269,8 +291,9 @@ class PaperBook:
 
     def _close(self, position: GradPaperPosition, quote: Decimal,
                reason: str) -> None:
-        fill = self._costs.sell_price(quote)
-        net = net_return(position, quote, self._costs) or Decimal(0)
+        leg = costs(position.notional_quote)
+        fill = leg.sell_price(quote)
+        net = net_return(position, quote, leg) or Decimal(0)
         position.closed_at = self._now
         position.close_quote = quote.quantize(_P)
         position.close_fill = fill.quantize(_P)
@@ -326,10 +349,12 @@ class PaperBook:
                 # rate would report a dollar P&L that never existed.
                 logger.warning("graduation_paper_no_rate", mint=row.mint)
                 continue
-            fill = self._costs.buy_price(row.price_native)
+            notional_quote = (config.PAPER_NOTIONAL_USD / rate).quantize(_Q)
+            # Priced at THIS position's size, so the flat priority fee is a
+            # share of what is actually being traded.
+            fill = costs(notional_quote).buy_price(row.price_native)
             if fill <= 0:
                 continue
-            notional_quote = (config.PAPER_NOTIONAL_USD / rate).quantize(_Q)
             self._session.add(GradPaperPosition(
                 mint=row.mint,
                 opened_at=row.open_at,
@@ -386,13 +411,24 @@ class PaperBook:
             .where(GradPaperPosition.closed_at.is_not(None),
                    GradPaperPosition.notional_usd > 0,
                    GradPaperPosition.mint.in_(bad)))
+        # The gate terms come from the realised trades themselves, so they
+        # cannot disagree with the list the page renders.
+        banked = (await self._session.scalars(
+            select(GradPaperPosition.pnl_usd)
+            .where(GradPaperPosition.closed_at.is_not(None),
+                   GradPaperPosition.pnl_usd.is_not(None), *sound))).all()
+        up = sum((p for p in banked if p > 0), Decimal(0))
+        down = -sum((p for p in banked if p < 0), Decimal(0))
+        pf = (up / down) if down > 0 else None
+        share = (max(banked) / up) if up > 0 else None
+
         open_rows = (await self._session.scalars(
             select(GradPaperPosition)
             .where(GradPaperPosition.closed_at.is_(None), *sound))).all()
 
         unrealised = Decimal(0)
         for position in open_rows:
-            net = net_return(position, position.last_quote, self._costs)
+            net = net_return(position, position.last_quote)
             if net is not None:
                 unrealised += position.notional_usd * net
 
@@ -404,6 +440,9 @@ class PaperBook:
             closed_positions=int(closed or 0),
             wins=int(wins or 0),
             voided=int(voided or 0),
+            profit_factor=(pf.quantize(Decimal("0.01")) if pf is not None else None),
+            top_token_share=(share.quantize(Decimal("0.0001"))
+                             if share is not None else None),
         )
 
 

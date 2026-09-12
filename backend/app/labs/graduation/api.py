@@ -108,6 +108,15 @@ class PaperBookOut(BaseModel):
     #: Take profit as a multiple of the price paid: 2 is "sell at 2x".
     take_profit_x: Decimal = Decimal(0)
     max_hold_minutes: int = 0
+    #: The gate this run was given BEFORE it produced a trade, and where it
+    #: currently stands against it.
+    gate_started: str = ""
+    gate_weeks: int = 0
+    gate_min_pf: Decimal = Decimal(0)
+    gate_min_trades: int = 0
+    gate_max_token_share: Decimal = Decimal(0)
+    profit_factor: Decimal | None = None
+    top_token_share: Decimal | None = None
     #: What the cost model charges on ONE leg: pump fee + assumed slippage +
     #: the priority fee as a share of the position. Published because "would a
     #: real wallet have made this?" is a question about exactly this number.
@@ -268,8 +277,13 @@ async def _paper(db: AsyncSession, *, limit: int | None = 10) -> PaperBookOut:
     """The book's state. Read-only: this endpoint never ticks it."""
     book = PaperBook(db)
     account = await book.account()
-    book_costs = costs()
     open_rows, closed_rows = await positions(db, limit=limit)
+    # The headline cost is a real position's, not a nominal one: the priority
+    # fee is flat in SOL, so its share depends entirely on the size traded.
+    # With no positions yet there is no rate to convert $100 with, and the
+    # configured nominal is the only honest stand-in.
+    sample = next((r[0] for r in (*open_rows, *closed_rows)), None)
+    book_costs = costs(sample.notional_quote if sample else None)
     cents = Decimal("0.01")
 
     def out(row: Any) -> PaperPosition:
@@ -282,7 +296,7 @@ async def _paper(db: AsyncSession, *, limit: int | None = 10) -> PaperBookOut:
         p, symbol, name, voided = row
         pnl, net = p.pnl_usd, p.net_return
         if p.closed_at is None:
-            live = net_return(p, p.last_quote, book_costs)
+            live = net_return(p, p.last_quote)
             if live is not None:
                 pnl = (p.notional_usd * live).quantize(cents)
                 net = live.quantize(Decimal("0.00000001"))
@@ -314,6 +328,13 @@ async def _paper(db: AsyncSession, *, limit: int | None = 10) -> PaperBookOut:
         trailing_pct=config.PAPER_TRAILING_PCT,
         take_profit_x=config.PAPER_TAKE_PROFIT_X,
         max_hold_minutes=config.PAPER_MAX_HOLD_MINUTES,
+        gate_started=config.PAPER_GATE_STARTED,
+        gate_weeks=config.PAPER_GATE_WEEKS,
+        gate_min_pf=config.PAPER_GATE_MIN_PF,
+        gate_min_trades=config.PAPER_GATE_MIN_TRADES,
+        gate_max_token_share=config.PAPER_GATE_MAX_TOKEN_SHARE,
+        profit_factor=account.profit_factor,
+        top_token_share=account.top_token_share,
         cost_pct_per_side=book_costs.side_fraction.quantize(Decimal("0.0001")),
         open_trades=[out(r) for r in open_rows],
         closed_trades=[out(r) for r in closed_rows],
