@@ -10,6 +10,7 @@ recorder has seen; it ranks nothing and recommends nothing.
 
 from __future__ import annotations
 
+import random
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -534,6 +535,11 @@ class ArmRow(BaseModel):
     name: str
     note: str = ""
     entry: str = ""
+    #: The rule in full, in words: what it buys and when it sells. Built from
+    #: the Arm itself, so the page cannot describe a rule the code is not
+    #: running.
+    entry_rule: str = ""
+    exit_rule: str = ""
     hold_minutes: int = 0
     take_profit_x: Decimal | None = None
     trailing_pct: Decimal | None = None
@@ -545,6 +551,21 @@ class ArmRow(BaseModel):
     profit_factor: Decimal | None = None
     top_token_share: Decimal | None = None
     open_positions: int = 0
+    #: Realised P&L as a percentage of the arm's $1,000 capital.
+    return_pct: Decimal = Decimal(0)
+    #: Where thirty days of the SAME rule at the SAME trade rate would land —
+    #: median, and the 5th-95th percentile band around it.
+    #:
+    #: The band is the point. A projection from a few dozen trades is mostly
+    #: an artefact of which tokens happened to arrive, and a single number
+    #: would hide that behind a decimal point. Positions are a fixed $100
+    #: regardless of equity, so the arithmetic is additive rather than
+    #: compounding — compounding a noisy edge produces numbers that are
+    #: arithmetic rather than forecast.
+    projected_30d_usd: Decimal | None = None
+    projected_30d_low: Decimal | None = None
+    projected_30d_high: Decimal | None = None
+    projected_trades: int = 0
 
 
 class Leaderboard(BaseModel):
@@ -575,6 +596,10 @@ class Leaderboard(BaseModel):
     verdict: str = ""
     total_trades: int = 0
     notional_usd: Decimal = Decimal(0)
+    capital_usd: Decimal = Decimal(0)
+    #: How long the tournament has been running. The projection is meaningless
+    #: below an hour and barely better above it, so the reader is told.
+    hours_running: Decimal = Decimal(0)
 
 
 @router.get("/tournament", response_model=Leaderboard)
@@ -599,11 +624,51 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
                GradPaperPosition.close_quote > 0)
         .group_by(GradPaperPosition.book))).all()
     stats = {r.book: r for r in closed}
+
+    # Per-trade returns, for the projection band. Aggregates cannot give it:
+    # the spread of thirty days depends on the SHAPE of an arm's returns, and
+    # this market's shape is hundreds of small gains against a few wipeouts.
+    per_arm: dict[str, list[float]] = {}
+    for book, ret in (await db.execute(
+            select(GradPaperPosition.book, GradPaperPosition.net_return)
+            .where(GradPaperPosition.closed_at.is_not(None),
+                   GradPaperPosition.notional_usd > 0,
+                   GradPaperPosition.close_quote > 0,
+                   GradPaperPosition.net_return.is_not(None)))).all():
+        per_arm.setdefault(book, []).append(float(ret))
     open_now = {r[0]: r[1] for r in (await db.execute(
         select(GradPaperPosition.book, func.count())
         .where(GradPaperPosition.closed_at.is_(None))
         .group_by(GradPaperPosition.book))).all()}
     started = await db.scalar(select(func.min(GradPaperPosition.opened_at)))
+    hours = ((datetime.now(UTC) - started).total_seconds() / 3600
+             if started else 0.0)
+
+    def project(returns: list[float]) -> tuple[Decimal | None, Decimal | None,
+                                               Decimal | None, int]:
+        """Thirty days of this arm, with the band that says how little we know.
+
+        The mean per trade is resampled with replacement — the spread of a
+        thirty-day total is the spread of that mean, scaled by how many trades
+        fit in thirty days. Refused below an hour of running or ten trades,
+        because a rate measured over minutes projects nonsense.
+        """
+        n = len(returns)
+        if n < 10 or hours < 1.0:
+            return None, None, None, 0
+        rate = n / hours
+        horizon = int(rate * 24 * 30)
+        size = float(config.PAPER_NOTIONAL_USD)
+        means = sorted(
+            sum(returns[random.randrange(n)] for _ in range(n)) / n  # noqa: S311
+            for _ in range(600))
+
+        def pick(p: float) -> Decimal:
+            return Decimal(
+                str(means[int(p * len(means))] * horizon * size)
+            ).quantize(Decimal("0.01"))
+
+        return pick(0.50), pick(0.05), pick(0.95), horizon
 
     def row(arm) -> ArmRow:
         s = stats.get(arm.name)
@@ -615,13 +680,22 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
                 top = (Decimal(s.best) / Decimal(s.gross_up)).quantize(Decimal("0.0001"))
             if s.mean is not None:
                 mean = (Decimal(s.mean) * 100).quantize(Decimal("0.01"))
+        mid, low, high, horizon = project(per_arm.get(arm.name, []))
+        realised = (Decimal(s.pnl) if s else Decimal(0)).quantize(Decimal("0.01"))
         return ArmRow(
-            name=arm.name, note=arm.note, entry=arm.entry, hold_minutes=arm.hold,
+            name=arm.name, note=arm.note, entry=arm.entry,
+            entry_rule=arm.entry_rule, exit_rule=arm.exit_rule,
+            hold_minutes=arm.hold,
             take_profit_x=arm.tp, trailing_pct=arm.trail, is_control=arm.is_control,
             trades=int(s.trades) if s else 0, wins=int(s.wins) if s else 0,
-            realised_usd=(Decimal(s.pnl) if s else Decimal(0)).quantize(Decimal("0.01")),
+            realised_usd=realised,
             mean_pct=mean, profit_factor=pf, top_token_share=top,
-            open_positions=int(open_now.get(arm.name, 0)))
+            open_positions=int(open_now.get(arm.name, 0)),
+            return_pct=((realised / config.PAPER_CAPITAL_USD * 100)
+                        .quantize(Decimal("0.01"))
+                        if config.PAPER_CAPITAL_USD else Decimal(0)),
+            projected_30d_usd=mid, projected_30d_low=low,
+            projected_30d_high=high, projected_trades=horizon)
 
     rows = [row(a) for a in ARMS]
     # An arm that has not traded is not leading. Sorting on P&L alone ranks a
@@ -649,6 +723,8 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
         max_token_share=config.TOURNEY_MAX_TOKEN_SHARE,
         total_trades=sum(r.trades for r in rows),
         notional_usd=config.PAPER_NOTIONAL_USD,
+        capital_usd=config.PAPER_CAPITAL_USD,
+        hours_running=Decimal(str(round(hours, 1))),
     )
     if leader is None:
         board.verdict = (

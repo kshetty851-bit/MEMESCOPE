@@ -206,3 +206,42 @@ def test_a_thin_sample_cannot_clear_its_own_bar() -> None:
     requirement is set where noise sits rather than somewhere reachable."""
     assert config.required_pf(10) == config.required_pf(30)
     assert config.required_pf(30) > D("50")
+
+
+# --- the rules are published, and cannot drift from the code -----------------
+
+def test_every_entry_filter_is_described() -> None:
+    """The page prints each arm's rule. If a filter gains a branch in
+    `accepts` and no sentence in `ENTRY_RULES`, the page would describe a
+    strategy the tournament is not running — so the two are bound here."""
+    from app.labs.graduation.tournament import ENTRY_RULES
+
+    used = {a.entry for a in ARMS}
+    assert used <= set(ENTRY_RULES), used - set(ENTRY_RULES)
+    for key, text in ENTRY_RULES.items():
+        assert text and not text.endswith("."), key
+    # Every control says so in its own description, so a reader skimming the
+    # rules cannot mistake one for a strategy.
+    for arm in CONTROLS:
+        assert "CONTROL" in arm.entry_rule
+
+
+def test_each_arm_states_both_halves_of_its_rule() -> None:
+    for arm in ARMS:
+        assert arm.entry_rule and arm.entry_rule != arm.entry, arm.name
+        assert "minute" in arm.exit_rule, arm.name
+
+
+def test_the_exit_rule_names_every_condition_the_arm_carries() -> None:
+    """A reader must be able to tell a plain hold from a hold plus a target,
+    without reading the arm's name."""
+    plain = BY_NAME["E05_hold_5m"]
+    assert plain.exit_rule == "at 5 minutes"
+
+    both = BY_NAME["X07_tp2_trail30"]
+    assert "2x" in both.exit_rule and "30%" in both.exit_rule
+    assert "60 minutes" in both.exit_rule
+    assert both.exit_rule.startswith("whichever comes first")
+
+    # Singular minute, because "1 minutes" reads as a bug in the data.
+    assert BY_NAME["E01_hold_1m"].exit_rule == "at 1 minute"
