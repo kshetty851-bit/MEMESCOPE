@@ -171,6 +171,14 @@ async def test_the_daily_cap_binds_against_what_was_opened(
         select(RafiqCandidate).where(RafiqCandidate.mint_address == mint)
     )).scalars().first()
     assert filed is not None and filed.reject_reason == "daily_trade_cap"
+    # And it was evaluated all the way through first, so the row carries the
+    # snapshot rather than a bare "cap" with no features. The cap is checked
+    # last on purpose: checked first it would be the recorded reason for
+    # nearly the whole stream and every one of those rows would lose the
+    # reason it would actually have failed for.
+    assert filed.liquidity_usd == Decimal("250000.0000")
+    assert filed.notional_usd is not None
+    assert filed.entry_impact_pct is not None
 
 
 async def test_the_cap_resets_on_a_new_day(lab_session, monkeypatch) -> None:

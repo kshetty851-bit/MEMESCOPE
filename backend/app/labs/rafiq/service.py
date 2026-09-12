@@ -329,9 +329,7 @@ class RafiqLabService:
             verdict = None
             reason: str | None = None
 
-            if remaining is not None and remaining <= 0:
-                reason = "daily_trade_cap"
-            elif (now - cand.detected_at).total_seconds() > config.MAX_CANDIDATE_AGE_SECONDS:
+            if (now - cand.detected_at).total_seconds() > config.MAX_CANDIDATE_AGE_SECONDS:
                 reason = "candidate_too_old"
             elif cand.opportunity_score < spec.profile.entry_threshold:
                 reason = "score_below_threshold"
@@ -389,6 +387,22 @@ class RafiqLabService:
                 if cand.mint_address not in filed:
                     await self._file(spec, row, cand, obs, now=now,
                                      reason="unquantifiable", notional=notional,
+                                     stop_pct=stop_pct, verdict=verdict)
+                    filed.add(cand.mint_address)
+                continue
+
+            # The daily cap is checked LAST, on purpose. Checked first it
+            # would be the recorded reason for nearly the whole stream — the
+            # cap is 20 and the Radar admits about 605 a day — and every one
+            # of those rows would lose the reason it would actually have
+            # failed for. Checked here it marks exactly the candidates the cap
+            # cost the book: ones that passed every other condition. That is
+            # the number worth having, and it leaves the rest of the
+            # population readable.
+            if remaining is not None and remaining <= 0:
+                if cand.mint_address not in filed:
+                    await self._file(spec, row, cand, obs, now=now,
+                                     reason="daily_trade_cap", notional=notional,
                                      stop_pct=stop_pct, verdict=verdict)
                     filed.add(cand.mint_address)
                 continue
