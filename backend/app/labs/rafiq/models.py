@@ -37,7 +37,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -156,6 +156,27 @@ class RafiqLabPosition(Base):
     #: exit. Stored rather than re-derived: the cost model is calibration, and
     #: a recalibration must not silently restate a trade that already happened.
     entry_price_impact_pct: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))
+
+    # --- the entry decision's two instrumented features ------------------
+    # Written ONCE, in the same INSERT as the rest of the row, from the store
+    # as it stood at `opened_at`. Nothing in this lab updates them afterwards
+    # and nothing backfills them: a value that appeared after the decision was
+    # not available to the decision, and writing it here later would turn an
+    # honest null into evidence the strategy never had. `_settle` touches only
+    # the exit columns, and `test_entry_features_are_never_backfilled` fails if
+    # a later-arriving snapshot changes a row that is already open.
+    #
+    # A null here is a fact about this platform's collectors, not about the
+    # token — `entry_features_error` says which store was silent.
+    entry_top10_holder_pct: Mapped[Decimal | None] = mapped_column(Numeric(9, 4))
+    entry_top10_captured_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True))
+    entry_lp_status: Mapped[str | None] = mapped_column(String(16))
+    entry_lp_reason_codes: Mapped[list | None] = mapped_column(JSONB)
+    entry_lp_checked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True))
+    entry_features_error: Mapped[str | None] = mapped_column(String(64))
+
     #: The geometry, frozen. `stop_price` is C's liquidity-derived level for
     #: E2, and the profile's flat `stop_mult` for A2, B2, C2 and D2.
     stop_price: Mapped[Decimal] = mapped_column(_PRICE, nullable=False)

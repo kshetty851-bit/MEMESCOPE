@@ -138,6 +138,10 @@ class RafiqLabService:
         for row in rows:
             spec = registry.BY_CODE[row.code]
             positions = await self._positions(row.id)
+            # A retired book still settles. Its open positions run to the
+            # geometry frozen on each row, because force-closing would sell
+            # every one of them at once into exactly the drained pools that
+            # produce the 0.0003x fills — the loss this lab exists to avoid.
             closed = await self._settle(spec, positions, seen, now=now)
             halted, reason = await self._breaker(spec, row, positions, now=now)
             opened = 0
@@ -150,7 +154,8 @@ class RafiqLabService:
                 opened = await self._enter(spec, row, positions, candidates, seen,
                                            now=now)
             report[row.code] = {"closed": closed, "opened": opened,
-                                "halted": halted, "halt_reason": reason}
+                                "halted": halted, "halt_reason": reason,
+                                "enters": spec.enters}
         await self._session.flush()
         return {"at": now.isoformat(), "strategies": report}
 
@@ -315,6 +320,15 @@ class RafiqLabService:
             if quantity is None or quantity <= 0:
                 continue
 
+            # Read AFTER the decision is settled and BEFORE the row exists, so
+            # the reading is the one the decision was made under and cannot be
+            # mistaken for a later state of the store. It cannot change the
+            # outcome: every gate above has already passed, this issues two
+            # SELECTs against tables the platform fills on its own schedule,
+            # and a silent store returns a named absence rather than raising.
+            features = await self._feed.entry_features(mint=cand.mint_address,
+                                                       at=now)
+
             # One buy, then split. Sizing each leg separately would have this
             # book pay two small impacts instead of the one large one it really
             # pays, which is a cost advantage the experiment never granted it.
@@ -331,6 +345,12 @@ class RafiqLabService:
                     entry_liquidity_usd=obs.liquidity_usd,
                     entry_market_cap_usd=obs.market_cap,
                     entry_price_impact_pct=verdict.entry_impact_pct,
+                    entry_top10_holder_pct=features.top10_holder_pct,
+                    entry_top10_captured_at=features.top10_captured_at,
+                    entry_lp_status=features.lp_status,
+                    entry_lp_reason_codes=features.lp_reason_codes,
+                    entry_lp_checked_at=features.lp_checked_at,
+                    entry_features_error=features.error,
                     stop_price=entry_price * (Decimal(100) - stop_pct) / 100,
                     target_price=(None if leg.take_profit_mult is None
                                   else entry_price * leg.take_profit_mult),

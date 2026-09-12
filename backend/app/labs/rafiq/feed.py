@@ -14,7 +14,11 @@ WHAT IT READS, AND WHAT IT CANNOT
 `wallet_flow_snapshots`      unique buyers and sellers, trade counts, top-10
                              concentration — **behind a flag that ships off**,
                              so these are frequently absent
-`token_security_evaluations` the safety verdict, or nothing at all
+`token_security_evaluations` the safety verdict, and the LIQUIDITY_SECURITY
+                             check's LP-custody reading, or nothing at all
+`holder_snapshots`           top-10 holder concentration — **behind
+                             FEATURE_RESEARCH_COLLECTORS_ENABLED, which
+                             ships off**, so this is frequently absent
 
 There is no social source in this platform, so Strategy E's social stream is
 permanently absent rather than assumed. Every field an `Observation` cannot
@@ -34,12 +38,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.labs.rafiq.adapters.safety import SafetyVerdict
 from app.models.market import TokenMarketSnapshot
 from app.models.radar import RadarToken
-from app.models.research_data import WalletFlowSnapshot
+from app.models.research_data import HolderSnapshot, WalletFlowSnapshot
 from app.models.token import DiscoveredToken
 from app.models.token_security import TokenSecurityEvaluationRow
 
 #: How far back a 15-minute change is measured from.
 _CHANGE_WINDOW = timedelta(minutes=15)
+#: The evaluator's own name for the on-chain LP-custody check. Pinned by
+#: `test_lp_check_name_matches_the_platform` so a rename in the shared
+#: contract breaks a test instead of silently returning `no_lp_check`.
+_LP_CHECK = "LIQUIDITY_SECURITY"
 #: A security evaluation older than this says nothing about now.
 _SAFETY_MAX_AGE = timedelta(hours=6)
 
@@ -86,6 +94,41 @@ class Observation:
     @property
     def is_priceable(self) -> bool:
         return self.price_usd is not None and self.price_usd > 0
+
+
+@dataclass(frozen=True, slots=True)
+class EntryFeatures:
+    """Holder concentration and LP custody as of one entry decision.
+
+    Both facts are read from stores this platform already fills, at the
+    decision instant, filtered `<= at` in SQL — so a collection that lands a
+    second after the decision can never be read back into it. Neither field is
+    fetched synchronously and neither can fail a trade: a silent store yields
+    `None` and names itself in `error`, and the caller enters anyway.
+
+    `error` exists because a bare `None` cannot be interpreted. "no row in the
+    store" and "a row that measured this as null" are different facts about
+    the platform, and an analysis that cannot tell them apart will read a
+    collector being switched off as a population of tokens with no holders.
+    """
+
+    top10_holder_pct: Decimal | None
+    #: When that snapshot was taken. The age at the decision is
+    #: `opened_at - this`, which is the only form in which age is trustworthy:
+    #: stored as an age it would silently be an age-at-write-time.
+    top10_captured_at: datetime | None
+    #: The LIQUIDITY_SECURITY check's status — PASS / FAIL / UNKNOWN /
+    #: NOT_APPLICABLE, verbatim from the platform's evaluator.
+    lp_status: str | None
+    #: Why, when it is not PASS. `LP_OUTSTANDING` (a redeemable claim on the
+    #: reserves exists) and `POOL_CUSTODY_OUT_OF_SCOPE` (this evaluator has
+    #: nothing to say) are both UNKNOWN and mean opposite things, so the
+    #: status alone cannot answer the question this instrument was added for.
+    lp_reason_codes: list[str] | None
+    lp_checked_at: datetime | None
+    #: Comma-joined store names that had nothing to say. `None` when both
+    #: answered.
+    error: str | None
 
 
 def _median(values: list[Decimal]) -> Decimal | None:
@@ -241,6 +284,56 @@ class RafiqFeed:
         return (await self._session.execute(
             select(RadarToken.token_id).where(RadarToken.mint_address == mint)
         )).scalar_one_or_none()
+
+    async def entry_features(self, *, mint: str, at: datetime) -> EntryFeatures:
+        """The two entry features, point-in-time, or a named absence.
+
+        No max-age filter, deliberately. A cut-off here would discard the
+        reading and leave a null that looks like a token nobody measured; the
+        timestamp is returned instead, so staleness is a column the analysis
+        can threshold rather than a decision this module already made.
+        """
+        missing: list[str] = []
+
+        holder = (await self._session.execute(
+            select(HolderSnapshot.top10_pct, HolderSnapshot.captured_at)
+            .where(HolderSnapshot.mint_address == mint,
+                   HolderSnapshot.captured_at <= at,
+                   HolderSnapshot.top10_pct.is_not(None))
+            .order_by(HolderSnapshot.captured_at.desc())
+            .limit(1)
+        )).first()
+        if holder is None:
+            missing.append("no_holder_snapshot")
+
+        status = codes = checked = None
+        row = (await self._session.execute(
+            select(TokenSecurityEvaluationRow.checks,
+                   TokenSecurityEvaluationRow.evaluated_at)
+            .where(TokenSecurityEvaluationRow.mint_address == mint,
+                   TokenSecurityEvaluationRow.evaluated_at <= at)
+            .order_by(TokenSecurityEvaluationRow.evaluated_at.desc())
+            .limit(1)
+        )).first()
+        if row is None:
+            missing.append("no_security_evaluation")
+        else:
+            checked = row.evaluated_at
+            check = next((c for c in (row.checks or [])
+                          if c.get("name") == _LP_CHECK), None)
+            if check is None:
+                # An evaluation that ran without this check is not the same as
+                # no evaluation: the timestamp is kept so the gap is visible.
+                missing.append("no_lp_check")
+            else:
+                status = str(check.get("status"))[:16]
+                codes = [str(c) for c in (check.get("reason_codes") or [])]
+
+        return EntryFeatures(
+            top10_holder_pct=holder.top10_pct if holder is not None else None,
+            top10_captured_at=holder.captured_at if holder is not None else None,
+            lp_status=status, lp_reason_codes=codes, lp_checked_at=checked,
+            error=",".join(missing) or None)
 
     async def latest_marks(self, mints: set[str]) -> dict[str, tuple[Decimal, Decimal | None]]:
         """The freshest usable (price, liquidity) for each mint, or absent.
