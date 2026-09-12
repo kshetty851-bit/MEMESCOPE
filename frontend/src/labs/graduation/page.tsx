@@ -665,7 +665,8 @@ function LeaderboardPanel() {
               <col />
               <col className="w-28" />
               <col className="w-20" />
-              <col className="w-16" />
+              <col className="w-48" />
+              <col className="w-20" />
               <col className="w-16" />
               <col className="w-24" />
             </colgroup>
@@ -674,8 +675,11 @@ function LeaderboardPanel() {
                 <th className="pb-2 pl-1 text-left font-medium">#</th>
                 <th className="pb-2 pr-3 text-left font-medium">Arm</th>
                 <th className="pb-2 pr-3 text-right font-medium">Realised</th>
+                <th className="pb-2 pr-3 text-right font-medium">Return</th>
+                <th className="pb-2 pr-3 text-right font-medium">
+                  30d projection
+                </th>
                 <th className="pb-2 pr-3 text-right font-medium">Trades</th>
-                <th className="pb-2 pr-3 text-right font-medium">Win</th>
                 <th className="pb-2 pr-3 text-right font-medium">PF</th>
                 <th className="pb-2 pr-1 text-right font-medium">Top token</th>
               </tr>
@@ -736,6 +740,44 @@ function LeaderboardPanel() {
                         />
                       </span>
                     </td>
+                    <td
+                      className={`grad-figure py-2.5 pr-3 text-right ${
+                        Number(a.return_pct) > 0
+                          ? "text-up"
+                          : Number(a.return_pct) < 0
+                            ? "text-down"
+                            : "text-ink-dim"
+                      }`}
+                    >
+                      {a.trades
+                        ? `${Number(a.return_pct) > 0 ? "+" : ""}${Number(
+                            a.return_pct,
+                          ).toFixed(1)}%`
+                        : "—"}
+                    </td>
+                    <td className="py-2.5 pr-3 text-right">
+                      {a.projected_30d_usd === null ? (
+                        <span className="text-micro text-ink-dim">
+                          too few trades
+                        </span>
+                      ) : (
+                        <>
+                          <span
+                            className={`grad-figure font-medium ${
+                              Number(a.projected_30d_usd) > 0
+                                ? "text-up"
+                                : "text-down"
+                            }`}
+                          >
+                            {signedUsd(a.projected_30d_usd)}
+                          </span>
+                          <span className="block text-micro tabular-nums text-ink-dim">
+                            {signedUsd(a.projected_30d_low)} to{" "}
+                            {signedUsd(a.projected_30d_high)}
+                          </span>
+                        </>
+                      )}
+                    </td>
                     <td className="py-2.5 pr-3 text-right">
                       <span className="grad-figure">{a.trades}</span>
                       {a.open_positions ? (
@@ -743,9 +785,6 @@ function LeaderboardPanel() {
                           +{a.open_positions}
                         </span>
                       ) : null}
-                    </td>
-                    <td className="grad-figure py-2.5 pr-3 text-right text-ink-dim">
-                      {a.trades ? `${Math.round((a.wins / a.trades) * 100)}%` : "—"}
                     </td>
                     <td className="grad-figure py-2.5 pr-3 text-right">
                       {a.profit_factor ?? "—"}
@@ -774,8 +813,19 @@ function LeaderboardPanel() {
                 : `Show all ${data.arms.length} arms, controls included`}
             </button>
           ) : null}
-          <p className="max-w-[52ch] text-micro leading-relaxed text-ink-dim">
-            A dot marks an arm ahead of every random one. Open positions are the
+          <p className="max-w-[64ch] text-micro leading-relaxed text-ink-dim">
+            <b className="text-ink">Read the 30-day band, not its middle.</b>{" "}
+            It is thirty days of the same rule at the same trade rate (
+            {data.arms.find((a) => a.projected_trades)?.projected_trades.toLocaleString() ??
+              "—"}{" "}
+            trades), resampled from what that arm has actually done — and after{" "}
+            {Number(data.hours_running).toFixed(1)} hours the band spans
+            outcomes that are mostly an accident of which tokens arrived.
+            Positions are a fixed {usd(data.notional_usd)} whatever the equity,
+            so the projection adds rather than compounds; compounding a noisy
+            edge produces arithmetic, not a forecast. Return % is against each
+            arm&rsquo;s {usd(data.capital_usd)}. A dot marks an arm ahead of
+            every random one. Open positions are the
             small <span className="text-ink">+n</span> beside the trade count and
             are <b className="text-ink">not</b> in the realised column — an
             unrealised number is what every book in this platform&rsquo;s history
