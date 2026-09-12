@@ -384,3 +384,22 @@ def test_the_migration_chain_has_exactly_one_head() -> None:
     assert len(heads) == 1, (
         f"alembic has {len(heads)} heads: "
         + ", ".join(f"{h} ({revisions[h]})" for h in sorted(heads)))
+
+
+def test_the_watch_set_is_measured_not_inferred_from_a_flag() -> None:
+    """`unsubscribed_at IS NULL` counts tokens the recorder has forgotten.
+
+    The watch set lives in memory, so every restart orphans its tokens with
+    the flag still NULL and nothing clears them. Observed on prod: 1,769
+    "watching" against a hard cap of 500, while the poller was really reading
+    478 — and `rpc_calls_per_minute` is derived from that count, so the page
+    claimed 360 calls a minute against a budget of 150 that was never being
+    exceeded.
+
+    A count that can exceed its own cap is not measuring what it names, so it
+    is now bounded by recent polling activity.
+    """
+    source = (pathlib.Path(__file__).resolve().parents[1] / "api.py").read_text()
+    block = source.split("base.watch_set = await count(")[1].split(")))")[0]
+    assert "last_sample_at" in block, (
+        "the watch set must be bounded by what was actually polled")

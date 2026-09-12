@@ -246,9 +246,21 @@ async def status(db: AsyncSession = Depends(get_db)) -> GraduationStatus:
             select(func.count()).select_from(complete_sub)
             .where(complete_sub.c.mint.not_in(feed_mints))),
     )
+    # What is ACTUALLY being polled, not what is flagged as unretired.
+    #
+    # The watch set lives in the recorder's memory, so every restart orphans
+    # its tokens with `unsubscribed_at` still NULL and nothing ever clears
+    # them. Counting the flag reported 1,769 against a cap of 500 while the
+    # poller was really reading 478 — and `rpc_calls_per_minute` is derived
+    # from this, so it claimed 360 calls a minute against a 150 budget that
+    # was never being exceeded. A number that cannot exceed its own cap is
+    # not measuring the thing it names.
+    watching_now = datetime.now(UTC) - timedelta(
+        seconds=config.POLL_INTERVAL_S * 5)
     base.watch_set = await count(
         select(func.count()).select_from(GradToken)
-        .where(GradToken.unsubscribed_at.is_(None)))
+        .where(GradToken.unsubscribed_at.is_(None),
+               GradToken.last_sample_at >= watching_now))
     base.curve_samples = await count(
         select(func.count()).select_from(GradCurveSample))
     base.checkpoints = await count(
