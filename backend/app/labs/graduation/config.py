@@ -461,7 +461,7 @@ PAPER_INTERVAL_SECONDS = _int("LAB_GRADUATION_PAPER_TICK_S", 10)
 #: The two arms the dedicated Paper panels render. Both are ordinary members
 #: of `tournament.ARMS` — the panels are a close-up of two rows of the
 #: leaderboard, not a separate experiment.
-PAPER_BOOKS = ("F15_all_2m", "F28_symnight_2m")
+PAPER_BOOKS = ("F01_all_2m", "F14_symnight_2m")
 #: The filtered book enters only when the pool opened inside this UTC window
 #: (start inclusive, end exclusive, wrapping midnight).
 PAPER_FILTER_HOUR_START = _int("LAB_GRADUATION_PAPER_FILTER_HOUR_START", 18)

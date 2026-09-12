@@ -326,7 +326,7 @@ def test_the_paper_panels_render_two_tournament_arms() -> None:
     from app.labs.graduation.paper import PaperBook
     from app.labs.graduation.tournament import BY_NAME
 
-    assert config.PAPER_BOOKS == ("F15_all_2m", "F28_symnight_2m")
+    assert config.PAPER_BOOKS == ("F01_all_2m", "F14_symnight_2m")
     control, filtered = (BY_NAME[n] for n in config.PAPER_BOOKS)
     assert control.entry == "all" and filtered.entry == "sym_night"
     assert control.hold == filtered.hold == config.PAPER_MAX_HOLD_MINUTES
