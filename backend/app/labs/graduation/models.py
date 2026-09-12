@@ -67,6 +67,11 @@ _PCT = Numeric(6, 3)
 #: A share of 1, to six places.
 _SHARE = Numeric(9, 6)
 _USD = Numeric(24, 8)
+#: A POST-GRADUATION price. Eighteen decimals, not eight: a pump.fun token
+#: trading below 0.000000005 SOL rounded to zero in `Numeric(24, 8)`, and
+#: nothing downstream could tell that from a price — the paper book marked
+#: those positions at zero and closed them at -100%.
+_PRICE = Numeric(36, 18)
 #: Minutes, to a thousandth. Every duration in `grad_features`.
 _MIN = Numeric(10, 3)
 #: Progress POINTS per minute. A curve can cross 70 points in one poll, so this
@@ -270,8 +275,8 @@ class GradPostgradSample(Base):
     pair_address: Mapped[str | None] = mapped_column(_ADDRESS)
     dex_id: Mapped[str | None] = mapped_column(String(32))
 
-    price_usd: Mapped[Decimal | None] = mapped_column(_USD)
-    price_native: Mapped[Decimal | None] = mapped_column(_USD)
+    price_usd: Mapped[Decimal | None] = mapped_column(_PRICE)
+    price_native: Mapped[Decimal | None] = mapped_column(_PRICE)
     liquidity_usd: Mapped[Decimal | None] = mapped_column(Numeric(24, 2))
     fdv: Mapped[Decimal | None] = mapped_column(Numeric(24, 2))
     volume_m5_usd: Mapped[Decimal | None] = mapped_column(Numeric(24, 2))

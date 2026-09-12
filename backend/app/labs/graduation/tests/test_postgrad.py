@@ -290,3 +290,30 @@ async def test_a_second_pool_cannot_reprice_a_position() -> None:
     assert [r["pair_address"] for r in rows] == ["POOL_DEEP"]
     assert [r["price_native"] for r in rows] == [D("0.5617")]
     assert sampler.pair_rejected == 2
+
+
+def test_a_price_too_small_to_store_is_missing_not_zero() -> None:
+    """`Numeric(24, 8)` quantised anything under 0.000000005 SOL to ZERO, and
+    a zero read back as a price.
+
+    16,775 samples across 378 mints were stored that way while the tokens were
+    still trading — one had a recorded maximum equal to its own pool-open
+    price. The paper book marked those positions at zero and closed them at
+    -100%: five trades, -$500 of a -$258.94 book. Without them the same book
+    is +$241, so this one defect was the entire loss and more.
+
+    Missing is the honest answer. A caller can skip a missing mark; it cannot
+    tell a fake zero from a real one.
+    """
+    tiny = _pair("POOL", price="0.000000000000000000001", liq=50_000)
+    row = parse_pair(tiny, ts=NOW)
+    assert row is not None
+    assert row["price_native"] is None, "a price too small to store is not zero"
+
+    # A real small price now survives, where eight decimals destroyed it.
+    small = _pair("POOL", price="0.000000001", liq=50_000)
+    assert parse_pair(small, ts=NOW)["price_native"] == D("0.000000001")
+
+    # A reported zero is missing too: it is never a price anything traded at.
+    assert parse_pair(_pair("POOL", price="0", liq=50_000),
+                      ts=NOW)["price_native"] is None

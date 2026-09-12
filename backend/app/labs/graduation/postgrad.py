@@ -40,7 +40,11 @@ from app.labs.graduation.sources import MarketSource, chunked
 logger = get_logger(__name__)
 
 _USD_DP = Decimal("0.01")
-_PRICE_DP = Decimal("0.00000001")
+#: Eighteen decimals. At eight, any price below 0.000000005 SOL quantised to
+#: ZERO and was stored as one — 16,775 samples across 378 mints, on tokens
+#: that were still trading. See `_decimal`, which now refuses that outcome
+#: rather than recording it.
+_PRICE_DP = Decimal("1E-18")
 _USD_MAX = Decimal(10) ** 22
 _PRICE_MAX = Decimal(10) ** 16
 
@@ -97,7 +101,14 @@ def _decimal(value: object, places: Decimal, ceiling: Decimal) -> Decimal | None
         return None
     if not out.is_finite() or out.copy_abs() >= ceiling:
         return None
-    return out.quantize(places)
+    quantised = out.quantize(places)
+    if quantised <= 0 < ceiling and places == _PRICE_DP:
+        # A price of zero is not a price. Either the value was too small for
+        # the column — 16,775 samples were stored that way on tokens still
+        # trading — or the source reported nothing. Both are MISSING, and
+        # recording a zero is what let the book close live positions at -100%.
+        return None
+    return quantised
 
 
 def _int(value: object) -> int | None:
