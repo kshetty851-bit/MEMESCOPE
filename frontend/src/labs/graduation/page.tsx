@@ -360,9 +360,11 @@ function TradeTable({
  * Fifty arms, eight of which decide by hashing the mint and therefore cannot
  * have an edge. Their best result is the bar every real arm has to clear —
  * without it a leaderboard just reports who is on top, which fifty coin
- * flippers also produce. The verdict line states pass/fail against terms
- * fixed before the first trade, so nothing here is left to the reader's
- * optimism.
+ * flippers also produce.
+ *
+ * The leader is NOT given the big-number treatment the counts get: an arm name
+ * is a dozen characters of monospace and rendering it at display size collides
+ * with whatever sits beside it. Figures get the scale; names get the width.
  */
 function LeaderboardPanel() {
   const { data } = useGraduationTournament();
@@ -370,42 +372,79 @@ function LeaderboardPanel() {
   if (!data?.running) return null;
   const band = data.control_band === null ? null : Number(data.control_band);
   const shown = showAll ? data.arms : data.arms.slice(0, 12);
+  const lead = data.arms.find((a) => a.name === data.leader);
+  const margin =
+    lead && band !== null ? Number(lead.realised_usd) - band : null;
+
   return (
     <Panel>
       <PanelHeader>
         <PanelTitle>Strategy tournament — 50 arms</PanelTitle>
       </PanelHeader>
-      <div className="flex flex-col gap-4 p-4">
+      <div className="flex flex-col gap-5 p-4">
+        {/* Verdict. The headline is the finding; the terms are underneath. */}
         <div
-          className={`rounded-md border p-3 ${
-            data.called ? "border-up/50" : "border-down/40"
+          className={`grad-row rounded-lg border p-4 ${
+            data.called
+              ? "border-up/50 bg-up/[0.04]"
+              : "border-line bg-ink/[0.02]"
           }`}
         >
-          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-ink-dim">
-            {data.called ? "Winner called" : "No winner yet"}
-          </h3>
-          <p className="mt-1 max-w-[70ch] text-sm">{data.verdict}</p>
+          <span className="inline-flex items-center gap-2 text-label uppercase tracking-[0.08em] text-ink-dim">
+            <span
+              className={`grad-live-dot inline-block h-1.5 w-1.5 rounded-full ${
+                data.called ? "bg-up" : "bg-accent"
+              }`}
+            />
+            {data.called ? "Winner called" : "Running — no winner yet"}
+          </span>
+          <p
+            className="mt-2 max-w-[64ch] text-heading leading-snug text-ink"
+            style={{ fontFamily: "var(--font-brand)" }}
+          >
+            {data.verdict}
+          </p>
         </div>
 
-        <p className="max-w-[70ch] text-xs text-ink-dim">
-          Every arm sees the same graduations, pays the same costs and uses the
-          same clock; they differ only in which tokens they accept and when
-          they leave. <b className="text-ink">Eight of them (R1–R8) decide by
-          hashing the token address</b> and cannot have an edge — run fifty
-          strategies and one leads whether or not any is good, so their best
-          result is the bar a real arm has to clear. To be called an arm needs{" "}
-          {data.min_trades}+ closed trades, a profit factor of{" "}
-          {Number(data.min_profit_factor).toFixed(2)}, no single token above{" "}
-          {(Number(data.max_token_share) * 100).toFixed(0)}% of its profit, and
-          it must beat the best random arm.
-        </p>
-
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <Stat label="Leader" value={data.leader || "—"} note="by realised P&L" />
+        {/* Leader gets width, counts get scale. */}
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_repeat(3,minmax(0,1fr))]">
+          <div className="grad-row flex flex-col gap-1 rounded-lg border border-line p-3">
+            <span className="text-label uppercase tracking-[0.08em] text-ink-dim">
+              Leader
+            </span>
+            <span className="truncate font-mono text-heading font-semibold text-ink">
+              {data.leader || "—"}
+            </span>
+            <span className="text-micro text-ink-dim">
+              {lead ? (
+                <>
+                  <span
+                    className={`grad-figure ${
+                      Number(lead.realised_usd) >= 0 ? "text-up" : "text-down"
+                    }`}
+                  >
+                    {signedUsd(lead.realised_usd)}
+                  </span>{" "}
+                  on {lead.trades} closed
+                  {margin !== null ? (
+                    <>
+                      {" · "}
+                      <span className={margin > 0 ? "text-up" : "text-down"}>
+                        {margin > 0 ? "+" : ""}
+                        {usd(String(margin))} vs random
+                      </span>
+                    </>
+                  ) : null}
+                </>
+              ) : (
+                "nothing closed yet"
+              )}
+            </span>
+          </div>
           <Stat
-            label="Best random arm"
+            label="Bar to clear"
             value={band === null ? "—" : signedUsd(String(band))}
-            note={data.best_control || "the bar to clear"}
+            note={data.best_control || "best random arm"}
           />
           <Stat
             label="Closed trades"
@@ -419,71 +458,114 @@ function LeaderboardPanel() {
           />
         </div>
 
+        <p className="max-w-[68ch] text-xs leading-relaxed text-ink-dim">
+          Every arm sees the same graduations, pays the same costs and uses the
+          same clock; they differ only in which tokens they accept and when they
+          leave.{" "}
+          <b className="text-ink">
+            Eight of them (R1–R8) decide by hashing the token address
+          </b>{" "}
+          and cannot have an edge — run fifty strategies and one leads whether or
+          not any is good, so their best result is the bar a real arm must
+          clear. To be called, an arm needs {data.min_trades}+ closed trades, a
+          profit factor of {Number(data.min_profit_factor).toFixed(2)}, no single
+          token above {(Number(data.max_token_share) * 100).toFixed(0)}% of its
+          profit, and it must beat the best random arm.
+        </p>
+
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[640px] text-sm">
+          <table className="w-full min-w-[680px] table-fixed border-collapse text-sm">
+            <colgroup>
+              <col className="w-10" />
+              <col />
+              <col className="w-28" />
+              <col className="w-20" />
+              <col className="w-16" />
+              <col className="w-16" />
+              <col className="w-24" />
+            </colgroup>
             <thead>
-              <tr className="text-left text-[11px] uppercase tracking-wider text-ink-dim">
-                <th className="pb-2 pr-3 font-medium">#</th>
-                <th className="pb-2 pr-3 font-medium">Arm</th>
+              <tr className="text-label uppercase tracking-[0.08em] text-ink-dim">
+                <th className="pb-2 pl-1 text-left font-medium">#</th>
+                <th className="pb-2 pr-3 text-left font-medium">Arm</th>
                 <th className="pb-2 pr-3 text-right font-medium">Realised</th>
                 <th className="pb-2 pr-3 text-right font-medium">Trades</th>
                 <th className="pb-2 pr-3 text-right font-medium">Win</th>
                 <th className="pb-2 pr-3 text-right font-medium">PF</th>
-                <th className="pb-2 text-right font-medium">Top token</th>
+                <th className="pb-2 pr-1 text-right font-medium">Top token</th>
               </tr>
             </thead>
             <tbody>
               {shown.map((a: ArmRow, i: number) => {
                 const v = Number(a.realised_usd);
-                const beatsBand = band !== null && v > band;
+                const beats = band !== null && a.trades > 0 && v > band;
+                const isLeader = a.name === data.leader;
                 return (
                   <tr
                     key={a.name}
-                    className={`border-t border-line ${
-                      a.is_control ? "opacity-70" : ""
-                    }`}
+                    className={`grad-row border-t border-line align-top ${
+                      isLeader ? "grad-leader" : ""
+                    } ${a.is_control ? "text-ink-dim" : ""}`}
+                    style={{ animationDelay: `${Math.min(i, 14) * 28}ms` }}
                   >
-                    <td className="py-2 pr-3 tabular-nums text-ink-dim">
+                    <td className="py-2.5 pl-1 text-label tabular-nums text-ink-dim">
                       {i + 1}
                     </td>
-                    <td className="py-2 pr-3">
-                      <span className="font-mono text-xs">{a.name}</span>
-                      {a.is_control ? (
-                        <span className="ml-2 rounded-full bg-down/15 px-2 py-0.5 text-[10px] uppercase tracking-wide text-down">
-                          random
+                    <td className="py-2.5 pr-3">
+                      <span className="flex items-center gap-2">
+                        <span
+                          className={`truncate font-mono text-xs ${
+                            isLeader ? "font-semibold text-ink" : ""
+                          }`}
+                        >
+                          {a.name}
                         </span>
-                      ) : null}
-                      <span className="block text-[11px] text-ink-dim">
+                        {a.is_control ? (
+                          <span className="shrink-0 rounded-full border border-down/40 px-1.5 py-px text-micro uppercase tracking-[0.08em] text-down">
+                            random
+                          </span>
+                        ) : null}
+                      </span>
+                      <span className="mt-0.5 block truncate text-micro text-ink-dim">
                         {a.note}
                       </span>
                     </td>
-                    <td
-                      className={`py-2 pr-3 text-right font-medium tabular-nums ${
-                        v > 0 ? "text-up" : v < 0 ? "text-down" : ""
-                      }`}
-                    >
-                      {signedUsd(a.realised_usd)}
-                      {!a.is_control && beatsBand ? (
-                        <span className="ml-1 text-up" title="beats every random arm">
-                          &#9679;
+                    <td className="py-2.5 pr-3 text-right">
+                      <span className="inline-flex items-baseline justify-end gap-1.5">
+                        <span
+                          className={`grad-figure font-medium ${
+                            v > 0 ? "text-up" : v < 0 ? "text-down" : "text-ink-dim"
+                          }`}
+                        >
+                          {a.trades ? signedUsd(a.realised_usd) : "—"}
                         </span>
-                      ) : null}
+                        <span
+                          className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                            beats && !a.is_control ? "bg-up" : "bg-transparent"
+                          }`}
+                          title={
+                            beats && !a.is_control
+                              ? "ahead of every random arm"
+                              : undefined
+                          }
+                        />
+                      </span>
                     </td>
-                    <td className="py-2 pr-3 text-right tabular-nums">
-                      {a.trades}
+                    <td className="py-2.5 pr-3 text-right">
+                      <span className="grad-figure">{a.trades}</span>
                       {a.open_positions ? (
-                        <span className="ml-1 text-[11px] text-ink-dim">
+                        <span className="ml-1 text-micro text-ink-dim">
                           +{a.open_positions}
                         </span>
                       ) : null}
                     </td>
-                    <td className="py-2 pr-3 text-right tabular-nums text-ink-dim">
+                    <td className="grad-figure py-2.5 pr-3 text-right text-ink-dim">
                       {a.trades ? `${Math.round((a.wins / a.trades) * 100)}%` : "—"}
                     </td>
-                    <td className="py-2 pr-3 text-right tabular-nums">
+                    <td className="grad-figure py-2.5 pr-3 text-right">
                       {a.profit_factor ?? "—"}
                     </td>
-                    <td className="py-2 text-right tabular-nums text-ink-dim">
+                    <td className="grad-figure py-2.5 pr-1 text-right text-ink-dim">
                       {a.top_token_share
                         ? `${(Number(a.top_token_share) * 100).toFixed(0)}%`
                         : "—"}
@@ -495,25 +577,26 @@ function LeaderboardPanel() {
           </table>
         </div>
 
-        {data.arms.length > 12 ? (
-          <button
-            type="button"
-            onClick={() => setShowAll((v) => !v)}
-            className="self-start text-xs text-accent hover:underline"
-          >
-            {showAll
-              ? "Show the top 12"
-              : `Show all ${data.arms.length} arms, controls included`}
-          </button>
-        ) : null}
-
-        <p className="max-w-[70ch] text-xs text-ink-dim">
-          A dot marks an arm ahead of every random one. Open positions are the
-          small <span className="text-ink">+n</span> beside the trade count and
-          are <b className="text-ink">not</b> in the realised column — an
-          unrealised number is what every book in this platform&rsquo;s history
-          was leading on shortly before it wasn&rsquo;t.
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          {data.arms.length > 12 ? (
+            <button
+              type="button"
+              onClick={() => setShowAll((v) => !v)}
+              className="rounded-md border border-line px-3 py-1.5 text-xs text-ink-dim transition-colors hover:border-line-strong hover:text-ink"
+            >
+              {showAll
+                ? "Show the top 12"
+                : `Show all ${data.arms.length} arms, controls included`}
+            </button>
+          ) : null}
+          <p className="max-w-[52ch] text-micro leading-relaxed text-ink-dim">
+            A dot marks an arm ahead of every random one. Open positions are the
+            small <span className="text-ink">+n</span> beside the trade count and
+            are <b className="text-ink">not</b> in the realised column — an
+            unrealised number is what every book in this platform&rsquo;s history
+            was leading on shortly before it wasn&rsquo;t.
+          </p>
+        </div>
       </div>
     </Panel>
   );
