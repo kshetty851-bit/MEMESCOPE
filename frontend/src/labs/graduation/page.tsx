@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 
 import { Panel, PanelHeader, PanelTitle } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -185,6 +185,20 @@ function TradeRow({ p, closed }: { p: PaperPosition; closed: boolean }) {
             {p.mint}
           </span>
         </a>
+        {p.liq_open_usd ? (
+          <span className="mt-0.5 block text-micro tabular-nums text-ink-dim">
+            pool {usd(p.liq_open_usd)}
+            {p.liq_close_usd && p.liq_close_usd !== p.liq_open_usd
+              ? ` → ${usd(p.liq_close_usd)}`
+              : ""}
+            {p.impact_open
+              ? ` · impact ${(Number(p.impact_open) * 100).toFixed(2)}%`
+              : ""}
+            {p.impact_close
+              ? ` / ${(Number(p.impact_close) * 100).toFixed(2)}%`
+              : ""}
+          </span>
+        ) : null}
       </td>
       <td className="py-2 pr-3 text-right tabular-nums">
         {usd(p.notional_usd)}
@@ -558,6 +572,58 @@ function Elapsed({ since }: { since: string | null }) {
 }
 
 /**
+ * One arm's own trades, fetched on expand.
+ *
+ * Its own component so the hook is called unconditionally — a hook inside the
+ * leaderboard's map would change count as rows open and close. Mounting it is
+ * what triggers the fetch, so a collapsed arm costs nothing.
+ */
+function ArmTrades({ name }: { name: string }) {
+  const { data, isLoading } = useGraduationTrades(name);
+  const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({
+    key: "closed_at",
+    desc: true,
+  });
+  if (isLoading) {
+    return <p className="p-3 text-xs text-ink-dim">Loading trades…</p>;
+  }
+  const closed = data?.closed_trades ?? [];
+  const open = data?.open_trades ?? [];
+  return (
+    <div className="flex flex-col gap-3 border-l-2 border-accent/40 bg-ink/[0.02] p-3">
+      <p className="max-w-[70ch] text-micro text-ink-dim">
+        Every trade this arm has made. The mint is in full and links to
+        DexScreener — the same feed the marks came from — and each row carries
+        the pool depth and the price impact its order caused, so a fill can be
+        checked rather than taken on trust.
+      </p>
+      {open.length ? (
+        <div className="flex flex-col gap-1">
+          <h4 className="text-label uppercase tracking-[0.08em] text-ink-dim">
+            Open — marked, nothing banked
+          </h4>
+          <TradeTable rows={open} closed={false} empty="none open" />
+        </div>
+      ) : null}
+      <div className="flex flex-col gap-1">
+        <h4 className="text-label uppercase tracking-[0.08em] text-ink-dim">
+          Closed — {closed.length}
+        </h4>
+        <TradeTable
+          rows={closed}
+          closed
+          sort={sort}
+          onSort={(key) =>
+            setSort((s) => ({ key, desc: s.key === key ? !s.desc : true }))
+          }
+          empty="nothing closed yet"
+        />
+      </div>
+    </div>
+  );
+}
+
+/**
  * THE LEADERBOARD
  *
  * Fifty arms, eight of which decide by hashing the mint and therefore cannot
@@ -572,6 +638,7 @@ function Elapsed({ since }: { since: string | null }) {
 function LeaderboardPanel() {
   const { data, dataUpdatedAt, isFetching } = useGraduationTournament();
   const [showAll, setShowAll] = useState(false);
+  const [openArm, setOpenArm] = useState<string | null>(null);
   if (!data?.running) return null;
   const band = data.control_band === null ? null : Number(data.control_band);
   const shown = showAll ? data.arms : data.arms.slice(0, 12);
@@ -729,8 +796,8 @@ function LeaderboardPanel() {
                 const beats = band !== null && a.trades > 0 && v > band;
                 const isLeader = a.name === data.leader;
                 return (
+                  <Fragment key={a.name}>
                   <tr
-                    key={a.name}
                     className={`grad-row border-t border-line align-top ${
                       isLeader ? "grad-leader" : ""
                     } ${a.is_control ? "text-ink-dim" : ""}`}
@@ -741,13 +808,19 @@ function LeaderboardPanel() {
                     </td>
                     <td className="py-2.5 pr-3">
                       <span className="flex items-center gap-2">
-                        <span
-                          className={`truncate font-mono text-xs ${
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setOpenArm((v) => (v === a.name ? null : a.name))
+                          }
+                          className={`truncate font-mono text-xs hover:text-accent ${
                             isLeader ? "font-semibold text-ink" : ""
                           }`}
+                          title="show every trade this arm has made"
                         >
+                          {openArm === a.name ? "▾ " : "▸ "}
                           {a.name}
-                        </span>
+                        </button>
                         {a.is_control ? (
                           <span className="shrink-0 rounded-full border border-down/40 px-1.5 py-px text-micro uppercase tracking-[0.08em] text-down">
                             random
@@ -869,6 +942,14 @@ function LeaderboardPanel() {
                         : "—"}
                     </td>
                   </tr>
+                  {openArm === a.name ? (
+                    <tr>
+                      <td colSpan={9} className="p-0">
+                        <ArmTrades name={a.name} />
+                      </td>
+                    </tr>
+                  ) : null}
+                  </Fragment>
                 );
               })}
             </tbody>

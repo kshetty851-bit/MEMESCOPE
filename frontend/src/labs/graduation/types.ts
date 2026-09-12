@@ -86,6 +86,13 @@ export interface PaperPosition {
   /** The recorded price series for this mint crossed pools, so the trade is
    * shown and counts for nothing. */
   voided: boolean;
+  /** What the fill was priced against — the pool's total value at each leg,
+   * and the constant-product move the order caused. Published so a trade can
+   * be audited against DexScreener rather than trusted. */
+  liq_open_usd: string | null;
+  liq_close_usd: string | null;
+  impact_open: string | null;
+  impact_close: string | null;
 }
 
 /** The forward paper book. Rules frozen in advance; nothing here is tunable. */

@@ -87,6 +87,14 @@ class PaperPosition(BaseModel):
     #: The recorded price series for this mint crossed pools, so the trade is
     #: shown but counts for nothing. See `paper.switched_mints`.
     voided: bool = False
+    #: What the fill was priced against. Published so a trade can be AUDITED
+    #: rather than trusted: the pool's total value at each leg and the exact
+    #: constant-product move the order caused against it. A reader can take
+    #: the mint to DexScreener and check the pool was that deep.
+    liq_open_usd: Decimal | None = None
+    liq_close_usd: Decimal | None = None
+    impact_open: Decimal | None = None
+    impact_close: Decimal | None = None
 
 
 class PaperBookOut(BaseModel):
@@ -363,7 +371,9 @@ async def _paper(db: AsyncSession, *, book: str = "E05_hold_5m",
             open_fill=p.open_fill, last_quote=p.last_quote,
             peak_quote=p.peak_quote, closed_at=p.closed_at,
             close_reason=p.close_reason, pnl_usd=pnl, net_return=net,
-            voided=bool(voided))
+            voided=bool(voided),
+            liq_open_usd=p.liq_open_usd, liq_close_usd=p.liq_close_usd,
+            impact_open=p.impact_open, impact_close=p.impact_close)
 
     return PaperBookOut(
         running=config.paper_enabled(),
