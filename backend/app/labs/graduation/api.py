@@ -16,7 +16,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
@@ -393,3 +393,110 @@ async def paper_trades(db: AsyncSession = Depends(get_db)) -> PaperBookOut:
     if not config.enabled():
         return PaperBookOut()
     return await _paper(db, limit=None)
+
+
+#: How far every graduated token got, from its pool open to its HIGHEST
+#: recorded price in the hour after.
+#:
+#: Peaks, not outcomes. Reaching 5x is not earning 5x — it needs the top
+#: called to the minute — so the same query returns where the tokens actually
+#: ENDED, which is the number that belongs next to it.
+#:
+#: Multi-pool series are excluded: a mint whose marks crossed pools shows a
+#: "peak" that is a change of denomination, which is how one token appeared
+#: to do 162x in a minute.
+_RETURNS_SQL = text("""
+WITH pairs AS (
+    SELECT mint, count(DISTINCT pair_address) AS np
+      FROM grad_postgrad_samples WHERE price_native > 0 GROUP BY mint),
+opened AS (
+    SELECT DISTINCT ON (mint) mint, price_native AS op
+      FROM grad_postgrad_samples WHERE price_native > 0 ORDER BY mint, ts),
+peaked AS (
+    SELECT mint, max(price_native) AS pk
+      FROM grad_postgrad_samples WHERE price_native > 0 GROUP BY mint),
+ended AS (
+    SELECT DISTINCT ON (mint) mint, price_native AS lp
+      FROM grad_postgrad_samples WHERE price_native > 0 ORDER BY mint, ts DESC),
+m AS (
+    SELECT o.mint, p.pk / o.op AS x, e.lp / o.op AS final
+      FROM opened o
+      JOIN peaked p USING (mint)
+      JOIN ended e USING (mint)
+      JOIN pairs USING (mint)
+     WHERE pairs.np = 1)
+SELECT
+    count(*)                                                   AS usable,
+    count(*) FILTER (WHERE x >= 1.5)                           AS over_1_5x,
+    count(*) FILTER (WHERE x >= 2)                             AS over_2x,
+    count(*) FILTER (WHERE x >= 3)                             AS over_3x,
+    count(*) FILTER (WHERE x >= 5)                             AS over_5x,
+    count(*) FILTER (WHERE x >= 10)                            AS over_10x,
+    count(*) FILTER (WHERE x >= 50)                            AS over_50x,
+    count(*) FILTER (WHERE x >= 100)                           AS over_100x,
+    count(*) FILTER (WHERE final < 1)                          AS ended_below,
+    count(*) FILTER (WHERE final < 0.1)                        AS ended_down_90,
+    max(x)                                                     AS best
+  FROM m
+""")
+
+
+class ReturnTier(BaseModel):
+    """One "reached at least this" tier. Cumulative, so the tiers nest."""
+
+    label: str
+    reached: int
+
+
+class Returns(BaseModel):
+    """What the recorded population actually did, with its denominator.
+
+    The denominator is published because it is most of the story: 20,529
+    tokens were seen and a few hundred have a usable price series, so a
+    percentage quoted against the wrong one is off by a factor of thirty.
+    """
+
+    running: bool = False
+    seen: int = 0
+    migrated: int = 0
+    priced: int = 0
+    excluded_multi_pool: int = 0
+    usable: int = 0
+    tiers: list[ReturnTier] = []
+    #: The counterweight to the tiers. A peak is not an outcome.
+    ended_below_open: int = 0
+    ended_down_90: int = 0
+    best_multiple: Decimal | None = None
+
+
+@router.get("/returns", response_model=Returns)
+async def returns(db: AsyncSession = Depends(get_db)) -> Returns:
+    """How far each graduated token got, and where it ended up."""
+    if not config.enabled():
+        return Returns()
+    row = (await db.execute(_RETURNS_SQL)).one()
+    priced = int(await db.scalar(
+        select(func.count(func.distinct(GradPostgradSample.mint)))
+        .where(GradPostgradSample.price_native > 0)) or 0)
+    return Returns(
+        running=True,
+        seen=int(await db.scalar(select(func.count()).select_from(GradToken)) or 0),
+        migrated=int(await db.scalar(
+            select(func.count(func.distinct(GradMigration.mint)))) or 0),
+        priced=priced,
+        excluded_multi_pool=priced - int(row.usable or 0),
+        usable=int(row.usable or 0),
+        tiers=[
+            ReturnTier(label="1.5x", reached=int(row.over_1_5x or 0)),
+            ReturnTier(label="2x", reached=int(row.over_2x or 0)),
+            ReturnTier(label="3x", reached=int(row.over_3x or 0)),
+            ReturnTier(label="5x", reached=int(row.over_5x or 0)),
+            ReturnTier(label="10x", reached=int(row.over_10x or 0)),
+            ReturnTier(label="50x", reached=int(row.over_50x or 0)),
+            ReturnTier(label="100x", reached=int(row.over_100x or 0)),
+        ],
+        ended_below_open=int(row.ended_below or 0),
+        ended_down_90=int(row.ended_down_90 or 0),
+        best_multiple=(Decimal(row.best).quantize(Decimal("0.1"))
+                       if row.best is not None else None),
+    )

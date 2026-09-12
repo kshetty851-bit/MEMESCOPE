@@ -1,6 +1,6 @@
 import { api } from "@/lib/api-client";
 
-import type { GraduationStatus, PaperBook } from "./types";
+import type { GraduationStatus, PaperBook, Returns } from "./types";
 
 /**
  * GRADUATION LAB CLIENT
@@ -19,4 +19,12 @@ export function fetchStatus(): Promise<GraduationStatus> {
  */
 export function fetchPaperTrades(): Promise<PaperBook> {
   return api.get<PaperBook>("/labs/graduation/paper/trades");
+}
+
+/**
+ * The peak-multiple distribution. Its own call because it scans the whole
+ * sample table and the board polls every thirty seconds.
+ */
+export function fetchReturns(): Promise<Returns> {
+  return api.get<Returns>("/labs/graduation/returns");
 }

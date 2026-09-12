@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 
-import { fetchPaperTrades, fetchStatus } from "./api";
+import { fetchPaperTrades, fetchReturns, fetchStatus } from "./api";
 
 /**
  * The recorder polls the chain every fifteen seconds and the launch feed runs
@@ -29,5 +29,17 @@ export function useGraduationTrades() {
     queryKey: ["graduation", "paper-trades"],
     queryFn: fetchPaperTrades,
     refetchInterval: 60_000,
+  });
+}
+
+/**
+ * The peak-multiple distribution. Five minutes: it is a population summary
+ * over weeks of recording and does not move on a thirty-second timescale.
+ */
+export function useGraduationReturns() {
+  return useQuery({
+    queryKey: ["graduation", "returns"],
+    queryFn: fetchReturns,
+    refetchInterval: 300_000,
   });
 }

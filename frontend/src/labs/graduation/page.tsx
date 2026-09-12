@@ -7,7 +7,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/states";
 import { shortenAddress } from "@/lib/format";
 
-import { useGraduationStatus, useGraduationTrades } from "./hooks";
+import {
+  useGraduationReturns,
+  useGraduationStatus,
+  useGraduationTrades,
+} from "./hooks";
 import type {
   Funnel,
   PaperBook,
@@ -335,6 +339,97 @@ function TradeTable({
         </tfoot>
       </table>
     </div>
+  );
+}
+
+
+/**
+ * HOW FAR THEY GOT
+ *
+ * The peak multiple each graduated token reached from its pool open. Peaks,
+ * not outcomes — reaching 5x is not earning 5x, it needs the top called to
+ * the minute — so where they ENDED sits directly underneath, because that is
+ * the number a reader will otherwise supply for themselves, wrongly.
+ */
+function ReturnsPanel() {
+  const { data } = useGraduationReturns();
+  if (!data?.running || !data.usable) return null;
+  const top = data.tiers[0]?.reached || 1;
+  return (
+    <Panel>
+      <PanelHeader>
+        <PanelTitle>How far they got</PanelTitle>
+      </PanelHeader>
+      <div className="flex flex-col gap-4 p-4">
+        <p className="max-w-[65ch] text-xs text-ink-dim">
+          The highest price each graduated token reached in the hour after its
+          pool opened, as a multiple of the open. Tiers are cumulative — a
+          token at 5x is counted in 1.5x, 2x and 3x too.
+        </p>
+
+        <div className="flex flex-col gap-1.5">
+          {data.tiers.map((t) => {
+            const share = data.usable ? (t.reached / data.usable) * 100 : 0;
+            return (
+              <div key={t.label} className="flex items-center gap-3 text-sm">
+                <span className="w-12 shrink-0 text-right font-mono text-ink-dim">
+                  {t.label}
+                </span>
+                <div className="h-4 flex-1 overflow-hidden rounded-sm bg-line/40">
+                  <div
+                    className="h-full bg-up/70"
+                    style={{ width: `${Math.max(t.reached ? 1 : 0, (t.reached / top) * 100)}%` }}
+                  />
+                </div>
+                <span className="w-28 shrink-0 tabular-nums">
+                  {t.reached}
+                  <span className="ml-1.5 text-ink-dim">
+                    {share.toFixed(share < 1 ? 2 : 1)}%
+                  </span>
+                </span>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="flex flex-col gap-2 rounded-md border border-down/40 p-3">
+          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-ink-dim">
+            …and where they ended
+          </h3>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <Stat
+              label="Ended below their open"
+              value={pct(data.ended_below_open, data.usable)}
+              note={`${data.ended_below_open} of ${data.usable}`}
+            />
+            <Stat
+              label="Ended down 90%+"
+              value={pct(data.ended_down_90, data.usable)}
+              note={`${data.ended_down_90} of ${data.usable}`}
+            />
+            <Stat
+              label="Best seen"
+              value={data.best_multiple ? `${data.best_multiple}x` : "—"}
+              note="single token, at its peak"
+            />
+          </div>
+        </div>
+
+        <p className="max-w-[65ch] text-xs text-ink-dim">
+          <b className="text-ink">The denominator matters more than the tiers.</b>{" "}
+          {data.seen.toLocaleString()} tokens were admitted from the launch
+          feed, {data.migrated.toLocaleString()} graduated,{" "}
+          {data.priced.toLocaleString()} have a recorded price series, and{" "}
+          {data.usable.toLocaleString()} of those came from a single pool and
+          are counted here. {data.excluded_multi_pool} were excluded because
+          their marks crossed pools, which produces a &ldquo;peak&rdquo; that
+          is a change of denomination rather than a price — one such token
+          appeared to do 162x in a minute. A percentage quoted against the{" "}
+          {data.seen.toLocaleString()} rather than the{" "}
+          {data.usable.toLocaleString()} is wrong by a factor of thirty.
+        </p>
+      </div>
+    </Panel>
   );
 }
 
@@ -810,6 +905,8 @@ export function GraduationLabPage() {
           </div>
         </Panel>
       </div>
+
+      <ReturnsPanel />
 
       {data.paper.running ? <PaperPanel book={data.paper} /> : null}
 

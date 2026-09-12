@@ -119,3 +119,27 @@ export interface PaperBook {
   open_trades: PaperPosition[];
   closed_trades: PaperPosition[];
 }
+
+
+/** One "reached at least this multiple" tier. Cumulative, so tiers nest. */
+export interface ReturnTier {
+  label: string;
+  reached: number;
+}
+
+/**
+ * How far each graduated token got from its pool open, and where it ended.
+ * Peaks are not outcomes, so both are published together.
+ */
+export interface Returns {
+  running: boolean;
+  seen: number;
+  migrated: number;
+  priced: number;
+  excluded_multi_pool: number;
+  usable: number;
+  tiers: ReturnTier[];
+  ended_below_open: number;
+  ended_down_90: number;
+  best_multiple: string | null;
+}
