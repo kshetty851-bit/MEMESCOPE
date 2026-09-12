@@ -279,3 +279,42 @@ def test_the_outcome_pass_reaches_no_external_endpoint() -> None:
         for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)
     }
     assert not imported & {"httpx", "requests", "aiohttp", "urllib"}
+
+
+async def test_the_chained_outcome_pass_actually_runs(lab_session, monkeypatch) -> None:
+    """The forward pass rides the lab's beat task instead of taking a beat
+    entry of its own. That is a branch that can silently never fire, so it
+    gets a test that drives the scheduler rather than `outcomes.record`.
+    """
+    import contextlib
+
+    from app.labs.rafiq import scheduler
+
+    monkeypatch.setenv("RAFIQ_LAB_ENABLED", "true")
+
+    @contextlib.asynccontextmanager
+    async def _factory():
+        yield lab_session
+
+    monkeypatch.setattr(scheduler, "SessionFactory", _factory)
+    # The session is inside the fixture's transaction, which is rolled back;
+    # a commit here would end it and detach everything after.
+    monkeypatch.setattr(lab_session, "commit", lab_session.flush)
+
+    on = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
+    monkeypatch.setattr(scheduler, "datetime",
+                        type("C", (), {"now": staticmethod(lambda tz=None: on)}))
+    assert on.minute % scheduler.OUTCOMES_EVERY_MINUTES == 0
+    assert "outcomes" in await scheduler.tick()
+
+    off = on.replace(minute=scheduler.OUTCOMES_EVERY_MINUTES // 2)
+    monkeypatch.setattr(scheduler, "datetime",
+                        type("C", (), {"now": staticmethod(lambda tz=None: off)}))
+    assert "outcomes" not in await scheduler.tick()
+
+
+def test_the_outcome_cadence_fires_every_hour() -> None:
+    """A cadence that did not divide 60 would skip hours unpredictably."""
+    from app.labs.rafiq import scheduler
+
+    assert 60 % scheduler.OUTCOMES_EVERY_MINUTES == 0
