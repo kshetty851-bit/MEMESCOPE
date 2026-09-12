@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Panel, PanelHeader, PanelTitle } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -355,6 +355,41 @@ function TradeTable({
  */
 
 /**
+ * How long ago the figures beside this were fetched.
+ *
+ * On the page rather than in a comment because "why is nothing moving" is a
+ * question the reader cannot otherwise answer: React Query suspends polling
+ * while a tab is hidden, so a page left open in the background is correct and
+ * frozen at the same time, and there is no way to tell that from a page that
+ * is broken. A clock that keeps counting says which one you are looking at.
+ */
+function Freshness({ at }: { at: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  if (!at) return null;
+  const secs = Math.max(0, Math.round((now - at) / 1000));
+  const stale = secs > 90;
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 text-micro tabular-nums ${
+        stale ? "text-warn" : "text-ink-dim"
+      }`}
+      title={new Date(at).toLocaleTimeString()}
+    >
+      <span
+        className={`${stale ? "" : "grad-live-dot"} inline-block h-1.5 w-1.5 rounded-full ${
+          stale ? "bg-warn" : "bg-up"
+        }`}
+      />
+      {secs < 60 ? `updated ${secs}s ago` : `updated ${Math.round(secs / 60)}m ago`}
+    </span>
+  );
+}
+
+/**
  * THE LEADERBOARD
  *
  * Fifty arms, eight of which decide by hashing the mint and therefore cannot
@@ -367,7 +402,7 @@ function TradeTable({
  * with whatever sits beside it. Figures get the scale; names get the width.
  */
 function LeaderboardPanel() {
-  const { data } = useGraduationTournament();
+  const { data, dataUpdatedAt, isFetching } = useGraduationTournament();
   const [showAll, setShowAll] = useState(false);
   if (!data?.running) return null;
   const band = data.control_band === null ? null : Number(data.control_band);
@@ -380,6 +415,11 @@ function LeaderboardPanel() {
     <Panel>
       <PanelHeader>
         <PanelTitle>Strategy tournament — 50 arms</PanelTitle>
+        <span
+          className={`transition-opacity ${isFetching ? "opacity-50" : "opacity-100"}`}
+        >
+          <Freshness at={dataUpdatedAt} />
+        </span>
       </PanelHeader>
       <div className="flex flex-col gap-5 p-4">
         {/* Verdict. The headline is the finding; the terms are underneath. */}

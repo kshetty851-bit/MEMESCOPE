@@ -16,11 +16,36 @@ import {
  */
 const REFRESH_MS = 30_000;
 
+/**
+ * Why every query here overrides the app-wide defaults.
+ *
+ * Two behaviours combine to freeze this page. React Query SUSPENDS
+ * `refetchInterval` while the document is hidden, so polling stops the moment
+ * you switch tabs — and the app then turns `refetchOnWindowFocus` off for
+ * healthy queries, on the reasoning that "the live stream already pushes
+ * changes". That is true of the screens it was written for. It is not true
+ * here: nothing pushes the graduation lab, every figure on it is polled, and
+ * the tournament closes trades continuously whether or not anyone is looking.
+ *
+ * The result was a page whose numbers were correct when you left and frozen
+ * when you came back — observed live, stuck at 211 closed trades while the
+ * database held 612.
+ *
+ * So: refetch on focus, and never serve a cached figure to a returning
+ * reader. Polling still pauses while the tab is hidden, which is right — no
+ * one is reading it, and the answer is fetched the instant they are.
+ */
+const LIVE = {
+  refetchOnWindowFocus: true,
+  staleTime: 0,
+} as const;
+
 export function useGraduationStatus() {
   return useQuery({
     queryKey: ["graduation", "status"],
     queryFn: fetchStatus,
     refetchInterval: REFRESH_MS,
+    ...LIVE,
   });
 }
 
@@ -34,6 +59,7 @@ export function useGraduationTrades(book: string) {
     queryKey: ["graduation", "paper-trades", book],
     queryFn: () => fetchPaperTrades(book),
     refetchInterval: 60_000,
+    ...LIVE,
   });
 }
 
@@ -46,6 +72,7 @@ export function useGraduationReturns() {
     queryKey: ["graduation", "returns"],
     queryFn: fetchReturns,
     refetchInterval: 300_000,
+    ...LIVE,
   });
 }
 
@@ -58,5 +85,6 @@ export function useGraduationTournament() {
     queryKey: ["graduation", "tournament"],
     queryFn: fetchTournament,
     refetchInterval: 30_000,
+    ...LIVE,
   });
 }
