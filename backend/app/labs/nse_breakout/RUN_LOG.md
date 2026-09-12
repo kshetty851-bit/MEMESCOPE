@@ -13,14 +13,16 @@ appear nowhere on this machine.** The closest real match was `~/Projects/swingsc
 (NSE, bhavcopy, `app/prebreakout/` with a 0–100 readiness score, `app/levels/`)
 — but it is Next.js, not Vite, and has no scheduler or Kite either. The user
 then directed that this live **inside MEMESCOPE**, so it is a new isolated lab
-beside the Solana Breakout Lab, whose architecture (levels → score → state
+beside the Solana Breakout Lab (since deleted, 2026-09-12), whose architecture
+(levels → score → state
 machine → episodes → outcomes → decile stats → SVG chart with resistance
 overlays) is the same shape this brief asks for.
 
 Consequences, all logged as unattended decisions in the README:
 
 * There is **no existing NSE score to reuse** (2.2). The readiness score is
-  built here, following `labs/breakout/momentum.py`'s shape.
+  built here, following the shape of the Solana lab's `momentum.py` — a file
+  that no longer exists, so `score.py` here is now the only copy of it.
 * There is **no existing 3:45 PM IST job** to leave untouched (1.3), no Kite
   auth to leave untouched, and no existing radar UI or screener logic to avoid
   rewriting. Those constraints are satisfied vacuously.
