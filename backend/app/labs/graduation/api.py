@@ -620,19 +620,24 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
             open_positions=int(open_now.get(arm.name, 0)))
 
     rows = [row(a) for a in ARMS]
-    rows.sort(key=lambda r: r.realised_usd, reverse=True)
+    # An arm that has not traded is not leading. Sorting on P&L alone ranks a
+    # never-traded $0.00 above an arm that took one trade and lost $1.30, and
+    # the top of the board fills with arms whose filter has simply not matched
+    # anything yet.
+    rows.sort(key=lambda r: (r.trades > 0, r.realised_usd), reverse=True)
+    traded = [r for r in rows if r.trades]
     control_rows = [r for r in rows if r.is_control]
-    real_rows = [r for r in rows if not r.is_control]
-    band = max((r.realised_usd for r in control_rows), default=None)
+    band = max((r.realised_usd for r in control_rows if r.trades), default=None)
     best_control = next((r.name for r in control_rows
-                         if band is not None and r.realised_usd == band), "")
-    leader = real_rows[0] if real_rows else None
+                         if band is not None and r.trades
+                         and r.realised_usd == band), "")
+    leader = next((r for r in traded if not r.is_control), None)
 
     board = Leaderboard(
         running=config.paper_enabled(), started_at=started, arms=rows,
         controls=control_rows, control_band=band, best_control=best_control,
         leader=leader.name if leader else "",
-        leader_beats_controls=bool(leader and band is not None
+        leader_beats_controls=bool(leader and leader.trades and band is not None
                                    and leader.realised_usd > band),
         min_trades=config.TOURNEY_MIN_TRADES,
         min_profit_factor=config.TOURNEY_MIN_PF,
@@ -640,8 +645,10 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
         total_trades=sum(r.trades for r in rows),
         notional_usd=config.PAPER_NOTIONAL_USD,
     )
-    if leader is None or not leader.trades:
-        board.verdict = "No arm has closed a trade yet."
+    if leader is None:
+        board.verdict = (
+            f"{len(traded)} arms have closed trades; none of them is a "
+            "strategy arm yet." if traded else "No arm has closed a trade yet.")
         return board
     fails = []
     if leader.trades < board.min_trades:
@@ -652,7 +659,10 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
     if leader.top_token_share is not None and leader.top_token_share > board.max_token_share:
         fails.append(f"one token is {leader.top_token_share * 100:.0f}% of its profit, "
                      f"needs under {board.max_token_share * 100:.0f}%")
-    if not board.leader_beats_controls:
+    if band is None:
+        fails.append("no random arm has closed a trade yet, so there is "
+                     "nothing to compare against")
+    elif not board.leader_beats_controls:
         fails.append(f"has not beaten the best random arm ({best_control}, "
                      f"${band})")
     board.called = not fails

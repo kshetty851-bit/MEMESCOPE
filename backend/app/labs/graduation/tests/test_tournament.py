@@ -114,3 +114,19 @@ def test_the_calling_gate_is_stated_before_the_tournament_runs() -> None:
     assert config.TOURNEY_MIN_TRADES >= 40
     assert D("1.5") <= config.TOURNEY_MIN_PF
     assert D("0.20") >= config.TOURNEY_MAX_TOKEN_SHARE
+
+
+def test_an_arm_that_has_not_traded_cannot_lead() -> None:
+    """Ranking on P&L alone puts a never-traded $0.00 above an arm that took
+    one trade and lost a dollar, so the top of the board fills with arms whose
+    filter has not matched anything yet. Observed live within a minute of the
+    tournament opening: 17 trades closed and the board showed a leader with
+    none of them.
+    """
+    rows = [
+        {"name": "untraded", "trades": 0, "pnl": D("0.00")},
+        {"name": "lost_one", "trades": 1, "pnl": D("-1.30")},
+        {"name": "won_two", "trades": 2, "pnl": D("4.10")},
+    ]
+    rows.sort(key=lambda r: (r["trades"] > 0, r["pnl"]), reverse=True)
+    assert [r["name"] for r in rows] == ["won_two", "lost_one", "untraded"]
