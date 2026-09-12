@@ -17,21 +17,6 @@ from app.labs.rafiq.models import (  # noqa: F401
     RafiqLabPosition,
     RafiqLabStrategy,
 )
-# Breakout Lab's ten `bo_*` tables, for the same reason: `alembic/env.py`
-# imports only `app.models`, so a model this package never imports is invisible
-# to autogenerate and the next revision would emit `drop_table` for each.
-from app.labs.breakout.models import (  # noqa: F401
-    BoAccount,
-    BoCandle,
-    BoEpisode,
-    BoEquity,
-    BoLevels,
-    BoPosition,
-    BoRun,
-    BoSetupSnapshot,
-    BoTrade,
-    BoUniverseMember,
-)
 # NSE Breakout Tracker's five `bt_*` tables, for the same reason.
 from app.labs.nse_breakout.models import (  # noqa: F401
     BtCandle,
