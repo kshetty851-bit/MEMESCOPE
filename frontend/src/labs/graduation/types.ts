@@ -173,6 +173,11 @@ export interface ArmRow {
   open_positions: number;
   /** Realised P&L as a percentage of the arm's $1,000. */
   return_pct: string;
+  /** Capital + realised + open positions marked to their last price — what a
+   * real account would show. The only figure here that includes anything not
+   * yet banked. */
+  equity_usd: string;
+  unrealised_usd: string;
   /** Thirty days of the same rule at the same trade rate: median, and the
    * 5th-95th band. The band is the point — a single figure would hide how
    * little a few dozen trades actually says. */

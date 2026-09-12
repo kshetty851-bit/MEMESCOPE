@@ -663,6 +663,7 @@ function LeaderboardPanel() {
             <colgroup>
               <col className="w-10" />
               <col />
+              <col className="w-32" />
               <col className="w-28" />
               <col className="w-20" />
               <col className="w-48" />
@@ -675,6 +676,7 @@ function LeaderboardPanel() {
               <tr className="text-label uppercase tracking-[0.08em] text-ink-dim">
                 <th className="pb-2 pl-1 text-left font-medium">#</th>
                 <th className="pb-2 pr-3 text-left font-medium">Arm</th>
+                <th className="pb-2 pr-3 text-right font-medium">Equity</th>
                 <th className="pb-2 pr-3 text-right font-medium">Realised</th>
                 <th className="pb-2 pr-3 text-right font-medium">Return</th>
                 <th className="pb-2 pr-3 text-right font-medium">
@@ -720,6 +722,24 @@ function LeaderboardPanel() {
                       <span className="mt-0.5 block truncate text-micro text-ink-dim">
                         {a.note}
                       </span>
+                    </td>
+                    <td className="py-2.5 pr-3 text-right">
+                      <span
+                        className={`grad-figure font-medium ${
+                          Number(a.equity_usd) > Number(data.capital_usd)
+                            ? "text-up"
+                            : Number(a.equity_usd) < Number(data.capital_usd)
+                              ? "text-down"
+                              : ""
+                        }`}
+                      >
+                        {usd(a.equity_usd)}
+                      </span>
+                      {Number(a.unrealised_usd) !== 0 ? (
+                        <span className="block text-micro tabular-nums text-ink-dim">
+                          incl. {signedUsd(a.unrealised_usd)} open
+                        </span>
+                      ) : null}
                     </td>
                     <td className="py-2.5 pr-3 text-right">
                       <span className="inline-flex items-baseline justify-end gap-1.5">

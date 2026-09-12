@@ -553,6 +553,11 @@ class ArmRow(BaseModel):
     open_positions: int = 0
     #: Realised P&L as a percentage of the arm's $1,000 capital.
     return_pct: Decimal = Decimal(0)
+    #: Capital + realised + open positions marked to their last price. The
+    #: number a real account would show, and the only one on this row that
+    #: includes anything not yet banked — `realised_usd` deliberately does not.
+    equity_usd: Decimal = Decimal(0)
+    unrealised_usd: Decimal = Decimal(0)
     #: Where thirty days of the SAME rule at the SAME trade rate would land —
     #: median, and the 5th-95th percentile band around it.
     #:
@@ -658,10 +663,20 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
                    GradPaperPosition.close_quote > 0,
                    GradPaperPosition.net_return.is_not(None)))).all():
         per_arm.setdefault(book, []).append(float(ret))
-    open_now = {r[0]: r[1] for r in (await db.execute(
-        select(GradPaperPosition.book, func.count())
-        .where(GradPaperPosition.closed_at.is_(None))
-        .group_by(GradPaperPosition.book))).all()}
+    open_now: dict[str, int] = {}
+    unrealised: dict[str, Decimal] = {}
+    for position in (await db.scalars(
+            select(GradPaperPosition)
+            .where(GradPaperPosition.closed_at.is_(None),
+                   GradPaperPosition.notional_usd > 0))).all():
+        open_now[position.book] = open_now.get(position.book, 0) + 1
+        # Marked to the last recorded price, at the rate captured when the
+        # position opened — the same arithmetic the closed rows use, so equity
+        # does not change shape the moment a position closes.
+        live = net_return(position, position.last_quote)
+        if live is not None:
+            unrealised[position.book] = (unrealised.get(position.book, Decimal(0))
+                                         + position.notional_usd * live)
     started = await db.scalar(select(func.min(GradPaperPosition.opened_at)))
     hours = ((datetime.now(UTC) - started).total_seconds() / 3600
              if started else 0.0)
@@ -741,6 +756,7 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
                 mean = (Decimal(s.mean) * 100).quantize(Decimal("0.01"))
         forecast = (cached.get(arm.name, {}) if fresh
                     else project(per_arm.get(arm.name, [])))
+        open_pnl = unrealised.get(arm.name, Decimal(0)).quantize(Decimal("0.01"))
         realised = (Decimal(s.pnl) if s else Decimal(0)).quantize(Decimal("0.01"))
         return ArmRow(
             name=arm.name, note=arm.note, entry=arm.entry,
@@ -754,6 +770,9 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
             return_pct=((realised / config.PAPER_CAPITAL_USD * 100)
                         .quantize(Decimal("0.01"))
                         if config.PAPER_CAPITAL_USD else Decimal(0)),
+            unrealised_usd=open_pnl,
+            equity_usd=(config.PAPER_CAPITAL_USD + realised + open_pnl
+                        ).quantize(Decimal("0.01")),
             **forecast)
 
     rows = [row(a) for a in ARMS]
