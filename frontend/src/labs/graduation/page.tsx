@@ -763,7 +763,8 @@ export function GraduationLabPage() {
                 question, because a strategy can only trade what it can see. */}
             <div className="flex flex-col gap-2 border-t border-line pt-3">
               <h3 className="text-[11px] font-semibold uppercase tracking-wider text-ink-dim">
-                Can the climb be seen? — poll every {data.poll_interval_s}s
+                Can the climb be seen? — last hour, poll every{" "}
+                {data.poll_interval_s}s
               </h3>
               <dl className="flex flex-col gap-2 text-sm">
                 <div className="flex justify-between">
@@ -792,9 +793,10 @@ export function GraduationLabPage() {
               <p className="max-w-[60ch] text-xs text-ink-dim">
                 Half of all graduates complete their curve within a minute of
                 first sighting, so the poll interval is the population filter,
-                not a detail. It was 34% / 16.6% at a fifteen-second poll on
-                12 Sep; the second figure is the only set a pre-graduation
-                strategy could actually trade.
+                not a detail. Measured over all of history at a fifteen-second
+                poll it was 34% / 16.6%; these are the last hour, so a change
+                to the interval shows here within the hour. The second figure
+                is the only set a pre-graduation strategy could actually trade.
               </p>
             </div>
             {!data.quote_side_trusted ? (

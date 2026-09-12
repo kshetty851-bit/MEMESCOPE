@@ -158,6 +158,8 @@ class GraduationStatus(BaseModel):
     #: curves it can see, and on 2026-09-12 that was 34% / 16.6% at a
     #: fifteen-second poll. Half of all graduates complete within a minute of
     #: first sighting, so the shutter speed IS the population filter.
+    #: All three are over the LAST HOUR, so a change to the poll interval
+    #: shows up here within the hour instead of being averaged into history.
     graduates_observed: int = 0
     graduates_seen_climbing: int = 0
     graduates_seen_at_90: int = 0
@@ -249,7 +251,10 @@ async def status(db: AsyncSession = Depends(get_db)) -> GraduationStatus:
         select(func.count()).select_from(GradToken)
         .where(GradToken.first_seen_at >= hour_ago))
 
-    # One pass, grouped — not a correlated subquery per token.
+    # Windowed to the last hour, not cumulative: this figure exists to show
+    # whether a change to the poll interval moved it, and a lifetime average
+    # would take days to drift. It also keeps the scan small as the table
+    # grows. One pass, grouped — not a correlated subquery per token.
     seen = (
         select(
             GradCurveSample.mint.label("mint"),
@@ -258,6 +263,7 @@ async def status(db: AsyncSession = Depends(get_db)) -> GraduationStatus:
             func.bool_or(GradCurveSample.complete.isnot(True)
                          & (GradCurveSample.progress_pct >= 90)).label("at90"),
         )
+        .where(GradCurveSample.ts >= hour_ago)
         .group_by(GradCurveSample.mint)
         .subquery()
     )
