@@ -13,14 +13,19 @@ from a sequential scan to an index-only scan, 2,269 ms to 1,099 ms. It cannot
 do better than that, because the question has to look at every mint however it
 is indexed.
 
-Revision ID: 0080_grad_perf
-Revises: 0079_grad_execution
+Re-parented from 0079 onto 0081: another session numbered its own migration
+0080 against the same parent, which is an alembic BRANCH — two heads, and
+`upgrade head` refuses to choose. This one only creates an index, so the order
+between the two is arbitrary and chaining behind theirs costs nothing.
+
+Revision ID: 0082_grad_perf
+Revises: 0081_rafiq_lab_candidates
 """
 
 from alembic import op
 
-revision = "0080_grad_perf"
-down_revision = "0079_grad_execution"
+revision = "0082_grad_perf"
+down_revision = "0081_rafiq_lab_candidates"
 branch_labels = None
 depends_on = None
 

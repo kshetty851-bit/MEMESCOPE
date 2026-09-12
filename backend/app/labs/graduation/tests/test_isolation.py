@@ -344,3 +344,43 @@ def test_every_migration_id_fits_the_version_column() -> None:
         if found and len(found.group(1)) > 32:
             long_ids.append((path.name, found.group(1), len(found.group(1))))
     assert not long_ids, f"revision ids over 32 chars: {long_ids}"
+
+
+def test_the_migration_chain_has_exactly_one_head() -> None:
+    """Two migrations sharing a parent is an alembic BRANCH, and
+    `alembic upgrade head` refuses to choose between them — every service that
+    migrates on startup then crash-loops.
+
+    It happened on 2026-09-13: a concurrent session numbered its migration
+    0080 against the same parent this lab's 0080 used. Neither file is wrong
+    on its own, which is exactly why nothing catches it until deploy.
+
+    Only tracked files count: an uncommitted migration in someone's working
+    tree is their business, and committing one is a separate mistake this
+    repo has also made.
+    """
+    import subprocess
+
+    root = pathlib.Path(__file__).resolve().parents[4]
+    listed = subprocess.run(
+        ["git", "ls-files", "alembic/versions/"],
+        cwd=root, capture_output=True, text=True, check=False).stdout.split()
+    revisions, parents = {}, set()
+    for name in listed:
+        path = root / name
+        if not path.exists():
+            continue
+        text = path.read_text()
+        rev = re.search(r'^revision(?::\s*str)?\s*=\s*["\']([^"\']+)', text, re.M)
+        down = re.search(r'^down_revision(?::[^=]+)?\s*=\s*["\']([^"\']+)', text, re.M)
+        if not rev:
+            continue
+        revisions[rev.group(1)] = path.name
+        if down:
+            parents.add(down.group(1))
+    if not revisions:
+        pytest.skip("no migrations visible to git here")
+    heads = [r for r in revisions if r not in parents]
+    assert len(heads) == 1, (
+        f"alembic has {len(heads)} heads: "
+        + ", ".join(f"{h} ({revisions[h]})" for h in sorted(heads)))
