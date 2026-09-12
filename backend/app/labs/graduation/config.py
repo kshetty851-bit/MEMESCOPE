@@ -441,13 +441,32 @@ PAPER_INTERVAL_SECONDS = _int("LAB_GRADUATION_PAPER_TICK_S", 15)
 # keep 47% of graduations. Two days is not enough to trust the P&L, so the
 # filter runs as a SECOND book beside the control, on the same graduations,
 # and the two are compared after four weeks. The control is not touched.
-PAPER_BOOKS = ("control", "filtered")
+#: The two arms the dedicated Paper panels render. Both are ordinary members
+#: of `tournament.ARMS` — the panels are a close-up of two rows of the
+#: leaderboard, not a separate experiment.
+PAPER_BOOKS = ("E05_hold_5m", "C01_symnight_5m")
 #: The filtered book enters only when the pool opened inside this UTC window
 #: (start inclusive, end exclusive, wrapping midnight).
 PAPER_FILTER_HOUR_START = _int("LAB_GRADUATION_PAPER_FILTER_HOUR_START", 18)
 PAPER_FILTER_HOUR_END = _int("LAB_GRADUATION_PAPER_FILTER_HOUR_END", 6)
 #: ...and only when at least this many EARLIER tokens used the same symbol.
 PAPER_FILTER_MIN_SYMBOL_REUSE = _int("LAB_GRADUATION_PAPER_FILTER_REUSE", 1)
+
+# --- what it takes to CALL a tournament winner, stated before it starts ------
+#
+# Fifty arms produce a leader in an hour whether or not any of them is good, so
+# a leaderboard alone is not a result. These are the terms, written down before
+# the first trade, and the page reports them as pass/fail rather than prose:
+#
+#   * enough trades that the ranking is not one lucky token;
+#   * a profit factor that would survive being wrong about a trade or two;
+#   * no single token carrying the arm — every fake edge this platform has
+#     found died on exactly this test;
+#   * and it must beat the best of the EIGHT RANDOM ARMS, which is the only
+#     term that distinguishes "leads" from "is better than chance".
+TOURNEY_MIN_TRADES = _int("LAB_GRADUATION_TOURNEY_MIN_TRADES", 40)
+TOURNEY_MIN_PF = _dec("LAB_GRADUATION_TOURNEY_MIN_PF", "1.5")
+TOURNEY_MAX_TOKEN_SHARE = _dec("LAB_GRADUATION_TOURNEY_MAX_SHARE", "0.20")
 
 # --- the kill gate, stated before this run produced a single trade ------------
 #

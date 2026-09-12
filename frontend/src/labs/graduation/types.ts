@@ -149,3 +149,45 @@ export interface Returns {
   ended_down_90: number;
   best_multiple: string | null;
 }
+
+
+/** One arm's standing. Realised only — an open position is not a result. */
+export interface ArmRow {
+  name: string;
+  note: string;
+  entry: string;
+  hold_minutes: number;
+  take_profit_x: string | null;
+  trailing_pct: string | null;
+  is_control: boolean;
+  trades: number;
+  wins: number;
+  realised_usd: string;
+  mean_pct: string | null;
+  profit_factor: string | null;
+  top_token_share: string | null;
+  open_positions: number;
+}
+
+/**
+ * Fifty arms, eight of which cannot have an edge. `control_band` is the best
+ * realised P&L among those eight; a leader that has not cleared it has not
+ * beaten chance.
+ */
+export interface Leaderboard {
+  running: boolean;
+  started_at: string | null;
+  arms: ArmRow[];
+  controls: ArmRow[];
+  control_band: string | null;
+  best_control: string;
+  leader: string;
+  leader_beats_controls: boolean;
+  min_trades: number;
+  min_profit_factor: string;
+  max_token_share: string;
+  called: boolean;
+  verdict: string;
+  total_trades: number;
+  notional_usd: string;
+}

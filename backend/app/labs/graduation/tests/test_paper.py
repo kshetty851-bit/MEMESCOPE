@@ -318,14 +318,20 @@ def test_the_book_ticks_often_enough_to_honour_its_own_exit() -> None:
 
 # --- the A/B entry filter -----------------------------------------------------
 
-def test_the_two_books_share_every_rule_but_one() -> None:
-    """The experiment is ONE check at entry. If anything else differs between
-    the books the comparison measures that instead."""
+def test_the_paper_panels_render_two_tournament_arms() -> None:
+    """They are a close-up of two rows of the leaderboard, not a separate
+    experiment: the control arm the live book has always run, and the filtered
+    arm the rug research proposed. Both are ordinary members of `ARMS`, so
+    neither can drift from the tournament it is being compared inside."""
     from app.labs.graduation.paper import PaperBook
+    from app.labs.graduation.tournament import BY_NAME
 
-    assert config.PAPER_BOOKS == ("control", "filtered")
-    # Same class, same code path; the book name is the only input.
-    assert PaperBook.__init__.__code__ is PaperBook.__init__.__code__
+    assert config.PAPER_BOOKS == ("E05_hold_5m", "C01_symnight_5m")
+    control, filtered = (BY_NAME[n] for n in config.PAPER_BOOKS)
+    assert control.entry == "all" and filtered.entry == "sym_night"
+    assert control.hold == filtered.hold == config.PAPER_MAX_HOLD_MINUTES
+    assert (control.tp, control.trail) == (filtered.tp, filtered.trail) == (None, None)
+
     import pytest
     with pytest.raises(ValueError):
         PaperBook(None, book="tuned")  # type: ignore[arg-type]

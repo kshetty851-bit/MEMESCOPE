@@ -60,7 +60,7 @@ PURE_MODULES = ("curve.py", "parse.py", "watchset.py", "backtest.py")
 MODULES = ("config.py", "curve.py", "parse.py", "watchset.py", "sources.py",
            "postgrad.py", "recorder.py", "features.py", "backtest.py",
            "scheduler.py", "models.py", "api.py", "paper.py", "analyst.py",
-           "__main__.py")
+           "tournament.py", "__main__.py")
 
 
 def imported_modules(tree: ast.AST) -> set[str]:

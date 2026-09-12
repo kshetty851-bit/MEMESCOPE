@@ -25,7 +25,7 @@ from app.db.session import SessionFactory
 from app.labs.graduation import config
 from app.labs.graduation.features import FeatureEngine
 from app.labs.graduation.models import GradCurveSample, GradToken
-from app.labs.graduation.paper import PaperBook
+from app.labs.graduation.tournament import Tournament
 from app.workers.celery_app import celery_app
 
 logger = get_logger(__name__)
@@ -101,13 +101,11 @@ async def paper_tick() -> dict[str, Any]:
         return {"skipped": "graduation_paper_disabled"}
     try:
         async with SessionFactory() as session:
-            # Both books, one clock, one commit: they see the same graduations
+            # Every arm, one clock, one commit: they see the same graduations
             # at the same instant, which is what makes them comparable.
-            now = datetime.now(UTC)
-            results = {book: await PaperBook(session, book=book, now=now).tick()
-                       for book in config.PAPER_BOOKS}
+            result = await Tournament(session, now=datetime.now(UTC)).tick()
             await session.commit()
-            return results
+            return result
     except Exception:  # containment: never raise into the beat
         logger.exception("graduation_paper_failed")
         return {"error": "graduation_paper_failed"}

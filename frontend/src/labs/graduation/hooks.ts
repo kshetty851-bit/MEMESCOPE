@@ -2,7 +2,12 @@
 
 import { useQuery } from "@tanstack/react-query";
 
-import { fetchPaperTrades, fetchReturns, fetchStatus } from "./api";
+import {
+  fetchPaperTrades,
+  fetchReturns,
+  fetchStatus,
+  fetchTournament,
+} from "./api";
 
 /**
  * The recorder polls the chain every fifteen seconds and the launch feed runs
@@ -41,5 +46,17 @@ export function useGraduationReturns() {
     queryKey: ["graduation", "returns"],
     queryFn: fetchReturns,
     refetchInterval: 300_000,
+  });
+}
+
+/**
+ * The leaderboard. Thirty seconds, like the board: this is the number the
+ * tournament exists to show and it moves every time an arm closes a trade.
+ */
+export function useGraduationTournament() {
+  return useQuery({
+    queryKey: ["graduation", "tournament"],
+    queryFn: fetchTournament,
+    refetchInterval: 30_000,
   });
 }

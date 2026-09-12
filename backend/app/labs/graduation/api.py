@@ -25,10 +25,12 @@ from app.labs.graduation.models import (
     GradCheckpoint,
     GradCurveSample,
     GradMigration,
+    GradPaperPosition,
     GradPostgradSample,
     GradToken,
 )
 from app.labs.graduation.paper import PaperBook, costs, net_return, positions
+from app.labs.graduation.tournament import ARMS
 
 router = APIRouter(prefix="/labs/graduation", tags=["graduation-lab"])
 
@@ -90,8 +92,8 @@ class PaperBookOut(BaseModel):
     """The forward book. Rules frozen in advance; nothing here is tunable."""
 
     running: bool = False
-    #: `control` or `filtered`. Same rules; the second adds one entry check.
-    book: str = "control"
+    #: Which tournament arm this panel renders, e.g. `E05_hold_5m`.
+    book: str = "E05_hold_5m"
     filter_description: str = ""
     starting_usd: Decimal = Decimal(0)
     equity_usd: Decimal = Decimal(0)
@@ -169,7 +171,7 @@ class GraduationStatus(BaseModel):
     paper: PaperBookOut = PaperBookOut()
     #: The A/B twin: identical rules behind an entry filter, on the same
     #: graduations. Compared against `paper` after four weeks.
-    paper_filtered: PaperBookOut = PaperBookOut(book="filtered")
+    paper_filtered: PaperBookOut = PaperBookOut(book="C01_symnight_5m")
 
     # --- is the chain actually being read? ----------------------------------
     #: When the poller last successfully read ANY curve. `last_sample_at`
@@ -300,8 +302,8 @@ async def status(db: AsyncSession = Depends(get_db)) -> GraduationStatus:
     polls_per_minute = max(1, 60 // max(1, config.POLL_INTERVAL_S))
     base.rpc_calls_per_minute = calls_per_poll * polls_per_minute
 
-    base.paper = await _paper(db, book="control")
-    base.paper_filtered = await _paper(db, book="filtered")
+    base.paper = await _paper(db, book=config.PAPER_BOOKS[0])
+    base.paper_filtered = await _paper(db, book=config.PAPER_BOOKS[1])
 
     rows = (await db.execute(
         select(GradToken.mint, GradToken.symbol, GradToken.max_progress_pct,
@@ -327,7 +329,7 @@ def _filter_description() -> str:
             f"earlier token{'s' if config.PAPER_FILTER_MIN_SYMBOL_REUSE != 1 else ''}")
 
 
-async def _paper(db: AsyncSession, *, book: str = "control",
+async def _paper(db: AsyncSession, *, book: str = "E05_hold_5m",
                  limit: int | None = 10) -> PaperBookOut:
     """One book's state. Read-only: this endpoint never ticks it."""
     account = await PaperBook(db, book=book).account()
@@ -365,7 +367,8 @@ async def _paper(db: AsyncSession, *, book: str = "control",
     return PaperBookOut(
         running=config.paper_enabled(),
         book=book,
-        filter_description=_filter_description() if book == "filtered" else "",
+        filter_description=(_filter_description()
+                            if book == config.PAPER_BOOKS[1] else ""),
         # Quantised HERE, not left to the renderer: an unrounded Decimal
         # serialises as 1023.223558651711844672524598 and reads as false
         # precision on a figure that is only ever dollars and cents.
@@ -398,7 +401,7 @@ async def _paper(db: AsyncSession, *, book: str = "control",
 
 
 @router.get("/paper/trades", response_model=PaperBookOut)
-async def paper_trades(book: str = "control",
+async def paper_trades(book: str = "E05_hold_5m",
                        db: AsyncSession = Depends(get_db)) -> PaperBookOut:
     """Every closed trade, not just the recent ones.
 
@@ -409,7 +412,9 @@ async def paper_trades(book: str = "control",
     """
     if not config.enabled():
         return PaperBookOut()
-    if book not in config.PAPER_BOOKS:
+    from app.labs.graduation.tournament import BY_NAME
+
+    if book not in BY_NAME:
         return PaperBookOut(book=book)
     return await _paper(db, book=book, limit=None)
 
@@ -519,3 +524,139 @@ async def returns(db: AsyncSession = Depends(get_db)) -> Returns:
         best_multiple=(Decimal(row.best).quantize(Decimal("0.1"))
                        if row.best is not None else None),
     )
+
+
+class ArmRow(BaseModel):
+    """One arm's standing. Everything is realised — open positions are not
+    counted, because an unrealised number is what every blown-up book in this
+    platform's history was leading on."""
+
+    name: str
+    note: str = ""
+    entry: str = ""
+    hold_minutes: int = 0
+    take_profit_x: Decimal | None = None
+    trailing_pct: Decimal | None = None
+    is_control: bool = False
+    trades: int = 0
+    wins: int = 0
+    realised_usd: Decimal = Decimal(0)
+    mean_pct: Decimal | None = None
+    profit_factor: Decimal | None = None
+    top_token_share: Decimal | None = None
+    open_positions: int = 0
+
+
+class Leaderboard(BaseModel):
+    """Fifty arms, eight of which cannot have an edge.
+
+    `control_band` is the best realised P&L among those eight. A leader that
+    has not cleared it has not beaten chance, and `leader_beats_controls` says
+    so in one boolean rather than leaving it to the reader's optimism.
+    """
+
+    running: bool = False
+    started_at: datetime | None = None
+    arms: list[ArmRow] = []
+    controls: list[ArmRow] = []
+    control_band: Decimal | None = None
+    best_control: str = ""
+    leader: str = ""
+    leader_beats_controls: bool = False
+    #: The gate a leader must clear to be called. Stated here, not in prose.
+    min_trades: int = 0
+    min_profit_factor: Decimal = Decimal(0)
+    max_token_share: Decimal = Decimal(0)
+    called: bool = False
+    verdict: str = ""
+    total_trades: int = 0
+    notional_usd: Decimal = Decimal(0)
+
+
+@router.get("/tournament", response_model=Leaderboard)
+async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
+    """The leaderboard. One grouped read, not fifty."""
+    if not config.enabled():
+        return Leaderboard()
+
+    closed = (await db.execute(
+        select(GradPaperPosition.book,
+               func.count().label("trades"),
+               func.count().filter(GradPaperPosition.pnl_usd > 0).label("wins"),
+               func.coalesce(func.sum(GradPaperPosition.pnl_usd), 0).label("pnl"),
+               func.coalesce(func.sum(GradPaperPosition.pnl_usd).filter(
+                   GradPaperPosition.pnl_usd > 0), 0).label("gross_up"),
+               func.coalesce(-func.sum(GradPaperPosition.pnl_usd).filter(
+                   GradPaperPosition.pnl_usd < 0), 0).label("gross_down"),
+               func.max(GradPaperPosition.pnl_usd).label("best"),
+               func.avg(GradPaperPosition.net_return).label("mean"))
+        .where(GradPaperPosition.closed_at.is_not(None),
+               GradPaperPosition.notional_usd > 0,
+               GradPaperPosition.close_quote > 0)
+        .group_by(GradPaperPosition.book))).all()
+    stats = {r.book: r for r in closed}
+    open_now = {r[0]: r[1] for r in (await db.execute(
+        select(GradPaperPosition.book, func.count())
+        .where(GradPaperPosition.closed_at.is_(None))
+        .group_by(GradPaperPosition.book))).all()}
+    started = await db.scalar(select(func.min(GradPaperPosition.opened_at)))
+
+    def row(arm) -> ArmRow:
+        s = stats.get(arm.name)
+        pf = top = mean = None
+        if s is not None and s.trades:
+            if s.gross_down > 0:
+                pf = (Decimal(s.gross_up) / Decimal(s.gross_down)).quantize(Decimal("0.01"))
+            if s.gross_up > 0 and s.best is not None and s.best > 0:
+                top = (Decimal(s.best) / Decimal(s.gross_up)).quantize(Decimal("0.0001"))
+            if s.mean is not None:
+                mean = (Decimal(s.mean) * 100).quantize(Decimal("0.01"))
+        return ArmRow(
+            name=arm.name, note=arm.note, entry=arm.entry, hold_minutes=arm.hold,
+            take_profit_x=arm.tp, trailing_pct=arm.trail, is_control=arm.is_control,
+            trades=int(s.trades) if s else 0, wins=int(s.wins) if s else 0,
+            realised_usd=(Decimal(s.pnl) if s else Decimal(0)).quantize(Decimal("0.01")),
+            mean_pct=mean, profit_factor=pf, top_token_share=top,
+            open_positions=int(open_now.get(arm.name, 0)))
+
+    rows = [row(a) for a in ARMS]
+    rows.sort(key=lambda r: r.realised_usd, reverse=True)
+    control_rows = [r for r in rows if r.is_control]
+    real_rows = [r for r in rows if not r.is_control]
+    band = max((r.realised_usd for r in control_rows), default=None)
+    best_control = next((r.name for r in control_rows
+                         if band is not None and r.realised_usd == band), "")
+    leader = real_rows[0] if real_rows else None
+
+    board = Leaderboard(
+        running=config.paper_enabled(), started_at=started, arms=rows,
+        controls=control_rows, control_band=band, best_control=best_control,
+        leader=leader.name if leader else "",
+        leader_beats_controls=bool(leader and band is not None
+                                   and leader.realised_usd > band),
+        min_trades=config.TOURNEY_MIN_TRADES,
+        min_profit_factor=config.TOURNEY_MIN_PF,
+        max_token_share=config.TOURNEY_MAX_TOKEN_SHARE,
+        total_trades=sum(r.trades for r in rows),
+        notional_usd=config.PAPER_NOTIONAL_USD,
+    )
+    if leader is None or not leader.trades:
+        board.verdict = "No arm has closed a trade yet."
+        return board
+    fails = []
+    if leader.trades < board.min_trades:
+        fails.append(f"{leader.trades} trades, needs {board.min_trades}")
+    if leader.profit_factor is None or leader.profit_factor < board.min_profit_factor:
+        fails.append(f"profit factor {leader.profit_factor or 0}, "
+                     f"needs {board.min_profit_factor}")
+    if leader.top_token_share is not None and leader.top_token_share > board.max_token_share:
+        fails.append(f"one token is {leader.top_token_share * 100:.0f}% of its profit, "
+                     f"needs under {board.max_token_share * 100:.0f}%")
+    if not board.leader_beats_controls:
+        fails.append(f"has not beaten the best random arm ({best_control}, "
+                     f"${band})")
+    board.called = not fails
+    board.verdict = ("CALLED: " + leader.name + " cleared every term."
+                     if board.called else
+                     f"{leader.name} leads but is not called — " + "; ".join(fails))
+    return board

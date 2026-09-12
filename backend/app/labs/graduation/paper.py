@@ -279,9 +279,11 @@ class PaperBook:
     are one class rather than two.
     """
 
-    def __init__(self, session: AsyncSession, *, book: str = "control",
+    def __init__(self, session: AsyncSession, *, book: str = "E05_hold_5m",
                  now: datetime | None = None) -> None:
-        if book not in config.PAPER_BOOKS:
+        from app.labs.graduation.tournament import BY_NAME
+
+        if book not in BY_NAME:
             raise ValueError(f"unknown paper book {book!r}")
         self._session = session
         self._book = book
@@ -534,7 +536,7 @@ class PaperBook:
         )
 
 
-async def positions(session: AsyncSession, *, book: str = "control",
+async def positions(session: AsyncSession, *, book: str = "E05_hold_5m",
                     limit: int | None = None
                     ) -> tuple[Sequence[Any], Sequence[Any]]:
     """Open and closed, separately.

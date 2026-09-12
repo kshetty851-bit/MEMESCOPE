@@ -603,10 +603,11 @@ class GradPaperPosition(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
     )
-    #: Which book this position belongs to: `control` runs the frozen rules
-    #: on every graduation; `filtered` runs the SAME rules behind an entry
-    #: filter. They are an A/B on identical tokens, so one row per (book, mint).
-    book: Mapped[str] = mapped_column(String(16), nullable=False,
+    #: Which ARM of the tournament this position belongs to — one of
+    #: `tournament.ARMS`, e.g. `E05_hold_5m` or `R1_coin50_5m`. Every arm sees
+    #: the same graduations and differs only in which it accepts and when it
+    #: leaves, so there is one row per (book, mint).
+    book: Mapped[str] = mapped_column(String(32), nullable=False,
                                       server_default="control")
     mint: Mapped[str] = mapped_column(_ADDRESS, nullable=False)
     symbol: Mapped[str | None] = mapped_column(String(32))

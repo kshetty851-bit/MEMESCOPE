@@ -1,6 +1,11 @@
 import { api } from "@/lib/api-client";
 
-import type { GraduationStatus, PaperBook, Returns } from "./types";
+import type {
+  GraduationStatus,
+  Leaderboard,
+  PaperBook,
+  Returns,
+} from "./types";
 
 /**
  * GRADUATION LAB CLIENT
@@ -29,4 +34,9 @@ export function fetchPaperTrades(book: string): Promise<PaperBook> {
  */
 export function fetchReturns(): Promise<Returns> {
   return api.get<Returns>("/labs/graduation/returns");
+}
+
+/** The fifty-arm leaderboard, controls included. */
+export function fetchTournament(): Promise<Leaderboard> {
+  return api.get<Leaderboard>("/labs/graduation/tournament");
 }

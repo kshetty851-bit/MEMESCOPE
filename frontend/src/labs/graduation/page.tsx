@@ -10,9 +10,11 @@ import { shortenAddress } from "@/lib/format";
 import {
   useGraduationReturns,
   useGraduationStatus,
+  useGraduationTournament,
   useGraduationTrades,
 } from "./hooks";
 import type {
+  ArmRow,
   Funnel,
   PaperBook,
   PaperPosition,
@@ -351,6 +353,172 @@ function TradeTable({
  * the minute — so where they ENDED sits directly underneath, because that is
  * the number a reader will otherwise supply for themselves, wrongly.
  */
+
+/**
+ * THE LEADERBOARD
+ *
+ * Fifty arms, eight of which decide by hashing the mint and therefore cannot
+ * have an edge. Their best result is the bar every real arm has to clear —
+ * without it a leaderboard just reports who is on top, which fifty coin
+ * flippers also produce. The verdict line states pass/fail against terms
+ * fixed before the first trade, so nothing here is left to the reader's
+ * optimism.
+ */
+function LeaderboardPanel() {
+  const { data } = useGraduationTournament();
+  const [showAll, setShowAll] = useState(false);
+  if (!data?.running) return null;
+  const band = data.control_band === null ? null : Number(data.control_band);
+  const shown = showAll ? data.arms : data.arms.slice(0, 12);
+  return (
+    <Panel>
+      <PanelHeader>
+        <PanelTitle>Strategy tournament — 50 arms</PanelTitle>
+      </PanelHeader>
+      <div className="flex flex-col gap-4 p-4">
+        <div
+          className={`rounded-md border p-3 ${
+            data.called ? "border-up/50" : "border-down/40"
+          }`}
+        >
+          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-ink-dim">
+            {data.called ? "Winner called" : "No winner yet"}
+          </h3>
+          <p className="mt-1 max-w-[70ch] text-sm">{data.verdict}</p>
+        </div>
+
+        <p className="max-w-[70ch] text-xs text-ink-dim">
+          Every arm sees the same graduations, pays the same costs and uses the
+          same clock; they differ only in which tokens they accept and when
+          they leave. <b className="text-ink">Eight of them (R1–R8) decide by
+          hashing the token address</b> and cannot have an edge — run fifty
+          strategies and one leads whether or not any is good, so their best
+          result is the bar a real arm has to clear. To be called an arm needs{" "}
+          {data.min_trades}+ closed trades, a profit factor of{" "}
+          {Number(data.min_profit_factor).toFixed(2)}, no single token above{" "}
+          {(Number(data.max_token_share) * 100).toFixed(0)}% of its profit, and
+          it must beat the best random arm.
+        </p>
+
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <Stat label="Leader" value={data.leader || "—"} note="by realised P&L" />
+          <Stat
+            label="Best random arm"
+            value={band === null ? "—" : signedUsd(String(band))}
+            note={data.best_control || "the bar to clear"}
+          />
+          <Stat
+            label="Closed trades"
+            value={data.total_trades.toLocaleString()}
+            note="across all 50 arms"
+          />
+          <Stat
+            label="Position size"
+            value={usd(data.notional_usd)}
+            note="identical on every arm"
+          />
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[640px] text-sm">
+            <thead>
+              <tr className="text-left text-[11px] uppercase tracking-wider text-ink-dim">
+                <th className="pb-2 pr-3 font-medium">#</th>
+                <th className="pb-2 pr-3 font-medium">Arm</th>
+                <th className="pb-2 pr-3 text-right font-medium">Realised</th>
+                <th className="pb-2 pr-3 text-right font-medium">Trades</th>
+                <th className="pb-2 pr-3 text-right font-medium">Win</th>
+                <th className="pb-2 pr-3 text-right font-medium">PF</th>
+                <th className="pb-2 text-right font-medium">Top token</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.map((a: ArmRow, i: number) => {
+                const v = Number(a.realised_usd);
+                const beatsBand = band !== null && v > band;
+                return (
+                  <tr
+                    key={a.name}
+                    className={`border-t border-line ${
+                      a.is_control ? "opacity-70" : ""
+                    }`}
+                  >
+                    <td className="py-2 pr-3 tabular-nums text-ink-dim">
+                      {i + 1}
+                    </td>
+                    <td className="py-2 pr-3">
+                      <span className="font-mono text-xs">{a.name}</span>
+                      {a.is_control ? (
+                        <span className="ml-2 rounded-full bg-down/15 px-2 py-0.5 text-[10px] uppercase tracking-wide text-down">
+                          random
+                        </span>
+                      ) : null}
+                      <span className="block text-[11px] text-ink-dim">
+                        {a.note}
+                      </span>
+                    </td>
+                    <td
+                      className={`py-2 pr-3 text-right font-medium tabular-nums ${
+                        v > 0 ? "text-up" : v < 0 ? "text-down" : ""
+                      }`}
+                    >
+                      {signedUsd(a.realised_usd)}
+                      {!a.is_control && beatsBand ? (
+                        <span className="ml-1 text-up" title="beats every random arm">
+                          &#9679;
+                        </span>
+                      ) : null}
+                    </td>
+                    <td className="py-2 pr-3 text-right tabular-nums">
+                      {a.trades}
+                      {a.open_positions ? (
+                        <span className="ml-1 text-[11px] text-ink-dim">
+                          +{a.open_positions}
+                        </span>
+                      ) : null}
+                    </td>
+                    <td className="py-2 pr-3 text-right tabular-nums text-ink-dim">
+                      {a.trades ? `${Math.round((a.wins / a.trades) * 100)}%` : "—"}
+                    </td>
+                    <td className="py-2 pr-3 text-right tabular-nums">
+                      {a.profit_factor ?? "—"}
+                    </td>
+                    <td className="py-2 text-right tabular-nums text-ink-dim">
+                      {a.top_token_share
+                        ? `${(Number(a.top_token_share) * 100).toFixed(0)}%`
+                        : "—"}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        {data.arms.length > 12 ? (
+          <button
+            type="button"
+            onClick={() => setShowAll((v) => !v)}
+            className="self-start text-xs text-accent hover:underline"
+          >
+            {showAll
+              ? "Show the top 12"
+              : `Show all ${data.arms.length} arms, controls included`}
+          </button>
+        ) : null}
+
+        <p className="max-w-[70ch] text-xs text-ink-dim">
+          A dot marks an arm ahead of every random one. Open positions are the
+          small <span className="text-ink">+n</span> beside the trade count and
+          are <b className="text-ink">not</b> in the realised column — an
+          unrealised number is what every book in this platform&rsquo;s history
+          was leading on shortly before it wasn&rsquo;t.
+        </p>
+      </div>
+    </Panel>
+  );
+}
+
 function ReturnsPanel() {
   const { data } = useGraduationReturns();
   if (!data?.running || !data.usable) return null;
@@ -920,6 +1088,8 @@ export function GraduationLabPage() {
           </div>
         </Panel>
       </div>
+
+      <LeaderboardPanel />
 
       <ReturnsPanel />
 
