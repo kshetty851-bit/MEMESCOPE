@@ -23,6 +23,16 @@ export interface RafiqStrategy {
   liquidity_derived_risk: boolean;
   daily_breaker: boolean;
   consensus_gate: boolean;
+  /**
+   * False for a retired book. It still settles its open positions under the
+   * geometry frozen on each row, but opens nothing new — so its equity is its
+   * last value, not a current one.
+   */
+  enters: boolean;
+  /** F2 only: the equity level at which it stops opening positions. */
+  equity_floor: string | null;
+  /** F2 only: its daily entry cap. */
+  max_trades_per_day: number | null;
   /** The v2 entry gate's thresholds, as published. */
   gate: Record<string, string>;
   starting_equity: string;

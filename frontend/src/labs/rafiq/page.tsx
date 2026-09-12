@@ -168,6 +168,14 @@ function StrategyCard({
             <span className="truncate text-sm text-ink">{strategy.name}</span>
           </div>
           <span className="flex shrink-0 items-center gap-1.5">
+            {strategy.enters ? null : (
+              <span
+                title="Retired: still settling its open positions, but opening nothing new. Its equity is its last value, not a current one."
+                className="rounded bg-raised px-1.5 py-0.5 text-label uppercase text-ink-3"
+              >
+                Retired
+              </span>
+            )}
             {leading ? (
               <span
                 title="Highest equity right now — not a verdict, the sample is tiny"
@@ -268,8 +276,11 @@ export function RafiqLabPage() {
   // Deliberately "leading" and not "winner": a few dozen closed trades is not
   // a result, and the word winner invites a reader to treat it as one.
   const leader = useMemo(() => {
+    // ...and among books that can still trade. A retired book's equity is
+    // frozen at its last mark, so badging it "leading" would rank a finished
+    // record against a running one.
     const traded = (status.data?.strategies ?? []).filter(
-      (s) => s.closed_trades > 0,
+      (s) => s.closed_trades > 0 && s.enters,
     );
     if (traded.length === 0) return null;
     return traded.reduce((best, s) =>
@@ -429,7 +440,17 @@ export function RafiqLabPage() {
               {status.data.strategies.map((s) => (
                 <tr key={s.code} className="border-b border-line">
                   <td className="p-2 text-ink">
-                    <span className="font-mono text-accent">{s.code}</span> {s.name}
+                    <span
+                      className={`font-mono ${s.enters ? "text-accent" : "text-ink-3"}`}
+                    >
+                      {s.code}
+                    </span>{" "}
+                    {s.name}
+                    {s.enters ? null : (
+                      <span className="ml-1.5 text-label uppercase text-ink-3">
+                        retired
+                      </span>
+                    )}
                   </td>
                   <td className="p-2 text-right font-mono tabular-nums text-ink-3">
                     {usd(s.starting_equity)}
