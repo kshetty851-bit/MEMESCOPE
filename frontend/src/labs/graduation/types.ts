@@ -180,6 +180,9 @@ export interface ArmRow {
   projected_30d_low: string | null;
   projected_30d_high: string | null;
   projected_trades: number;
+  /** Share of simulated 30-day paths where the account could no longer fund a
+   * position. A running total cannot express this at all. */
+  ruin_pct: string | null;
 }
 
 /**

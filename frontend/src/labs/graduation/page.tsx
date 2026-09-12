@@ -667,6 +667,7 @@ function LeaderboardPanel() {
               <col className="w-20" />
               <col className="w-48" />
               <col className="w-20" />
+              <col className="w-20" />
               <col className="w-16" />
               <col className="w-24" />
             </colgroup>
@@ -679,6 +680,7 @@ function LeaderboardPanel() {
                 <th className="pb-2 pr-3 text-right font-medium">
                   30d projection
                 </th>
+                <th className="pb-2 pr-3 text-right font-medium">Wipeout</th>
                 <th className="pb-2 pr-3 text-right font-medium">Trades</th>
                 <th className="pb-2 pr-3 text-right font-medium">PF</th>
                 <th className="pb-2 pr-1 text-right font-medium">Top token</th>
@@ -779,6 +781,23 @@ function LeaderboardPanel() {
                       )}
                     </td>
                     <td className="py-2.5 pr-3 text-right">
+                      {a.ruin_pct === null ? (
+                        <span className="text-micro text-ink-dim">—</span>
+                      ) : (
+                        <span
+                          className={`grad-figure ${
+                            Number(a.ruin_pct) >= 50
+                              ? "text-down"
+                              : Number(a.ruin_pct) >= 10
+                                ? "text-warn"
+                                : "text-ink-dim"
+                          }`}
+                        >
+                          {Number(a.ruin_pct).toFixed(0)}%
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-2.5 pr-3 text-right">
                       <span className="grad-figure">{a.trades}</span>
                       {a.open_positions ? (
                         <span className="ml-1 text-micro text-ink-dim">
@@ -821,11 +840,16 @@ function LeaderboardPanel() {
             trades), resampled from what that arm has actually done — and after{" "}
             {Number(data.hours_running).toFixed(1)} hours the band spans
             outcomes that are mostly an accident of which tokens arrived.
-            Positions are a fixed {usd(data.notional_usd)} whatever the equity,
-            so the projection adds rather than compounds; compounding a noisy
-            edge produces arithmetic, not a forecast. Return % is against each
-            arm&rsquo;s {usd(data.capital_usd)}. A dot marks an arm ahead of
-            every random one. Open positions are the
+            It is simulated as an <b className="text-ink">account</b>, not a
+            running total: positions stay {usd(data.notional_usd)} whatever the
+            equity, and an account that cannot pay for the next one stops — so
+            the worst thirty days costs {usd(data.capital_usd)} and no more,
+            and a path wiped out on day three never collects the other
+            twenty-seven. <b className="text-ink">Wipeout</b> is the share of
+            simulated months that ended that way, which is the number a running
+            total cannot express. Return % is against each arm&rsquo;s{" "}
+            {usd(data.capital_usd)}. A dot marks an arm ahead of every random
+            one. Open positions are the
             small <span className="text-ink">+n</span> beside the trade count and
             are <b className="text-ink">not</b> in the realised column — an
             unrealised number is what every book in this platform&rsquo;s history

@@ -566,6 +566,9 @@ class ArmRow(BaseModel):
     projected_30d_low: Decimal | None = None
     projected_30d_high: Decimal | None = None
     projected_trades: int = 0
+    #: Share of simulated thirty-day paths in which the account could no
+    #: longer fund a position. The one figure a running total cannot express.
+    ruin_pct: Decimal | None = None
 
 
 class Leaderboard(BaseModel):
@@ -644,31 +647,63 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
     hours = ((datetime.now(UTC) - started).total_seconds() / 3600
              if started else 0.0)
 
-    def project(returns: list[float]) -> tuple[Decimal | None, Decimal | None,
-                                               Decimal | None, int]:
-        """Thirty days of this arm, with the band that says how little we know.
+    def project(returns: list[float]) -> dict[str, Any]:
+        """Thirty days of this arm, as an ACCOUNT rather than a running total.
 
-        The mean per trade is resampled with replacement — the spread of a
-        thirty-day total is the spread of that mean, scaled by how many trades
-        fit in thirty days. Refused below an hour of running or ten trades,
-        because a rate measured over minutes projects nonsense.
+        The previous version summed per-trade returns and reported bands like
+        "-$140,681 from $1,000", which is not a pessimistic forecast — it is an
+        impossible one. It kept funding $100 positions after the account was
+        empty. An account that cannot pay for the next position stops, and the
+        worst thirty days can therefore cost exactly the capital and no more.
+
+        That barrier changes the upside too: a path wiped out on day three does
+        not collect the other twenty-seven, so the median is not the mean of an
+        unbounded sum.
+
+        `P(ruin)` is the number that matters to anyone about to use real money,
+        and the sum of per-trade returns cannot express it at all.
+
+        Sampled in blocks of `PAPER_MAX_SLOTS`, because that is how the account
+        actually moves — ten positions are open at once and resolve together —
+        and the block sums are drawn once into a pool so the cost does not grow
+        with a thirty-day horizon.
         """
         n = len(returns)
         if n < 10 or hours < 1.0:
-            return None, None, None, 0
+            return {}
         rate = n / hours
         horizon = int(rate * 24 * 30)
+        cap = float(config.PAPER_CAPITAL_USD)
         size = float(config.PAPER_NOTIONAL_USD)
-        means = sorted(
-            sum(returns[random.randrange(n)] for _ in range(n)) / n  # noqa: S311
-            for _ in range(600))
+        block = max(1, config.PAPER_MAX_SLOTS)
+        steps = max(1, horizon // block)
+        pool = [sum(returns[random.randrange(n)] for _ in range(block))  # noqa: S311
+                for _ in range(1024)]
+        finals: list[float] = []
+        ruined = 0
+        for _ in range(240):
+            equity = cap
+            for _ in range(steps):
+                equity += size * pool[random.randrange(len(pool))]  # noqa: S311
+                if equity < size:
+                    equity = max(0.0, equity)
+                    ruined += 1
+                    break
+            finals.append(equity - cap)
+        finals.sort()
 
-        def pick(p: float) -> Decimal:
-            return Decimal(
-                str(means[int(p * len(means))] * horizon * size)
-            ).quantize(Decimal("0.01"))
+        def at(p: float) -> Decimal:
+            return Decimal(str(finals[int(p * (len(finals) - 1))])).quantize(
+                Decimal("0.01"))
 
-        return pick(0.50), pick(0.05), pick(0.95), horizon
+        return {
+            "projected_30d_usd": at(0.50),
+            "projected_30d_low": at(0.05),
+            "projected_30d_high": at(0.95),
+            "projected_trades": horizon,
+            "ruin_pct": (Decimal(ruined) / Decimal(len(finals)) * 100
+                         ).quantize(Decimal("0.1")),
+        }
 
     def row(arm) -> ArmRow:
         s = stats.get(arm.name)
@@ -680,7 +715,7 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
                 top = (Decimal(s.best) / Decimal(s.gross_up)).quantize(Decimal("0.0001"))
             if s.mean is not None:
                 mean = (Decimal(s.mean) * 100).quantize(Decimal("0.01"))
-        mid, low, high, horizon = project(per_arm.get(arm.name, []))
+        forecast = project(per_arm.get(arm.name, []))
         realised = (Decimal(s.pnl) if s else Decimal(0)).quantize(Decimal("0.01"))
         return ArmRow(
             name=arm.name, note=arm.note, entry=arm.entry,
@@ -694,8 +729,7 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
             return_pct=((realised / config.PAPER_CAPITAL_USD * 100)
                         .quantize(Decimal("0.01"))
                         if config.PAPER_CAPITAL_USD else Decimal(0)),
-            projected_30d_usd=mid, projected_30d_low=low,
-            projected_30d_high=high, projected_trades=horizon)
+            **forecast)
 
     rows = [row(a) for a in ARMS]
     # An arm that has not traded is not leading. Sorting on P&L alone ranks a

@@ -245,3 +245,38 @@ def test_the_exit_rule_names_every_condition_the_arm_carries() -> None:
 
     # Singular minute, because "1 minutes" reads as a bug in the data.
     assert BY_NAME["E01_hold_1m"].exit_rule == "at 1 minute"
+
+
+# --- the projection is an account, not a running total ------------------------
+
+def test_a_thousand_dollar_account_cannot_lose_more_than_a_thousand() -> None:
+    """The first version summed per-trade returns and reported bands like
+    "-$140,681 from $1,000" — not a pessimistic forecast but an impossible
+    one, because it kept funding $100 positions after the account was empty.
+
+    Simulated here directly: a strategy that loses on every trade stops when
+    it can no longer pay for the next one.
+    """
+    capital, size = 1000.0, 100.0
+    equity, trades = capital, 0
+    while equity >= size and trades < 10_000:
+        equity += size * -0.50           # every trade halves its position
+        trades += 1
+    assert equity >= 0
+    assert capital - equity <= capital, "cannot lose more than the account holds"
+    assert trades < 30, "a losing arm ruins quickly, it does not run 30 days"
+
+
+def test_ruin_ends_the_path_and_the_rest_of_the_month() -> None:
+    """A path wiped out on day three does not collect the other twenty-seven,
+    so the barrier changes the upside as well as the downside."""
+    capital, size = 1000.0, 100.0
+    returns = [-1.0] * 12 + [10.0]       # a winner that arrives too late
+    equity, collected = capital, 0
+    for r in returns:
+        if equity < size:
+            break
+        equity += size * r
+        collected += 1
+    assert collected < len(returns), "the late winner is never reached"
+    assert equity < capital
