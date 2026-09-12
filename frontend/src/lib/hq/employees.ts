@@ -362,7 +362,7 @@ export const EMPLOYEES: Employee[] = [
   {
     id: "karthik",
     name: "Karthik",
-    role: "Paper Wallet Operator",
+    role: "Graduation Lab Analyst",
     zone: "karthik",
     department: "karthik_lab",
     // Centre of the lab, with all four neighbours clear: north to the deck and
@@ -371,7 +371,7 @@ export const EMPLOYEES: Employee[] = [
     // on one of those four tiles.
     desk: { col: 18, row: 9 },
     systemResponsibility:
-      "Karthik Paper Wallet and Strategy Lab monitoring, audit, safe auto-repair, reporting and owner escalation",
+      "Graduation Lab paper book: closed trades, exit geometry, execution cost and the suggestion box",
     // The Lab watch was added on the owner's instruction, 2026-09-04. It widens
     // the isolation note above: this desk now also watches the Strategy Lab
     // tournament, because all four `lab:` conditions were being DETECTED with
@@ -381,12 +381,12 @@ export const EMPLOYEES: Employee[] = [
     // not here: the two Lab repairs re-enqueue the Lab's own beat tasks and can
     // open nothing, close nothing, pick no strategy and reach no wallet.
     whatIDo:
-      "I watch every Karthik Paper Wallet opportunity, entry, open position, target, dead token and accounting event, and I keep the Strategy Lab tournament running. I repair the small operational failures that cannot change a result, and I escalate anything that needs the owner's judgement.",
+      "I read every trade the graduation book closes and say what the record supports changing. Most of what I report is what would NOT help: the profit is one trade, and every take-profit level I replay makes the book worse.",
     // Radar and Atlas because the wallet's universe is theirs; Byte because
     // the machinery underneath is his; Nova because an owner-attention item
     // has to reach somebody who can decide.
     worksWith: ["radar", "atlas", "byte", "nova"],
-    personality: "Fast hands, narrow remit. Reads the evidence, then says what he cannot do.",
+    personality: "Fast hands, narrow remit. Quotes the number without the best trade in it.",
     accessory: "headphones",
     palette: "magenta",
   },
@@ -476,9 +476,9 @@ export const EMPLOYEES: Employee[] = [
     // like five people who happened to be in the same postcode.
     desk: { col: 12, row: 16 },
     systemResponsibility:
-      "Rafiq Lab Strategy C (volatility adjusted risk): open positions, closed trades, exit reasons and execution cost",
+      "Rafiq Lab Strategy C (partial exit): open positions, closed trades, exit reasons and execution cost",
     whatIDo:
-      "I read Strategy C, the arm that sets its own stop from the volatility it measured at entry. My job is to check the measurement against what the position then did.",
+      "I read Strategy C, the arm that splits every position in two: half takes the target, half has no target at all. Two halves of one trade is two answers, and my job is to keep them apart.",
     // Every analyst works with the other four. Strategy E only enters when the
     // arms agree, so the room's readings genuinely depend on each other rather
     // than five people sitting near one another.
@@ -500,14 +500,14 @@ export const EMPLOYEES: Employee[] = [
     // like five people who happened to be in the same postcode.
     desk: { col: 15, row: 16 },
     systemResponsibility:
-      "Rafiq Lab Strategy D (daily drawdown breaker): open positions, closed trades, exit reasons and execution cost",
+      "Rafiq Lab Strategy D (no cap): open positions, closed trades, exit reasons and execution cost",
     whatIDo:
-      "I read Strategy D, the arm that stops itself when a day goes badly enough. Most of my record is days where nothing happened, and that is the point of it.",
+      "I read Strategy D, the arm with no target at all. It can only leave on the stop, the trail or the clock, so every exit on my desk is one of three and never a win taken early.",
     // Every analyst works with the other four. Strategy E only enters when the
     // arms agree, so the room's readings genuinely depend on each other rather
     // than five people sitting near one another.
     worksWith: ["anchor", "tempo", "sigma", "chorus"],
-    personality: "Watchful and quiet. Keeps one eye on the day's line and says little until it moves.",
+    personality: "Watchful and quiet. Waits out the ones that are still running.",
     accessory: "chart-roll",
     palette: "plum",
   },

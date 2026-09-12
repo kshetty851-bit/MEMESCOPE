@@ -1,23 +1,21 @@
-import fs from "node:fs";
-import path from "node:path";
-
 import { describe, expect, it } from "vitest";
 
-import { ANALYST_STRATEGY, deriveHqState, type RafiqAnalysis } from "@/lib/hq/adapter";
+import { ANALYST_ORDER, deriveHqState, type RafiqAnalysis } from "@/lib/hq/adapter";
 import { EMPLOYEES, EMPLOYEE_BY_ID } from "@/lib/hq/employees";
 
 const NOW = 1_760_000_000_000;
 
 function analysis(over: Partial<RafiqAnalysis> = {}): RafiqAnalysis {
   return {
-    code: "A",
+    analyst: "anchor",
+    code: "A2",
     lane: "hard_stop_guard",
     measured: true,
     detail: "Computed from this strategy's own position rows.",
-    verdict: "$-424.22 realised over 56 settled trades, 30% of them profitable.",
+    verdict: "$-165.87 realised over 69 settled trades, 54% of them profitable.",
     open_positions: 0,
-    closed_positions: 56,
-    figures: [{ label: "Realised P&L", value: "$-424.22", source: "exit_proceeds_usd" }],
+    closed_positions: 69,
+    figures: [{ label: "Realised P&L", value: "$-165.87", source: "exit_proceeds_usd" }],
     findings: [],
     ...over,
   };
@@ -33,94 +31,89 @@ function build(rows: RafiqAnalysis[] | null) {
   });
 }
 
-describe("the analytics wing", () => {
-  it("agrees with the backend about who answers for which strategy", () => {
-    // Two hardcoded maps, one in TypeScript and one in Python, and a desk
-    // reporting the wrong strategy's book would look completely normal — the
-    // figures would be real, the trades would be real, and they would belong
-    // to somebody else. Nothing else in either codebase would catch it, so
-    // the file is read as text and compared.
-    const desk = fs.readFileSync(
-      path.join(process.cwd(), "../backend/app/hq_ops/desk.py"),
-      "utf8",
-    );
-    const block = desk.match(/ANALYSTS: dict\[str, str\] = \{([^}]*)\}/);
-    expect(block, "ANALYSTS was renamed or removed in desk.py").not.toBeNull();
+const FIVE = ANALYST_ORDER.map((id, i) =>
+  analysis({ analyst: id, code: `${"ABCDE"[i]}2` }),
+);
 
-    const backend = Object.fromEntries(
-      [...block![1].matchAll(/"(\w+)":\s*"(\w+)"/g)].map((m) => [m[1], m[2]]),
-    );
-    expect(backend).toEqual(ANALYST_STRATEGY);
+describe("the analytics wing", () => {
+  /**
+   * THE REGRESSION TEST FOR THE OUTAGE.
+   *
+   * The old version of this file asserted that the TypeScript code-map equalled
+   * the Python one. Both were hardcoded to A-E; when the lab shipped v2 with
+   * A2-E2 the two copies still agreed with each other, the test stayed green,
+   * and all five desks reported "No strategy 'A' is registered" on the live
+   * site for a day. Agreement between two copies of a wrong answer is not a
+   * check.
+   *
+   * The check below is BEHAVIOURAL on purpose. The first version of it scanned
+   * the source for a pinned code and failed — on the comment above explaining
+   * the bug. Grepping source matches the prose that warns about the thing as
+   * readily as the thing. Feeding the adapter codes it has never seen proves
+   * the same property and cannot be fooled by its own documentation.
+   */
+  it("lights every desk up whatever the lab calls its strategies today", () => {
+    // The exact shape of the v2 cutover. Codes the browser has never heard of.
+    for (const rows of [
+      FIVE,
+      ANALYST_ORDER.map((id, i) => analysis({ analyst: id, code: `v3-${i}` })),
+    ]) {
+      const state = build(rows);
+      for (const id of ANALYST_ORDER) {
+        expect(state.employees[id as never].state, id).not.toBe("unknown");
+      }
+    }
   });
 
-  it("puts exactly one analyst on each of the lab's five strategies", () => {
-    expect(Object.values(ANALYST_STRATEGY).sort()).toEqual(["A", "B", "C", "D", "E"]);
-    for (const id of Object.keys(ANALYST_STRATEGY)) {
+  it("seats exactly the five analysts on the roster, in order", () => {
+    for (const id of ANALYST_ORDER) {
       const who = EMPLOYEE_BY_ID.get(id as never);
       expect(who, `${id} is not on the roster`).toBeDefined();
       expect(who!.zone).toBe("rafiq");
     }
-    // Nobody outside the wing is quietly given a strategy as a second hat.
     const inWing = EMPLOYEES.filter((e) => e.zone === "rafiq").map((e) => e.id);
-    expect(inWing.sort()).toEqual(Object.keys(ANALYST_STRATEGY).sort());
+    expect(inWing).toEqual([...ANALYST_ORDER]);
   });
 
   it("reports every analyst as unread when the lab does not answer", () => {
     const state = build(null);
-    for (const id of Object.keys(ANALYST_STRATEGY)) {
+    for (const id of ANALYST_ORDER) {
       const desk = state.employees[id as never];
       expect(desk.state, id).toBe("unknown");
-      // Never a zero, never a flat book, never quiet-looking.
       expect(desk.metrics, id).toHaveLength(0);
     }
+  });
+
+  it("distinguishes an unreachable lab from a lab with fewer arms than desks", () => {
+    const short = build([analysis({ analyst: "anchor", code: "A2" })]);
+    expect(short.employees.anchor.state).toBe("idle");
+    expect(short.employees.tempo.detail).not.toEqual(build(null).employees.tempo.detail);
+    expect(short.employees.tempo.state).toBe("unknown");
   });
 
   it("says a strategy that has never traded has not traded", () => {
     const state = build([
       analysis({
-        code: "E",
+        analyst: "chorus",
+        code: "E2",
         measured: false,
         detail: "This strategy has not opened a position yet.",
       }),
     ]);
     expect(state.employees.chorus.state).toBe("unknown");
-    // The backend's sentence, not a second wording of it.
-    expect(state.employees.chorus.detail).toBe(
-      "This strategy has not opened a position yet.",
-    );
-  });
-
-  it("distinguishes an unreachable lab from a lab missing an arm", () => {
-    const missing = build([analysis({ code: "A" })]);
-    expect(missing.employees.anchor.state).toBe("idle");
-    // B..E were not in the payload. That is a different fact from the lab
-    // being down, and it must not read the same.
-    expect(missing.employees.tempo.detail).toContain("Strategy B");
-    expect(missing.employees.tempo.detail).not.toEqual(build(null).employees.tempo.detail);
+    expect(state.employees.chorus.detail).toBe("This strategy has not opened a position yet.");
   });
 
   it("watches while the arm is holding, and is idle when it is flat", () => {
-    // Deliberately NOT keyed to whether findings exist: a finding is a
-    // standing property of a record rather than an event, so keying on it
-    // would pin all five desks to one state for ever and peg the whole
-    // office's activity meter along with them.
-    const flat = build([analysis({ code: "A", open_positions: 0, findings: [
-      { key: "asymmetry", headline: "h", evidence: "e", lever: "l", source: "s" },
-    ] })]);
+    const flat = build([analysis({ analyst: "anchor", open_positions: 0 })]);
     expect(flat.employees.anchor.state).toBe("idle");
-
-    const holding = build([analysis({ code: "A", open_positions: 3, findings: [] })]);
+    const holding = build([analysis({ analyst: "anchor", open_positions: 3 })]);
     expect(holding.employees.anchor.state).toBe("reviewing");
   });
 
   it("never paints a losing strategy as a fault", () => {
-    // The lab exists to find out whether these rules lose money. A red desk
-    // would be the office asserting a verdict the experiment has not reached,
-    // and a green one would call a sample an achievement.
     for (const open of [0, 4]) {
-      const state = build([
-        analysis({ code: "A", open_positions: open, verdict: "$-424.22 realised" }),
-      ]);
+      const state = build([analysis({ analyst: "anchor", open_positions: open })]);
       expect(["alert", "error", "incident", "success"]).not.toContain(
         state.employees.anchor.state,
       );
@@ -130,14 +123,14 @@ describe("the analytics wing", () => {
   it("carries every figure through with the columns behind it", () => {
     const state = build([
       analysis({
-        code: "A",
+        analyst: "anchor",
         figures: [
-          { label: "Breakeven win rate", value: "53%", source: "avg_loss / (avg_win + avg_loss)" },
+          { label: "Breakeven win rate", value: "67%", source: "avg_loss / (avg_win + avg_loss)" },
         ],
       }),
     ]);
     expect(state.employees.anchor.metrics).toEqual([
-      { label: "Breakeven win rate", value: "53%", source: "avg_loss / (avg_win + avg_loss)" },
+      { label: "Breakeven win rate", value: "67%", source: "avg_loss / (avg_win + avg_loss)" },
     ]);
   });
 });

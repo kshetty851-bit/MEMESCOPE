@@ -36,7 +36,7 @@ describe("Karthik is on the roster like everybody else", () => {
     const employee = EMPLOYEE_BY_ID.get("karthik");
     expect(employee).toBeDefined();
     expect(employee!.name).toBe("Karthik");
-    expect(employee!.role).toBe("Paper Wallet Operator");
+    expect(employee!.role).toBe("Graduation Lab Analyst");
     expect(employee!.zone).toBe("karthik");
     expect(employee!.department).toBe("karthik_lab");
     expect(CHARACTERS.karthik).toBeDefined();

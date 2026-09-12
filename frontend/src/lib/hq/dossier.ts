@@ -54,6 +54,22 @@ export interface DeskFinding {
   source: string;
 }
 
+/**
+ * Something that could be changed, with what the record says it does.
+ *
+ * `supported` is false for most entries and that is the point. The suggestion
+ * box exists to answer "how do we improve this", and on a book whose profit is
+ * one trade the truthful answer is mostly "not that way" — with the replayed
+ * number attached so a reader can check rather than believe.
+ */
+export interface DeskSuggestion {
+  title: string;
+  detail: string;
+  outcome: string;
+  supported: boolean;
+  source: string;
+}
+
 export interface DeskDossier {
   employee: string;
   since: string;
@@ -67,6 +83,8 @@ export interface DeskDossier {
   /** Absent on desks that predate the analysts; defaulted at the use site. */
   readings?: DeskReading[];
   findings?: DeskFinding[];
+  /** The suggestion box. Rendered below the findings, never merged into them. */
+  suggestions?: DeskSuggestion[];
 }
 
 /** `GET /api/v1/hq/desk/{employee}`. Read on demand — nobody needs fourteen

@@ -1027,6 +1027,8 @@ function sentinelMetrics(operations: HqOperations | null): Metric[] {
 
 /** One strategy's reading, exactly as `/labs/rafiq/analysis` publishes it. */
 export interface RafiqAnalysis {
+  /** Which desk answers for this strategy, decided server-side. */
+  analyst: string | null;
   code: string;
   lane: string;
   measured: boolean;
@@ -1044,14 +1046,25 @@ export interface RafiqAnalysis {
   }>;
 }
 
-/** Which analyst answers for which strategy. The room's whole org chart. */
-export const ANALYST_STRATEGY: Record<string, string> = {
-  anchor: "A",
-  tempo: "B",
-  sigma: "C",
-  halt: "D",
-  chorus: "E",
-};
+/**
+ * The analysts' seating order, west to east. NOT a map to strategy codes.
+ *
+ * It used to be `{anchor: "A", ...}` here and the same map again in Python.
+ * When the lab shipped v2 with codes A2-E2, the two copies still agreed with
+ * each other and both disagreed with the database: all five desks went dark
+ * and no test could see it, because consistency between the copies was
+ * exactly what the tests checked.
+ *
+ * The backend now names the analyst on each row, so this list says only who
+ * sits in the room and in what order.
+ */
+export const ANALYST_ORDER: readonly string[] = [
+  "anchor",
+  "tempo",
+  "sigma",
+  "halt",
+  "chorus",
+];
 
 /**
  * The five analysts, derived from one payload.
@@ -1087,17 +1100,20 @@ function deriveAnalysts(s: HqSources): Record<string, EmployeeReading> {
   const at = rows ? s.rafiqAnalysis.observedAt : null;
 
   const out: Record<string, EmployeeReading> = {};
-  for (const [id, code] of Object.entries(ANALYST_STRATEGY)) {
+  for (const id of ANALYST_ORDER) {
     if (!rows) {
       out[id] = unknown(gone);
       continue;
     }
-    const row = rows.find((r) => r.code === code);
+    // Matched on the id the BACKEND assigned, so a code change in the lab
+    // cannot desynchronise the room from the database again.
+    const row = rows.find((r) => r.analyst === id);
     if (!row) {
-      // The endpoint answered and this strategy was not in it. Said plainly
-      // rather than smoothed into "no data": a missing arm is a different
-      // fact from an unreachable lab, and only one of them is a bug.
-      out[id] = unknown(`The lab answered without Strategy ${code} in it.`);
+      // The endpoint answered and this desk was not in it. Said plainly rather
+      // than smoothed into "no data": a lab with fewer strategies than
+      // analysts is a different fact from an unreachable lab, and only one of
+      // them is a bug.
+      out[id] = unknown("The lab answered without a strategy for this desk.");
       continue;
     }
 

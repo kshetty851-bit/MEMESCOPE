@@ -9,7 +9,7 @@ different shape of question — it needs a log, and most desks do not have one.
 The honest answer is therefore per-desk rather than uniform. Four characters
 sit on top of a real, timestamped, append-only record:
 
-    karthik   hq_actions + his wallet's own positions and decisions
+    karthik   the Graduation Lab's paper book (re-tasked 2026-09-12)
     patch     hq_actions, and the incidents he was assigned
     sentinel  hq_incidents he raised
     radar     radar_tokens, whose first_detected_at is an admission log
@@ -97,6 +97,23 @@ class Finding:
     source: str
 
 
+@dataclass(frozen=True, slots=True)
+class Suggestion:
+    """Something that could be changed, with what the record says it does.
+
+    `outcome` is what separates this from a wish. A suggestion on this
+    platform arrives with its replayed number attached, and the ones the
+    record argues AGAINST stay on the board saying so — a box that lists only
+    good ideas is a box that has quietly done the deciding for the reader.
+    """
+
+    title: str
+    detail: str
+    outcome: str
+    supported: bool
+    source: str
+
+
 @dataclass(slots=True)
 class Dossier:
     employee: str
@@ -114,6 +131,11 @@ class Dossier:
     #: measurable quantity rather than an outcome — see `labs.rafiq.analyst`,
     #: which is the only thing that produces them.
     findings: list[Finding] = field(default_factory=list)
+    #: The suggestion box. Rendered below the findings and deliberately
+    #: separate from them: a finding is what the record says, a suggestion is
+    #: what somebody might do about it, and blurring the two is how a
+    #: measurement turns into advice nobody checked.
+    suggestions: list[Suggestion] = field(default_factory=list)
 
 
 def _unlogged(employee: str, why: str, since: datetime, until: datetime) -> Dossier:
@@ -170,17 +192,28 @@ NO_LOG: dict[str, str] = {
 }
 
 
-#: Which analyst answers for which Rafiq Lab strategy. Mirrors the frontend's
-#: `ANALYST_STRATEGY`; the two are asserted equal in the frontend's own test,
-#: because a desk reporting the wrong strategy's book is the worst possible
-#: failure of this feature and it would be invisible.
-ANALYSTS: dict[str, str] = {
-    "anchor": "A",
-    "tempo": "B",
-    "sigma": "C",
-    "halt": "D",
-    "chorus": "E",
-}
+#: The analysts' seating order, west to east. NOT a map to strategy codes.
+#:
+#: It used to be `{"anchor": "A", ...}`, hardcoded here AND in the frontend.
+#: On 2026-09-11 the lab shipped v2 with codes A2-E2 and retired A-E, and all
+#: five desks went dark reporting "No strategy 'A' is registered" — correct
+#: behaviour from a wrong premise, and invisible until somebody looked.
+#:
+#: So the codes are resolved from the registry at read time and paired by
+#: position. A future v3 renames nothing here. Where the lab has fewer
+#: strategies than analysts, the spare desks say so rather than guessing.
+ANALYST_ORDER: tuple[str, ...] = ("anchor", "tempo", "sigma", "halt", "chorus")
+
+
+def strategy_for(employee: str) -> str | None:
+    """The strategy code this analyst answers for, as the lab is registered now."""
+    from app.labs.rafiq import registry
+
+    if employee not in ANALYST_ORDER:
+        return None
+    seat = ANALYST_ORDER.index(employee)
+    codes = [s.code for s in registry.STRATEGIES]
+    return codes[seat] if seat < len(codes) else None
 
 
 async def build(
@@ -193,13 +226,19 @@ async def build(
     if employee in NO_LOG:
         return _unlogged(employee, NO_LOG[employee], since, until)
 
-    if employee in ("karthik", "patch"):
+    # Karthik was re-tasked to the Graduation Lab on 2026-09-12. His ops watch
+    # still runs — that is `hq_ops`, a different system — but the question this
+    # desk answers is now "what did the graduation book do, and what would
+    # change it", which is the most active book on the platform.
+    if employee == "karthik":
+        return await _from_graduation(session, employee, since, until)
+    if employee == "patch":
         return await _from_actions(session, employee, since, until)
     if employee == "sentinel":
         return await _from_incidents(session, employee, since, until)
     if employee == "radar":
         return await _from_admissions(session, employee, since, until)
-    if employee in ANALYSTS:
+    if employee in ANALYST_ORDER:
         return await _from_rafiq(session, employee, since, until)
 
     return _unlogged(
@@ -449,7 +488,15 @@ async def _from_rafiq(
     from app.labs.rafiq import analyst as rafiq_analyst
     from app.labs.rafiq.models import RafiqLabPosition, RafiqLabStrategy
 
-    code = ANALYSTS[employee]
+    code = strategy_for(employee)
+    if code is None:
+        return _unlogged(
+            employee,
+            "This lab has fewer strategies registered than it has analysts, so "
+            "this desk has nothing assigned to it.",
+            since,
+            until,
+        )
     analysis = await rafiq_analyst.analyse(session, code, now=until)
 
     if not analysis.measured:
@@ -543,6 +590,108 @@ async def _from_rafiq(
     )
 
 
+async def _from_graduation(
+    session: AsyncSession, employee: str, since: datetime, until: datetime
+) -> Dossier:
+    """Karthik's day: the graduation book's closed trades, and what moves them.
+
+    The timeline is literally what was asked for — the trades this book opened
+    and closed — and the findings and suggestions come from
+    `labs.graduation.analyst` unchanged. This function computes no conclusion
+    of its own: two places deciding what the book means is two places that can
+    disagree, and the analyst module is the one with the tests.
+    """
+    from app.labs.graduation import analyst as grad
+    from app.labs.graduation.models import GradPaperPosition
+
+    analysis = await grad.analyse(session, now=until)
+    if not analysis.measured:
+        return _unlogged(employee, analysis.detail, since, until)
+
+    rows = (
+        (
+            await session.execute(
+                select(GradPaperPosition)
+                .where(
+                    (GradPaperPosition.opened_at >= since)
+                    | (GradPaperPosition.closed_at >= since)
+                )
+                .order_by(GradPaperPosition.opened_at.desc())
+                .limit(TIMELINE_LIMIT)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    timeline: list[Event] = []
+    opened = closed = 0
+    for row in rows:
+        name = row.symbol or row.mint[:8]
+        if row.closed_at is not None and row.closed_at >= since:
+            closed += 1
+            peak = (
+                f", peaked {row.peak_quote / row.open_fill:.3f}x"
+                if row.open_fill and row.peak_quote is not None
+                else ""
+            )
+            timeline.append(
+                Event(
+                    at=row.closed_at,
+                    label=f"closed {name}",
+                    detail=(
+                        f"{row.close_reason or 'unrecorded'}, "
+                        f"{row.pnl_usd:+,.2f} USD{peak}"
+                        if row.pnl_usd is not None
+                        else f"{row.close_reason or 'unrecorded'}{peak}"
+                    ),
+                    kind="trade",
+                )
+            )
+        if row.opened_at >= since:
+            opened += 1
+            timeline.append(
+                Event(
+                    at=row.opened_at,
+                    label=f"opened {name}",
+                    detail=(
+                        f"${row.notional_usd:,.2f}"
+                        if row.notional_usd is not None
+                        else "opened"
+                    ),
+                    kind="trade",
+                )
+            )
+    timeline.sort(key=lambda e: e.at, reverse=True)
+
+    return Dossier(
+        employee=employee,
+        since=since,
+        until=until,
+        measured=True,
+        headline=analysis.verdict,
+        detail=(
+            "Graduation Lab forward paper book. Figures are over the whole book; "
+            "the timeline is the last 24 hours."
+        ),
+        sources=["grad_paper_positions"],
+        counts=[
+            Count("Opened in window", opened, "grad_paper_positions.opened_at"),
+            Count("Closed in window", closed, "grad_paper_positions.closed_at"),
+            Count("Open now", analysis.open_positions, "grad_paper_positions.closed_at is null"),
+        ],
+        timeline=timeline[:TIMELINE_LIMIT],
+        readings=[Reading(f.label, f.value, f.source) for f in analysis.figures],
+        findings=[
+            Finding(f.headline, f.evidence, f.lever, f.source) for f in analysis.findings
+        ],
+        suggestions=[
+            Suggestion(x.title, x.detail, x.outcome, x.supported, x.source)
+            for x in analysis.suggestions
+        ],
+    )
+
+
 def as_dict(dossier: Dossier) -> dict[str, Any]:
     return {
         "employee": dossier.employee,
@@ -570,5 +719,15 @@ def as_dict(dossier: Dossier) -> dict[str, Any]:
                 "source": f.source,
             }
             for f in dossier.findings
+        ],
+        "suggestions": [
+            {
+                "title": s.title,
+                "detail": s.detail,
+                "outcome": s.outcome,
+                "supported": s.supported,
+                "source": s.source,
+            }
+            for s in dossier.suggestions
         ],
     }

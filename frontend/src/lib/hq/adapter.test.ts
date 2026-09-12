@@ -312,11 +312,15 @@ function posture(over: Record<string, unknown> = {}) {
   } as never;
 }
 
-/** Five settled, flat books. Overridden per test where a book matters. */
+/** Five settled, flat books. Overridden per test where a book matters.
+ *
+ *  `analyst` is what the adapter matches on — the backend assigns it, so the
+ *  browser never has to know what the lab calls its strategies this month. */
 function analysis(over: Partial<Record<string, unknown>> = {}) {
-  return ["A", "B", "C", "D", "E"].map((code) => ({
-    code,
-    lane: `lane_${code.toLowerCase()}`,
+  return ["anchor", "tempo", "sigma", "halt", "chorus"].map((who, i) => ({
+    analyst: who,
+    code: `${"ABCDE"[i]}2`,
+    lane: `lane_${who}`,
     measured: true,
     detail: "Computed from this strategy's own position rows.",
     verdict: "$-10.00 realised over 40 settled trades, 30% of them profitable.",

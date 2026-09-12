@@ -180,6 +180,55 @@ export function DeskPanel({
               </table>
             ) : null}
 
+            {(data.suggestions?.length ?? 0) > 0 ? (
+              <div
+                className="mt-1 flex flex-col gap-2 rounded-md border border-[var(--color-line)] p-3"
+                data-testid="desk-suggestions"
+              >
+                {/* Its own box, below the findings and visibly separated from
+                    them. A finding is what the record says; a suggestion is
+                    what somebody might do about it. Running the two together
+                    is how a measurement quietly becomes advice. */}
+                <p className="text-[10px] uppercase tracking-wide text-[var(--color-ink-3,var(--color-ink))]">
+                  Suggestion box
+                </p>
+                {data.suggestions!.map((suggestion) => (
+                  <article key={suggestion.title} className="flex flex-col gap-0.5">
+                    <h3 className="flex items-center gap-1.5 text-xs font-semibold text-[var(--color-ink)]">
+                      {/* The verdict marker. An unsupported suggestion is not
+                          hidden — it is the most useful thing on the board,
+                          because "take profit earlier" is the first idea
+                          anybody has and the replay already answered it. */}
+                      <span
+                        aria-hidden="true"
+                        className="inline-block h-1.5 w-1.5 shrink-0 rounded-full"
+                        style={{
+                          background: suggestion.supported
+                            ? "var(--color-up)"
+                            : "var(--color-ink-3, var(--color-ink))",
+                        }}
+                      />
+                      {suggestion.title}
+                      <span className="sr-only">
+                        {suggestion.supported
+                          ? " — supported by the record"
+                          : " — the record argues against this"}
+                      </span>
+                    </h3>
+                    <p className="text-[11px] leading-snug text-[var(--color-ink-3,var(--color-ink))]">
+                      {suggestion.detail}
+                    </p>
+                    <p className="font-mono text-[11px] text-[var(--color-ink)]">
+                      {suggestion.outcome}
+                    </p>
+                    <p className="font-mono text-[10px] text-[var(--color-ink-3,var(--color-ink))] opacity-70">
+                      {suggestion.source}
+                    </p>
+                  </article>
+                ))}
+              </div>
+            ) : null}
+
             {data.timeline.length > 0 ? (
               <div className="mt-1">
                 <p className="pb-1 text-[10px] uppercase tracking-wide text-[var(--color-ink-3,var(--color-ink))]">

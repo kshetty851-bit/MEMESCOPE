@@ -182,6 +182,14 @@ class FindingOut(BaseModel):
 
 
 class AnalysisOut(BaseModel):
+    #: Which HQ desk answers for this strategy, resolved server-side.
+    #:
+    #: Published so the browser never has to map a code to a person. That map
+    #: used to live in TypeScript AND in Python, and when the lab shipped v2
+    #: with new codes the two agreed with each other and disagreed with the
+    #: database — five desks went dark and no test could see it, because both
+    #: copies were still consistent. One source, sent over the wire.
+    analyst: str | None
     code: str
     lane: str
     #: False when the strategy has no trades to read. The reason is in
@@ -401,7 +409,13 @@ async def analysis(session: AsyncSession = Depends(get_db)) -> list[AnalysisOut]
     """
     if not config.enabled():
         return []
-    return [
-        AnalysisOut(**analyst.as_dict(await analyst.analyse(session, code)))
-        for code in sorted(registry.BY_CODE)
-    ]
+    from app.hq_ops.desk import ANALYST_ORDER
+
+    codes = [s.code for s in registry.STRATEGIES]
+    rows = []
+    for seat, code in enumerate(codes):
+        who = ANALYST_ORDER[seat] if seat < len(ANALYST_ORDER) else None
+        rows.append(
+            AnalysisOut(analyst=who, **analyst.as_dict(await analyst.analyse(session, code)))
+        )
+    return rows
