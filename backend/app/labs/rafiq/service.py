@@ -49,6 +49,10 @@ from app.labs.rafiq.strategies.strategy_d_daily_breaker import (
 
 logger = get_logger(__name__)
 
+#: How far back `_filed` looks. Comfortably past the candidate window,
+#: so a decision that could still be re-made is always in the set.
+_FILED_LOOKBACK = timedelta(hours=6)
+
 
 class RafiqLabService:
     """One tick's worth of work. Holds a session; writes only lab tables."""
@@ -299,7 +303,7 @@ class RafiqLabService:
         # Which mints this book has already filed a decision on. Loaded once
         # per tick so a candidate the gate refuses on every tick for an hour
         # costs one row and one feature read, not 3,600 of each.
-        filed = await self._filed(row.id)
+        filed = await self._filed(row.id, now=now)
 
         # Rafiq's `MAX_TRADES_PER_DAY`, counted against what was actually
         # opened today rather than an in-process counter: a worker restart
@@ -451,11 +455,22 @@ class RafiqLabService:
                 remaining -= 1
         return opened
 
-    async def _filed(self, strategy_id: uuid.UUID) -> set[str]:
-        """Mints this book has already filed a decision on."""
+    async def _filed(self, strategy_id: uuid.UUID, *, now: datetime) -> set[str]:
+        """Mints this book filed a decision on recently.
+
+        Bounded rather than "ever": a candidate has to be under
+        `MAX_CANDIDATE_AGE_SECONDS` old to be considered at all, so a decision
+        from a day ago cannot be re-made and does not need to be in this set.
+        Without the bound this query grows without limit and is issued on every
+        tick. The set is only an optimisation — the `ON CONFLICT` rule in
+        `_file` is what actually guarantees one row per candidate, so a mint
+        that falls outside the window costs at most one insert that does
+        nothing.
+        """
         return set((await self._session.execute(
             select(RafiqCandidate.mint_address)
-            .where(RafiqCandidate.strategy_id == strategy_id)
+            .where(RafiqCandidate.strategy_id == strategy_id,
+                   RafiqCandidate.decided_at >= now - _FILED_LOOKBACK)
         )).scalars())
 
     async def _file(self, spec: LabStrategy, row: RafiqLabStrategy,
