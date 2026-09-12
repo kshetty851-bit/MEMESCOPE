@@ -148,6 +148,19 @@ class GraduationStatus(BaseModel):
     recent: list[Recent] = []
     #: Surfaced because the page must not imply the quote side is sound.
     quote_side_trusted: bool = False
+
+    # --- can the climb be seen at all? --------------------------------------
+    #: Of tokens whose curve was observed COMPLETE, how many were ever also
+    #: observed incomplete, and how many at 90% or above.
+    #:
+    #: This is the lab's own resolution, measured rather than assumed, and it
+    #: bounds every pre-graduation question: a strategy can only trade the
+    #: curves it can see, and on 2026-09-12 that was 34% / 16.6% at a
+    #: fifteen-second poll. Half of all graduates complete within a minute of
+    #: first sighting, so the shutter speed IS the population filter.
+    graduates_observed: int = 0
+    graduates_seen_climbing: int = 0
+    graduates_seen_at_90: int = 0
     paper: PaperBookOut = PaperBookOut()
 
     # --- is the chain actually being read? ----------------------------------
@@ -235,6 +248,27 @@ async def status(db: AsyncSession = Depends(get_db)) -> GraduationStatus:
     base.tokens_last_hour = await count(
         select(func.count()).select_from(GradToken)
         .where(GradToken.first_seen_at >= hour_ago))
+
+    # One pass, grouped — not a correlated subquery per token.
+    seen = (
+        select(
+            GradCurveSample.mint.label("mint"),
+            func.bool_or(GradCurveSample.complete.is_(True)).label("done"),
+            func.bool_or(GradCurveSample.complete.isnot(True)).label("climbing"),
+            func.bool_or(GradCurveSample.complete.isnot(True)
+                         & (GradCurveSample.progress_pct >= 90)).label("at90"),
+        )
+        .group_by(GradCurveSample.mint)
+        .subquery()
+    )
+    coverage = (await db.execute(
+        select(
+            func.count().filter(seen.c.done),
+            func.count().filter(seen.c.done & seen.c.climbing),
+            func.count().filter(seen.c.done & seen.c.at90),
+        ).select_from(seen))).one()
+    (base.graduates_observed, base.graduates_seen_climbing,
+     base.graduates_seen_at_90) = (int(x or 0) for x in coverage)
 
     base.last_chain_read_at = await db.scalar(
         select(func.max(GradToken.last_sample_at)))

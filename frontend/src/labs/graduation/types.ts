@@ -45,6 +45,12 @@ export interface GraduationStatus {
   tokens_last_hour: number;
   recent: RecentToken[];
   quote_side_trusted: boolean;
+  /** The lab's own resolution: of curves seen complete, how many were ever
+   * seen climbing, and how many at 90%+. This bounds every pre-graduation
+   * question — you can only trade what you can see. */
+  graduates_observed: number;
+  graduates_seen_climbing: number;
+  graduates_seen_at_90: number;
   /** The RPC's pulse. `last_sample_at` advances on every successful chain
    * read, so a stall here means the poller is not reading — a revoked key, a
    * dead node, a crashed loop — none of which a row count can show. */

@@ -759,6 +759,44 @@ export function GraduationLabPage() {
                 <dd className="tabular-nums">{data.postgrad_samples}</dd>
               </div>
             </dl>
+            {/* The lab's own shutter speed. It bounds every pre-graduation
+                question, because a strategy can only trade what it can see. */}
+            <div className="flex flex-col gap-2 border-t border-line pt-3">
+              <h3 className="text-[11px] font-semibold uppercase tracking-wider text-ink-dim">
+                Can the climb be seen? — poll every {data.poll_interval_s}s
+              </h3>
+              <dl className="flex flex-col gap-2 text-sm">
+                <div className="flex justify-between">
+                  <dt className="text-ink-dim">Graduates observed</dt>
+                  <dd className="tabular-nums">{data.graduates_observed}</dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-ink-dim">…ever seen climbing</dt>
+                  <dd className="tabular-nums">
+                    {pct(data.graduates_seen_climbing, data.graduates_observed)}
+                    <span className="ml-2 text-ink-dim">
+                      {data.graduates_seen_climbing}
+                    </span>
+                  </dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-ink-dim">…ever seen at 90%+</dt>
+                  <dd className="tabular-nums">
+                    {pct(data.graduates_seen_at_90, data.graduates_observed)}
+                    <span className="ml-2 text-ink-dim">
+                      {data.graduates_seen_at_90}
+                    </span>
+                  </dd>
+                </div>
+              </dl>
+              <p className="max-w-[60ch] text-xs text-ink-dim">
+                Half of all graduates complete their curve within a minute of
+                first sighting, so the poll interval is the population filter,
+                not a detail. It was 34% / 16.6% at a fifteen-second poll on
+                12 Sep; the second figure is the only set a pre-graduation
+                strategy could actually trade.
+              </p>
+            </div>
             {!data.quote_side_trusted ? (
               <p className="max-w-[60ch] rounded border border-warn/40 bg-warn/10 p-3 text-xs text-warn">
                 The curve&rsquo;s SOL side is not modelled correctly yet, so
