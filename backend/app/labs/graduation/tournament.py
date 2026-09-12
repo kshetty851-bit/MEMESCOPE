@@ -75,6 +75,26 @@ class Arm:
     def is_control(self) -> bool:
         return self.entry.startswith("rand")
 
+    @property
+    def entry_rule(self) -> str:
+        """Buy when — in the words the page prints."""
+        return ENTRY_RULES.get(self.entry, self.entry)
+
+    @property
+    def exit_rule(self) -> str:
+        """Sell when. The hold is always present because the price series ends
+        an hour after the open: past it there is no mark and no exit price, so
+        every arm needs a backstop whatever else it carries."""
+        parts = []
+        if self.trail:
+            parts.append(f"{self.trail * 100:.0f}% off the running peak")
+        if self.tp:
+            parts.append(f"{self.tp:g}x the price paid")
+        parts.append(f"{self.hold} minute{'s' if self.hold != 1 else ''}")
+        if len(parts) == 1:
+            return f"at {parts[0]}"
+        return "whichever comes first: " + ", or ".join(parts)
+
     def policy(self) -> ExitPolicy:
         rules: list[Any] = []
         if self.trail:
@@ -91,6 +111,32 @@ def _coin(arm: str, mint: str, pct: int) -> bool:
     digest = hashlib.blake2b(f"{arm}:{mint}".encode(), digest_size=8).digest()
     return int.from_bytes(digest, "big") % 100 < pct
 
+
+#: What each entry key MEANS, in the words the page prints.
+#:
+#: Kept beside `accepts` rather than in the frontend so the description cannot
+#: drift from the rule it describes — `test_every_entry_filter_is_described`
+#: fails if a filter gains a branch and loses its sentence, or vice versa.
+ENTRY_RULES: dict[str, str] = {
+    "all": "every graduation, no filter",
+    "sym": "the token's symbol had been used by at least one earlier token",
+    "sym3": "the symbol had been used by at least three earlier tokens",
+    "newsym": "the symbol had never been seen before (the rug side of the split)",
+    "night": "the pool opened between 18:00 and 06:00 UTC",
+    "day": "the pool opened between 06:00 and 18:00 UTC",
+    "sym_night": "symbol used before AND the pool opened 18:00-06:00 UTC",
+    "deep": "the pool held at least $100,000 at the open",
+    "shallow": "the pool held under $30,000 at the open",
+    "nosell": "no sells had printed in the first five minutes of flow",
+    "hassell": "at least one sell had already printed",
+    "bigcap": "market cap at the open was at least $1,000,000",
+    "smallcap": "market cap at the open was under $200,000",
+    "sym_deep": "symbol used before AND the pool held at least $100,000",
+    "sym_nosell": "symbol used before AND no sells had printed",
+    "rand25": "a hash of the token address, taking a quarter of them — CONTROL",
+    "rand50": "a hash of the token address, taking half of them — CONTROL",
+    "rand75": "a hash of the token address, taking three quarters — CONTROL",
+}
 
 #: Candidate features, measured at the pool open. Every one was chosen before
 #: the tournament opened a position; none is tuned to a result.
@@ -200,6 +246,9 @@ assert len(ARMS) == 50, f"the tournament is fifty arms, not {len(ARMS)}"
 assert len(CONTROLS) == 8
 assert len({a.name for a in ARMS}) == 50, "arm names must be unique"
 assert all(len(a.name) <= 32 for a in ARMS), "arm name must fit the column"
+assert {a.entry for a in ARMS} <= set(ENTRY_RULES), (
+    "every entry filter an arm uses must be described: "
+    f"{ {a.entry for a in ARMS} - set(ENTRY_RULES) }")
 
 
 class Tournament:

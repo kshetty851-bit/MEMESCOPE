@@ -534,6 +534,11 @@ class ArmRow(BaseModel):
     name: str
     note: str = ""
     entry: str = ""
+    #: The rule in full, in words: what it buys and when it sells. Built from
+    #: the Arm itself, so the page cannot describe a rule the code is not
+    #: running.
+    entry_rule: str = ""
+    exit_rule: str = ""
     hold_minutes: int = 0
     take_profit_x: Decimal | None = None
     trailing_pct: Decimal | None = None
@@ -616,7 +621,9 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
             if s.mean is not None:
                 mean = (Decimal(s.mean) * 100).quantize(Decimal("0.01"))
         return ArmRow(
-            name=arm.name, note=arm.note, entry=arm.entry, hold_minutes=arm.hold,
+            name=arm.name, note=arm.note, entry=arm.entry,
+            entry_rule=arm.entry_rule, exit_rule=arm.exit_rule,
+            hold_minutes=arm.hold,
             take_profit_x=arm.tp, trailing_pct=arm.trail, is_control=arm.is_control,
             trades=int(s.trades) if s else 0, wins=int(s.wins) if s else 0,
             realised_usd=(Decimal(s.pnl) if s else Decimal(0)).quantize(Decimal("0.01")),

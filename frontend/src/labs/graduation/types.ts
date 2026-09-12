@@ -156,6 +156,10 @@ export interface ArmRow {
   name: string;
   note: string;
   entry: string;
+  /** The rule in full, in words — built from the Arm itself, so the page
+   * cannot describe a strategy the tournament is not running. */
+  entry_rule: string;
+  exit_rule: string;
   hold_minutes: number;
   take_profit_x: string | null;
   trailing_pct: string | null;

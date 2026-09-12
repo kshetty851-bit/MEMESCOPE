@@ -389,6 +389,144 @@ function Freshness({ at }: { at: number }) {
   );
 }
 
+const ARM_FAMILIES: { prefix: string; title: string; blurb: string }[] = [
+  {
+    prefix: "E",
+    title: "Exit only",
+    blurb:
+      "Every graduation, nothing filtered. These isolate the one variable that " +
+      "earlier replay work found mattered — how long you hold.",
+  },
+  {
+    prefix: "X",
+    title: "Exit rules",
+    blurb:
+      "Targets and trailing stops layered on the 15- and 60-minute holds, to " +
+      "see whether capping the upside pays for the drawdown it avoids.",
+  },
+  {
+    prefix: "F",
+    title: "One entry filter each",
+    blurb:
+      "A single condition at the pool open, all exiting at five minutes so the " +
+      "filter is the only difference. Each filter's inverse is here too — a " +
+      "signal that works must beat its own opposite.",
+  },
+  {
+    prefix: "C",
+    title: "Combinations",
+    blurb:
+      "Filters stacked, and the same filters at other hold lengths.",
+  },
+  {
+    prefix: "R",
+    title: "Controls — these cannot have an edge",
+    blurb:
+      "They decide by hashing the token address. Same graduations, same costs, " +
+      "same exits; the rule is provably meaningless. Any arm that cannot beat " +
+      "them has shown nothing.",
+  },
+];
+
+/**
+ * THE FIFTY RULES
+ *
+ * Published in full because a leaderboard of opaque names is not evidence of
+ * anything — a reader has to be able to check that the arm which won is a
+ * strategy and not a coincidence, and that the ones which lost were given a
+ * fair run. Both halves of every rule come from the `Arm` record itself, so
+ * this cannot describe a strategy the tournament is not running.
+ */
+function RulesPanel() {
+  const { data } = useGraduationTournament();
+  const [open, setOpen] = useState(false);
+  if (!data?.running || !data.arms.length) return null;
+  const byName = [...data.arms].sort((a, b) => a.name.localeCompare(b.name));
+  return (
+    <Panel>
+      <PanelHeader>
+        <PanelTitle>The 50 rules</PanelTitle>
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="rounded-md border border-line px-3 py-1.5 text-xs text-ink-dim transition-colors hover:border-line-strong hover:text-ink"
+        >
+          {open ? "Hide" : "Show all 50"}
+        </button>
+      </PanelHeader>
+      <div className="flex flex-col gap-4 p-4">
+        <p className="max-w-[70ch] text-xs leading-relaxed text-ink-dim">
+          Every arm buys at the pool open with{" "}
+          {usd(data.notional_usd)}, up to ten at a time, and is refused
+          entirely if the order would move the pool more than 10% — what a real
+          wallet&rsquo;s slippage tolerance does. Fills are the exact
+          constant-product price against the pool&rsquo;s recorded depth, on
+          both legs. Arms differ in <b className="text-ink">two places only</b>:
+          which graduations they accept, and when they leave.
+        </p>
+
+        {open
+          ? ARM_FAMILIES.map((fam) => {
+              const arms = byName.filter((a) => a.name.startsWith(fam.prefix));
+              if (!arms.length) return null;
+              return (
+                <div key={fam.prefix} className="flex flex-col gap-2">
+                  <h3 className="text-label uppercase tracking-[0.08em] text-ink-dim">
+                    {fam.title} · {arms.length}
+                  </h3>
+                  <p className="max-w-[70ch] text-xs text-ink-dim">{fam.blurb}</p>
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[620px] table-fixed text-sm">
+                      <colgroup>
+                        <col className="w-44" />
+                        <col />
+                        <col className="w-56" />
+                      </colgroup>
+                      <thead>
+                        <tr className="text-label uppercase tracking-[0.08em] text-ink-dim">
+                          <th className="pb-2 pr-3 text-left font-medium">Arm</th>
+                          <th className="pb-2 pr-3 text-left font-medium">Buys</th>
+                          <th className="pb-2 text-left font-medium">Sells</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {arms.map((a: ArmRow) => (
+                          <tr
+                            key={a.name}
+                            className={`border-t border-line align-top ${
+                              a.is_control ? "text-ink-dim" : ""
+                            }`}
+                          >
+                            <td className="py-2 pr-3 font-mono text-xs">
+                              {a.name}
+                            </td>
+                            <td className="py-2 pr-3 text-xs">{a.entry_rule}</td>
+                            <td className="py-2 text-xs">{a.exit_rule}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              );
+            })
+          : (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+              {ARM_FAMILIES.map((fam) => (
+                <div key={fam.prefix} className="flex flex-col">
+                  <span className="font-mono text-heading font-semibold text-ink">
+                    {byName.filter((a) => a.name.startsWith(fam.prefix)).length}
+                  </span>
+                  <span className="text-micro text-ink-dim">{fam.title}</span>
+                </div>
+              ))}
+            </div>
+          )}
+      </div>
+    </Panel>
+  );
+}
+
 /**
  * THE LEADERBOARD
  *
@@ -1220,6 +1358,8 @@ export function GraduationLabPage() {
       </div>
 
       <LeaderboardPanel />
+
+      <RulesPanel />
 
       <ReturnsPanel />
 
