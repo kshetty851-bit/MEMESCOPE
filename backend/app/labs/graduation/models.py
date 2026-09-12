@@ -609,9 +609,9 @@ class GradPaperPosition(Base):
         DateTime(timezone=True), nullable=False, index=True
     )
     #: The quoted price at entry, before costs.
-    open_quote: Mapped[Decimal] = mapped_column(_USD, nullable=False)
+    open_quote: Mapped[Decimal] = mapped_column(_PRICE, nullable=False)
     #: What was actually paid per token, costs included.
-    open_fill: Mapped[Decimal] = mapped_column(_USD, nullable=False)
+    open_fill: Mapped[Decimal] = mapped_column(_PRICE, nullable=False)
     #: What the position was sized at, in dollars — the stated size.
     notional_usd: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
     #: The SOL/USD rate OBSERVED at entry, from the same sample that priced
@@ -625,14 +625,14 @@ class GradPaperPosition(Base):
     #: Highest price SEEN SO FAR — a running peak, updated each tick. The
     #: trailing stop reads this, never the window's eventual high, which
     #: nothing could have known at the time.
-    peak_quote: Mapped[Decimal] = mapped_column(_USD, nullable=False)
+    peak_quote: Mapped[Decimal] = mapped_column(_PRICE, nullable=False)
     #: The most recent mark, so an open position has a value between ticks.
-    last_quote: Mapped[Decimal | None] = mapped_column(_USD)
+    last_quote: Mapped[Decimal | None] = mapped_column(_PRICE)
     marked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    close_quote: Mapped[Decimal | None] = mapped_column(_USD)
-    close_fill: Mapped[Decimal | None] = mapped_column(_USD)
+    close_quote: Mapped[Decimal | None] = mapped_column(_PRICE)
+    close_fill: Mapped[Decimal | None] = mapped_column(_PRICE)
     #: `trailing_stop`, `max_hold`, `end_of_data`.
     close_reason: Mapped[str | None] = mapped_column(String(24))
     pnl_quote: Mapped[Decimal | None] = mapped_column(_QUOTE)

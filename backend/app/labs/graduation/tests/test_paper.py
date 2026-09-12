@@ -275,3 +275,27 @@ def test_a_net_return_needs_a_price_and_refuses_without_one() -> None:
 
 # --- the 2x target ------------------------------------------------------------
 
+
+
+def test_a_tiny_price_survives_being_stored() -> None:
+    """Prices are quantised before they are written, and at eight decimals a
+    token quoted below 0.000000005 SOL stored EVERY one of its prices as zero.
+
+    The realised P&L was still right, because it is computed from the
+    unquantised price. What broke was everything that reads the stored value:
+    `last_quote` marked an open position at zero, and a `close_quote` of zero
+    tripped the rule voiding trades closed against an unrepresentable price —
+    so a legitimate trade was dropped on a rounding artefact in a field the
+    P&L never touches.
+
+    This asserts the quantum itself, because that is the thing that was wrong;
+    a test of the arithmetic passed throughout.
+    """
+    from app.labs.graduation.paper import _P
+
+    tiny = D("0.0000000012")            # 1.2e-9 SOL, an ordinary dead memecoin
+    assert tiny.quantize(_P) > 0, "a real price must not quantise to zero"
+    assert tiny.quantize(_P) == tiny
+
+    # And the quantum must not be coarser than the column that holds it.
+    assert _P <= D("1E-18")

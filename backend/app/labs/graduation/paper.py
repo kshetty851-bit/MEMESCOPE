@@ -75,7 +75,15 @@ from app.labs.graduation.models import (
 logger = get_logger(__name__)
 
 _Q = Decimal("0.000000001")
-_P = Decimal("0.00000001")
+#: Price precision. EIGHTEEN decimals, matching the column.
+#:
+#: It was eight, and a token quoted below 0.000000005 SOL stored every one of
+#: its prices as zero. The realised P&L was still right — it is computed from
+#: the unquantised price — but a `close_quote` of zero then tripped the rule
+#: that voids a trade closed against a price the column could not represent,
+#: so a legitimate trade was dropped on a rounding artefact in a field the
+#: P&L never reads.
+_P = Decimal("1E-18")
 
 
 def costs(notional_quote: Decimal | None = None) -> Costs:
@@ -399,7 +407,9 @@ class PaperBook:
         bad = switched_mints()
         sound = (GradPaperPosition.notional_usd > 0,
                  GradPaperPosition.mint.not_in(bad),
-                 # Closed against a price the column could not represent.
+                 # Closed against a zero. Since 0076 the column can hold
+                 # eighteen decimals, so this is a real zero rather than a
+                 # small price rounded into one.
                  GradPaperPosition.close_quote.is_distinct_from(0))
         realised = await self._session.scalar(
             select(func.coalesce(func.sum(GradPaperPosition.pnl_usd), 0))
