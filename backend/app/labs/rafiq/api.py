@@ -54,6 +54,14 @@ class StrategyOut(BaseModel):
     liquidity_derived_risk: bool
     daily_breaker: bool
     consensus_gate: bool
+    #: False for a retired book: it still settles its open positions under the
+    #: geometry frozen on each row, but opens nothing new. Published because a
+    #: page showing six books without it reads as six books competing, and
+    #: five of them stopped taking entries when F2 started.
+    enters: bool
+    #: A retired book's numbers are its last, not its current. Only F2's move.
+    equity_floor: str | None
+    max_trades_per_day: int | None
     #: The v2 entry gate this book runs, as published thresholds. Identical
     #: across A2-D2; E2's is stricter.
     gate: dict[str, str]
@@ -274,6 +282,9 @@ async def status(session: AsyncSession = Depends(get_db)) -> StatusOut:
             entry_threshold=str(spec.profile.entry_threshold),
             liquidity_derived_risk=spec.liquidity_derived_risk,
             daily_breaker=spec.daily_breaker, consensus_gate=spec.consensus_gate,
+            enters=spec.enters,
+            equity_floor=_q(spec.equity_floor),
+            max_trades_per_day=spec.max_trades_per_day,
             gate={k: str(v) for k, v in spec.gate.canonical.items()},
             starting_equity=str(row.starting_equity),
             execution_cost_usd=str(_execution_cost(mine)), cash=str(cash),

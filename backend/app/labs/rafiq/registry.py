@@ -48,6 +48,7 @@ from app.labs.rafiq.adapters.engine import ExitRules
 from app.labs.rafiq.adapters.profiles import StrategyProfile
 from app.labs.rafiq.entry_gate import GateThresholds
 from app.labs.rafiq.strategies import strategy_e_ensemble as e
+from app.labs.rafiq.strategies import strategy_f2
 from app.labs.rafiq.strategies.strategy_a_hard_stop import HARD_STOP_GUARD
 from app.labs.rafiq.strategies.strategy_b_time_boxed import TIME_BOXED_EXIT
 from app.labs.rafiq.strategies.strategy_c_volatility_adjusted import (
@@ -133,6 +134,29 @@ class LabStrategy:
     daily_breaker: bool = False
     #: True for E2: consensus + manipulation veto gate the entry.
     consensus_gate: bool = False
+    #: False for a retired book. It still SETTLES its open positions under the
+    #: geometry frozen on each row — force-closing would sell into exactly the
+    #: drained pools that produce the 0.0003x fills — but it opens nothing new.
+    #:
+    #: Deliberately OUTSIDE `digest`: retiring a book must not change the hash
+    #: its record was opened under, or the runner halts on drift it caused
+    #: itself. Verified: A2-E2's digests are unchanged by this field.
+    enters: bool = True
+    #: F2 only. Rafiq's own `EquityFloor` level: at or below this the book
+    #: stops OPENING positions. It never force-closes — selling into a drained
+    #: pool is what produces the 0.0003x fills, so the floor deliberately
+    #: exposes no liquidate path and `test_floor_does_not_expose_a_force_close`
+    #: keeps it that way.
+    #:
+    #: $900 and not $1,000 on Karthik's explicit instruction. At $1,000 on a
+    #: $1,000 book the first losing trade halts it permanently and the sample
+    #: is one trade; $900 gives F2 room for about ninety $10 losses, which is
+    #: the smallest floor that can still collect a testable sample.
+    equity_floor: Decimal | None = None
+    #: F2 only. Rafiq's `MAX_TRADES_PER_DAY`. Counted per calendar day in UTC
+    #: against positions actually opened, because an in-memory counter would
+    #: reset on every worker restart and the cap would quietly stop binding.
+    max_trades_per_day: int | None = None
 
     @property
     def digest(self) -> str:
@@ -164,6 +188,14 @@ class LabStrategy:
             ),
             "breaker_policy": _breaker_canonical() if self.daily_breaker else None,
         }
+        # Added only when set, so a book that has neither hashes exactly as it
+        # did before these fields existed. They ARE rules — they change which
+        # candidates become positions — so for the book that has them they
+        # belong in the hash, unlike `enters`.
+        if self.equity_floor is not None:
+            canonical["equity_floor"] = str(self.equity_floor)
+        if self.max_trades_per_day is not None:
+            canonical["max_trades_per_day"] = self.max_trades_per_day
         return hashlib.sha256(
             json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
@@ -192,7 +224,8 @@ STRATEGIES: tuple[LabStrategy, ...] = (
     LabStrategy("A2", "Gate only",
                 "What does the entry gate alone do, against v1's A?",
                 HARD_STOP_GUARD,
-                legs=(Leg(_WHOLE, Decimal("1.30"), Decimal("0.20")),)),
+                legs=(Leg(_WHOLE, Decimal("1.30"), Decimal("0.20")),),
+                enters=False),
 
     # B was v1's only book near breakeven before costs (-0.3%/trade gross over
     # 151 trades), so v2 treats B as the template rather than A. Same rules,
@@ -200,7 +233,8 @@ STRATEGIES: tuple[LabStrategy, ...] = (
     LabStrategy("B2", "Fast and cheap, gated",
                 "Does the gate push the best v1 book over the line?",
                 TIME_BOXED_EXIT,
-                legs=(Leg(_WHOLE, Decimal("1.20"), None),)),
+                legs=(Leg(_WHOLE, Decimal("1.20"), None),),
+                enters=False),
 
     # C2's two legs ARE the question. Half takes the same +30% A2 takes; half
     # has no target and can only leave on the trail, the stop or the hold.
@@ -208,14 +242,16 @@ STRATEGIES: tuple[LabStrategy, ...] = (
                 "Does scaling out beat a hard cap, given losers go to -100%?",
                 PARTIAL_EXIT,
                 legs=(Leg(_HALF, Decimal("1.30"), None),
-                      Leg(_HALF, None, Decimal("0.25")))),
+                      Leg(_HALF, None, Decimal("0.25"))),
+                enters=False),
 
     # v1 closed trades at +29% that would have run to +352%, +373%, +261%.
     # D2 removes the cap entirely and shortens the hold to pay for it.
     LabStrategy("D2", "No cap",
                 "Is the +30% cap cutting off the tail that pays for the rugs?",
                 NO_CAP,
-                legs=(Leg(_WHOLE, None, Decimal("0.25")),)),
+                legs=(Leg(_WHOLE, None, Decimal("0.25")),),
+                enters=False),
 
     # E2 keeps v1 E's three guards and runs the gate far stricter on top. It is
     # expected to trade rarely — v1's E closed nothing at all in 19 hours on
@@ -226,7 +262,31 @@ STRATEGIES: tuple[LabStrategy, ...] = (
                 legs=(Leg(_WHOLE, Decimal("1.30"), Decimal("0.20")),),
                 gate=entry_gate.STRICT,
                 liquidity_derived_risk=True, daily_breaker=True,
-                consensus_gate=True),
+                consensus_gate=True, enters=False),
+
+    # F2 is the active book, and it is NOT a sixth exit variant. A2-E2 settled
+    # that question: 98 of their 102 total losses exited on `stop`, at a median
+    # 0.0003x the stop price with zero friction, so the price was already gone
+    # and no exit rule could have recovered it. F2 therefore keeps E2's exits
+    # unchanged — E2 had the best survivor return of any book at +14.9% — and
+    # changes only arithmetic:
+    #
+    #   $10 instead of $50, so a total loss costs 1% of book and not 5%;
+    #   20 entries a day against v2's observed 588;
+    #   a $900 floor that halts new entries and never force-closes.
+    #
+    # None of that creates an edge. It keeps the book alive long enough to
+    # collect the ~200 trades that would test whether holder concentration or
+    # LP status separate total losses before entry, which is the only number
+    # that matters and the one nothing here moves.
+    LabStrategy("F2", "Loss bounded",
+                "Does bounding size and count keep the book alive long enough "
+                "to collect a testable sample?",
+                strategy_f2.LOSS_BOUNDED,
+                legs=(Leg(_WHOLE, Decimal("1.30"), Decimal("0.20")),),
+                gate=entry_gate.F2, daily_breaker=True,
+                equity_floor=strategy_f2.FLOOR_WITH_ROOM.floor_usd,
+                max_trades_per_day=strategy_f2.MAX_TRADES_PER_DAY),
 )
 
 BY_CODE = {s.code: s for s in STRATEGIES}
@@ -271,7 +331,7 @@ def max_hold_for(strategy: LabStrategy) -> timedelta:
     return strategy.profile.exits.max_hold
 
 
-assert {s.code for s in STRATEGIES} == {"A2", "B2", "C2", "D2", "E2"}, \
+assert {s.code for s in STRATEGIES} == {"A2", "B2", "C2", "D2", "E2", "F2"}, \
     "the registry must hold exactly the five v2 books"
 assert all(sum((leg.fraction for leg in s.legs), Decimal(0)) == 1
            for s in STRATEGIES), \

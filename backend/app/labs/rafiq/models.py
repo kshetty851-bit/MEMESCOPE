@@ -37,7 +37,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -156,6 +156,27 @@ class RafiqLabPosition(Base):
     #: exit. Stored rather than re-derived: the cost model is calibration, and
     #: a recalibration must not silently restate a trade that already happened.
     entry_price_impact_pct: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))
+
+    # --- the entry decision's two instrumented features ------------------
+    # Written ONCE, in the same INSERT as the rest of the row, from the store
+    # as it stood at `opened_at`. Nothing in this lab updates them afterwards
+    # and nothing backfills them: a value that appeared after the decision was
+    # not available to the decision, and writing it here later would turn an
+    # honest null into evidence the strategy never had. `_settle` touches only
+    # the exit columns, and `test_entry_features_are_never_backfilled` fails if
+    # a later-arriving snapshot changes a row that is already open.
+    #
+    # A null here is a fact about this platform's collectors, not about the
+    # token — `entry_features_error` says which store was silent.
+    entry_top10_holder_pct: Mapped[Decimal | None] = mapped_column(Numeric(9, 4))
+    entry_top10_captured_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True))
+    entry_lp_status: Mapped[str | None] = mapped_column(String(16))
+    entry_lp_reason_codes: Mapped[list | None] = mapped_column(JSONB)
+    entry_lp_checked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True))
+    entry_features_error: Mapped[str | None] = mapped_column(String(64))
+
     #: The geometry, frozen. `stop_price` is C's liquidity-derived level for
     #: E2, and the profile's flat `stop_mult` for A2, B2, C2 and D2.
     stop_price: Mapped[Decimal] = mapped_column(_PRICE, nullable=False)
@@ -275,6 +296,139 @@ class RafiqLabGateRejection(Base):
         Integer, nullable=False, default=0, server_default=text("0")
     )
     last_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class RafiqCandidate(Base):
+    """Every candidate F2 decided on, entered or refused, and what happened next.
+
+    ## Why this table exists
+
+    Every statistic in `FINDINGS.md` is conditioned on trades that were taken.
+    That makes the most important question unanswerable: a filter cannot be
+    evaluated against a population nobody recorded. `rafiq_lab_gate_rejections`
+    counts refusals but keeps no features, so it can say the gate refused 4,812
+    candidates and nothing about whether refusing them was right.
+
+    This is the other half. One row per (strategy, mint), carrying the feature
+    snapshot as it stood at the decision instant, the reason if it was refused,
+    and the forward return at three horizons — so "would this filter have
+    helped" becomes a query instead of an argument.
+
+    ## One row per candidate, and which decision it holds
+
+    An entry always supersedes an earlier rejection of the same mint: a book
+    that refuses a token at 09:00 for a thin pool and buys it at 09:40 made one
+    decision that matters, and it is the entry. A repeated *rejection* is
+    discarded — the first one is kept, because that is the one whose feature
+    snapshot is point-in-time with respect to the forward window measured from
+    it.
+
+    ## The forward columns are not backfilled in the entry sense
+
+    They are written later by design — that is what "forward" means — but only
+    ever from snapshots strictly after `decided_at`, and never into the feature
+    columns. `max_return` is the best the token reached at any observation
+    inside the horizon, so it is a ceiling nobody could have captured; it is
+    here to bound what any exit rule could have done, not to suggest one did.
+    """
+
+    __tablename__ = "rafiq_lab_candidates"
+    __table_args__ = (
+        UniqueConstraint("strategy_id", "mint_address",
+                         name="uq_rafiq_lab_candidates_strategy_mint"),
+        # The forward-outcome beat's own query: rows old enough for a horizon
+        # whose columns are still null.
+        Index("ix_rafiq_lab_candidates_decided", "decided_at"),
+        Index("ix_rafiq_lab_candidates_outcome", "outcome", "reject_reason"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    strategy_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("rafiq_lab_strategies.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    mint_address: Mapped[str] = mapped_column(String(44), nullable=False)
+    symbol: Mapped[str | None] = mapped_column(String(32))
+    #: When the Radar admitted it, and when this book judged it.
+    detected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    decided_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    #: `entered` or `rejected`. Nothing else.
+    outcome: Mapped[str] = mapped_column(String(8), nullable=False)
+    #: The first condition that refused it, `None` when it entered. Covers the
+    #: cheap filters as well as the gate, because "we never looked at it" and
+    #: "we looked and the pool was thin" are different rejections.
+    reject_reason: Mapped[str | None] = mapped_column(String(48))
+    #: The position it opened, when it entered. Kept as a link rather than a
+    #: duplicated P&L so the two tables can never disagree.
+    position_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("rafiq_lab_positions.id", ondelete="SET NULL"),
+    )
+
+    # --- the market as the decision saw it -------------------------------
+    observed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    price_usd: Mapped[Decimal | None] = mapped_column(_PRICE)
+    liquidity_usd: Mapped[Decimal | None] = mapped_column(_MONEY)
+    market_cap_usd: Mapped[Decimal | None] = mapped_column(_MONEY)
+    volume_m5: Mapped[Decimal | None] = mapped_column(_MONEY)
+    liquidity_change_15m: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
+    opportunity_score: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))
+    #: Unique buyers and sellers, trade counts, and the top-10 transaction
+    #: share, from `wallet_flow_snapshots`. JSONB because the whole group is
+    #: absent together whenever that collector is off, and five null columns
+    #: say the same thing less clearly than one absent key set.
+    flow: Mapped[dict | None] = mapped_column(JSONB)
+
+    # --- what the sizing and the gate made of it -------------------------
+    #: `None` when the candidate was refused before sizing ran.
+    notional_usd: Mapped[Decimal | None] = mapped_column(_MONEY)
+    stop_pct: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))
+    entry_impact_pct: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))
+
+    # --- the two instrumented features, same source as the position row --
+    safety_status: Mapped[str | None] = mapped_column(String(16))
+    safety_observed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    top10_holder_pct: Mapped[Decimal | None] = mapped_column(Numeric(9, 4))
+    top10_captured_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    lp_status: Mapped[str | None] = mapped_column(String(16))
+    lp_reason_codes: Mapped[list | None] = mapped_column(JSONB)
+    lp_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    features_error: Mapped[str | None] = mapped_column(String(64))
+
+    # --- forward outcomes, written by the beat once each horizon closes ---
+    # Returns against `price_usd`, from `token_market_snapshots` alone: the
+    # platform already prices every admitted token about every sixteen
+    # seconds, so no external endpoint is called and none can rate-limit this.
+    # `dead` is the horizon's last observed liquidity below $1,000.
+    max_return_1h: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
+    final_return_1h: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
+    dead_1h: Mapped[bool | None] = mapped_column(Boolean)
+    max_return_6h: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
+    final_return_6h: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
+    dead_6h: Mapped[bool | None] = mapped_column(Boolean)
+    max_return_24h: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
+    final_return_24h: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
+    dead_24h: Mapped[bool | None] = mapped_column(Boolean)
+    #: Which horizons have been attempted, so a token that stopped printing
+    #: is not retried for ever. `{"1h": "2026-09-12T...", "6h": null}` — a key
+    #: with a null value is an attempt that found no snapshots at all.
+    outcomes_attempted: Mapped[dict | None] = mapped_column(JSONB)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
