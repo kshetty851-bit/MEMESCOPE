@@ -507,10 +507,17 @@ function LeaderboardPanel() {
           </b>{" "}
           and cannot have an edge — run fifty strategies and one leads whether or
           not any is good, so their best result is the bar a real arm must
-          clear. To be called, an arm needs {data.min_trades}+ closed trades, a
-          profit factor of {Number(data.min_profit_factor).toFixed(2)}, no single
-          token above {(Number(data.max_token_share) * 100).toFixed(0)}% of its
-          profit, and it must beat the best random arm.
+          clear. To be called, an arm needs {data.min_trades}+ closed trades,
+          no single token above{" "}
+          {(Number(data.max_token_share) * 100).toFixed(0)}% of its profit, it
+          must beat the best random arm, and its profit factor must clear{" "}
+          <b className="text-ink">
+            {Number(data.required_profit_factor).toFixed(2)}
+          </b>{" "}
+          — the bar is not a round number but the 95th percentile of what the
+          luckiest of 42 noise arms reaches at the leader&rsquo;s own trade
+          count, so it falls as the sample grows. At 40 trades that is above
+          20; at 250 it is about 2.3.
         </p>
 
         <div className="overflow-x-auto">

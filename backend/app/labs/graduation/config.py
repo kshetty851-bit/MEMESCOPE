@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import os
 from decimal import Decimal, InvalidOperation
+from itertools import pairwise
 
 
 def _flag(name: str) -> bool:
@@ -483,8 +484,66 @@ PAPER_REQUIRE_KNOWN_DEPTH = True
 #   * and it must beat the best of the EIGHT RANDOM ARMS, which is the only
 #     term that distinguishes "leads" from "is better than chance".
 TOURNEY_MIN_TRADES = _int("LAB_GRADUATION_TOURNEY_MIN_TRADES", 40)
-TOURNEY_MIN_PF = _dec("LAB_GRADUATION_TOURNEY_MIN_PF", "1.5")
 TOURNEY_MAX_TOKEN_SHARE = _dec("LAB_GRADUATION_TOURNEY_MAX_SHARE", "0.20")
+
+#: The profit factor a leader must clear, BY ITS OWN TRADE COUNT.
+#:
+#: This replaces a flat 1.50, which was wrong by a wide margin and wrong in
+#: the flattering direction. A fixed bar reasons about one strategy; this
+#: tournament reports the BEST OF FORTY-TWO, and the maximum of forty-two
+#: draws is nothing like a single draw.
+#:
+#: Bootstrapped from 553 recorded graduations under the live execution model —
+#: exact constant-product impact both legs, orders over 10% impact refused —
+#: these are the 95th percentile of the best-of-42 profit factor when every
+#: arm is noise:
+#:
+#:      30 trades   PF 104     75 trades   PF 5.2     300 trades   PF 2.0
+#:      40 trades   PF 23      100 trades  PF 3.8     500 trades   PF 1.7
+#:      50 trades   PF 9.8     150 trades  PF 2.9     800 trades   PF 1.5
+#:
+#: So at forty trades an arm the old bar of 1.50 sat BELOW the median of pure
+#: noise: the luckiest of forty-two coin flippers typically reaches 4.8 there,
+#: and one time in twenty reaches 23. The bar falls with sample size because
+#: sample size is the only thing that dilutes luck.
+#:
+#: Recompute this if the number of real arms changes — the ceiling is a
+#: property of how many draws the leaderboard takes, not just of the market.
+TOURNEY_NOISE_CEILING: tuple[tuple[int, Decimal], ...] = (
+    (30, Decimal("104.27")),
+    (40, Decimal("23.47")),
+    (50, Decimal("9.84")),
+    (75, Decimal("5.23")),
+    (100, Decimal("3.84")),
+    (150, Decimal("2.85")),
+    (200, Decimal("2.48")),
+    (300, Decimal("2.04")),
+    (500, Decimal("1.72")),
+    (800, Decimal("1.53")),
+    (1200, Decimal("1.41")),
+)
+#: The floor the curve is allowed to approach. Below this a "win" is too thin
+#: to survive being wrong about a trade or two, however many trades there are.
+TOURNEY_FLOOR_PF = _dec("LAB_GRADUATION_TOURNEY_FLOOR_PF", "1.30")
+
+
+def required_pf(trades: int) -> Decimal:
+    """The profit factor a leader needs at this trade count.
+
+    Linear between the tabulated points, flat outside them. Below the first
+    point the requirement is the first point's value, which is unreachable on
+    purpose: an arm with under thirty trades has not produced evidence, and
+    the trade-count term refuses it anyway.
+    """
+    points = TOURNEY_NOISE_CEILING
+    if trades <= points[0][0]:
+        return points[0][1]
+    for (lo_n, lo_v), (hi_n, hi_v) in pairwise(points):
+        if trades <= hi_n:
+            span = Decimal(hi_n - lo_n)
+            step = (Decimal(trades - lo_n) / span) if span else Decimal(0)
+            return (lo_v + (hi_v - lo_v) * step).quantize(Decimal("0.01"))
+    return max(points[-1][1], TOURNEY_FLOOR_PF)
 
 # --- the kill gate, stated before this run produced a single trade ------------
 #

@@ -184,7 +184,9 @@ export interface Leaderboard {
   leader: string;
   leader_beats_controls: boolean;
   min_trades: number;
-  min_profit_factor: string;
+  /** The PF required of THIS leader, at its own trade count: the 95th
+   * percentile of the best-of-42 profit factor when every arm is noise. */
+  required_profit_factor: string;
   max_token_share: string;
   called: boolean;
   verdict: string;

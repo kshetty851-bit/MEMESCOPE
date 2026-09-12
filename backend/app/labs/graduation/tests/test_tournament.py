@@ -112,8 +112,10 @@ def test_the_live_book_and_the_ab_arm_are_both_in_the_tournament() -> None:
 def test_the_calling_gate_is_stated_before_the_tournament_runs() -> None:
     """Including the term that separates 'leads' from 'beats chance'."""
     assert config.TOURNEY_MIN_TRADES >= 40
-    assert D("1.5") <= config.TOURNEY_MIN_PF
     assert D("0.20") >= config.TOURNEY_MAX_TOKEN_SHARE
+    # The PF term is no longer a constant — it is the noise ceiling for the
+    # leader's own trade count. See `test_the_pf_bar_is_the_noise_ceiling`.
+    assert callable(config.required_pf)
 
 
 def test_an_arm_that_has_not_traded_cannot_lead() -> None:
@@ -169,3 +171,38 @@ def test_the_exit_is_sized_by_what_the_position_is_now_worth() -> None:
     after_run = amm_sell(spot, value_usd=D(978), liquidity_usd=depth, fee_fraction=fee)
     assert at_cost is not None and after_run is not None
     assert after_run < at_cost, "a grown position must be harder to sell"
+
+
+# --- the bar moves with the sample -------------------------------------------
+
+def test_the_pf_bar_is_the_noise_ceiling_not_a_round_number() -> None:
+    """A flat 1.50 was wrong by a wide margin and wrong in the flattering
+    direction. The tournament reports the BEST OF FORTY-TWO arms, and the
+    maximum of forty-two draws is nothing like a single draw: bootstrapped
+    from 553 recorded graduations under the live execution model, the luckiest
+    of forty-two noise arms typically reaches PF 4.8 at forty trades and one
+    time in twenty reaches 23.
+    """
+    assert config.required_pf(40) > D("20")
+    assert config.required_pf(100) > D("3.5")
+    assert config.required_pf(300) > D("2")
+    assert not hasattr(config, "TOURNEY_MIN_PF"), "the flat bar is gone"
+
+
+def test_the_bar_falls_as_the_sample_grows_and_never_inverts() -> None:
+    """Sample size is the only thing that dilutes luck, so the requirement has
+    to fall monotonically — a bar that rose with evidence would be absurd."""
+    counts = [30, 40, 50, 75, 100, 150, 200, 300, 500, 800, 1200, 5000]
+    bars = [config.required_pf(n) for n in counts]
+    assert bars == sorted(bars, reverse=True), bars
+    # Interpolated between tabulated points, not snapped to them.
+    assert config.required_pf(100) > config.required_pf(125) > config.required_pf(150)
+    # And it never drops below something a real trader would take seriously.
+    assert bars[-1] >= config.TOURNEY_FLOOR_PF
+
+
+def test_a_thin_sample_cannot_clear_its_own_bar() -> None:
+    """The point of the curve: at thirty trades nothing is provable, so the
+    requirement is set where noise sits rather than somewhere reachable."""
+    assert config.required_pf(10) == config.required_pf(30)
+    assert config.required_pf(30) > D("50")

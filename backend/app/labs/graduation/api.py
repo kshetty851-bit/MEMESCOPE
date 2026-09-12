@@ -565,7 +565,11 @@ class Leaderboard(BaseModel):
     leader_beats_controls: bool = False
     #: The gate a leader must clear to be called. Stated here, not in prose.
     min_trades: int = 0
-    min_profit_factor: Decimal = Decimal(0)
+    #: The PF required OF THIS LEADER, at its own trade count — the 95th
+    #: percentile of the best-of-42 profit factor when every arm is noise.
+    #: A flat bar would be answering a question nobody asked: the tournament
+    #: reports a maximum of forty-two draws, not a single strategy.
+    required_profit_factor: Decimal = Decimal(0)
     max_token_share: Decimal = Decimal(0)
     called: bool = False
     verdict: str = ""
@@ -640,7 +644,8 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
         leader_beats_controls=bool(leader and leader.trades and band is not None
                                    and leader.realised_usd > band),
         min_trades=config.TOURNEY_MIN_TRADES,
-        min_profit_factor=config.TOURNEY_MIN_PF,
+        required_profit_factor=config.required_pf(
+            leader.trades if leader else 0),
         max_token_share=config.TOURNEY_MAX_TOKEN_SHARE,
         total_trades=sum(r.trades for r in rows),
         notional_usd=config.PAPER_NOTIONAL_USD,
@@ -651,11 +656,14 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
             "strategy arm yet." if traded else "No arm has closed a trade yet.")
         return board
     fails = []
+    need_pf = config.required_pf(leader.trades)
+    board.required_profit_factor = need_pf
     if leader.trades < board.min_trades:
         fails.append(f"{leader.trades} trades, needs {board.min_trades}")
-    if leader.profit_factor is None or leader.profit_factor < board.min_profit_factor:
-        fails.append(f"profit factor {leader.profit_factor or 0}, "
-                     f"needs {board.min_profit_factor}")
+    if leader.profit_factor is None or leader.profit_factor < need_pf:
+        fails.append(f"profit factor {leader.profit_factor or 0}, needs "
+                     f"{need_pf} at {leader.trades} trades — that is what the "
+                     f"luckiest of 42 noise arms reaches")
     if leader.top_token_share is not None and leader.top_token_share > board.max_token_share:
         fails.append(f"one token is {leader.top_token_share * 100:.0f}% of its profit, "
                      f"needs under {board.max_token_share * 100:.0f}%")
