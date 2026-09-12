@@ -221,7 +221,18 @@ DEXSCREENER_URL = "https://api.dexscreener.com"
 GECKOTERMINAL_URL = "https://api.geckoterminal.com/api/v2"
 NETWORK = "solana"
 #: How often a graduated token's pair is sampled.
-POSTGRAD_INTERVAL_S = _int("LAB_GRADUATION_POSTGRAD_INTERVAL_S", 60)
+#: TWENTY seconds, was sixty.
+#:
+#: A position can only leave at a price that was recorded, so the mark
+#: interval is the floor on exit accuracy. With the tournament re-scoped to
+#: 1-3 minute holds, sixty-second marks meant a two-minute hold could only
+#: exit at 2:00 or 3:00 — a fifty per cent overshoot on the one variable the
+#: whole re-scope is about, and the extra minute is where the wipeouts live.
+#:
+#: It costs almost nothing: roughly thirty tokens sit in the post-graduation
+#: window and `DEXSCREENER_BATCH` is 30, so this is two or three requests a
+#: minute against an endpoint that allows hundreds. Well short of a burst.
+POSTGRAD_INTERVAL_S = _int("LAB_GRADUATION_POSTGRAD_INTERVAL_S", 20)
 #: `/tokens/v1/{chain}/{addresses}` takes a comma-separated list. Thirty is the
 #: documented ceiling and the number the Breakout lab measured against.
 DEXSCREENER_BATCH = 30
@@ -395,7 +406,7 @@ PAPER_TRAILING_PCT = _dec("LAB_GRADUATION_PAPER_TRAILING_PCT", "0")
 #: the next sample rather than at the target: +157% average against a +94%
 #: target, which flatters the book and would not happen to a limit order.
 PAPER_TAKE_PROFIT_X = _dec("LAB_GRADUATION_PAPER_TAKE_PROFIT_X", "0")
-#: FIVE MINUTES, and now the only exit there is.
+#: TWO MINUTES. Was five.
 #:
 #: This stopped being a backstop and became the strategy. Replayed over 430
 #: graduations, holds of 1-5 minutes are the only ones that are positive at
@@ -407,11 +418,16 @@ PAPER_TAKE_PROFIT_X = _dec("LAB_GRADUATION_PAPER_TAKE_PROFIT_X", "0")
 #:
 #: It is still ALSO the data's limit: the price series ends at
 #: POST_MIGRATION_SECONDS, past which there is no mark and no exit price.
-PAPER_MAX_HOLD_MINUTES = _int("LAB_GRADUATION_PAPER_MAX_HOLD_MIN", 5)
+#: Measured over 427 live trades, the share of trades losing more than half
+#: is a straight function of the hold: 4.5% at 1m, 7.7% at 2m, 12.3% at 3m,
+#: 18.8% at 5m, and 40% by an hour. Every extra minute is another minute in
+#: which the pool's liquidity can be pulled, and no exit rule offsets it —
+#: 93% of collapses move price and liquidity in the SAME sample.
+PAPER_MAX_HOLD_MINUTES = _int("LAB_GRADUATION_PAPER_MAX_HOLD_MIN", 2)
 #: A position is only opened on a token whose pool opened within this long, so
 #: the book enters near the open rather than halfway through a window.
 PAPER_ENTRY_GRACE_MINUTES = _int("LAB_GRADUATION_PAPER_ENTRY_GRACE_MIN", 3)
-#: How often the book ticks. FIFTEEN seconds, not sixty.
+#: How often the book ticks. TEN seconds — a tenth of the shortest hold.
 #:
 #: At sixty the book was breaking its own rule: a position due out at five
 #: minutes is not noticed until the next tick, so 104 closed trades averaged
@@ -426,7 +442,7 @@ PAPER_ENTRY_GRACE_MINUTES = _int("LAB_GRADUATION_PAPER_ENTRY_GRACE_MIN", 3)
 #: It costs nothing to fix: the tick is database-only, no external call. The
 #: floor on accuracy is now the sampler's 60-second mark, not the book's
 #: inattention.
-PAPER_INTERVAL_SECONDS = _int("LAB_GRADUATION_PAPER_TICK_S", 15)
+PAPER_INTERVAL_SECONDS = _int("LAB_GRADUATION_PAPER_TICK_S", 10)
 
 # --- the A/B: an entry filter, tested rather than adopted ---------------------
 #
@@ -445,7 +461,7 @@ PAPER_INTERVAL_SECONDS = _int("LAB_GRADUATION_PAPER_TICK_S", 15)
 #: The two arms the dedicated Paper panels render. Both are ordinary members
 #: of `tournament.ARMS` — the panels are a close-up of two rows of the
 #: leaderboard, not a separate experiment.
-PAPER_BOOKS = ("E05_hold_5m", "C01_symnight_5m")
+PAPER_BOOKS = ("F15_all_2m", "F28_symnight_2m")
 #: The filtered book enters only when the pool opened inside this UTC window
 #: (start inclusive, end exclusive, wrapping midnight).
 PAPER_FILTER_HOUR_START = _int("LAB_GRADUATION_PAPER_FILTER_HOUR_START", 18)

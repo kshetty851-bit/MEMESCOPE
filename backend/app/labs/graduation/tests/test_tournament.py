@@ -46,7 +46,7 @@ def test_arms_differ_only_in_entry_and_exit() -> None:
 def test_a_control_decides_on_nothing_and_never_changes_its_mind() -> None:
     """Hashed rather than drawn: a control that re-rolled each tick would be a
     different rule every time, and could not be compared with anything."""
-    assert _coin("R1_coin50_5m", "abc", 50) == _coin("R1_coin50_5m", "abc", 50)
+    assert _coin("R1_coin50_1m", "abc", 50) == _coin("R1_coin50_1m", "abc", 50)
     mints = [f"m{i}pump" for i in range(4000)]
     for arm in CONTROLS:
         pct = int(arm.entry[4:])
@@ -54,8 +54,8 @@ def test_a_control_decides_on_nothing_and_never_changes_its_mind() -> None:
         assert abs(taken / len(mints) * 100 - pct) < 4, arm.name
     # Two controls with the same rule must still pick different tokens, or
     # they are one control counted twice.
-    a = {m for m in mints if _coin("R1_coin50_5m", m, 50)}
-    b = {m for m in mints if _coin("R2_coin50_5m", m, 50)}
+    a = {m for m in mints if _coin("R1_coin50_1m", m, 50)}
+    b = {m for m in mints if _coin("R2_coin50_2m", m, 50)}
     assert 0.2 < len(a & b) / len(a | b) < 0.5
 
 
@@ -72,42 +72,42 @@ def test_the_filters_split_the_population_the_way_they_claim() -> None:
     def took(name: str, when: datetime, **over: object) -> bool:
         return accepts(BY_NAME[name], open_at=when, **{**TOKEN, **over})
 
-    assert took("E05_hold_5m", DAY) and took("E05_hold_5m", NIGHT)
-    assert took("F04_night_5m", NIGHT) and not took("F04_night_5m", DAY)
-    assert took("F05_day_5m", DAY) and not took("F05_day_5m", NIGHT)
-    assert took("F01_sym_5m", DAY) and not took("F01_sym_5m", DAY, reuse=0)
-    assert took("F03_newsym_5m", DAY, reuse=0) and not took("F03_newsym_5m", DAY)
-    assert took("F06_deep_5m", DAY) and not took("F06_deep_5m", DAY, liquidity=D(5_000))
-    assert took("F07_shallow_5m", DAY, liquidity=D(5_000))
-    assert took("F08_nosell_5m", DAY) and not took("F08_nosell_5m", DAY, sells=7)
-    assert took("F09_hassell_5m", DAY, sells=7)
-    assert took("F10_bigcap_5m", DAY) and not took("F10_bigcap_5m", DAY, fdv=D(50_000))
-    assert took("F11_smallcap_5m", DAY, fdv=D(50_000))
-    # The A/B arm needs BOTH conditions.
-    assert took("C01_symnight_5m", NIGHT)
-    assert not took("C01_symnight_5m", DAY)
-    assert not took("C01_symnight_5m", NIGHT, reuse=0)
+    assert took("F15_all_2m", DAY) and took("F15_all_2m", NIGHT)
+    assert took("F19_night_2m", NIGHT) and not took("F19_night_2m", DAY)
+    assert took("F20_day_2m", DAY) and not took("F20_day_2m", NIGHT)
+    assert took("F16_sym_2m", DAY) and not took("F16_sym_2m", DAY, reuse=0)
+    assert took("F18_newsym_2m", DAY, reuse=0) and not took("F18_newsym_2m", DAY)
+    assert took("F21_deep_2m", DAY) and not took("F21_deep_2m", DAY, liquidity=D(5_000))
+    assert took("F22_shallow_2m", DAY, liquidity=D(5_000))
+    assert took("F23_nosell_2m", DAY) and not took("F23_nosell_2m", DAY, sells=7)
+    assert took("F24_hassell_2m", DAY, sells=7)
+    assert took("F25_bigcap_2m", DAY) and not took("F25_bigcap_2m", DAY, fdv=D(50_000))
+    assert took("F26_smallcap_2m", DAY, fdv=D(50_000))
+    # The combined arm needs BOTH conditions.
+    assert took("F28_symnight_2m", NIGHT)
+    assert not took("F28_symnight_2m", DAY)
+    assert not took("F28_symnight_2m", NIGHT, reuse=0)
 
 
 def test_a_missing_feature_is_a_refusal_not_a_pass() -> None:
     """DexScreener can answer without liquidity or a transaction count. An arm
     that treated a missing value as satisfying its filter would be trading a
     different population from the one it claims."""
-    for name in ("F06_deep_5m", "F07_shallow_5m", "F10_bigcap_5m", "F11_smallcap_5m"):
+    for name in ("F21_deep_2m", "F22_shallow_2m", "F25_bigcap_2m", "F26_smallcap_2m"):
         assert not accepts(BY_NAME[name], open_at=NIGHT,
                            **{**TOKEN, "liquidity": None, "fdv": None})
-    for name in ("F08_nosell_5m", "F09_hassell_5m"):
+    for name in ("F23_nosell_2m", "F24_hassell_2m"):
         assert not accepts(BY_NAME[name], open_at=NIGHT, **{**TOKEN, "sells": None})
-    assert not accepts(BY_NAME["F01_sym_5m"], open_at=NIGHT, **{**TOKEN, "reuse": None})
+    assert not accepts(BY_NAME["F16_sym_2m"], open_at=NIGHT, **{**TOKEN, "reuse": None})
 
 
 def test_the_live_book_and_the_ab_arm_are_both_in_the_tournament() -> None:
     """The Paper panels render two arms of the leaderboard rather than a
     separate experiment, so those names must exist."""
-    assert config.PAPER_BOOKS == ("E05_hold_5m", "C01_symnight_5m")
+    assert config.PAPER_BOOKS == ("F15_all_2m", "F28_symnight_2m")
     for name in config.PAPER_BOOKS:
         assert name in BY_NAME
-    assert BY_NAME["E05_hold_5m"].hold == config.PAPER_MAX_HOLD_MINUTES
+    assert BY_NAME["F15_all_2m"].hold == config.PAPER_MAX_HOLD_MINUTES
 
 
 def test_the_calling_gate_is_stated_before_the_tournament_runs() -> None:
@@ -236,16 +236,13 @@ def test_each_arm_states_both_halves_of_its_rule() -> None:
 def test_the_exit_rule_names_every_condition_the_arm_carries() -> None:
     """A reader must be able to tell a plain hold from a hold plus a target,
     without reading the arm's name."""
-    plain = BY_NAME["E05_hold_5m"]
-    assert plain.exit_rule == "at 5 minutes"
-
-    both = BY_NAME["X07_tp2_trail30"]
-    assert "2x" in both.exit_rule and "30%" in both.exit_rule
-    assert "60 minutes" in both.exit_rule
-    assert both.exit_rule.startswith("whichever comes first")
-
+    assert BY_NAME["F15_all_2m"].exit_rule == "at 2 minutes"
+    assert BY_NAME["F29_all_3m"].exit_rule == "at 3 minutes"
     # Singular minute, because "1 minutes" reads as a bug in the data.
-    assert BY_NAME["E01_hold_1m"].exit_rule == "at 1 minute"
+    assert BY_NAME["F01_all_1m"].exit_rule == "at 1 minute"
+    # Every arm is a plain hold now; the target and trailing families held
+    # 15 minutes or more and were dropped with them.
+    assert all(a.tp is None and a.trail is None for a in ARMS)
 
 
 # --- the projection is an account, not a running total ------------------------

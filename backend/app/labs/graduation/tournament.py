@@ -180,70 +180,96 @@ def accepts(arm: Arm, *, mint: str, open_at: datetime, liquidity: Decimal | None
 
 
 D = Decimal
-#: The fifty. Named so the leaderboard reads as a grid rather than a list:
-#: E = exit only, F = entry filter, C = combination, R = random control.
+#: The fifty, RE-SCOPED 2026-09-13 to the short end.
+#:
+#: The first run made the hold length the finding. Wipeout rate — a trade
+#: losing more than half — was a straight function of how long an arm held,
+#: monotone across eight lengths and 427 trades:
+#:
+#:     1m  4.5%   3m 12.3%   10m 31.7%   30m 38.5%
+#:     2m  7.7%   5m 18.8%   15m 34.5%   60m 40.0%
+#:
+#: Every extra minute is another minute in which the LP can be pulled, and
+#: no exit rule can help: 93% of collapses take the price and the liquidity
+#: in the SAME sample, because the rug is one transaction.
+#:
+#: So the long holds and the target/trailing families are gone — they were
+#: supplying most of the losses and had nothing left to say — and the slots
+#: they used now carry every entry filter at 1, 2 and 3 minutes. That is a
+#: full factorial: fourteen filters, three holds, and each filter's own
+#: inverse present, so a signal has to beat its opposite rather than zero.
+#:
+#: This IS selection: arms were dropped for losing. The justification is
+#: mechanistic and was predicted independently by replay before the
+#: tournament opened — but the surviving arms start from zero, and the
+#: fifty-arm noise ceiling still applies because there are still 42 real
+#: arms drawing from it.
 ARMS: tuple[Arm, ...] = (
-    # --- E: the exit, on every graduation. The live book is E05. ------------
-    Arm("E01_hold_1m", "all", 1, note="everything, out at 1 minute"),
-    Arm("E02_hold_2m", "all", 2, note="everything, out at 2 minutes"),
-    Arm("E03_hold_3m", "all", 3, note="everything, out at 3 minutes"),
-    Arm("E05_hold_5m", "all", 5, note="the live book's rule"),
-    Arm("E10_hold_10m", "all", 10, note="everything, out at 10 minutes"),
-    Arm("E15_hold_15m", "all", 15, note="everything, out at 15 minutes"),
-    Arm("E30_hold_30m", "all", 30, note="everything, out at 30 minutes"),
-    Arm("E60_hold_60m", "all", 60, note="held to the end of the series"),
-    # --- X: exit rules layered on the 5m and 15m holds -----------------------
-    Arm("X01_tp_1_5x_15m", "all", 15, tp=D("1.5"), note="1.5x target, 15m cap"),
-    Arm("X02_tp_2x_15m", "all", 15, tp=D("2"), note="2x target, 15m cap"),
-    Arm("X03_tp_3x_60m", "all", 60, tp=D("3"), note="3x target, hour cap"),
-    Arm("X04_trail_20_15m", "all", 15, trail=D("0.20"), note="20% trailing stop"),
-    Arm("X05_trail_30_60m", "all", 60, trail=D("0.30"), note="30% trailing, hour cap"),
-    Arm("X06_trail_50_60m", "all", 60, trail=D("0.50"), note="50% trailing, hour cap"),
-    Arm("X07_tp2_trail30", "all", 60, tp=D("2"), trail=D("0.30"), note="2x or -30% off peak"),
-    # --- F: one entry filter each, all at the 5-minute exit ------------------
-    Arm("F01_sym_5m", "sym", 5, note="symbol used before"),
-    Arm("F02_sym3_5m", "sym3", 5, note="symbol used 3+ times before"),
-    Arm("F03_newsym_5m", "newsym", 5, note="symbol never seen (the rug side)"),
-    Arm("F04_night_5m", "night", 5, note="pool opened 18:00-06:00 UTC"),
-    Arm("F05_day_5m", "day", 5, note="pool opened 06:00-18:00 UTC"),
-    Arm("F06_deep_5m", "deep", 5, note="liquidity >= $100k"),
-    Arm("F07_shallow_5m", "shallow", 5, note="liquidity < $30k"),
-    Arm("F08_nosell_5m", "nosell", 5, note="no sells in the first 5m of flow"),
-    Arm("F09_hassell_5m", "hassell", 5, note="some sells already"),
-    Arm("F10_bigcap_5m", "bigcap", 5, note="market cap >= $1M"),
-    Arm("F11_smallcap_5m", "smallcap", 5, note="market cap < $200k"),
-    # --- C: the combinations, and the same filters at other holds ------------
-    Arm("C01_symnight_5m", "sym_night", 5, note="symbol reused AND night — the A/B arm"),
-    Arm("C02_symnight_2m", "sym_night", 2, note="same filter, out at 2 minutes"),
-    Arm("C03_symnight_10m", "sym_night", 10, note="same filter, out at 10 minutes"),
-    Arm("C04_symnight_15m", "sym_night", 15, note="same filter, out at 15 minutes"),
-    Arm("C05_symnight_tp2", "sym_night", 15, tp=D("2"), note="filter + 2x target"),
-    Arm("C06_symdeep_5m", "sym_deep", 5, note="symbol reused AND deep pool"),
-    Arm("C07_symnosell_5m", "sym_nosell", 5, note="symbol reused AND no sells"),
-    Arm("C08_sym_2m", "sym", 2, note="symbol reused, out at 2 minutes"),
-    Arm("C09_sym_15m", "sym", 15, note="symbol reused, out at 15 minutes"),
-    Arm("C10_night_2m", "night", 2, note="night, out at 2 minutes"),
-    Arm("C11_night_15m", "night", 15, note="night, out at 15 minutes"),
-    Arm("C12_deep_2m", "deep", 2, note="deep pool, out at 2 minutes"),
-    Arm("C13_deep_15m", "deep", 15, note="deep pool, out at 15 minutes"),
-    Arm("C14_nosell_2m", "nosell", 2, note="no sells, out at 2 minutes"),
-    Arm("C15_smallcap_60m", "smallcap", 60, trail=D("0.30"),
-        note="small caps held for the tail, 30% trailing"),
-    Arm("C16_bigcap_15m", "bigcap", 15, note="big caps, out at 15 minutes"),
-    # --- R: the controls. These cannot have an edge. -------------------------
-    Arm("R1_coin50_5m", "rand50", 5, note="CONTROL — half the tokens, by coin flip"),
-    Arm("R2_coin50_5m", "rand50", 5, note="CONTROL — different coin, same rule"),
-    Arm("R3_coin50_2m", "rand50", 2, note="CONTROL — coin flip, 2m exit"),
-    Arm("R4_coin50_15m", "rand50", 15, note="CONTROL — coin flip, 15m exit"),
-    Arm("R5_coin25_5m", "rand25", 5, note="CONTROL — a quarter of the tokens"),
-    Arm("R6_coin25_15m", "rand25", 15, note="CONTROL — a quarter, 15m exit"),
-    Arm("R7_coin75_5m", "rand75", 5, note="CONTROL — three quarters"),
-    Arm("R8_coin75_60m", "rand75", 60, note="CONTROL — three quarters, hour hold"),
+    # --- every filter at one, two and three minutes ----------------------
+    # 1 minute
+    Arm("F01_all_1m", "all", 1, note="every graduation, out at 1m"),
+    Arm("F02_sym_1m", "sym", 1, note="symbol used before, out at 1m"),
+    Arm("F03_sym3_1m", "sym3", 1, note="symbol used 3+ times, out at 1m"),
+    Arm("F04_newsym_1m", "newsym", 1, note="symbol never seen, out at 1m"),
+    Arm("F05_night_1m", "night", 1, note="opened 18:00-06:00 UTC, out at 1m"),
+    Arm("F06_day_1m", "day", 1, note="opened 06:00-18:00 UTC, out at 1m"),
+    Arm("F07_deep_1m", "deep", 1, note="pool >= $100k, out at 1m"),
+    Arm("F08_shallow_1m", "shallow", 1, note="pool < $30k, out at 1m"),
+    Arm("F09_nosell_1m", "nosell", 1, note="no sells yet, out at 1m"),
+    Arm("F10_hassell_1m", "hassell", 1, note="sells already printed, out at 1m"),
+    Arm("F11_bigcap_1m", "bigcap", 1, note="market cap >= $1M, out at 1m"),
+    Arm("F12_smallcap_1m", "smallcap", 1, note="market cap < $200k, out at 1m"),
+    Arm("F13_symdeep_1m", "sym_deep", 1, note="symbol reused AND deep pool, out at 1m"),
+    Arm("F14_symnight_1m", "sym_night", 1, note="symbol reused AND night, out at 1m"),
+    # 2 minute
+    Arm("F15_all_2m", "all", 2, note="every graduation, out at 2m"),
+    Arm("F16_sym_2m", "sym", 2, note="symbol used before, out at 2m"),
+    Arm("F17_sym3_2m", "sym3", 2, note="symbol used 3+ times, out at 2m"),
+    Arm("F18_newsym_2m", "newsym", 2, note="symbol never seen, out at 2m"),
+    Arm("F19_night_2m", "night", 2, note="opened 18:00-06:00 UTC, out at 2m"),
+    Arm("F20_day_2m", "day", 2, note="opened 06:00-18:00 UTC, out at 2m"),
+    Arm("F21_deep_2m", "deep", 2, note="pool >= $100k, out at 2m"),
+    Arm("F22_shallow_2m", "shallow", 2, note="pool < $30k, out at 2m"),
+    Arm("F23_nosell_2m", "nosell", 2, note="no sells yet, out at 2m"),
+    Arm("F24_hassell_2m", "hassell", 2, note="sells already printed, out at 2m"),
+    Arm("F25_bigcap_2m", "bigcap", 2, note="market cap >= $1M, out at 2m"),
+    Arm("F26_smallcap_2m", "smallcap", 2, note="market cap < $200k, out at 2m"),
+    Arm("F27_symdeep_2m", "sym_deep", 2, note="symbol reused AND deep pool, out at 2m"),
+    Arm("F28_symnight_2m", "sym_night", 2, note="symbol reused AND night, out at 2m"),
+    # 3 minute
+    Arm("F29_all_3m", "all", 3, note="every graduation, out at 3m"),
+    Arm("F30_sym_3m", "sym", 3, note="symbol used before, out at 3m"),
+    Arm("F31_sym3_3m", "sym3", 3, note="symbol used 3+ times, out at 3m"),
+    Arm("F32_newsym_3m", "newsym", 3, note="symbol never seen, out at 3m"),
+    Arm("F33_night_3m", "night", 3, note="opened 18:00-06:00 UTC, out at 3m"),
+    Arm("F34_day_3m", "day", 3, note="opened 06:00-18:00 UTC, out at 3m"),
+    Arm("F35_deep_3m", "deep", 3, note="pool >= $100k, out at 3m"),
+    Arm("F36_shallow_3m", "shallow", 3, note="pool < $30k, out at 3m"),
+    Arm("F37_nosell_3m", "nosell", 3, note="no sells yet, out at 3m"),
+    Arm("F38_hassell_3m", "hassell", 3, note="sells already printed, out at 3m"),
+    Arm("F39_bigcap_3m", "bigcap", 3, note="market cap >= $1M, out at 3m"),
+    Arm("F40_smallcap_3m", "smallcap", 3, note="market cap < $200k, out at 3m"),
+    Arm("F41_symdeep_3m", "sym_deep", 3, note="symbol reused AND deep pool, out at 3m"),
+    Arm("F42_symnight_3m", "sym_night", 3, note="symbol reused AND night, out at 3m"),
+    # --- controls. These cannot have an edge. -----------------------------
+    Arm("R1_coin50_1m", "rand50", 1, note="CONTROL — 50% of tokens by coin flip, out at 1m"),
+    Arm("R2_coin50_2m", "rand50", 2, note="CONTROL — 50% of tokens by coin flip, out at 2m"),
+    Arm("R3_coin50_3m", "rand50", 3, note="CONTROL — 50% of tokens by coin flip, out at 3m"),
+    Arm("R4_coin25_2m", "rand25", 2, note="CONTROL — 25% of tokens by coin flip, out at 2m"),
+    Arm("R5_coin25_3m", "rand25", 3, note="CONTROL — 25% of tokens by coin flip, out at 3m"),
+    Arm("R6_coin75_1m", "rand75", 1, note="CONTROL — 75% of tokens by coin flip, out at 1m"),
+    Arm("R7_coin75_2m", "rand75", 2, note="CONTROL — 75% of tokens by coin flip, out at 2m"),
+    Arm("R8_coin75_3m", "rand75", 3, note="CONTROL — 75% of tokens by coin flip, out at 3m"),
 )
 
 BY_NAME: dict[str, Arm] = {a.name: a for a in ARMS}
 CONTROLS: tuple[Arm, ...] = tuple(a for a in ARMS if a.is_control)
 assert len(ARMS) == 50, f"the tournament is fifty arms, not {len(ARMS)}"
+assert {a.hold for a in ARMS} == {1, 2, 3}, (
+    "re-scoped to the short end: wipeout rate rises monotonically with hold "
+    "length and no exit rule can offset it")
+assert all(a.tp is None and a.trail is None for a in ARMS), (
+    "targets and trailing stops are gone — every one of them held 15m+")
 assert len(CONTROLS) == 8
 assert len({a.name for a in ARMS}) == 50, "arm names must be unique"
 assert all(len(a.name) <= 32 for a in ARMS), "arm name must fit the column"

@@ -363,7 +363,7 @@ def test_the_migration_chain_has_exactly_one_head() -> None:
 
     root = pathlib.Path(__file__).resolve().parents[4]
     listed = subprocess.run(
-        ["git", "ls-files", "alembic/versions/"],
+        ["git", "ls-files", "alembic/versions/"],  # noqa: S607
         cwd=root, capture_output=True, text=True, check=False).stdout.split()
     revisions, parents = {}, set()
     for name in listed:

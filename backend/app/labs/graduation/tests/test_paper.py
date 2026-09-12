@@ -42,7 +42,7 @@ def test_the_book_ships_with_the_rules_the_replay_supports() -> None:
     assert D("1000") == config.PAPER_CAPITAL_USD
     assert D("100") == config.PAPER_NOTIONAL_USD
     assert config.PAPER_MAX_SLOTS == 10
-    assert config.PAPER_MAX_HOLD_MINUTES == 5
+    assert config.PAPER_MAX_HOLD_MINUTES == 2
     # Both disabled: each made every hold worse at every level replayed.
     assert D("0") == config.PAPER_TRAILING_PCT
     assert D("0") == config.PAPER_TAKE_PROFIT_X
@@ -326,7 +326,7 @@ def test_the_paper_panels_render_two_tournament_arms() -> None:
     from app.labs.graduation.paper import PaperBook
     from app.labs.graduation.tournament import BY_NAME
 
-    assert config.PAPER_BOOKS == ("E05_hold_5m", "C01_symnight_5m")
+    assert config.PAPER_BOOKS == ("F15_all_2m", "F28_symnight_2m")
     control, filtered = (BY_NAME[n] for n in config.PAPER_BOOKS)
     assert control.entry == "all" and filtered.entry == "sym_night"
     assert control.hold == filtered.hold == config.PAPER_MAX_HOLD_MINUTES

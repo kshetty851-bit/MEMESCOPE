@@ -28,3 +28,22 @@ def test_the_poll_is_fast_enough_to_see_a_curve_climb() -> None:
     slower than a few seconds photographs the climb four times and calls the
     result a population."""
     assert config.POLL_INTERVAL_S <= 5
+
+
+def test_the_mark_interval_can_resolve_the_shortest_hold() -> None:
+    """A position can only leave at a price that was RECORDED, so the sampler's
+    interval is the floor on exit accuracy — the tick cannot beat it.
+
+    At sixty-second marks a two-minute hold could only exit at 2:00 or 3:00, a
+    fifty per cent overshoot on the one variable the tournament is now about:
+    wipeout rate rises monotonically with every extra minute held.
+    """
+    from app.labs.graduation.tournament import ARMS
+
+    shortest = min(a.hold for a in ARMS) * 60
+    assert shortest / 2 >= config.POSTGRAD_INTERVAL_S, (
+        f"{config.POSTGRAD_INTERVAL_S}s marks cannot resolve a "
+        f"{shortest}s hold")
+    assert config.PAPER_INTERVAL_SECONDS <= config.POSTGRAD_INTERVAL_S, (
+        "ticking slower than the marks arrive throws away resolution already "
+        "paid for")
