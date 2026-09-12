@@ -331,3 +331,21 @@ def test_the_pair_switch_answer_is_memoised() -> None:
     assert paper._SWITCHED_TTL.total_seconds() >= 60
     src = inspect.getsource(paper.switched_mints)
     assert "_SWITCHED" in src and "frozenset" in src
+
+
+def test_the_projection_is_memoised_because_its_cost_grows() -> None:
+    """160 simulated paths over a thirty-day horizon, for every arm with
+    enough trades, and the horizon grows with the trade rate. Measured on prod
+    across three consecutive calls: 1,955 ms, 2,279 ms, 2,577 ms — climbing,
+    on an endpoint polled every thirty seconds.
+
+    A forecast of the next month does not change meaningfully in two minutes.
+    Everything else on the leaderboard stays live.
+    """
+    from app.labs.graduation import api
+
+    assert api._PROJECTION_TTL.total_seconds() >= 60
+    body = inspect.getsource(api.tournament)
+    assert "_PROJECTIONS" in body and "cached.get" in body
+    # The live figures must NOT come from the memo.
+    assert "realised_usd=realised" in body

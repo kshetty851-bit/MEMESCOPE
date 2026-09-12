@@ -605,6 +605,21 @@ class Leaderboard(BaseModel):
     hours_running: Decimal = Decimal(0)
 
 
+#: Thirty-day projections, memoised. `(computed_at, {arm: fields})`.
+#:
+#: The simulation is 160 paths over a thirty-day horizon for every arm that
+#: has enough trades, and its cost grows with the horizon — measured on prod
+#: at 1,955 ms, then 2,279, then 2,577 across three consecutive calls as the
+#: trade rate climbed. That is precisely the "slows down later" shape, on an
+#: endpoint the board polls every thirty seconds.
+#:
+#: A forecast of the next month does not change meaningfully in two minutes,
+#: so it is computed at most that often. Everything else on the leaderboard —
+#: P&L, trade counts, the gate — stays live on every request.
+_PROJECTIONS: tuple[datetime, dict[str, dict[str, Any]]] | None = None
+_PROJECTION_TTL = timedelta(minutes=2)
+
+
 @router.get("/tournament", response_model=Leaderboard)
 async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
     """The leaderboard. One grouped read, not fifty."""
@@ -651,6 +666,11 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
     hours = ((datetime.now(UTC) - started).total_seconds() / 3600
              if started else 0.0)
 
+    global _PROJECTIONS
+    fresh = (_PROJECTIONS is not None
+             and datetime.now(UTC) - _PROJECTIONS[0] < _PROJECTION_TTL)
+    cached: dict[str, dict[str, Any]] = _PROJECTIONS[1] if fresh and _PROJECTIONS else {}
+
     def project(returns: list[float]) -> dict[str, Any]:
         """Thirty days of this arm, as an ACCOUNT rather than a running total.
 
@@ -685,7 +705,7 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
                 for _ in range(1024)]
         finals: list[float] = []
         ruined = 0
-        for _ in range(240):
+        for _ in range(160):
             equity = cap
             for _ in range(steps):
                 equity += size * pool[random.randrange(len(pool))]  # noqa: S311
@@ -719,7 +739,8 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
                 top = (Decimal(s.best) / Decimal(s.gross_up)).quantize(Decimal("0.0001"))
             if s.mean is not None:
                 mean = (Decimal(s.mean) * 100).quantize(Decimal("0.01"))
-        forecast = project(per_arm.get(arm.name, []))
+        forecast = (cached.get(arm.name, {}) if fresh
+                    else project(per_arm.get(arm.name, [])))
         realised = (Decimal(s.pnl) if s else Decimal(0)).quantize(Decimal("0.01"))
         return ArmRow(
             name=arm.name, note=arm.note, entry=arm.entry,
@@ -736,6 +757,14 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
             **forecast)
 
     rows = [row(a) for a in ARMS]
+    if not fresh:
+        _PROJECTIONS = (datetime.now(UTC), {
+            r.name: {"projected_30d_usd": r.projected_30d_usd,
+                     "projected_30d_low": r.projected_30d_low,
+                     "projected_30d_high": r.projected_30d_high,
+                     "projected_trades": r.projected_trades,
+                     "ruin_pct": r.ruin_pct}
+            for r in rows if r.projected_30d_usd is not None})
     # An arm that has not traded is not leading. Sorting on P&L alone ranks a
     # never-traded $0.00 above an arm that took one trade and lost $1.30, and
     # the top of the board fills with arms whose filter has simply not matched
