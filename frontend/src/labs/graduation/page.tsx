@@ -437,7 +437,8 @@ function PaperPanel({ book }: { book: PaperBook }) {
   // The full history, fetched apart from the board. While it loads the panel
   // shows the handful `/status` already carried, so the table is never empty
   // just because a second request is in flight.
-  const { data: history } = useGraduationTrades();
+  const { data: history } = useGraduationTrades(book.book);
+  const filtered = book.book === "filtered";
   const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({
     key: "closed_at",
     desc: true,
@@ -459,9 +460,23 @@ function PaperPanel({ book }: { book: PaperBook }) {
   return (
     <Panel>
       <PanelHeader>
-        <PanelTitle>Paper book (forward)</PanelTitle>
+        <PanelTitle>
+          {filtered ? "Paper book B — filtered" : "Paper book A — control"}
+        </PanelTitle>
       </PanelHeader>
       <div className="flex flex-col gap-4 p-4">
+        {filtered ? (
+          <p className="max-w-[65ch] rounded-md border border-accent/40 p-3 text-xs text-ink-dim">
+            <b className="text-ink">Identical rules, one extra check at entry:</b>{" "}
+            {book.filter_description}. Replaying 537 graduations, a never-seen
+            symbol rugged inside five minutes 18% of the time against 3% for
+            a reused one, and pools opening in the daytime-UTC hours rugged
+            15% against 5%. Two days of data is not enough to trust the
+            P&L, so it runs here beside the control on the same graduations
+            and the two are compared after four weeks. Nothing about the
+            control changed.
+          </p>
+        ) : null}
         <p className="max-w-[65ch] text-xs text-ink-dim">
           Buy the pool open, {usd(book.notional_usd)} a position,{" "}
           {book.max_slots} at once, sell at {book.max_hold_minutes} minutes.
@@ -909,6 +924,9 @@ export function GraduationLabPage() {
       <ReturnsPanel />
 
       {data.paper.running ? <PaperPanel book={data.paper} /> : null}
+      {data.paper_filtered.running ? (
+        <PaperPanel book={data.paper_filtered} />
+      ) : null}
 
       <Panel>
         <PanelHeader>

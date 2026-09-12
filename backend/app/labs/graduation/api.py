@@ -90,6 +90,9 @@ class PaperBookOut(BaseModel):
     """The forward book. Rules frozen in advance; nothing here is tunable."""
 
     running: bool = False
+    #: `control` or `filtered`. Same rules; the second adds one entry check.
+    book: str = "control"
+    filter_description: str = ""
     starting_usd: Decimal = Decimal(0)
     equity_usd: Decimal = Decimal(0)
     realised_usd: Decimal = Decimal(0)
@@ -164,6 +167,9 @@ class GraduationStatus(BaseModel):
     graduates_seen_climbing: int = 0
     graduates_seen_at_90: int = 0
     paper: PaperBookOut = PaperBookOut()
+    #: The A/B twin: identical rules behind an entry filter, on the same
+    #: graduations. Compared against `paper` after four weeks.
+    paper_filtered: PaperBookOut = PaperBookOut(book="filtered")
 
     # --- is the chain actually being read? ----------------------------------
     #: When the poller last successfully read ANY curve. `last_sample_at`
@@ -294,7 +300,8 @@ async def status(db: AsyncSession = Depends(get_db)) -> GraduationStatus:
     polls_per_minute = max(1, 60 // max(1, config.POLL_INTERVAL_S))
     base.rpc_calls_per_minute = calls_per_poll * polls_per_minute
 
-    base.paper = await _paper(db)
+    base.paper = await _paper(db, book="control")
+    base.paper_filtered = await _paper(db, book="filtered")
 
     rows = (await db.execute(
         select(GradToken.mint, GradToken.symbol, GradToken.max_progress_pct,
@@ -313,11 +320,18 @@ async def status(db: AsyncSession = Depends(get_db)) -> GraduationStatus:
     return base
 
 
-async def _paper(db: AsyncSession, *, limit: int | None = 10) -> PaperBookOut:
-    """The book's state. Read-only: this endpoint never ticks it."""
-    book = PaperBook(db)
-    account = await book.account()
-    open_rows, closed_rows = await positions(db, limit=limit)
+def _filter_description() -> str:
+    return (f"pool opened {config.PAPER_FILTER_HOUR_START:02d}:00-"
+            f"{config.PAPER_FILTER_HOUR_END:02d}:00 UTC, and the symbol had "
+            f"been used by at least {config.PAPER_FILTER_MIN_SYMBOL_REUSE} "
+            f"earlier token{'s' if config.PAPER_FILTER_MIN_SYMBOL_REUSE != 1 else ''}")
+
+
+async def _paper(db: AsyncSession, *, book: str = "control",
+                 limit: int | None = 10) -> PaperBookOut:
+    """One book's state. Read-only: this endpoint never ticks it."""
+    account = await PaperBook(db, book=book).account()
+    open_rows, closed_rows = await positions(db, book=book, limit=limit)
     # The headline cost is a real position's, not a nominal one: the priority
     # fee is flat in SOL, so its share depends entirely on the size traded.
     # With no positions yet there is no rate to convert $100 with, and the
@@ -350,6 +364,8 @@ async def _paper(db: AsyncSession, *, limit: int | None = 10) -> PaperBookOut:
 
     return PaperBookOut(
         running=config.paper_enabled(),
+        book=book,
+        filter_description=_filter_description() if book == "filtered" else "",
         # Quantised HERE, not left to the renderer: an unrounded Decimal
         # serialises as 1023.223558651711844672524598 and reads as false
         # precision on a figure that is only ever dollars and cents.
@@ -382,7 +398,8 @@ async def _paper(db: AsyncSession, *, limit: int | None = 10) -> PaperBookOut:
 
 
 @router.get("/paper/trades", response_model=PaperBookOut)
-async def paper_trades(db: AsyncSession = Depends(get_db)) -> PaperBookOut:
+async def paper_trades(book: str = "control",
+                       db: AsyncSession = Depends(get_db)) -> PaperBookOut:
     """Every closed trade, not just the recent ones.
 
     Its own route rather than a bigger `/status`, because the board polls
@@ -392,7 +409,9 @@ async def paper_trades(db: AsyncSession = Depends(get_db)) -> PaperBookOut:
     """
     if not config.enabled():
         return PaperBookOut()
-    return await _paper(db, limit=None)
+    if book not in config.PAPER_BOOKS:
+        return PaperBookOut(book=book)
+    return await _paper(db, book=book, limit=None)
 
 
 #: How far every graduated token got, from its pool open to its HIGHEST

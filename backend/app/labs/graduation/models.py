@@ -595,13 +595,19 @@ class GradPaperPosition(Base):
 
     __tablename__ = "grad_paper_positions"
     __table_args__ = (
-        UniqueConstraint("mint", name="uq_grad_paper_positions_mint"),
+        UniqueConstraint("book", "mint", name="uq_grad_paper_positions_book_mint"),
         Index("ix_grad_paper_positions_open", "closed_at"),
+        Index("ix_grad_paper_positions_book", "book", "closed_at"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
     )
+    #: Which book this position belongs to: `control` runs the frozen rules
+    #: on every graduation; `filtered` runs the SAME rules behind an entry
+    #: filter. They are an A/B on identical tokens, so one row per (book, mint).
+    book: Mapped[str] = mapped_column(String(16), nullable=False,
+                                      server_default="control")
     mint: Mapped[str] = mapped_column(_ADDRESS, nullable=False)
     symbol: Mapped[str | None] = mapped_column(String(32))
 

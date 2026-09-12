@@ -314,3 +314,43 @@ def test_the_book_ticks_often_enough_to_honour_its_own_exit() -> None:
     assert hold_s / 10 >= config.PAPER_INTERVAL_SECONDS, (
         f"a {config.PAPER_INTERVAL_SECONDS}s tick cannot honour a "
         f"{config.PAPER_MAX_HOLD_MINUTES}-minute hold")
+
+
+# --- the A/B entry filter -----------------------------------------------------
+
+def test_the_two_books_share_every_rule_but_one() -> None:
+    """The experiment is ONE check at entry. If anything else differs between
+    the books the comparison measures that instead."""
+    from app.labs.graduation.paper import PaperBook
+
+    assert config.PAPER_BOOKS == ("control", "filtered")
+    # Same class, same code path; the book name is the only input.
+    assert PaperBook.__init__.__code__ is PaperBook.__init__.__code__
+    import pytest
+    with pytest.raises(ValueError):
+        PaperBook(None, book="tuned")  # type: ignore[arg-type]
+
+
+def test_the_filter_is_pinned_to_what_the_replay_found() -> None:
+    """18:00-05:59 UTC, symbol used at least once before. Pinned so a later
+    edit is a visible change to a stated rule; the values came from a replay
+    of 537 graduations and are not tuned after the fact."""
+    assert (config.PAPER_FILTER_HOUR_START, config.PAPER_FILTER_HOUR_END) == (18, 6)
+    assert config.PAPER_FILTER_MIN_SYMBOL_REUSE == 1
+
+
+def test_the_hour_window_wraps_midnight() -> None:
+    from app.labs.graduation.paper import in_hour_window
+
+    def at(h: int) -> datetime:
+        return datetime(2026, 9, 13, h, 30, tzinfo=UTC)
+
+    inside = [in_hour_window(at(h), 18, 6) for h in (18, 21, 23, 0, 3, 5)]
+    outside = [in_hour_window(at(h), 18, 6) for h in (6, 9, 12, 15, 17)]
+    assert all(inside) and not any(outside)
+    # A non-wrapping window still works, and the end is exclusive.
+    assert in_hour_window(at(9), 6, 18) and not in_hour_window(at(18), 6, 18)
+    # Timezone-aware input from a different zone is judged in UTC.
+    from datetime import timedelta, timezone
+    ist = timezone(timedelta(hours=5, minutes=30))
+    assert in_hour_window(datetime(2026, 9, 13, 2, 0, tzinfo=ist), 18, 6)  # 20:30 UTC

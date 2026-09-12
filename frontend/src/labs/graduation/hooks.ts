@@ -24,10 +24,10 @@ export function useGraduationStatus() {
  * never changes, so the only new information is the odd exit, and the book
  * ticks once a minute.
  */
-export function useGraduationTrades() {
+export function useGraduationTrades(book: string) {
   return useQuery({
-    queryKey: ["graduation", "paper-trades"],
-    queryFn: fetchPaperTrades,
+    queryKey: ["graduation", "paper-trades", book],
+    queryFn: () => fetchPaperTrades(book),
     refetchInterval: 60_000,
   });
 }

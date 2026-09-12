@@ -59,6 +59,9 @@ export interface GraduationStatus {
   recorder_stalled: boolean;
   stall_threshold_s: number;
   paper: PaperBook;
+  /** The A/B twin: identical rules behind an entry filter, on the same
+   * graduations. Compared against `paper` after four weeks. */
+  paper_filtered: PaperBook;
 }
 
 
@@ -88,6 +91,9 @@ export interface PaperPosition {
 /** The forward paper book. Rules frozen in advance; nothing here is tunable. */
 export interface PaperBook {
   running: boolean;
+  /** `control` or `filtered`. Same rules; the second adds one entry check. */
+  book: string;
+  filter_description: string;
   starting_usd: string;
   equity_usd: string;
   realised_usd: string;

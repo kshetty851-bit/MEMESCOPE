@@ -101,9 +101,13 @@ async def paper_tick() -> dict[str, Any]:
         return {"skipped": "graduation_paper_disabled"}
     try:
         async with SessionFactory() as session:
-            result = await PaperBook(session).tick()
+            # Both books, one clock, one commit: they see the same graduations
+            # at the same instant, which is what makes them comparable.
+            now = datetime.now(UTC)
+            results = {book: await PaperBook(session, book=book, now=now).tick()
+                       for book in config.PAPER_BOOKS}
             await session.commit()
-            return result
+            return results
     except Exception:  # containment: never raise into the beat
         logger.exception("graduation_paper_failed")
         return {"error": "graduation_paper_failed"}

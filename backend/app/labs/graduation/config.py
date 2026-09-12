@@ -427,6 +427,28 @@ PAPER_ENTRY_GRACE_MINUTES = _int("LAB_GRADUATION_PAPER_ENTRY_GRACE_MIN", 3)
 #: inattention.
 PAPER_INTERVAL_SECONDS = _int("LAB_GRADUATION_PAPER_TICK_S", 15)
 
+# --- the A/B: an entry filter, tested rather than adopted ---------------------
+#
+# Replaying 537 graduations (2026-09-11/12) found two ENTRY-TIME signals that
+# separate rugs, both mechanistic, both holding on each recorded day:
+#
+#   symbol never seen before   rugs in 5m 18.0%   reused symbol      3.0%
+#   pool open 06:00-17:59 UTC  rugs in 5m 14.9%   18:00-05:59 UTC    5.4%
+#
+# The never-seen symbols that rugged were mash-ups of trending words — flygpt,
+# juggbrain, fomoceo — fresh fabrications. The reused ones were copies of
+# things with proven demand. Combined, the two cut the rug rate to 2.0% and
+# keep 47% of graduations. Two days is not enough to trust the P&L, so the
+# filter runs as a SECOND book beside the control, on the same graduations,
+# and the two are compared after four weeks. The control is not touched.
+PAPER_BOOKS = ("control", "filtered")
+#: The filtered book enters only when the pool opened inside this UTC window
+#: (start inclusive, end exclusive, wrapping midnight).
+PAPER_FILTER_HOUR_START = _int("LAB_GRADUATION_PAPER_FILTER_HOUR_START", 18)
+PAPER_FILTER_HOUR_END = _int("LAB_GRADUATION_PAPER_FILTER_HOUR_END", 6)
+#: ...and only when at least this many EARLIER tokens used the same symbol.
+PAPER_FILTER_MIN_SYMBOL_REUSE = _int("LAB_GRADUATION_PAPER_FILTER_REUSE", 1)
+
 # --- the kill gate, stated before this run produced a single trade ------------
 #
 # Written down on 2026-09-12, the day the book was re-armed, so that a good

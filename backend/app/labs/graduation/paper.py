@@ -229,14 +229,68 @@ class Account:
         }
 
 
-class PaperBook:
-    """One tick: mark and manage what is open, then fill what it can."""
+def in_hour_window(when: datetime, start: int, end: int) -> bool:
+    """Is `when` inside [start, end) UTC hours, wrapping midnight?"""
+    hour = when.astimezone(UTC).hour
+    return (start <= hour < end) if start < end else (hour >= start or hour < end)
 
-    def __init__(self, session: AsyncSession, *,
+
+async def symbol_reuse(session: AsyncSession, mint: str) -> int | None:
+    """How many tokens with this mint's symbol were first seen BEFORE it.
+
+    Strictly earlier, so it is knowable at entry. None when the token has no
+    symbol on record — the research treated that as zero reuse and skipped it,
+    and so does the filter.
+    """
+    row = (await session.execute(
+        select(GradToken.symbol, GradToken.first_seen_at)
+        .where(GradToken.mint == mint))).first()
+    if row is None or not row.symbol or not row.symbol.strip():
+        return None
+    return int(await session.scalar(
+        select(func.count()).select_from(GradToken)
+        .where(func.lower(GradToken.symbol) == row.symbol.strip().lower(),
+               GradToken.first_seen_at < row.first_seen_at,
+               GradToken.mint != mint)) or 0)
+
+
+async def passes_entry_filter(session: AsyncSession, mint: str,
+                              open_at: datetime) -> tuple[bool, str]:
+    """The filtered book's one extra rule. Returns (verdict, reason).
+
+    Two conditions, both fixed before the book opened a trade: the pool
+    opened inside the hour window, and the symbol had been used before.
+    """
+    if not in_hour_window(open_at, config.PAPER_FILTER_HOUR_START,
+                          config.PAPER_FILTER_HOUR_END):
+        return False, "hour"
+    reuse = await symbol_reuse(session, mint)
+    if reuse is None or reuse < config.PAPER_FILTER_MIN_SYMBOL_REUSE:
+        return False, "symbol_new"
+    return True, "ok"
+
+
+class PaperBook:
+    """One tick: mark and manage what is open, then fill what it can.
+
+    `book` selects which of the two books this instance is. They share every
+    rule and every line of code; the filtered one adds a single check before
+    opening a position. That is the whole experiment, and it is why the two
+    are one class rather than two.
+    """
+
+    def __init__(self, session: AsyncSession, *, book: str = "control",
                  now: datetime | None = None) -> None:
+        if book not in config.PAPER_BOOKS:
+            raise ValueError(f"unknown paper book {book!r}")
         self._session = session
+        self._book = book
         self._now = now or datetime.now(UTC)
         self._costs = costs()
+
+    @property
+    def book(self) -> str:
+        return self._book
 
     async def tick(self) -> dict[str, Any]:
         if not config.paper_enabled():
@@ -244,7 +298,8 @@ class PaperBook:
         closed = await self._manage()
         opened = await self._fill()
         account = await self.account()
-        return {"opened": opened, "closed": closed, **account.as_dict()}
+        return {"book": self._book, "opened": opened, "closed": closed,
+                **account.as_dict()}
 
     # --- managing what is open ----------------------------------------------
 
@@ -258,7 +313,8 @@ class PaperBook:
         """
         positions = (await self._session.scalars(
             select(GradPaperPosition)
-            .where(GradPaperPosition.closed_at.is_(None),
+            .where(GradPaperPosition.book == self._book,
+                   GradPaperPosition.closed_at.is_(None),
                    # Rows written before the book was denominated in dollars
                    # carry no size and cannot be marked. They are excluded
                    # rather than counted as zero-value positions.
@@ -312,8 +368,9 @@ class PaperBook:
         # Re-converting the SOL proceeds at today's rate would let a move in
         # SOL rewrite what a closed trade earned.
         position.pnl_usd = (position.notional_usd * net).quantize(Decimal("0.01"))
-        logger.info("graduation_paper_closed", mint=position.mint,
-                    reason=reason, net=float(position.net_return))
+        logger.info("graduation_paper_closed", book=self._book,
+                    mint=position.mint, reason=reason,
+                    net=float(position.net_return))
 
     # --- filling free slots -------------------------------------------------
 
@@ -328,7 +385,8 @@ class PaperBook:
         if account.free_slots <= 0:
             return 0
 
-        traded = select(GradPaperPosition.mint)
+        traded = (select(GradPaperPosition.mint)
+                  .where(GradPaperPosition.book == self._book))
         cutoff = self._now - timedelta(minutes=config.PAPER_ENTRY_GRACE_MINUTES)
         opens = (select(GradPostgradSample.mint,
                         func.min(GradPostgradSample.ts).label("open_at"))
@@ -351,6 +409,13 @@ class PaperBook:
         for row in rows:
             if row.price_native is None or row.price_native <= 0:
                 continue
+            if self._book == "filtered":
+                ok, why = await passes_entry_filter(
+                    self._session, row.mint, row.open_at)
+                if not ok:
+                    logger.info("graduation_paper_filtered_out",
+                                mint=row.mint, reason=why)
+                    continue
             rate = _rate(row.price_usd, row.price_native)
             if rate is None:
                 # No observed SOL/USD for this token. Sizing it at an invented
@@ -364,6 +429,7 @@ class PaperBook:
             if fill <= 0:
                 continue
             self._session.add(GradPaperPosition(
+                book=self._book,
                 mint=row.mint,
                 opened_at=row.open_at,
                 open_quote=row.price_native.quantize(_P),
@@ -377,8 +443,8 @@ class PaperBook:
                 marked_at=self._now,
             ))
             opened += 1
-            logger.info("graduation_paper_opened", mint=row.mint,
-                        usd=float(config.PAPER_NOTIONAL_USD))
+            logger.info("graduation_paper_opened", book=self._book,
+                        mint=row.mint, usd=float(config.PAPER_NOTIONAL_USD))
         return opened
 
     # --- reads ---------------------------------------------------------------
@@ -406,7 +472,8 @@ class PaperBook:
     async def account(self) -> Account:
         bad = switched_mints()
         #: Applies to every position, open or closed.
-        sound = (GradPaperPosition.notional_usd > 0,
+        sound = (GradPaperPosition.book == self._book,
+                 GradPaperPosition.notional_usd > 0,
                  GradPaperPosition.mint.not_in(bad))
         #: A CLOSED position must also have exited at a real price. A zero or
         #: NULL `close_quote` means the exit was marked against a price the
@@ -426,7 +493,8 @@ class PaperBook:
                    GradPaperPosition.pnl_usd > 0, *banked))
         voided = await self._session.scalar(
             select(func.count()).select_from(GradPaperPosition)
-            .where(GradPaperPosition.closed_at.is_not(None),
+            .where(GradPaperPosition.book == self._book,
+                   GradPaperPosition.closed_at.is_not(None),
                    GradPaperPosition.notional_usd > 0,
                    GradPaperPosition.mint.in_(bad)
                    | GradPaperPosition.close_quote.is_(None)
@@ -466,7 +534,8 @@ class PaperBook:
         )
 
 
-async def positions(session: AsyncSession, *, limit: int | None = None
+async def positions(session: AsyncSession, *, book: str = "control",
+                    limit: int | None = None
                     ) -> tuple[Sequence[Any], Sequence[Any]]:
     """Open and closed, separately.
 
@@ -488,7 +557,8 @@ async def positions(session: AsyncSession, *, limit: int | None = None
                            & GradPaperPosition.close_quote.is_(None))
                         | (GradPaperPosition.close_quote <= 0)).label("voided"))
                 .outerjoin(GradToken, GradToken.mint == GradPaperPosition.mint)
-                .where(GradPaperPosition.notional_usd > 0,
+                .where(GradPaperPosition.book == book,
+                       GradPaperPosition.notional_usd > 0,
                        GradPaperPosition.closed_at.is_not(None) if closed
                        else GradPaperPosition.closed_at.is_(None)))
 
