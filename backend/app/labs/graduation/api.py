@@ -631,10 +631,14 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
     # Per-trade returns, for the projection band. Aggregates cannot give it:
     # the spread of thirty days depends on the SHAPE of an arm's returns, and
     # this market's shape is hundreds of small gains against a few wipeouts.
+    # Bounded to a week. Unbounded this grows without limit, and a projection
+    # built from month-old trades would be describing a market that has moved
+    # on — the recent window is both cheaper and more honest.
     per_arm: dict[str, list[float]] = {}
     for book, ret in (await db.execute(
             select(GradPaperPosition.book, GradPaperPosition.net_return)
             .where(GradPaperPosition.closed_at.is_not(None),
+                   GradPaperPosition.closed_at >= datetime.now(UTC) - timedelta(days=7),
                    GradPaperPosition.notional_usd > 0,
                    GradPaperPosition.close_quote > 0,
                    GradPaperPosition.net_return.is_not(None)))).all():

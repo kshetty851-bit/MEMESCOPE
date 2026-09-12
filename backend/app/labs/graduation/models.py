@@ -258,6 +258,11 @@ class GradPostgradSample(Base):
     __table_args__ = (
         UniqueConstraint("mint", "ts", name="uq_grad_postgrad_samples_mint_ts"),
         Index("ix_grad_postgrad_samples_mint_ts", "mint", "ts"),
+        # `paper.switched_mints` asks whether any mint was sampled against two
+        # pools. That has to look at every mint however it is indexed, so this
+        # only takes it from a sequential scan to an index-only scan — the
+        # real fix is the five-minute memo on the Python side.
+        Index("ix_grad_postgrad_mint_pair", "mint", "pair_address"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(

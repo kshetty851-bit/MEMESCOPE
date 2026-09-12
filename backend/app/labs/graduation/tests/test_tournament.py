@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from datetime import UTC, datetime
 from decimal import Decimal
 
@@ -280,3 +281,53 @@ def test_ruin_ends_the_path_and_the_rest_of_the_month() -> None:
         collected += 1
     assert collected < len(returns), "the late winner is never reached"
     assert equity < capital
+
+
+# --- the tick must not get slower as the lab records more --------------------
+
+def test_the_candidate_query_is_bounded_by_the_window_not_the_table() -> None:
+    """The obvious form — GROUP BY mint HAVING min(ts) >= cutoff — asks every
+    mint that ever existed when its first sample was, so Postgres scans the
+    whole table: 211 ms against 56,000 rows, on a table growing 130,000 a day,
+    inside a tick that runs every fifteen seconds.
+
+    The form actually used asks it backwards: a pool that opened inside the
+    window HAS a sample inside it and NO sample before it. Both are index
+    lookups, and the first only ever touches the last few minutes of rows.
+    Measured 23 ms, and flat in table size.
+
+    Asserted on the SQL rather than by timing, because a timing test on a
+    developer machine measures the developer's machine.
+    """
+    import re
+
+    from app.labs.graduation import tournament as t
+
+    src = inspect.getsource(t.Tournament._candidates)
+    body = "\n".join(ln for ln in src.splitlines()
+                     if not ln.strip().startswith("#"))
+    assert "exists()" in body, "the cheap form uses a NOT EXISTS"
+    assert not re.search(r"having\s*\(\s*func\.min", body), (
+        "HAVING min(ts) over the whole table is the scan this replaced")
+
+
+def test_the_projection_window_is_bounded() -> None:
+    """Per-trade returns feed the thirty-day projection. Unbounded, that query
+    grows without limit; and a projection built from month-old trades would be
+    describing a market that has moved on."""
+    from app.labs.graduation import api
+
+    body = inspect.getsource(api.tournament)
+    assert "timedelta(days=7)" in body
+
+
+def test_the_pair_switch_answer_is_memoised() -> None:
+    """Deriving it is a pass over every sample ever recorded — 2,269 ms at
+    56,000 rows, and it ran on every status poll. An index only reaches
+    1,099 ms because the question has to look at every mint however it is
+    indexed, so the answer is held instead."""
+    from app.labs.graduation import paper
+
+    assert paper._SWITCHED_TTL.total_seconds() >= 60
+    src = inspect.getsource(paper.switched_mints)
+    assert "_SWITCHED" in src and "frozenset" in src

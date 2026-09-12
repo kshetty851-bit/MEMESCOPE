@@ -53,7 +53,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import false, func, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
@@ -101,7 +101,16 @@ def costs(notional_quote: Decimal | None = None) -> Costs:
     return Costs(notional_quote=notional_quote or config.BACKTEST_NOTIONAL_QUOTE)
 
 
-def switched_mints():
+#: `switched_mints` memo: (computed_at, mints). Module level so every request
+#: shares it.
+_SWITCHED: tuple[datetime, frozenset[str]] | None = None
+#: Five minutes. The set can only grow from rows written BEFORE the sampler
+#: began pinning the pair, and pinning means it should never grow again — so
+#: this is cache invalidation for something that has stopped changing.
+_SWITCHED_TTL = timedelta(minutes=5)
+
+
+async def switched_mints(session: AsyncSession) -> frozenset[str]:
     """Mints whose recorded price series hops between pools.
 
     A position is opened against ONE pool and marking it against another is
@@ -114,10 +123,26 @@ def switched_mints():
     Derived rather than stamped on the position: it is a property of the
     price series, it can only be known after the fact, and a column would be
     a second copy of something the samples already state.
+
+    CACHED, because deriving it costs a pass over every sample ever recorded —
+    measured at 2,269 ms against 56,000 rows, on a table growing by 130,000 a
+    day, and it ran on every status poll. An index only took it to 1,099 ms:
+    the question "does any mint have two pair addresses" has to look at every
+    mint however it is indexed. So it is computed at most every five minutes
+    and the answer is held as a set, which turns the caller's `NOT IN` from a
+    correlated scan into a membership test against a few dozen values.
     """
-    return (select(GradPostgradSample.mint)
-            .group_by(GradPostgradSample.mint)
-            .having(func.count(func.distinct(GradPostgradSample.pair_address)) > 1))
+    global _SWITCHED
+    now = datetime.now(UTC)
+    if _SWITCHED is not None and now - _SWITCHED[0] < _SWITCHED_TTL:
+        return _SWITCHED[1]
+    rows = (await session.scalars(
+        select(GradPostgradSample.mint)
+        .group_by(GradPostgradSample.mint)
+        .having(func.count(func.distinct(GradPostgradSample.pair_address)) > 1)
+    )).all()
+    _SWITCHED = (now, frozenset(rows))
+    return _SWITCHED[1]
 
 
 def exit_policy() -> ExitPolicy:
@@ -472,11 +497,11 @@ class PaperBook:
             .order_by(GradPostgradSample.ts.desc()).limit(1))
 
     async def account(self) -> Account:
-        bad = switched_mints()
+        bad = await switched_mints(self._session)
         #: Applies to every position, open or closed.
         sound = (GradPaperPosition.book == self._book,
                  GradPaperPosition.notional_usd > 0,
-                 GradPaperPosition.mint.not_in(bad))
+                 GradPaperPosition.mint.not_in(bad) if bad else true())
         #: A CLOSED position must also have exited at a real price. A zero or
         #: NULL `close_quote` means the exit was marked against a price the
         #: old eight-decimal column could not represent — 0076 turned those
@@ -498,7 +523,7 @@ class PaperBook:
             .where(GradPaperPosition.book == self._book,
                    GradPaperPosition.closed_at.is_not(None),
                    GradPaperPosition.notional_usd > 0,
-                   GradPaperPosition.mint.in_(bad)
+                   (GradPaperPosition.mint.in_(bad) if bad else false())
                    | GradPaperPosition.close_quote.is_(None)
                    | (GradPaperPosition.close_quote <= 0)))
         # The gate terms come from the realised trades themselves, so they
@@ -550,11 +575,11 @@ async def positions(session: AsyncSession, *, book: str = "E05_hold_5m",
     writing the symbol at fill time would only fix the ones opened from here on.
     """
 
-    bad = switched_mints()
+    bad = await switched_mints(session)
 
     def rows(closed: bool):
         return (select(GradPaperPosition, GradToken.symbol, GradToken.name,
-                       (GradPaperPosition.mint.in_(bad)
+                       ((GradPaperPosition.mint.in_(bad) if bad else false())
                         | (GradPaperPosition.closed_at.is_not(None)
                            & GradPaperPosition.close_quote.is_(None))
                         | (GradPaperPosition.close_quote <= 0)).label("voided"))

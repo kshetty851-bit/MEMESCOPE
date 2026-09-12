@@ -40,6 +40,7 @@ from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.core.logging import get_logger
 from app.labs.graduation import config
@@ -379,12 +380,34 @@ class Tournament:
         """Pool opens inside the entry grace window, with everything each arm
         needs to decide, in one read."""
         cutoff = self._now - timedelta(minutes=config.PAPER_ENTRY_GRACE_MINUTES)
+        # Written to stay flat as the sample table grows, not to read well.
+        #
+        # The obvious form — GROUP BY mint HAVING min(ts) >= cutoff — asks
+        # every mint that ever existed when its first sample was, so Postgres
+        # scans the whole table: measured at 211 ms against 56,000 rows, on a
+        # table growing 130,000 a day, inside a tick that runs every fifteen
+        # seconds. This asks the same question backwards. A pool that opened
+        # inside the window HAS a sample inside the window and NO sample
+        # before it, and both of those are index lookups: 23 ms, and the first
+        # step only ever touches the last few minutes of rows however large
+        # the table gets.
+        earlier = aliased(GradPostgradSample)
+        recent = (select(GradPostgradSample.mint)
+                  .where(GradPostgradSample.ts >= cutoff,
+                         GradPostgradSample.ts <= self._now,
+                         GradPostgradSample.price_native > 0)
+                  .distinct()).subquery()
+        fresh = (select(recent.c.mint)
+                 .where(~select(1).select_from(earlier)
+                        .where(earlier.mint == recent.c.mint,
+                               earlier.ts < cutoff,
+                               earlier.price_native > 0)
+                        .exists())).subquery()
         opens = (select(GradPostgradSample.mint,
                         func.min(GradPostgradSample.ts).label("open_at"))
-                 .where(GradPostgradSample.price_native > 0,
-                        GradPostgradSample.ts <= self._now)
+                 .join(fresh, fresh.c.mint == GradPostgradSample.mint)
+                 .where(GradPostgradSample.price_native > 0)
                  .group_by(GradPostgradSample.mint)
-                 .having(func.min(GradPostgradSample.ts) >= cutoff)
                  .order_by(func.min(GradPostgradSample.ts))
                  .limit(64)).subquery()
         return (await self._session.execute(
