@@ -106,6 +106,18 @@ STRICT = GateThresholds(
     max_position_pct_of_liquidity=Decimal("0.25"),
 )
 
+#: F2 only. $200k and not $300k: above $200k the liquidity/total-loss
+#: association is no longer significant (p=0.16 on Karthik, n=311), so raising
+#: the floor further buys nothing measurable and costs trade volume. $300k
+#: looked better only on n=28 from a single calendar day, with a bootstrap 95%
+#: CI on mean net P&L of [-$0.67, +$3.17] — and it did not replicate on v2.
+#: The impact ceiling is Rafiq's `max_impact_pct` of 1.5.
+F2 = GateThresholds(
+    min_liquidity_usd=Decimal(200_000),
+    min_market_cap_usd=Decimal(200_000),
+    max_entry_price_impact_pct=Decimal("1.5"),
+)
+
 
 @dataclass(frozen=True, slots=True)
 class GateVerdict:

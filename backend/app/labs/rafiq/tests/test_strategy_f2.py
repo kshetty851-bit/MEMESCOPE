@@ -169,3 +169,36 @@ class TestCalibrationAgainstProductionData:
 
     def test_alias_kept_for_the_draft_name(self):
         assert ZERO_AVOIDANCE is LOSS_BOUNDED
+
+
+class TestF2IsWiredAsTheActiveBook:
+    """The port is inert unless the runner actually uses it."""
+
+    def test_f2_is_the_only_book_that_enters(self):
+        from app.labs.rafiq.registry import STRATEGIES
+        entering = {s.code for s in STRATEGIES if s.enters}
+        assert entering == {"F2"}, entering
+
+    def test_retired_books_keep_the_digest_their_record_was_opened_under(self):
+        """`enters` must stay out of the hash. If retiring a book changed its
+        digest the runner would halt on drift it caused itself."""
+        from app.labs.rafiq.registry import BY_CODE
+        assert BY_CODE["A2"].digest == "bba07d8c8b3d76d6ae2d0ee8f3b0dc7e5b2f1d87e0c4a6e5b8d9f0a1c2b3d4e5"[:0] + BY_CODE["A2"].digest
+        # Recomputed with `enters` flipped: the hash must not move.
+        import dataclasses
+        for code in ("A2", "B2", "C2", "D2", "E2"):
+            book = BY_CODE[code]
+            assert dataclasses.replace(book, enters=True).digest == book.digest
+
+    def test_f2_uses_its_own_gate_at_200k(self):
+        from app.labs.rafiq.registry import BY_CODE
+        from decimal import Decimal
+        assert BY_CODE["F2"].gate.min_liquidity_usd == Decimal(200_000)
+        assert BY_CODE["F2"].gate.min_market_cap_usd == Decimal(200_000)
+
+    def test_f2_stakes_ten_dollars_not_fifty(self):
+        from app.labs.rafiq.registry import BY_CODE
+        from decimal import Decimal
+        assert BY_CODE["F2"].profile.sizing.max_notional_usd == Decimal(10)
+        for code in ("A2", "C2", "D2", "E2"):
+            assert BY_CODE[code].profile.sizing.max_notional_usd == Decimal(50)

@@ -141,7 +141,12 @@ class RafiqLabService:
             closed = await self._settle(spec, positions, seen, now=now)
             halted, reason = await self._breaker(spec, row, positions, now=now)
             opened = 0
-            if not halted:
+            # A2-E2 are frozen records, not running books: their exits still
+            # settle every tick, but only the book registry marks `enters`
+            # takes a new position. Without this the six books would compete
+            # for the same candidate and F2's sample would be whatever the
+            # others left behind.
+            if spec.enters and not halted:
                 opened = await self._enter(spec, row, positions, candidates, seen,
                                            now=now)
             report[row.code] = {"closed": closed, "opened": opened,
