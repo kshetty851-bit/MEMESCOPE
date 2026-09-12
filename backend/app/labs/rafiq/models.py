@@ -339,14 +339,14 @@ class RafiqCandidate(Base):
     here to bound what any exit rule could have done, not to suggest one did.
     """
 
-    __tablename__ = "rafiq_candidates"
+    __tablename__ = "rafiq_lab_candidates"
     __table_args__ = (
         UniqueConstraint("strategy_id", "mint_address",
-                         name="uq_rafiq_candidates_strategy_mint"),
+                         name="uq_rafiq_lab_candidates_strategy_mint"),
         # The forward-outcome beat's own query: rows old enough for a horizon
         # whose columns are still null.
-        Index("ix_rafiq_candidates_decided", "decided_at"),
-        Index("ix_rafiq_candidates_outcome", "outcome", "reject_reason"),
+        Index("ix_rafiq_lab_candidates_decided", "decided_at"),
+        Index("ix_rafiq_lab_candidates_outcome", "outcome", "reject_reason"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(

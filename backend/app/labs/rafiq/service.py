@@ -542,7 +542,7 @@ class RafiqLabService:
         }
         stmt = pg_insert(RafiqCandidate).values(**values)
         await self._session.execute(stmt.on_conflict_do_update(
-            constraint="uq_rafiq_candidates_strategy_mint",
+            constraint="uq_rafiq_lab_candidates_strategy_mint",
             set_={k: v for k, v in values.items()
                   if k not in ("strategy_id", "mint_address")},
             # Only an entry may overwrite, and only a rejection may be

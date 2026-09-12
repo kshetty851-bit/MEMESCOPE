@@ -185,6 +185,39 @@ different experiment, verdict NO-GO, never deployed. `rafiq_lab_` is still the
 requested prefix and is the version that survives if that branch is ever
 merged.
 
+The F2 brief named its new table `rafiq_candidates`. It is
+`rafiq_lab_candidates` for the reason above — the name is incidental to what
+the table does, and one lab with two prefixes is worse than either.
+
+---
+
+### Measured fill rates for the two entry features
+
+Prod, every Radar admission in the 24 hours to 2026-09-12 13:17Z, n=489. "At
+the decision" means the reading existed within `MAX_CANDIDATE_AGE_SECONDS` of
+admission, which is the window F2 judges a candidate in.
+
+| field | at the decision | ever |
+|---|---|---|
+| `top10_holder_pct` | 485 / 489 — **99.2%** | 100% |
+| `lp_status` | 359 / 489 — **73.4%** | 73.6% |
+
+Of the 130 admissions with no LP reading, **129 were never evaluated at all**
+and zero were evaluated without the check — so the shortfall is coverage, not
+freshness, and widening the window buys nothing. The evaluator runs on what
+the labs are about to judge; an admission outside that selection never gets a
+verdict. Those rows read `no_security_evaluation` in `entry_features_error`,
+not `no_lp_check`.
+
+**Do not measure this on dev.** Dev is an idle copy: its
+`FEATURE_RESEARCH_COLLECTORS_ENABLED` is off so `holder_snapshots` is empty,
+its `nursery_admissions` is empty, and its Celery beat shelve at
+`/tmp/celerybeat-schedule` holds 33 entries against 48 in
+`conf.beat_schedule`, so `security-lab-coverage` never fires and nothing has
+written a security evaluation there since 2026-08-22. Measured on dev, both
+features look permanently dead. They are not. `outcomes.coverage()` reports
+the live rate against whatever database it is pointed at.
+
 ---
 
 ## Tests

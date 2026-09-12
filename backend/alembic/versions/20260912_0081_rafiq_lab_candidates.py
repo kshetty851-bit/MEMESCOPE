@@ -34,7 +34,7 @@ exit rule did. It bounds what was available.
 for an attempt that found no snapshots at all, so a token that stopped
 printing is not retried for ever.
 
-Revision ID: 0081_rafiq_candidates
+Revision ID: 0081_rafiq_lab_candidates
 Revises: 0080_rafiq_entry_features
 """
 
@@ -44,7 +44,7 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision = "0081_rafiq_candidates"
+revision = "0081_rafiq_lab_candidates"
 down_revision = "0080_rafiq_entry_features"
 branch_labels = None
 depends_on = None
@@ -57,7 +57,7 @@ _TS = sa.DateTime(timezone=True)
 
 def upgrade() -> None:
     op.create_table(
-        "rafiq_candidates",
+        "rafiq_lab_candidates",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True,
                   server_default=sa.text("gen_random_uuid()")),
         sa.Column("strategy_id", postgresql.UUID(as_uuid=True), nullable=False),
@@ -110,15 +110,15 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["position_id"], ["rafiq_lab_positions.id"],
                                 ondelete="SET NULL"),
         sa.UniqueConstraint("strategy_id", "mint_address",
-                            name="uq_rafiq_candidates_strategy_mint"),
+                            name="uq_rafiq_lab_candidates_strategy_mint"),
     )
-    op.create_index("ix_rafiq_candidates_decided", "rafiq_candidates",
+    op.create_index("ix_rafiq_lab_candidates_decided", "rafiq_lab_candidates",
                     ["decided_at"])
-    op.create_index("ix_rafiq_candidates_outcome", "rafiq_candidates",
+    op.create_index("ix_rafiq_lab_candidates_outcome", "rafiq_lab_candidates",
                     ["outcome", "reject_reason"])
 
 
 def downgrade() -> None:
-    op.drop_index("ix_rafiq_candidates_outcome", table_name="rafiq_candidates")
-    op.drop_index("ix_rafiq_candidates_decided", table_name="rafiq_candidates")
-    op.drop_table("rafiq_candidates")
+    op.drop_index("ix_rafiq_lab_candidates_outcome", table_name="rafiq_lab_candidates")
+    op.drop_index("ix_rafiq_lab_candidates_decided", table_name="rafiq_lab_candidates")
+    op.drop_table("rafiq_lab_candidates")
