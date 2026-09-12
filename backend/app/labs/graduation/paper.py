@@ -405,34 +405,38 @@ class PaperBook:
 
     async def account(self) -> Account:
         bad = switched_mints()
+        #: Applies to every position, open or closed.
         sound = (GradPaperPosition.notional_usd > 0,
-                 GradPaperPosition.mint.not_in(bad),
-                 # Closed against a zero. Since 0076 the column can hold
-                 # eighteen decimals, so this is a real zero rather than a
-                 # small price rounded into one.
-                 GradPaperPosition.close_quote.is_distinct_from(0))
+                 GradPaperPosition.mint.not_in(bad))
+        #: A CLOSED position must also have exited at a real price. A zero or
+        #: NULL `close_quote` means the exit was marked against a price the
+        #: old eight-decimal column could not represent — 0076 turned those
+        #: zeros into NULLs, so both spellings have to be refused or the
+        #: fabricated -100% exits walk straight back into the book.
+        banked = (*sound, GradPaperPosition.close_quote > 0)
         realised = await self._session.scalar(
             select(func.coalesce(func.sum(GradPaperPosition.pnl_usd), 0))
-            .where(GradPaperPosition.closed_at.is_not(None), *sound))
+            .where(GradPaperPosition.closed_at.is_not(None), *banked))
         closed = await self._session.scalar(
             select(func.count()).select_from(GradPaperPosition)
-            .where(GradPaperPosition.closed_at.is_not(None), *sound))
+            .where(GradPaperPosition.closed_at.is_not(None), *banked))
         wins = await self._session.scalar(
             select(func.count()).select_from(GradPaperPosition)
             .where(GradPaperPosition.closed_at.is_not(None),
-                   GradPaperPosition.pnl_usd > 0, *sound))
+                   GradPaperPosition.pnl_usd > 0, *banked))
         voided = await self._session.scalar(
             select(func.count()).select_from(GradPaperPosition)
             .where(GradPaperPosition.closed_at.is_not(None),
                    GradPaperPosition.notional_usd > 0,
                    GradPaperPosition.mint.in_(bad)
-                   | (GradPaperPosition.close_quote == 0)))
+                   | GradPaperPosition.close_quote.is_(None)
+                   | (GradPaperPosition.close_quote <= 0)))
         # The gate terms come from the realised trades themselves, so they
         # cannot disagree with the list the page renders.
         banked = (await self._session.scalars(
             select(GradPaperPosition.pnl_usd)
             .where(GradPaperPosition.closed_at.is_not(None),
-                   GradPaperPosition.pnl_usd.is_not(None), *sound))).all()
+                   GradPaperPosition.pnl_usd.is_not(None), *banked))).all()
         up = sum((p for p in banked if p > 0), Decimal(0))
         down = -sum((p for p in banked if p < 0), Decimal(0))
         pf = (up / down) if down > 0 else None
@@ -480,7 +484,9 @@ async def positions(session: AsyncSession, *, limit: int | None = None
     def rows(closed: bool):
         return (select(GradPaperPosition, GradToken.symbol, GradToken.name,
                        (GradPaperPosition.mint.in_(bad)
-                        | (GradPaperPosition.close_quote == 0)).label("voided"))
+                        | (GradPaperPosition.closed_at.is_not(None)
+                           & GradPaperPosition.close_quote.is_(None))
+                        | (GradPaperPosition.close_quote <= 0)).label("voided"))
                 .outerjoin(GradToken, GradToken.mint == GradPaperPosition.mint)
                 .where(GradPaperPosition.notional_usd > 0,
                        GradPaperPosition.closed_at.is_not(None) if closed
