@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 
 import { LogoMark, Wordmark } from "@/components/brand/logo";
 import { IconCollapse, IconExpand } from "@/components/layout/nav-icons";
+import { SolTicker } from "@/components/layout/sol-ticker";
 import { Tooltip } from "@/components/ui/tooltip";
 import { useNavRail } from "@/hooks/use-nav-rail";
 import { NAV_FOOTER, NAV_GROUPS, activeItem, type NavItem } from "@/lib/design/nav";
@@ -214,6 +215,8 @@ export function AppSidebar() {
       </div>
 
       <SidebarContent collapsed={collapsed} />
+
+      <SolTicker collapsed={collapsed} />
 
       <div className="border-t border-line-subtle p-2">
         <button

@@ -1116,3 +1116,20 @@
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1, "zero" 1;
 }
+
+/* The SOL ticker's live mark. One dot, breathing — it is the only thing in
+   the rail that says the number is still arriving. Collapsed by the global
+   reduced-motion block above. */
+@keyframes sol-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.sol-pulse {
+  animation: sol-pulse 2s ease-in-out infinite;
+}

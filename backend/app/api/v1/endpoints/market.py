@@ -3,6 +3,7 @@
 Two mounts, one router file:
   * `/tokens/{mint}/market` and `/tokens/{mint}/history` — per-token views.
   * `/market/trending` — cross-token ranking.
+  * `/market/sol` — SOL/USD and an hour of minute closes, for the nav rail.
 
 Public, matching the rest of the token API: this is public chain data.
 """
@@ -13,6 +14,7 @@ from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Query
+from pydantic import BaseModel
 
 from app.api.deps import DbSession
 from app.schemas.market import (
@@ -25,6 +27,8 @@ from app.schemas.market import (
 )
 from app.schemas.token import TokenRead
 from app.services.market.query_service import MarketQueryService
+from app.services.market.sol_price import as_dict as sol_as_dict
+from app.services.market.sol_price import get_sol_price
 
 # Base58 pubkeys are 32-44 chars; reject junk before it reaches the database.
 MINT_PATTERN = r"^[1-9A-HJ-NP-Za-km-z]{32,44}$"
@@ -126,3 +130,32 @@ async def get_trending(
         pages=(total + page_size - 1) // page_size if page_size else 0,
         sort_by=sort_by,
     )
+
+
+class SolPriceRead(BaseModel):
+    """SOL/USD for the navigation rail.
+
+    `stale` and `age_seconds` are part of the answer, not diagnostics. The rail
+    is on every screen, so a provider hiccup must degrade to a slightly old
+    number rather than an empty box — and the reader is told which they have.
+    """
+
+    price_usd: float
+    change_pct_1h: float | None = None
+    change_pct_24h: float | None = None
+    #: Minute closes, oldest first. The sparkline's whole input.
+    series: list[float] = []
+    age_seconds: int = 0
+    stale: bool = False
+
+
+@market_router.get(
+    "/sol",
+    response_model=SolPriceRead,
+    summary="SOL/USD with an hour of minute closes",
+)
+async def sol_price() -> SolPriceRead:
+    """Cached for forty-five seconds and shared by every viewer: the rail is
+    mounted on every route, so an uncached fetch would multiply by tabs, by
+    users and by every navigation against a rate-limited provider."""
+    return SolPriceRead(**sol_as_dict(await get_sol_price()))
