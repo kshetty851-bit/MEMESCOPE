@@ -766,3 +766,68 @@ def test_the_csv_carries_every_trade_and_its_week() -> None:
     assert rows.splitlines()[0].startswith("mint,strategy,path,iso_week")
     assert "2026-W37" in rows and "2026-W38" in rows
     assert len(rows.strip().splitlines()) == 3
+
+
+# --- AMM execution ------------------------------------------------------------
+
+def test_impact_is_the_order_against_half_the_pool() -> None:
+    """DexScreener reports TOTAL pool value; a balanced constant-product pool
+    holds half per side, and the exact average price paid is worse than spot
+    by order/quote-reserve."""
+    from app.labs.graduation.backtest import amm_impact
+
+    assert amm_impact(D(100), D(20_000)) == D("0.01")      # $100 into $10k/side
+    assert amm_impact(D(100), D(2_000)) == D("0.1")
+    # The case the flat 25 bps model priced as free: a $21 pool.
+    assert amm_impact(D(100), D(21)) > D("9")
+
+
+def test_an_order_bigger_than_the_pool_is_priced_as_a_catastrophe() -> None:
+    """Not as 25 basis points. This is the whole defect: 487 trades went into
+    pools smaller than the order and produced nearly all the apparent profit,
+    including one token that showed +878% on a pool holding $21."""
+    from app.labs.graduation.backtest import amm_buy
+
+    spot = D("0.000000000159")
+    fair = amm_buy(spot, order_usd=D(100), liquidity_usd=D(200_000),
+                   fee_fraction=D("0.005"))
+    awful = amm_buy(spot, order_usd=D(100), liquidity_usd=D(21),
+                    fee_fraction=D("0.005"))
+    assert fair is not None and awful is not None
+    assert fair < spot * D("1.02")          # deep pool: a rounding error
+    assert awful > spot * D(10)             # $21 pool: ten times the quote
+
+
+def test_a_bigger_position_is_harder_to_sell() -> None:
+    """A token that ran does not sell for what the quote says: the position is
+    a larger order on the way out, into the same shallow pool."""
+    from app.labs.graduation.backtest import amm_sell
+
+    spot = D("0.000001")
+    small = amm_sell(spot, value_usd=D(100), liquidity_usd=D(10_000),
+                     fee_fraction=D("0.005"))
+    grown = amm_sell(spot, value_usd=D(1_000), liquidity_usd=D(10_000),
+                     fee_fraction=D("0.005"))
+    assert small is not None and grown is not None
+    assert grown < small < spot
+    assert amm_sell(spot, value_usd=D(1), liquidity_usd=D(0),
+                    fee_fraction=D("0.005")) is None
+
+
+def test_unknown_depth_is_refused_not_assumed_free() -> None:
+    from app.labs.graduation.backtest import amm_buy, amm_impact, amm_sell
+
+    assert amm_impact(D(100), None) is None
+    assert amm_buy(D(1), order_usd=D(100), liquidity_usd=None,
+                   fee_fraction=D("0.005")) is None
+    assert amm_sell(D(1), value_usd=D(100), liquidity_usd=None,
+                    fee_fraction=D("0.005")) is None
+
+
+def test_fee_fraction_does_not_double_charge_slippage() -> None:
+    """Impact is computed exactly from pool depth now, so the assumed
+    `slip_bps` must come OUT of the per-leg fee or every live fill pays for
+    price impact twice."""
+    c = Costs()
+    assert c.fee_fraction < c.side_fraction
+    assert c.side_fraction - c.fee_fraction == D(c.slip_bps) / D(10_000)

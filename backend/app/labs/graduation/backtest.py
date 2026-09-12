@@ -320,9 +320,22 @@ class Costs:
 
     @property
     def side_fraction(self) -> Decimal:
-        """AMM legs only."""
+        """AMM legs only, with slippage ASSUMED. Superseded for live fills by
+        `fee_fraction` plus an exact impact — kept because the replay harness
+        has no depth series to compute impact from."""
         return ((Decimal(self.pump_fee_bps) + Decimal(self.slip_bps)) / _BPS
                 + self.priority_fraction)
+
+    @property
+    def fee_fraction(self) -> Decimal:
+        """Everything a leg costs EXCEPT price impact: the AMM's own fee and
+        the transaction fee.
+
+        Separate from `side_fraction` because impact is no longer a guess.
+        `amm_impact` computes it exactly from the pool's depth, and adding an
+        assumed `slip_bps` on top would charge for the same thing twice.
+        """
+        return Decimal(self.pump_fee_bps) / _BPS + self.priority_fraction
 
     def buy_price(self, price: Decimal) -> Decimal:
         """A buy fills WORSE than the quote."""
@@ -332,6 +345,54 @@ class Costs:
         """And a sell fills worse too. Floored at zero: a cost model may not
         invent a negative price."""
         return max(Decimal(0), price * (1 - self.side_fraction))
+
+
+def amm_impact(order_usd: Decimal, liquidity_usd: Decimal | None) -> Decimal | None:
+    """How far an order moves a constant-product pool. EXACT, not a bps guess.
+
+    For reserves (Q, T) and an order of `S` quote, the constant product gives
+    `tokens_out = T*S/(Q+S)`, so the average price paid is `(Q+S)/T` against a
+    spot of `Q/T` — worse by exactly `S/Q`. DexScreener reports the pool's
+    TOTAL value, and a balanced pool holds half of it per side, so `Q` is
+    `liquidity_usd / 2`.
+
+    This replaces a flat 25 bps that was derived from a MEDIAN pool depth of
+    about $98,000. That figure is fine for a median token and absurd for the
+    tail: measured 2026-09-13, 487 of 1,902 paper trades went into pools
+    holding less than $100, one of them $21 — where a $100 order is five times
+    the entire pool, and the flat model priced it at a quarter of one percent.
+    Those trades produced essentially all of the tournament's apparent profit.
+
+    Returns None when the depth is unknown, which callers must treat as
+    "cannot verify this is executable" rather than as free execution.
+    """
+    if liquidity_usd is None or liquidity_usd <= 0 or order_usd <= 0:
+        return None
+    return order_usd / (liquidity_usd / 2)
+
+
+def amm_buy(spot: Decimal, *, order_usd: Decimal, liquidity_usd: Decimal | None,
+            fee_fraction: Decimal) -> Decimal | None:
+    """The price a buy actually fills at, or None if the depth is unknown."""
+    impact = amm_impact(order_usd, liquidity_usd)
+    if impact is None:
+        return None
+    return spot * (1 + impact) * (1 + fee_fraction)
+
+
+def amm_sell(spot: Decimal, *, value_usd: Decimal, liquidity_usd: Decimal | None,
+             fee_fraction: Decimal) -> Decimal | None:
+    """The price a sell actually fills at.
+
+    The mirror of `amm_buy`: selling into the pool moves price the other way,
+    so the divisor rather than the multiplier. A position that grew is a
+    LARGER order on the way out, which is why a token that ran 878% on a $67
+    pool cannot be sold for what the quote says it is worth.
+    """
+    impact = amm_impact(value_usd, liquidity_usd)
+    if impact is None:
+        return None
+    return max(Decimal(0), spot / (1 + impact) * (1 - fee_fraction))
 
 
 # --- exit rules ---------------------------------------------------------------

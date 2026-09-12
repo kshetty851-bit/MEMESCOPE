@@ -43,9 +43,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.labs.graduation import config
-from app.labs.graduation.backtest import ExitPolicy, ExitState, TakeProfit, Tick, TrailingStop
+from app.labs.graduation.backtest import (
+    ExitPolicy,
+    ExitState,
+    TakeProfit,
+    Tick,
+    TrailingStop,
+    amm_buy,
+    amm_impact,
+    amm_sell,
+)
 from app.labs.graduation.models import GradPaperPosition, GradPostgradSample, GradToken
-from app.labs.graduation.paper import _P, _Q, _rate, costs, in_hour_window, net_return
+from app.labs.graduation.paper import _P, _Q, _rate, costs, in_hour_window
 
 logger = get_logger(__name__)
 
@@ -209,8 +218,15 @@ class Tournament:
 
     # --- marking -------------------------------------------------------------
 
-    async def _latest_prices(self, mints: Sequence[str]) -> dict[str, Decimal]:
-        """One price per mint, at or before this tick's clock.
+    async def _latest_prices(
+        self, mints: Sequence[str]
+    ) -> dict[str, tuple[Decimal, Decimal | None]]:
+        """Price AND pool depth per mint, at or before this tick's clock.
+
+        The depth comes back with the price because an exit is priced against
+        it: a position that ran is a larger order into the same pool, and
+        selling it at the quote is the mistake this whole change exists to
+        stop.
 
         `DISTINCT ON` rather than a query per position: fifty arms hold the
         same handful of tokens, and pricing each one once is the difference
@@ -219,13 +235,14 @@ class Tournament:
         if not mints:
             return {}
         rows = (await self._session.execute(
-            select(GradPostgradSample.mint, GradPostgradSample.price_native)
+            select(GradPostgradSample.mint, GradPostgradSample.price_native,
+                   GradPostgradSample.liquidity_usd)
             .where(GradPostgradSample.mint.in_(list(mints)),
                    GradPostgradSample.price_native > 0,
                    GradPostgradSample.ts <= self._now)
             .distinct(GradPostgradSample.mint)
             .order_by(GradPostgradSample.mint, GradPostgradSample.ts.desc()))).all()
-        return {r.mint: r.price_native for r in rows}
+        return {r.mint: (r.price_native, r.liquidity_usd) for r in rows}
 
     async def _manage(self) -> int:
         positions = (await self._session.scalars(
@@ -234,13 +251,13 @@ class Tournament:
                    GradPaperPosition.notional_usd > 0))).all()
         if not positions:
             return 0
-        prices = await self._latest_prices(sorted({p.mint for p in positions}))
+        marks = await self._latest_prices(sorted({p.mint for p in positions}))
         closed = 0
         for position in positions:
             arm = BY_NAME.get(position.book)
             if arm is None:
                 continue
-            price = prices.get(position.mint)
+            price, depth = marks.get(position.mint, (None, None))
             age = (self._now - position.opened_at).total_seconds() / 60
             if price is not None:
                 position.peak_quote = max(position.peak_quote, price)
@@ -252,23 +269,48 @@ class Tournament:
                     tick=Tick(ts=self._now, price=price, source="paper"),
                     peak=position.peak_quote))
                 if fired is not None:
-                    self._close(position, price, fired)
+                    self._close(position, price, depth, fired)
                     closed += 1
                     continue
             if age >= arm.hold:
                 mark = price if price is not None else position.last_quote
                 if mark is not None and mark > 0:
-                    self._close(position, mark,
+                    self._close(position, mark, depth,
                                 "max_hold" if price is not None else "end_of_data")
                     closed += 1
         return closed
 
-    def _close(self, position: GradPaperPosition, quote: Decimal, reason: str) -> None:
+    def _close(self, position: GradPaperPosition, quote: Decimal,
+               depth: Decimal | None, reason: str) -> None:
+        """Exit at what the pool would actually pay for this position.
+
+        The order size on the way out is the position's CURRENT value, not
+        what it cost: a token that ran 878% is ten times the order it was, into
+        a pool that is usually no deeper. Pricing the exit at the quote is what
+        turned a $21 pool into $878 of paper profit.
+
+        With no recorded depth the exit is still taken — the position has to
+        leave — but at the spot price with fees only, and `impact_close` stays
+        NULL so the row shows the fill was never verified.
+        """
         leg = costs(position.notional_quote)
-        net = net_return(position, quote, leg) or Decimal(0)
+        # Value at the quote, before impact: the size of the sell order.
+        value_usd = position.notional_usd * (quote / (
+            position.notional_quote / position.tokens))
+        fill = amm_sell(quote, value_usd=value_usd, liquidity_usd=depth,
+                        fee_fraction=leg.fee_fraction)
+        if fill is None:
+            fill = leg.sell_price(quote)
+        else:
+            position.impact_close = (amm_impact(value_usd, depth) or Decimal(0)
+                                     ).quantize(Decimal("0.000001"))
+        position.liq_close_usd = depth
+        proceeds = position.tokens * fill
+        net = (proceeds / position.notional_quote - 1
+               if position.notional_quote > 0 else Decimal(0))
         position.closed_at = self._now
         position.close_quote = quote.quantize(_P)
-        position.close_fill = leg.sell_price(quote).quantize(_P)
+        position.close_fill = fill.quantize(_P)
         position.close_reason = reason
         position.pnl_quote = (position.notional_quote * net).quantize(_Q)
         position.net_return = net.quantize(Decimal("0.00000001"))
@@ -300,8 +342,8 @@ class Tournament:
             select(opens.c.mint, opens.c.open_at,
                    GradPostgradSample.price_native, GradPostgradSample.price_usd,
                    GradPostgradSample.liquidity_usd, GradPostgradSample.fdv,
-                   GradPostgradSample.txns_m5_sells, GradToken.symbol,
-                   GradToken.first_seen_at)
+                   GradPostgradSample.txns_m5_sells,
+                   GradToken.symbol, GradToken.first_seen_at)
             .join(GradPostgradSample,
                   (GradPostgradSample.mint == opens.c.mint)
                   & (GradPostgradSample.ts == opens.c.open_at))
@@ -343,15 +385,30 @@ class Tournament:
             .where(GradPaperPosition.mint.in_(mints)))).all()}
         counts = await self._open_counts()
         opened = 0
+        refused = 0
         for row in rows:
             if row.price_native is None or row.price_native <= 0:
                 continue
             rate = _rate(row.price_usd, row.price_native)
             if rate is None:
                 continue
+            # Could a real wallet have filled this at all? A transaction whose
+            # price move exceeds the slippage tolerance REVERTS — it does not
+            # fill badly, it does not fill. Refusing here is the difference
+            # between a book that informs a real wallet and one that cannot.
+            impact = amm_impact(config.PAPER_NOTIONAL_USD, row.liquidity_usd)
+            if impact is None or impact > config.PAPER_MAX_IMPACT:
+                refused += 1
+                logger.info("graduation_tournament_unfillable", mint=row.mint,
+                            liquidity=float(row.liquidity_usd or 0),
+                            impact=float(impact) if impact is not None else None)
+                continue
             notional_quote = (config.PAPER_NOTIONAL_USD / rate).quantize(_Q)
-            fill = costs(notional_quote).buy_price(row.price_native)
-            if fill <= 0:
+            leg = costs(notional_quote)
+            fill = amm_buy(row.price_native, order_usd=config.PAPER_NOTIONAL_USD,
+                           liquidity_usd=row.liquidity_usd,
+                           fee_fraction=leg.fee_fraction)
+            if fill is None or fill <= 0:
                 continue
             for arm in ARMS:
                 if (arm.name, row.mint) in taken:
@@ -374,11 +431,13 @@ class Tournament:
                     tokens=(notional_quote / fill).quantize(_Q),
                     peak_quote=row.price_native.quantize(_P),
                     last_quote=row.price_native.quantize(_P),
+                    liq_open_usd=row.liquidity_usd,
+                    impact_open=impact.quantize(Decimal("0.000001")),
                     marked_at=self._now))
                 counts[arm.name] = counts.get(arm.name, 0) + 1
                 taken.add((arm.name, row.mint))
                 opened += 1
-        if opened:
+        if opened or refused:
             logger.info("graduation_tournament_filled", opened=opened,
-                        candidates=len(rows))
+                        refused_unfillable=refused, candidates=len(rows))
         return opened

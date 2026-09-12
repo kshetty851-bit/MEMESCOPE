@@ -452,6 +452,24 @@ PAPER_FILTER_HOUR_END = _int("LAB_GRADUATION_PAPER_FILTER_HOUR_END", 6)
 #: ...and only when at least this many EARLIER tokens used the same symbol.
 PAPER_FILTER_MIN_SYMBOL_REUSE = _int("LAB_GRADUATION_PAPER_FILTER_REUSE", 1)
 
+# --- execution: what a real wallet could actually have done ------------------
+#
+# The paper book exists to inform a real wallet, so a trade it cannot execute
+# is worse than no trade — it is a number that will not be there later.
+#
+# Slippage is no longer a flat assumption. `backtest.amm_impact` computes the
+# exact constant-product move for the order against the pool's recorded depth,
+# and an order too large for the pool is REFUSED rather than priced.
+#
+# 10%: a real wallet sets a slippage tolerance and the transaction reverts
+# above it. Ten percent is already a loose tolerance for a deliberate trade;
+# anything beyond it is not execution, it is hope.
+PAPER_MAX_IMPACT = _dec("LAB_GRADUATION_PAPER_MAX_IMPACT", "0.10")
+#: A pool whose depth was never recorded cannot be shown to be tradeable, so
+#: it is refused too. False would mean "assume free execution when we do not
+#: know", which is the assumption that produced a $21-pool trade worth $878.
+PAPER_REQUIRE_KNOWN_DEPTH = True
+
 # --- what it takes to CALL a tournament winner, stated before it starts ------
 #
 # Fifty arms produce a leader in an hour whether or not any of them is good, so

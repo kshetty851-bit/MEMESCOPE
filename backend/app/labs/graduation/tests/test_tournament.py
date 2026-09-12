@@ -130,3 +130,42 @@ def test_an_arm_that_has_not_traded_cannot_lead() -> None:
     ]
     rows.sort(key=lambda r: (r["trades"] > 0, r["pnl"]), reverse=True)
     assert [r["name"] for r in rows] == ["won_two", "lost_one", "untraded"]
+
+
+# --- execution: could a real wallet have done this? ---------------------------
+
+def test_a_pool_too_small_for_the_order_is_refused_not_priced() -> None:
+    """The defect this replaced: a flat 25 bps was charged on a $100 order into
+    a pool holding $21, and the resulting trade showed +878% and carried the
+    whole leaderboard. A real transaction whose price move exceeds the wallet's
+    slippage tolerance REVERTS — it does not fill badly, it does not fill.
+    """
+    from app.labs.graduation.backtest import amm_impact
+
+    order = config.PAPER_NOTIONAL_USD
+    # The $21 pool that produced $878 of paper profit.
+    assert amm_impact(order, D(21)) > config.PAPER_MAX_IMPACT
+    # A pool that can absorb a $100 order comfortably.
+    assert amm_impact(order, D(200_000)) < config.PAPER_MAX_IMPACT
+    # Unknown depth cannot be shown to be tradeable.
+    assert amm_impact(order, None) is None
+    assert config.PAPER_REQUIRE_KNOWN_DEPTH is True
+
+
+def test_the_slippage_tolerance_is_a_real_wallets_tolerance() -> None:
+    """Ten percent is already loose for a deliberate trade. Above it the model
+    would be claiming fills nobody gets."""
+    assert D("0.01") <= config.PAPER_MAX_IMPACT <= D("0.15")
+
+
+def test_the_exit_is_sized_by_what_the_position_is_now_worth() -> None:
+    """A token that ran 878% is ten times the order on the way out, into a pool
+    that is usually no deeper. Selling it at the quote is the error that made a
+    $21 pool look like $878 of profit."""
+    from app.labs.graduation.backtest import amm_sell
+
+    spot, depth, fee = D("0.000001"), D(10_000), D("0.005")
+    at_cost = amm_sell(spot, value_usd=D(100), liquidity_usd=depth, fee_fraction=fee)
+    after_run = amm_sell(spot, value_usd=D(978), liquidity_usd=depth, fee_fraction=fee)
+    assert at_cost is not None and after_run is not None
+    assert after_run < at_cost, "a grown position must be harder to sell"

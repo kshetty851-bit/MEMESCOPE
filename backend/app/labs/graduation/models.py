@@ -637,6 +637,16 @@ class GradPaperPosition(Base):
     last_quote: Mapped[Decimal | None] = mapped_column(_PRICE)
     marked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    #: The pool's TOTAL recorded value when the position opened and closed,
+    #: and the constant-product price move the order caused against it. Stored
+    #: so a fill can be audited rather than trusted: a real wallet will be
+    #: asked to reproduce these numbers, and it cannot reproduce a trade into
+    #: a pool that could not hold the order.
+    liq_open_usd: Mapped[Decimal | None] = mapped_column(Numeric(24, 4))
+    liq_close_usd: Mapped[Decimal | None] = mapped_column(Numeric(24, 4))
+    impact_open: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
+    impact_close: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
+
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     close_quote: Mapped[Decimal | None] = mapped_column(_PRICE)
     close_fill: Mapped[Decimal | None] = mapped_column(_PRICE)
