@@ -528,6 +528,36 @@ function RulesPanel() {
 }
 
 /**
+ * How long this run has been going.
+ *
+ * Separate from `Freshness`, which says how stale the figures are. This says
+ * how much evidence exists behind them — the single thing that decides
+ * whether any profit factor on the board means anything, and the thing a
+ * reader cannot recover from the page otherwise because the tournament has
+ * been reset when its rules changed.
+ */
+function Elapsed({ since }: { since: string | null }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  if (!since) return null;
+  const secs = Math.max(0, Math.floor((now - new Date(since).getTime()) / 1000));
+  const d = Math.floor(secs / 86400);
+  const h = Math.floor((secs % 86400) / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = secs % 60;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return (
+    <span className="grad-figure font-mono" title={new Date(since).toLocaleString()}>
+      {d ? `${d}d ` : ""}
+      {pad(h)}:{pad(m)}:{pad(s)}
+    </span>
+  );
+}
+
+/**
  * THE LEADERBOARD
  *
  * Fifty arms, eight of which decide by hashing the mint and therefore cannot
@@ -553,10 +583,15 @@ function LeaderboardPanel() {
     <Panel>
       <PanelHeader>
         <PanelTitle>Strategy tournament — 50 arms</PanelTitle>
-        <span
-          className={`transition-opacity ${isFetching ? "opacity-50" : "opacity-100"}`}
-        >
-          <Freshness at={dataUpdatedAt} />
+        <span className="flex items-center gap-3">
+          <span className="text-micro text-ink-dim">
+            running <Elapsed since={data?.started_at ?? null} />
+          </span>
+          <span
+            className={`transition-opacity ${isFetching ? "opacity-50" : "opacity-100"}`}
+          >
+            <Freshness at={dataUpdatedAt} />
+          </span>
         </span>
       </PanelHeader>
       <div className="flex flex-col gap-5 p-4">
@@ -627,7 +662,7 @@ function LeaderboardPanel() {
           <Stat
             label="Closed trades"
             value={data.total_trades.toLocaleString()}
-            note="across all 50 arms"
+            note={`across all 50 arms · ${Number(data.hours_running).toFixed(1)}h in`}
           />
           <Stat
             label="Position size"
