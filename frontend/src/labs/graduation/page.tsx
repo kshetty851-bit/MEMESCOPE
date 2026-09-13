@@ -643,7 +643,7 @@ function LeaderboardPanel() {
   const shown = showAll ? data.arms : data.arms.slice(0, 12);
   const lead = data.arms.find((a) => a.name === data.leader);
   const margin =
-    lead && band !== null ? Number(lead.realised_usd) - band : null;
+    lead && band !== null ? Number(lead.wallet_100_usd) - band : null;
 
   return (
     <Panel>
@@ -699,10 +699,13 @@ function LeaderboardPanel() {
                 <>
                   <span
                     className={`grad-figure ${
-                      Number(lead.realised_usd) >= 0 ? "text-up" : "text-down"
+                      Number(lead.wallet_100_usd) >=
+                      Number(data.wallet_demo_usd)
+                        ? "text-up"
+                        : "text-down"
                     }`}
                   >
-                    {signedUsd(lead.realised_usd)}
+                    {usd(lead.wallet_100_usd)}
                   </span>{" "}
                   on {lead.trades} closed
                   {margin !== null ? (
@@ -722,8 +725,8 @@ function LeaderboardPanel() {
           </div>
           <Stat
             label="Bar to clear"
-            value={band === null ? "—" : signedUsd(String(band))}
-            note={data.best_control || "best random arm"}
+            value={band === null ? "—" : usd(String(band))}
+            note={`${data.best_control || "best random arm"} · $100 wallet`}
           />
           <Stat
             label="Closed trades"
@@ -902,16 +905,17 @@ function LeaderboardPanel() {
                         <>
                           <span
                             className={`grad-figure font-medium ${
-                              Number(a.projected_30d_usd) > 0
+                              Number(a.projected_30d_usd) >=
+                              Number(data.wallet_demo_usd)
                                 ? "text-up"
                                 : "text-down"
                             }`}
                           >
-                            {signedUsd(a.projected_30d_usd)}
+                            {usd(a.projected_30d_usd)}
                           </span>
                           <span className="block text-micro tabular-nums text-ink-dim">
-                            {signedUsd(a.projected_30d_low)} to{" "}
-                            {signedUsd(a.projected_30d_high)}
+                            {usd(a.projected_30d_low)} to{" "}
+                            {usd(a.projected_30d_high)}
                           </span>
                         </>
                       )}
@@ -984,18 +988,20 @@ function LeaderboardPanel() {
             trades), resampled from what that arm has actually done — and after{" "}
             {Number(data.hours_running).toFixed(1)} hours the band spans
             outcomes that are mostly an accident of which tokens arrived.
-            It is simulated as an <b className="text-ink">account</b>, not a
-            running total: positions stay {usd(data.notional_usd)} whatever the
-            equity, and an account that cannot pay for the next one stops — so
-            the worst thirty days costs {usd(data.capital_usd)} and no more,
-            and a path wiped out on day three never collects the other
-            twenty-seven. <b className="text-ink">Wipeout</b> is the share of
-            simulated months that ended that way, which is the number a running
-            total cannot express. Return % is against each arm&rsquo;s{" "}
-            {usd(data.capital_usd)}. A dot marks an arm ahead of every random
-            one. Open positions are the
+            Every money figure on this board is the same{" "}
+            {usd(data.wallet_demo_usd)} wallet over {data.wallet_demo_slots}{" "}
+            positions: the projection is the <b className="text-ink">balance</b>{" "}
+            that wallet ends the month on, not a gain on top of it, and{" "}
+            <b className="text-ink">Bar to clear</b> is the balance the luckiest
+            random arm reached on the same trades. Each position is a tenth of
+            current equity, so it compounds, and it stops when the next position
+            would be too small to be worth placing —{" "}
+            <b className="text-ink">Wipeout</b> is the share of simulated months
+            that ended that way, which is the number a running total cannot
+            express. A dot marks an arm ahead of every random one. Open
+            positions are the
             small <span className="text-ink">+n</span> beside the trade count and
-            are <b className="text-ink">not</b> in the realised column — an
+            are <b className="text-ink">not</b> in the wallet column — an
             unrealised number is what every book in this platform&rsquo;s history
             was leading on shortly before it wasn&rsquo;t.
           </p>

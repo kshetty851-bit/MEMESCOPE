@@ -11,6 +11,7 @@ recorder has seen; it ranks nothing and recommends nothing.
 from __future__ import annotations
 
 import random
+from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -587,28 +588,31 @@ class ArmRow(BaseModel):
     #: The worst single trade the arm has taken. The number that decides the
     #: figure above, because compounding has no memory of the good ones.
     worst_trade_pct: Decimal | None = None
-    #: Where thirty days of the SAME rule at the SAME trade rate would land —
-    #: median, and the 5th-95th percentile band around it.
+    #: Where the $100 WALLET lands after thirty days of the same rule at the
+    #: same trade rate — median balance, and the 5th-95th percentile band.
+    #:
+    #: A BALANCE, not a gain, and in the same dollars as `wallet_100_usd`:
+    #: $41 means the wallet is down to $41. It used to be a gain on a $1,000
+    #: book sitting one column away from a $100 balance.
     #:
     #: The band is the point. A projection from a few dozen trades is mostly
     #: an artefact of which tokens happened to arrive, and a single number
-    #: would hide that behind a decimal point. Positions are a fixed $100
-    #: regardless of equity, so the arithmetic is additive rather than
-    #: compounding — compounding a noisy edge produces numbers that are
-    #: arithmetic rather than forecast.
+    #: would hide that behind a decimal point.
     projected_30d_usd: Decimal | None = None
     projected_30d_low: Decimal | None = None
     projected_30d_high: Decimal | None = None
     projected_trades: int = 0
-    #: Share of simulated thirty-day paths in which the account could no
-    #: longer fund a position. The one figure a running total cannot express.
+    #: Share of simulated thirty-day paths in which the wallet fell below the
+    #: size at which a position is worth placing. The one figure a running
+    #: total cannot express.
     ruin_pct: Decimal | None = None
 
 
 class Leaderboard(BaseModel):
     """Fifty arms, eight of which cannot have an edge.
 
-    `control_band` is the best realised P&L among those eight. A leader that
+    `control_band` is the best $100 WALLET among those eight — the same
+    dollars as every other money figure on the board. A leader that
     has not cleared it has not beaten chance, and `leader_beats_controls` says
     so in one boolean rather than leaving it to the reader's optimism.
     """
@@ -659,6 +663,34 @@ _PROJECTION_TTL = timedelta(minutes=2)
 
 
 @router.get("/tournament", response_model=Leaderboard)
+def _wallet_walk(returns: Iterable[float]) -> tuple[float, bool]:
+    """Walk the $100 wallet through these returns; equity and whether it died.
+
+    ONE model, two callers — the leaderboard's money column and its thirty-day
+    projection. They disagreed before this existed: the column compounded $100
+    over ten slots while the projection added fixed $100 positions to a $1,000
+    book, so the same arm read $152 in one column and +$23,876 in the next.
+    Two currencies on one row is not a forecast, it is a typo with decimals.
+
+    Each position is a TENTH of current equity, so the account compounds and no
+    single trade ends it. It stops below `WALLET_MIN_USD / slots`, the point at
+    which the next position is too small to be worth placing.
+
+    An element of `returns` is ONE STEP, which is one trade for the column
+    (the real sequence, in order) and the sum of a ten-position block for the
+    projection (ten slots really do resolve together). The formula is the same
+    either way, which is the point of having one function.
+    """
+    slots = max(1, config.WALLET_DEMO_SLOTS)
+    equity = float(config.WALLET_DEMO_USD)
+    floor = float(config.WALLET_MIN_USD) / slots
+    for r in returns:
+        equity += (equity / slots) * r
+        if equity < floor:
+            return 0.0, True
+    return equity, False
+
+
 async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
     """The leaderboard. One grouped read, not fifty."""
     if not config.enabled():
@@ -720,14 +752,7 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
         """
         if not returns:
             return config.WALLET_DEMO_USD, None
-        slots = max(1, config.WALLET_DEMO_SLOTS)
-        equity = float(config.WALLET_DEMO_USD)
-        floor = float(config.WALLET_MIN_USD)
-        for r in returns:
-            equity += (equity / slots) * r
-            if equity < floor / slots:
-                equity = 0.0
-                break
+        equity, _ = _wallet_walk(returns)
         return (Decimal(str(equity)).quantize(Decimal("0.01")),
                 Decimal(str(min(returns) * 100)).quantize(Decimal("0.1")))
     open_now: dict[str, int] = {}
@@ -779,23 +804,21 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
             return {}
         rate = n / hours
         horizon = int(rate * 24 * 30)
-        cap = float(config.PAPER_CAPITAL_USD)
-        size = float(config.PAPER_NOTIONAL_USD)
-        block = max(1, config.PAPER_MAX_SLOTS)
+        # Ten positions are open at once and resolve together, so a step is a
+        # block of ten and the block sums are drawn ONCE into a pool. Walking
+        # 9,000 individual trades 160 times per arm across fifty arms is 74
+        # million iterations inside a web request; this is 148 thousand.
+        block = max(1, config.WALLET_DEMO_SLOTS)
         steps = max(1, horizon // block)
         pool = [sum(returns[random.randrange(n)] for _ in range(block))  # noqa: S311
                 for _ in range(1024)]
         finals: list[float] = []
         ruined = 0
         for _ in range(160):
-            equity = cap
-            for _ in range(steps):
-                equity += size * pool[random.randrange(len(pool))]  # noqa: S311
-                if equity < size:
-                    equity = max(0.0, equity)
-                    ruined += 1
-                    break
-            finals.append(equity - cap)
+            equity, dead = _wallet_walk(
+                pool[random.randrange(1024)] for _ in range(steps))  # noqa: S311
+            ruined += dead
+            finals.append(equity)
         finals.sort()
 
         def at(p: float) -> Decimal:
@@ -860,10 +883,13 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
     rows.sort(key=lambda r: (r.trades > 0, r.realised_usd), reverse=True)
     traded = [r for r in rows if r.trades]
     control_rows = [r for r in rows if r.is_control]
-    band = max((r.realised_usd for r in control_rows if r.trades), default=None)
+    # In WALLET dollars, because that is the column the board now shows. As
+    # realised P&L this stat contradicted the very dot beside it: the frontend
+    # already marked "beats every random arm" on wallet value.
+    band = max((r.wallet_100_usd for r in control_rows if r.trades), default=None)
     best_control = next((r.name for r in control_rows
                          if band is not None and r.trades
-                         and r.realised_usd == band), "")
+                         and r.wallet_100_usd == band), "")
     leader = next((r for r in traded if not r.is_control), None)
 
     board = Leaderboard(
@@ -871,7 +897,7 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
         controls=control_rows, control_band=band, best_control=best_control,
         leader=leader.name if leader else "",
         leader_beats_controls=bool(leader and leader.trades and band is not None
-                                   and leader.realised_usd > band),
+                                   and leader.wallet_100_usd > band),
         min_trades=config.TOURNEY_MIN_TRADES,
         required_profit_factor=config.required_pf(
             leader.trades if leader else 0),
@@ -905,7 +931,7 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
                      "nothing to compare against")
     elif not board.leader_beats_controls:
         fails.append(f"has not beaten the best random arm ({best_control}, "
-                     f"${band})")
+                     f"${band} wallet against ${leader.wallet_100_usd})")
     board.called = not fails
     board.verdict = ("CALLED: " + leader.name + " cleared every term."
                      if board.called else
