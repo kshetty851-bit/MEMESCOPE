@@ -129,3 +129,25 @@ def test_the_baseline_shares_the_grid_universe_exactly():
             f"${probe}: grid={taken_by_grid} floor={taken_by_floor} — the "
             "baseline and the grid must shop in the same universe")
     assert LIQ_BANDS[-1][2] >= 1_000_000_000, "the top band must be unbounded"
+
+
+@pytest.mark.asyncio
+async def test_retiring_an_arm_does_not_strand_its_open_positions():
+    """A position on a book that is no longer an arm must still be settled.
+
+    Generation 2 replaced generation 1 and left 51 positions open on 47
+    retired arms — the oldest a TWO-MINUTE hold that had been open for
+    twenty-five hours, rendered on the page as a live trade. The manage pass
+    walked `BY_NAME` and skipped anything it did not recognise, so a retired
+    book's rows could never close.
+    """
+    import inspect
+
+    from app.labs.graduation.tournament import Tournament
+
+    src = inspect.getsource(Tournament._manage)
+    head = src[src.index("arm = BY_NAME.get"):]
+    branch = head[:head.index("age =")]
+    assert "_close(" in branch and "arm_retired" in branch, (
+        "_manage skips positions whose arm is gone instead of settling them; "
+        "those rows stay open for ever")

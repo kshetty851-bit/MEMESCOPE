@@ -478,9 +478,21 @@ class Tournament:
         closed = 0
         for position in positions:
             arm = BY_NAME.get(position.book)
-            if arm is None:
-                continue
             price, depth = marks.get(position.mint, (None, None))
+            if arm is None:
+                # The arm was retired out of ARMS while this position was
+                # open. Skipping it left the row open FOR EVER: when
+                # generation 2 replaced generation 1, fifty-one positions on
+                # forty-seven retired arms stayed open, the oldest a
+                # two-minute hold that had been running twenty-five hours.
+                # They showed on the page as open trades and could never
+                # close, because nothing walks a book that is no longer an
+                # arm. Settle at the last mark and say why.
+                mark = price if price is not None else position.last_quote
+                if mark is not None and mark > 0:
+                    self._close(position, mark, depth, "arm_retired")
+                    closed += 1
+                continue
             age = (self._now - position.opened_at).total_seconds() / 60
             if price is not None:
                 position.peak_quote = max(position.peak_quote, price)
