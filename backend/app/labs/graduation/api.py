@@ -664,7 +664,6 @@ _PROJECTIONS: tuple[datetime, dict[str, dict[str, Any]]] | None = None
 _PROJECTION_TTL = timedelta(minutes=2)
 
 
-@router.get("/tournament", response_model=Leaderboard)
 def _wallet_walk(returns: Iterable[float]) -> tuple[float, bool]:
     """Walk the $100 wallet through these returns; equity and whether it died.
 
@@ -703,6 +702,7 @@ def _wallet_walk(returns: Iterable[float]) -> tuple[float, bool]:
     return equity, False
 
 
+@router.get("/tournament", response_model=Leaderboard)
 async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
     """The leaderboard. One grouped read, not fifty."""
     if not config.enabled():

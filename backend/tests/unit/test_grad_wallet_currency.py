@@ -86,3 +86,28 @@ def test_todays_wallets_are_unaffected_by_the_cap():
     equity, _ = api._wallet_walk([0.05] * 9)
     assert equity < float(config.PAPER_NOTIONAL_USD) * config.WALLET_DEMO_SLOTS
     assert equity == pytest.approx(float(config.WALLET_DEMO_USD) * 1.005 ** 9)
+
+
+def test_every_route_reaches_the_endpoint_it_names():
+    """The lab went blank for an hour because a helper was inserted between
+    `@router.get("/tournament")` and `async def tournament`, so the decorator
+    bound the ROUTE to the helper. Its `returns` argument became a required
+    query parameter and every call 422'd in 12ms without running.
+
+    Nothing else caught it: the module imported, the page built, the tests
+    passed, and `api.tournament(db)` called directly returned a full board —
+    because the name was still bound, only the route was not. Only a request
+    could see it.
+    """
+    for route in api.router.routes:
+        name = getattr(route, "name", "")
+        endpoint = getattr(route, "endpoint", None)
+        assert endpoint is not None and not name.startswith("_"), (
+            f"route {getattr(route, 'path', '?')} is bound to {name!r} — "
+            "a decorator that slid onto the wrong function")
+        # A GET endpoint on this router takes no required query parameters:
+        # every one of them is a dependency or has a default.
+        for param in inspect.signature(endpoint).parameters.values():
+            assert param.default is not inspect.Parameter.empty, (
+                f"{name}() has a required parameter {param.name!r}, which "
+                "FastAPI serves as a mandatory query string — 422, always")
