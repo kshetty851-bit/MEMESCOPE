@@ -64,6 +64,57 @@ def _anchor_keys() -> set[str]:
     return set(re.findall(r"^  ([A-Z][A-Z0-9_]*):", block.group(1), re.M))
 
 
+def _anchor_fallback(key: str) -> str:
+    """The `${KEY:-fallback}` default the anchor supplies for `key`."""
+    assert REPO_ROOT is not None
+    text = (REPO_ROOT / "docker-compose.yml").read_text()
+    found = re.search(
+        r"^  " + re.escape(key) + r":\s*\$\{" + re.escape(key) + r":-(.*?)\}\s*$",
+        text,
+        re.M,
+    )
+    assert found is not None, f"{key} has no ${{{key}:-default}} in the anchor"
+    return found.group(1)
+
+
+#: Settings where the anchor's fallback IS production's value, so it must equal
+#: the code default rather than merely existing. Most anchor entries are exempt:
+#: the base compose is a development file and `docker-compose.prod.yml`
+#: deliberately overrides DEBUG, LOG_FORMAT and the rest. These are discovery
+#: settings with no prod override, which makes the anchor the only thing that
+#: decides them.
+MUST_MATCH_CODE_DEFAULT = ("SCANNER_WATCH_PROGRAMS", "SCANNER_COMMITMENT")
+
+
+@pytest.mark.parametrize("key", MUST_MATCH_CODE_DEFAULT)
+def test_anchor_fallback_equals_the_code_default(key: str) -> None:
+    """A code default the anchor contradicts is dead code in production.
+
+    There is no `env_file`, so the anchor is the only route from host
+    environment into a container: a setting absent from `.env.production` takes
+    the anchor's fallback and never reaches `Settings`' own default at all.
+
+    Measured on 2026-09-13: `SCANNER_WATCH_PROGRAMS` and `SCANNER_COMMITMENT`
+    were changed in `config.py`, reviewed, tested, deployed green with 14/14
+    health checks — and production kept subscribing to two programs at
+    `confirmed`, because the anchor still said so. Nothing failed. The scanner
+    logged the old values and looked perfectly healthy.
+    """
+    from app.core.config import Settings
+
+    field = Settings.model_fields[key]
+    default = field.default_factory() if field.default_factory else field.default
+    expected = (
+        ",".join(str(x) for x in default)
+        if isinstance(default, (list, tuple))
+        else str(default)
+    )
+    assert _anchor_fallback(key) == expected, (
+        f"{key}: docker-compose.yml says {_anchor_fallback(key)!r} but "
+        f"config.py says {expected!r}. Production runs the compose value."
+    )
+
+
 #: Settings whose absence from the anchor breaks a service at runtime rather
 #: than merely leaving it on a default. Each entry names why, so a future
 #: reader can judge whether a removal is safe.

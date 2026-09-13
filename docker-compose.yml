@@ -74,15 +74,24 @@ x-backend-env: &backend-env
   SOLANA_WS_URL: ${SOLANA_WS_URL:-wss://api.mainnet-beta.solana.com}
   HELIUS_API_KEY: ${HELIUS_API_KEY:-}
   FEATURE_SCANNER_ENABLED: ${FEATURE_SCANNER_ENABLED:-false}
-  # pump.fun bonding-curve launches plus direct PumpSwap pool launches. The
-  # pAMM program's create_pool emits a CreatePoolEvent naming the base mint —
-  # verified on mainnet; see app/services/scanner/parser.py.
-  SCANNER_WATCH_PROGRAMS: ${SCANNER_WATCH_PROGRAMS:-6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P,pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA}
+  # pump.fun bonding-curve launches, direct PumpSwap pool launches, Meteora's
+  # Dynamic Bonding Curve (dbci…, which Moonshot launches on) and Raydium's
+  # LaunchLab (LanM…). Sampled 2026-09-13: the first two alone held 82 of 105
+  # tokens born that hour, and these two account for half of what was missed.
+  #
+  # THIS FALLBACK IS WHAT PRODUCTION RUNS. There is no env_file, so a value
+  # absent from .env.production reaches the container from here and nowhere
+  # else — the anchor's default silently beats the one in config.py. Changing
+  # SCANNER_WATCH_PROGRAMS or SCANNER_COMMITMENT in config.py alone deploys
+  # green and changes nothing, which is exactly what happened on 2026-09-13.
+  SCANNER_WATCH_PROGRAMS: ${SCANNER_WATCH_PROGRAMS:-6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P,pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA,dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN,LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj}
   # Gap recovery on (re)connect: the slot budget the scanner may walk back with
   # getBlock, and the pause between block reads. Zero slots disables recovery.
   SCANNER_RECOVERY_MAX_SLOTS: ${SCANNER_RECOVERY_MAX_SLOTS:-900}
   SCANNER_RECOVERY_BLOCK_DELAY_SECONDS: ${SCANNER_RECOVERY_BLOCK_DELAY_SECONDS:-1.0}
-  SCANNER_COMMITMENT: ${SCANNER_COMMITMENT:-confirmed}
+  # processed, not confirmed: measured 106ms earlier at the median and earlier
+  # on 100% of 3,932 shared signatures, same endpoint, no notifications lost.
+  SCANNER_COMMITMENT: ${SCANNER_COMMITMENT:-processed}
   SCANNER_WORKER_CONCURRENCY: ${SCANNER_WORKER_CONCURRENCY:-4}
   # Reconnect escalation and the state the scanner publishes for the health
   # endpoint. In the anchor, not on the scanner service: the scanner writes the
