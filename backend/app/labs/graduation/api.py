@@ -897,11 +897,16 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
                      "projected_trades": r.projected_trades,
                      "ruin_pct": r.ruin_pct}
             for r in rows if r.projected_30d_usd is not None})
-    # An arm that has not traded is not leading. Sorting on P&L alone ranks a
-    # never-traded $0.00 above an arm that took one trade and lost $1.30, and
-    # the top of the board fills with arms whose filter has simply not matched
-    # anything yet.
-    rows.sort(key=lambda r: (r.trades > 0, r.realised_usd), reverse=True)
+    # Ranked on the WALLET, which is the money column the board shows. Ranking
+    # on the $1,000 book's P&L put "#1" beside a number computed from a
+    # different account, and the two can disagree: the book is additive, so it
+    # rewards a big win on a dead arm that the wallet never recovers from.
+    #
+    # An arm that has not traded is not leading. Sorting on money alone ranks a
+    # never-traded arm — still holding its full $100 — above every arm that has
+    # taken a trade and lost, and the top fills with filters that have simply
+    # not matched anything yet.
+    rows.sort(key=lambda r: (r.trades > 0, r.wallet_100_usd), reverse=True)
     traded = [r for r in rows if r.trades]
     control_rows = [r for r in rows if r.is_control]
     # In WALLET dollars, because that is the column the board now shows. As
