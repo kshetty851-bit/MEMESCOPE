@@ -7,7 +7,7 @@ takes a candle iterator and knows nothing about Postgres, which is the point.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import func, select
@@ -23,22 +23,32 @@ _MINUTES_PER_FULL_WEEK = 5 * 24 * 60
 
 async def status(session: AsyncSession, symbol: str = config.SYMBOL) -> dict[str, Any]:
     """What is loaded, and what the loader still owes."""
-    total, first, last = (await session.execute(
-        select(func.count(), func.min(FxCandle.minute), func.max(FxCandle.minute))
-        .where(FxCandle.symbol == symbol)
-    )).one()
-    hours = dict((await session.execute(
-        select(FxIngestHour.ok, func.count()).where(FxIngestHour.symbol == symbol)
-        .group_by(FxIngestHour.ok)
-    )).all())
+    total, first, last = (
+        await session.execute(
+            select(func.count(), func.min(FxCandle.minute), func.max(FxCandle.minute)).where(
+                FxCandle.symbol == symbol
+            )
+        )
+    ).one()
+    hours = dict(
+        (
+            await session.execute(
+                select(FxIngestHour.ok, func.count())
+                .where(FxIngestHour.symbol == symbol)
+                .group_by(FxIngestHour.ok)
+            )
+        ).all()
+    )
     per_year = [
         {"year": int(y), "candles": int(n)}
-        for y, n in (await session.execute(
-            select(func.extract("year", FxCandle.minute), func.count())
-            .where(FxCandle.symbol == symbol)
-            .group_by(func.extract("year", FxCandle.minute))
-            .order_by(func.extract("year", FxCandle.minute))
-        )).all()
+        for y, n in (
+            await session.execute(
+                select(func.extract("year", FxCandle.minute), func.count())
+                .where(FxCandle.symbol == symbol)
+                .group_by(func.extract("year", FxCandle.minute))
+                .order_by(func.extract("year", FxCandle.minute))
+            )
+        ).all()
     ]
     return {
         "symbol": symbol,
@@ -66,16 +76,30 @@ async def iter_candles(
     """
     cursor, first = start, True
     while True:
-        q = (select(FxCandle.minute, FxCandle.bid_open, FxCandle.bid_high,
-                    FxCandle.bid_low, FxCandle.bid_close, FxCandle.ask_open,
-                    FxCandle.ask_high, FxCandle.ask_low, FxCandle.ask_close)
-             .where(FxCandle.symbol == symbol)
-             .order_by(FxCandle.minute).limit(chunk))
+        q = (
+            select(
+                FxCandle.minute,
+                FxCandle.bid_open,
+                FxCandle.bid_high,
+                FxCandle.bid_low,
+                FxCandle.bid_close,
+                FxCandle.ask_open,
+                FxCandle.ask_high,
+                FxCandle.ask_low,
+                FxCandle.ask_close,
+            )
+            .where(FxCandle.symbol == symbol)
+            .order_by(FxCandle.minute)
+            .limit(chunk)
+        )
         if cursor is not None:
             # Inclusive on the first page (the caller asked to start AT `start`),
             # exclusive on every page after it (that row has been yielded).
-            q = q.where(FxCandle.minute >= cursor) if first \
+            q = (
+                q.where(FxCandle.minute >= cursor)
+                if first
                 else q.where(FxCandle.minute > cursor)
+            )
         if end is not None:
             q = q.where(FxCandle.minute < end)
         rows = (await session.execute(q)).all()
@@ -116,15 +140,17 @@ async def integrity_check(
     the loader dropped something.
     """
     # --- 2. bid <= ask, on all four points -----------------------------------
-    crossed = (await session.execute(
-        select(func.count()).where(
-            FxCandle.symbol == symbol,
-            (FxCandle.bid_open > FxCandle.ask_open)
-            | (FxCandle.bid_high > FxCandle.ask_high)
-            | (FxCandle.bid_low > FxCandle.ask_low)
-            | (FxCandle.bid_close > FxCandle.ask_close),
+    crossed = (
+        await session.execute(
+            select(func.count()).where(
+                FxCandle.symbol == symbol,
+                (FxCandle.bid_open > FxCandle.ask_open)
+                | (FxCandle.bid_high > FxCandle.ask_high)
+                | (FxCandle.bid_low > FxCandle.ask_low)
+                | (FxCandle.bid_close > FxCandle.ask_close),
+            )
         )
-    )).scalar_one()
+    ).scalar_one()
 
     # --- 1. gaps --------------------------------------------------------------
     gaps: list[dict] = []
@@ -133,11 +159,14 @@ async def integrity_check(
     async for row in iter_candles(session, symbol):
         m = row[0]
         if prev is not None and m - prev > limit and not _gap_is_the_weekend(prev, m):
-            gaps.append({
-                "from": prev.isoformat(), "to": m.isoformat(),
-                "minutes": int((m - prev).total_seconds() // 60),
-                "holiday": market.holiday_name(prev, m),
-            })
+            gaps.append(
+                {
+                    "from": prev.isoformat(),
+                    "to": m.isoformat(),
+                    "minutes": int((m - prev).total_seconds() // 60),
+                    "holiday": market.holiday_name(prev, m),
+                }
+            )
         prev = m
     unexplained = [g for g in gaps if g["holiday"] is None]
 
@@ -148,11 +177,15 @@ async def integrity_check(
         y = row["year"]
         expected = _expected_minutes(y)
         ratio = row["candles"] / expected if expected else 0.0
-        years.append({
-            "year": y, "candles": row["candles"], "expected": expected,
-            "ratio": round(ratio, 4),
-            "within_tolerance": abs(1 - ratio) <= config.CANDLE_COUNT_TOLERANCE,
-        })
+        years.append(
+            {
+                "year": y,
+                "candles": row["candles"],
+                "expected": expected,
+                "ratio": round(ratio, 4),
+                "within_tolerance": abs(1 - ratio) <= config.CANDLE_COUNT_TOLERANCE,
+            }
+        )
 
     passed = (
         crossed == 0

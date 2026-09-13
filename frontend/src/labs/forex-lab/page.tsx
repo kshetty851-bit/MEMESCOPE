@@ -515,9 +515,23 @@ export function ForexLabPage() {
     );
   }
   if (latest.isError || !latest.data) {
+    // The frontend and the backend deploy separately, and the frontend is the
+    // faster of the two. A 404 here means this page shipped ahead of the API
+    // that serves it — which is a deployment state, not a fault, and saying
+    // "could not load" would send the reader looking for a bug that is not
+    // there.
+    const status = (latest.error as { status?: number } | null)?.status;
+    const notDeployed = status === 404;
     return (
       <ErrorState
-        body="Could not load the Forex Lab."
+        title={notDeployed ? "Backend not deployed yet" : "Signal lost"}
+        body={
+          notDeployed
+            ? "This page is live but the API route it reads has not shipped yet — " +
+              "the frontend and the backend deploy separately. Deploy the backend " +
+              "and it will fill in; nothing is broken."
+            : "Could not load the Forex Lab."
+        }
         onRetry={() => void latest.refetch()}
       />
     );

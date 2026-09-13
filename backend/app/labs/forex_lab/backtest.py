@@ -17,6 +17,7 @@ minute — and each worker memory-maps it. One read, 27 replays.
 from __future__ import annotations
 
 import array
+import asyncio
 import json
 import math
 import os
@@ -43,27 +44,27 @@ CANDLE_FILE = OUTPUT / "candles.bin"
 # --- export -------------------------------------------------------------------
 
 
-async def export_candles(session, path: Path = CANDLE_FILE, symbol: str = config.SYMBOL) -> int:
+async def export_candles(
+    session, path: Path = CANDLE_FILE, symbol: str = config.SYMBOL
+) -> int:
     """Write every stored candle to the binary replay file. Returns the count."""
     from app.labs.forex_lab.store import iter_candles
 
     path.parent.mkdir(parents=True, exist_ok=True)
     n = 0
-    with open(path, "wb") as fh:
-        buf = bytearray()
-        async for (minute, bo, bh, bl, bc, ao, ah, al, ac) in iter_candles(session, symbol):
-            buf += _ROW.pack(
-                int(minute.timestamp()),
-                (float(bo) + float(ao)) / 2.0,
-                (float(bh) + float(ah)) / 2.0,
-                (float(bl) + float(al)) / 2.0,
-                (float(bc) + float(ac)) / 2.0,
-            )
-            n += 1
-            if len(buf) >= 1 << 20:
-                fh.write(buf)
-                buf.clear()
-        fh.write(buf)
+    buf = bytearray()
+    async for minute, bo, bh, bl, bc, ao, ah, al, ac in iter_candles(session, symbol):
+        buf += _ROW.pack(
+            int(minute.timestamp()),
+            (float(bo) + float(ao)) / 2.0,
+            (float(bh) + float(ah)) / 2.0,
+            (float(bl) + float(al)) / 2.0,
+            (float(bc) + float(ac)) / 2.0,
+        )
+        n += 1
+    # Off the loop. Sixty megabytes of blocking write inside an async function
+    # is a bug waiting for a caller that shares the loop with something else.
+    await asyncio.to_thread(path.write_bytes, bytes(buf))
     return n
 
 
@@ -74,9 +75,9 @@ def load_candles(path: Path = CANDLE_FILE) -> tuple[array.array, array.array]:
     ts = array.array("q")
     px = array.array("f")
     for i in range(n):
-        t, o, h, l, c = _ROW.unpack_from(raw, i * _ROW.size)
+        t, o, h, lo, c = _ROW.unpack_from(raw, i * _ROW.size)
         ts.append(t)
-        px.extend((o, h, l, c))
+        px.extend((o, h, lo, c))
     return ts, px
 
 
@@ -101,8 +102,9 @@ def _profit_factor(trades) -> float:
     return won / lost
 
 
-def replay(cfg: GridConfig, ts: array.array, px: array.array,
-           with_trades: bool = False) -> dict[str, Any]:
+def replay(
+    cfg: GridConfig, ts: array.array, px: array.array, with_trades: bool = False
+) -> dict[str, Any]:
     """One configuration over the whole series."""
     n = len(ts)
     if n == 0:
@@ -153,17 +155,26 @@ def replay(cfg: GridConfig, ts: array.array, px: array.array,
     years = {int(k): round(v, 2) for k, v in sorted(yearly.items())}
     total_profit = final - cfg.start_equity
     winners = [v for v in months.values() if v > 0]
-    best_month_share = (max(winners) / total_profit) if (winners and total_profit > 0) else None
+    best_month_share = (
+        (max(winners) / total_profit) if (winners and total_profit > 0) else None
+    )
 
     out = {
-        "config": {"step_pips": cfg.step_pips, "levels": cfg.levels,
-                   "lots": cfg.lots, "stop_multiplier": cfg.stop_multiplier,
-                   "name": cfg.name},
+        "config": {
+            "step_pips": cfg.step_pips,
+            "levels": cfg.levels,
+            "lots": cfg.lots,
+            "stop_multiplier": cfg.stop_multiplier,
+            "name": cfg.name,
+        },
         "start_equity": cfg.start_equity,
         "final_equity": round(final, 2),
         "total_return_pct": round(100 * total_profit / cfg.start_equity, 2),
-        "profit_factor": (None if _profit_factor(eng.trades) == math.inf
-                          else round(_profit_factor(eng.trades), 3)),
+        "profit_factor": (
+            None
+            if _profit_factor(eng.trades) == math.inf
+            else round(_profit_factor(eng.trades), 3)
+        ),
         "max_drawdown_pct": round(100 * _max_drawdown(equity_curve), 2),
         "trades": len(eng.trades),
         "min_equity": round(eng.min_equity, 2),
@@ -187,21 +198,25 @@ def replay(cfg: GridConfig, ts: array.array, px: array.array,
         "years_positive": sum(1 for y in config.FULL_YEARS if years.get(y, 0) > 0),
         "years_total": sum(1 for y in config.FULL_YEARS if y in years),
         "partial_year_pnl": years.get(config.PARTIAL_YEAR),
-        "best_month_share": (None if best_month_share is None
-                             else round(best_month_share, 4)),
+        "best_month_share": (None if best_month_share is None else round(best_month_share, 4)),
         "equity_curve": [round(v, 2) for v in equity_curve],
         "equity_days": equity_days,
     }
     if with_trades:
         out["trade_list"] = [
-            {**asdict(t), "opened_at": t.opened_at.isoformat(),
-             "closed_at": t.closed_at.isoformat()} for t in eng.trades
+            {
+                **asdict(t),
+                "opened_at": t.opened_at.isoformat(),
+                "closed_at": t.closed_at.isoformat(),
+            }
+            for t in eng.trades
         ]
     return out
 
 
-def buy_and_hold(ts: array.array, px: array.array,
-                 lots: float = config.DEFAULT_LOTS) -> dict[str, Any]:
+def buy_and_hold(
+    ts: array.array, px: array.array, lots: float = config.DEFAULT_LOTS
+) -> dict[str, Any]:
     """The other baseline: long one micro lot, start to finish, paying the same
     spread on both fills and the same long swap every night."""
     cfg = GridConfig(lots=lots)
@@ -226,8 +241,10 @@ def buy_and_hold(ts: array.array, px: array.array,
     total = gross + swap
     return {
         "name": "buy_and_hold",
-        "entry": round(entry, 5), "exit": round(exit_, 5),
-        "gross": round(gross, 2), "swap": round(swap, 2),
+        "entry": round(entry, 5),
+        "exit": round(exit_, 5),
+        "gross": round(gross, 2),
+        "swap": round(swap, 2),
         "final_equity": round(config.DEFAULT_START_EQUITY + total, 2),
         "total_return_pct": round(100 * total / config.DEFAULT_START_EQUITY, 2),
     }
@@ -248,12 +265,15 @@ def _one(args) -> dict[str, Any]:
     return r
 
 
-def run_sweep_sync(out: str = "sweep.json", jobs: int = 0,
-                   path: Path = CANDLE_FILE) -> dict[str, Any]:
-    combos = [(s, n, m, config.DEFAULT_LOTS, str(path))
-              for s in config.SWEEP_STEPS
-              for n in config.SWEEP_LEVELS
-              for m in config.SWEEP_STOP_MULTIPLIERS]
+def run_sweep_sync(
+    out: str = "sweep.json", jobs: int = 0, path: Path = CANDLE_FILE
+) -> dict[str, Any]:
+    combos = [
+        (s, n, m, config.DEFAULT_LOTS, str(path))
+        for s in config.SWEEP_STEPS
+        for n in config.SWEEP_LEVELS
+        for m in config.SWEEP_STOP_MULTIPLIERS
+    ]
     jobs = jobs or (os.cpu_count() or 4)
     with ProcessPoolExecutor(max_workers=jobs) as pool:
         results = list(pool.map(_one, combos))
@@ -273,8 +293,14 @@ def run_sweep_sync(out: str = "sweep.json", jobs: int = 0,
     return {"written": str(dest), "configs": len(results), "candles": len(ts)}
 
 
-def run_one_sync(step: float, levels: int, mult: float, lots: float,
-                 with_trades: bool = False, path: Path = CANDLE_FILE) -> dict[str, Any]:
+def run_one_sync(
+    step: float,
+    levels: int,
+    mult: float,
+    lots: float,
+    with_trades: bool = False,
+    path: Path = CANDLE_FILE,
+) -> dict[str, Any]:
     ts, px = load_candles(path)
     cfg = GridConfig(step_pips=step, levels=levels, lots=lots, stop_multiplier=mult)
     r = replay(cfg, ts, px, with_trades=with_trades)
@@ -292,8 +318,12 @@ def _git_sha() -> str | None:
 
     try:
         return subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], cwd=str(HERE), stderr=subprocess.DEVNULL,
-            text=True, timeout=5).strip()
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(HERE),
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=5,
+        ).strip()
     except Exception:
         return None
 
@@ -312,7 +342,9 @@ async def publish(session_factory, sweep_path: str = "sweep.json") -> dict[str, 
     path = Path(sweep_path)
     if not path.is_absolute():
         path = OUTPUT / sweep_path
-    data = json.loads(path.read_text())
+    # Read off the loop: this is a one-shot CLI today, but an async function
+    # that blocks is a bug waiting for a caller that cares.
+    data = json.loads(await asyncio.to_thread(path.read_text))
     ranked = sorted(data["results"], key=lambda x: -(x["profit_factor"] or -1))
     best = ranked[0]
     verdict = gate_verdict(best)
@@ -334,5 +366,9 @@ async def publish(session_factory, sweep_path: str = "sweep.json") -> dict[str, 
         )
         session.add(row)
         await session.commit()
-        return {"published": str(row.id), "best_config": row.best_config,
-                "gate_passed": row.gate_passed, "candles": row.candles}
+        return {
+            "published": str(row.id),
+            "best_config": row.best_config,
+            "gate_passed": row.gate_passed,
+            "candles": row.candles,
+        }

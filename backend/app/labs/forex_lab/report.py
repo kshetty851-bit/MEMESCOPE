@@ -56,9 +56,11 @@ def _fmt(v, nd=2, dash="—"):
 
 
 def _config_table(results: list[dict]) -> str:
-    head = ("| Config | PF | Return % | Max DD % | Low water | Trades | "
-            "Re-centres | Stop-outs | Rejected | Years + (of 6) | "
-            "Best month share |")
+    head = (
+        "| Config | PF | Return % | Max DD % | Low water | Trades | "
+        "Re-centres | Stop-outs | Rejected | Years + (of 6) | "
+        "Best month share |"
+    )
     sep = "|" + "---|" * 11
     rows = []
     for r in sorted(results, key=lambda x: -(x["profit_factor"] or -1)):
@@ -159,8 +161,10 @@ observations.
 def _baseline_row(label: str, r: dict | None) -> str:
     if r is None:
         return f"| {label} | — | — |"
-    return (f"| {label}, `{r['config']['name']}` | {_fmt(r['final_equity'])} | "
-            f"{_fmt(r['total_return_pct'])}% |")
+    return (
+        f"| {label}, `{r['config']['name']}` | {_fmt(r['final_equity'])} | "
+        f"{_fmt(r['total_return_pct'])}% |"
+    )
 
 
 def _verdict_sentence(hedged: dict | None, neutral: dict | None, bh: dict) -> str:
@@ -168,16 +172,16 @@ def _verdict_sentence(hedged: dict | None, neutral: dict | None, bh: dict) -> st
     baseline is missing rather than quietly comparing against nothing."""
     if hedged is None:
         return "No hedged configuration was run, so there is nothing to compare."
+
+    def verdict(other: float) -> str:
+        return "**beat**" if hedged["final_equity"] > other else "**did not beat**"
+
     parts = []
     if neutral is None:
         parts.append("no neutral grid was run to compare against")
     else:
-        parts.append(
-            f"**{'beat' if hedged['final_equity'] > neutral['final_equity'] else 'did not beat'}** "
-            "the neutral-grid baseline")
-    parts.append(
-        f"**{'beat' if hedged['final_equity'] > bh['final_equity'] else 'did not beat'}** "
-        "buy-and-hold")
+        parts.append(f"{verdict(neutral['final_equity'])} the neutral-grid baseline")
+    parts.append(f"{verdict(bh['final_equity'])} buy-and-hold")
     return "The hedged grid " + " and ".join(parts) + "."
 
 
@@ -205,12 +209,10 @@ def write_report(sweep_path: str = "sweep.json", dest: Path | None = None) -> st
     y2022 = {int(k): val for k, val in best["per_year"].items()}.get(2022, 0.0)
 
     def best_of(rs):
-        return max(rs, key=lambda x: (x["profit_factor"] or -1)) if rs else None
+        return max(rs, key=lambda x: x["profit_factor"] or -1) if rs else None
 
-    best_neutral = best_of([r for r in results
-                            if r["config"]["stop_multiplier"] == 0.0])
-    best_hedged = best_of([r for r in results
-                           if r["config"]["stop_multiplier"] > 0])
+    best_neutral = best_of([r for r in results if r["config"]["stop_multiplier"] == 0.0])
+    best_hedged = best_of([r for r in results if r["config"]["stop_multiplier"] > 0])
     bh = data["buy_and_hold"]
 
     cfg = best["config"]
@@ -227,7 +229,7 @@ def write_report(sweep_path: str = "sweep.json", dest: Path | None = None) -> st
             f"> **Partial coverage.** The brief's window is {want_first} to "
             f"{want_last}; this replay covers {first} to {last}. Every number "
             "below is about the window that was loaded, and the gate's "
-            "\"4 of 6 years\" cannot be satisfied by a window that does not "
+            '"4 of 6 years" cannot be satisfied by a window that does not '
             "contain six years.",
             "",
         ]
@@ -275,13 +277,13 @@ def write_report(sweep_path: str = "sweep.json", dest: Path | None = None) -> st
         "2026 is January to June, half a year, and is counted in nothing: the "
         "gate's denominator is the six full years 2020–2025.",
         "",
-        "\"Low water\" is the lowest equity the account ever showed, measured at "
+        '"Low water" is the lowest equity the account ever showed, measured at '
         "the worse extreme of every candle rather than at a daily close. A "
         "configuration marked BLOWN passed through zero: its profit factor and "
         "its return are arithmetic about an account that had stopped existing, "
         "and no gate result for it means anything.",
         "",
-        "\"Best month share\" is the most profitable month as a fraction of the "
+        '"Best month share" is the most profitable month as a fraction of the '
         "run's TOTAL profit, so it exceeds 100% whenever the other months lost "
         "money between them — a configuration whose whole result is one good "
         "month and a slow bleed. It is blank where there was no profit to "

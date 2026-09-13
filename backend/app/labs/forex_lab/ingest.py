@@ -163,30 +163,47 @@ async def _fetch(client: httpx.AsyncClient, url: str, gate: _Gate) -> bytes | No
                     continue
         # Jittered backoff: a fleet of coroutines that all retry on the same
         # schedule just rebuilds the burst that drew the 503.
-        await asyncio.sleep(min(20.0, 1.5 * (attempt + 1)) * (0.5 + random.random()))
+        # S311: retry jitter, not a secret.
+        await asyncio.sleep(
+            min(20.0, 1.5 * (attempt + 1)) * (0.5 + random.random())  # noqa: S311
+        )
     raise RuntimeError(last)
 
 
-async def _missing_hours(session: AsyncSession, symbol: str, hours: list[datetime]) -> list[datetime]:
+async def _missing_hours(
+    session: AsyncSession, symbol: str, hours: list[datetime]
+) -> list[datetime]:
     done = set(
-        (await session.execute(
-            select(FxIngestHour.hour_start).where(
-                FxIngestHour.symbol == symbol, FxIngestHour.ok.is_(True)
+        (
+            await session.execute(
+                select(FxIngestHour.hour_start).where(
+                    FxIngestHour.symbol == symbol, FxIngestHour.ok.is_(True)
+                )
             )
-        )).scalars()
+        ).scalars()
     )
     # Postgres hands back tz-aware datetimes; normalise both sides.
     done = {d.astimezone(UTC) for d in done}
     return [h for h in hours if h not in done]
 
 
-async def _store(session: AsyncSession, symbol: str, hour: datetime, raw: bytes | None) -> dict:
+async def _store(
+    session: AsyncSession, symbol: str, hour: datetime, raw: bytes | None
+) -> dict:
     """Decode, aggregate and upsert one hour. Commits."""
     if raw is None:
-        session.add(FxIngestHour(
-            symbol=symbol, hour_start=hour, ok=True, empty=True,
-            tick_count=0, candle_count=0, error=None, fetched_at=datetime.now(UTC),
-        ))
+        session.add(
+            FxIngestHour(
+                symbol=symbol,
+                hour_start=hour,
+                ok=True,
+                empty=True,
+                tick_count=0,
+                candle_count=0,
+                error=None,
+                fetched_at=datetime.now(UTC),
+            )
+        )
         await session.commit()
         return {"ticks": 0, "candles": 0, "empty": True}
 
@@ -195,26 +212,48 @@ async def _store(session: AsyncSession, symbol: str, hour: datetime, raw: bytes 
     if candles:
         await session.execute(
             pg_insert(FxCandle)
-            .values([{
-                "symbol": symbol, "minute": c.minute,
-                "bid_open": c.bid_open, "bid_high": c.bid_high,
-                "bid_low": c.bid_low, "bid_close": c.bid_close,
-                "ask_open": c.ask_open, "ask_high": c.ask_high,
-                "ask_low": c.ask_low, "ask_close": c.ask_close,
-                "ticks": c.ticks,
-            } for c in candles])
+            .values(
+                [
+                    {
+                        "symbol": symbol,
+                        "minute": c.minute,
+                        "bid_open": c.bid_open,
+                        "bid_high": c.bid_high,
+                        "bid_low": c.bid_low,
+                        "bid_close": c.bid_close,
+                        "ask_open": c.ask_open,
+                        "ask_high": c.ask_high,
+                        "ask_low": c.ask_low,
+                        "ask_close": c.ask_close,
+                        "ticks": c.ticks,
+                    }
+                    for c in candles
+                ]
+            )
             .on_conflict_do_nothing(index_elements=["symbol", "minute"])
         )
     await session.execute(
         pg_insert(FxIngestHour)
-        .values(symbol=symbol, hour_start=hour, ok=True, empty=not candles,
-                tick_count=len(ticks), candle_count=len(candles), error=None,
-                fetched_at=datetime.now(UTC))
+        .values(
+            symbol=symbol,
+            hour_start=hour,
+            ok=True,
+            empty=not candles,
+            tick_count=len(ticks),
+            candle_count=len(candles),
+            error=None,
+            fetched_at=datetime.now(UTC),
+        )
         .on_conflict_do_update(
             index_elements=["symbol", "hour_start"],
-            set_={"ok": True, "empty": not candles, "tick_count": len(ticks),
-                  "candle_count": len(candles), "error": None,
-                  "fetched_at": datetime.now(UTC)},
+            set_={
+                "ok": True,
+                "empty": not candles,
+                "tick_count": len(ticks),
+                "candle_count": len(candles),
+                "error": None,
+                "fetched_at": datetime.now(UTC),
+            },
         )
     )
     await session.commit()
@@ -225,13 +264,19 @@ async def _record_failure(session_factory, symbol: str, hour: datetime, error: s
     async with session_factory() as session:
         await session.execute(
             pg_insert(FxIngestHour)
-            .values(symbol=symbol, hour_start=hour, ok=False, empty=False,
-                    tick_count=0, candle_count=0, error=error[:256],
-                    fetched_at=datetime.now(UTC))
+            .values(
+                symbol=symbol,
+                hour_start=hour,
+                ok=False,
+                empty=False,
+                tick_count=0,
+                candle_count=0,
+                error=error[:256],
+                fetched_at=datetime.now(UTC),
+            )
             .on_conflict_do_update(
                 index_elements=["symbol", "hour_start"],
-                set_={"ok": False, "error": error[:256],
-                      "fetched_at": datetime.now(UTC)},
+                set_={"ok": False, "error": error[:256], "fetched_at": datetime.now(UTC)},
             )
         )
         await session.commit()
@@ -258,8 +303,9 @@ async def ingest_until_clean(
     """
     history = []
     for i in range(passes):
-        stats = await ingest(session_factory, symbol, start, end, concurrency,
-                             progress_every, on_progress)
+        stats = await ingest(
+            session_factory, symbol, start, end, concurrency, progress_every, on_progress
+        )
         history.append(stats)
         if on_pass:
             on_pass(i + 1, stats)
@@ -269,8 +315,11 @@ async def ingest_until_clean(
             break
         if i + 1 < passes:
             await asyncio.sleep(pause_between)
-    return {"passes": len(history), "history": history,
-            "outstanding": history[-1]["failed"] if history else 0}
+    return {
+        "passes": len(history),
+        "history": history,
+        "outstanding": history[-1]["failed"] if history else 0,
+    }
 
 
 async def ingest(
@@ -283,17 +332,29 @@ async def ingest(
     on_progress=None,
 ) -> dict:
     """One pass over every hour not already recorded `ok`. Returns a summary."""
-    start = start or datetime(config.START.year, config.START.month, config.START.day, tzinfo=UTC)
-    end = end or datetime(config.END.year, config.END.month, config.END.day, tzinfo=UTC) + timedelta(days=1)
+    start = start or datetime(
+        config.START.year, config.START.month, config.START.day, tzinfo=UTC
+    )
+    end = end or datetime(
+        config.END.year, config.END.month, config.END.day, tzinfo=UTC
+    ) + timedelta(days=1)
     conc = concurrency or config.INGEST_CONCURRENCY
 
     all_hours = list(iter_hours(start, end))
     async with session_factory() as session:
         todo = await _missing_hours(session, symbol, all_hours)
 
-    stats = {"planned": len(all_hours), "todo": len(todo), "ok": 0, "empty": 0,
-             "failed": 0, "ticks": 0, "candles": 0, "cooldowns": 0,
-             "cooldown_seconds": 0.0}
+    stats = {
+        "planned": len(all_hours),
+        "todo": len(todo),
+        "ok": 0,
+        "empty": 0,
+        "failed": 0,
+        "ticks": 0,
+        "candles": 0,
+        "cooldowns": 0,
+        "cooldown_seconds": 0.0,
+    }
     if not todo:
         return stats
 
@@ -302,13 +363,18 @@ async def ingest(
     limits = httpx.Limits(max_connections=conc, max_keepalive_connections=conc)
     lock = asyncio.Lock()
 
-    async with httpx.AsyncClient(limits=limits, headers={"User-Agent": "Mozilla/5.0"}) as client:
+    async with httpx.AsyncClient(
+        limits=limits, headers={"User-Agent": "Mozilla/5.0"}
+    ) as client:
+
         async def one(hour: datetime) -> None:
             async with sem:
                 try:
                     raw = await _fetch(client, hour_url(symbol, hour), gate)
                 except Exception as exc:  # exhausted retries
-                    await _record_failure(session_factory, symbol, hour, f"{type(exc).__name__}: {exc}")
+                    await _record_failure(
+                        session_factory, symbol, hour, f"{type(exc).__name__}: {exc}"
+                    )
                     async with lock:
                         stats["failed"] += 1
                     return
@@ -316,7 +382,9 @@ async def ingest(
                     async with session_factory() as session:
                         r = await _store(session, symbol, hour, raw)
                 except (TickDecodeError, Exception) as exc:
-                    await _record_failure(session_factory, symbol, hour, f"{type(exc).__name__}: {exc}")
+                    await _record_failure(
+                        session_factory, symbol, hour, f"{type(exc).__name__}: {exc}"
+                    )
                     async with lock:
                         stats["failed"] += 1
                     return
@@ -360,22 +428,32 @@ async def verify_against_published(
     a rerun checks the same days and a difference is a real change.
     """
     from app.labs.forex_lab.models import FxCandle
-    from app.labs.forex_lab.ticks import decode_day_candles, day_candles_url
+    from app.labs.forex_lab.ticks import day_candles_url, decode_day_candles
 
-    rng = random.Random(seed)
+    rng = random.Random(seed)  # noqa: S311 — a reproducible sample, not a secret
     async with session_factory() as session:
-        loaded = sorted({
-            r[0].date() for r in (await session.execute(
-                select(FxIngestHour.hour_start).where(
-                    FxIngestHour.symbol == symbol,
-                    FxIngestHour.ok.is_(True),
-                    FxIngestHour.empty.is_(False),
-                )
-            )).all()
-        })
+        loaded = sorted(
+            {
+                r[0].date()
+                for r in (
+                    await session.execute(
+                        select(FxIngestHour.hour_start).where(
+                            FxIngestHour.symbol == symbol,
+                            FxIngestHour.ok.is_(True),
+                            FxIngestHour.empty.is_(False),
+                        )
+                    )
+                ).all()
+            }
+        )
     if not loaded:
-        return {"checked_days": 0, "compared": 0, "differences": 0,
-                "passed": False, "reason": "nothing loaded"}
+        return {
+            "checked_days": 0,
+            "compared": 0,
+            "differences": 0,
+            "passed": False,
+            "reason": "nothing loaded",
+        }
 
     # Only days whose every trading hour is loaded; a half-loaded day would
     # report every missing minute as a difference.
@@ -400,13 +478,19 @@ async def verify_against_published(
             theirs_ask = decode_day_candles(ask_raw, day)
 
             async with session_factory() as session:
-                rows = (await session.execute(
-                    select(FxCandle).where(
-                        FxCandle.symbol == symbol,
-                        FxCandle.minute >= day,
-                        FxCandle.minute < day + timedelta(days=1),
+                rows = (
+                    (
+                        await session.execute(
+                            select(FxCandle).where(
+                                FxCandle.symbol == symbol,
+                                FxCandle.minute >= day,
+                                FxCandle.minute < day + timedelta(days=1),
+                            )
+                        )
                     )
-                )).scalars().all()
+                    .scalars()
+                    .all()
+                )
             if not rows:
                 continue
             checked.append(d.isoformat())
@@ -416,19 +500,29 @@ async def verify_against_published(
                     t = theirs.get(m)
                     if t is None:
                         continue
-                    ours = (float(getattr(row, f"{side}_open")),
-                            float(getattr(row, f"{side}_high")),
-                            float(getattr(row, f"{side}_low")),
-                            float(getattr(row, f"{side}_close")))
+                    ours = (
+                        float(getattr(row, f"{side}_open")),
+                        float(getattr(row, f"{side}_high")),
+                        float(getattr(row, f"{side}_low")),
+                        float(getattr(row, f"{side}_close")),
+                    )
                     compared += 1
-                    if max(abs(a - b) for a, b in zip(ours, t)) > tolerance:
+                    if max(abs(a - b) for a, b in zip(ours, t, strict=True)) > tolerance:
                         differences += 1
                         if len(worst) < 10:
-                            worst.append({"minute": m.isoformat(), "side": side,
-                                          "ours": ours, "theirs": t})
+                            worst.append(
+                                {
+                                    "minute": m.isoformat(),
+                                    "side": side,
+                                    "ours": ours,
+                                    "theirs": t,
+                                }
+                            )
     return {
-        "checked_days": len(checked), "days": checked,
-        "compared": compared, "differences": differences,
+        "checked_days": len(checked),
+        "days": checked,
+        "compared": compared,
+        "differences": differences,
         "passed": compared > 0 and differences == 0,
         "sample": worst,
     }

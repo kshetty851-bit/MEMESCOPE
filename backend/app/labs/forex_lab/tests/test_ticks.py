@@ -14,7 +14,11 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from app.labs.forex_lab.ticks import (
-    Candle, Tick, TickDecodeError, decode_hour, hour_url, to_minute_candles,
+    Tick,
+    TickDecodeError,
+    decode_hour,
+    hour_url,
+    to_minute_candles,
 )
 
 HOUR = datetime(2023, 1, 3, 14, 0, tzinfo=UTC)
@@ -22,8 +26,9 @@ HOUR = datetime(2023, 1, 3, 14, 0, tzinfo=UTC)
 
 def pack(records) -> bytes:
     """Build a .bi5 body the way Dukascopy does: big-endian, 20 bytes a tick."""
-    raw = b"".join(struct.pack(">3I2f", ms, ask, bid, av, bv)
-                   for ms, ask, bid, av, bv in records)
+    raw = b"".join(
+        struct.pack(">3I2f", ms, ask, bid, av, bv) for ms, ask, bid, av, bv in records
+    )
     return lzma.compress(raw, format=lzma.FORMAT_ALONE)
 
 
@@ -63,9 +68,11 @@ def test_the_url_uses_a_zero_based_month():
     """January is 00. Getting this wrong loads a month of the wrong prices and
     nothing anywhere raises."""
     assert hour_url("EURUSD", datetime(2023, 1, 3, 14, tzinfo=UTC)).endswith(
-        "EURUSD/2023/00/03/14h_ticks.bi5")
+        "EURUSD/2023/00/03/14h_ticks.bi5"
+    )
     assert hour_url("EURUSD", datetime(2020, 12, 31, 0, tzinfo=UTC)).endswith(
-        "EURUSD/2020/11/31/00h_ticks.bi5")
+        "EURUSD/2020/11/31/00h_ticks.bi5"
+    )
 
 
 # --- aggregation --------------------------------------------------------------
@@ -76,8 +83,12 @@ def _t(sec: float, bid: float, ask: float) -> Tick:
 
 
 def test_one_minute_of_ticks_becomes_one_ohlc_candle():
-    ticks = [_t(1, 1.0500, 1.0501), _t(20, 1.0510, 1.0512),
-             _t(40, 1.0495, 1.0496), _t(59, 1.0505, 1.0506)]
+    ticks = [
+        _t(1, 1.0500, 1.0501),
+        _t(20, 1.0510, 1.0512),
+        _t(40, 1.0495, 1.0496),
+        _t(59, 1.0505, 1.0506),
+    ]
     (c,) = to_minute_candles(ticks)
     assert c.minute == HOUR
     assert (c.bid_open, c.bid_high, c.bid_low, c.bid_close) == (1.0500, 1.0510, 1.0495, 1.0505)
@@ -118,15 +129,16 @@ def test_bid_never_exceeds_ask_in_an_aggregate_when_it_never_did_in_a_tick():
 def pack_candles(records) -> bytes:
     """Dukascopy's candle format: 24 bytes, `>5If`, and the order is O, C, L, H
     — not the O, H, L, C everything else in the world uses."""
-    raw = b"".join(struct.pack(">5If", sec, o, c, lo, hi, vol)
-                   for sec, o, c, lo, hi, vol in records)
+    raw = b"".join(
+        struct.pack(">5If", sec, o, c, lo, hi, vol) for sec, o, c, lo, hi, vol in records
+    )
     return lzma.compress(raw, format=lzma.FORMAT_ALONE)
 
 
 DAY = datetime(2023, 1, 3, 0, 0, tzinfo=UTC)
 
 
-def test_day_candles_are_reordered_from_ocIh_to_ohlc():
+def test_day_candles_are_reordered_from_open_close_low_high():
     """Reading O, C, L, H as O, H, L, C would swap high and close on every
     candle and still look entirely plausible."""
     from app.labs.forex_lab.ticks import decode_day_candles
@@ -141,10 +153,15 @@ def test_a_minute_the_market_did_not_trade_is_dropped():
     compared against nothing would report a difference that is not one."""
     from app.labs.forex_lab.ticks import decode_day_candles
 
-    got = decode_day_candles(pack_candles([
-        (0, 106764, 106735, 106732, 106766, 471.4),
-        (60, 106735, 106735, 106735, 106735, 0.0),
-    ]), DAY)
+    got = decode_day_candles(
+        pack_candles(
+            [
+                (0, 106764, 106735, 106732, 106766, 471.4),
+                (60, 106735, 106735, 106735, 106735, 0.0),
+            ]
+        ),
+        DAY,
+    )
     assert list(got) == [DAY]
 
 
@@ -152,9 +169,11 @@ def test_the_day_candle_url_also_uses_a_zero_based_month():
     from app.labs.forex_lab.ticks import day_candles_url
 
     assert day_candles_url("EURUSD", DAY, "BID").endswith(
-        "EURUSD/2023/00/03/BID_candles_min_1.bi5")
+        "EURUSD/2023/00/03/BID_candles_min_1.bi5"
+    )
     assert day_candles_url("EURUSD", DAY, "ask").endswith(
-        "EURUSD/2023/00/03/ASK_candles_min_1.bi5")
+        "EURUSD/2023/00/03/ASK_candles_min_1.bi5"
+    )
 
 
 def test_a_truncated_candle_file_raises():

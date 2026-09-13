@@ -34,7 +34,7 @@ def series(start: datetime, prices) -> tuple[array.array, array.array]:
 
 def ramp(a: float, b: float, pips_per_candle: float = 5.0) -> list[float]:
     d = pips_per_candle * PIP * (1 if b > a else -1)
-    n = int(round(abs(b - a) / (pips_per_candle * PIP)))
+    n = round(abs(b - a) / (pips_per_candle * PIP))
     return [round(a + d * (i + 1), 7) for i in range(n)]
 
 
@@ -67,9 +67,11 @@ def test_the_per_year_totals_add_up_to_the_final_equity():
     ts, px = series(start, (ramp(1.10000, 1.09400) + ramp(1.09400, 1.10000)) * 4)
     r = replay(GridConfig(step_pips=25, levels=4), ts, px)
     assert sum(r["per_year"].values()) == pytest.approx(
-        r["final_equity"] - r["start_equity"], abs=0.02)
+        r["final_equity"] - r["start_equity"], abs=0.02
+    )
     assert sum(r["per_month"].values()) == pytest.approx(
-        r["final_equity"] - r["start_equity"], abs=0.02)
+        r["final_equity"] - r["start_equity"], abs=0.02
+    )
 
 
 def test_years_positive_counts_the_six_full_years_not_the_seven_calendar_ones():
@@ -145,21 +147,30 @@ def test_the_gate_needs_all_five_conditions():
     from app.labs.forex_lab.report import gate_verdict
 
     passing = {
-        "profit_factor": 1.4, "years_positive": 5, "max_drawdown_pct": 20.0,
-        "best_month_share": 0.2, "total_return_pct": 30.0,
+        "profit_factor": 1.4,
+        "years_positive": 5,
+        "max_drawdown_pct": 20.0,
+        "best_month_share": 0.2,
+        "total_return_pct": 30.0,
         "per_year": {"2022": 50.0},
     }
     assert gate_verdict(passing)["passed"] is True
 
-    for key, bad in (("profit_factor", 1.29), ("years_positive", 3),
-                     ("max_drawdown_pct", 25.0), ("best_month_share", 0.31)):
+    for key, bad in (
+        ("profit_factor", 1.29),
+        ("years_positive", 3),
+        ("max_drawdown_pct", 25.0),
+        ("best_month_share", 0.31),
+    ):
         assert gate_verdict({**passing, key: bad})["passed"] is False
     assert gate_verdict({**passing, "per_year": {"2022": -1.0}})["passed"] is False
     assert gate_verdict({**passing, "profit_factor": None})["passed"] is False
     # Profit concentrated in one month cannot pass just because there was no
     # profit at all to concentrate.
-    assert gate_verdict({**passing, "total_return_pct": -5.0,
-                         "best_month_share": None})["passed"] is False
+    assert (
+        gate_verdict({**passing, "total_return_pct": -5.0, "best_month_share": None})["passed"]
+        is False
+    )
 
 
 # --- the report's honesty about its own coverage ------------------------------
@@ -168,26 +179,53 @@ def test_the_gate_needs_all_five_conditions():
 def _sweep(first: str, last: str) -> dict:
     def result(name: str, mult: float) -> dict:
         return {
-            "config": {"step_pips": 25, "levels": 4, "lots": 1.0,
-                       "stop_multiplier": mult, "name": name},
-            "start_equity": 1000.0, "final_equity": 1100.0,
-            "total_return_pct": 10.0, "profit_factor": 1.4,
-            "max_drawdown_pct": 5.0, "trades": 10, "min_equity": 950.0,
-            "blown": False, "recenters": 1, "stopouts": 0, "rejected_fills": 0,
-            "fills": 10, "spread_paid": 1.0, "swap_paid": -1.0,
-            "recenter_loss": -1.0, "stopout_loss": 0.0, "tp_pnl": 100.0,
+            "config": {
+                "step_pips": 25,
+                "levels": 4,
+                "lots": 1.0,
+                "stop_multiplier": mult,
+                "name": name,
+            },
+            "start_equity": 1000.0,
+            "final_equity": 1100.0,
+            "total_return_pct": 10.0,
+            "profit_factor": 1.4,
+            "max_drawdown_pct": 5.0,
+            "trades": 10,
+            "min_equity": 950.0,
+            "blown": False,
+            "recenters": 1,
+            "stopouts": 0,
+            "rejected_fills": 0,
+            "fills": 10,
+            "spread_paid": 1.0,
+            "swap_paid": -1.0,
+            "recenter_loss": -1.0,
+            "stopout_loss": 0.0,
+            "tp_pnl": 100.0,
             "per_year": {str(y): 10.0 for y in range(2020, 2027)},
-            "per_month": {"2020-01": 100.0}, "years_positive": 6,
-            "years_total": 6, "partial_year_pnl": 10.0, "best_month_share": 0.2,
+            "per_month": {"2020-01": 100.0},
+            "years_positive": 6,
+            "years_total": 6,
+            "partial_year_pnl": 10.0,
+            "best_month_share": 0.2,
         }
 
     return {
-        "generated_at": "2026-09-13T00:00:00Z", "candles": 2_400_000,
-        "first_minute": f"{first}T00:00:00Z", "last_minute": f"{last}T21:00:00Z",
+        "generated_at": "2026-09-13T00:00:00Z",
+        "candles": 2_400_000,
+        "first_minute": f"{first}T00:00:00Z",
+        "last_minute": f"{last}T21:00:00Z",
         "results": [result("S25_N4_M1", 1.0), result("S25_N4_M0", 0.0)],
-        "buy_and_hold": {"name": "buy_and_hold", "entry": 1.1, "exit": 1.2,
-                         "gross": 100.0, "swap": -10.0, "final_equity": 1090.0,
-                         "total_return_pct": 9.0},
+        "buy_and_hold": {
+            "name": "buy_and_hold",
+            "entry": 1.1,
+            "exit": 1.2,
+            "gross": 100.0,
+            "swap": -10.0,
+            "final_equity": 1090.0,
+            "total_return_pct": 9.0,
+        },
     }
 
 
@@ -238,6 +276,8 @@ def test_the_comparison_says_so_when_a_baseline_is_missing():
     assert "no neutral grid was run" in _verdict_sentence(hedged, None, bh)
     assert "nothing to compare" in _verdict_sentence(None, None, bh)
     assert "**beat** the neutral-grid baseline" in _verdict_sentence(
-        hedged, {"final_equity": 1000.0}, bh)
+        hedged, {"final_equity": 1000.0}, bh
+    )
     assert "**did not beat** the neutral-grid baseline" in _verdict_sentence(
-        hedged, {"final_equity": 1200.0}, bh)
+        hedged, {"final_equity": 1200.0}, bh
+    )

@@ -68,8 +68,12 @@ def upgrade() -> None:
         sa.Column("tick_count", sa.BigInteger(), nullable=False, server_default=sa.text("0")),
         sa.Column("candle_count", sa.Integer(), nullable=False, server_default=sa.text("0")),
         sa.Column("error", sa.String(256), nullable=True),
-        sa.Column("fetched_at", sa.DateTime(timezone=True), nullable=False,
-                  server_default=sa.func.now()),
+        sa.Column(
+            "fetched_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.func.now(),
+        ),
         sa.PrimaryKeyConstraint("symbol", "hour_start", name="pk_fx_ingest_hours"),
     )
     # The resume query is "which hours are not ok", so that is the index.
@@ -81,18 +85,27 @@ def upgrade() -> None:
     # single answer to a single question.
     op.create_table(
         "fx_sweep_runs",
-        sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False,
-                  server_default=sa.text("gen_random_uuid()")),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False,
-                  server_default=sa.func.now()),
+        sa.Column(
+            "id",
+            postgresql.UUID(as_uuid=True),
+            nullable=False,
+            server_default=sa.text("gen_random_uuid()"),
+        ),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.func.now(),
+        ),
         sa.Column("symbol", sa.String(16), nullable=False),
         sa.Column("first_minute", sa.DateTime(timezone=True), nullable=False),
         sa.Column("last_minute", sa.DateTime(timezone=True), nullable=False),
         sa.Column("candles", sa.BigInteger(), nullable=False),
         sa.Column("git_sha", sa.String(40), nullable=True),
         sa.Column("best_config", sa.String(32), nullable=False),
-        sa.Column("gate_passed", sa.Boolean(), nullable=False,
-                  server_default=sa.text("false")),
+        sa.Column(
+            "gate_passed", sa.Boolean(), nullable=False, server_default=sa.text("false")
+        ),
         sa.Column("result", postgresql.JSONB(), nullable=False),
         sa.PrimaryKeyConstraint("id", name="pk_fx_sweep_runs"),
     )

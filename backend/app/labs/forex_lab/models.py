@@ -48,14 +48,10 @@ class FxCandle(Base):
     """
 
     __tablename__ = "fx_candles"
-    __table_args__ = (
-        Index("ix_fx_candles_minute", "minute"),
-    )
+    __table_args__ = (Index("ix_fx_candles_minute", "minute"),)
 
     symbol: Mapped[str] = mapped_column(String(16), primary_key=True)
-    minute: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), primary_key=True
-    )
+    minute: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
     bid_open: Mapped[float] = mapped_column(_PRICE, nullable=False)
     bid_high: Mapped[float] = mapped_column(_PRICE, nullable=False)
     bid_low: Mapped[float] = mapped_column(_PRICE, nullable=False)
@@ -80,18 +76,12 @@ class FxIngestHour(Base):
     """
 
     __tablename__ = "fx_ingest_hours"
-    __table_args__ = (
-        Index("ix_fx_ingest_hours_ok", "symbol", "ok"),
-    )
+    __table_args__ = (Index("ix_fx_ingest_hours_ok", "symbol", "ok"),)
 
     symbol: Mapped[str] = mapped_column(String(16), primary_key=True)
-    hour_start: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), primary_key=True
-    )
+    hour_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
     ok: Mapped[bool] = mapped_column(Boolean, nullable=False)
-    empty: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, server_default=text("false")
-    )
+    empty: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     tick_count: Mapped[int] = mapped_column(
         BigInteger, nullable=False, server_default=text("0")
     )

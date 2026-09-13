@@ -50,10 +50,10 @@ def test_the_lab_mounts_under_labs_beside_its_siblings(served):
 def test_registering_this_lab_did_not_unmount_another(served):
     """The include was moved once, from beside `health` to beside the other
     labs. A bad edit there silently drops every route below it."""
-    for sibling in ("/api/v1/labs/v6-fast-accum/latest",
-                    "/api/v1/labs/graduation/status"):
+    for sibling in ("/api/v1/labs/v6-fast-accum/latest", "/api/v1/labs/graduation/status"):
         assert sibling in served or any(
-            p.startswith(sibling.rsplit("/", 1)[0]) for p in served), sibling
+            p.startswith(sibling.rsplit("/", 1)[0]) for p in served
+        ), sibling
 
 
 # --- the deployed case ---------------------------------------------------------

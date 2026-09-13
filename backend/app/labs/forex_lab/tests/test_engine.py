@@ -395,8 +395,23 @@ def test_same_candles_and_config_give_an_identical_trade_list():
     run(b, candles)
 
     def fingerprint(e):
-        return [(t.opened_at, t.closed_at, t.side, t.lots, t.entry, t.exit,
-                 t.kind, t.reason, t.gross, t.cost, t.swap, t.pnl) for t in e.trades]
+        return [
+            (
+                t.opened_at,
+                t.closed_at,
+                t.side,
+                t.lots,
+                t.entry,
+                t.exit,
+                t.kind,
+                t.reason,
+                t.gross,
+                t.cost,
+                t.swap,
+                t.pnl,
+            )
+            for t in e.trades
+        ]
 
     assert a.trades, "the fixture must actually trade"
     assert fingerprint(a) == fingerprint(b)
@@ -415,12 +430,12 @@ def test_both_intracandle_orderings_agree_on_the_hand_computed_paths():
     for target in (1.09400, 1.11000):
         candles = walk(C0, target, t0=T0)
         low_first, high_first = make(), make()
-        for minute, o, h, l, c in candles:
+        for minute, o, h, lo, c in candles:
             low_first._apply_swap(minute)
-            low_first._walk(o, l, h, c, minute)
+            low_first._walk(o, lo, h, c, minute)
             low_first.mark = c
             high_first._apply_swap(minute)
-            high_first._walk(o, h, l, c, minute)
+            high_first._walk(o, h, lo, c, minute)
             high_first.mark = c
         assert low_first.balance == pytest.approx(high_first.balance, abs=1e-9)
         assert len(low_first.trades) == len(high_first.trades)
@@ -434,8 +449,7 @@ def test_the_worse_ordering_is_the_one_that_is_kept():
     # Asymmetric on purpose: a candle whose high and low are the same distance
     # out and that closes where it opened is symmetric enough that both
     # orderings land on the same balance. +80 / -40 / close +60 does not.
-    wide = (T0, C0, round(C0 + 80 * PIP, 7), round(C0 - 40 * PIP, 7),
-            round(C0 + 60 * PIP, 7))
+    wide = (T0, C0, round(C0 + 80 * PIP, 7), round(C0 - 40 * PIP, 7), round(C0 + 60 * PIP, 7))
 
     low_first = e._clone()
     low_first._walk(wide[1], wide[3], wide[2], wide[4], wide[0])
@@ -472,13 +486,23 @@ def test_the_margin_call_is_checked_on_a_candle_that_fires_nothing():
     from app.labs.forex_lab.engine import Order, Position
 
     def book(mid_at_start: float) -> GridEngine:
-        e = GridEngine(GridConfig(step_pips=500, levels=4, lots=1.0,
-                                  start_equity=200.0), C0, T0)
+        e = GridEngine(
+            GridConfig(step_pips=500, levels=4, lots=1.0, start_equity=200.0), C0, T0
+        )
         e.orders = []
         origin = Order(-1, "buy_limit", 1.05000, +1, 1.0, 1.10000, -1)
-        e.positions = [Position(side=+1, lots=1.0, entry=1.05004, tp=1.10000,
-                                margin=1000 * 1.05004 / 10, opened_at=T0,
-                                origin=origin, cost_paid=0.04)]
+        e.positions = [
+            Position(
+                side=+1,
+                lots=1.0,
+                entry=1.05004,
+                tp=1.10000,
+                margin=1000 * 1.05004 / 10,
+                opened_at=T0,
+                origin=origin,
+                cost_paid=0.04,
+            )
+        ]
         e.mark = mid_at_start
         e._refresh_bounds()
         assert round(e._bound_down, 5) == 0.90000
@@ -543,14 +567,17 @@ def test_a_gap_lands_in_exactly_the_same_book_as_the_same_move_walked():
     run(walked, walk(C0, round(C0 - 60 * PIP, 7), t0=T0))
 
     def book(e):
-        return {(p.origin.level, p.origin.kind): round(p.entry, 5)
-                for p in e.positions}
+        return {(p.origin.level, p.origin.kind): round(p.entry, 5) for p in e.positions}
 
-    assert book(gapped) == book(walked) == {
-        (-1, "buy_limit"): 1.09754,   # level + half spread
-        (-2, "buy_limit"): 1.09504,
-        (-2, "sell_stop"): 1.09494,   # level - half spread - slip
-    }
+    assert (
+        book(gapped)
+        == book(walked)
+        == {
+            (-1, "buy_limit"): 1.09754,  # level + half spread
+            (-2, "buy_limit"): 1.09504,
+            (-2, "sell_stop"): 1.09494,  # level - half spread - slip
+        }
+    )
     # The level-1 sell stop opened at 1.09744 and took profit at 1.09500 on the
     # way through, both times, for the same $2.40 — and its order is back.
     assert [round(t.pnl, 2) for t in gapped.trades] == [2.40]

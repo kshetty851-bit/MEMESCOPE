@@ -46,7 +46,7 @@ treating them as stop fills rather than limit fills is the honest reading.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -205,25 +205,29 @@ class GridEngine:
 
     def _build_grid(self, ts: datetime) -> None:
         cfg = self.cfg
-        S, C = cfg.step, self.center
+        step, centre = cfg.step, self.center
         stop_lots = cfg.lots * cfg.stop_multiplier
         self.orders = []
         for k in range(1, cfg.levels + 1):
-            below = round(C - k * S, 7)
-            above = round(C + k * S, 7)
-            # Below the centre: a buy limit (TP one step toward C) and a sell
-            # stop (TP one step away).
-            self.orders.append(Order(-k, "buy_limit", below, +1, cfg.lots,
-                                     round(below + S, 7), -1))
+            below = round(centre - k * step, 7)
+            above = round(centre + k * step, 7)
+            # Below the centre: a buy limit (TP one step toward the centre)
+            # and a sell stop (TP one step away).
+            self.orders.append(
+                Order(-k, "buy_limit", below, +1, cfg.lots, round(below + step, 7), -1)
+            )
             if stop_lots > 0:
-                self.orders.append(Order(-k, "sell_stop", below, -1, stop_lots,
-                                         round(below - S, 7), -1))
-            # Above: a sell limit (TP toward C) and a buy stop (TP away).
-            self.orders.append(Order(k, "sell_limit", above, -1, cfg.lots,
-                                     round(above - S, 7), +1))
+                self.orders.append(
+                    Order(-k, "sell_stop", below, -1, stop_lots, round(below - step, 7), -1)
+                )
+            # Above: a sell limit (TP toward the centre), a buy stop (away).
+            self.orders.append(
+                Order(k, "sell_limit", above, -1, cfg.lots, round(above - step, 7), +1)
+            )
             if stop_lots > 0:
-                self.orders.append(Order(k, "buy_stop", above, +1, stop_lots,
-                                         round(above + S, 7), +1))
+                self.orders.append(
+                    Order(k, "buy_stop", above, +1, stop_lots, round(above + step, 7), +1)
+                )
         self._refresh_bounds()
 
     def _refresh_bounds(self) -> None:
@@ -284,15 +288,25 @@ class GridEngine:
             self.rejections.append((ts, o.kind, o.price))
             return False
         cost = (abs(entry - mid)) * _units(o.lots)
-        self.positions.append(Position(
-            side=o.side, lots=o.lots, entry=entry, tp=o.tp, margin=margin,
-            opened_at=ts, origin=replace(o), cost_paid=cost,
-        ))
+        self.positions.append(
+            Position(
+                side=o.side,
+                lots=o.lots,
+                entry=entry,
+                tp=o.tp,
+                margin=margin,
+                opened_at=ts,
+                origin=replace(o),
+                cost_paid=cost,
+            )
+        )
         self.stats["fills"] += 1
         self.stats["spread_paid"] += cost
         return True
 
-    def _close(self, p: Position, mid: float, ts: datetime, reason: str, slipping: bool) -> float:
+    def _close(
+        self, p: Position, mid: float, ts: datetime, reason: str, slipping: bool
+    ) -> float:
         x = self._close_price(p.side, mid, slipping=slipping)
         gross = p.side * (x - p.entry) * _units(p.lots)
         exit_cost = abs(x - mid) * _units(p.lots)
@@ -302,12 +316,22 @@ class GridEngine:
         # separately so the breakdown adds up; it is not subtracted twice.
         pnl = gross
         self.balance += pnl
-        self.trades.append(Trade(
-            opened_at=p.opened_at, closed_at=ts, side=p.side, lots=p.lots,
-            entry=p.entry, exit=x, kind=p.origin.kind, reason=reason,
-            gross=p.side * (mid - p.origin.price) * _units(p.lots),
-            cost=p.cost_paid + exit_cost, swap=p.swap_paid, pnl=pnl,
-        ))
+        self.trades.append(
+            Trade(
+                opened_at=p.opened_at,
+                closed_at=ts,
+                side=p.side,
+                lots=p.lots,
+                entry=p.entry,
+                exit=x,
+                kind=p.origin.kind,
+                reason=reason,
+                gross=p.side * (mid - p.origin.price) * _units(p.lots),
+                cost=p.cost_paid + exit_cost,
+                swap=p.swap_paid,
+                pnl=pnl,
+            )
+        )
         self.positions.remove(p)
         return pnl
 
@@ -354,14 +378,15 @@ class GridEngine:
         cands += [o.price for o in self.orders if o.trigger_dir == d]
         cands += [p.tp for p in self.positions if p.tp_dir == d]
         for price in cands:
+            # Half-open: strictly past `cur`, up to and including `target`.
             if d < 0:
-                if price < cur - EPS and price >= target - EPS:
-                    if best is None or price > best:
-                        best = price
+                reached = cur - EPS > price >= target - EPS
+                nearer = best is None or price > best
             else:
-                if price > cur + EPS and price <= target + EPS:
-                    if best is None or price < best:
-                        best = price
+                reached = cur + EPS < price <= target + EPS
+                nearer = best is None or price < best
+            if reached and nearer:
+                best = price
         return best
 
     def _process_point(self, mid: float, d: int, ts: datetime) -> bool:
@@ -370,14 +395,12 @@ class GridEngine:
         Entries first, then take-profits: see conservatism note 3 at the top.
         """
         # 1. entries
-        firing = [o for o in self.orders
-                  if o.trigger_dir == d and abs(o.price - mid) < EPS]
+        firing = [o for o in self.orders if o.trigger_dir == d and abs(o.price - mid) < EPS]
         for o in firing:
             self.orders.remove(o)
             self._open(o, mid, ts)
         # 2. take-profits
-        for p in [p for p in self.positions
-                  if p.tp_dir == d and abs(p.tp - mid) < EPS]:
+        for p in [p for p in self.positions if p.tp_dir == d and abs(p.tp - mid) < EPS]:
             origin = p.origin
             pnl = self._close(p, mid, ts, "tp", slipping=False)
             self.stats["tp_pnl"] += pnl
@@ -403,9 +426,7 @@ class GridEngine:
             cur = nxt
             self._process_point(cur, d, ts)
             self._check_stop_out(cur, ts)
-        raise EngineError(
-            f"leg {p_from}->{p_to} at {ts} fired {_MAX_EVENTS_PER_LEG} triggers"
-        )
+        raise EngineError(f"leg {p_from}->{p_to} at {ts} fired {_MAX_EVENTS_PER_LEG} triggers")
 
     def _check_stop_out(self, mid: float, ts: datetime) -> None:
         um = self.used_margin
@@ -424,8 +445,9 @@ class GridEngine:
         """
         if not self.cfg.swap_enabled or not self.positions:
             ny = ts.astimezone(_NY)
-            self._last_rollover = ny.date() if ny.hour >= config.SWAP_HOUR_NY \
-                else ny.date() - timedelta(days=1)
+            self._last_rollover = (
+                ny.date() if ny.hour >= config.SWAP_HOUR_NY else ny.date() - timedelta(days=1)
+            )
             return
         ny = ts.astimezone(_NY)
         r_date = ny.date() if ny.hour >= config.SWAP_HOUR_NY else ny.date() - timedelta(days=1)
@@ -437,8 +459,13 @@ class GridEngine:
         d = self._last_rollover + timedelta(days=1)
         while d <= r_date:
             if d.weekday() < 5:  # brokers roll Mon-Fri; the weekend is Wednesday's
-                mult = 3.0 if (self.cfg.triple_wednesday
-                               and d.weekday() == config.TRIPLE_SWAP_WEEKDAY) else 1.0
+                mult = (
+                    3.0
+                    if (
+                        self.cfg.triple_wednesday and d.weekday() == config.TRIPLE_SWAP_WEEKDAY
+                    )
+                    else 1.0
+                )
                 long_rate, short_rate = _swap_rates(d.year)
                 for p in self.positions:
                     amt = (long_rate if p.side > 0 else short_rate) * p.lots * mult
@@ -450,7 +477,7 @@ class GridEngine:
 
     # --- cloning, for the two-ordering comparison -----------------------------
 
-    def _clone(self) -> "GridEngine":
+    def _clone(self) -> GridEngine:
         c = GridEngine.__new__(GridEngine)
         c.cfg = self.cfg
         c.balance = self.balance
@@ -467,7 +494,7 @@ class GridEngine:
         c._bound_up = self._bound_up
         return c
 
-    def _adopt(self, other: "GridEngine") -> None:
+    def _adopt(self, other: GridEngine) -> None:
         self.balance = other.balance
         self.center = other.center
         self.orders = other.orders
@@ -491,8 +518,14 @@ class GridEngine:
         self._run_leg(a, b, ts)
         self._run_leg(b, c, ts)
 
-    def step(self, minute: datetime, mid_open: float, mid_high: float,
-             mid_low: float, mid_close: float) -> None:
+    def step(
+        self,
+        minute: datetime,
+        mid_open: float,
+        mid_high: float,
+        mid_low: float,
+        mid_close: float,
+    ) -> None:
         self._apply_swap(minute)
 
         # The bound check is conservative: `_bound_up` is the nearest up-trigger
@@ -504,8 +537,11 @@ class GridEngine:
             low_first._walk(mid_open, mid_low, mid_high, mid_close, minute)
             high_first = self._clone()
             high_first._walk(mid_open, mid_high, mid_low, mid_close, minute)
-            worse = (low_first if low_first.equity(mid_close) <= high_first.equity(mid_close)
-                     else high_first)
+            worse = (
+                low_first
+                if low_first.equity(mid_close) <= high_first.equity(mid_close)
+                else high_first
+            )
             self._adopt(worse)
 
         # The margin call is checked on EVERY candle, not only on the ones that

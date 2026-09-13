@@ -52,16 +52,15 @@ async def latest(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     published: "the sweep has not run" and "the sweep ran and the grid lost
     money" are different facts and must not render identically.
     """
-    row = (await db.execute(
-        select(FxSweepRun).order_by(desc(FxSweepRun.created_at)).limit(1)
-    )).scalar_one_or_none()
+    row = (
+        await db.execute(select(FxSweepRun).order_by(desc(FxSweepRun.created_at)).limit(1))
+    ).scalar_one_or_none()
     if row is None:
         return {
             "has_run": False,
             "backtest_only": True,
             "symbol": config.SYMBOL,
-            "window": {"start": config.START.isoformat(),
-                       "end": config.END.isoformat()},
+            "window": {"start": config.START.isoformat(), "end": config.END.isoformat()},
             "gate": _GATE_SUMMARY,
         }
     payload = _run_payload(row)
@@ -77,16 +76,31 @@ async def runs(limit: int = 20, db: AsyncSession = Depends(get_db)) -> dict[str,
     same verdict — the engine is deterministic and a test asserts it. A pair
     here that does not is a bug, and this list is where it becomes visible.
     """
-    rows = (await db.execute(
-        select(FxSweepRun).order_by(desc(FxSweepRun.created_at)).limit(min(limit, 100))
-    )).scalars().all()
-    return {"backtest_only": True, "runs": [
-        {"run_id": str(r.id), "created_at": r.created_at.isoformat(),
-         "first_minute": r.first_minute.isoformat(),
-         "last_minute": r.last_minute.isoformat(), "candles": r.candles,
-         "best_config": r.best_config, "gate_passed": r.gate_passed,
-         "git_sha": r.git_sha}
-        for r in rows]}
+    rows = (
+        (
+            await db.execute(
+                select(FxSweepRun).order_by(desc(FxSweepRun.created_at)).limit(min(limit, 100))
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return {
+        "backtest_only": True,
+        "runs": [
+            {
+                "run_id": str(r.id),
+                "created_at": r.created_at.isoformat(),
+                "first_minute": r.first_minute.isoformat(),
+                "last_minute": r.last_minute.isoformat(),
+                "candles": r.candles,
+                "best_config": r.best_config,
+                "gate_passed": r.gate_passed,
+                "git_sha": r.git_sha,
+            }
+            for r in rows
+        ],
+    }
 
 
 @router.get("/data")
@@ -103,18 +117,25 @@ async def data(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
 
     `source` says which one answered, so the page never has to guess.
     """
-    total, first, last = (await db.execute(
-        select(func.count(), func.min(FxCandle.minute), func.max(FxCandle.minute))
-        .where(FxCandle.symbol == config.SYMBOL)
-    )).one()
+    total, first, last = (
+        await db.execute(
+            select(func.count(), func.min(FxCandle.minute), func.max(FxCandle.minute)).where(
+                FxCandle.symbol == config.SYMBOL
+            )
+        )
+    ).one()
     source = "candles"
     if not total:
-        row = (await db.execute(
-            select(FxSweepRun).order_by(desc(FxSweepRun.created_at)).limit(1)
-        )).scalar_one_or_none()
+        row = (
+            await db.execute(select(FxSweepRun).order_by(desc(FxSweepRun.created_at)).limit(1))
+        ).scalar_one_or_none()
         if row is not None:
             total, first, last, source = (
-                row.candles, row.first_minute, row.last_minute, "published_run")
+                row.candles,
+                row.first_minute,
+                row.last_minute,
+                "published_run",
+            )
         else:
             source = "empty"
     return {

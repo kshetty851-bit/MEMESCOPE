@@ -11,12 +11,10 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 
-import pytest
-
 from app.labs.forex_lab import market
 
-WINTER_FRI = datetime(2020, 1, 3, tzinfo=UTC)   # EST: boundary at 22:00 UTC
-SUMMER_FRI = datetime(2020, 6, 5, tzinfo=UTC)   # EDT: boundary at 21:00 UTC
+WINTER_FRI = datetime(2020, 1, 3, tzinfo=UTC)  # EST: boundary at 22:00 UTC
+SUMMER_FRI = datetime(2020, 6, 5, tzinfo=UTC)  # EDT: boundary at 21:00 UTC
 
 
 def at(day: datetime, hour: int) -> datetime:
@@ -64,9 +62,9 @@ def test_midweek_is_always_open():
 def test_the_dst_switch_weekends_themselves():
     """US DST began 8 March 2020 and ended 1 November 2020. The Friday before
     each switch and the Sunday of it fall on opposite sides of the boundary."""
-    assert market.is_open(datetime(2020, 3, 6, 21, tzinfo=UTC)) is True   # still EST
+    assert market.is_open(datetime(2020, 3, 6, 21, tzinfo=UTC)) is True  # still EST
     assert market.is_open(datetime(2020, 3, 6, 22, tzinfo=UTC)) is False
-    assert market.is_open(datetime(2020, 3, 8, 21, tzinfo=UTC)) is True   # now EDT
+    assert market.is_open(datetime(2020, 3, 8, 21, tzinfo=UTC)) is True  # now EDT
     assert market.is_open(datetime(2020, 10, 30, 20, tzinfo=UTC)) is True  # still EDT
     assert market.is_open(datetime(2020, 10, 30, 21, tzinfo=UTC)) is False
     assert market.is_open(datetime(2020, 11, 1, 21, tzinfo=UTC)) is False  # now EST
@@ -76,10 +74,16 @@ def test_the_dst_switch_weekends_themselves():
 def test_a_full_week_is_exactly_one_hundred_and_twenty_hours():
     """Sunday 17:00 New York to Friday 17:00 New York, five days, however the
     UTC offset moves underneath it."""
-    for start in (datetime(2020, 1, 5, tzinfo=UTC), datetime(2020, 6, 7, tzinfo=UTC),
-                  datetime(2023, 9, 10, tzinfo=UTC)):
-        hours = list(market.open_hours(start, start.replace() + __import__(
-            "datetime").timedelta(days=7)))
+    for start in (
+        datetime(2020, 1, 5, tzinfo=UTC),
+        datetime(2020, 6, 7, tzinfo=UTC),
+        datetime(2023, 9, 10, tzinfo=UTC),
+    ):
+        hours = list(
+            market.open_hours(
+                start, start.replace() + __import__("datetime").timedelta(days=7)
+            )
+        )
         assert len(hours) == 120, f"{start:%Y-%m-%d}: {len(hours)}"
 
 
@@ -122,13 +126,25 @@ def test_good_friday_2020_explains_the_gap_it_actually_opened():
 
 
 def test_either_end_of_a_gap_can_carry_the_holiday():
-    assert market.holiday_name(datetime(2023, 12, 24, 12, tzinfo=UTC),
-                               datetime(2023, 12, 27, 2, tzinfo=UTC)) == "Christmas Eve"
-    assert market.holiday_name(datetime(2023, 12, 23, 12, tzinfo=UTC),
-                               datetime(2023, 12, 25, 2, tzinfo=UTC)) == "Christmas Day"
+    assert (
+        market.holiday_name(
+            datetime(2023, 12, 24, 12, tzinfo=UTC), datetime(2023, 12, 27, 2, tzinfo=UTC)
+        )
+        == "Christmas Eve"
+    )
+    assert (
+        market.holiday_name(
+            datetime(2023, 12, 23, 12, tzinfo=UTC), datetime(2023, 12, 25, 2, tzinfo=UTC)
+        )
+        == "Christmas Day"
+    )
 
 
 def test_an_ordinary_weekday_gap_is_not_excused():
     """The check is only worth running if it can still say no."""
-    assert market.holiday_name(datetime(2023, 5, 17, 3, tzinfo=UTC),
-                               datetime(2023, 5, 17, 9, tzinfo=UTC)) is None
+    assert (
+        market.holiday_name(
+            datetime(2023, 5, 17, 3, tzinfo=UTC), datetime(2023, 5, 17, 9, tzinfo=UTC)
+        )
+        is None
+    )

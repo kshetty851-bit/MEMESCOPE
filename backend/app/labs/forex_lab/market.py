@@ -31,13 +31,12 @@ def is_open(t: datetime) -> bool:
     """Is the market open at this instant? Takes an aware UTC datetime."""
     ny = t.astimezone(NY)
     wd = ny.weekday()  # Mon=0 .. Sun=6
-    if wd == 5:  # Saturday, all of it
-        return False
-    if wd == 4 and ny.hour >= WEEK_BOUNDARY_HOUR_NY:  # Friday, after the close
-        return False
-    if wd == 6 and ny.hour < WEEK_BOUNDARY_HOUR_NY:  # Sunday, before the open
-        return False
-    return True
+    shut = (
+        wd == 5  # Saturday, all of it
+        or (wd == 4 and ny.hour >= WEEK_BOUNDARY_HOUR_NY)  # Friday, after the close
+        or (wd == 6 and ny.hour < WEEK_BOUNDARY_HOUR_NY)  # Sunday, before the open
+    )
+    return not shut
 
 
 def open_hours(start: datetime, end: datetime):
@@ -63,11 +62,15 @@ def open_minutes_in_year(year: int, window_start: date, window_end: date) -> int
     nine days a year (Christmas and its neighbours, New Year, 4 July, Good
     Friday). The 5% tolerance absorbs the rest.
     """
-    first = max(datetime(year, 1, 1, tzinfo=UTC),
-                datetime(window_start.year, window_start.month, window_start.day, tzinfo=UTC))
-    last = min(datetime(year + 1, 1, 1, tzinfo=UTC),
-               datetime(window_end.year, window_end.month, window_end.day, tzinfo=UTC)
-               + timedelta(days=1))
+    first = max(
+        datetime(year, 1, 1, tzinfo=UTC),
+        datetime(window_start.year, window_start.month, window_start.day, tzinfo=UTC),
+    )
+    last = min(
+        datetime(year + 1, 1, 1, tzinfo=UTC),
+        datetime(window_end.year, window_end.month, window_end.day, tzinfo=UTC)
+        + timedelta(days=1),
+    )
     if last <= first:
         return 0
     hours = sum(1 for _ in open_hours(first, last))
@@ -105,9 +108,9 @@ def easter_sunday(year: int) -> date:
     g = (b - f + 1) // 3
     h = (19 * a + b - d - g + 15) % 30
     i, k = divmod(c, 4)
-    l = (32 + 2 * e + 2 * i - h - k) % 7
-    m = (a + 11 * h + 22 * l) // 451
-    month, day = divmod(h + l - 7 * m + 114, 31)
+    ell = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * ell) // 451
+    month, day = divmod(h + ell - 7 * m + 114, 31)
     return date(year, month, day + 1)
 
 

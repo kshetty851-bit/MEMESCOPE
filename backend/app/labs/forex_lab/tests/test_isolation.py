@@ -24,13 +24,24 @@ MIGRATION = BACKEND / "alembic" / "versions" / "20260913_0085_forex_lab.py"
 TABLES = ["fx_candles", "fx_ingest_hours", "fx_sweep_runs"]
 
 FORBIDDEN_MODULES = (
-    "app.paper", "app.paper_v2", "app.karthik", "app.karthik_ops",
-    "app.real_wallet", "app.real_wallet_safety", "app.lab", "app.arena",
-    "app.strategy_lab", "app.models", "app.radar",
+    "app.paper",
+    "app.paper_v2",
+    "app.karthik",
+    "app.karthik_ops",
+    "app.real_wallet",
+    "app.real_wallet_safety",
+    "app.lab",
+    "app.arena",
+    "app.strategy_lab",
+    "app.models",
+    "app.radar",
     # Sibling labs. Each is independently gated and independently deletable;
     # an import here would make that false in one direction.
-    "app.labs.rafiq", "app.labs.crypto_trend", "app.labs.breakout",
-    "app.labs.early_movers", "app.labs.graduation",
+    "app.labs.rafiq",
+    "app.labs.crypto_trend",
+    "app.labs.breakout",
+    "app.labs.early_movers",
+    "app.labs.graduation",
 )
 #: The ONLY platform modules this lab reaches into. `api.py` adds the FastAPI
 #: session dependency; it reads and serves, and mounts no write route at all.
@@ -38,12 +49,21 @@ ALLOWED_PLATFORM = ("app.db.base", "app.db.session")
 #: `api.py` is allowed FastAPI; nothing else in the package is.
 #: Nothing in these may know a network exists. `ingest.py` is the only module
 #: in the package allowed to.
-PURE_MODULES = ("engine.py", "ticks.py", "backtest.py", "report.py",
-                "config.py", "market.py")
+PURE_MODULES = ("engine.py", "ticks.py", "backtest.py", "report.py", "config.py", "market.py")
 #: Every module the package ships.
-MODULES = ("config.py", "market.py", "models.py", "ticks.py", "ingest.py",
-           "store.py", "engine.py", "backtest.py", "report.py", "api.py",
-           "__main__.py")
+MODULES = (
+    "config.py",
+    "market.py",
+    "models.py",
+    "ticks.py",
+    "ingest.py",
+    "store.py",
+    "engine.py",
+    "backtest.py",
+    "report.py",
+    "api.py",
+    "__main__.py",
+)
 
 
 def imported_modules(tree: ast.AST) -> set[str]:
@@ -68,8 +88,9 @@ def test_every_module_is_present() -> None:
 def test_no_module_imports_another_engine_or_lab(path: pathlib.Path) -> None:
     for imported in imported_modules(tree(path)):
         for forbidden in FORBIDDEN_MODULES:
-            assert imported != forbidden and not imported.startswith(f"{forbidden}."), \
+            assert imported != forbidden and not imported.startswith(f"{forbidden}."), (
                 f"{path.name} imports {imported}"
+            )
 
 
 @pytest.mark.parametrize("path", SOURCES, ids=lambda p: p.name)
@@ -111,14 +132,23 @@ def test_the_migration_touches_only_this_lab_s_tables() -> None:
     src = MIGRATION.read_text()
     node = tree(MIGRATION)
     created = [
-        c.args[0].value for c in ast.walk(node)
-        if isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute)
-        and c.func.attr == "create_table" and c.args
+        c.args[0].value
+        for c in ast.walk(node)
+        if isinstance(c, ast.Call)
+        and isinstance(c.func, ast.Attribute)
+        and c.func.attr == "create_table"
+        and c.args
         and isinstance(c.args[0], ast.Constant)
     ]
     assert sorted(created) == TABLES
-    for forbidden in ("alter_column", "drop_column", "add_column", "rename_table",
-                      "execute", "drop_constraint"):
+    for forbidden in (
+        "alter_column",
+        "drop_column",
+        "add_column",
+        "rename_table",
+        "execute",
+        "drop_constraint",
+    ):
         assert f"op.{forbidden}(" not in src, forbidden
 
 

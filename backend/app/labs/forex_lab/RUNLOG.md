@@ -494,3 +494,61 @@ the page says so in its coverage banner.
 
 **Remaining:** the download (~2,300 of 31,431 this pass), then the final
 integrity check, sweep and REPORT.md. No failing tests.
+
+---
+
+## Iteration 13 — made fit to merge
+
+The operator asked for this on `main`, so it had to survive `main`'s CI rather
+than just its own test suite. Ran every gate CI runs.
+
+**Lint: 63 errors in this lab, down to 17.** Several were real rather than
+stylistic:
+
+* `l` as a variable name in seven places — it means "low" everywhere it
+  appears, so it now says so;
+* two unused imports;
+* `zip()` without `strict=`;
+* **two blocking file operations inside async functions** (`ASYNC230`) — the
+  sweep file read in `publish()` and, worse, a 58 MB blocking write in
+  `export_candles()`. Both are one-shot CLI paths today, so nothing starves;
+  an async function that blocks the loop is a bug waiting for a caller that
+  shares it. Both moved to `asyncio.to_thread`.
+
+The seventeen that remain are the families every sibling lab already trips:
+`T201` (a CLI's `print` is its output), `RUF001/2/3` (em-dashes in prose) and
+one documented `S607` noqa.
+
+**The rename that broke the engine.** Renaming `S, C` to `step, centre` in
+`_build_grid` — to satisfy `N806` — left four references behind, because
+`ruff format` had already re-wrapped the lines my edit was matching against.
+Thirty tests went red instantly. Worth recording as the thing a test suite is
+for: a "purely cosmetic" rename silently produced a grid whose take-profits
+pointed at an undefined name.
+
+Afterwards the current engine was replayed over the ORIGINAL candle file and
+reproduced the pre-refactor numbers on every configuration checked, to six
+decimal places. The cleanup changed no result.
+
+**Alembic.** `0085` up-and-down cleanly: 3 tables → 0 → 3.
+
+Two of CI's migration steps fail, and **both were already failing on `main`
+before this lab existed**:
+
+* `alembic downgrade base` dies on `bo_equity`, a Breakout Lab table dropped
+  by `0083_remove_breakout`;
+* `alembic check` reports drift on `real_wallet_live_intents`,
+  `research_quotes`, `token_enrichment_state` and `token_early_buyers`.
+
+Neither names an `fx_` table. This lab does not add to them and does not fix
+them — the brief forbids touching files outside it, and a drift in
+`real_wallet` is not a thing to repair in passing.
+
+**The page now distinguishes "not deployed yet" from "broken".** The frontend
+and the backend deploy separately and the frontend is faster, so a reader will
+reach this page before the API route exists. A 404 now says so instead of
+"could not load", which would send them looking for a bug that is not there.
+
+### Tests
+
+`124 passed`, `next build` passes, `ruff format --check` clean.

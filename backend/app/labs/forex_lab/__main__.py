@@ -85,8 +85,7 @@ async def _export() -> dict:
 
     async with SessionFactory() as session:
         n = await export_candles(session)
-    return {"candles": n, "path": str(CANDLE_FILE),
-            "bytes": CANDLE_FILE.stat().st_size}
+    return {"candles": n, "path": str(CANDLE_FILE), "bytes": CANDLE_FILE.stat().st_size}
 
 
 async def _integrity() -> dict:
@@ -112,8 +111,9 @@ def main(argv: list[str] | None = None) -> int:
     ing.add_argument("--start")
     ing.add_argument("--end")
     ing.add_argument("--concurrency", type=int, default=None)
-    ing.add_argument("--passes", type=int, default=8,
-                     help="repeat until nothing is outstanding (default 8)")
+    ing.add_argument(
+        "--passes", type=int, default=8, help="repeat until nothing is outstanding (default 8)"
+    )
 
     sub.add_parser("status", help="what is loaded")
     sub.add_parser("integrity", help="the data integrity check")
@@ -157,9 +157,15 @@ def main(argv: list[str] | None = None) -> int:
     elif args.cmd == "backtest":
         from app.labs.forex_lab.backtest import run_one_sync
 
-        print(json.dumps(run_one_sync(args.step, args.levels, args.stop_mult,
-                                      args.lots, with_trades=args.trades),
-                         indent=2, default=str))
+        print(
+            json.dumps(
+                run_one_sync(
+                    args.step, args.levels, args.stop_mult, args.lots, with_trades=args.trades
+                ),
+                indent=2,
+                default=str,
+            )
+        )
     elif args.cmd == "sweep":
         from app.labs.forex_lab.backtest import run_sweep_sync
 

@@ -35,7 +35,7 @@ from __future__ import annotations
 import lzma
 import struct
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 from app.labs.forex_lab import config
 
@@ -92,7 +92,9 @@ class TickDecodeError(ValueError):
     """
 
 
-def decode_hour(raw: bytes, hour_start: datetime, scale: float = config.POINT_SCALE) -> list[Tick]:
+def decode_hour(
+    raw: bytes, hour_start: datetime, scale: float = config.POINT_SCALE
+) -> list[Tick]:
     """Decompress and unpack one hour-file. Empty input is an empty hour."""
     if not raw:
         return []
@@ -161,8 +163,9 @@ def to_minute_candles(ticks: list[Tick]) -> list[Candle]:
 _CANDLE = struct.Struct(">5If")
 
 
-def decode_day_candles(raw: bytes, day: datetime,
-                       scale: float = config.POINT_SCALE) -> dict[datetime, tuple]:
+def decode_day_candles(
+    raw: bytes, day: datetime, scale: float = config.POINT_SCALE
+) -> dict[datetime, tuple]:
     """Dukascopy's own 1-minute candles for one day and one side.
 
     Returns {minute: (open, high, low, close)} — reordered from the file's
@@ -187,7 +190,10 @@ def decode_day_candles(raw: bytes, day: datetime,
         if vol <= 0:
             continue
         out[day + timedelta(seconds=sec)] = (
-            o * scale, hi * scale, lo * scale, c * scale,
+            o * scale,
+            hi * scale,
+            lo * scale,
+            c * scale,
         )
     return out
 

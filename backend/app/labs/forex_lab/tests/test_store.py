@@ -43,11 +43,13 @@ async def test_storing_the_same_hour_twice_changes_nothing(session):
     first = await _store(session, "EURUSD", HOUR, raw)
     assert first == {"ticks": 6 * 60, "candles": 60, "empty": False}
 
-    before = (await session.execute(
-        store.select(store.func.count()).select_from(FxCandle))).scalar_one()
+    before = (
+        await session.execute(store.select(store.func.count()).select_from(FxCandle))
+    ).scalar_one()
     second = await _store(session, "EURUSD", HOUR, raw)
-    after = (await session.execute(
-        store.select(store.func.count()).select_from(FxCandle))).scalar_one()
+    after = (
+        await session.execute(store.select(store.func.count()).select_from(FxCandle))
+    ).scalar_one()
 
     assert second == first
     assert before == after == 60
@@ -68,9 +70,18 @@ async def test_the_resume_query_asks_only_for_what_is_missing(session):
     hours = [HOUR + timedelta(hours=i) for i in range(4)]
     await _store(session, "EURUSD", hours[0], bi5(hours[0], 5))
     await _store(session, "EURUSD", hours[2], None)
-    session.add(FxIngestHour(symbol="EURUSD", hour_start=hours[3], ok=False,
-                             empty=False, tick_count=0, candle_count=0,
-                             error="HTTP 503", fetched_at=datetime.now(UTC)))
+    session.add(
+        FxIngestHour(
+            symbol="EURUSD",
+            hour_start=hours[3],
+            ok=False,
+            empty=False,
+            tick_count=0,
+            candle_count=0,
+            error="HTTP 503",
+            fetched_at=datetime.now(UTC),
+        )
+    )
     await session.commit()
 
     missing = await _missing_hours(session, "EURUSD", hours)
@@ -83,29 +94,40 @@ def test_the_planner_skips_the_hours_the_market_is_shut():
     them would add ~15,000 requests to a CDN-bound job, each a 404."""
     start = datetime(2023, 1, 6, 20, 0, tzinfo=UTC)  # Friday
     hours = list(iter_hours(start, start + timedelta(days=3)))
-    assert datetime(2023, 1, 6, 21, 0, tzinfo=UTC) in hours     # Friday 21:00
+    assert datetime(2023, 1, 6, 21, 0, tzinfo=UTC) in hours  # Friday 21:00
     assert datetime(2023, 1, 6, 22, 0, tzinfo=UTC) not in hours  # after close
-    assert not any(h.weekday() == 5 for h in hours)              # no Saturday
+    assert not any(h.weekday() == 5 for h in hours)  # no Saturday
     assert datetime(2023, 1, 8, 21, 0, tzinfo=UTC) not in hours  # before open
-    assert datetime(2023, 1, 8, 22, 0, tzinfo=UTC) in hours      # Sunday open
+    assert datetime(2023, 1, 8, 22, 0, tzinfo=UTC) in hours  # Sunday open
 
 
 # --- the integrity check ------------------------------------------------------
 
 
-async def _fill_minutes(session, start: datetime, n: int, spread: float = 0.00005,
-                        skip: set[int] | None = None):
+async def _fill_minutes(
+    session, start: datetime, n: int, spread: float = 0.00005, skip: set[int] | None = None
+):
     skip = skip or set()
     for i in range(n):
         if i in skip:
             continue
         m = start + timedelta(minutes=i)
         bid = 1.0500 + i * 1e-5
-        session.add(FxCandle(
-            symbol="EURUSD", minute=m,
-            bid_open=bid, bid_high=bid, bid_low=bid, bid_close=bid,
-            ask_open=bid + spread, ask_high=bid + spread,
-            ask_low=bid + spread, ask_close=bid + spread, ticks=6))
+        session.add(
+            FxCandle(
+                symbol="EURUSD",
+                minute=m,
+                bid_open=bid,
+                bid_high=bid,
+                bid_low=bid,
+                bid_close=bid,
+                ask_open=bid + spread,
+                ask_high=bid + spread,
+                ask_low=bid + spread,
+                ask_close=bid + spread,
+                ticks=6,
+            )
+        )
     await session.commit()
 
 
@@ -142,10 +164,21 @@ async def test_a_christmas_gap_is_reported_but_explained(session):
 async def test_a_crossed_quote_fails_the_check(session):
     start = datetime(2023, 1, 3, 0, 0, tzinfo=UTC)
     await _fill_minutes(session, start, 10)
-    session.add(FxCandle(
-        symbol="EURUSD", minute=start + timedelta(minutes=10),
-        bid_open=1.06, bid_high=1.06, bid_low=1.06, bid_close=1.06,
-        ask_open=1.05, ask_high=1.05, ask_low=1.05, ask_close=1.05, ticks=1))
+    session.add(
+        FxCandle(
+            symbol="EURUSD",
+            minute=start + timedelta(minutes=10),
+            bid_open=1.06,
+            bid_high=1.06,
+            bid_low=1.06,
+            bid_close=1.06,
+            ask_open=1.05,
+            ask_high=1.05,
+            ask_low=1.05,
+            ask_close=1.05,
+            ticks=1,
+        )
+    )
     await session.commit()
 
     r = await store.integrity_check(session)
@@ -157,9 +190,18 @@ async def test_a_failed_hour_still_outstanding_fails_the_check(session):
     """A pass that lost requests to the CDN must not be able to produce a green
     integrity check just because the minutes it did get look tidy."""
     await _fill_minutes(session, datetime(2023, 1, 3, 0, 0, tzinfo=UTC), 10)
-    session.add(FxIngestHour(symbol="EURUSD", hour_start=HOUR, ok=False,
-                             empty=False, tick_count=0, candle_count=0,
-                             error="HTTP 503", fetched_at=datetime.now(UTC)))
+    session.add(
+        FxIngestHour(
+            symbol="EURUSD",
+            hour_start=HOUR,
+            ok=False,
+            empty=False,
+            tick_count=0,
+            candle_count=0,
+            error="HTTP 503",
+            fetched_at=datetime.now(UTC),
+        )
+    )
     await session.commit()
     r = await store.integrity_check(session)
     assert r["hours_failed"] == 1
@@ -237,7 +279,9 @@ def test_retry_after_is_honoured_when_the_feed_sends_one():
 
     assert _retry_after(httpx.Response(429, headers={"Retry-After": "12"})) == 12.0
     # GeckoTerminal-style nonsense and a missing header both fall back.
-    assert _retry_after(httpx.Response(429, headers={"Retry-After": "soon"})) == _COOLDOWN_SECONDS
+    assert (
+        _retry_after(httpx.Response(429, headers={"Retry-After": "soon"})) == _COOLDOWN_SECONDS
+    )
     assert _retry_after(httpx.Response(429)) == _COOLDOWN_SECONDS
 
 
@@ -249,10 +293,16 @@ async def test_passes_repeat_until_nothing_is_outstanding(session_factory, sessi
 
     calls: list[int] = []
     outcomes = [
-        {"planned": 10, "todo": 10, "ok": 8, "empty": 0, "failed": 2,
-         "ticks": 0, "candles": 0},
-        {"planned": 10, "todo": 2, "ok": 2, "empty": 0, "failed": 0,
-         "ticks": 0, "candles": 0},
+        {
+            "planned": 10,
+            "todo": 10,
+            "ok": 8,
+            "empty": 0,
+            "failed": 2,
+            "ticks": 0,
+            "candles": 0,
+        },
+        {"planned": 10, "todo": 2, "ok": 2, "empty": 0, "failed": 0, "ticks": 0, "candles": 0},
     ]
 
     async def fake_ingest(*a, **kw):
@@ -278,8 +328,15 @@ async def test_a_pass_that_loads_nothing_stops_the_loop(session_factory):
 
     async def fake_ingest(*a, **kw):
         calls.append(1)
-        return {"planned": 10, "todo": 10, "ok": 0, "empty": 0, "failed": 10,
-                "ticks": 0, "candles": 0}
+        return {
+            "planned": 10,
+            "todo": 10,
+            "ok": 0,
+            "empty": 0,
+            "failed": 10,
+            "ticks": 0,
+            "candles": 0,
+        }
 
     monkey = ing.ingest
     ing.ingest = fake_ingest
