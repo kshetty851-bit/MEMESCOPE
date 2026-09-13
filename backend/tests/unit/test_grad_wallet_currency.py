@@ -62,3 +62,27 @@ def test_the_board_compares_the_leader_to_controls_in_wallet_dollars():
                 and any(isinstance(t, ast.Name) and t.id == "band" for t in n.targets))
     assert "wallet_100_usd" in {n.attr for n in ast.walk(band)
                                 if isinstance(n, ast.Attribute)}
+
+
+def test_a_position_stops_growing_where_the_evidence_stops():
+    """Returns were measured at $100 an order. Uncapped, a 1.6%-per-trade arm
+    compounds $100 into nine figures in a month — arithmetic, not a forecast."""
+    # Past `cap * slots` of equity, growth is LINEAR: equal stretches of the
+    # same winning trade add equal dollars instead of multiplying.
+    a, _ = api._wallet_walk([0.10] * 2000)
+    b, _ = api._wallet_walk([0.10] * 3000)
+    c, _ = api._wallet_walk([0.10] * 4000)
+    assert c - b == pytest.approx(b - a)
+    # Uncapped, the same run is e^40 dollars.
+    assert c < 1e5
+    # Below the cap it still compounds.
+    small, _ = api._wallet_walk([0.01] * 10)
+    assert small == pytest.approx(float(config.WALLET_DEMO_USD) * 1.001 ** 10)
+
+
+def test_todays_wallets_are_unaffected_by_the_cap():
+    """The cap must not silently restate a column the user is already reading:
+    a $150 wallet holds $15 positions, nowhere near $100."""
+    equity, _ = api._wallet_walk([0.05] * 9)
+    assert equity < float(config.PAPER_NOTIONAL_USD) * config.WALLET_DEMO_SLOTS
+    assert equity == pytest.approx(float(config.WALLET_DEMO_USD) * 1.005 ** 9)

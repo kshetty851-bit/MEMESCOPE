@@ -14,6 +14,8 @@ import random
 from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from math import sqrt
+from statistics import pstdev
 from typing import Any
 
 from fastapi import APIRouter, Depends
@@ -680,12 +682,22 @@ def _wallet_walk(returns: Iterable[float]) -> tuple[float, bool]:
     (the real sequence, in order) and the sum of a ten-position block for the
     projection (ten slots really do resolve together). The formula is the same
     either way, which is the point of having one function.
+
+    A position stops growing at `PAPER_NOTIONAL_USD`, and that cap is evidence
+    rather than caution: every return here was MEASURED at a $100 order, and
+    the shallowest decile of pools this lab trades holds $15.9k, so $100 pays
+    1.3% of impact a leg and $800 pays 10.1% — past the size at which the lab
+    refuses to fill at all. Uncapped, a 1.6%-per-trade arm compounds $100 into
+    $1.4bn over a month of trades, which is arithmetic, not a forecast. Above
+    $100 a position there is no evidence, and the impact curve says what there
+    is would be worse.
     """
     slots = max(1, config.WALLET_DEMO_SLOTS)
     equity = float(config.WALLET_DEMO_USD)
     floor = float(config.WALLET_MIN_USD) / slots
+    cap = float(config.PAPER_NOTIONAL_USD)
     for r in returns:
-        equity += (equity / slots) * r
+        equity += min(equity / slots, cap) * r
         if equity < floor:
             return 0.0, True
     return equity, False
@@ -804,6 +816,13 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
             return {}
         rate = n / hours
         horizon = int(rate * 24 * 30)
+        # Resampling the observed trades holds this arm's mean FIXED at the
+        # sample mean, so the band answers "which tokens arrive" and silently
+        # assumes the edge is real. After a day, the standard error of that
+        # mean is usually larger than the mean — the dominant uncertainty is
+        # whether there is an edge at all, and a band that omits it is the
+        # confident half of the answer. Each path draws its own mean.
+        sem = pstdev(returns) / sqrt(n) if n > 1 else 0.0
         # Ten positions are open at once and resolve together, so a step is a
         # block of ten and the block sums are drawn ONCE into a pool. Walking
         # 9,000 individual trades 160 times per arm across fifty arms is 74
@@ -815,8 +834,10 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
         finals: list[float] = []
         ruined = 0
         for _ in range(160):
+            drift = random.gauss(0.0, sem) * block
             equity, dead = _wallet_walk(
-                pool[random.randrange(1024)] for _ in range(steps))  # noqa: S311
+                pool[random.randrange(1024)] + drift  # noqa: S311
+                for _ in range(steps))
             ruined += dead
             finals.append(equity)
         finals.sort()
