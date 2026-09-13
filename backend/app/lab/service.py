@@ -1146,13 +1146,16 @@ class LabService:
                 "quantity_remaining": pos.quantity_remaining}
 
     #: pump.fun's bonding curve, and PumpSwap — its own AMM for direct pool
-    #: launches. `SCANNER_WATCH_PROGRAMS` is the same pair the scanner listens
-    #: to, so this cannot drift from what discovery actually admitted.
+    #: launches. Read from `PUMPFUN_PROGRAMS`, not from `SCANNER_WATCH_PROGRAMS`:
+    #: the scanner now also watches Meteora's bonding curve and Raydium's
+    #: LaunchLab, and borrowing its watch list here would have quietly answered
+    #: "yes, pump.fun" for every token launched on either — widening both this
+    #: entry gate and copycontrol's control pool without a line of code changing.
     @staticmethod
     def _pumpfun_programs() -> set[str]:
-        from app.core.config import settings
+        from app.core.config import PUMPFUN_PROGRAMS
 
-        return set(settings.SCANNER_WATCH_PROGRAMS)
+        return set(PUMPFUN_PROGRAMS)
 
     async def _age_hours(self, token_id, at: datetime) -> Decimal | None:
         """Hours between the token's on-chain creation and this checkpoint.

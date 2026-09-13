@@ -32,6 +32,19 @@ CsvList = Annotated[list[str], NoDecode]
 Environment = Literal["local", "test", "staging", "production"]
 
 
+#: pump.fun's bonding curve and PumpSwap, its own AMM for direct pool launches.
+#: Kept apart from `SCANNER_WATCH_PROGRAMS` because the two stopped meaning the
+#: same thing the moment the scanner learned to watch other launchpads: the
+#: watch list is "where discovery looks", this is "what is actually a pump.fun
+#: token". Reading the watch list for the second question silently admits every
+#: Meteora and Raydium launch to rules — and to a live control group — written
+#: for pump.fun alone.
+PUMPFUN_PROGRAMS: tuple[str, ...] = (
+    "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+    "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",
+)
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -218,13 +231,34 @@ class Settings(BaseSettings):
     # PumpSwap AMM (`pAMM…`) covers direct pool launches that never touch the
     # bonding curve — its `create_pool` emits a `CreatePoolEvent` (discriminator
     # b1310cd2a076a774, verified against mainnet) naming the base mint.
+    # Meteora's Dynamic Bonding Curve (`dbci…`) and Raydium's LaunchLab
+    # (`LanM…`) are the two launchpads worth the RPC: sampling 105 tokens born
+    # on 2026-09-13 against GeckoTerminal's new-pool index, the two programs
+    # above covered 82 of them and these two accounted for 12 of the 23 missed.
+    # Both resolve through the existing transaction fallback — verified against
+    # nine real launches: five the untouched parser already read correctly,
+    # three more the new pre-filter marker unblocked, and one excluded because
+    # the fixture's oldest signature is a swap rather than its creation. No
+    # launch produced a wrong mint. Meteora's DAMM v2 (`cpam…`) is deliberately
+    # absent: it is where DBC tokens graduate *to*, so watching it would pay
+    # two RPC calls to rediscover a token already held.
     SCANNER_WATCH_PROGRAMS: CsvList = Field(
         default_factory=lambda: [
-            "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
-            "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",
+            *PUMPFUN_PROGRAMS,
+            "dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN",
+            "LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj",
         ]
     )
-    SCANNER_COMMITMENT: Literal["processed", "confirmed", "finalized"] = "confirmed"
+    # `processed`, not `confirmed`: three subscriptions raced live on the same
+    # pump.fun stream on 2026-09-13 put `processed` ahead of `confirmed` by
+    # 106ms at the median and earlier on 100% of 3,932 shared signatures, with
+    # no drop in the number of notifications delivered. The same race found the
+    # vendor endpoint worth only 12ms at equal commitment, so the latency is
+    # the commitment level and nothing else. The cost is that a processed
+    # transaction can still be rolled back — for discovery that risks recording
+    # a mint from a dropped fork, which the unique index and the Redis dedupe
+    # both absorb, and which trading never acts on directly.
+    SCANNER_COMMITMENT: Literal["processed", "confirmed", "finalized"] = "processed"
     # Bounded queue: under a launch burst we shed load rather than exhaust memory.
     SCANNER_QUEUE_SIZE: int = 2000
     SCANNER_WORKER_CONCURRENCY: int = 4

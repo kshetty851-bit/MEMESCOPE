@@ -18,10 +18,22 @@ from typing import Any
 from app.services.curve.pda import b58encode
 
 # Log markers that indicate a mint is being created. `initializeMint`/
-# `initializeMint2` is the authoritative signal — a mint account cannot come
-# into existence without it — and covers both the SPL Token and Token-2022
-# programs, so new launchpads are picked up without a code change.
-MINT_INIT_MARKERS = ("Instruction: InitializeMint2", "Instruction: InitializeMint")
+# `initializeMint2` covers both the SPL Token and Token-2022 programs, so most
+# new launchpads are picked up without a code change. It is not universal: a
+# launchpad that mints via CPI can create the account without either line ever
+# reaching the logs, which is what the third marker is for.
+MINT_INIT_MARKERS = (
+    "Instruction: InitializeMint2",
+    "Instruction: InitializeMint",
+    # Meteora's Dynamic Bonding Curve (which Moonshot now launches on) mints the
+    # token inside `initialize_virtual_pool_*` without the SPL program ever
+    # logging a mint-init line, so the two markers above miss the launch
+    # entirely — measured 2026-09-13: 4 of 9 sampled DBC/Moonshot launches were
+    # refused here while `parse_transaction` resolved every one of them
+    # correctly once let through. The prefix covers both the SplToken and the
+    # Token2022 variant.
+    "Instruction: InitializeVirtualPool",
+)
 
 # Creation markers emitted by launchpad programs wrapping the mint init.
 CREATE_MARKERS = (

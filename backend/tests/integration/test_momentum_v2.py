@@ -92,14 +92,23 @@ def test_every_wallet_including_the_controls_is_pumpfun_only() -> None:
         assert any(c.feature == "is_pumpfun" for c in s.entry), s.id
 
 
-def test_the_provenance_feature_matches_what_discovery_admitted() -> None:
-    """`is_pumpfun` must be derived from the SAME program list the scanner
-    listens to, or the filter and the universe drift apart."""
-    from app.core.config import settings
+def test_the_provenance_feature_names_pumpfun_and_nothing_else() -> None:
+    """`is_pumpfun` must mean pump.fun, not "whatever the scanner watches".
+
+    It used to read `SCANNER_WATCH_PROGRAMS`, which was the same pair until the
+    scanner learned Meteora's bonding curve and Raydium's LaunchLab. Had that
+    survived, every wallet here — the controls included — would have started
+    buying two other launchpads with no spec change to show for it.
+    """
+    from app.core.config import PUMPFUN_PROGRAMS, settings
     from app.lab.service import LabService
 
-    assert LabService._pumpfun_programs() == set(settings.SCANNER_WATCH_PROGRAMS)
+    assert LabService._pumpfun_programs() == set(PUMPFUN_PROGRAMS)
     assert "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P" in LabService._pumpfun_programs()
+    # The watch list is a superset, and must stay one: discovery may look
+    # anywhere, but it still has to admit every pump.fun launch.
+    assert set(PUMPFUN_PROGRAMS) <= set(settings.SCANNER_WATCH_PROGRAMS)
+    assert LabService._pumpfun_programs() < set(settings.SCANNER_WATCH_PROGRAMS)
 
 
 # --------------------------------------------------------------------------

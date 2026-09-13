@@ -85,6 +85,24 @@ def test_creation_log_is_detected() -> None:
     assert is_token_creation_log(["Program log: Instruction: InitializeMint2"])
 
 
+def test_meteora_dbc_launch_is_detected() -> None:
+    """Meteora's DBC mints via CPI and logs no mint-init line of its own.
+
+    Taken from mint 13FoYQbnRwdRaZjtdPDPK4iNu1dbEZ25qRsjUtGm69dL, launched
+    2026-09-13. Without this marker the launch — and every Moonshot one, which
+    runs on the same program — is dropped before any decoder sees it.
+    """
+    assert is_token_creation_log(
+        [
+            "Program dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN invoke [1]",
+            "Program log: Instruction: InitializeVirtualPoolWithSplToken",
+        ]
+    )
+    assert is_token_creation_log(
+        ["Program log: Instruction: InitializeVirtualPoolWithToken2022"]
+    )
+
+
 def test_ordinary_transfer_log_is_ignored() -> None:
     assert not is_token_creation_log(
         ["Program log: Instruction: TransferChecked", "Program log: Instruction: Buy"]
