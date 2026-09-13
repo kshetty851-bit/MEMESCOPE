@@ -149,3 +149,18 @@ def test_benjamini_hochberg_is_monotone_and_bounded():
         {"a": 0.001, "b": 0.02, "c": 0.5, "d": 0.9}, 0.05)
     assert all(0 <= v["adjusted_p"] <= 1 for v in bh.values())
     assert bh["a"]["adjusted_p"] <= bh["b"]["adjusted_p"] <= bh["c"]["adjusted_p"]
+
+
+def test_walk_forward_sizes_folds_from_data_not_from_the_request():
+    """A 14-day lookback over a 41-hour archive must not yield weekly folds.
+
+    The engine reads `window_start`/`window_end`, so if `load()` ever reports
+    the REQUESTED range instead of the observed one, this span looks like two
+    weeks and the walk-forward cuts it into empty folds and calls them OK.
+    """
+    ds = Dataset(tokens=(), loaded_at=T0, window_start=T0,
+                 window_end=T0 + timedelta(hours=41), dataset_version="x")
+    folds, status = analysis.walk_forward(ds, {}, fold="weekly")
+    assert status == "INSUFFICIENT_HISTORY" and folds == []
+    folds, status = analysis.walk_forward(ds, {}, fold="daily")
+    assert status == "INSUFFICIENT_HISTORY" and folds == []

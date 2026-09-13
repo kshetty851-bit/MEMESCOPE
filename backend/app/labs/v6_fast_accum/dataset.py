@@ -137,6 +137,10 @@ async def load(
     finished. Including them would count every one of them as censored and
     understate resolution for a reason that is purely the clock.
 
+    The returned `window_start`/`window_end` describe the DATA that came back,
+    not the range that was asked for — see the clamp below. Everything
+    downstream sizes its folds from them.
+
     Pruned tokens are loaded and FLAGGED, not dropped. Their curve series is
     gone, so they cannot produce a trade — but they are the population the
     24-hour pruner removed, and `quality` has to be able to count them to say
@@ -185,6 +189,14 @@ async def load(
               migrated_at=r.migrated_at)
         for r in rows
     )
+
+    # The window is the extent of the DATA, not of the request. Reporting the
+    # requested 14-day lookback when the archive holds 41 hours would hand the
+    # walk-forward engine a 14-day span, and it would dutifully cut it into
+    # dozens of empty weekly folds and call the result OK. The span has to be
+    # what was actually observed, so "too short to test" stays visible.
+    window_start = min(t.first_seen_at for t in tokens)
+    window_end = max(t.first_seen_at for t in tokens)
 
     # The digest covers the rows, not the query: it is the identity of the DATA.
     h = hashlib.sha256()
