@@ -39,7 +39,6 @@ celery_app = Celery(
         "app.momentum.scheduler",
         "app.depth.scheduler",
         "app.security.lab_scheduler",
-        "app.dexlab.scheduler",
         "app.social.scheduler",
         "app.copycontrol.scheduler",
         "app.labs.rafiq.scheduler",
@@ -303,14 +302,6 @@ celery_app.conf.beat_schedule = {
     # leave the verdict arriving after the decision it exists to inform.
     "security-lab-coverage": {
         "task": "app.security.lab_scheduler.cover_lab_candidates_tick",
-        "schedule": crontab(minute="*"),
-    },
-    # The Dex Lab: hourly turnover as a pre-gainer filter, against its
-    # control. Every minute so a six-hour exit fires within a minute of its
-    # clock rather than within five, and so the rolling sample is offered at
-    # the freshness the candidate query demands.
-    "dex-tick": {
-        "task": "app.dexlab.scheduler.dex_tick",
         "schedule": crontab(minute="*"),
     },
     # The Social Lab: attention against its own control.

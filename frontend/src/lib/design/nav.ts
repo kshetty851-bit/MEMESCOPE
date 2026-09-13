@@ -72,18 +72,12 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "Strategy",
     items: [
       { href: "/wallet", label: "Paper wallet", icon: IconWallet, status: "ready" },
-      // Per-lab pages are removed by default. The Dex Lab is the one current
-      // exception, listed deliberately rather than by drift — the test in
-      // hq.test.tsx records that it is intended.
+      // Per-lab pages are removed by default; the ones below are listed
+      // deliberately rather than by drift, and hq.test.tsx records that.
       //
-      // The Movers, Matrix and KOL Labs held the same exception until
-      // 2026-09-10, when all three were deleted on the operator's instruction,
-      // code and records together.
-      //
-      // Dex: hourly turnover as a pre-gainer filter, against a control drawn
-      // from the same pool. Named for the board it rebuilds — DexScreener
-      // publishes no gainers endpoint — not for a result it has.
-      { href: "/dex-lab", label: "Dex Lab", icon: IconSpark, status: "ready" },
+      // The Movers, Matrix and KOL Labs held that exception until 2026-09-10,
+      // the Breakout Lab until 2026-09-12 and the Dex Lab until 2026-09-13 —
+      // each deleted on the operator's instruction, code and records together.
       // A collaborator's five strategies, on five separate $1,000 paper books
       // over their own tables. Named for whose rules it runs so it can never be
       // read as another generation of the labs above it, and listed beside them

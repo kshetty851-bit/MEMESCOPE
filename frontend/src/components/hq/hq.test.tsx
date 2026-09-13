@@ -68,20 +68,6 @@ describe("navigation", () => {
     }
   });
 
-  it("keeps the Dex Lab, the current deliberate exception", () => {
-    // Per-lab pages are removed by default and the test below keeps them gone.
-    // The Dex Lab is asserted rather than left sitting ambiguously between the
-    // two rules — a reader of the list below would otherwise reasonably delete
-    // it as an oversight.
-    //
-    // The Five-Minute (Graduation) Lab held this exception until 2026-09-09,
-    // when it was deleted after every arm lost. The Movers, Matrix and KOL
-    // Labs held it until 2026-09-10, when all three were deleted on the
-    // operator's instruction — code and DB records together.
-    const hrefs = NAV_GROUPS.flatMap((group) => group.items).map((item) => item.href);
-    expect(hrefs).toContain("/dex-lab");
-  });
-
   it("does not resurrect the removed destinations", () => {
     const hrefs = NAV_GROUPS.flatMap((group) => group.items).map((item) => item.href);
     for (const gone of ["/trending", "/launches", "/watchlist", "/strategy-lab",
@@ -92,6 +78,11 @@ describe("navigation", () => {
                         // Deleted 2026-09-10 on the operator's instruction,
                         // code and DB records together.
                         "/movers-lab", "/matrix-lab", "/kol-lab",
+                        // The same, on 2026-09-12 and 2026-09-13. The Dex Lab
+                        // was the last standing "deliberate exception" this
+                        // file asserted; that test goes with it rather than
+                        // being re-pointed at whichever lab is newest.
+                        "/breakout-lab", "/dex-lab",
                         "/momentum-lab", "/pumpfun-lab"]) {
       expect(hrefs).not.toContain(gone);
     }

@@ -24,7 +24,6 @@ from app.api.v1.endpoints import (
 from app.compound import api as compound
 from app.copycontrol import api as copycontrol
 from app.depth import api as depth
-from app.dexlab import api as dexlab
 from app.exit_signals import api as intelligence
 from app.health import api as pipeline_health
 from app.hq_ops import api as hq_ops
@@ -71,7 +70,6 @@ api_router.include_router(compound.router)
 api_router.include_router(pumpfun.router)
 api_router.include_router(momentum.router)
 api_router.include_router(depth.router)
-api_router.include_router(dexlab.router)
 api_router.include_router(social.router)
 api_router.include_router(copycontrol.router)
 # Exit Watch, the permanent record and the leaderboards. Additive; the Radar's

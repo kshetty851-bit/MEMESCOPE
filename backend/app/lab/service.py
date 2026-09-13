@@ -115,6 +115,17 @@ def implausible_without_quote(price, entry_price, realisable) -> bool:
 SAMPLE_FRESHNESS = timedelta(minutes=2)
 
 
+#: The liquidity a lab may buy at when its spec does not say otherwise.
+#:
+#: Named rather than inlined because `security/lab_coverage.py` has to look at
+#: least this deep — a lab buying below what the coverage pass evaluates would
+#: open positions on coins that never get a security verdict. That invariant is
+#: asserted in `test_lab_security_coverage.py`, and it used to be pinned to
+#: whichever lab happened to declare a floor; both of those labs have since
+#: been deleted, orphaning it twice.
+DEFAULT_LIQUIDITY_FLOOR = Decimal("100000")
+
+
 class LabService:
     """The tournament engine, over whichever frozen registry it is handed.
 
@@ -526,7 +537,7 @@ class LabService:
             # minute and then go quiet — a one-off snapshot of the universe
             # wearing a strategy's clothes. The clause asks for the FIRST time
             # this token was ever seen at depth.
-            floor_usd = getattr(self._spec, "LIQUIDITY_FLOOR", Decimal("100000"))
+            floor_usd = getattr(self._spec, "LIQUIDITY_FLOOR", DEFAULT_LIQUIDITY_FLOOR)
             prior = aliased(TokenMarketSnapshot)
             q = (
                 select(TokenMarketSnapshot.token_id, DiscoveredToken.mint_address,
@@ -589,7 +600,7 @@ class LabService:
             # It answers "what does a random established token do in five
             # minutes", which is the question the graduation arms must beat.
             # `ORDER BY random()` is the point rather than an oversight.
-            floor_usd = getattr(self._spec, "LIQUIDITY_FLOOR", Decimal("100000"))
+            floor_usd = getattr(self._spec, "LIQUIDITY_FLOOR", DEFAULT_LIQUIDITY_FLOOR)
             per_tick = min(limit, getattr(self._spec, "SAMPLE_PER_TICK", 1))
             venues = list(getattr(
                 self._spec, "DEEP_VENUES", universe_rules.DEEP_AMM_VENUES,

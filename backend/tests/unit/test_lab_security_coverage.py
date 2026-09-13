@@ -66,11 +66,40 @@ def test_the_lookback_covers_the_checkpoint_with_room() -> None:
     assert lab_coverage.LOOKBACK.total_seconds() / 60 >= 15
 
 
-def test_the_floor_matches_what_a_lab_can_buy() -> None:
-    """Re-pointed at the Dex Lab on 2026-09-10, when the Movers Lab that used
-    to anchor this was deleted. The invariant is unchanged — the coverage pass
-    must evaluate everything a lab is allowed to buy, or the gated arm sits
-    idle waiting for verdicts nobody is collecting."""
-    from app.dexlab import spec
+def test_no_live_spec_can_buy_below_the_coverage_floor() -> None:
+    """The coverage pass must evaluate everything a lab is allowed to buy, or a
+    gated arm sits idle waiting for verdicts nobody is collecting.
 
-    assert lab_coverage.MIN_LIQUIDITY_USD == int(spec.MIN_LIQUIDITY_USD)
+    ANCHORED ON EVERY LIVE SPEC, NOT ON ONE LAB. This asserted equality with
+    the Movers Lab's floor until 2026-09-10 and the Dex Lab's until 2026-09-13;
+    each deletion orphaned it and needed a human to notice and re-point it at
+    whatever was still alive. Asking the question of all of them instead
+    survives the next deletion, and is the invariant that was actually meant.
+
+    `LabService` reads `LIQUIDITY_FLOOR` off the spec and falls back to its own
+    default, so a spec without one cannot buy thinner than the engine allows.
+    """
+    import types
+
+    from app.lab import scheduler, service
+
+    # The anchor: a spec that says nothing about liquidity buys at the engine's
+    # default, so that default is what the coverage pass must reach.
+    assert lab_coverage.MIN_LIQUIDITY_USD == int(service.DEFAULT_LIQUIDITY_FLOOR)
+
+    # And the forward guard: no live spec may lower its own floor beneath it.
+    # Vacuous today — with the Dex Lab deleted on 2026-09-13 no spec overrides
+    # the default any more — and deliberately kept, because the next lab that
+    # does is exactly the case this exists to catch.
+    for module in list(vars(scheduler).values()):
+        # MODULES only. SQLAlchemy's `func` answers `hasattr` for every name
+        # there has ever been, so a bare duck-type check picks it up and then
+        # fails on `int(<_FunctionGenerator>)`.
+        if not isinstance(module, types.ModuleType):
+            continue
+        floor = getattr(module, "LIQUIDITY_FLOOR", None)
+        if floor is None or not hasattr(module, "SPEC_VERSION"):
+            continue
+        assert int(floor) >= lab_coverage.MIN_LIQUIDITY_USD, (
+            f"{module.SPEC_VERSION} may buy at {int(floor)}, below the "
+            f"{lab_coverage.MIN_LIQUIDITY_USD} the coverage pass looks at")
