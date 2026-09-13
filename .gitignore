@@ -153,3 +153,12 @@ test-ledger/
 *-signer.json
 *signer*.key
 frontend/node_modules
+
+# Local npm workaround: registry.npmjs.org is TLS-blocked on this machine.
+frontend/.npmrc
+frontend/.npm-cache/
+frontend/.env.local
+
+# Forex Lab: derived data, rebuilt by `python -m app.labs.forex_lab export`.
+backend/app/labs/forex_lab/output/
+backend/.fxweb.env

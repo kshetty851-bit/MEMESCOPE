@@ -31,6 +31,7 @@ from app.karthik import api as karthik
 from app.karthik_ops import api as karthik_ops
 from app.lab import api as lab
 from app.labs.graduation import api as graduation_lab
+from app.labs.forex_lab import api as forex_lab
 from app.labs.nse_breakout import api as nse_tracker
 from app.labs.rafiq import api as rafiq_lab
 from app.labs.v6_fast_accum import api as v6_fast_accum_lab
@@ -134,3 +135,8 @@ api_router.include_router(graduation_lab.router)
 # `v6lab_*` tables, no trading path, no wallet, and no collector of its own.
 # Every route answers `has_run: false` until the experiment is run by hand.
 api_router.include_router(v6_fast_accum_lab.router)
+# Forex Lab. BACKTEST ONLY and read-only, like the V6 lab above it: it
+# replays a hedged grid on EUR/USD over stored candles and holds no wallet,
+# live or paper. Listed here beside the other labs because that is where a
+# reader looks for one.
+api_router.include_router(forex_lab.router)

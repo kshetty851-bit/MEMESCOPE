@@ -102,6 +102,17 @@ export const NAV_GROUPS: NavGroup[] = [
         status: "ready",
         note: "Research only. Pre-registered edge test; no book, no wallet.",
       },
+      // Forex Lab. EUR/USD, not Solana — and a BACKTEST, not a book: it
+      // replays a hedged grid over stored candles and holds no wallet, live or
+      // paper. Listed beside the labs because that is where a reader looks for
+      // one, and named for the market so it cannot be read as a Solana strategy.
+      {
+        href: "/forex-lab",
+        label: "Forex Lab",
+        icon: IconSpark,
+        status: "ready",
+        note: "Backtest only. EUR/USD hedged grid; no book, no wallet.",
+      },
       {
         href: "/graduation-lab",
         label: "Graduation Lab",

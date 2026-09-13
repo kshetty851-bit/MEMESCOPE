@@ -35,6 +35,12 @@ from app.labs.nse_breakout.models import (  # noqa: F401
     BtState,
     BtUniverseMember,
 )
+# Forex Lab's three `fx_*` tables, for the same reason.
+from app.labs.forex_lab.models import (  # noqa: F401
+    FxCandle,
+    FxIngestHour,
+    FxSweepRun,
+)
 from app.models.alpha_session import AlphaSession
 from app.models.curve import TokenCurveSnapshot  # noqa: F401
 from app.models.basechain import EvmLaunch  # noqa: F401
