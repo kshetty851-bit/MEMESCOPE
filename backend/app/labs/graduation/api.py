@@ -177,10 +177,6 @@ class GraduationStatus(BaseModel):
     graduates_observed: int = 0
     graduates_seen_climbing: int = 0
     graduates_seen_at_90: int = 0
-    paper: PaperBookOut = PaperBookOut()
-    #: The A/B twin: identical rules behind an entry filter, on the same
-    #: graduations. Compared against `paper` after four weeks.
-    paper_filtered: PaperBookOut = PaperBookOut(book="C01_symnight_5m")
 
     # --- is the chain actually being read? ----------------------------------
     #: When the poller last successfully read ANY curve. `last_sample_at`
@@ -323,8 +319,6 @@ async def status(db: AsyncSession = Depends(get_db)) -> GraduationStatus:
     polls_per_minute = max(1, 60 // max(1, config.POLL_INTERVAL_S))
     base.rpc_calls_per_minute = calls_per_poll * polls_per_minute
 
-    base.paper = await _paper(db, book=config.PAPER_BOOKS[0])
-    base.paper_filtered = await _paper(db, book=config.PAPER_BOOKS[1])
 
     rows = (await db.execute(
         select(GradToken.mint, GradToken.symbol, GradToken.max_progress_pct,
