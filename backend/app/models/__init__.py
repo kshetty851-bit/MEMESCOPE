@@ -17,6 +17,13 @@ from app.labs.rafiq.models import (  # noqa: F401
     RafiqLabPosition,
     RafiqLabStrategy,
 )
+# V6 Fast-Accumulation Lab's two `v6lab_*` tables, for the same reason.
+# RESEARCH_ONLY: declared here so autogenerate can see them, and referenced
+# nowhere in any trading path.
+from app.labs.v6_fast_accum.models import (  # noqa: F401
+    V6LabRun,
+    V6LabTrade,
+)
 # NSE Breakout Tracker's five `bt_*` tables, for the same reason.
 from app.labs.nse_breakout.models import (  # noqa: F401
     BtCandle,

@@ -92,6 +92,16 @@ export const NAV_GROUPS: NavGroup[] = [
       // pump.fun launches climbing the bonding curve. Watch only, like the
       // NSE tracker below — no book, nothing ranked — so it is named for what
       // it records rather than for a strategy it does not have.
+      // V6 Fast-Accumulation Lab. A RESEARCH result, not a book: it reports a
+      // pre-registered experiment over the graduation lab's tables and holds
+      // no wallet, so it is named for the question rather than a strategy.
+      {
+        href: "/v6-fast-accum",
+        label: "V6 Fast-Accum Lab",
+        icon: IconSpark,
+        status: "ready",
+        note: "Research only. Pre-registered edge test; no book, no wallet.",
+      },
       {
         href: "/graduation-lab",
         label: "Graduation Lab",

@@ -33,6 +33,7 @@ from app.lab import api as lab
 from app.labs.graduation import api as graduation_lab
 from app.labs.nse_breakout import api as nse_tracker
 from app.labs.rafiq import api as rafiq_lab
+from app.labs.v6_fast_accum import api as v6_fast_accum_lab
 from app.momentum import api as momentum
 from app.paper import api as paper
 from app.pumpfun import api as pumpfun
@@ -129,3 +130,7 @@ api_router.include_router(nse_tracker.router)
 # Graduation Lab. Read-only status board; every route answers
 # `running: false` without a query when LAB_GRADUATION_ENABLED is off.
 api_router.include_router(graduation_lab.router)
+# V6 Fast-Accumulation Lab. RESEARCH ONLY: read-only routes over its own
+# `v6lab_*` tables, no trading path, no wallet, and no collector of its own.
+# Every route answers `has_run: false` until the experiment is run by hand.
+api_router.include_router(v6_fast_accum_lab.router)
