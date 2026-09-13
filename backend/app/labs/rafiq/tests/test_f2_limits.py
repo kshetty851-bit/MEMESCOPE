@@ -168,7 +168,8 @@ async def test_the_daily_cap_binds_against_what_was_opened(
                                        RafiqLabPosition.mint_address == mint)
     )).scalars().first() is None, "the cap did not bind"
     filed = (await lab_session.execute(
-        select(RafiqCandidate).where(RafiqCandidate.mint_address == mint)
+        select(RafiqCandidate).where(RafiqCandidate.mint_address == mint,
+                                     RafiqCandidate.strategy_id == row.id)
     )).scalars().first()
     assert filed is not None and filed.reject_reason == "daily_trade_cap"
     # And it was evaluated all the way through first, so the row carries the

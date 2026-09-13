@@ -174,31 +174,40 @@ class TestCalibrationAgainstProductionData:
 class TestF2IsWiredAsTheActiveBook:
     """The port is inert unless the runner actually uses it."""
 
-    def test_f2_is_the_only_book_that_enters(self):
+    def test_every_book_enters(self):
+        """All six trade. F2 ran alone from 2026-09-12 13:45Z until Karthik
+        re-armed A2-E2 the next day; the books do not compete for candidates
+        (each gets its own positions, cash and `held` set, and the candidate
+        list is read-only), so running them together costs F2's sample
+        nothing. Pinned so that turning one off is a deliberate edit."""
         from app.labs.rafiq.registry import STRATEGIES
         entering = {s.code for s in STRATEGIES if s.enters}
-        assert entering == {"F2"}, entering
+        assert entering == {"A2", "B2", "C2", "D2", "E2", "F2"}, entering
 
-    def test_retired_books_keep_the_digest_their_record_was_opened_under(self):
-        """`enters` must stay out of the hash. If retiring a book changed its
-        digest the runner would halt on drift it caused itself."""
-        from app.labs.rafiq.registry import BY_CODE
-        assert BY_CODE["A2"].digest == "bba07d8c8b3d76d6ae2d0ee8f3b0dc7e5b2f1d87e0c4a6e5b8d9f0a1c2b3d4e5"[:0] + BY_CODE["A2"].digest
-        # Recomputed with `enters` flipped: the hash must not move.
+    def test_enters_stays_out_of_the_digest_in_both_directions(self):
+        """Retiring or re-arming a book must not move its hash. If it did,
+        the runner would halt on drift it caused itself — and the ledger rows
+        opened under the old hash could never be traded again."""
         import dataclasses
-        for code in ("A2", "B2", "C2", "D2", "E2"):
-            book = BY_CODE[code]
+
+        from app.labs.rafiq.registry import STRATEGIES
+        for book in STRATEGIES:
             assert dataclasses.replace(book, enters=True).digest == book.digest
+            assert dataclasses.replace(book, enters=False).digest == book.digest
 
     def test_f2_uses_its_own_gate_at_200k(self):
-        from app.labs.rafiq.registry import BY_CODE
         from decimal import Decimal
+
+        from app.labs.rafiq.registry import BY_CODE
+
         assert BY_CODE["F2"].gate.min_liquidity_usd == Decimal(200_000)
         assert BY_CODE["F2"].gate.min_market_cap_usd == Decimal(200_000)
 
     def test_f2_stakes_ten_dollars_not_fifty(self):
-        from app.labs.rafiq.registry import BY_CODE
         from decimal import Decimal
+
+        from app.labs.rafiq.registry import BY_CODE
+
         assert BY_CODE["F2"].profile.sizing.max_notional_usd == Decimal(10)
         for code in ("A2", "C2", "D2", "E2"):
             assert BY_CODE[code].profile.sizing.max_notional_usd == Decimal(50)

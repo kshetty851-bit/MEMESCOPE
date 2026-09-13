@@ -224,8 +224,7 @@ STRATEGIES: tuple[LabStrategy, ...] = (
     LabStrategy("A2", "Gate only",
                 "What does the entry gate alone do, against v1's A?",
                 HARD_STOP_GUARD,
-                legs=(Leg(_WHOLE, Decimal("1.30"), Decimal("0.20")),),
-                enters=False),
+                legs=(Leg(_WHOLE, Decimal("1.30"), Decimal("0.20")),)),
 
     # B was v1's only book near breakeven before costs (-0.3%/trade gross over
     # 151 trades), so v2 treats B as the template rather than A. Same rules,
@@ -233,8 +232,7 @@ STRATEGIES: tuple[LabStrategy, ...] = (
     LabStrategy("B2", "Fast and cheap, gated",
                 "Does the gate push the best v1 book over the line?",
                 TIME_BOXED_EXIT,
-                legs=(Leg(_WHOLE, Decimal("1.20"), None),),
-                enters=False),
+                legs=(Leg(_WHOLE, Decimal("1.20"), None),)),
 
     # C2's two legs ARE the question. Half takes the same +30% A2 takes; half
     # has no target and can only leave on the trail, the stop or the hold.
@@ -242,16 +240,14 @@ STRATEGIES: tuple[LabStrategy, ...] = (
                 "Does scaling out beat a hard cap, given losers go to -100%?",
                 PARTIAL_EXIT,
                 legs=(Leg(_HALF, Decimal("1.30"), None),
-                      Leg(_HALF, None, Decimal("0.25"))),
-                enters=False),
+                      Leg(_HALF, None, Decimal("0.25")))),
 
     # v1 closed trades at +29% that would have run to +352%, +373%, +261%.
     # D2 removes the cap entirely and shortens the hold to pay for it.
     LabStrategy("D2", "No cap",
                 "Is the +30% cap cutting off the tail that pays for the rugs?",
                 NO_CAP,
-                legs=(Leg(_WHOLE, None, Decimal("0.25")),),
-                enters=False),
+                legs=(Leg(_WHOLE, None, Decimal("0.25")),)),
 
     # E2 keeps v1 E's three guards and runs the gate far stricter on top. It is
     # expected to trade rarely — v1's E closed nothing at all in 19 hours on
@@ -262,7 +258,7 @@ STRATEGIES: tuple[LabStrategy, ...] = (
                 legs=(Leg(_WHOLE, Decimal("1.30"), Decimal("0.20")),),
                 gate=entry_gate.STRICT,
                 liquidity_derived_risk=True, daily_breaker=True,
-                consensus_gate=True, enters=False),
+                consensus_gate=True),
 
     # F2 is the active book, and it is NOT a sixth exit variant. A2-E2 settled
     # that question: 98 of their 102 total losses exited on `stop`, at a median

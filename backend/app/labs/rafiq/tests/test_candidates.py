@@ -19,7 +19,11 @@ import pytest
 from sqlalchemy import select
 
 from app.labs.rafiq import outcomes, registry
-from app.labs.rafiq.models import RafiqCandidate, RafiqLabPosition
+from app.labs.rafiq.models import (
+    RafiqCandidate,
+    RafiqLabPosition,
+    RafiqLabStrategy,
+)
 from app.labs.rafiq.service import RafiqLabService
 from app.labs.rafiq.tests.test_full_cycle import seed_candidate
 from app.models.market import TokenMarketSnapshot
@@ -28,8 +32,21 @@ from app.models.token import DiscoveredToken
 pytestmark = pytest.mark.integration
 
 
-async def _rows(session, mint: str | None = None) -> list[RafiqCandidate]:
-    stmt = select(RafiqCandidate).order_by(RafiqCandidate.decided_at)
+async def _rows(session, mint: str | None = None, *,
+                code: str = "F2") -> list[RafiqCandidate]:
+    """One book's decisions.
+
+    Scoped to a strategy, because the ledger's invariants are per
+    (strategy, mint) and not per mint: all six books judge the same candidate
+    stream and each files its own row. A query by mint alone returns six rows
+    for one token and reads as a duplicate.
+    """
+    stmt = (
+        select(RafiqCandidate)
+        .join(RafiqLabStrategy, RafiqLabStrategy.id == RafiqCandidate.strategy_id)
+        .where(RafiqLabStrategy.code == code)
+        .order_by(RafiqCandidate.decided_at)
+    )
     if mint:
         stmt = stmt.where(RafiqCandidate.mint_address == mint)
     return list((await session.execute(stmt)).scalars())
@@ -243,11 +260,15 @@ async def test_coverage_reports_the_non_null_rate(lab_session, monkeypatch) -> N
     assert report["non_null_pct"]["lp_status"] == 0.0
 
 
-def test_only_f2_files_candidates() -> None:
-    """One book enters, so one book's decisions are the population. If a
-    second book were ever re-armed this test says the sample changed."""
-    entering = [s.code for s in registry.STRATEGIES if s.enters]
-    assert entering == ["F2"]
+def test_every_entering_book_files_its_decisions() -> None:
+    """Each entering book files its own decisions, keyed by `strategy_id`, so
+    six books produce six separate populations rather than one mixed one.
+
+    Pinned rather than computed: if a book is ever retired, the row it stops
+    producing is a change to what the table can answer, and that should be a
+    visible edit rather than a silent narrowing of the sample."""
+    entering = sorted(s.code for s in registry.STRATEGIES if s.enters)
+    assert entering == ["A2", "B2", "C2", "D2", "E2", "F2"]
 
 
 def test_every_reject_reason_is_short_enough_to_store() -> None:

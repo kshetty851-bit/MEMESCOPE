@@ -89,12 +89,23 @@ async def test_a_second_activation_does_not_refund_f2(
     assert f2.activated_at == opened_at, "activation boundary moved"
 
 
-async def test_the_retired_books_keep_settling_but_open_nothing(
+async def test_a_retired_book_keeps_settling_but_opens_nothing(
     lab_session, monkeypatch
 ) -> None:
-    """Prod has 62 open positions across A2-D2. `enters=False` must stop new
-    entries WITHOUT abandoning those — and without force-closing them, since
-    selling into a drained pool is what produces the -100% rows."""
+    """`enters=False` stops entries without abandoning open positions, and
+    without force-closing them — selling into a drained pool is what produces
+    the -100% rows.
+
+    No book carries `enters=False` today (all six trade), so this patches one
+    rather than relying on a book's current setting. That is the point: the
+    mechanism has to keep working for whenever it is next used, and a test
+    that only passed while A2 happened to be retired stopped testing it the
+    moment A2 was re-armed.
+    """
+    import dataclasses
+
+    from app.labs.rafiq import registry
+
     monkeypatch.setenv("RAFIQ_LAB_ENABLED", "true")
     now = datetime.now(UTC)
     service = RafiqLabService(lab_session)
@@ -103,6 +114,12 @@ async def test_the_retired_books_keep_settling_but_open_nothing(
     a2 = (await lab_session.execute(
         select(RafiqLabStrategy).where(RafiqLabStrategy.code == "A2")
     )).scalars().one()
+    retired = dataclasses.replace(registry.BY_CODE["A2"], enters=False)
+    monkeypatch.setitem(registry.BY_CODE, "A2", retired)
+    monkeypatch.setattr(
+        registry, "STRATEGIES",
+        tuple(retired if s.code == "A2" else s for s in registry.STRATEGIES))
+
     # A real market behind the legacy position, or `_settle` has nothing to
     # mark it against and the test would pass for the wrong reason.
     legacy_mint = await seed_candidate(lab_session, now, tag="legacyopen")

@@ -151,11 +151,14 @@ class RafiqLabService:
             closed = await self._settle(spec, positions, seen, now=now)
             halted, reason = await self._breaker(spec, row, positions, now=now)
             opened = 0
-            # A2-E2 are frozen records, not running books: their exits still
-            # settle every tick, but only the book registry marks `enters`
-            # takes a new position. Without this the six books would compete
-            # for the same candidate and F2's sample would be whatever the
-            # others left behind.
+            # `enters=False` retires a book: it keeps settling, opens nothing.
+            #
+            # It does NOT exist to stop books competing — they cannot. Each
+            # book gets its own `positions`, its own `held` set and its own
+            # cash, and `candidates` is a read-only list every book sees in
+            # full. One book taking a token removes it from no other book's
+            # view. An earlier version of this comment claimed otherwise and
+            # was simply wrong.
             if spec.enters and not halted:
                 opened = await self._enter(spec, row, positions, candidates, seen,
                                            now=now)
