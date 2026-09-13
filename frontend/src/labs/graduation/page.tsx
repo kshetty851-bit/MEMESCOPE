@@ -477,13 +477,13 @@ function RulesPanel() {
   return (
     <Panel>
       <PanelHeader>
-        <PanelTitle>The 50 rules</PanelTitle>
+        <PanelTitle>The {data.arms.length} rules</PanelTitle>
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
           className="rounded-md border border-line px-3 py-1.5 text-xs text-ink-dim transition-colors hover:border-line-strong hover:text-ink"
         >
-          {open ? "Hide" : "Show all 50"}
+          {open ? "Hide" : `Show all ${data.arms.length}`}
         </button>
       </PanelHeader>
       <div className="flex flex-col gap-4 p-4">
@@ -670,7 +670,7 @@ function LeaderboardPanel() {
   return (
     <Panel>
       <PanelHeader>
-        <PanelTitle>Strategy tournament — 50 arms</PanelTitle>
+        <PanelTitle>Strategy tournament — {data.arms.length} arms</PanelTitle>
         <span className="flex items-center gap-3">
           <span className="text-micro text-ink-dim">
             running <Elapsed since={data?.started_at ?? null} />
@@ -753,7 +753,7 @@ function LeaderboardPanel() {
           <Stat
             label="Closed trades"
             value={data.total_trades.toLocaleString()}
-            note={`across all 50 arms · ${Number(data.hours_running).toFixed(1)}h in`}
+            note={`across all ${data.arms.length} arms · ${Number(data.hours_running).toFixed(1)}h in`}
           />
           <Stat
             label="Wallet simulated"

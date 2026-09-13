@@ -25,13 +25,19 @@ TOKEN = {"mint": "Abc123pump", "liquidity": D(150_000), "fdv": D(2_000_000),
          "sells": 0, "reuse": 4}
 
 
-def test_the_tournament_is_fifty_arms_of_which_eight_are_noise() -> None:
+def test_the_tournament_is_fifty_one_arms_of_which_eight_are_noise() -> None:
     """The controls are the whole point. Fifty strategies produce a leader in
     an hour whether or not any of them is good, so the leaderboard only means
-    something against arms that provably cannot have an edge."""
-    assert len(ARMS) == 50
+    something against arms that provably cannot have an edge.
+
+    Fifty-one since 2026-09-13: `F51_band_5m` was added after the first fifty
+    produced no arm that beat its own control, to test the one hypothesis the
+    data pointed at — a liquidity BAND rather than a floor. It starts at zero
+    trades and is judged on its own, against a bar fixed before it ran.
+    """
+    assert len(ARMS) == 51
     assert len(CONTROLS) == 8
-    assert len({a.name for a in ARMS}) == 50
+    assert len({a.name for a in ARMS}) == 51
     assert all(len(a.name) <= 32 for a in ARMS)
 
 

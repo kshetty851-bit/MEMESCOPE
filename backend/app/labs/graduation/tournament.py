@@ -126,6 +126,8 @@ ENTRY_RULES: dict[str, str] = {
     "night": "the pool opened between 18:00 and 06:00 UTC",
     "day": "the pool opened between 06:00 and 18:00 UTC",
     "sym_night": "symbol used before AND the pool opened 18:00-06:00 UTC",
+    "band": "the pool held between $95,000 and $222,000 at the open — a band, "
+            "not a floor, because tail risk rises again above it",
     "deep": "the pool held at least $100,000 at the open",
     "shallow": "the pool held under $30,000 at the open",
     "nosell": "no sells had printed in the first five minutes of flow",
@@ -158,6 +160,16 @@ def accepts(arm: Arm, *, mint: str, open_at: datetime, liquidity: Decimal | None
         return (reuse or 0) >= 3
     if e == "newsym":
         return (reuse or 0) == 0
+    if e == "band":
+        # A BAND, not a floor. Measured per TOKEN (437 of them, because fifty
+        # arms trade the same graduations and a per-trade count multiplies each
+        # one ~25 times): tail risk falls from 36.8% of tokens below $17k to
+        # 1.1% between $116k and $198k, then RETURNS to 5.6% above $213k. A
+        # `>= $100k` floor spans the good band and the bad tail above it, which
+        # is why `deep` reads +0.28% where the band reads +1.15%.
+        #
+        # In-sample. This arm exists to test it forward, not to be believed.
+        return liquidity is not None and 95_000 <= liquidity <= 222_000
     if e == "deep":
         return liquidity is not None and liquidity >= 100_000
     if e == "shallow":
@@ -249,6 +261,21 @@ ARMS: tuple[Arm, ...] = (
     Arm("F41_symdeep_5m", "sym_deep", 5, note="symbol reused AND deep pool, out at 5m"),
     Arm("F42_symnight_5m", "sym_night", 5, note="symbol reused AND night, out at 5m"),
     # --- controls. These cannot have an edge. -----------------------------
+    # Added 2026-09-13, after the first fifty returned no edge. The finding
+    # that produced it: entry selection is not the problem (71% of trades win)
+    # and execution is not the problem (1.85% against a -2.08% token move) —
+    # the mean is negative only because of a left tail averaging -61.6%, and
+    # that tail cannot be stopped out, since 98% of collapses skip straight
+    # past any stop level between two samples. The only escape is entering
+    # tokens that do not have one, and pool depth is the one property that
+    # separates them.
+    #
+    # ONE arm at one hold, deliberately: a hypothesis found in-sample earns a
+    # single forward test, not three. Bar set in advance — 400 trades, z > 3
+    # against F29_all_5m. Five minutes because the median token move grows
+    # with hold (+0.94% at 2m, +3.02% at 5m) and inside the band there is
+    # almost no tail to pay for it.
+    Arm("F51_band_5m", "band", 5, note="pool $95k-$222k at open, out at 5m"),
     Arm("R1_coin50_2m", "rand50", 2, note="CONTROL — 50% of tokens by coin flip, out at 2m"),
     Arm("R2_coin50_3m", "rand50", 3, note="CONTROL — 50% of tokens by coin flip, out at 3m"),
     Arm("R3_coin50_5m", "rand50", 5, note="CONTROL — 50% of tokens by coin flip, out at 5m"),
@@ -261,14 +288,18 @@ ARMS: tuple[Arm, ...] = (
 
 BY_NAME: dict[str, Arm] = {a.name: a for a in ARMS}
 CONTROLS: tuple[Arm, ...] = tuple(a for a in ARMS if a.is_control)
-assert len(ARMS) == 50, f"the tournament is fifty arms, not {len(ARMS)}"
+#: 50 original arms + F51_band_5m, added 2026-09-13 after the first fifty
+#: returned no edge. The count is pinned rather than free because an arm that
+#: appears mid-tournament changes what every other number means — so changing
+#: it must be a deliberate edit with a date, not a side effect.
+assert len(ARMS) == 51, f"the tournament is fifty-one arms, not {len(ARMS)}"
 assert {a.hold for a in ARMS} == {2, 3, 5}, (
     "short holds only: past ten minutes the wipeout rate triples and buys "
     "FEWER big winners, not more")
 assert all(a.tp is None and a.trail is None for a in ARMS), (
     "targets and trailing stops are gone — every one of them held 15m+")
 assert len(CONTROLS) == 8
-assert len({a.name for a in ARMS}) == 50, "arm names must be unique"
+assert len({a.name for a in ARMS}) == 51, "arm names must be unique"
 assert all(len(a.name) <= 32 for a in ARMS), "arm name must fit the column"
 assert {a.entry for a in ARMS} <= set(ENTRY_RULES), (
     "every entry filter an arm uses must be described: "
