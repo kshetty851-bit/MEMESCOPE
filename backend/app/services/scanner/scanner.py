@@ -43,7 +43,7 @@ from app.services.discovery.ledger import record_rpc_observation
 from app.services.rpc.base import SolanaRPC
 from app.services.rpc.registry import get_rpc
 from app.services.scanner.parser import (
-    POOL_CREATE_MARKER,
+    POOL_ARTIFACT_MARKERS,
     LogEvent,
     TokenCreation,
     TokenMetadata,
@@ -799,10 +799,11 @@ class TokenScanner:
         resolved: _Resolution | None = self._from_logs(event)
         if resolved is not None:
             self.stats.resolved_from_logs += 1
-        elif any(POOL_CREATE_MARKER in line for line in event.logs):
-            # A pool creation whose event did not decode. The transaction
-            # fallback is *wrong* here, not merely wasteful: the only mint such
-            # a transaction initialises is the pool's LP mint, which
+        elif any(m in line for line in event.logs for m in POOL_ARTIFACT_MARKERS):
+            # A pool creation whose event did not decode, or a graduation into
+            # an AMM. The transaction fallback is *wrong* here, not merely
+            # wasteful: the only mint such a transaction initialises is the
+            # pool's LP mint or its position NFT, which
             # `extract_mint_and_decimals` would confidently report as a new
             # token. Refuse the reading; the counter keeps the refusals visible.
             self.stats.pool_events_refused += 1

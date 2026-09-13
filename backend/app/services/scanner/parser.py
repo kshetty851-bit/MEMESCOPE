@@ -50,6 +50,24 @@ CREATE_MARKERS = (
 # the LP token. The `CreatePoolEvent` decoded below is the authoritative source.
 POOL_CREATE_MARKER = "Instruction: CreatePool"
 
+#: Transactions whose only newly initialised mint is a pool artifact — an LP
+#: mint or a liquidity-position NFT — and never a launch.
+#:
+#: `MigrationDammV2` is a Meteora DBC token *graduating* to DAMM v2, which mints
+#: a "Meteora Position NFT" for the new LP position. Measured 2026-09-13, the
+#: day the DBC program was first watched: 16 of 60 sampled pending tokens (27%)
+#: were these NFTs, recorded as though they were coins. They are also pure
+#: waste even when read correctly — the token being migrated was already
+#: discovered at its launch, so the whole transaction can only re-find
+#: something held or invent something that is not a token at all.
+#:
+#: Same reasoning as the PumpSwap marker above it, and the same refusal: no
+#: reading beats a confident wrong one.
+POOL_ARTIFACT_MARKERS = (
+    POOL_CREATE_MARKER,
+    "Instruction: MigrationDammV2",
+)
+
 
 @dataclass(frozen=True, slots=True)
 class LogEvent:

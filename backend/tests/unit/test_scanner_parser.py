@@ -14,6 +14,7 @@ import pytest
 from app.services.scanner.parser import (
     extract_fee_payer,
     extract_mint_and_decimals,
+    POOL_ARTIFACT_MARKERS,
     is_token_creation_log,
     parse_asset_metadata,
     parse_log_notification,
@@ -101,6 +102,38 @@ def test_meteora_dbc_launch_is_detected() -> None:
     assert is_token_creation_log(
         ["Program log: Instruction: InitializeVirtualPoolWithToken2022"]
     )
+
+
+def test_a_meteora_graduation_is_refused_not_read() -> None:
+    """A DBC token migrating to DAMM v2 mints an LP position NFT, not a coin.
+
+    Real instruction sequence from mint E4EnmLjyDZpH…, 2026-09-13. The
+    transaction carries `InitializeMint2`, so the pre-filter passes it and the
+    transaction fallback would report the position NFT as a new token — which
+    is exactly what happened for 16 of 60 sampled tokens on the day Meteora's
+    program was first watched. The token being migrated was already discovered
+    at its launch, so refusing costs nothing.
+    """
+    logs = [
+        "Program log: Instruction: MigrationDammV2",
+        "Program log: Instruction: InitializePoolWithDynamicConfig",
+        "Program log: Instruction: InitializeMint2",
+        "Program log: Instruction: MintTo",
+    ]
+    assert is_token_creation_log(logs), "the pre-filter still sees a mint init"
+    assert any(m in line for line in logs for m in POOL_ARTIFACT_MARKERS), (
+        "a graduation must be refused before the transaction fallback reads it"
+    )
+
+
+def test_a_real_dbc_launch_is_not_refused() -> None:
+    """The refusal must not swallow the launches the program was added for."""
+    logs = [
+        "Program log: Instruction: InitializeVirtualPoolWithSplToken",
+        "Program log: Instruction: MintTo",
+    ]
+    assert is_token_creation_log(logs)
+    assert not any(m in line for line in logs for m in POOL_ARTIFACT_MARKERS)
 
 
 def test_ordinary_transfer_log_is_ignored() -> None:
