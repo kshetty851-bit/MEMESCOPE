@@ -113,12 +113,56 @@ def _coin(arm: str, mint: str, pct: int) -> bool:
     return int.from_bytes(digest, "big") % 100 < pct
 
 
+#: The fourteen liquidity bands, in dollars of pool at the pool open.
+#:
+#: CONTIGUOUS AND ORDERED, which is the whole design. Generation 1 ran fifty
+#: independent filters and the winner had to clear the best-of-fifty noise
+#: ceiling — profit factor 4.79 — which nothing reached in seventeen hours.
+#: Ordered bands ask a different question: a real effect appears as a
+#: SHAPE across neighbours, and noise appears as one spike beside eight flat
+#: cells. A shape is visible with far fewer trades than a maximum is.
+#:
+#: The edges come from measurement, per TOKEN (1,484 tokens, 7 days), not from
+#: round numbers. Share of tokens losing more than 25% in the first five
+#: minutes, by pool at the open:
+#:
+#:     under $17k   57.4%      $75k-$116k   12.0%
+#:     $17k-$75k    32.8%      $116k-$198k   1.6%   <- 94.5% of tokens WIN here
+#:                             over $198k    3.1%
+#:
+#: So the grid starts at $75,000 — below it a third to a half of tokens are
+#: destroyed and no exit rule reaches them — and it is finest between $116k
+#: and $198k, where generation 1's only real signal was hiding inside a
+#: `>= $100k` floor that also swept in the worse band above.
+LIQ_BANDS: tuple[tuple[str, int, int], ...] = (
+    ("L01", 75_000, 90_000),
+    ("L02", 90_000, 105_000),
+    ("L03", 105_000, 116_000),
+    ("L04", 116_000, 128_000),
+    ("L05", 128_000, 140_000),
+    ("L06", 140_000, 155_000),
+    ("L07", 155_000, 170_000),
+    ("L08", 170_000, 185_000),
+    ("L09", 185_000, 198_000),
+    ("L10", 198_000, 220_000),
+    ("L11", 220_000, 250_000),
+    ("L12", 250_000, 300_000),
+    ("L13", 300_000, 400_000),
+    ("L14", 400_000, 1_000_000_000),
+)
+BAND_BY_KEY: dict[str, tuple[int, int]] = {
+    f"liq_{k}": (lo, hi) for k, lo, hi in LIQ_BANDS}
+
+
 #: What each entry key MEANS, in the words the page prints.
 #:
 #: Kept beside `accepts` rather than in the frontend so the description cannot
 #: drift from the rule it describes — `test_every_entry_filter_is_described`
 #: fails if a filter gains a branch and loses its sentence, or vice versa.
 ENTRY_RULES: dict[str, str] = {
+    **{f"liq_{k}": f"the pool held ${lo:,} to ${hi:,} at the open"
+       for k, lo, hi in LIQ_BANDS[:-1]},
+    f"liq_{LIQ_BANDS[-1][0]}": f"the pool held over ${LIQ_BANDS[-1][1]:,} at the open",
     "all": "every graduation, no filter",
     "sym": "the token's symbol had been used by at least one earlier token",
     "sym3": "the symbol had been used by at least three earlier tokens",
@@ -146,6 +190,10 @@ ENTRY_RULES: dict[str, str] = {
 def accepts(arm: Arm, *, mint: str, open_at: datetime, liquidity: Decimal | None,
             fdv: Decimal | None, sells: int | None, reuse: int | None) -> bool:
     e = arm.entry
+    band = BAND_BY_KEY.get(e)
+    if band is not None:
+        lo, hi = band
+        return liquidity is not None and lo <= liquidity < hi
     if e == "all":
         return True
     if e == "sym":
@@ -213,77 +261,100 @@ D = Decimal
 #:
 #: So the exit stays short and the 1m slots go to 5m. No reset: new arms
 #: start at zero and the 2m and 3m arms keep their record.
+#: Generation 2, opened 2026-09-13. Fifty arms: a 10 x 4 grid plus ten
+#: controls.
+#:
+#: WHAT GENERATION 1 GOT WRONG. Fifty-one arms ran for seventeen hours and not
+#: one beat the `all` arm at its own hold (0 of 47 cleared z>2, where chance
+#: alone gives 1-2). The leader was a coin flip. Three things were wrong:
+#:
+#:  1. Thirty-nine of forty-two filters tested WHICH token to buy — symbol
+#:     reuse, hour of day, market cap, seller presence. Entry selection was
+#:     never the problem: 71% of trades already win, and the median token move
+#:     is POSITIVE (+0.94% at 2m, +3.02% at 5m). The mean is negative only
+#:     because of a left tail averaging -61.6%.
+#:  2. That tail cannot be exited. Of 1,578 trades below -25%, just 33 (2%)
+#:     ever passed through the -20%..-40% zone; 98% skip it between two
+#:     samples. So the only defence is entering tokens that do not have one,
+#:     and pool depth is the single measured property that separates them.
+#:  3. Fifty independent arms set the bar at best-of-fifty noise (PF 4.79).
+#:     Ordered bands replace "who won" with "what shape", which resolves far
+#:     sooner.
+#:
+#: WHAT WAS TESTED AND DROPPED BEFORE SPENDING AN ARM ON IT:
+#:
+#:  - Longer holds. Inside the band, mean falls and the tail grows with every
+#:    extra minute (5m +3.33% tail 1.6%; 30m -6.48% tail 14.6%). 5m stands.
+#:  - Take-profits and trailing stops. Inside the band the average PEAK in
+#:    five minutes is +4.33% and the five-minute mark already captures
+#:    +3.33% of it. Only 3.8% of tokens ever touch +10% and 1.6% ever touch
+#:    -10%. The move is smooth and small; an exit rule has nothing to catch.
+#:  - FDV / liquidity, an unbacked-float proxy. Inside the band its terciles
+#:    return 3.31%, 3.85%, 2.10% on an IDENTICAL 1.7% tail. No separation.
+#:
+#: So two factors survived and the grid tests exactly those: WHERE the pool
+#: sits, and HOW LONG you hold. Sub-five-minute holds are in because nobody
+#: has ever looked at them inside a band.
 ARMS: tuple[Arm, ...] = (
-    # --- every filter at two, three and five minutes ---------------------
-    # 2 minutes
-    Arm("F01_all_2m", "all", 2, note="every graduation, out at 2m"),
-    Arm("F02_sym_2m", "sym", 2, note="symbol used before, out at 2m"),
-    Arm("F03_sym3_2m", "sym3", 2, note="symbol used 3+ times, out at 2m"),
-    Arm("F04_newsym_2m", "newsym", 2, note="symbol never seen, out at 2m"),
-    Arm("F05_night_2m", "night", 2, note="opened 18:00-06:00 UTC, out at 2m"),
-    Arm("F06_day_2m", "day", 2, note="opened 06:00-18:00 UTC, out at 2m"),
-    Arm("F07_deep_2m", "deep", 2, note="pool >= $100k, out at 2m"),
-    Arm("F08_shallow_2m", "shallow", 2, note="pool < $30k, out at 2m"),
-    Arm("F09_nosell_2m", "nosell", 2, note="no sells yet, out at 2m"),
-    Arm("F10_hassell_2m", "hassell", 2, note="sells already printed, out at 2m"),
-    Arm("F11_bigcap_2m", "bigcap", 2, note="market cap >= $1M, out at 2m"),
-    Arm("F12_smallcap_2m", "smallcap", 2, note="market cap < $200k, out at 2m"),
-    Arm("F13_symdeep_2m", "sym_deep", 2, note="symbol reused AND deep pool, out at 2m"),
-    Arm("F14_symnight_2m", "sym_night", 2, note="symbol reused AND night, out at 2m"),
-    # 3 minutes
-    Arm("F15_all_3m", "all", 3, note="every graduation, out at 3m"),
-    Arm("F16_sym_3m", "sym", 3, note="symbol used before, out at 3m"),
-    Arm("F17_sym3_3m", "sym3", 3, note="symbol used 3+ times, out at 3m"),
-    Arm("F18_newsym_3m", "newsym", 3, note="symbol never seen, out at 3m"),
-    Arm("F19_night_3m", "night", 3, note="opened 18:00-06:00 UTC, out at 3m"),
-    Arm("F20_day_3m", "day", 3, note="opened 06:00-18:00 UTC, out at 3m"),
-    Arm("F21_deep_3m", "deep", 3, note="pool >= $100k, out at 3m"),
-    Arm("F22_shallow_3m", "shallow", 3, note="pool < $30k, out at 3m"),
-    Arm("F23_nosell_3m", "nosell", 3, note="no sells yet, out at 3m"),
-    Arm("F24_hassell_3m", "hassell", 3, note="sells already printed, out at 3m"),
-    Arm("F25_bigcap_3m", "bigcap", 3, note="market cap >= $1M, out at 3m"),
-    Arm("F26_smallcap_3m", "smallcap", 3, note="market cap < $200k, out at 3m"),
-    Arm("F27_symdeep_3m", "sym_deep", 3, note="symbol reused AND deep pool, out at 3m"),
-    Arm("F28_symnight_3m", "sym_night", 3, note="symbol reused AND night, out at 3m"),
-    # 5 minutes
-    Arm("F29_all_5m", "all", 5, note="every graduation, out at 5m"),
-    Arm("F30_sym_5m", "sym", 5, note="symbol used before, out at 5m"),
-    Arm("F31_sym3_5m", "sym3", 5, note="symbol used 3+ times, out at 5m"),
-    Arm("F32_newsym_5m", "newsym", 5, note="symbol never seen, out at 5m"),
-    Arm("F33_night_5m", "night", 5, note="opened 18:00-06:00 UTC, out at 5m"),
-    Arm("F34_day_5m", "day", 5, note="opened 06:00-18:00 UTC, out at 5m"),
-    Arm("F35_deep_5m", "deep", 5, note="pool >= $100k, out at 5m"),
-    Arm("F36_shallow_5m", "shallow", 5, note="pool < $30k, out at 5m"),
-    Arm("F37_nosell_5m", "nosell", 5, note="no sells yet, out at 5m"),
-    Arm("F38_hassell_5m", "hassell", 5, note="sells already printed, out at 5m"),
-    Arm("F39_bigcap_5m", "bigcap", 5, note="market cap >= $1M, out at 5m"),
-    Arm("F40_smallcap_5m", "smallcap", 5, note="market cap < $200k, out at 5m"),
-    Arm("F41_symdeep_5m", "sym_deep", 5, note="symbol reused AND deep pool, out at 5m"),
-    Arm("F42_symnight_5m", "sym_night", 5, note="symbol reused AND night, out at 5m"),
-    # --- controls. These cannot have an edge. -----------------------------
-    # Added 2026-09-13, after the first fifty returned no edge. The finding
-    # that produced it: entry selection is not the problem (71% of trades win)
-    # and execution is not the problem (1.85% against a -2.08% token move) —
-    # the mean is negative only because of a left tail averaging -61.6%, and
-    # that tail cannot be stopped out, since 98% of collapses skip straight
-    # past any stop level between two samples. The only escape is entering
-    # tokens that do not have one, and pool depth is the one property that
-    # separates them.
-    #
-    # ONE arm at one hold, deliberately: a hypothesis found in-sample earns a
-    # single forward test, not three. Bar set in advance — 400 trades, z > 3
-    # against F29_all_5m. Five minutes because the median token move grows
-    # with hold (+0.94% at 2m, +3.02% at 5m) and inside the band there is
-    # almost no tail to pay for it.
-    Arm("F51_band_5m", "band", 5, note="pool $95k-$222k at open, out at 5m"),
-    Arm("R1_coin50_2m", "rand50", 2, note="CONTROL — 50% of tokens by coin flip, out at 2m"),
-    Arm("R2_coin50_3m", "rand50", 3, note="CONTROL — 50% of tokens by coin flip, out at 3m"),
-    Arm("R3_coin50_5m", "rand50", 5, note="CONTROL — 50% of tokens by coin flip, out at 5m"),
-    Arm("R4_coin25_3m", "rand25", 3, note="CONTROL — 25% of tokens by coin flip, out at 3m"),
-    Arm("R5_coin25_5m", "rand25", 5, note="CONTROL — 25% of tokens by coin flip, out at 5m"),
-    Arm("R6_coin75_2m", "rand75", 2, note="CONTROL — 75% of tokens by coin flip, out at 2m"),
-    Arm("R7_coin75_3m", "rand75", 3, note="CONTROL — 75% of tokens by coin flip, out at 3m"),
-    Arm("R8_coin75_5m", "rand75", 5, note="CONTROL — 75% of tokens by coin flip, out at 5m"),
+    Arm("L01_75k_2m", "liq_L01", 2, note="pool $75k-$90k, out at 2m"),
+    Arm("L01_75k_3m", "liq_L01", 3, note="pool $75k-$90k, out at 3m"),
+    Arm("L01_75k_5m", "liq_L01", 5, note="pool $75k-$90k, out at 5m"),
+    Arm("L02_90k_2m", "liq_L02", 2, note="pool $90k-$105k, out at 2m"),
+    Arm("L02_90k_3m", "liq_L02", 3, note="pool $90k-$105k, out at 3m"),
+    Arm("L02_90k_5m", "liq_L02", 5, note="pool $90k-$105k, out at 5m"),
+    Arm("L03_105k_2m", "liq_L03", 2, note="pool $105k-$116k, out at 2m"),
+    Arm("L03_105k_3m", "liq_L03", 3, note="pool $105k-$116k, out at 3m"),
+    Arm("L03_105k_5m", "liq_L03", 5, note="pool $105k-$116k, out at 5m"),
+    Arm("L04_116k_2m", "liq_L04", 2, note="pool $116k-$128k, out at 2m"),
+    Arm("L04_116k_3m", "liq_L04", 3, note="pool $116k-$128k, out at 3m"),
+    Arm("L04_116k_5m", "liq_L04", 5, note="pool $116k-$128k, out at 5m"),
+    Arm("L05_128k_2m", "liq_L05", 2, note="pool $128k-$140k, out at 2m"),
+    Arm("L05_128k_3m", "liq_L05", 3, note="pool $128k-$140k, out at 3m"),
+    Arm("L05_128k_5m", "liq_L05", 5, note="pool $128k-$140k, out at 5m"),
+    Arm("L06_140k_2m", "liq_L06", 2, note="pool $140k-$155k, out at 2m"),
+    Arm("L06_140k_3m", "liq_L06", 3, note="pool $140k-$155k, out at 3m"),
+    Arm("L06_140k_5m", "liq_L06", 5, note="pool $140k-$155k, out at 5m"),
+    Arm("L07_155k_2m", "liq_L07", 2, note="pool $155k-$170k, out at 2m"),
+    Arm("L07_155k_3m", "liq_L07", 3, note="pool $155k-$170k, out at 3m"),
+    Arm("L07_155k_5m", "liq_L07", 5, note="pool $155k-$170k, out at 5m"),
+    Arm("L08_170k_2m", "liq_L08", 2, note="pool $170k-$185k, out at 2m"),
+    Arm("L08_170k_3m", "liq_L08", 3, note="pool $170k-$185k, out at 3m"),
+    Arm("L08_170k_5m", "liq_L08", 5, note="pool $170k-$185k, out at 5m"),
+    Arm("L09_185k_2m", "liq_L09", 2, note="pool $185k-$198k, out at 2m"),
+    Arm("L09_185k_3m", "liq_L09", 3, note="pool $185k-$198k, out at 3m"),
+    Arm("L09_185k_5m", "liq_L09", 5, note="pool $185k-$198k, out at 5m"),
+    Arm("L10_198k_2m", "liq_L10", 2, note="pool $198k-$220k, out at 2m"),
+    Arm("L10_198k_3m", "liq_L10", 3, note="pool $198k-$220k, out at 3m"),
+    Arm("L10_198k_5m", "liq_L10", 5, note="pool $198k-$220k, out at 5m"),
+    Arm("L11_220k_2m", "liq_L11", 2, note="pool $220k-$250k, out at 2m"),
+    Arm("L11_220k_3m", "liq_L11", 3, note="pool $220k-$250k, out at 3m"),
+    Arm("L11_220k_5m", "liq_L11", 5, note="pool $220k-$250k, out at 5m"),
+    Arm("L12_250k_2m", "liq_L12", 2, note="pool $250k-$300k, out at 2m"),
+    Arm("L12_250k_3m", "liq_L12", 3, note="pool $250k-$300k, out at 3m"),
+    Arm("L12_250k_5m", "liq_L12", 5, note="pool $250k-$300k, out at 5m"),
+    Arm("L13_300k_2m", "liq_L13", 2, note="pool $300k-$400k, out at 2m"),
+    Arm("L13_300k_3m", "liq_L13", 3, note="pool $300k-$400k, out at 3m"),
+    Arm("L13_300k_5m", "liq_L13", 5, note="pool $300k-$400k, out at 5m"),
+    Arm("L14_400k_2m", "liq_L14", 2, note="pool over $400k, out at 2m"),
+    Arm("L14_400k_3m", "liq_L14", 3, note="pool over $400k, out at 3m"),
+    Arm("L14_400k_5m", "liq_L14", 5, note="pool over $400k, out at 5m"),
+    # Six controls: a coin flip at two rates on each of the three holds, so
+    # no strategy hold is judged without a matched dice roll on its own clock.
+    Arm("R25_2m", "rand25", 2, note="CONTROL — 25% of tokens by coin flip, out at 2m"),
+    Arm("R25_3m", "rand25", 3, note="CONTROL — 25% of tokens by coin flip, out at 3m"),
+    Arm("R25_5m", "rand25", 5, note="CONTROL — 25% of tokens by coin flip, out at 5m"),
+    Arm("R50_2m", "rand50", 2, note="CONTROL — 50% of tokens by coin flip, out at 2m"),
+    Arm("R50_3m", "rand50", 3, note="CONTROL — 50% of tokens by coin flip, out at 3m"),
+    Arm("R50_5m", "rand50", 5, note="CONTROL — 50% of tokens by coin flip, out at 5m"),
+    # Carried over UNCHANGED from generation 1, and deliberately: these two
+    # are a pre-registered A/B on the rug signals (a never-seen symbol rugs
+    # 18% against 3%; a daytime-UTC open 15% against 5%), opened 2026-09-13
+    # with a judge date of 10 October. Rebuilding the tournament around them
+    # must not quietly end an experiment that has a date on it, so they keep
+    # their names, their rules and their accumulated trades.
+    Arm("F01_all_2m", "all", 2, note="A/B control — every graduation, out at 2m"),
+    Arm("F14_symnight_2m", "sym_night", 2,
+        note="A/B arm — reused symbol AND a night-UTC open, out at 2m"),
 )
 
 BY_NAME: dict[str, Arm] = {a.name: a for a in ARMS}
@@ -292,14 +363,23 @@ CONTROLS: tuple[Arm, ...] = tuple(a for a in ARMS if a.is_control)
 #: returned no edge. The count is pinned rather than free because an arm that
 #: appears mid-tournament changes what every other number means — so changing
 #: it must be a deliberate edit with a date, not a side effect.
-assert len(ARMS) == 51, f"the tournament is fifty-one arms, not {len(ARMS)}"
+assert len(ARMS) == 50, f"the tournament is fifty arms, not {len(ARMS)}"
 assert {a.hold for a in ARMS} == {2, 3, 5}, (
-    "short holds only: past ten minutes the wipeout rate triples and buys "
-    "FEWER big winners, not more")
+    "Two, three and five minutes. Longer is measurably worse INSIDE the band "
+    "(5m is +3.33% at a 1.6% tail; 30m is -6.48% at 14.6%), and one minute is "
+    "not measurable at all: the median gap between price samples is 61s, so a "
+    "60-second exit would be marked anywhere from 60 to 70+ seconds out. An "
+    "arm the data cannot price is an arm a real wallet cannot verify")
 assert all(a.tp is None and a.trail is None for a in ARMS), (
     "targets and trailing stops are gone — every one of them held 15m+")
-assert len(CONTROLS) == 8
-assert len({a.name for a in ARMS}) == 51, "arm names must be unique"
+assert len([a for a in ARMS if not a.is_control]) == 44, (
+    "`config.required_pf` is calibrated on the maximum of FORTY-TWO noise "
+    "draws. Forty-four non-control arms make that bar marginally lenient — the "
+    "95th percentile of a best-of-44 sits a shade above a best-of-42. Stated "
+    "rather than fixed: recalibrating the curve over two arms would be false "
+    "precision, but a silent mismatch would not be")
+assert len(CONTROLS) == 6
+assert len({a.name for a in ARMS}) == 50, "arm names must be unique"
 assert all(len(a.name) <= 32 for a in ARMS), "arm name must fit the column"
 assert {a.entry for a in ARMS} <= set(ENTRY_RULES), (
     "every entry filter an arm uses must be described: "

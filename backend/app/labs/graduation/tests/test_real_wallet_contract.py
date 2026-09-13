@@ -1,0 +1,90 @@
+"""Every arm must be executable with a real wallet, not just scorable.
+
+A backtest can price things a wallet cannot buy. These are the four ways this
+tournament could drift into measuring something unbuyable, each one pinned so
+the drift fails here rather than at the point of funding an account.
+
+The measurements behind the numbers, taken on prod 2026-09-13 over 3 days:
+
+  - migration -> first observable price: 10% by 13s, median 42s, 90% by 73s.
+    The lab enters at that FIRST OBSERVED sample, so a wallet reading the same
+    feed sees the same price. Entry is reproducible.
+  - gap between price samples in the first five minutes: median 61s, 90th
+    percentile 70s. An exit shorter than that is marked by a sample that has
+    not arrived, so a one-minute hold cannot be verified by either the lab or
+    the wallet.
+"""
+
+from __future__ import annotations
+
+import inspect
+from decimal import Decimal
+
+import pytest
+
+from app.labs.graduation import config
+from app.labs.graduation.tournament import ARMS, accepts
+
+pytestmark = pytest.mark.unit
+
+#: Median gap between observable prices, in seconds. An arm holding for less
+#: than this is priced by a sample that does not exist yet.
+OBSERVED_SAMPLE_GAP_S = 61
+
+
+def test_no_arm_holds_for_less_than_the_data_can_see():
+    for arm in ARMS:
+        assert arm.hold * 60 >= OBSERVED_SAMPLE_GAP_S, (
+            f"{arm.name} holds {arm.hold}m, under the {OBSERVED_SAMPLE_GAP_S}s "
+            "median gap between price samples — its exit price would come from "
+            "a mark that arrives late, and a real wallet could not verify it")
+
+
+def test_every_entry_decision_uses_only_what_a_wallet_can_see_first():
+    """`accepts` takes the token's mint, its open time, and three figures the
+    price feed carries. It must not reach for anything else — an entry rule
+    that depended on the outcome, or on a later sample, would be unbuyable."""
+    params = set(inspect.signature(accepts).parameters) - {"arm"}
+    assert params == {"mint", "open_at", "liquidity", "fdv", "sells", "reuse"}, (
+        "the entry decision gained an input; check it is observable BEFORE the "
+        f"buy, not after: {params}")
+
+
+def test_a_missing_reading_refuses_the_trade():
+    """The feed can answer without liquidity. Treating that as 'in band' would
+    buy tokens the rule never claimed — and a wallet would do the same."""
+    blank = {"mint": "M" * 44, "liquidity": None, "fdv": None,
+             "sells": None, "reuse": None}
+    from datetime import UTC, datetime
+    now = datetime.now(UTC)
+    for arm in ARMS:
+        if arm.entry.startswith("liq_"):
+            assert not accepts(arm, open_at=now, **blank), arm.name
+
+
+def test_the_position_stays_above_the_size_that_can_be_paid_for():
+    """Below $25 a round trip costs more than it can make: the priority fee is
+    flat in SOL, so it is 0.25% of a $250 order and 2.32% of a $10 one against
+    a break-even near 1% a side."""
+    assert config.PAPER_NOTIONAL_USD >= config.WALLET_MIN_USD
+    assert config.WALLET_DEMO_USD / config.WALLET_DEMO_SLOTS < config.PAPER_NOTIONAL_USD
+
+
+def test_an_order_that_would_move_the_pool_is_refused_not_filled():
+    """The one thing a backtest can fake for free. Ten percent is the cap, and
+    it is the same number a real wallet sets as slippage tolerance."""
+    assert Decimal("0") < config.PAPER_MAX_IMPACT <= Decimal("0.10")
+
+
+def test_the_grid_never_buys_below_the_floor_where_tokens_are_destroyed():
+    """Under $75k, 32-57% of tokens lose more than a quarter in five minutes
+    and 98% of those skip past any stop between two samples. No arm may buy
+    there — not as a filter, as a refusal."""
+    from datetime import UTC, datetime
+    now = datetime.now(UTC)
+    token = {"mint": "M" * 44, "fdv": Decimal("500000"), "sells": 1, "reuse": 1}
+    for liq in (Decimal("1000"), Decimal("40000"), Decimal("74999")):
+        for arm in ARMS:
+            if arm.entry.startswith("liq_"):
+                assert not accepts(arm, open_at=now, liquidity=liq, **token), (
+                    f"{arm.name} would buy a ${liq} pool")

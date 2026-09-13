@@ -25,19 +25,19 @@ TOKEN = {"mint": "Abc123pump", "liquidity": D(150_000), "fdv": D(2_000_000),
          "sells": 0, "reuse": 4}
 
 
-def test_the_tournament_is_fifty_one_arms_of_which_eight_are_noise() -> None:
+def test_the_tournament_is_fifty_arms_of_which_six_are_noise() -> None:
     """The controls are the whole point. Fifty strategies produce a leader in
     an hour whether or not any of them is good, so the leaderboard only means
     something against arms that provably cannot have an edge.
 
-    Fifty-one since 2026-09-13: `F51_band_5m` was added after the first fifty
-    produced no arm that beat its own control, to test the one hypothesis the
-    data pointed at — a liquidity BAND rather than a floor. It starts at zero
-    trades and is judged on its own, against a bar fixed before it ran.
+    Generation 2 (2026-09-13) is 42 grid arms (14 liquidity bands x 3 holds)
+    + 6 controls + the 2 pre-registered A/B arms carried over. Two coin rates
+    on every hold, so no hold is ever judged without a matched dice roll on
+    its own clock — generation 1's eight controls did not cover every hold.
     """
-    assert len(ARMS) == 51
-    assert len(CONTROLS) == 8
-    assert len({a.name for a in ARMS}) == 51
+    assert len(ARMS) == 50
+    assert len(CONTROLS) == 6
+    assert len({a.name for a in ARMS}) == 50
     assert all(len(a.name) <= 32 for a in ARMS)
 
 
@@ -60,8 +60,8 @@ def test_a_control_decides_on_nothing_and_never_changes_its_mind() -> None:
         assert abs(taken / len(mints) * 100 - pct) < 4, arm.name
     # Two controls with the same rule must still pick different tokens, or
     # they are one control counted twice.
-    a = {m for m in mints if _coin("R1_coin50_2m", m, 50)}
-    b = {m for m in mints if _coin("R2_coin50_3m", m, 50)}
+    a = {m for m in mints if _coin("R50_2m", m, 50)}
+    b = {m for m in mints if _coin("R50_3m", m, 50)}
     assert 0.2 < len(a & b) / len(a | b) < 0.5
 
 
@@ -79,32 +79,45 @@ def test_the_filters_split_the_population_the_way_they_claim() -> None:
         return accepts(BY_NAME[name], open_at=when, **{**TOKEN, **over})
 
     assert took("F01_all_2m", DAY) and took("F01_all_2m", NIGHT)
-    assert took("F05_night_2m", NIGHT) and not took("F05_night_2m", DAY)
-    assert took("F06_day_2m", DAY) and not took("F06_day_2m", NIGHT)
-    assert took("F02_sym_2m", DAY) and not took("F02_sym_2m", DAY, reuse=0)
-    assert took("F04_newsym_2m", DAY, reuse=0) and not took("F04_newsym_2m", DAY)
-    assert took("F07_deep_2m", DAY) and not took("F07_deep_2m", DAY, liquidity=D(5_000))
-    assert took("F08_shallow_2m", DAY, liquidity=D(5_000))
-    assert took("F09_nosell_2m", DAY) and not took("F09_nosell_2m", DAY, sells=7)
-    assert took("F10_hassell_2m", DAY, sells=7)
-    assert took("F11_bigcap_2m", DAY) and not took("F11_bigcap_2m", DAY, fdv=D(50_000))
-    assert took("F12_smallcap_2m", DAY, fdv=D(50_000))
-    # The combined arm needs BOTH conditions.
+    # The combined A/B arm needs BOTH conditions.
     assert took("F14_symnight_2m", NIGHT)
     assert not took("F14_symnight_2m", DAY)
     assert not took("F14_symnight_2m", NIGHT, reuse=0)
+    # The grid: every band takes its own slice and nothing else, the bands
+    # tile the range without a gap or an overlap, and the edges are closed
+    # below and open above so a pool worth exactly $116,000 lands in one band.
+    from app.labs.graduation.tournament import LIQ_BANDS
+
+    for key, lo, hi in LIQ_BANDS:
+        name = next(a.name for a in ARMS if a.entry == f"liq_{key}")
+        assert took(name, DAY, liquidity=D(lo))
+        assert took(name, DAY, liquidity=D(hi - 1))
+        assert not took(name, DAY, liquidity=D(hi))
+        if lo > 0:
+            assert not took(name, DAY, liquidity=D(lo - 1))
+    for (_, _, hi), (_, lo2, _) in zip(LIQ_BANDS, LIQ_BANDS[1:]):
+        assert hi == lo2, "the bands must tile without a gap"
+    # Every token above the floor lands in exactly one band.
+    for liq in (75_000, 99_999, 116_000, 197_999, 250_000, 5_000_000):
+        hit = [a.name for a in ARMS if a.hold == 2 and a.entry.startswith("liq_")
+               and took(a.name, DAY, liquidity=D(liq))]
+        assert len(hit) == 1, (liq, hit)
+    # And nothing below the floor is bought at all — that is the whole point.
+    assert not any(took(a.name, DAY, liquidity=D(40_000))
+                   for a in ARMS if a.entry.startswith("liq_"))
 
 
 def test_a_missing_feature_is_a_refusal_not_a_pass() -> None:
     """DexScreener can answer without liquidity or a transaction count. An arm
     that treated a missing value as satisfying its filter would be trading a
     different population from the one it claims."""
-    for name in ("F07_deep_2m", "F08_shallow_2m", "F11_bigcap_2m", "F12_smallcap_2m"):
-        assert not accepts(BY_NAME[name], open_at=NIGHT,
+    for arm in ARMS:
+        if not arm.entry.startswith("liq_"):
+            continue
+        assert not accepts(arm, open_at=NIGHT,
                            **{**TOKEN, "liquidity": None, "fdv": None})
-    for name in ("F09_nosell_2m", "F10_hassell_2m"):
-        assert not accepts(BY_NAME[name], open_at=NIGHT, **{**TOKEN, "sells": None})
-    assert not accepts(BY_NAME["F02_sym_2m"], open_at=NIGHT, **{**TOKEN, "reuse": None})
+    assert not accepts(BY_NAME["F14_symnight_2m"], open_at=NIGHT,
+                       **{**TOKEN, "reuse": None})
 
 
 def test_the_live_book_and_the_ab_arm_are_both_in_the_tournament() -> None:
@@ -243,9 +256,12 @@ def test_the_exit_rule_names_every_condition_the_arm_carries() -> None:
     """A reader must be able to tell a plain hold from a hold plus a target,
     without reading the arm's name."""
     assert BY_NAME["F01_all_2m"].exit_rule == "at 2 minutes"
-    assert BY_NAME["F15_all_3m"].exit_rule == "at 3 minutes"
-    # Singular minute, because "1 minutes" reads as a bug in the data.
-    assert BY_NAME["F29_all_5m"].exit_rule == "at 5 minutes"
+    assert BY_NAME["L04_116k_3m"].exit_rule == "at 3 minutes"
+    assert BY_NAME["L04_116k_5m"].exit_rule == "at 5 minutes"
+    # Singular minute, for whenever an arm holds one — the formatting must
+    # not read as a bug in the data.
+    from app.labs.graduation.tournament import Arm
+    assert Arm("x", "all", 1).exit_rule == "at 1 minute"
     # Every arm is a plain hold now; the target and trailing families held
     # 15 minutes or more and were dropped with them.
     assert all(a.tp is None and a.trail is None for a in ARMS)
