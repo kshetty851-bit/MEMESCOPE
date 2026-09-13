@@ -151,3 +151,39 @@ async def test_retiring_an_arm_does_not_strand_its_open_positions():
     assert "_close(" in branch and "arm_retired" in branch, (
         "_manage skips positions whose arm is gone instead of settling them; "
         "those rows stay open for ever")
+
+
+def test_the_curve_arm_prices_its_depth_the_way_the_impact_maths_expects():
+    """`v_quote_reserves` is the QUOTE SIDE; `liquidity_usd` is the pool TOTAL.
+
+    Every other arm passes DexScreener's total, and the impact maths halves it
+    to recover the quote side. Handing the curve's reserve straight through
+    would halve the depth and DOUBLE every impact figure — which would refuse
+    fills a real wallet would get, and mis-price the ones it took.
+    """
+    from decimal import Decimal as D
+
+    from app.labs.graduation.backtest import amm_impact
+    from app.labs.graduation.tournament import _curve_depth_usd
+
+    # Measured: a median curve at >=90% holds 97.7 SOL, and a $100 buy there
+    # is ~1.01% impact.
+    depth = _curve_depth_usd(D("97.7"), D("101.35"))
+    impact = amm_impact(D("100"), depth)
+    assert impact is not None
+    assert D("0.009") < impact < D("0.011"), impact
+    # No rate means no claim, rather than a guessed one.
+    assert _curve_depth_usd(D("97.7"), None) is None
+
+
+def test_the_curve_arm_is_refused_when_the_curve_is_too_thin():
+    """The bottom decile at >=90% holds about $184 of quote. A $100 order there
+    is over half the pool and must be refused, not filled."""
+    from decimal import Decimal as D
+
+    from app.labs.graduation.backtest import amm_impact
+    from app.labs.graduation.tournament import _curve_depth_usd
+
+    thin = _curve_depth_usd(D("1.82"), D("101.35"))
+    impact = amm_impact(D("100"), thin)
+    assert impact is not None and impact > config.PAPER_MAX_IMPACT, impact

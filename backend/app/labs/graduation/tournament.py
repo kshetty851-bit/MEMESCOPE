@@ -54,7 +54,12 @@ from app.labs.graduation.backtest import (
     amm_impact,
     amm_sell,
 )
-from app.labs.graduation.models import GradPaperPosition, GradPostgradSample, GradToken
+from app.labs.graduation.models import (
+    GradCurveSample,
+    GradPaperPosition,
+    GradPostgradSample,
+    GradToken,
+)
 from app.labs.graduation.paper import _P, _Q, _rate, costs, in_hour_window
 
 logger = get_logger(__name__)
@@ -119,6 +124,20 @@ class Arm:
         return ExitPolicy(tuple(rules))
 
 
+def _curve_depth_usd(v_quote_reserves: Decimal,
+                     rate: Decimal | None) -> Decimal | None:
+    """The bonding curve's depth, in the units `amm_buy` expects.
+
+    `v_quote_reserves` is the QUOTE SIDE alone. DexScreener's `liquidity_usd`
+    — what every other arm passes — is the pool TOTAL, and the impact maths
+    halves it to recover the quote side. Passing the curve's reserve straight
+    through would therefore halve the depth and double every impact figure.
+    """
+    if rate is None or v_quote_reserves <= 0:
+        return None
+    return (v_quote_reserves * rate * 2).quantize(Decimal("0.01"))
+
+
 def _coin(arm: str, mint: str, pct: int) -> bool:
     """A decision that depends on nothing. Hashed rather than `random` so it is
     the same on every tick, every restart and every replay — a control that
@@ -148,6 +167,24 @@ def _coin(arm: str, mint: str, pct: int) -> bool:
 #: destroyed and no exit rule reaches them — and it is finest between $116k
 #: and $198k, where generation 1's only real signal was hiding inside a
 #: `>= $100k` floor that also swept in the worse band above.
+#: Curve progress at which the pre-graduation arm buys.
+#:
+#: Ninety percent, and it is observable — which it was NOT when this was last
+#: looked at (217 of 218 completed curves had never been seen incomplete).
+#: Measured 2026-09-14 over three days: of 2,414 graduations, 51% were seen
+#: still climbing and 419 (17%) were seen at >=90% while incomplete. Of 556
+#: tokens that reached 90%, 419 — 75% — went on to graduate.
+#:
+#: Lead time from the first >=90% sighting to graduation is a median 73s, with
+#: a quarter giving only 16s. That is the honest ceiling on this arm: it can
+#: only trade the ones it sees in time.
+#:
+#: And it is fillable. The curve IS a constant-product pool, so a $100 buy
+#: costs S/Q of impact against the quote reserve: a median 97.7 SOL (~$9,905)
+#: at >=90%, so 1.01% — in line with the AMM arms. The bottom decile holds
+#: $184 and is refused by the same 10% impact cap.
+CURVE_ENTRY_PCT = Decimal("90")
+
 LIQ_BANDS: tuple[tuple[str, int, int], ...] = (
     ("L01", 75_000, 90_000),
     ("L02", 90_000, 105_000),
@@ -177,6 +214,9 @@ ENTRY_RULES: dict[str, str] = {
     **{f"liq_{k}": f"the pool held ${lo:,} to ${hi:,} at the open"
        for k, lo, hi in LIQ_BANDS[:-1]},
     f"liq_{LIQ_BANDS[-1][0]}": f"the pool held over ${LIQ_BANDS[-1][1]:,} at the open",
+    "curve": f"the token is still ON the bonding curve, at or past "
+             f"{CURVE_ENTRY_PCT:g}% of the way to graduating — bought before "
+             f"it migrates, not after",
     "floor": f"BASELINE — every graduation with a pool at or above "
              f"${LIQ_BANDS[0][1]:,}, no band selection",
     "band": f"the pool held ${LIQ_BANDS[3][1]:,} to ${LIQ_BANDS[8][2]:,} at "
@@ -215,6 +255,12 @@ def accepts(arm: Arm, *, mint: str, open_at: datetime, liquidity: Decimal | None
     if band is not None:
         lo, hi = band
         return liquidity is not None and lo <= liquidity < hi
+    if e == "curve":
+        # The selection is in the SOURCE, not here: only tokens sitting on an
+        # incomplete curve at or past CURVE_ENTRY_PCT ever reach this arm, and
+        # they arrive through `_curve_candidates`, not the pool-open query.
+        # Nothing further to filter, so nothing is filtered.
+        return True
     if e == "floor":
         # The baseline: every graduation the grid is allowed to touch, with no
         # band selection. Same floor, same universe — so the only difference
@@ -391,6 +437,14 @@ ARMS: tuple[Arm, ...] = (
     # with a judge date of 10 October. Rebuilding the tournament around them
     # must not quietly end an experiment that has a date on it, so they keep
     # their names, their rules and their accumulated trades.
+    # The pre-graduation arm. Every other arm on this board buys AFTER the
+    # migration; this one buys while the token is still climbing, which is a
+    # different population and a different pool — the bonding curve itself.
+    #
+    # Its natural comparison is F01_all_2m: the same 2-minute hold on tokens
+    # bought after they graduate. "Before or after" is the question.
+    Arm("CURVE90_2m", "curve", 2,
+        note="pool still on the bonding curve at 90%+, out at 2m"),
     Arm("F01_all_2m", "all", 2, note="A/B control — every graduation, out at 2m"),
     Arm("F14_symnight_2m", "sym_night", 2,
         note="A/B arm — reused symbol AND a night-UTC open, out at 2m"),
@@ -402,7 +456,7 @@ CONTROLS: tuple[Arm, ...] = tuple(a for a in ARMS if a.is_control)
 #: returned no edge. The count is pinned rather than free because an arm that
 #: appears mid-tournament changes what every other number means — so changing
 #: it must be a deliberate edit with a date, not a side effect.
-assert len(ARMS) == 50, f"the tournament is fifty arms, not {len(ARMS)}"
+assert len(ARMS) == 51, f"the tournament is fifty-one arms, not {len(ARMS)}"
 assert {a.hold for a in ARMS} == {2, 3, 5}, (
     "Two, three and five minutes. Longer is measurably worse INSIDE the band "
     "(5m is +3.33% at a 1.6% tail; 30m is -6.48% at 14.6%), and one minute is "
@@ -411,14 +465,14 @@ assert {a.hold for a in ARMS} == {2, 3, 5}, (
     "arm the data cannot price is an arm a real wallet cannot verify")
 assert all(a.tp is None and a.trail is None for a in ARMS), (
     "targets and trailing stops are gone — every one of them held 15m+")
-assert len([a for a in ARMS if not a.is_control]) == 47, (
+assert len([a for a in ARMS if not a.is_control]) == 48, (
     "`config.required_pf` is calibrated on the maximum of FORTY-TWO noise "
-    "draws. Forty-seven arms are now judged against it, which makes that bar "
+    "draws. Forty-eight arms are now judged against it, which makes that bar "
     "slightly lenient — the 95th percentile of a best-of-47 sits a shade above "
-    "a best-of-42. Stated rather than fixed: recalibrating over five arms would "
+    "a best-of-42. Stated rather than fixed: recalibrating over six arms would "
     "be false precision, but a silent mismatch would not be")
 assert len(CONTROLS) == 3, "three baselines, one per hold"
-assert len({a.name for a in ARMS}) == 50, "arm names must be unique"
+assert len({a.name for a in ARMS}) == 51, "arm names must be unique"
 assert all(len(a.name) <= 32 for a in ARMS), "arm name must fit the column"
 assert {a.entry for a in ARMS} <= set(ENTRY_RULES), (
     "every entry filter an arm uses must be described: "
@@ -465,7 +519,67 @@ class Tournament:
                    GradPostgradSample.ts <= self._now)
             .distinct(GradPostgradSample.mint)
             .order_by(GradPostgradSample.mint, GradPostgradSample.ts.desc()))).all()
-        return {r.mint: (r.price_native, r.liquidity_usd) for r in rows}
+        marks = {r.mint: (r.price_native, r.liquidity_usd) for r in rows}
+        # A position opened ON the curve has no pool sample until the token
+        # migrates, and until then the curve IS its market. Without this the
+        # pre-graduation arm could never be marked and never exit: its hold
+        # would elapse against a price that does not exist yet.
+        missing = [m for m in mints if m not in marks]
+        if missing:
+            rate = await self._sol_rate()
+            for r in (await self._session.execute(
+                    select(GradCurveSample.mint, GradCurveSample.v_quote_reserves,
+                           GradCurveSample.v_token_reserves)
+                    .where(GradCurveSample.mint.in_(missing),
+                           GradCurveSample.v_quote_reserves > 0,
+                           GradCurveSample.v_token_reserves > 0,
+                           GradCurveSample.ts <= self._now)
+                    .distinct(GradCurveSample.mint)
+                    .order_by(GradCurveSample.mint,
+                              GradCurveSample.ts.desc()))).all():
+                price = r.v_quote_reserves / r.v_token_reserves
+                marks[r.mint] = (price, _curve_depth_usd(r.v_quote_reserves, rate))
+        return marks
+
+    async def _sol_rate(self) -> Decimal | None:
+        """SOL/USD, observed rather than fetched.
+
+        Curve samples carry reserves in SOL and no dollar price, so the curve
+        arm needs a rate to size $100 and to state pool depth in dollars. Taken
+        from the newest pool sample carrying BOTH prices, which keeps the
+        figure inside the same data the rest of the tick trusts — an external
+        quote here would be a second failure mode inside the trading path.
+        """
+        row = (await self._session.execute(
+            select(GradPostgradSample.price_usd, GradPostgradSample.price_native)
+            .where(GradPostgradSample.price_usd > 0,
+                   GradPostgradSample.price_native > 0,
+                   GradPostgradSample.ts <= self._now)
+            .order_by(GradPostgradSample.ts.desc()).limit(1))).first()
+        return _rate(row.price_usd, row.price_native) if row else None
+
+    async def _curve_candidates(self) -> Sequence[Any]:
+        """Tokens still climbing, at or past the entry threshold.
+
+        Newest sample per mint inside the grace window, and only while
+        `complete` is still false — the moment it completes this is a pool
+        open and the other forty-eight arms own it.
+        """
+        cutoff = self._now - timedelta(minutes=config.PAPER_ENTRY_GRACE_MINUTES)
+        return (await self._session.execute(
+            select(GradCurveSample.mint, GradCurveSample.ts.label("open_at"),
+                   GradCurveSample.v_quote_reserves,
+                   GradCurveSample.v_token_reserves,
+                   GradToken.symbol)
+            .outerjoin(GradToken, GradToken.mint == GradCurveSample.mint)
+            .where(GradCurveSample.complete.isnot(True),
+                   GradCurveSample.progress_pct >= CURVE_ENTRY_PCT,
+                   GradCurveSample.v_quote_reserves > 0,
+                   GradCurveSample.v_token_reserves > 0,
+                   GradCurveSample.ts >= cutoff,
+                   GradCurveSample.ts <= self._now)
+            .distinct(GradCurveSample.mint)
+            .order_by(GradCurveSample.mint, GradCurveSample.ts.desc()))).all()
 
     async def _manage(self) -> int:
         positions = (await self._session.scalars(
@@ -631,10 +745,77 @@ class Tournament:
             out[r.mint] = sum(1 for t in seen.get(key, []) if t < r.first_seen_at)
         return out
 
-    async def _fill(self) -> int:
-        rows = await self._candidates()
+    async def _fill_curve(self) -> int:
+        """Buy tokens still climbing the curve, for the arms that want them.
+
+        Deliberately separate from `_fill`: the candidates come from a
+        different table, the price is derived from reserves rather than read
+        from a feed, and the depth needs the SOL rate. Folding it into the
+        pool-open path would have meant a second meaning for every field in
+        that loop.
+        """
+        arms = [a for a in ARMS if a.entry == "curve"]
+        if not arms:
+            return 0
+        rows = await self._curve_candidates()
         if not rows:
             return 0
+        rate = await self._sol_rate()
+        if rate is None:
+            logger.warning("graduation_curve_no_rate", candidates=len(rows))
+            return 0
+        taken = {(b, m) for b, m in (await self._session.execute(
+            select(GradPaperPosition.book, GradPaperPosition.mint)
+            .where(GradPaperPosition.mint.in_([r.mint for r in rows]))))
+            .all()}
+        counts = await self._open_counts()
+        opened = 0
+        notional_quote = (config.PAPER_NOTIONAL_USD / rate).quantize(_Q)
+        leg = costs(notional_quote)
+        for row in rows:
+            price = row.v_quote_reserves / row.v_token_reserves
+            if price <= 0:
+                continue
+            depth = _curve_depth_usd(row.v_quote_reserves, rate)
+            impact = amm_impact(config.PAPER_NOTIONAL_USD, depth)
+            if impact is None or impact > config.PAPER_MAX_IMPACT:
+                logger.info("graduation_curve_unfillable", mint=row.mint,
+                            depth=float(depth or 0),
+                            impact=float(impact) if impact is not None else None)
+                continue
+            fill = amm_buy(price, order_usd=config.PAPER_NOTIONAL_USD,
+                           liquidity_usd=depth, fee_fraction=leg.fee_fraction)
+            if fill is None or fill <= 0:
+                continue
+            for arm in arms:
+                if (arm.name, row.mint) in taken:
+                    continue
+                if counts.get(arm.name, 0) >= config.PAPER_MAX_SLOTS:
+                    continue
+                self._session.add(GradPaperPosition(
+                    book=arm.name, mint=row.mint, symbol=row.symbol,
+                    opened_at=row.open_at,
+                    open_quote=price.quantize(_P),
+                    open_fill=fill.quantize(_P),
+                    notional_usd=config.PAPER_NOTIONAL_USD,
+                    sol_usd_at_open=rate.quantize(Decimal("0.000001")),
+                    notional_quote=notional_quote,
+                    tokens=(notional_quote / fill).quantize(_Q),
+                    peak_quote=price.quantize(_P),
+                    last_quote=price.quantize(_P),
+                    liq_open_usd=depth,
+                    impact_open=impact.quantize(Decimal("0.000001")),
+                    marked_at=self._now))
+                counts[arm.name] = counts.get(arm.name, 0) + 1
+                taken.add((arm.name, row.mint))
+                opened += 1
+        return opened
+
+    async def _fill(self) -> int:
+        opened_curve = await self._fill_curve()
+        rows = await self._candidates()
+        if not rows:
+            return opened_curve
         reuse = await self._symbol_reuse(rows)
         mints = [r.mint for r in rows]
         taken = {(b, m) for b, m in (await self._session.execute(
@@ -694,6 +875,7 @@ class Tournament:
                 counts[arm.name] = counts.get(arm.name, 0) + 1
                 taken.add((arm.name, row.mint))
                 opened += 1
+        opened += opened_curve
         if opened or refused:
             logger.info("graduation_tournament_filled", opened=opened,
                         refused_unfillable=refused, candidates=len(rows))
