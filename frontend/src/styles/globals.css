@@ -1084,6 +1084,32 @@
   animation: grad-rise 340ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
 }
 
+/* One arm is spotlit: CURVE90_2m, the only rule on the board that buys BEFORE
+   the migration rather than after. It is not the leader and must not be
+   mistaken for it — the leader's mark is a moving sheen, this is a still amber
+   rail — but it answers a different question from the other fifty and deserves
+   to be findable without scrolling for its name. */
+.grad-spotlight {
+  position: relative;
+  background: color-mix(in oklch, var(--color-warn) 9%, transparent);
+  box-shadow: inset 3px 0 0 0 var(--color-warn);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .grad-spotlight {
+    animation: grad-spotlight-in 700ms ease-out both;
+  }
+}
+
+@keyframes grad-spotlight-in {
+  from {
+    background: color-mix(in oklch, var(--color-warn) 26%, transparent);
+  }
+  to {
+    background: color-mix(in oklch, var(--color-warn) 9%, transparent);
+  }
+}
+
 /* The leader keeps a slow sheen travelling across it. It is the only row that
    moves after arrival, which is the whole point of marking it. */
 .grad-leader {

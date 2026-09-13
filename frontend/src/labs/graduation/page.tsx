@@ -130,6 +130,9 @@ function usd(value: string | number | null): string {
  * Two decimals under 1/hr: several filters fire a few times a day, and "0.0"
  * would read as "never" for an arm that has traded.
  */
+/** The arm the board spotlights: the only one that buys before the migration. */
+const SPOTLIT_ARM = "CURVE90_2m";
+
 function perHour(trades: number, hours: string | number): string {
   const h = Number(hours);
   if (!Number.isFinite(h) || h <= 0 || !trades) return "—";
@@ -662,7 +665,15 @@ function LeaderboardPanel() {
   const [openArm, setOpenArm] = useState<string | null>(null);
   if (!data?.running) return null;
   const band = data.control_band === null ? null : Number(data.control_band);
-  const shown = showAll ? data.arms : data.arms.slice(0, 12);
+  // The spotlit arm is always on screen. Highlighting a row the reader has to
+  // click "show all" to reach highlights nothing — and this one is a different
+  // question from the other fifty, not a contender for the top of the table,
+  // so it will usually rank outside the first twelve.
+  const top = data.arms.slice(0, 12);
+  const pinned = data.arms.find(
+    (a) => a.name === SPOTLIT_ARM && !top.some((t) => t.name === a.name),
+  );
+  const shown = showAll ? data.arms : pinned ? [...top, pinned] : top;
   const lead = data.arms.find((a) => a.name === data.leader);
   const margin =
     lead && band !== null ? Number(lead.wallet_100_usd) - band : null;
@@ -830,16 +841,25 @@ function LeaderboardPanel() {
                 const beats =
                   a.trades > 0 && Number(a.wallet_100_usd) > baselineWallet;
                 const isLeader = a.name === data.leader;
+                // The one arm that buys BEFORE the migration. Spotlit because
+                // it answers a different question from the other fifty, not
+                // because it is winning.
+                const spotlit = a.name === SPOTLIT_ARM;
                 return (
                   <Fragment key={a.name}>
                   <tr
                     className={`grad-row border-t border-line align-top ${
                       isLeader ? "grad-leader" : ""
-                    } ${a.is_control ? "text-ink-dim" : ""}`}
+                    } ${spotlit ? "grad-spotlight" : ""} ${
+                      a.is_control ? "text-ink-dim" : ""
+                    }`}
                     style={{ animationDelay: `${Math.min(i, 14) * 28}ms` }}
                   >
                     <td className="py-2.5 pl-1 text-label tabular-nums text-ink-dim">
-                      {i + 1}
+                      {/* The arm's TRUE rank, not its position in this list.
+                          A pinned row appended after the top twelve would
+                          otherwise read as 13th when it is fortieth. */}
+                      {data.arms.findIndex((x) => x.name === a.name) + 1}
                     </td>
                     <td className="py-2.5 pr-3">
                       <span className="flex items-center gap-2">
@@ -859,6 +879,11 @@ function LeaderboardPanel() {
                         {a.is_control ? (
                           <span className="shrink-0 rounded-full border border-down/40 px-1.5 py-px text-micro uppercase tracking-[0.08em] text-down">
                             baseline
+                          </span>
+                        ) : null}
+                        {spotlit ? (
+                          <span className="shrink-0 rounded-full border border-warn/50 px-1.5 py-px text-micro uppercase tracking-[0.08em] text-warn">
+                            pre-graduation
                           </span>
                         ) : null}
                       </span>
