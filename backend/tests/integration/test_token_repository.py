@@ -201,3 +201,38 @@ async def test_search_sorts_ascending_and_descending(db_session: AsyncSession) -
 
     assert [t.slot for t in asc] == [100, 200, 300]
     assert [t.slot for t in desc] == [300, 200, 100]
+
+
+async def test_list_pending_metadata_returns_newest_first(db_session: AsyncSession) -> None:
+    """Oldest-first would spend days on dead tokens before reaching today's."""
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime.now(UTC)
+    for name, age_days in (("MintOld", 30), ("MintNew", 0)):
+        token = await repo_insert(db_session, name)
+        token.discovered_at = now - timedelta(days=age_days)
+    await db_session.flush()
+
+    pending = await TokenRepository(db_session).list_pending_metadata()
+    assert [t.mint_address for t in pending] == ["MintNew", "MintOld"]
+
+
+async def test_list_pending_metadata_skips_rows_past_the_attempt_cap(
+    db_session: AsyncSession,
+) -> None:
+    """A mint DAS will never know must not crowd out ones it would answer."""
+    repo = TokenRepository(db_session)
+    spent = await repo.insert_if_absent(_values("MintSpent"))
+    assert spent is not None
+    spent.metadata_attempts = 5
+    await repo.insert_if_absent(_values("MintFresh"))
+    await db_session.flush()
+
+    pending = await repo.list_pending_metadata(max_attempts=5)
+    assert [t.mint_address for t in pending] == ["MintFresh"]
+
+
+async def repo_insert(session: AsyncSession, mint: str):
+    token = await TokenRepository(session).insert_if_absent(_values(mint))
+    assert token is not None
+    return token

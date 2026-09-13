@@ -125,6 +125,14 @@ celery_app.conf.beat_schedule = {
         "task": "app.hq_ops.tasks.karthik_ops_tick",
         "schedule": crontab(minute="*/5"),
     },
+    # Names the tokens discovery could not name. Every minute, 60 at a time:
+    # the nameless arrive at ~210/hour, so this keeps up and still eats into
+    # the backlog. Each row gets SCANNER_METADATA_ATTEMPTS tries and is then
+    # marked FAILED, so a mint DAS will never know cannot be retried for ever.
+    "resolve-pending-metadata": {
+        "task": "app.workers.tasks.resolve_pending_metadata",
+        "schedule": crontab(minute="*"),
+    },
     "purge-expired-refresh-tokens": {
         "task": "app.workers.tasks.purge_expired_refresh_tokens",
         "schedule": crontab(hour="3", minute="0"),

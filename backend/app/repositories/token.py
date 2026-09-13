@@ -196,14 +196,27 @@ class TokenRepository(BaseRepository[DiscoveredToken]):
         )
         return (await self.session.execute(stmt)).scalars().all()
 
-    async def list_pending_metadata(self, *, limit: int = 50) -> Sequence[DiscoveredToken]:
-        """Tokens whose metadata has not resolved yet, oldest first."""
-        stmt = (
-            select(DiscoveredToken)
-            .where(DiscoveredToken.metadata_status == MetadataStatus.PENDING)
-            .order_by(DiscoveredToken.discovered_at.asc())
-            .limit(limit)
+    async def list_pending_metadata(
+        self, *, limit: int = 50, max_attempts: int | None = None
+    ) -> Sequence[DiscoveredToken]:
+        """Tokens whose metadata has not resolved yet, NEWEST first.
+
+        Newest rather than oldest, which is what this returned while nothing
+        called it: on 2026-09-13 the backlog was 75,977 rows reaching back to
+        July, so oldest-first would have spent days naming tokens that died
+        weeks ago before it reached anything launched today. Resolution rate
+        comfortably exceeds the arrival rate either way, so the backlog still
+        drains — just from the end that is worth something.
+
+        `max_attempts` skips rows already tried that many times, so a mint DAS
+        will never know about cannot crowd out the ones it would answer.
+        """
+        stmt = select(DiscoveredToken).where(
+            DiscoveredToken.metadata_status == MetadataStatus.PENDING
         )
+        if max_attempts is not None:
+            stmt = stmt.where(DiscoveredToken.metadata_attempts < max_attempts)
+        stmt = stmt.order_by(DiscoveredToken.discovered_at.desc()).limit(limit)
         return (await self.session.execute(stmt)).scalars().all()
 
     def _apply_filters(
