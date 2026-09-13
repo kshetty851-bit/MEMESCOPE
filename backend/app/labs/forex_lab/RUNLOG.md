@@ -677,3 +677,52 @@ and then take profit. 2.92% per candle against 1.80% daily — the daily figure
 
 **Remaining:** the download, then the integrity check, the sweep and
 REPORT.md. The backend deploy is blocked on a permission I do not have.
+
+---
+
+## Iteration 17 — DONE. The download finished, and the grid did not.
+
+**Data.** 40,729 hours over six passes, **0 outstanding**. 2,416,710 one-minute
+candles, 2020-01-01 → 2026-06-30.
+
+**Integrity check: PASSED.**
+
+| | |
+|---|---|
+| crossed quotes (bid > ask) | 0 |
+| gaps over an hour outside weekends | 9, **all nine holiday-explained**, 0 unexplained |
+| per-year coverage | 0.9866 – 0.9959, every year inside [0.95, 1.001] |
+
+The seven ratios landing within 0.9 percentage points of each other is the
+strongest evidence available that both the dataset and the expected-minutes
+model are right — a broken model would not agree with itself across seven
+independent years.
+
+**Sweep.** 27 configurations over 2.4M candles, 4m52s on six cores.
+
+**Result: FAIL, and not narrowly.** Best by profit factor is `S50_N3_M0` at
+**1.045** against a required 1.3. Two of the five gate conditions pass. 21 of
+the 27 configurations lose money, seven of them more than 85% of the account.
+
+**The finding that matters is not the profit factor.** It is the stability
+table the report now computes from the sweep itself: **six different
+configurations win the seven years, and the overall winner never wins one of
+them** — it places #11, #11, #11, #8, #24, #2, #9. A configuration that is
+mid-table every year and wins overall is winning by being least bad, which is
+a property of the sample.
+
+The interim run said the same thing in advance and I did not read it that way
+at the time: on data to 2022-07 the winner was `S50_N6_M0` at PF 1.337 and
++35.68%. Over the full window that same configuration returns **+0.31%**.
+
+**Three bugs found while the download ran**, each of which would have made this
+report wrong rather than merely late:
+
+1. the coverage check passed years missing 6% of their hours;
+2. the cost table did not add up to the total printed under it;
+3. the drawdown was measured on daily closes, understating it on all 27
+   configurations and pushing one back across the gate's ceiling.
+
+### Tests
+
+`132 passed`. Integrity passed. Sweep complete. REPORT.md written.

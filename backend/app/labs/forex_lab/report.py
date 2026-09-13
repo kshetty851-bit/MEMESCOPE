@@ -158,6 +158,64 @@ observations.
 """
 
 
+def _stability_section(results: list[dict], best: dict) -> str:
+    """Which configuration would have won each year, and where the overall
+    winner placed in each.
+
+    Computed from the sweep itself rather than asserted, because it is the one
+    thing a single headline profit factor cannot tell you: whether the
+    configuration that won is a strategy or an artefact of the window.
+    """
+    years = sorted({int(y) for r in results for y in r["per_year"]})
+    if not years:
+        return ""
+
+    def pnl(r: dict, y: int) -> float:
+        return r["per_year"].get(str(y), r["per_year"].get(y, 0.0))
+
+    rows = []
+    winners = set()
+    for y in years:
+        w = max(results, key=lambda r: pnl(r, y))
+        winners.add(w["config"]["name"])
+        ranked = sorted(results, key=lambda r: -pnl(r, y))
+        place = next(
+            i for i, r in enumerate(ranked, 1) if r["config"]["name"] == best["config"]["name"]
+        )
+        rows.append(
+            f"| {y} | `{w['config']['name']}` | {pnl(w, y):+,.0f} | "
+            f"#{place} of {len(results)} | {pnl(best, y):+,.0f} |"
+        )
+    return "\n".join(
+        [
+            "## Is the winner a strategy, or the window?",
+            "",
+            "The headline above is one number over one window. This is the question "
+            "it cannot answer, computed from the same sweep:",
+            "",
+            "| Year | Best that year | Its P&L | Rank of "
+            f"`{best['config']['name']}` | Its P&L |",
+            "|---|---|---|---|---|",
+            *rows,
+            "",
+            f"**{len(winners)} different configurations win the {len(years)} years**, "
+            f"and `{best['config']['name']}` — the overall winner by profit factor — "
+            + (
+                "never wins one of them."
+                if best["config"]["name"] not in winners
+                else "wins only where the table says so."
+            ),
+            "",
+            "That is the signature of a parameter chosen by the window rather than "
+            "by an edge. A configuration with a real advantage should be near the "
+            "top most years; one that is mid-table every year and wins overall is "
+            "winning by being least bad, which is a property of the sample and not "
+            "of the strategy.",
+            "",
+        ]
+    )
+
+
 def _baseline_row(label: str, r: dict | None) -> str:
     if r is None:
         return f"| {label} | — | — |"
@@ -321,6 +379,7 @@ def write_report(sweep_path: str = "sweep.json", dest: Path | None = None) -> st
         f"{best['rejected_fills']:,} fills rejected by the 90% margin cap, "
         f"{best['recenters']:,} re-centres, {best['stopouts']:,} stop-outs.",
         "",
+        _stability_section(results, best),
         "## Against the baselines",
         "",
         "| | Final equity | Return |",
