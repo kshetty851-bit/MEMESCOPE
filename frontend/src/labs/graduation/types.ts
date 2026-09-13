@@ -182,8 +182,9 @@ export interface ArmRow {
   equity_usd: string;
   unrealised_usd: string;
   /** What a real $100 wallet would hold, having taken these same trades. Not
-   * the tournament equity divided by ten: a $100 account runs ONE position
-   * fully invested, so it compounds — and a single -99% ends it for good. */
+   * the tournament equity divided by ten: that book is additive, while a $100
+   * account is fully invested and compounds, spread over ten positions of a
+   * tenth of equity each — which is what keeps it alive. */
   wallet_100_usd: string;
   /** The worst single trade. The number that decides the figure above. */
   worst_trade_pct: string | null;
@@ -224,5 +225,6 @@ export interface Leaderboard {
   notional_usd: string;
   capital_usd: string;
   wallet_demo_usd: string;
+  wallet_demo_slots: number;
   hours_running: string;
 }

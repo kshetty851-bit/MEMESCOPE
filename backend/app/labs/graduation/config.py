@@ -582,6 +582,27 @@ WALLET_DEMO_USD = _dec("LAB_GRADUATION_WALLET_DEMO_USD", "100")
 #: about $2.65, and compounding lets that $2.65 "recover" to nine figures on
 #: later winners it could never have placed.
 WALLET_MIN_USD = _dec("LAB_GRADUATION_WALLET_MIN_USD", "25")
+#: How many positions that wallet spreads itself over. TEN.
+#:
+#: Measured across 69 arms, re-pricing every recorded trade at each size from
+#: the pool depth it actually hit:
+#:
+#:     1 x $100   median $0    best $188   survived  4/69 arms
+#:     4 x $25    median $32   best $191   survived 60/69 arms
+#:     10 x $10   median $54   best $121   survived 69/69 arms
+#:
+#: Ten wins, and it corrects a conclusion carried across from the wrong
+#: machine. In the $1,000 tournament P&L is ADDITIVE — a -99% costs $100 of
+#: $1,000, ruin never arrives, and the only thing that matters is execution
+#: cost, where $10 positions are terrible (2.32% a side against 0.56%). A
+#: $100 account is fully invested and COMPOUNDS, and there ruin dominates
+#: everything: paying four times the execution cost is cheap insurance
+#: against one trade ending the account permanently.
+#:
+#: It buys survival, not profit. A median of $54 from $100 is still losing
+#: half the account; ten-by-ten is the configuration that lasts long enough
+#: to find that out.
+WALLET_DEMO_SLOTS = _int("LAB_GRADUATION_WALLET_DEMO_SLOTS", 10)
 
 # --- the kill gate, stated before this run produced a single trade ------------
 #

@@ -350,6 +350,35 @@ def test_the_projection_is_memoised_because_its_cost_grows() -> None:
 
 # --- what a real $100 wallet would hold ---------------------------------------
 
+def test_ten_positions_beat_one_for_a_hundred_dollar_account() -> None:
+    """A conclusion that was right about the tournament and wrong about a
+    wallet, corrected by measurement.
+
+    The $1,000 book is ADDITIVE: a -99% costs $100 of $1,000, ruin never
+    arrives, and the only thing that matters is execution cost — where $10
+    positions are terrible, 2.32% a side against 0.56%. A $100 account is
+    fully invested and COMPOUNDS, and there ruin dominates: re-pricing every
+    recorded trade at each size from the pool depth it actually hit, across
+    69 arms —
+
+        1 x $100   median $0    survived  4/69
+        4 x $25    median $32   survived 60/69
+        10 x $10   median $54   survived 69/69
+
+    Four times the execution cost is cheap insurance against one trade ending
+    the account. It buys survival, not profit: $54 from $100 is still losing
+    half.
+    """
+    losses = [0.04] * 30 + [-0.99]
+    one, ten = 100.0, 100.0
+    for r in losses:
+        one += one * r
+        ten += (ten / 10) * r
+    assert one < 5, "a single position is ended by one wipeout"
+    assert ten > 100, "ten positions take a tenth of the hit and survive it"
+    assert config.WALLET_DEMO_SLOTS == 10
+
+
 def test_a_hundred_dollar_wallet_compounds_and_can_end_at_zero() -> None:
     """The tournament runs $1,000 over ten $100 slots and its P&L is ADDITIVE.
     A $100 account is a different machine: it holds one position, fully

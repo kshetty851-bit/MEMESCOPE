@@ -576,14 +576,13 @@ class ArmRow(BaseModel):
     unrealised_usd: Decimal = Decimal(0)
     #: What a REAL $100 wallet would hold, having taken these same trades.
     #:
-    #: Not the tournament's equity divided by ten. A $100 account cannot run
-    #: ten $100 positions — it runs ONE, fully invested, so it COMPOUNDS:
-    #: 100 x product(1 + return). That is a different arithmetic from the
-    #: book's additive $100-a-slot sizing, and it is the one that applies to
-    #: an account you would actually fund.
+    #: Not the tournament's equity divided by ten. That book is ADDITIVE —
+    #: $100 a slot out of $1,000, so a -99% costs a tenth. A $100 account is
+    #: fully invested and COMPOUNDS, spread over `WALLET_DEMO_SLOTS`
+    #: positions of a tenth of equity each.
     #:
-    #: The consequence is the point. A single -99% trade takes the product to
-    #: zero and the wallet never comes back, whatever the arm does afterwards.
+    #: The spread is what keeps it alive. At one position per account a -99%
+    #: is terminal and 65 of 69 arms end at zero; at ten, none do.
     wallet_100_usd: Decimal = Decimal(0)
     #: The worst single trade the arm has taken. The number that decides the
     #: figure above, because compounding has no memory of the good ones.
@@ -635,8 +634,10 @@ class Leaderboard(BaseModel):
     total_trades: int = 0
     notional_usd: Decimal = Decimal(0)
     capital_usd: Decimal = Decimal(0)
-    #: The starting balance the `wallet_100_usd` column simulates.
+    #: The starting balance the `wallet_100_usd` column simulates, and how
+    #: many positions it spreads over.
     wallet_demo_usd: Decimal = Decimal(0)
+    wallet_demo_slots: int = 0
     #: How long the tournament has been running. The projection is meaningless
     #: below an hour and barely better above it, so the reader is told.
     hours_running: Decimal = Decimal(0)
@@ -700,23 +701,31 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
         per_arm.setdefault(book, []).append(float(ret))
 
     def wallet_100(returns: list[float]) -> tuple[Decimal, Decimal | None]:
-        """A real $100 account taking these trades, one at a time.
+        """A real $100 account taking these trades, spread over ten positions.
 
-        Fully invested and therefore compounding, which is what a $100 wallet
-        running $100 positions necessarily is.
+        Each position is a TENTH of current equity, so the account compounds
+        but no single trade can end it — which is why ten beats one here.
+        Measured across 69 arms: one position survived 4 of them, ten survived
+        all 69, and ten had the better median as well.
 
         It stops at `WALLET_MIN_USD`, and that floor is load-bearing rather
-        than tidy: an account taking a -99% trade holds about $2.65, and
-        without a floor the product lets that $2.65 "recover" to nine figures
-        on later winners it could never have placed. Below $25 a round trip
-        costs more than the strategy makes.
+        than tidy: without it a wallet reduced to a few dollars "recovers" on
+        later winners it could never have placed — a test caught exactly that,
+        compounding $2.65 back to nine figures.
+
+        The returns are the tournament's, taken at $100 a position. A $10
+        order pays a wider spread, so this is the optimistic reading of the
+        smaller size; the sizing comparison that chose ten re-priced every
+        trade properly, and ten won there too.
         """
         if not returns:
             return config.WALLET_DEMO_USD, None
+        slots = max(1, config.WALLET_DEMO_SLOTS)
         equity = float(config.WALLET_DEMO_USD)
+        floor = float(config.WALLET_MIN_USD)
         for r in returns:
-            equity *= (1 + r)
-            if equity < float(config.WALLET_MIN_USD):
+            equity += (equity / slots) * r
+            if equity < floor / slots:
                 equity = 0.0
                 break
         return (Decimal(str(equity)).quantize(Decimal("0.01")),
@@ -871,6 +880,7 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
         notional_usd=config.PAPER_NOTIONAL_USD,
         capital_usd=config.PAPER_CAPITAL_USD,
         wallet_demo_usd=config.WALLET_DEMO_USD,
+        wallet_demo_slots=config.WALLET_DEMO_SLOTS,
         hours_running=Decimal(str(round(hours, 1))),
     )
     if leader is None:
