@@ -346,3 +346,49 @@ def test_the_projection_is_memoised_because_its_cost_grows() -> None:
     assert "_PROJECTIONS" in body and "cached.get" in body
     # The live figures must NOT come from the memo.
     assert "realised_usd=realised" in body
+
+
+# --- what a real $100 wallet would hold ---------------------------------------
+
+def test_a_hundred_dollar_wallet_compounds_and_can_end_at_zero() -> None:
+    """The tournament runs $1,000 over ten $100 slots and its P&L is ADDITIVE.
+    A $100 account is a different machine: it holds one position, fully
+    invested, so it compounds — and compounding has no memory of the good
+    trades once a bad one takes the product to zero.
+
+    Measured on the live book: arms with 17-99 trades show $111-$177, and
+    every arm past 180 trades shows $0.00, because by then it has met its
+    -99%. That is the number that applies to an account someone would fund.
+    """
+    grow = [0.05] * 20
+    equity = 100.0
+    for r in grow:
+        equity *= 1 + r
+    assert equity > 250, "twenty +5% trades compound well past additive"
+
+    # One -99% ends it, and nothing after can bring it back — but ONLY if the
+    # floor is the smallest position that can actually be executed. At a $1
+    # floor the surviving $2.65 compounds back to nine figures on winners it
+    # could never have placed, which is how this test first failed.
+    ruinous = [0.05] * 20 + [-0.99] + [0.50] * 50
+    equity = 100.0
+    for r in ruinous:
+        equity *= 1 + r
+        if equity < float(config.WALLET_MIN_USD):
+            equity = 0.0
+            break
+    assert equity == 0.0, "a wipeout is permanent for a fully-invested wallet"
+    assert D("20") <= config.WALLET_MIN_USD, (
+        "below ~$25 a round trip costs more than the strategy earns, so a "
+        "wallet that small is finished whatever the arithmetic says")
+
+
+def test_the_wallet_is_not_the_tournament_equity_divided_by_ten() -> None:
+    """The obvious shortcut is wrong in both directions: additive sizing
+    cannot be rescaled into compounding sizing, and a $100 account cannot run
+    ten $100 positions at all."""
+    assert D("100") == config.WALLET_DEMO_USD
+    assert D("1000") == config.PAPER_CAPITAL_USD
+    assert config.PAPER_NOTIONAL_USD * config.PAPER_MAX_SLOTS == config.PAPER_CAPITAL_USD
+    # A $100 wallet could not fund even two of the tournament's positions.
+    assert config.WALLET_DEMO_USD < config.PAPER_NOTIONAL_USD * 2

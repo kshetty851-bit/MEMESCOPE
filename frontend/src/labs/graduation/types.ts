@@ -181,6 +181,12 @@ export interface ArmRow {
    * yet banked. */
   equity_usd: string;
   unrealised_usd: string;
+  /** What a real $100 wallet would hold, having taken these same trades. Not
+   * the tournament equity divided by ten: a $100 account runs ONE position
+   * fully invested, so it compounds — and a single -99% ends it for good. */
+  wallet_100_usd: string;
+  /** The worst single trade. The number that decides the figure above. */
+  worst_trade_pct: string | null;
   /** Thirty days of the same rule at the same trade rate: median, and the
    * 5th-95th band. The band is the point — a single figure would hide how
    * little a few dozen trades actually says. */
@@ -217,5 +223,6 @@ export interface Leaderboard {
   total_trades: number;
   notional_usd: string;
   capital_usd: string;
+  wallet_demo_usd: string;
   hours_running: string;
 }

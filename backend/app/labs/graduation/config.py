@@ -561,6 +561,28 @@ def required_pf(trades: int) -> Decimal:
             return (lo_v + (hi_v - lo_v) * step).quantize(Decimal("0.01"))
     return max(points[-1][1], TOURNEY_FLOOR_PF)
 
+#: The balance the leaderboard's "$100 wallet" column simulates.
+#:
+#: The tournament runs $1,000 over ten $100 slots because that is the size at
+#: which execution is cheapest and the volume at which per-trade statistics
+#: mean anything. A real account of $100 is a different machine: it holds ONE
+#: position, fully invested, so it compounds rather than adds — and a single
+#: -99% trade ends it permanently, whatever the arm does afterwards.
+#:
+#: Both are shown. The tournament measures the rule; this measures the wallet.
+WALLET_DEMO_USD = _dec("LAB_GRADUATION_WALLET_DEMO_USD", "100")
+#: Below this the wallet is finished, whatever the arithmetic says.
+#:
+#: $25, from the execution cost curve measured on this market: the priority
+#: fee is flat in SOL, so a leg costs 0.25% of a $250 position, 1.10% of a $25
+#: one and 2.32% of a $10 one — against a break-even of roughly 1% a side.
+#: Twenty-five dollars is exactly where a round trip stops being payable.
+#:
+#: Without this floor the simulation is fiction: an account taking -99% holds
+#: about $2.65, and compounding lets that $2.65 "recover" to nine figures on
+#: later winners it could never have placed.
+WALLET_MIN_USD = _dec("LAB_GRADUATION_WALLET_MIN_USD", "25")
+
 # --- the kill gate, stated before this run produced a single trade ------------
 #
 # Written down on 2026-09-12, the day the book was re-armed, so that a good

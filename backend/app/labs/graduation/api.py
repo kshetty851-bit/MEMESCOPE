@@ -574,6 +574,20 @@ class ArmRow(BaseModel):
     #: includes anything not yet banked — `realised_usd` deliberately does not.
     equity_usd: Decimal = Decimal(0)
     unrealised_usd: Decimal = Decimal(0)
+    #: What a REAL $100 wallet would hold, having taken these same trades.
+    #:
+    #: Not the tournament's equity divided by ten. A $100 account cannot run
+    #: ten $100 positions — it runs ONE, fully invested, so it COMPOUNDS:
+    #: 100 x product(1 + return). That is a different arithmetic from the
+    #: book's additive $100-a-slot sizing, and it is the one that applies to
+    #: an account you would actually fund.
+    #:
+    #: The consequence is the point. A single -99% trade takes the product to
+    #: zero and the wallet never comes back, whatever the arm does afterwards.
+    wallet_100_usd: Decimal = Decimal(0)
+    #: The worst single trade the arm has taken. The number that decides the
+    #: figure above, because compounding has no memory of the good ones.
+    worst_trade_pct: Decimal | None = None
     #: Where thirty days of the SAME rule at the SAME trade rate would land —
     #: median, and the 5th-95th percentile band around it.
     #:
@@ -621,6 +635,8 @@ class Leaderboard(BaseModel):
     total_trades: int = 0
     notional_usd: Decimal = Decimal(0)
     capital_usd: Decimal = Decimal(0)
+    #: The starting balance the `wallet_100_usd` column simulates.
+    wallet_demo_usd: Decimal = Decimal(0)
     #: How long the tournament has been running. The projection is meaningless
     #: below an hour and barely better above it, so the reader is told.
     hours_running: Decimal = Decimal(0)
@@ -670,6 +686,8 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
     # Bounded to a week. Unbounded this grows without limit, and a projection
     # built from month-old trades would be describing a market that has moved
     # on — the recent window is both cheaper and more honest.
+    # ORDERED, because one consumer compounds them and compounding is not
+    # commutative once a trade can take the account to zero.
     per_arm: dict[str, list[float]] = {}
     for book, ret in (await db.execute(
             select(GradPaperPosition.book, GradPaperPosition.net_return)
@@ -677,8 +695,32 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
                    GradPaperPosition.closed_at >= datetime.now(UTC) - timedelta(days=7),
                    GradPaperPosition.notional_usd > 0,
                    GradPaperPosition.close_quote > 0,
-                   GradPaperPosition.net_return.is_not(None)))).all():
+                   GradPaperPosition.net_return.is_not(None))
+            .order_by(GradPaperPosition.closed_at))).all():
         per_arm.setdefault(book, []).append(float(ret))
+
+    def wallet_100(returns: list[float]) -> tuple[Decimal, Decimal | None]:
+        """A real $100 account taking these trades, one at a time.
+
+        Fully invested and therefore compounding, which is what a $100 wallet
+        running $100 positions necessarily is.
+
+        It stops at `WALLET_MIN_USD`, and that floor is load-bearing rather
+        than tidy: an account taking a -99% trade holds about $2.65, and
+        without a floor the product lets that $2.65 "recover" to nine figures
+        on later winners it could never have placed. Below $25 a round trip
+        costs more than the strategy makes.
+        """
+        if not returns:
+            return config.WALLET_DEMO_USD, None
+        equity = float(config.WALLET_DEMO_USD)
+        for r in returns:
+            equity *= (1 + r)
+            if equity < float(config.WALLET_MIN_USD):
+                equity = 0.0
+                break
+        return (Decimal(str(equity)).quantize(Decimal("0.01")),
+                Decimal(str(min(returns) * 100)).quantize(Decimal("0.1")))
     open_now: dict[str, int] = {}
     unrealised: dict[str, Decimal] = {}
     for position in (await db.scalars(
@@ -773,6 +815,7 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
         forecast = (cached.get(arm.name, {}) if fresh
                     else project(per_arm.get(arm.name, [])))
         open_pnl = unrealised.get(arm.name, Decimal(0)).quantize(Decimal("0.01"))
+        wallet, worst = wallet_100(per_arm.get(arm.name, []))
         realised = (Decimal(s.pnl) if s else Decimal(0)).quantize(Decimal("0.01"))
         return ArmRow(
             name=arm.name, note=arm.note, entry=arm.entry,
@@ -786,6 +829,7 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
             return_pct=((realised / config.PAPER_CAPITAL_USD * 100)
                         .quantize(Decimal("0.01"))
                         if config.PAPER_CAPITAL_USD else Decimal(0)),
+            wallet_100_usd=wallet, worst_trade_pct=worst,
             unrealised_usd=open_pnl,
             equity_usd=(config.PAPER_CAPITAL_USD + realised + open_pnl
                         ).quantize(Decimal("0.01")),
@@ -826,6 +870,7 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
         total_trades=sum(r.trades for r in rows),
         notional_usd=config.PAPER_NOTIONAL_USD,
         capital_usd=config.PAPER_CAPITAL_USD,
+        wallet_demo_usd=config.WALLET_DEMO_USD,
         hours_running=Decimal(str(round(hours, 1))),
     )
     if leader is None:

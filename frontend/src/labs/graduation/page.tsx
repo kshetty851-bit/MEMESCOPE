@@ -765,6 +765,7 @@ function LeaderboardPanel() {
               <col className="w-10" />
               <col />
               <col className="w-32" />
+              <col className="w-32" />
               <col className="w-28" />
               <col className="w-20" />
               <col className="w-48" />
@@ -777,6 +778,7 @@ function LeaderboardPanel() {
               <tr className="text-label uppercase tracking-[0.08em] text-ink-dim">
                 <th className="pb-2 pl-1 text-left font-medium">#</th>
                 <th className="pb-2 pr-3 text-left font-medium">Arm</th>
+                <th className="pb-2 pr-3 text-right font-medium">$100 wallet</th>
                 <th className="pb-2 pr-3 text-right font-medium">Equity</th>
                 <th className="pb-2 pr-3 text-right font-medium">Realised</th>
                 <th className="pb-2 pr-3 text-right font-medium">Return</th>
@@ -829,6 +831,26 @@ function LeaderboardPanel() {
                       <span className="mt-0.5 block truncate text-micro text-ink-dim">
                         {a.note}
                       </span>
+                    </td>
+                    <td className="py-2.5 pr-3 text-right">
+                      <span
+                        className={`grad-figure font-semibold ${
+                          Number(a.wallet_100_usd) === 0
+                            ? "text-down"
+                            : Number(a.wallet_100_usd) > Number(data.wallet_demo_usd)
+                              ? "text-up"
+                              : "text-ink-dim"
+                        }`}
+                      >
+                        {Number(a.wallet_100_usd) === 0
+                          ? "WIPED"
+                          : usd(a.wallet_100_usd)}
+                      </span>
+                      {a.worst_trade_pct !== null ? (
+                        <span className="block text-micro tabular-nums text-ink-dim">
+                          worst trade {Number(a.worst_trade_pct).toFixed(0)}%
+                        </span>
+                      ) : null}
                     </td>
                     <td className="py-2.5 pr-3 text-right">
                       <span
@@ -943,7 +965,7 @@ function LeaderboardPanel() {
                   </tr>
                   {openArm === a.name ? (
                     <tr>
-                      <td colSpan={9} className="p-0">
+                      <td colSpan={10} className="p-0">
                         <ArmTrades name={a.name} />
                       </td>
                     </tr>
