@@ -446,3 +446,51 @@ the missing-baseline case.
 
 **Remaining:** the download, the integrity check, the sweep, REPORT.md. No
 failing tests.
+
+---
+
+## Iteration 12 — shipped to the site, and a warning about reading interim numbers
+
+Renamed to **Forex Lab** on the operator's instruction and ported onto a branch
+off `origin/main`, because the branch it was built on cannot reach the website:
+main is 264 commits ahead of `karthik-hq` and the two number the same migration
+slots differently — main's 0068 is `nse_breakout_phase2` and its 0069 is
+`graduation_lab`, so a migration parented to karthik-hq's
+`0068_graduation_features` cannot run on a database that has never seen it.
+This branch's migration is `0085`, parented to main's head.
+
+Added `fx_sweep_runs`, three read-only routes and a dashboard page; details in
+the commit. Route registration was verified against `app.openapi()["paths"]`
+rather than `app.routes` — this FastAPI keeps an included router as one lazy
+object, so walking `app.routes` finds nothing and an assertion over it would
+pass just as happily on a router that was never registered.
+
+### The interim number moved a long way on seven months of data
+
+The first published sweep, over 449,585 candles (to 2021-04-12), had a best
+profit factor of **1.390**. Re-run over 676,865 candles (to 2021-11-12) it is
+**1.228** — the gate's PF condition flips from PASS to FAIL.
+
+Two things could explain that: the engine fixes of iterations 4, 6 and 10, or
+the extra data. So the current engine was replayed over the ORIGINAL 449,585
+candles, and it reproduces the original numbers exactly:
+
+| config | PF then | PF now | return then | return now |
+|---|---|---|---|---|
+| `S50_N6_M0` | 1.390 | 1.390 | 22.44% | 22.44% |
+| `S25_N6_M1` | 1.072 | 1.072 | 16.14% | 16.14% |
+| `S25_N4_M1` | 0.986 | 0.986 | −6.66% | −6.66% |
+| `S15_N3_M1` | 0.892 | 0.892 | −49.29% | −49.29% |
+
+So **none of the P&L change is from the fixes** — they moved which candles
+exist, how P&L is attributed to a year, and how drawdown is measured, not what
+the strategy earns on a given series. The whole move is seven extra months.
+
+That is the clearest available evidence for the caveat the report already
+makes: a grid's headline number is a function of the window it ran over. Seven
+months took the best configuration from clearing the profit-factor bar to
+missing it. Nothing about the interim result should be read as a finding, and
+the page says so in its coverage banner.
+
+**Remaining:** the download (~2,300 of 31,431 this pass), then the final
+integrity check, sweep and REPORT.md. No failing tests.
