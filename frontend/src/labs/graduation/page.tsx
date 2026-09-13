@@ -731,9 +731,9 @@ function LeaderboardPanel() {
             note={`across all 50 arms · ${Number(data.hours_running).toFixed(1)}h in`}
           />
           <Stat
-            label="Position size"
-            value={usd(data.notional_usd)}
-            note="identical on every arm"
+            label="Wallet simulated"
+            value={usd(data.wallet_demo_usd)}
+            note={`${data.wallet_demo_slots} positions, compounding`}
           />
         </div>
 
@@ -765,8 +765,6 @@ function LeaderboardPanel() {
               <col className="w-10" />
               <col />
               <col className="w-32" />
-              <col className="w-32" />
-              <col className="w-28" />
               <col className="w-20" />
               <col className="w-48" />
               <col className="w-20" />
@@ -778,9 +776,9 @@ function LeaderboardPanel() {
               <tr className="text-label uppercase tracking-[0.08em] text-ink-dim">
                 <th className="pb-2 pl-1 text-left font-medium">#</th>
                 <th className="pb-2 pr-3 text-left font-medium">Arm</th>
-                <th className="pb-2 pr-3 text-right font-medium">$100 wallet</th>
-                <th className="pb-2 pr-3 text-right font-medium">Equity</th>
-                <th className="pb-2 pr-3 text-right font-medium">Realised</th>
+                <th className="pb-2 pr-3 text-right font-medium">
+                  $100 wallet
+                </th>
                 <th className="pb-2 pr-3 text-right font-medium">Return</th>
                 <th className="pb-2 pr-3 text-right font-medium">
                   30d projection
@@ -793,8 +791,16 @@ function LeaderboardPanel() {
             </thead>
             <tbody>
               {shown.map((a: ArmRow, i: number) => {
-                const v = Number(a.realised_usd);
-                const beats = band !== null && a.trades > 0 && v > band;
+                // Ahead of every random arm — judged on the WALLET, which is
+                // the column now shown, not on the book's realised P&L.
+                const bestRandomWallet = Math.max(
+                  ...data.arms
+                    .filter((x) => x.is_control && x.trades > 0)
+                    .map((x) => Number(x.wallet_100_usd)),
+                  0,
+                );
+                const beats =
+                  a.trades > 0 && Number(a.wallet_100_usd) > bestRandomWallet;
                 const isLeader = a.name === data.leader;
                 return (
                   <Fragment key={a.name}>
@@ -833,51 +839,20 @@ function LeaderboardPanel() {
                       </span>
                     </td>
                     <td className="py-2.5 pr-3 text-right">
-                      <span
-                        className={`grad-figure font-semibold ${
-                          Number(a.wallet_100_usd) === 0
-                            ? "text-down"
-                            : Number(a.wallet_100_usd) > Number(data.wallet_demo_usd)
-                              ? "text-up"
-                              : "text-ink-dim"
-                        }`}
-                      >
-                        {Number(a.wallet_100_usd) === 0
-                          ? "WIPED"
-                          : usd(a.wallet_100_usd)}
-                      </span>
-                      {a.worst_trade_pct !== null ? (
-                        <span className="block text-micro tabular-nums text-ink-dim">
-                          worst trade {Number(a.worst_trade_pct).toFixed(0)}%
-                        </span>
-                      ) : null}
-                    </td>
-                    <td className="py-2.5 pr-3 text-right">
-                      <span
-                        className={`grad-figure font-medium ${
-                          Number(a.equity_usd) > Number(data.capital_usd)
-                            ? "text-up"
-                            : Number(a.equity_usd) < Number(data.capital_usd)
-                              ? "text-down"
-                              : ""
-                        }`}
-                      >
-                        {usd(a.equity_usd)}
-                      </span>
-                      {Number(a.unrealised_usd) !== 0 ? (
-                        <span className="block text-micro tabular-nums text-ink-dim">
-                          incl. {signedUsd(a.unrealised_usd)} open
-                        </span>
-                      ) : null}
-                    </td>
-                    <td className="py-2.5 pr-3 text-right">
                       <span className="inline-flex items-baseline justify-end gap-1.5">
                         <span
-                          className={`grad-figure font-medium ${
-                            v > 0 ? "text-up" : v < 0 ? "text-down" : "text-ink-dim"
+                          className={`grad-figure font-semibold ${
+                            Number(a.wallet_100_usd) === 0
+                              ? "text-down"
+                              : Number(a.wallet_100_usd) >
+                                  Number(data.wallet_demo_usd)
+                                ? "text-up"
+                                : "text-ink-dim"
                           }`}
                         >
-                          {a.trades ? signedUsd(a.realised_usd) : "—"}
+                          {Number(a.wallet_100_usd) === 0
+                            ? "WIPED"
+                            : usd(a.wallet_100_usd)}
                         </span>
                         <span
                           className={`h-1.5 w-1.5 shrink-0 rounded-full ${
@@ -890,19 +865,31 @@ function LeaderboardPanel() {
                           }
                         />
                       </span>
+                      {a.worst_trade_pct !== null ? (
+                        <span className="block text-micro tabular-nums text-ink-dim">
+                          worst trade {Number(a.worst_trade_pct).toFixed(0)}%
+                        </span>
+                      ) : null}
                     </td>
                     <td
                       className={`grad-figure py-2.5 pr-3 text-right ${
-                        Number(a.return_pct) > 0
+                        Number(a.wallet_100_usd) > Number(data.wallet_demo_usd)
                           ? "text-up"
-                          : Number(a.return_pct) < 0
+                          : Number(a.wallet_100_usd) < Number(data.wallet_demo_usd)
                             ? "text-down"
                             : "text-ink-dim"
                       }`}
                     >
-                      {a.trades
-                        ? `${Number(a.return_pct) > 0 ? "+" : ""}${Number(
-                            a.return_pct,
+                      {a.trades && Number(a.wallet_100_usd) >= 0
+                        ? `${
+                            Number(a.wallet_100_usd) >= Number(data.wallet_demo_usd)
+                              ? "+"
+                              : ""
+                          }${(
+                            (Number(a.wallet_100_usd) /
+                              Number(data.wallet_demo_usd) -
+                              1) *
+                            100
                           ).toFixed(1)}%`
                         : "—"}
                     </td>
@@ -965,7 +952,7 @@ function LeaderboardPanel() {
                   </tr>
                   {openArm === a.name ? (
                     <tr>
-                      <td colSpan={10} className="p-0">
+                      <td colSpan={8} className="p-0">
                         <ArmTrades name={a.name} />
                       </td>
                     </tr>
