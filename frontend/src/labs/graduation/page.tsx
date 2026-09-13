@@ -118,6 +118,25 @@ function usd(value: string | number | null): string {
   })}`;
 }
 
+/**
+ * How often this arm actually fires, per hour.
+ *
+ * The denominator is the TOURNAMENT's hours, not the arm's own: all fifty
+ * started together on one reset, so they share a clock. It is also the same
+ * rate the thirty-day projection extrapolates from, which is the point — a
+ * reader can see where that horizon's trade count came from instead of taking
+ * it on trust.
+ *
+ * Two decimals under 1/hr: several filters fire a few times a day, and "0.0"
+ * would read as "never" for an arm that has traded.
+ */
+function perHour(trades: number, hours: string | number): string {
+  const h = Number(hours);
+  if (!Number.isFinite(h) || h <= 0 || !trades) return "—";
+  const rate = trades / h;
+  return `${rate < 1 ? rate.toFixed(2) : rate.toFixed(1)}/hr`;
+}
+
 function signedUsd(value: string | null): string {
   if (value === null) return "—";
   return `${Number(value) >= 0 ? "+" : ""}${usd(value)}`;
@@ -790,7 +809,9 @@ function LeaderboardPanel() {
                   30d projection
                 </th>
                 <th className="pb-2 pr-3 text-right font-medium">Wipeout</th>
-                <th className="pb-2 pr-3 text-right font-medium">Trades</th>
+                <th className="pb-2 pr-3 text-right font-medium">
+                  Trades <span className="text-ink-dim">/ hr</span>
+                </th>
                 <th className="pb-2 pr-3 text-right font-medium">PF</th>
                 <th className="pb-2 pr-1 text-right font-medium">Top token</th>
               </tr>
@@ -947,6 +968,9 @@ function LeaderboardPanel() {
                           +{a.open_positions}
                         </span>
                       ) : null}
+                      <span className="block text-micro tabular-nums text-ink-dim">
+                        {perHour(a.trades, data.hours_running)}
+                      </span>
                     </td>
                     <td className="grad-figure py-2.5 pr-3 text-right">
                       {a.profit_factor ?? "—"}
@@ -1001,8 +1025,12 @@ function LeaderboardPanel() {
             would be too small to be worth placing —{" "}
             <b className="text-ink">Wipeout</b> is the share of simulated months
             that ended that way, which is the number a running total cannot
-            express. A dot marks an arm ahead of every random one. Open
-            positions are the
+            express. Under each trade count is how often that arm actually{" "}
+            <b className="text-ink">fires per hour</b>, on the tournament&rsquo;s
+            clock — all fifty started together. It is the same rate the 30-day
+            projection extrapolates from, so a filter that trades twice a day is
+            visibly forecasting from a handful of trades. A dot marks an arm
+            ahead of every random one. Open positions are the
             small <span className="text-ink">+n</span> beside the trade count and
             are <b className="text-ink">not</b> in the wallet column — an
             unrealised number is what every book in this platform&rsquo;s history
