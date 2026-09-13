@@ -229,6 +229,7 @@ x-backend-env: &backend-env
   # container may name a key path.
   MAINNET_SIGNER_SOCKET: ${MAINNET_SIGNER_SOCKET:-}
   FEATURE_LAB_ENABLED: ${FEATURE_LAB_ENABLED:-false}
+  FOREX_LAB_ENABLED: ${FOREX_LAB_ENABLED:-false}
   # In the anchor, not only in .env.production. This list is EXPLICIT, so a new
   # variable set in the env file and absent here never reaches the container —
   # the deploy appears to succeed and the flag does nothing. That has happened
