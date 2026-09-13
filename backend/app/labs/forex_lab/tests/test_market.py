@@ -87,11 +87,22 @@ def test_a_full_week_is_exactly_one_hundred_and_twenty_hours():
         assert len(hours) == 120, f"{start:%Y-%m-%d}: {len(hours)}"
 
 
-def test_the_expected_minute_count_matches_what_2020_actually_loaded():
-    """2020 loaded 371,658 candles. The model must land within the integrity
-    check's own 5% of that, or a correct dataset fails its own check."""
+def test_the_expected_count_is_the_minutes_the_market_was_open_and_no_fudge():
+    """2020 is the one year loaded complete — 373,418 candles against 377,280
+    open minutes, 0.9898. About 3.7 days of thin tape over Christmas, New Year
+    and Good Friday.
+
+    An earlier version subtracted a 9-day holiday allowance from this figure,
+    which made that complete year read as 1.015 — ABOVE 1 — and a year cannot
+    hold more minutes than the market was open for. The allowance turned a
+    one-sided bound into a two-sided fudge and hid the bug it should catch.
+    """
     expected = market.open_minutes_in_year(2020, date(2020, 1, 1), date(2026, 6, 30))
-    assert abs(1 - 371_658 / expected) < 0.05, expected
+    assert expected == 377_280
+    ratio = 373_418 / expected
+    assert 0.95 <= ratio <= 1.0, ratio
+    # The whole year of open market, to the minute, with nothing taken off.
+    assert expected % 60 == 0
 
 
 def test_2026_is_counted_to_june_only():

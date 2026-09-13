@@ -146,5 +146,11 @@ PARTIAL_YEAR = 2026
 
 #: A gap longer than this outside a weekend fails the integrity check.
 MAX_GAP_MINUTES = 60
-#: Per-year candle count must land within this fraction of the expected count.
+#: A year may hold at most this fraction FEWER minutes than the market was open
+#: — market holidays and thin hours account for about 1% on real data, so 5%
+#: is generous.
 CANDLE_COUNT_TOLERANCE = 0.05
+#: And it may hold essentially none MORE. A year cannot have more minutes than
+#: the market was open for, so anything above 1 is a duplicated or spurious
+#: row, not a busy December. The slack is for boundary minutes only.
+CANDLE_COUNT_CEILING = 1.001

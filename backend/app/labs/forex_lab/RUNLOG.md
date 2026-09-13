@@ -552,3 +552,49 @@ reach this page before the API route exists. A 404 now says so instead of
 ### Tests
 
 `124 passed`, `next build` passes, `ruff format --check` clean.
+
+---
+
+## Iteration 14 — the coverage check was passing years that were missing 6%
+
+Checking the download's progress, 2020 stood out: it has **one** failed hour
+out of 6,322, so it is effectively complete — and it scored **1.0148**. Above
+one. A year cannot hold more minutes than the market was open for.
+
+The cause was a 9-day holiday allowance subtracted from the denominator.
+Measured against 2020, the real figure is ~3.7 days: 373,418 candles against
+377,280 open minutes, 0.9898. The allowance was 2.4x too big, deflating
+"expected" by 2.4%, and that turned a ONE-SIDED bound into a two-sided fudge.
+
+**What it was hiding.** Under the old model:
+
+| year | failed hours | old ratio | old verdict | new ratio | new verdict |
+|---|---|---|---|---|---|
+| 2020 | 1 | 1.0148 | ok | 0.9898 | ok |
+| 2021 | 365 (5.8%) | 0.9523 | **ok** | 0.9288 | **OUT** |
+| 2022 | 396 (6.4%) | 0.9562 | **ok** | 0.9326 | **OUT** |
+
+Two years missing six percent of their hours were passing the coverage check.
+That is not a cosmetic problem: the brief gates the sweep on the integrity
+check, so the sweep would have run on incomplete years and the report would
+have presented the result as a full backtest of them.
+
+**Fixed** by comparing against the raw open minutes and making the two bounds
+what they actually are, which is not symmetric:
+
+* **floor 0.95** — holidays and thin hours legitimately remove minutes;
+* **ceiling 1.001** — nothing legitimately adds them, so anything above one is
+  a duplicated or spurious row.
+
+The ceiling is the half that could not exist before. A deflated denominator
+absorbs duplicate rows silently; against the true open-minute count they show
+up immediately.
+
+### Tests
+
+`128 passed` — four new, including the ceiling (every row duplicated must
+fail) and a regression on the real 2020 figure, asserting a complete year sits
+inside both bounds with room rather than scraping one.
+
+**Remaining:** the download, then the integrity check, the sweep and
+REPORT.md.

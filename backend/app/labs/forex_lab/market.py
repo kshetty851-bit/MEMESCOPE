@@ -52,15 +52,24 @@ def open_hours(start: datetime, end: datetime):
 
 @lru_cache(maxsize=16)
 def open_minutes_in_year(year: int, window_start: date, window_end: date) -> int:
-    """Minutes of open market in `year`, clipped to the backtest window.
+    """Minutes the market was OPEN in `year`, clipped to the backtest window.
 
     Counted hour by hour from `is_open` rather than from an average week, so
-    leap years, the DST shifts and a window that stops on 30 June are all
+    leap years, both DST switches and a window that stops on 30 June are all
     handled by the same predicate the loader uses.
 
-    Holidays are then allowed for: the tape is genuinely near-empty on about
-    nine days a year (Christmas and its neighbours, New Year, 4 July, Good
-    Friday). The 5% tolerance absorbs the rest.
+    No holiday allowance is subtracted, deliberately. An earlier version took
+    9/365 off for market holidays, which made a COMPLETE year read as 1.015 —
+    above 1 — and that is the wrong shape for this check entirely. A year can
+    never legitimately hold more minutes than the market was open for; it can
+    only hold fewer. Deflating the denominator turns a one-sided bound into a
+    two-sided fudge and hides the class of bug it would otherwise catch: a
+    duplicated or spurious row pushes the ratio above 1, and against a
+    denominator that is already 2.4% low it simply disappears.
+
+    Measured on 2020, the one year loaded complete: 373,418 of 377,280 open
+    minutes, 0.9898 — about 3.7 days of thin tape across Christmas, New Year
+    and Good Friday. The 9-day allowance was 2.4x that.
     """
     first = max(
         datetime(year, 1, 1, tzinfo=UTC),
@@ -73,8 +82,7 @@ def open_minutes_in_year(year: int, window_start: date, window_end: date) -> int
     )
     if last <= first:
         return 0
-    hours = sum(1 for _ in open_hours(first, last))
-    return int(hours * 60 * (1 - 9 / 365))
+    return sum(1 for _ in open_hours(first, last)) * 60
 
 
 # --- holidays -----------------------------------------------------------------

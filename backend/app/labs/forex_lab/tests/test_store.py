@@ -424,3 +424,39 @@ async def test_the_replay_file_keeps_candles_in_time_order(session, tmp_path):
     ts, _ = load_candles(path)
     assert list(ts) == sorted(ts)
     assert len(set(ts)) == 40
+
+
+async def test_more_candles_than_the_market_was_open_fails_the_check(session):
+    """The bound this check exists for, and the one an earlier version could not
+    see. A year can hold FEWER minutes than the market was open — holidays,
+    thin hours — but never more. Duplicated or spurious rows push the ratio
+    above 1, and against a denominator deflated by a holiday allowance that
+    simply disappeared.
+    """
+    from app.labs.forex_lab import config
+    from app.labs.forex_lab.store import _expected_minutes
+
+    expected = _expected_minutes(2021)
+    assert config.CANDLE_COUNT_CEILING < 1.01, "the ceiling must be ~1, not a band"
+
+    def verdict(n: int) -> bool:
+        ratio = n / expected
+        return 1 - config.CANDLE_COUNT_TOLERANCE <= ratio <= config.CANDLE_COUNT_CEILING
+
+    assert verdict(expected) is True, "exactly the open minutes passes"
+    assert verdict(int(expected * 0.99)) is True, "a holiday or two passes"
+    assert verdict(int(expected * 0.96)) is True, "inside the 5% floor"
+    assert verdict(int(expected * 0.94)) is False, "below the floor fails"
+    assert verdict(int(expected * 1.02)) is False, "2% MORE than open fails"
+    assert verdict(expected * 2) is False, "every row duplicated fails"
+
+
+async def test_a_complete_year_lands_between_the_two_bounds(session):
+    """Regression on the real figure: 2020 loaded complete is 0.9898, which
+    must sit inside [0.95, 1.001] with room on both sides rather than scraping
+    a boundary."""
+    from app.labs.forex_lab.store import _expected_minutes
+
+    ratio = 373_418 / _expected_minutes(2020)
+    assert 0.95 < ratio < 1.0
+    assert ratio > 0.96, "if a complete year is this close to the floor, the floor is wrong"

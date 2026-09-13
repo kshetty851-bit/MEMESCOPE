@@ -131,8 +131,9 @@ async def integrity_check(
 
     1. no gap longer than an hour outside a weekend;
     2. bid <= ask on every row;
-    3. per-year candle count within 5% of what a full year of open market
-       would produce.
+    3. per-year candle count between 95% and 100.1% of the minutes the market
+       was actually open — a year can hold fewer minutes than that (holidays,
+       thin hours) but never more, so the two bounds are not symmetric.
 
     A holiday is a gap, and a real one — 25 December is genuinely missing from
     the tape. Gaps that start on a recognised market holiday are reported
