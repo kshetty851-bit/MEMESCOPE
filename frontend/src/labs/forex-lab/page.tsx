@@ -489,9 +489,14 @@ function DataPanel({ data }: { data: DataHealth }) {
         </div>
       </div>
       <p className="border-t border-line px-4 py-3 text-xs text-ink-dim">
-        One-minute bid/ask candles aggregated here from Dukascopy tick files. The
+        One-minute bid/ask candles aggregated from Dukascopy tick files. The
         aggregation is checked against Dukascopy&rsquo;s own published candles on
-        days sampled at random from what is loaded.
+        days sampled at random.{" "}
+        {data.source === "published_run"
+          ? "These figures come from the published sweep: the candles themselves are a working set for an offline replay and this server does not hold a copy."
+          : data.source === "empty"
+            ? "Nothing is loaded and nothing has been published."
+            : "Read from this server's own candle table."}
       </p>
     </Panel>
   );

@@ -54,3 +54,22 @@ def test_registering_this_lab_did_not_unmount_another(served):
                     "/api/v1/labs/graduation/status"):
         assert sibling in served or any(
             p.startswith(sibling.rsplit("/", 1)[0]) for p in served), sibling
+
+
+# --- the deployed case ---------------------------------------------------------
+
+
+def test_the_data_route_declares_which_source_answered(served):
+    """On a deployed instance `fx_candles` is empty — the 2.4M candles are a
+    working set for an offline replay, not something production needs a copy
+    of. Reporting zero there would tell a reader the backtest ran on nothing,
+    so the route falls back to the published sweep and says which one answered.
+    """
+    import inspect
+
+    from app.labs.forex_lab import api
+
+    src = inspect.getsource(api.data)
+    assert '"published_run"' in src
+    assert '"source"' in src
+    assert f"{PREFIX}/data" in served

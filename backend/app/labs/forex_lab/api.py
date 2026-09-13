@@ -91,14 +91,35 @@ async def runs(limit: int = 20, db: AsyncSession = Depends(get_db)) -> dict[str,
 
 @router.get("/data")
 async def data(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
-    """What is loaded, so the page can say whether the replay covered the
-    window the brief asked for rather than implying it did."""
+    """What the published result was computed over.
+
+    Reads the local `fx_candles` table first, and falls back to the published
+    sweep when that table is empty — which is the NORMAL case on a deployed
+    instance. The 2.4M candles are a working set for an offline replay, not
+    something production needs a copy of; the sweep document already records
+    how many there were and what they spanned. Reporting zero because the
+    server happens not to hold the candles itself would tell a reader the
+    backtest ran on nothing.
+
+    `source` says which one answered, so the page never has to guess.
+    """
     total, first, last = (await db.execute(
         select(func.count(), func.min(FxCandle.minute), func.max(FxCandle.minute))
         .where(FxCandle.symbol == config.SYMBOL)
     )).one()
+    source = "candles"
+    if not total:
+        row = (await db.execute(
+            select(FxSweepRun).order_by(desc(FxSweepRun.created_at)).limit(1)
+        )).scalar_one_or_none()
+        if row is not None:
+            total, first, last, source = (
+                row.candles, row.first_minute, row.last_minute, "published_run")
+        else:
+            source = "empty"
     return {
         "symbol": config.SYMBOL,
+        "source": source,
         "candles": int(total or 0),
         "first_minute": first.isoformat() if first else None,
         "last_minute": last.isoformat() if last else None,

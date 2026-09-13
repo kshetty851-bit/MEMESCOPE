@@ -107,6 +107,11 @@ export interface LatestRun {
 
 export interface DataHealth {
   symbol: string;
+  /**
+   * Which table answered. "published_run" is the normal case on a deployed
+   * instance, where the candles are a working set the server does not hold.
+   */
+  source: "candles" | "published_run" | "empty";
   candles: number;
   first_minute: string | null;
   last_minute: string | null;
