@@ -58,10 +58,6 @@ export interface GraduationStatus {
   seconds_since_chain_read: number | null;
   recorder_stalled: boolean;
   stall_threshold_s: number;
-  paper: PaperBook;
-  /** The A/B twin: identical rules behind an entry filter, on the same
-   * graduations. Compared against `paper` after four weeks. */
-  paper_filtered: PaperBook;
 }
 
 
