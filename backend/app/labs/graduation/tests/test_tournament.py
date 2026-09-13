@@ -25,18 +25,18 @@ TOKEN = {"mint": "Abc123pump", "liquidity": D(150_000), "fdv": D(2_000_000),
          "sells": 0, "reuse": 4}
 
 
-def test_the_tournament_is_fifty_arms_of_which_six_are_noise() -> None:
+def test_the_tournament_is_fifty_arms_of_which_three_are_the_baseline() -> None:
     """The controls are the whole point. Fifty strategies produce a leader in
     an hour whether or not any of them is good, so the leaderboard only means
     something against arms that provably cannot have an edge.
 
     Generation 2 (2026-09-13) is 42 grid arms (14 liquidity bands x 3 holds)
-    + 6 controls + the 2 pre-registered A/B arms carried over. Two coin rates
-    on every hold, so no hold is ever judged without a matched dice roll on
-    its own clock — generation 1's eight controls did not cover every hold.
+    + 3 FLOOR baselines + 3 whole-band arms + the 2 pre-registered A/B arms.
+    One baseline per hold, so no hold is judged without an unselected twin on
+    its own clock. Nothing on this board decides by hashing a mint.
     """
     assert len(ARMS) == 50
-    assert len(CONTROLS) == 6
+    assert len(CONTROLS) == 3
     assert len({a.name for a in ARMS}) == 50
     assert all(len(a.name) <= 32 for a in ARMS)
 
@@ -49,20 +49,24 @@ def test_arms_differ_only_in_entry_and_exit() -> None:
         "name", "entry", "hold", "tp", "trail", "note"}
 
 
-def test_a_control_decides_on_nothing_and_never_changes_its_mind() -> None:
-    """Hashed rather than drawn: a control that re-rolled each tick would be a
-    different rule every time, and could not be compared with anything."""
-    assert _coin("R1_coin50_2m", "abc", 50) == _coin("R1_coin50_2m", "abc", 50)
+def test_the_baseline_is_a_strategy_not_a_dice_roll() -> None:
+    """Generation 2 dropped the coin-flip controls: a hash-of-the-mint arm is
+    a sharp null and it is executable, but it is not fundable, and this lab
+    exists to find something to fund.
+
+    FLOOR — buy every graduation above the floor — is the honest null for a
+    selection rule, because every grid arm is a SUBSET of its population.
+
+    `_coin` stays in the module: it is still the right tool if a future
+    generation needs a randomised control, and deleting it would mean writing
+    it again from memory."""
+    assert all(a.entry == "floor" for a in CONTROLS)
+    assert not any(a.entry.startswith("rand") for a in ARMS)
+    # Still deterministic, for whenever it is wanted again.
+    assert _coin("R50_2m", "abc", 50) == _coin("R50_2m", "abc", 50)
     mints = [f"m{i}pump" for i in range(4000)]
-    for arm in CONTROLS:
-        pct = int(arm.entry[4:])
-        taken = sum(1 for m in mints if _coin(arm.name, m, pct))
-        assert abs(taken / len(mints) * 100 - pct) < 4, arm.name
-    # Two controls with the same rule must still pick different tokens, or
-    # they are one control counted twice.
-    a = {m for m in mints if _coin("R50_2m", m, 50)}
-    b = {m for m in mints if _coin("R50_3m", m, 50)}
-    assert 0.2 < len(a & b) / len(a | b) < 0.5
+    taken = sum(1 for m in mints if _coin("R50_2m", m, 50))
+    assert abs(taken / len(mints) * 100 - 50) < 4
 
 
 def test_every_entry_filter_is_implemented() -> None:
@@ -243,7 +247,7 @@ def test_every_entry_filter_is_described() -> None:
     # Every control says so in its own description, so a reader skimming the
     # rules cannot mistake one for a strategy.
     for arm in CONTROLS:
-        assert "CONTROL" in arm.entry_rule
+        assert "BASELINE" in arm.entry_rule
 
 
 def test_each_arm_states_both_halves_of_its_rule() -> None:

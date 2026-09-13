@@ -735,7 +735,7 @@ function LeaderboardPanel() {
                       {" · "}
                       <span className={margin > 0 ? "text-up" : "text-down"}>
                         {margin > 0 ? "+" : ""}
-                        {usd(String(margin))} vs random
+                        {usd(String(margin))} vs baseline
                       </span>
                     </>
                   ) : null}
@@ -748,7 +748,7 @@ function LeaderboardPanel() {
           <Stat
             label="Bar to clear"
             value={band === null ? "—" : usd(String(band))}
-            note={`${data.best_control || "best random arm"} · $100 wallet`}
+            note={`${data.best_control || "baseline"} · $100 wallet`}
           />
           <Stat
             label="Closed trades"
@@ -774,7 +774,8 @@ function LeaderboardPanel() {
           clear. To be called, an arm needs {data.min_trades}+ closed trades,
           no single token above{" "}
           {(Number(data.max_token_share) * 100).toFixed(0)}% of its profit, it
-          must beat the best random arm, and its profit factor must clear{" "}
+          must beat the baseline — buying every graduation above the floor with no
+          selection — and its profit factor must clear{" "}
           <b className="text-ink">
             {Number(data.required_profit_factor).toFixed(2)}
           </b>{" "}
@@ -818,16 +819,16 @@ function LeaderboardPanel() {
             </thead>
             <tbody>
               {shown.map((a: ArmRow, i: number) => {
-                // Ahead of every random arm — judged on the WALLET, which is
+                // Ahead of the baseline — judged on the WALLET, which is
                 // the column now shown, not on the book's realised P&L.
-                const bestRandomWallet = Math.max(
+                const baselineWallet = Math.max(
                   ...data.arms
                     .filter((x) => x.is_control && x.trades > 0)
                     .map((x) => Number(x.wallet_100_usd)),
                   0,
                 );
                 const beats =
-                  a.trades > 0 && Number(a.wallet_100_usd) > bestRandomWallet;
+                  a.trades > 0 && Number(a.wallet_100_usd) > baselineWallet;
                 const isLeader = a.name === data.leader;
                 return (
                   <Fragment key={a.name}>
@@ -857,7 +858,7 @@ function LeaderboardPanel() {
                         </button>
                         {a.is_control ? (
                           <span className="shrink-0 rounded-full border border-down/40 px-1.5 py-px text-micro uppercase tracking-[0.08em] text-down">
-                            random
+                            baseline
                           </span>
                         ) : null}
                       </span>
@@ -887,7 +888,7 @@ function LeaderboardPanel() {
                           }`}
                           title={
                             beats && !a.is_control
-                              ? "ahead of every random arm"
+                              ? "ahead of the baseline"
                               : undefined
                           }
                         />
@@ -1020,7 +1021,8 @@ function LeaderboardPanel() {
             positions: the projection is the <b className="text-ink">balance</b>{" "}
             that wallet ends the month on, not a gain on top of it, and{" "}
             <b className="text-ink">Bar to clear</b> is the balance the luckiest
-            random arm reached on the same trades. Each position is a tenth of
+            baseline reached on the same trades — buying every graduation above
+            the floor, no selection. Each position is a tenth of
             current equity, so it compounds, and it stops when the next position
             would be too small to be worth placing —{" "}
             <b className="text-ink">Wipeout</b> is the share of simulated months
@@ -1030,7 +1032,8 @@ function LeaderboardPanel() {
             clock — all fifty started together. It is the same rate the 30-day
             projection extrapolates from, so a filter that trades twice a day is
             visibly forecasting from a handful of trades. A dot marks an arm
-            ahead of every random one. Open positions are the
+            ahead of the baseline. Nothing on this board decides by dice roll:
+            every arm is a rule you could fund. Open positions are the
             small <span className="text-ink">+n</span> beside the trade count and
             are <b className="text-ink">not</b> in the wallet column — an
             unrealised number is what every book in this platform&rsquo;s history

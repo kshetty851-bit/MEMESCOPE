@@ -88,3 +88,44 @@ def test_the_grid_never_buys_below_the_floor_where_tokens_are_destroyed():
             if arm.entry.startswith("liq_"):
                 assert not accepts(arm, open_at=now, liquidity=liq, **token), (
                     f"{arm.name} would buy a ${liq} pool")
+
+
+def test_no_arm_decides_by_dice_roll():
+    """Every arm on this board must be a strategy someone would fund.
+
+    A hash-of-the-mint control is a sharp null and it is executable, but it is
+    not fundable, and a leaderboard topped by something unfundable answers a
+    question nobody asked. The baseline is now FLOOR — buy every graduation
+    above $75k — which is both a real strategy and the correct null for a
+    selection rule, since every grid arm is a subset of its population.
+    """
+    for arm in ARMS:
+        assert not arm.entry.startswith("rand"), (
+            f"{arm.name} decides by hashing the mint — no rule, nothing to "
+            "fund. Use FLOOR as the baseline instead")
+
+
+def test_the_baseline_shares_the_grid_universe_exactly():
+    """A baseline that bought a different population would not be a baseline.
+
+    FLOOR must take every token any grid arm takes, and no token any grid arm
+    refuses — otherwise 'the band beat the baseline' could just mean the two
+    were shopping in different shops.
+    """
+    from datetime import UTC, datetime
+
+    from app.labs.graduation.tournament import LIQ_BANDS
+
+    now = datetime.now(UTC)
+    token = {"mint": "M" * 44, "fdv": Decimal("500000"), "sells": 1, "reuse": 1}
+    floor = next(a for a in ARMS if a.entry == "floor")
+    grid = [a for a in ARMS if a.entry.startswith("liq_")]
+    for probe in (74_999, 75_000, 100_000, 250_000, 5_000_000):
+        liq = Decimal(probe)
+        taken_by_grid = any(accepts(a, open_at=now, liquidity=liq, **token)
+                            for a in grid)
+        taken_by_floor = accepts(floor, open_at=now, liquidity=liq, **token)
+        assert taken_by_grid == taken_by_floor, (
+            f"${probe}: grid={taken_by_grid} floor={taken_by_floor} — the "
+            "baseline and the grid must shop in the same universe")
+    assert LIQ_BANDS[-1][2] >= 1_000_000_000, "the top band must be unbounded"

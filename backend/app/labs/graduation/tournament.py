@@ -74,7 +74,21 @@ class Arm:
 
     @property
     def is_control(self) -> bool:
-        return self.entry.startswith("rand")
+        """The baseline an arm has to beat: buying every graduation above the
+        floor, with no selection at all.
+
+        Generation 2 replaced the coin-flip controls with this. A dice roll is
+        a perfectly sharp null and it is executable — hash the mint, buy under
+        25 — but it is not a strategy anyone would fund, and this lab exists to
+        find something to fund. "No selection" is the honest null for a
+        selection rule anyway: every grid arm is a SUBSET of the floor arm's
+        population, so beating it is exactly the claim each one makes.
+
+        The protection a dice roll gave against a best-of-N leader is not lost
+        with it — `config.required_pf` prices that directly, from the trade
+        count, and it is a harder bar than any single control.
+        """
+        return self.entry == "floor"
 
     @property
     def entry_rule(self) -> str:
@@ -163,6 +177,10 @@ ENTRY_RULES: dict[str, str] = {
     **{f"liq_{k}": f"the pool held ${lo:,} to ${hi:,} at the open"
        for k, lo, hi in LIQ_BANDS[:-1]},
     f"liq_{LIQ_BANDS[-1][0]}": f"the pool held over ${LIQ_BANDS[-1][1]:,} at the open",
+    "floor": f"BASELINE — every graduation with a pool at or above "
+             f"${LIQ_BANDS[0][1]:,}, no band selection",
+    "band": f"the pool held ${LIQ_BANDS[3][1]:,} to ${LIQ_BANDS[8][2]:,} at "
+            f"the open — generation 1's signal, as one arm",
     "all": "every graduation, no filter",
     "sym": "the token's symbol had been used by at least one earlier token",
     "sym3": "the symbol had been used by at least three earlier tokens",
@@ -190,10 +208,18 @@ ENTRY_RULES: dict[str, str] = {
 def accepts(arm: Arm, *, mint: str, open_at: datetime, liquidity: Decimal | None,
             fdv: Decimal | None, sells: int | None, reuse: int | None) -> bool:
     e = arm.entry
+    if e == "band":
+        return (liquidity is not None
+                and LIQ_BANDS[3][1] <= liquidity < LIQ_BANDS[8][2])
     band = BAND_BY_KEY.get(e)
     if band is not None:
         lo, hi = band
         return liquidity is not None and lo <= liquidity < hi
+    if e == "floor":
+        # The baseline: every graduation the grid is allowed to touch, with no
+        # band selection. Same floor, same universe — so the only difference
+        # between this and a grid arm is the band, which is the thing on trial.
+        return liquidity is not None and liquidity >= LIQ_BANDS[0][1]
     if e == "all":
         return True
     if e == "sym":
@@ -338,14 +364,27 @@ ARMS: tuple[Arm, ...] = (
     Arm("L14_400k_2m", "liq_L14", 2, note="pool over $400k, out at 2m"),
     Arm("L14_400k_3m", "liq_L14", 3, note="pool over $400k, out at 3m"),
     Arm("L14_400k_5m", "liq_L14", 5, note="pool over $400k, out at 5m"),
-    # Six controls: a coin flip at two rates on each of the three holds, so
-    # no strategy hold is judged without a matched dice roll on its own clock.
-    Arm("R25_2m", "rand25", 2, note="CONTROL — 25% of tokens by coin flip, out at 2m"),
-    Arm("R25_3m", "rand25", 3, note="CONTROL — 25% of tokens by coin flip, out at 3m"),
-    Arm("R25_5m", "rand25", 5, note="CONTROL — 25% of tokens by coin flip, out at 5m"),
-    Arm("R50_2m", "rand50", 2, note="CONTROL — 50% of tokens by coin flip, out at 2m"),
-    Arm("R50_3m", "rand50", 3, note="CONTROL — 50% of tokens by coin flip, out at 3m"),
-    Arm("R50_5m", "rand50", 5, note="CONTROL — 50% of tokens by coin flip, out at 5m"),
+    # SIX ARMS THAT ARE ALSO REAL STRATEGIES.
+    #
+    # Generation 1 and the first cut of generation 2 used coin flips here. A
+    # dice roll is a sharp null, and it is executable — but it is not a thing
+    # anyone would fund, and a lab whose leaderboard is topped by something
+    # unfundable answers a question nobody asked.
+    #
+    # FLOOR is the baseline every grid arm is measured against: the same
+    # universe, the same floor, no band. Every grid arm is a subset of its
+    # population, so "beat FLOOR" is precisely the claim a band makes.
+    #
+    # BAND is generation 1's one real signal as a single arm ($116k-$198k),
+    # kept whole so the grid can be checked against the coarse version of
+    # itself — if fourteen bands find nothing the six-band lump already had,
+    # the extra resolution bought nothing.
+    Arm("FLOOR_2m", "floor", 2, note="BASELINE — every graduation over $75k, out at 2m"),
+    Arm("FLOOR_3m", "floor", 3, note="BASELINE — every graduation over $75k, out at 3m"),
+    Arm("FLOOR_5m", "floor", 5, note="BASELINE — every graduation over $75k, out at 5m"),
+    Arm("BAND_2m", "band", 2, note="pool $116k-$198k, out at 2m"),
+    Arm("BAND_3m", "band", 3, note="pool $116k-$198k, out at 3m"),
+    Arm("BAND_5m", "band", 5, note="pool $116k-$198k, out at 5m"),
     # Carried over UNCHANGED from generation 1, and deliberately: these two
     # are a pre-registered A/B on the rug signals (a never-seen symbol rugs
     # 18% against 3%; a daytime-UTC open 15% against 5%), opened 2026-09-13
@@ -372,13 +411,13 @@ assert {a.hold for a in ARMS} == {2, 3, 5}, (
     "arm the data cannot price is an arm a real wallet cannot verify")
 assert all(a.tp is None and a.trail is None for a in ARMS), (
     "targets and trailing stops are gone — every one of them held 15m+")
-assert len([a for a in ARMS if not a.is_control]) == 44, (
+assert len([a for a in ARMS if not a.is_control]) == 47, (
     "`config.required_pf` is calibrated on the maximum of FORTY-TWO noise "
-    "draws. Forty-four non-control arms make that bar marginally lenient — the "
-    "95th percentile of a best-of-44 sits a shade above a best-of-42. Stated "
-    "rather than fixed: recalibrating the curve over two arms would be false "
-    "precision, but a silent mismatch would not be")
-assert len(CONTROLS) == 6
+    "draws. Forty-seven arms are now judged against it, which makes that bar "
+    "slightly lenient — the 95th percentile of a best-of-47 sits a shade above "
+    "a best-of-42. Stated rather than fixed: recalibrating over five arms would "
+    "be false precision, but a silent mismatch would not be")
+assert len(CONTROLS) == 3, "three baselines, one per hold"
 assert len({a.name for a in ARMS}) == 50, "arm names must be unique"
 assert all(len(a.name) <= 32 for a in ARMS), "arm name must fit the column"
 assert {a.entry for a in ARMS} <= set(ENTRY_RULES), (
