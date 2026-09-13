@@ -75,3 +75,27 @@ def test_production_config_passes_when_hardened() -> None:
 def test_pumpfun_radar_rejects_an_inverted_age_window() -> None:
     with pytest.raises(ValidationError, match="PUMPFUN_RADAR_MIN_AGE_DAYS"):
         _settings(PUMPFUN_RADAR_MIN_AGE_DAYS=9, PUMPFUN_RADAR_MAX_AGE_DAYS=8)
+
+
+@pytest.mark.parametrize(
+    ("configured", "expected"),
+    [("processed", "confirmed"), ("confirmed", "confirmed"), ("finalized", "finalized")],
+)
+def test_rpc_commitment_never_falls_below_confirmed(configured: str, expected: str) -> None:
+    """`getTransaction`/`getBlocks`/`getBlock` refuse anything below confirmed.
+
+    Solana answers `-32602 Method does not support commitment below confirmed`,
+    and on 2026-09-13 that killed gap recovery the moment SCANNER_COMMITMENT
+    became `processed`: the walk threw on its first `getBlocks`, the
+    best-effort handler swallowed it by design, and the scanner kept reporting
+    healthy with recovery dead. Verified against mainnet the same day —
+    `getSlot` accepts `processed`, `getTransaction` and `getBlocks` do not.
+    """
+    settings = _settings(SCANNER_COMMITMENT=configured)
+    assert settings.SCANNER_RPC_COMMITMENT == expected
+    assert settings.SCANNER_RPC_COMMITMENT != "processed"
+
+
+def test_the_subscription_keeps_the_commitment_it_was_given() -> None:
+    """The clamp must not reach `logsSubscribe`, which is where the 106ms is."""
+    assert _settings(SCANNER_COMMITMENT="processed").SCANNER_COMMITMENT == "processed"

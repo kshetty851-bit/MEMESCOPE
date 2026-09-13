@@ -424,7 +424,7 @@ class TokenScanner:
         """
         try:
             current = await self._rpc.call(
-                "getSlot", [{"commitment": settings.SCANNER_COMMITMENT}]
+                "getSlot", [{"commitment": settings.SCANNER_RPC_COMMITMENT}]
             )
             if not isinstance(current, int):
                 return
@@ -453,7 +453,7 @@ class TokenScanner:
             )
 
             slots = await self._rpc.call(
-                "getBlocks", [start, current, {"commitment": settings.SCANNER_COMMITMENT}]
+                "getBlocks", [start, current, {"commitment": settings.SCANNER_RPC_COMMITMENT}]
             )
             if not isinstance(slots, list):
                 return
@@ -488,7 +488,7 @@ class TokenScanner:
                         [
                             slot,
                             {
-                                "commitment": settings.SCANNER_COMMITMENT,
+                                "commitment": settings.SCANNER_RPC_COMMITMENT,
                                 "encoding": "json",
                                 "transactionDetails": "full",
                                 "rewards": False,

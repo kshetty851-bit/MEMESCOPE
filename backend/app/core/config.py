@@ -1214,6 +1214,26 @@ class Settings(BaseSettings):
 
     @computed_field  # type: ignore[prop-decorator]
     @property
+    def SCANNER_RPC_COMMITMENT(self) -> str:
+        """`SCANNER_COMMITMENT`, raised to `confirmed` when it is `processed`.
+
+        The subscription and the RPC reads do not accept the same commitments.
+        `logsSubscribe` is happy at `processed` — that is the 106ms the setting
+        exists to buy — but `getTransaction`, `getBlocks` and `getBlock` refuse
+        it outright with `-32602 Method does not support commitment below
+        confirmed`. One setting feeding both is how gap recovery broke on
+        2026-09-13: the walk threw on its first `getBlocks`, the best-effort
+        handler swallowed it exactly as designed, and the scanner went on
+        reporting healthy with recovery dead. `getSlot` does accept
+        `processed`, and is clamped here anyway so the whole walk reads one
+        consistent view of the chain.
+        """
+        return (
+            "confirmed" if self.SCANNER_COMMITMENT == "processed" else self.SCANNER_COMMITMENT
+        )
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
     def rpc_ws_url(self) -> str:
         """The subscription endpoint for the configured provider.
 

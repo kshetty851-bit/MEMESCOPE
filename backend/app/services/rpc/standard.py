@@ -180,7 +180,7 @@ class StandardSolanaRPC(SolanaRPC):
             {
                 "encoding": "jsonParsed",
                 "maxSupportedTransactionVersion": 0,
-                "commitment": settings.SCANNER_COMMITMENT,
+                "commitment": settings.SCANNER_RPC_COMMITMENT,
             },
         ]
 
