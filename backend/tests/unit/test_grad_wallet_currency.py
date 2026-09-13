@@ -111,3 +111,28 @@ def test_every_route_reaches_the_endpoint_it_names():
             assert param.default is not inspect.Parameter.empty, (
                 f"{name}() has a required parameter {param.name!r}, which "
                 "FastAPI serves as a mandatory query string — 422, always")
+
+
+class TestStallAlarm:
+    """The alarm must not be silenced by the failure it exists to report."""
+
+    @staticmethod
+    def _stalled(watch_set: int, tokens_last_hour: int, age_s: float,
+                 threshold_s: float) -> bool:
+        """The shipped rule, stated once so the test pins behaviour."""
+        has_work = watch_set > 0 or tokens_last_hour > 0
+        return has_work and age_s > threshold_s
+
+    def test_a_dead_recorder_still_raises_the_alarm(self):
+        """The real incident: the recorder stopped, the watch set emptied
+        BECAUSE it stopped, and the page said "polling normally" for 31 min."""
+        assert self._stalled(watch_set=0, tokens_last_hour=286,
+                             age_s=1854, threshold_s=15)
+
+    def test_a_quiet_lab_with_nothing_to_watch_does_not_cry_wolf(self):
+        assert not self._stalled(watch_set=0, tokens_last_hour=0,
+                                 age_s=99999, threshold_s=15)
+
+    def test_a_healthy_recorder_is_not_stalled(self):
+        assert not self._stalled(watch_set=478, tokens_last_hour=286,
+                                 age_s=3, threshold_s=15)

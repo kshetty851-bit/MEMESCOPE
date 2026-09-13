@@ -309,14 +309,24 @@ async def status(db: AsyncSession = Depends(get_db)) -> GraduationStatus:
     # Five poll intervals. A healthy poller refreshes every one of them, so
     # five is slack for a slow flush without being slow to notice a stall.
     base.stall_threshold_s = config.POLL_INTERVAL_S * 5
+    # Whether there is anything to watch — NOT whether anything is being
+    # watched. `watch_set` is derived from RECENT POLLING, so a dead recorder
+    # empties it, and guarding the alarm on it meant the alarm switched itself
+    # off at the exact moment it was needed. On 2026-09-13 the recorder was
+    # stopped for thirty-one minutes and this page read "polling normally" the
+    # whole time, because watch_set had fallen to 0.
+    #
+    # The launch feed is the independent witness: it kept admitting 286 tokens
+    # an hour throughout, which is the proof there was work the recorder was
+    # not doing.
+    has_work = base.watch_set > 0 or base.tokens_last_hour > 0
     if base.last_chain_read_at is not None:
         age = (datetime.now(UTC) - base.last_chain_read_at).total_seconds()
         base.seconds_since_chain_read = int(age)
-        base.recorder_stalled = (base.watch_set > 0
-                                 and age > base.stall_threshold_s)
+        base.recorder_stalled = has_work and age > base.stall_threshold_s
     else:
         # Nothing has ever been read. Only a stall if there is something to read.
-        base.recorder_stalled = base.watch_set > 0
+        base.recorder_stalled = has_work
 
     calls_per_poll = -(-base.watch_set // config.MAX_ACCOUNTS_PER_CALL)
     polls_per_minute = max(1, 60 // max(1, config.POLL_INTERVAL_S))
