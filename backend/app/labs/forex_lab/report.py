@@ -296,8 +296,15 @@ def write_report(sweep_path: str = "sweep.json", dest: Path | None = None) -> st
         f"| Banked by take-profits | {_fmt(best['tp_pnl'])} |",
         f"| Realised on re-centres | {_fmt(best['recenter_loss'])} |",
         f"| Realised on stop-outs | {_fmt(best['stopout_loss'])} |",
+        f"| Closed at the end of the run | {_fmt(best.get('end_pnl'))} |",
         f"| Swap | {_fmt(best['swap_paid'])} |",
         f"| **Final equity** | **{_fmt(best['final_equity'])}** |",
+        "",
+        "Those five and the opening $1,000 add to the final equity exactly; a "
+        "cost table that does not reconcile to the number printed under it is "
+        "a table a reader has no reason to trust. The fourth line is the "
+        "positions still open when the replay ran out of candles, closed at "
+        "market so the curve ends in cash rather than on a mark.",
         "",
         f"Spread and slippage inside those figures: **{_fmt(best['spread_paid'])}** "
         "paid across every fill, entries and exits both. It is not a separate line "

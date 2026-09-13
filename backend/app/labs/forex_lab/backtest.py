@@ -191,6 +191,7 @@ def replay(
         "recenter_loss": round(eng.stats["recenter_loss"], 2),
         "stopout_loss": round(eng.stats["stopout_loss"], 2),
         "tp_pnl": round(eng.stats["tp_pnl"], 2),
+        "end_pnl": round(eng.stats["end_pnl"], 2),
         "per_year": years,
         "per_month": months,
         # Over the SIX FULL years only. 2026 is half a year and is reported

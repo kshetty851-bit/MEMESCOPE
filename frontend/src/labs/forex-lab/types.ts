@@ -41,6 +41,8 @@ export interface ConfigResult {
   recenter_loss: number;
   stopout_loss: number;
   tp_pnl: number;
+  /** The positions force-closed when the replay ran out of candles. */
+  end_pnl: number;
   per_year: Record<string, number>;
   per_month: Record<string, number>;
   /** Counted over the six FULL years only; 2026 is half a year. */

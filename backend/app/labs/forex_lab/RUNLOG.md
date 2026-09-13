@@ -598,3 +598,40 @@ inside both bounds with room rather than scraping one.
 
 **Remaining:** the download, then the integrity check, the sweep and
 REPORT.md.
+
+---
+
+## Iteration 15 — the cost table did not add up to the total printed under it
+
+Checked the report's own arithmetic against the interim sweep. It does not
+reconcile:
+
+| config | start + tp + re-centre + stop-out + swap | final equity | missing |
+|---|---|---|---|
+| `S50_N6_M0` | 1,168.92 | 1,167.06 | −1.86 |
+| `S25_N6_M0` | 1,140.44 | 1,134.88 | −5.56 |
+| `S25_N6_M1` | 1,253.65 | 1,220.97 | **−32.68** |
+
+The missing money is the positions still open when the replay runs out of
+candles. `finish()` closes them at market so the equity curve ends in cash
+rather than on a mark — a real P&L event, and it landed in no bucket at all.
+Up to 2.6% of the wallet, printed as a column of figures that did not add to
+the total beneath them.
+
+A reader who checks a cost breakdown and finds it short has every reason to
+distrust the rest of the table, and they would be right to.
+
+**Fixed** with an `end_pnl` bucket, a row in the report and on the page, and —
+the part that matters — a test asserting the reconciliation holds to the cent,
+plus one asserting that every close reason lands in exactly one bucket, so a
+fifth reason added later cannot silently reopen the hole.
+
+Re-swept and re-published: all twenty-seven configurations now reconcile to
+0.00.
+
+### Tests
+
+`130 passed`.
+
+**Remaining:** the download, then the integrity check, the sweep and
+REPORT.md.

@@ -322,6 +322,11 @@ function Costs({ best }: { best: ConfigResult }) {
     ["Banked by take-profits", usd(best.tp_pnl)],
     ["Realised on re-centres", usd(best.recenter_loss)],
     ["Realised on stop-outs", usd(best.stopout_loss)],
+    [
+      "Closed at the end of the run",
+      usd(best.end_pnl),
+      "positions still open when the replay ran out of candles",
+    ],
     ["Swap", usd(best.swap_paid)],
     [
       "Spread and slippage",
@@ -356,6 +361,9 @@ function Costs({ best }: { best: ConfigResult }) {
         </div>
       </div>
       <p className="border-t border-line px-4 py-3 text-xs text-ink-dim">
+        Those five and the opening $1,000 add to the final equity exactly. A
+        cost table that does not reconcile to the number printed under it is a
+        table with no reason to be trusted.{" "}
         {best.fills.toLocaleString()} fills, {best.trades.toLocaleString()} closed
         positions, {best.rejected_fills.toLocaleString()} fills rejected by the 90%
         margin cap, {best.recenters.toLocaleString()} re-centres,{" "}

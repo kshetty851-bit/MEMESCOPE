@@ -191,6 +191,12 @@ class GridEngine:
             "recenter_loss": 0.0,
             "stopout_loss": 0.0,
             "tp_pnl": 0.0,
+            # The forced liquidation at the end of the replay. Its own bucket,
+            # because without one the cost breakdown does not add up to the
+            # final equity printed underneath it — and a reader who checks the
+            # arithmetic and finds it short has every reason to distrust the
+            # rest of the table.
+            "end_pnl": 0.0,
         }
         self.rejections: list[tuple[datetime, str, float]] = []
         #: The lowest equity the account ever showed, at the worse extreme of
@@ -559,6 +565,6 @@ class GridEngine:
 
     def finish(self, minute: datetime, mid_close: float) -> None:
         """Close what is still open, so the equity curve ends at cash."""
-        self._close_all(mid_close, minute, "end")
+        self.stats["end_pnl"] += self._close_all(mid_close, minute, "end")
         self.orders = []
         self.mark = mid_close

@@ -281,3 +281,38 @@ def test_the_comparison_says_so_when_a_baseline_is_missing():
     assert "**did not beat** the neutral-grid baseline" in _verdict_sentence(
         hedged, {"final_equity": 1200.0}, bh
     )
+
+
+def test_the_cost_breakdown_reconciles_to_the_final_equity():
+    """The invariant the report's cost table rests on, and the one that was
+    broken: opening balance plus every bucket must equal the final equity, to
+    the cent.
+
+    It did not, because the positions force-closed when the replay runs out of
+    candles landed in no bucket at all — between $1.86 and $32.68 missing on
+    the configurations checked, printed as a column of figures that did not add
+    to the total underneath them.
+    """
+    start = datetime(2023, 6, 1, 0, 0, tzinfo=UTC)
+    # A path that ends holding open positions, so the final liquidation is not
+    # zero and the test can actually see it.
+    ts, px = series(start, ramp(1.10000, 1.09400) * 2)
+    r = replay(GridConfig(step_pips=25, levels=4), ts, px)
+
+    buckets = (
+        r["tp_pnl"] + r["recenter_loss"] + r["stopout_loss"] + r["end_pnl"]
+        + r["swap_paid"]
+    )
+    assert r["start_equity"] + buckets == pytest.approx(r["final_equity"], abs=0.01)
+    assert r["end_pnl"] != 0.0, "the fixture must actually close something at the end"
+
+
+def test_every_close_reason_lands_in_exactly_one_bucket():
+    """Four reasons, four buckets. A fifth reason added later without a bucket
+    would silently break the reconciliation above, so the reasons are asserted
+    here rather than assumed."""
+    start = datetime(2023, 6, 1, 0, 0, tzinfo=UTC)
+    ts, px = series(start, ramp(1.10000, 1.11200) + ramp(1.11200, 1.09600))
+    r = replay(GridConfig(step_pips=25, levels=4), ts, px, with_trades=True)
+    reasons = {t["reason"] for t in r["trade_list"]}
+    assert reasons <= {"tp", "recenter", "stopout", "end"}, reasons
