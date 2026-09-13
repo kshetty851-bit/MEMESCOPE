@@ -346,3 +346,81 @@ async def test_a_pass_that_loads_nothing_stops_the_loop(session_factory):
         ing.ingest = monkey
     assert len(calls) == 1
     assert r["outstanding"] == 10
+
+
+# --- the binary replay file ---------------------------------------------------
+
+
+async def test_candles_survive_the_round_trip_through_the_replay_file(session, tmp_path):
+    """The sweep reads this file, not the database. Every figure in the report
+    comes through this encoder, so a silent corruption here would be a silent
+    corruption of the whole result — and it is 24 bytes of hand-rolled struct
+    packing, written once and then trusted twenty-seven times.
+
+    Worth its own test because the writer was rewritten to move a 58 MB
+    blocking write off the event loop, and a rewrite that packs the fields in a
+    different order still produces a file that loads without complaint.
+    """
+    from datetime import datetime as dt
+
+    from app.labs.forex_lab.backtest import export_candles, load_candles
+
+    start = datetime(2023, 1, 3, 14, 0, tzinfo=UTC)
+    rows = [
+        # bid o/h/l/c, ask o/h/l/c — deliberately asymmetric so a transposed
+        # field cannot pass by looking plausible.
+        (1.05000, 1.05040, 1.04980, 1.05020, 1.05008, 1.05048, 1.04988, 1.05028),
+        (1.05020, 1.05070, 1.05010, 1.05060, 1.05028, 1.05078, 1.05018, 1.05068),
+        (1.05060, 1.05065, 1.04900, 1.04950, 1.05068, 1.05073, 1.04908, 1.04958),
+    ]
+    for i, r in enumerate(rows):
+        session.add(
+            FxCandle(
+                symbol="EURUSD",
+                minute=start + timedelta(minutes=i),
+                bid_open=r[0],
+                bid_high=r[1],
+                bid_low=r[2],
+                bid_close=r[3],
+                ask_open=r[4],
+                ask_high=r[5],
+                ask_low=r[6],
+                ask_close=r[7],
+                ticks=9,
+            )
+        )
+    await session.commit()
+
+    path = tmp_path / "candles.bin"
+    n = await export_candles(session, path=path)
+    assert n == 3
+
+    ts, px = load_candles(path)
+    assert len(ts) == 3
+    assert len(px) == 12, "four prices a candle"
+
+    for i, r in enumerate(rows):
+        assert dt.fromtimestamp(ts[i], UTC) == start + timedelta(minutes=i)
+        o, h, low, c = px[i * 4 : i * 4 + 4]
+        # The file carries MIDS: the engine triggers on mids, and the bid/ask
+        # split has done its job by the time the integrity check has run.
+        assert o == pytest.approx((r[0] + r[4]) / 2, abs=1e-6)
+        assert h == pytest.approx((r[1] + r[5]) / 2, abs=1e-6)
+        assert low == pytest.approx((r[2] + r[6]) / 2, abs=1e-6)
+        assert c == pytest.approx((r[3] + r[7]) / 2, abs=1e-6)
+        assert low <= o <= h and low <= c <= h
+
+
+async def test_the_replay_file_keeps_candles_in_time_order(session, tmp_path):
+    """The engine walks the file front to back and treats each candle's open as
+    following the last one's close. Out of order, every gap leg would be
+    nonsense and nothing would raise."""
+    from app.labs.forex_lab.backtest import export_candles, load_candles
+
+    start = datetime(2023, 1, 3, 0, 0, tzinfo=UTC)
+    await _fill_minutes(session, start, 40)
+    path = tmp_path / "candles.bin"
+    assert await export_candles(session, path=path) == 40
+    ts, _ = load_candles(path)
+    assert list(ts) == sorted(ts)
+    assert len(set(ts)) == 40
