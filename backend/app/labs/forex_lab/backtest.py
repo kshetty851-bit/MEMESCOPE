@@ -85,7 +85,12 @@ def load_candles(path: Path = CANDLE_FILE) -> tuple[array.array, array.array]:
 
 
 def _max_drawdown(curve: list[float]) -> float:
-    """As a fraction of the running peak. Reported positive."""
+    """As a fraction of the running peak, over DAILY samples. Reported positive.
+
+    Kept only for the comparison the report prints beside the real figure: it
+    is what a daily-close drawdown would have claimed, and the gap between the
+    two is the point.
+    """
     peak, worst = curve[0] if curve else 0.0, 0.0
     for v in curve:
         peak = max(peak, v)
@@ -175,7 +180,14 @@ def replay(
             if _profit_factor(eng.trades) == math.inf
             else round(_profit_factor(eng.trades), 3)
         ),
-        "max_drawdown_pct": round(100 * _max_drawdown(equity_curve), 2),
+        # From the engine, which marks every candle, not from the daily curve.
+        # A daily sample cannot see a trough that recovers before the day ends,
+        # and this figure feeds a drawdown CEILING in the gate — measured too
+        # low it passes runs that should fail. Measured on the interim sweep,
+        # the daily curve reported 14.92% where the true fall was 17.4%.
+        "max_drawdown_pct": round(100 * eng.max_drawdown, 2),
+        "max_drawdown_daily_pct": round(100 * _max_drawdown(equity_curve), 2),
+        "peak_equity": round(eng.peak_equity, 2),
         "trades": len(eng.trades),
         "min_equity": round(eng.min_equity, 2),
         # An account that passed through zero did not have a bad year, it

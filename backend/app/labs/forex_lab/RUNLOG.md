@@ -635,3 +635,45 @@ Re-swept and re-published: all twenty-seven configurations now reconcile to
 
 **Remaining:** the download, then the integrity check, the sweep and
 REPORT.md.
+
+---
+
+## Iteration 16 — the drawdown was measured on daily closes, and the gate is a ceiling
+
+`min_equity` marks every candle; the reported drawdown was computed from the
+DAILY equity curve. Those two should tell the same story, and they did not:
+`S50_N6_M0` reported 14.92% while its own low-water mark implied at least
+17.4% — and that is a floor, because the true fall is measured from the
+running peak rather than from the opening balance.
+
+A daily sample cannot see a trough that recovers before the day ends. The gate
+this figure feeds is a **ceiling** — "max DD < 25%" — so measuring it low does
+not lose a passing run, it passes a failing one.
+
+**Fixed** by tracking the peak and the fall in the engine, on every candle, at
+the worse extreme of each. The peak is taken from the candle's best equity and
+the fall measured to its worst, which assumes the high came before the low —
+a few pips inside one minute, and the same conservative posture as resolving
+fills by the worse of the two orderings.
+
+**What it changed, over the interim sweep:**
+
+* the daily curve understated the drawdown on **all 27 configurations**;
+* one of them crosses the gate: `S25_N6_M1` goes **23.90% (pass) → 25.69%
+  (fail)**.
+
+The old figure is still computed and reported beside the real one, because the
+gap between them is the point.
+
+### Tests
+
+`132 passed` — two new. The second needed three attempts, and the failures were
+informative: a price round trip is NOT an equity round trip on a grid that
+re-centres, because re-centring *realises* the loss instead of recovering it.
+The working fixture uses a 50-pip, 6-level grid and a 250-pip dive, wide enough
+that price returns without a re-centre, so the open positions go under water
+and then take profit. 2.92% per candle against 1.80% daily — the daily figure
+38% smaller.
+
+**Remaining:** the download, then the integrity check, the sweep and
+REPORT.md. The backend deploy is blocked on a permission I do not have.

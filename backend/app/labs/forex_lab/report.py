@@ -277,6 +277,11 @@ def write_report(sweep_path: str = "sweep.json", dest: Path | None = None) -> st
         "2026 is January to June, half a year, and is counted in nothing: the "
         "gate's denominator is the six full years 2020–2025.",
         "",
+        '"Max DD" is measured on EVERY candle, at the worse extreme of each, '
+        "not on a daily close — a daily sample cannot see a trough that "
+        "recovers before the day ends, and the gate this feeds is a ceiling, "
+        "so measuring it low passes runs that should fail. Over this sweep the "
+        "daily figure understated the fall on every configuration. "
         '"Low water" is the lowest equity the account ever showed, measured at '
         "the worse extreme of every candle rather than at a daily close. A "
         "configuration marked BLOWN passed through zero: its profit factor and "

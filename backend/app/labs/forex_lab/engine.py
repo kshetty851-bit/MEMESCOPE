@@ -204,6 +204,13 @@ class GridEngine:
         #: passed through zero, and a profit factor computed over a blown
         #: account is a number about a thing that stopped existing.
         self.min_equity = cfg.start_equity
+        #: Running peak and the worst peak-to-trough fall from it, both measured
+        #: on EVERY candle rather than on a daily close. A daily sample cannot
+        #: see a trough that recovers before the day ends, and the gate this
+        #: feeds is a drawdown ceiling — under-measuring it passes runs that
+        #: should fail.
+        self.peak_equity = cfg.start_equity
+        self.max_drawdown = 0.0
         self._last_rollover: date | None = None
         self._build_grid(start_ts)
 
@@ -495,6 +502,8 @@ class GridEngine:
         c.stats = dict(self.stats)
         c.rejections = list(self.rejections)
         c.min_equity = self.min_equity
+        c.peak_equity = self.peak_equity
+        c.max_drawdown = self.max_drawdown
         c._last_rollover = self._last_rollover
         c._bound_down = self._bound_down
         c._bound_up = self._bound_up
@@ -510,6 +519,8 @@ class GridEngine:
         self.stats = other.stats
         self.rejections = other.rejections
         self.min_equity = other.min_equity
+        self.peak_equity = other.peak_equity
+        self.max_drawdown = other.max_drawdown
         self._last_rollover = other._last_rollover
         self._bound_down = other._bound_down
         self._bound_up = other._bound_up
@@ -557,11 +568,27 @@ class GridEngine:
         # traded is a stop-out the backtest would mostly miss.
         low, high = self.unrealized(mid_low), self.unrealized(mid_high)
         worst_mid = mid_low if low < high else mid_high
-        worst_equity = self.balance + min(low, high)
-        if worst_equity < self.min_equity:
-            self.min_equity = worst_equity
+        self._mark_equity(self.balance + min(low, high), self.balance + max(low, high))
         self._check_stop_out(worst_mid, minute)
         self.mark = mid_close
+
+    def _mark_equity(self, worst: float, best: float) -> None:
+        """Update the low-water mark and the drawdown from this candle.
+
+        The peak is taken from the candle's BEST equity and the fall measured to
+        its WORST, which assumes the high came before the low. Within one minute
+        that is a few pips of difference, and it is the same conservative
+        posture as resolving fills by the worse of the two orderings: a
+        drawdown ceiling should be approached from above.
+        """
+        if worst < self.min_equity:
+            self.min_equity = worst
+        if best > self.peak_equity:
+            self.peak_equity = best
+        if self.peak_equity > 0:
+            fall = (self.peak_equity - worst) / self.peak_equity
+            if fall > self.max_drawdown:
+                self.max_drawdown = fall
 
     def finish(self, minute: datetime, mid_close: float) -> None:
         """Close what is still open, so the equity curve ends at cash."""

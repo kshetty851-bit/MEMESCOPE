@@ -300,8 +300,7 @@ def test_the_cost_breakdown_reconciles_to_the_final_equity():
     r = replay(GridConfig(step_pips=25, levels=4), ts, px)
 
     buckets = (
-        r["tp_pnl"] + r["recenter_loss"] + r["stopout_loss"] + r["end_pnl"]
-        + r["swap_paid"]
+        r["tp_pnl"] + r["recenter_loss"] + r["stopout_loss"] + r["end_pnl"] + r["swap_paid"]
     )
     assert r["start_equity"] + buckets == pytest.approx(r["final_equity"], abs=0.01)
     assert r["end_pnl"] != 0.0, "the fixture must actually close something at the end"
@@ -316,3 +315,54 @@ def test_every_close_reason_lands_in_exactly_one_bucket():
     r = replay(GridConfig(step_pips=25, levels=4), ts, px, with_trades=True)
     reasons = {t["reason"] for t in r["trade_list"]}
     assert reasons <= {"tp", "recenter", "stopout", "end"}, reasons
+
+
+def test_drawdown_is_measured_on_every_candle_not_on_daily_closes():
+    """The gate is a drawdown CEILING, so measuring it too low passes runs that
+    should fail — and a daily sample cannot see a trough that recovers before
+    the day ends.
+
+    On the interim sweep this was not hypothetical: `S50_N6_M0` reported 14.92%
+    from the daily curve while its per-candle low-water mark implied at least
+    17.4%, and that is itself a floor, because the true fall is measured from
+    the running peak rather than from the opening balance.
+    """
+    start = datetime(2023, 6, 1, 0, 0, tzinfo=UTC)
+    # Down hard, back up within the same day, so a daily close sees little.
+    ts, px = series(start, ramp(1.10000, 1.08000) + ramp(1.08000, 1.10000))
+    r = replay(GridConfig(step_pips=25, levels=4), ts, px)
+
+    assert r["max_drawdown_pct"] >= r["max_drawdown_daily_pct"], (
+        "the per-candle figure can never be the smaller of the two"
+    )
+    assert r["max_drawdown_pct"] > 0
+    # The low-water mark and the drawdown must tell the same story.
+    implied = 100 * (r["peak_equity"] - r["min_equity"]) / r["peak_equity"]
+    assert r["max_drawdown_pct"] == pytest.approx(implied, abs=0.02)
+
+
+def test_a_trough_inside_one_day_is_not_invisible():
+    """The specific failure mode: equity falls and substantially recovers
+    BETWEEN two daily samples, so the daily curve never sees the bottom.
+
+    A 250-pip dive and return on a 50-pip, 6-level grid — wide enough that
+    price comes back without a re-centre, so the open positions go under water
+    and then take profit, which is an equity round trip rather than a realised
+    loss. Then flat past midnight so a daily sample is actually taken, well
+    after the recovery.
+
+    Measured: 2.92% per candle against 1.80% on the daily curve. The daily
+    figure is 38% smaller, and it is the one the gate's drawdown ceiling would
+    have been judged on.
+    """
+    start = datetime(2023, 6, 1, 0, 0, tzinfo=UTC)
+    dive = ramp(1.10000, 1.07500) + ramp(1.07500, 1.10000)
+    flat = [1.10000] * (1500 - len(dive))
+    ts, px = series(start, dive + flat)
+    assert len(ts) > 1440, "the series must cross midnight for a daily sample"
+
+    r = replay(GridConfig(step_pips=50, levels=6), ts, px)
+    assert r["recenters"] == 0, "a re-centre would realise the loss, not recover it"
+    assert r["max_drawdown_pct"] > r["max_drawdown_daily_pct"] * 1.2, (
+        f"per-candle {r['max_drawdown_pct']} vs daily {r['max_drawdown_daily_pct']}"
+    )

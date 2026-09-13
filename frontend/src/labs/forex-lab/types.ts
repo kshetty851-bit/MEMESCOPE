@@ -26,7 +26,11 @@ export interface ConfigResult {
   total_return_pct: number;
   /** Null means no losing trade at all — over six years, a bug or an empty run. */
   profit_factor: number | null;
+  /** Measured on every candle, at the worse extreme of each. */
   max_drawdown_pct: number;
+  /** What a daily close would have claimed. Always the smaller of the two. */
+  max_drawdown_daily_pct: number;
+  peak_equity: number;
   trades: number;
   /** Lowest equity the account ever showed, at the worse extreme of a candle. */
   min_equity: number;

@@ -245,6 +245,10 @@ function SweepTable({ results, spec }: { results: ConfigResult[]; spec: GateSpec
         </table>
       </div>
       <p className="border-t border-line px-4 py-3 text-xs text-ink-dim">
+        <strong>Max DD</strong> is measured on every candle, at the worse
+        extreme of each — not on a daily close, which cannot see a trough that
+        recovers before the day ends. The gate this feeds is a ceiling, so
+        measuring it low passes runs that should fail.{" "}
         <strong>Low water</strong> is the lowest equity the account ever showed,
         measured at the worse extreme of every candle rather than at a daily
         close. A row marked <strong className="text-danger">BLOWN</strong> passed
