@@ -594,7 +594,10 @@ function ArmTrades({ name }: { name: string }) {
         Every trade this arm has made. The mint is in full and links to
         DexScreener — the same feed the marks came from — and each row carries
         the pool depth and the price impact its order caused, so a fill can be
-        checked rather than taken on trust.
+        checked rather than taken on trust. These are the{" "}
+        <b className="text-ink">$100 fills the returns were measured from</b>,
+        not the $100 wallet on the row above: the wallet compounds a tenth of
+        itself per position, so the same trades read differently there.
       </p>
       {open.length ? (
         <div className="flex flex-col gap-1">
