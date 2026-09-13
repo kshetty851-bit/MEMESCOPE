@@ -164,3 +164,34 @@ def test_walk_forward_sizes_folds_from_data_not_from_the_request():
     assert status == "INSUFFICIENT_HISTORY" and folds == []
     folds, status = analysis.walk_forward(ds, {}, fold="daily")
     assert status == "INSUFFICIENT_HISTORY" and folds == []
+
+
+def test_graduation_exit_is_priced_at_the_last_pre_migration_print():
+    """A completed curve zeroes all four reserves, so the graduation sample has
+    no price. Exiting at it produced a censored trade still labelled a
+    graduation — which the leakage audit rejected, correctly. The position must
+    leave at the last print that existed before migration."""
+    entry = _s(30, "16", "31", V_Q, V_T)
+    # x1.2: inside the stop and short of the target, so neither price rule
+    # fires and graduation is the only exit left to test.
+    live = _s(60, "80", "90", V_Q * Decimal("1.2"), V_T)
+    grad = Sample(ts=T0 + timedelta(seconds=90), progress_pct=Decimal("100"),
+                  mcap_quote=None, v_quote=Decimal(0), v_token=Decimal(0),
+                  complete=True)                       # reserves zeroed
+    tok = _token([entry, live, grad])
+    tr = simulate(tok, entry, "T", now_limit=T0 + timedelta(hours=2))
+    assert tr.exit_reason == "graduation"
+    assert tr.censored is False
+    assert tr.exit_price == live.price
+    assert tr.net_return is not None
+
+    ok, findings = leakage.audit([tr])
+    assert ok, [f.rule for f in findings]
+
+
+def test_leakage_findings_serialise():
+    """`frozen=True, slots=True` dataclasses have no __dict__; the runner has to
+    use asdict. This aborted the first real run."""
+    from dataclasses import asdict
+    f = leakage.LeakageFinding("M", "S", "rule", "detail")
+    assert asdict(f)["rule"] == "rule"

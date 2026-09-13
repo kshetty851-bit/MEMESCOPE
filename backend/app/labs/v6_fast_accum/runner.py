@@ -14,6 +14,7 @@ leak.
 from __future__ import annotations
 
 import subprocess
+from dataclasses import asdict
 from datetime import UTC, datetime
 from decimal import Decimal
 
@@ -62,7 +63,7 @@ async def run(session: AsyncSession, *, now: datetime | None = None,
             "experiment_id": _experiment_id(started),
             "verdict": "RUN ABORTED — LEAKAGE DETECTED",
             "leakage_passed": False,
-            "leakage_findings": [f.__dict__ for f in findings[:50]],
+            "leakage_findings": [asdict(f) for f in findings[:50]],
         }
 
     # --- controls, on the primary candidate ----------------------------------

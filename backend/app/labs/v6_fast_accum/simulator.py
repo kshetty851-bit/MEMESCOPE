@@ -178,6 +178,12 @@ def simulate(
     t100 = t_peak = None
     exit_s: Sample | None = None
     reason = "censored"
+    #: The most recent sample that could actually be priced. A completed curve
+    #: ZEROES all four reserves, so the graduation sample itself has no price —
+    #: exiting "at" it produced a trade with no return that was still labelled
+    #: a graduation, which is what the leakage audit rejected. The position
+    #: leaves at the last pre-migration print, which is also what a seller gets.
+    last_priced: Sample | None = None
 
     for s in path:
         px = s.price
@@ -185,8 +191,10 @@ def simulate(
             # Graduation outranks every price condition in this interval: the
             # position must be out BEFORE migration, and a post-migration print
             # is information the rule is not allowed to use.
-            exit_s, reason = s, "graduation"
+            exit_s, reason = (last_priced or entry), "graduation"
             break
+        if px is not None and px > 0:
+            last_priced = s
         if px is None or entry_price <= 0:
             continue
         mult = px / entry_price
