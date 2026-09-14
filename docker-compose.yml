@@ -71,6 +71,20 @@ x-backend-env: &backend-env
   # container, and the beat task then reports "disabled" for ever while
   # looking perfectly healthy.
   LAB_GRADUATION_PAPER_ENABLED: ${LAB_GRADUATION_PAPER_ENABLED:-false}
+  # Seconds between chain reads. In the ANCHOR rather than on the graduation
+  # service alone, because the API renders this figure on the lab page: a
+  # recorder polling at 30s beside a page claiming 3s is the kind of quiet
+  # divergence this file has already produced three times.
+  #
+  # Raised from 3s on 2026-09-14 after Helius returned `429 max usage reached`.
+  # The arithmetic was never survivable on a free plan: a 500-token watch set
+  # at 100 accounts a call is 5 calls a poll, so 3s meant 100 calls/min —
+  # 144,000 a day, 4.3M a month against an allowance near 1M. At 30s it is
+  # 430k a month, and nothing currently running needs the lost resolution:
+  # the tournament trades on DexScreener, graduations arrive over the
+  # PumpPortal websocket, and CURVE90_2m — the one arm that read the chain —
+  # was retired the same day after measuring -3.02%.
+  LAB_GRADUATION_POLL_INTERVAL_S: ${LAB_GRADUATION_POLL_INTERVAL_S:-3}
   SOLANA_WS_URL: ${SOLANA_WS_URL:-wss://api.mainnet-beta.solana.com}
   HELIUS_API_KEY: ${HELIUS_API_KEY:-}
   FEATURE_SCANNER_ENABLED: ${FEATURE_SCANNER_ENABLED:-false}
