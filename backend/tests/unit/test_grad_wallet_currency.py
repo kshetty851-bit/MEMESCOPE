@@ -136,3 +136,31 @@ class TestStallAlarm:
     def test_a_healthy_recorder_is_not_stalled(self):
         assert not self._stalled(watch_set=478, tokens_last_hour=286,
                                  age_s=3, threshold_s=15)
+
+
+class TestLeaderSelection:
+    """A baseline that wins must be able to be called the winner.
+
+    Excluding controls from leadership was right when a control was a coin
+    flip: a dice roll cannot win anything. It became wrong the moment the
+    baseline became a strategy. On 2026-09-14 FLOOR_3m reached profit factor
+    4.24 against a required 2.99 on 143 trades — the first arm ever to clear
+    its bar here — and the board named a SIX-trade band arm as leader, because
+    the thing that was working had been classified as the control.
+    """
+
+    def test_leadership_is_not_gated_on_being_a_strategy(self):
+        src = inspect.getsource(api.tournament)
+        pick = next(line for line in src.splitlines()
+                    if line.strip().startswith("leader = next("))
+        assert "not r.is_control" not in pick, (
+            "a baseline that outperforms every filter must be able to lead; "
+            "excluding it hides the most useful result this lab can produce")
+
+    def test_a_leading_baseline_is_measured_against_selecting_nothing(self):
+        """It cannot be asked to beat itself, so the term becomes the arm that
+        applies no floor and no band at all."""
+        src = inspect.getsource(api.tournament)
+        assert "leader.is_control" in src and "naked" in src, (
+            "when the leader IS the baseline the gate must swap in the "
+            "no-selection arm, not compare it against itself")

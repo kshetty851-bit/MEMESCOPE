@@ -954,7 +954,23 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
     best_control = next((r.name for r in control_rows
                          if band is not None and r.trades
                          and r.wallet_100_usd == band), "")
-    leader = next((r for r in traded if not r.is_control), None)
+    # ANY arm may lead, baselines included.
+    #
+    # This excluded controls, which was right when a control was a coin flip —
+    # a dice roll cannot be "the winner" of anything. It became wrong the
+    # moment the baseline stopped being a dice roll and started being a
+    # strategy: on 2026-09-14 `FLOOR_3m` reached profit factor 4.24 against a
+    # required 2.99 on 143 trades, the first arm in this lab ever to clear its
+    # bar — and the board reported a SIX-trade band arm as the leader, because
+    # the thing that was working had been classified as the control.
+    #
+    # A baseline that wins is the most useful result this lab can produce: it
+    # means the edge is in the floor, not in anything clever layered on top.
+    leader = next(iter(traded), None)
+    # The no-selection arm: every graduation, no floor, no band. Every other
+    # arm's population is a subset of its own, so it is what a baseline has to
+    # beat when the baseline is itself the leader.
+    naked = next((r for r in rows if r.entry == "all" and r.trades), None)
 
     board = Leaderboard(
         running=config.paper_enabled(), started_at=started, arms=rows,
@@ -993,11 +1009,27 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
     if band is None:
         fails.append("no random arm has closed a trade yet, so there is "
                      "nothing to compare against")
+    elif leader.is_control:
+        # The leader IS the baseline. "Has not beaten the baseline" is a
+        # sentence about nothing when the two are the same arm, so the term it
+        # must clear instead is the arm that selects nothing at all.
+        if naked is None:
+            fails.append("the no-selection arm has not traded, so there is "
+                         "nothing to compare a baseline against")
+        elif leader.wallet_100_usd <= naked.wallet_100_usd:
+            fails.append(f"is the baseline and has not beaten {naked.name}, "
+                         f"which applies no filter at all "
+                         f"(${naked.wallet_100_usd} against "
+                         f"${leader.wallet_100_usd})")
+        else:
+            board.leader_beats_controls = True
     elif not board.leader_beats_controls:
-        fails.append(f"has not beaten the best random arm ({best_control}, "
+        fails.append(f"has not beaten the baseline ({best_control}, "
                      f"${band} wallet against ${leader.wallet_100_usd})")
     board.called = not fails
     board.verdict = ("CALLED: " + leader.name + " cleared every term."
+                     + (" It is the BASELINE — the edge is the floor itself, "
+                        "not a filter layered on it." if leader.is_control else "")
                      if board.called else
                      f"{leader.name} leads but is not called — " + "; ".join(fails))
     return board
