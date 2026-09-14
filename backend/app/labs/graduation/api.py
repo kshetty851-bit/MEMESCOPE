@@ -636,10 +636,11 @@ class ArmRow(BaseModel):
     gross_pct: Decimal | None = None
     cost_pct: Decimal | None = None
     projected_trades: int = 0
-    #: Share of simulated thirty-day paths in which the wallet fell below the
-    #: size at which a position is worth placing. The one figure a running
-    #: total cannot express.
+    #: Share of simulated paths in which the wallet fell below the size at
+    #: which a position is worth placing — and over how many days, because a
+    #: wipeout rate over a week is not one over a month.
     ruin_pct: Decimal | None = None
+    ruin_days: int = 0
 
 
 class Leaderboard(BaseModel):
@@ -928,9 +929,23 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
         # path. Each horizon walks a PREFIX of one drawn sequence rather than
         # being simulated separately, so the four cannot contradict each other:
         # a wallet that is dead at day one is dead at day thirty.
-        days = (1, 7, 15, 30)
+        # A HORIZON IS ONLY SHOWN IF THE DATA REACHES A TENTH OF THE WAY TO IT.
+        #
+        # Clustering the error by hour barely moved the band, and it should not
+        # have: with fourteen hours of consistently positive trades, no honest
+        # measure of SAMPLING error produces a negative month. The problem is
+        # not the error model, it is that a month is fifty-one times the window
+        # observed. Nothing in fourteen hours can speak about thirty days.
+        #
+        # A tenth is the limit, so: a day needs 2.4 hours behind it, a week
+        # needs 17, a fortnight 36, a month 72. Horizons past that are left
+        # blank until the history reaches them, which is the difference between
+        # a projection and a wish.
+        days = tuple(d for d in (1, 7, 15, 30) if hours * 10 >= d * 24)
+        if not days:
+            return {}
         cuts = {d: max(1, int(rate * 24 * d) // block) for d in days}
-        longest = cuts[30]
+        longest = cuts[days[-1]]
         finals: dict[int, list[float]] = {d: [] for d in days}
         ruined = 0
         for _ in range(160):
@@ -940,7 +955,7 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
             for d in days:
                 equity, dead = _wallet_walk(seq[:cuts[d]])
                 finals[d].append(equity)
-                if d == 30:
+                if d == days[-1]:
                     ruined += dead
         for d in days:
             finals[d].sort()
@@ -949,17 +964,20 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
             v = finals[d]
             return Decimal(str(v[int(p * (len(v) - 1))])).quantize(Decimal("0.01"))
 
-        return {
-            "projected_1d_usd": at(1, 0.50),
-            "projected_1w_usd": at(7, 0.50),
-            "projected_15d_usd": at(15, 0.50),
-            "projected_30d_usd": at(30, 0.50),
-            "projected_30d_low": at(30, 0.05),
-            "projected_30d_high": at(30, 0.95),
-            "projected_trades": horizon,
-            "ruin_pct": (Decimal(ruined) / Decimal(len(finals[30])) * 100
-                         ).quantize(Decimal("0.1")),
-        }
+        out: dict[str, Any] = {"projected_trades": horizon}
+        for d, field in ((1, "1d"), (7, "1w"), (15, "15d"), (30, "30d")):
+            if d in finals:
+                out[f"projected_{field}_usd"] = at(d, 0.50)
+        if 30 in finals:
+            out["projected_30d_low"] = at(30, 0.05)
+            out["projected_30d_high"] = at(30, 0.95)
+        # Ruin is counted on the LONGEST horizon actually simulated, and the
+        # page says which — a wipeout rate over a week is not a wipeout rate
+        # over a month and must not be read as one.
+        out["ruin_days"] = days[-1]
+        out["ruin_pct"] = (Decimal(ruined) / Decimal(len(finals[days[-1]])) * 100
+                           ).quantize(Decimal("0.1"))
+        return out
 
     def row(arm) -> ArmRow:
         s = stats.get(arm.name)
@@ -1016,7 +1034,7 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
                      "projected_30d_low": r.projected_30d_low,
                      "projected_30d_high": r.projected_30d_high,
                      "projected_trades": r.projected_trades,
-                     "ruin_pct": r.ruin_pct}
+                     "ruin_pct": r.ruin_pct, "ruin_days": r.ruin_days}
             for r in rows if r.projected_30d_usd is not None})
     # Ranked on the WALLET, which is the money column the board shows. Ranking
     # on the $1,000 book's P&L put "#1" beside a number computed from a

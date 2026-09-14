@@ -839,7 +839,9 @@ function LeaderboardPanel() {
                 <th className="pb-2 pr-3 text-right font-medium">
                   30d projection
                 </th>
-                <th className="pb-2 pr-3 text-right font-medium">Wipeout</th>
+                <th className="pb-2 pr-3 text-right font-medium">
+                  Wallet dies
+                </th>
                 <th className="pb-2 pr-3 text-right font-medium">
                   Trades <span className="text-ink-dim">/ hr</span>
                 </th>
@@ -1002,6 +1004,11 @@ function LeaderboardPanel() {
                           {Number(a.ruin_pct).toFixed(0)}%
                         </span>
                       )}
+                      {a.ruin_pct === null ? null : (
+                        <span className="block text-micro text-ink-dim">
+                          of {a.ruin_days}d runs
+                        </span>
+                      )}
                     </td>
                     <td className="py-2.5 pr-3 text-right">
                       <span className="grad-figure">{a.trades}</span>
@@ -1092,9 +1099,19 @@ function LeaderboardPanel() {
             the floor, no selection. Each position is a tenth of
             current equity, so it compounds, and it stops when the next position
             would be too small to be worth placing —{" "}
-            <b className="text-ink">Wipeout</b> is the share of simulated months
-            that ended that way, which is the number a running total cannot
-            express. <b className="text-ink">Gross</b> is the token&rsquo;s own move
+            <b className="text-ink">Wallet dies</b> counts how often that
+            happened: run the wallet forward a thousand times and this is the
+            share of runs where it ended too small to place another trade. 0%
+            means it survived every run; 40% means two in five ended broke. The
+            column says how many days each run covered, because dying within a
+            week is not the same as dying within a month.
+            <br />
+            <span className="mt-1 block">
+              A horizon is only shown when the arm&rsquo;s history reaches a
+              tenth of the way to it — a day needs 2.4 hours behind it, a month
+              needs 72. Blank means not enough history yet, which is the
+              difference between a projection and a wish.
+            </span> <b className="text-ink">Gross</b> is the token&rsquo;s own move
             before execution, and <b className="text-ink">toll</b> is what fees
             and impact took — net is what is left. The two are separated because
             a losing arm with no edge and a winning arm that paid its edge away

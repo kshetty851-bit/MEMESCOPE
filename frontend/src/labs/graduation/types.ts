@@ -205,6 +205,7 @@ export interface ArmRow {
   /** Share of simulated 30-day paths where the account could no longer fund a
    * position. A running total cannot express this at all. */
   ruin_pct: string | null;
+  ruin_days: number;
 }
 
 /**
