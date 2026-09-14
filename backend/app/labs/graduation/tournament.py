@@ -146,14 +146,18 @@ def _coin(arm: str, mint: str, pct: int) -> bool:
     return int.from_bytes(digest, "big") % 100 < pct
 
 
-#: The fourteen liquidity bands, in dollars of pool at the pool open.
+#: The three liquidity bands, in dollars of pool at the pool open.
 #:
 #: CONTIGUOUS AND ORDERED, which is the whole design. Generation 1 ran fifty
 #: independent filters and the winner had to clear the best-of-fifty noise
 #: ceiling — profit factor 4.79 — which nothing reached in seventeen hours.
-#: Ordered bands ask a different question: a real effect appears as a
-#: SHAPE across neighbours, and noise appears as one spike beside eight flat
-#: cells. A shape is visible with far fewer trades than a maximum is.
+#: Fourteen bands were tried first and starved: each took only 25 trades a day
+#: of a 320-token flow, and pooled over all three holds they produced scatter,
+#: not a shape — +2.48%, +1.98%, -4.40%, +0.35%, +2.84% across neighbours. The
+#: same data pooled by HOLD separated cleanly (see the arm list below), so the
+#: resolution was being spent on the factor that does not move and starved from
+#: the one that does. Three wide bands keep the question alive at four times
+#: the sample.
 #:
 #: The edges come from measurement, per TOKEN (1,484 tokens, 7 days), not from
 #: round numbers. Share of tokens losing more than 25% in the first five
@@ -186,20 +190,9 @@ def _coin(arm: str, mint: str, pct: int) -> bool:
 CURVE_ENTRY_PCT = Decimal("90")
 
 LIQ_BANDS: tuple[tuple[str, int, int], ...] = (
-    ("L01", 75_000, 90_000),
-    ("L02", 90_000, 105_000),
-    ("L03", 105_000, 116_000),
-    ("L04", 116_000, 128_000),
-    ("L05", 128_000, 140_000),
-    ("L06", 140_000, 155_000),
-    ("L07", 155_000, 170_000),
-    ("L08", 170_000, 185_000),
-    ("L09", 185_000, 198_000),
-    ("L10", 198_000, 220_000),
-    ("L11", 220_000, 250_000),
-    ("L12", 250_000, 300_000),
-    ("L13", 300_000, 400_000),
-    ("L14", 400_000, 1_000_000_000),
+    ("B1",  75_000,   116_000),
+    ("B2", 116_000,   198_000),
+    ("B3", 198_000, 1_000_000_000),
 )
 BAND_BY_KEY: dict[str, tuple[int, int]] = {
     f"liq_{k}": (lo, hi) for k, lo, hi in LIQ_BANDS}
@@ -219,8 +212,6 @@ ENTRY_RULES: dict[str, str] = {
              f"it migrates, not after",
     "floor": f"BASELINE — every graduation with a pool at or above "
              f"${LIQ_BANDS[0][1]:,}, no band selection",
-    "band": f"the pool held ${LIQ_BANDS[3][1]:,} to ${LIQ_BANDS[8][2]:,} at "
-            f"the open — generation 1's signal, as one arm",
     "all": "every graduation, no filter",
     "sym": "the token's symbol had been used by at least one earlier token",
     "sym3": "the symbol had been used by at least three earlier tokens",
@@ -248,9 +239,6 @@ ENTRY_RULES: dict[str, str] = {
 def accepts(arm: Arm, *, mint: str, open_at: datetime, liquidity: Decimal | None,
             fdv: Decimal | None, sells: int | None, reuse: int | None) -> bool:
     e = arm.entry
-    if e == "band":
-        return (liquidity is not None
-                and LIQ_BANDS[3][1] <= liquidity < LIQ_BANDS[8][2])
     band = BAND_BY_KEY.get(e)
     if band is not None:
         lo, hi = band
@@ -368,94 +356,47 @@ D = Decimal
 #: sits, and HOW LONG you hold. Sub-five-minute holds are in because nobody
 #: has ever looked at them inside a band.
 ARMS: tuple[Arm, ...] = (
-    Arm("L01_75k_2m", "liq_L01", 2, note="pool $75k-$90k, out at 2m"),
-    Arm("L01_75k_3m", "liq_L01", 3, note="pool $75k-$90k, out at 3m"),
-    Arm("L01_75k_5m", "liq_L01", 5, note="pool $75k-$90k, out at 5m"),
-    Arm("L02_90k_2m", "liq_L02", 2, note="pool $90k-$105k, out at 2m"),
-    Arm("L02_90k_3m", "liq_L02", 3, note="pool $90k-$105k, out at 3m"),
-    Arm("L02_90k_5m", "liq_L02", 5, note="pool $90k-$105k, out at 5m"),
-    Arm("L03_105k_2m", "liq_L03", 2, note="pool $105k-$116k, out at 2m"),
-    Arm("L03_105k_3m", "liq_L03", 3, note="pool $105k-$116k, out at 3m"),
-    Arm("L03_105k_5m", "liq_L03", 5, note="pool $105k-$116k, out at 5m"),
-    Arm("L04_116k_2m", "liq_L04", 2, note="pool $116k-$128k, out at 2m"),
-    Arm("L04_116k_3m", "liq_L04", 3, note="pool $116k-$128k, out at 3m"),
-    Arm("L04_116k_5m", "liq_L04", 5, note="pool $116k-$128k, out at 5m"),
-    Arm("L05_128k_2m", "liq_L05", 2, note="pool $128k-$140k, out at 2m"),
-    Arm("L05_128k_3m", "liq_L05", 3, note="pool $128k-$140k, out at 3m"),
-    Arm("L05_128k_5m", "liq_L05", 5, note="pool $128k-$140k, out at 5m"),
-    Arm("L06_140k_2m", "liq_L06", 2, note="pool $140k-$155k, out at 2m"),
-    Arm("L06_140k_3m", "liq_L06", 3, note="pool $140k-$155k, out at 3m"),
-    Arm("L06_140k_5m", "liq_L06", 5, note="pool $140k-$155k, out at 5m"),
-    Arm("L07_155k_2m", "liq_L07", 2, note="pool $155k-$170k, out at 2m"),
-    Arm("L07_155k_3m", "liq_L07", 3, note="pool $155k-$170k, out at 3m"),
-    Arm("L07_155k_5m", "liq_L07", 5, note="pool $155k-$170k, out at 5m"),
-    Arm("L08_170k_2m", "liq_L08", 2, note="pool $170k-$185k, out at 2m"),
-    Arm("L08_170k_3m", "liq_L08", 3, note="pool $170k-$185k, out at 3m"),
-    Arm("L08_170k_5m", "liq_L08", 5, note="pool $170k-$185k, out at 5m"),
-    Arm("L09_185k_2m", "liq_L09", 2, note="pool $185k-$198k, out at 2m"),
-    Arm("L09_185k_3m", "liq_L09", 3, note="pool $185k-$198k, out at 3m"),
-    Arm("L09_185k_5m", "liq_L09", 5, note="pool $185k-$198k, out at 5m"),
-    Arm("L10_198k_2m", "liq_L10", 2, note="pool $198k-$220k, out at 2m"),
-    Arm("L10_198k_3m", "liq_L10", 3, note="pool $198k-$220k, out at 3m"),
-    Arm("L10_198k_5m", "liq_L10", 5, note="pool $198k-$220k, out at 5m"),
-    Arm("L11_220k_2m", "liq_L11", 2, note="pool $220k-$250k, out at 2m"),
-    Arm("L11_220k_3m", "liq_L11", 3, note="pool $220k-$250k, out at 3m"),
-    Arm("L11_220k_5m", "liq_L11", 5, note="pool $220k-$250k, out at 5m"),
-    Arm("L12_250k_2m", "liq_L12", 2, note="pool $250k-$300k, out at 2m"),
-    Arm("L12_250k_3m", "liq_L12", 3, note="pool $250k-$300k, out at 3m"),
-    Arm("L12_250k_5m", "liq_L12", 5, note="pool $250k-$300k, out at 5m"),
-    Arm("L13_300k_2m", "liq_L13", 2, note="pool $300k-$400k, out at 2m"),
-    Arm("L13_300k_3m", "liq_L13", 3, note="pool $300k-$400k, out at 3m"),
-    Arm("L13_300k_5m", "liq_L13", 5, note="pool $300k-$400k, out at 5m"),
-    Arm("L14_400k_2m", "liq_L14", 2, note="pool over $400k, out at 2m"),
-    Arm("L14_400k_3m", "liq_L14", 3, note="pool over $400k, out at 3m"),
-    Arm("L14_400k_5m", "liq_L14", 5, note="pool over $400k, out at 5m"),
-    # SIX ARMS THAT ARE ALSO REAL STRATEGIES.
+    # THE HOLD SWEEP. Each of these takes every qualifying graduation — about
+    # 320 a day — so each accumulates twelve times faster than a 14-band arm
+    # did, and the five together trade the SAME tokens, differing only in when
+    # they sell. That is what makes the comparison clean.
     #
-    # Generation 1 and the first cut of generation 2 used coin flips here. A
-    # dice roll is a sharp null, and it is executable — but it is not a thing
-    # anyone would fund, and a lab whose leaderboard is topped by something
-    # unfundable answers a question nobody asked.
+    # Why hold is now the hypothesis: pooling the old grid by hold gave
+    # 2m +1.11% gross, 3m +2.22%, 5m +0.34% on identical 140-trade samples
+    # with a flat ~1.15% toll. The same shape showed arm by arm — FLOOR at
+    # 2/3/5m was +0.98% / +2.11% / -0.18%, BAND was +0.93% / +2.08% / -3.10%.
+    # Three minutes beat its neighbours every time.
     #
-    # FLOOR is the baseline every grid arm is measured against: the same
-    # universe, the same floor, no band. Every grid arm is a subset of its
-    # population, so "beat FLOOR" is precisely the claim a band makes.
-    #
-    # BAND is generation 1's one real signal as a single arm ($116k-$198k),
-    # kept whole so the grid can be checked against the coarse version of
-    # itself — if fourteen bands find nothing the six-band lump already had,
-    # the extra resolution bought nothing.
+    # 4m and 6m have NEVER been tested and are the point of this sweep: they
+    # decide whether three minutes is a peak or the edge of a step. Holds must
+    # differ by at least a minute because the median gap between price samples
+    # is 61s — anything finer is not measurable.
     Arm("FLOOR_2m", "floor", 2, note="BASELINE — every graduation over $75k, out at 2m"),
     Arm("FLOOR_3m", "floor", 3, note="BASELINE — every graduation over $75k, out at 3m"),
+    Arm("FLOOR_4m", "floor", 4, note="BASELINE — every graduation over $75k, out at 4m"),
     Arm("FLOOR_5m", "floor", 5, note="BASELINE — every graduation over $75k, out at 5m"),
-    Arm("BAND_2m", "band", 2, note="pool $116k-$198k, out at 2m"),
-    Arm("BAND_3m", "band", 3, note="pool $116k-$198k, out at 3m"),
-    Arm("BAND_5m", "band", 5, note="pool $116k-$198k, out at 5m"),
-    # Carried over UNCHANGED from generation 1, and deliberately: these two
-    # are a pre-registered A/B on the rug signals (a never-seen symbol rugs
-    # 18% against 3%; a daytime-UTC open 15% against 5%), opened 2026-09-13
-    # with a judge date of 10 October. Rebuilding the tournament around them
-    # must not quietly end an experiment that has a date on it, so they keep
-    # their names, their rules and their accumulated trades.
-    # CURVE90_2m was here, and it is ANSWERED. It bought tokens still climbing
-    # the bonding curve at >=90% and sold at two minutes, against F01_all_2m
-    # buying the same clock AFTER the migration. Retired 2026-09-14:
-    #
-    #     CURVE90_2m   n=206   mean -3.02%   winners 44%   (before)
-    #     F01_all_2m   n=741   mean -1.21%   winners 46%   (after)
-    #     FLOOR_2m     n=115   mean -0.24%   winners 41%   (after, over $75k)
-    #
-    # Buying before the migration is WORSE than buying after it, and worse
-    # again than simply not buying the shallow pools. It read +10.13% on its
-    # first three trades and -3.02% on two hundred, which is the whole reason
-    # a leader with a single-digit trade count is never a finding.
-    #
-    # The machinery stays — `_fill_curve`, `_curve_candidates`, `_sol_rate`,
-    # `_curve_depth_usd`, and the curve fallback in `_latest_prices` — all of
-    # it inert while no arm carries `entry="curve"`, all of it tested. Curve
-    # entry took real work to make correct (the quote-side depth alone would
-    # have doubled every impact figure) and the next hypothesis that wants it
-    # should not have to rediscover it.
+    Arm("FLOOR_6m", "floor", 6, note="BASELINE — every graduation over $75k, out at 6m"),
+    # The band question, kept alive at four times the resolution it had. Each
+    # band arm is measured against the FLOOR arm on ITS OWN hold, so a band
+    # that helps has to beat no-selection at the same clock.
+    Arm("B1_75k_2m", "liq_B1", 2, note="pool $75k-$116k, out at 2m"),
+    Arm("B1_75k_3m", "liq_B1", 3, note="pool $75k-$116k, out at 3m"),
+    Arm("B1_75k_4m", "liq_B1", 4, note="pool $75k-$116k, out at 4m"),
+    Arm("B1_75k_5m", "liq_B1", 5, note="pool $75k-$116k, out at 5m"),
+    Arm("B1_75k_6m", "liq_B1", 6, note="pool $75k-$116k, out at 6m"),
+    Arm("B2_116k_2m", "liq_B2", 2, note="pool $116k-$198k, out at 2m"),
+    Arm("B2_116k_3m", "liq_B2", 3, note="pool $116k-$198k, out at 3m"),
+    Arm("B2_116k_4m", "liq_B2", 4, note="pool $116k-$198k, out at 4m"),
+    Arm("B2_116k_5m", "liq_B2", 5, note="pool $116k-$198k, out at 5m"),
+    Arm("B2_116k_6m", "liq_B2", 6, note="pool $116k-$198k, out at 6m"),
+    Arm("B3_198k_2m", "liq_B3", 2, note="pool over $198k, out at 2m"),
+    Arm("B3_198k_3m", "liq_B3", 3, note="pool over $198k, out at 3m"),
+    Arm("B3_198k_4m", "liq_B3", 4, note="pool over $198k, out at 4m"),
+    Arm("B3_198k_5m", "liq_B3", 5, note="pool over $198k, out at 5m"),
+    Arm("B3_198k_6m", "liq_B3", 6, note="pool over $198k, out at 6m"),
+    # Carried over UNCHANGED: a pre-registered A/B on the rug signals with a
+    # 10 October judge date. Rebuilding the tournament must not quietly end an
+    # experiment that has a date on it.
     Arm("F01_all_2m", "all", 2, note="A/B control — every graduation, out at 2m"),
     Arm("F14_symnight_2m", "sym_night", 2,
         note="A/B arm — reused symbol AND a night-UTC open, out at 2m"),
@@ -467,8 +408,8 @@ CONTROLS: tuple[Arm, ...] = tuple(a for a in ARMS if a.is_control)
 #: returned no edge. The count is pinned rather than free because an arm that
 #: appears mid-tournament changes what every other number means — so changing
 #: it must be a deliberate edit with a date, not a side effect.
-assert len(ARMS) == 50, f"the tournament is fifty arms, not {len(ARMS)}"
-assert {a.hold for a in ARMS} == {2, 3, 5}, (
+assert len(ARMS) == 22, f"the tournament is twenty-two arms, not {len(ARMS)}"
+assert {a.hold for a in ARMS} == {2, 3, 4, 5, 6}, (
     "Two, three and five minutes. Longer is measurably worse INSIDE the band "
     "(5m is +3.33% at a 1.6% tail; 30m is -6.48% at 14.6%), and one minute is "
     "not measurable at all: the median gap between price samples is 61s, so a "
@@ -476,14 +417,14 @@ assert {a.hold for a in ARMS} == {2, 3, 5}, (
     "arm the data cannot price is an arm a real wallet cannot verify")
 assert all(a.tp is None and a.trail is None for a in ARMS), (
     "targets and trailing stops are gone — every one of them held 15m+")
-assert len([a for a in ARMS if not a.is_control]) == 47, (
+assert len([a for a in ARMS if not a.is_control]) == 17, (
     "`config.required_pf` is calibrated on the maximum of FORTY-TWO noise "
-    "draws. Forty-seven arms are now judged against it, which makes that bar "
-    "slightly lenient — the 95th percentile of a best-of-47 sits a shade above "
-    "a best-of-42. Stated rather than fixed: recalibrating over five arms would "
-    "be false precision, but a silent mismatch would not be")
-assert len(CONTROLS) == 3, "three baselines, one per hold"
-assert len({a.name for a in ARMS}) == 50, "arm names must be unique"
+    "draws. Seventeen arms are now judged against it, so the bar is if anything "
+    "CONSERVATIVE — the luckiest of seventeen reaches less than the luckiest "
+    "of forty-two. Left as it is deliberately: a bar that is too hard costs a "
+    "real finding some time, where one that is too easy costs a false one nothing")
+assert len(CONTROLS) == 5, "one baseline per hold"
+assert len({a.name for a in ARMS}) == 22, "arm names must be unique"
 assert all(len(a.name) <= 32 for a in ARMS), "arm name must fit the column"
 assert {a.entry for a in ARMS} <= set(ENTRY_RULES), (
     "every entry filter an arm uses must be described: "

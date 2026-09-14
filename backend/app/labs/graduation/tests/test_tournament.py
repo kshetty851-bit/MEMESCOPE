@@ -25,22 +25,27 @@ TOKEN = {"mint": "Abc123pump", "liquidity": D(150_000), "fdv": D(2_000_000),
          "sells": 0, "reuse": 4}
 
 
-def test_the_tournament_is_fifty_arms_of_which_three_are_the_baseline() -> None:
+def test_the_tournament_is_a_hold_sweep_with_a_baseline_on_every_hold() -> None:
     """The controls are the whole point. Fifty strategies produce a leader in
     an hour whether or not any of them is good, so the leaderboard only means
     something against arms that provably cannot have an edge.
 
-    Generation 2 (2026-09-13) is 42 grid arms (14 liquidity bands x 3 holds)
-    + 3 FLOOR baselines + 3 whole-band arms + the 2 pre-registered A/B arms.
-    CURVE90_2m was here and is retired: buying before the migration measured
-    -3.02% against -1.21% for the same hold after it, on 206 trades.
+    Generation 2.1 (2026-09-14) is a HOLD SWEEP: 5 FLOOR baselines at 2/3/4/5/6
+    minutes taking every qualifying graduation, 3 wide bands x the same 5
+    holds, and the 2 pre-registered A/B arms.
+
+    Fourteen narrow bands came first and starved — 25 trades a day each of a
+    320-token flow — while producing scatter rather than a shape. Pooled by
+    HOLD the same data separated cleanly (2m +1.11%, 3m +2.22%, 5m +0.34%
+    gross on identical samples), so the resolution moved to the factor that
+    moves.
 
     One baseline per hold, so no hold is judged without an unselected twin on
     its own clock. Nothing on this board decides by hashing a mint.
     """
-    assert len(ARMS) == 50
-    assert len(CONTROLS) == 3
-    assert len({a.name for a in ARMS}) == 50
+    assert len(ARMS) == 22
+    assert len(CONTROLS) == 5
+    assert len({a.name for a in ARMS}) == 22
     assert all(len(a.name) <= 32 for a in ARMS)
 
 
@@ -263,8 +268,8 @@ def test_the_exit_rule_names_every_condition_the_arm_carries() -> None:
     """A reader must be able to tell a plain hold from a hold plus a target,
     without reading the arm's name."""
     assert BY_NAME["F01_all_2m"].exit_rule == "at 2 minutes"
-    assert BY_NAME["L04_116k_3m"].exit_rule == "at 3 minutes"
-    assert BY_NAME["L04_116k_5m"].exit_rule == "at 5 minutes"
+    assert BY_NAME["B2_116k_3m"].exit_rule == "at 3 minutes"
+    assert BY_NAME["B2_116k_5m"].exit_rule == "at 5 minutes"
     # Singular minute, for whenever an arm holds one — the formatting must
     # not read as a bug in the data.
     from app.labs.graduation.tournament import Arm
