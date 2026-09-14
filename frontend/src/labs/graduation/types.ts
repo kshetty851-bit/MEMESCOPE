@@ -195,6 +195,9 @@ export interface ArmRow {
   /** Thirty days of the same rule at the same trade rate: median, and the
    * 5th-95th band. The band is the point — a single figure would hide how
    * little a few dozen trades actually says. */
+  projected_1d_usd: string | null;
+  projected_1w_usd: string | null;
+  projected_15d_usd: string | null;
   projected_30d_usd: string | null;
   projected_30d_low: string | null;
   projected_30d_high: string | null;

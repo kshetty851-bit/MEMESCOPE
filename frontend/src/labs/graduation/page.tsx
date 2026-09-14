@@ -683,6 +683,32 @@ function LeaderboardPanel() {
         </span>
       </PanelHeader>
       <div className="flex flex-col gap-5 p-4">
+        {/* What these numbers are made of. Stated at the top rather than
+            buried, because every figure below is a claim about money and a
+            reader is owed the provenance before the result. Written to be
+            exactly true: it says what IS real and names the one thing a real
+            wallet must do that this book does not. */}
+        <p className="max-w-[78ch] rounded-lg border border-line bg-ink/[0.02] p-3 text-xs leading-relaxed text-ink-dim">
+          <b className="text-ink">Nothing here is invented.</b> Every entry and
+          exit is priced at a price this platform actually recorded from the
+          live feed, at the minute it happened. Every fill is charged the real
+          cost of trading: the exact constant-product move your own order makes
+          against the pool&rsquo;s <b className="text-ink">recorded depth</b>,
+          on both legs, plus the swap fee and the priority fee — the{" "}
+          <b className="text-ink">toll</b> column is that cost, taken out before
+          any number you see. An order that would move a pool more than 10% is{" "}
+          <b className="text-ink">refused, not filled</b>, because a real
+          transaction past its slippage limit reverts. So a wallet trading these
+          rules, at those moments, with {usd(data.notional_usd)} a position,
+          would have paid these prices.
+          <br />
+          <span className="mt-1 block">
+            The one thing it must do that this book does not:{" "}
+            <b className="text-ink">land the transaction</b>. These fills assume
+            your buy confirms at the price on screen. That is the honest gap,
+            and it is the only one.
+          </span>
+        </p>
         {/* Verdict. The headline is the finding; the terms are underneath. */}
         <div
           className={`grad-row rounded-lg border p-4 ${
@@ -906,37 +932,42 @@ function LeaderboardPanel() {
                         </span>
                       ) : null}
                     </td>
-                    <td
-                      className={`grad-figure py-2.5 pr-3 text-right ${
-                        Number(a.wallet_100_usd) > Number(data.wallet_demo_usd)
-                          ? "text-up"
-                          : Number(a.wallet_100_usd) < Number(data.wallet_demo_usd)
-                            ? "text-down"
-                            : "text-ink-dim"
-                      }`}
-                    >
-                      {a.trades && Number(a.wallet_100_usd) >= 0
-                        ? `${
-                            Number(a.wallet_100_usd) >= Number(data.wallet_demo_usd)
-                              ? "+"
-                              : ""
-                          }${(
-                            (Number(a.wallet_100_usd) /
-                              Number(data.wallet_demo_usd) -
-                              1) *
-                            100
-                          ).toFixed(1)}%`
-                        : "—"}
-                    </td>
+                    {/* One simulated path, measured at four points, so the
+                        four figures cannot contradict each other — a wallet
+                        dead at day one is dead at day thirty. The 30D band
+                        sits under its own column; the earlier horizons are
+                        medians only, because four bands on one row is a wall
+                        of numbers nobody reads. */}
+                    {(
+                      [
+                        ["projected_1d_usd", "pr-2"],
+                        ["projected_1w_usd", "pr-2"],
+                        ["projected_15d_usd", "pr-2"],
+                      ] as const
+                    ).map(([key, pad]) => (
+                      <td key={key} className={`py-2.5 ${pad} text-right`}>
+                        {a[key] === null ? (
+                          <span className="text-micro text-ink-dim">—</span>
+                        ) : (
+                          <span
+                            className={`grad-figure tabular-nums ${
+                              Number(a[key]) >= Number(data.wallet_demo_usd)
+                                ? "text-up"
+                                : "text-down"
+                            }`}
+                          >
+                            {usd(a[key])}
+                          </span>
+                        )}
+                      </td>
+                    ))}
                     <td className="py-2.5 pr-3 text-right">
                       {a.projected_30d_usd === null ? (
-                        <span className="text-micro text-ink-dim">
-                          too few trades
-                        </span>
+                        <span className="text-micro text-ink-dim">—</span>
                       ) : (
                         <>
                           <span
-                            className={`grad-figure font-medium ${
+                            className={`grad-figure font-medium tabular-nums ${
                               Number(a.projected_30d_usd) >=
                               Number(data.wallet_demo_usd)
                                 ? "text-up"

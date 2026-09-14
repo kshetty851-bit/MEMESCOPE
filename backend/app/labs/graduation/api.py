@@ -610,6 +610,13 @@ class ArmRow(BaseModel):
     #: The band is the point. A projection from a few dozen trades is mostly
     #: an artefact of which tokens happened to arrive, and a single number
     #: would hide that behind a decimal point.
+    #: The wallet's median balance at each horizon, from ONE simulated path per
+    #: draw: the same walk is measured at a day, a week, a fortnight and a
+    #: month, so the four figures are consistent with each other by
+    #: construction rather than four separate guesses.
+    projected_1d_usd: Decimal | None = None
+    projected_1w_usd: Decimal | None = None
+    projected_15d_usd: Decimal | None = None
     projected_30d_usd: Decimal | None = None
     projected_30d_low: Decimal | None = None
     projected_30d_high: Decimal | None = None
@@ -813,7 +820,15 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
         if live is not None:
             unrealised[position.book] = (unrealised.get(position.book, Decimal(0))
                                          + position.notional_usd * live)
-    started = await db.scalar(select(func.min(GradPaperPosition.opened_at)))
+    # The clock belongs to the arms that are running, not to the table.
+    #
+    # This was `min(opened_at)` over every row ever written, so it counted from
+    # the first trade of a generation that has since been retired — the board
+    # read "running 35.9h" on arms whose oldest trade was ninety minutes old.
+    # Scoped to the current ARMS, it restarts when a generation does.
+    started = await db.scalar(
+        select(func.min(GradPaperPosition.opened_at))
+        .where(GradPaperPosition.book.in_([a.name for a in ARMS])))
     hours = ((datetime.now(UTC) - started).total_seconds() / 3600
              if started else 0.0)
 
@@ -860,30 +875,42 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
         # 9,000 individual trades 160 times per arm across fifty arms is 74
         # million iterations inside a web request; this is 148 thousand.
         block = max(1, config.WALLET_DEMO_SLOTS)
-        steps = max(1, horizon // block)
         pool = [sum(returns[random.randrange(n)] for _ in range(block))  # noqa: S311
                 for _ in range(1024)]
-        finals: list[float] = []
+        # A day, a week, a fortnight, a month — as step counts on the same
+        # path. Each horizon walks a PREFIX of one drawn sequence rather than
+        # being simulated separately, so the four cannot contradict each other:
+        # a wallet that is dead at day one is dead at day thirty.
+        days = (1, 7, 15, 30)
+        cuts = {d: max(1, int(rate * 24 * d) // block) for d in days}
+        longest = cuts[30]
+        finals: dict[int, list[float]] = {d: [] for d in days}
         ruined = 0
         for _ in range(160):
             drift = random.gauss(0.0, sem) * block
-            equity, dead = _wallet_walk(
-                pool[random.randrange(1024)] + drift  # noqa: S311
-                for _ in range(steps))
-            ruined += dead
-            finals.append(equity)
-        finals.sort()
+            seq = [pool[random.randrange(1024)] + drift  # noqa: S311
+                   for _ in range(longest)]
+            for d in days:
+                equity, dead = _wallet_walk(seq[:cuts[d]])
+                finals[d].append(equity)
+                if d == 30:
+                    ruined += dead
+        for d in days:
+            finals[d].sort()
 
-        def at(p: float) -> Decimal:
-            return Decimal(str(finals[int(p * (len(finals) - 1))])).quantize(
-                Decimal("0.01"))
+        def at(d: int, p: float) -> Decimal:
+            v = finals[d]
+            return Decimal(str(v[int(p * (len(v) - 1))])).quantize(Decimal("0.01"))
 
         return {
-            "projected_30d_usd": at(0.50),
-            "projected_30d_low": at(0.05),
-            "projected_30d_high": at(0.95),
+            "projected_1d_usd": at(1, 0.50),
+            "projected_1w_usd": at(7, 0.50),
+            "projected_15d_usd": at(15, 0.50),
+            "projected_30d_usd": at(30, 0.50),
+            "projected_30d_low": at(30, 0.05),
+            "projected_30d_high": at(30, 0.95),
             "projected_trades": horizon,
-            "ruin_pct": (Decimal(ruined) / Decimal(len(finals)) * 100
+            "ruin_pct": (Decimal(ruined) / Decimal(len(finals[30])) * 100
                          ).quantize(Decimal("0.1")),
         }
 
@@ -929,7 +956,10 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
     rows = [row(a) for a in ARMS]
     if not fresh:
         _PROJECTIONS = (datetime.now(UTC), {
-            r.name: {"projected_30d_usd": r.projected_30d_usd,
+            r.name: {"projected_1d_usd": r.projected_1d_usd,
+                     "projected_1w_usd": r.projected_1w_usd,
+                     "projected_15d_usd": r.projected_15d_usd,
+                     "projected_30d_usd": r.projected_30d_usd,
                      "projected_30d_low": r.projected_30d_low,
                      "projected_30d_high": r.projected_30d_high,
                      "projected_trades": r.projected_trades,
