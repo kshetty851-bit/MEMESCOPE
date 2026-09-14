@@ -613,6 +613,21 @@ class ArmRow(BaseModel):
     projected_30d_usd: Decimal | None = None
     projected_30d_low: Decimal | None = None
     projected_30d_high: Decimal | None = None
+    #: The token's own move per trade, BEFORE execution — and what execution
+    #: took, which is the difference between this and `mean_pct`.
+    #:
+    #: On the board because the two failures look identical in the net figure
+    #: and need opposite responses. Measured over three days: pools under $75k
+    #: cost 3.24% a round trip, $75k-$116k cost 1.30%, and deeper than $116k
+    #: cost 1.06% — of which only 0.175% is price impact. The rest is fees,
+    #: which no entry rule can filter away.
+    #:
+    #: The consequence is the bar this lab is really chasing: the best gross
+    #: edge measured anywhere is +0.60%, against a cheapest toll of 1.06%. An
+    #: arm whose GROSS is under its COST cannot be profitable however good its
+    #: entry rule is.
+    gross_pct: Decimal | None = None
+    cost_pct: Decimal | None = None
     projected_trades: int = 0
     #: Share of simulated thirty-day paths in which the wallet fell below the
     #: size at which a position is worth placing. The one figure a running
@@ -728,10 +743,17 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
                func.coalesce(-func.sum(GradPaperPosition.pnl_usd).filter(
                    GradPaperPosition.pnl_usd < 0), 0).label("gross_down"),
                func.max(GradPaperPosition.pnl_usd).label("best"),
-               func.avg(GradPaperPosition.net_return).label("mean"))
+               func.avg(GradPaperPosition.net_return).label("mean"),
+               # The token's own move, before execution took its cut. The
+               # difference between this and `mean` is the whole toll — fees
+               # and impact together — and without it a losing arm cannot be
+               # told apart from a winning arm that paid its edge away.
+               func.avg(GradPaperPosition.close_quote
+                        / GradPaperPosition.open_quote - 1).label("gross"))
         .where(GradPaperPosition.closed_at.is_not(None),
                GradPaperPosition.notional_usd > 0,
-               GradPaperPosition.close_quote > 0)
+               GradPaperPosition.close_quote > 0,
+               GradPaperPosition.open_quote > 0)
         .group_by(GradPaperPosition.book))).all()
     stats = {r.book: r for r in closed}
 
@@ -868,6 +890,11 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
     def row(arm) -> ArmRow:
         s = stats.get(arm.name)
         pf = top = mean = None
+        gross = cost = None
+        if s is not None and s.trades and s.gross is not None:
+            gross = (Decimal(s.gross) * 100).quantize(Decimal("0.01"))
+            if s.mean is not None:
+                cost = (gross - (Decimal(s.mean) * 100)).quantize(Decimal("0.01"))
         if s is not None and s.trades:
             if s.gross_down > 0:
                 pf = (Decimal(s.gross_up) / Decimal(s.gross_down)).quantize(Decimal("0.01"))
@@ -887,7 +914,8 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
             take_profit_x=arm.tp, trailing_pct=arm.trail, is_control=arm.is_control,
             trades=int(s.trades) if s else 0, wins=int(s.wins) if s else 0,
             realised_usd=realised,
-            mean_pct=mean, profit_factor=pf, top_token_share=top,
+            mean_pct=mean, gross_pct=gross, cost_pct=cost,
+            profit_factor=pf, top_token_share=top,
             open_positions=int(open_now.get(arm.name, 0)),
             return_pct=((realised / config.PAPER_CAPITAL_USD * 100)
                         .quantize(Decimal("0.01"))

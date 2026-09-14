@@ -795,6 +795,7 @@ function LeaderboardPanel() {
               <col className="w-48" />
               <col className="w-20" />
               <col className="w-20" />
+              <col className="w-20" />
               <col className="w-16" />
               <col className="w-24" />
             </colgroup>
@@ -812,6 +813,9 @@ function LeaderboardPanel() {
                 <th className="pb-2 pr-3 text-right font-medium">Wipeout</th>
                 <th className="pb-2 pr-3 text-right font-medium">
                   Trades <span className="text-ink-dim">/ hr</span>
+                </th>
+                <th className="pb-2 pr-3 text-right font-medium">
+                  Gross <span className="text-ink-dim">/ toll</span>
                 </th>
                 <th className="pb-2 pr-3 text-right font-medium">PF</th>
                 <th className="pb-2 pr-1 text-right font-medium">Top token</th>
@@ -976,6 +980,32 @@ function LeaderboardPanel() {
                         {perHour(a.trades, data.hours_running)}
                       </span>
                     </td>
+                    <td className="py-2.5 pr-3 text-right">
+                      {a.gross_pct === null ? (
+                        <span className="text-micro text-ink-dim">—</span>
+                      ) : (
+                        <>
+                          {/* Green only when the token's own move cleared the
+                              toll. An arm whose gross is under its cost cannot
+                              be profitable however good its entry rule is, and
+                              the net figure alone hides which of the two
+                              failures it is. */}
+                          <span
+                            className={`grad-figure font-medium ${
+                              a.cost_pct !== null &&
+                              Number(a.gross_pct) > Number(a.cost_pct)
+                                ? "text-up"
+                                : "text-ink-dim"
+                            }`}
+                          >
+                            {signed(String(Number(a.gross_pct) / 100))}
+                          </span>
+                          <span className="block text-micro tabular-nums text-ink-dim">
+                            toll {a.cost_pct === null ? "—" : `${Number(a.cost_pct).toFixed(2)}%`}
+                          </span>
+                        </>
+                      )}
+                    </td>
                     <td className="grad-figure py-2.5 pr-3 text-right">
                       {a.profit_factor ?? "—"}
                     </td>
@@ -1030,7 +1060,17 @@ function LeaderboardPanel() {
             would be too small to be worth placing —{" "}
             <b className="text-ink">Wipeout</b> is the share of simulated months
             that ended that way, which is the number a running total cannot
-            express. Under each trade count is how often that arm actually{" "}
+            express. <b className="text-ink">Gross</b> is the token&rsquo;s own move
+            before execution, and <b className="text-ink">toll</b> is what fees
+            and impact took — net is what is left. The two are separated because
+            a losing arm with no edge and a winning arm that paid its edge away
+            look identical in the net figure and need opposite fixes. Measured
+            over three days: a round trip costs 3.24% in pools under $75k, 1.30%
+            from $75k to $116k, and 1.06% deeper than that — of which only 0.175%
+            is impact. The rest is fees, which no entry rule can filter away, so
+            an arm whose gross is under its toll cannot be profitable however
+            good its rule is. Under each trade count is how often that arm
+            actually{" "}
             <b className="text-ink">fires per hour</b>, on the tournament&rsquo;s
             clock — all fifty started together. It is the same rate the 30-day
             projection extrapolates from, so a filter that trades twice a day is

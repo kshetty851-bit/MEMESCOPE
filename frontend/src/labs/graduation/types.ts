@@ -171,6 +171,10 @@ export interface ArmRow {
   wins: number;
   realised_usd: string;
   mean_pct: string | null;
+  /** The token's own move per trade, before execution took its cut. */
+  gross_pct: string | null;
+  /** What execution took: fees plus impact. gross - net. */
+  cost_pct: string | null;
   profit_factor: string | null;
   top_token_share: string | null;
   open_positions: number;
