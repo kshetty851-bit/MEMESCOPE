@@ -187,3 +187,22 @@ def test_the_curve_arm_is_refused_when_the_curve_is_too_thin():
     thin = _curve_depth_usd(D("1.82"), D("101.35"))
     impact = amm_impact(D("100"), thin)
     assert impact is not None and impact > config.PAPER_MAX_IMPACT, impact
+
+
+def test_the_curve_machinery_is_inert_while_no_arm_uses_it():
+    """CURVE90_2m is retired but its plumbing stays, tested and unused.
+
+    Curve entry was not trivial to make correct — the quote-side depth alone
+    would have doubled every impact figure — and the next hypothesis that
+    wants pre-graduation entry should not rediscover it. It must cost nothing
+    while idle: no arm carries `entry="curve"`, so `_fill_curve` returns
+    before it queries anything.
+    """
+    from app.labs.graduation.tournament import Tournament
+
+    assert not [a for a in ARMS if a.entry == "curve"]
+    src = inspect.getsource(Tournament._fill_curve)
+    guard = src[:src.index("rows = await")]
+    assert 'a.entry == "curve"' in guard and "return 0" in guard, (
+        "_fill_curve must bail before touching the database when no arm "
+        "carries the curve entry")

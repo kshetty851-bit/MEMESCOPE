@@ -25,21 +25,22 @@ TOKEN = {"mint": "Abc123pump", "liquidity": D(150_000), "fdv": D(2_000_000),
          "sells": 0, "reuse": 4}
 
 
-def test_the_tournament_is_fifty_one_arms_of_which_three_are_the_baseline() -> None:
+def test_the_tournament_is_fifty_arms_of_which_three_are_the_baseline() -> None:
     """The controls are the whole point. Fifty strategies produce a leader in
     an hour whether or not any of them is good, so the leaderboard only means
     something against arms that provably cannot have an edge.
 
     Generation 2 (2026-09-13) is 42 grid arms (14 liquidity bands x 3 holds)
-    + 3 FLOOR baselines + 3 whole-band arms + the 2 pre-registered A/B arms
-    + CURVE90_2m, which buys BEFORE the migration rather than after.
+    + 3 FLOOR baselines + 3 whole-band arms + the 2 pre-registered A/B arms.
+    CURVE90_2m was here and is retired: buying before the migration measured
+    -3.02% against -1.21% for the same hold after it, on 206 trades.
 
     One baseline per hold, so no hold is judged without an unselected twin on
     its own clock. Nothing on this board decides by hashing a mint.
     """
-    assert len(ARMS) == 51
+    assert len(ARMS) == 50
     assert len(CONTROLS) == 3
-    assert len({a.name for a in ARMS}) == 51
+    assert len({a.name for a in ARMS}) == 50
     assert all(len(a.name) <= 32 for a in ARMS)
 
 

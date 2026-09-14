@@ -437,14 +437,25 @@ ARMS: tuple[Arm, ...] = (
     # with a judge date of 10 October. Rebuilding the tournament around them
     # must not quietly end an experiment that has a date on it, so they keep
     # their names, their rules and their accumulated trades.
-    # The pre-graduation arm. Every other arm on this board buys AFTER the
-    # migration; this one buys while the token is still climbing, which is a
-    # different population and a different pool — the bonding curve itself.
+    # CURVE90_2m was here, and it is ANSWERED. It bought tokens still climbing
+    # the bonding curve at >=90% and sold at two minutes, against F01_all_2m
+    # buying the same clock AFTER the migration. Retired 2026-09-14:
     #
-    # Its natural comparison is F01_all_2m: the same 2-minute hold on tokens
-    # bought after they graduate. "Before or after" is the question.
-    Arm("CURVE90_2m", "curve", 2,
-        note="pool still on the bonding curve at 90%+, out at 2m"),
+    #     CURVE90_2m   n=206   mean -3.02%   winners 44%   (before)
+    #     F01_all_2m   n=741   mean -1.21%   winners 46%   (after)
+    #     FLOOR_2m     n=115   mean -0.24%   winners 41%   (after, over $75k)
+    #
+    # Buying before the migration is WORSE than buying after it, and worse
+    # again than simply not buying the shallow pools. It read +10.13% on its
+    # first three trades and -3.02% on two hundred, which is the whole reason
+    # a leader with a single-digit trade count is never a finding.
+    #
+    # The machinery stays — `_fill_curve`, `_curve_candidates`, `_sol_rate`,
+    # `_curve_depth_usd`, and the curve fallback in `_latest_prices` — all of
+    # it inert while no arm carries `entry="curve"`, all of it tested. Curve
+    # entry took real work to make correct (the quote-side depth alone would
+    # have doubled every impact figure) and the next hypothesis that wants it
+    # should not have to rediscover it.
     Arm("F01_all_2m", "all", 2, note="A/B control — every graduation, out at 2m"),
     Arm("F14_symnight_2m", "sym_night", 2,
         note="A/B arm — reused symbol AND a night-UTC open, out at 2m"),
@@ -456,7 +467,7 @@ CONTROLS: tuple[Arm, ...] = tuple(a for a in ARMS if a.is_control)
 #: returned no edge. The count is pinned rather than free because an arm that
 #: appears mid-tournament changes what every other number means — so changing
 #: it must be a deliberate edit with a date, not a side effect.
-assert len(ARMS) == 51, f"the tournament is fifty-one arms, not {len(ARMS)}"
+assert len(ARMS) == 50, f"the tournament is fifty arms, not {len(ARMS)}"
 assert {a.hold for a in ARMS} == {2, 3, 5}, (
     "Two, three and five minutes. Longer is measurably worse INSIDE the band "
     "(5m is +3.33% at a 1.6% tail; 30m is -6.48% at 14.6%), and one minute is "
@@ -465,14 +476,14 @@ assert {a.hold for a in ARMS} == {2, 3, 5}, (
     "arm the data cannot price is an arm a real wallet cannot verify")
 assert all(a.tp is None and a.trail is None for a in ARMS), (
     "targets and trailing stops are gone — every one of them held 15m+")
-assert len([a for a in ARMS if not a.is_control]) == 48, (
+assert len([a for a in ARMS if not a.is_control]) == 47, (
     "`config.required_pf` is calibrated on the maximum of FORTY-TWO noise "
-    "draws. Forty-eight arms are now judged against it, which makes that bar "
+    "draws. Forty-seven arms are now judged against it, which makes that bar "
     "slightly lenient — the 95th percentile of a best-of-47 sits a shade above "
-    "a best-of-42. Stated rather than fixed: recalibrating over six arms would "
+    "a best-of-42. Stated rather than fixed: recalibrating over five arms would "
     "be false precision, but a silent mismatch would not be")
 assert len(CONTROLS) == 3, "three baselines, one per hold"
-assert len({a.name for a in ARMS}) == 51, "arm names must be unique"
+assert len({a.name for a in ARMS}) == 50, "arm names must be unique"
 assert all(len(a.name) <= 32 for a in ARMS), "arm name must fit the column"
 assert {a.entry for a in ARMS} <= set(ENTRY_RULES), (
     "every entry filter an arm uses must be described: "
