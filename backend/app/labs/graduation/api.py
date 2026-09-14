@@ -751,6 +751,7 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
                    GradPaperPosition.pnl_usd < 0), 0).label("gross_down"),
                func.max(GradPaperPosition.pnl_usd).label("best"),
                func.avg(GradPaperPosition.net_return).label("mean"),
+               func.min(GradPaperPosition.opened_at).label("first"),
                # The token's own move, before execution took its cut. The
                # difference between this and `mean` is the whole toll — fees
                # and impact together — and without it a losing arm cannot be
@@ -848,7 +849,7 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
              and datetime.now(UTC) - _PROJECTIONS[0] < _PROJECTION_TTL)
     cached: dict[str, dict[str, Any]] = _PROJECTIONS[1] if fresh and _PROJECTIONS else {}
 
-    def project(returns: list[float]) -> dict[str, Any]:
+    def project(returns: list[float], hours: float) -> dict[str, Any]:
         """Thirty days of this arm, as an ACCOUNT rather than a running total.
 
         The previous version summed per-trade returns and reported bands like
@@ -872,6 +873,13 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
         n = len(returns)
         if n < 10 or hours < 1.0:
             return {}
+        # The arm's OWN elapsed time, not the board's.
+        #
+        # Every arm used to share the board clock, which was wrong the moment
+        # arms started at different times — and became absurd when the clock
+        # was narrowed to the window in which all arms are comparable: an arm
+        # whose 190 trades span 37 hours had its rate computed over 3.7, so it
+        # projected ten times the trades it takes and $330 from $100 in a day.
         rate = n / hours
         horizon = int(rate * 24 * 30)
         # Resampling the observed trades holds this arm's mean FIXED at the
@@ -940,8 +948,13 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
                 top = (Decimal(s.best) / Decimal(s.gross_up)).quantize(Decimal("0.0001"))
             if s.mean is not None:
                 mean = (Decimal(s.mean) * 100).quantize(Decimal("0.01"))
+        # Hours since THIS arm's first trade. An arm added today must not
+        # inherit the trade rate of one that has run since yesterday.
+        first = s.first if s is not None else None
+        arm_hours = ((datetime.now(UTC) - first).total_seconds() / 3600
+                     if first else 0.0)
         forecast = (cached.get(arm.name, {}) if fresh
-                    else project(per_arm.get(arm.name, [])))
+                    else project(per_arm.get(arm.name, []), arm_hours))
         open_pnl = unrealised.get(arm.name, Decimal(0)).quantize(Decimal("0.01"))
         wallet, worst = wallet_100(per_arm.get(arm.name, []))
         realised = (Decimal(s.pnl) if s else Decimal(0)).quantize(Decimal("0.01"))

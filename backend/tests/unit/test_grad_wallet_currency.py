@@ -164,3 +164,21 @@ class TestLeaderSelection:
         assert "leader.is_control" in src and "naked" in src, (
             "when the leader IS the baseline the gate must swap in the "
             "no-selection arm, not compare it against itself")
+
+
+def test_each_arm_projects_from_its_own_elapsed_time():
+    """An arm added today must not inherit the trade rate of one that has run
+    since yesterday.
+
+    Every arm shared the board clock, which was merely imprecise while all arms
+    started together and became absurd when the clock was narrowed to the
+    window in which arms are comparable: an arm whose 190 trades spanned 37
+    hours had its rate computed over 3.7, projected ten times the trades it
+    actually takes, and showed $330 from $100 in a single day.
+    """
+    src = inspect.getsource(api.tournament)
+    assert "def project(returns: list[float], hours: float)" in src, (
+        "project() must be given the hours to use rather than closing over a "
+        "board-wide figure")
+    assert "arm_hours" in src and "project(per_arm.get(arm.name, []), arm_hours)" in src, (
+        "each row must pass ITS OWN elapsed time into the projection")
