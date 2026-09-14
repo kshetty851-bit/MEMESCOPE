@@ -21,6 +21,7 @@ computing none. Every one of them is an environment variable.
 from __future__ import annotations
 
 import os
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from itertools import pairwise
 
@@ -468,6 +469,53 @@ PAPER_FILTER_HOUR_START = _int("LAB_GRADUATION_PAPER_FILTER_HOUR_START", 18)
 PAPER_FILTER_HOUR_END = _int("LAB_GRADUATION_PAPER_FILTER_HOUR_END", 6)
 #: ...and only when at least this many EARLIER tokens used the same symbol.
 PAPER_FILTER_MIN_SYMBOL_REUSE = _int("LAB_GRADUATION_PAPER_FILTER_REUSE", 1)
+
+# --- what it takes to ADOPT the entry filter, stated before anyone looks ------
+#
+# The A/B above runs for four weeks. "Compare the two books" is not a decision
+# rule, and this platform has thirteen recorded findings that looked real until
+# somebody wrote the rule down afterwards. These are the terms, fixed now.
+#
+# THE PRIMARY ENDPOINT IS THE EXCLUDED SET, NOT THE TWO BOOK TOTALS.
+#
+# The filtered book takes a strict SUBSET of the control's entries, so the two
+# differ by exactly one thing: the graduations the filter refused. Comparing
+# book totals measures that difference plus the noise of every trade they share.
+# Measuring the refused set measures only the difference. The filter earned its
+# keep if and only if the trades it threw away were, together, losers.
+#
+# THE CONTROL THAT MATTERS: a filter that discards 54% of a book improves that
+# book about half the time by luck alone. So the real filter is judged against
+# RANDOM filters of the same selectivity — the same count of graduations, drawn
+# at random from the same control book. The real one must discard a worse set
+# than 95% of random discards. Without this term the test measures nothing but
+# the fact that some trades lose.
+#
+# THE PRECONDITION V2 ESTABLISHED: cutting catastrophes out of a book that
+# loses anyway does not produce a profit. Track Record V2 drove its catastrophe
+# rate from 26.7-90% down to 1.4% and still scored PF 0.54. So the ADMITTED set
+# has to be positive on its own. A filter that turns a large loss into a small
+# loss is a smaller loss, not an edge.
+#
+#: Not before this date, whatever the numbers look like. The judge refuses to
+#: conclude early — the forex lab's interim window read PF 1.337 and its final
+#: window read 1.045, and an early peek is how a window gets chosen.
+AB_JUDGE_DATE = date(2026, 10, 10)
+#: Refused graduations needed before the excluded set means anything.
+AB_MIN_EXCLUDED = _int("LAB_GRADUATION_AB_MIN_EXCLUDED", 400)
+#: ...and admitted ones, so the precondition is measured on real evidence too.
+AB_MIN_ADMITTED = _int("LAB_GRADUATION_AB_MIN_ADMITTED", 400)
+#: No single mint may carry the excluded set's loss. Every fake edge this
+#: platform has found died on exactly this test.
+AB_MAX_TOKEN_SHARE = _dec("LAB_GRADUATION_AB_MAX_SHARE", "0.20")
+#: Random filters drawn to build the null distribution.
+AB_RANDOM_DRAWS = _int("LAB_GRADUATION_AB_RANDOM_DRAWS", 2000)
+#: The real filter's excluded-set mean must sit below this percentile of the
+#: random filters' excluded-set means. 5 = beats 95% of chance.
+AB_RANDOM_PERCENTILE = 5
+#: Seed, so the null distribution is the same on a re-run and a changed verdict
+#: means changed data rather than a changed draw.
+AB_RANDOM_SEED = 20261010
 
 # --- execution: what a real wallet could actually have done ------------------
 #

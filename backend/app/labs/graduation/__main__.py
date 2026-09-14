@@ -159,6 +159,8 @@ def main(argv: list[str] | None = None) -> int:
                       help="maximum tokens to load")
     sub.add_parser("prune", help="one prune pass")
     sub.add_parser("health", help="recorder_health() as JSON")
+    sub.add_parser("judge-ab",
+                   help="judge the entry-filter A/B on its pre-registered terms")
     one = sub.add_parser("curve", help="derive, fetch and decode one mint's curve")
     one.add_argument("--mint", required=True)
     progress = sub.add_parser("progress", help="what a reserve reading means")
@@ -199,11 +201,25 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "health":
         _emit(asyncio.run(_health()))
         return 0
+    if args.command == "judge-ab":
+        v = asyncio.run(_judge_ab())
+        _emit(v)
+        # Non-zero while the experiment is still running, so a cron or a human
+        # cannot mistake "not yet" for "no".
+        return 0 if v["ready"] else 2
     if args.command == "curve":
         _emit(asyncio.run(_curve(args.mint)))
         return 0
     _emit(_progress(args.tokens))
     return 0
+
+
+async def _judge_ab() -> dict:
+    from app.db.session import SessionFactory
+    from app.labs.graduation.ab import judge_live
+
+    async with SessionFactory() as session:
+        return (await judge_live(session)).as_dict()
 
 
 async def _poll_once() -> dict:
