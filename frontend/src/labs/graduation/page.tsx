@@ -673,7 +673,10 @@ function LeaderboardPanel() {
         <PanelTitle>Strategy tournament — {data.arms.length} arms</PanelTitle>
         <span className="flex items-center gap-3">
           <span className="text-micro text-ink-dim">
-            running <Elapsed since={data?.started_at ?? null} />
+            {/* Since the NEWEST arm started — the only window in which every
+                arm has traded the same tokens, and so the only one in which
+                comparing them means anything. */}
+            all arms live <Elapsed since={data?.started_at ?? null} />
           </span>
           <span
             className={`transition-opacity ${isFetching ? "opacity-50" : "opacity-100"}`}

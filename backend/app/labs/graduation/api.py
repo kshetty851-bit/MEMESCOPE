@@ -820,15 +820,26 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
         if live is not None:
             unrealised[position.book] = (unrealised.get(position.book, Decimal(0))
                                          + position.notional_usd * live)
-    # The clock belongs to the arms that are running, not to the table.
+    # How long every arm has been running TOGETHER — the newest arm's first
+    # trade, not the oldest arm's.
     #
-    # This was `min(opened_at)` over every row ever written, so it counted from
-    # the first trade of a generation that has since been retired — the board
-    # read "running 35.9h" on arms whose oldest trade was ninety minutes old.
-    # Scoped to the current ARMS, it restarts when a generation does.
-    started = await db.scalar(
+    # It was `min(opened_at)` over every row ever written, so it counted from a
+    # generation that has since been retired: the board read "running 35.9h"
+    # on arms whose oldest trade was ninety minutes old. Scoping it to the
+    # current arms was not enough either, because two of them are carried-over
+    # A/B arms with months of history, which would report 36.9h for a board
+    # whose newest twelve arms are two hours old.
+    #
+    # The newest arm's start is the honest figure because it is the only window
+    # in which the board is a FAIR COMPARISON. Outside it the arms traded
+    # different tokens in different markets, and comparing them there is the
+    # error that made a 35-trade arm look like it beat a 166-trade one earlier
+    # today.
+    firsts = (await db.execute(
         select(func.min(GradPaperPosition.opened_at))
-        .where(GradPaperPosition.book.in_([a.name for a in ARMS])))
+        .where(GradPaperPosition.book.in_([a.name for a in ARMS]))
+        .group_by(GradPaperPosition.book))).scalars().all()
+    started = max(firsts) if firsts else None
     hours = ((datetime.now(UTC) - started).total_seconds() / 3600
              if started else 0.0)
 
