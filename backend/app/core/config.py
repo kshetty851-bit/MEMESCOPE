@@ -270,11 +270,13 @@ class Settings(BaseSettings):
     # by DAS; both are retried rather than dropped.
     SCANNER_TX_FETCH_ATTEMPTS: int = 6
     SCANNER_METADATA_ATTEMPTS: int = 5
-    # How many PENDING tokens the backfill retries per tick. 60/min clears the
-    # ~210/hour that arrive nameless with room to spare, and still walks the
-    # 75,977-row backlog down rather than sitting on it. One DAS call each, on
-    # the vendor endpoint, off the scanner's own allowance.
-    METADATA_BACKFILL_BATCH: int = Field(default=60, ge=1, le=500)
+    # How many PENDING tokens the backfill retries per tick. 20, not the 60
+    # this shipped with: the binding constraint is the vendor's DAS quota, not
+    # the database, and 60 reads a minute rate-limited Helius within twenty
+    # minutes of going live. 20/min still clears the ~210/hour that arrive
+    # nameless and walks the backlog down; the task paces itself between reads
+    # on top of this.
+    METADATA_BACKFILL_BATCH: int = Field(default=20, ge=1, le=500)
     SCANNER_WS_PING_INTERVAL_SECONDS: float = 20.0
     # TTL of the Redis dedupe key that suppresses repeated events for a mint.
     SCANNER_DEDUPE_TTL_SECONDS: int = 3600

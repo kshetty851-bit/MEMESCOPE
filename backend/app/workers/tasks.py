@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from app.core.logging import get_logger
@@ -12,6 +13,14 @@ from app.workers.celery_app import celery_app
 from app.workers.runtime import run_async
 
 logger = get_logger(__name__)
+
+#: Consecutive-ish provider failures inside one batch before it gives up. A
+#: rate limit deepens the more you push at it, so the batch stops rather than
+#: spending its remaining rows learning the same thing sixty times.
+_PROVIDER_ERROR_CUTOFF = 5
+#: Spacing between DAS reads. The vendor quota is the binding constraint, not
+#: the database: 60 reads fired back to back is what triggered the throttle.
+_PACING_SECONDS = 0.35
 
 
 @celery_app.task(name="app.workers.tasks.purge_expired_refresh_tokens")
@@ -72,7 +81,7 @@ async def _resolve_pending_metadata() -> dict[str, Any]:
 
     rpc = get_rpc("helius")
     await rpc.start()
-    resolved = exhausted = retried = 0
+    resolved = exhausted = retried = provider_errors = 0
     try:
         async with SessionFactory() as session:
             repository = TokenRepository(session)
@@ -81,15 +90,42 @@ async def _resolve_pending_metadata() -> dict[str, Any]:
                 max_attempts=settings.SCANNER_METADATA_ATTEMPTS,
             )
             for token in tokens:
+                # `get_asset` is deliberately NOT used here. It swallows every
+                # RpcError and returns None, so a throttled provider is
+                # indistinguishable from a mint DAS has never heard of — and
+                # this loop spends an attempt either way. On 2026-09-14 that
+                # retired 374 rows to FAILED in twenty minutes while Helius was
+                # rate-limiting every call; DAS held their metadata the whole
+                # time. The raw call raises, which is the difference between
+                # "no such asset" and "ask again later".
                 try:
-                    asset = await rpc.get_asset(token.mint_address, attempts=1)
-                except Exception:
-                    # One unreadable mint costs that mint, not the batch. The
-                    # row keeps its attempt count and comes back next tick.
-                    logger.warning(
-                        "metadata_backfill_failed", mint=token.mint_address, exc_info=True
+                    asset = await rpc.call(
+                        "getAsset", {"id": token.mint_address}, attempts=1
                     )
+                except Exception as exc:
+                    # A provider problem is not the row's fault: leave its
+                    # attempt count alone so it comes back intact next tick.
+                    provider_errors += 1
+                    logger.warning(
+                        "metadata_backfill_provider_error",
+                        mint=token.mint_address,
+                        error=str(exc)[:120],
+                    )
+                    if provider_errors >= _PROVIDER_ERROR_CUTOFF:
+                        # The endpoint is refusing wholesale. Grinding through
+                        # the rest of the batch only deepens the rate limit.
+                        logger.warning(
+                            "metadata_backfill_abandoned",
+                            reason="provider refusing",
+                            provider_errors=provider_errors,
+                        )
+                        break
                     continue
+                # A partial DAS response carries no content; that is the
+                # indexer still catching up, not an answer.
+                if isinstance(asset, dict) and not asset.get("content"):
+                    asset = None
+                await asyncio.sleep(_PACING_SECONDS)
 
                 metadata = parse_asset_metadata(asset) if asset else None
                 named = bool(metadata and (metadata.name or metadata.symbol))
@@ -118,6 +154,15 @@ async def _resolve_pending_metadata() -> dict[str, Any]:
         await rpc.close()
 
     logger.info(
-        "metadata_backfill_ran", resolved=resolved, exhausted=exhausted, retried=retried
+        "metadata_backfill_ran",
+        resolved=resolved,
+        exhausted=exhausted,
+        retried=retried,
+        provider_errors=provider_errors,
     )
-    return {"resolved": resolved, "exhausted": exhausted, "retried": retried}
+    return {
+        "resolved": resolved,
+        "exhausted": exhausted,
+        "retried": retried,
+        "provider_errors": provider_errors,
+    }
