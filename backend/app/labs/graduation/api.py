@@ -15,7 +15,7 @@ from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from math import sqrt
-from statistics import pstdev
+from statistics import fmean, pstdev
 from typing import Any
 
 from fastapi import APIRouter, Depends
@@ -774,8 +774,13 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
     # ORDERED, because one consumer compounds them and compounding is not
     # commutative once a trade can take the account to zero.
     per_arm: dict[str, list[float]] = {}
-    for book, ret in (await db.execute(
-            select(GradPaperPosition.book, GradPaperPosition.net_return)
+    #: The same returns, grouped by the HOUR they closed in. Trades inside one
+    #: hour are the same market, not independent draws, and the projection's
+    #: uncertainty has to be measured between hours rather than between trades.
+    per_arm_hourly: dict[str, dict[datetime, list[float]]] = {}
+    for book, ret, closed_at in (await db.execute(
+            select(GradPaperPosition.book, GradPaperPosition.net_return,
+                   GradPaperPosition.closed_at)
             .where(GradPaperPosition.closed_at.is_not(None),
                    GradPaperPosition.closed_at >= datetime.now(UTC) - timedelta(days=7),
                    GradPaperPosition.notional_usd > 0,
@@ -783,6 +788,9 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
                    GradPaperPosition.net_return.is_not(None))
             .order_by(GradPaperPosition.closed_at))).all():
         per_arm.setdefault(book, []).append(float(ret))
+        (per_arm_hourly.setdefault(book, {})
+         .setdefault(closed_at.replace(minute=0, second=0, microsecond=0), [])
+         .append(float(ret)))
 
     def wallet_100(returns: list[float]) -> tuple[Decimal, Decimal | None]:
         """A real $100 account taking these trades, spread over ten positions.
@@ -849,7 +857,8 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
              and datetime.now(UTC) - _PROJECTIONS[0] < _PROJECTION_TTL)
     cached: dict[str, dict[str, Any]] = _PROJECTIONS[1] if fresh and _PROJECTIONS else {}
 
-    def project(returns: list[float], hours: float) -> dict[str, Any]:
+    def project(returns: list[float], hours: float,
+                hourly: dict[datetime, list[float]]) -> dict[str, Any]:
         """Thirty days of this arm, as an ACCOUNT rather than a running total.
 
         The previous version summed per-trade returns and reported bands like
@@ -888,7 +897,26 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
         # mean is usually larger than the mean — the dominant uncertainty is
         # whether there is an edge at all, and a band that omits it is the
         # confident half of the answer. Each path draws its own mean.
-        sem = pstdev(returns) / sqrt(n) if n > 1 else 0.0
+        # THE STANDARD ERROR, CLUSTERED BY HOUR.
+        #
+        # Measured between trades this was `pstdev(returns)/sqrt(n)`, which
+        # treats 190 trades as 190 independent draws. They are not: trades
+        # inside one hour are the same market moving, so the effective sample
+        # is the number of HOURS, not the number of fills. The difference is
+        # not cosmetic — with per-trade error a 14-hour arm reported a 30-day
+        # band of $5,845 to $11,133 and a 0% chance of ever being wiped out,
+        # which is a promise of eighty-fold with no downside.
+        #
+        # This is the same error, in a new place, as counting 2,223 trades
+        # across 79 tokens as 2,223 observations.
+        by_hour = [fmean(v) for v in hourly.values() if v] if hourly else []
+        if len(by_hour) > 1:
+            sem = pstdev(by_hour) / sqrt(len(by_hour))
+        else:
+            # Under two hours of history there is nothing to measure variation
+            # between, and the per-trade figure would understate it. Refuse the
+            # projection rather than print a confident one.
+            return {}
         # Ten positions are open at once and resolve together, so a step is a
         # block of ten and the block sums are drawn ONCE into a pool. Walking
         # 9,000 individual trades 160 times per arm across fifty arms is 74
@@ -954,7 +982,8 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
         arm_hours = ((datetime.now(UTC) - first).total_seconds() / 3600
                      if first else 0.0)
         forecast = (cached.get(arm.name, {}) if fresh
-                    else project(per_arm.get(arm.name, []), arm_hours))
+                    else project(per_arm.get(arm.name, []), arm_hours,
+                                 per_arm_hourly.get(arm.name, {})))
         open_pnl = unrealised.get(arm.name, Decimal(0)).quantize(Decimal("0.01"))
         wallet, worst = wallet_100(per_arm.get(arm.name, []))
         realised = (Decimal(s.pnl) if s else Decimal(0)).quantize(Decimal("0.01"))

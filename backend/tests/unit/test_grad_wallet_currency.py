@@ -177,8 +177,31 @@ def test_each_arm_projects_from_its_own_elapsed_time():
     actually takes, and showed $330 from $100 in a single day.
     """
     src = inspect.getsource(api.tournament)
-    assert "def project(returns: list[float], hours: float)" in src, (
+    assert "def project(returns: list[float], hours: float," in src, (
         "project() must be given the hours to use rather than closing over a "
         "board-wide figure")
-    assert "arm_hours" in src and "project(per_arm.get(arm.name, []), arm_hours)" in src, (
+    assert "arm_hours" in src and "project(per_arm.get(arm.name, []), arm_hours," in src, (
         "each row must pass ITS OWN elapsed time into the projection")
+
+
+def test_projection_uncertainty_is_clustered_by_hour_not_by_trade():
+    """Trades inside one hour are the same market, not independent draws.
+
+    Measured per trade, a 14-hour arm with 190 fills reported a 30-day band of
+    $5,845 to $11,133 and a 0% chance of wipeout — a promise of eighty-fold
+    with no downside — because 190 correlated fills were counted as 190
+    independent observations. The effective sample is the number of HOURS.
+
+    Same error, different place, as counting 2,223 trades across 79 tokens as
+    2,223 observations.
+    """
+    src = inspect.getsource(api.tournament)
+    assert "pstdev(returns) / sqrt(n)" not in src, (
+        "per-trade standard error understates the uncertainty enormously")
+    assert "by_hour" in src and "pstdev(by_hour) / sqrt(len(by_hour))" in src
+
+    body = src[src.index("def project("):]
+    guard = body[:body.index("pool = [")]
+    assert "return {}" in guard, (
+        "under two hours of history there is nothing to measure variation "
+        "between; the projection must be refused, not printed confidently")
