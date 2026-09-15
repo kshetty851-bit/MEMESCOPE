@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from sqlalchemy import func, select
@@ -28,6 +29,8 @@ DRIVER_LOCK_KEY = 0x44525652
 EXECUTOR_LOCK_KEY = 0x45584543
 #: And the exit driver's.
 EXIT_LOCK_KEY = 0x45584954
+#: And the self-paced exit loop's, so it never blocks the minute tasks.
+FAST_EXIT_LOCK_KEY = 0x46415354
 
 #: States that still have somewhere to go. Terminal ones are skipped rather than
 #: queried, so a finished book does not grow the work every minute.
@@ -209,6 +212,109 @@ async def _real_wallet_exit_tick() -> dict[str, Any]:
     if outcome.exits_requested:
         logger.warning("real_wallet_exit_tick", **outcome.as_dict())
     return outcome.as_dict()
+
+
+@celery_app.task(name="app.real_wallet.scheduler.real_wallet_fast_exit_tick")
+def real_wallet_fast_exit_tick() -> dict[str, Any]:
+    """Run the exit path inside the minute instead of once per minute.
+
+    ## Why this exists
+
+    Beat cannot schedule faster than a minute, and `RealWalletExecutor.advance`
+    moves an intent exactly one state per call. A SELL therefore needed one tick
+    to be noticed and four more to reach submission: a position bought under a
+    five-minute rule was sold at roughly ten.
+
+    For a strategy whose margin is seconds that is not slower, it is fatal.
+    Replayed over the graduation lab's own 145 trades, exiting 30s late wiped
+    the wallet; drawing the tick phase uniformly across the minute wiped it in
+    54% of draws, against $139.54 for the same trades exiting on time.
+
+    ## What it does
+
+    One pass is: ask the exit driver what should leave, then walk every
+    unfinished intent as far as it will go — rather than one step and a minute's
+    wait. The pass repeats on a short interval until the window closes, and beat
+    starts the next one.
+
+    ## What it does not do
+
+    No authority of its own, exactly like its neighbours. It calls the same exit
+    driver and the same executor, so the autotrade switch, the kill switches,
+    the submission guard and the transport policy are each evaluated where they
+    always were. Running more often changes WHEN those refusals happen, never
+    whether. With the execution mode at its default it refuses before doing
+    anything at all.
+
+    Every pass commits. The window sits far below the 540s soft limit, but a
+    task killed mid-window still leaves every decision it already made on disk.
+    """
+    return run_async(_real_wallet_fast_exit_tick())
+
+
+async def _drain(session: Any, *, now_fn: Any) -> list[dict[str, object]]:
+    """Walk every unfinished intent to a terminal state, not one step of it."""
+    ids = list((await session.scalars(
+        select(RealWalletLiveIntent.id)
+        .where(RealWalletLiveIntent.state.in_(UNFINISHED_STATES))
+        .order_by(RealWalletLiveIntent.created_at)
+    )).all())
+    executor = RealWalletExecutor(session)
+    moved: list[dict[str, object]] = []
+    for intent_id in ids:
+        for _ in range(settings.REAL_WALLET_FAST_EXIT_MAX_STEPS):
+            # One intent's failure must not strand the rest of the book — and in
+            # particular must not stop a SUBMITTED intent being reconciled.
+            try:
+                outcome = await executor.advance(intent_id, now=now_fn())
+            except Exception:
+                logger.exception("real_wallet_fast_advance_failed",
+                                 intent_id=str(intent_id))
+                break
+            if not outcome.changed:
+                break
+            moved.append(outcome.as_dict())
+    return moved
+
+
+async def _real_wallet_fast_exit_tick() -> dict[str, Any]:
+    if settings.REAL_WALLET_EXECUTION_MODE == "disabled":
+        return {"skipped": "execution_mode_disabled"}
+    deadline = utcnow().timestamp() + settings.REAL_WALLET_FAST_EXIT_WINDOW_S
+    passes = exits = advanced = 0
+    while True:
+        try:
+            async with SessionFactory() as session:
+                acquired = await session.scalar(
+                    select(func.pg_try_advisory_xact_lock(
+                        DRY_RUN_LOCK_NAMESPACE, FAST_EXIT_LOCK_KEY
+                    ))
+                )
+                if not acquired:
+                    await session.rollback()
+                    return {"skipped": "fast_exit_already_running",
+                            "passes": passes}
+                outcome = await RealWalletExitDriver(session).tick(now=utcnow())
+                moved = await _drain(session, now_fn=utcnow)
+                await session.commit()
+            passes += 1
+            exits += outcome.exits_requested
+            advanced += len(moved)
+            if outcome.exits_requested or moved:
+                logger.warning("real_wallet_fast_exit_pass",
+                               exits=outcome.exits_requested,
+                               advanced=len(moved))
+        except Exception:
+            # Contained like its neighbours: this task shares a beat with the
+            # kill switch's, and must not take them down with it.
+            logger.exception("real_wallet_fast_exit_tick_failed")
+            return {"failed": True, "passes": passes}
+        # Checked AFTER a pass, so a zero window still does one — otherwise
+        # setting it to 0 would silently disable the exit path entirely.
+        if utcnow().timestamp() >= deadline:
+            break
+        await asyncio.sleep(settings.REAL_WALLET_FAST_EXIT_INTERVAL_S)
+    return {"passes": passes, "exits_requested": exits, "advanced": advanced}
 
 
 @celery_app.task(name="app.real_wallet.scheduler.real_wallet_balance_watch")

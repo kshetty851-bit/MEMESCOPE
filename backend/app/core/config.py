@@ -891,6 +891,25 @@ class Settings(BaseSettings):
     # submission transport. `live` exists only so the central guard can reject
     # incomplete production configuration; this codebase does not install a
     # live submission transport.
+    # --- exit latency ------------------------------------------------------
+    # Beat's finest granularity is one minute, and the exit path needs four
+    # ticks to walk an intent from CREATED to SUBMITTED, so a position bought
+    # under a five-minute rule was being sold at roughly ten. Measured against
+    # the graduation lab's own 145 trades that is not a degradation, it is a
+    # wipeout: the earliest collapse in that sample lands at 5m28s, and a
+    # once-a-minute exit ended the account in 54% of tick phases.
+    #
+    # So one task paces itself inside the minute instead. The window stays far
+    # below the 540s soft limit, and every pass commits, so a kill mid-window
+    # loses nothing already decided.
+    REAL_WALLET_FAST_EXIT_WINDOW_S: int = Field(default=50, ge=0, le=300)
+    REAL_WALLET_FAST_EXIT_INTERVAL_S: float = Field(default=3.0, gt=0, le=60)
+    #: Steps one intent may take in a single pass. Four is the whole machine
+    #: (CREATED -> SAFETY_APPROVED -> ORDER_CREATED -> SUBMITTED -> reconcile);
+    #: the bound exists so a handler that reports `changed` without moving
+    #: cannot spin the window away.
+    REAL_WALLET_FAST_EXIT_MAX_STEPS: int = Field(default=5, ge=1, le=20)
+
     REAL_WALLET_EXECUTION_MODE: Literal["disabled", "dry_run", "armed", "live"] = "disabled"
     REAL_WALLET_EXECUTION_ENABLED: bool = False
     REAL_WALLET_AUTOTRADE_ENABLED: bool = False

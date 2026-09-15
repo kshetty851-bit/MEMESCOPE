@@ -419,6 +419,17 @@ celery_app.conf.beat_schedule = {
         "task": "app.real_wallet.scheduler.real_wallet_exit_tick",
         "schedule": crontab(minute="*"),
     },
+    # The same exit path, paced inside the minute. Beat's floor is one minute
+    # and the executor advances one state per call, so a SELL took five ticks
+    # to reach submission — a five-minute rule selling at ten. This task loops
+    # for most of the minute and walks each intent all the way, which is the
+    # difference between an exit that is late and one that is a wipeout. It
+    # refuses immediately while the execution mode is "disabled", its default,
+    # so registering it here changes nothing until the wallet is configured.
+    "real-wallet-fast-exit-tick": {
+        "task": "app.real_wallet.scheduler.real_wallet_fast_exit_tick",
+        "schedule": crontab(minute="*"),
+    },
     "regime-snapshot-hourly": {
         "task": "app.workers.research_tasks.regime_snapshot_hourly",
         "schedule": crontab(minute="7"),
