@@ -260,6 +260,8 @@ ENTRY_RULES: dict[str, str] = {
     "smallcap": "market cap at the open was under $200,000",
     "sym_deep": "symbol used before AND the pool held at least $100,000",
     "sym_nosell": "symbol used before AND no sells had printed",
+    "deep500_flow": "the pool held at least $500,000 at the open AND more buys "
+                    "than sells had printed in its first five minutes",
     "rand25": "a hash of the token address, taking a quarter of them — CONTROL",
     "rand50": "a hash of the token address, taking half of them — CONTROL",
     "rand75": "a hash of the token address, taking three quarters — CONTROL",
@@ -268,7 +270,8 @@ ENTRY_RULES: dict[str, str] = {
 #: Candidate features, measured at the pool open. Every one was chosen before
 #: the tournament opened a position; none is tuned to a result.
 def accepts(arm: Arm, *, mint: str, open_at: datetime, liquidity: Decimal | None,
-            fdv: Decimal | None, sells: int | None, reuse: int | None) -> bool:
+            fdv: Decimal | None, sells: int | None, reuse: int | None,
+            buys: int | None = None) -> bool:
     e = arm.entry
     band = BAND_BY_KEY.get(e)
     if band is not None:
@@ -285,6 +288,16 @@ def accepts(arm: Arm, *, mint: str, open_at: datetime, liquidity: Decimal | None
         # band selection. Same floor, same universe — so the only difference
         # between this and a grid arm is the band, which is the thing on trial.
         return liquidity is not None and liquidity >= LIQ_BANDS[0][1]
+    if e == "deep500_flow":
+        # Deep pool AND net buying. Replayed over 2,205 recorded graduations
+        # this pair admitted 174 tokens, none of which fell more than 80%
+        # inside five minutes, at a gross move of +1.208% a trade — the only
+        # rule measured that clears the ~0.97% toll with room. It is here to
+        # be tested FORWARD: backwards it made +$47 over its first 87 trades
+        # and -$5 over its last 87, which is what a coin looks like.
+        if liquidity is None or liquidity < 500_000:
+            return False
+        return (buys or 0) > (sells or 0)
     if e == "all":
         return True
     if e == "sym":
@@ -407,6 +420,24 @@ ARMS: tuple[Arm, ...] = (
     #    finding — a never-seen symbol rugs 18% against 3% — stays unconfirmed.
     #
     # Both are one commit from coming back; their trade history is untouched.
+    # THE BASELINE, restored 2026-09-15. Without one the board has been saying
+    # so itself for days: a profitable arm cannot be told apart from a market
+    # that simply drifted up over the same tokens, because every arm here is a
+    # SUBSET of this one's population. Beating it is exactly the claim each
+    # selection rule makes, so until it runs, none of them has been tested.
+    #
+    # A NEW NAME on purpose. `FLOOR_5m` still holds 475 closed trades from the
+    # generation that was retired; reusing the name would splice a fresh
+    # baseline onto a wiped book and the wallet would start from that history.
+    Arm("BASE_75k_5m", "floor", 5,
+        note="BASELINE — every graduation over $75k, no selection, out at 5m"),
+    # The one rule in 132 replayed over the full record that clears the toll
+    # with room: 174 tokens, zero falling >80% inside five minutes, +1.208%
+    # gross a trade. It failed the backward split (+$47 then -$5), which is
+    # why it is deployed rather than believed — forward, on tokens it has
+    # never seen, is the only test that has not already been failed.
+    Arm("B5_500k_flow_5m", "deep500_flow", 5,
+        note="pool over $500k AND net buying, out at 5m"),
     Arm("B3_198k_3m", "liq_B3", 3, note="pool over $198k, out at 3m"),
     Arm("B3_198k_4m", "liq_B3", 4, note="pool over $198k, out at 4m"),
     Arm("B3_198k_5m", "liq_B3", 5, note="pool over $198k, out at 5m"),
@@ -427,16 +458,24 @@ ARMS: tuple[Arm, ...] = (
 )
 
 BY_NAME: dict[str, Arm] = {a.name: a for a in ARMS}
+#: There must be a baseline. The board spent four days telling us what a
+#: tournament without one is worth: a profitable arm that cannot be told
+#: apart from a market that went up. Losing it again should fail here.
+assert any(a.is_control for a in ARMS), (
+    "no baseline — every arm is a SUBSET of the floor arm's population, so "
+    "without it none of them has been tested against anything")
 CONTROLS: tuple[Arm, ...] = tuple(a for a in ARMS if a.is_control)
 #: 50 original arms + F51_band_5m, added 2026-09-13 after the first fifty
 #: returned no edge. The count is pinned rather than free because an arm that
 #: appears mid-tournament changes what every other number means — so changing
 #: it must be a deliberate edit with a date, not a side effect.
-assert len(ARMS) == 6, (
-    "four B3 arms plus the two pre-registered A/B arms, which are a separate "
-    f"experiment with a judge date rather than tournament entries — not {len(ARMS)}")
+assert len(ARMS) == 8, (
+    "four B3 arms, the restored BASELINE, the $500k+flow candidate, and the "
+    "two pre-registered A/B arms — which are a separate experiment with a "
+    f"judge date rather than tournament entries — not {len(ARMS)}")
 assert {a.hold for a in ARMS} == {2, 3, 4, 5}, (
-    "Three, four and five minutes — plus the A/B pair's two. Two and six "
+    "Three, four and five minutes — plus the A/B pair's two. The baseline "
+    "and the $500k candidate are both five, so the set is unchanged. Two and six "
     "were retired after both wiped in every band. Longer is measurably worse "
     "(5m is +3.33% at a 1.6% tail; 30m is -6.48% at 14.6%), and one minute is "
     "not measurable at all: the median gap between price samples is 61s, so a "
@@ -448,17 +487,16 @@ assert all(a.tp is None and a.trail is None for a in ARMS), (
 assert all(a.stop is None or a.stop == Decimal("0.10") for a in ARMS), (
     "one stop level, so the twins differ in ONE thing. Sweeping levels here "
     "would be fitting a parameter on the same data that suggested it")
-assert len([a for a in ARMS if not a.is_control]) == 6, (
+assert len([a for a in ARMS if not a.is_control]) == 7, (
     "`config.required_pf` is calibrated on the maximum of FORTY-TWO noise "
     "draws. Six arms are now judged against it, so the bar is if anything "
     "CONSERVATIVE — the luckiest of seventeen reaches less than the luckiest "
     "of forty-two. Left as it is deliberately: a bar that is too hard costs a "
     "real finding some time, where one that is too easy costs a false one nothing")
-assert not CONTROLS, (
-    "no baseline remains, and that is a deliberate state rather than a bug: "
-    "every FLOOR arm was retired on request. Restoring one restores the only "
-    "comparison that can tell a band's edge from a rising market")
-assert len({a.name for a in ARMS}) == 6, "arm names must be unique"
+assert len(CONTROLS) == 1, (
+    "exactly one baseline, restored 2026-09-15. More than one would split the "
+    "comparison; none is the state the board spent four days complaining about")
+assert len({a.name for a in ARMS}) == len(ARMS), "arm names must be unique"
 assert all(len(a.name) <= 32 for a in ARMS), "arm name must fit the column"
 assert {a.entry for a in ARMS} <= set(ENTRY_RULES), (
     "every entry filter an arm uses must be described: "
@@ -700,6 +738,7 @@ class Tournament:
                    GradPostgradSample.price_native, GradPostgradSample.price_usd,
                    GradPostgradSample.liquidity_usd, GradPostgradSample.fdv,
                    GradPostgradSample.txns_m5_sells,
+                   GradPostgradSample.txns_m5_buys,
                    GradToken.symbol, GradToken.first_seen_at)
             .join(GradPostgradSample,
                   (GradPostgradSample.mint == opens.c.mint)
@@ -850,6 +889,7 @@ class Tournament:
                 if not accepts(arm, mint=row.mint, open_at=row.open_at,
                                liquidity=row.liquidity_usd, fdv=row.fdv,
                                sells=row.txns_m5_sells,
+                               buys=row.txns_m5_buys,
                                reuse=reuse.get(row.mint)):
                     continue
                 self._session.add(GradPaperPosition(
