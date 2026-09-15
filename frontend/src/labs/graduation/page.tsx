@@ -616,20 +616,25 @@ function ArmTrades({ name }: { name: string }) {
           The totals below sum every trade as a fresh $100 bet — so a
           hundred-odd trades can total more than any wallet ever held, because
           the money was deployed again and again. The wallet figure on the row
-          above is one $100 account compounding a tenth of itself per position,
-          and it is charged what a position THAT size really costs, which a
-          $100 fill does not pay. Both are correct. They count different things,
-          and only the per-trade average is free of either.
+          above is one $100 account taking these same trades one at a time,
+          which is what you would actually do with $100. Both are correct. They
+          count different things, and only the per-trade average is free of
+          either.
         </span>
       </p>
-      {open.length ? (
-        <div className="flex flex-col gap-1">
-          <h4 className="text-label uppercase tracking-[0.08em] text-ink-dim">
-            Open — marked, nothing banked
-          </h4>
-          <TradeTable rows={open} closed={false} empty="none open" />
-        </div>
-      ) : null}
+      {/* Rendered even when empty. An arm that holds for minutes is FLAT most
+          of the time, and a section that disappears when the count is zero
+          reads as a missing feature rather than an answer. */}
+      <div className="flex flex-col gap-1">
+        <h4 className="text-label uppercase tracking-[0.08em] text-ink-dim">
+          Open — {open.length} · marked, nothing banked
+        </h4>
+        <TradeTable
+          rows={open}
+          closed={false}
+          empty="Nothing open right now. This arm holds each position for only a few minutes, so it sits in cash between trades."
+        />
+      </div>
       <div className="flex flex-col gap-1">
         <h4 className="text-label uppercase tracking-[0.08em] text-ink-dim">
           Closed — {closed.length}
@@ -663,10 +668,14 @@ function ArmTrades({ name }: { name: string }) {
 function LeaderboardPanel() {
   const { data, dataUpdatedAt, isFetching } = useGraduationTournament();
   const [showAll, setShowAll] = useState(false);
-  const [openArm, setOpenArm] = useState<string | null>(null);
+  // undefined = untouched, so the top arm shows its trades on arrival;
+  // null = deliberately collapsed. Two states, because falling back to the
+  // leader whenever the value is empty makes row one impossible to close.
+  const [openArm, setOpenArm] = useState<string | null | undefined>(undefined);
   if (!data?.running) return null;
   const band = data.control_band === null ? null : Number(data.control_band);
   const shown = showAll ? data.arms : data.arms.slice(0, 12);
+  const expanded = openArm === undefined ? (data.arms[0]?.name ?? null) : openArm;
   const lead = data.arms.find((a) => a.name === data.leader);
   const margin =
     lead && band !== null ? Number(lead.wallet_100_usd) - band : null;
@@ -867,14 +876,15 @@ function LeaderboardPanel() {
                         <button
                           type="button"
                           onClick={() =>
-                            setOpenArm((v) => (v === a.name ? null : a.name))
+                            setOpenArm(expanded === a.name ? null : a.name)
                           }
                           className={`truncate font-mono text-xs hover:text-accent ${
                             isLeader ? "font-semibold text-ink" : ""
                           }`}
                           title="show every trade this arm has made"
+                          aria-expanded={expanded === a.name}
                         >
-                          {openArm === a.name ? "▾ " : "▸ "}
+                          {expanded === a.name ? "▾ " : "▸ "}
                           {a.name}
                         </button>
                         {a.is_control ? (
@@ -965,7 +975,7 @@ function LeaderboardPanel() {
                       })()}
                     </td>
                   </tr>
-                  {openArm === a.name ? (
+                  {expanded === a.name ? (
                     <tr>
                       <td colSpan={6} className="p-0">
                         <ArmTrades name={a.name} />
@@ -1002,7 +1012,10 @@ function LeaderboardPanel() {
             <b className="text-ink">Open</b> and <b className="text-ink">Closed</b>{" "}
             are position counts; open positions are not in the P&amp;L, because
             an unrealised number is what every book in this platform&rsquo;s
-            history was leading on shortly before it wasn&rsquo;t.
+            history was leading on shortly before it wasn&rsquo;t.{" "}
+            <b className="text-ink">Click any strategy name</b> to see every
+            trade behind its figures, open and closed — the leader is already
+            open below.
             <br />
             <span className="mt-1 block">
               <b className="text-ink">Expected</b> is where that wallet lands if
