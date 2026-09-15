@@ -386,75 +386,40 @@ D = Decimal
 #: sits, and HOW LONG you hold. Sub-five-minute holds are in because nobody
 #: has ever looked at them inside a band.
 ARMS: tuple[Arm, ...] = (
-    # THE HOLD SWEEP, now 3/4/5 minutes. Two and six were RETIRED 2026-09-15,
-    # both wiped in every band they ran in:
+    # DEEP POOLS ONLY, 2026-09-15. Everything else retired on request.
     #
-    #     FLOOR_2m $0  B1_75k_2m $0  B3_198k_2m $0
-    #     FLOOR_6m $0  B1_75k_6m $0  B3_198k_6m $0
+    # B3 is the one family that never reversed. It was positive at every check
+    # through a day in which every other arm wiped, it survived the slot change
+    # from ten to one that killed the rest, and its worst trade is -20% to -28%
+    # where everything else saw -90% or worse. Deep pools do not rug.
     #
-    # They were the extremes of the sweep and they failed as extremes do: 2m
-    # exits before the median token has moved (+0.94% at 2m against +3.02% at
-    # 5m) and pays a full toll for it, while 6m holds long enough to meet the
-    # tail. The three minutes in the middle are what is left worth testing.
+    # WHAT THIS COSTS, recorded because it is not recoverable by looking at the
+    # board later:
     #
-    # F01_all_2m keeps its two-minute hold: it is a pre-registered A/B arm
-    # with a 10 October judge date, not part of this sweep.
+    #  - THERE IS NO BASELINE. Every band arm was a SUBSET of FLOOR's
+    #    population, so "the band beats no selection" was a question with an
+    #    answer. With FLOOR gone, a profitable B3 cannot be told apart from a
+    #    rising market. The verdict says so rather than implying a comparison
+    #    it can no longer make.
+    #  - The pre-registered rug-signal A/B (F01_all_2m against F14_symnight_2m,
+    #    opened 2026-09-13, judge date 10 October) ends three weeks early. Its
+    #    finding — a never-seen symbol rugs 18% against 3% — stays unconfirmed.
     #
-    # Each of these takes every qualifying graduation — about
-    # 320 a day — so each accumulates twelve times faster than a 14-band arm
-    # did, and the five together trade the SAME tokens, differing only in when
-    # they sell. That is what makes the comparison clean.
-    #
-    # Why hold is now the hypothesis: pooling the old grid by hold gave
-    # 2m +1.11% gross, 3m +2.22%, 5m +0.34% on identical 140-trade samples
-    # with a flat ~1.15% toll. The same shape showed arm by arm — FLOOR at
-    # 2/3/5m was +0.98% / +2.11% / -0.18%, BAND was +0.93% / +2.08% / -3.10%.
-    # Three minutes beat its neighbours every time.
-    #
-    # 4m and 6m have NEVER been tested and are the point of this sweep: they
-    # decide whether three minutes is a peak or the edge of a step. Holds must
-    # differ by at least a minute because the median gap between price samples
-    # is 61s — anything finer is not measurable.
-    Arm("FLOOR_3m", "floor", 3, note="BASELINE — every graduation over $75k, out at 3m"),
-    Arm("FLOOR_4m", "floor", 4, note="BASELINE — every graduation over $75k, out at 4m"),
-    Arm("FLOOR_5m", "floor", 5, note="BASELINE — every graduation over $75k, out at 5m"),
-    # The band question, kept alive at four times the resolution it had. Each
-    # band arm is measured against the FLOOR arm on ITS OWN hold, so a band
-    # that helps has to beat no-selection at the same clock.
-    Arm("B1_75k_3m", "liq_B1", 3, note="pool $75k-$116k, out at 3m"),
-    Arm("B1_75k_4m", "liq_B1", 4, note="pool $75k-$116k, out at 4m"),
-    Arm("B1_75k_5m", "liq_B1", 5, note="pool $75k-$116k, out at 5m"),
+    # Both are one commit from coming back; their trade history is untouched.
     Arm("B3_198k_3m", "liq_B3", 3, note="pool over $198k, out at 3m"),
     Arm("B3_198k_4m", "liq_B3", 4, note="pool over $198k, out at 4m"),
     Arm("B3_198k_5m", "liq_B3", 5, note="pool over $198k, out at 5m"),
-    # STOP-CARRYING TWINS, added 2026-09-15. Each is an exact copy of an arm
-    # above it with a 10% hard stop bolted on, so the comparison is the same
-    # tokens on the same clock, stop against no stop.
-    #
-    # They exist because the loss in this market is reachable after all, which
-    # took three measurements to establish and contradicts what this file said
-    # for a week. Collapses are cascades — median 247 sells, $159 each, where
-    # $352 is needed to move price 10% — falling 1.14% a second. Nothing is
-    # unsellable: at the first print below -20% the pool still holds over half
-    # its liquidity 57% of the time. The tail was never out of reach; the data
-    # was 61 seconds stale, and 1.14%/s x 61s = 69.6% is exactly the -64%
-    # median fill that made stops look useless.
-    #
-    # `HELD_INTERVAL_S` re-prices open positions every 3 seconds, which is what
-    # makes these arms able to fire at all.
-    Arm("FLOOR_3m_SL", "floor", 3, stop=Decimal("0.10"),
-        note="every graduation over $75k, 10% stop, out at 3m"),
-    Arm("FLOOR_4m_SL", "floor", 4, stop=Decimal("0.10"),
-        note="every graduation over $75k, 10% stop, out at 4m"),
-    Arm("FLOOR_5m_SL", "floor", 5, stop=Decimal("0.10"),
-        note="every graduation over $75k, 10% stop, out at 5m"),
-    Arm("B1_75k_5m_SL", "liq_B1", 5, stop=Decimal("0.10"),
-        note="pool $75k-$116k, 10% stop, out at 5m"),
     Arm("B3_198k_5m_SL", "liq_B3", 5, stop=Decimal("0.10"),
         note="pool over $198k, 10% stop, out at 5m"),
-    # Carried over UNCHANGED: a pre-registered A/B on the rug signals with a
-    # 10 October judge date. Rebuilding the tournament must not quietly end an
-    # experiment that has a date on it.
+    # NOT part of the tournament, and kept when everything else went. These
+    # two are a PRE-REGISTERED A/B on the rug signals — a never-seen symbol
+    # rugs 18% against 3%, a daytime-UTC open 15% against 5% — opened
+    # 2026-09-13 with a judge date of 10 October, and `test_ab.py` exists
+    # specifically to stop them being ended quietly.
+    #
+    # They compete with nothing here: B3 asks which pool depth to buy, this
+    # asks whether a symbol predicts a rug. Retiring them three weeks short
+    # would throw away two days of accumulated evidence and answer nothing.
     Arm("F01_all_2m", "all", 2, note="A/B control — every graduation, out at 2m"),
     Arm("F14_symnight_2m", "sym_night", 2,
         note="A/B arm — reused symbol AND a night-UTC open, out at 2m"),
@@ -466,7 +431,9 @@ CONTROLS: tuple[Arm, ...] = tuple(a for a in ARMS if a.is_control)
 #: returned no edge. The count is pinned rather than free because an arm that
 #: appears mid-tournament changes what every other number means — so changing
 #: it must be a deliberate edit with a date, not a side effect.
-assert len(ARMS) == 16, f"the tournament is sixteen arms, not {len(ARMS)}"
+assert len(ARMS) == 6, (
+    "four B3 arms plus the two pre-registered A/B arms, which are a separate "
+    f"experiment with a judge date rather than tournament entries — not {len(ARMS)}")
 assert {a.hold for a in ARMS} == {2, 3, 4, 5}, (
     "Three, four and five minutes — plus the A/B pair's two. Two and six "
     "were retired after both wiped in every band. Longer is measurably worse "
@@ -480,14 +447,17 @@ assert all(a.tp is None and a.trail is None for a in ARMS), (
 assert all(a.stop is None or a.stop == Decimal("0.10") for a in ARMS), (
     "one stop level, so the twins differ in ONE thing. Sweeping levels here "
     "would be fitting a parameter on the same data that suggested it")
-assert len([a for a in ARMS if not a.is_control]) == 13, (
+assert len([a for a in ARMS if not a.is_control]) == 6, (
     "`config.required_pf` is calibrated on the maximum of FORTY-TWO noise "
-    "draws. Thirteen arms are now judged against it, so the bar is if anything "
+    "draws. Six arms are now judged against it, so the bar is if anything "
     "CONSERVATIVE — the luckiest of seventeen reaches less than the luckiest "
     "of forty-two. Left as it is deliberately: a bar that is too hard costs a "
     "real finding some time, where one that is too easy costs a false one nothing")
-assert len(CONTROLS) == 3, "one baseline per surviving hold"
-assert len({a.name for a in ARMS}) == 16, "arm names must be unique"
+assert not CONTROLS, (
+    "no baseline remains, and that is a deliberate state rather than a bug: "
+    "every FLOOR arm was retired on request. Restoring one restores the only "
+    "comparison that can tell a band's edge from a rising market")
+assert len({a.name for a in ARMS}) == 6, "arm names must be unique"
 assert all(len(a.name) <= 32 for a in ARMS), "arm name must fit the column"
 assert {a.entry for a in ARMS} <= set(ENTRY_RULES), (
     "every entry filter an arm uses must be described: "

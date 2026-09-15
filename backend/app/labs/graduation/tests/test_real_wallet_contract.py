@@ -113,37 +113,29 @@ def test_no_arm_decides_by_dice_roll():
             "fund. Use FLOOR as the baseline instead")
 
 
-def test_the_baseline_shares_the_grid_universe_exactly():
-    """A baseline that bought a different population would not be a baseline.
-
-    FLOOR must take every token any grid arm takes, and no token any grid arm
-    refuses — otherwise 'the band beat the baseline' could just mean the two
-    were shopping in different shops.
-    """
+def test_no_band_buys_below_the_floor_the_bands_were_drawn_from():
+    """There is no FLOOR arm left to compare against — every baseline was
+    retired 2026-09-15 — so what survives of that check is the absolute rule:
+    nothing may buy a pool under $75k, which is where a third to a half of
+    tokens are destroyed."""
     from datetime import UTC, datetime
 
     from app.labs.graduation.tournament import LIQ_BANDS
 
     now = datetime.now(UTC)
     token = {"mint": "M" * 44, "fdv": Decimal("500000"), "sells": 1, "reuse": 1}
-    floor = next(a for a in ARMS if a.entry == "floor")
-    grid = [a for a in ARMS if a.entry.startswith("liq_")]
-    for probe in (74_999, 75_000, 100_000, 250_000, 5_000_000):
-        liq = Decimal(probe)
-        taken_by_grid = any(accepts(a, open_at=now, liquidity=liq, **token)
-                            for a in grid)
-        taken_by_floor = accepts(floor, open_at=now, liquidity=liq, **token)
-        # A band may cover LESS than the floor — B2 was retired and its range
-        # has no band arm — but it must never cover MORE. A band buying what
-        # the baseline refuses would not be a subset, and "the band beat the
-        # baseline" would stop meaning anything.
-        assert not (taken_by_grid and not taken_by_floor), (
-            f"${probe}: a band buys what the baseline refuses")
-    assert LIQ_BANDS[-1][2] >= 1_000_000_000, "the top band must be unbounded"
+    for probe in (1_000, 40_000, 74_999):
+        # F01_all_2m is exempt and must be: it is the A/B CONTROL, and its
+        # whole rule is "every graduation, no filter". Excluding it here is
+        # what makes this a statement about the BANDS.
+        assert not any(
+            accepts(a, open_at=now, liquidity=Decimal(probe), **token)
+            for a in ARMS if a.entry.startswith("liq_")), (
+            f"${probe} must be refused by every band arm")
+    assert LIQ_BANDS[0][1] == 75_000
 
 
-@pytest.mark.asyncio
-async def test_retiring_an_arm_does_not_strand_its_open_positions():
+def test_retiring_an_arm_does_not_strand_its_open_positions():
     """A position on a book that is no longer an arm must still be settled.
 
     Generation 2 replaced generation 1 and left 51 positions open on 47

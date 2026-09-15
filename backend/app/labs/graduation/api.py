@@ -1185,8 +1185,12 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
     if leader.top_token_share is not None and leader.top_token_share > board.max_token_share:
         fails.append(f"one token is {leader.top_token_share * 100:.0f}% of its profit, "
                      f"needs under {board.max_token_share * 100:.0f}%")
-    if band is None:
-        fails.append("no random arm has closed a trade yet, so there is "
+    if not control_rows:
+        fails.append("THERE IS NO BASELINE — every FLOOR arm was retired, so a "
+                     "profitable arm here cannot be told apart from a rising "
+                     "market. Restoring one baseline restores the comparison")
+    elif band is None:
+        fails.append("no baseline arm has closed a trade yet, so there is "
                      "nothing to compare against")
     elif leader.is_control:
         # The leader IS the baseline. "Has not beaten the baseline" is a

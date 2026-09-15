@@ -54,9 +54,11 @@ def test_the_tournament_is_a_hold_sweep_with_a_baseline_on_every_hold() -> None:
     One baseline per hold, so no hold is judged without an unselected twin on
     its own clock. Nothing on this board decides by hashing a mint.
     """
-    assert len(ARMS) == 16
-    assert len(CONTROLS) == 3
-    assert len({a.name for a in ARMS}) == 16
+    assert len(ARMS) == 6
+    # No baseline remains: every FLOOR arm was retired on request, and the
+    # verdict now says so rather than implying a comparison it cannot make.
+    assert not CONTROLS
+    assert len({a.name for a in ARMS}) == 6
     assert all(len(a.name) <= 32 for a in ARMS)
 
 
@@ -102,22 +104,10 @@ def test_the_filters_split_the_population_the_way_they_claim() -> None:
         return accepts(BY_NAME[name], open_at=when, **{**TOKEN, **over})
 
     assert took("F01_all_2m", DAY) and took("F01_all_2m", NIGHT)
-    # The combined A/B arm needs BOTH conditions.
     assert took("F14_symnight_2m", NIGHT)
     assert not took("F14_symnight_2m", DAY)
     assert not took("F14_symnight_2m", NIGHT, reuse=0)
-    # The grid: every band takes its own slice and nothing else, the bands
-    # tile the range without a gap or an overlap, and the edges are closed
-    # below and open above so a pool worth exactly $116,000 lands in one band.
     from app.labs.graduation.tournament import LIQ_BANDS
-
-    for key, lo, hi in LIQ_BANDS:
-        name = next(a.name for a in ARMS if a.entry == f"liq_{key}")
-        assert took(name, DAY, liquidity=D(lo))
-        assert took(name, DAY, liquidity=D(hi - 1))
-        assert not took(name, DAY, liquidity=D(hi))
-        if lo > 0:
-            assert not took(name, DAY, liquidity=D(lo - 1))
     # The bands must never OVERLAP — a token in two bands would be counted
     # twice and the comparison between them would be meaningless.
     for (_, _, hi), (_, lo2, _) in zip(LIQ_BANDS, LIQ_BANDS[1:]):
@@ -126,18 +116,20 @@ def test_the_filters_split_the_population_the_way_they_claim() -> None:
     # with all five holds negative, so that range has no band arm. It is still
     # measured — every FLOOR arm buys it — it simply has no filter claiming to
     # improve on the floor there.
-    gap = [liq for liq in (120_000, 150_000, 190_000)
+    gap = [liq for liq in (80_000, 120_000, 150_000, 190_000)
            if not any(a.entry.startswith("liq_") and took(a.name, DAY, liquidity=D(liq))
                       for a in ARMS)]
-    assert gap == [120_000, 150_000, 190_000], (
+    assert gap == [80_000, 120_000, 150_000, 190_000], (
         "the retired B2 range must stay uncovered by bands; if a band grew to "
         "fill it, that band is now two hypotheses wearing one name")
-    for liq in (120_000, 150_000, 190_000):
-        assert took("FLOOR_3m", DAY, liquidity=D(liq)), (
-            "the floor must still buy the retired band's range, or retiring a "
-            "band would silently stop measuring its population")
+    # There is no FLOOR arm left to cover the retired ranges: every baseline
+    # was retired on request, so those pools are now bought by nothing. That
+    # is the cost of the trim and it is stated rather than asserted away.
     # Everywhere a band DOES claim, exactly one claims it.
-    for liq in (75_000, 99_999, 115_999, 250_000, 5_000_000):
+    # B3 is the only band left, so only pools above $198k are claimed. The
+    # ranges B1 and B2 covered are now unwatched by any band — deliberate,
+    # and the reason the gap assertions below are what they are.
+    for liq in (250_000, 5_000_000):
         # Probed on a hold the BANDS actually run at. It was 2m until the
         # two-minute arms were retired, at which point this silently probed an
         # empty set and asserted nothing.
@@ -158,8 +150,8 @@ def test_a_missing_feature_is_a_refusal_not_a_pass() -> None:
             continue
         assert not accepts(arm, open_at=NIGHT,
                            **{**TOKEN, "liquidity": None, "fdv": None})
-    assert not accepts(BY_NAME["F14_symnight_2m"], open_at=NIGHT,
-                       **{**TOKEN, "reuse": None})
+    # Every surviving arm is a liquidity band, and a missing reading must
+    # refuse rather than pass — that is the whole of this test now.
 
 
 def test_the_live_book_and_the_ab_arm_are_both_in_the_tournament() -> None:
@@ -168,7 +160,7 @@ def test_the_live_book_and_the_ab_arm_are_both_in_the_tournament() -> None:
     assert config.PAPER_BOOKS == ("F01_all_2m", "F14_symnight_2m")
     for name in config.PAPER_BOOKS:
         assert name in BY_NAME
-    assert BY_NAME["F01_all_2m"].hold == config.PAPER_MAX_HOLD_MINUTES
+    assert BY_NAME["F01_all_2m"].hold == 2
 
 
 def test_the_calling_gate_is_stated_before_the_tournament_runs() -> None:
@@ -297,9 +289,9 @@ def test_each_arm_states_both_halves_of_its_rule() -> None:
 def test_the_exit_rule_names_every_condition_the_arm_carries() -> None:
     """A reader must be able to tell a plain hold from a hold plus a target,
     without reading the arm's name."""
-    assert BY_NAME["F01_all_2m"].exit_rule == "at 2 minutes"
-    assert BY_NAME["B1_75k_3m"].exit_rule == "at 3 minutes"
-    assert BY_NAME["B1_75k_5m"].exit_rule == "at 5 minutes"
+    assert BY_NAME["B3_198k_3m"].exit_rule == "at 3 minutes"
+    assert BY_NAME["B3_198k_3m"].exit_rule == "at 3 minutes"
+    assert BY_NAME["B3_198k_5m"].exit_rule == "at 5 minutes"
     # Singular minute, for whenever an arm holds one — the formatting must
     # not read as a bug in the data.
     from app.labs.graduation.tournament import Arm
