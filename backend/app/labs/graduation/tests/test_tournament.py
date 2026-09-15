@@ -41,6 +41,10 @@ def test_the_tournament_is_a_hold_sweep_with_a_baseline_on_every_hold() -> None:
     arm above it with a 10% hard stop. A stop makes an arm a strategy rather
     than a baseline, so FLOOR_*_SL are NOT counted among the controls.
 
+    The 2m and 6m holds were retired 2026-09-15 — both wiped in every band
+    they ran in. F01_all_2m keeps its two minutes: it is a pre-registered A/B
+    arm with a judge date, not part of the sweep.
+
     Fourteen narrow bands came first and starved — 25 trades a day each of a
     320-token flow — while producing scatter rather than a shape. Pooled by
     HOLD the same data separated cleanly (2m +1.11%, 3m +2.22%, 5m +0.34%
@@ -50,9 +54,9 @@ def test_the_tournament_is_a_hold_sweep_with_a_baseline_on_every_hold() -> None:
     One baseline per hold, so no hold is judged without an unselected twin on
     its own clock. Nothing on this board decides by hashing a mint.
     """
-    assert len(ARMS) == 22
-    assert len(CONTROLS) == 5
-    assert len({a.name for a in ARMS}) == 22
+    assert len(ARMS) == 16
+    assert len(CONTROLS) == 3
+    assert len({a.name for a in ARMS}) == 16
     assert all(len(a.name) <= 32 for a in ARMS)
 
 
@@ -134,7 +138,10 @@ def test_the_filters_split_the_population_the_way_they_claim() -> None:
             "band would silently stop measuring its population")
     # Everywhere a band DOES claim, exactly one claims it.
     for liq in (75_000, 99_999, 115_999, 250_000, 5_000_000):
-        hit = [a.name for a in ARMS if a.hold == 2 and a.entry.startswith("liq_")
+        # Probed on a hold the BANDS actually run at. It was 2m until the
+        # two-minute arms were retired, at which point this silently probed an
+        # empty set and asserted nothing.
+        hit = [a.name for a in ARMS if a.hold == 3 and a.entry.startswith("liq_")
                and took(a.name, DAY, liquidity=D(liq))]
         assert len(hit) == 1, (liq, hit)
     # And nothing below the floor is bought at all — that is the whole point.
