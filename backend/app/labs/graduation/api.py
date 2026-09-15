@@ -697,7 +697,8 @@ _PROJECTIONS: tuple[datetime, dict[str, dict[str, Any]]] | None = None
 _PROJECTION_TTL = timedelta(minutes=2)
 
 
-def _wallet_walk(returns: Iterable[float]) -> tuple[float, bool]:
+def _wallet_walk(returns: Iterable[float],
+                 rate: Decimal | None = None) -> tuple[float, bool]:
     """Walk the $100 wallet through these returns; equity and whether it died.
 
     ONE model, two callers — the leaderboard's money column and its thirty-day
@@ -715,6 +716,10 @@ def _wallet_walk(returns: Iterable[float]) -> tuple[float, bool]:
     projection (ten slots really do resolve together). The formula is the same
     either way, which is the point of having one function.
 
+    `rate` is SOL/USD, and without it the walk charges no size penalty — the
+    old behaviour, kept only so a caller with no rate in hand still returns a
+    number rather than raising. Every caller that can get one should.
+
     A position stops growing at `PAPER_NOTIONAL_USD`, and that cap is evidence
     rather than caution: every return here was MEASURED at a $100 order, and
     the shallowest decile of pools this lab trades holds $15.9k, so $100 pays
@@ -728,11 +733,39 @@ def _wallet_walk(returns: Iterable[float]) -> tuple[float, bool]:
     equity = float(config.WALLET_DEMO_USD)
     floor = float(config.WALLET_MIN_USD) / slots
     cap = float(config.PAPER_NOTIONAL_USD)
+    base = float(config.PAPER_NOTIONAL_USD)
     for r in returns:
-        equity += min(equity / slots, cap) * r
+        position = min(equity / slots, cap)
+        equity += position * (r - _size_penalty(position, base, rate))
         if equity < floor:
             return 0.0, True
     return equity, False
+
+
+def _size_penalty(position_usd: float, measured_at_usd: float,
+                  rate: Decimal | None) -> float:
+    """What a position of THIS size pays beyond what the measured one did.
+
+    Every return handed to this walk was priced on a $100 order. The wallet
+    trades a TENTH of its equity — $10 at the start — and a $10 order does not
+    cost what a $100 order costs, because the priority fee is flat in SOL and
+    its share explodes as the order shrinks:
+
+        $100  0.705% a leg    $50  0.909%    $25  1.318%    $10  2.546%
+
+    Charging $100 execution to a $10 position understated the round trip by
+    3.68% PER TRADE, which is larger than any gross edge this lab has ever
+    measured. It turned the leaderboard's best arm from $88.84 into $121.04.
+
+    Returned as the EXCESS over the size the returns were measured at, so a
+    wallet whose position happens to be $100 pays nothing extra and the walk
+    stays identical to what it was.
+    """
+    if rate is None or position_usd <= 0:
+        return 0.0
+    here = costs(Decimal(str(position_usd)) / rate).side_fraction
+    there = costs(Decimal(str(measured_at_usd)) / rate).side_fraction
+    return float(here - there) * 2
 
 
 @router.get("/tournament", response_model=Leaderboard)
@@ -774,6 +807,15 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
     # on — the recent window is both cheaper and more honest.
     # ORDERED, because one consumer compounds them and compounding is not
     # commutative once a trade can take the account to zero.
+    # SOL/USD, so the wallet can charge what ITS position size really costs.
+    # Observed rather than fetched: the newest sample carrying both prices,
+    # which keeps the figure inside the data the rest of the board trusts.
+    sol_rate = await db.scalar(
+        select(GradPostgradSample.price_usd / GradPostgradSample.price_native)
+        .where(GradPostgradSample.price_usd > 0,
+               GradPostgradSample.price_native > 0)
+        .order_by(GradPostgradSample.ts.desc()).limit(1))
+
     per_arm: dict[str, list[float]] = {}
     #: The same returns, grouped by the HOUR they closed in. Trades inside one
     #: hour are the same market, not independent draws, and the projection's
@@ -813,7 +855,7 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
         """
         if not returns:
             return config.WALLET_DEMO_USD, None
-        equity, _ = _wallet_walk(returns)
+        equity, _ = _wallet_walk(returns, sol_rate)
         return (Decimal(str(equity)).quantize(Decimal("0.01")),
                 Decimal(str(min(returns) * 100)).quantize(Decimal("0.1")))
     open_now: dict[str, int] = {}
@@ -953,7 +995,7 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
             seq = [pool[random.randrange(1024)] + drift  # noqa: S311
                    for _ in range(longest)]
             for d in days:
-                equity, dead = _wallet_walk(seq[:cuts[d]])
+                equity, dead = _wallet_walk(seq[:cuts[d]], sol_rate)
                 finals[d].append(equity)
                 if d == days[-1]:
                     ruined += dead
