@@ -251,3 +251,28 @@ def test_market_snapshot_protection_is_bounded():
         "the window must come from settings, not a literal")
     # An OPEN position is protected regardless of how old it is.
     assert "closed_at IS NULL" in src
+
+
+def test_wiped_arms_are_kept_but_ranked_below_every_live_one():
+    """Deleting losers is how a leaderboard becomes flattering by construction.
+
+    The wiped rows carry the most important finding of 2026-09-15: at one slot
+    every one of them died to a SINGLE token while holding the whole wallet.
+    That is the cost of concentration, and it is only visible because they are
+    still on the board.
+
+    They must also never be named leader — `leader` takes the first traded row,
+    so the sort is what keeps a $0.00 arm off the top on a tie-break.
+    """
+    src = inspect.getsource(api.tournament)
+    key = next(line for line in src.splitlines() if "rows.sort(key=" in line)
+    assert "r.wallet_100_usd > 0" in key, (
+        "live arms must sort above wiped ones, or a dead arm can lead")
+    assert "r.trades > 0" in key, "untraded arms must not outrank traded ones"
+
+    # The ordering the key produces: live, then dead, then untraded.
+    def rank(traded: bool, wallet: float) -> tuple:
+        return (traded, wallet > 0, wallet)
+
+    live, wiped, untraded = rank(True, 310.5), rank(True, 0.0), rank(False, 100.0)
+    assert sorted([wiped, untraded, live], reverse=True) == [live, wiped, untraded]

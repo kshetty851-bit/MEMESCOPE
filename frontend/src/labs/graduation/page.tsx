@@ -888,12 +888,17 @@ function LeaderboardPanel() {
                 const beats =
                   a.trades > 0 && Number(a.wallet_100_usd) > baselineWallet;
                 const isLeader = a.name === data.leader;
+                // Wiped, and kept on the board on purpose: these rows are the
+                // evidence that one slot means one token can end the wallet.
+                const dead = a.trades > 0 && Number(a.wallet_100_usd) === 0;
                 return (
                   <Fragment key={a.name}>
                   <tr
                     className={`grad-row border-t border-line align-top ${
                       isLeader ? "grad-leader" : ""
-} ${a.is_control ? "text-ink-dim" : ""}`}
+} ${dead ? "grad-dead" : ""} ${
+                      a.is_control ? "text-ink-dim" : ""
+                    }`}
                     style={{ animationDelay: `${Math.min(i, 14) * 28}ms` }}
                   >
                     <td className="py-2.5 pl-1 text-label tabular-nums text-ink-dim">
@@ -920,6 +925,11 @@ function LeaderboardPanel() {
                         {a.is_control ? (
                           <span className="shrink-0 rounded-full border border-down/40 px-1.5 py-px text-micro uppercase tracking-[0.08em] text-down">
                             baseline
+                          </span>
+                        ) : null}
+                        {dead ? (
+                          <span className="shrink-0 rounded-full border border-down bg-down/15 px-1.5 py-px text-micro uppercase tracking-[0.08em] text-down">
+                            dead
                           </span>
                         ) : null}
                       </span>

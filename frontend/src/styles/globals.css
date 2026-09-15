@@ -1110,6 +1110,18 @@
   }
 }
 
+/* A wiped arm. It stays on the board — deleting losers is how a leaderboard
+   becomes flattering by construction — but it must never be mistaken for a
+   contender, so it is dimmed and sorted below every live arm. Readable, not
+   hidden: the reason these rows matter is that they died to a single token. */
+.grad-dead {
+  opacity: 0.55;
+}
+
+.grad-dead:hover {
+  opacity: 1;
+}
+
 /* The leader keeps a slow sheen travelling across it. It is the only row that
    moves after arrival, which is the whole point of marking it. */
 .grad-leader {

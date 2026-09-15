@@ -1112,7 +1112,18 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
     # never-traded arm — still holding its full $100 — above every arm that has
     # taken a trade and lost, and the top fills with filters that have simply
     # not matched anything yet.
-    rows.sort(key=lambda r: (r.trades > 0, r.wallet_100_usd), reverse=True)
+    # LIVE ARMS FIRST, then the dead, then whatever has not traded.
+    #
+    # A wiped arm stays on the board deliberately — deleting losers is how a
+    # leaderboard becomes flattering by construction, and these rows carry the
+    # day's most important finding: every one of them died to a single token
+    # while holding the whole wallet. That is the cost of one slot, and it is
+    # only visible because they are still here.
+    #
+    # It also fixes the leader: `leader` takes the first traded row, so without
+    # this a wiped arm could be named leader on tie-breaks.
+    rows.sort(key=lambda r: (r.trades > 0, r.wallet_100_usd > 0, r.wallet_100_usd),
+              reverse=True)
     traded = [r for r in rows if r.trades]
     control_rows = [r for r in rows if r.is_control]
     # In WALLET dollars, because that is the column the board now shows. As
