@@ -52,12 +52,19 @@ ALLOWED_PLATFORM = (
     "app.services.curve.pda", "app.services.curve.state",
     "app.services.rpc.standard",
     "app.services.market.providers.rate_budget",
+    # Pool and vault derivation for the held-position watcher. Deliberate: the
+    # platform's decoder is verified against mainnet, and writing a second one
+    # inside this package would be a second thing to get wrong.
+    "app.security.liquidity",
+    "app.core.config",
 )
 #: Nothing in these may know a network exists. `sources.py` is the only module
 #: in the package allowed to.
-PURE_MODULES = ("curve.py", "parse.py", "watchset.py", "backtest.py")
+PURE_MODULES = ("curve.py", "parse.py", "watchset.py", "backtest.py",
+                "held_watch.py")
 #: Every module the package ships.
 MODULES = ("config.py", "curve.py", "parse.py", "watchset.py", "sources.py",
+           "held_watch.py",
            "postgrad.py", "recorder.py", "features.py", "backtest.py",
            "scheduler.py", "models.py", "api.py", "paper.py", "analyst.py",
            "tournament.py", "ab.py", "__main__.py")

@@ -60,6 +60,23 @@ def _int(name: str, default: int) -> int:
 #: needs a key. `subscribeTokenTrade` is metered and is deliberately not used:
 #: progress comes from the chain instead, which costs nothing.
 PUMPPORTAL_WS_URL = "wss://pumpportal.fun/api/data"
+#: Where the held-position watcher subscribes. The PUBLIC Solana node, on
+#: purpose and not as a fallback.
+#:
+#: `accountSubscribe` needs no key: measured 2026-09-15 on a pool taking 1,512
+#: sells in five minutes, it delivered 44 updates in 25 seconds — one every
+#: 0.6s, first arriving 1.3s after subscribing. DexScreener refreshes about
+#: every 27 SECONDS, which is 45x slower and on the wrong side of the cliff
+#: that decides whether a stop works at all:
+#:
+#:     0.6s -> FLOOR_5m $1,040      27s -> FLOOR_5m $0
+#:
+#: Helius refuses the websocket while its quota is spent (InvalidStatus), so
+#: the public node is not the compromise here — it is the one that works.
+#: Only open positions are subscribed, one to five at a time, so the public
+#: node's connection limits are never close.
+SOLANA_WS_URL = (os.getenv("LAB_GRADUATION_SOLANA_WS_URL", "").strip()
+                 or "wss://api.mainnet-beta.solana.com")
 
 #: Reconnect backoff, seconds. The platform's `BackoffPolicy` applies jitter.
 RECONNECT_INITIAL_SECONDS = 1.0
@@ -247,6 +264,13 @@ POSTGRAD_INTERVAL_S = _int("LAB_GRADUATION_POSTGRAD_INTERVAL_S", 20)
 #: costs one request every three seconds and NOTHING on the RPC quota, which
 #: is exhausted.
 HELD_INTERVAL_S = _int("LAB_GRADUATION_HELD_INTERVAL_S", 3)
+#: How far price must move before a websocket update is written as a sample.
+#:
+#: The socket delivers one update every ~0.6s. Writing all of them would flood
+#: a table already driving this box to 88% disk, and the record is not the
+#: point — a FRESH MARK when a stop needs it is. Half a percent is well inside
+#: the 1.14%-per-second fall these stops exist to catch.
+HELD_WRITE_PCT = _dec("LAB_GRADUATION_HELD_WRITE_PCT", "0.005")
 #: `/tokens/v1/{chain}/{addresses}` takes a comma-separated list. Thirty is the
 #: documented ceiling and the number the Breakout lab measured against.
 DEXSCREENER_BATCH = 30

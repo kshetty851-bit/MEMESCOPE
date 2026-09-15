@@ -156,20 +156,51 @@ class GraduationRecorder:
                 logger.exception("graduation_postgrad_failed")
 
     async def _held_loop(self) -> None:
-        """Mark the positions actually open, fast.
+        """Keep the mark fresh on the positions actually open.
 
-        Separate from the bulk loop on purpose: it is a different question. The
-        bulk loop asks "what is happening across the market"; this asks "is the
-        thing I am holding dying right now", and only the second one has a
-        deadline.
+        A 3-second DexScreener poll looked fast and was not — their feed
+        refreshes about every 27 SECONDS, and collapses fall 1.14% a second, so
+        27s is past the cliff where a stop stops working:
+
+            reaction   0.6s    3s    18s    27s    61s
+            FLOOR_5m  $1040  $949   $342     $0     $0
+
+        Not every update is written. The socket gives one every ~0.6s, which
+        would flood a table already driving this box to 88% disk, and the value
+        is not the record — it is the MARK being fresh when a stop needs it.
         """
         from sqlalchemy import select
 
         from app.db.session import SessionFactory
+        from app.labs.graduation.held_watch import pool_for, vaults_from_pool
         from app.labs.graduation.models import GradPaperPosition
+        from app.labs.graduation.sources import HeldVaultStream
+
+        stream = HeldVaultStream(now=self._now)
+        # Pool and vault addresses never change for a mint, so this costs one
+        # getAccountInfo per token ever rather than per reconnect.
+        cache: dict[str, tuple[str, str] | None] = {}
+        last: dict[str, tuple[Decimal, datetime]] = {}
+
+        async def on_price(mint: str, price: Decimal, ts: datetime) -> None:
+            seen = last.get(mint)
+            if seen is not None:
+                moved = abs(price / seen[0] - 1) if seen[0] else Decimal(1)
+                if (moved < config.HELD_WRITE_PCT
+                        and (ts - seen[1]).total_seconds() < config.HELD_INTERVAL_S):
+                    return
+            last[mint] = (price, ts)
+            state = self.postgrad.states.get(mint)
+            if state is None or state.pair_address is None:
+                return
+            self._buffer(self._postgrad_rows, {
+                "mint": mint, "ts": ts, "source": "held_ws",
+                "pair_address": state.pair_address, "dex_id": state.dex_id,
+                "price_native": price, "price_usd": None,
+                "liquidity_usd": None, "fdv": None})
+            await self.flush()
 
         while True:
-            await asyncio.sleep(config.HELD_INTERVAL_S)
             try:
                 async with SessionFactory() as session:
                     mints = (await session.scalars(
@@ -177,15 +208,25 @@ class GraduationRecorder:
                         .where(GradPaperPosition.closed_at.is_(None),
                                GradPaperPosition.notional_usd > 0)
                         .distinct())).all()
-                if not mints:
+                triples = []
+                for mint in mints:
+                    if mint not in cache:
+                        pool = pool_for(mint)
+                        raw = await stream.account_data(pool) if pool else None
+                        cache[mint] = vaults_from_pool(raw)
+                    pair = cache.get(mint)
+                    if pair:
+                        triples.append((mint, pair[0], pair[1]))
+                if not triples:
+                    await asyncio.sleep(config.HELD_INTERVAL_S)
                     continue
-                for row in await self.postgrad.poll_held(list(mints), self._now()):
-                    self._buffer(self._postgrad_rows, row)
-                await self.flush()
+                await stream.stream(triples, on_price)
             except asyncio.CancelledError:
                 raise
-            except Exception:
-                logger.exception("graduation_held_failed")
+            except Exception as exc:
+                logger.warning("graduation_held_dropped", error=repr(exc),
+                               updates=stream.updates)
+                await asyncio.sleep(config.RECONNECT_INITIAL_SECONDS)
 
     async def shutdown(self) -> None:
         """Last flush. Every live state is closed, so a restart does not think

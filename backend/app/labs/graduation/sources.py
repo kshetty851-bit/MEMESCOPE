@@ -41,7 +41,7 @@ import websockets
 
 from app.core.backoff import BackoffPolicy
 from app.core.logging import get_logger
-from app.labs.graduation import config, curve
+from app.labs.graduation import config, held_watch, curve
 from app.services.curve.pda import InvalidAddressError, bonding_curve_address
 from app.services.curve.state import CurveState
 from app.services.market.providers.rate_budget import CallBudget
@@ -414,3 +414,111 @@ def _retry_after(response: httpx.Response) -> float:
         return float(raw) if raw is not None else 0.0
     except (TypeError, ValueError):
         return 0.0
+
+
+class HeldVaultStream:
+    """Sub-second prices for the positions actually open.
+
+    In `sources.py` because this package allows exactly one module to know a
+    network exists, and that rule is worth more than the convenience of
+    keeping this beside its decoding. The decoding lives in `held_watch.py`,
+    which stays pure.
+
+    WHY IT EXISTS. Collapses here are cascades — median 247 sells of about
+    $159, where $352 is needed to move price 10% — falling 1.14% a SECOND. So
+    reaction time is the whole result:
+
+        reaction   0.6s    3s    18s    27s    61s
+        FLOOR_5m  $1040  $949   $342     $0     $0
+
+    DexScreener refreshes about every 27 seconds (measured: on a pool taking
+    1,512 sells in five minutes only 11% of 3-second polls returned a new
+    price), which is past the cliff. `accountSubscribe` on the pool's two
+    vaults gave 44 updates in 25 seconds on that same pool and needs NO KEY —
+    Helius refuses the socket while its quota is spent, so the public node is
+    not the compromise, it is the thing that works.
+    """
+
+    def __init__(
+        self,
+        *,
+        url: str | None = None,
+        connect: Callable[..., Any] = websockets.connect,
+        now: Callable[[], datetime] = lambda: datetime.now(UTC),
+    ) -> None:
+        self._url = url or config.SOLANA_WS_URL
+        self._connect = connect
+        self._now = now
+        self.updates = 0
+
+    async def account_data(self, address: str) -> bytes | None:
+        """One `getAccountInfo` against the same public node.
+
+        Not the lab's RPC client: that carries the Helius key, which is spent.
+        Called once per token ever — the caller caches — so it is nowhere near
+        the public node's limits.
+        """
+        body = {"jsonrpc": "2.0", "id": 1, "method": "getAccountInfo",
+                "params": [address, {"encoding": "base64"}]}
+        url = self._url.replace("wss://", "https://")
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                got = (await client.post(url, json=body)).json()
+        except Exception as exc:
+            logger.warning("graduation_held_account_failed",
+                           address=address, error=repr(exc))
+            return None
+        return held_watch.account_bytes((got.get("result") or {}).get("value"))
+
+    async def stream(
+        self,
+        vaults: Sequence[tuple[str, str, str]],
+        on_price: Callable[[str, Decimal, datetime], Awaitable[None]],
+    ) -> None:
+        """Subscribe to (mint, base_vault, quote_vault) triples and report.
+
+        Returns when the socket drops, so the caller decides whether the held
+        set has changed before reconnecting. A dead socket looks exactly like a
+        quiet market, which is the failure this platform has already shipped
+        once, so every drop is logged.
+        """
+        if not vaults:
+            return
+        state: dict[str, held_watch.Held] = {
+            mint: held_watch.Held(mint=mint, base_vault=base, quote_vault=quote)
+            for mint, base, quote in vaults}
+        pending: dict[int, tuple[str, str]] = {}
+        live: dict[int, tuple[str, str]] = {}
+        async with self._connect(self._url, open_timeout=20) as ws:
+            ident = 0
+            for mint, base, quote in vaults:
+                for label, address in (("base", base), ("quote", quote)):
+                    ident += 1
+                    await ws.send(held_watch.subscribe_frame(address, ident))
+                    pending[ident] = (mint, label)
+            logger.info("graduation_held_watching", mints=len(state))
+            while True:
+                payload = json.loads(await ws.recv())
+                if "id" in payload and "result" in payload:
+                    key = pending.pop(payload["id"], None)
+                    if key is not None:
+                        live[payload["result"]] = key
+                    continue
+                sub = held_watch.subscription_of(payload)
+                if sub is None or sub not in live:
+                    continue
+                mint, label = live[sub]
+                raw = held_watch.account_bytes(
+                    ((payload.get("params") or {}).get("result") or {}).get("value"))
+                amount = held_watch.vault_amount(raw)
+                if amount is None:
+                    continue
+                held = state[mint]
+                if label == "base":
+                    held.base = amount
+                else:
+                    held.quote = amount
+                price = held.price()
+                if price is not None:
+                    self.updates += 1
+                    await on_price(mint, price, self._now())
