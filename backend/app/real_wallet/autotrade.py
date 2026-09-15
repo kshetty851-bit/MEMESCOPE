@@ -69,8 +69,14 @@ class AutotradeState:
 
 def _known_strategy(strategy_id: str) -> bool:
     from app.lab.spec import BY_ID
+    from app.labs.graduation.live_spec import BY_ID as GRAD_BY_ID
 
-    return strategy_id.upper() in BY_ID
+    # Two registries, because the graduation arm cannot live in the first one:
+    # `SPEC_HASH` is taken over the whole of `app.lab.spec.STRATEGIES` and is
+    # compared on every Lab tick, so adding an entry there drifts the hash and
+    # halts V7. The arm carries its own spec_version and hash instead, exactly
+    # as `pumpfun`, `compound` and `momentum` already do.
+    return strategy_id.upper() in BY_ID or strategy_id.upper() in GRAD_BY_ID
 
 
 class AutotradeSwitchService:

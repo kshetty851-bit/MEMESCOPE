@@ -223,9 +223,25 @@ class RealWalletDriver:
             logger.warning("real_wallet_balance_unreadable", error=str(exc)[:80])
             return None
 
+    @staticmethod
+    def _decision_age(strategy_id: str) -> timedelta:
+        """How stale a decision may be, per strategy rather than globally.
+
+        Ten minutes is right for a V6/V7 strategy holding for hours. It is
+        wrong by an order of magnitude for the graduation arm, whose hold is
+        five minutes: a decision acted on nine minutes late buys the token at
+        the edge of the collapse the strategy exists to stay in front of.
+        """
+        from app.labs.graduation.live_spec import BY_ID as GRAD_BY_ID
+        from app.labs.graduation.live_spec import MAX_DECISION_AGE_SECONDS
+
+        if strategy_id.upper() in GRAD_BY_ID:
+            return timedelta(seconds=MAX_DECISION_AGE_SECONDS)
+        return MAX_DECISION_AGE
+
     async def _next_candidate(self, *, strategy_id: str, now: datetime) -> str | None:
         """The most recent mint this strategy chose and this wallet has not traded."""
-        cutoff = now - MAX_DECISION_AGE
+        cutoff = now - self._decision_age(strategy_id)
         traded = select(RealWalletLiveIntent.mint_address)
         rows = await self._session.execute(
             select(LabDecision.mint_address)

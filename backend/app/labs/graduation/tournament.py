@@ -44,6 +44,7 @@ from sqlalchemy.orm import aliased
 
 from app.core.logging import get_logger
 from app.labs.graduation import config
+from app.labs.graduation import live_decisions, live_spec
 from app.labs.graduation.backtest import (
     HardStop,
     ExitPolicy,
@@ -755,6 +756,7 @@ class Tournament:
             .all()}
         counts = await self._open_counts()
         opened = 0
+        mirror: list[live_decisions.Mirrored] = []
         notional_quote = (config.PAPER_NOTIONAL_USD / rate).quantize(_Q)
         leg = costs(notional_quote)
         for row in rows:
@@ -794,6 +796,12 @@ class Tournament:
                 counts[arm.name] = counts.get(arm.name, 0) + 1
                 taken.add((arm.name, row.mint))
                 opened += 1
+                if arm.name == live_spec.PAPER_BOOK:
+                    mirror.append(live_decisions.Mirrored(
+                        mint=row.mint, opened_at=row.open_at,
+                        liquidity_usd=depth, impact=impact,
+                        price_native=price))
+        await live_decisions.record(self._session, mirror)
         return opened
 
     async def _fill(self) -> int:
@@ -809,6 +817,7 @@ class Tournament:
         counts = await self._open_counts()
         opened = 0
         refused = 0
+        mirror: list[live_decisions.Mirrored] = []
         for row in rows:
             if row.price_native is None or row.price_native <= 0:
                 continue
@@ -860,6 +869,17 @@ class Tournament:
                 counts[arm.name] = counts.get(arm.name, 0) + 1
                 taken.add((arm.name, row.mint))
                 opened += 1
+                # The ONLY thing that makes this arm visible to the real
+                # wallet. Written in the entry's own transaction, because the
+                # exit clock starts when the WALLET fills: a buy 60s late still
+                # exits five minutes after itself, six minutes after
+                # graduation, which wiped the wallet in 51% of replayed draws.
+                if arm.name == live_spec.PAPER_BOOK:
+                    mirror.append(live_decisions.Mirrored(
+                        mint=row.mint, opened_at=row.open_at,
+                        liquidity_usd=row.liquidity_usd, impact=impact,
+                        price_native=row.price_native))
+        await live_decisions.record(self._session, mirror)
         opened += opened_curve
         if opened or refused:
             logger.info("graduation_tournament_filled", opened=opened,

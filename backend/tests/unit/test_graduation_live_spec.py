@@ -1,0 +1,91 @@
+"""The graduation arm's registry, and the one thing it must never do.
+
+The failure this guards against is silent and total: adding a strategy to
+`app.lab.spec` drifts `SPEC_HASH`, and a drift makes `lab_tick` answer
+`{"halted": "spec_hash_drift"}` on every pass — V7 stops, with no error anyone
+would see except a board that quietly stops moving.
+"""
+from __future__ import annotations
+
+from decimal import Decimal
+
+from app.lab import spec as v7
+from app.lab.rules import MarkState, evaluate_exit
+from app.labs.graduation import live_spec
+from app.models.lab import LabDecision, LabStrategy, LabTournament
+from app.real_wallet.autotrade import _known_strategy
+from app.real_wallet.driver import RealWalletDriver
+
+#: V7's hash as prod stores it on the active `1.2.0` tournament row. Hard-coded
+#: rather than recomputed, because a test that recomputes it from the same
+#: source it is checking cannot fail.
+V7_SPEC_HASH_PREFIX = "ae1627b4ec0d3f9f"
+
+
+def test_v7_spec_hash_is_untouched() -> None:
+    """The whole reason this arm has its own registry."""
+    assert v7.SPEC_HASH.startswith(V7_SPEC_HASH_PREFIX)
+    assert "G-B3-5M" not in v7.BY_ID
+
+
+def test_the_two_registries_do_not_overlap() -> None:
+    assert not (set(v7.BY_ID) & set(live_spec.BY_ID))
+    assert live_spec.SPEC_VERSION != v7.SPEC_VERSION
+    assert live_spec.SPEC_HASH != v7.SPEC_HASH
+
+
+def test_ids_and_versions_fit_their_columns() -> None:
+    """String(8) and String(16) truncate silently in some drivers."""
+    dec = LabDecision.__table__.c
+    strat = LabStrategy.__table__.c
+    tour = LabTournament.__table__.c
+    for s in live_spec.STRATEGIES:
+        assert len(s.id) <= dec.strategy_id.type.length
+        assert len(s.id) <= strat.strategy_id.type.length
+        assert len(s.name) <= strat.name.type.length
+    assert len(live_spec.SPEC_VERSION) <= strat.version.type.length
+    assert len(live_spec.SPEC_VERSION) <= tour.spec_version.type.length
+
+
+def _held(seconds: float) -> MarkState:
+    return MarkState(
+        exec_multiple=Decimal("1.02"), peak_exec_multiple=Decimal("1.05"),
+        # Exactly how `exit_driver` computes it.
+        held_hours=seconds / 3600,
+        liquidity_usd=Decimal("500000"), entry_liquidity_usd=Decimal("500000"),
+        is_dead=False, sell_route_ok=True, break_even_armed=False,
+        partial_done=False)
+
+
+def test_the_clock_fires_exactly_at_five_minutes() -> None:
+    """Six seconds of a 28-second margin rides on this boundary.
+
+    The earliest collapse in this arm's own 145 trades landed at 5m28s, and a
+    Decimal bound carries more digits than the float `held_hours`, which left
+    the position in for one more pass at 5m00s.
+    """
+    exits = live_spec.STRATEGIES[0].exits
+    assert evaluate_exit(exits, _held(299)).action is None
+    assert evaluate_exit(exits, _held(300)).action == "CLOSE"
+
+
+def test_there_is_no_stop_and_no_target() -> None:
+    """Both were measured and both were worse; absence here is the finding."""
+    exits = live_spec.STRATEGIES[0].exits
+    assert exits.stop_loss is None
+    assert exits.take_profit is None
+    # A deep pool that has not moved must be held, not exited on liquidity.
+    assert evaluate_exit(exits, _held(60)).action is None
+
+
+def test_it_is_nominatable_and_nonsense_is_not() -> None:
+    assert _known_strategy("G-B3-5M")
+    assert _known_strategy("V7-01"), "the V7 registry must still resolve"
+    assert not _known_strategy("B3_198k_5m"), "the long paper name is not an id"
+    assert not _known_strategy("NOPE-99")
+
+
+def test_its_decisions_go_stale_in_a_minute_not_ten() -> None:
+    """A decision older than the hold buys the token at the cliff."""
+    assert RealWalletDriver._decision_age("G-B3-5M").total_seconds() == 60
+    assert RealWalletDriver._decision_age("V7-01").total_seconds() == 600
