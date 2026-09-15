@@ -271,6 +271,14 @@ HELD_INTERVAL_S = _int("LAB_GRADUATION_HELD_INTERVAL_S", 3)
 #: point — a FRESH MARK when a stop needs it is. Half a percent is well inside
 #: the 1.14%-per-second fall these stops exist to catch.
 HELD_WRITE_PCT = _dec("LAB_GRADUATION_HELD_WRITE_PCT", "0.005")
+#: Whether websocket prices are WRITTEN as marks. Off until the scale is right.
+#:
+#: The socket reports a raw reserve ratio; the book's entry prices carry token
+#: decimals. Marking one against the other is marking against a different
+#: instrument, and for twenty minutes on 2026-09-15 it put FLOOR_4m_SL at
+#: $17,517 on eight trades. The feed is correct and the scale is not.
+HELD_WRITE_ENABLED = os.getenv(
+    "LAB_GRADUATION_HELD_WRITE_ENABLED", "").strip().lower() in {"1", "true", "yes"}
 #: `/tokens/v1/{chain}/{addresses}` takes a comma-separated list. Thirty is the
 #: documented ceiling and the number the Breakout lab measured against.
 DEXSCREENER_BATCH = 30

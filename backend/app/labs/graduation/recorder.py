@@ -190,6 +190,25 @@ class GraduationRecorder:
                         and (ts - seen[1]).total_seconds() < config.HELD_INTERVAL_S):
                     return
             last[mint] = (price, ts)
+            # WRITES ARE OFF, 2026-09-15, and this is not caution — it is a
+            # correction. `price` here is a RAW reserve ratio, quote units over
+            # base units. Every entry price in the book came from DexScreener
+            # with token decimals applied. They are different units, so marking
+            # a position against this is marking it against a different
+            # instrument — the exact failure the pair pinning exists to stop.
+            #
+            # It was live for roughly twenty minutes and produced FLOOR_4m_SL
+            # at $17,517 on eight trades. The subscription itself is sound: 44
+            # updates in 25 seconds, vaults decoded correctly off the pinned
+            # pair. Only the SCALE is wrong, and guessing decimals is how the
+            # wrong number gets shipped twice.
+            #
+            # To re-enable: read the two mints' decimals once per token, scale
+            # to SOL-per-token, and assert the first websocket price is within
+            # a few percent of the DexScreener price for the same mint before
+            # any of it is written.
+            if not config.HELD_WRITE_ENABLED:
+                return
             state = self.postgrad.states.get(mint)
             if state is None or state.pair_address is None:
                 return
