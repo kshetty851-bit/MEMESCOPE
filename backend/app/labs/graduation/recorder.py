@@ -172,7 +172,7 @@ class GraduationRecorder:
         from sqlalchemy import select
 
         from app.db.session import SessionFactory
-        from app.labs.graduation.held_watch import pool_for, vaults_from_pool
+        from app.labs.graduation.held_watch import vaults_from_pool
         from app.labs.graduation.models import GradPaperPosition
         from app.labs.graduation.sources import HeldVaultStream
 
@@ -211,7 +211,16 @@ class GraduationRecorder:
                 triples = []
                 for mint in mints:
                     if mint not in cache:
-                        pool = pool_for(mint)
+                        # The pair DexScreener actually priced, not a derived
+                        # address: deriving gave an account that does not exist
+                        # on chain, because a graduation can land on pumpswap
+                        # or elsewhere and only the feed knows which. The pair
+                        # is already pinned on the first sample precisely so a
+                        # position is marked against ONE pool, so reusing it
+                        # here keeps the socket on the same pool the entry
+                        # price came from.
+                        state = self.postgrad.states.get(mint)
+                        pool = state.pair_address if state else None
                         raw = await stream.account_data(pool) if pool else None
                         cache[mint] = vaults_from_pool(raw)
                     pair = cache.get(mint)

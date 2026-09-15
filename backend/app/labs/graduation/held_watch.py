@@ -69,7 +69,15 @@ class Held:
 
 
 def pool_for(mint: str) -> str | None:
-    """The pool address a mint migrates to, derived rather than looked up."""
+    """The pool address a mint migrates to, derived from the mint.
+
+    NOT used by the held watcher, and the reason is worth keeping: derivation
+    returned an address with no account on chain for a live pumpswap token.
+    A graduation can land on more than one venue and only the price feed knows
+    which, so the watcher uses the pair DexScreener actually priced — which is
+    also the pair the entry price came from, already pinned on the first
+    sample. Kept because it is the right tool when there is no feed to ask.
+    """
     derived = derive_or_none(mint, pumpfun_program=settings.PUMPFUN_PROGRAM_ID)
     return derived[1] if derived else None
 
