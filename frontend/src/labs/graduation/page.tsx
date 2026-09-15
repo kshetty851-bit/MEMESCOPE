@@ -118,25 +118,6 @@ function usd(value: string | number | null): string {
   })}`;
 }
 
-/**
- * How often this arm actually fires, per hour.
- *
- * The denominator is the TOURNAMENT's hours, not the arm's own: all fifty
- * started together on one reset, so they share a clock. It is also the same
- * rate the thirty-day projection extrapolates from, which is the point — a
- * reader can see where that horizon's trade count came from instead of taking
- * it on trust.
- *
- * Two decimals under 1/hr: several filters fire a few times a day, and "0.0"
- * would read as "never" for an arm that has traded.
- */
-function perHour(trades: number, hours: string | number): string {
-  const h = Number(hours);
-  if (!Number.isFinite(h) || h <= 0 || !trades) return "—";
-  const rate = trades / h;
-  return `${rate < 1 ? rate.toFixed(2) : rate.toFixed(1)}/hr`;
-}
-
 function signedUsd(value: string | null): string {
   if (value === null) return "—";
   return `${Number(value) >= 0 ? "+" : ""}${usd(value)}`;
@@ -843,50 +824,24 @@ function LeaderboardPanel() {
               <col className="w-10" />
               <col />
               <col className="w-32" />
-              <col className="w-20" />
-              <col className="w-48" />
-              <col className="w-20" />
-              <col className="w-20" />
-              <col className="w-20" />
               <col className="w-16" />
-              <col className="w-24" />
+              <col className="w-20" />
+              <col className="w-32" />
             </colgroup>
             <thead>
               <tr className="text-label uppercase tracking-[0.08em] text-ink-dim">
                 <th className="pb-2 pl-1 text-left font-medium">#</th>
-                <th className="pb-2 pr-3 text-left font-medium">Arm</th>
-                <th className="pb-2 pr-3 text-right font-medium">
-                  $100 wallet
+                <th className="pb-2 pr-3 text-left font-medium">Strategy</th>
+                <th className="pb-2 pr-3 text-right font-medium">P&amp;L</th>
+                <th className="pb-2 pr-3 text-right font-medium">Open</th>
+                <th className="pb-2 pr-3 text-right font-medium">Closed</th>
+                <th className="pb-2 pr-1 text-right font-medium">
+                  Expected <span className="text-ink-dim">in 30d</span>
                 </th>
-                <th className="pb-2 pr-3 text-right font-medium">Return</th>
-                <th className="pb-2 pr-3 text-right font-medium">
-                  30d projection
-                </th>
-                <th className="pb-2 pr-3 text-right font-medium">
-                  Wallet dies
-                </th>
-                <th className="pb-2 pr-3 text-right font-medium">
-                  Trades <span className="text-ink-dim">/ hr</span>
-                </th>
-                <th className="pb-2 pr-3 text-right font-medium">
-                  Gross <span className="text-ink-dim">/ toll</span>
-                </th>
-                <th className="pb-2 pr-3 text-right font-medium">PF</th>
-                <th className="pb-2 pr-1 text-right font-medium">Top token</th>
               </tr>
             </thead>
             <tbody>
               {shown.map((a: ArmRow, i: number) => {
-                // Ahead of the baseline — judged on the WALLET, which is
-                // the column now shown, not on the book's realised P&L.
-                const baselineWallet = Math.max(
-                  ...data.arms
-                    .filter((x) => x.is_control && x.trades > 0)
-                    .map((x) => Number(x.wallet_100_usd)),
-                  0,
-                );
-                const beats =
-                  a.trades > 0 && Number(a.wallet_100_usd) > baselineWallet;
                 const isLeader = a.name === data.leader;
                 // Wiped, and kept on the board on purpose: these rows are the
                 // evidence that one slot means one token can end the wallet.
@@ -937,161 +892,82 @@ function LeaderboardPanel() {
                         {a.note}
                       </span>
                     </td>
+                    {/* P&L: what the $100 wallet made or lost. The balance
+                        sits under it, because "+$27" and "$127" are different
+                        questions and both get asked. */}
                     <td className="py-2.5 pr-3 text-right">
-                      <span className="inline-flex items-baseline justify-end gap-1.5">
-                        <span
-                          className={`grad-figure font-semibold ${
-                            Number(a.wallet_100_usd) === 0
-                              ? "text-down"
-                              : Number(a.wallet_100_usd) >
-                                  Number(data.wallet_demo_usd)
-                                ? "text-up"
-                                : "text-ink-dim"
-                          }`}
-                        >
-                          {Number(a.wallet_100_usd) === 0
-                            ? "WIPED"
-                            : usd(a.wallet_100_usd)}
-                        </span>
-                        <span
-                          className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                            beats && !a.is_control ? "bg-up" : "bg-transparent"
-                          }`}
-                          title={
-                            beats && !a.is_control
-                              ? "ahead of the baseline"
-                              : undefined
-                          }
-                        />
+                      <span
+                        className={`grad-figure font-semibold tabular-nums ${
+                          Number(a.wallet_100_usd) > Number(data.wallet_demo_usd)
+                            ? "text-up"
+                            : Number(a.wallet_100_usd) === Number(data.wallet_demo_usd)
+                              ? "text-ink-dim"
+                              : "text-down"
+                        }`}
+                      >
+                        {Number(a.wallet_100_usd) === 0
+                          ? "WIPED"
+                          : signedUsd(
+                              String(
+                                Number(a.wallet_100_usd) -
+                                  Number(data.wallet_demo_usd),
+                              ),
+                            )}
                       </span>
-                      {a.worst_trade_pct !== null ? (
+                      {Number(a.wallet_100_usd) === 0 ? null : (
                         <span className="block text-micro tabular-nums text-ink-dim">
-                          worst trade {Number(a.worst_trade_pct).toFixed(0)}%
-                        </span>
-                      ) : null}
-                    </td>
-                    {/* One simulated path, measured at four points, so the
-                        four figures cannot contradict each other — a wallet
-                        dead at day one is dead at day thirty. The 30D band
-                        sits under its own column; the earlier horizons are
-                        medians only, because four bands on one row is a wall
-                        of numbers nobody reads. */}
-                    {(
-                      [
-                        ["projected_1d_usd", "pr-2"],
-                        ["projected_1w_usd", "pr-2"],
-                        ["projected_15d_usd", "pr-2"],
-                      ] as const
-                    ).map(([key, pad]) => (
-                      <td key={key} className={`py-2.5 ${pad} text-right`}>
-                        {a[key] === null ? (
-                          <span className="text-micro text-ink-dim">—</span>
-                        ) : (
-                          <span
-                            className={`grad-figure tabular-nums ${
-                              Number(a[key]) >= Number(data.wallet_demo_usd)
-                                ? "text-up"
-                                : "text-down"
-                            }`}
-                          >
-                            {usd(a[key])}
-                          </span>
-                        )}
-                      </td>
-                    ))}
-                    <td className="py-2.5 pr-3 text-right">
-                      {a.projected_30d_usd === null ? (
-                        <span className="text-micro text-ink-dim">—</span>
-                      ) : (
-                        <>
-                          <span
-                            className={`grad-figure font-medium tabular-nums ${
-                              Number(a.projected_30d_usd) >=
-                              Number(data.wallet_demo_usd)
-                                ? "text-up"
-                                : "text-down"
-                            }`}
-                          >
-                            {usd(a.projected_30d_usd)}
-                          </span>
-                          <span className="block text-micro tabular-nums text-ink-dim">
-                            {usd(a.projected_30d_low)} to{" "}
-                            {usd(a.projected_30d_high)}
-                          </span>
-                        </>
-                      )}
-                    </td>
-                    <td className="py-2.5 pr-3 text-right">
-                      {a.ruin_pct === null ? (
-                        <span className="text-micro text-ink-dim">—</span>
-                      ) : (
-                        <span
-                          className={`grad-figure ${
-                            Number(a.ruin_pct) >= 50
-                              ? "text-down"
-                              : Number(a.ruin_pct) >= 10
-                                ? "text-warn"
-                                : "text-ink-dim"
-                          }`}
-                        >
-                          {Number(a.ruin_pct).toFixed(0)}%
-                        </span>
-                      )}
-                      {a.ruin_pct === null ? null : (
-                        <span className="block text-micro text-ink-dim">
-                          of {a.ruin_days}d runs
+                          {usd(a.wallet_100_usd)} balance
                         </span>
                       )}
                     </td>
-                    <td className="py-2.5 pr-3 text-right">
-                      <span className="grad-figure">{a.trades}</span>
-                      {a.open_positions ? (
-                        <span className="ml-1 text-micro text-ink-dim">
-                          +{a.open_positions}
-                        </span>
-                      ) : null}
-                      <span className="block text-micro tabular-nums text-ink-dim">
-                        {perHour(a.trades, data.hours_running)}
-                      </span>
+                    <td className="grad-figure py-2.5 pr-3 text-right tabular-nums">
+                      {a.open_positions || "—"}
                     </td>
-                    <td className="py-2.5 pr-3 text-right">
-                      {a.gross_pct === null ? (
-                        <span className="text-micro text-ink-dim">—</span>
-                      ) : (
-                        <>
-                          {/* Green only when the token's own move cleared the
-                              toll. An arm whose gross is under its cost cannot
-                              be profitable however good its entry rule is, and
-                              the net figure alone hides which of the two
-                              failures it is. */}
-                          <span
-                            className={`grad-figure font-medium ${
-                              a.cost_pct !== null &&
-                              Number(a.gross_pct) > Number(a.cost_pct)
-                                ? "text-up"
-                                : "text-ink-dim"
-                            }`}
-                          >
-                            {signed(String(Number(a.gross_pct) / 100))}
-                          </span>
-                          <span className="block text-micro tabular-nums text-ink-dim">
-                            toll {a.cost_pct === null ? "—" : `${Number(a.cost_pct).toFixed(2)}%`}
-                          </span>
-                        </>
-                      )}
+                    <td className="grad-figure py-2.5 pr-3 text-right tabular-nums">
+                      {a.trades.toLocaleString()}
                     </td>
-                    <td className="grad-figure py-2.5 pr-3 text-right">
-                      {a.profit_factor ?? "—"}
-                    </td>
-                    <td className="grad-figure py-2.5 pr-1 text-right text-ink-dim">
-                      {a.top_token_share
-                        ? `${(Number(a.top_token_share) * 100).toFixed(0)}%`
-                        : "—"}
+                    {/* The 30-day figure when the arm has enough history to
+                        reach for it, otherwise the longest horizon it CAN
+                        support, labelled. An empty column is less use than a
+                        shorter honest one. */}
+                    <td className="py-2.5 pr-1 text-right">
+                      {(() => {
+                        const steps = [
+                          [a.projected_30d_usd, "in 30 days"],
+                          [a.projected_15d_usd, "only 15 days ahead"],
+                          [a.projected_1w_usd, "only 1 week ahead"],
+                          [a.projected_1d_usd, "only 1 day ahead"],
+                        ] as const;
+                        const got = steps.find(([v]) => v !== null);
+                        if (!got) {
+                          return (
+                            <span className="text-micro text-ink-dim">
+                              too few trades
+                            </span>
+                          );
+                        }
+                        return (
+                          <>
+                            <span
+                              className={`grad-figure font-medium tabular-nums ${
+                                Number(got[0]) >= Number(data.wallet_demo_usd)
+                                  ? "text-up"
+                                  : "text-down"
+                              }`}
+                            >
+                              {usd(got[0])}
+                            </span>
+                            <span className="block text-micro text-ink-dim">
+                              {got[1]}
+                            </span>
+                          </>
+                        );
+                      })()}
                     </td>
                   </tr>
                   {openArm === a.name ? (
                     <tr>
-                      <td colSpan={8} className="p-0">
+                      <td colSpan={6} className="p-0">
                         <ArmTrades name={a.name} />
                       </td>
                     </tr>
@@ -1116,56 +992,31 @@ function LeaderboardPanel() {
             </button>
           ) : null}
           <p className="max-w-[64ch] text-micro leading-relaxed text-ink-dim">
-            <b className="text-ink">Read the 30-day band, not its middle.</b>{" "}
-            It is thirty days of the same rule at the same trade rate (
-            {data.arms.find((a) => a.projected_trades)?.projected_trades.toLocaleString() ??
-              "—"}{" "}
-            trades), resampled from what that arm has actually done — and after{" "}
-            {Number(data.hours_running).toFixed(1)} hours the band spans
-            outcomes that are mostly an accident of which tokens arrived.
-            Every money figure on this board is the same{" "}
-            {usd(data.wallet_demo_usd)} wallet over {data.wallet_demo_slots}{" "}
-            positions: the projection is the <b className="text-ink">balance</b>{" "}
-            that wallet ends the month on, not a gain on top of it, and{" "}
-            <b className="text-ink">Bar to clear</b> is the balance the luckiest
-            baseline reached on the same trades — buying every graduation above
-            the floor, no selection. Each position is a tenth of
-            current equity, so it compounds, and it stops when the next position
-            would be too small to be worth placing —{" "}
-            <b className="text-ink">Wallet dies</b> counts how often that
-            happened: run the wallet forward a thousand times and this is the
-            share of runs where it ended too small to place another trade. 0%
-            means it survived every run; 40% means two in five ended broke. The
-            column says how many days each run covered, because dying within a
-            week is not the same as dying within a month.
+            <b className="text-ink">How to read this.</b>{" "}
+            <b className="text-ink">P&amp;L</b> is what a real {usd(data.wallet_demo_usd)}{" "}
+            wallet would have made or lost taking these trades — every price
+            recorded from the live feed at the minute it happened, every fill
+            charged the exact move your own order makes against the pool&rsquo;s
+            recorded depth plus swap and priority fees, and any order that would
+            move a pool more than 10% refused rather than filled.{" "}
+            <b className="text-ink">Open</b> and <b className="text-ink">Closed</b>{" "}
+            are position counts; open positions are not in the P&amp;L, because
+            an unrealised number is what every book in this platform&rsquo;s
+            history was leading on shortly before it wasn&rsquo;t.
             <br />
             <span className="mt-1 block">
-              A horizon is only shown when the arm&rsquo;s history reaches a
-              tenth of the way to it — a day needs 2.4 hours behind it, a month
-              needs 72. Blank means not enough history yet, which is the
-              difference between a projection and a wish.
-            </span> <b className="text-ink">Gross</b> is the token&rsquo;s own move
-            before execution, and <b className="text-ink">toll</b> is what fees
-            and impact took — net is what is left. The two are separated because
-            a losing arm with no edge and a winning arm that paid its edge away
-            look identical in the net figure and need opposite fixes. Measured
-            over three days: a round trip costs 3.24% in pools under $75k, 1.30%
-            from $75k to $116k, and 1.06% deeper than that — of which only 0.175%
-            is impact. The rest is fees, which no entry rule can filter away, so
-            an arm whose gross is under its toll cannot be profitable however
-            good its rule is. Under each trade count is how often that arm
-            actually{" "}
-            <b className="text-ink">fires per hour</b>, on the tournament&rsquo;s
-            clock — all fifty started together. It is the same rate the 30-day
-            projection extrapolates from, so a filter that trades twice a day is
-            visibly forecasting from a handful of trades. A dot marks an arm
-            ahead of the baseline. Nothing on this board decides by dice roll:
-            every arm is a rule you could fund. Open positions are the
-            small <span className="text-ink">+n</span> beside the trade count and
-            are <b className="text-ink">not</b> in the wallet column — an
-            unrealised number is what every book in this platform&rsquo;s history
-            was leading on shortly before it wasn&rsquo;t.
-          </p>
+              <b className="text-ink">Expected</b> is where that wallet lands if
+              the arm keeps doing exactly what it has done. It is an{" "}
+              <b className="text-ink">estimate, not a promise</b> — run forward a
+              thousand times from the trades so far, and the middle one shown. An
+              arm only gets a 30-day figure once its own history reaches a tenth
+              of the way there; otherwise the longest horizon it can honestly
+              support is shown and labelled. <b className="text-ink">WIPED</b>{" "}
+              means the wallet fell below the size at which a trade is worth
+              placing. Those rows stay on the board because deleting losers is
+              how a leaderboard starts flattering itself.
+            </span>
+            </p>
         </div>
       </div>
     </Panel>
