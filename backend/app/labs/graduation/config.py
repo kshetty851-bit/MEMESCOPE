@@ -630,27 +630,33 @@ WALLET_DEMO_USD = _dec("LAB_GRADUATION_WALLET_DEMO_USD", "100")
 #: about $2.65, and compounding lets that $2.65 "recover" to nine figures on
 #: later winners it could never have placed.
 WALLET_MIN_USD = _dec("LAB_GRADUATION_WALLET_MIN_USD", "25")
-#: How many positions that wallet spreads itself over. TEN.
+#: How many positions that wallet spreads itself over. ONE.
 #:
-#: Measured across 69 arms, re-pricing every recorded trade at each size from
-#: the pool depth it actually hit:
+#: It was TEN, on a measurement that compared survival across sizes but did
+#: NOT charge what the smaller positions cost. That was the error. The priority
+#: fee is flat in SOL, so the round trip is entirely a function of order size:
 #:
-#:     1 x $100   median $0    best $188   survived  4/69 arms
-#:     4 x $25    median $32   best $191   survived 60/69 arms
-#:     10 x $10   median $54   best $121   survived 69/69 arms
+#:     $100  1.41%     $50  1.82%     $20  3.05%     $10  5.09%
 #:
-#: Ten wins, and it corrects a conclusion carried across from the wrong
-#: machine. In the $1,000 tournament P&L is ADDITIVE — a -99% costs $100 of
-#: $1,000, ruin never arrives, and the only thing that matters is execution
-#: cost, where $10 positions are terrible (2.32% a side against 0.56%). A
-#: $100 account is fully invested and COMPOUNDS, and there ruin dominates
-#: everything: paying four times the execution cost is cheap insurance
-#: against one trade ending the account permanently.
+#: A $100 wallet over ten slots holds $10 positions and pays 5.09% a trade
+#: from the very first fill — more than any gross edge this lab has measured.
+#: The same 86 trades on the board's best arm:
 #:
-#: It buys survival, not profit. A median of $54 from $100 is still losing
-#: half the account; ten-by-ten is the configuration that lasts long enough
-#: to find that out.
-WALLET_DEMO_SLOTS = _int("LAB_GRADUATION_WALLET_DEMO_SLOTS", 10)
+#:     1 slot  $310.50     2 slots  $257.99     5 slots  $116.75     10  $88.70
+#:
+#: Ten slots did not lose to the market. It lost to the fee.
+#:
+#: What one slot costs is real and must be said: a single -99% trade ends the
+#: wallet permanently, where ten slots would lose a tenth. That is the risk
+#: this accepts — and it is the risk a $100 account actually has, because
+#: splitting $100 ten ways in THIS market is not diversification, it is paying
+#: 5% a trade for the privilege. The arms that die at one slot were dying at
+#: ten as well: FLOOR_3m is $0.00 at every slot count.
+#:
+#: It also makes the wallet describe the same thing the trades panel does —
+#: a $100 position paying a $100 position's costs — which is the confusion
+#: that sent Karthik round this loop three times.
+WALLET_DEMO_SLOTS = _int("LAB_GRADUATION_WALLET_DEMO_SLOTS", 1)
 
 # --- the kill gate, stated before this run produced a single trade ------------
 #

@@ -28,11 +28,18 @@ def test_a_flat_run_leaves_the_wallet_exactly_where_it_started():
     assert not dead
 
 
-def test_one_total_loss_costs_a_tenth_not_the_account():
-    """Ten slots is the whole reason the $100 wallet is survivable."""
+def test_one_total_loss_ends_a_single_position_wallet():
+    """At one slot the wallet IS the position, so a wipeout is terminal.
+
+    It held ten slots until 2026-09-15, where a -99% cost a tenth. That
+    survivability was bought at 5.09% a trade in fees, which is more than any
+    edge here — so the wallet now concentrates and accepts the tail instead.
+    This test records which regime is live, because the two behave completely
+    differently and a silent switch between them would be invisible.
+    """
+    assert config.WALLET_DEMO_SLOTS == 1
     equity, dead = api._wallet_walk([-0.99])
-    assert not dead
-    assert equity == pytest.approx(float(config.WALLET_DEMO_USD) * 0.901)
+    assert dead and equity == 0.0
 
 
 def test_a_wallet_below_the_payable_size_is_dead_and_stays_dead():
@@ -73,19 +80,31 @@ def test_a_position_stops_growing_where_the_evidence_stops():
     b, _ = api._wallet_walk([0.10] * 3000)
     c, _ = api._wallet_walk([0.10] * 4000)
     assert c - b == pytest.approx(b - a)
-    # Uncapped, the same run is e^40 dollars.
-    assert c < 1e5
-    # Below the cap it still compounds.
+    # Uncapped, the same run is e^200 dollars at one slot.
+    assert c < 1e6
+    # At ONE slot with a $100 wallet and a $100 cap the position is capped
+    # from the very first trade, so the wallet is ADDITIVE throughout — and
+    # that is the point: it makes the wallet equal $100 plus the book's P&L,
+    # which is exactly what Karthik expected to see and could not find.
+    #
+    #     86 trades averaging +2.45% of $100 = +$210.51 of book P&L
+    #     wallet = $100 + $210.51 = $310.51
+    #
+    # Ten slots is what broke that identity, by trading a tenth of the size
+    # the book traded.
     small, _ = api._wallet_walk([0.01] * 10)
-    assert small == pytest.approx(float(config.WALLET_DEMO_USD) * 1.001 ** 10)
+    cap = float(config.PAPER_NOTIONAL_USD)
+    assert small == pytest.approx(float(config.WALLET_DEMO_USD) + 10 * cap * 0.01)
 
 
-def test_todays_wallets_are_unaffected_by_the_cap():
-    """The cap must not silently restate a column the user is already reading:
-    a $150 wallet holds $15 positions, nowhere near $100."""
-    equity, _ = api._wallet_walk([0.05] * 9)
-    assert equity < float(config.PAPER_NOTIONAL_USD) * config.WALLET_DEMO_SLOTS
-    assert equity == pytest.approx(float(config.WALLET_DEMO_USD) * 1.005 ** 9)
+def test_the_cap_binds_at_the_measured_notional():
+    """A wallet at or above `PAPER_NOTIONAL_USD * slots` stops compounding,
+    because past that its position would exceed the size every return was
+    measured at and there is no evidence for what a bigger one earns."""
+    ceiling = float(config.PAPER_NOTIONAL_USD) * config.WALLET_DEMO_SLOTS
+    grown, _ = api._wallet_walk([0.05] * 40)
+    # Growth above the ceiling is additive, so it cannot run away.
+    assert grown < ceiling * 4, grown
 
 
 def test_every_route_reaches_the_endpoint_it_names():

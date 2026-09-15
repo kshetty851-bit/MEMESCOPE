@@ -403,33 +403,50 @@ def test_the_projection_is_memoised_because_its_cost_grows() -> None:
 
 # --- what a real $100 wallet would hold ---------------------------------------
 
-def test_ten_positions_beat_one_for_a_hundred_dollar_account() -> None:
-    """A conclusion that was right about the tournament and wrong about a
-    wallet, corrected by measurement.
+def test_one_position_because_ten_could_not_pay_the_fee() -> None:
+    """A conclusion corrected twice, and the second correction is not a
+    retraction of the first — both measurements were right about their own
+    population.
 
-    The $1,000 book is ADDITIVE: a -99% costs $100 of $1,000, ruin never
-    arrives, and the only thing that matters is execution cost — where $10
-    positions are terrible, 2.32% a side against 0.56%. A $100 account is
-    fully invested and COMPOUNDS, and there ruin dominates: re-pricing every
-    recorded trade at each size from the pool depth it actually hit, across
-    69 arms —
+    TEN was chosen across 69 arms of an older generation, re-pricing every
+    trade at each size:
 
         1 x $100   median $0    survived  4/69
         4 x $25    median $32   survived 60/69
         10 x $10   median $54   survived 69/69
 
-    Four times the execution cost is cheap insurance against one trade ending
-    the account. It buys survival, not profit: $54 from $100 is still losing
-    half.
+    That generation bought everything, -99% tokens included, so a single
+    position was ended by the first one it met. Ten slots bought survival.
+
+    Generation 2.1 refuses pools under $75k, which is where those -99% tokens
+    live, and the calculus inverts. The priority fee is flat in SOL, so the
+    round trip is a function of order size — $100 1.41%, $50 1.82%, $20 3.05%,
+    $10 5.09% — and on the board's best arm, same 86 trades:
+
+        1 slot $310.50   2 slots $257.99   5 slots $116.75   10 slots $88.70
+
+    Ten slots did not lose to the market. It lost to the fee: 5.09% a trade is
+    larger than any gross edge this lab has measured.
+
+    THE COST IS REAL AND STAYS SAID: one position is ended permanently by one
+    -99% trade, where ten would lose a tenth. That risk is accepted because it
+    is the risk a $100 account actually has — splitting $100 ten ways in this
+    market is not diversification, it is paying 5% a trade for the privilege.
     """
+    # The old finding still holds on the old population: concentration dies to
+    # a wipeout, and that has not stopped being true.
     losses = [0.04] * 30 + [-0.99]
     one, ten = 100.0, 100.0
     for r in losses:
         one += one * r
         ten += (ten / 10) * r
     assert one < 5, "a single position is ended by one wipeout"
-    assert ten > 100, "ten positions take a tenth of the hit and survive it"
-    assert config.WALLET_DEMO_SLOTS == 10
+    assert ten > 100, "ten positions take a tenth of the hit"
+    # And the fee is why ten lost anyway, once the floor removed those tokens.
+    assert config.WALLET_DEMO_SLOTS == 1
+    assert config.WALLET_DEMO_USD / config.WALLET_DEMO_SLOTS == config.PAPER_NOTIONAL_USD, (
+        "the wallet must trade the size its returns were MEASURED at, or the "
+        "board reports one number priced two ways")
 
 
 def test_a_hundred_dollar_wallet_compounds_and_can_end_at_zero() -> None:

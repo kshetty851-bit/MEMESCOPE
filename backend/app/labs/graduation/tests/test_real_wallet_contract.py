@@ -67,7 +67,15 @@ def test_the_position_stays_above_the_size_that_can_be_paid_for():
     flat in SOL, so it is 0.25% of a $250 order and 2.32% of a $10 one against
     a break-even near 1% a side."""
     assert config.PAPER_NOTIONAL_USD >= config.WALLET_MIN_USD
-    assert config.WALLET_DEMO_USD / config.WALLET_DEMO_SLOTS < config.PAPER_NOTIONAL_USD
+    # The wallet's position must be at least the payable floor. This used to
+    # assert the OPPOSITE — that the position was SMALLER than the notional the
+    # returns were measured at — which is precisely the condition that made
+    # every wallet figure optimistic: a $10 position was charged a $100
+    # position's costs.
+    position = config.WALLET_DEMO_USD / config.WALLET_DEMO_SLOTS
+    assert position >= config.WALLET_MIN_USD, (
+        f"a ${position} position is below the ${config.WALLET_MIN_USD} at which "
+        "a round trip stops being payable")
 
 
 def test_an_order_that_would_move_the_pool_is_refused_not_filled():
