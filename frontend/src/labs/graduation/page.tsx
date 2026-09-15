@@ -360,13 +360,28 @@ function TradeTable({
             </td>
             <td className="pt-2 pr-3 text-right tabular-nums">
               {usd(String(deployed))}
+              <span className="block text-micro text-ink-dim">
+                deployed in total
+              </span>
             </td>
+            {/* This total is the BOOK: every trade a fresh $100, profits
+                summed. It is not an account balance and must never be read as
+                one — $210 here came from $8,600 of cumulative deployment
+                across 86 separate bets, beside a wallet of $88.70. Both are
+                right; they count different things. So the per-trade average
+                sits under it, which is the only figure of the three that does
+                not depend on how much money you had. */}
             <td
               className={`pt-2 pr-3 text-right font-medium tabular-nums ${
                 total > 0 ? "text-up" : total < 0 ? "text-down" : ""
               }`}
             >
               {signedUsd(String(total))}
+              <span className="block text-micro font-normal text-ink-dim">
+                {counted.length
+                  ? `${signed(String(total / (deployed || 1)))} a trade`
+                  : "—"}
+              </span>
             </td>
             <td colSpan={2} />
           </tr>
@@ -613,10 +628,18 @@ function ArmTrades({ name }: { name: string }) {
         Every trade this arm has made. The mint is in full and links to
         DexScreener — the same feed the marks came from — and each row carries
         the pool depth and the price impact its order caused, so a fill can be
-        checked rather than taken on trust. These are the{" "}
-        <b className="text-ink">$100 fills the returns were measured from</b>,
-        not the $100 wallet on the row above: the wallet compounds a tenth of
-        itself per position, so the same trades read differently there.
+        checked rather than taken on trust.
+        <br />
+        <span className="mt-1 block">
+          <b className="text-ink">These are $100 fills, not a $100 account.</b>{" "}
+          The totals below sum every trade as a fresh $100 bet — so a
+          hundred-odd trades can total more than any wallet ever held, because
+          the money was deployed again and again. The wallet figure on the row
+          above is one $100 account compounding a tenth of itself per position,
+          and it is charged what a position THAT size really costs, which a
+          $100 fill does not pay. Both are correct. They count different things,
+          and only the per-trade average is free of either.
+        </span>
       </p>
       {open.length ? (
         <div className="flex flex-col gap-1">
