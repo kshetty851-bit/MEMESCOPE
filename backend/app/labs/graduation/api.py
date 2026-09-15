@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import random
 from collections.abc import Iterable
+from functools import lru_cache
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from math import sqrt
@@ -742,6 +743,30 @@ def _wallet_walk(returns: Iterable[float],
     return equity, False
 
 
+@lru_cache(maxsize=64)
+def _fee_shape(measured_at_usd: float, rate_str: str) -> tuple[float, float]:
+    """The cost curve as (flat, priority_usd), solved once per rate.
+
+    `costs()` builds Decimals, and calling it twice per step inside the wallet
+    walk took the leaderboard from 3s to 30s — past every browser timeout, so
+    the board simply did not load. The model is exactly linear in 1/size (a
+    flat swap fee plus a priority fee fixed in SOL), so two evaluations pin it
+    and the inner loop becomes float arithmetic:
+
+        side(s) = flat + priority / s
+
+    Verified against the model at four sizes: $100 0.705%, $50 0.909%,
+    $25 1.318%, $10 2.546% a leg.
+    """
+    rate = Decimal(rate_str)
+    a, b = 100.0, 10.0
+    sa = float(costs(Decimal(str(a)) / rate).side_fraction)
+    sb = float(costs(Decimal(str(b)) / rate).side_fraction)
+    priority = (sa - sb) / (1.0 / a - 1.0 / b)
+    flat = sa - priority / a
+    return flat, priority
+
+
 def _size_penalty(position_usd: float, measured_at_usd: float,
                   rate: Decimal | None) -> float:
     """What a position of THIS size pays beyond what the measured one did.
@@ -763,9 +788,9 @@ def _size_penalty(position_usd: float, measured_at_usd: float,
     """
     if rate is None or position_usd <= 0:
         return 0.0
-    here = costs(Decimal(str(position_usd)) / rate).side_fraction
-    there = costs(Decimal(str(measured_at_usd)) / rate).side_fraction
-    return float(here - there) * 2
+    _flat, priority = _fee_shape(measured_at_usd, str(rate))
+    # Only the priority term differs between sizes; the flat fee cancels.
+    return 2.0 * (priority / position_usd - priority / measured_at_usd)
 
 
 @router.get("/tournament", response_model=Leaderboard)
