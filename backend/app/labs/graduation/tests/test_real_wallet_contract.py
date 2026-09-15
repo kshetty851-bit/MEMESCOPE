@@ -125,9 +125,12 @@ def test_the_baseline_shares_the_grid_universe_exactly():
         taken_by_grid = any(accepts(a, open_at=now, liquidity=liq, **token)
                             for a in grid)
         taken_by_floor = accepts(floor, open_at=now, liquidity=liq, **token)
-        assert taken_by_grid == taken_by_floor, (
-            f"${probe}: grid={taken_by_grid} floor={taken_by_floor} — the "
-            "baseline and the grid must shop in the same universe")
+        # A band may cover LESS than the floor — B2 was retired and its range
+        # has no band arm — but it must never cover MORE. A band buying what
+        # the baseline refuses would not be a subset, and "the band beat the
+        # baseline" would stop meaning anything.
+        assert not (taken_by_grid and not taken_by_floor), (
+            f"${probe}: a band buys what the baseline refuses")
     assert LIQ_BANDS[-1][2] >= 1_000_000_000, "the top band must be unbounded"
 
 

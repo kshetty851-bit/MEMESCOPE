@@ -31,8 +31,11 @@ def test_the_tournament_is_a_hold_sweep_with_a_baseline_on_every_hold() -> None:
     something against arms that provably cannot have an edge.
 
     Generation 2.1 (2026-09-14) is a HOLD SWEEP: 5 FLOOR baselines at 2/3/4/5/6
-    minutes taking every qualifying graduation, 3 wide bands x the same 5
-    holds, and the 2 pre-registered A/B arms.
+    minutes taking every qualifying graduation, wide bands crossed with the
+    same 5 holds, and the 2 pre-registered A/B arms.
+
+    B2 ($116k-$198k) was retired 2026-09-15 with all five of its holds
+    negative — the band the historical slice liked best, refuted forward.
 
     Fourteen narrow bands came first and starved — 25 trades a day each of a
     320-token flow — while producing scatter rather than a shape. Pooled by
@@ -43,9 +46,9 @@ def test_the_tournament_is_a_hold_sweep_with_a_baseline_on_every_hold() -> None:
     One baseline per hold, so no hold is judged without an unselected twin on
     its own clock. Nothing on this board decides by hashing a mint.
     """
-    assert len(ARMS) == 22
+    assert len(ARMS) == 17
     assert len(CONTROLS) == 5
-    assert len({a.name for a in ARMS}) == 22
+    assert len({a.name for a in ARMS}) == 17
     assert all(len(a.name) <= 32 for a in ARMS)
 
 
@@ -107,10 +110,26 @@ def test_the_filters_split_the_population_the_way_they_claim() -> None:
         assert not took(name, DAY, liquidity=D(hi))
         if lo > 0:
             assert not took(name, DAY, liquidity=D(lo - 1))
+    # The bands must never OVERLAP — a token in two bands would be counted
+    # twice and the comparison between them would be meaningless.
     for (_, _, hi), (_, lo2, _) in zip(LIQ_BANDS, LIQ_BANDS[1:]):
-        assert hi == lo2, "the bands must tile without a gap"
-    # Every token above the floor lands in exactly one band.
-    for liq in (75_000, 99_999, 116_000, 197_999, 250_000, 5_000_000):
+        assert hi <= lo2, "bands must not overlap"
+    # They no longer TILE, and that is deliberate: B2 ($116k-$198k) was retired
+    # with all five holds negative, so that range has no band arm. It is still
+    # measured — every FLOOR arm buys it — it simply has no filter claiming to
+    # improve on the floor there.
+    gap = [liq for liq in (120_000, 150_000, 190_000)
+           if not any(a.entry.startswith("liq_") and took(a.name, DAY, liquidity=D(liq))
+                      for a in ARMS)]
+    assert gap == [120_000, 150_000, 190_000], (
+        "the retired B2 range must stay uncovered by bands; if a band grew to "
+        "fill it, that band is now two hypotheses wearing one name")
+    for liq in (120_000, 150_000, 190_000):
+        assert took("FLOOR_3m", DAY, liquidity=D(liq)), (
+            "the floor must still buy the retired band's range, or retiring a "
+            "band would silently stop measuring its population")
+    # Everywhere a band DOES claim, exactly one claims it.
+    for liq in (75_000, 99_999, 115_999, 250_000, 5_000_000):
         hit = [a.name for a in ARMS if a.hold == 2 and a.entry.startswith("liq_")
                and took(a.name, DAY, liquidity=D(liq))]
         assert len(hit) == 1, (liq, hit)
@@ -268,8 +287,8 @@ def test_the_exit_rule_names_every_condition_the_arm_carries() -> None:
     """A reader must be able to tell a plain hold from a hold plus a target,
     without reading the arm's name."""
     assert BY_NAME["F01_all_2m"].exit_rule == "at 2 minutes"
-    assert BY_NAME["B2_116k_3m"].exit_rule == "at 3 minutes"
-    assert BY_NAME["B2_116k_5m"].exit_rule == "at 5 minutes"
+    assert BY_NAME["B1_75k_3m"].exit_rule == "at 3 minutes"
+    assert BY_NAME["B1_75k_5m"].exit_rule == "at 5 minutes"
     # Singular minute, for whenever an arm holds one — the formatting must
     # not read as a bug in the data.
     from app.labs.graduation.tournament import Arm

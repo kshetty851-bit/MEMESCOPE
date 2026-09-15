@@ -146,7 +146,23 @@ def _coin(arm: str, mint: str, pct: int) -> bool:
     return int.from_bytes(digest, "big") % 100 < pct
 
 
-#: The three liquidity bands, in dollars of pool at the pool open.
+#: The liquidity bands, in dollars of pool at the pool open.
+#:
+#: B2 ($116k-$198k) was here and is RETIRED, 2026-09-15. It was the band the
+#: historical slice liked best — 1.1% tail, +1.15% per token, 91% winners —
+#: and forward it was the worst thing on the board. All five holds negative on
+#: 90 trades each:
+#:
+#:     B2_116k_3m  $87.15    B2_116k_4m  $86.15    B2_116k_5m  $73.50
+#:     B2_116k_2m  $71.27    B2_116k_6m  $52.27
+#:
+#: Five holds agreeing is a refutation of the band, not five unlucky arms. It
+#: is also the cleanest in-sample/out-of-sample reversal this lab has produced,
+#: and the reason a band is now chosen by forward evidence or not at all.
+#:
+#: THE GAP IS DELIBERATE. $116k-$198k now has no band arm. It is not unwatched
+#: — every FLOOR arm still buys it, so the population is still measured; it
+#: simply has no filter claiming to improve on that.
 #:
 #: CONTIGUOUS AND ORDERED, which is the whole design. Generation 1 ran fifty
 #: independent filters and the winner had to clear the best-of-fifty noise
@@ -191,7 +207,6 @@ CURVE_ENTRY_PCT = Decimal("90")
 
 LIQ_BANDS: tuple[tuple[str, int, int], ...] = (
     ("B1",  75_000,   116_000),
-    ("B2", 116_000,   198_000),
     ("B3", 198_000, 1_000_000_000),
 )
 BAND_BY_KEY: dict[str, tuple[int, int]] = {
@@ -384,11 +399,6 @@ ARMS: tuple[Arm, ...] = (
     Arm("B1_75k_4m", "liq_B1", 4, note="pool $75k-$116k, out at 4m"),
     Arm("B1_75k_5m", "liq_B1", 5, note="pool $75k-$116k, out at 5m"),
     Arm("B1_75k_6m", "liq_B1", 6, note="pool $75k-$116k, out at 6m"),
-    Arm("B2_116k_2m", "liq_B2", 2, note="pool $116k-$198k, out at 2m"),
-    Arm("B2_116k_3m", "liq_B2", 3, note="pool $116k-$198k, out at 3m"),
-    Arm("B2_116k_4m", "liq_B2", 4, note="pool $116k-$198k, out at 4m"),
-    Arm("B2_116k_5m", "liq_B2", 5, note="pool $116k-$198k, out at 5m"),
-    Arm("B2_116k_6m", "liq_B2", 6, note="pool $116k-$198k, out at 6m"),
     Arm("B3_198k_2m", "liq_B3", 2, note="pool over $198k, out at 2m"),
     Arm("B3_198k_3m", "liq_B3", 3, note="pool over $198k, out at 3m"),
     Arm("B3_198k_4m", "liq_B3", 4, note="pool over $198k, out at 4m"),
@@ -408,7 +418,7 @@ CONTROLS: tuple[Arm, ...] = tuple(a for a in ARMS if a.is_control)
 #: returned no edge. The count is pinned rather than free because an arm that
 #: appears mid-tournament changes what every other number means — so changing
 #: it must be a deliberate edit with a date, not a side effect.
-assert len(ARMS) == 22, f"the tournament is twenty-two arms, not {len(ARMS)}"
+assert len(ARMS) == 17, f"the tournament is seventeen arms, not {len(ARMS)}"
 assert {a.hold for a in ARMS} == {2, 3, 4, 5, 6}, (
     "Two, three and five minutes. Longer is measurably worse INSIDE the band "
     "(5m is +3.33% at a 1.6% tail; 30m is -6.48% at 14.6%), and one minute is "
@@ -417,14 +427,14 @@ assert {a.hold for a in ARMS} == {2, 3, 4, 5, 6}, (
     "arm the data cannot price is an arm a real wallet cannot verify")
 assert all(a.tp is None and a.trail is None for a in ARMS), (
     "targets and trailing stops are gone — every one of them held 15m+")
-assert len([a for a in ARMS if not a.is_control]) == 17, (
+assert len([a for a in ARMS if not a.is_control]) == 12, (
     "`config.required_pf` is calibrated on the maximum of FORTY-TWO noise "
-    "draws. Seventeen arms are now judged against it, so the bar is if anything "
+    "draws. Twelve arms are now judged against it, so the bar is if anything "
     "CONSERVATIVE — the luckiest of seventeen reaches less than the luckiest "
     "of forty-two. Left as it is deliberately: a bar that is too hard costs a "
     "real finding some time, where one that is too easy costs a false one nothing")
 assert len(CONTROLS) == 5, "one baseline per hold"
-assert len({a.name for a in ARMS}) == 22, "arm names must be unique"
+assert len({a.name for a in ARMS}) == 17, "arm names must be unique"
 assert all(len(a.name) <= 32 for a in ARMS), "arm name must fit the column"
 assert {a.entry for a in ARMS} <= set(ENTRY_RULES), (
     "every entry filter an arm uses must be described: "
