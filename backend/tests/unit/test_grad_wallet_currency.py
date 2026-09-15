@@ -224,3 +224,30 @@ def test_projection_uncertainty_is_clustered_by_hour_not_by_trade():
     assert "return {}" in guard, (
         "under two hours of history there is nothing to measure variation "
         "between; the projection must be refused, not printed confidently")
+
+
+def test_market_snapshot_protection_is_bounded():
+    """A traded mint keeps its series while a position is OPEN and for a
+    bounded window after the last one closes — not forever.
+
+    Unbounded protection made the carve-out a third of the table: 1,292 mints
+    held 1,986,783 rows, nothing older than thirty days, still growing. The
+    obvious knob was not the lever — cutting MARKET_SNAPSHOT_RETENTION_DAYS
+    from 7 to 3 would have freed 8.7 MB, because 99.2% of rows past three days
+    were already protected.
+    """
+    import inspect as _inspect
+
+    from app.core.config import settings
+    from app.workers import retention_tasks
+
+    assert 1 <= settings.MARKET_SNAPSHOT_PROTECT_DAYS <= 365
+    src = _inspect.getsource(retention_tasks._prune_market_snapshots)
+    # Both protected tables must carry the bound, or one of them keeps
+    # everything forever and the fix does nothing.
+    assert src.count("closed_at IS NULL OR closed_at >= :prot_cutoff") == 2, (
+        "paper_positions AND lab_positions must both bound their protection")
+    assert "MARKET_SNAPSHOT_PROTECT_DAYS" in src, (
+        "the window must come from settings, not a literal")
+    # An OPEN position is protected regardless of how old it is.
+    assert "closed_at IS NULL" in src

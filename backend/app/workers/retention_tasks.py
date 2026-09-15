@@ -140,6 +140,20 @@ async def _prune_market_snapshots(days: int) -> int:
     lab wallets are live, and before this a lab entry kept its evidence only
     if the mint also happened to be a Radar token.
 
+    **The protection is now BOUNDED**, 2026-09-15. It used to last forever,
+    which made it unbounded by construction: 1,292 traded mints held 1,986,783
+    rows, a third of the table, and nothing in it was older than thirty days —
+    it was still growing. A mint keeps its series while it has an OPEN position
+    and for `MARKET_SNAPSHOT_PROTECT_DAYS` after the last one closes; the
+    series that explains a trade is the one around it, not one in perpetuity.
+    Measured at the time: 991,684 rows, roughly 713 MB, belonged to positions
+    last traded over a week ago.
+
+    That this was the lever at all is worth recording, because the obvious
+    knob was not: cutting MARKET_SNAPSHOT_RETENTION_DAYS from 7 days to 3
+    would have freed 8.7 MB and destroyed four days of untraded history,
+    because 99.2% of rows past three days were already protected.
+
     **Both protected sets are inline CTEs, not temp tables.** A temp table
     belongs to one connection, and committing between batches hands the
     connection back to the pool — so the next batch can land on a different
@@ -157,8 +171,10 @@ async def _prune_market_snapshots(days: int) -> int:
         """
         WITH prot_mints AS (
             SELECT mint_address FROM paper_positions
+             WHERE closed_at IS NULL OR closed_at >= :prot_cutoff
             UNION
             SELECT mint_address FROM lab_positions
+             WHERE closed_at IS NULL OR closed_at >= :prot_cutoff
         ),
         prot_snaps AS (
             SELECT market_snapshot_id AS id FROM paper_decision_snapshots
@@ -182,7 +198,10 @@ async def _prune_market_snapshots(days: int) -> int:
         )
         DELETE FROM token_market_snapshots t USING doomed d WHERE t.id = d.id
         """,
-        {"cutoff": datetime.now(UTC) - timedelta(days=days), "batch": _BATCH},
+        {"cutoff": datetime.now(UTC) - timedelta(days=days),
+         "prot_cutoff": datetime.now(UTC) - timedelta(
+             days=settings.MARKET_SNAPSHOT_PROTECT_DAYS),
+         "batch": _BATCH},
     )
 
 

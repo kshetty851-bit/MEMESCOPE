@@ -420,6 +420,20 @@ class Settings(BaseSettings):
     # the nursery running, against a 38 GB disk.
     SCORING_HISTORY_RETENTION_DAYS: int = 7
     MARKET_SNAPSHOT_RETENTION_DAYS: int = Field(default=7, ge=1, le=365)
+    #: How long a TRADED mint keeps its snapshots after its last position
+    #: closed. Traded mints used to be protected FOREVER, which made the
+    #: carve-out unbounded: 1,292 mints held 1,986,783 rows — 34% of the table
+    #: — and 991,684 of those belonged to positions that last traded over a
+    #: week ago. Nothing was older than thirty days, so it was still growing.
+    #:
+    #: A position closed a week back does not need minute-level snapshots in
+    #: perpetuity to stay explainable; the series that matters is the one
+    #: around the trade. An OPEN position is protected regardless of age.
+    #:
+    #: Measured before the change: cutting MARKET_SNAPSHOT_RETENTION_DAYS from
+    #: 7 to 3 would have freed 8.7 MB, because 99.2% of rows past three days
+    #: were already protected. This bound is the lever that has weight.
+    MARKET_SNAPSHOT_PROTECT_DAYS: int = Field(default=7, ge=1, le=365)
     #: The heaviest table per row (~8 KB, mostly JSONB) and the fastest grower.
     #: The distilled `radar_decision_outcomes` is permanent; this is only its
     #: raw input, and a decision that already has an outcome is excluded from
