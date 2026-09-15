@@ -217,3 +217,29 @@ def test_the_curve_machinery_is_inert_while_no_arm_uses_it():
     assert 'a.entry == "curve"' in guard and "return 0" in guard, (
         "_fill_curve must bail before touching the database when no arm "
         "carries the curve entry")
+
+
+def test_a_stop_is_only_real_if_the_price_is_fresh_enough_to_fire_it():
+    """A stop on minute-old prices is worse than no stop.
+
+    Measured 2026-09-15: collapses are cascades of ~247 sells falling 1.14% a
+    SECOND, so 61-second-old data fires a 10% stop at -70% — and the observed
+    median fill was -64%, which is the same number reached two ways. The stop
+    arms are only honest because open positions are re-priced every
+    HELD_INTERVAL_S seconds.
+    """
+    from app.labs.graduation.tournament import ARMS
+
+    stops = [a for a in ARMS if a.stop is not None]
+    assert stops, "no stop arms to protect"
+    assert config.HELD_INTERVAL_S <= 5, (
+        f"open positions are re-priced every {config.HELD_INTERVAL_S}s; at "
+        "1.14% a second a stop cannot fill near its level")
+    # Every stop arm must have an exact twin WITHOUT the stop, or the forward
+    # comparison is against a different population.
+    for arm in stops:
+        twin = arm.name.replace("_SL", "")
+        match = next((a for a in ARMS if a.name == twin), None)
+        assert match is not None, f"{arm.name} has no stopless twin"
+        assert (match.entry, match.hold) == (arm.entry, arm.hold), (
+            f"{arm.name} and {twin} must differ ONLY in the stop")

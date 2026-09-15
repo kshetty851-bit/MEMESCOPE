@@ -26,7 +26,7 @@ This is reported rather than hidden: `backfill_impossible` counts it.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
@@ -240,6 +240,34 @@ class PostGradSampler:
         rows.sort(key=lambda r: r.get("liquidity_usd") or 0, reverse=True)
         rows = [r for r in rows if self._accept(r)]
         rows.extend(await self._backfill(now))
+        self.samples_written += len(rows)
+        return rows
+
+    async def poll_held(self, mints: Sequence[str],
+                        now: datetime | None = None) -> list[dict[str, Any]]:
+        """Sample ONLY the mints a position is currently open on.
+
+        The bulk poll spreads one batch across the whole watch set, so any
+        single token is looked at about once a minute. That minute is the
+        entire loss: collapses here are cascades of ~247 small sells falling
+        1.14% a SECOND, so by the time the bulk loop comes round, price is 64%
+        below where a stop would have wanted to fire — measured, and confirmed
+        by 1.14 x 61s = 69.6%.
+
+        Open positions are one to five mints, which DexScreener answers in a
+        single call, so this costs one request every few seconds and nothing
+        at all on the RPC quota.
+        """
+        if not mints:
+            return []
+        now = now or self._now()
+        rows: list[dict[str, Any]] = []
+        for batch in chunked(list(mints), config.DEXSCREENER_BATCH):
+            for pair in await self._market.dex_pairs(batch):
+                if (row := parse_pair(pair, ts=now)) is not None:
+                    rows.append(row)
+        rows.sort(key=lambda r: r.get("liquidity_usd") or 0, reverse=True)
+        rows = [r for r in rows if self._accept(r)]
         self.samples_written += len(rows)
         return rows
 

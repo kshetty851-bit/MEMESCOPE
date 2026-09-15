@@ -234,6 +234,19 @@ NETWORK = "solana"
 #: window and `DEXSCREENER_BATCH` is 30, so this is two or three requests a
 #: minute against an endpoint that allows hundreds. Well short of a burst.
 POSTGRAD_INTERVAL_S = _int("LAB_GRADUATION_POSTGRAD_INTERVAL_S", 20)
+#: How often the mints we currently HOLD are re-priced.
+#:
+#: Three seconds, against twenty for the bulk loop — and the bulk loop spreads
+#: its batch across the whole watch set, so any one token is seen about once a
+#: MINUTE. That minute is where the money goes. Collapses here are cascades of
+#: roughly 247 small sells (median $159 each, where $352 is needed to move
+#: price 10%) falling 1.14% a second. Sixty-one seconds of that is 69.6%,
+#: which is why the median fill on a stop was -64%.
+#:
+#: Open positions are one to five mints — a single DexScreener call — so this
+#: costs one request every three seconds and NOTHING on the RPC quota, which
+#: is exhausted.
+HELD_INTERVAL_S = _int("LAB_GRADUATION_HELD_INTERVAL_S", 3)
 #: `/tokens/v1/{chain}/{addresses}` takes a comma-separated list. Thirty is the
 #: documented ceiling and the number the Breakout lab measured against.
 DEXSCREENER_BATCH = 30

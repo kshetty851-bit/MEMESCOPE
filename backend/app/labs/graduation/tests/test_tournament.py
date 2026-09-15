@@ -37,6 +37,10 @@ def test_the_tournament_is_a_hold_sweep_with_a_baseline_on_every_hold() -> None:
     B2 ($116k-$198k) was retired 2026-09-15 with all five of its holds
     negative — the band the historical slice liked best, refuted forward.
 
+    Five STOP-CARRYING twins were added the same day, each an exact copy of an
+    arm above it with a 10% hard stop. A stop makes an arm a strategy rather
+    than a baseline, so FLOOR_*_SL are NOT counted among the controls.
+
     Fourteen narrow bands came first and starved — 25 trades a day each of a
     320-token flow — while producing scatter rather than a shape. Pooled by
     HOLD the same data separated cleanly (2m +1.11%, 3m +2.22%, 5m +0.34%
@@ -46,9 +50,9 @@ def test_the_tournament_is_a_hold_sweep_with_a_baseline_on_every_hold() -> None:
     One baseline per hold, so no hold is judged without an unselected twin on
     its own clock. Nothing on this board decides by hashing a mint.
     """
-    assert len(ARMS) == 17
+    assert len(ARMS) == 22
     assert len(CONTROLS) == 5
-    assert len({a.name for a in ARMS}) == 17
+    assert len({a.name for a in ARMS}) == 22
     assert all(len(a.name) <= 32 for a in ARMS)
 
 
@@ -57,7 +61,7 @@ def test_arms_differ_only_in_entry_and_exit() -> None:
     measures. Size, costs and clock are shared by construction — the Arm
     record has nowhere to put them."""
     assert set(Arm.__dataclass_fields__) == {
-        "name", "entry", "hold", "tp", "trail", "note"}
+        "name", "entry", "hold", "tp", "trail", "stop", "note"}
 
 
 def test_the_baseline_is_a_strategy_not_a_dice_roll() -> None:

@@ -113,6 +113,7 @@ class GraduationRecorder:
             tasks = [
                 asyncio.create_task(self._poll_loop(), name="graduation-poll"),
                 asyncio.create_task(self._postgrad_loop(), name="graduation-postgrad"),
+                asyncio.create_task(self._held_loop(), name="graduation-held"),
             ]
             try:
                 await self._discovery()
@@ -153,6 +154,38 @@ class GraduationRecorder:
                 raise
             except Exception:
                 logger.exception("graduation_postgrad_failed")
+
+    async def _held_loop(self) -> None:
+        """Mark the positions actually open, fast.
+
+        Separate from the bulk loop on purpose: it is a different question. The
+        bulk loop asks "what is happening across the market"; this asks "is the
+        thing I am holding dying right now", and only the second one has a
+        deadline.
+        """
+        from sqlalchemy import select
+
+        from app.db.session import SessionFactory
+        from app.labs.graduation.models import GradPaperPosition
+
+        while True:
+            await asyncio.sleep(config.HELD_INTERVAL_S)
+            try:
+                async with SessionFactory() as session:
+                    mints = (await session.scalars(
+                        select(GradPaperPosition.mint)
+                        .where(GradPaperPosition.closed_at.is_(None),
+                               GradPaperPosition.notional_usd > 0)
+                        .distinct())).all()
+                if not mints:
+                    continue
+                for row in await self.postgrad.poll_held(list(mints), self._now()):
+                    self._buffer(self._postgrad_rows, row)
+                await self.flush()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("graduation_held_failed")
 
     async def shutdown(self) -> None:
         """Last flush. Every live state is closed, so a restart does not think

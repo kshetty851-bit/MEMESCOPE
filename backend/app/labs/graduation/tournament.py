@@ -45,6 +45,7 @@ from sqlalchemy.orm import aliased
 from app.core.logging import get_logger
 from app.labs.graduation import config
 from app.labs.graduation.backtest import (
+    HardStop,
     ExitPolicy,
     ExitState,
     TakeProfit,
@@ -75,6 +76,10 @@ class Arm:
     hold: int
     tp: Decimal | None = None
     trail: Decimal | None = None
+    #: A hard stop measured from the ENTRY price. Kept separate from `trail`,
+    #: which measures from the running peak — a trailing stop on a token that
+    #: only ever fell has never armed, and would not have saved anything.
+    stop: Decimal | None = None
     note: str = ""
 
     @property
@@ -93,7 +98,10 @@ class Arm:
         with it — `config.required_pf` prices that directly, from the trade
         count, and it is a harder bar than any single control.
         """
-        return self.entry == "floor"
+        # A stop makes it a strategy, not a baseline. The baseline is "buy
+        # every graduation above the floor and hold to the clock" — adding a
+        # rule to that is precisely the thing being tested against it.
+        return self.entry == "floor" and self.stop is None
 
     @property
     def entry_rule(self) -> str:
@@ -106,6 +114,8 @@ class Arm:
         an hour after the open: past it there is no mark and no exit price, so
         every arm needs a backstop whatever else it carries."""
         parts = []
+        if self.stop:
+            parts.append(f"{self.stop * 100:.0f}% below the price paid")
         if self.trail:
             parts.append(f"{self.trail * 100:.0f}% off the running peak")
         if self.tp:
@@ -117,6 +127,11 @@ class Arm:
 
     def policy(self) -> ExitPolicy:
         rules: list[Any] = []
+        # LOSS FIRST. A stop and a target can both be true on one mark, and
+        # which filled is not knowable from the data — taking the loss is the
+        # conservative reading.
+        if self.stop:
+            rules.append(HardStop(self.stop))
         if self.trail:
             rules.append(TrailingStop(self.trail))
         if self.tp:
@@ -404,6 +419,31 @@ ARMS: tuple[Arm, ...] = (
     Arm("B3_198k_4m", "liq_B3", 4, note="pool over $198k, out at 4m"),
     Arm("B3_198k_5m", "liq_B3", 5, note="pool over $198k, out at 5m"),
     Arm("B3_198k_6m", "liq_B3", 6, note="pool over $198k, out at 6m"),
+    # STOP-CARRYING TWINS, added 2026-09-15. Each is an exact copy of an arm
+    # above it with a 10% hard stop bolted on, so the comparison is the same
+    # tokens on the same clock, stop against no stop.
+    #
+    # They exist because the loss in this market is reachable after all, which
+    # took three measurements to establish and contradicts what this file said
+    # for a week. Collapses are cascades — median 247 sells, $159 each, where
+    # $352 is needed to move price 10% — falling 1.14% a second. Nothing is
+    # unsellable: at the first print below -20% the pool still holds over half
+    # its liquidity 57% of the time. The tail was never out of reach; the data
+    # was 61 seconds stale, and 1.14%/s x 61s = 69.6% is exactly the -64%
+    # median fill that made stops look useless.
+    #
+    # `HELD_INTERVAL_S` re-prices open positions every 3 seconds, which is what
+    # makes these arms able to fire at all.
+    Arm("FLOOR_3m_SL", "floor", 3, stop=Decimal("0.10"),
+        note="every graduation over $75k, 10% stop, out at 3m"),
+    Arm("FLOOR_4m_SL", "floor", 4, stop=Decimal("0.10"),
+        note="every graduation over $75k, 10% stop, out at 4m"),
+    Arm("FLOOR_5m_SL", "floor", 5, stop=Decimal("0.10"),
+        note="every graduation over $75k, 10% stop, out at 5m"),
+    Arm("B1_75k_5m_SL", "liq_B1", 5, stop=Decimal("0.10"),
+        note="pool $75k-$116k, 10% stop, out at 5m"),
+    Arm("B3_198k_5m_SL", "liq_B3", 5, stop=Decimal("0.10"),
+        note="pool over $198k, 10% stop, out at 5m"),
     # Carried over UNCHANGED: a pre-registered A/B on the rug signals with a
     # 10 October judge date. Rebuilding the tournament must not quietly end an
     # experiment that has a date on it.
@@ -418,7 +458,7 @@ CONTROLS: tuple[Arm, ...] = tuple(a for a in ARMS if a.is_control)
 #: returned no edge. The count is pinned rather than free because an arm that
 #: appears mid-tournament changes what every other number means — so changing
 #: it must be a deliberate edit with a date, not a side effect.
-assert len(ARMS) == 17, f"the tournament is seventeen arms, not {len(ARMS)}"
+assert len(ARMS) == 22, f"the tournament is twenty-two arms, not {len(ARMS)}"
 assert {a.hold for a in ARMS} == {2, 3, 4, 5, 6}, (
     "Two, three and five minutes. Longer is measurably worse INSIDE the band "
     "(5m is +3.33% at a 1.6% tail; 30m is -6.48% at 14.6%), and one minute is "
@@ -426,15 +466,19 @@ assert {a.hold for a in ARMS} == {2, 3, 4, 5, 6}, (
     "60-second exit would be marked anywhere from 60 to 70+ seconds out. An "
     "arm the data cannot price is an arm a real wallet cannot verify")
 assert all(a.tp is None and a.trail is None for a in ARMS), (
-    "targets and trailing stops are gone — every one of them held 15m+")
-assert len([a for a in ARMS if not a.is_control]) == 12, (
+    "targets and TRAILING stops stay gone — every one of them held 15m+. A "
+    "hard stop from entry is a different rule and is allowed")
+assert all(a.stop is None or a.stop == Decimal("0.10") for a in ARMS), (
+    "one stop level, so the twins differ in ONE thing. Sweeping levels here "
+    "would be fitting a parameter on the same data that suggested it")
+assert len([a for a in ARMS if not a.is_control]) == 17, (
     "`config.required_pf` is calibrated on the maximum of FORTY-TWO noise "
     "draws. Twelve arms are now judged against it, so the bar is if anything "
     "CONSERVATIVE — the luckiest of seventeen reaches less than the luckiest "
     "of forty-two. Left as it is deliberately: a bar that is too hard costs a "
     "real finding some time, where one that is too easy costs a false one nothing")
 assert len(CONTROLS) == 5, "one baseline per hold"
-assert len({a.name for a in ARMS}) == 17, "arm names must be unique"
+assert len({a.name for a in ARMS}) == 22, "arm names must be unique"
 assert all(len(a.name) <= 32 for a in ARMS), "arm name must fit the column"
 assert {a.entry for a in ARMS} <= set(ENTRY_RULES), (
     "every entry filter an arm uses must be described: "
