@@ -60,6 +60,19 @@ async def test_refuses_while_execution_mode_is_disabled(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_idles_when_nothing_is_open(monkeypatch) -> None:
+    """Production runs at mode="live" with the switch off, so the mode check
+    gates nothing there. An empty book must not leave a 3-second loop polling."""
+    monkeypatch.setattr(settings, "REAL_WALLET_EXECUTION_MODE", "live")
+
+    async def _no_work() -> bool:
+        return False
+
+    monkeypatch.setattr(scheduler, "_has_work", _no_work)
+    assert await scheduler._real_wallet_fast_exit_tick() == {"skipped": "nothing_open"}
+
+
+@pytest.mark.asyncio
 async def test_drain_walks_an_intent_past_a_single_transition(monkeypatch) -> None:
     """The whole point: one pass reaches SUBMITTED, not one step towards it.
 

@@ -12,6 +12,7 @@ from app.core.events import publish_live_update
 from app.core.logging import get_logger
 from app.db.session import SessionFactory
 from app.models.real_wallet_execution import RealWalletLiveIntent
+from app.models.real_wallet_execution import RealWalletPosition
 from app.paper.service import utcnow
 from app.real_wallet.driver import RealWalletDriver
 from app.real_wallet.dry_run import RealWalletDryRunService
@@ -277,9 +278,34 @@ async def _drain(session: Any, *, now_fn: Any) -> list[dict[str, object]]:
     return moved
 
 
+async def _has_work() -> bool:
+    """Is there anything for the loop to pace itself over?
+
+    Checked once per beat rather than trusted to the execution mode, because
+    "disabled" is this setting's default and NOT what a configured wallet runs:
+    production sits at `live` with the operator's switch off, so a mode check
+    alone would leave a three-second loop polling an empty book for ever on a
+    two-core box. Nothing can appear mid-window that this misses — positions are
+    created by the driver's own minute tick, and the soonest exit any of them
+    can want is its whole hold away.
+    """
+    async with SessionFactory() as session:
+        open_positions = await session.scalar(
+            select(func.count()).select_from(RealWalletPosition)
+            .where(RealWalletPosition.status == "OPEN"))
+        if open_positions:
+            return True
+        unfinished = await session.scalar(
+            select(func.count()).select_from(RealWalletLiveIntent)
+            .where(RealWalletLiveIntent.state.in_(UNFINISHED_STATES)))
+        return bool(unfinished)
+
+
 async def _real_wallet_fast_exit_tick() -> dict[str, Any]:
     if settings.REAL_WALLET_EXECUTION_MODE == "disabled":
         return {"skipped": "execution_mode_disabled"}
+    if not await _has_work():
+        return {"skipped": "nothing_open"}
     deadline = utcnow().timestamp() + settings.REAL_WALLET_FAST_EXIT_WINDOW_S
     passes = exits = advanced = 0
     while True:
