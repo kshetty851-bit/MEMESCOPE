@@ -10,8 +10,8 @@ import pytest
 
 from app.labs.graduation import config
 from app.labs.graduation.models import GradPaperPosition
-from app.labs.graduation.restate import NOT_GRADUATION, restate_one
-from app.labs.graduation.tournament import Mark, graduation_pool
+from app.labs.graduation.restate import BOOKS, NOT_GRADUATION, restate_one
+from app.labs.graduation.tournament import ARMS, Mark, graduation_pool
 
 pytestmark = pytest.mark.unit
 
@@ -99,3 +99,11 @@ def test_a_stop_keeps_its_exit_and_is_only_recharged() -> None:
     assert position.close_quote == D("0.00044")
     # The pool's real tier and the router, both legs, where 25 bps was charged.
     assert D("-0.13") < position.net_return < D("-0.12")
+
+
+def test_the_pre_registered_ab_is_never_restated() -> None:
+    """Its judge weighs the trades its filter refused; leaving their rugs out
+    would decide the verdict."""
+    assert BOOKS == tuple(a.name for a in ARMS if not a.ab_experiment)
+    assert "B3_198k_5m" in BOOKS
+    assert not {"F01_all_2m", "F14_symnight_2m"} & set(BOOKS)

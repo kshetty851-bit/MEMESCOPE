@@ -63,6 +63,12 @@ NOT_GRADUATION = "not_graduation_pool"
 #: rule here could have avoided them in advance — so each row still shows what
 #: it really lost, and the board states the total.
 RUGGED = "rugged"
+#: The board's arms only. The rug-signal A/B (`F01`, `F14`) is a pre-registered
+#: experiment whose judge compares the P&L of the trades its filter refused —
+#: leaving its rugs out would decide that verdict, and rewriting its closed
+#: trades would change a record its rules were fixed before. Its history is
+#: left exactly as it was booked.
+BOOKS = tuple(a.name for a in ARMS if not a.ab_experiment)
 #: Only these closes are re-timed. A stop fired on the mark in front of it,
 #: and a retired arm or an ended series had no later mark to wait for; those
 #: keep their exit and are re-charged only.
@@ -185,7 +191,7 @@ async def restate(session: AsyncSession, *, apply: bool,
     done = select(GradPaperRestatement.position_id)
     positions = (await session.scalars(
         select(GradPaperPosition)
-        .where(GradPaperPosition.book.in_([a.name for a in ARMS]),
+        .where(GradPaperPosition.book.in_(BOOKS),
                GradPaperPosition.opened_at < opened_before,
                GradPaperPosition.closed_at.is_not(None),
                GradPaperPosition.notional_usd > 0,
