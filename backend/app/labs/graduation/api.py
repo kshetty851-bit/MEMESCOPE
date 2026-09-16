@@ -1360,6 +1360,18 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
             "strategy arm yet." if traded else "No arm has closed a trade yet.")
         return board
     fails = []
+    # A WHAT-IF IS NEVER CALLED. Trades on pools drained while they were open
+    # are left out of these figures on the operator's instruction, and with
+    # them out B3_198k_5m cleared every term below. It would not have with
+    # them in: the gate certifies a strategy, and a strategy made those trades.
+    rugged = await db.scalar(
+        select(func.count()).select_from(GradPaperPosition)
+        .where(GradPaperPosition.book == leader.name,
+               GradPaperPosition.excluded == "rugged"))
+    if rugged:
+        fails.append(f"{rugged} trades on pools drained while they were open are "
+                     f"left out of these figures as a what-if, and a winner is "
+                     f"only called on every trade it made")
     need_pf = config.required_pf(leader.trades)
     board.required_profit_factor = need_pf
     if leader.trades < board.min_trades:
