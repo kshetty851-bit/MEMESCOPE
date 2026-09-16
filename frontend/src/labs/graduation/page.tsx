@@ -5,19 +5,15 @@ import { Fragment, useEffect, useState } from "react";
 import { Panel, PanelHeader, PanelTitle } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/states";
-import { shortenAddress } from "@/lib/format";
 
 import {
-  useGraduationReturns,
   useGraduationStatus,
   useGraduationTournament,
   useGraduationTrades,
 } from "./hooks";
 import type {
   ArmRow,
-  Funnel,
   PaperPosition,
-  RecentToken,
 } from "./types";
 
 /**
@@ -31,25 +27,6 @@ import type {
  * a rule written in the page would be a second, unpublished rule competing
  * with the one the recorder followed.
  */
-
-const STAGES: { key: keyof Funnel; label: string; note: string }[] = [
-  { key: "seen", label: "Seen", note: "admitted from the launch feed" },
-  { key: "crossed_70", label: "70%", note: "tracked from here" },
-  { key: "crossed_80", label: "80%", note: "" },
-  { key: "crossed_90", label: "90%", note: "" },
-  { key: "crossed_95", label: "95%", note: "" },
-  { key: "graduated", label: "Graduated", note: "curve filled" },
-];
-
-function pct(part: number, whole: number): string {
-  if (!whole) return "—";
-  return `${((part / whole) * 100).toFixed(1)}%`;
-}
-
-function progress(value: string | null): string {
-  if (value === null) return "—";
-  return `${Number(value).toFixed(1)}%`;
-}
 
 function Stat({
   label,
@@ -68,38 +45,6 @@ function Stat({
       <span className="text-2xl font-semibold tabular-nums">{value}</span>
       {note ? <span className="text-xs text-ink-dim">{note}</span> : null}
     </div>
-  );
-}
-
-function TokenRow({ token }: { token: RecentToken }) {
-  return (
-    <tr className="border-t border-line">
-      <td className="py-2 pr-3 font-medium">
-        {token.symbol ?? <span className="text-ink-dim">unnamed</span>}
-      </td>
-      <td className="py-2 pr-3 font-mono text-xs text-ink-dim">
-        {shortenAddress(token.mint)}
-      </td>
-      <td className="py-2 pr-3 text-right tabular-nums">
-        {progress(token.max_progress_pct)}
-      </td>
-      <td className="py-2 pr-3 text-right tabular-nums text-ink-dim">
-        {token.sample_count}
-      </td>
-      <td className="py-2 text-right">
-        {token.migrated ? (
-          <span className="rounded-full bg-up/15 px-2 py-0.5 text-[11px] text-up">
-            graduated
-          </span>
-        ) : token.tracked ? (
-          <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[11px] text-accent">
-            tracking
-          </span>
-        ) : (
-          <span className="text-[11px] text-ink-dim">watching</span>
-        )}
-      </td>
-    </tr>
   );
 }
 
@@ -388,7 +333,6 @@ function TradeTable({
     </div>
   );
 }
-
 
 /**
  * HOW FAR THEY GOT
@@ -770,9 +714,23 @@ function LeaderboardPanel() {
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_repeat(3,minmax(0,1fr))]">
           <div className="grad-row flex flex-col gap-1 rounded-lg border border-line p-3">
             <span className="text-label uppercase tracking-[0.08em] text-ink-dim">
-              Leader
+              Balance now
             </span>
-            <span className="truncate font-mono text-heading font-semibold text-ink">
+            {/* THE BALANCE FIRST. What the account is worth right now is what a
+                reader came for, so it takes the scale and the left-hand slot;
+                the arm that earned it is the caption underneath. */}
+            <span
+              className={`grad-figure text-2xl font-semibold tabular-nums ${
+                !lead
+                  ? "text-ink"
+                  : Number(lead.wallet_funded_usd) >= Number(data.wallet_demo_usd)
+                    ? "text-up"
+                    : "text-down"
+              }`}
+            >
+              {lead ? usd(lead.wallet_funded_usd) : usd(data.wallet_demo_usd)}
+            </span>
+            <span className="truncate font-mono text-micro text-ink">
               {data.leader || "—"}
             </span>
             <span className="text-micro text-ink-dim">
@@ -786,9 +744,15 @@ function LeaderboardPanel() {
                         : "text-down"
                     }`}
                   >
-                    {usd(lead.wallet_funded_usd)}
+                    {signedUsd(
+                      String(
+                        Number(lead.wallet_funded_usd) -
+                          Number(data.wallet_demo_usd),
+                      ),
+                    )}{" "}
+                    ({walletPct(lead.wallet_funded_usd, data.wallet_demo_usd)})
                   </span>{" "}
-                  on {lead.trades} closed
+                  · {lead.trades_funded} of {lead.trades} funded
                   {margin !== null ? (
                     <>
                       {" · "}
@@ -1111,88 +1075,6 @@ function LeaderboardPanel() {
   );
 }
 
-function ReturnsPanel() {
-  const { data } = useGraduationReturns();
-  if (!data?.running || !data.usable) return null;
-  const top = data.tiers[0]?.reached || 1;
-  return (
-    <Panel>
-      <PanelHeader>
-        <PanelTitle>How far they got</PanelTitle>
-      </PanelHeader>
-      <div className="flex flex-col gap-4 p-4">
-        <p className="max-w-[65ch] text-xs text-ink-dim">
-          The highest price each graduated token reached in the hour after its
-          pool opened, as a multiple of the open. Tiers are cumulative — a
-          token at 5x is counted in 1.5x, 2x and 3x too.
-        </p>
-
-        <div className="flex flex-col gap-1.5">
-          {data.tiers.map((t) => {
-            const share = data.usable ? (t.reached / data.usable) * 100 : 0;
-            return (
-              <div key={t.label} className="flex items-center gap-3 text-sm">
-                <span className="w-12 shrink-0 text-right font-mono text-ink-dim">
-                  {t.label}
-                </span>
-                <div className="h-4 flex-1 overflow-hidden rounded-sm bg-line/40">
-                  <div
-                    className="h-full bg-up/70"
-                    style={{ width: `${Math.max(t.reached ? 1 : 0, (t.reached / top) * 100)}%` }}
-                  />
-                </div>
-                <span className="w-28 shrink-0 tabular-nums">
-                  {t.reached}
-                  <span className="ml-1.5 text-ink-dim">
-                    {share.toFixed(share < 1 ? 2 : 1)}%
-                  </span>
-                </span>
-              </div>
-            );
-          })}
-        </div>
-
-        <div className="flex flex-col gap-2 rounded-md border border-down/40 p-3">
-          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-ink-dim">
-            …and where they ended
-          </h3>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <Stat
-              label="Ended below their open"
-              value={pct(data.ended_below_open, data.usable)}
-              note={`${data.ended_below_open} of ${data.usable}`}
-            />
-            <Stat
-              label="Ended down 90%+"
-              value={pct(data.ended_down_90, data.usable)}
-              note={`${data.ended_down_90} of ${data.usable}`}
-            />
-            <Stat
-              label="Best seen"
-              value={data.best_multiple ? `${data.best_multiple}x` : "—"}
-              note="single token, at its peak"
-            />
-          </div>
-        </div>
-
-        <p className="max-w-[65ch] text-xs text-ink-dim">
-          <b className="text-ink">The denominator matters more than the tiers.</b>{" "}
-          {data.seen.toLocaleString()} tokens were admitted from the launch
-          feed, {data.migrated.toLocaleString()} graduated,{" "}
-          {data.priced.toLocaleString()} have a recorded price series, and{" "}
-          {data.usable.toLocaleString()} of those came from a single pool and
-          are counted here. {data.excluded_multi_pool} were excluded because
-          their marks crossed pools, which produces a &ldquo;peak&rdquo; that
-          is a change of denomination rather than a price — one such token
-          appeared to do 162x in a minute. A percentage quoted against the{" "}
-          {data.seen.toLocaleString()} rather than the{" "}
-          {data.usable.toLocaleString()} is wrong by a factor of thirty.
-        </p>
-      </div>
-    </Panel>
-  );
-}
-
 export function GraduationLabPage() {
   const { data, isLoading, isError, refetch } = useGraduationStatus();
 
@@ -1228,8 +1110,6 @@ export function GraduationLabPage() {
     );
   }
 
-  const { funnel, signals } = data;
-
   return (
     <div className="flex flex-col gap-6 p-6">
       <header className="flex flex-col gap-1">
@@ -1261,220 +1141,13 @@ export function GraduationLabPage() {
         </div>
       ) : null}
 
-      <Panel>
-        <PanelHeader>
-          <PanelTitle>Right now</PanelTitle>
-        </PanelHeader>
-        <div className="grid grid-cols-2 gap-6 p-4 sm:grid-cols-4">
-          <Stat
-            label="Watch set"
-            value={`${data.watch_set}`}
-            note={`of ${data.watch_set_max} max`}
-          />
-          <Stat
-            label="RPC calls / min"
-            value={`${data.rpc_calls_per_minute}`}
-            note="derived from the watch set"
-          />
-          <Stat
-            label="New tokens / hr"
-            value={`${data.tokens_last_hour}`}
-            note="admitted from the feed"
-          />
-          <Stat
-            label="Curve samples / hr"
-            value={`${data.samples_last_hour}`}
-            note="written only when reserves move"
-          />
-          <Stat
-            label="Last chain read"
-            value={
-              data.seconds_since_chain_read === null
-                ? "never"
-                : `${data.seconds_since_chain_read}s ago`
-            }
-            note={data.recorder_stalled ? "STALLED" : "polling normally"}
-          />
-        </div>
-      </Panel>
-
-      <Panel>
-        <PanelHeader>
-          <PanelTitle>How far they get</PanelTitle>
-        </PanelHeader>
-        <div className="overflow-x-auto p-4">
-          <div className="flex min-w-[520px] items-end gap-2">
-            {STAGES.map((stage) => {
-              const value = funnel[stage.key];
-              const share = funnel.seen ? value / funnel.seen : 0;
-              return (
-                <div key={stage.key} className="flex flex-1 flex-col gap-2">
-                  <div className="flex h-28 items-end">
-                    <div
-                      className="w-full rounded-t bg-accent/70"
-                      style={{ height: `${Math.max(share * 100, 1.5)}%` }}
-                    />
-                  </div>
-                  <div className="flex flex-col gap-0.5 border-t border-line pt-2">
-                    <span className="text-sm font-semibold tabular-nums">
-                      {value}
-                    </span>
-                    <span className="text-[11px] uppercase tracking-wider text-ink-dim">
-                      {stage.label}
-                    </span>
-                    <span className="text-[11px] tabular-nums text-ink-dim">
-                      {pct(value, funnel.seen)}
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </Panel>
-
       <div className="grid gap-6 lg:grid-cols-2">
-        <Panel>
-          <PanelHeader>
-            <PanelTitle>Graduation signals</PanelTitle>
-          </PanelHeader>
-          <div className="flex flex-col gap-3 p-4">
-            <p className="max-w-[60ch] text-xs text-ink-dim">
-              Two independent sources report a graduation — the migration feed
-              and the curve account&rsquo;s own <code>complete</code> flag —
-              and either can arrive alone. Counting one would undercount.
-            </p>
-            <dl className="flex flex-col gap-2 text-sm">
-              <div className="flex justify-between">
-                <dt className="text-ink-dim">Both agreed</dt>
-                <dd className="tabular-nums">{signals.both}</dd>
-              </div>
-              <div className="flex justify-between">
-                <dt className="text-ink-dim">Feed only</dt>
-                <dd className="tabular-nums">{signals.feed_only}</dd>
-              </div>
-              <div className="flex justify-between">
-                <dt className="text-ink-dim">Chain only</dt>
-                <dd className="tabular-nums">{signals.chain_only}</dd>
-              </div>
-            </dl>
-          </div>
-        </Panel>
 
-        <Panel>
-          <PanelHeader>
-            <PanelTitle>What has been recorded</PanelTitle>
-          </PanelHeader>
-          <div className="flex flex-col gap-3 p-4">
-            <dl className="flex flex-col gap-2 text-sm">
-              <div className="flex justify-between">
-                <dt className="text-ink-dim">Curve samples</dt>
-                <dd className="tabular-nums">{data.curve_samples}</dd>
-              </div>
-              <div className="flex justify-between">
-                <dt className="text-ink-dim">Checkpoints</dt>
-                <dd className="tabular-nums">{data.checkpoints}</dd>
-              </div>
-              <div className="flex justify-between">
-                <dt className="text-ink-dim">…of those, with reserves</dt>
-                <dd className="tabular-nums">
-                  {data.checkpoints_with_reserves}
-                </dd>
-              </div>
-              <div className="flex justify-between">
-                <dt className="text-ink-dim">Post-graduation samples</dt>
-                <dd className="tabular-nums">{data.postgrad_samples}</dd>
-              </div>
-            </dl>
-            {/* The lab's own shutter speed. It bounds every pre-graduation
-                question, because a strategy can only trade what it can see. */}
-            <div className="flex flex-col gap-2 border-t border-line pt-3">
-              <h3 className="text-[11px] font-semibold uppercase tracking-wider text-ink-dim">
-                Can the climb be seen? — last hour, poll every{" "}
-                {data.poll_interval_s}s
-              </h3>
-              <dl className="flex flex-col gap-2 text-sm">
-                <div className="flex justify-between">
-                  <dt className="text-ink-dim">Graduates observed</dt>
-                  <dd className="tabular-nums">{data.graduates_observed}</dd>
-                </div>
-                <div className="flex justify-between">
-                  <dt className="text-ink-dim">…ever seen climbing</dt>
-                  <dd className="tabular-nums">
-                    {pct(data.graduates_seen_climbing, data.graduates_observed)}
-                    <span className="ml-2 text-ink-dim">
-                      {data.graduates_seen_climbing}
-                    </span>
-                  </dd>
-                </div>
-                <div className="flex justify-between">
-                  <dt className="text-ink-dim">…ever seen at 90%+</dt>
-                  <dd className="tabular-nums">
-                    {pct(data.graduates_seen_at_90, data.graduates_observed)}
-                    <span className="ml-2 text-ink-dim">
-                      {data.graduates_seen_at_90}
-                    </span>
-                  </dd>
-                </div>
-              </dl>
-              <p className="max-w-[60ch] text-xs text-ink-dim">
-                Half of all graduates complete their curve within a minute of
-                first sighting, so the poll interval is the population filter,
-                not a detail. Measured over all of history at a fifteen-second
-                poll it was 34% / 16.6%; these are the last hour, so a change
-                to the interval shows here within the hour. The second figure
-                is the only set a pre-graduation strategy could actually trade.
-              </p>
-            </div>
-            {!data.quote_side_trusted ? (
-              <p className="max-w-[60ch] rounded border border-warn/40 bg-warn/10 p-3 text-xs text-warn">
-                The curve&rsquo;s SOL side is not modelled correctly yet, so
-                reserve and market-cap figures should not be relied on. The
-                token side is sound — progress and the checkpoints are
-                unaffected, and they are what this lab records.
-              </p>
-            ) : null}
-          </div>
-        </Panel>
       </div>
 
       <LeaderboardPanel />
 
       <RulesPanel />
-
-      <ReturnsPanel />
-
-
-      <Panel>
-        <PanelHeader>
-          <PanelTitle>Furthest up the curve</PanelTitle>
-        </PanelHeader>
-        <div className="overflow-x-auto p-4">
-          {data.recent.length === 0 ? (
-            <EmptyState
-              title="Nothing has moved yet"
-              body="No watched token has recorded a progress reading."
-            />
-          ) : (
-            <table className="w-full min-w-[480px] text-sm">
-              <thead>
-                <tr className="text-left text-[11px] uppercase tracking-wider text-ink-dim">
-                  <th className="pb-2 pr-3 font-medium">Symbol</th>
-                  <th className="pb-2 pr-3 font-medium">Mint</th>
-                  <th className="pb-2 pr-3 text-right font-medium">Peak</th>
-                  <th className="pb-2 pr-3 text-right font-medium">Samples</th>
-                  <th className="pb-2 text-right font-medium">State</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.recent.map((token) => (
-                  <TokenRow key={token.mint} token={token} />
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </Panel>
 
       <p className="text-xs text-ink-dim">
         Polling {data.rpc_host} · recorder refreshes every{" "}
