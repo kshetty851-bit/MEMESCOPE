@@ -778,10 +778,23 @@ function LeaderboardPanel() {
             value={data.total_trades.toLocaleString()}
             note={`across all ${data.arms.length} arms · ${Number(data.hours_running).toFixed(1)}h in`}
           />
+          {/* TWO clocks, and they say different things — which is exactly why
+              one of them was impossible to find in micro type under an arm
+              name. This is the LEADER's own age, from its first trade. The
+              header's "all arms live" runs from the NEWEST arm instead, so it
+              reset to hours the moment the baseline was added yesterday while
+              the leader had been running two days. A reader looking for "how
+              long has this been going" was being shown the wrong one. */}
           <Stat
-            label="Wallet simulated"
-            value={usd(data.wallet_demo_usd)}
-            note={`${data.wallet_demo_slots} positions, compounding`}
+            label="Leader running"
+            value={lead ? elapsed(lead.arm_hours) : "—"}
+            note={
+              lead
+                ? `since its first trade · all arms comparable for ${Number(
+                    data.hours_running,
+                  ).toFixed(1)}h`
+                : "no trades yet"
+            }
           />
         </div>
 
@@ -909,7 +922,10 @@ function LeaderboardPanel() {
                           comparison and says nothing about how much evidence
                           any single row has behind it. */}
                       <span className="mt-0.5 block text-micro tabular-nums text-ink-dim">
-                        trading {elapsed(a.arm_hours)}
+                        <span className="rounded bg-ink/[0.06] px-1.5 py-px text-ink">
+                          {elapsed(a.arm_hours)}
+                        </span>{" "}
+                        since first trade
                       </span>
                     </td>
                     {/* P&L: what the $100 wallet made or lost. The balance
