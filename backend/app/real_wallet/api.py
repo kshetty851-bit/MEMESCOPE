@@ -1,19 +1,39 @@
-"""Admin-only, read-only dedicated execution-wallet status."""
+"""The execution wallet's page: status, start/stop, withdraw.
+
+Who may do what, decided by the operator on 2026-09-16:
+
+* Reading the wallet, pressing STOP and withdrawing need only the site code
+  (`AlphaAccessMiddleware`). None of them can spend the money on anything:
+  STOP only ends buying, and a withdrawal can only reach the one nominated
+  address, which the signer re-checks against its own copy.
+* START and clearing a kill switch need the administrator account, because
+  they are the two controls a stranger could use to put the money at risk.
+
+Account emails are shown only to the administrator; the site code is shared.
+"""
 
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
-from decimal import Decimal
+from datetime import UTC, datetime, timedelta
+from decimal import ROUND_UP, Decimal
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy import func, select
 
-from app.api.deps import AdminUser, DbSession
+from app.api.deps import AdminUser, DbSession, OptionalUser
 from app.core.config import settings
 from app.core.exceptions import ConflictError, NotFoundError, ServiceUnavailableError
-from app.models.real_wallet_execution import RealWalletDevnetIntent, RealWalletDevnetQuote
+from app.models.lab import LabDecision
+from app.models.real_wallet_execution import (
+    RealWalletDevnetIntent,
+    RealWalletDevnetQuote,
+    RealWalletLiveIntent,
+    RealWalletPosition,
+)
+from app.models.user import User, UserRole
 from app.real_wallet.balance import ExecutionWalletBalanceService
 from app.real_wallet.devnet_intent import DevnetIntentState, DevnetIntentTransitionError
 from app.real_wallet.devnet_repository import DevnetIntentExpiredError, DevnetIntentRepository
@@ -27,6 +47,7 @@ from app.real_wallet.devnet_workflow import (
     DevnetManualWorkflow,
     DevnetManualWorkflowError,
 )
+from app.real_wallet.driver import RealWalletDriver
 from app.real_wallet.live_repository import LiveIntentRepository
 from app.real_wallet import withdraw_service, withdrawal
 from app.real_wallet.mainnet_signer_client import (
@@ -45,12 +66,11 @@ from app.real_wallet.autotrade import AutotradeSwitchService, UnknownStrategyErr
 from app.real_wallet.rehearsal import as_dict as rehearsal_as_dict
 from app.real_wallet.rehearsal import rehearse
 from app.real_wallet.policy import configured_entry_size_usd
-from app.real_wallet.repository import RealWalletExecutionRepository
-from app.real_wallet.sol_price import JupiterSolUsdPriceSource, SolUsdPrice
+from app.real_wallet.sol_price import JupiterSolUsdPriceSource
+from app.real_wallet.sol_price import current_usd as sol_usd_now
 from app.real_wallet.transport_policy import readiness as transport_readiness
-from app.real_wallet.tx_inspect import DEFAULT_ALLOWED_PROGRAMS, lamports_from_sol
+from app.real_wallet.tx_inspect import lamports_from_sol
 from app.repositories.token import TokenRepository
-from app.security import entry_policy
 from app.services.rpc.standard import StandardSolanaRPC
 
 from app.core.logging import get_logger
@@ -59,14 +79,42 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/real-wallet", tags=["real-wallet"])
 
 
-def _allowed_programs() -> frozenset[str]:
-    """The effective program allowlist: the reviewed defaults plus configuration."""
-    extra = {
-        program.strip()
-        for program in settings.REAL_WALLET_ALLOWED_PROGRAM_IDS
-        if program.strip()
+def _is_owner(viewer: User | None) -> bool:
+    return viewer is not None and viewer.role == UserRole.ADMIN
+
+
+def _who(actor: str | None, owner: bool) -> str | None:
+    """An account email is the owner's to see; the site code is shared."""
+    if owner or not actor or "@" not in actor:
+        return actor
+    return "signed-in user"
+
+
+def _wallet_strategy() -> dict[str, object]:
+    """The strategy START nominates, stated from its own spec."""
+    from app.labs.graduation import config as grad
+    from app.labs.graduation import live_spec
+
+    strategy = live_spec.STRATEGIES[0]
+    return {
+        "id": strategy.id,
+        "name": strategy.name,
+        "paper_book": live_spec.PAPER_BOOK,
+        "idea": strategy.hypothesis,
+        "pool_floor_usd": live_spec.POOL_FLOOR_USD,
+        "hold_minutes": live_spec.HOLD_MINUTES,
+        "take_profit": strategy.exits.take_profit is not None,
+        "stop_loss": strategy.exits.stop_loss is not None,
+        "max_signal_age_seconds": live_spec.MAX_DECISION_AGE_SECONDS,
+        "ticket_usd": _decimal(settings.REAL_WALLET_ENTRY_SIZE_USD),
+        "min_ticket_usd": _decimal(grad.WALLET_MIN_USD),
     }
-    return DEFAULT_ALLOWED_PROGRAMS | extra
+
+
+def _sol_for(usd: Decimal, price: Decimal) -> Decimal:
+    """SOL a balance needs to spend `usd` and still keep the fee reserve."""
+    return (settings.REAL_WALLET_MIN_SOL_FEE_RESERVE + usd / price).quantize(
+        Decimal("0.001"), rounding=ROUND_UP)
 
 
 class NativeTransferQuoteIn(BaseModel):
@@ -127,37 +175,6 @@ def _decimal(value: Decimal) -> str:
     return format(value, "f")
 
 
-def _fee_accounting_readiness(
-    price: SolUsdPrice | None, *, now: datetime
-) -> dict[str, object]:
-    """Whether a settled trade could be given an honest net figure right now.
-
-    `fee_accounting_ready` is about capability, not about any one trade: a fresh
-    SOL/USD reading means a fee paid in SOL can be stated in the USD every limit
-    here is written in. Without it a settlement keeps its measured gross figure
-    and claims no net figure at all.
-    """
-    fresh = price is not None and price.is_fresh(
-        now, max_age_seconds=settings.EXECUTION_SOL_PRICE_MAX_AGE_SECONDS
-    )
-    return {
-        "sol_price_provider": settings.EXECUTION_SOL_PRICE_PROVIDER,
-        "sol_price_source": None if price is None else price.source,
-        "sol_price_usd": None if price is None else _decimal(price.usd),
-        "sol_price_observed_at": None if price is None else price.observed_at,
-        "sol_price_age_seconds": (None if price is None else _decimal(price.age_seconds(now))),
-        "sol_price_fresh": fresh,
-        "max_age_seconds": settings.EXECUTION_SOL_PRICE_MAX_AGE_SECONDS,
-        "min_sol_fee_reserve": _decimal(settings.REAL_WALLET_MIN_SOL_FEE_RESERVE),
-        "priority_fee_sol": _decimal(settings.EXECUTION_PRIORITY_FEE_SOL),
-        "exit_fee_reserve_multiplier": settings.EXECUTION_EXIT_FEE_RESERVE_MULTIPLIER,
-        "fee_accounting_ready": fresh,
-        "unavailable_reason": (
-            None if fresh else "No fresh SOL/USD reading; net figures would be gross."
-        ),
-    }
-
-
 class AutotradeStartIn(BaseModel):
     """Starting requires naming a strategy and a reason. Both are recorded."""
 
@@ -170,13 +187,19 @@ class AutotradeStopIn(BaseModel):
 
 
 @router.get("/autotrade", summary="Read the operator start/stop control")
-async def read_autotrade(_admin: AdminUser, session: DbSession) -> dict[str, object]:
+async def read_autotrade(viewer: OptionalUser, session: DbSession) -> dict[str, object]:
+    owner = _is_owner(viewer)
     service = AutotradeSwitchService(session)
-    state = await service.state()
+    state = (await service.state()).as_dict()
+    for key in ("started_by", "stopped_by"):
+        state[key] = _who(state[key], owner)
     return {
-        **state.as_dict(),
+        **state,
+        "strategy": _wallet_strategy(),
+        # START needs the administrator account; everything else here does not.
+        "can_start": owner,
         "history": [
-            {"action": e.action, "actor": e.actor, "reason": e.reason,
+            {"action": e.action, "actor": _who(e.actor, owner), "reason": e.reason,
              "nominated_strategy": e.nominated_strategy,
              "occurred_at": e.occurred_at.isoformat()}
             for e in await service.history(limit=20)
@@ -212,17 +235,18 @@ async def start_autotrade(
 
 @router.post("/autotrade/stop", summary="Stop autonomous trading, unconditionally")
 async def stop_autotrade(
-    payload: AutotradeStopIn, admin: AdminUser, session: DbSession
+    payload: AutotradeStopIn, viewer: OptionalUser, session: DbSession
 ) -> dict[str, object]:
     """Stop. This can never be refused and needs no other condition to be true.
 
     A control an operator cannot trust to stop is a control they will be afraid
-    to start, so this path has no barrier of its own and takes effect on the
-    next guard evaluation.
+    to start, so this path has no barrier of its own — not even an account — and
+    takes effect on the next guard evaluation. Open positions still sell on time.
     """
     service = AutotradeSwitchService(session)
     state = await service.stop(
-        actor=admin.email, reason=payload.reason, at=datetime.now(UTC)
+        actor=viewer.email if viewer else "site visitor",
+        reason=payload.reason, at=datetime.now(UTC),
     )
     await session.commit()
     return state.as_dict()
@@ -242,13 +266,14 @@ async def rehearsal(_admin: AdminUser, session: DbSession) -> dict[str, object]:
     "/funding-readiness",
     summary="What stands between here and a funded canary",
 )
-async def funding_readiness(_admin: AdminUser, session: DbSession) -> dict[str, object]:
+async def funding_readiness(session: DbSession) -> dict[str, object]:
     """A read-only checklist. It can never enable anything.
 
-    Measures what it can (balance, genesis, kill switch) and reports the rest as
-    UNKNOWN rather than as satisfied — an unmeasured precondition has not been
-    met, it has merely not been looked at.
+    Measures what it can (balance, genesis, kill switch, signals, settled
+    trades) and reports the rest as UNKNOWN rather than as satisfied — an
+    unmeasured precondition has not been met, it has merely not been looked at.
     """
+    now = datetime.now(UTC)
     public_key = settings.REAL_WALLET_PUBLIC_KEY.strip()
     balance_sol: Decimal | None = None
     network_verified: bool | None = None
@@ -268,13 +293,41 @@ async def funding_readiness(_admin: AdminUser, session: DbSession) -> dict[str, 
         except Exception:  # pragma: no cover - an unreadable chain is UNKNOWN
             network_verified = None
 
+    live = LiveIntentRepository(session)
     kill_switch_active: bool | None = None
     try:
-        kill_switch_active = bool(
-            await LiveIntentRepository(session).active_kill_switches()
-        )
+        kill_switch_active = bool(await live.active_kill_switches())
     except Exception:  # pragma: no cover - unreadable state stays UNKNOWN
         kill_switch_active = None
+
+    # What the next entry would spend, by the driver's own rule.
+    strategy = _wallet_strategy()
+    switch = await AutotradeSwitchService(session).state()
+    strategy_id = switch.nominated_strategy or str(strategy["id"])
+    price = await sol_usd_now(now)
+    next_trade: Decimal | None = None
+    min_trade_sol = full_trade_sol = None
+    if price is not None:
+        min_trade_sol = _sol_for(Decimal(str(strategy["min_ticket_usd"])), price)
+        full_trade_sol = _sol_for(settings.REAL_WALLET_ENTRY_SIZE_USD, price)
+        if balance_sol is not None:
+            open_positions = await live.open_positions_count()
+            configured = configured_entry_size_usd(
+                balance_sol * price + await live.open_exposure_usd())
+            if configured is not None:
+                next_trade = RealWalletDriver._fundable(
+                    strategy_id, configured,
+                    balance_lamports=lamports_from_sol(balance_sol),
+                    sol_price=price, open_positions=open_positions)
+
+    last_signal = await session.scalar(
+        select(func.max(LabDecision.checkpoint_at)).where(
+            LabDecision.strategy_id == strategy_id.upper(),
+            LabDecision.eligible.is_(True)))
+    round_trips = await session.scalar(
+        select(func.count()).select_from(RealWalletPosition).where(
+            RealWalletPosition.status == "CLOSED",
+            RealWalletPosition.exit_transaction_signature.is_not(None)))
 
     # Asked over the socket. This container cannot answer it from its own
     # environment — it is deliberately denied any key path — so an unreachable
@@ -294,11 +347,20 @@ async def funding_readiness(_admin: AdminUser, session: DbSession) -> dict[str, 
         network_verified=network_verified,
         kill_switch_active=kill_switch_active,
         signer_holds_pinned_key=signer_holds_pinned_key,
-        # Nothing has been promoted. When the V6 review promotes something this
-        # becomes its id, and it is deliberately not derivable from config.
+        # Nothing has been promoted. When the lab's review promotes something
+        # this becomes its id, and it is deliberately not derivable from config.
         validated_strategy=None,
+        next_trade_usd=next_trade,
+        min_trade_sol=min_trade_sol,
+        full_trade_sol=full_trade_sol,
+        last_signal_minutes=(None if last_signal is None
+                             else (now - last_signal).total_seconds() / 60),
+        signals_measured=True,
+        round_trips=int(round_trips or 0),
     )
-    return readiness_as_dict(readiness)
+    return {**readiness_as_dict(readiness), "strategy_id": strategy_id,
+            "min_trade_sol": None if min_trade_sol is None else _decimal(min_trade_sol),
+            "full_trade_sol": None if full_trade_sol is None else _decimal(full_trade_sol)}
 
 
 class WithdrawIn(BaseModel):
@@ -310,7 +372,7 @@ class WithdrawIn(BaseModel):
 
 @router.post("/withdraw", summary="Send SOL to the one nominated address")
 async def withdraw(
-    payload: WithdrawIn, admin: AdminUser, session: DbSession
+    payload: WithdrawIn, viewer: OptionalUser, session: DbSession
 ) -> dict[str, object]:
     """The only path here that moves money without a trade.
 
@@ -346,7 +408,8 @@ async def withdraw(
     except (MainnetSignerUnavailableError, MainnetSignerRejectedError) as exc:
         raise ServiceUnavailableError(f"signer: {exc}") from exc
 
-    logger.warning("real_wallet_withdrawal_submitted", actor=str(admin.id),
+    logger.warning("real_wallet_withdrawal_submitted",
+                   actor=str(viewer.id) if viewer else "site visitor",
                    signature=signature, lamports=prepared.lamports)
     return {
         "submitted": True,
@@ -360,13 +423,12 @@ async def withdraw(
 
 
 @router.get("/status", summary="Read dedicated execution-wallet status")
-async def status(_admin: AdminUser, session: DbSession) -> dict[str, object]:
-    """Return public and readiness metadata only; never signer material."""
+async def status(viewer: OptionalUser, session: DbSession) -> dict[str, object]:
+    """Return public metadata only; never signer material."""
     now = datetime.now(UTC)
-    transport = transport_readiness()
+    owner = _is_owner(viewer)
     # Read-only price probe. It cannot trigger an order, a signature or a
-    # submission; it exists so the dashboard can distinguish "fee accounting
-    # would work" from "a net figure would silently be gross".
+    # submission; it prices the balance in the unit every limit is written in.
     try:
         sol_price = await JupiterSolUsdPriceSource().current(now=now)
     except Exception:  # pragma: no cover - the source already fails closed
@@ -426,24 +488,33 @@ async def status(_admin: AdminUser, session: DbSession) -> dict[str, object]:
                         )
         except Exception:
             balance_error = "unavailable"
-    decisions = await RealWalletExecutionRepository(session).latest(limit=30)
     live = LiveIntentRepository(session)
-    unresolved = await live.unresolved()
     kill_switches = await live.active_kill_switches()
     kill_switch_history = await live.kill_switch_history(limit=20)
     open_positions = await live.open_positions_count()
     health = await live.health()
-    positions = await live.positions(limit=30)
+    positions = await live.positions(limit=50)
+    exit_states: dict[uuid.UUID, str] = {
+        row.id: row.state for row in (await session.execute(
+            select(RealWalletLiveIntent.id, RealWalletLiveIntent.state).where(
+                RealWalletLiveIntent.id.in_(
+                    [p.exit_intent_id for p in positions if p.exit_intent_id])))).all()
+    }
+    symbols = await TokenRepository(session).get_many_by_mints(
+        list({p.mint_address for p in positions}))
+    pnl_today = await live.realised_pnl_today(now)
+    tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    def amount(value: Decimal | None) -> str | None:
+        return None if value is None else _decimal(value)
+
     return {
         "public_key": public_key or None,
         "address_valid": address_valid,
         "network": settings.REAL_WALLET_NETWORK,
         "rpc": rpc_status,
         "sol_balance": balance_sol,
-        # The balance in the unit every limit on this page is written in. The
-        # price was already being fetched for fee accounting and was only
-        # reachable three levels down; a wallet that shows SOL alone makes the
-        # operator convert in their head against a number the page already knows.
+        # The balance in the unit every limit on this page is written in.
         # `None` when the price is unreadable — never a stale or guessed rate.
         "sol_price_usd": (float(sol_price.usd) if sol_price is not None else None),
         "sol_price_fresh": (
@@ -458,66 +529,9 @@ async def status(_admin: AdminUser, session: DbSession) -> dict[str, object]:
         ),
         "token_balances": token_balances,
         "balance_error": balance_error,
-        "funding_status": (
-            "unknown" if balance_sol is None else "unfunded" if balance_sol == 0 else "funded"
-        ),
         "mode": settings.REAL_WALLET_EXECUTION_MODE,
         "execution_enabled": settings.REAL_WALLET_EXECUTION_ENABLED,
         "autotrade_enabled": settings.REAL_WALLET_AUTOTRADE_ENABLED,
-        # An API process must never read a keypair merely to light a dashboard
-        # badge. A future isolated signer will report health through a narrow
-        # authenticated channel; until then this is intentionally unavailable.
-        "signer_status": "not_available_to_api",
-        "live_submission_transport": (
-            "installed" if transport.production_transport_installed else "not_installed"
-        ),
-        "safety_gate": "read_only_safety_gate_available",
-        # --- Pre-mainnet readiness ------------------------------------------
-        # Deliberately four separate blocks that each say "architecturally
-        # ready" or not. None of them says the system is live, and none of them
-        # can make it live: this endpoint is read-only and there is no
-        # enable control anywhere in the product.
-        "readiness": {
-            "config_contract": {
-                # Proven by `test_compose_env_contract.py`, not asserted here:
-                # every execution setting is in the shared compose anchor, so
-                # the API, worker and scheduler cannot hold different values.
-                "execution_settings_shared": True,
-                "mode": settings.REAL_WALLET_EXECUTION_MODE,
-                "execution_enabled": settings.REAL_WALLET_EXECUTION_ENABLED,
-                "autotrade_enabled": settings.REAL_WALLET_AUTOTRADE_ENABLED,
-                "safety_policy_version": settings.REAL_WALLET_SAFETY_POLICY_VERSION,
-            },
-            "transport": {
-                "envelope": transport.envelope,
-                "release_approved": transport.release_approved,
-                "production_transport_installed": (transport.production_transport_installed),
-                "submission_permitted": transport.submission_permitted,
-                "reasons": list(transport.reasons),
-                "allowed_hosts": list(transport.allowed_hosts),
-                "configured_host": transport.configured_host,
-            },
-            "order_validation": {
-                # The check the signer cannot perform: swap semantics compared
-                # against the authorised intent before anything is signed.
-                "evidence_recheck_installed": True,
-                "checks": [
-                    "taker",
-                    "input_mint",
-                    "output_mint",
-                    "in_amount_exact",
-                    "minimum_output",
-                    "slippage_bps",
-                    "request_id",
-                    "order_freshness",
-                    "price_impact",
-                    "route_evidence",
-                    "sell_position_binding",
-                    "sell_quantity_confirmed",
-                ],
-            },
-            "fee_accounting": _fee_accounting_readiness(sol_price, now=now),
-        },
         # Asymmetric on purpose: anyone may deposit to a public address, and the
         # money may leave for exactly one nominated destination.
         "withdrawal": {
@@ -525,13 +539,6 @@ async def status(_admin: AdminUser, session: DbSession) -> dict[str, object]:
             "configured": withdrawal.policy().usable,
             "reason": withdrawal.policy().reason or None,
         },
-        # The one line that must never be ambiguous on a dashboard. `LOCKED`
-        # means no configuration reachable from this process can submit; it is
-        # derived from the transport policy rather than restated by hand, so it
-        # cannot say unlocked while the policy refuses.
-        "lock_state": (
-            "LOCKED" if not transport.submission_permitted else "SUBMISSION_PERMITTED"
-        ),
         "limits": {
             "entry_size_usd": (
                 None
@@ -545,132 +552,72 @@ async def status(_admin: AdminUser, session: DbSession) -> dict[str, object]:
             "max_daily_notional_usd": _decimal(settings.REAL_WALLET_MAX_DAILY_NOTIONAL_USD),
             "max_daily_trades": settings.REAL_WALLET_MAX_DAILY_TRADES,
             "max_daily_loss_usd": _decimal(settings.REAL_WALLET_MAX_DAILY_LOSS_USD),
+            "balance_ceiling_enabled": settings.REAL_WALLET_BALANCE_CEILING_ENABLED,
             "max_balance_sol": _decimal(settings.REAL_WALLET_MAX_BALANCE_SOL),
-            "max_balance_lamports": lamports_from_sol(settings.REAL_WALLET_MAX_BALANCE_SOL),
             "min_sol_fee_reserve": _decimal(settings.REAL_WALLET_MIN_SOL_FEE_RESERVE),
+            "exit_max_price_impact_pct": _decimal(
+                settings.REAL_WALLET_EXIT_MAX_PRICE_IMPACT_PCT),
+            "max_slippage_bps": settings.REAL_WALLET_EXIT_MAX_SLIPPAGE_BPS,
         },
-        "security_gate": {
-            # Named so the dashboard can state it rather than imply it: real
-            # entries are gated by the same SEC-2 evaluator and the same pure
-            # `entry_policy.decide` that Paper uses.
-            "shared_with_paper": True,
-            "evaluator": "sec2_entry_policy",
-            "mandatory_checks": [
-                str(check) for check in entry_policy.MANDATORY_CHECKS
-            ],
-            "max_evidence_age_seconds": int(
-                entry_policy.MAX_EVIDENCE_AGE.total_seconds()
-            ),
+        # The two daily limits, as they stand. Both reset at 00:00 UTC.
+        "today": {
+            "realised_pnl_usd": _decimal(pnl_today),
+            "loss_limit_usd": _decimal(settings.REAL_WALLET_MAX_DAILY_LOSS_USD),
+            "loss_limit_hit": -pnl_today >= settings.REAL_WALLET_MAX_DAILY_LOSS_USD,
+            "buys": await RealWalletDriver(session)._trades_today(now),
+            "buys_limit": settings.REAL_WALLET_MAX_DAILY_TRADES,
+            "resets_at": tomorrow.isoformat(),
         },
-        "program_allowlist": sorted(_allowed_programs()),
-        "dry_run": {
-            "feature_enabled": settings.FEATURE_REAL_WALLET_DRY_RUN_ENABLED,
-            "decisions": [
-                {
-                    "mint_address": row.mint_address,
-                    "symbol": row.symbol,
-                    "radar_rank": row.radar_rank,
-                    "status": row.status,
-                    "safety": row.safety_decision,
-                    "reason_codes": row.reason_codes,
-                    "buy_impact_pct": (
-                        None if row.buy_impact_pct is None else str(row.buy_impact_pct)
-                    ),
-                    "sell_impact_pct": (
-                        None if row.sell_impact_pct is None else str(row.sell_impact_pct)
-                    ),
-                    "round_trip_loss_pct": (
-                        None
-                        if row.round_trip_loss_pct is None
-                        else str(row.round_trip_loss_pct)
-                    ),
-                    "liquidity_usd": (
-                        None if row.liquidity_usd is None else str(row.liquidity_usd)
-                    ),
-                    "buy_order": row.buy_order,
-                    "sell_order": row.sell_order,
-                    "evaluated_at": row.evaluated_at,
-                }
-                for row in decisions
-            ],
-        },
-        "live_readiness": {
-            "open_real_positions": open_positions,
-            "unresolved_intents": [
-                {
-                    "id": str(intent.id),
-                    "mint_address": intent.mint_address,
-                    "state": intent.state,
-                }
-                for intent in unresolved
-            ],
-            "kill_switches": [
-                {
-                    "kind": switch.kind,
-                    "reason": switch.reason,
-                    "activated_at": switch.activated_at,
-                    "activated_by": switch.actor,
-                }
-                for switch in kill_switches
-            ],
-            "kill_switch_history": [
-                {
-                    "kind": event.kind,
-                    "action": event.action,
-                    "actor": event.actor,
-                    "reason": event.reason,
-                    "at": event.created_at,
-                }
-                for event in kill_switch_history
-            ],
-        },
-        "confirmed_lifecycle": {
-            "consecutive_execution_failures": (
-                0 if health is None else health.consecutive_failures
-            ),
-            "last_failure_reason": None if health is None else health.last_failure_reason,
-            "positions": [
-                {
-                    "id": str(position.id),
-                    "mint_address": position.mint_address,
-                    "status": position.status,
-                    "quantity": _decimal(position.quantity),
-                    "entry_actual_input_amount": (
-                        None
-                        if position.entry_actual_input_amount is None
-                        else _decimal(position.entry_actual_input_amount)
-                    ),
-                    "entry_actual_output_amount": (
-                        None
-                        if position.entry_actual_output_amount is None
-                        else _decimal(position.entry_actual_output_amount)
-                    ),
-                    "exit_actual_input_amount": (
-                        None
-                        if position.exit_actual_input_amount is None
-                        else _decimal(position.exit_actual_input_amount)
-                    ),
-                    "exit_actual_output_amount": (
-                        None
-                        if position.exit_actual_output_amount is None
-                        else _decimal(position.exit_actual_output_amount)
-                    ),
-                    "realised_gross_pnl_usd": (
-                        None
-                        if position.realised_gross_pnl_usd is None
-                        else _decimal(position.realised_gross_pnl_usd)
-                    ),
-                    "realised_net_pnl_usd": (
-                        None
-                        if position.realised_net_pnl_usd is None
-                        else _decimal(position.realised_net_pnl_usd)
-                    ),
-                    "opened_at": position.opened_at,
-                    "closed_at": position.closed_at,
-                }
-                for position in positions
-            ],
-        },
+        "open_positions": open_positions,
+        "kill_switches": [
+            {
+                "kind": switch.kind,
+                "reason": switch.reason,
+                "activated_at": switch.activated_at,
+                "activated_by": _who(switch.actor, owner),
+            }
+            for switch in kill_switches
+        ],
+        "kill_switch_history": [
+            {
+                "kind": event.kind,
+                "action": event.action,
+                "actor": _who(event.actor, owner),
+                "reason": event.reason,
+                "at": event.created_at,
+            }
+            for event in kill_switch_history
+        ],
+        "consecutive_execution_failures": (
+            0 if health is None else health.consecutive_failures
+        ),
+        "failures_before_kill_switch": settings.REAL_WALLET_MAX_CONSECUTIVE_EXECUTION_FAILURES,
+        "last_failure_reason": None if health is None else health.last_failure_reason,
+        "positions": [
+            {
+                "id": str(position.id),
+                "mint_address": position.mint_address,
+                "symbol": (symbols[position.mint_address].symbol
+                           if position.mint_address in symbols else None),
+                "status": position.status,
+                "strategy_id": position.strategy_id,
+                "quantity": _decimal(position.quantity),
+                "cost_usd": _decimal(position.entry_price_usd * position.quantity),
+                "spent": amount(position.entry_actual_input_amount),
+                "received": amount(position.exit_actual_output_amount),
+                "realised_gross_pnl_usd": amount(position.realised_gross_pnl_usd),
+                "realised_net_pnl_usd": amount(position.realised_net_pnl_usd),
+                "exit_reason": position.exit_reason,
+                # What the sell is doing right now, for an open position.
+                "exit_state": (exit_states.get(position.exit_intent_id)
+                               if position.exit_intent_id else None),
+                "opened_at": position.opened_at,
+                "closed_at": position.closed_at,
+                "entry_signature": position.entry_transaction_signature,
+                "exit_signature": position.exit_transaction_signature,
+            }
+            for position in positions
+        ],
     }
 
 

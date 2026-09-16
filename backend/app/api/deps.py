@@ -101,6 +101,26 @@ async def get_current_user(
 CurrentUser = Annotated[User, Depends(get_current_user)]
 
 
+async def get_optional_user(
+    request: Request, session: DbSession, credentials: Credentials
+) -> User | None:
+    """The signed-in user when there is one, else None — never a refusal.
+
+    For routes the site code alone may use, where an account only improves the
+    attribution. A missing, expired or revoked token reads as anonymous.
+    """
+    anonymous = credentials is None or not credentials.credentials
+    if anonymous and not settings.auth_bypass_active:
+        return None
+    try:
+        return await get_current_user(request, session, credentials)
+    except (AuthenticationError, PermissionDeniedError):
+        return None
+
+
+OptionalUser = Annotated[User | None, Depends(get_optional_user)]
+
+
 def require_role(
     *roles: UserRole,
 ) -> Callable[[User], Coroutine[Any, Any, User]]:

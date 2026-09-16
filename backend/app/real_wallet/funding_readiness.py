@@ -16,9 +16,13 @@ different resolutions:
 
   CODE      a reviewed diff. Cannot be resolved by editing an environment.
   OPERATOR  a human action — a key, a funded wallet, a configuration decision.
-  EVIDENCE  a result the tournament has not produced yet. No amount of
+  EVIDENCE  a result the market has not produced yet. No amount of
             engineering closes one of these, which is the point of listing them
             beside the others rather than leaving them implicit.
+
+`ready_to_trade` is CODE and OPERATOR only: whether pressing Start would put
+money to work. EVIDENCE is reported beside it as `proven`, because an operator
+may start an unproven strategy, and must be told plainly that it is one.
 """
 
 from __future__ import annotations
@@ -65,6 +69,7 @@ class Check:
 class FundingReadiness:
     ready_to_fund: bool
     ready_to_trade: bool
+    proven: bool
     checks: tuple[Check, ...]
 
     @property
@@ -88,9 +93,21 @@ def evaluate(
     kill_switch_active: bool | None = None,
     signer_holds_pinned_key: bool | None = None,
     validated_strategy: str | None = None,
+    next_trade_usd: Decimal | None = None,
+    min_trade_sol: Decimal | None = None,
+    full_trade_sol: Decimal | None = None,
+    last_signal_minutes: float | None = None,
+    signals_measured: bool = False,
+    round_trips: int | None = None,
 ) -> FundingReadiness:
     """Assess every precondition. Facts the caller could not measure pass as
-    `None` and are reported UNKNOWN — never as satisfied."""
+    `None` and are reported UNKNOWN — never as satisfied.
+
+    `next_trade_usd` is what the driver would spend right now (None: nothing),
+    and `min_trade_sol` / `full_trade_sol` the balances the smallest and a full
+    entry need. `last_signal_minutes` is the age of the strategy's newest buy
+    signal, None when it has none; `signals_measured` says it was looked at.
+    """
     public_key = settings.REAL_WALLET_PUBLIC_KEY.strip()
     entry_size = configured_entry_size_usd()
     execute_host = (urlparse(settings.JUPITER_V2_BASE_URL).hostname or "").lower() \
@@ -153,15 +170,18 @@ def evaluate(
             unknown=network_verified is None,
         ),
         _check(
-            "wallet_funded", "The wallet holds enough SOL for fees",
-            Owner.OPERATOR,
-            wallet_balance_sol is not None and wallet_balance_sol >= fee_reserve,
-            (f"balance {wallet_balance_sol} SOL vs reserve {fee_reserve} SOL"
-             if wallet_balance_sol is not None else "balance not readable"),
-            f"Fund the wallet with at least {fee_reserve} SOL for fees, and keep it "
-            f"under the {settings.REAL_WALLET_MAX_BALANCE_SOL} SOL ceiling the canary "
-            "policy enforces. Funding is an operator action.",
-            unknown=wallet_balance_sol is None,
+            "wallet_funded", "The wallet can pay for a trade",
+            Owner.OPERATOR, next_trade_usd is not None,
+            (f"balance {wallet_balance_sol} SOL — next trade ${next_trade_usd}"
+             if next_trade_usd is not None else
+             f"balance {wallet_balance_sol} SOL; one trade needs {min_trade_sol} SOL"
+             if wallet_balance_sol is not None and min_trade_sol is not None
+             else "balance or SOL price not readable"),
+            (f"Send at least {min_trade_sol or '?'} SOL for the smallest trade, or "
+             f"{full_trade_sol or '?'} SOL for a full one. {fee_reserve} SOL always "
+             "stays behind to pay the fees of the sell."),
+            unknown=next_trade_usd is None
+            and (wallet_balance_sol is None or min_trade_sol is None),
         ),
         _check(
             "entry_size_configured", "An entry size has been decided",
@@ -201,7 +221,19 @@ def evaluate(
             "Set REAL_WALLET_AUTOTRADE_ENABLED=true only when a strategy is "
             "actually meant to act without a human per trade.",
         ),
-        # --- CODE: the reviewed release -------------------------------------
+        # --- CODE: the system ------------------------------------------------
+        _check(
+            "strategy_signals", "The strategy is sending buy signals",
+            Owner.CODE,
+            last_signal_minutes is not None and last_signal_minutes <= 360,
+            ("not measured" if not signals_measured else
+             "no buy signal recorded yet" if last_signal_minutes is None else
+             f"last signal {last_signal_minutes:.0f} min ago"),
+            "The graduation recorder writes a buy signal when a qualifying pool "
+            "opens, a few times an hour. None for six hours means the recorder "
+            "is down, and the wallet would not trade even if started.",
+            unknown=not signals_measured,
+        ),
         _check(
             "execute_host_allowlisted", "The execute host is allowlisted",
             Owner.CODE, execute_host in ALLOWED_EXECUTE_HOSTS,
@@ -235,16 +267,25 @@ def evaluate(
             "and it requires a focused security review plus a real submission "
             "transport — the installed one refuses by construction.",
         ),
-        # --- EVIDENCE: what the wallet would even trade ----------------------
+        # --- EVIDENCE: what the market has shown ----------------------------
         _check(
-            "validated_strategy", "A strategy has earned real money",
+            "validated_strategy", "The strategy is proven",
             Owner.EVIDENCE, bool(validated_strategy),
             validated_strategy or
-            "none promoted — seven NO-EDGE verdicts; V6 is running forward",
-            "The V6 tournament's 30-day review (protocol §13a) is the gate: >=100 "
-            "closed trades, beats CASH and RANDOM, survives -best-1 and -best-3, "
-            "top-3 trades under 80% of gross profit. No engineering closes this "
-            "one — only forward evidence does.",
+            "not proven — the Graduation Lab has not called it an edge",
+            "Only forward results close this: enough closed paper trades that "
+            "beat their matched control and survive losing the best trades. The "
+            "Graduation Lab board shows where it stands. Trading before then is "
+            "a decision to trade an unproven strategy.",
+        ),
+        _check(
+            "real_round_trip", "A real buy and sell have completed",
+            Owner.EVIDENCE, bool(round_trips),
+            ("not measured" if round_trips is None
+             else f"{round_trips} real round trip(s) settled"),
+            "The sell path is tested but has never run with real money. The "
+            "first real trade proves it; watch it close before funding more.",
+            unknown=round_trips is None,
         ),
     ]
 
@@ -266,8 +307,11 @@ def evaluate(
             if c.key in ("wallet_configured", "network_is_mainnet",
                          "network_verified")
         ),
-        # Trading needs everything, evidence included.
-        ready_to_trade=all(c.status is Status.PASS for c in ordered),
+        # Everything that decides whether Start puts money to work.
+        ready_to_trade=all(c.status is Status.PASS for c in ordered
+                           if c.owner is not Owner.EVIDENCE),
+        proven=all(c.status is Status.PASS for c in ordered
+                   if c.owner is Owner.EVIDENCE),
         checks=ordered,
     )
 
@@ -276,6 +320,7 @@ def as_dict(readiness: FundingReadiness) -> dict:
     return {
         "ready_to_fund": readiness.ready_to_fund,
         "ready_to_trade": readiness.ready_to_trade,
+        "proven": readiness.proven,
         "blocked_total": len(readiness.blocked),
         "blocked_by_owner": {
             owner.value: [c.key for c in readiness.by_owner(owner)]

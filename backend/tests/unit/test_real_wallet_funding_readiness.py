@@ -46,14 +46,62 @@ def test_an_armed_kill_switch_blocks_rather_than_unknowns():
     assert check.status is Status.BLOCKED
 
 
-def test_a_balance_below_the_fee_reserve_is_blocked(monkeypatch):
+def test_funded_means_a_trade_can_be_paid_for_not_just_fees():
+    """It used to PASS at 0.05 SOL — enough for fees, and nothing like the $56
+    the smallest trade needs. Funded is now the driver's own answer."""
+    def funded(**facts):
+        return next(c for c in fr.evaluate(**facts).checks if c.key == "wallet_funded")
+
+    short = funded(wallet_balance_sol=Decimal("0.0498"), next_trade_usd=None,
+                   min_trade_sol=Decimal("0.587"), full_trade_sol=Decimal("1.041"))
+    assert short.status is Status.BLOCKED
+    assert "0.587" in short.detail and "1.041" in short.remediation
+    ok = funded(wallet_balance_sol=Decimal("1.05"), next_trade_usd=Decimal("99.00"),
+                min_trade_sol=Decimal("0.587"))
+    assert ok.status is Status.PASS and "$99.00" in ok.detail
+    # No price, no answer — never a guess.
+    assert funded(wallet_balance_sol=Decimal("1.05")).status is Status.UNKNOWN
+
+
+def test_buy_signals_must_be_arriving_to_be_ready_to_trade():
+    def signals(**facts):
+        return next(c for c in fr.evaluate(**facts).checks if c.key == "strategy_signals")
+
+    assert signals().status is Status.UNKNOWN
+    assert signals(signals_measured=True).status is Status.BLOCKED
+    assert signals(signals_measured=True, last_signal_minutes=30).status is Status.PASS
+    assert signals(signals_measured=True, last_signal_minutes=400).status is Status.BLOCKED
+
+
+def test_ready_to_trade_is_the_system_and_proven_is_the_evidence(monkeypatch):
+    """An operator may start an unproven strategy; the report must say both
+    that the system would trade and that the strategy is unproven."""
     from app.core.config import settings
 
-    monkeypatch.setattr(settings, "REAL_WALLET_MIN_SOL_FEE_RESERVE", Decimal("0.01"))
-    low = fr.evaluate(wallet_balance_sol=Decimal("0.001"))
-    assert next(c for c in low.checks if c.key == "wallet_funded").status is Status.BLOCKED
-    ok = fr.evaluate(wallet_balance_sol=Decimal("0.05"))
-    assert next(c for c in ok.checks if c.key == "wallet_funded").status is Status.PASS
+    for name, value in (
+        ("REAL_WALLET_PUBLIC_KEY", "7WctMGpqz1tGkYStBBjJRMnmuh9uwJubYV2tL4pLwRr9"),
+        ("REAL_WALLET_NETWORK", "mainnet"),
+        ("REAL_WALLET_WITHDRAWAL_ADDRESS", "FoHVQyJmv5AHPjccV3BWpMoKiMHLPkF5cfQdqo1nH5TN"),
+        ("REAL_WALLET_ENTRY_SIZE_USD", Decimal("100")),
+        ("REAL_WALLET_EXECUTION_MODE", "live"),
+        ("REAL_WALLET_EXECUTION_ENABLED", True),
+        ("REAL_WALLET_AUTOTRADE_ENABLED", True),
+    ):
+        monkeypatch.setattr(settings, name, value)
+    facts = {"wallet_balance_sol": Decimal("1.05"), "network_verified": True,
+             "kill_switch_active": False, "signer_holds_pinned_key": True,
+             "next_trade_usd": Decimal("99.00"), "signals_measured": True,
+             "last_signal_minutes": 12, "round_trips": 0}
+    r = fr.evaluate(**facts)
+    assert [c.key for c in r.blocked] == ["validated_strategy", "real_round_trip"]
+    assert (r.ready_to_fund, r.ready_to_trade, r.proven) == (True, True, False)
+    assert fr.as_dict(r)["proven"] is False
+
+    stopped = fr.evaluate(**{**facts, "kill_switch_active": True})
+    assert stopped.ready_to_trade is False
+
+    proven = fr.evaluate(**{**facts, "round_trips": 3, "validated_strategy": "G-B3-5M"})
+    assert proven.proven is True
 
 
 def test_the_release_switch_is_owned_by_code_not_by_configuration():
@@ -71,7 +119,7 @@ def test_a_missing_strategy_is_an_evidence_blocker_no_code_can_close():
     check = next(c for c in fr.evaluate().checks if c.key == "validated_strategy")
     assert check.owner is Owner.EVIDENCE
     assert check.status is Status.BLOCKED
-    assert "30-day" in check.remediation or "closed trades" in check.remediation
+    assert "Graduation Lab" in check.remediation
 
 
 def test_naming_a_strategy_alone_never_makes_it_ready_to_trade():

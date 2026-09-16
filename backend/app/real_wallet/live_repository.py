@@ -285,8 +285,8 @@ class LiveIntentRepository:
             )
         )
 
-    async def realised_loss_today(self, now: datetime) -> Decimal:
-        """What the positions closed since UTC midnight lost, net; zero on an up day.
+    async def realised_pnl_today(self, now: datetime) -> Decimal:
+        """What the positions closed since UTC midnight made, net.
 
         Net where it was measured and gross where a fee could not be priced: a
         loss limit that skipped every unpriced trade would be a limit a missing
@@ -299,9 +299,12 @@ class LiveIntentRepository:
             select(RealWalletPosition.realised_net_pnl_usd,
                    RealWalletPosition.realised_gross_pnl_usd)
             .where(RealWalletPosition.closed_at >= start))).all()
-        total = sum(((net if net is not None else gross) or Decimal(0)
-                     for net, gross in rows), Decimal(0))
-        return max(Decimal(0), -total)
+        return sum(((net if net is not None else gross) or Decimal(0)
+                    for net, gross in rows), Decimal(0))
+
+    async def realised_loss_today(self, now: datetime) -> Decimal:
+        """Today's net realised loss; zero on an up day."""
+        return max(Decimal(0), -await self.realised_pnl_today(now))
 
     async def sell_attempts(self, position_id: uuid.UUID) -> int:
         """How many exits have been asked for this position, whatever became of them."""
