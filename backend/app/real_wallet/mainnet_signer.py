@@ -47,7 +47,7 @@ from typing import Any
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.db.session import SessionFactory
-from app.real_wallet import tx_inspect
+from app.real_wallet import account_close, tx_inspect
 from app.real_wallet.live_readiness import ExecutionState
 from app.real_wallet.live_repository import LiveIntentRepository
 from app.real_wallet.network import require_verified_network
@@ -272,6 +272,39 @@ async def sign_withdrawal(encoded_transaction: str) -> dict[str, Any]:
     }
 
 
+async def sign_close_accounts(encoded_transaction: str) -> dict[str, Any]:
+    """Sign a transaction that only closes this wallet's token accounts into itself.
+
+    Bytes, like `sign_withdrawal`, and safe for the same kind of reason: the
+    inspection runs here, against the wallet key in THIS process's environment,
+    and accepts nothing but `CloseAccount`s whose rent goes to that wallet and
+    whose only signer is that wallet. The token program refuses to close an
+    account that still holds tokens, so the worst such a transaction can do is
+    return rent to its owner.
+    """
+    genesis = await _verified_chain()
+    expected = settings.REAL_WALLET_PUBLIC_KEY.strip()
+    if not expected:
+        raise MainnetSignerError("mainnet_signer_pinned_key_not_configured")
+    try:
+        inspected = account_close.inspect(encoded_transaction, wallet=expected)
+    except account_close.AccountCloseRejectedError as exc:
+        logger.warning("mainnet_signer_refused_close", reason=str(exc))
+        raise MainnetSignerError(f"close_rejected:{exc}") from exc
+
+    signer = FileExecutionSigner.load(
+        secret_file=_secret_file(), expected_public_key=expected
+    )
+    signed, signature = signer.sign_native_transaction(encoded_transaction)
+    logger.info("mainnet_signer_signed_close", genesis=genesis[:12],
+                accounts=list(inspected.accounts))
+    return {
+        "signed_transaction": signed,
+        "signature": signature,
+        "accounts": list(inspected.accounts),
+    }
+
+
 async def _handle_connection(
     reader: asyncio.StreamReader, writer: asyncio.StreamWriter
 ) -> None:
@@ -283,11 +316,12 @@ async def _handle_connection(
         op = body.get("op")
         if op == IDENTITY:
             response: dict[str, Any] = {"ok": True, **(await identity())}
-        elif op == "sign_withdrawal":
+        elif op in ("sign_withdrawal", "sign_close_accounts"):
             encoded = body.get("transaction")
             if not isinstance(encoded, str) or not encoded:
                 raise MainnetSignerError("invalid_signer_request")
-            response = {"ok": True, **(await sign_withdrawal(encoded))}
+            sign_bytes = sign_withdrawal if op == "sign_withdrawal" else sign_close_accounts
+            response = {"ok": True, **(await sign_bytes(encoded))}
         elif op == "sign":
             raw_id = body.get("intent_id")
             if not isinstance(raw_id, str):

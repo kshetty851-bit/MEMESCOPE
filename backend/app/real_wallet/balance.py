@@ -32,11 +32,30 @@ class ExecutionWalletTokenBalance:
     raw_amount: str
     decimals: int
     program_id: str
+    #: What decides whether the account may be closed: "initialized" or
+    #: "frozen"; who else may close it; wrapped SOL; Token-2022 fees withheld.
+    state: str = "initialized"
+    close_authority: str | None = None
+    is_native: bool = False
+    withheld_amount: int = 0
 
     @property
     def quantity(self) -> str:
         amount = Decimal(self.raw_amount).scaleb(-self.decimals)
         return format(amount, "f")
+
+
+def _withheld(extensions: Any) -> int:
+    """Token-2022 transfer fees held in the account; -1 when unreadable."""
+    total = 0
+    for ext in extensions if isinstance(extensions, list) else []:
+        if isinstance(ext, dict) and ext.get("extension") == "transferFeeAmount":
+            state = ext.get("state")
+            try:
+                total += int((state or {}).get("withheldAmount") or 0)
+            except (AttributeError, TypeError, ValueError):
+                return -1
+    return total
 
 
 class ExecutionWalletBalanceService:
@@ -92,6 +111,7 @@ class ExecutionWalletBalanceService:
                 or decimals < 0
             ):
                 continue
+            close_authority = info.get("closeAuthority")
             parsed.append(
                 ExecutionWalletTokenBalance(
                     token_account=account["pubkey"],
@@ -99,6 +119,15 @@ class ExecutionWalletBalanceService:
                     raw_amount=raw_amount,
                     decimals=decimals,
                     program_id=program_id,
+                    state=str(info.get("state") or "unknown"),
+                    # Anything unreadable here reads as "someone else may close
+                    # it", which keeps the account open.
+                    close_authority=(close_authority
+                                     if close_authority is None
+                                     or isinstance(close_authority, str)
+                                     else "unreadable"),
+                    is_native=bool(info.get("isNative")),
+                    withheld_amount=_withheld(info.get("extensions")),
                 )
             )
         return parsed

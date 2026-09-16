@@ -34,6 +34,8 @@ EXECUTOR_LOCK_KEY = 0x45584543
 EXIT_LOCK_KEY = 0x45584954
 #: And the self-paced exit loop's, so it never blocks the minute tasks.
 FAST_EXIT_LOCK_KEY = 0x46415354
+#: And the empty-account sweep's.
+CLOSE_LOCK_KEY = 0x434C4F53
 
 #: States that still have somewhere to go. Terminal ones are skipped rather than
 #: queried, so a finished book does not grow the work every minute.
@@ -417,3 +419,40 @@ async def _real_wallet_balance_watch() -> dict[str, Any]:
         "delta_lamports": reading.delta_lamports,
         "unexplained": reading.unexplained,
     }
+
+
+@celery_app.task(name="app.real_wallet.scheduler.real_wallet_close_empty_accounts")
+def real_wallet_close_empty_accounts() -> dict[str, Any]:
+    """Return the rent parked in the wallet's empty token accounts.
+
+    Each buy parks ~0.0015 SOL in a new token account and the sell leaves it
+    there. This closes the empty ones into the wallet itself — a transaction the
+    isolated signer re-inspects and refuses unless the rent goes to the wallet.
+    It waits while a trade is in flight and never touches an open position's
+    mint; see `account_close`.
+    """
+    return run_async(_real_wallet_close_empty_accounts())
+
+
+async def _real_wallet_close_empty_accounts() -> dict[str, Any]:
+    from app.real_wallet import account_close
+
+    try:
+        async with SessionFactory() as session:
+            acquired = await session.scalar(
+                select(func.pg_try_advisory_xact_lock(
+                    DRY_RUN_LOCK_NAMESPACE, CLOSE_LOCK_KEY
+                ))
+            )
+            if not acquired:
+                await session.rollback()
+                return {"skipped": "close_sweep_already_running"}
+            outcome = await account_close.sweep(session)
+            await session.rollback()
+    except Exception:
+        # Contained like its neighbours: parked rent can wait for the next sweep.
+        logger.exception("real_wallet_close_empty_accounts_failed")
+        return {"failed": True}
+    if outcome.closed or outcome.refused:
+        logger.warning("real_wallet_close_empty_accounts", **outcome.as_dict())
+    return outcome.as_dict()

@@ -447,6 +447,12 @@ celery_app.conf.beat_schedule = {
         "task": "app.real_wallet.scheduler.real_wallet_fast_exit_tick",
         "schedule": crontab(minute="*"),
     },
+    # Rent back from the wallet's emptied token accounts. Five minutes is
+    # plenty: a few cents per trade, and the sweep waits while one is in flight.
+    "real-wallet-close-empty-accounts": {
+        "task": "app.real_wallet.scheduler.real_wallet_close_empty_accounts",
+        "schedule": crontab(minute="*/5"),
+    },
     "regime-snapshot-hourly": {
         "task": "app.workers.research_tasks.regime_snapshot_hourly",
         "schedule": crontab(minute="7"),

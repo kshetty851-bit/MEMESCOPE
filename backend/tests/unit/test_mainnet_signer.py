@@ -135,12 +135,13 @@ def test_the_client_can_ask_for_a_signature_but_never_holds_a_key():
         for k, n in zip(kw.keys, kw.values)
         if isinstance(k, ast.Constant) and k.value == "op" and isinstance(n, ast.Constant)
     }
-    # Three now: identity, sign (by id), and sign_withdrawal (by bytes). The
-    # last sends BYTES, which is only safe because the signer re-derives the
-    # DESTINATION from them and compares it to the withdrawal address in its own
-    # environment — see the withdrawal tests. What must stay true is that this
-    # list is short and every entry is deliberate.
-    assert ops == {"identity", "sign", "sign_withdrawal"}
+    # Four now: identity, sign (by id), sign_withdrawal and sign_close_accounts
+    # (both by bytes). Bytes are only safe because the signer re-derives what
+    # matters from them against its own environment: the withdrawal's
+    # DESTINATION, and for a close that the rent goes to the wallet and the
+    # wallet alone signs — see the withdrawal and account-close tests. What must
+    # stay true is that this list is short and every entry is deliberate.
+    assert ops == {"identity", "sign", "sign_withdrawal", "sign_close_accounts"}
 
     # It imports nothing that could produce or handle key material.
     imported: set[str] = set()
