@@ -51,6 +51,7 @@ from app.labs.graduation.models import (
     GradCheckpoint,
     GradCurveSample,
     GradMigration,
+    GradPaperPosition,
     GradPostgradSample,
     GradToken,
 )
@@ -265,11 +266,6 @@ class GraduationRecorder:
                             writer: MarkWriter) -> None:
         """What is held, what DexScreener says about it, and which pools can be
         watched — every `HELD_INTERVAL_S`."""
-        from sqlalchemy import select
-
-        from app.db.session import SessionFactory
-        from app.labs.graduation.models import GradPaperPosition
-
         # Pools and decimals never change for a mint, so this costs two
         # account reads per token ever rather than per reconnect. A None is
         # kept too: a venue the decoder does not read is not asked again.
@@ -277,52 +273,77 @@ class GraduationRecorder:
         # DexScreener refreshes about every 27s, so most 3-second polls return
         # the row already written. Only a changed one is kept.
         seen: dict[str, tuple[Any, ...]] = {}
+        loop = asyncio.get_running_loop()
         while True:
+            started = loop.time()
             try:
-                async with SessionFactory() as session:
-                    held = (select(GradPaperPosition.mint)
-                            .where(GradPaperPosition.closed_at.is_(None),
-                                   GradPaperPosition.notional_usd > 0))
-                    rows = (await session.execute(
-                        select(GradPostgradSample.mint,
-                               GradPostgradSample.pair_address,
-                               GradPostgradSample.price_native,
-                               GradPostgradSample.price_usd)
-                        .where(GradPostgradSample.mint.in_(held),
-                               GradPostgradSample.source == SOURCE_DEXSCREENER,
-                               GradPostgradSample.price_native > 0,
-                               GradPostgradSample.price_usd > 0)
-                        .distinct(GradPostgradSample.mint)
-                        .order_by(GradPostgradSample.mint,
-                                  GradPostgradSample.ts.desc()))).all()
-                mints = [r.mint for r in rows]
-                for row in await self.postgrad.poll_held(mints, self._now()):
-                    key = tuple(row[k] for k in _HELD_DEX_FIELDS)
-                    if seen.get(row["mint"]) != key:
-                        seen[row["mint"]] = key
-                        self._buffer(self._postgrad_rows, row)
-                await self.flush()
-                for r in rows:
-                    refs[r.mint] = (r.price_native, r.price_usd / r.price_native)
-                    if r.mint not in cache and r.pair_address:
-                        try:
-                            cache[r.mint] = await stream.resolve(r.mint, r.pair_address)
-                        except ConnectionError:
-                            continue  # the node did not answer; asked again next pass
-                        if cache[r.mint] is None:
-                            logger.info("graduation_held_unwatchable",
-                                        mint=r.mint, pool=r.pair_address)
-                for stale in (cache, refs, seen):
-                    for mint in stale.keys() - set(mints):
-                        del stale[mint]
-                writer.keep(mints)
-                wanted.clear()
-                wanted.update({m: h for m, h in cache.items() if h is not None})
+                await self._held_pass(stream, wanted, refs, writer, cache, seen)
             except asyncio.CancelledError:
                 raise
             except Exception:
                 logger.exception("graduation_held_refresh_failed")
+            took = loop.time() - started
+            if took > 3 * config.HELD_INTERVAL_S:
+                # Silence is how this stalled for two minutes a pass on its
+                # first day live. A slow pass says so.
+                logger.warning("graduation_held_refresh_slow",
+                               seconds=round(took, 1), held=len(refs))
             await asyncio.sleep(config.HELD_INTERVAL_S)
+
+    async def _held_pass(self, stream: HeldVaultStream, wanted: dict[str, Held],
+                         refs: dict[str, tuple[Decimal, Decimal]],
+                         writer: MarkWriter, cache: dict[str, Held | None],
+                         seen: dict[str, tuple[Any, ...]]) -> None:
+        """One refresh. The SOCKET'S SET IS SETTLED FIRST.
+
+        Nothing slow may stand between a new position and its first fast mark.
+        On 2026-09-16 this pass flushed before it handed the socket its set,
+        and a flush reads holder concentration for every new graduation over a
+        spent RPC: ten positions in a row waited 84-136 seconds for their
+        first socket mark, which is most of a two-minute hold.
+        """
+        async with self._sessions() as session:
+            held = (select(GradPaperPosition.mint)
+                    .where(GradPaperPosition.closed_at.is_(None),
+                           GradPaperPosition.notional_usd > 0))
+            rows = (await session.execute(
+                select(GradPostgradSample.mint,
+                       GradPostgradSample.pair_address,
+                       GradPostgradSample.price_native,
+                       GradPostgradSample.price_usd)
+                .where(GradPostgradSample.mint.in_(held),
+                       GradPostgradSample.source == SOURCE_DEXSCREENER,
+                       GradPostgradSample.price_native > 0,
+                       GradPostgradSample.price_usd > 0)
+                .distinct(GradPostgradSample.mint)
+                .order_by(GradPostgradSample.mint,
+                          GradPostgradSample.ts.desc()))).all()
+        mints = [r.mint for r in rows]
+        for r in rows:
+            refs[r.mint] = (r.price_native, r.price_usd / r.price_native)
+            if r.mint not in cache and r.pair_address:
+                try:
+                    cache[r.mint] = await stream.resolve(r.mint, r.pair_address)
+                except ConnectionError:
+                    continue  # the node did not answer; asked again next pass
+                if cache[r.mint] is None:
+                    logger.info("graduation_held_unwatchable",
+                                mint=r.mint, pool=r.pair_address)
+        for stale in (cache, refs, seen):
+            for mint in stale.keys() - set(mints):
+                del stale[mint]
+        writer.keep(mints)
+        wanted.clear()
+        wanted.update({m: h for m, h in cache.items() if h is not None})
+
+        # Then the fallback feed, which can wait on DexScreener's budget.
+        for row in await self.postgrad.poll_held(mints, self._now()):
+            key = tuple(row[k] for k in _HELD_DEX_FIELDS)
+            if seen.get(row["mint"]) != key:
+                seen[row["mint"]] = key
+                self._buffer(self._postgrad_rows, row)
+        # Never the holder reads: the poll and post-graduation loops take them.
+        await self.flush(read_holders=False)
 
     async def _held_socket(self, stream: HeldVaultStream, wanted: dict[str, Held],
                            refs: dict[str, tuple[Decimal, Decimal]],

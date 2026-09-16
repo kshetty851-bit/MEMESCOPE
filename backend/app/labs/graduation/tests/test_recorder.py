@@ -7,6 +7,7 @@ be subtly wrong in a way that shows up as a missing checkpoint months later.
 
 from __future__ import annotations
 
+import contextlib
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
@@ -468,3 +469,67 @@ async def test_a_failed_resume_never_stops_the_recorder() -> None:
     recorder = _recorder_on(_Scripted())
     await recorder._resume_windows()
     assert not recorder.postgrad.states
+
+
+async def test_the_socket_gets_its_set_before_anything_slow() -> None:
+    """On its first day live the pass flushed — and read holder concentration
+    over a spent RPC — before handing the socket its set: ten positions in a
+    row waited 84-136s for a first fast mark, most of a two-minute hold. Here
+    DexScreener never answers, and the socket must still have its set."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from app.labs.graduation.held_watch import MarkWriter
+
+    class Silent(FakeMarket):
+        async def dex_pairs(self, mints):
+            await asyncio.Event().wait()
+
+    class Resolver:
+        async def resolve(self, mint, pool):
+            return SimpleNamespace(mint=mint, pool=pool)
+
+    row = SimpleNamespace(mint=MINT, pair_address="POOL",
+                          price_native=D("0.000001"), price_usd=D("0.0002"))
+    recorder = GraduationRecorder(
+        stream=_NoStream(), rpc=FakeRPC({}), market=Silent(pairs=PAIRS),
+        session_factory=lambda: _Scripted([row]), now=Clock(START))
+    recorder.postgrad.start(MINT, START)
+    recorder._owe_holders.add("JustGraduated")
+    wanted: dict = {}
+    refs: dict = {}
+    task = asyncio.create_task(recorder._held_pass(
+        Resolver(), wanted, refs, MarkWriter(), {}, {}))
+    for _ in range(200):
+        if wanted:
+            break
+        await asyncio.sleep(0.01)
+    try:
+        assert set(wanted) == {MINT}
+        assert refs[MINT] == (D("0.000001"), D("200"))
+        assert not task.done()                    # still waiting on DexScreener
+        assert recorder.rpc.holders_asked == []
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+
+async def test_a_pass_leaves_holder_reads_to_the_other_loops() -> None:
+    from types import SimpleNamespace
+
+    from app.labs.graduation.held_watch import MarkWriter
+
+    class Resolver:
+        async def resolve(self, mint, pool):
+            return None
+
+    row = SimpleNamespace(mint=MINT, pair_address="POOL",
+                          price_native=D("0.000001"), price_usd=D("0.0002"))
+    recorder = GraduationRecorder(
+        stream=_NoStream(), rpc=FakeRPC({}), market=FakeMarket(pairs=PAIRS),
+        session_factory=lambda: _Scripted([row]), now=Clock(START))
+    recorder._owe_holders.add("JustGraduated")
+    await recorder._held_pass(Resolver(), {}, {}, MarkWriter(), {}, {})
+    assert recorder.rpc.holders_asked == []
+    assert recorder._owe_holders == {"JustGraduated"}
