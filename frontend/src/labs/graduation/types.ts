@@ -196,6 +196,8 @@ export interface ArmRow {
   trades_skipped: number;
   /** Hours since THIS arm's first trade, not the board clock. */
   arm_hours: string;
+  /** ISO time of this arm's first position — the anchor a live clock ticks from. */
+  first_trade_at: string | null;
   /** The worst single trade. The number that decides the figure above. */
   worst_trade_pct: string | null;
   /** Thirty days of the same rule at the same trade rate: median, and the

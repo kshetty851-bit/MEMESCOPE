@@ -76,15 +76,6 @@ function walletPct(value: string | number, start: string | number): string {
   return `${n >= 0 ? "+" : ""}${n.toFixed(1)}%`;
 }
 
-/** Hours since an arm's first trade, in the shortest form that stays exact. */
-function elapsed(hours: string | number): string {
-  const h = Number(hours);
-  if (!h) return "new";
-  if (h < 1) return `${Math.round(h * 60)}m`;
-  if (h < 48) return `${h.toFixed(1)}h`;
-  return `${(h / 24).toFixed(1)}d`;
-}
-
 const dexscreener = (mint: string) =>
   `https://dexscreener.com/solana/${mint}`;
 
@@ -785,17 +776,25 @@ function LeaderboardPanel() {
               reset to hours the moment the baseline was added yesterday while
               the leader had been running two days. A reader looking for "how
               long has this been going" was being shown the wrong one. */}
-          <Stat
-            label="Leader running"
-            value={lead ? elapsed(lead.arm_hours) : "—"}
-            note={
-              lead
+          <div className="flex flex-col gap-1">
+            <span className="text-[11px] uppercase tracking-wider text-ink-dim">
+              Leader running
+            </span>
+            <span className="text-2xl font-semibold tabular-nums">
+              {lead?.first_trade_at ? (
+                <Elapsed since={lead.first_trade_at} />
+              ) : (
+                "—"
+              )}
+            </span>
+            <span className="text-xs text-ink-dim">
+              {lead
                 ? `since its first trade · all arms comparable for ${Number(
                     data.hours_running,
                   ).toFixed(1)}h`
-                : "no trades yet"
-            }
-          />
+                : "no trades yet"}
+            </span>
+          </div>
         </div>
 
         <p className="max-w-[68ch] text-xs leading-relaxed text-ink-dim">
@@ -921,11 +920,23 @@ function LeaderboardPanel() {
                           window they all traded in — which is right for the
                           comparison and says nothing about how much evidence
                           any single row has behind it. */}
+                      {/* A LIVE clock, not a figure. `arm_hours` is computed
+                          server-side and therefore frozen between polls — it
+                          jumped every thirty seconds and sat still in between.
+                          `Elapsed` ticks each second off the first trade's own
+                          timestamp, which is the same component the board
+                          header uses, so the two cannot drift apart. */}
                       <span className="mt-0.5 block text-micro tabular-nums text-ink-dim">
-                        <span className="rounded bg-ink/[0.06] px-1.5 py-px text-ink">
-                          {elapsed(a.arm_hours)}
-                        </span>{" "}
-                        since first trade
+                        {a.first_trade_at ? (
+                          <>
+                            <span className="rounded bg-ink/[0.06] px-1.5 py-px text-ink">
+                              <Elapsed since={a.first_trade_at} />
+                            </span>{" "}
+                            since first trade
+                          </>
+                        ) : (
+                          "no trades yet"
+                        )}
                       </span>
                     </td>
                     {/* P&L: what the $100 wallet made or lost. The balance

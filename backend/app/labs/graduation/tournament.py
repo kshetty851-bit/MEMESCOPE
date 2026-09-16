@@ -81,6 +81,15 @@ class Arm:
     #: which measures from the running peak — a trailing stop on a token that
     #: only ever fell has never armed, and would not have saved anything.
     stop: Decimal | None = None
+    #: Runs, but is NOT a tournament entry and must not appear on its board.
+    #:
+    #: The rug-signal A/B is a separate experiment with its own pre-registered
+    #: judge date. It competes with nothing here — B3 asks which pool depth to
+    #: buy, the A/B asks whether a symbol predicts a rug — so ranking it beside
+    #: the arms invites exactly the request that prompted this: "delete the
+    #: negative ones". Ending it three weeks early would destroy the only thing
+    #: a pre-registered experiment has, which is that nobody chose when to stop.
+    ab_experiment: bool = False
     note: str = ""
 
     @property
@@ -438,7 +447,9 @@ ARMS: tuple[Arm, ...] = (
     # never seen, is the only test that has not already been failed.
     Arm("B5_500k_flow_5m", "deep500_flow", 5,
         note="pool over $500k AND net buying, out at 5m"),
-    Arm("B3_198k_3m", "liq_B3", 3, note="pool over $198k, out at 3m"),
+    # B3_198k_3m RETIRED 2026-09-16 at -$58.90 on 213 trades. Three minutes was
+    # the worst hold in every band the lab has run, and what it was there to
+    # show — that leaving earlier is worse — is still shown by 4m against 5m.
     Arm("B3_198k_4m", "liq_B3", 4, note="pool over $198k, out at 4m"),
     Arm("B3_198k_5m", "liq_B3", 5, note="pool over $198k, out at 5m"),
     Arm("B3_198k_5m_SL", "liq_B3", 5, stop=Decimal("0.10"),
@@ -452,8 +463,9 @@ ARMS: tuple[Arm, ...] = (
     # They compete with nothing here: B3 asks which pool depth to buy, this
     # asks whether a symbol predicts a rug. Retiring them three weeks short
     # would throw away two days of accumulated evidence and answer nothing.
-    Arm("F01_all_2m", "all", 2, note="A/B control — every graduation, out at 2m"),
-    Arm("F14_symnight_2m", "sym_night", 2,
+    Arm("F01_all_2m", "all", 2, ab_experiment=True,
+        note="A/B control — every graduation, out at 2m"),
+    Arm("F14_symnight_2m", "sym_night", 2, ab_experiment=True,
         note="A/B arm — reused symbol AND a night-UTC open, out at 2m"),
 )
 
@@ -469,12 +481,15 @@ CONTROLS: tuple[Arm, ...] = tuple(a for a in ARMS if a.is_control)
 #: returned no edge. The count is pinned rather than free because an arm that
 #: appears mid-tournament changes what every other number means — so changing
 #: it must be a deliberate edit with a date, not a side effect.
-assert len(ARMS) == 8, (
-    "four B3 arms, the restored BASELINE, the $500k+flow candidate, and the "
-    "two pre-registered A/B arms — which are a separate experiment with a "
-    f"judge date rather than tournament entries — not {len(ARMS)}")
-assert {a.hold for a in ARMS} == {2, 3, 4, 5}, (
-    "Three, four and five minutes — plus the A/B pair's two. The baseline "
+assert len(ARMS) == 7, (
+    "three B3 arms (3m retired 2026-09-16 at -$58.90), the BASELINE, the "
+    "$500k+flow candidate, and the two pre-registered A/B arms — which run but "
+    f"are flagged off the tournament board — not {len(ARMS)}")
+assert len([a for a in ARMS if a.ab_experiment]) == 2, (
+    "the rug-signal A/B is exactly F01_all_2m and F14_symnight_2m; flagging a "
+    "tournament arm as an experiment would hide it from its own comparison")
+assert {a.hold for a in ARMS} == {2, 4, 5}, (
+    "Four and five minutes — plus the A/B pair's two. The baseline "
     "and the $500k candidate are both five, so the set is unchanged. Two and six "
     "were retired after both wiped in every band. Longer is measurably worse "
     "(5m is +3.33% at a 1.6% tail; 30m is -6.48% at 14.6%), and one minute is "
@@ -487,7 +502,7 @@ assert all(a.tp is None and a.trail is None for a in ARMS), (
 assert all(a.stop is None or a.stop == Decimal("0.10") for a in ARMS), (
     "one stop level, so the twins differ in ONE thing. Sweeping levels here "
     "would be fitting a parameter on the same data that suggested it")
-assert len([a for a in ARMS if not a.is_control]) == 7, (
+assert len([a for a in ARMS if not a.is_control]) == 6, (
     "`config.required_pf` is calibrated on the maximum of FORTY-TWO noise "
     "draws. Six arms are now judged against it, so the bar is if anything "
     "CONSERVATIVE — the luckiest of seventeen reaches less than the luckiest "

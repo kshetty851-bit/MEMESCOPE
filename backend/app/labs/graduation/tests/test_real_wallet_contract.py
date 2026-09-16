@@ -43,9 +43,16 @@ def test_no_arm_holds_for_less_than_the_data_can_see():
 def test_every_entry_decision_uses_only_what_a_wallet_can_see_first():
     """`accepts` takes the token's mint, its open time, and three figures the
     price feed carries. It must not reach for anything else — an entry rule
-    that depended on the outcome, or on a later sample, would be unbuyable."""
+    that depended on the outcome, or on a later sample, would be unbuyable.
+
+    `buys` joined `sells` on 2026-09-16 for the $500k+flow arm. It is
+    `txns_m5_buys` on the pool's FIRST recorded sample — the same row, the same
+    instant, and the same feed as the depth the rule already reads. A wallet
+    sees it at the moment it decides.
+    """
     params = set(inspect.signature(accepts).parameters) - {"arm"}
-    assert params == {"mint", "open_at", "liquidity", "fdv", "sells", "reuse"}, (
+    assert params == {"mint", "open_at", "liquidity", "fdv",
+                      "sells", "buys", "reuse"}, (
         "the entry decision gained an input; check it is observable BEFORE the "
         f"buy, not after: {params}")
 

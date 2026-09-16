@@ -57,7 +57,21 @@ ALLOWED_PLATFORM = (
     # inside this package would be a second thing to get wrong.
     "app.security.liquidity",
     "app.core.config",
+    # THE BRIDGE, and the only two modules allowed across it.
+    #
+    # `live_spec.py` and `live_decisions.py` exist to make one graduation arm
+    # visible to the real wallet, which reads `lab_decisions` keyed by a
+    # strategy `app.lab.spec` must know. Reaching into the platform is their
+    # entire purpose, so the rule they break is stated rather than deleted:
+    # no OTHER module in this package may import either, and these two may
+    # import nothing else new. `test_only_the_bridge_reaches_the_lab_tables`
+    # below is what keeps that true.
+    "app.lab.spec",
+    "app.models.lab",
 )
+#: The two modules allowed to reach `app.lab` and `app.models.lab`, and the
+#: only ones. Everything else in the package stays isolated.
+BRIDGE_MODULES = ("live_spec.py", "live_decisions.py")
 #: Nothing in these may know a network exists. `sources.py` is the only module
 #: in the package allowed to.
 PURE_MODULES = ("curve.py", "parse.py", "watchset.py", "backtest.py",
@@ -67,7 +81,7 @@ MODULES = ("config.py", "curve.py", "parse.py", "watchset.py", "sources.py",
            "held_watch.py",
            "postgrad.py", "recorder.py", "features.py", "backtest.py",
            "scheduler.py", "models.py", "api.py", "paper.py", "analyst.py",
-           "tournament.py", "ab.py", "__main__.py")
+           "tournament.py", "ab.py", "__main__.py", *BRIDGE_MODULES)
 
 
 def imported_modules(tree: ast.AST) -> set[str]:
@@ -90,8 +104,19 @@ def test_every_module_is_present() -> None:
 
 @pytest.mark.parametrize("path", SOURCES, ids=lambda p: p.name)
 def test_no_module_imports_another_engine_or_lab(path: pathlib.Path) -> None:
+    # The bridge is exempt from `app.lab` only, and from nothing else: it must
+    # still not reach the paper engine, the radar, or any sibling lab. Listing
+    # the exemption per-module keeps it auditable — a second entry here is a
+    # decision somebody has to write down.
+    # `app.models` covers the platform's whole ORM; the bridge needs exactly
+    # three tables from it (lab_tournaments, lab_strategies, lab_decisions) and
+    # `test_only_the_bridge_reaches_the_lab_tables` holds it to that.
+    exempt = ({"app.lab", "app.models"} if path.name in BRIDGE_MODULES
+              else set())
     for imported in imported_modules(tree(path)):
         for forbidden in FORBIDDEN_MODULES:
+            if forbidden in exempt:
+                continue
             assert imported != forbidden and not imported.startswith(f"{forbidden}."), \
                 f"{path.name} imports {imported}"
 
@@ -410,3 +435,20 @@ def test_the_watch_set_is_measured_not_inferred_from_a_flag() -> None:
     block = source.split("base.watch_set = await count(")[1].split(")))")[0]
     assert "last_sample_at" in block, (
         "the watch set must be bounded by what was actually polled")
+
+
+def test_only_the_bridge_reaches_the_lab_tables() -> None:
+    """`app.lab.spec` and `app.models.lab` are on the allow-list for exactly
+    two modules. Widening that quietly is how a lab stops being isolated: the
+    point of the bridge is that it is ONE place, auditable, and that the
+    recorder, the paper book and the tournament still cannot see the platform's
+    strategy registry or its tables.
+    """
+    bridge_only = {"app.lab.spec", "app.models.lab"}
+    for path in SOURCES:
+        if path.name in BRIDGE_MODULES:
+            continue
+        for imported in imported_modules(tree(path)):
+            assert imported not in bridge_only, (
+                f"{path.name} reaches the platform Lab tables; only "
+                f"{BRIDGE_MODULES} may")

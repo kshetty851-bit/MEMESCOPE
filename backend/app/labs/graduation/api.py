@@ -615,6 +615,11 @@ class ArmRow(BaseModel):
     #: started this morning are not the same evidence, and the board's single
     #: clock cannot say so.
     arm_hours: Decimal = Decimal(0)
+    #: When this arm opened its FIRST position. `arm_hours` is this minus now,
+    #: computed server-side and therefore frozen between polls; the timestamp
+    #: lets the page tick a live clock instead of showing a figure that jumps
+    #: every thirty seconds.
+    first_trade_at: datetime | None = None
     #: The worst single trade the arm has taken. The number that decides the
     #: figure above, because compounding has no memory of the good ones.
     worst_trade_pct: Decimal | None = None
@@ -1188,12 +1193,18 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
             wallet_funded_usd=Decimal(str(funded_usd)).quantize(Decimal("0.01")),
             trades_funded=n_funded, trades_skipped=n_skipped,
             arm_hours=Decimal(str(arm_hours)).quantize(Decimal("0.1")),
+            first_trade_at=first,
             unrealised_usd=open_pnl,
             equity_usd=(config.PAPER_CAPITAL_USD + realised + open_pnl
                         ).quantize(Decimal("0.01")),
             **forecast)
 
-    rows = [row(a) for a in ARMS]
+    # The A/B pair KEEPS TRADING and keeps its judge date; it just does not
+    # appear on a leaderboard it is not competing in. Ranking a separate
+    # experiment beside the arms is what made "delete the negative ones" the
+    # obvious request — and ending a pre-registered experiment early destroys
+    # the only property it has.
+    rows = [row(a) for a in ARMS if not a.ab_experiment]
     if not fresh:
         _PROJECTIONS = (datetime.now(UTC), {
             r.name: {"projected_1d_usd": r.projected_1d_usd,

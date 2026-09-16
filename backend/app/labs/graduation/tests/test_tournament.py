@@ -54,11 +54,16 @@ def test_the_tournament_is_a_hold_sweep_with_a_baseline_on_every_hold() -> None:
     One baseline per hold, so no hold is judged without an unselected twin on
     its own clock. Nothing on this board decides by hashing a mint.
     """
-    assert len(ARMS) == 6
-    # No baseline remains: every FLOOR arm was retired on request, and the
-    # verdict now says so rather than implying a comparison it cannot make.
-    assert not CONTROLS
-    assert len({a.name for a in ARMS}) == 6
+    assert len(ARMS) == 7
+    # The BASELINE is back (2026-09-16). Without one the board could not tell a
+    # profitable arm from a rising market — every arm here is a SUBSET of the
+    # floor arm's population, so beating it is the claim each one makes.
+    assert len(CONTROLS) == 1 and CONTROLS[0].name == "BASE_75k_5m"
+    # B3_198k_3m retired the same day at -$58.90 on 213 trades. Three minutes
+    # was the worst hold in every band this lab has run, and what it showed —
+    # leaving earlier is worse — is still shown by 4m against 5m.
+    assert not any(a.name == "B3_198k_3m" for a in ARMS)
+    assert len({a.name for a in ARMS}) == len(ARMS)
     assert all(len(a.name) <= 32 for a in ARMS)
 
 
@@ -66,8 +71,16 @@ def test_arms_differ_only_in_entry_and_exit() -> None:
     """Anything else varying between arms would be what the tournament
     measures. Size, costs and clock are shared by construction — the Arm
     record has nowhere to put them."""
+    # `ab_experiment` is not a strategy parameter and cannot become one: it
+    # decides whether an arm appears on the BOARD, never what it buys or when
+    # it sells. The rug-signal A/B runs on its own pre-registered clock and
+    # competes with nothing here, so ranking it beside the arms invited
+    # "delete the losing ones" — which would have ended it three weeks early.
     assert set(Arm.__dataclass_fields__) == {
-        "name", "entry", "hold", "tp", "trail", "stop", "note"}
+        "name", "entry", "hold", "tp", "trail", "stop", "note", "ab_experiment"}
+    assert all(a.ab_experiment is False for a in ARMS if a.entry.startswith("liq_")), (
+        "a tournament arm flagged as an experiment would vanish from its own "
+        "comparison")
 
 
 def test_the_baseline_is_a_strategy_not_a_dice_roll() -> None:
@@ -129,11 +142,16 @@ def test_the_filters_split_the_population_the_way_they_claim() -> None:
     # B3 is the only band left, so only pools above $198k are claimed. The
     # ranges B1 and B2 covered are now unwatched by any band — deliberate,
     # and the reason the gap assertions below are what they are.
+    # DERIVED, not hard-coded. This probed 2m until the two-minute arms were
+    # retired and 3m until B3_198k_3m was, and each time it silently fell to an
+    # empty set and asserted nothing. Taking the hold from the arms themselves
+    # means a retirement can never quietly switch this test off.
+    band_holds = sorted({a.hold for a in ARMS if a.entry.startswith("liq_")})
+    assert band_holds, "no band arms left — this test would assert nothing"
+    probe_hold = band_holds[0]
     for liq in (250_000, 5_000_000):
-        # Probed on a hold the BANDS actually run at. It was 2m until the
-        # two-minute arms were retired, at which point this silently probed an
-        # empty set and asserted nothing.
-        hit = [a.name for a in ARMS if a.hold == 3 and a.entry.startswith("liq_")
+        hit = [a.name for a in ARMS
+               if a.hold == probe_hold and a.entry.startswith("liq_")
                and took(a.name, DAY, liquidity=D(liq))]
         assert len(hit) == 1, (liq, hit)
     # And nothing below the floor is bought at all — that is the whole point.
@@ -289,8 +307,8 @@ def test_each_arm_states_both_halves_of_its_rule() -> None:
 def test_the_exit_rule_names_every_condition_the_arm_carries() -> None:
     """A reader must be able to tell a plain hold from a hold plus a target,
     without reading the arm's name."""
-    assert BY_NAME["B3_198k_3m"].exit_rule == "at 3 minutes"
-    assert BY_NAME["B3_198k_3m"].exit_rule == "at 3 minutes"
+    assert BY_NAME["B3_198k_4m"].exit_rule == "at 4 minutes"
+    assert BY_NAME["B3_198k_4m"].exit_rule == "at 4 minutes"
     assert BY_NAME["B3_198k_5m"].exit_rule == "at 5 minutes"
     # Singular minute, for whenever an arm holds one — the formatting must
     # not read as a bug in the data.
