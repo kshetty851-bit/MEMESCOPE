@@ -723,8 +723,11 @@ class Leaderboard(BaseModel):
     restated_trades: int = 0
     restated_excluded: int = 0
     restated_repriced: int = 0
-    #: Of the repriced: exits that fell after the pool had been drained.
+    #: Of the repriced: exits that fell after the pool had been drained. Those
+    #: trades are LEFT OUT of every figure (operator's instruction), and
+    #: `restated_rugged_usd` is what they really lost.
     restated_collapsed: int = 0
+    restated_rugged_usd: Decimal = Decimal(0)
 
 
 #: Thirty-day projections, memoised. `(computed_at, {arm: fields})`.
@@ -1321,6 +1324,11 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
                                            if not a.ab_experiment]))
         .group_by(GradPaperRestatement.reason))).all())
     rule = await db.scalar(select(func.max(GradPaperRestatement.rule)))
+    rugged_usd = await db.scalar(
+        select(func.coalesce(func.sum(GradPaperPosition.pnl_usd), 0))
+        .where(GradPaperPosition.excluded == "rugged",
+               GradPaperPosition.book.in_([a.name for a in ARMS
+                                           if not a.ab_experiment])))
 
     board = Leaderboard(
         restated_rule=rule or "",
@@ -1329,6 +1337,7 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
         restated_repriced=sum(v for k, v in restated.items()
                               if k not in ("fees", "not_graduation_pool")),
         restated_collapsed=restated.get("pool_collapsed", 0),
+        restated_rugged_usd=Decimal(rugged_usd or 0).quantize(Decimal("0.01")),
         running=config.paper_enabled(), started_at=started, arms=rows,
         controls=control_rows, control_band=band, best_control=best_control,
         leader=leader.name if leader else "",

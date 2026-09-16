@@ -57,6 +57,12 @@ from app.labs.graduation.tournament import (
 
 RULE = "exit-fees-2026-09-16"
 NOT_GRADUATION = "not_graduation_pool"
+#: A trade whose pool was drained while it was open. Left out of every figure
+#: on the operator's instruction (2026-09-16): the board shows what the arm
+#: would have made had those tokens never been bought. It is a what-if — no
+#: rule here could have avoided them in advance — so each row still shows what
+#: it really lost, and the board states the total.
+RUGGED = "rugged"
 #: Only these closes are re-timed. A stop fired on the mark in front of it,
 #: and a retired arm or an ended series had no later mark to wait for; those
 #: keep their exit and are re-charged only.
@@ -69,6 +75,7 @@ class Outcome:
 
     book: str
     reason: str
+    excluded: str | None
     was_pnl_usd: Decimal
     now_pnl_usd: Decimal
 
@@ -133,6 +140,8 @@ def restate_one(position: GradPaperPosition, *, pinned_pair: str | None,
     position.open_fill = fill.quantize(_P)
     position.tokens = (position.notional_quote / fill).quantize(_Q)
     settle(position, quote, depth, reason, closed_at)
+    if reason == "pool_collapsed":
+        position.excluded = RUGGED
     return audit
 
 
@@ -197,22 +206,31 @@ async def restate(session: AsyncSession, *, apply: bool,
         audit = restate_one(position, pinned_pair=pinned.get(position.mint),
                             marks=marks.get(position.mint, []))
         session.add(audit)
-        now = Decimal(0) if position.excluded else (position.pnl_usd or Decimal(0))
-        outcomes.append(Outcome(position.book, audit.reason, was, now))
+        now = position.pnl_usd or Decimal(0)
+        outcomes.append(Outcome(position.book, audit.reason, position.excluded,
+                                was, now))
     if apply:
         await session.flush()
     else:
         await session.rollback()
 
     books: dict[str, dict[str, Any]] = {}
+    zero = Decimal(0)
     for o in outcomes:
-        b = books.setdefault(o.book, {"trades": 0, "excluded": 0, "reasons": {},
-                                      "was_usd": Decimal(0), "now_usd": Decimal(0)})
+        b = books.setdefault(o.book, {"trades": 0, "not_graduation": 0,
+                                      "rugged": 0, "reasons": {},
+                                      "was_usd": zero, "counted_usd": zero,
+                                      "rugged_usd": zero})
         b["trades"] += 1
-        b["excluded"] += o.reason == NOT_GRADUATION
+        b["not_graduation"] += o.excluded == NOT_GRADUATION
+        b["rugged"] += o.excluded == RUGGED
         b["reasons"][o.reason] = b["reasons"].get(o.reason, 0) + 1
         b["was_usd"] += o.was_pnl_usd
-        b["now_usd"] += o.now_pnl_usd
+        if o.excluded is None:
+            b["counted_usd"] += o.now_pnl_usd
+        elif o.excluded == RUGGED:
+            b["rugged_usd"] += o.now_pnl_usd
     return {"rule": RULE, "applied": apply, "restated": len(outcomes),
-            "books": {k: {**v, "was_usd": str(v["was_usd"]),
-                          "now_usd": str(v["now_usd"])} for k, v in books.items()}}
+            "books": {k: {**v, **{f: str(v[f]) for f in
+                                  ("was_usd", "counted_usd", "rugged_usd")}}
+                      for k, v in books.items()}}
