@@ -242,3 +242,34 @@ def test_a_stop_is_only_real_if_the_price_is_fresh_enough_to_fire_it():
         assert match is not None, f"{arm.name} has no stopless twin"
         assert (match.entry, match.hold) == (arm.entry, arm.hold), (
             f"{arm.name} and {twin} must differ ONLY in the stop")
+
+
+def test_only_sol_quoted_pools_are_sizeable():
+    """A wallet holding SOL cannot reach a USDC-quoted pool in one hop.
+
+    `price_usd / price_native` is the QUOTE CURRENCY's dollar price, not
+    always SOL's: 1.00 means the pair is stablecoin-quoted and `price_native`
+    is dollars. Eight of B3_198k_5m's 213 closed trades were exactly that, on
+    raydium, orca and meteora, and one had an implied rate of 0.0037 — quoted
+    in neither SOL nor a dollar.
+
+    Their RETURNS were never wrong; the quote cancels in a price ratio. What
+    was wrong is the sentence the board prints beside them, which says a SOL
+    wallet would have paid those prices. It would have paid two more swap legs.
+
+    Guarded in `_rate` because every entry path sizes through it — the curve
+    fill, the post-graduation fill and the paper book.
+    """
+    from decimal import Decimal as D
+
+    from app.labs.graduation.paper import _rate
+
+    # a SOL-quoted pool: token at 0.00000048 SOL, $0.000048 -> SOL ~ $100
+    assert _rate(D("0.000048"), D("0.00000048")) == D(100)
+    # a stablecoin pool: both prices are dollars, so the ratio is 1
+    assert _rate(D("0.000048"), D("0.000048")) is None
+    # and the odd one actually seen in the record
+    assert _rate(D("1"), D("270")) is None
+    # the band must never reject a real SOL price
+    for sol in ("20", "95", "104", "260", "1000"):
+        assert _rate(D(sol), D(1)) == D(sol), f"SOL at ${sol} must be tradeable"

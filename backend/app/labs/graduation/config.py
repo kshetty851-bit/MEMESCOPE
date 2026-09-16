@@ -574,6 +574,24 @@ AB_RANDOM_SEED = 20261010
 # 10%: a real wallet sets a slippage tolerance and the transaction reverts
 # above it. Ten percent is already a loose tolerance for a deliberate trade;
 # anything beyond it is not execution, it is hope.
+#: The band an implied SOL/USD rate must fall in for the pool to be SOL-quoted.
+#:
+#: `price_usd / price_native` is the quote currency's dollar price. For a
+#: SOL-quoted pool that is the SOL price; for a USDC-quoted one it is 1.00, and
+#: `price_native` is then dollars, not SOL. Both were being traded: 8 of
+#: B3_198k_5m's 213 closed trades sat in stablecoin pools on raydium, orca and
+#: meteora, and one had an implied rate of 0.0037 — a pool quoted in neither.
+#:
+#: The RETURNS from those are still correct, because the quote cancels in a
+#: price ratio. What is not correct is the page's claim that a SOL wallet would
+#: have paid these prices: reaching a USDC pool costs a SOL->USDC leg in and a
+#: USDC->SOL leg out, neither of which the cost model charges.
+#:
+#: Wide on purpose. SOL has traded $8-$260 in its life and this only has to
+#: separate "a SOL price" from "1.00" and "0.0037".
+SOL_USD_MIN = _dec("LAB_GRADUATION_SOL_USD_MIN", "20")
+SOL_USD_MAX = _dec("LAB_GRADUATION_SOL_USD_MAX", "1000")
+
 PAPER_MAX_IMPACT = _dec("LAB_GRADUATION_PAPER_MAX_IMPACT", "0.10")
 #: A pool whose depth was never recorded cannot be shown to be tradeable, so
 #: it is refused too. False would mean "assume free execution when we do not

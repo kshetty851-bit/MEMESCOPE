@@ -939,6 +939,15 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
                    GradPaperPosition.closed_at >= datetime.now(UTC) - timedelta(days=7),
                    GradPaperPosition.notional_usd > 0,
                    GradPaperPosition.close_quote > 0,
+                   # SOL-QUOTED ONLY. `sol_usd_at_open` is the pool's quote
+                   # currency in dollars, stored at entry — 1.00 for a
+                   # stablecoin pair. Those trades happened and their returns
+                   # are right, but a SOL wallet could not have reached them in
+                   # one hop, and the board claims it could. Filtered at read
+                   # time rather than rewritten: the rows stay exactly as they
+                   # closed, and lifting the band shows them again.
+                   GradPaperPosition.sol_usd_at_open >= config.SOL_USD_MIN,
+                   GradPaperPosition.sol_usd_at_open <= config.SOL_USD_MAX,
                    GradPaperPosition.net_return.is_not(None))
             .order_by(GradPaperPosition.closed_at))).all():
         per_arm.setdefault(book, []).append(float(ret))

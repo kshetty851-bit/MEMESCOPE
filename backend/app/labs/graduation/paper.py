@@ -166,11 +166,22 @@ def _rate(price_usd: Decimal | None, price_native: Decimal | None) -> Decimal | 
 
     Refused rather than guessed when either side is missing: a position sized
     at an invented rate would report a dollar P&L that never existed.
+
+    ALSO refused when the rate is not a SOL price. The ratio is whatever the
+    pool is quoted in — 1.00 for a stablecoin pair, 0.0037 for one seen quoted
+    in something else entirely — and a wallet holding SOL cannot reach those in
+    one hop. The returns would still be arithmetically right; the claim that a
+    SOL wallet paid them would not.
+
+    One guard, here, because every entry path in the lab sizes through this
+    function: the curve fill, the post-graduation fill and the paper book.
     """
     if not price_usd or not price_native or price_native <= 0:
         return None
     rate = price_usd / price_native
-    return rate if rate > 0 else None
+    if not (config.SOL_USD_MIN <= rate <= config.SOL_USD_MAX):
+        return None
+    return rate
 
 
 def net_return(position: Any, quote: Decimal | None,
