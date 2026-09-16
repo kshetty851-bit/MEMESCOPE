@@ -1224,17 +1224,28 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
     #
     # It also fixes the leader: `leader` takes the first traded row, so without
     # this a wiped arm could be named leader on tie-breaks.
-    rows.sort(key=lambda r: (r.trades > 0, r.wallet_100_usd > 0, r.wallet_100_usd),
-              reverse=True)
+    # Ranked on the FUNDED wallet, because that is the column the board shows
+    # and a board ranked by a figure a reader cannot see is the same defect as
+    # a figure labelled as something it is not.
+    #
+    # The cost is real and worth stating: the funded walk skips trades the
+    # account could not pay for, and WHICH ones it skips is timing rather than
+    # skill. An arm that dodged its losers is flattered here, and one that
+    # dodged its winners is punished. `wallet_100_usd` is still computed and
+    # still on the API for exactly that comparison — it just no longer decides
+    # the order while being invisible.
+    rows.sort(key=lambda r: (r.trades > 0, r.wallet_funded_usd > 0,
+                             r.wallet_funded_usd), reverse=True)
     traded = [r for r in rows if r.trades]
     control_rows = [r for r in rows if r.is_control]
     # In WALLET dollars, because that is the column the board now shows. As
     # realised P&L this stat contradicted the very dot beside it: the frontend
     # already marked "beats every random arm" on wallet value.
-    band = max((r.wallet_100_usd for r in control_rows if r.trades), default=None)
+    band = max((r.wallet_funded_usd for r in control_rows if r.trades),
+               default=None)
     best_control = next((r.name for r in control_rows
                          if band is not None and r.trades
-                         and r.wallet_100_usd == band), "")
+                         and r.wallet_funded_usd == band), "")
     # ANY arm may lead, baselines included.
     #
     # This excluded controls, which was right when a control was a coin flip —
@@ -1258,7 +1269,7 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
         controls=control_rows, control_band=band, best_control=best_control,
         leader=leader.name if leader else "",
         leader_beats_controls=bool(leader and leader.trades and band is not None
-                                   and leader.wallet_100_usd > band),
+                                   and leader.wallet_funded_usd > band),
         min_trades=config.TOURNEY_MIN_TRADES,
         required_profit_factor=config.required_pf(
             leader.trades if leader else 0),
@@ -1301,16 +1312,16 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
         if naked is None:
             fails.append("the no-selection arm has not traded, so there is "
                          "nothing to compare a baseline against")
-        elif leader.wallet_100_usd <= naked.wallet_100_usd:
+        elif leader.wallet_funded_usd <= naked.wallet_funded_usd:
             fails.append(f"is the baseline and has not beaten {naked.name}, "
                          f"which applies no filter at all "
-                         f"(${naked.wallet_100_usd} against "
-                         f"${leader.wallet_100_usd})")
+                         f"(${naked.wallet_funded_usd} against "
+                         f"${leader.wallet_funded_usd})")
         else:
             board.leader_beats_controls = True
     elif not board.leader_beats_controls:
         fails.append(f"has not beaten the baseline ({best_control}, "
-                     f"${band} wallet against ${leader.wallet_100_usd})")
+                     f"${band} wallet against ${leader.wallet_funded_usd})")
     board.called = not fails
     board.verdict = ("CALLED: " + leader.name + " cleared every term."
                      + (" It is the BASELINE — the edge is the floor itself, "

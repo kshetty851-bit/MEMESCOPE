@@ -62,13 +62,20 @@ def test_the_projection_walks_the_same_wallet():
 
 
 def test_the_board_compares_the_leader_to_controls_in_wallet_dollars():
-    """The dot and the stat disagreed: one read wallets, the other P&L."""
+    """The dot and the stat disagreed: one read wallets, the other P&L.
+
+    Still wallet dollars — the field moved from `wallet_100_usd` to
+    `wallet_funded_usd` when the board stopped showing the rule-scored column,
+    because a bar quoted in a currency the reader cannot see on the row is the
+    same defect this test was written for.
+    """
     src = ast.parse(inspect.getsource(api.tournament).lstrip())
     band = next(n for n in ast.walk(src)
                 if isinstance(n, ast.Assign)
                 and any(isinstance(t, ast.Name) and t.id == "band" for t in n.targets))
-    assert "wallet_100_usd" in {n.attr for n in ast.walk(band)
-                                if isinstance(n, ast.Attribute)}
+    attrs = {n.attr for n in ast.walk(band) if isinstance(n, ast.Attribute)}
+    assert attrs & {"wallet_100_usd", "wallet_funded_usd"}, (
+        "the bar must be in WALLET dollars, not realised P&L")
 
 
 def test_a_position_stops_growing_where_the_evidence_stops():
@@ -271,8 +278,9 @@ def test_wiped_arms_are_kept_but_ranked_below_every_live_one():
     so the sort is what keeps a $0.00 arm off the top on a tie-break.
     """
     src = inspect.getsource(api.tournament)
-    key = next(line for line in src.splitlines() if "rows.sort(key=" in line)
-    assert "r.wallet_100_usd > 0" in key, (
+    key = "".join(src.splitlines(keepends=True)[
+        next(i for i, l in enumerate(src.splitlines()) if "rows.sort(key=" in l):][:3])
+    assert ("r.wallet_funded_usd > 0" in key or "r.wallet_100_usd > 0" in key), (
         "live arms must sort above wiped ones, or a dead arm can lead")
     assert "r.trades > 0" in key, "untraded arms must not outrank traded ones"
 
