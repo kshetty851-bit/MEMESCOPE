@@ -190,6 +190,10 @@ export interface ArmRow {
    * account is fully invested and compounds, spread over ten positions of a
    * tenth of equity each — which is what keeps it alive. */
   wallet_100_usd: string;
+  /** The same $100, but only taking trades it could actually fund. */
+  wallet_funded_usd: string;
+  trades_funded: number;
+  trades_skipped: number;
   /** The worst single trade. The number that decides the figure above. */
   worst_trade_pct: string | null;
   /** Thirty days of the same rule at the same trade rate: median, and the

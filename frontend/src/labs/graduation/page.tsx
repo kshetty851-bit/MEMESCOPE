@@ -833,6 +833,7 @@ function LeaderboardPanel() {
               <col className="w-10" />
               <col />
               <col className="w-32" />
+              <col className="w-32" />
               <col className="w-16" />
               <col className="w-20" />
               <col className="w-32" />
@@ -841,7 +842,18 @@ function LeaderboardPanel() {
               <tr className="text-label uppercase tracking-[0.08em] text-ink-dim">
                 <th className="pb-2 pl-1 text-left font-medium">#</th>
                 <th className="pb-2 pr-3 text-left font-medium">Strategy</th>
-                <th className="pb-2 pr-3 text-right font-medium">P&amp;L</th>
+                <th
+                  className="pb-2 pr-3 text-right font-medium"
+                  title="Every trade the arm made, at $100 a position. The number to compare arms on — it does not care which overlapping trades an account happened to be free for."
+                >
+                  P&amp;L <span className="text-ink-dim">every trade</span>
+                </th>
+                <th
+                  className="pb-2 pr-3 text-right font-medium"
+                  title="The same $100, taking only trades it could actually fund. A $100 account holding one $100 position has no money for a second, so overlapping signals are skipped."
+                >
+                  Your $100 <span className="text-ink-dim">funded</span>
+                </th>
                 <th className="pb-2 pr-3 text-right font-medium">Open</th>
                 <th className="pb-2 pr-3 text-right font-medium">Closed</th>
                 <th className="pb-2 pr-1 text-right font-medium">
@@ -930,6 +942,43 @@ function LeaderboardPanel() {
                         </span>
                       )}
                     </td>
+                    {/* The achievable twin. The column beside this one counts
+                        every trade the arm made, which is right for ranking
+                        arms and wrong for "what would my $100 have done" — an
+                        account already holding a $100 position cannot fund a
+                        second, so overlapping signals are skipped. The skipped
+                        count sits underneath because it is the whole reason
+                        the two figures differ. */}
+                    <td className="py-2.5 pr-3 text-right">
+                      <span
+                        className={`grad-figure font-semibold tabular-nums ${
+                          Number(a.wallet_funded_usd) > Number(data.wallet_demo_usd)
+                            ? "text-up"
+                            : Number(a.wallet_funded_usd) === Number(data.wallet_demo_usd)
+                              ? "text-ink-dim"
+                              : "text-down"
+                        }`}
+                      >
+                        {a.trades === 0
+                          ? "—"
+                          : Number(a.wallet_funded_usd) === 0
+                            ? "WIPED"
+                            : signedUsd(
+                                String(
+                                  Number(a.wallet_funded_usd) -
+                                    Number(data.wallet_demo_usd),
+                                ),
+                              )}
+                      </span>
+                      {a.trades === 0 ? null : (
+                        <span className="block text-micro tabular-nums text-ink-dim">
+                          {a.trades_funded} funded
+                          {a.trades_skipped
+                            ? `, ${a.trades_skipped} unaffordable`
+                            : ""}
+                        </span>
+                      )}
+                    </td>
                     <td className="grad-figure py-2.5 pr-3 text-right tabular-nums">
                       {a.open_positions || "—"}
                     </td>
@@ -977,7 +1026,7 @@ function LeaderboardPanel() {
                   </tr>
                   {expanded === a.name ? (
                     <tr>
-                      <td colSpan={6} className="p-0">
+                      <td colSpan={7} className="p-0">
                         <ArmTrades name={a.name} />
                       </td>
                     </tr>
@@ -1003,12 +1052,20 @@ function LeaderboardPanel() {
           ) : null}
           <p className="max-w-[64ch] text-micro leading-relaxed text-ink-dim">
             <b className="text-ink">How to read this.</b>{" "}
-            <b className="text-ink">P&amp;L</b> is what a real {usd(data.wallet_demo_usd)}{" "}
-            wallet would have made or lost taking these trades — every price
-            recorded from the live feed at the minute it happened, every fill
-            charged the exact move your own order makes against the pool&rsquo;s
-            recorded depth plus swap and priority fees, and any order that would
-            move a pool more than 10% refused rather than filled.{" "}
+            <b className="text-ink">P&amp;L</b> scores every trade the arm made,
+            at {usd(data.wallet_demo_usd)} a position — every price recorded from
+            the live feed at the minute it happened, every fill charged the exact
+            move your own order makes against the pool&rsquo;s recorded depth
+            plus swap and priority fees, and any order that would move a pool
+            more than 10% refused rather than filled. It is the column to{" "}
+            <b className="text-ink">compare arms on</b>, because it does not care
+            which overlapping trades an account happened to be free for.{" "}
+            <b className="text-ink">Your {usd(data.wallet_demo_usd)}</b> is the
+            achievable twin: the same trades, but only the ones a single{" "}
+            {usd(data.wallet_demo_usd)} account could actually fund. Holding one{" "}
+            {usd(data.wallet_demo_usd)} position leaves nothing for a second, so
+            overlapping signals are skipped and the count underneath says how
+            many. Both are correct; the second is the one you could have had.{" "}
             <b className="text-ink">Open</b> and <b className="text-ink">Closed</b>{" "}
             are position counts; open positions are not in the P&amp;L, because
             an unrealised number is what every book in this platform&rsquo;s

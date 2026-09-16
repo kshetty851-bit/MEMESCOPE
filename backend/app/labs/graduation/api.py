@@ -598,6 +598,17 @@ class ArmRow(BaseModel):
     #: The spread is what keeps it alive. At one position per account a -99%
     #: is terminal and 65 of 69 arms end at zero; at ten, none do.
     wallet_100_usd: Decimal = Decimal(0)
+    #: The same $100, but only taking trades it could actually FUND.
+    #:
+    #: `wallet_100_usd` above counts every trade the arm made, because that is
+    #: what scores a rule. A real account cannot buy a second token with money
+    #: already in the first, so when signals overlap it skips them — and the
+    #: page used to print "what a real $100 wallet would have made" under a
+    #: number that had taken 212 trades an account could only fund 139 of.
+    #: Both are correct; only this one is achievable.
+    wallet_funded_usd: Decimal = Decimal(0)
+    trades_funded: int = 0
+    trades_skipped: int = 0
     #: The worst single trade the arm has taken. The number that decides the
     #: figure above, because compounding has no memory of the good ones.
     worst_trade_pct: Decimal | None = None
@@ -696,6 +707,58 @@ class Leaderboard(BaseModel):
 #: P&L, trade counts, the gate — stays live on every request.
 _PROJECTIONS: tuple[datetime, dict[str, dict[str, Any]]] | None = None
 _PROJECTION_TTL = timedelta(minutes=2)
+
+
+def _funded_walk(trades: list[tuple[datetime, datetime, float]],
+                 rate: Decimal | None = None) -> tuple[float, int, int]:
+    """What a real $100 account could have taken — equity, funded, skipped.
+
+    `_wallet_walk` walks the arm's returns one after another and never asks
+    whether the account could have held them at the same time. That is right
+    for scoring a RULE: every trade the arm made is counted, so the comparison
+    between arms is not decided by which overlapping signal an account happened
+    to be free for.
+
+    It is wrong for the sentence the page prints beside it. A $100 account
+    holding one $100 position has no money for a second, so when signals
+    overlap it must SKIP them — measured on B3_198k_5m, 73 of 212. Reported
+    separately rather than replacing the other, because the two answer
+    different questions and putting one number under both was the defect.
+
+    Slots are not configured here; they emerge from cash, which is the same
+    thing a wallet does. The ticket never grows past `PAPER_NOTIONAL_USD`: the
+    returns were measured at that size and a larger order pays more impact.
+    """
+    cap = float(config.PAPER_NOTIONAL_USD)
+    floor = float(config.WALLET_MIN_USD)
+    base = float(config.PAPER_NOTIONAL_USD)
+    cash = float(config.WALLET_DEMO_USD)
+    held: list[tuple[datetime, float, float]] = []
+    funded = skipped = 0
+    for opened, closed, ret in trades:
+        due = [h for h in held if h[0] <= opened]
+        if due:
+            held = [h for h in held if h[0] > opened]
+            for _, r, size in due:
+                cash += size * r
+        if held:
+            # A second position needs a WHOLE ticket; this is what "$200 holds
+            # two" means, and it is the rule the board was silently skipping.
+            if cash + 1e-9 < cap:
+                skipped += 1
+                continue
+            size = cap
+        else:
+            size = min(cap, cash)
+            if size < floor:
+                skipped += 1
+                continue
+        cash -= size
+        held.append((closed, 1.0 + ret - _size_penalty(size, base, rate), size))
+        funded += 1
+    for _, r, size in held:
+        cash += size * r
+    return cash, funded, skipped
 
 
 def _wallet_walk(returns: Iterable[float],
@@ -846,9 +909,12 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
     #: hour are the same market, not independent draws, and the projection's
     #: uncertainty has to be measured between hours rather than between trades.
     per_arm_hourly: dict[str, dict[datetime, list[float]]] = {}
-    for book, ret, closed_at in (await db.execute(
+    #: Entry and exit times as well as the return, because whether an account
+    #: could have HELD two trades at once is a fact about their overlap.
+    per_arm_trades: dict[str, list[tuple[datetime, datetime, float]]] = {}
+    for book, ret, closed_at, opened_at in (await db.execute(
             select(GradPaperPosition.book, GradPaperPosition.net_return,
-                   GradPaperPosition.closed_at)
+                   GradPaperPosition.closed_at, GradPaperPosition.opened_at)
             .where(GradPaperPosition.closed_at.is_not(None),
                    GradPaperPosition.closed_at >= datetime.now(UTC) - timedelta(days=7),
                    GradPaperPosition.notional_usd > 0,
@@ -856,17 +922,24 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
                    GradPaperPosition.net_return.is_not(None))
             .order_by(GradPaperPosition.closed_at))).all():
         per_arm.setdefault(book, []).append(float(ret))
+        per_arm_trades.setdefault(book, []).append(
+            (opened_at, closed_at, float(ret)))
         (per_arm_hourly.setdefault(book, {})
          .setdefault(closed_at.replace(minute=0, second=0, microsecond=0), [])
          .append(float(ret)))
 
     def wallet_100(returns: list[float]) -> tuple[Decimal, Decimal | None]:
-        """A real $100 account taking these trades, spread over ten positions.
+        """A $100 account taking EVERY trade the arm made, one after another.
 
-        Each position is a TENTH of current equity, so the account compounds
-        but no single trade can end it — which is why ten beats one here.
-        Measured across 69 arms: one position survived 4 of them, ten survived
-        all 69, and ten had the better median as well.
+        `WALLET_DEMO_SLOTS` is 1, so each position is the whole account capped
+        at `PAPER_NOTIONAL_USD` — the "ten positions of a tenth each" this
+        docstring used to describe has not been the behaviour since the slot
+        count changed, and the sentence outlived the code.
+
+        It models no concurrency: overlapping trades are walked in sequence as
+        though the account were free for all of them. That is deliberate and it
+        is what makes this the number to COMPARE arms on — every arm is scored
+        on every trade it made. `wallet_funded_usd` is the achievable twin.
 
         It stops at `WALLET_MIN_USD`, and that floor is load-bearing rather
         than tidy: without it a wallet reduced to a few dollars "recovers" on
@@ -1071,6 +1144,8 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
                                  per_arm_hourly.get(arm.name, {})))
         open_pnl = unrealised.get(arm.name, Decimal(0)).quantize(Decimal("0.01"))
         wallet, worst = wallet_100(per_arm.get(arm.name, []))
+        funded_usd, n_funded, n_skipped = _funded_walk(
+            per_arm_trades.get(arm.name, []), sol_rate)
         realised = (Decimal(s.pnl) if s else Decimal(0)).quantize(Decimal("0.01"))
         return ArmRow(
             name=arm.name, note=arm.note, entry=arm.entry,
@@ -1086,6 +1161,8 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
                         .quantize(Decimal("0.01"))
                         if config.PAPER_CAPITAL_USD else Decimal(0)),
             wallet_100_usd=wallet, worst_trade_pct=worst,
+            wallet_funded_usd=Decimal(str(funded_usd)).quantize(Decimal("0.01")),
+            trades_funded=n_funded, trades_skipped=n_skipped,
             unrealised_usd=open_pnl,
             equity_usd=(config.PAPER_CAPITAL_USD + realised + open_pnl
                         ).quantize(Decimal("0.01")),
