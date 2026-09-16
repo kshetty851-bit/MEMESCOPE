@@ -31,6 +31,7 @@ from app.labs.graduation.models import (
     GradCurveSample,
     GradMigration,
     GradPaperPosition,
+    GradPaperRestatement,
     GradPostgradSample,
     GradToken,
 )
@@ -99,6 +100,13 @@ class PaperPosition(BaseModel):
     liq_close_usd: Decimal | None = None
     impact_open: Decimal | None = None
     impact_close: Decimal | None = None
+    #: Why the trade counts for nothing, when it does not: `not_graduation_pool`
+    #: for a token that never graduated from pump.fun.
+    excluded: str | None = None
+    #: A restated trade: what the restatement did, and what the row said before.
+    restated: str | None = None
+    was_pnl_usd: Decimal | None = None
+    was_net_return: Decimal | None = None
 
 
 class PaperBookOut(BaseModel):
@@ -368,7 +376,8 @@ async def _paper(db: AsyncSession, *, book: str = "E05_hold_5m",
     # With no positions yet there is no rate to convert $100 with, and the
     # configured nominal is the only honest stand-in.
     sample = next((r[0] for r in (*open_rows, *closed_rows)), None)
-    book_costs = costs(sample.notional_quote if sample else None)
+    book_costs = costs(sample.notional_quote if sample else None,
+                       pool_fee_bps=sample.pool_fee_bps if sample else None)
     cents = Decimal("0.01")
 
     def out(row: Any) -> PaperPosition:
@@ -378,7 +387,7 @@ async def _paper(db: AsyncSession, *, book: str = "E05_hold_5m",
         Both the dollars and the percentage come from the same ratio, so they
         cannot disagree with each other.
         """
-        p, symbol, name, voided = row
+        p, symbol, name, voided, restatement = row
         pnl, net = p.pnl_usd, p.net_return
         if p.closed_at is None:
             live = net_return(p, p.last_quote)
@@ -393,7 +402,11 @@ async def _paper(db: AsyncSession, *, book: str = "E05_hold_5m",
             close_reason=p.close_reason, pnl_usd=pnl, net_return=net,
             voided=bool(voided),
             liq_open_usd=p.liq_open_usd, liq_close_usd=p.liq_close_usd,
-            impact_open=p.impact_open, impact_close=p.impact_close)
+            impact_open=p.impact_open, impact_close=p.impact_close,
+            excluded=p.excluded,
+            restated=restatement.reason if restatement else None,
+            was_pnl_usd=restatement.was_pnl_usd if restatement else None,
+            was_net_return=restatement.was_net_return if restatement else None)
 
     return PaperBookOut(
         running=config.paper_enabled(),
@@ -703,6 +716,15 @@ class Leaderboard(BaseModel):
     #: How long the tournament has been running. The projection is meaningless
     #: below an hour and barely better above it, so the reader is told.
     hours_running: Decimal = Decimal(0)
+    #: The 2026-09-16 restatement of the board's closed trades: how many were
+    #: rebooked, how many of those were never graduations and now count for
+    #: nothing, and how many exits moved to a price taken after they were due.
+    restated_rule: str = ""
+    restated_trades: int = 0
+    restated_excluded: int = 0
+    restated_repriced: int = 0
+    #: Of the repriced: exits that fell after the pool had been drained.
+    restated_collapsed: int = 0
 
 
 #: Thirty-day projections, memoised. `(computed_at, {arm: fields})`.
@@ -900,7 +922,10 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
         .where(GradPaperPosition.closed_at.is_not(None),
                GradPaperPosition.notional_usd > 0,
                GradPaperPosition.close_quote > 0,
-               GradPaperPosition.open_quote > 0)
+               GradPaperPosition.open_quote > 0,
+               # A restated trade that was never a graduation is shown on its
+               # arm's panel and counted nowhere, here included.
+               GradPaperPosition.excluded.is_(None))
         .group_by(GradPaperPosition.book))).all()
     stats = {r.book: r for r in closed}
 
@@ -945,8 +970,14 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
                    # closed, and lifting the band shows them again.
                    GradPaperPosition.sol_usd_at_open >= config.SOL_USD_MIN,
                    GradPaperPosition.sol_usd_at_open <= config.SOL_USD_MAX,
-                   GradPaperPosition.net_return.is_not(None))
-            .order_by(GradPaperPosition.closed_at))).all():
+                   GradPaperPosition.net_return.is_not(None),
+                   GradPaperPosition.excluded.is_(None))
+            # In the order a wallet MEETS them: by entry, then by id. Ordered
+            # by close, trades closed in the same tick came back in whatever
+            # order the table gave, and the funded wallet — which takes one
+            # and skips the other — read anywhere from $220 to $240 on the
+            # same 225 trades.
+            .order_by(GradPaperPosition.opened_at, GradPaperPosition.id))).all():
         per_arm.setdefault(book, []).append(float(ret))
         per_arm_trades.setdefault(book, []).append(
             (opened_at, closed_at, float(ret)))
@@ -987,7 +1018,8 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
     for position in (await db.scalars(
             select(GradPaperPosition)
             .where(GradPaperPosition.closed_at.is_(None),
-                   GradPaperPosition.notional_usd > 0))).all():
+                   GradPaperPosition.notional_usd > 0,
+                   GradPaperPosition.excluded.is_(None)))).all():
         open_now[position.book] = open_now.get(position.book, 0) + 1
         # Marked to the last recorded price, at the rate captured when the
         # position opened — the same arithmetic the closed rows use, so equity
@@ -1281,7 +1313,22 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
     # beat when the baseline is itself the leader.
     naked = next((r for r in rows if r.entry == "all" and r.trades), None)
 
+    restated = dict((await db.execute(
+        select(GradPaperRestatement.reason, func.count())
+        .join(GradPaperPosition,
+              GradPaperPosition.id == GradPaperRestatement.position_id)
+        .where(GradPaperPosition.book.in_([a.name for a in ARMS
+                                           if not a.ab_experiment]))
+        .group_by(GradPaperRestatement.reason))).all())
+    rule = await db.scalar(select(func.max(GradPaperRestatement.rule)))
+
     board = Leaderboard(
+        restated_rule=rule or "",
+        restated_trades=sum(restated.values()),
+        restated_excluded=restated.get("not_graduation_pool", 0),
+        restated_repriced=sum(v for k, v in restated.items()
+                              if k not in ("fees", "not_graduation_pool")),
+        restated_collapsed=restated.get("pool_collapsed", 0),
         running=config.paper_enabled(), started_at=started, arms=rows,
         controls=control_rows, control_band=band, best_control=best_control,
         leader=leader.name if leader else "",

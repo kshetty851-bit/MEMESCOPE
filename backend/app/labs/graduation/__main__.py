@@ -161,6 +161,12 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("health", help="recorder_health() as JSON")
     sub.add_parser("judge-ab",
                    help="judge the entry-filter A/B on its pre-registered terms")
+    rest = sub.add_parser(
+        "restate", help="rebook closed trades under the 2026-09-16 exit and fee rules")
+    rest.add_argument("--opened-before", required=True,
+                      help="ISO time the fixed tick went live; later trades are left alone")
+    rest.add_argument("--apply", action="store_true",
+                      help="write it (default: report what would change)")
     one = sub.add_parser("curve", help="derive, fetch and decode one mint's curve")
     one.add_argument("--mint", required=True)
     progress = sub.add_parser("progress", help="what a reserve reading means")
@@ -210,8 +216,27 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "curve":
         _emit(asyncio.run(_curve(args.mint)))
         return 0
+    if args.command == "restate":
+        from datetime import datetime
+
+        cutoff = datetime.fromisoformat(args.opened_before)
+        if cutoff.tzinfo is None:
+            raise SystemExit("--opened-before needs a timezone, e.g. 2026-09-16T16:30:00+00:00")
+        _emit(asyncio.run(_restate(apply=args.apply, opened_before=cutoff)))
+        return 0
     _emit(_progress(args.tokens))
     return 0
+
+
+async def _restate(*, apply: bool, opened_before) -> dict:
+    from app.db.session import SessionFactory
+    from app.labs.graduation.restate import restate
+
+    async with SessionFactory() as session:
+        result = await restate(session, apply=apply, opened_before=opened_before)
+        if apply:
+            await session.commit()
+        return result
 
 
 async def _judge_ab() -> dict:

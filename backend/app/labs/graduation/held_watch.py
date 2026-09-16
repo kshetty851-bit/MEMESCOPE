@@ -89,6 +89,10 @@ class Held:
     #: than allowed to rewind the price.
     slot: int = 0
     quote_mint: str = ""
+    #: The pool's virtual quote reserve, raw units. PumpSwap prices a swap as
+    #: if this sat in the quote vault, so a price from the vaults alone reads
+    #: low by virtual/quote — 1.5% on a 1,200 SOL pool.
+    virtual_quote: int = 0
 
     def apply(self, side: str, amount: int, slot: int) -> bool:
         if slot < self.slot:
@@ -108,10 +112,14 @@ class Held:
         ratio was written as marks for twenty minutes on 2026-09-15 and put
         FLOOR_4m_SL at $17,517; against DexScreener in calm trading it read
         997.5x. This docstring used to say the scale did not matter.
+
+        The virtual quote reserve counts here and NOT in `depth_usd`: it moves
+        the price every swap pays, but no seller can ever be paid out of it.
         """
         if not self.base or not self.quote:
             return None
-        return self.quote_whole() / Decimal(self.base).scaleb(-self.base_decimals)
+        return (Decimal(self.quote + self.virtual_quote).scaleb(-self.quote_decimals)
+                / Decimal(self.base).scaleb(-self.base_decimals))
 
     def quote_whole(self) -> Decimal:
         return Decimal(self.quote or 0).scaleb(-self.quote_decimals)
@@ -153,7 +161,8 @@ def watch(mint: str, pool_address: str, pool: PoolState | None,
         return None
     return Held(mint=mint, pool=pool_address, base_vault=pool.base_vault,
                 quote_vault=pool.quote_vault, base_decimals=base_decimals,
-                quote_decimals=quote_decimals, quote_mint=pool.quote_mint)
+                quote_decimals=quote_decimals, quote_mint=pool.quote_mint,
+                virtual_quote=pool.virtual_quote)
 
 
 def transaction_accounts(tx: Any) -> list[str]:

@@ -89,6 +89,16 @@ export interface PaperPosition {
   liq_close_usd: string | null;
   impact_open: string | null;
   impact_close: string | null;
+  /** Why this trade counts for nothing: `not_graduation_pool` for a token that
+   * never graduated from pump.fun. Shown struck through, never summed. */
+  excluded: string | null;
+  /** Set on a trade rebooked by the 2026-09-16 restatement: `fees` when only
+   * the fees changed, otherwise the new exit's reason (`max_hold`,
+   * `pool_collapsed`, `stale_exit`). */
+  restated: string | null;
+  /** What the trade said before it was restated. */
+  was_pnl_usd: string | null;
+  was_net_return: string | null;
 }
 
 /** The forward paper book. Rules frozen in advance; nothing here is tunable. */
@@ -243,4 +253,13 @@ export interface Leaderboard {
   wallet_demo_usd: string;
   wallet_demo_slots: number;
   hours_running: string;
+  /** The 2026-09-16 restatement of these arms' closed trades. */
+  restated_rule: string;
+  restated_trades: number;
+  /** Never graduations: shown on each arm's panel, counted nowhere. */
+  restated_excluded: number;
+  /** Exits moved to the first price recorded after they were due. */
+  restated_repriced: number;
+  /** Of those, exits that fell after the pool had been drained. */
+  restated_collapsed: number;
 }

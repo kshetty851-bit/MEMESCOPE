@@ -68,6 +68,7 @@ from app.labs.graduation.backtest import (
 )
 from app.labs.graduation.models import (
     GradPaperPosition,
+    GradPaperRestatement,
     GradPostgradSample,
     GradToken,
 )
@@ -86,19 +87,25 @@ _Q = Decimal("0.000000001")
 _P = Decimal("1E-18")
 
 
-def costs(notional_quote: Decimal | None = None) -> Costs:
-    """The book's cost model: the backtester's, at the POSITION's size.
+def costs(notional_quote: Decimal | None = None, *,
+          pool_fee_bps: int | None = None) -> Costs:
+    """The book's cost model: what a real wallet pays, at the POSITION's size.
 
-    Pass the real `notional_quote`. The priority fee is flat in SOL, so its
-    share of the position is entirely a function of size — 0.21% on $100 and
-    2.06% on $10 — and the nominal 0.5 SOL this used to fall back on was not
-    "a basis point or two" out, as the docstring here used to claim. It was
-    the difference between a book that could win and one that could not.
+    Pass the real `notional_quote`. The network fee is flat in SOL, so its
+    share of the position is entirely a function of size, and the nominal
+    0.5 SOL this used to fall back on was not "a basis point or two" out, as
+    the docstring here used to claim. It was the difference between a book
+    that could win and one that could not.
 
-    The fallback remains only for callers with no position in hand, such as a
-    page rendering the headline cost.
+    Pass the pool's `pool_fee_bps` too (`config.pool_fee_bps`): PumpSwap
+    charges by market cap, 30 to 125 bps a side, and the router adds its own
+    cut on top. Without it the leg is charged the backtester's flat fee, which
+    only callers with no position in hand should see.
     """
-    return Costs(notional_quote=notional_quote or config.BACKTEST_NOTIONAL_QUOTE)
+    return Costs(notional_quote=notional_quote or config.BACKTEST_NOTIONAL_QUOTE,
+                 pump_fee_bps=(config.BACKTEST_PUMP_FEE_BPS if pool_fee_bps is None
+                               else pool_fee_bps),
+                 router_fee_bps=config.ROUTER_FEE_BPS)
 
 
 #: `switched_mints` memo: (computed_at, mints). Module level so every request
@@ -202,7 +209,8 @@ def net_return(position: Any, quote: Decimal | None,
     """
     if quote is None or position.notional_quote <= 0:
         return None
-    leg = book_costs or costs(position.notional_quote)
+    leg = book_costs or costs(position.notional_quote,
+                              pool_fee_bps=config.pool_fee_bps(quote))
     return (position.tokens * leg.sell_price(quote)
             / position.notional_quote - 1)
 
@@ -512,6 +520,7 @@ class PaperBook:
         #: Applies to every position, open or closed.
         sound = (GradPaperPosition.book == self._book,
                  GradPaperPosition.notional_usd > 0,
+                 GradPaperPosition.excluded.is_(None),
                  GradPaperPosition.mint.not_in(bad) if bad else true())
         #: A CLOSED position must also have exited at a real price. A zero or
         #: NULL `close_quote` means the exit was marked against a price the
@@ -535,6 +544,7 @@ class PaperBook:
                    GradPaperPosition.closed_at.is_not(None),
                    GradPaperPosition.notional_usd > 0,
                    (GradPaperPosition.mint.in_(bad) if bad else false())
+                   | GradPaperPosition.excluded.is_not(None)
                    | GradPaperPosition.close_quote.is_(None)
                    | (GradPaperPosition.close_quote <= 0)))
         # The gate terms come from the realised trades themselves, so they
@@ -591,10 +601,14 @@ async def positions(session: AsyncSession, *, book: str = "E05_hold_5m",
     def rows(closed: bool):
         return (select(GradPaperPosition, GradToken.symbol, GradToken.name,
                        ((GradPaperPosition.mint.in_(bad) if bad else false())
+                        | GradPaperPosition.excluded.is_not(None)
                         | (GradPaperPosition.closed_at.is_not(None)
                            & GradPaperPosition.close_quote.is_(None))
-                        | (GradPaperPosition.close_quote <= 0)).label("voided"))
+                        | (GradPaperPosition.close_quote <= 0)).label("voided"),
+                       GradPaperRestatement)
                 .outerjoin(GradToken, GradToken.mint == GradPaperPosition.mint)
+                .outerjoin(GradPaperRestatement,
+                           GradPaperRestatement.position_id == GradPaperPosition.id)
                 .where(GradPaperPosition.book == book,
                        GradPaperPosition.notional_usd > 0,
                        GradPaperPosition.closed_at.is_not(None) if closed

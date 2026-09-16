@@ -32,16 +32,18 @@ fifty of them affordable at a fifteen-second tick.
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from typing import Any
+from functools import lru_cache
+from typing import Any, NamedTuple
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.labs.graduation import config
 from app.labs.graduation import live_decisions, live_spec
@@ -65,8 +67,77 @@ from app.labs.graduation.models import (
     GradToken,
 )
 from app.labs.graduation.paper import _P, _Q, _rate, costs, in_hour_window
+from app.security.liquidity import derive_or_none
 
 logger = get_logger(__name__)
+
+
+@lru_cache(maxsize=8192)
+def graduation_pool(mint: str) -> str | None:
+    """The pool pump.fun's migration creates for this mint: derived, not asked.
+
+    The only thing that makes a trade a GRADUATION trade. The migration feed
+    also announces `raydium-cpmm` events for tokens that never had a pump.fun
+    curve — JUP, PENGU, tokenized stocks — and DexScreener's deepest pool for a
+    real graduate is sometimes another pool entirely. On 2026-09-16, 357 of the
+    last 12 hours' graduations were priced on exactly this address, and none of
+    the 15 B3 trades that were not graduations was.
+    """
+    derived = derive_or_none(mint, pumpfun_program=settings.PUMPFUN_PROGRAM_ID)
+    return derived[0] if derived else None
+
+
+class Mark(NamedTuple):
+    """A price for a held token, with the moment it was read and by whom."""
+
+    price: Decimal
+    depth: Decimal | None
+    ts: datetime | None = None
+    source: str | None = None
+
+
+def seen_at(mark: Mark) -> datetime | None:
+    """The market moment a mark describes. A socket read describes itself; a
+    DexScreener row quotes a trade `FEED_LAG_S` older than its fetch."""
+    if mark.ts is None:
+        return None
+    if mark.source == SOURCE_HELD_WS:
+        return mark.ts
+    return mark.ts - timedelta(seconds=config.FEED_LAG_S)
+
+
+def exit_mark(marks: Iterable[Mark], due: datetime) -> Mark | None:
+    """The first mark that describes the market AT OR AFTER a timed exit.
+
+    A timed exit used to take the newest mark there was, however old. On
+    2026-09-14 FAIR's pool was drained at 19:14:50, four seconds after its exit
+    was due; the book closed at 19:15:00 on a price from 19:13, and a -100%
+    trade was booked at -0.1%. Five B3 trades did that. Nothing that describes
+    the market before the exit was due can price it.
+    """
+    after = [(seen, m) for m in marks
+             if (seen := seen_at(m)) is not None and seen >= due]
+    return min(after, key=lambda pair: pair[0])[1] if after else None
+
+
+def valued(mark: Mark, open_quote: Decimal,
+           liq_open: Decimal | None) -> tuple[Decimal, str | None]:
+    """The price a mark can actually be sold at, and why it differs, if it does.
+
+    A pool drained below `EXIT_COLLAPSE_FRACTION` of its entry depth has no
+    price anyone can sell at. Its quote is the virtual reserve over a handful of
+    tokens — DexScreener printed 1.747 SOL for a token bought at 0.0005 — so it
+    is priced by the constant product instead: price moves with the square of
+    the quote side, from the price paid.
+    """
+    if (mark.depth is not None and liq_open is not None and liq_open > 0
+            and mark.depth < liq_open * config.EXIT_COLLAPSE_FRACTION):
+        ratio = mark.depth / liq_open
+        # Never below the price column's last place: a close that rounds to
+        # zero is voided as unrepresentable, and a -100% trade would vanish
+        # from the book it belongs to.
+        return max(open_quote * ratio * ratio, _P), "pool_collapsed"
+    return mark.price, None
 
 
 @dataclass(frozen=True, slots=True)
@@ -538,6 +609,54 @@ assert {a.entry for a in ARMS} <= set(ENTRY_RULES), (
     f"{ {a.entry for a in ARMS} - set(ENTRY_RULES) }")
 
 
+def settle(position: GradPaperPosition, quote: Decimal, depth: Decimal | None,
+           reason: str, closed_at: datetime) -> None:
+    """Exit at what the pool would actually pay for this position.
+
+    The order size on the way out is the position's CURRENT value, not
+    what it cost: a token that ran 878% is ten times the order it was, into
+    a pool that is usually no deeper. Pricing the exit at the quote is what
+    turned a $21 pool into $878 of paper profit.
+
+    With no recorded depth the exit is still taken — the position has to
+    leave — but at the spot price with fees only, and `impact_close` stays
+    NULL so the row shows the fill was never verified.
+
+    The one place a close is booked: the live tick and a restatement both
+    call it, so a restated trade is priced by the same arithmetic as a live one.
+    """
+    # The pool's fee at the price it is sold at: a drained pool is a tiny
+    # market cap and charges the top tier.
+    leg = costs(position.notional_quote, pool_fee_bps=config.pool_fee_bps(quote))
+    # Value at the quote, before impact: the size of the sell order.
+    value_usd = position.notional_usd * (quote / (
+        position.notional_quote / position.tokens))
+    fill = amm_sell(quote, value_usd=value_usd, liquidity_usd=depth,
+                    fee_fraction=leg.fee_fraction)
+    if fill is None:
+        fill = leg.sell_price(quote)
+        position.impact_close = None
+    else:
+        position.impact_close = (amm_impact(value_usd, depth) or Decimal(0)
+                                 ).quantize(Decimal("0.000001"))
+    position.liq_close_usd = depth
+    proceeds = position.tokens * fill
+    net = (proceeds / position.notional_quote - 1
+           if position.notional_quote > 0 else Decimal(0))
+    position.closed_at = closed_at
+    position.close_quote = quote.quantize(_P)
+    position.close_fill = fill.quantize(_P)
+    position.close_reason = reason
+    position.pnl_quote = (position.notional_quote * net).quantize(_Q)
+    position.net_return = net.quantize(Decimal("0.00000001"))
+    position.pnl_usd = (position.notional_usd * net).quantize(Decimal("0.01"))
+
+
+def _due(position: GradPaperPosition) -> datetime:
+    """When a position's timed exit falls due, by the rule of its arm."""
+    return position.opened_at + timedelta(minutes=BY_NAME[position.book].hold)
+
+
 class Tournament:
     """Every arm, one tick, six queries."""
 
@@ -554,9 +673,7 @@ class Tournament:
 
     # --- marking -------------------------------------------------------------
 
-    async def _latest_prices(
-        self, mints: Sequence[str]
-    ) -> dict[str, tuple[Decimal, Decimal | None]]:
+    async def _latest_prices(self, mints: Sequence[str]) -> dict[str, Mark]:
         """Price AND pool depth per mint, at or before this tick's clock.
 
         The depth comes back with the price because an exit is priced against
@@ -573,7 +690,8 @@ class Tournament:
 
         def newest(*where: Any) -> Any:
             return (select(GradPostgradSample.mint, GradPostgradSample.price_native,
-                           GradPostgradSample.liquidity_usd)
+                           GradPostgradSample.liquidity_usd,
+                           GradPostgradSample.ts, GradPostgradSample.source)
                     .where(GradPostgradSample.mint.in_(list(mints)),
                            GradPostgradSample.price_native > 0,
                            GradPostgradSample.ts <= self._now, *where)
@@ -590,7 +708,8 @@ class Tournament:
             GradPostgradSample.source == SOURCE_HELD_WS,
             GradPostgradSample.ts >= self._now - timedelta(
                 seconds=config.HELD_TRUST_S)))).all()
-        marks = {r.mint: (r.price_native, r.liquidity_usd) for r in (*rows, *live)}
+        marks = {r.mint: Mark(r.price_native, r.liquidity_usd, r.ts, r.source)
+                 for r in (*rows, *live)}
         # A position opened ON the curve has no pool sample until the token
         # migrates, and until then the curve IS its market. Without this the
         # pre-graduation arm could never be marked and never exit: its hold
@@ -617,8 +736,34 @@ class Tournament:
                     # sample exists.
                     continue
                 price = r.v_quote_reserves / r.v_token_reserves
-                marks[r.mint] = (price, _curve_depth_usd(r.v_quote_reserves, rate))
+                marks[r.mint] = Mark(price, _curve_depth_usd(r.v_quote_reserves, rate))
         return marks
+
+    async def _exit_marks(
+        self, due: Sequence[GradPaperPosition]
+    ) -> dict[Any, Mark | None]:
+        """For each position whose timed exit is due, the mark that may price it.
+
+        One read for every due position: their marks from the earliest due
+        moment on. Few positions are due in any tick, and each has a few
+        minutes of rows at most.
+        """
+        if not due:
+            return {}
+        start = min(p.opened_at for p in due)
+        by_mint: dict[str, list[Mark]] = {}
+        for r in (await self._session.execute(
+                select(GradPostgradSample.mint, GradPostgradSample.price_native,
+                       GradPostgradSample.liquidity_usd, GradPostgradSample.ts,
+                       GradPostgradSample.source)
+                .where(GradPostgradSample.mint.in_(sorted({p.mint for p in due})),
+                       GradPostgradSample.price_native > 0,
+                       GradPostgradSample.ts >= start,
+                       GradPostgradSample.ts <= self._now))).all():
+            by_mint.setdefault(r.mint, []).append(
+                Mark(r.price_native, r.liquidity_usd, r.ts, r.source))
+        return {p.id: exit_mark(by_mint.get(p.mint, ()), _due(p))
+                for p in due}
 
     async def _sol_rate(self) -> Decimal | None:
         """SOL/USD, observed rather than fetched.
@@ -668,10 +813,18 @@ class Tournament:
         if not positions:
             return 0
         marks = await self._latest_prices(sorted({p.mint for p in positions}))
+        exits = await self._exit_marks(
+            [p for p in positions
+             if p.book in BY_NAME and self._now >= _due(p)])
         closed = 0
         for position in positions:
             arm = BY_NAME.get(position.book)
-            price, depth = marks.get(position.mint, (None, None))
+            mark = marks.get(position.mint)
+            price = depth = collapsed = None
+            if mark is not None:
+                price, collapsed = valued(mark, position.open_quote,
+                                          position.liq_open_usd)
+                depth = mark.depth
             if arm is None:
                 # The arm was retired out of ARMS while this position was
                 # open. Skipping it left the row open FOR EVER: when
@@ -681,9 +834,9 @@ class Tournament:
                 # They showed on the page as open trades and could never
                 # close, because nothing walks a book that is no longer an
                 # arm. Settle at the last mark and say why.
-                mark = price if price is not None else position.last_quote
-                if mark is not None and mark > 0:
-                    self._close(position, mark, depth, "arm_retired")
+                last = price if price is not None else position.last_quote
+                if last is not None and last > 0:
+                    self._close(position, last, depth, "arm_retired")
                     closed += 1
                 continue
             age = (self._now - position.opened_at).total_seconds() / 60
@@ -697,52 +850,32 @@ class Tournament:
                     tick=Tick(ts=self._now, price=price, source="paper"),
                     peak=position.peak_quote))
                 if fired is not None:
-                    self._close(position, price, depth, fired)
+                    self._close(position, price, depth, collapsed or fired)
                     closed += 1
                     continue
-            if age >= arm.hold:
-                mark = price if price is not None else position.last_quote
-                if mark is not None and mark > 0:
-                    self._close(position, mark, depth,
-                                "max_hold" if price is not None else "end_of_data")
+            if age < arm.hold:
+                continue
+            # A TIMED exit is priced only by a mark describing the market after
+            # it was due. Until one arrives the position waits, and a book that
+            # is late to close is recorded late rather than early.
+            out = exits.get(position.id)
+            if out is not None:
+                out_price, out_collapsed = valued(out, position.open_quote,
+                                                  position.liq_open_usd)
+                self._close(position, out_price, out.depth,
+                            out_collapsed or "max_hold")
+                closed += 1
+            elif (self._now - _due(position)).total_seconds() >= config.EXIT_MAX_WAIT_S:
+                last = price if price is not None else position.last_quote
+                if last is not None and last > 0:
+                    self._close(position, last, depth,
+                                "stale_exit" if price is not None else "end_of_data")
                     closed += 1
         return closed
 
     def _close(self, position: GradPaperPosition, quote: Decimal,
                depth: Decimal | None, reason: str) -> None:
-        """Exit at what the pool would actually pay for this position.
-
-        The order size on the way out is the position's CURRENT value, not
-        what it cost: a token that ran 878% is ten times the order it was, into
-        a pool that is usually no deeper. Pricing the exit at the quote is what
-        turned a $21 pool into $878 of paper profit.
-
-        With no recorded depth the exit is still taken — the position has to
-        leave — but at the spot price with fees only, and `impact_close` stays
-        NULL so the row shows the fill was never verified.
-        """
-        leg = costs(position.notional_quote)
-        # Value at the quote, before impact: the size of the sell order.
-        value_usd = position.notional_usd * (quote / (
-            position.notional_quote / position.tokens))
-        fill = amm_sell(quote, value_usd=value_usd, liquidity_usd=depth,
-                        fee_fraction=leg.fee_fraction)
-        if fill is None:
-            fill = leg.sell_price(quote)
-        else:
-            position.impact_close = (amm_impact(value_usd, depth) or Decimal(0)
-                                     ).quantize(Decimal("0.000001"))
-        position.liq_close_usd = depth
-        proceeds = position.tokens * fill
-        net = (proceeds / position.notional_quote - 1
-               if position.notional_quote > 0 else Decimal(0))
-        position.closed_at = self._now
-        position.close_quote = quote.quantize(_P)
-        position.close_fill = fill.quantize(_P)
-        position.close_reason = reason
-        position.pnl_quote = (position.notional_quote * net).quantize(_Q)
-        position.net_return = net.quantize(Decimal("0.00000001"))
-        position.pnl_usd = (position.notional_usd * net).quantize(Decimal("0.01"))
+        settle(position, quote, depth, reason, self._now)
 
     # --- filling -------------------------------------------------------------
 
@@ -791,6 +924,7 @@ class Tournament:
         return (await self._session.execute(
             select(opens.c.mint, opens.c.open_at,
                    GradPostgradSample.price_native, GradPostgradSample.price_usd,
+                   GradPostgradSample.pair_address,
                    GradPostgradSample.liquidity_usd, GradPostgradSample.fdv,
                    GradPostgradSample.txns_m5_sells,
                    GradPostgradSample.txns_m5_buys,
@@ -926,6 +1060,8 @@ class Tournament:
         counts = await self._open_counts()
         opened = 0
         for early, symbol in rows:
+            if early.pool != graduation_pool(early.mint):
+                continue
             rate = _rate(early.sol_usd * early.price_native, early.price_native)
             if rate is None or early.price_native <= 0:
                 continue
@@ -933,7 +1069,8 @@ class Tournament:
             if impact is None or impact > config.PAPER_MAX_IMPACT:
                 continue
             notional_quote = (config.PAPER_NOTIONAL_USD / rate).quantize(_Q)
-            leg = costs(notional_quote)
+            fee_bps = config.pool_fee_bps(early.price_native)
+            leg = costs(notional_quote, pool_fee_bps=fee_bps)
             fill = amm_buy(early.price_native, order_usd=config.PAPER_NOTIONAL_USD,
                            liquidity_usd=early.depth_usd,
                            fee_fraction=leg.fee_fraction)
@@ -956,6 +1093,7 @@ class Tournament:
                     last_quote=early.price_native.quantize(_P),
                     liq_open_usd=early.depth_usd,
                     impact_open=impact.quantize(Decimal("0.000001")),
+                    pool_fee_bps=fee_bps,
                     marked_at=self._now))
                 counts[arm.name] = counts.get(arm.name, 0) + 1
                 taken.add((arm.name, early.mint))
@@ -977,9 +1115,15 @@ class Tournament:
         counts = await self._open_counts()
         opened = 0
         refused = 0
+        foreign = 0
         mirror: list[live_decisions.Mirrored] = []
         for row in rows:
             if row.price_native is None or row.price_native <= 0:
+                continue
+            if row.pair_address != graduation_pool(row.mint):
+                # Not a pump.fun graduation trading on the pool its migration
+                # made. Every arm here is a graduation rule, so none may buy it.
+                foreign += 1
                 continue
             rate = _rate(row.price_usd, row.price_native)
             if rate is None:
@@ -996,7 +1140,8 @@ class Tournament:
                             impact=float(impact) if impact is not None else None)
                 continue
             notional_quote = (config.PAPER_NOTIONAL_USD / rate).quantize(_Q)
-            leg = costs(notional_quote)
+            fee_bps = config.pool_fee_bps(row.price_native)
+            leg = costs(notional_quote, pool_fee_bps=fee_bps)
             fill = amm_buy(row.price_native, order_usd=config.PAPER_NOTIONAL_USD,
                            liquidity_usd=row.liquidity_usd,
                            fee_fraction=leg.fee_fraction)
@@ -1026,6 +1171,7 @@ class Tournament:
                     last_quote=row.price_native.quantize(_P),
                     liq_open_usd=row.liquidity_usd,
                     impact_open=impact.quantize(Decimal("0.000001")),
+                    pool_fee_bps=fee_bps,
                     marked_at=self._now))
                 counts[arm.name] = counts.get(arm.name, 0) + 1
                 taken.add((arm.name, row.mint))
@@ -1042,7 +1188,8 @@ class Tournament:
                         price_native=row.price_native))
         await live_decisions.record(self._session, mirror)
         opened += opened_curve
-        if opened or refused:
+        if opened or refused or foreign:
             logger.info("graduation_tournament_filled", opened=opened,
-                        refused_unfillable=refused, candidates=len(rows))
+                        refused_unfillable=refused, not_graduation=foreign,
+                        candidates=len(rows))
         return opened

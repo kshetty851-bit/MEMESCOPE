@@ -41,6 +41,7 @@ from decimal import Decimal
 from sqlalchemy import (
     Boolean,
     DateTime,
+    ForeignKey,
     Index,
     Integer,
     Numeric,
@@ -720,3 +721,44 @@ class GradPaperPosition(Base):
     #: what a closed trade earned.
     pnl_usd: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
     net_return: Mapped[Decimal | None] = mapped_column(Numeric(18, 8))
+    #: PumpSwap's fee tier at entry, bps a side. The exit is charged its own
+    #: tier, at the exit price.
+    pool_fee_bps: Mapped[int | None] = mapped_column(Integer)
+    #: Why this trade counts for nothing, or NULL. Set only by a restatement
+    #: (see `GradPaperRestatement`); the row is kept and shown, never summed.
+    excluded: Mapped[str | None] = mapped_column(String(32))
+
+
+class GradPaperRestatement(Base):
+    """What a closed position said BEFORE it was restated, and why.
+
+    A restatement rewrites a closed row — something this book otherwise never
+    does — so the original figures are kept here, one row per position, and
+    the page shows them beside the new ones. Written once; a position already
+    restated under a rule is not restated again.
+    """
+
+    __tablename__ = "grad_paper_restatements"
+
+    position_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("grad_paper_positions.id", ondelete="CASCADE"),
+        primary_key=True)
+    rule: Mapped[str] = mapped_column(String(32), nullable=False)
+    #: `not_graduation_pool`, `stale_exit_repriced`, `fees`, ...
+    reason: Mapped[str] = mapped_column(String(64), nullable=False)
+    restated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now())
+    was_open_fill: Mapped[Decimal] = mapped_column(_PRICE, nullable=False)
+    was_tokens: Mapped[Decimal] = mapped_column(_TOKENS, nullable=False)
+    was_close_quote: Mapped[Decimal | None] = mapped_column(_PRICE)
+    was_close_fill: Mapped[Decimal | None] = mapped_column(_PRICE)
+    was_close_reason: Mapped[str | None] = mapped_column(String(24))
+    was_liq_close_usd: Mapped[Decimal | None] = mapped_column(Numeric(24, 4))
+    was_pnl_quote: Mapped[Decimal | None] = mapped_column(_QUOTE)
+    was_pnl_usd: Mapped[Decimal | None] = mapped_column(Numeric(18, 2))
+    was_net_return: Mapped[Decimal | None] = mapped_column(Numeric(18, 8))
+    was_closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    #: The market moment the new exit price describes, and where it came from.
+    exit_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    exit_source: Mapped[str | None] = mapped_column(String(16))
