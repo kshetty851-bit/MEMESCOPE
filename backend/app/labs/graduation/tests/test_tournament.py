@@ -550,3 +550,31 @@ async def test_a_live_socket_mark_beats_a_later_stamped_dexscreener_row() -> Non
     assert "held_ws" in socket_query.params.values()
     window = [v for v in socket_query.params.values() if isinstance(v, datetime)]
     assert NIGHT - timedelta(seconds=config.HELD_TRUST_S) in window
+
+
+async def test_a_tick_that_finds_another_running_steps_aside(monkeypatch) -> None:
+    """At a ten-second cadence a slow tick can still be running when the next
+    begins. Both would fill the same graduation, and the (book, mint)
+    constraint would roll back the whole second tick, its closes included."""
+    from app.labs.graduation import scheduler
+
+    class Locked:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return None
+
+        async def scalar(self, statement):
+            assert "pg_try_advisory_xact_lock" in str(statement)
+            return False
+
+    class NeverBuilt:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("a second tick ran")
+
+    monkeypatch.setenv("LAB_GRADUATION_ENABLED", "1")
+    monkeypatch.setenv("LAB_GRADUATION_PAPER_ENABLED", "1")
+    monkeypatch.setattr(scheduler, "SessionFactory", Locked)
+    monkeypatch.setattr(scheduler, "Tournament", NeverBuilt)
+    assert await scheduler.paper_tick() == {"skipped": "graduation_paper_tick_running"}

@@ -317,3 +317,20 @@ def test_a_price_too_small_to_store_is_missing_not_zero() -> None:
     # A reported zero is missing too: it is never a price anything traded at.
     assert parse_pair(_pair("POOL", price="0", liq=50_000),
                       ts=NOW)["price_native"] is None
+
+
+async def test_fresh_rows_can_be_taken_without_waiting_for_the_backfill() -> None:
+    market = FakeMarket()
+    sampler = PostGradSampler(market=market)
+    sampler.start(MINT, NOW)
+    gap = "GappedMint"
+    sampler.start(gap, NOW)
+    sampler.states[gap].pair_address = "pool1"
+    sampler.states[gap].last_sample_at = NOW - timedelta(minutes=5)
+    market.candles = [[int(NOW.timestamp()), 1.0, 1.0, 1.0, 1.0, 1.0]]
+
+    rows = await sampler.poll(NOW, backfill=False)
+    assert [r["source"] for r in rows] == ["dexscreener"]
+    assert market.ohlcv_calls == []
+    assert [r["source"] for r in await sampler.backfill(NOW)] == ["geckoterminal"]
+    assert market.ohlcv_calls[0][0] == "pool1"

@@ -99,6 +99,8 @@ class GraduationRecorder:
         #: A set, so a mint the chain and the websocket both report is asked
         #: about once.
         self._owe_holders: set[str] = set()
+        #: Readings taken by `_holders_loop`, waiting for the next flush.
+        self._holders_ready: dict[str, Any] = {}
         self._market = market or MarketSource()
         self._sessions = session_factory
         self._now = now
@@ -141,6 +143,7 @@ class GraduationRecorder:
                 asyncio.create_task(self._poll_loop(), name="graduation-poll"),
                 asyncio.create_task(self._postgrad_loop(), name="graduation-postgrad"),
                 asyncio.create_task(self._held_loop(), name="graduation-held"),
+                asyncio.create_task(self._holders_loop(), name="graduation-holders"),
             ]
             try:
                 await self._discovery()
@@ -230,13 +233,43 @@ class GraduationRecorder:
         while True:
             await asyncio.sleep(config.POSTGRAD_INTERVAL_S)
             try:
-                for row in await self.postgrad.poll(self._now()):
+                now = self._now()
+                # Fresh prices are written BEFORE the backfill runs. A new
+                # graduate's first sample is the paper book's entry, and the
+                # backfill waits on GeckoTerminal, which refuses bursts for
+                # tens of seconds at a time — behind it, entries mirrored to
+                # the real wallet were a median 77s old when written.
+                for row in await self.postgrad.poll(now, backfill=False):
+                    self._buffer(self._postgrad_rows, row)
+                await self.flush()
+                for row in await self.postgrad.backfill(now):
                     self._buffer(self._postgrad_rows, row)
                 await self.flush()
             except asyncio.CancelledError:
                 raise
             except Exception:
                 logger.exception("graduation_postgrad_failed")
+
+    async def _holders_loop(self) -> None:
+        """Holder concentration for new graduations, on its own clock.
+
+        The reads wait on a spent RPC — retries, a budget, seconds a mint —
+        and while they ran inside `flush()` every loop that wrote waited with
+        them: new positions took 84-136s to reach the vault socket, and new
+        graduates' first samples, which the paper book enters on, sat behind
+        them too. Now `flush()` only writes what this loop has already read.
+        """
+        while True:
+            await asyncio.sleep(1)
+            try:
+                await self._collect_holders()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("graduation_holders_loop_failed")
+
+    async def _collect_holders(self) -> None:
+        self._holders_ready.update(await self._read_holders())
 
     async def _held_loop(self) -> None:
         """Keep the mark fresh on the positions actually open.
@@ -298,9 +331,9 @@ class GraduationRecorder:
 
         Nothing slow may stand between a new position and its first fast mark.
         On 2026-09-16 this pass flushed before it handed the socket its set,
-        and a flush reads holder concentration for every new graduation over a
-        spent RPC: ten positions in a row waited 84-136 seconds for their
-        first socket mark, which is most of a two-minute hold.
+        and a flush then read holder concentration over a spent RPC: ten
+        positions in a row waited 84-136 seconds for their first socket mark,
+        most of a two-minute hold.
         """
         async with self._sessions() as session:
             held = (select(GradPaperPosition.mint)
@@ -342,8 +375,7 @@ class GraduationRecorder:
             if seen.get(row["mint"]) != key:
                 seen[row["mint"]] = key
                 self._buffer(self._postgrad_rows, row)
-        # Never the holder reads: the poll and post-graduation loops take them.
-        await self.flush(read_holders=False)
+        await self.flush()
 
     async def _held_socket(self, stream: HeldVaultStream, wanted: dict[str, Held],
                            refs: dict[str, tuple[Decimal, Decimal]],
@@ -373,7 +405,7 @@ class GraduationRecorder:
                 "pair_address": held.pool, "dex_id": "pumpswap",
                 "price_native": stored,
                 "liquidity_usd": _decimal(held.depth_usd(quote_usd), _USD_DP, _USD_MAX)})
-            await self.flush(read_holders=False)
+            await self.flush()
 
         loop = asyncio.get_running_loop()
         delay = config.RECONNECT_INITIAL_SECONDS
@@ -613,8 +645,7 @@ class GraduationRecorder:
             logger.info("graduation_holders_read", asked=len(owed), got=len(out))
         return out
 
-    async def flush(self, *, now: datetime | None = None,
-                    read_holders: bool = True) -> dict[str, int]:
+    async def flush(self, *, now: datetime | None = None) -> dict[str, int]:
         """Drain every buffer in one transaction.
 
         Tokens first: the sample rows name them, and a reader that saw a sample
@@ -624,13 +655,10 @@ class GraduationRecorder:
         """
         if not (self._dirty or self._retired or self._samples
                 or self._checkpoints or self._migrations or self._postgrad_rows
-                or (read_holders and self._owe_holders)):
+                or self._holders_ready):
             return {}
-        # The socket's writes skip the holder reads: those wait on the RPC
-        # budget for up to 30s, and a mark that waits behind every other
-        # token's graduation is not a fast mark. The next ordinary flush,
-        # three seconds away at most, reads them.
-        holders = await self._read_holders() if read_holders else {}
+        # No network in here, ever: every loop that writes waits on this.
+        holders, self._holders_ready = self._holders_ready, {}
         live = [self.watch.states[m] for m in self._dirty if m in self.watch]
         retired, self._retired = self._retired, {}
         samples, self._samples = self._samples, []

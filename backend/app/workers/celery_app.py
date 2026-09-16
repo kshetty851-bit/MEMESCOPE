@@ -6,6 +6,7 @@ scoring jobs land here later as their own modules under `app/workers/`.
 
 from __future__ import annotations
 
+import os
 from datetime import timedelta
 
 from celery import Celery
@@ -13,6 +14,16 @@ from celery.schedules import crontab
 from celery.signals import task_postrun
 
 from app.core.config import settings
+
+
+def _seconds(name: str, default: float) -> float:
+    """An interval from the environment that can never fail at import: a bad
+    value here would take down every worker and the beat together."""
+    try:
+        return float(os.getenv(name) or default)
+    except ValueError:
+        return default
+
 
 celery_app = Celery(
     "memescope",
@@ -362,7 +373,13 @@ celery_app.conf.beat_schedule = {
     # Paper only — nothing in that package can reach a signer or a key.
     "graduation-lab-paper": {
         "task": "app.labs.graduation.scheduler.graduation_paper_tick",
-        "schedule": crontab(minute="*"),
+        # Seconds, not a crontab: a crontab cannot run more than once a
+        # minute, and this book holds for two to five. Ticking once a minute,
+        # a "5-minute" hold closed a median 26s late (p90 56s), and 71% of the
+        # entries mirrored to the real wallet were already past its 60s
+        # staleness limit when written. The lab's own knob, which this entry
+        # used to ignore.
+        "schedule": _seconds("LAB_GRADUATION_PAPER_TICK_S", 10.0),
     },
     # NSE Breakout Tracker. The exchange publishes the day's bhavcopy after
     # the close, so ingest runs at 13:00 UTC (18:30 IST) and retries hourly to

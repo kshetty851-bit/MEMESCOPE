@@ -47,3 +47,17 @@ def test_the_mark_interval_can_resolve_the_shortest_hold() -> None:
     assert config.PAPER_INTERVAL_SECONDS <= config.POSTGRAD_INTERVAL_S, (
         "ticking slower than the marks arrive throws away resolution already "
         "paid for")
+
+
+def test_the_paper_book_ticks_as_often_as_its_config_says() -> None:
+    """The config said ten seconds for months while the beat entry said
+    `crontab(minute="*")` — a crontab cannot run faster than once a minute. A
+    "5-minute" hold closed a median 26s late, and 71% of the entries mirrored
+    to the real wallet were already past its 60s staleness limit when written.
+    This checks the schedule beat actually runs, not the constant."""
+    from app.workers.celery_app import celery_app
+
+    entry = celery_app.conf.beat_schedule["graduation-lab-paper"]
+    assert entry["schedule"] == float(config.PAPER_INTERVAL_SECONDS)
+    from app.labs.graduation.live_spec import MAX_DECISION_AGE_SECONDS
+    assert config.PAPER_INTERVAL_SECONDS * 3 <= MAX_DECISION_AGE_SECONDS

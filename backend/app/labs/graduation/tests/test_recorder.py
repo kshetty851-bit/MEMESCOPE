@@ -393,21 +393,66 @@ async def test_a_batch_mixing_sources_keeps_every_column() -> None:
         assert sorted(buys, key=lambda v: v is None) == [dex_row["txns_m5_buys"], None]
 
 
-async def test_a_socket_mark_never_waits_on_holder_reads() -> None:
-    """Holder reads wait on the RPC budget for up to 30s. A mark written
-    behind them is not a fast mark, so the socket's flush skips them and the
-    next ordinary flush reads them."""
-    recorder, rpc, *_ = build()
+async def test_no_flush_ever_waits_on_the_network() -> None:
+    """Holder reads wait on a spent RPC for seconds a mint. While they ran
+    inside `flush()`, every loop that wrote waited with them — new positions
+    reached the vault socket 84-136s late. Now a flush writes only what the
+    holders loop has already read."""
+    from app.labs.graduation.sources import Holders
+
+    recorder, rpc, _, sessions, _ = build()
     recorder._owe_holders.add(MINT)
+    rpc.holder_readings[MINT] = Holders(top1_share=D("0.2"), top10_share=D("0.5"),
+                                        top_address="POOL", seen=20)
     recorder._buffer(recorder._postgrad_rows, {
         "mint": MINT, "ts": START, "source": "held_ws",
         "price_native": D("0.000001")})
-    written = await recorder.flush(read_holders=False)
+    written = await recorder.flush()
     assert written["postgrad"] == 1
     assert rpc.holders_asked == []
     assert recorder._owe_holders == {MINT}
-    await recorder.flush()
+
+    await recorder._collect_holders()             # the holders loop's turn
     assert rpc.holders_asked == [MINT]
+    assert not recorder._owe_holders
+    before = len(sessions.statements)
+    await recorder.flush()
+    assert "grad_tokens" in sessions.table_names()[before:]
+    assert not recorder._holders_ready
+
+
+async def test_a_new_graduates_first_sample_is_written_before_the_backfill(
+        monkeypatch) -> None:
+    """The first sample is the paper book's entry. Behind a GeckoTerminal
+    backfill that refuses bursts for tens of seconds, entries mirrored to the
+    real wallet were a median 77s old when written."""
+    import asyncio
+
+    class StuckBackfill(FakeMarket):
+        async def gecko_minute_ohlcv(self, pool, *, limit):
+            await asyncio.Event().wait()
+
+    monkeypatch.setattr(config, "POSTGRAD_INTERVAL_S", 0)
+    recorder, *_ = build(pairs=PAIRS)
+    recorder._market = recorder.postgrad._market = StuckBackfill(pairs=PAIRS)
+    sessions = recorder._sessions
+    recorder.postgrad.start(MINT, START)
+    stale = "AnOlderGraduateWithAGap"
+    recorder.postgrad.start(stale, START)
+    recorder.postgrad.states[stale].pair_address = "pool1"
+    recorder.postgrad.states[stale].last_sample_at = START - timedelta(minutes=5)
+    task = asyncio.create_task(recorder._postgrad_loop())
+    try:
+        for _ in range(200):
+            if "grad_postgrad_samples" in sessions.table_names():
+                break
+            await asyncio.sleep(0.01)
+        assert "grad_postgrad_samples" in sessions.table_names()
+        assert not task.done()                    # the backfill is still stuck
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
 
 
 class _Scripted:

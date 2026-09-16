@@ -17,7 +17,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
@@ -33,6 +33,8 @@ logger = get_logger(__name__)
 TASK_NAME = "app.labs.graduation.scheduler.graduation_prune_tick"
 FEATURES_TASK = "app.labs.graduation.scheduler.graduation_features_tick"
 PAPER_TASK = "app.labs.graduation.scheduler.graduation_paper_tick"
+#: Held for the length of one paper tick. "GRAD", as a number.
+PAPER_LOCK_KEY = 0x47524144
 
 
 @celery_app.task(name=TASK_NAME)
@@ -101,6 +103,13 @@ async def paper_tick() -> dict[str, Any]:
         return {"skipped": "graduation_paper_disabled"}
     try:
         async with SessionFactory() as session:
+            # One tick at a time. At a ten-second cadence a slow tick can still
+            # be running when the next begins; both would fill the same
+            # graduation, and the (book, mint) constraint would then roll back
+            # the whole second tick, its closes included.
+            if not await session.scalar(
+                    select(func.pg_try_advisory_xact_lock(PAPER_LOCK_KEY))):
+                return {"skipped": "graduation_paper_tick_running"}
             # Every arm, one clock, one commit: they see the same graduations
             # at the same instant, which is what makes them comparable.
             result = await Tournament(session, now=datetime.now(UTC)).tick()

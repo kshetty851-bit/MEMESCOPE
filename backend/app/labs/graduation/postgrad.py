@@ -241,8 +241,13 @@ class PostGradSampler:
             self.states.pop(mint, None)
         return done
 
-    async def poll(self, now: datetime | None = None) -> list[dict[str, Any]]:
-        """One pass: sample everything due, then backfill what was missed."""
+    async def poll(self, now: datetime | None = None, *,
+                   backfill: bool = True) -> list[dict[str, Any]]:
+        """One pass: sample everything due, then backfill what was missed.
+
+        `backfill=False` returns the fresh rows alone, so the caller can write
+        them before `backfill()` waits on GeckoTerminal.
+        """
         now = now or self._now()
         self.expire(now)
         due = [m for m, s in self.states.items() if s.due(now)]
@@ -256,7 +261,14 @@ class PostGradSampler:
         # happened to list first.
         rows.sort(key=lambda r: r.get("liquidity_usd") or 0, reverse=True)
         rows = [r for r in rows if self._accept(r)]
-        rows.extend(await self._backfill(now))
+        if backfill:
+            rows.extend(await self._backfill(now))
+        self.samples_written += len(rows)
+        return rows
+
+    async def backfill(self, now: datetime | None = None) -> list[dict[str, Any]]:
+        """Only the backfill half of `poll`."""
+        rows = await self._backfill(now or self._now())
         self.samples_written += len(rows)
         return rows
 
