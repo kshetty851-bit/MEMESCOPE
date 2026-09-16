@@ -589,6 +589,27 @@ AB_RANDOM_SEED = 20261010
 #:
 #: Wide on purpose. SOL has traded $8-$260 in its life and this only has to
 #: separate "a SOL price" from "1.00" and "0.0037".
+#: Read each graduate's holder concentration once, at graduation.
+#:
+#: One `getTokenLargestAccounts` plus one `getTokenSupply` per graduating mint —
+#: about 800 calls a day at the observed rate, against a budget the curve poller
+#: already lives inside. Collection is ON because the data cannot be obtained
+#: later: `getTokenLargestAccounts` answers about TODAY, and for a token that
+#: has since rugged today's distribution is the wreckage. Measuring it after the
+#: outcome and finding that rugs were concentrated would be reading the answer,
+#: not predicting it.
+HOLDER_COLLECT_ENABLED = (
+    os.getenv("LAB_GRADUATION_HOLDER_COLLECT", "1").strip().lower()
+    in {"1", "true", "yes", "on"})
+
+#: The filter, and it is OFF. Nothing may act on this data until there is
+#: enough of it to say whether concentration predicts anything — LP-lock and
+#: deployer history were both collected as rug predictors here and neither
+#: did. `None` means admit every token regardless of concentration.
+HOLDER_MAX_TOP1_SHARE: Decimal | None = (
+    _dec("LAB_GRADUATION_HOLDER_MAX_TOP1", "0")
+    if os.getenv("LAB_GRADUATION_HOLDER_MAX_TOP1", "").strip() else None)
+
 SOL_USD_MIN = _dec("LAB_GRADUATION_SOL_USD_MIN", "20")
 SOL_USD_MAX = _dec("LAB_GRADUATION_SOL_USD_MAX", "1000")
 

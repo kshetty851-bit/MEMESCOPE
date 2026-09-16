@@ -68,6 +68,15 @@ class FakeRPC:
         self.failures = 0
         self.rate_limited = 0
         self.last_failure: str | None = None
+        #: What `holders` answers, keyed by mint. A mint ABSENT means the
+        #: read failed — the case the recorder must survive by leaving a
+        #: NULL rather than writing a fabricated share.
+        self.holder_readings: dict[str, object] = {}
+        self.holders_asked: list[str] = []
+
+    async def holders(self, mint: str) -> object | None:
+        self.holders_asked.append(mint)
+        return self.holder_readings.get(mint)
 
     async def __aenter__(self) -> Self:
         return self

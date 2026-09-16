@@ -192,6 +192,25 @@ class GradToken(Base):
     first_trade_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_trade_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # --- holder concentration, read ONCE at graduation ------------------------
+    #: Shares of TOTAL SUPPLY, including the AMM pool — which after a
+    #: graduation is normally the largest single account. `top_holder_address`
+    #: is stored so the pool can be identified and subtracted later: writing a
+    #: pool-excluded figure now would bake in an interpretation before there is
+    #: any evidence about which interpretation predicts anything.
+    #:
+    #: NULL means not read, never "no concentration". The columns that came
+    #: before these on `grad_checkpoints` sat empty for months because a
+    #: retired trade stream was their only source, and 0 was indistinguishable
+    #: from uncollected — so these are nullable and `holders_checked_at` says
+    #: whether the question was ever asked.
+    top1_holder_share: Mapped[Decimal | None] = mapped_column(_SHARE)
+    top10_holder_share: Mapped[Decimal | None] = mapped_column(_SHARE)
+    top_holder_address: Mapped[str | None] = mapped_column(_ADDRESS)
+    holders_seen: Mapped[int | None] = mapped_column(Integer)
+    holders_checked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True))
+
     #: Set by the pruner. A row with this set has no `grad_curve_samples` left.
     pruned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 

@@ -31,8 +31,10 @@ import asyncio
 import base64
 import binascii
 import json
+from dataclasses import dataclass
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Sequence
 from datetime import UTC, datetime
+from decimal import Decimal
 from types import TracebackType
 from typing import Any, Self
 
@@ -285,6 +287,82 @@ class CurveRPC:
             await self._sleep(0.5)
             waited += 0.5
         return True
+
+    async def holders(self, mint: str) -> "Holders | None":
+        """One mint's holder concentration, through the same budget as the rest.
+
+        Charged against `_acquire` like every other read here: a collector that
+        quietly spends outside the rate budget is how a free-tier key gets
+        revoked mid-experiment.
+        """
+        if self._rpc is None:
+            return None
+        if not await self._acquire():
+            logger.warning("graduation_holders_budget_exhausted", mint=mint)
+            self.rate_limited += 1
+            return None
+        got = await top_holders(self._rpc, mint)
+        self.calls += 1
+        if got is None:
+            self.failures += 1
+        return got
+
+
+
+
+@dataclass(frozen=True, slots=True)
+class Holders:
+    """Who holds a mint, at the moment it was asked.
+
+    Shares are of TOTAL SUPPLY and include the AMM pool, which after a
+    graduation is normally the largest single account. `top_address` is kept so
+    the analysis can identify and subtract it later: storing a
+    pool-excluded figure now would bake in an interpretation before there is
+    any evidence about which interpretation matters.
+    """
+
+    top1_share: Decimal
+    top10_share: Decimal
+    top_address: str
+    seen: int
+
+
+async def top_holders(rpc: StandardSolanaRPC, mint: str) -> Holders | None:
+    """The concentration of a mint's supply, from two RPC reads.
+
+    `getTokenLargestAccounts` returns at most twenty accounts, which is enough
+    for a top-10 share and is one call. Supply comes from the mint account
+    rather than from summing those twenty — the twenty are not the whole float,
+    and a denominator built from them would make every token look concentrated.
+
+    Returns None on any failure, never a partial figure: a share computed from
+    a short read is a number about nothing.
+    """
+    try:
+        supply = await rpc.get_token_supply(mint)
+        if supply is None or supply <= 0:
+            return None
+        payload = await rpc.call("getTokenLargestAccounts", [mint])
+    except Exception as exc:
+        logger.warning("graduation_holders_failed", mint=mint, error=repr(exc))
+        return None
+    rows = (payload or {}).get("value") or []
+    amounts: list[tuple[Decimal, str]] = []
+    for row in rows:
+        raw = row.get("uiAmountString") or row.get("uiAmount")
+        if raw in (None, ""):
+            continue
+        try:
+            amounts.append((Decimal(str(raw)), str(row.get("address") or "")))
+        except (ArithmeticError, ValueError):
+            continue
+    if not amounts:
+        return None
+    amounts.sort(key=lambda a: a[0], reverse=True)
+    top1, addr = amounts[0]
+    top10 = sum(a for a, _ in amounts[:10])
+    return Holders(top1_share=(top1 / supply), top10_share=(top10 / supply),
+                   top_address=addr, seen=len(amounts))
 
 
 def _decode_account(value: dict | None) -> CurveState | None:

@@ -452,3 +452,22 @@ def test_only_the_bridge_reaches_the_lab_tables() -> None:
             assert imported not in bridge_only, (
                 f"{path.name} reaches the platform Lab tables; only "
                 f"{BRIDGE_MODULES} may")
+
+
+def test_holder_reading_stays_in_sources() -> None:
+    """The RPC call that reads holder concentration belongs to `sources.py`.
+
+    `top_holders` and `CurveRPC.holders` are network reads. The recorder marks
+    a debt and drains it; it must not learn to make the call itself, which is
+    the rule every other read in this package already follows.
+    """
+    # A CALL, not a mention: config.py names the method in a comment
+    # explaining what the collector costs, and that is not a network read.
+    called = '"getTokenLargestAccounts"'
+    src = (PACKAGE / "sources.py").read_text()
+    assert called in src, "the holder read must live in sources.py"
+    for path in SOURCES:
+        if path.name == "sources.py":
+            continue
+        assert called not in path.read_text(), (
+            f"{path.name} makes its own RPC call; sources.py owns the network")

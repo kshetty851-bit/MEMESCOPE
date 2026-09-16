@@ -36,7 +36,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -73,6 +73,10 @@ class GraduationRecorder:
     ) -> None:
         self._stream = stream or PumpPortalStream()
         self._rpc = rpc or CurveRPC()
+        #: Mints that graduated this pass and have not had their holders read.
+        #: A set, so a mint the chain and the websocket both report is asked
+        #: about once.
+        self._owe_holders: set[str] = set()
         self._market = market or MarketSource()
         self._sessions = session_factory
         self._now = now
@@ -327,6 +331,11 @@ class GraduationRecorder:
         state.max_progress = Decimal(100)
         self._dirty.add(row.mint)
         self._owe_checkpoints(state, None, ts=row.ts)
+        # Holder concentration is read HERE and nowhere else, because it can
+        # only be read here: `getTokenLargestAccounts` answers about today, and
+        # for a token that later rugs today's distribution is the wreckage.
+        # Asked after the outcome it would be reading the answer.
+        self._owe_holders.add(row.mint)
         logger.info("graduation_migrated", mint=row.mint, tracked=state.tracked)
 
     # --- polling ------------------------------------------------------------
@@ -443,6 +452,31 @@ class GraduationRecorder:
 
     # --- writing ------------------------------------------------------------
 
+    async def _read_holders(self) -> dict[str, Any]:
+        """Holder concentration for the mints that graduated this pass.
+
+        Outside the transaction on purpose: these are network reads, and
+        holding a database transaction open across an RPC round trip is how a
+        slow node becomes a lock nobody can explain.
+
+        A failure is dropped, not retried. The read is only meaningful close to
+        graduation — asked an hour later it describes a different token — so a
+        mint that could not be read keeps a NULL, which is the honest record of
+        a question that went unanswered.
+        """
+        if not config.HOLDER_COLLECT_ENABLED or not self._owe_holders:
+            self._owe_holders.clear()
+            return {}
+        owed, self._owe_holders = self._owe_holders, set()
+        out: dict[str, Any] = {}
+        for mint in owed:
+            got = await self._rpc.holders(mint)
+            if got is not None:
+                out[mint] = got
+        if out:
+            logger.info("graduation_holders_read", asked=len(owed), got=len(out))
+        return out
+
     async def flush(self, *, now: datetime | None = None) -> dict[str, int]:
         """Drain every buffer in one transaction.
 
@@ -452,8 +486,10 @@ class GraduationRecorder:
         goes into the next batch rather than this one.
         """
         if not (self._dirty or self._retired or self._samples
-                or self._checkpoints or self._migrations or self._postgrad_rows):
+                or self._checkpoints or self._migrations or self._postgrad_rows
+                or self._owe_holders):
             return {}
+        holders = await self._read_holders()
         live = [self.watch.states[m] for m in self._dirty if m in self.watch]
         retired, self._retired = self._retired, {}
         samples, self._samples = self._samples, []
@@ -466,6 +502,8 @@ class GraduationRecorder:
         try:
             async with self._sessions() as session:
                 await self._upsert_tokens(session, live)
+                if holders:
+                    await self._write_holders(session, holders, closed_at)
                 for reason in {r for _, r in retired.values()}:
                     await self._upsert_tokens(
                         session, [s for s, r in retired.values() if r == reason],
@@ -510,6 +548,26 @@ class GraduationRecorder:
         elif index is not None:
             statement = statement.on_conflict_do_nothing(index_elements=[index])
         await session.execute(statement)
+
+    async def _write_holders(self, session: AsyncSession,
+                             holders: dict[str, Any], now: datetime) -> None:
+        """Stamp holder concentration onto the mints it was read for.
+
+        A narrow UPDATE rather than a column on `_upsert_tokens`, for the same
+        reason that method lists what it will not touch: the token upsert runs
+        on every dirty mint every flush, and folding these in would rewrite a
+        NULL over a reading taken minutes earlier the next time the token was
+        merely re-sampled.
+        """
+        for mint, got in holders.items():
+            await session.execute(
+                update(GradToken)
+                .where(GradToken.mint == mint)
+                .values(top1_holder_share=got.top1_share,
+                        top10_holder_share=got.top10_share,
+                        top_holder_address=got.top_address,
+                        holders_seen=got.seen,
+                        holders_checked_at=now))
 
     async def _upsert_tokens(self, session: AsyncSession, states: list[TokenState],
                              *, unsubscribed_at: datetime | None = None,

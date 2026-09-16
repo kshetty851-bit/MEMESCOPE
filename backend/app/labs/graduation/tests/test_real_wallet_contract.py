@@ -273,3 +273,25 @@ def test_only_sol_quoted_pools_are_sizeable():
     # the band must never reject a real SOL price
     for sol in ("20", "95", "104", "260", "1000"):
         assert _rate(D(sol), D(1)) == D(sol), f"SOL at ${sol} must be tradeable"
+
+
+def test_holder_concentration_is_collected_but_not_acted_on():
+    """Collected because it can only be read at graduation; OFF because there
+    is no evidence yet that it predicts anything.
+
+    `getTokenLargestAccounts` answers about TODAY. For a token that has since
+    rugged, today's distribution is the wreckage — so measuring it after the
+    outcome and finding rugs were concentrated reads the answer rather than
+    predicting it. That is why collection cannot wait for a hypothesis.
+
+    And why the FILTER waits: LP-lock and deployer history were both collected
+    here as rug predictors and neither predicted rugs. Concentration is the
+    third candidate, not a known one.
+    """
+    from app.labs.graduation import config
+
+    assert config.HOLDER_COLLECT_ENABLED is True, (
+        "the reading cannot be taken later; collection must be on")
+    assert config.HOLDER_MAX_TOP1_SHARE is None, (
+        "nothing may be excluded on concentration until there is data saying "
+        "concentration predicts a rug")
