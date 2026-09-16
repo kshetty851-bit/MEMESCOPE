@@ -43,13 +43,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.core.logging import get_logger
 from app.db.session import SessionFactory
 from app.labs.graduation import config, curve, parse
-from app.labs.graduation.held_watch import Held, MarkWriter
+from app.labs.graduation.held_watch import EarlyWatch, Held, MarkWriter
 from app.labs.graduation.models import (
     SOURCE_DEXSCREENER,
     SOURCE_HELD_WS,
     STATUS_DONE,
     GradCheckpoint,
     GradCurveSample,
+    GradEarlyOpen,
     GradMigration,
     GradPaperPosition,
     GradPostgradSample,
@@ -101,6 +102,13 @@ class GraduationRecorder:
         self._owe_holders: set[str] = set()
         #: Readings taken by `_holders_loop`, waiting for the next flush.
         self._holders_ready: dict[str, Any] = {}
+        #: New pumpswap graduations whose pool is watched for B3's depth, and
+        #: the rows their first crossing wrote.
+        self.early = EarlyWatch(floor_usd=config.EARLY_FLOOR_USD,
+                                window_s=config.EARLY_WINDOW_S)
+        self._early_rows: list[dict[str, Any]] = []
+        #: SOL/USD from the newest DexScreener row: prices early pool depth.
+        self._sol_usd: Decimal | None = None
         self._market = market or MarketSource()
         self._sessions = session_factory
         self._now = now
@@ -192,7 +200,8 @@ class GraduationRecorder:
                 pins = {r.mint: r for r in (await session.execute(
                     select(s.mint, s.pair_address, s.dex_id)
                     .where(s.mint.in_(mints), s.source == SOURCE_DEXSCREENER,
-                           s.pair_address.is_not(None))
+                           s.pair_address.is_not(None),
+                           s.dex_id.is_distinct_from(config.CURVE_DEX_ID))
                     .distinct(s.mint)
                     .order_by(s.mint, s.ts))).all()} if mints else {}
         except Exception:
@@ -306,11 +315,14 @@ class GraduationRecorder:
         # DexScreener refreshes about every 27s, so most 3-second polls return
         # the row already written. Only a changed one is kept.
         seen: dict[str, tuple[Any, ...]] = {}
+        # New graduates' pools, resolved from their migration transactions.
+        early: dict[str, Held | None] = {}
         loop = asyncio.get_running_loop()
         while True:
             started = loop.time()
             try:
-                await self._held_pass(stream, wanted, refs, writer, cache, seen)
+                await self._held_pass(stream, wanted, refs, writer, cache, seen,
+                                      early)
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -326,7 +338,8 @@ class GraduationRecorder:
     async def _held_pass(self, stream: HeldVaultStream, wanted: dict[str, Held],
                          refs: dict[str, tuple[Decimal, Decimal]],
                          writer: MarkWriter, cache: dict[str, Held | None],
-                         seen: dict[str, tuple[Any, ...]]) -> None:
+                         seen: dict[str, tuple[Any, ...]],
+                         early: dict[str, Held | None] | None = None) -> None:
         """One refresh. The SOCKET'S SET IS SETTLED FIRST.
 
         Nothing slow may stand between a new position and its first fast mark.
@@ -351,6 +364,19 @@ class GraduationRecorder:
                 .distinct(GradPostgradSample.mint)
                 .order_by(GradPostgradSample.mint,
                           GradPostgradSample.ts.desc()))).all()
+            # The SOL rate that prices early depth: the newest DexScreener row
+            # quoted in SOL, which is any row whose ratio is a SOL price.
+            ratio = GradPostgradSample.price_usd / GradPostgradSample.price_native
+            rates = (await session.execute(
+                select(ratio.label("rate"))
+                .where(GradPostgradSample.source == SOURCE_DEXSCREENER,
+                       GradPostgradSample.price_usd > 0,
+                       GradPostgradSample.price_native > 0,
+                       ratio.between(config.SOL_USD_MIN, config.SOL_USD_MAX))
+                .order_by(GradPostgradSample.ts.desc())
+                .limit(1))).all()
+        if rates:
+            self._sol_usd = rates[0].rate
         mints = [r.mint for r in rows]
         for r in rows:
             refs[r.mint] = (r.price_native, r.price_usd / r.price_native)
@@ -366,7 +392,10 @@ class GraduationRecorder:
             for mint in stale.keys() - set(mints):
                 del stale[mint]
         writer.keep(mints)
+        if early is not None:
+            await self._resolve_early(stream, early)
         wanted.clear()
+        wanted.update({m: h for m, h in (early or {}).items() if h is not None})
         wanted.update({m: h for m, h in cache.items() if h is not None})
 
         # Then the fallback feed, which can wait on DexScreener's budget.
@@ -377,6 +406,31 @@ class GraduationRecorder:
                 self._buffer(self._postgrad_rows, row)
         await self.flush()
 
+    async def _resolve_early(self, stream: HeldVaultStream,
+                             early: dict[str, Held | None]) -> None:
+        """The pools of graduations still inside their early window.
+
+        Read off each migration's own transaction — deriving the address
+        matched DexScreener's pool for none of 146 graduations. A transaction
+        too new to read is asked again next pass; one with no pumpswap pool
+        for the mint is dropped.
+        """
+        for mint in self.early.expire(self._now()):
+            early.pop(mint, None)
+        for mint, (_, signature) in list(self.early.due.items()):
+            if mint in early:
+                continue
+            try:
+                pool = await stream.pool_from_migration(mint, signature)
+                early[mint] = await stream.resolve(mint, pool) if pool else None
+            except ConnectionError:
+                continue
+            if early[mint] is None:
+                logger.info("graduation_early_unwatchable", mint=mint)
+                self.early.drop(mint)
+        for mint in early.keys() - self.early.due.keys():
+            del early[mint]
+
     async def _held_socket(self, stream: HeldVaultStream, wanted: dict[str, Held],
                            refs: dict[str, tuple[Decimal, Decimal]],
                            writer: MarkWriter) -> None:
@@ -384,6 +438,14 @@ class GraduationRecorder:
         warned: set[str] = set()
 
         async def on_price(held: Held, ts: datetime) -> None:
+            opened = self.early.observe(held, self._sol_usd, ts)
+            if opened is not None:
+                self._buffer(self._early_rows, opened)
+                logger.info("graduation_early_open", mint=held.mint,
+                            depth=float(opened["depth_usd"]),
+                            after_s=round((ts - opened["migrated_at"])
+                                          .total_seconds(), 1))
+                await self.flush()
             if not config.HELD_WRITE_ENABLED:
                 return
             price = held.price()
@@ -493,6 +555,10 @@ class GraduationRecorder:
             "raw": row.raw,
         })
         self.postgrad.start(row.mint, row.ts)
+        if row.pool == config.PUMPSWAP_VENUE and row.signature:
+            # Watched whether or not the lab saw its curve: the feed is global,
+            # and most deep pools belong to tokens nobody was watching.
+            self.early.add(row.mint, row.ts, row.signature)
         if state is None:
             return
         state.migrated_at = row.ts
@@ -612,7 +678,8 @@ class GraduationRecorder:
         than a sample with a hole in it.
         """
         total = (len(self._samples) + len(self._checkpoints)
-                 + len(self._migrations) + len(self._postgrad_rows))
+                 + len(self._migrations) + len(self._postgrad_rows)
+                 + len(self._early_rows))
         if total >= config.BUFFER_MAX_ROWS:
             self.dropped_rows += 1
             return
@@ -655,7 +722,7 @@ class GraduationRecorder:
         """
         if not (self._dirty or self._retired or self._samples
                 or self._checkpoints or self._migrations or self._postgrad_rows
-                or self._holders_ready):
+                or self._holders_ready or self._early_rows):
             return {}
         # No network in here, ever: every loop that writes waits on this.
         holders, self._holders_ready = self._holders_ready, {}
@@ -665,6 +732,7 @@ class GraduationRecorder:
         checkpoints, self._checkpoints = self._checkpoints, []
         migrations, self._migrations = self._migrations, []
         postgrad, self._postgrad_rows = self._postgrad_rows, []
+        early, self._early_rows = self._early_rows, []
         self._dirty = set()
         closed_at = now or self._now()
 
@@ -684,6 +752,7 @@ class GraduationRecorder:
                                    constraint="uq_grad_checkpoints_mint")
                 await self._insert(session, GradPostgradSample, postgrad,
                                    constraint="uq_grad_postgrad_samples_mint_ts")
+                await self._insert(session, GradEarlyOpen, early, "mint")
                 await session.commit()
         except Exception:
             # The rows are gone from the buffer either way: re-queueing a batch
@@ -691,7 +760,7 @@ class GraduationRecorder:
             # aggregates are re-derived from state on the next flush; only one
             # window of samples is lost, and the count says how many.
             self.dropped_rows += (len(samples) + len(checkpoints)
-                                  + len(migrations) + len(postgrad))
+                                  + len(migrations) + len(postgrad) + len(early))
             logger.exception("graduation_flush_failed", samples=len(samples),
                              checkpoints=len(checkpoints))
             return {"error": 1}
@@ -837,6 +906,8 @@ async def recorder_health(session: AsyncSession, *,
             "dropped_rows": recorder.dropped_rows,
             "backfills": recorder.postgrad.backfilled,
             "backfill_impossible": recorder.postgrad.backfill_impossible,
+            "curve_pairs_refused": recorder.postgrad.curve_rejected,
+            "early_watching": len(recorder.early.due),
             "unexpected_fields": sorted(recorder.unexpected_fields),
         }
     return health

@@ -12,14 +12,18 @@ from decimal import Decimal
 import pytest
 
 from app.labs.graduation import config
+from app.labs.graduation import held_watch as held_watch_module
 from app.labs.graduation.held_watch import (
+    EarlyWatch,
     Held,
     MarkWriter,
     account_bytes,
     mint_decimals,
     notification,
+    pool_among,
     subscribe_frame,
     subscription_of,
+    transaction_accounts,
     vault_amount,
     vault_mint,
     watch,
@@ -382,3 +386,97 @@ async def test_an_unanswered_read_is_retried_not_cached_as_unwatchable():
         await stream.resolve(TOKEN_MINT, "POOL")
     stream.accounts = empty
     assert await stream.resolve(TOKEN_MINT, "POOL") is None
+
+
+# --- the early arm's watch ----------------------------------------------------
+
+def _early() -> EarlyWatch:
+    return EarlyWatch(floor_usd=Decimal("198000"), window_s=90)
+
+
+def _sol_quoted(**kw) -> Held:
+    return _held(quote_mint=config.WSOL_MINT, **kw)
+
+
+def test_the_early_watch_records_the_first_reading_deep_enough():
+    """A pump.fun pool opens around 85 SOL a side — $17,000 of depth at $100 —
+    so B3's $198k is a pool that has since filled. The first reading that
+    shows it is the entry, and it is taken once."""
+    watch = _early()
+    watch.add(TOKEN_MINT, T0, "sig")
+    shallow = _sol_quoted(base=206_900_000_000_000, quote=85_000_000_000)
+    assert watch.observe(shallow, Decimal(100), T0 + timedelta(seconds=3)) is None
+    deep = _sol_quoted(base=17_000_000_000_000, quote=1_000_000_000_000)
+    row = watch.observe(deep, Decimal(100), T0 + timedelta(seconds=40))
+    assert row is not None
+    assert (row["migrated_at"], row["crossed_at"]) == (T0, T0 + timedelta(seconds=40))
+    assert row["depth_usd"] == Decimal("200000")
+    assert row["price_native"] == deep.price()
+    assert (row["first_seen_at"], row["first_depth_usd"]) == (
+        T0 + timedelta(seconds=3), Decimal("17000"))
+    assert watch.observe(deep, Decimal(100), T0 + timedelta(seconds=41)) is None
+    assert TOKEN_MINT not in watch.due and TOKEN_MINT not in watch.first
+
+
+def test_the_early_watch_refuses_what_it_cannot_price_or_is_too_late_for():
+    watch = _early()
+    watch.add(TOKEN_MINT, T0, "sig")
+    deep = _sol_quoted(base=1, quote=1_000_000_000_000)
+    usdc = _held(base=1, quote=1_000_000_000_000, quote_mint="USDC")
+    assert watch.observe(usdc, Decimal(100), T0) is None        # not SOL-quoted
+    assert watch.observe(deep, None, T0) is None                # no SOL rate yet
+    assert watch.observe(deep, Decimal(100), T0 + timedelta(seconds=91)) is None
+    assert watch.expire(T0 + timedelta(seconds=91)) == [TOKEN_MINT]
+    assert not watch.due
+    assert _early().observe(deep, Decimal(100), T0) is None     # never registered
+
+
+def test_a_transaction_names_its_static_and_loaded_accounts():
+    tx = {"transaction": {"message": {"accountKeys": ["A", "B"]}},
+          "meta": {"loadedAddresses": {"writable": ["C"], "readonly": ["D"]}}}
+    assert transaction_accounts(tx) == ["A", "B", "C", "D"]
+    for bad in (None, {}, {"transaction": {}}, "x"):
+        assert transaction_accounts(bad) == []
+
+
+def test_the_pool_is_the_one_account_whose_base_is_this_mint(monkeypatch):
+    from types import SimpleNamespace
+
+    decoded = {b"pool": SimpleNamespace(base_mint=TOKEN_MINT),
+               b"other": SimpleNamespace(base_mint=SOL_MINT)}
+    monkeypatch.setattr(held_watch_module, "parse_pool", decoded.get)
+    assert pool_among(TOKEN_MINT, ["K1", "K2", "K3"], [b"x", b"pool", b"other"]) == "K2"
+    assert pool_among(TOKEN_MINT, ["K1"], [b"other"]) is None
+    # Two pools for one mint is a guess, and a guess is refused.
+    assert pool_among(TOKEN_MINT, ["K1", "K2"], [b"pool", b"pool"]) is None
+
+
+async def test_the_pool_comes_from_the_migrations_own_transaction(monkeypatch):
+    """Deriving the address matched DexScreener's pool for 0 of 146 recent
+    graduations; the migration transaction's accounts matched 10 of 10."""
+    from types import SimpleNamespace
+
+    stream = HeldVaultStream(url="wss://node")
+    keys = [f"K{i}" for i in range(150)]
+    txs = {"sig": {"transaction": {"message": {"accountKeys": keys}}}}
+    reads: list[int] = []
+
+    async def call(method, params):
+        assert method == "getTransaction"
+        assert params[1]["maxSupportedTransactionVersion"] == 0
+        return txs.get(params[0])
+
+    async def accounts(batch):
+        reads.append(len(batch))
+        return 7, [b"pool" if k == "K120" else b"x" for k in batch]
+
+    decoded = {b"pool": SimpleNamespace(base_mint=TOKEN_MINT)}
+    monkeypatch.setattr(held_watch_module, "parse_pool", decoded.get)
+    stream._call = call
+    stream.accounts = accounts
+    assert await stream.pool_from_migration(TOKEN_MINT, "sig") == "K120"
+    assert reads == [100, 50]                   # the node's 100-account limit
+    decoded.clear()
+    assert await stream.pool_from_migration(TOKEN_MINT, "sig") is None
+    with pytest.raises(ConnectionError):        # too new to read: ask again
+        await stream.pool_from_migration(TOKEN_MINT, "not-yet")

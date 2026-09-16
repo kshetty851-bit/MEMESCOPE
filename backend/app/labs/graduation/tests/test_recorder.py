@@ -11,6 +11,8 @@ import contextlib
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
+import pytest
+
 from app.labs.graduation import config
 from app.labs.graduation.recorder import GraduationRecorder
 from app.labs.graduation.tests.fakes import (
@@ -538,7 +540,7 @@ async def test_the_socket_gets_its_set_before_anything_slow() -> None:
                           price_native=D("0.000001"), price_usd=D("0.0002"))
     recorder = GraduationRecorder(
         stream=_NoStream(), rpc=FakeRPC({}), market=Silent(pairs=PAIRS),
-        session_factory=lambda: _Scripted([row]), now=Clock(START))
+        session_factory=lambda: _Scripted([row], []), now=Clock(START))
     recorder.postgrad.start(MINT, START)
     recorder._owe_holders.add("JustGraduated")
     wanted: dict = {}
@@ -573,8 +575,69 @@ async def test_a_pass_leaves_holder_reads_to_the_other_loops() -> None:
                           price_native=D("0.000001"), price_usd=D("0.0002"))
     recorder = GraduationRecorder(
         stream=_NoStream(), rpc=FakeRPC({}), market=FakeMarket(pairs=PAIRS),
-        session_factory=lambda: _Scripted([row]), now=Clock(START))
+        session_factory=lambda: _Scripted([row], []), now=Clock(START))
     recorder._owe_holders.add("JustGraduated")
     await recorder._held_pass(Resolver(), {}, {}, MarkWriter(), {}, {})
     assert recorder.rpc.holders_asked == []
     assert recorder._owe_holders == {"JustGraduated"}
+
+
+def test_a_pumpswap_graduation_is_watched_for_the_early_arm() -> None:
+    from app.labs.graduation.parse import MigrationRow
+
+    recorder, *_ = build()
+    for mint, venue in (("PoolMint", "pump-amm"), ("CpmmMint", "raydium-cpmm")):
+        recorder._on_migration(MigrationRow(
+            mint=mint, ts=START, pool=venue, signature=f"sig-{mint}", raw={}))
+    assert set(recorder.early.due) == {"PoolMint"}
+    assert recorder.early.due["PoolMint"] == (START, "sig-PoolMint")
+
+
+async def test_an_early_crossing_is_found_watched_and_written() -> None:
+    """The whole early path through the recorder: the pass reads the pool off
+    the migration transaction and hands it to the socket; the first reading at
+    B3's depth becomes a `grad_early_opens` row."""
+    import asyncio
+    from dataclasses import replace
+    from types import SimpleNamespace
+
+    from app.labs.graduation.held_watch import Held, MarkWriter
+
+    watched = Held(mint="EarlyMint", pool="POOL", base_vault="bv",
+                   quote_vault="qv", base_decimals=6, quote_decimals=9,
+                   quote_mint=config.WSOL_MINT)
+    deep = replace(watched, base=17_000_000_000_000, quote=1_000_000_000_000)
+
+    class Stream:
+        updates = 0
+
+        async def pool_from_migration(self, mint, signature):
+            assert (mint, signature) == ("EarlyMint", "sig")
+            return "POOL"
+
+        async def resolve(self, mint, pool):
+            assert pool == "POOL"
+            return watched
+
+        async def stream(self, wanted, on_price):
+            assert "EarlyMint" in wanted()
+            await on_price(deep, START + timedelta(seconds=40))
+            raise asyncio.CancelledError
+
+    writes = FakeSessionFactory()
+    first = iter([_Scripted([], [SimpleNamespace(rate=D(100))])])
+    recorder = GraduationRecorder(
+        stream=_NoStream(), rpc=FakeRPC({}), market=FakeMarket(pairs=[]),
+        session_factory=lambda: next(first, None) or writes(),
+        now=Clock(START + timedelta(seconds=5)))
+    recorder.early.add("EarlyMint", START, "sig")
+    wanted: dict = {}
+    early: dict = {}
+    await recorder._held_pass(Stream(), wanted, {}, MarkWriter(), {}, {}, early)
+    assert wanted == {"EarlyMint": watched}
+    assert recorder._sol_usd == D(100)
+
+    with pytest.raises(asyncio.CancelledError):
+        await recorder._held_socket(Stream(), wanted, {}, MarkWriter())
+    assert "grad_early_opens" in writes.table_names()
+    assert not recorder.early.due

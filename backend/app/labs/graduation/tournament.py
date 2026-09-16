@@ -59,6 +59,7 @@ from app.labs.graduation.backtest import (
 from app.labs.graduation.models import (
     SOURCE_HELD_WS,
     GradCurveSample,
+    GradEarlyOpen,
     GradPaperPosition,
     GradPostgradSample,
     GradToken,
@@ -272,6 +273,9 @@ ENTRY_RULES: dict[str, str] = {
     "sym_nosell": "symbol used before AND no sells had printed",
     "deep500_flow": "the pool held at least $500,000 at the open AND more buys "
                     "than sells had printed in its first five minutes",
+    "early_B3": f"the pool's OWN reserves showed over ${LIQ_BANDS[-1][1]:,} within "
+                f"{config.EARLY_WINDOW_S}s of graduating — bought the moment that "
+                f"was visible, not when DexScreener first listed the pool",
     "rand25": "a hash of the token address, taking a quarter of them — CONTROL",
     "rand50": "a hash of the token address, taking half of them — CONTROL",
     "rand75": "a hash of the token address, taking three quarters — CONTROL",
@@ -293,6 +297,12 @@ def accepts(arm: Arm, *, mint: str, open_at: datetime, liquidity: Decimal | None
         # they arrive through `_curve_candidates`, not the pool-open query.
         # Nothing further to filter, so nothing is filtered.
         return True
+    if e == "early_B3":
+        # Never from the pool-open query. This arm's entries arrive through
+        # `_fill_early`, priced off the pool's own reserves before DexScreener
+        # has listed it; buying here as well would add tokens the early watch
+        # never saw, at DexScreener's later price — B3 again, under a new name.
+        return False
     if e == "floor":
         # The baseline: every graduation the grid is allowed to touch, with no
         # band selection. Same floor, same universe — so the only difference
@@ -455,6 +465,14 @@ ARMS: tuple[Arm, ...] = (
     Arm("B3_198k_5m", "liq_B3", 5, note="pool over $198k, out at 5m"),
     Arm("B3_198k_5m_SL", "liq_B3", 5, stop=Decimal("0.10"),
         note="pool over $198k, 10% stop, out at 5m"),
+    # B3, bought EARLY, 2026-09-16. DexScreener first reports a B3 pool a
+    # median 52s after the migration, and that is where B3 buys. The pool's
+    # own reserves say it is deep the moment it is — this arm buys then, and
+    # holds five minutes from THAT entry. Same depth, same hold, earlier fill:
+    # the one question is whether those seconds are worth anything.
+    Arm("B3E_198k_5m", "early_B3", 5,
+        note="pool's own reserves over $198k within 90s of graduating, "
+             "bought on sight, out at 5m"),
     # NOT part of the tournament, and kept when everything else went. These
     # two are a PRE-REGISTERED A/B on the rug signals — a never-seen symbol
     # rugs 18% against 3%, a daytime-UTC open 15% against 5% — opened
@@ -482,10 +500,11 @@ CONTROLS: tuple[Arm, ...] = tuple(a for a in ARMS if a.is_control)
 #: returned no edge. The count is pinned rather than free because an arm that
 #: appears mid-tournament changes what every other number means — so changing
 #: it must be a deliberate edit with a date, not a side effect.
-assert len(ARMS) == 7, (
-    "three B3 arms (3m retired 2026-09-16 at -$58.90), the BASELINE, the "
-    "$500k+flow candidate, and the two pre-registered A/B arms — which run but "
-    f"are flagged off the tournament board — not {len(ARMS)}")
+assert len(ARMS) == 8, (
+    "three B3 arms (3m retired 2026-09-16 at -$58.90), B3 bought early "
+    "(added 2026-09-16), the BASELINE, the $500k+flow candidate, and the two "
+    "pre-registered A/B arms — which run but are flagged off the tournament "
+    f"board — not {len(ARMS)}")
 assert len([a for a in ARMS if a.ab_experiment]) == 2, (
     "the rug-signal A/B is exactly F01_all_2m and F14_symnight_2m; flagging a "
     "tournament arm as an experiment would hide it from its own comparison")
@@ -503,9 +522,9 @@ assert all(a.tp is None and a.trail is None for a in ARMS), (
 assert all(a.stop is None or a.stop == Decimal("0.10") for a in ARMS), (
     "one stop level, so the twins differ in ONE thing. Sweeping levels here "
     "would be fitting a parameter on the same data that suggested it")
-assert len([a for a in ARMS if not a.is_control]) == 6, (
+assert len([a for a in ARMS if not a.is_control]) == 7, (
     "`config.required_pf` is calibrated on the maximum of FORTY-TWO noise "
-    "draws. Six arms are now judged against it, so the bar is if anything "
+    "draws. Seven arms are now judged against it, so the bar is if anything "
     "CONSERVATIVE — the luckiest of seventeen reaches less than the luckiest "
     "of forty-two. Left as it is deliberately: a bar that is too hard costs a "
     "real finding some time, where one that is too easy costs a false one nothing")
@@ -581,7 +600,8 @@ class Tournament:
             rate = await self._sol_rate()
             for r in (await self._session.execute(
                     select(GradCurveSample.mint, GradCurveSample.v_quote_reserves,
-                           GradCurveSample.v_token_reserves)
+                           GradCurveSample.v_token_reserves,
+                           GradCurveSample.complete)
                     .where(GradCurveSample.mint.in_(missing),
                            GradCurveSample.v_quote_reserves > 0,
                            GradCurveSample.v_token_reserves > 0,
@@ -589,6 +609,13 @@ class Tournament:
                     .distinct(GradCurveSample.mint)
                     .order_by(GradCurveSample.mint,
                               GradCurveSample.ts.desc()))).all():
+                if r.complete:
+                    # A graduated token's curve is dead, and its last price is
+                    # a fraction of where the pool trades — the early arm opens
+                    # before DexScreener has a pool row, and would be marked
+                    # -99% on it. No mark is the truthful answer until a pool
+                    # sample exists.
+                    continue
                 price = r.v_quote_reserves / r.v_token_reserves
                 marks[r.mint] = (price, _curve_depth_usd(r.v_quote_reserves, rate))
         return marks
@@ -871,8 +898,74 @@ class Tournament:
         await live_decisions.record(self._session, mirror)
         return opened
 
+    async def _fill_early(self) -> int:
+        """Buy pools the recorder saw reach B3's depth on their own reserves.
+
+        Separate from `_fill` for the reason `_fill_curve` is: the candidates
+        come from another table, and the price and depth are the pool's own
+        rather than DexScreener's. The conventions are B3's, so the two can be
+        compared: the position opens AT the signal (as B3's opens at its first
+        sample), is sized at the same $100 against the same depth, and pays
+        the same impact and fees.
+        """
+        arms = [a for a in ARMS if a.entry == "early_B3"]
+        if not arms:
+            return 0
+        rows = (await self._session.execute(
+            select(GradEarlyOpen, GradToken.symbol)
+            .outerjoin(GradToken, GradToken.mint == GradEarlyOpen.mint)
+            .where(GradEarlyOpen.crossed_at >= self._now - timedelta(
+                       seconds=config.EARLY_MAX_AGE_S),
+                   GradEarlyOpen.crossed_at <= self._now))).all()
+        if not rows:
+            return 0
+        taken = {(b, m) for b, m in (await self._session.execute(
+            select(GradPaperPosition.book, GradPaperPosition.mint)
+            .where(GradPaperPosition.mint.in_([r[0].mint for r in rows]))))
+            .all()}
+        counts = await self._open_counts()
+        opened = 0
+        for early, symbol in rows:
+            rate = _rate(early.sol_usd * early.price_native, early.price_native)
+            if rate is None or early.price_native <= 0:
+                continue
+            impact = amm_impact(config.PAPER_NOTIONAL_USD, early.depth_usd)
+            if impact is None or impact > config.PAPER_MAX_IMPACT:
+                continue
+            notional_quote = (config.PAPER_NOTIONAL_USD / rate).quantize(_Q)
+            leg = costs(notional_quote)
+            fill = amm_buy(early.price_native, order_usd=config.PAPER_NOTIONAL_USD,
+                           liquidity_usd=early.depth_usd,
+                           fee_fraction=leg.fee_fraction)
+            if fill is None or fill <= 0:
+                continue
+            for arm in arms:
+                if ((arm.name, early.mint) in taken
+                        or counts.get(arm.name, 0) >= config.PAPER_MAX_SLOTS):
+                    continue
+                self._session.add(GradPaperPosition(
+                    book=arm.name, mint=early.mint, symbol=symbol,
+                    opened_at=early.crossed_at,
+                    open_quote=early.price_native.quantize(_P),
+                    open_fill=fill.quantize(_P),
+                    notional_usd=config.PAPER_NOTIONAL_USD,
+                    sol_usd_at_open=rate.quantize(Decimal("0.000001")),
+                    notional_quote=notional_quote,
+                    tokens=(notional_quote / fill).quantize(_Q),
+                    peak_quote=early.price_native.quantize(_P),
+                    last_quote=early.price_native.quantize(_P),
+                    liq_open_usd=early.depth_usd,
+                    impact_open=impact.quantize(Decimal("0.000001")),
+                    marked_at=self._now))
+                counts[arm.name] = counts.get(arm.name, 0) + 1
+                taken.add((arm.name, early.mint))
+                opened += 1
+        if opened:
+            logger.info("graduation_tournament_early_filled", opened=opened)
+        return opened
+
     async def _fill(self) -> int:
-        opened_curve = await self._fill_curve()
+        opened_curve = await self._fill_curve() + await self._fill_early()
         rows = await self._candidates()
         if not rows:
             return opened_curve

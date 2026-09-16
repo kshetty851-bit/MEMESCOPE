@@ -54,7 +54,7 @@ def test_the_tournament_is_a_hold_sweep_with_a_baseline_on_every_hold() -> None:
     One baseline per hold, so no hold is judged without an unselected twin on
     its own clock. Nothing on this board decides by hashing a mint.
     """
-    assert len(ARMS) == 7
+    assert len(ARMS) == 8
     # The BASELINE is back (2026-09-16). Without one the board could not tell a
     # profitable arm from a rising market — every arm here is a SUBSET of the
     # floor arm's population, so beating it is the claim each one makes.
@@ -578,3 +578,84 @@ async def test_a_tick_that_finds_another_running_steps_aside(monkeypatch) -> Non
     monkeypatch.setattr(scheduler, "SessionFactory", Locked)
     monkeypatch.setattr(scheduler, "Tournament", NeverBuilt)
     assert await scheduler.paper_tick() == {"skipped": "graduation_paper_tick_running"}
+
+
+
+class _Answers:
+    """A session that answers each query with the next scripted rows."""
+
+    def __init__(self, *answers):
+        self.answers, self.statements, self.added = list(answers), [], []
+
+    async def execute(self, statement):
+        from types import SimpleNamespace
+
+        self.statements.append(statement)
+        rows = self.answers.pop(0)
+        return SimpleNamespace(all=lambda: rows,
+                               first=lambda: rows[0] if rows else None)
+
+    def add(self, obj):
+        self.added.append(obj)
+
+
+def test_the_early_arm_is_b3_bought_earlier_not_a_new_rule() -> None:
+    from app.labs.graduation.tournament import BAND_BY_KEY
+
+    early, b3 = BY_NAME["B3E_198k_5m"], BY_NAME["B3_198k_5m"]
+    assert (early.hold, early.stop, early.tp, early.trail) == (
+        b3.hold, b3.stop, b3.tp, b3.trail)
+    assert BAND_BY_KEY[b3.entry][0] == config.EARLY_FLOOR_USD
+    assert not early.ab_experiment and not early.is_control
+    # Never from DexScreener's pool open, however deep: that would be B3 again.
+    assert not accepts(early, open_at=NIGHT, **{**TOKEN, "liquidity": D(5_000_000)})
+
+
+async def test_the_early_arm_buys_the_crossing_at_the_pools_own_price() -> None:
+    from types import SimpleNamespace
+
+    from sqlalchemy.dialects import postgresql
+
+    from app.labs.graduation.tournament import Tournament
+
+    crossing = SimpleNamespace(
+        mint="EarlyMint", crossed_at=NIGHT - timedelta(seconds=4),
+        price_native=D("0.0000012"), depth_usd=D("250000"), sol_usd=D("100"))
+    session = _Answers([(crossing, "EARLY")], [], [])
+    assert await Tournament(session, now=NIGHT)._fill_early() == 1
+    (position,) = session.added
+    assert position.book == "B3E_198k_5m"
+    assert position.opened_at == crossing.crossed_at
+    assert position.open_quote == crossing.price_native
+    assert position.open_fill > position.open_quote     # fee and impact paid
+    assert position.liq_open_usd == crossing.depth_usd
+    assert position.sol_usd_at_open == D("100")
+    query = str(session.statements[0].compile(dialect=postgresql.dialect()))
+    assert "grad_early_opens.crossed_at >=" in query
+    assert "grad_early_opens.crossed_at <=" in query
+
+    # Already held: not bought twice.
+    again = _Answers([(crossing, "EARLY")], [("B3E_198k_5m", "EarlyMint")], [])
+    assert await Tournament(again, now=NIGHT)._fill_early() == 0
+    # A pool too shallow for $100 to fill is refused, as B3's would be.
+    thin = SimpleNamespace(**{**crossing.__dict__, "depth_usd": D("500")})
+    assert await Tournament(_Answers([(thin, None)], [], []), now=NIGHT)._fill_early() == 0
+
+
+async def test_a_graduated_curve_is_never_a_mark() -> None:
+    """The early arm opens before DexScreener has a pool row. The token's last
+    curve price is a fraction of the pool's, and marking on it would book a
+    -99% that never happened."""
+    from types import SimpleNamespace
+
+    from app.labs.graduation.tournament import Tournament
+
+    dead = SimpleNamespace(mint="EarlyMint", v_quote_reserves=D(85),
+                           v_token_reserves=D(206_900_000), complete=True)
+    live = SimpleNamespace(mint="Climbing", v_quote_reserves=D(60),
+                           v_token_reserves=D(400_000_000), complete=False)
+    rate = SimpleNamespace(price_usd=D("0.0002"), price_native=D("0.000002"))
+    session = _Answers([], [], [rate], [dead, live])
+    marks = await Tournament(session, now=NIGHT)._latest_prices(["EarlyMint", "Climbing"])
+    assert "EarlyMint" not in marks
+    assert marks["Climbing"][0] == D(60) / D(400_000_000)

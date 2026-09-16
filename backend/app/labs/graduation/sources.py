@@ -581,6 +581,30 @@ class HeldVaultStream:
             raise ConnectionError(f"accounts of pool {pool} unread")
         return held_watch.watch(mint, pool, state, accounts)
 
+    async def pool_from_migration(self, mint: str, signature: str) -> str | None:
+        """The pumpswap pool a graduation created, read off its own transaction.
+
+        The migration feed names the venue, not the pool, and deriving the pool
+        address matched DexScreener's pair for 0 of 146 recent graduations;
+        the transaction's accounts matched 10 of 10 (2026-09-16). Raises when
+        the node did not answer — a transaction too new to read, or a 429 —
+        so the caller asks again; None means no pool for this mint is there.
+        """
+        tx = await self._call("getTransaction", [signature, {
+            "encoding": "json", "commitment": "confirmed",
+            "maxSupportedTransactionVersion": 0}])
+        keys = held_watch.transaction_accounts(tx)
+        if not keys:
+            raise ConnectionError(f"migration {signature[:12]} not readable yet")
+        found: str | None = None
+        for start in range(0, len(keys), 100):
+            batch = keys[start:start + 100]
+            slot, raws = await self.accounts(batch)
+            if not slot:
+                raise ConnectionError(f"accounts of migration {signature[:12]} unread")
+            found = found or held_watch.pool_among(mint, batch, raws)
+        return found
+
     async def _read(self, helds: Sequence[held_watch.Held]) -> None:
         """Both balances of each pool, straight from the chain."""
         slot, raws = await self.accounts(

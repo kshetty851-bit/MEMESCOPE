@@ -299,6 +299,28 @@ HELD_SCALE_BAND = _dec("LAB_GRADUATION_HELD_SCALE_BAND", "2")
 #: Keepalive on the socket, seconds. A half-open connection reads exactly like
 #: a quiet market; a missed pong turns it into a drop within two of these.
 HELD_PING_S = _int("LAB_GRADUATION_HELD_PING_S", 5)
+#: THE EARLY ARM, B3E_198k_5m. Every pumpswap graduation's pool is watched on
+#: the vault socket for this long after the migration, and the first reading
+#: at B3's depth is an entry.
+#:
+#: Ninety seconds, from where B3's own entries land: DexScreener first reports
+#: a B3 pool a median 52s after the migration (p10 27s, p90 84.5s — 175 entries
+#: over 48h, 2026-09-16). Watching longer would buy pools B3 never could have.
+EARLY_WINDOW_S = _int("LAB_GRADUATION_EARLY_WINDOW_S", 90)
+#: A crossing older than this is not an entry: a wallet acts on one in
+#: seconds, and the book ticks every ten.
+EARLY_MAX_AGE_S = _int("LAB_GRADUATION_EARLY_MAX_AGE_S", 30)
+#: B3's floor, in dollars of pool depth. `test_tournament` holds it to the band.
+EARLY_FLOOR_USD = Decimal(198_000)
+#: Wrapped SOL. Depth is priced with the SOL rate, so only a SOL-quoted pool
+#: can be priced here at all.
+WSOL_MINT = "So11111111111111111111111111111111111111112"
+#: The migration feed's name for a pumpswap graduation — the only venue whose
+#: pool `parse_pool` reads.
+PUMPSWAP_VENUE = "pump-amm"
+#: DexScreener's name for the pump.fun bonding curve, which is not a pool.
+#: See `PostGradSampler._accept`.
+CURVE_DEX_ID = "pumpfun"
 #: `/tokens/v1/{chain}/{addresses}` takes a comma-separated list. Thirty is the
 #: documented ceiling and the number the Breakout lab measured against.
 DEXSCREENER_BATCH = 30

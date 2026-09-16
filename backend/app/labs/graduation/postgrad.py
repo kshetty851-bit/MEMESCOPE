@@ -205,6 +205,8 @@ class PostGradSampler:
         #: Samples refused because they came from a pool the position was not
         #: opened against. A non-zero count here is the sampler working.
         self.pair_rejected = 0
+        #: Samples refused because the "pair" was the dead bonding curve.
+        self.curve_rejected = 0
 
     def __len__(self) -> int:
         return len(self.states)
@@ -317,6 +319,14 @@ class PostGradSampler:
         """
         state = self.states.get(row["mint"])
         if state is None:
+            return False
+        if row.get("dex_id") == config.CURVE_DEX_ID:
+            # The bonding curve is not a pool. After a graduation DexScreener
+            # still lists the dead curve pair — ALONE, until it has indexed the
+            # pumpswap pool — and pinning it froze 304 of 1,085 graduations
+            # (2026-09-16) on one price while the real pool was refused for the
+            # rest of their hour. Refused here, the first row kept is the pool.
+            self.curve_rejected += 1
             return False
         pair = row.get("pair_address")
         if state.pair_address is None:

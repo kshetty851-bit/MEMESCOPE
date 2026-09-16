@@ -320,6 +320,42 @@ class GradPostgradSample(Base):
     txns_h1_sells: Mapped[int | None] = mapped_column(Integer)
 
 
+class GradEarlyOpen(Base):
+    """The first moment a new pool's OWN reserves showed B3's depth.
+
+    Written by the recorder, which watches every pumpswap graduation's pool on
+    the vault socket for `EARLY_WINDOW_S` after the migration, and read by the
+    early arm, which buys at that moment rather than waiting for DexScreener
+    to list the pool — a median 52s after the migration for B3's own entries.
+
+    One row per mint, and only for pools that got deep enough in time: the
+    first crossing is the signal, and a later one is not a second signal.
+    Kept out of `grad_postgrad_samples` on purpose — every "first sample"
+    query there defines the pool open, and a socket row landing before
+    DexScreener's would silently move every other arm's entry.
+    """
+
+    __tablename__ = "grad_early_opens"
+    __table_args__ = (
+        Index("ix_grad_early_opens_crossed_at", "crossed_at"),
+    )
+
+    mint: Mapped[str] = mapped_column(_ADDRESS, primary_key=True)
+    pool: Mapped[str] = mapped_column(_ADDRESS, nullable=False)
+    migrated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False)
+    #: The first reading, and the depth then. A crossing AT the first reading
+    #: means the pool was already deep by the time it could be looked at.
+    first_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False)
+    first_depth_usd: Mapped[Decimal] = mapped_column(Numeric(24, 2), nullable=False)
+    crossed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False)
+    price_native: Mapped[Decimal] = mapped_column(_PRICE, nullable=False)
+    depth_usd: Mapped[Decimal] = mapped_column(Numeric(24, 2), nullable=False)
+    sol_usd: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
+
+
 class GradCheckpoint(Base):
     """The state of one token the first time it polled at one level.
 

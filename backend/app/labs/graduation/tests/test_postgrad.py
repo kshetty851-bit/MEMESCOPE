@@ -334,3 +334,23 @@ async def test_fresh_rows_can_be_taken_without_waiting_for_the_backfill() -> Non
     assert market.ohlcv_calls == []
     assert [r["source"] for r in await sampler.backfill(NOW)] == ["geckoterminal"]
     assert market.ohlcv_calls[0][0] == "pool1"
+
+
+async def test_the_dead_curve_pair_is_never_pinned() -> None:
+    """After a graduation DexScreener still lists the pump.fun curve — alone,
+    until it has indexed the pumpswap pool. Pinning it froze 304 of 1,085
+    graduations (2026-09-16) on one price, with the real pool refused for the
+    rest of their hour."""
+    curve = {**PAIRS[0], "dexId": "pumpfun", "pairAddress": "CurvePair"}
+    pool = {**PAIRS[0], "dexId": "pumpswap", "pairAddress": "PoolPair"}
+    market = FakeMarket(pairs=[curve])
+    sampler = PostGradSampler(market=market)
+    sampler.start(MINT, NOW)
+    assert await sampler.poll(NOW, backfill=False) == []
+    assert sampler.states[MINT].pair_address is None
+    assert sampler.curve_rejected == 1
+    market.pairs = [curve, pool]
+    rows = await sampler.poll(NOW + timedelta(seconds=config.POSTGRAD_INTERVAL_S),
+                              backfill=False)
+    assert [r["pair_address"] for r in rows] == ["PoolPair"]
+    assert sampler.states[MINT].pair_address == "PoolPair"

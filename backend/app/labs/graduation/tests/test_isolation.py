@@ -30,10 +30,11 @@ MIGRATIONS = (
     BACKEND / "alembic" / "versions" / "20260911_0070_graduation_rpc_polling.py",
     BACKEND / "alembic" / "versions" / "20260911_0071_graduation_features.py",
     BACKEND / "alembic" / "versions" / "20260911_0073_graduation_paper_book.py",
+    BACKEND / "alembic" / "versions" / "20260916_0088_grad_early_opens.py",
 )
-TABLES = ["grad_checkpoints", "grad_curve_samples", "grad_features",
-          "grad_migrations", "grad_paper_positions", "grad_postgrad_samples",
-          "grad_tokens", "grad_trades"]
+TABLES = ["grad_checkpoints", "grad_curve_samples", "grad_early_opens",
+          "grad_features", "grad_migrations", "grad_paper_positions",
+          "grad_postgrad_samples", "grad_tokens", "grad_trades"]
 
 FORBIDDEN_MODULES = (
     "app.paper", "app.paper_v2", "app.karthik", "app.karthik_ops",
@@ -224,6 +225,7 @@ def test_each_migration_creates_the_tables_it_claims() -> None:
         "0070": ["grad_curve_samples", "grad_postgrad_samples"],
         "0071": ["grad_features"],
         "0073": ["grad_paper_positions"],
+        "0088": ["grad_early_opens"],
     }
     for path, expected in zip(MIGRATIONS, by_migration.values(), strict=True):
         created = re.findall(r'op\.create_table\(\s*"([^"]+)"', path.read_text())

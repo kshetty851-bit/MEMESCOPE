@@ -36,7 +36,7 @@ from typing import Any
 
 from app.core.config import settings
 from app.labs.graduation import config
-from app.security.liquidity import PoolState, b58encode, derive_or_none
+from app.security.liquidity import PoolState, b58encode, derive_or_none, parse_pool
 
 #: An SPL token account holds its balance as a little-endian u64 at byte 64,
 #: after the 32-byte mint and 32-byte owner. Standard across every SPL account,
@@ -88,6 +88,7 @@ class Held:
     #: direct read, and not always in order; an older slot is dropped rather
     #: than allowed to rewind the price.
     slot: int = 0
+    quote_mint: str = ""
 
     def apply(self, side: str, amount: int, slot: int) -> bool:
         if slot < self.slot:
@@ -152,7 +153,92 @@ def watch(mint: str, pool_address: str, pool: PoolState | None,
         return None
     return Held(mint=mint, pool=pool_address, base_vault=pool.base_vault,
                 quote_vault=pool.quote_vault, base_decimals=base_decimals,
-                quote_decimals=quote_decimals)
+                quote_decimals=quote_decimals, quote_mint=pool.quote_mint)
+
+
+def transaction_accounts(tx: Any) -> list[str]:
+    """Every account a transaction named: its static keys and any it loaded
+    from an address-lookup table."""
+    if not isinstance(tx, dict):
+        return []
+    message = (tx.get("transaction") or {}).get("message") or {}
+    keys = [k for k in message.get("accountKeys") or [] if isinstance(k, str)]
+    loaded = (tx.get("meta") or {}).get("loadedAddresses") or {}
+    for part in ("writable", "readonly"):
+        keys += [k for k in loaded.get(part) or [] if isinstance(k, str)]
+    return keys
+
+
+def pool_among(mint: str, keys: Sequence[str],
+               accounts: Sequence[bytes | None]) -> str | None:
+    """The one pumpswap pool among these accounts whose base is this mint.
+
+    More than one is refused as firmly as none: a migration creates exactly
+    one pool, and guessing between two is how a position gets marked against
+    the wrong instrument.
+    """
+    found = {key for key, raw in zip(keys, accounts, strict=False)
+             if (state := parse_pool(raw)) is not None and state.base_mint == mint}
+    return found.pop() if len(found) == 1 else None
+
+
+@dataclass(slots=True)
+class EarlyWatch:
+    """New graduates, watched from the migration until their pool is deep
+    enough or the window closes.
+
+    The early arm buys the first moment a pool's OWN reserves show B3's depth,
+    instead of waiting for DexScreener to list the pool — which it did a median
+    52s after the migration for B3's own entries. Nothing here is a price feed
+    for positions: it answers one question per mint, once.
+    """
+
+    floor_usd: Decimal
+    window_s: float
+    #: mint -> (migrated_at, migration signature)
+    due: dict[str, tuple[datetime, str]] = field(default_factory=dict)
+    #: mint -> (first reading, depth then)
+    first: dict[str, tuple[datetime, Decimal]] = field(default_factory=dict)
+
+    def add(self, mint: str, migrated_at: datetime, signature: str) -> None:
+        self.due.setdefault(mint, (migrated_at, signature))
+
+    def drop(self, mint: str) -> None:
+        self.due.pop(mint, None)
+        self.first.pop(mint, None)
+
+    def expire(self, now: datetime) -> list[str]:
+        """Close the windows that have run out, and name them."""
+        done = [m for m, (at, _) in self.due.items()
+                if (now - at).total_seconds() > self.window_s]
+        for mint in done:
+            self.drop(mint)
+        return done
+
+    def observe(self, held: Held, quote_usd: Decimal | None,
+                at: datetime) -> dict[str, Any] | None:
+        """The early-open row, the first time this pool reads deep enough.
+
+        Only a SOL-quoted pool can be priced with the SOL rate, and a reading
+        after the window is not an entry, however deep.
+        """
+        entry = self.due.get(held.mint)
+        if (entry is None or held.quote_mint != config.WSOL_MINT
+                or not quote_usd or quote_usd <= 0
+                or (at - entry[0]).total_seconds() > self.window_s):
+            return None
+        depth = held.depth_usd(quote_usd)
+        price = held.price()
+        if depth is None or price is None:
+            return None
+        first_at, first_depth = self.first.setdefault(held.mint, (at, depth))
+        if depth < self.floor_usd:
+            return None
+        self.drop(held.mint)
+        return {"mint": held.mint, "pool": held.pool, "migrated_at": entry[0],
+                "first_seen_at": first_at, "first_depth_usd": first_depth,
+                "crossed_at": at, "price_native": price,
+                "depth_usd": depth, "sol_usd": quote_usd}
 
 
 @dataclass(slots=True)
