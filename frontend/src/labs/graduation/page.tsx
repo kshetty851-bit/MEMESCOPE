@@ -845,7 +845,7 @@ function LeaderboardPanel() {
         </p>
 
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[680px] table-fixed border-collapse text-sm">
+          <table className="w-full min-w-[980px] table-fixed border-collapse text-sm">
             <colgroup>
               <col className="w-10" />
               <col />
@@ -853,7 +853,10 @@ function LeaderboardPanel() {
               <col className="w-32" />
               <col className="w-16" />
               <col className="w-20" />
-              <col className="w-32" />
+              <col className="w-24" />
+              <col className="w-24" />
+              <col className="w-24" />
+              <col className="w-24" />
             </colgroup>
             <thead>
               <tr className="text-label uppercase tracking-[0.08em] text-ink-dim">
@@ -873,9 +876,22 @@ function LeaderboardPanel() {
                 </th>
                 <th className="pb-2 pr-3 text-right font-medium">Open</th>
                 <th className="pb-2 pr-3 text-right font-medium">Closed</th>
-                <th className="pb-2 pr-1 text-right font-medium">
-                  Expected <span className="text-ink-dim">in 30d</span>
-                </th>
+                {/* Four horizons side by side rather than one collapsed cell.
+                    They are PREFIXES of the same simulated path, so they cannot
+                    contradict each other — a wallet dead at 1d is dead at 30d —
+                    and seeing them together is the only way to read the shape
+                    of the forecast instead of one number from it. A blank means
+                    the history does not reach a tenth of the way to that
+                    horizon, which is a refusal, not a zero. */}
+                {(["1d", "1w", "15d", "30d"] as const).map((h) => (
+                  <th
+                    key={h}
+                    className="pb-2 pr-1 text-right font-medium"
+                    title="Where your $100 lands if the arm keeps doing what it has done — projected from the trades the wallet could actually fund. Blank means too little history to say."
+                  >
+                    {h}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
@@ -1023,44 +1039,42 @@ function LeaderboardPanel() {
                         reach for it, otherwise the longest horizon it CAN
                         support, labelled. An empty column is less use than a
                         shorter honest one. */}
-                    <td className="py-2.5 pr-1 text-right">
-                      {(() => {
-                        const steps = [
-                          [a.projected_30d_usd, "in 30 days"],
-                          [a.projected_15d_usd, "only 15 days ahead"],
-                          [a.projected_1w_usd, "only 1 week ahead"],
-                          [a.projected_1d_usd, "only 1 day ahead"],
-                        ] as const;
-                        const got = steps.find(([v]) => v !== null);
-                        if (!got) {
-                          return (
-                            <span className="text-micro text-ink-dim">
-                              too few trades
-                            </span>
-                          );
-                        }
-                        return (
-                          <>
-                            <span
-                              className={`grad-figure font-medium tabular-nums ${
-                                Number(got[0]) >= Number(data.wallet_demo_usd)
-                                  ? "text-up"
-                                  : "text-down"
-                              }`}
-                            >
-                              {usd(got[0])}
-                            </span>
-                            <span className="block text-micro text-ink-dim">
-                              {got[1]}
-                            </span>
-                          </>
-                        );
-                      })()}
-                    </td>
+                    {(
+                      [
+                        a.projected_1d_usd,
+                        a.projected_1w_usd,
+                        a.projected_15d_usd,
+                        a.projected_30d_usd,
+                      ] as const
+                    ).map((v, i) => (
+                      <td
+                        key={i}
+                        className="py-2.5 pr-1 text-right align-top"
+                      >
+                        {v === null ? (
+                          <span
+                            className="text-micro text-ink-dim"
+                            title="Not enough history to reach a tenth of the way to this horizon."
+                          >
+                            &mdash;
+                          </span>
+                        ) : (
+                          <span
+                            className={`grad-figure font-medium tabular-nums ${
+                              Number(v) >= Number(data.wallet_demo_usd)
+                                ? "text-up"
+                                : "text-down"
+                            }`}
+                          >
+                            {usd(v)}
+                          </span>
+                        )}
+                      </td>
+                    ))}
                   </tr>
                   {expanded === a.name ? (
                     <tr>
-                      <td colSpan={7} className="p-0">
+                      <td colSpan={10} className="p-0">
                         <ArmTrades name={a.name} />
                       </td>
                     </tr>
@@ -1109,12 +1123,15 @@ function LeaderboardPanel() {
             open below.
             <br />
             <span className="mt-1 block">
-              <b className="text-ink">Expected</b> is where{" "}
+              <b className="text-ink">1d / 1w / 15d / 30d</b> is where{" "}
               <b className="text-ink">your {usd(data.wallet_demo_usd)}</b> lands
               if the arm keeps doing exactly what it has done — projected from
               the trades that wallet could actually FUND, at the rate it funds
-              them, not from every trade the arm made. It is an{" "}
-              <b className="text-ink">estimate, not a promise</b> — run forward a
+              them, not from every trade the arm made. The four are prefixes of
+              one simulated path, so they cannot disagree: a wallet dead at a day
+              is dead at a month. A dash means the arm has not run a tenth of the
+              way to that horizon, and a blank is a refusal rather than a zero.
+              It is an <b className="text-ink">estimate, not a promise</b> — run forward a
               thousand times from the trades so far, and the middle one shown. An
               arm only gets a 30-day figure once its own history reaches a tenth
               of the way there; otherwise the longest horizon it can honestly
