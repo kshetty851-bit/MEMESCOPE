@@ -727,6 +727,13 @@ class GradPaperPosition(Base):
     #: Why this trade counts for nothing, or NULL. Set only by a restatement
     #: (see `GradPaperRestatement`); the row is kept and shown, never summed.
     excluded: Mapped[str | None] = mapped_column(String(32))
+    #: When the token graduated, as the migration feed said. An arm whose
+    #: clock starts at graduation reads this.
+    graduated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    #: A stop that fired: the moment from which the sale is priced (the mark
+    #: it fired on plus the reaction time), and which stop it was.
+    exit_signal_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    exit_signal: Mapped[str | None] = mapped_column(String(24))
 
 
 class GradPaperRestatement(Base):

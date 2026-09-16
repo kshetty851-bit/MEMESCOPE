@@ -311,6 +311,16 @@ async def _has_work() -> bool:
         switch = await AutotradeSwitchService(session).state()
         if not (switch.enabled and switch.nominated_strategy):
             return False
+        # The graduation arm's decisions land mid-minute and go stale in sixty
+        # seconds, so a loop that only notices them at the next beat buys up to
+        # a minute late — measured at a median 55s behind the paper book. While
+        # it is the nominated strategy, the loop runs its whole window and the
+        # driver looks every pass; the driver's first question is a single
+        # query, so an empty pass costs almost nothing.
+        from app.labs.graduation.live_spec import BY_ID as GRADUATION
+
+        if switch.nominated_strategy.upper() in GRADUATION:
+            return True
         cutoff = utcnow() - RealWalletDriver._decision_age(
             switch.nominated_strategy)
         fresh = await session.scalar(

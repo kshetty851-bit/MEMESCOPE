@@ -57,7 +57,7 @@ def _configured(monkeypatch):
     monkeypatch.setattr(settings, "REAL_WALLET_MAX_OPEN_POSITIONS", 1)
 
 
-async def _decision(session, *, strategy="V6-06", mint=MINT, at=None, eligible=True):
+async def _decision(session, *, strategy="V7-06", mint=MINT, at=None, eligible=True):
     strat = await LabService(session).activate(valid_from=NOW - timedelta(days=1))
     row = (await session.execute(
         select(LabDecision).limit(1)
@@ -75,7 +75,7 @@ async def _decision(session, *, strategy="V6-06", mint=MINT, at=None, eligible=T
     await session.flush()
 
 
-async def _switch_on(session, strategy="V6-06"):
+async def _switch_on(session, strategy="V7-06"):
     await AutotradeSwitchService(session).start(
         actor="op@x.com", reason="testing the driver", strategy_id=strategy, at=NOW
     )
@@ -98,7 +98,7 @@ async def test_it_creates_one_intent_when_everything_allows_it(db_session):
     assert intent.side == "BUY"
     assert intent.requested_usd == Decimal("5")
     assert intent.wallet_public_key == WALLET
-    assert intent.strategy_id == "V6-06"
+    assert intent.strategy_id == "V7-06"
 
 
 async def test_it_creates_at_most_one_intent_per_tick(db_session):
@@ -121,8 +121,8 @@ async def test_it_never_trades_the_same_mint_twice(db_session):
 
 
 async def test_it_only_trades_the_nominated_strategy(db_session):
-    await _decision(db_session, strategy="V6-05")
-    await _switch_on(db_session, strategy="V6-06")
+    await _decision(db_session, strategy="V7-05")
+    await _switch_on(db_session, strategy="V7-06")
     out = await RealWalletDriver(db_session).tick(now=NOW)
     assert out.created == 0
     assert out.skipped == "no_fresh_candidate"

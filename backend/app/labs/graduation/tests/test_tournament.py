@@ -59,7 +59,7 @@ def test_the_tournament_is_a_hold_sweep_with_a_baseline_on_every_hold() -> None:
     One baseline per hold, so no hold is judged without an unselected twin on
     its own clock. Nothing on this board decides by hashing a mint.
     """
-    assert len(ARMS) == 8
+    assert len(ARMS) == 10
     # The BASELINE is back (2026-09-16). Without one the board could not tell a
     # profitable arm from a rising market — every arm here is a SUBSET of the
     # floor arm's population, so beating it is the claim each one makes.
@@ -82,7 +82,8 @@ def test_arms_differ_only_in_entry_and_exit() -> None:
     # competes with nothing here, so ranking it beside the arms invited
     # "delete the losing ones" — which would have ended it three weeks early.
     assert set(Arm.__dataclass_fields__) == {
-        "name", "entry", "hold", "tp", "trail", "stop", "note", "ab_experiment"}
+        "name", "entry", "hold", "tp", "trail", "stop", "drain", "clock",
+        "note", "ab_experiment"}
     assert all(a.ab_experiment is False for a in ARMS if a.entry.startswith("liq_")), (
         "a tournament arm flagged as an experiment would vanish from its own "
         "comparison")
@@ -151,13 +152,16 @@ def test_the_filters_split_the_population_the_way_they_claim() -> None:
     # retired and 3m until B3_198k_3m was, and each time it silently fell to an
     # empty set and asserted nothing. Taking the hold from the arms themselves
     # means a retirement can never quietly switch this test off.
-    band_holds = sorted({a.hold for a in ARMS if a.entry.startswith("liq_")})
+    # Exit VARIANTS of a band arm (a stop, a drain, a clock from graduation)
+    # buy exactly what it buys by design; the overlap rule is about bands.
+    plain = [a for a in ARMS if a.entry.startswith("liq_") and a.stop is None
+             and a.drain is None and a.clock == "entry"]
+    band_holds = sorted({a.hold for a in plain})
     assert band_holds, "no band arms left — this test would assert nothing"
     probe_hold = band_holds[0]
     for liq in (250_000, 5_000_000):
-        hit = [a.name for a in ARMS
-               if a.hold == probe_hold and a.entry.startswith("liq_")
-               and took(a.name, DAY, liquidity=D(liq))]
+        hit = [a.name for a in plain
+               if a.hold == probe_hold and took(a.name, DAY, liquidity=D(liq))]
         assert len(hit) == 1, (liq, hit)
     # And nothing below the floor is bought at all — that is the whole point.
     assert not any(took(a.name, DAY, liquidity=D(40_000))
@@ -631,6 +635,7 @@ async def test_the_early_arm_buys_the_crossing_at_the_pools_own_price() -> None:
 
     crossing = SimpleNamespace(
         mint=REAL_MINT, pool=REAL_POOL, crossed_at=NIGHT - timedelta(seconds=4),
+        migrated_at=NIGHT - timedelta(seconds=30),
         price_native=D("0.0000012"), depth_usd=D("250000"), sol_usd=D("100"))
     session = _Answers([(crossing, "EARLY")], [], [])
     assert await Tournament(session, now=NIGHT)._fill_early() == 1
@@ -865,6 +870,7 @@ async def test_a_token_that_never_graduated_is_not_bought(monkeypatch) -> None:
     def candidate(pair):
         return SimpleNamespace(
             mint=REAL_MINT, open_at=NIGHT, price_native=D("0.00008"),
+            graduated_at=NIGHT - timedelta(seconds=40),
             price_usd=D("0.008"), pair_address=pair,
             liquidity_usd=D("250000"), fdv=D("8000000"), txns_m5_sells=1,
             txns_m5_buys=50, symbol=None, first_seen_at=None)
@@ -873,10 +879,10 @@ async def test_a_token_that_never_graduated_is_not_bought(monkeypatch) -> None:
         return 0
 
     monkeypatch.setattr(tournament.live_decisions, "record", no_mirror)
-    # Five arms take a $250k pool: the baseline, the three B3 arms and the
+    # Seven arms take a $250k pool: the baseline, the five B3 arms and the
     # all-graduations A/B control. B5 needs $500k; B3E and the night A/B do not
     # buy from this query.
-    for pair, bought in ((OTHER_POOL, 0), (REAL_POOL, 5)):
+    for pair, bought in ((OTHER_POOL, 0), (REAL_POOL, 7)):
         session = _Answers([], [], [])
         session.statements = []
         t = Tournament(session, now=NIGHT)
@@ -887,3 +893,84 @@ async def test_a_token_that_never_graduated_is_not_bought(monkeypatch) -> None:
         monkeypatch.setattr(t, "_candidates", rows)
         assert await t._fill() == bought
         assert all(p.pool_fee_bps == 40 for p in session.added)
+
+
+# --- the rug arms ------------------------------------------------------------
+
+def test_the_rug_arms_say_what_they_do() -> None:
+    assert BY_NAME["B3_198k_5m_DR"].exit_rule == (
+        "whichever comes first: the pool loses 20% of its SOL, or 5 minutes")
+    assert BY_NAME["B3_198k_g4"].exit_rule == "at 4 minutes after graduating"
+    # Variants of B3, never baselines.
+    assert not BY_NAME["B3_198k_5m_DR"].is_control
+    assert not BY_NAME["B3_198k_g4"].is_control
+
+
+def test_a_graduation_clock_counts_from_the_graduation() -> None:
+    from app.labs.graduation.tournament import _due, _time_left
+
+    graduated = NIGHT - timedelta(seconds=50)
+    position = _open_position(NIGHT, book="B3_198k_g4")
+    position.graduated_at = graduated
+    assert _due(position) == graduated + timedelta(minutes=4)
+    # Unknown graduation: the entry is all there is to count from.
+    position.graduated_at = None
+    assert _due(position) == NIGHT + timedelta(minutes=4)
+    g4, b3 = BY_NAME["B3_198k_g4"], BY_NAME["B3_198k_5m"]
+    # A pool listed three minutes in still has a minute to hold; one listed
+    # later would be bought and sold in the same breath.
+    assert _time_left(g4, graduated + timedelta(minutes=3), graduated)
+    assert not _time_left(g4, graduated + timedelta(minutes=3, seconds=1), graduated)
+    assert not _time_left(g4, NIGHT, None)
+    assert _time_left(b3, graduated + timedelta(minutes=30), None)
+
+
+async def test_a_drain_stop_sells_on_the_market_after_it_fires() -> None:
+    """FAIR went from 2,960 SOL to 41 in one second; USGR took twenty. A stop
+    that fired on a drained mark and sold AT that mark would book a price the
+    drain had already left behind, so the sale is the first mark after the
+    stop plus the time a wallet needs to act."""
+    from app.labs.graduation.tournament import Tournament
+
+    opened = NIGHT - timedelta(minutes=1)
+    position = _open_position(opened, book="B3_198k_5m_DR")
+    draining = _row(NIGHT - timedelta(seconds=2), "0.00031", "440000", source="held_ws")
+    first = await Tournament(_Tick([position], [draining], [draining]),
+                             now=NIGHT)._manage()
+    assert first == 0 and position.closed_at is None
+    assert position.exit_signal == "drain_stop"
+    assert position.exit_signal_at == draining.ts + timedelta(
+        seconds=config.EXIT_REACTION_S)
+
+    later = NIGHT + timedelta(seconds=10)
+    after = _row(NIGHT + timedelta(seconds=4), "0.00020", "350000", source="held_ws")
+    session = _Tick([position], [after], [after], [draining, after])
+    assert await Tournament(session, now=later)._manage() == 1
+    assert position.close_reason == "drain_stop"
+    assert position.close_quote == D("0.00020")
+
+
+async def test_a_pool_that_holds_its_depth_does_not_trip_the_drain_stop() -> None:
+    from app.labs.graduation.tournament import Tournament
+
+    position = _open_position(NIGHT - timedelta(minutes=1), book="B3_198k_5m_DR")
+    dip = _row(NIGHT - timedelta(seconds=2), "0.00045", "560000", source="held_ws")
+    assert await Tournament(_Tick([position], [dip], [dip]), now=NIGHT)._manage() == 0
+    assert position.exit_signal is None
+
+
+async def test_a_price_stop_also_sells_on_the_mark_after_it() -> None:
+    from app.labs.graduation.tournament import Tournament
+
+    position = _open_position(NIGHT - timedelta(minutes=1), book="B3_198k_5m_SL")
+    fell = _row(NIGHT - timedelta(seconds=40), "0.00042", "600000")
+    assert await Tournament(_Tick([position], [fell], []), now=NIGHT)._manage() == 0
+    assert position.exit_signal == "hard_stop"
+    # A DexScreener row describes the market 27s before it was fetched.
+    assert position.exit_signal_at == (fell.ts - timedelta(seconds=config.FEED_LAG_S)
+                                       + timedelta(seconds=config.EXIT_REACTION_S))
+    next_row = _row(NIGHT + timedelta(seconds=5), "0.00040", "590000")
+    session = _Tick([position], [next_row], [], [fell, next_row])
+    assert await Tournament(session, now=NIGHT + timedelta(seconds=10))._manage() == 1
+    assert position.close_reason == "hard_stop"
+    assert position.close_quote == D("0.00040")

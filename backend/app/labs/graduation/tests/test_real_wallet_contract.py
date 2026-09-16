@@ -142,7 +142,7 @@ def test_no_band_buys_below_the_floor_the_bands_were_drawn_from():
     assert LIQ_BANDS[0][1] == 75_000
 
 
-def test_retiring_an_arm_does_not_strand_its_open_positions():
+async def test_retiring_an_arm_does_not_strand_its_open_positions():
     """A position on a book that is no longer an arm must still be settled.
 
     Generation 2 replaced generation 1 and left 51 positions open on 47
@@ -151,16 +151,37 @@ def test_retiring_an_arm_does_not_strand_its_open_positions():
     walked `BY_NAME` and skipped anything it did not recognise, so a retired
     book's rows could never close.
     """
-    import inspect
+    import uuid
+    from datetime import UTC, datetime, timedelta
+    from decimal import Decimal as D
+    from types import SimpleNamespace
 
+    from app.labs.graduation.models import GradPaperPosition
     from app.labs.graduation.tournament import Tournament
 
-    src = inspect.getsource(Tournament._manage)
-    head = src[src.index("arm = BY_NAME.get"):]
-    branch = head[:head.index("age =")]
-    assert "_close(" in branch and "arm_retired" in branch, (
-        "_manage skips positions whose arm is gone instead of settling them; "
-        "those rows stay open for ever")
+    now = datetime(2026, 9, 16, 12, 0, tzinfo=UTC)
+    position = GradPaperPosition(
+        id=uuid.uuid4(), book="R1_coin50_5m", mint="Retired111", opened_at=now - timedelta(hours=25),
+        open_quote=D("0.001"), open_fill=D("0.001"), notional_usd=D(100),
+        sol_usd_at_open=D(100), notional_quote=D(1), tokens=D(1000),
+        peak_quote=D("0.001"), last_quote=D("0.001"), liq_open_usd=D("50000"))
+    mark = SimpleNamespace(mint="Retired111", price_native=D("0.0011"),
+                           liquidity_usd=D("50000"), ts=now, source="dexscreener")
+
+    class Session:
+        def __init__(self):
+            self.answers = [[mark], []]
+
+        async def scalars(self, statement):
+            return SimpleNamespace(all=lambda: [position])
+
+        async def execute(self, statement):
+            rows = self.answers.pop(0)
+            return SimpleNamespace(all=lambda: rows)
+
+    assert await Tournament(Session(), now=now)._manage() == 1
+    assert position.close_reason == "arm_retired"
+    assert position.close_quote == D("0.0011")
 
 
 def test_the_curve_arm_prices_its_depth_the_way_the_impact_maths_expects():

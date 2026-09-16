@@ -102,6 +102,7 @@ from app.real_wallet.reconciliation import (
 )
 from app.real_wallet.transport_policy import LIVE_TRANSPORT_RELEASE_APPROVED
 from app.real_wallet.tx_inspect import lamports_from_sol
+from app.real_wallet import market_refresh
 from app.real_wallet_safety.service import RealWalletSafetyGate
 from app.services.rpc.standard import StandardSolanaRPC
 
@@ -200,6 +201,17 @@ class RealWalletExecutor:
                 detail={"safety": "not_applied_to_a_sell"},
             )
             return AdvanceOutcome(ExecutionState.SAFETY_APPROVED, str(intent.id), True)
+        # The gate judges the newest reading there is; make sure there is one.
+        # Graduations are bought before enrichment reaches them on its own.
+        reading = await market_refresh.ensure_fresh(
+            self._session, intent.mint_address, now=now)
+        if reading.status != "fresh":
+            logger.info("real_wallet_market_refreshed", intent_id=str(intent.id),
+                        mint=intent.mint_address, result=reading.status)
+        if reading.captured_at is not None and reading.captured_at > now:
+            # Judged from the moment the reading exists. From `now` it would
+            # sit in the future, and the gate refuses that as stale.
+            now = reading.captured_at
         decision = await RealWalletSafetyGate(self._session).evaluate(
             mint_address=intent.mint_address,
             trade_size_usd=Decimal(str(intent.requested_usd)),

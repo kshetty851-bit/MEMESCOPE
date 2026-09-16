@@ -62,6 +62,7 @@ from app.labs.graduation.models import (
     SOURCE_HELD_WS,
     GradCurveSample,
     GradEarlyOpen,
+    GradMigration,
     GradPaperPosition,
     GradPostgradSample,
     GradToken,
@@ -154,6 +155,14 @@ class Arm:
     #: which measures from the running peak — a trailing stop on a token that
     #: only ever fell has never armed, and would not have saved anything.
     stop: Decimal | None = None
+    #: Leave when the pool has lost this share of the SOL it held at entry.
+    #: Measured on depth, not price: a drain empties the quote side, and the
+    #: socket reads the quote side within a second of each swap.
+    drain: Decimal | None = None
+    #: What `hold` counts from: the entry, or the graduation itself. The pools
+    #: B3 buys are drained five to seven minutes after graduating, whatever
+    #: time the book happened to get in.
+    clock: str = "entry"
     #: Runs, but is NOT a tournament entry and must not appear on its board.
     #:
     #: The rug-signal A/B is a separate experiment with its own pre-registered
@@ -184,7 +193,8 @@ class Arm:
         # A stop makes it a strategy, not a baseline. The baseline is "buy
         # every graduation above the floor and hold to the clock" — adding a
         # rule to that is precisely the thing being tested against it.
-        return self.entry == "floor" and self.stop is None
+        return (self.entry == "floor" and self.stop is None
+                and self.drain is None and self.clock == "entry")
 
     @property
     def entry_rule(self) -> str:
@@ -197,13 +207,16 @@ class Arm:
         an hour after the open: past it there is no mark and no exit price, so
         every arm needs a backstop whatever else it carries."""
         parts = []
+        if self.drain:
+            parts.append(f"the pool loses {self.drain * 100:.0f}% of its SOL")
         if self.stop:
             parts.append(f"{self.stop * 100:.0f}% below the price paid")
         if self.trail:
             parts.append(f"{self.trail * 100:.0f}% off the running peak")
         if self.tp:
             parts.append(f"{self.tp:g}x the price paid")
-        parts.append(f"{self.hold} minute{'s' if self.hold != 1 else ''}")
+        parts.append(f"{self.hold} minute{'s' if self.hold != 1 else ''}"
+                     + (" after graduating" if self.clock == "graduation" else ""))
         if len(parts) == 1:
             return f"at {parts[0]}"
         return "whichever comes first: " + ", or ".join(parts)
@@ -536,6 +549,22 @@ ARMS: tuple[Arm, ...] = (
     Arm("B3_198k_5m", "liq_B3", 5, note="pool over $198k, out at 5m"),
     Arm("B3_198k_5m_SL", "liq_B3", 5, stop=Decimal("0.10"),
         note="pool over $198k, 10% stop, out at 5m"),
+    # THE RUG ARMS, 2026-09-16. Eleven board trades were drained while open,
+    # every one five to seven minutes after its graduation — B3 sells at about
+    # six. Two ways out, tested FORWARD because both were picked on those same
+    # trades:
+    #  * DR leaves the moment the pool has lost a fifth of its SOL, on the
+    #    socket's sub-second reserves. It never fired on the recorded history,
+    #    whose DexScreener rows are 30-60s apart and see a drain only once it
+    #    is over; the socket is the whole reason it can work now. A two-second
+    #    cascade like FAIR's is still faster than any sell.
+    #  * g4 sells four minutes after GRADUATION instead of five after entry.
+    #    Replayed with rugs counted: +$89 on 215 trades and no drain, where B3
+    #    lost $175 with four.
+    Arm("B3_198k_5m_DR", "liq_B3", 5, drain=Decimal("0.20"),
+        note="pool over $198k, out at 5m or once the pool loses a fifth of its SOL"),
+    Arm("B3_198k_g4", "liq_B3", 4, clock="graduation",
+        note="pool over $198k, out four minutes after graduating"),
     # B3, bought EARLY, 2026-09-16. DexScreener first reports a B3 pool a
     # median 52s after the migration, and that is where B3 buys. The pool's
     # own reserves say it is deep the moment it is — this arm buys then, and
@@ -571,11 +600,11 @@ CONTROLS: tuple[Arm, ...] = tuple(a for a in ARMS if a.is_control)
 #: returned no edge. The count is pinned rather than free because an arm that
 #: appears mid-tournament changes what every other number means — so changing
 #: it must be a deliberate edit with a date, not a side effect.
-assert len(ARMS) == 8, (
+assert len(ARMS) == 10, (
     "three B3 arms (3m retired 2026-09-16 at -$58.90), B3 bought early "
-    "(added 2026-09-16), the BASELINE, the $500k+flow candidate, and the two "
-    "pre-registered A/B arms — which run but are flagged off the tournament "
-    f"board — not {len(ARMS)}")
+    "(added 2026-09-16), the two rug arms (added 2026-09-16), the BASELINE, "
+    "the $500k+flow candidate, and the two pre-registered A/B arms — which run "
+    f"but are flagged off the tournament board — not {len(ARMS)}")
 assert len([a for a in ARMS if a.ab_experiment]) == 2, (
     "the rug-signal A/B is exactly F01_all_2m and F14_symnight_2m; flagging a "
     "tournament arm as an experiment would hide it from its own comparison")
@@ -593,12 +622,15 @@ assert all(a.tp is None and a.trail is None for a in ARMS), (
 assert all(a.stop is None or a.stop == Decimal("0.10") for a in ARMS), (
     "one stop level, so the twins differ in ONE thing. Sweeping levels here "
     "would be fitting a parameter on the same data that suggested it")
-assert len([a for a in ARMS if not a.is_control]) == 7, (
+assert len([a for a in ARMS if not a.is_control]) == 9, (
     "`config.required_pf` is calibrated on the maximum of FORTY-TWO noise "
-    "draws. Seven arms are now judged against it, so the bar is if anything "
-    "CONSERVATIVE — the luckiest of seventeen reaches less than the luckiest "
+    "draws. Nine arms are now judged against it, so the bar is if anything "
+    "CONSERVATIVE — the luckiest of nine reaches less than the luckiest "
     "of forty-two. Left as it is deliberately: a bar that is too hard costs a "
     "real finding some time, where one that is too easy costs a false one nothing")
+assert all(a.clock in {"entry", "graduation"} for a in ARMS), "a clock is one of two"
+assert all(a.drain is None or a.drain == Decimal("0.20") for a in ARMS), (
+    "one drain level, for the same reason as one stop level")
 assert len(CONTROLS) == 1, (
     "exactly one baseline, restored 2026-09-15. More than one would split the "
     "comparison; none is the state the board spent four days complaining about")
@@ -652,9 +684,42 @@ def settle(position: GradPaperPosition, quote: Decimal, depth: Decimal | None,
     position.pnl_usd = (position.notional_usd * net).quantize(Decimal("0.01"))
 
 
+def _timed_due(position: GradPaperPosition) -> datetime:
+    """When the arm's clock says sell: minutes from the entry, or from the
+    graduation for an arm that counts from there."""
+    arm = BY_NAME[position.book]
+    start = position.opened_at
+    if arm.clock == "graduation" and position.graduated_at is not None:
+        start = position.graduated_at
+    return start + timedelta(minutes=arm.hold)
+
+
 def _due(position: GradPaperPosition) -> datetime:
-    """When a position's timed exit falls due, by the rule of its arm."""
-    return position.opened_at + timedelta(minutes=BY_NAME[position.book].hold)
+    """When a position must be sold: a stop's signal, or its clock."""
+    timed = _timed_due(position)
+    signal = position.exit_signal_at
+    return min(timed, signal) if signal is not None else timed
+
+
+def _time_left(arm: Arm, open_at: datetime, graduated_at: datetime | None) -> bool:
+    """Can an arm that counts from graduation still hold for a minute?
+
+    A pool DexScreener lists late — it has been twelve minutes — would
+    otherwise be bought and sold in the same breath, paying both fees for
+    nothing. An unknown graduation time cannot be counted from at all.
+    """
+    if arm.clock != "graduation":
+        return True
+    return (graduated_at is not None
+            and open_at <= graduated_at + timedelta(minutes=arm.hold - 1))
+
+
+def _drained(mark: Mark | None, position: GradPaperPosition,
+             share: Decimal | None) -> bool:
+    """Has the pool lost `share` of the SOL it held when this was bought?"""
+    return (share is not None and mark is not None and mark.depth is not None
+            and position.liq_open_usd is not None and position.liq_open_usd > 0
+            and mark.depth < position.liq_open_usd * (1 - share))
 
 
 class Tournament:
@@ -839,31 +904,41 @@ class Tournament:
                     self._close(position, last, depth, "arm_retired")
                     closed += 1
                 continue
-            age = (self._now - position.opened_at).total_seconds() / 60
             if price is not None:
                 position.peak_quote = max(position.peak_quote, price)
                 position.last_quote = price
                 position.marked_at = self._now
-                fired = arm.policy().fires(ExitState(
-                    clock_at=position.opened_at,
-                    entry_price=position.notional_quote / position.tokens,
-                    tick=Tick(ts=self._now, price=price, source="paper"),
-                    peak=position.peak_quote))
-                if fired is not None:
-                    self._close(position, price, depth, collapsed or fired)
-                    closed += 1
-                    continue
-            if age < arm.hold:
+                if position.exit_signal_at is None:
+                    fired = arm.policy().fires(ExitState(
+                        clock_at=position.opened_at,
+                        entry_price=position.notional_quote / position.tokens,
+                        tick=Tick(ts=self._now, price=price, source="paper"),
+                        peak=position.peak_quote))
+                    if fired is None and _drained(mark, position, arm.drain):
+                        fired = "drain_stop"
+                    if fired is not None:
+                        # A stop DECIDES on this mark and SELLS on the market
+                        # after it: a wallet needs a moment to act, and a
+                        # drain does not wait for it.
+                        position.exit_signal_at = (
+                            (seen_at(mark) or self._now)
+                            + timedelta(seconds=config.EXIT_REACTION_S))
+                        position.exit_signal = fired
+            if self._now < _due(position):
                 continue
-            # A TIMED exit is priced only by a mark describing the market after
+            # Every exit is priced only by a mark describing the market after
             # it was due. Until one arrives the position waits, and a book that
             # is late to close is recorded late rather than early.
             out = exits.get(position.id)
+            reason = (position.exit_signal
+                      if position.exit_signal_at is not None
+                      and position.exit_signal_at <= _timed_due(position)
+                      else "max_hold")
             if out is not None:
                 out_price, out_collapsed = valued(out, position.open_quote,
                                                   position.liq_open_usd)
                 self._close(position, out_price, out.depth,
-                            out_collapsed or "max_hold")
+                            out_collapsed or reason)
                 closed += 1
             elif (self._now - _due(position)).total_seconds() >= config.EXIT_MAX_WAIT_S:
                 last = price if price is not None else position.last_quote
@@ -923,6 +998,7 @@ class Tournament:
                  .limit(64)).subquery()
         return (await self._session.execute(
             select(opens.c.mint, opens.c.open_at,
+                   GradMigration.ts.label("graduated_at"),
                    GradPostgradSample.price_native, GradPostgradSample.price_usd,
                    GradPostgradSample.pair_address,
                    GradPostgradSample.liquidity_usd, GradPostgradSample.fdv,
@@ -932,7 +1008,8 @@ class Tournament:
             .join(GradPostgradSample,
                   (GradPostgradSample.mint == opens.c.mint)
                   & (GradPostgradSample.ts == opens.c.open_at))
-            .outerjoin(GradToken, GradToken.mint == opens.c.mint))).all()
+            .outerjoin(GradToken, GradToken.mint == opens.c.mint)
+            .outerjoin(GradMigration, GradMigration.mint == opens.c.mint))).all()
 
     async def _symbol_reuse(self, rows: Sequence[Any]) -> dict[str, int]:
         """How many tokens carried each candidate's symbol BEFORE it existed.
@@ -1078,7 +1155,8 @@ class Tournament:
                 continue
             for arm in arms:
                 if ((arm.name, early.mint) in taken
-                        or counts.get(arm.name, 0) >= config.PAPER_MAX_SLOTS):
+                        or counts.get(arm.name, 0) >= config.PAPER_MAX_SLOTS
+                        or not _time_left(arm, early.crossed_at, early.migrated_at)):
                     continue
                 self._session.add(GradPaperPosition(
                     book=arm.name, mint=early.mint, symbol=symbol,
@@ -1094,6 +1172,7 @@ class Tournament:
                     liq_open_usd=early.depth_usd,
                     impact_open=impact.quantize(Decimal("0.000001")),
                     pool_fee_bps=fee_bps,
+                    graduated_at=early.migrated_at,
                     marked_at=self._now))
                 counts[arm.name] = counts.get(arm.name, 0) + 1
                 taken.add((arm.name, early.mint))
@@ -1158,6 +1237,8 @@ class Tournament:
                                buys=row.txns_m5_buys,
                                reuse=reuse.get(row.mint)):
                     continue
+                if not _time_left(arm, row.open_at, row.graduated_at):
+                    continue
                 self._session.add(GradPaperPosition(
                     book=arm.name, mint=row.mint, symbol=row.symbol,
                     opened_at=row.open_at,
@@ -1172,6 +1253,7 @@ class Tournament:
                     liq_open_usd=row.liquidity_usd,
                     impact_open=impact.quantize(Decimal("0.000001")),
                     pool_fee_bps=fee_bps,
+                    graduated_at=row.graduated_at,
                     marked_at=self._now))
                 counts[arm.name] = counts.get(arm.name, 0) + 1
                 taken.add((arm.name, row.mint))

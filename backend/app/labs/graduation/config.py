@@ -693,6 +693,9 @@ ROUTER_FEE_BPS = _int("LAB_GRADUATION_ROUTER_FEE_BPS", 10)
 #: and refreshes about every 27s, so a row fetched at T describes T - 27s.
 #: Socket rows describe the moment they were read.
 FEED_LAG_S = _int("LAB_GRADUATION_FEED_LAG_S", 27)
+#: From a stop firing to a sale: a wallet sees the mark, quotes, signs and
+#: sends. A stop is priced by the first mark this long after the one it fired on.
+EXIT_REACTION_S = _int("LAB_GRADUATION_EXIT_REACTION_S", 3)
 #: How long a due exit waits for a mark that describes the market AFTER it was
 #: due. Past this it takes the newest mark there is and records `stale_exit`.
 EXIT_MAX_WAIT_S = _int("LAB_GRADUATION_EXIT_MAX_WAIT_S", 600)
