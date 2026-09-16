@@ -841,7 +841,7 @@ function LeaderboardPanel() {
                   className="pb-2 pr-3 text-right font-medium"
                   title="What a real $100 account would hold, taking only the trades it could actually pay for. Holding one $100 position leaves nothing for a second, so overlapping signals are skipped — the count is under each figure."
                 >
-                  P&amp;L <span className="text-ink-dim">your $100</span>
+                  Balance <span className="text-ink-dim">your $100</span>
                 </th>
                 <th className="pb-2 pr-3 text-right font-medium">Open</th>
                 <th className="pb-2 pr-3 text-right font-medium">Closed</th>
@@ -949,33 +949,44 @@ function LeaderboardPanel() {
                         second, so overlapping signals are skipped. The skipped
                         count sits underneath because it is the whole reason
                         the two figures differ. */}
+                    {/* BALANCE at the top, gain underneath — the same order as
+                        the summary card, so a reader is not asked to switch
+                        between "what is it worth" and "what did it make" going
+                        down the page. The gain keeps the colour, because that
+                        is the part with a sign. */}
                     <td className="py-2.5 pr-3 text-right">
                       <span
                         className={`grad-figure font-semibold tabular-nums ${
-                          Number(a.wallet_funded_usd) > Number(data.wallet_demo_usd)
-                            ? "text-up"
-                            : Number(a.wallet_funded_usd) === Number(data.wallet_demo_usd)
-                              ? "text-ink-dim"
-                              : "text-down"
+                          a.trades === 0 || Number(a.wallet_funded_usd) === 0
+                            ? "text-ink-dim"
+                            : "text-ink"
                         }`}
                       >
                         {a.trades === 0
                           ? "—"
                           : Number(a.wallet_funded_usd) === 0
                             ? "WIPED"
-                            : signedUsd(
-                                String(
-                                  Number(a.wallet_funded_usd) -
-                                    Number(data.wallet_demo_usd),
-                                ),
-                              )}
+                            : usd(a.wallet_funded_usd)}
                       </span>
-                      {a.trades === 0 ? null : (
+                      {a.trades === 0 || Number(a.wallet_funded_usd) === 0 ? null : (
                         <>
-                          <span className="block text-micro tabular-nums text-ink-dim">
-                            {Number(a.wallet_funded_usd) === 0
-                              ? "—"
-                              : `${walletPct(a.wallet_funded_usd, data.wallet_demo_usd)} · ${usd(a.wallet_funded_usd)}`}
+                          <span
+                            className={`block text-micro tabular-nums ${
+                              Number(a.wallet_funded_usd) > Number(data.wallet_demo_usd)
+                                ? "text-up"
+                                : Number(a.wallet_funded_usd) ===
+                                    Number(data.wallet_demo_usd)
+                                  ? "text-ink-dim"
+                                  : "text-down"
+                            }`}
+                          >
+                            {signedUsd(
+                              String(
+                                Number(a.wallet_funded_usd) -
+                                  Number(data.wallet_demo_usd),
+                              ),
+                            )}{" "}
+                            ({walletPct(a.wallet_funded_usd, data.wallet_demo_usd)})
                           </span>
                           <span className="block text-micro tabular-nums text-ink-dim">
                             {a.trades_funded} funded
@@ -1057,8 +1068,8 @@ function LeaderboardPanel() {
           ) : null}
           <p className="max-w-[64ch] text-micro leading-relaxed text-ink-dim">
             <b className="text-ink">How to read this.</b>{" "}
-            <b className="text-ink">P&amp;L</b> is what a real{" "}
-            {usd(data.wallet_demo_usd)} account would hold — every price recorded
+            <b className="text-ink">Balance</b> is what a real{" "}
+            {usd(data.wallet_demo_usd)} account would hold now — every price recorded
             from the live feed at the minute it happened, every fill charged the
             exact move your own order makes against the pool&rsquo;s recorded
             depth plus swap and priority fees, and any order that would move a
