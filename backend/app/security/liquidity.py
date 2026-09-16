@@ -100,7 +100,17 @@ POOL_ACCOUNT_SIZE = 301
 # 171     32    pool_quote_token_account
 # 203     8     lp_supply (the pool's own notional record, NOT the mint supply)
 # 211     32    coin_creator
+# 243     2     (flags, not read)
+# 245     8     virtual quote reserve, in quote base units
+#
+# The virtual quote reserve is priced as if it sat in the quote vault: a swap
+# is the constant product over (vault + virtual, base vault). Verified
+# 2026-09-16 on three pump.fun migration pools, where the field read
+# 17,584,505,288 lamports and the reserve offset implied by live Buy/Sell
+# events was 17,584,503,389 and 17,584,516,145 (rounding). A price taken from
+# the two vaults alone is low by virtual/vault: 1.5% on a 1,200 SOL pool.
 _CREATOR_AT = 11
+_VIRTUAL_QUOTE_AT = 245
 _FIELD_ORDER = (
     "creator",
     "base_mint",
@@ -155,6 +165,8 @@ class PoolState:
     lp_supply_field: int
     pool_bump: int
     index: int
+    #: Quote the pool prices with but does not hold. See the layout above.
+    virtual_quote: int = 0
 
 
 def parse_pool(data: bytes | None) -> PoolState | None:
@@ -175,6 +187,7 @@ def parse_pool(data: bytes | None) -> PoolState | None:
             fields[name] = b58encode(data[offset : offset + 32])
             offset += 32
         (lp_supply,) = struct.unpack_from("<Q", data, offset)
+        (virtual_quote,) = struct.unpack_from("<Q", data, _VIRTUAL_QUOTE_AT)
     except (struct.error, IndexError):
         return None
     if any(len(value) < 32 for value in fields.values()):
@@ -185,6 +198,7 @@ def parse_pool(data: bytes | None) -> PoolState | None:
         lp_supply_field=lp_supply,
         pool_bump=data[8],
         index=int.from_bytes(data[9:11], "little"),
+        virtual_quote=virtual_quote,
         **fields,
     )
 

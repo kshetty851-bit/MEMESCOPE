@@ -499,3 +499,58 @@ async def test_a_pool_not_yet_visible_is_asked_again_not_given_up_on():
     stream.accounts = missing
     with pytest.raises(ConnectionError):
         await stream.resolve(TOKEN_MINT, "POOL")
+
+
+#: The pool account of STRATEGY's graduation pool (3AUWJB3U...), as mainnet
+#: returned it on 2026-09-16. Public chain data, pinned so the offset of the
+#: virtual quote reserve is checked against real bytes, not a hand-built blob.
+_STRATEGY_POOL = base64.b64decode(
+    "8ZptBBGxbbz/AABkXaEH7cjfrXzJ6SE7D3bRLXvfoVCw+3AkITzEJvxhiQKL7gX1NXRNZfn+sI81"
+    "ntK1Edr57a60u/1LbudPX9CvBpuIV/6rgYT7aH9jRhjANdrEOdwa6ztVmKDwAAAAAAHjLJYjE8RC"
+    "ZFaRpHj4dyD6y7kEg/krT8eiVqkJdGgccJK/+1wLVEHQ+AQtb9MSxiKF6jKK4zPPoAjnst/jyQZl"
+    "CkqBGapE7HSA+qyM+TKpgKOb4TZFjOnX/aa7bHIfaq7sQmtZ0AMAACAVewfeSxY2gimGiIq5opRr"
+    "RF2lCHDgH8bHWoO48uEnAADIQR4YBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAA==")
+
+
+def test_the_pool_prices_with_a_virtual_quote_reserve_the_vaults_do_not_hold():
+    """PumpSwap swaps are the constant product over (quote vault + virtual,
+    base vault). Two real STRATEGY swaps from 2026-09-16 reproduce to the
+    lamport with the pool's own field and miss by 1.44% without it — which is
+    how far below the market every socket mark sat."""
+    from app.security.liquidity import parse_pool
+
+    state = parse_pool(_STRATEGY_POOL)
+    assert state is not None
+    assert state.base_mint == "Awa4V1xpYjvVtzjhqXAB6tfxvDdQv8jQ62JXTjspump"
+    assert state.quote_mint == config.WSOL_MINT
+    assert state.virtual_quote == 17_584_505_288
+    v = state.virtual_quote
+    # A sell: 3,166,939,805 raw tokens in, pre-trade reserves as the event said.
+    base, quote, sold = 14_409_248_111_408, 1_205_305_261_040, 3_166_939_805
+    assert (quote + v) * sold // (base + sold) == 268_714_040
+    assert quote * sold // (base + sold) == 264_850_075          # 1.44% short
+    # A buy of 2,778,812,493 raw tokens: the program rounds the quote UP.
+    base, quote, bought = 14_412_026_923_901, 1_205_069_001_669, 2_778_812_493
+    assert -(-(quote + v) * bought // (base - bought)) == 235_787_795
+
+
+def test_a_socket_price_counts_the_virtual_reserve_and_the_depth_does_not():
+    """The virtual reserve moves the price every swap pays, but no seller can be
+    paid out of it — so it is in the mark and not in the depth an exit sells
+    into."""
+    real = _held(base=14_294_014_149_286, quote=1_215_375_620_089)
+    priced = _held(base=14_294_014_149_286, quote=1_215_375_620_089,
+                   virtual_quote=17_584_505_288)
+    assert priced.price() == (Decimal("1232.960125377")
+                              / Decimal("14294014.149286"))
+    assert priced.price() / real.price() - 1 > Decimal("0.0144")
+    assert priced.depth_usd(Decimal(100)) == real.depth_usd(Decimal(100))
+
+
+def test_the_watcher_carries_the_pools_virtual_reserve():
+    from dataclasses import replace
+
+    accounts = [_mint(6), _mint(9), _account(1, TOKEN), _account(1, SOL)]
+    held = watch(TOKEN_MINT, "POOL", replace(_pool(), virtual_quote=42), accounts)
+    assert held is not None and held.virtual_quote == 42

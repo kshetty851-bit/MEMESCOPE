@@ -23,6 +23,11 @@ NIGHT = datetime(2026, 9, 13, 20, 0, tzinfo=UTC)
 DAY = datetime(2026, 9, 13, 10, 0, tzinfo=UTC)
 TOKEN = {"mint": "Abc123pump", "liquidity": D(150_000), "fdv": D(2_000_000),
          "sells": 0, "reuse": 4}
+#: STRATEGY, a B3 trade of 2026-09-16, and the pool its migration made.
+REAL_MINT = "Awa4V1xpYjvVtzjhqXAB6tfxvDdQv8jQ62JXTjspump"
+REAL_POOL = "3AUWJB3UckEypW9QFn8gaFtiLpr5FPhBpb4Yc8jnF9dw"
+#: NTDA's pool: a real pumpswap pool, and the wrong one for REAL_MINT.
+OTHER_POOL = "9iBTLLovzL4hJeDo3iYj7bYMC4cMkTWGuqt5eCfY8pTo"
 
 
 def test_the_tournament_is_a_hold_sweep_with_a_baseline_on_every_hold() -> None:
@@ -536,15 +541,21 @@ async def test_a_live_socket_mark_beats_a_later_stamped_dexscreener_row() -> Non
             return SimpleNamespace(all=lambda: rows)
 
     stale = SimpleNamespace(mint="A", price_native=D("0.00000022"),
-                            liquidity_usd=D("10896.26"))
+                            liquidity_usd=D("10896.26"), ts=NIGHT,
+                            source="dexscreener")
     live = SimpleNamespace(mint="A", price_native=D("0.000000005"),
-                           liquidity_usd=D("310.00"))
+                           liquidity_usd=D("310.00"),
+                           ts=NIGHT - timedelta(seconds=2), source="held_ws")
     other = SimpleNamespace(mint="B", price_native=D("0.000001"),
-                            liquidity_usd=D("200000"))
+                            liquidity_usd=D("200000"), ts=NIGHT,
+                            source="dexscreener")
     session = Session([stale, other], [live])
     marks = await Tournament(session, now=NIGHT)._latest_prices(["A", "B"])
-    assert marks == {"A": (live.price_native, live.liquidity_usd),
-                     "B": (other.price_native, other.liquidity_usd)}
+    assert {m: mark[:2] for m, mark in marks.items()} == {
+        "A": (live.price_native, live.liquidity_usd),
+        "B": (other.price_native, other.liquidity_usd)}
+    # The mark says when it was read and by whom: the exit rule needs both.
+    assert marks["A"].source == "held_ws" and marks["A"].ts == live.ts
     socket_query = session.statements[1].compile(dialect=postgresql.dialect())
     assert "grad_postgrad_samples.source = " in str(socket_query)
     assert "held_ws" in socket_query.params.values()
@@ -619,7 +630,7 @@ async def test_the_early_arm_buys_the_crossing_at_the_pools_own_price() -> None:
     from app.labs.graduation.tournament import Tournament
 
     crossing = SimpleNamespace(
-        mint="EarlyMint", crossed_at=NIGHT - timedelta(seconds=4),
+        mint=REAL_MINT, pool=REAL_POOL, crossed_at=NIGHT - timedelta(seconds=4),
         price_native=D("0.0000012"), depth_usd=D("250000"), sol_usd=D("100"))
     session = _Answers([(crossing, "EARLY")], [], [])
     assert await Tournament(session, now=NIGHT)._fill_early() == 1
@@ -635,11 +646,14 @@ async def test_the_early_arm_buys_the_crossing_at_the_pools_own_price() -> None:
     assert "grad_early_opens.crossed_at <=" in query
 
     # Already held: not bought twice.
-    again = _Answers([(crossing, "EARLY")], [("B3E_198k_5m", "EarlyMint")], [])
+    again = _Answers([(crossing, "EARLY")], [("B3E_198k_5m", REAL_MINT)], [])
     assert await Tournament(again, now=NIGHT)._fill_early() == 0
     # A pool too shallow for $100 to fill is refused, as B3's would be.
     thin = SimpleNamespace(**{**crossing.__dict__, "depth_usd": D("500")})
     assert await Tournament(_Answers([(thin, None)], [], []), now=NIGHT)._fill_early() == 0
+    # A pool the migration did not make is not a graduation, however deep.
+    other = SimpleNamespace(**{**crossing.__dict__, "pool": OTHER_POOL})
+    assert await Tournament(_Answers([(other, None)], [], []), now=NIGHT)._fill_early() == 0
 
 
 async def test_a_graduated_curve_is_never_a_mark() -> None:
@@ -659,3 +673,217 @@ async def test_a_graduated_curve_is_never_a_mark() -> None:
     marks = await Tournament(session, now=NIGHT)._latest_prices(["EarlyMint", "Climbing"])
     assert "EarlyMint" not in marks
     assert marks["Climbing"][0] == D(60) / D(400_000_000)
+
+
+# --- the 2026-09-16 fixes -------------------------------------------------------
+
+def test_only_the_pool_a_pump_fun_migration_makes_is_a_graduation() -> None:
+    from app.labs.graduation.tournament import graduation_pool
+
+    assert graduation_pool(REAL_MINT) == REAL_POOL
+    # JUP was bought as a "graduation" on 2026-09-15; it never had a curve.
+    assert graduation_pool("JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN") != (
+        "C1MgLojNLWBKADvu9BHdtgzz1oZX4dZ5zGdGcgvvW8Wz")
+    assert graduation_pool("not a mint") is None
+
+
+def _mk(ts: datetime, price: str, depth: str | None = "250000",
+        source: str = "dexscreener"):
+    from app.labs.graduation.tournament import Mark
+
+    return Mark(D(price), D(depth) if depth else None, ts, source)
+
+
+def test_a_timed_exit_is_priced_only_by_the_market_after_it_was_due() -> None:
+    """FAIR, 2026-09-14: due 19:14:46, drained 19:14:50, closed 19:15:00 on a
+    DexScreener row from 19:13 — booked at -0.1% instead of -100%. A row
+    fetched at T quotes the market at T minus the feed's lag, so it can only
+    price an exit due at or before that."""
+    from app.labs.graduation.tournament import exit_mark
+
+    due = NIGHT
+    lag = timedelta(seconds=config.FEED_LAG_S)
+    fetched_just_after = _mk(due + lag - timedelta(seconds=1), "1.0")
+    fetched_late_enough = _mk(due + lag, "0.9")
+    later = _mk(due + lag + timedelta(seconds=30), "0.8")
+    assert exit_mark([fetched_just_after], due) is None
+    assert exit_mark([later, fetched_late_enough, fetched_just_after], due) == (
+        fetched_late_enough)
+    # A socket read describes the moment it was taken: no lag. Read at `due`,
+    # it describes an earlier moment than a row fetched five seconds after
+    # `due + lag`, however the two were stamped.
+    socket = _mk(due, "0.95", source="held_ws")
+    fetched_after = _mk(due + lag + timedelta(seconds=5), "0.9")
+    assert exit_mark([later, fetched_after, socket], due) == socket
+    assert exit_mark([], due) is None
+
+
+def test_a_drained_pool_is_priced_by_its_depth_not_its_quote() -> None:
+    """After a drain DexScreener printed FAIR at 1.747 SOL — 3,500x what it was
+    bought at — over $1,829 of depth. No one could sell there."""
+    from app.labs.graduation.tournament import valued
+
+    entry, liq = D("0.0005"), D("613000")
+    drained = _mk(NIGHT, "1.747", depth="1829")
+    price, why = valued(drained, entry, liq)
+    assert why == "pool_collapsed"
+    ratio = D("1829") / liq
+    assert price == entry * ratio * ratio
+    assert price < entry * D("0.0001")
+    # A hard dump that leaves the pool standing is still a price: WOFI fell 30%
+    # on 2026-09-15 with 85% of its depth intact.
+    dumped = _mk(NIGHT, "0.00035", depth="521000")
+    assert valued(dumped, entry, liq) == (D("0.00035"), None)
+    assert valued(_mk(NIGHT, "0.00035", depth=None), entry, liq) == (D("0.00035"), None)
+    assert valued(drained, entry, None) == (D("1.747"), None)
+    # Emptied outright, it still books a price the column can hold, so the
+    # -100% is counted rather than voided as unrepresentable.
+    emptied = _mk(NIGHT, "1.747", depth="0")
+    assert valued(emptied, D("0.0000001"), liq) == (D("1E-18"), "pool_collapsed")
+
+
+def test_the_pool_fee_is_pumpswaps_tier_at_that_market_cap() -> None:
+    """Matched to live swaps on 2026-09-16: STRATEGY at 79k SOL paid 40 bps,
+    NTDA at 1.44M SOL paid 30, and a pool of unknown price is charged the top."""
+    assert config.pool_fee_bps(D("0.00007898")) == 40
+    assert config.pool_fee_bps(D("0.001441")) == 30
+    assert config.pool_fee_bps(D("0.00006386")) == 48      # exactly 63,860 SOL
+    assert config.pool_fee_bps(D("0.0000638599")) == 50
+    assert config.pool_fee_bps(D("0.0000000001")) == 125
+    assert config.pool_fee_bps(None) == 125
+    tiers = [bps for _, bps in config.PUMPSWAP_FEE_TIERS]
+    assert tiers == sorted(tiers, reverse=True)
+
+
+def test_the_book_charges_the_pool_tier_and_the_router() -> None:
+    from app.labs.graduation.paper import costs
+
+    leg = costs(D("1.0"), pool_fee_bps=40)
+    assert leg.fee_fraction == D("0.0040") + D("0.0010") + config.BACKTEST_PRIORITY_FEE_QUOTE
+    assert config.ROUTER_FEE_BPS == 10
+
+
+class _Tick:
+    """Positions for `scalars`, then scripted rows for each `execute`."""
+
+    def __init__(self, positions, *answers):
+        self.positions, self.answers = positions, list(answers)
+        self.statements = []
+
+    async def scalars(self, statement):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(all=lambda: self.positions)
+
+    async def execute(self, statement):
+        from types import SimpleNamespace
+
+        self.statements.append(statement)
+        rows = self.answers.pop(0)
+        return SimpleNamespace(all=lambda: rows)
+
+
+def _open_position(opened_at: datetime, *, book: str = "B3_198k_5m"):
+    import uuid
+
+    from app.labs.graduation.models import GradPaperPosition
+
+    return GradPaperPosition(
+        id=uuid.uuid4(), book=book, mint=REAL_MINT, opened_at=opened_at,
+        open_quote=D("0.0005"), open_fill=D("0.000503"), notional_usd=D(100),
+        sol_usd_at_open=D(100), notional_quote=D(1), tokens=D(1) / D("0.000503"),
+        peak_quote=D("0.0005"), last_quote=D("0.0005"),
+        liq_open_usd=D("613000"))
+
+
+def _row(ts: datetime, price: str, depth: str, source: str = "dexscreener"):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(mint=REAL_MINT, price_native=D(price),
+                           liquidity_usd=D(depth), ts=ts, source=source)
+
+
+async def test_a_due_position_waits_for_a_mark_taken_after_it_was_due() -> None:
+    from app.labs.graduation.tournament import Tournament
+
+    opened = NIGHT - timedelta(minutes=5, seconds=10)       # due 10s ago
+    stale = _row(NIGHT - timedelta(seconds=5), "0.00051", "613000")
+    position = _open_position(opened)
+    session = _Tick([position], [stale], [], [stale])
+    assert await Tournament(session, now=NIGHT)._manage() == 0
+    assert position.closed_at is None
+    # The book still marks it — it just may not sell on that mark.
+    assert position.last_quote == D("0.00051")
+
+
+async def test_the_first_mark_after_due_closes_it_at_that_price() -> None:
+    from app.labs.graduation.tournament import Tournament
+
+    opened = NIGHT - timedelta(minutes=6)                    # due 60s ago
+    before = _row(NIGHT - timedelta(seconds=50), "0.00051", "613000")
+    after = _row(NIGHT - timedelta(seconds=20), "0.00052", "614000")
+    position = _open_position(opened)
+    session = _Tick([position], [after], [], [before, after])
+    assert await Tournament(session, now=NIGHT)._manage() == 1
+    assert position.close_reason == "max_hold"
+    assert position.close_quote == D("0.00052")
+    assert position.closed_at == NIGHT
+
+
+async def test_a_drain_after_due_is_booked_as_the_loss_it_was() -> None:
+    from app.labs.graduation.tournament import Tournament
+
+    opened = NIGHT - timedelta(minutes=6)
+    drained = _row(NIGHT - timedelta(seconds=20), "1.747", "1829")
+    position = _open_position(opened)
+    session = _Tick([position], [drained], [], [drained])
+    assert await Tournament(session, now=NIGHT)._manage() == 1
+    assert position.close_reason == "pool_collapsed"
+    assert position.net_return < D("-0.99")
+
+
+async def test_an_exit_with_no_later_mark_is_taken_late_and_says_so() -> None:
+    from app.labs.graduation.tournament import Tournament
+
+    opened = NIGHT - timedelta(minutes=5, seconds=config.EXIT_MAX_WAIT_S + 1)
+    last = _row(opened + timedelta(minutes=4), "0.00051", "613000")
+    position = _open_position(opened)
+    session = _Tick([position], [last], [], [last])
+    assert await Tournament(session, now=NIGHT)._manage() == 1
+    assert position.close_reason == "stale_exit"
+
+
+async def test_a_token_that_never_graduated_is_not_bought(monkeypatch) -> None:
+    """JUP, PENGU and tokenized stocks arrived as `raydium-cpmm` migrations and
+    were bought as B3 on pools over $198k. Priced on any pool but the one the
+    pump.fun migration made, a candidate is not a graduation."""
+    from types import SimpleNamespace
+
+    from app.labs.graduation import tournament
+    from app.labs.graduation.tournament import Tournament
+
+    def candidate(pair):
+        return SimpleNamespace(
+            mint=REAL_MINT, open_at=NIGHT, price_native=D("0.00008"),
+            price_usd=D("0.008"), pair_address=pair,
+            liquidity_usd=D("250000"), fdv=D("8000000"), txns_m5_sells=1,
+            txns_m5_buys=50, symbol=None, first_seen_at=None)
+
+    async def no_mirror(session, entries):
+        return 0
+
+    monkeypatch.setattr(tournament.live_decisions, "record", no_mirror)
+    # Five arms take a $250k pool: the baseline, the three B3 arms and the
+    # all-graduations A/B control. B5 needs $500k; B3E and the night A/B do not
+    # buy from this query.
+    for pair, bought in ((OTHER_POOL, 0), (REAL_POOL, 5)):
+        session = _Answers([], [], [])
+        session.statements = []
+        t = Tournament(session, now=NIGHT)
+
+        async def rows(pair=pair):
+            return [candidate(pair)]
+
+        monkeypatch.setattr(t, "_candidates", rows)
+        assert await t._fill() == bought
+        assert all(p.pool_fee_bps == 40 for p in session.added)

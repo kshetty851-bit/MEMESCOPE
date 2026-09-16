@@ -34,6 +34,7 @@ MIGRATIONS = (
 )
 TABLES = ["grad_checkpoints", "grad_curve_samples", "grad_early_opens",
           "grad_features", "grad_migrations", "grad_paper_positions",
+          "grad_paper_restatements",
           "grad_postgrad_samples", "grad_tokens", "grad_trades"]
 
 FORBIDDEN_MODULES = (
@@ -82,7 +83,8 @@ MODULES = ("config.py", "curve.py", "parse.py", "watchset.py", "sources.py",
            "held_watch.py",
            "postgrad.py", "recorder.py", "features.py", "backtest.py",
            "scheduler.py", "models.py", "api.py", "paper.py", "analyst.py",
-           "tournament.py", "ab.py", "__main__.py", *BRIDGE_MODULES)
+           "tournament.py", "ab.py", "restate.py", "__main__.py",
+           *BRIDGE_MODULES)
 
 
 def imported_modules(tree: ast.AST) -> set[str]:

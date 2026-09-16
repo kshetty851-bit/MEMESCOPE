@@ -92,6 +92,8 @@ async def _closed(session: AsyncSession, book: str) -> list[GradPaperPosition]:
             .where(
                 GradPaperPosition.book == book,
                 GradPaperPosition.closed_at.is_not(None),
+                # Never a graduation: both arms drop the same kind of trade.
+                GradPaperPosition.excluded.is_(None),
             )
             .order_by(GradPaperPosition.opened_at)
         )

@@ -76,9 +76,11 @@ def test_the_book_uses_the_backtester_cost_model() -> None:
 
 
 def test_a_flat_round_trip_still_loses_the_spread() -> None:
+    """The book's own model adds the router's 10 bps a side to the
+    backtester's, so a flat round trip costs 1.24% where the replay says 1.04%."""
     c = costs()
     entry, exit_ = c.buy_price(D(1)), c.sell_price(D(1))
-    assert round(exit_ / entry - 1, 4) == D("-0.0178")
+    assert round(exit_ / entry - 1, 4) == D("-0.0124")
 
 
 # --- the account --------------------------------------------------------------
@@ -230,8 +232,8 @@ def test_a_position_marked_at_its_own_entry_shows_exactly_the_round_trip_cost() 
     net = net_return(_bought("0.00000048"), D("0.00000048"), costs())
     assert net is not None
     assert abs(net - expected) < D("0.000001")
-    # Concretely: a $100 position opens showing about -$1.78.
-    assert D("-1.8") < D("100") * net < D("-1.7")
+    # Concretely: a $100 position opens showing about -$1.24.
+    assert D("-1.3") < D("100") * net < D("-1.2")
 
 
 def test_the_formula_reproduces_a_trade_the_live_book_actually_closed() -> None:
@@ -245,7 +247,8 @@ def test_the_formula_reproduces_a_trade_the_live_book_actually_closed() -> None:
     slippage default. Reproducing the row means using the model it was closed
     under, not today's.
     """
-    then = Costs(pump_fee_bps=100, slip_bps=150, notional_quote=D("0.5"))
+    then = Costs(pump_fee_bps=100, slip_bps=150, notional_quote=D("0.5"),
+                 priority_fee_quote=D("0.002"))
     position = _Position("1.0", str(D("1.0") / then.buy_price(D("0.00000048"))))
     net = net_return(position, D("0.00000060"), then)
     assert net is not None

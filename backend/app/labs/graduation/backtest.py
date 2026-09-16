@@ -309,6 +309,9 @@ class Costs:
     slip_bps: int = config.BACKTEST_SLIP_BPS
     priority_fee_quote: Decimal = config.BACKTEST_PRIORITY_FEE_QUOTE
     notional_quote: Decimal = config.BACKTEST_NOTIONAL_QUOTE
+    #: The aggregator's cut, on top of the pool's. Zero here so the replay
+    #: harness keeps its numbers; the paper book's `costs()` charges it.
+    router_fee_bps: int = 0
 
     @property
     def priority_fraction(self) -> Decimal:
@@ -323,7 +326,8 @@ class Costs:
         """AMM legs only, with slippage ASSUMED. Superseded for live fills by
         `fee_fraction` plus an exact impact — kept because the replay harness
         has no depth series to compute impact from."""
-        return ((Decimal(self.pump_fee_bps) + Decimal(self.slip_bps)) / _BPS
+        return ((Decimal(self.pump_fee_bps) + Decimal(self.slip_bps)
+                 + Decimal(self.router_fee_bps)) / _BPS
                 + self.priority_fraction)
 
     @property
@@ -335,7 +339,8 @@ class Costs:
         `amm_impact` computes it exactly from the pool's depth, and adding an
         assumed `slip_bps` on top would charge for the same thing twice.
         """
-        return Decimal(self.pump_fee_bps) / _BPS + self.priority_fraction
+        return ((Decimal(self.pump_fee_bps) + Decimal(self.router_fee_bps)) / _BPS
+                + self.priority_fraction)
 
     def buy_price(self, price: Decimal) -> Decimal:
         """A buy fills WORSE than the quote."""

@@ -428,9 +428,14 @@ BACKTEST_CURVE_FEE_BPS = _int("LAB_GRADUATION_CURVE_FEE_BPS", 125)
 #: 75th percentile of impact at $100. It is a stated approximation of a real
 #: quantity, which the 150 never was.
 BACKTEST_SLIP_BPS = _int("LAB_GRADUATION_SLIP_BPS", 25)
-#: A flat priority fee per side, in quote. At the default notional this is
-#: another 40 bps, which is why it is not ignorable on a 0.5 SOL position.
-BACKTEST_PRIORITY_FEE_QUOTE = _dec("LAB_GRADUATION_PRIORITY_FEE_QUOTE", "0.002")
+#: A flat network fee per side, in quote: what a real swap paid, not a guess.
+#:
+#: 0.0001075 SOL. The repo's real mainnet swap (tests/unit/fixtures) paid
+#: 105,000 lamports a side — 5,000 base plus 100,000 priority — and closing the
+#: emptied token account afterwards (the wallet's sweep, which returns the
+#: rent) is one more 5,000-lamport transaction per round trip. It was 0.002, a
+#: guess twenty times too high that charged ~0.2% a side for nothing.
+BACKTEST_PRIORITY_FEE_QUOTE = _dec("LAB_GRADUATION_PRIORITY_FEE_QUOTE", "0.0001075")
 #: Concurrent positions. A signal arriving with every slot full is SKIPPED and
 #: counted, never queued: a backtest that queues signals is quietly assuming
 #: capital it did not have.
@@ -654,6 +659,50 @@ HOLDER_MAX_TOP1_SHARE: Decimal | None = (
 
 SOL_USD_MIN = _dec("LAB_GRADUATION_SOL_USD_MIN", "20")
 SOL_USD_MAX = _dec("LAB_GRADUATION_SOL_USD_MAX", "1000")
+
+# --- what a real wallet pays on a graduation pool, per side --------------------
+#: PumpSwap's fee on a pump.fun migration pool, by market cap in SOL:
+#: (from, lp + protocol + creator bps). Read from the fee program's config
+#: account 5PHirr8joyTMp9JMm6nW7hNDVyEYdkzDqazxPD7RaTjx on 2026-09-16 and
+#: matched to live Buy/Sell events — a $7.9M token paid 40, a $140M one 30.
+#: The book charged a flat 25, which no pump.fun pool charges.
+PUMPSWAP_FEE_TIERS: tuple[tuple[int, int], ...] = (
+    (0, 125), (420, 120), (1_470, 115), (2_460, 110), (3_440, 105),
+    (4_420, 100), (9_820, 95), (14_740, 90), (19_650, 85), (24_560, 80),
+    (29_470, 75), (34_380, 70), (39_300, 65), (44_210, 60), (49_120, 55),
+    (54_030, 53), (58_940, 50), (63_860, 48), (68_770, 45), (73_681, 43),
+    (78_590, 40), (83_500, 38), (88_400, 35), (93_330, 33), (98_240, 30))
+#: Every pump.fun mint is a fixed billion tokens, so market cap is price x this.
+PUMP_SUPPLY = 1_000_000_000
+
+
+def pool_fee_bps(price_native: Decimal | None) -> int:
+    """The tier a pump.fun pool charges at this SOL price. No price, top tier."""
+    if price_native is None or price_native <= 0:
+        return PUMPSWAP_FEE_TIERS[0][1]
+    mcap = price_native * PUMP_SUPPLY
+    return next(bps for floor, bps in reversed(PUMPSWAP_FEE_TIERS) if mcap >= floor)
+
+
+#: Jupiter's own cut of every swap it routes: `platformFee.feeBps` on a live
+#: `/order` quote, 2026-09-16. The real wallet trades through it.
+ROUTER_FEE_BPS = _int("LAB_GRADUATION_ROUTER_FEE_BPS", 10)
+
+# --- when a timed exit may close -----------------------------------------------
+#: How far behind the market a DexScreener row is. It quotes the last trade
+#: and refreshes about every 27s, so a row fetched at T describes T - 27s.
+#: Socket rows describe the moment they were read.
+FEED_LAG_S = _int("LAB_GRADUATION_FEED_LAG_S", 27)
+#: How long a due exit waits for a mark that describes the market AFTER it was
+#: due. Past this it takes the newest mark there is and records `stale_exit`.
+EXIT_MAX_WAIT_S = _int("LAB_GRADUATION_EXIT_MAX_WAIT_S", 600)
+#: A pool down to this share of its entry depth has been drained, and its
+#: quoted price is not one anyone can sell at: after a drain the quote is the
+#: virtual reserve over a few tokens, which DexScreener printed at 3,500x the
+#: entry. Such a mark is priced by the constant product instead — entry price
+#: times the square of the depth ratio. Every drain this lab has seen went
+#: below 10%; the deepest non-drain dump, -30%, kept 85%.
+EXIT_COLLAPSE_FRACTION = _dec("LAB_GRADUATION_EXIT_COLLAPSE_FRACTION", "0.2")
 
 PAPER_MAX_IMPACT = _dec("LAB_GRADUATION_PAPER_MAX_IMPACT", "0.10")
 #: A pool whose depth was never recorded cannot be shown to be tradeable, so

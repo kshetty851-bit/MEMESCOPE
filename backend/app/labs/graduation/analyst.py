@@ -135,7 +135,9 @@ async def analyse(session: AsyncSession, *, now: datetime | None = None) -> Anal
     """The graduation paper book, read as an analyst would read it."""
     observed_at = now or datetime.now(UTC)
 
-    rows = (await session.execute(select(GradPaperPosition))).scalars().all()
+    rows = (await session.execute(
+        select(GradPaperPosition)
+        .where(GradPaperPosition.excluded.is_(None)))).scalars().all()
     closed = [r for r in rows if r.closed_at is not None and r.pnl_usd is not None]
     live = [r for r in rows if r.closed_at is None]
 

@@ -101,6 +101,23 @@ const SORTS: Record<SortKey, (p: PaperPosition) => number> = {
   held: (p) => held(p) ?? 0,
 };
 
+/** Why a trade was rebooked on 16 Sep, in the words the row's tooltip uses. */
+const RESTATED: Record<string, string> = {
+  fees: "Restated 16 Sep: same exit, re-charged at the pool's real fee tier plus Jupiter's 0.10%.",
+  max_hold:
+    "Restated 16 Sep: repriced on the first price recorded after the exit was due, instead of the newest one before it.",
+  pool_collapsed:
+    "Restated 16 Sep: the book had closed this on a price from before the pool was drained. Repriced on the first price after the exit was due, when the pool was already empty.",
+  stale_exit:
+    "Restated 16 Sep: no price was recorded after the exit was due, so the last one before it is used and flagged.",
+};
+
+/** Exit reasons a reader would otherwise have to decode. */
+const EXIT_LABEL: Record<string, string> = {
+  pool_collapsed: "pool drained",
+  stale_exit: "no later price",
+};
+
 /**
  * One trade. The mint is rendered in FULL and linked to the very feed the
  * marks come from, so every figure in the row can be checked against its
@@ -161,6 +178,11 @@ function TradeRow({ p, closed }: { p: PaperPosition; closed: boolean }) {
         ) : (
           signedUsd(p.pnl_usd)
         )}
+        {p.restated && !p.excluded && p.was_pnl_usd !== p.pnl_usd ? (
+          <span className="block text-micro font-normal text-ink-dim">
+            was {signedUsd(p.was_pnl_usd)}
+          </span>
+        ) : null}
       </td>
       <td className={`py-2 pr-3 text-right tabular-nums ${tone}`}>
         {p.voided ? (
@@ -168,19 +190,36 @@ function TradeRow({ p, closed }: { p: PaperPosition; closed: boolean }) {
         ) : (
           signed(p.net_return)
         )}
+        {p.restated && !p.excluded && p.was_net_return !== p.net_return ? (
+          <span className="block text-micro text-ink-dim">
+            was {signed(p.was_net_return)}
+          </span>
+        ) : null}
       </td>
       <td className="py-2 text-right text-[11px] text-ink-dim">
         {p.voided ? (
           <span
             className="rounded-full bg-down/15 px-2 py-0.5 text-down"
-            title="The recorded price series for this token crossed pools, so this trade is not counted."
+            title={
+              p.excluded
+                ? "Bought as a graduation, but this token never graduated from pump.fun: its pool is not the one a pump.fun migration creates. Shown, counted nowhere."
+                : "The recorded price series for this token crossed pools, so this trade is not counted."
+            }
           >
-            voided
+            {p.excluded ? "not a graduation" : "voided"}
           </span>
         ) : closed ? (
           <>
-            {p.close_reason}
+            {EXIT_LABEL[p.close_reason ?? ""] ?? p.close_reason}
             <span className="block">{minutes}m held</span>
+            {p.restated ? (
+              <span
+                className="mt-0.5 inline-block rounded-full bg-accent/15 px-2 py-0.5 text-accent"
+                title={RESTATED[p.restated] ?? "Restated 16 Sep."}
+              >
+                restated
+              </span>
+            ) : null}
           </>
         ) : (
           <span className="rounded-full bg-accent/15 px-2 py-0.5 text-accent">
@@ -250,6 +289,8 @@ function TradeTable({
   // Voided trades are shown but never summed: their prices came from two
   // different pools, so the figure would be a number about nothing.
   const counted = ordered.filter((p) => !p.voided);
+  const excluded = ordered.filter((p) => p.excluded).length;
+  const voided = ordered.length - counted.length - excluded;
   const total = counted.reduce((a, p) => a + Number(p.pnl_usd ?? 0), 0);
   const deployed = counted.reduce((a, p) => a + Number(p.notional_usd), 0);
   return (
@@ -288,9 +329,8 @@ function TradeTable({
           <tr className="border-t border-line text-[11px] text-ink-dim">
             <td className="pt-2 pr-3">
               {counted.length} counted
-              {counted.length < ordered.length
-                ? `, ${ordered.length - counted.length} voided`
-                : ""}
+              {excluded ? `, ${excluded} not graduations` : ""}
+              {voided ? `, ${voided} voided` : ""}
             </td>
             <td className="pt-2 pr-3 text-right tabular-nums">
               {usd(String(deployed))}
@@ -657,26 +697,48 @@ function LeaderboardPanel() {
             exactly true: it says what IS real and names the one thing a real
             wallet must do that this book does not. */}
         <p className="max-w-[78ch] rounded-lg border border-line bg-ink/[0.02] p-3 text-xs leading-relaxed text-ink-dim">
-          <b className="text-ink">Nothing here is invented.</b> Every entry and
-          exit is priced at a price this platform actually recorded from the
-          live feed, at the minute it happened. Every fill is charged the real
-          cost of trading: the exact constant-product move your own order makes
-          against the pool&rsquo;s <b className="text-ink">recorded depth</b>,
-          on both legs, plus the swap fee and the priority fee — the{" "}
+          <b className="text-ink">Nothing here is invented.</b> Only pump.fun
+          graduations count: a token bought on any pool but the one its
+          pump.fun migration created is shown struck through and counted
+          nowhere. Every entry is priced at the first price this platform
+          recorded for the pool, and every timed exit at the{" "}
+          <b className="text-ink">first price recorded after the exit was due</b>
+          . A pool drained by then is priced by what is left in it, not by its
+          quote. Every fill is charged what a real wallet pays: the exact
+          constant-product move your own order makes against the pool&rsquo;s{" "}
+          <b className="text-ink">recorded depth</b>, on both legs, plus
+          PumpSwap&rsquo;s fee for that market cap (0.30% to 1.25%),
+          Jupiter&rsquo;s 0.10% and the network fee — the{" "}
           <b className="text-ink">toll</b> column is that cost, taken out before
           any number you see. An order that would move a pool more than 10% is{" "}
           <b className="text-ink">refused, not filled</b>, because a real
-          transaction past its slippage limit reverts. So a wallet trading these
-          rules, at those moments, with {usd(data.notional_usd)} a position,
-          would have paid these prices.
+          transaction past its slippage limit reverts.
           <br />
           <span className="mt-1 block">
-            The one thing it must do that this book does not:{" "}
-            <b className="text-ink">land the transaction</b>. These fills assume
-            your buy confirms at the price on screen. That is the honest gap,
-            and it is the only one.
+            What a wallet must do that this book does not:{" "}
+            <b className="text-ink">land the transaction, on time</b>. The book
+            buys when a pool is first listed and sells the moment its exit is
+            due; a real {usd(data.notional_usd)} wallet does both tens of
+            seconds later, and on these tokens the price moves in that time.
           </span>
         </p>
+        {/* The restatement, stated where the numbers are. Every figure below
+            is AFTER it, and a reader who remembers yesterday's board is owed
+            the reason it changed. */}
+        {data.restated_trades > 0 ? (
+          <p className="max-w-[78ch] rounded-lg border border-accent/40 bg-accent/[0.05] p-3 text-xs leading-relaxed text-ink-dim">
+            <b className="text-ink">Restated 16 Sep.</b>{" "}
+            {data.restated_trades} closed trades on this board were rebooked
+            under the rules above. {data.restated_excluded} were never
+            graduations and now count for nothing.{" "}
+            {data.restated_repriced} exits moved to the first price recorded
+            after they were due
+            {data.restated_collapsed
+              ? ` — ${data.restated_collapsed} of them into a pool that had already been drained, which the old book had closed at a normal price`
+              : ""}
+            . Every restated trade shows what it said before.
+          </p>
+        ) : null}
         {/* Verdict. The headline is the finding; the terms are underneath. */}
         <div
           className={`grad-row rounded-lg border p-4 ${

@@ -1,0 +1,218 @@
+"""Restate the tournament's closed trades under the rules fixed on 2026-09-16.
+
+An audit of the leading arm found three faults in how trades had been booked,
+all fixed in the live tick the same day:
+
+* a timed exit took the newest mark there was, however old — five B3 trades
+  were closed on a price from before their pool was drained;
+* the migration feed's `raydium-cpmm` events for JUP, PENGU and tokenized
+  stocks were bought as graduations;
+* fees were PumpSwap's flat 25 bps and a 0.002 SOL network fee, where the pool
+  charges 30-125 bps by market cap, Jupiter takes 10 more, and the network fee
+  is about a twentieth of that.
+
+This walks every closed trade of the current arms and books it as the fixed
+tick would have. A trade that was never a graduation is EXCLUDED — kept and
+shown, never summed. What a row said before is written to
+`grad_paper_restatements`, once; a restated row is not restated again.
+
+Prices come from DexScreener rows only. The socket marks written before the
+fix left out the pool's virtual reserve and read up to 2% low, and every
+position has DexScreener rows around its exit anyway.
+
+Dry run by default:
+`python -m app.labs.graduation restate --opened-before ISO [--apply]`.
+"""
+
+from __future__ import annotations
+
+from collections import defaultdict
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from decimal import Decimal
+from typing import Any
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.labs.graduation import config
+from app.labs.graduation.backtest import amm_buy
+from app.labs.graduation.models import (
+    SOURCE_DEXSCREENER,
+    GradPaperPosition,
+    GradPaperRestatement,
+    GradPostgradSample,
+)
+from app.labs.graduation.paper import _P, _Q, costs
+from app.labs.graduation.tournament import (
+    ARMS,
+    BY_NAME,
+    Mark,
+    exit_mark,
+    graduation_pool,
+    seen_at,
+    settle,
+    valued,
+)
+
+RULE = "exit-fees-2026-09-16"
+NOT_GRADUATION = "not_graduation_pool"
+#: Only these closes are re-timed. A stop fired on the mark in front of it,
+#: and a retired arm or an ended series had no later mark to wait for; those
+#: keep their exit and are re-charged only.
+TIMED = "max_hold"
+
+
+@dataclass(frozen=True, slots=True)
+class Outcome:
+    """What one restatement did, for the summary."""
+
+    book: str
+    reason: str
+    was_pnl_usd: Decimal
+    now_pnl_usd: Decimal
+
+
+def _snapshot(position: GradPaperPosition, *, reason: str,
+              seen: datetime | None, source: str | None) -> GradPaperRestatement:
+    return GradPaperRestatement(
+        position_id=position.id, rule=RULE, reason=reason,
+        was_open_fill=position.open_fill, was_tokens=position.tokens,
+        was_close_quote=position.close_quote, was_close_fill=position.close_fill,
+        was_close_reason=position.close_reason,
+        was_liq_close_usd=position.liq_close_usd,
+        was_pnl_quote=position.pnl_quote, was_pnl_usd=position.pnl_usd,
+        was_net_return=position.net_return, was_closed_at=position.closed_at,
+        exit_seen_at=seen, exit_source=source)
+
+
+def restate_one(position: GradPaperPosition, *, pinned_pair: str | None,
+                marks: list[Mark]) -> GradPaperRestatement:
+    """Rebook one closed position in place and return what it said before.
+
+    Pure apart from the position it is handed, so it can be tested without a
+    database: `marks` are the mint's DexScreener rows around the trade.
+    """
+    if pinned_pair != graduation_pool(position.mint):
+        audit = _snapshot(position, reason=NOT_GRADUATION, seen=None, source=None)
+        position.excluded = NOT_GRADUATION
+        return audit
+
+    # The exit, re-timed if it was a timed exit. Any other exit keeps its
+    # price and time and is only re-charged.
+    quote, depth = position.close_quote, position.liq_close_usd
+    reason, closed_at = position.close_reason or TIMED, position.closed_at
+    seen = source = None
+    restated_as = "fees"
+    if position.close_reason == TIMED:
+        due = position.opened_at + timedelta(minutes=BY_NAME[position.book].hold)
+        out = exit_mark(marks, due)
+        why = TIMED
+        if out is None:
+            # Nothing recorded after the exit was due: the newest mark the
+            # book had, flagged as exactly that.
+            before = [m for m in marks if m.ts is not None and m.ts <= closed_at]
+            out = max(before, key=lambda m: m.ts) if before else None
+            why = "stale_exit"
+        if out is not None:
+            quote, collapsed = valued(out, position.open_quote,
+                                      position.liq_open_usd)
+            depth, reason = out.depth, collapsed or why
+            closed_at = max(closed_at, out.ts)
+            seen, source = seen_at(out), out.source
+            restated_as = reason
+    audit = _snapshot(position, reason=restated_as, seen=seen, source=source)
+
+    # The entry, re-charged: same price, the pool's real tier and the router.
+    fee_bps = config.pool_fee_bps(position.open_quote)
+    leg = costs(position.notional_quote, pool_fee_bps=fee_bps)
+    fill = amm_buy(position.open_quote, order_usd=position.notional_usd,
+                   liquidity_usd=position.liq_open_usd,
+                   fee_fraction=leg.fee_fraction) or leg.buy_price(position.open_quote)
+    position.pool_fee_bps = fee_bps
+    position.open_fill = fill.quantize(_P)
+    position.tokens = (position.notional_quote / fill).quantize(_Q)
+    settle(position, quote, depth, reason, closed_at)
+    return audit
+
+
+async def _marks(session: AsyncSession, mints: list[str], start: datetime,
+                 end: datetime) -> dict[str, list[Mark]]:
+    out: dict[str, list[Mark]] = defaultdict(list)
+    for i in range(0, len(mints), 200):
+        for r in (await session.execute(
+                select(GradPostgradSample.mint, GradPostgradSample.price_native,
+                       GradPostgradSample.liquidity_usd, GradPostgradSample.ts,
+                       GradPostgradSample.source)
+                .where(GradPostgradSample.mint.in_(mints[i:i + 200]),
+                       GradPostgradSample.source == SOURCE_DEXSCREENER,
+                       GradPostgradSample.price_native > 0,
+                       GradPostgradSample.ts >= start,
+                       GradPostgradSample.ts <= end))).all():
+            out[r.mint].append(Mark(r.price_native, r.liquidity_usd, r.ts, r.source))
+    return out
+
+
+async def _pinned(session: AsyncSession, mints: list[str]) -> dict[str, str | None]:
+    """The pair each mint was priced on: its first DexScreener row's."""
+    out: dict[str, str | None] = {}
+    for i in range(0, len(mints), 500):
+        for mint, pair in (await session.execute(
+                select(GradPostgradSample.mint, GradPostgradSample.pair_address)
+                .where(GradPostgradSample.mint.in_(mints[i:i + 500]),
+                       GradPostgradSample.source == SOURCE_DEXSCREENER,
+                       GradPostgradSample.price_native > 0)
+                .distinct(GradPostgradSample.mint)
+                .order_by(GradPostgradSample.mint, GradPostgradSample.ts))).all():
+            out[mint] = pair
+    return out
+
+
+async def restate(session: AsyncSession, *, apply: bool,
+                  opened_before: datetime) -> dict[str, Any]:
+    """Every closed, not yet restated trade of the current arms that was opened
+    before `opened_before` — the moment the fixed tick went live. A trade
+    opened after it was bought and sold by the fixed rules already."""
+    done = select(GradPaperRestatement.position_id)
+    positions = (await session.scalars(
+        select(GradPaperPosition)
+        .where(GradPaperPosition.book.in_([a.name for a in ARMS]),
+               GradPaperPosition.opened_at < opened_before,
+               GradPaperPosition.closed_at.is_not(None),
+               GradPaperPosition.notional_usd > 0,
+               GradPaperPosition.close_quote > 0,
+               GradPaperPosition.id.not_in(done))
+        .order_by(GradPaperPosition.opened_at))).all()
+    if not positions:
+        return {"rule": RULE, "applied": apply, "restated": 0}
+    mints = sorted({p.mint for p in positions})
+    pinned = await _pinned(session, mints)
+    wait = timedelta(seconds=config.EXIT_MAX_WAIT_S + config.FEED_LAG_S)
+    marks = await _marks(session, mints, min(p.opened_at for p in positions),
+                         max(p.closed_at for p in positions) + wait)
+
+    outcomes: list[Outcome] = []
+    for position in positions:
+        was = position.pnl_usd or Decimal(0)
+        audit = restate_one(position, pinned_pair=pinned.get(position.mint),
+                            marks=marks.get(position.mint, []))
+        session.add(audit)
+        now = Decimal(0) if position.excluded else (position.pnl_usd or Decimal(0))
+        outcomes.append(Outcome(position.book, audit.reason, was, now))
+    if apply:
+        await session.flush()
+    else:
+        await session.rollback()
+
+    books: dict[str, dict[str, Any]] = {}
+    for o in outcomes:
+        b = books.setdefault(o.book, {"trades": 0, "excluded": 0, "reasons": {},
+                                      "was_usd": Decimal(0), "now_usd": Decimal(0)})
+        b["trades"] += 1
+        b["excluded"] += o.reason == NOT_GRADUATION
+        b["reasons"][o.reason] = b["reasons"].get(o.reason, 0) + 1
+        b["was_usd"] += o.was_pnl_usd
+        b["now_usd"] += o.now_pnl_usd
+    return {"rule": RULE, "applied": apply, "restated": len(outcomes),
+            "books": {k: {**v, "was_usd": str(v["was_usd"]),
+                          "now_usd": str(v["now_usd"])} for k, v in books.items()}}
