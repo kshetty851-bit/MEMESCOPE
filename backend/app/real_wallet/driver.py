@@ -91,6 +91,16 @@ class RealWalletDriver:
         if await repo.active_kill_switches():
             return DriverOutcome(0, "kill_switch_active")
 
+        # Asked before anything costly. While the graduation arm is nominated
+        # the fast loop calls this every few seconds, and with no fresh
+        # decision there is nothing to size: the balance read below is an RPC
+        # call and the SOL price an HTTP one, neither of which a no-op needs.
+        candidate = await self._next_candidate(
+            strategy_id=switch.nominated_strategy, now=now
+        )
+        if candidate is None:
+            return DriverOutcome(0, "no_fresh_candidate")
+
         # Measured, not assumed. `evaluate_canary_entry` refuses an unreadable
         # balance on purpose — the ceiling exists to keep the canary tiny, and a
         # wallet nobody measured has not been shown to be tiny. An RPC failure
@@ -176,12 +186,6 @@ class RealWalletDriver:
         )
         if not decision.allowed:
             return DriverOutcome(0, "policy:" + ",".join(decision.reason_codes))
-
-        candidate = await self._next_candidate(
-            strategy_id=switch.nominated_strategy, now=now
-        )
-        if candidate is None:
-            return DriverOutcome(0, "no_fresh_candidate")
 
         # One intent per tick, deliberately. A loop here would turn a single
         # bad minute into a whole book.

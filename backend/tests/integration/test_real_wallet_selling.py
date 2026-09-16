@@ -165,6 +165,37 @@ async def test_a_graduation_position_with_no_price_is_sold_at_five_minutes(db_se
     assert position.exit_reason == "time_exit_unpriced"
 
 
+async def test_a_graduation_sale_follows_the_paper_clock_not_the_fill(db_session):
+    """The wallet bought 40 seconds after the lab decided. Counting the five
+    minutes from its own fill sold 40 seconds late, into the window in which
+    these pools are drained; it now sells when the paper book does."""
+    now = datetime.now(UTC)
+    filled = now - timedelta(seconds=200)
+    decided = filled - timedelta(seconds=40)
+    await live_decisions.record(db_session, [live_decisions.Mirrored(
+        mint=MINT, opened_at=decided, liquidity_usd=Decimal("250000"),
+        impact=None, price_native=Decimal("0.000001"))])
+    position = await _bought(db_session, at=filled, price=_usd(now))
+    driver = RealWalletExitDriver(db_session)
+
+    # 300s after the decision, 260s after the fill: due by the paper clock.
+    out = await driver.tick(now=decided + timedelta(seconds=301))
+    assert out.exits_requested == 1, out.as_dict()
+    assert position.exit_reason == "time_exit_unpriced"
+
+
+async def test_only_the_graduation_arm_counts_from_the_decision(db_session):
+    now = datetime.now(UTC)
+    filled = now - timedelta(seconds=200)
+    await live_decisions.record(db_session, [live_decisions.Mirrored(
+        mint=MINT, opened_at=filled - timedelta(seconds=40),
+        liquidity_usd=Decimal("250000"), impact=None,
+        price_native=Decimal("0.000001"))])
+    position = await _bought(db_session, at=filled, price=_usd(now), strategy="V7-06")
+    started = await RealWalletExitDriver(db_session)._clock_start(position)
+    assert started == position.opened_at
+
+
 async def test_an_exit_that_sold_nothing_is_asked_for_again(db_session):
     now = datetime.now(UTC)
     position = await _bought(db_session, at=now - timedelta(minutes=6), price=_usd(now))

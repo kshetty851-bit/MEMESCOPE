@@ -130,6 +130,8 @@ const EXCLUDED: Record<string, { label: string; title: string }> = {
 const EXIT_LABEL: Record<string, string> = {
   pool_collapsed: "pool drained",
   stale_exit: "no later price",
+  drain_stop: "pool draining — sold",
+  hard_stop: "stop",
 };
 
 /**
@@ -720,10 +722,11 @@ function LeaderboardPanel() {
           graduations count: a token bought on any pool but the one its
           pump.fun migration created is shown struck through and counted
           nowhere. Every entry is priced at the first price this platform
-          recorded for the pool, and every timed exit at the{" "}
-          <b className="text-ink">first price recorded after the exit was due</b>
-          . A pool drained by then is priced by what is left in it, not by its
-          quote. Every fill is charged what a real wallet pays: the exact
+          recorded for the pool, and every exit at the{" "}
+          <b className="text-ink">first price recorded after it was due</b> — a
+          stop is due a few seconds after it fires, the time a wallet needs to
+          act. A pool drained by then is priced by what is left in it, not by
+          its quote. Every fill is charged what a real wallet pays: the exact
           constant-product move your own order makes against the pool&rsquo;s{" "}
           <b className="text-ink">recorded depth</b>, on both legs, plus
           PumpSwap&rsquo;s fee for that market cap (0.30% to 1.25%),

@@ -30,6 +30,16 @@ Its time exit still does: "sell at five minutes" reads a clock, not a market,
 and 20 of 174 graduation trades had no snapshot at all during their hold — a
 rule that waited for one would have held them for ever.
 
+## A graduation trade's clock starts at the paper entry
+
+The paper book holds a graduation from the moment it first saw the pool and
+sells five minutes later. The wallet buys some seconds after that, and a hold
+counted from its own fill sold those seconds later too — into the window, five
+to seven minutes after graduation, in which the pools this arm buys get
+drained. So for the graduation arm the clock starts at the decision the wallet
+acted on, and the wallet sells when the paper book does. Every other strategy
+still counts from its own fill.
+
 ## An exit that sold nothing is asked for again
 
 A sell refused before it was sent, or reverted on chain, sold nothing, and
@@ -51,7 +61,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -59,6 +69,7 @@ from app.core.logging import get_logger
 from app.lab import execution, spec
 from app.lab.rules import MarkState, evaluate_exit
 from app.labs.graduation import live_spec
+from app.models.lab import LabDecision
 from app.models.real_wallet_execution import RealWalletPosition
 from app.real_wallet.live_repository import (
     RETRYABLE_EXIT_STATES,
@@ -128,6 +139,7 @@ class RealWalletExitDriver:
                 skip("unknown_strategy")
                 continue
 
+            started = await self._clock_start(pos)
             if pos.exit_intent_id is not None:
                 # Already decided. Asked again only if nothing was sold, and
                 # never re-judged: the paper book closed when the rule fired.
@@ -136,7 +148,7 @@ class RealWalletExitDriver:
                     skip(waiting)
                     continue
                 reason = pos.exit_reason or "retry"
-            elif (state := await self._mark(pos, strategy, now)) is not None:
+            elif (state := await self._mark(pos, strategy, now, started)) is not None:
                 marked += 1
                 verdict = evaluate_exit(strategy.exits, state)
                 if verdict.action is None:
@@ -149,7 +161,7 @@ class RealWalletExitDriver:
                 reason = (f"partial_promoted_to_close:{verdict.reason}"
                           if verdict.action == "PARTIAL" else str(verdict.reason))
             elif (strategy.exits.time_exit_hours is not None
-                  and _held_hours(pos, now) >= strategy.exits.time_exit_hours):
+                  and _held_hours(started, now) >= strategy.exits.time_exit_hours):
                 reason = "time_exit_unpriced"
             else:
                 skip("unpriceable")
@@ -176,8 +188,22 @@ class RealWalletExitDriver:
 
     # --- marking ------------------------------------------------------------
 
+    async def _clock_start(self, pos: RealWalletPosition) -> datetime:
+        """When this position's hold began. See "A graduation trade's clock"."""
+        opened = _aware(pos.opened_at)
+        key = (pos.strategy_id or "").upper()
+        if key not in live_spec.BY_ID:
+            return opened
+        decided = await self._session.scalar(
+            select(func.max(LabDecision.checkpoint_at))
+            .where(LabDecision.strategy_id == key,
+                   LabDecision.mint_address == pos.mint_address,
+                   LabDecision.checkpoint_at <= opened))
+        return min(opened, _aware(decided)) if decided is not None else opened
+
     async def _mark(
-        self, pos: RealWalletPosition, strategy: spec.Strategy, now: datetime
+        self, pos: RealWalletPosition, strategy: spec.Strategy, now: datetime,
+        started: datetime,
     ) -> MarkState | None:
         """Update the position's live state and return what the rules read.
 
@@ -223,7 +249,7 @@ class RealWalletExitDriver:
         else:
             pos.flat_since = None
 
-        held_hours = _held_hours(pos, now)
+        held_hours = _held_hours(started, now)
         flat_hours = ((now - _aware(pos.flat_since)).total_seconds() / 3600
                       if pos.flat_since else 0.0)
         return MarkState(
@@ -282,9 +308,9 @@ def _aware(value: datetime) -> datetime:
     return value if value.tzinfo else value.replace(tzinfo=UTC)
 
 
-def _held_hours(pos: RealWalletPosition, now: datetime) -> float:
+def _held_hours(started: datetime, now: datetime) -> float:
     """Hours held, as a float — the unit and arithmetic `live_spec` pins its bound to."""
-    return (now - _aware(pos.opened_at)).total_seconds() / 3600
+    return (now - _aware(started)).total_seconds() / 3600
 
 
 __all__ = ["ExitOutcome", "RealWalletExitDriver", "strategy_for"]

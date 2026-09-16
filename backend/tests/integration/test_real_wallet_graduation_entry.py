@@ -79,3 +79,18 @@ async def test_a_wallet_under_the_floor_stops_like_the_board(db_session, monkeyp
     out = await RealWalletDriver(db_session).tick(now=now)
     assert (out.created, out.skipped) == (0, "entry_not_fundable")
     assert (await db_session.execute(select(RealWalletLiveIntent))).first() is None
+
+
+async def test_with_no_fresh_decision_the_chain_is_never_asked(db_session, monkeypatch):
+    """While the graduation arm is nominated the fast loop asks every few
+    seconds; an empty ask must not cost an RPC balance read each time."""
+    async def _no_rpc(self, wallet):
+        raise AssertionError("balance read with nothing to buy")
+
+    monkeypatch.setattr(RealWalletDriver, "_wallet_lamports", _no_rpc)
+    now = datetime.now(UTC)
+    await AutotradeSwitchService(db_session).start(
+        actor="op@x.com", reason="empty ask", strategy_id="G-B3-5M", at=now)
+    outcome = await RealWalletDriver(db_session).tick(now=now)
+    assert outcome.as_dict() == {"created": 0, "skipped": "no_fresh_candidate",
+                                 "mint": None}

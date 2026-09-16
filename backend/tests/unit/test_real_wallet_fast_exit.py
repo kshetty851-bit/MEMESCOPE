@@ -140,3 +140,36 @@ async def test_a_fresh_decision_counts_as_work() -> None:
     assert "LabDecision" in src and "nominated_strategy" in src, (
         "with entries in the loop, a fresh decision is work — otherwise the "
         "fast path sleeps through the window it exists to serve")
+
+
+@pytest.mark.asyncio
+async def test_the_graduation_arm_keeps_the_loop_awake(monkeypatch) -> None:
+    """Its decisions land mid-minute and are stale in sixty seconds; a loop
+    that waited for the next beat to see one bought a median 55s late."""
+    from types import SimpleNamespace
+
+    class _Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return None
+
+        async def scalar(self, _stmt):
+            return 0  # nothing open, nothing unfinished, no decision yet
+
+    def _switch(strategy):
+        class _Service:
+            def __init__(self, session):
+                pass
+
+            async def state(self):
+                return SimpleNamespace(enabled=True, nominated_strategy=strategy)
+        return _Service
+
+    monkeypatch.setattr(scheduler, "SessionFactory", _Session)
+    monkeypatch.setattr(scheduler, "AutotradeSwitchService", _switch("G-B3-5M"))
+    assert await scheduler._has_work() is True
+    # A strategy that decides on a ten-minute horizon still waits for a decision.
+    monkeypatch.setattr(scheduler, "AutotradeSwitchService", _switch("V7-06"))
+    assert await scheduler._has_work() is False
