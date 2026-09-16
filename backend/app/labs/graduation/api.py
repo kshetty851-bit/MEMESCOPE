@@ -25,7 +25,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
-from app.labs.graduation import config
+from app.labs.graduation import config, live_spec
 from app.labs.graduation.models import (
     GradCheckpoint,
     GradCurveSample,
@@ -720,8 +720,9 @@ _PROJECTIONS: tuple[datetime, dict[str, dict[str, Any]]] | None = None
 _PROJECTION_TTL = timedelta(minutes=2)
 
 
-def _funded_walk(trades: list[tuple[datetime, datetime, float]],
-                 rate: Decimal | None = None) -> tuple[float, int, int]:
+def _funded_walk(
+    trades: list[tuple[datetime, datetime, float]], rate: Decimal | None = None,
+) -> tuple[float, int, int, list[tuple[datetime, float]]]:
     """What a real $100 account could have taken — equity, funded, skipped.
 
     `_wallet_walk` walks the arm's returns one after another and never asks
@@ -760,20 +761,16 @@ def _funded_walk(trades: list[tuple[datetime, datetime, float]],
             held = [h for h in held if h[0] > opened]
             for _, r, size in due:
                 cash += size * r
-        if held:
-            # A second position needs a WHOLE ticket; this is what "$200 holds
-            # two" means, and it is the rule the board was silently skipping.
-            if cash + 1e-9 < cap:
-                skipped += 1
-                continue
-            size = cap
-        else:
-            size = min(cap, cash)
-            if size < floor:
-                skipped += 1
-                continue
-        cash -= size
-        held.append((closed, 1.0 + ret - _size_penalty(size, base, rate), size))
+        # The wallet's own rule (`live_spec.fundable`), so this balance is the
+        # one the real wallet would reach. Rounded to shed float dust that
+        # would otherwise make a whole ticket read a hair short.
+        stake = live_spec.fundable(round(cash, 9), holding=bool(held),
+                                   ticket=cap, floor=floor)
+        if stake is None:
+            skipped += 1
+            continue
+        cash -= stake
+        held.append((closed, 1.0 + ret - _size_penalty(stake, base, rate), stake))
         took.append((closed, ret))
         funded += 1
     for _, r, size in held:

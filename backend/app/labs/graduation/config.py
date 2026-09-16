@@ -723,17 +723,21 @@ def required_pf(trades: int) -> Decimal:
 #:
 #: Both are shown. The tournament measures the rule; this measures the wallet.
 WALLET_DEMO_USD = _dec("LAB_GRADUATION_WALLET_DEMO_USD", "100")
-#: Below this the wallet is finished, whatever the arithmetic says.
+#: Below this the wallet is finished, whatever the arithmetic says — and the
+#: REAL wallet stops here too. `RealWalletDriver` sizes the graduation arm with
+#: this floor through `live_spec.fundable`, the same rule `_funded_walk` walks,
+#: so the board and the wallet cannot disagree about when the account is done.
 #:
-#: $25, from the execution cost curve measured on this market: the priority
-#: fee is flat in SOL, so a leg costs 0.25% of a $250 position, 1.10% of a $25
-#: one and 2.32% of a $10 one — against a break-even of roughly 1% a side.
-#: Twenty-five dollars is exactly where a round trip stops being payable.
+#: $56, this arm's own break-even ticket (2026-09-16). The priority fee is flat
+#: in SOL, so a round trip costs 0.98% at $100, 1.35% at $50, 2.14% at $25 and
+#: 4.56% at $10, and against B3's measured gross move the cost overtakes it at
+#: about $56. It was $25 — where a round trip stops being payable against ~1%
+#: a side at all — until the wallet began sizing from it.
 #:
-#: Without this floor the simulation is fiction: an account taking -99% holds
+#: Without a floor the simulation is fiction: an account taking -99% holds
 #: about $2.65, and compounding lets that $2.65 "recover" to nine figures on
 #: later winners it could never have placed.
-WALLET_MIN_USD = _dec("LAB_GRADUATION_WALLET_MIN_USD", "25")
+WALLET_MIN_USD = _dec("LAB_GRADUATION_WALLET_MIN_USD", "56")
 #: How many positions that wallet spreads itself over. ONE.
 #:
 #: It was TEN, on a measurement that compared survival across sizes but did

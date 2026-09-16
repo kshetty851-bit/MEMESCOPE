@@ -70,9 +70,9 @@ def test_a_missing_reading_refuses_the_trade():
 
 
 def test_the_position_stays_above_the_size_that_can_be_paid_for():
-    """Below $25 a round trip costs more than it can make: the priority fee is
-    flat in SOL, so it is 0.25% of a $250 order and 2.32% of a $10 one against
-    a break-even near 1% a side."""
+    """Below $56 this arm's round trip costs more than it makes: the priority
+    fee is flat in SOL, so a round trip is 0.98% of a $100 order and 4.56% of a
+    $10 one, and B3's measured gross move stops covering it at about $56."""
     assert config.PAPER_NOTIONAL_USD >= config.WALLET_MIN_USD
     # The wallet's position must be at least the payable floor. This used to
     # assert the OPPOSITE — that the position was SMALLER than the notional the
@@ -295,3 +295,28 @@ def test_holder_concentration_is_collected_but_not_acted_on():
     assert config.HOLDER_MAX_TOP1_SHARE is None, (
         "nothing may be excluded on concentration until there is data saying "
         "concentration predicts a rug")
+
+
+def test_the_board_stops_where_the_real_wallet_does():
+    """`_funded_walk` and `RealWalletDriver` share `live_spec.fundable`, so the
+    balance the page prints is the one the wallet would reach. A $100 account
+    that halves is finished at the floor: the next signal is skipped on the
+    board exactly as the wallet refuses it."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.labs.graduation.api import _funded_walk
+
+    t0 = datetime(2026, 9, 16, tzinfo=UTC)
+    minutes = timedelta(minutes=1)
+    trades = [(t0, t0 + 5 * minutes, -0.50),
+              (t0 + 10 * minutes, t0 + 15 * minutes, 0.10)]
+    cash, funded, skipped, _ = _funded_walk(trades)
+    assert (funded, skipped) == (1, 1)
+    assert cash < float(config.WALLET_MIN_USD)
+
+    # A drawdown that stays above the floor keeps trading, at a smaller size.
+    trades = [(t0, t0 + 5 * minutes, -0.10),
+              (t0 + 10 * minutes, t0 + 15 * minutes, 0.10)]
+    cash, funded, skipped, _ = _funded_walk(trades)
+    assert (funded, skipped) == (2, 0)
+    assert round(cash, 2) == 99.0

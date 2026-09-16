@@ -104,3 +104,78 @@ class TestTheCapMovesWithTheLadder:
         grown = configured_entry_size_usd(Decimal("800"))
         assert grown == Decimal("40")          # 8x ladder, under the 8x cap of 96
         assert grown <= settings.REAL_WALLET_MAX_TRADE_USD * 8
+
+
+class TestTheGraduationArmSizesLikeTheBoard:
+    """A fixed $100 ticket and a 0.01 SOL fee reserve do not mix on a $100
+    account: funded with exactly $100 it never traded, and funded with $103 the
+    first 3% drawdown stopped it for good. The graduation arm now sizes with
+    the board's own rule, `live_spec.fundable`, over what the reserve leaves.
+    Priced at $100 a SOL, so SOL and hundreds of dollars read the same."""
+
+    PRICE = Decimal("100")
+
+    @pytest.fixture(autouse=True)
+    def _reserve(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(settings, "REAL_WALLET_MIN_SOL_FEE_RESERVE", Decimal("0.01"))
+
+    def fund(self, sol: str, *, holding: int = 0, strategy: str = "G-B3-5M"):
+        from app.real_wallet.driver import RealWalletDriver
+
+        return RealWalletDriver._fundable(
+            strategy, Decimal("100"),
+            balance_lamports=int(Decimal(sol) * 1_000_000_000),
+            sol_price=self.PRICE, open_positions=holding)
+
+    def test_exactly_one_hundred_dollars_trades_what_the_reserve_leaves(self) -> None:
+        assert self.fund("1") == Decimal("99.00")
+
+    def test_a_richer_account_takes_the_whole_ticket_and_no_more(self) -> None:
+        assert self.fund("1.03") == Decimal("100")
+        assert self.fund("5") == Decimal("100")
+
+    def test_a_drawdown_shrinks_the_ticket_instead_of_stopping_it(self) -> None:
+        assert self.fund("0.9785") == Decimal("96.85")
+
+    def test_it_stops_where_the_board_stops(self) -> None:
+        from app.labs.graduation import config as grad
+
+        assert Decimal("56") == grad.WALLET_MIN_USD
+        assert self.fund("0.57") == Decimal("56.00")
+        assert self.fund("0.5699") is None
+
+    def test_a_second_position_needs_a_whole_ticket(self) -> None:
+        """"$200 holds two" — two full positions, never one and a scrap."""
+        assert self.fund("1.5", holding=1) == Decimal("100")
+        assert self.fund("0.9", holding=1) is None
+
+    def test_other_strategies_keep_their_fixed_ticket(self) -> None:
+        assert self.fund("0.2", strategy="V6-06") == Decimal("100")
+
+    def test_the_policy_accepts_the_size_it_is_handed(self) -> None:
+        """The sized spend leaves exactly the reserve; the old fixed ticket is
+        what the policy refused."""
+        from decimal import ROUND_DOWN
+
+        from app.real_wallet.policy import (
+            AutonomousExecutionPolicy,
+            PolicyReason,
+            PolicyState,
+        )
+        from app.real_wallet.tx_inspect import lamports_from_sol
+
+        def reasons(usd: Decimal) -> tuple[str, ...]:
+            spend = lamports_from_sol((usd / self.PRICE).quantize(
+                Decimal("1e-9"), rounding=ROUND_DOWN))
+            return AutonomousExecutionPolicy().evaluate_canary_entry(
+                requested_usd=usd,
+                state=PolicyState(
+                    open_positions=0, exposure_usd=Decimal(0),
+                    daily_notional_usd=Decimal(0),
+                    daily_realised_loss_usd=Decimal(0), daily_trades=0,
+                    wallet_balance_lamports=1_000_000_000,
+                    equity_usd=Decimal(100), side="BUY", spend_lamports=spend),
+            ).reason_codes
+
+        assert PolicyReason.MIN_SOL_FEE_RESERVE in reasons(Decimal("100"))
+        assert PolicyReason.MIN_SOL_FEE_RESERVE not in reasons(self.fund("1"))

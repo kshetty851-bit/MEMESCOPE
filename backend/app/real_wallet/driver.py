@@ -127,6 +127,12 @@ class RealWalletDriver:
         entry_usd = configured_entry_size_usd(equity_usd)
         if entry_usd is None or entry_usd <= 0:
             return DriverOutcome(0, "entry_size_not_configured")
+        entry_usd = self._fundable(
+            switch.nominated_strategy, entry_usd,
+            balance_lamports=balance_lamports, sol_price=sol_price,
+            open_positions=open_positions)
+        if entry_usd is None:
+            return DriverOutcome(0, "entry_not_fundable")
 
         # Price the entry in the asset the wallet actually holds, and store it.
         #
@@ -238,6 +244,38 @@ class RealWalletDriver:
         if strategy_id.upper() in GRAD_BY_ID:
             return timedelta(seconds=MAX_DECISION_AGE_SECONDS)
         return MAX_DECISION_AGE
+
+    @staticmethod
+    def _fundable(strategy_id: str, configured: Decimal, *,
+                  balance_lamports: int, sol_price: Decimal,
+                  open_positions: int) -> Decimal | None:
+        """What this entry may spend. For the graduation arm, exactly what the
+        board's $100 account would.
+
+        A fixed ticket and a fee-reserve floor do not mix on a small account.
+        Funded with $100, a $100 ticket left nothing for the 0.01 SOL reserve
+        and every entry was refused; funded with $103, the first 3% drawdown
+        refused every entry after it, for good — while the board went on
+        trading whatever its cash allowed. `live_spec.fundable` is now the rule
+        for both, applied to the SOL the wallet can spend once the reserve is
+        kept, and it stops where the board does.
+
+        Other strategies keep their fixed ticket: how they size is the Paper
+        position-size work's decision, not this one.
+        """
+        from app.labs.graduation import config as grad
+        from app.labs.graduation import live_spec
+
+        if strategy_id.upper() not in live_spec.BY_ID:
+            return configured
+        reserve = lamports_from_sol(
+            Decimal(str(settings.REAL_WALLET_MIN_SOL_FEE_RESERVE)))
+        # Cents, rounded DOWN: the spend is priced back into lamports, also
+        # rounded down, so it can never reach into the reserve.
+        cash = (Decimal(max(balance_lamports - reserve, 0)) / _LAMPORTS_PER_SOL
+                * sol_price).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+        return live_spec.fundable(cash, holding=open_positions > 0,
+                                  ticket=configured, floor=grad.WALLET_MIN_USD)
 
     async def _next_candidate(self, *, strategy_id: str, now: datetime) -> str | None:
         """The most recent mint this strategy chose and this wallet has not traded."""

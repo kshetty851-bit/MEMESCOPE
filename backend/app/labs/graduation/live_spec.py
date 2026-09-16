@@ -43,10 +43,12 @@ import hashlib
 import json
 from dataclasses import asdict
 from decimal import Decimal
+from typing import TypeVar
 
 from app.lab.spec import Exits, Strategy
 
 D = Decimal
+_Money = TypeVar("_Money", float, Decimal)
 
 SPEC_VERSION = "gradlive-1.0.0"
 
@@ -128,6 +130,27 @@ STRATEGIES: tuple[Strategy, ...] = (
 )
 
 BY_ID = {s.id: s for s in STRATEGIES}
+
+
+def fundable(cash: _Money, *, holding: bool, ticket: _Money,
+             floor: _Money) -> _Money | None:
+    """What the $100 account spends on its next entry, or None to skip it.
+
+    ONE rule for the board and the wallet: `api._funded_walk` walks it over the
+    paper trades and `RealWalletDriver` applies it to the live balance, so the
+    balance the page prints is the balance the wallet would have.
+
+    * Nothing held: the whole ticket, or all the cash when there is less — but
+      never under `floor`, below which the flat priority fee outruns the move.
+    * Something held: a WHOLE ticket or nothing. "$200 holds two" means two
+      full positions, never a full one and a scrap.
+
+    Floats (the board) and Decimals (the wallet) both work; do not mix them.
+    """
+    if holding:
+        return ticket if cash >= ticket else None
+    size = min(ticket, cash)
+    return size if size >= floor else None
 
 
 def _canonical() -> str:
