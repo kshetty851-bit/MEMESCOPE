@@ -11,9 +11,11 @@ from app.core.config import settings
 from app.core.events import publish_live_update
 from app.core.logging import get_logger
 from app.db.session import SessionFactory
+from app.models.lab import LabDecision
 from app.models.real_wallet_execution import RealWalletLiveIntent
 from app.models.real_wallet_execution import RealWalletPosition
 from app.paper.service import utcnow
+from app.real_wallet.autotrade import AutotradeSwitchService
 from app.real_wallet.driver import RealWalletDriver
 from app.real_wallet.dry_run import RealWalletDryRunService
 from app.real_wallet.executor import RealWalletExecutor
@@ -298,7 +300,23 @@ async def _has_work() -> bool:
         unfinished = await session.scalar(
             select(func.count()).select_from(RealWalletLiveIntent)
             .where(RealWalletLiveIntent.state.in_(UNFINISHED_STATES)))
-        return bool(unfinished)
+        if unfinished:
+            return True
+        # A fresh decision is work too, now that this loop also ENTERS. Without
+        # this the fast path would idle through exactly the sixty seconds in
+        # which a five-minute strategy has to be filled, and entries would fall
+        # back to the once-a-minute beat this exists to replace.
+        switch = await AutotradeSwitchService(session).state()
+        if not (switch.enabled and switch.nominated_strategy):
+            return False
+        cutoff = utcnow() - RealWalletDriver._decision_age(
+            switch.nominated_strategy)
+        fresh = await session.scalar(
+            select(func.count()).select_from(LabDecision)
+            .where(LabDecision.strategy_id == switch.nominated_strategy.upper(),
+                   LabDecision.eligible.is_(True),
+                   LabDecision.checkpoint_at >= cutoff))
+        return bool(fresh)
 
 
 async def _real_wallet_fast_exit_tick() -> dict[str, Any]:
@@ -307,7 +325,7 @@ async def _real_wallet_fast_exit_tick() -> dict[str, Any]:
     if not await _has_work():
         return {"skipped": "nothing_open"}
     deadline = utcnow().timestamp() + settings.REAL_WALLET_FAST_EXIT_WINDOW_S
-    passes = exits = advanced = 0
+    passes = entries = exits = advanced = 0
     while True:
         try:
             async with SessionFactory() as session:
@@ -320,14 +338,34 @@ async def _real_wallet_fast_exit_tick() -> dict[str, Any]:
                     await session.rollback()
                     return {"skipped": "fast_exit_already_running",
                             "passes": passes}
+                # ENTRY, not only exit. The hold runs from the wallet's own
+                # fill but the collapse runs from GRADUATION, so a late buy
+                # pushes the SELL past the cliff rather than merely delaying
+                # it. Replayed over the graduation arm's own 145 trades, a
+                # uniform 0-60s entry lag wiped the wallet in 51% of draws and
+                # a flat 60s lag in 100%; at 0-15s it is 0%. A once-a-minute
+                # driver tick is therefore not a slower version of the right
+                # thing for a five-minute hold — it is the wrong thing.
+                #
+                # No new authority. `RealWalletDriver.tick` creates at most ONE
+                # buy intent per call and is a chain of refusals: switch off,
+                # no strategy nominated, no wallet, no entry size, kill switch,
+                # unreadable balance, policy bounds, no fresh decision, mint
+                # already traded. Calling it more often changes WHEN those
+                # refuse, never whether — and REAL_WALLET_MAX_OPEN_POSITIONS
+                # and MAX_TOTAL_EXPOSURE_USD bound the book however fast this
+                # runs.
+                bought = await RealWalletDriver(session).tick(now=utcnow())
                 outcome = await RealWalletExitDriver(session).tick(now=utcnow())
                 moved = await _drain(session, now_fn=utcnow)
                 await session.commit()
             passes += 1
+            entries += bought.created
             exits += outcome.exits_requested
             advanced += len(moved)
-            if outcome.exits_requested or moved:
+            if bought.created or outcome.exits_requested or moved:
                 logger.warning("real_wallet_fast_exit_pass",
+                               entries=bought.created,
                                exits=outcome.exits_requested,
                                advanced=len(moved))
         except Exception:
@@ -340,7 +378,8 @@ async def _real_wallet_fast_exit_tick() -> dict[str, Any]:
         if utcnow().timestamp() >= deadline:
             break
         await asyncio.sleep(settings.REAL_WALLET_FAST_EXIT_INTERVAL_S)
-    return {"passes": passes, "exits_requested": exits, "advanced": advanced}
+    return {"passes": passes, "entries": entries,
+            "exits_requested": exits, "advanced": advanced}
 
 
 @celery_app.task(name="app.real_wallet.scheduler.real_wallet_balance_watch")

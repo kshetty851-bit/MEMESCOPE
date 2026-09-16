@@ -5,6 +5,8 @@ check is on the two properties that make it different from the minute tick.
 """
 from __future__ import annotations
 
+import inspect
+
 import pytest
 
 from app.core.config import settings
@@ -100,3 +102,41 @@ async def test_drain_is_bounded(monkeypatch) -> None:
     monkeypatch.setattr(scheduler, "RealWalletExecutor", _Stuck)
     moved = await scheduler._drain(_FakeSession(["i1"]), now_fn=lambda: None)
     assert len(moved) == settings.REAL_WALLET_FAST_EXIT_MAX_STEPS
+
+
+@pytest.mark.asyncio
+async def test_the_fast_loop_enters_as_well_as_exits() -> None:
+    """A five-minute hold cannot be entered on a once-a-minute beat.
+
+    The clock starts at the WALLET's fill; the collapse starts at GRADUATION.
+    So a late buy does not merely delay the sale, it pushes it PAST the cliff.
+    Replayed over the graduation arm's own 145 trades:
+
+        entry lag        wallet wiped
+        0-15s                      0%
+        0-30s                      9%
+        0-60s                     51%
+        exactly 60s              100%
+
+    If this regresses to exit-only, entries fall back to `crontab(minute="*")`
+    and nothing else in the system notices.
+    """
+    src = inspect.getsource(scheduler._real_wallet_fast_exit_tick)
+    assert "RealWalletDriver(session).tick" in src, (
+        "the fast loop must drive ENTRIES; exits alone leave buys on the "
+        "minute beat, which wiped the wallet in 51% of replayed draws")
+    assert "RealWalletExitDriver(session).tick" in src, "and still exit"
+
+
+@pytest.mark.asyncio
+async def test_a_fresh_decision_counts_as_work() -> None:
+    """Idling on an empty book must not idle through the minute a buy is due.
+
+    `_has_work` short-circuits the 3-second loop when nothing is open. Once the
+    loop also enters, that is exactly the window an entry has to land in — so a
+    fresh, eligible decision for the nominated strategy is work.
+    """
+    src = inspect.getsource(scheduler._has_work)
+    assert "LabDecision" in src and "nominated_strategy" in src, (
+        "with entries in the loop, a fresh decision is work — otherwise the "
+        "fast path sleeps through the window it exists to serve")
