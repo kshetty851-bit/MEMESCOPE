@@ -407,3 +407,64 @@ async def test_a_socket_mark_never_waits_on_holder_reads() -> None:
     assert recorder._owe_holders == {MINT}
     await recorder.flush()
     assert rpc.holders_asked == [MINT]
+
+
+class _Scripted:
+    """A session that answers each query with the next scripted row list."""
+
+    def __init__(self, *answers) -> None:
+        self.answers = list(answers)
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+    async def execute(self, statement):
+        from types import SimpleNamespace
+
+        if not self.answers:
+            raise RuntimeError("database down")
+        rows = self.answers.pop(0)
+        return SimpleNamespace(all=lambda: rows)
+
+
+def _recorder_on(session) -> GraduationRecorder:
+    return GraduationRecorder(stream=_NoStream(), rpc=FakeRPC({}),
+                              market=FakeMarket(pairs=PAIRS),
+                              session_factory=lambda: session, now=Clock(START))
+
+
+async def test_a_restart_resumes_every_open_window_on_its_pinned_pair() -> None:
+    """The windows lived only in memory: every deploy cut short the hour of
+    every token that graduated before it, and left open positions with no
+    DexScreener mark until they closed."""
+    from types import SimpleNamespace
+
+    fed = START - timedelta(minutes=20)
+    chain_only = "ChainSawItFeedDidNot"
+    recorder = _recorder_on(_Scripted(
+        [SimpleNamespace(mint=MINT, ts=fed)],
+        [SimpleNamespace(mint=MINT, opened_at=fed + timedelta(minutes=9),
+                         last_at=START - timedelta(seconds=40)),
+         SimpleNamespace(mint=chain_only, opened_at=START - timedelta(minutes=5),
+                         last_at=START - timedelta(minutes=1))],
+        [SimpleNamespace(mint=MINT, pair_address="PINNED", dex_id="pumpswap")]))
+    await recorder._resume_windows()
+    state = recorder.postgrad.states[MINT]
+    assert (state.migrated_at, state.pair_address) == (fed, "PINNED")
+    assert state.opened_at == fed + timedelta(minutes=9)
+    assert state.gap_seconds(START) == 40      # the backfill fills the restart
+    assert recorder.postgrad.states[chain_only].migrated_at == START - timedelta(minutes=5)
+    # The pin survives: another pool is refused, the pinned one accepted.
+    assert not recorder.postgrad._accept(
+        {"mint": MINT, "pair_address": "ELSEWHERE", "ts": START})
+    assert recorder.postgrad._accept(
+        {"mint": MINT, "pair_address": "PINNED", "ts": START})
+
+
+async def test_a_failed_resume_never_stops_the_recorder() -> None:
+    recorder = _recorder_on(_Scripted())
+    await recorder._resume_windows()
+    assert not recorder.postgrad.states

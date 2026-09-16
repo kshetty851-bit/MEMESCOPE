@@ -135,6 +135,7 @@ class GraduationRecorder:
             logger.info("graduation_recorder_disabled")
             return
         async with self._rpc, self._market:
+            await self._resume_windows()
             tasks = [
                 asyncio.create_task(self._poll_loop(), name="graduation-poll"),
                 asyncio.create_task(self._postgrad_loop(), name="graduation-postgrad"),
@@ -149,6 +150,62 @@ class GraduationRecorder:
                     with contextlib.suppress(asyncio.CancelledError):
                         await task
                 await self.shutdown()
+
+    async def _resume_windows(self) -> None:
+        """Re-open the post-graduation windows a restart would forget.
+
+        The sampler's windows lived only in memory, so every restart cut short
+        the hour of every token that graduated before it, and left open
+        positions with no DexScreener mark until they closed. Measured on the
+        2026-09-16 11:42 deploy: for minutes afterwards the socket was the
+        only thing writing a sample.
+
+        A window is re-opened for a migration inside the hour-plus-grace, and
+        for a token whose FIRST pool sample is inside the hour — the chain can
+        report a graduation the migration feed never mentions.
+        """
+        s = GradPostgradSample
+        now = self._now()
+        try:
+            async with self._sessions() as session:
+                migrated: dict[str, datetime] = {r.mint: r.ts for r in (
+                    await session.execute(
+                        select(GradMigration.mint, GradMigration.ts)
+                        .where(GradMigration.ts >= now - timedelta(
+                            seconds=config.POST_MIGRATION_SECONDS
+                            + config.POSTGRAD_OPEN_GRACE_SECONDS)))).all()}
+                recent = select(s.mint).where(
+                    s.ts >= now - timedelta(seconds=config.POST_MIGRATION_SECONDS))
+                opened = func.min(s.ts).filter(s.source == SOURCE_DEXSCREENER)
+                sampled = {r.mint: r for r in (await session.execute(
+                    select(s.mint, opened.label("opened_at"),
+                           func.max(s.ts).label("last_at"))
+                    .where(s.mint.in_(recent), s.source != SOURCE_HELD_WS)
+                    .group_by(s.mint)
+                    .having(opened >= now - timedelta(
+                        seconds=config.POST_MIGRATION_SECONDS)))).all()}
+                mints = migrated.keys() | sampled.keys()
+                pins = {r.mint: r for r in (await session.execute(
+                    select(s.mint, s.pair_address, s.dex_id)
+                    .where(s.mint.in_(mints), s.source == SOURCE_DEXSCREENER,
+                           s.pair_address.is_not(None))
+                    .distinct(s.mint)
+                    .order_by(s.mint, s.ts))).all()} if mints else {}
+        except Exception:
+            logger.exception("graduation_windows_resume_failed")
+            return
+        for mint in mints:
+            seen, pin = sampled.get(mint), pins.get(mint)
+            since = migrated.get(mint) or (seen.opened_at if seen else None)
+            if since is None:
+                continue
+            self.postgrad.resume(
+                mint, since,
+                pair_address=pin.pair_address if pin else None,
+                dex_id=pin.dex_id if pin else None,
+                opened_at=seen.opened_at if seen else None,
+                last_sample_at=seen.last_at if seen else None)
+        logger.info("graduation_windows_resumed", windows=len(mints))
 
     async def _discovery(self) -> None:
         async for message in self._stream.messages():

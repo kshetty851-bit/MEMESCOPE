@@ -214,6 +214,23 @@ class PostGradSampler:
         `complete` flag can both report the same graduation."""
         self.states.setdefault(mint, PostGradState(mint=mint, migrated_at=migrated_at))
 
+    def resume(self, mint: str, migrated_at: datetime, *,
+               pair_address: str | None, dex_id: str | None,
+               opened_at: datetime | None,
+               last_sample_at: datetime | None) -> None:
+        """Re-open a window a restart forgot, on the pair it was PINNED to.
+
+        Without the pin, the first poll after a restart pins whichever pool
+        DexScreener lists first — the change of instrument `_accept` exists to
+        refuse. `last_sample_at` makes the backfill fill the restart's gap.
+        """
+        state = self.states.setdefault(
+            mint, PostGradState(mint=mint, migrated_at=migrated_at))
+        state.pair_address = state.pair_address or pair_address
+        state.dex_id = state.dex_id or dex_id
+        state.opened_at = state.opened_at or opened_at
+        state.last_sample_at = state.last_sample_at or last_sample_at
+
     def close(self, mint: str) -> None:
         self.states.pop(mint, None)
 
