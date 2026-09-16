@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import inspect
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -512,3 +512,41 @@ def test_the_wallet_is_not_the_tournament_equity_divided_by_ten() -> None:
     assert config.PAPER_NOTIONAL_USD * config.PAPER_MAX_SLOTS == config.PAPER_CAPITAL_USD
     # A $100 wallet could not fund even two of the tournament's positions.
     assert config.WALLET_DEMO_USD < config.PAPER_NOTIONAL_USD * 2
+
+
+async def test_a_live_socket_mark_beats_a_later_stamped_dexscreener_row() -> None:
+    """A DexScreener row carries its FETCH time and a price ~27s old. After
+    sVkL4MXW rugged on 2026-09-15 it sat 5.7x above the pool's own reserves
+    for over a minute, so "newest row" would have closed the position on a
+    price that no longer existed. A socket mark inside the trust window wins;
+    past it the socket is presumed down and the newest row stands."""
+    from types import SimpleNamespace
+
+    from sqlalchemy.dialects import postgresql
+
+    from app.labs.graduation.tournament import Tournament
+
+    class Session:
+        def __init__(self, *answers):
+            self.answers, self.statements = list(answers), []
+
+        async def execute(self, statement):
+            self.statements.append(statement)
+            rows = self.answers.pop(0)
+            return SimpleNamespace(all=lambda: rows)
+
+    stale = SimpleNamespace(mint="A", price_native=D("0.00000022"),
+                            liquidity_usd=D("10896.26"))
+    live = SimpleNamespace(mint="A", price_native=D("0.000000005"),
+                           liquidity_usd=D("310.00"))
+    other = SimpleNamespace(mint="B", price_native=D("0.000001"),
+                            liquidity_usd=D("200000"))
+    session = Session([stale, other], [live])
+    marks = await Tournament(session, now=NIGHT)._latest_prices(["A", "B"])
+    assert marks == {"A": (live.price_native, live.liquidity_usd),
+                     "B": (other.price_native, other.liquidity_usd)}
+    socket_query = session.statements[1].compile(dialect=postgresql.dialect())
+    assert "grad_postgrad_samples.source = " in str(socket_query)
+    assert "held_ws" in socket_query.params.values()
+    window = [v for v in socket_query.params.values() if isinstance(v, datetime)]
+    assert NIGHT - timedelta(seconds=config.HELD_TRUST_S) in window

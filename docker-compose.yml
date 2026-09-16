@@ -85,6 +85,11 @@ x-backend-env: &backend-env
   # PumpPortal websocket, and CURVE90_2m — the one arm that read the chain —
   # was retired the same day after measuring -3.02%.
   LAB_GRADUATION_POLL_INTERVAL_S: ${LAB_GRADUATION_POLL_INTERVAL_S:-3}
+  # The kill switch for the lab's vault-socket marks. Here and not only in
+  # .env.production, for the reason above: a value the anchor does not name
+  # never reaches a container, and a kill switch that cannot be flipped is not
+  # one. Set false to fall back to DexScreener marks alone.
+  LAB_GRADUATION_HELD_WRITE_ENABLED: ${LAB_GRADUATION_HELD_WRITE_ENABLED:-true}
   SOLANA_WS_URL: ${SOLANA_WS_URL:-wss://api.mainnet-beta.solana.com}
   HELIUS_API_KEY: ${HELIUS_API_KEY:-}
   FEATURE_SCANNER_ENABLED: ${FEATURE_SCANNER_ENABLED:-false}

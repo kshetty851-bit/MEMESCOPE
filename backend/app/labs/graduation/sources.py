@@ -31,7 +31,7 @@ import asyncio
 import base64
 import binascii
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Sequence
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -44,6 +44,7 @@ import websockets
 from app.core.backoff import BackoffPolicy
 from app.core.logging import get_logger
 from app.labs.graduation import config, held_watch, curve
+from app.security.liquidity import parse_pool
 from app.services.curve.pda import InvalidAddressError, bonding_curve_address
 from app.services.curve.state import CurveState
 from app.services.market.providers.rate_budget import CallBudget
@@ -529,74 +530,155 @@ class HeldVaultStream:
         self._now = now
         self.updates = 0
 
-    async def account_data(self, address: str) -> bytes | None:
-        """One `getAccountInfo` against the same public node.
+    async def _call(self, method: str, params: list[Any]) -> Any:
+        """One JSON-RPC call against the same public node as the socket.
 
         Not the lab's RPC client: that carries the Helius key, which is spent.
-        Called once per token ever — the caller caches — so it is nowhere near
-        the public node's limits.
         """
-        body = {"jsonrpc": "2.0", "id": 1, "method": "getAccountInfo",
-                "params": [address, {"encoding": "base64"}]}
+        body = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
         url = self._url.replace("wss://", "https://")
         try:
             async with httpx.AsyncClient(timeout=15) as client:
                 got = (await client.post(url, json=body)).json()
         except Exception as exc:
-            logger.warning("graduation_held_account_failed",
-                           address=address, error=repr(exc))
+            logger.warning("graduation_held_rpc_failed", method=method,
+                           error=repr(exc))
             return None
-        return held_watch.account_bytes((got.get("result") or {}).get("value"))
+        return got.get("result") if isinstance(got, dict) else None
+
+    async def accounts(self, addresses: Sequence[str]) -> tuple[int, list[bytes | None]]:
+        """Accounts in the order asked, and the slot they were read at.
+
+        PROCESSED commitment, as the socket uses: a finalized read is seconds
+        behind it. A failed read is slot 0 and no data, never a partial list.
+        """
+        got = await self._call("getMultipleAccounts", [
+            list(addresses), {"encoding": "base64", "commitment": "processed"}])
+        values = (got or {}).get("value")
+        slot = ((got or {}).get("context") or {}).get("slot")
+        if (not isinstance(values, list) or len(values) != len(addresses)
+                or not isinstance(slot, int)):
+            return 0, [None] * len(addresses)
+        return slot, [held_watch.account_bytes(v) for v in values]
+
+    async def resolve(self, mint: str, pool: str) -> held_watch.Held | None:
+        """The watchable form of one position's pool, or nothing.
+
+        Two calls, once per token: the caller caches the answer, including a
+        None for a venue `parse_pool` does not decode. A node that did not
+        answer RAISES instead — cached as "unwatchable", one dropped request
+        would leave a position on minute-old marks for its whole life.
+        """
+        slot, (raw,) = await self.accounts([pool])
+        if not slot:
+            raise ConnectionError(f"pool {pool} unread")
+        state = parse_pool(raw)
+        if state is None:
+            return None
+        slot, accounts = await self.accounts([state.base_mint, state.quote_mint,
+                                              state.base_vault, state.quote_vault])
+        if not slot:
+            raise ConnectionError(f"accounts of pool {pool} unread")
+        return held_watch.watch(mint, pool, state, accounts)
+
+    async def _read(self, helds: Sequence[held_watch.Held]) -> None:
+        """Both balances of each pool, straight from the chain."""
+        slot, raws = await self.accounts(
+            [a for h in helds for a in (h.base_vault, h.quote_vault)])
+        if not slot:
+            return
+        for i, held in enumerate(helds):
+            base = held_watch.vault_amount(raws[2 * i])
+            quote = held_watch.vault_amount(raws[2 * i + 1])
+            if base is not None and quote is not None:
+                held.apply("base", base, slot)
+                held.apply("quote", quote, slot)
 
     async def stream(
         self,
-        vaults: Sequence[tuple[str, str, str]],
-        on_price: Callable[[str, Decimal, datetime], Awaitable[None]],
+        wanted: Callable[[], dict[str, held_watch.Held]],
+        on_price: Callable[[held_watch.Held, datetime], Awaitable[None]],
     ) -> None:
-        """Subscribe to (mint, base_vault, quote_vault) triples and report.
+        """Keep one socket subscribed to exactly the pools `wanted()` names.
 
-        Returns when the socket drops, so the caller decides whether the held
-        set has changed before reconnecting. A dead socket looks exactly like a
-        quiet market, which is the failure this platform has already shipped
-        once, so every drop is logged.
+        The held set changes about once a minute (0.77 changes a minute,
+        measured 2026-09-16), so subscriptions are added and dropped on the
+        open socket. The first version subscribed once and re-read the set
+        only when the socket dropped — in its twenty live minutes it watched
+        ONE token.
+
+        A pool the socket has not spoken about for `HELD_HEARTBEAT_S` is read
+        directly, and a newly added pool is read at once, so its first price
+        does not wait for a trade.
+
+        Returns only by raising: a dropped socket propagates so the caller
+        reconnects, and keepalive pings turn a half-open connection into a
+        drop instead of a silence that reads like a quiet market.
         """
-        if not vaults:
-            return
-        state: dict[str, held_watch.Held] = {
-            mint: held_watch.Held(mint=mint, base_vault=base, quote_vault=quote)
-            for mint, base, quote in vaults}
+        loop = asyncio.get_running_loop()
+        watching: dict[str, held_watch.Held] = {}
+        heard: dict[str, float] = {}
+        subs: dict[str, list[int]] = {}
         pending: dict[int, tuple[str, str]] = {}
         live: dict[int, tuple[str, str]] = {}
-        async with self._connect(self._url, open_timeout=20) as ws:
-            ident = 0
-            for mint, base, quote in vaults:
-                for label, address in (("base", base), ("quote", quote)):
-                    ident += 1
-                    await ws.send(held_watch.subscribe_frame(address, ident))
-                    pending[ident] = (mint, label)
-            logger.info("graduation_held_watching", mints=len(state))
+        ident = 0
+        async with self._connect(self._url, open_timeout=20,
+                                 ping_interval=config.HELD_PING_S,
+                                 ping_timeout=config.HELD_PING_S) as ws:
+            tick = 0.0
             while True:
-                payload = json.loads(await ws.recv())
-                if "id" in payload and "result" in payload:
+                if loop.time() >= tick:
+                    tick = loop.time() + 1.0
+                    want = wanted()
+                    for mint in watching.keys() - want.keys():
+                        del watching[mint], heard[mint]
+                        for sub in subs.pop(mint, []):
+                            live.pop(sub, None)
+                            ident += 1
+                            await ws.send(held_watch.unsubscribe_frame(sub, ident))
+                    for mint in want.keys() - watching.keys():
+                        held = watching[mint] = replace(want[mint])
+                        heard[mint] = float("-inf")
+                        for side, address in (("base", held.base_vault),
+                                              ("quote", held.quote_vault)):
+                            ident += 1
+                            pending[ident] = (mint, side)
+                            await ws.send(held_watch.subscribe_frame(address, ident))
+                    quiet = [h for m, h in watching.items()
+                             if loop.time() - heard[m] >= config.HELD_HEARTBEAT_S]
+                    if quiet:
+                        for held in quiet:
+                            heard[held.mint] = loop.time()
+                        await self._read(quiet)
+                        for held in quiet:
+                            if held.mint in watching and held.price() is not None:
+                                await on_price(held, self._now())
+                try:
+                    payload = json.loads(await asyncio.wait_for(
+                        ws.recv(), max(0.05, tick - loop.time())))
+                except TimeoutError:
+                    continue
+                if "id" in payload:
                     key = pending.pop(payload["id"], None)
-                    if key is not None:
-                        live[payload["result"]] = key
+                    if key is None:
+                        continue  # an unsubscribe, acknowledged
+                    sub = payload.get("result")
+                    if not isinstance(sub, int) or isinstance(sub, bool):
+                        raise RuntimeError(f"accountSubscribe refused: {payload}")
+                    if key[0] in watching:
+                        live[sub] = key
+                        subs.setdefault(key[0], []).append(sub)
+                    else:  # the position closed while this was in flight
+                        ident += 1
+                        await ws.send(held_watch.unsubscribe_frame(sub, ident))
                     continue
-                sub = held_watch.subscription_of(payload)
-                if sub is None or sub not in live:
+                note = held_watch.notification(payload)
+                if note is None or note[0] not in live:
                     continue
-                mint, label = live[sub]
-                raw = held_watch.account_bytes(
-                    ((payload.get("params") or {}).get("result") or {}).get("value"))
-                amount = held_watch.vault_amount(raw)
-                if amount is None:
-                    continue
-                held = state[mint]
-                if label == "base":
-                    held.base = amount
-                else:
-                    held.quote = amount
-                price = held.price()
-                if price is not None:
+                sub, amount, slot = note
+                mint, side = live[sub]
+                held = watching[mint]
+                heard[mint] = loop.time()
+                if held.apply(side, amount, slot) and held.price() is not None:
                     self.updates += 1
-                    await on_price(mint, price, self._now())
+                    await on_price(held, self._now())

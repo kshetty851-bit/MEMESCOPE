@@ -43,7 +43,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.core.logging import get_logger
 from app.db.session import SessionFactory
 from app.labs.graduation import config, curve, parse
+from app.labs.graduation.held_watch import Held, MarkWriter
 from app.labs.graduation.models import (
+    SOURCE_DEXSCREENER,
+    SOURCE_HELD_WS,
     STATUS_DONE,
     GradCheckpoint,
     GradCurveSample,
@@ -51,11 +54,29 @@ from app.labs.graduation.models import (
     GradPostgradSample,
     GradToken,
 )
-from app.labs.graduation.postgrad import PostGradSampler
-from app.labs.graduation.sources import CurveRPC, MarketSource, PumpPortalStream
+from app.labs.graduation.postgrad import (
+    _PRICE_DP,
+    _PRICE_MAX,
+    _USD_DP,
+    _USD_MAX,
+    PostGradSampler,
+    _decimal,
+)
+from app.labs.graduation.sources import (
+    CurveRPC,
+    HeldVaultStream,
+    MarketSource,
+    PumpPortalStream,
+)
 from app.labs.graduation.watchset import TokenState, WatchSet
 
 logger = get_logger(__name__)
+
+#: What makes one DexScreener reading different from the last. Their feed
+#: refreshes about every 27s, so most 3-second polls of a held token return
+#: the row already written; only a changed one is kept.
+_HELD_DEX_FIELDS = ("price_native", "liquidity_usd", "volume_m5_usd",
+                    "txns_m5_buys", "txns_m5_sells")
 
 
 class GraduationRecorder:
@@ -162,103 +183,140 @@ class GraduationRecorder:
     async def _held_loop(self) -> None:
         """Keep the mark fresh on the positions actually open.
 
-        A 3-second DexScreener poll looked fast and was not — their feed
-        refreshes about every 27 SECONDS, and collapses fall 1.14% a second, so
-        27s is past the cliff where a stop stops working:
+        Two feeds, one job. The vault socket prices a pumpswap pool from its
+        own reserves in under a second. DexScreener is polled every
+        `HELD_INTERVAL_S` beside it: the fallback when the socket is down or
+        the venue is not pumpswap (10 of 180 B3 trades, 2026-09-16), and the
+        reference every socket price is checked against before it is trusted.
+
+        The bulk loop alone sees a held token about once a MINUTE — median
+        gap 62s on 2026-09-16 — and collapses fall 1.14% a second:
 
             reaction   0.6s    3s    18s    27s    61s
             FLOOR_5m  $1040  $949   $342     $0     $0
-
-        Not every update is written. The socket gives one every ~0.6s, which
-        would flood a table already driving this box to 88% disk, and the value
-        is not the record — it is the MARK being fresh when a stop needs it.
         """
+        stream = HeldVaultStream(now=self._now)
+        wanted: dict[str, Held] = {}
+        refs: dict[str, tuple[Decimal, Decimal]] = {}
+        writer = MarkWriter()
+        await asyncio.gather(
+            self._held_refresh(stream, wanted, refs, writer),
+            self._held_socket(stream, wanted, refs, writer))
+
+    async def _held_refresh(self, stream: HeldVaultStream, wanted: dict[str, Held],
+                            refs: dict[str, tuple[Decimal, Decimal]],
+                            writer: MarkWriter) -> None:
+        """What is held, what DexScreener says about it, and which pools can be
+        watched — every `HELD_INTERVAL_S`."""
         from sqlalchemy import select
 
         from app.db.session import SessionFactory
-        from app.labs.graduation.held_watch import vaults_from_pool
         from app.labs.graduation.models import GradPaperPosition
-        from app.labs.graduation.sources import HeldVaultStream
 
-        stream = HeldVaultStream(now=self._now)
-        # Pool and vault addresses never change for a mint, so this costs one
-        # getAccountInfo per token ever rather than per reconnect.
-        cache: dict[str, tuple[str, str] | None] = {}
-        last: dict[str, tuple[Decimal, datetime]] = {}
-
-        async def on_price(mint: str, price: Decimal, ts: datetime) -> None:
-            seen = last.get(mint)
-            if seen is not None:
-                moved = abs(price / seen[0] - 1) if seen[0] else Decimal(1)
-                if (moved < config.HELD_WRITE_PCT
-                        and (ts - seen[1]).total_seconds() < config.HELD_INTERVAL_S):
-                    return
-            last[mint] = (price, ts)
-            # WRITES ARE OFF, 2026-09-15, and this is not caution — it is a
-            # correction. `price` here is a RAW reserve ratio, quote units over
-            # base units. Every entry price in the book came from DexScreener
-            # with token decimals applied. They are different units, so marking
-            # a position against this is marking it against a different
-            # instrument — the exact failure the pair pinning exists to stop.
-            #
-            # It was live for roughly twenty minutes and produced FLOOR_4m_SL
-            # at $17,517 on eight trades. The subscription itself is sound: 44
-            # updates in 25 seconds, vaults decoded correctly off the pinned
-            # pair. Only the SCALE is wrong, and guessing decimals is how the
-            # wrong number gets shipped twice.
-            #
-            # To re-enable: read the two mints' decimals once per token, scale
-            # to SOL-per-token, and assert the first websocket price is within
-            # a few percent of the DexScreener price for the same mint before
-            # any of it is written.
-            if not config.HELD_WRITE_ENABLED:
-                return
-            state = self.postgrad.states.get(mint)
-            if state is None or state.pair_address is None:
-                return
-            self._buffer(self._postgrad_rows, {
-                "mint": mint, "ts": ts, "source": "held_ws",
-                "pair_address": state.pair_address, "dex_id": state.dex_id,
-                "price_native": price, "price_usd": None,
-                "liquidity_usd": None, "fdv": None})
-            await self.flush()
-
+        # Pools and decimals never change for a mint, so this costs two
+        # account reads per token ever rather than per reconnect. A None is
+        # kept too: a venue the decoder does not read is not asked again.
+        cache: dict[str, Held | None] = {}
+        # DexScreener refreshes about every 27s, so most 3-second polls return
+        # the row already written. Only a changed one is kept.
+        seen: dict[str, tuple[Any, ...]] = {}
         while True:
             try:
                 async with SessionFactory() as session:
-                    mints = (await session.scalars(
-                        select(GradPaperPosition.mint)
-                        .where(GradPaperPosition.closed_at.is_(None),
-                               GradPaperPosition.notional_usd > 0)
-                        .distinct())).all()
-                triples = []
-                for mint in mints:
-                    if mint not in cache:
-                        # The pair DexScreener actually priced, not a derived
-                        # address: deriving gave an account that does not exist
-                        # on chain, because a graduation can land on pumpswap
-                        # or elsewhere and only the feed knows which. The pair
-                        # is already pinned on the first sample precisely so a
-                        # position is marked against ONE pool, so reusing it
-                        # here keeps the socket on the same pool the entry
-                        # price came from.
-                        state = self.postgrad.states.get(mint)
-                        pool = state.pair_address if state else None
-                        raw = await stream.account_data(pool) if pool else None
-                        cache[mint] = vaults_from_pool(raw)
-                    pair = cache.get(mint)
-                    if pair:
-                        triples.append((mint, pair[0], pair[1]))
-                if not triples:
-                    await asyncio.sleep(config.HELD_INTERVAL_S)
-                    continue
-                await stream.stream(triples, on_price)
+                    held = (select(GradPaperPosition.mint)
+                            .where(GradPaperPosition.closed_at.is_(None),
+                                   GradPaperPosition.notional_usd > 0))
+                    rows = (await session.execute(
+                        select(GradPostgradSample.mint,
+                               GradPostgradSample.pair_address,
+                               GradPostgradSample.price_native,
+                               GradPostgradSample.price_usd)
+                        .where(GradPostgradSample.mint.in_(held),
+                               GradPostgradSample.source == SOURCE_DEXSCREENER,
+                               GradPostgradSample.price_native > 0,
+                               GradPostgradSample.price_usd > 0)
+                        .distinct(GradPostgradSample.mint)
+                        .order_by(GradPostgradSample.mint,
+                                  GradPostgradSample.ts.desc()))).all()
+                mints = [r.mint for r in rows]
+                for row in await self.postgrad.poll_held(mints, self._now()):
+                    key = tuple(row[k] for k in _HELD_DEX_FIELDS)
+                    if seen.get(row["mint"]) != key:
+                        seen[row["mint"]] = key
+                        self._buffer(self._postgrad_rows, row)
+                await self.flush()
+                for r in rows:
+                    refs[r.mint] = (r.price_native, r.price_usd / r.price_native)
+                    if r.mint not in cache and r.pair_address:
+                        try:
+                            cache[r.mint] = await stream.resolve(r.mint, r.pair_address)
+                        except ConnectionError:
+                            continue  # the node did not answer; asked again next pass
+                        if cache[r.mint] is None:
+                            logger.info("graduation_held_unwatchable",
+                                        mint=r.mint, pool=r.pair_address)
+                for stale in (cache, refs, seen):
+                    for mint in stale.keys() - set(mints):
+                        del stale[mint]
+                writer.keep(mints)
+                wanted.clear()
+                wanted.update({m: h for m, h in cache.items() if h is not None})
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("graduation_held_refresh_failed")
+            await asyncio.sleep(config.HELD_INTERVAL_S)
+
+    async def _held_socket(self, stream: HeldVaultStream, wanted: dict[str, Held],
+                           refs: dict[str, tuple[Decimal, Decimal]],
+                           writer: MarkWriter) -> None:
+        """The vault socket, and the rows it is allowed to write."""
+        warned: set[str] = set()
+
+        async def on_price(held: Held, ts: datetime) -> None:
+            if not config.HELD_WRITE_ENABLED:
+                return
+            price = held.price()
+            if price is None:
+                return
+            reference, quote_usd = refs.get(held.mint, (None, Decimal(0)))
+            verdict = writer.decide(held.mint, price, reference, ts)
+            if verdict == "wrong_scale" and held.mint not in warned:
+                warned.add(held.mint)
+                logger.warning("graduation_held_wrong_scale", mint=held.mint,
+                               socket=str(price), dexscreener=str(reference))
+            if verdict != "write":
+                return
+            stored = _decimal(price, _PRICE_DP, _PRICE_MAX)
+            if stored is None:
+                return
+            self._buffer(self._postgrad_rows, {
+                "mint": held.mint, "ts": ts, "source": SOURCE_HELD_WS,
+                "pair_address": held.pool, "dex_id": "pumpswap",
+                "price_native": stored,
+                "liquidity_usd": _decimal(held.depth_usd(quote_usd), _USD_DP, _USD_MAX)})
+            await self.flush(read_holders=False)
+
+        loop = asyncio.get_running_loop()
+        delay = config.RECONNECT_INITIAL_SECONDS
+        while True:
+            if not wanted:
+                await asyncio.sleep(config.HELD_INTERVAL_S)
+                continue
+            started = loop.time()
+            try:
+                await stream.stream(lambda: wanted, on_price)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
+                # Doubling, so a node that refuses us is not redialled every
+                # second; a socket that ran a while earns a fast retry again.
+                if loop.time() - started > config.RECONNECT_MAX_SECONDS:
+                    delay = config.RECONNECT_INITIAL_SECONDS
                 logger.warning("graduation_held_dropped", error=repr(exc),
-                               updates=stream.updates)
-                await asyncio.sleep(config.RECONNECT_INITIAL_SECONDS)
+                               updates=stream.updates, retry_in=delay)
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, config.RECONNECT_MAX_SECONDS)
 
     async def shutdown(self) -> None:
         """Last flush. Every live state is closed, so a restart does not think
@@ -477,7 +535,8 @@ class GraduationRecorder:
             logger.info("graduation_holders_read", asked=len(owed), got=len(out))
         return out
 
-    async def flush(self, *, now: datetime | None = None) -> dict[str, int]:
+    async def flush(self, *, now: datetime | None = None,
+                    read_holders: bool = True) -> dict[str, int]:
         """Drain every buffer in one transaction.
 
         Tokens first: the sample rows name them, and a reader that saw a sample
@@ -487,9 +546,13 @@ class GraduationRecorder:
         """
         if not (self._dirty or self._retired or self._samples
                 or self._checkpoints or self._migrations or self._postgrad_rows
-                or self._owe_holders):
+                or (read_holders and self._owe_holders)):
             return {}
-        holders = await self._read_holders()
+        # The socket's writes skip the holder reads: those wait on the RPC
+        # budget for up to 30s, and a mark that waits behind every other
+        # token's graduation is not a fast mark. The next ordinary flush,
+        # three seconds away at most, reads them.
+        holders = await self._read_holders() if read_holders else {}
         live = [self.watch.states[m] for m in self._dirty if m in self.watch]
         retired, self._retired = self._retired, {}
         samples, self._samples = self._samples, []
@@ -542,6 +605,13 @@ class GraduationRecorder:
         observation and not a newer one."""
         if not rows:
             return
+        # One multi-row VALUES takes the batch, and SQLAlchemy builds it from
+        # the FIRST row's keys: a later row with more keys silently loses them,
+        # one with fewer fails the whole flush. Sources differ in what they can
+        # say — a socket row has a price and depth and nothing else — so every
+        # row is widened to the union, and what a source cannot say is NULL.
+        keys = {key for row in rows for key in row}
+        rows = [dict.fromkeys(keys) | row for row in rows]
         statement = insert(model).values(rows)
         if constraint is not None:
             statement = statement.on_conflict_do_nothing(constraint=constraint)

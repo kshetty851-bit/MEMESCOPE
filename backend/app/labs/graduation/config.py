@@ -271,14 +271,34 @@ HELD_INTERVAL_S = _int("LAB_GRADUATION_HELD_INTERVAL_S", 3)
 #: point — a FRESH MARK when a stop needs it is. Half a percent is well inside
 #: the 1.14%-per-second fall these stops exist to catch.
 HELD_WRITE_PCT = _dec("LAB_GRADUATION_HELD_WRITE_PCT", "0.005")
-#: Whether websocket prices are WRITTEN as marks. Off until the scale is right.
+#: Whether websocket prices are WRITTEN as marks. The kill switch.
 #:
-#: The socket reports a raw reserve ratio; the book's entry prices carry token
-#: decimals. Marking one against the other is marking against a different
-#: instrument, and for twenty minutes on 2026-09-15 it put FLOOR_4m_SL at
-#: $17,517 on eight trades. The feed is correct and the scale is not.
+#: Off from 2026-09-15 to 2026-09-16: the socket's raw reserve ratio was
+#: written against entry prices that carry token decimals, and for twenty
+#: minutes it put FLOOR_4m_SL at $17,517 on eight trades. Back on once both
+#: decimals were read off the mint accounts and every mint's first price is
+#: checked against DexScreener before it is written (`held_watch.MarkWriter`).
 HELD_WRITE_ENABLED = os.getenv(
-    "LAB_GRADUATION_HELD_WRITE_ENABLED", "").strip().lower() in {"1", "true", "yes"}
+    "LAB_GRADUATION_HELD_WRITE_ENABLED", "1").strip().lower() in {"1", "true", "yes"}
+#: A quiet pool is re-read from the chain this often, and its mark re-written.
+#: A pool's price cannot move without its vaults changing, so silence on a
+#: healthy subscription means an unchanged price — but "healthy" is proven by
+#: reading, not assumed, which is what stops a dead subscription from
+#: asserting a frozen price.
+HELD_HEARTBEAT_S = _int("LAB_GRADUATION_HELD_HEARTBEAT_S", 10)
+#: How long the book prefers a socket mark over a DexScreener row stamped
+#: LATER. A DexScreener row carries its fetch time but a price ~27s old, so
+#: "newest row" is not "newest price". Three heartbeats: past this the socket
+#: is presumed down and the book falls back to whatever is newest.
+HELD_TRUST_S = _int("LAB_GRADUATION_HELD_TRUST_S", 30)
+#: A mint's first socket price may not sit more than this factor ABOVE
+#: DexScreener's. A decimals error is a power of ten; DexScreener's own lag put
+#: an honest price 17% away on a fresh graduate. Below is never refused — that
+#: is a rug, which DexScreener can lag for minutes. See `MarkWriter`.
+HELD_SCALE_BAND = _dec("LAB_GRADUATION_HELD_SCALE_BAND", "2")
+#: Keepalive on the socket, seconds. A half-open connection reads exactly like
+#: a quiet market; a missed pong turns it into a drop within two of these.
+HELD_PING_S = _int("LAB_GRADUATION_HELD_PING_S", 5)
 #: `/tokens/v1/{chain}/{addresses}` takes a comma-separated list. Thirty is the
 #: documented ceiling and the number the Breakout lab measured against.
 DEXSCREENER_BATCH = 30

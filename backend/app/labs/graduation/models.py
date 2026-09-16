@@ -90,6 +90,8 @@ STATUS_DONE = "done"
 #: `grad_postgrad_samples.source`.
 SOURCE_DEXSCREENER = "dexscreener"
 SOURCE_GECKOTERMINAL = "geckoterminal"
+#: The pool's own reserves, off the vault subscription. Price and depth only.
+SOURCE_HELD_WS = "held_ws"
 
 
 class GradToken(Base):

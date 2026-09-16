@@ -24,6 +24,7 @@ needs nothing cleverer.
 
 from __future__ import annotations
 
+import ast
 import re
 from pathlib import Path
 
@@ -62,6 +63,25 @@ def _anchor_keys() -> set[str]:
     assert block is not None, "x-backend-env anchor not found in docker-compose.yml"
 
     return set(re.findall(r"^  ([A-Z][A-Z0-9_]*):", block.group(1), re.M))
+
+
+def _lab_env_keys() -> set[str]:
+    """Keys an isolated lab reads for itself: the first argument of a call in
+    its own `config.py` — `_flag("X")`, `_int("X", 3)`, `os.getenv("X")`.
+
+    Labs keep their switches out of `Settings` on purpose, so any one of them
+    can be deleted without touching the platform's configuration. A key named
+    only in a comment or a docstring is not a call argument and still fails.
+    """
+    assert REPO_ROOT is not None
+    keys: set[str] = set()
+    for path in (REPO_ROOT / "backend" / "app" / "labs").glob("*/config.py"):
+        for node in ast.walk(ast.parse(path.read_text())):
+            if (isinstance(node, ast.Call) and node.args
+                    and isinstance(node.args[0], ast.Constant)
+                    and isinstance(node.args[0].value, str)):
+                keys.add(node.args[0].value)
+    return keys
 
 
 def _anchor_fallback(key: str) -> str:
@@ -413,7 +433,7 @@ def test_every_anchor_key_is_a_real_setting() -> None:
     # about whether HQ may act.
     infrastructure = {"RUN_MIGRATIONS", "BUILD_SHA", "HQ_AUTONOMY_ENABLED"}
 
-    unknown = _anchor_keys() - known - infrastructure
+    unknown = _anchor_keys() - known - infrastructure - _lab_env_keys()
     assert not unknown, (
         f"Anchor defines settings the application does not read: {sorted(unknown)}. "
         "Either they were renamed in config.py or they are dead configuration."

@@ -57,6 +57,7 @@ from app.labs.graduation.backtest import (
     amm_sell,
 )
 from app.labs.graduation.models import (
+    SOURCE_HELD_WS,
     GradCurveSample,
     GradPaperPosition,
     GradPostgradSample,
@@ -550,15 +551,27 @@ class Tournament:
         """
         if not mints:
             return {}
-        rows = (await self._session.execute(
-            select(GradPostgradSample.mint, GradPostgradSample.price_native,
-                   GradPostgradSample.liquidity_usd)
-            .where(GradPostgradSample.mint.in_(list(mints)),
-                   GradPostgradSample.price_native > 0,
-                   GradPostgradSample.ts <= self._now)
-            .distinct(GradPostgradSample.mint)
-            .order_by(GradPostgradSample.mint, GradPostgradSample.ts.desc()))).all()
-        marks = {r.mint: (r.price_native, r.liquidity_usd) for r in rows}
+
+        def newest(*where: Any) -> Any:
+            return (select(GradPostgradSample.mint, GradPostgradSample.price_native,
+                           GradPostgradSample.liquidity_usd)
+                    .where(GradPostgradSample.mint.in_(list(mints)),
+                           GradPostgradSample.price_native > 0,
+                           GradPostgradSample.ts <= self._now, *where)
+                    .distinct(GradPostgradSample.mint)
+                    .order_by(GradPostgradSample.mint, GradPostgradSample.ts.desc()))
+
+        rows = (await self._session.execute(newest())).all()
+        # A live socket mark beats a DexScreener row stamped later: that row
+        # carries its FETCH time and a price ~27s old, so newest-by-timestamp
+        # is not newest-by-price. After sVkL4MXW rugged on 2026-09-15,
+        # DexScreener sat 5.7x above the pool's own reserves for over a
+        # minute, and a position closed on it would have booked that.
+        live = (await self._session.execute(newest(
+            GradPostgradSample.source == SOURCE_HELD_WS,
+            GradPostgradSample.ts >= self._now - timedelta(
+                seconds=config.HELD_TRUST_S)))).all()
+        marks = {r.mint: (r.price_native, r.liquidity_usd) for r in (*rows, *live)}
         # A position opened ON the curve has no pool sample until the token
         # migrates, and until then the curve IS its market. Without this the
         # pre-graduation arm could never be marked and never exit: its hold

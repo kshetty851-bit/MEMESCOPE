@@ -363,3 +363,47 @@ async def test_every_fixture_message_is_handled_without_raising() -> None:
     for message in MESSAGES:
         recorder.handle(message, START)
     assert len(recorder.watch) >= 1
+
+
+async def test_a_batch_mixing_sources_keeps_every_column() -> None:
+    """One multi-row INSERT takes the batch, and SQLAlchemy builds it from the
+    FIRST row's keys. A socket row carries a price and a depth and nothing
+    else, so at the head of a batch it silently dropped the volume and trade
+    counts of every DexScreener row behind it — and behind one, it failed the
+    whole flush."""
+    from sqlalchemy.dialects import postgresql
+
+    from app.labs.graduation.postgrad import parse_pair
+
+    recorder, _, _, sessions, _ = build()
+    socket_row = {"mint": MINT, "ts": START, "source": "held_ws",
+                  "pair_address": "POOL", "dex_id": "pumpswap",
+                  "price_native": D("0.000001"), "liquidity_usd": D("90000.00")}
+    dex_row = parse_pair(PAIRS[0], ts=START + timedelta(seconds=1))
+    assert dex_row is not None and dex_row["txns_m5_buys"] is not None
+    for batch in ([socket_row, dex_row], [dex_row, socket_row]):
+        for row in batch:
+            recorder._buffer(recorder._postgrad_rows, dict(row))
+        await recorder.flush()
+        statement = sessions.statements[-1]
+        compiled = statement.compile(dialect=postgresql.dialect())
+        assert "txns_m5_buys" in str(compiled)
+        buys = [v for k, v in compiled.params.items() if k.startswith("txns_m5_buys")]
+        assert sorted(buys, key=lambda v: v is None) == [dex_row["txns_m5_buys"], None]
+
+
+async def test_a_socket_mark_never_waits_on_holder_reads() -> None:
+    """Holder reads wait on the RPC budget for up to 30s. A mark written
+    behind them is not a fast mark, so the socket's flush skips them and the
+    next ordinary flush reads them."""
+    recorder, rpc, *_ = build()
+    recorder._owe_holders.add(MINT)
+    recorder._buffer(recorder._postgrad_rows, {
+        "mint": MINT, "ts": START, "source": "held_ws",
+        "price_native": D("0.000001")})
+    written = await recorder.flush(read_holders=False)
+    assert written["postgrad"] == 1
+    assert rpc.holders_asked == []
+    assert recorder._owe_holders == {MINT}
+    await recorder.flush()
+    assert rpc.holders_asked == [MINT]
