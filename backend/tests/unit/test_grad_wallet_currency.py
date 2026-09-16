@@ -194,12 +194,18 @@ def test_each_arm_projects_from_its_own_elapsed_time():
     window in which arms are comparable: an arm whose 190 trades spanned 37
     hours had its rate computed over 3.7, projected ten times the trades it
     actually takes, and showed $330 from $100 in a single day.
+
+    The first argument changed from every trade to the FUNDED ones, and the
+    clock did not: a $100 account cannot fund 213 trades in 47 hours, so
+    forecasting the rule's rate onto it overstated by exactly the 73 it would
+    have had to skip. Same defect as the shared clock — a rate measured over a
+    population the account does not actually trade.
     """
     src = inspect.getsource(api.tournament)
     assert "def project(returns: list[float], hours: float," in src, (
         "project() must be given the hours to use rather than closing over a "
         "board-wide figure")
-    assert "arm_hours" in src and "project(per_arm.get(arm.name, []), arm_hours," in src, (
+    assert "arm_hours" in src and "project(funded_returns, arm_hours," in src, (
         "each row must pass ITS OWN elapsed time into the projection")
 
 

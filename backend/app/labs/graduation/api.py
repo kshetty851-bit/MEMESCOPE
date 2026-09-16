@@ -609,6 +609,12 @@ class ArmRow(BaseModel):
     wallet_funded_usd: Decimal = Decimal(0)
     trades_funded: int = 0
     trades_skipped: int = 0
+    #: Hours since this arm's OWN first trade — not the board clock, which
+    #: measures from the newest arm so that every arm is compared over a window
+    #: they all traded in. A row that has been running three days and one that
+    #: started this morning are not the same evidence, and the board's single
+    #: clock cannot say so.
+    arm_hours: Decimal = Decimal(0)
     #: The worst single trade the arm has taken. The number that decides the
     #: figure above, because compounding has no memory of the good ones.
     worst_trade_pct: Decimal | None = None
@@ -719,6 +725,10 @@ def _funded_walk(trades: list[tuple[datetime, datetime, float]],
     between arms is not decided by which overlapping signal an account happened
     to be free for.
 
+    Returns the funded trades as well, because the PROJECTION has to be built
+    from the same set: forecasting the rule's trade rate onto an account that
+    can only fund two thirds of them overstates by exactly the gap.
+
     It is wrong for the sentence the page prints beside it. A $100 account
     holding one $100 position has no money for a second, so when signals
     overlap it must SKIP them — measured on B3_198k_5m, 73 of 212. Reported
@@ -734,6 +744,10 @@ def _funded_walk(trades: list[tuple[datetime, datetime, float]],
     base = float(config.PAPER_NOTIONAL_USD)
     cash = float(config.WALLET_DEMO_USD)
     held: list[tuple[datetime, float, float]] = []
+    #: (closed_at, return) for every trade the account could pay for. The
+    #: projection is built from THESE, so the forecast and the column beside it
+    #: describe the same account rather than two different ones.
+    took: list[tuple[datetime, float]] = []
     funded = skipped = 0
     for opened, closed, ret in trades:
         due = [h for h in held if h[0] <= opened]
@@ -755,10 +769,11 @@ def _funded_walk(trades: list[tuple[datetime, datetime, float]],
                 continue
         cash -= size
         held.append((closed, 1.0 + ret - _size_penalty(size, base, rate), size))
+        took.append((closed, ret))
         funded += 1
     for _, r, size in held:
         cash += size * r
-    return cash, funded, skipped
+    return cash, funded, skipped, took
 
 
 def _wallet_walk(returns: Iterable[float],
@@ -1139,13 +1154,22 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
         first = s.first if s is not None else None
         arm_hours = ((datetime.now(UTC) - first).total_seconds() / 3600
                      if first else 0.0)
-        forecast = (cached.get(arm.name, {}) if fresh
-                    else project(per_arm.get(arm.name, []), arm_hours,
-                                 per_arm_hourly.get(arm.name, {})))
         open_pnl = unrealised.get(arm.name, Decimal(0)).quantize(Decimal("0.01"))
         wallet, worst = wallet_100(per_arm.get(arm.name, []))
-        funded_usd, n_funded, n_skipped = _funded_walk(
+        funded_usd, n_funded, n_skipped, funded_trades = _funded_walk(
             per_arm_trades.get(arm.name, []), sol_rate)
+        # The forecast now describes the SAME account as the column beside it.
+        # Projecting the rule's trade rate onto a $100 wallet overstated by
+        # exactly the trades that wallet could never have funded — 73 of 213
+        # on the leading arm.
+        funded_returns = [r for _, r in funded_trades]
+        funded_hourly: dict[datetime, list[float]] = {}
+        for closed_at, r in funded_trades:
+            (funded_hourly.setdefault(
+                closed_at.replace(minute=0, second=0, microsecond=0), [])
+             .append(r))
+        forecast = (cached.get(arm.name, {}) if fresh
+                    else project(funded_returns, arm_hours, funded_hourly))
         realised = (Decimal(s.pnl) if s else Decimal(0)).quantize(Decimal("0.01"))
         return ArmRow(
             name=arm.name, note=arm.note, entry=arm.entry,
@@ -1163,6 +1187,7 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
             wallet_100_usd=wallet, worst_trade_pct=worst,
             wallet_funded_usd=Decimal(str(funded_usd)).quantize(Decimal("0.01")),
             trades_funded=n_funded, trades_skipped=n_skipped,
+            arm_hours=Decimal(str(arm_hours)).quantize(Decimal("0.1")),
             unrealised_usd=open_pnl,
             equity_usd=(config.PAPER_CAPITAL_USD + realised + open_pnl
                         ).quantize(Decimal("0.01")),

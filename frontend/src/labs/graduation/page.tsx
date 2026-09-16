@@ -123,6 +123,23 @@ function signedUsd(value: string | null): string {
   return `${Number(value) >= 0 ? "+" : ""}${usd(value)}`;
 }
 
+/** A wallet figure as a return on the starting balance. */
+function walletPct(value: string | number, start: string | number): string {
+  const s = Number(start);
+  if (!s) return "";
+  const n = (Number(value) / s - 1) * 100;
+  return `${n >= 0 ? "+" : ""}${n.toFixed(1)}%`;
+}
+
+/** Hours since an arm's first trade, in the shortest form that stays exact. */
+function elapsed(hours: string | number): string {
+  const h = Number(hours);
+  if (!h) return "new";
+  if (h < 1) return `${Math.round(h * 60)}m`;
+  if (h < 48) return `${h.toFixed(1)}h`;
+  return `${(h / 24).toFixed(1)}d`;
+}
+
 const dexscreener = (mint: string) =>
   `https://dexscreener.com/solana/${mint}`;
 
@@ -913,6 +930,14 @@ function LeaderboardPanel() {
                       <span className="mt-0.5 block truncate text-micro text-ink-dim">
                         {a.note}
                       </span>
+                      {/* This arm's OWN clock. The board's header clock runs
+                          from the NEWEST arm, so every arm is compared over a
+                          window they all traded in — which is right for the
+                          comparison and says nothing about how much evidence
+                          any single row has behind it. */}
+                      <span className="mt-0.5 block text-micro tabular-nums text-ink-dim">
+                        trading {elapsed(a.arm_hours)}
+                      </span>
                     </td>
                     {/* P&L: what the $100 wallet made or lost. The balance
                         sits under it, because "+$27" and "$127" are different
@@ -938,7 +963,9 @@ function LeaderboardPanel() {
                       </span>
                       {Number(a.wallet_100_usd) === 0 ? null : (
                         <span className="block text-micro tabular-nums text-ink-dim">
-                          {usd(a.wallet_100_usd)} balance
+                          {walletPct(a.wallet_100_usd, data.wallet_demo_usd)}
+                          {" · "}
+                          {usd(a.wallet_100_usd)}
                         </span>
                       )}
                     </td>
@@ -971,12 +998,19 @@ function LeaderboardPanel() {
                               )}
                       </span>
                       {a.trades === 0 ? null : (
-                        <span className="block text-micro tabular-nums text-ink-dim">
-                          {a.trades_funded} funded
-                          {a.trades_skipped
-                            ? `, ${a.trades_skipped} unaffordable`
-                            : ""}
-                        </span>
+                        <>
+                          <span className="block text-micro tabular-nums text-ink-dim">
+                            {Number(a.wallet_funded_usd) === 0
+                              ? "—"
+                              : `${walletPct(a.wallet_funded_usd, data.wallet_demo_usd)} · ${usd(a.wallet_funded_usd)}`}
+                          </span>
+                          <span className="block text-micro tabular-nums text-ink-dim">
+                            {a.trades_funded} funded
+                            {a.trades_skipped
+                              ? `, ${a.trades_skipped} unaffordable`
+                              : ""}
+                          </span>
+                        </>
                       )}
                     </td>
                     <td className="grad-figure py-2.5 pr-3 text-right tabular-nums">
@@ -1075,8 +1109,11 @@ function LeaderboardPanel() {
             open below.
             <br />
             <span className="mt-1 block">
-              <b className="text-ink">Expected</b> is where that wallet lands if
-              the arm keeps doing exactly what it has done. It is an{" "}
+              <b className="text-ink">Expected</b> is where{" "}
+              <b className="text-ink">your {usd(data.wallet_demo_usd)}</b> lands
+              if the arm keeps doing exactly what it has done — projected from
+              the trades that wallet could actually FUND, at the rate it funds
+              them, not from every trade the arm made. It is an{" "}
               <b className="text-ink">estimate, not a promise</b> — run forward a
               thousand times from the trades so far, and the middle one shown. An
               arm only gets a 30-day figure once its own history reaches a tenth
