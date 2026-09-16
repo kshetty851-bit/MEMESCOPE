@@ -9,6 +9,18 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/panel";
 import { useAuth } from "@/hooks/use-auth";
 
+/**
+ * Where to go after signing in: `?next=` when it is a plain path on this site
+ * (so the real wallet's "Sign in to start" comes back to the wallet), else the
+ * Command Center. Anything else — another host, `//`, a backslash — is ignored.
+ */
+function afterSignIn(): string {
+  const next = new URLSearchParams(window.location.search).get("next");
+  return next && /^\/[A-Za-z0-9/_-]*$/.test(next) && !next.startsWith("//")
+    ? next
+    : "/command";
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const { login, error, clearError, isAuthenticated } = useAuth();
@@ -18,7 +30,7 @@ export default function LoginPage() {
 
   useEffect(() => {
     const manualAuth = new URLSearchParams(window.location.search).get("auth") === "manual";
-    if (!manualAuth && isAuthenticated) router.replace("/command");
+    if (!manualAuth && isAuthenticated) router.replace(afterSignIn());
   }, [isAuthenticated, router]);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -27,7 +39,7 @@ export default function LoginPage() {
     setSubmitting(true);
     try {
       await login({ email, password });
-      router.replace("/command");
+      router.replace(afterSignIn());
     } catch {
       // The store holds the message; the banner below renders it.
     } finally {

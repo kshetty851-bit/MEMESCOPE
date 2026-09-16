@@ -6,10 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import RealWalletPage from "@/app/(dashboard)/real-wallet/page";
 import type * as ApiClientModule from "@/lib/api-client";
 import { ApiError, api } from "@/lib/api-client";
+import { useAuthStore } from "@/stores/auth-store";
 
-// `api` is mocked; `ApiError` is not. The page branches on the real error type,
-// so a stubbed one would let the branch pass a test it does not pass in a
-// browser — which is the whole failure this file now covers.
+// `api` is mocked; `ApiError` is not. The page branches on the real error type.
 vi.mock("@/lib/api-client", async (importOriginal) => ({
   ...(await importOriginal<typeof ApiClientModule>()),
   api: { get: vi.fn(), post: vi.fn() },
@@ -22,444 +21,460 @@ function wrapper({ children }: { children: ReactNode }) {
   return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
 }
 
-/**
- * The status payload the page actually receives, in its locked posture.
- *
- * Shared by both rendering tests because the previous inline fixture had
- * drifted behind the page: `rpc`, `network` and `readiness` are always present
- * in the real response, and rendering without them threw before a single
- * assertion could run.
- */
-function lockedStatus() {
+const ADDRESS = "7WctMGpqz1tGkYStBBjJRMnmuh9uwJubYV2tL4pLwRr9";
+const MINE = "FoHVQyJmv5AHPjccV3BWpMoKiMHLPkF5cfQdqo1nH5TN";
+
+function status(overrides: Record<string, unknown> = {}) {
   return {
-    public_key: "PublicExecutionWalletAddress",
-    withdrawal: {
-      locked_to: "FoHVQyJmv5AHPjccV3BWpMoKiMHLPkF5cfQdqo1nH5TN",
-      configured: true,
-      reason: null,
-    },
-    address_valid: true,
-    network: "devnet",
-    rpc: {
-      network: "devnet",
-      verified: true,
-      observed_genesis_hash: "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
-      error: null,
-    },
-    sol_balance: 0,
+    public_key: ADDRESS,
+    network: "mainnet",
+    rpc: { verified: true, error: null },
+    sol_balance: 0.0498,
+    sol_price_usd: 97,
+    sol_price_fresh: true,
+    balance_usd: 4.83,
     token_balances: [],
     balance_error: null,
-    funding_status: "unfunded",
-    mode: "disabled",
-    execution_enabled: false,
-    autotrade_enabled: false,
-    signer_status: "not_available_to_api",
-    live_submission_transport: "not_installed",
-    safety_gate: "read_only_safety_gate_available",
-    lock_state: "LOCKED",
-    security_gate: {
-      shared_with_paper: true,
-      evaluator: "sec2_entry_policy",
-      mandatory_checks: ["mint_authority", "freeze_authority"],
-      max_evidence_age_seconds: 900,
-    },
-    program_allowlist: ["JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4"],
-    readiness: {
-      config_contract: {
-        execution_settings_shared: true,
-        mode: "disabled",
-        execution_enabled: false,
-        autotrade_enabled: false,
-        safety_policy_version: "real_wallet_safety_v1",
-      },
-      transport: {
-        envelope: "disabled",
-        release_approved: false,
-        production_transport_installed: false,
-        submission_permitted: false,
-        reasons: ["RELEASE_NOT_APPROVED"],
-        allowed_hosts: ["api.jup.ag"],
-        configured_host: "api.jup.ag",
-      },
-      order_validation: { evidence_recheck_installed: true, checks: ["taker"] },
-      fee_accounting: {
-        sol_price_provider: "jupiter",
-        sol_price_source: null,
-        sol_price_usd: null,
-        sol_price_observed_at: null,
-        sol_price_age_seconds: null,
-        sol_price_fresh: false,
-        max_age_seconds: 120,
-        min_sol_fee_reserve: "0.01",
-        priority_fee_sol: "0.0005",
-        exit_fee_reserve_multiplier: 2,
-        fee_accounting_ready: false,
-        unavailable_reason: "sol_price_unavailable",
-      },
-    },
+    withdrawal: { locked_to: MINE, configured: true, reason: null },
+    mode: "live",
+    execution_enabled: true,
+    autotrade_enabled: true,
     limits: {
-      entry_size_usd: null,
-      entry_size_configured: false,
-      max_trade_usd: "5",
-      max_open_positions: 1,
-      max_total_exposure_usd: "10",
-      max_daily_notional_usd: "20",
-      max_daily_trades: 4,
-      max_daily_loss_usd: "10",
-      max_balance_sol: "0.25",
-      max_balance_lamports: 250000000,
+      entry_size_usd: "100",
+      max_open_positions: 6,
+      max_total_exposure_usd: "600",
+      max_daily_trades: 100,
+      max_daily_loss_usd: "30",
+      balance_ceiling_enabled: false,
+      max_balance_sol: "15",
       min_sol_fee_reserve: "0.01",
+      exit_max_price_impact_pct: "50",
+      max_slippage_bps: 300,
     },
-    dry_run: { feature_enabled: false, decisions: [] },
-    live_readiness: {
-      open_real_positions: 0,
-      unresolved_intents: [],
-      kill_switches: [],
-      kill_switch_history: [],
+    today: {
+      realised_pnl_usd: "0",
+      loss_limit_usd: "30",
+      loss_limit_hit: false,
+      buys: 0,
+      buys_limit: 100,
+      resets_at: "2026-09-17T00:00:00+00:00",
     },
-    confirmed_lifecycle: {
-      consecutive_execution_failures: 0,
-      last_failure_reason: null,
-      positions: [
-        {
-          id: "position-1",
-          mint_address: "ConfirmedMintAddress",
-          status: "CLOSED",
-          quantity: "2.5",
-          entry_actual_input_amount: "5",
-          entry_actual_output_amount: "2.5",
-          exit_actual_input_amount: "2.5",
-          exit_actual_output_amount: "7.5",
-          realised_gross_pnl_usd: "2.5",
-          realised_net_pnl_usd: "2.5",
-          opened_at: "2026-08-09T00:00:00Z",
-          closed_at: "2026-08-09T00:01:00Z",
-        },
-      ],
-    },
+    open_positions: 0,
+    kill_switches: [],
+    consecutive_execution_failures: 0,
+    failures_before_kill_switch: 2,
+    last_failure_reason: null,
+    positions: [],
+    ...overrides,
   };
 }
+
+function autotrade(overrides: Record<string, unknown> = {}) {
+  return {
+    enabled: false,
+    nominated_strategy: null,
+    started_at: null,
+    started_by: null,
+    stopped_at: null,
+    stopped_by: null,
+    can_start: false,
+    strategy: {
+      id: "G-B3-5M",
+      name: "GRADUATION-B3-5MIN",
+      paper_book: "B3_198k_5m",
+      idea: "hold graduations for five minutes",
+      pool_floor_usd: 198000,
+      hold_minutes: 5,
+      take_profit: false,
+      stop_loss: false,
+      max_signal_age_seconds: 60,
+      ticket_usd: "100",
+      min_ticket_usd: "56",
+    },
+    history: [],
+    ...overrides,
+  };
+}
+
+function check(key: string, owner: string, state: string, title: string, detail = "") {
+  return { key, owner, status: state, title, detail, remediation: `How to fix ${key}.` };
+}
+
+function readiness(overrides: Record<string, unknown> = {}) {
+  return {
+    ready_to_fund: true,
+    ready_to_trade: false,
+    proven: false,
+    min_trade_sol: "0.588",
+    full_trade_sol: "1.041",
+    checks: [
+      check("wallet_configured", "OPERATOR", "PASS", "A dedicated execution wallet exists"),
+      check(
+        "wallet_funded", "OPERATOR", "BLOCKED", "The wallet can pay for a trade",
+        "balance 0.0498 SOL; one trade needs 0.588 SOL",
+      ),
+      check("strategy_signals", "CODE", "PASS", "The strategy is sending buy signals",
+        "last signal 12 min ago"),
+      check("validated_strategy", "EVIDENCE", "BLOCKED", "The strategy is proven",
+        "not proven — the Graduation Lab has not called it an edge"),
+      check("real_round_trip", "EVIDENCE", "BLOCKED", "A real buy and sell have completed",
+        "0 real round trip(s) settled"),
+    ],
+    ...overrides,
+  };
+}
+
+function serve(
+  data: { status?: unknown; autotrade?: unknown; readiness?: unknown } = {},
+) {
+  vi.mocked(api.get).mockImplementation(async (path: string) => {
+    if (path === "/real-wallet/status") return data.status ?? status();
+    if (path === "/real-wallet/autotrade") return data.autotrade ?? autotrade();
+    if (path === "/real-wallet/funding-readiness") return data.readiness ?? readiness();
+    throw new Error(`unexpected GET ${path}`);
+  });
+}
+
+async function renderLoaded() {
+  render(<RealWalletPage />, { wrapper });
+  await waitFor(() => expect(screen.getByText(ADDRESS)).toBeInTheDocument());
+}
+
+function signInAsAdmin() {
+  useAuthStore.setState({
+    status: "authenticated",
+    user: {
+      id: "admin-1",
+      email: "owner@example.com",
+      display_name: "Owner",
+      role: "admin",
+      is_active: true,
+      is_verified: true,
+      last_login_at: null,
+      created_at: new Date(0).toISOString(),
+    },
+  });
+}
+
+beforeEach(() => {
+  useAuthStore.setState({ status: "unauthenticated", user: null });
+});
 
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
 });
 
-describe("RealWalletPage", () => {
-  // The seatbelt is a once-per-session pause in front of the page. These tests
-  // are about what the page shows once you are through it, so they start
-  // buckled; the gate itself is covered separately below.
-  beforeEach(() => {
-    window.sessionStorage.setItem("memescope.seatbelt", "1");
+describe("RealWalletPage without signing in", () => {
+  it("opens straight onto the wallet — no entry screen, no sign-in wall", async () => {
+    serve();
+    await renderLoaded();
+    expect(screen.queryByText(/fasten your seatbelt/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/session has expired/i)).not.toBeInTheDocument();
+    expect(screen.getByText("0.049800")).toBeInTheDocument();
   });
 
-  it("stops at the seatbelt before showing anything, once per session", async () => {
-    window.sessionStorage.removeItem("memescope.seatbelt");
-    vi.mocked(api.get).mockResolvedValue(lockedStatus());
+  it("claims nothing about the wallet before it has been read", () => {
+    vi.mocked(api.get).mockReturnValue(new Promise(() => {}));
     render(<RealWalletPage />, { wrapper });
+    expect(screen.getByText("Reading the wallet…")).toBeInTheDocument();
+    expect(screen.queryByText(/no wallet configured/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/would not trade yet/i)).not.toBeInTheDocument();
+  });
 
-    expect(screen.getByText("Fasten your seatbelt")).toBeInTheDocument();
-    // Nothing behind the gate is rendered yet — not the address, not a control.
-    expect(screen.queryByText("Public address")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Start" })).not.toBeInTheDocument();
+  it("carries none of the retired panels", async () => {
+    serve();
+    await renderLoaded();
+    for (const gone of [
+      /manual devnet/i,
+      /dry-run decisions/i,
+      /program allowlist/i,
+      /pre-mainnet readiness/i,
+      /choose a strategy/i,
+    ]) {
+      expect(screen.queryByText(gone)).not.toBeInTheDocument();
+    }
+  });
 
-    fireEvent.click(
-      screen.getByRole("button", { name: /enter the execution wallet/i }),
+  it("names the strategy the wallet trades, in plain words", async () => {
+    serve();
+    await renderLoaded();
+    const card = screen.getByText("Strategy this wallet trades").closest("section")!;
+    expect(within(card).getByText("G-B3-5M")).toBeInTheDocument();
+    expect(card.textContent).toContain("copies paper book B3_198k_5m");
+    expect(card.textContent).toContain("at least $198,000");
+    expect(card.textContent).toContain("exactly 5 minutes later");
+    expect(card.textContent).toContain("never under $56");
+    // Unproven is said, with a way to look.
+    expect(card.textContent).toContain("Not proven yet");
+    expect(within(card).getByRole("link", { name: /paper results/i })).toHaveAttribute(
+      "href",
+      "/graduation-lab",
     );
+  });
+
+  it("offers a sign-in link where Start would be, and Stop that works now", async () => {
+    serve();
+    await renderLoaded();
+    const panel = screen.getByText("Trading").closest("section")!;
+    expect(within(panel).queryByRole("button", { name: /^start/i })).toBeNull();
+    expect(within(panel).getByRole("link", { name: /sign in to start/i })).toHaveAttribute(
+      "href",
+      "/login?next=/real-wallet",
+    );
+    const stop = within(panel).getByRole("button", { name: /^stop$/i });
+    expect(stop).toBeEnabled();
+  });
+
+  it("stops at once, without an account or a typed reason", async () => {
+    serve({ autotrade: autotrade({ enabled: true, nominated_strategy: "G-B3-5M" }) });
+    vi.mocked(api.post).mockResolvedValue(autotrade());
+    await renderLoaded();
+    fireEvent.click(screen.getByRole("button", { name: /^stop$/i }));
     await waitFor(() =>
-      expect(screen.getByText("PublicExecutionWalletAddress")).toBeInTheDocument(),
+      expect(api.post).toHaveBeenCalledWith("/real-wallet/autotrade/stop", {
+        reason: "stopped from the wallet page",
+      }),
     );
-  });
-
-  it("says plainly that the seatbelt is not the access control", async () => {
-    window.sessionStorage.removeItem("memescope.seatbelt");
-    vi.mocked(api.get).mockResolvedValue(lockedStatus());
-    render(<RealWalletPage />, { wrapper });
-    expect(screen.getByText(/pause, not a permission/i)).toBeInTheDocument();
-    expect(screen.getByText(/administrator role on the server/i)).toBeInTheDocument();
-  });
-
-  it("does not reveal execution wallet information after an authorization failure", async () => {
-    vi.mocked(api.get).mockRejectedValue(new ApiError(403, "forbidden", "forbidden"));
-    render(<RealWalletPage />, { wrapper });
-    await waitFor(() => expect(screen.getByText("Restricted")).toBeInTheDocument());
-    expect(screen.queryByText("Public address")).not.toBeInTheDocument();
-  });
-
-  it("tells an expired session it is expired, not that it lacks permission", async () => {
-    // The failure that wasted an owner's time: a 401 rendered as "Restricted"
-    // sends someone hunting for a permissions problem they do not have.
-    vi.mocked(api.get).mockRejectedValue(new ApiError(401, "unauthorized", "nope"));
-    render(<RealWalletPage />, { wrapper });
-    await waitFor(() => expect(screen.getByText("Signed out")).toBeInTheDocument());
-    expect(screen.getByText(/session has expired/i)).toBeInTheDocument();
-    // Telling somebody to sign in without giving them a way to is a dead end,
-    // and it sent the owner round the homepage access code three times.
-    const link = screen.getByRole("link", { name: /go to sign in/i });
-    expect(link).toHaveAttribute("href", "/login");
-    // And it must name the trap: the access code is not an account.
-    expect(screen.getByText(/site-wide cookie rather than an account/i))
-      .toBeInTheDocument();
-    expect(screen.queryByText("Restricted")).not.toBeInTheDocument();
-    expect(screen.queryByText("Public address")).not.toBeInTheDocument();
-  });
-
-  it("does not claim a permissions verdict when the request simply failed", async () => {
-    vi.mocked(api.get).mockRejectedValue(new ApiError(503, "unavailable", "down"));
-    render(<RealWalletPage />, { wrapper });
-    await waitFor(() => expect(screen.getByText("Unavailable")).toBeInTheDocument());
-    expect(screen.getByText(/not a statement that you lack access/i)).toBeInTheDocument();
-    expect(screen.queryByText("Public address")).not.toBeInTheDocument();
-  });
-
-  it("renders only public read-only wallet data", async () => {
-    vi.mocked(api.get).mockResolvedValue(lockedStatus());
-    render(<RealWalletPage />, { wrapper });
-    await waitFor(() =>
-      expect(screen.getByText("PublicExecutionWalletAddress")).toBeInTheDocument(),
-    );
-    // The address itself is the copy control now; the labelled button moved into
-    // the Deposit panel, which is collapsed until asked for.
-    expect(screen.getByText("copy")).toBeInTheDocument();
-    expect(screen.getByText("Confirmed lifecycle ledger")).toBeInTheDocument();
-    expect(screen.getByText("$2.5")).toBeInTheDocument();
-    // Execution and autotrade each read DISABLED on their own status card.
-    expect(screen.getAllByText("DISABLED").length).toBeGreaterThanOrEqual(2);
-  });
-
-  it("states the locked posture and the canary bounds without offering a way past them", async () => {
-    vi.mocked(api.get).mockResolvedValue(lockedStatus());
-    render(<RealWalletPage />, { wrapper });
-    await waitFor(() =>
-      expect(
-        screen.getByText("LOCKED · NO REAL SUBMISSION IS POSSIBLE"),
-      ).toBeInTheDocument(),
-    );
-    // An unconfigured entry size must read as a refusal, not as a blank.
-    expect(screen.getByText("NOT CONFIGURED — entries refuse")).toBeInTheDocument();
-    expect(screen.getByText(/0\.25 SOL \(250000000 lamports\)/)).toBeInTheDocument();
-    expect(screen.getByText(/same SEC-2 evaluator/)).toBeInTheDocument();
-    expect(
-      screen.getByText("JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4"),
-    ).toBeInTheDocument();
-    // No *control* on this page may enable execution or widen a limit. Asserted
-    // over interactive elements rather than page text, so the paragraph that
-    // explains the property does not satisfy the test that checks it.
-    const controls = [
-      ...screen.queryAllByRole("button"),
-      ...screen.queryAllByRole("checkbox"),
-      ...screen.queryAllByRole("switch"),
-    ].map((element) => element.textContent ?? "");
-    expect(
-      controls.filter((label) => /enable|arm|unlock|go live|mainnet/i.test(label)),
-    ).toEqual([]);
   });
 });
 
-describe("RealWalletPage balance card", () => {
-  beforeEach(() => {
-    window.sessionStorage.setItem("memescope.seatbelt", "1");
+describe("RealWalletPage signed in as the administrator", () => {
+  it("starts the wallet's strategy once a reason is given", async () => {
+    signInAsAdmin();
+    serve();
+    vi.mocked(api.post).mockResolvedValue(autotrade({ enabled: true }));
+    await renderLoaded();
+    const panel = screen.getByText("Trading").closest("section")!;
+    const start = within(panel).getByRole("button", { name: "Start G-B3-5M" });
+    expect(start).toBeDisabled();
+
+    fireEvent.change(within(panel).getByPlaceholderText(/reason/i), {
+      target: { value: "funded, going live" },
+    });
+    expect(start).toBeEnabled();
+    fireEvent.click(start);
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith("/real-wallet/autotrade/start", {
+        strategy_id: "G-B3-5M",
+        reason: "funded, going live",
+      }),
+    );
   });
 
-  it("puts the balance and the address first, before any barrier prose", async () => {
-    vi.mocked(api.get).mockResolvedValue(lockedStatus());
-    render(<RealWalletPage />, { wrapper });
-    await waitFor(() =>
-      expect(screen.getByText("PublicExecutionWalletAddress")).toBeInTheDocument(),
-    );
-    expect(screen.getByRole("button", { name: /deposit/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /withdraw/i })).toBeInTheDocument();
+  it("cannot start twice", async () => {
+    signInAsAdmin();
+    serve({ autotrade: autotrade({ enabled: true, nominated_strategy: "G-B3-5M" }) });
+    await renderLoaded();
+    const panel = screen.getByText("Trading").closest("section")!;
+    fireEvent.change(within(panel).getByPlaceholderText(/reason/i), {
+      target: { value: "again" },
+    });
+    expect(within(panel).getByRole("button", { name: "Start G-B3-5M" })).toBeDisabled();
+    expect(panel.textContent).toContain("ON — G-B3-5M");
+  });
+});
+
+describe("RealWalletPage readiness", () => {
+  it("answers fund, trade and proven, and says what is missing", async () => {
+    serve();
+    await renderLoaded();
+    expect(screen.getByText("Ready to fund: YES")).toBeInTheDocument();
+    expect(screen.getByText("Ready to trade: NO")).toBeInTheDocument();
+    expect(screen.getByText("Strategy proven: NO")).toBeInTheDocument();
+    expect(screen.getByText("The wallet can pay for a trade")).toBeInTheDocument();
+    expect(screen.getByText(/one trade needs 0\.588 SOL/)).toBeInTheDocument();
+    // Evidence is reported beside the verdicts, never hidden.
+    expect(screen.getByText(/A real buy and sell have completed/)).toBeInTheDocument();
   });
 
-  it("offers deposit as a real action, because receiving needs only an address", async () => {
-    vi.mocked(api.get).mockResolvedValue(lockedStatus());
-    render(<RealWalletPage />, { wrapper });
-    await waitFor(() =>
-      expect(screen.getByText("PublicExecutionWalletAddress")).toBeInTheDocument(),
+  it("does not promise a buy the wallet cannot make", async () => {
+    serve();
+    await renderLoaded();
+    const panel = screen.getByText("Trading").closest("section")!;
+    expect(panel.textContent).toContain("Start would not buy yet");
+    expect(panel.textContent).not.toContain("buys with real money");
+  });
+
+  it("says Start will trade once nothing is missing", async () => {
+    serve({
+      readiness: readiness({
+        ready_to_trade: true,
+        checks: [check("wallet_funded", "OPERATOR", "PASS", "The wallet can pay for a trade")],
+      }),
+    });
+    await renderLoaded();
+    expect(screen.getByText("Ready to trade: YES")).toBeInTheDocument();
+    expect(screen.getByText(/pressing Start will trade real money/)).toBeInTheDocument();
+    expect(screen.getByText("Trading").closest("section")!.textContent).toContain(
+      "Start buys with real money from the next signal",
     );
+  });
+
+  it("puts the whole checklist one tap away", async () => {
+    serve();
+    await renderLoaded();
+    fireEvent.click(screen.getByRole("button", { name: "Show all 5 checks" }));
+    expect(screen.getByText("A dedicated execution wallet exists")).toBeInTheDocument();
+  });
+
+  it("tells the depositor how much a trade needs", async () => {
+    serve();
+    await renderLoaded();
     fireEvent.click(screen.getByRole("button", { name: /deposit/i }));
-    expect(screen.getByText("Deposit SOL")).toBeInTheDocument();
-    expect(screen.getByText("Copy address")).toBeInTheDocument();
+    const panel = screen.getByText("Deposit SOL").closest("div")!;
+    expect(panel.textContent).toContain("One trade needs at least 0.588 SOL");
+    expect(panel.textContent).toContain("a full $100 trade needs 1.041 SOL");
+    expect(within(panel).getByText("Copy address")).toBeInTheDocument();
+  });
+});
+
+describe("RealWalletPage trades and limits", () => {
+  it("shows a sell in progress and a settled result", async () => {
+    serve({
+      status: status({
+        open_positions: 1,
+        positions: [
+          {
+            id: "p-open", mint_address: "OpenMint1111", symbol: "OPEN", status: "OPEN",
+            strategy_id: "G-B3-5M", quantity: "10", cost_usd: "99", spent: "1.0206",
+            received: null, realised_gross_pnl_usd: null, realised_net_pnl_usd: null,
+            exit_reason: "time_exit_unpriced", exit_state: "blocked",
+            opened_at: "2026-09-16T10:00:00Z", closed_at: null,
+            entry_signature: "sig1", exit_signature: null,
+          },
+          {
+            id: "p-closed", mint_address: "DoneMint2222", symbol: null, status: "CLOSED",
+            strategy_id: "G-B3-5M", quantity: "10", cost_usd: "3.0075", spent: "0.030075",
+            received: "0.029185068", realised_gross_pnl_usd: "-0.0889932",
+            realised_net_pnl_usd: "-0.1099932", exit_reason: "time_0.0833h",
+            exit_state: null, opened_at: "2026-09-16T09:00:00Z",
+            closed_at: "2026-09-16T09:05:00Z", entry_signature: "sig2",
+            exit_signature: "sig3",
+          },
+        ],
+      }),
+    });
+    await renderLoaded();
+    const table = screen.getByText("Real trades").closest("section")!;
+    expect(table.textContent).toContain("sell refused — retrying");
+    expect(table.textContent).toContain("sold on time");
+    expect(table.textContent).toContain("0.0301 SOL");
+    expect(table.textContent).toContain("0.0292 SOL");
+    expect(table.textContent).toContain("−$0.11");
+    expect(within(table).getByText("DoneMint")).toBeInTheDocument();
   });
 
-  it("offers a withdrawal with no recipient field, only an amount", async () => {
-    // The one control here that moves money without a trade. It used to refuse
-    // outright and this test pinned the refusal; withdrawal is now built, and
-    // what makes it safe to put on a screen is that the form CANNOT choose a
-    // recipient — the destination is configuration, re-proven inside the signer.
-    vi.mocked(api.get).mockResolvedValue(lockedStatus());
-    render(<RealWalletPage />, { wrapper });
-    await waitFor(() =>
-      expect(screen.getByText("PublicExecutionWalletAddress")).toBeInTheDocument(),
-    );
-    fireEvent.click(screen.getByRole("button", { name: /withdraw/i }));
-    expect(screen.getByText("Withdraw SOL")).toBeInTheDocument();
-
-    // Scoped to the withdraw panel — the separate devnet workflow lower down
-    // has its own recipient field and is not what this asserts about.
-    const panel = screen.getByText("Withdraw SOL").closest("div");
-    expect(panel).not.toBeNull();
-    const inputs = Array.from(panel!.querySelectorAll("input"));
-    expect(inputs).toHaveLength(1);
-    expect(inputs[0].placeholder).toBe("0.00");
-    // And the destination is shown as fixed text, never as something editable.
-    expect(panel!.textContent).toContain("Locked destination");
+  it("says so plainly when the daily loss limit has stopped buying", async () => {
+    serve({
+      status: status({
+        today: {
+          realised_pnl_usd: "-31.20", loss_limit_usd: "30", loss_limit_hit: true,
+          buys: 12, buys_limit: 100, resets_at: "2026-09-17T00:00:00+00:00",
+        },
+      }),
+    });
+    await renderLoaded();
+    expect(screen.getByText("−$31.20")).toBeInTheDocument();
+    expect(screen.getByText(/Loss limit of \$30 reached — no new buys/)).toBeInTheDocument();
+    expect(screen.getByText("12")).toBeInTheDocument();
   });
 
-  it("says why the button is greyed instead of just looking broken", async () => {
-    // A disabled control with no reason reads as a broken feature, and it did:
-    // the wallet's owner reported the withdrawal as "not enabled" when it was
-    // working and merely waiting for an amount. The hint used to require a
-    // keystroke before it appeared, so the empty state — the one everybody
-    // lands on — explained nothing.
-    vi.mocked(api.get).mockResolvedValue(lockedStatus());
-    render(<RealWalletPage />, { wrapper });
-    await waitFor(() =>
-      expect(screen.getByText("PublicExecutionWalletAddress")).toBeInTheDocument(),
-    );
-    fireEvent.click(screen.getByRole("button", { name: /withdraw/i }));
-
-    const panel = screen.getByText("Withdraw SOL").closest("div");
-    expect(panel!.querySelector("input")!).toHaveValue("");
-    expect(panel!.textContent).toContain("Enter an amount above zero");
+  it("puts an emergency stop at the top of the safety card", async () => {
+    serve({
+      status: status({
+        kill_switches: [{
+          kind: "consecutive_execution_failures", reason: "failure_threshold_reached",
+          activated_at: null, activated_by: null,
+        }],
+        consecutive_execution_failures: 2,
+      }),
+    });
+    await renderLoaded();
+    expect(screen.getByText(/EMERGENCY STOP ON/)).toBeInTheDocument();
+    expect(screen.getByText(/Failed sends in a row: 2 of 2/)).toBeInTheDocument();
   });
 
-  it("does not claim to be sending while it is still only armed", async () => {
-    // The wallet's owner typed 0.001, pressed Withdraw, read "Sending 0.001
-    // SOL to …" and waited. Nothing was in flight — the send needs a second
-    // press — so the copy described an action that had not started and the
-    // user correctly waited for a completion that could never arrive. On the
-    // one screen that moves real money, a progress message for a thing that
-    // is not happening is the worst available wording.
-    // A FUNDED wallet: the shared fixture holds 0 SOL, which makes every amount
-    // invalid and would arm nothing at all.
-    vi.mocked(api.get).mockResolvedValue({ ...lockedStatus(), sol_balance: 0.05 });
+  it("asks for the site code, not an account, when the gate refuses", async () => {
+    vi.mocked(api.get).mockRejectedValue(
+      new ApiError(401, "alpha_access_required", "Alpha access is required."),
+    );
     render(<RealWalletPage />, { wrapper });
     await waitFor(() =>
-      expect(screen.getByText("PublicExecutionWalletAddress")).toBeInTheDocument(),
+      expect(screen.getByText(/enter the site code on the home page/i)).toBeInTheDocument(),
     );
+    expect(screen.queryByText(ADDRESS)).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /sign in/i })).toBeNull();
+  });
+});
+
+describe("RealWalletPage withdrawal", () => {
+  it("has no recipient field, only an amount, and shows the fixed destination", async () => {
+    serve();
+    await renderLoaded();
     fireEvent.click(screen.getByRole("button", { name: /^withdraw$/i }));
+    const panel = screen.getByText("Withdraw SOL").closest("div")!;
+    const inputs = Array.from(panel.querySelectorAll("input"));
+    expect(inputs).toHaveLength(1);
+    expect(inputs[0]?.placeholder).toBe("0.00");
+    expect(panel.textContent).toContain("Locked destination");
+    expect(panel.textContent).toContain(MINE);
+  });
 
+  it("says why the button is greyed", async () => {
+    serve();
+    await renderLoaded();
+    fireEvent.click(screen.getByRole("button", { name: /^withdraw$/i }));
+    const panel = screen.getByText("Withdraw SOL").closest("div")!;
+    expect(panel.textContent).toContain("Enter an amount above zero");
+  });
+
+  it("arms first and says nothing has been sent", async () => {
+    serve();
+    await renderLoaded();
+    fireEvent.click(screen.getByRole("button", { name: /^withdraw$/i }));
     const panel = screen.getByText("Withdraw SOL").closest("div")!;
     fireEvent.change(within(panel).getByPlaceholderText("0.00"), {
       target: { value: "0.001" },
     });
     fireEvent.click(within(panel).getByRole("button", { name: /^withdraw$/i }));
-
-    // Armed, not sent.
     expect(api.post).not.toHaveBeenCalled();
     expect(panel.textContent).toContain("Nothing has been sent yet");
-    expect(panel.textContent).not.toContain("Sending 0.001 SOL to");
-    expect(
-      within(panel).getByRole("button", { name: /confirm — send now/i }),
-    ).toBeInTheDocument();
+    expect(within(panel).getByRole("button", { name: /confirm — send now/i })).toBeInTheDocument();
   });
 
-  it("requires a second, explicit confirmation before it sends", async () => {
-    // A submitted transfer whose response was lost is UNCERTAIN, and pressing
-    // again is how one withdrawal becomes two. One click must not send.
-    vi.mocked(api.get).mockResolvedValue(lockedStatus());
-    render(<RealWalletPage />, { wrapper });
-    await waitFor(() =>
-      expect(screen.getByText("PublicExecutionWalletAddress")).toBeInTheDocument(),
-    );
+  it("sends only on the explicit confirmation", async () => {
+    serve();
+    vi.mocked(api.post).mockResolvedValue({
+      signature: "sigW", sol: "0.001", explorer: "https://solscan.io/tx/sigW",
+      note: "Submitted once.",
+    });
+    await renderLoaded();
     fireEvent.click(screen.getByRole("button", { name: /^withdraw$/i }));
-
-    expect(api.post).not.toHaveBeenCalled();
-    expect(
-      screen.queryByRole("button", { name: /confirm — send now/i }),
-    ).toBeNull();
-  });
-});
-
-describe("RealWalletPage autotrade control", () => {
-  beforeEach(() => {
-    window.sessionStorage.setItem("memescope.seatbelt", "1");
-  });
-
-  it("says starting spends real money when the barriers are already down", async () => {
-    // This paragraph used to end "on this deployment submission is still
-    // impossible" — true when written, false from the day the flags went live.
-    // Stale reassurance directly above the control that commits real capital is
-    // the worst place in the product for it, so the text is now DERIVED.
-    vi.mocked(api.get).mockResolvedValue({
-      ...lockedStatus(),
-      mode: "live",
-      execution_enabled: true,
-      autotrade_enabled: true,
+    const panel = screen.getByText("Withdraw SOL").closest("div")!;
+    fireEvent.change(within(panel).getByPlaceholderText("0.00"), {
+      target: { value: "0.001" },
     });
-    render(<RealWalletPage />, { wrapper });
+    fireEvent.click(within(panel).getByRole("button", { name: /^withdraw$/i }));
+    fireEvent.click(within(panel).getByRole("button", { name: /confirm — send now/i }));
     await waitFor(() =>
-      expect(screen.getByText("Autonomous trading")).toBeInTheDocument(),
+      expect(api.post).toHaveBeenCalledWith("/real-wallet/withdraw", {
+        sol_amount: "0.001",
+        confirmation_phrase: "WITHDRAW_TO_MY_ADDRESS",
+      }),
     );
-    const panel = screen.getByText("Autonomous trading").closest("section")!;
-    expect(panel.textContent).toContain("Starting will trade real money");
-    expect(panel.textContent).not.toContain("submission is still impossible");
-  });
-
-  it("will not start until a strategy is actually chosen", async () => {
-    // A pre-filled strategy means a mis-tap nominates whichever name happened
-    // to be sitting in the box. Karthik presses this from a phone.
-    vi.mocked(api.get).mockResolvedValue(lockedStatus());
-    render(<RealWalletPage />, { wrapper });
-    await waitFor(() =>
-      expect(screen.getByText("Autonomous trading")).toBeInTheDocument(),
-    );
-    const panel = screen.getByText("Autonomous trading").closest("section")!;
-    const start = within(panel).getByRole("button", { name: /^start$/i });
-
-    fireEvent.change(
-      within(panel).getByPlaceholderText(/reason/i),
-      { target: { value: "going live" } },
-    );
-    expect(start).toBeDisabled();          // reason given, strategy still empty
-
-    fireEvent.change(within(panel).getByRole("combobox"), {
-      target: { value: "V6-07" },
-    });
-    expect(start).toBeEnabled();
-    expect(api.post).not.toHaveBeenCalled();
-  });
-
-  it("never gates STOP on the strategy field", async () => {
-    // Stopping is unconditional. Gating it on a field that has nothing to do
-    // with stopping would make the emergency control depend on the thing the
-    // emergency is about.
-    vi.mocked(api.get).mockResolvedValue(lockedStatus());
-    render(<RealWalletPage />, { wrapper });
-    await waitFor(() =>
-      expect(screen.getByText("Autonomous trading")).toBeInTheDocument(),
-    );
-    const panel = screen.getByText("Autonomous trading").closest("section")!;
-    fireEvent.change(
-      within(panel).getByPlaceholderText(/reason/i),
-      { target: { value: "stop now" } },
-    );
-    expect(within(panel).getByRole("button", { name: /^stop$/i })).toBeEnabled();
-  });
-});
-
-describe("RealWalletPage withdrawal without a destination", () => {
-  beforeEach(() => {
-    window.sessionStorage.setItem("memescope.seatbelt", "1");
   });
 
   it("offers nothing to press when no destination is nominated", async () => {
-    // An unset destination permits nothing rather than anything — the same
-    // fail-closed direction the server takes. There must be no amount field to
-    // fill in and no way to send.
-    vi.mocked(api.get).mockResolvedValue({
-      ...lockedStatus(),
-      withdrawal: { locked_to: null, configured: false, reason: "not configured" },
+    serve({
+      status: status({
+        withdrawal: { locked_to: null, configured: false, reason: "not configured" },
+      }),
     });
-    render(<RealWalletPage />, { wrapper });
-    await waitFor(() =>
-      expect(screen.getByText("PublicExecutionWalletAddress")).toBeInTheDocument(),
-    );
-    fireEvent.click(screen.getByRole("button", { name: /withdraw/i }));
-
+    await renderLoaded();
+    fireEvent.click(screen.getByRole("button", { name: /^withdraw$/i }));
     expect(screen.getByText(/No destination is nominated/)).toBeInTheDocument();
-    const panel = screen.getByText("Withdraw SOL").closest("div");
-    expect(panel!.querySelectorAll("input")).toHaveLength(0);
+    const panel = screen.getByText("Withdraw SOL").closest("div")!;
+    expect(panel.querySelectorAll("input")).toHaveLength(0);
   });
 });
