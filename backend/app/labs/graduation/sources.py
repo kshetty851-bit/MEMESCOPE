@@ -546,14 +546,15 @@ class HeldVaultStream:
             return None
         return got.get("result") if isinstance(got, dict) else None
 
-    async def accounts(self, addresses: Sequence[str]) -> tuple[int, list[bytes | None]]:
+    async def accounts(self, addresses: Sequence[str], *,
+                       commitment: str = "processed") -> tuple[int, list[bytes | None]]:
         """Accounts in the order asked, and the slot they were read at.
 
-        PROCESSED commitment, as the socket uses: a finalized read is seconds
+        PROCESSED by default, as the socket uses: a finalized read is seconds
         behind it. A failed read is slot 0 and no data, never a partial list.
         """
         got = await self._call("getMultipleAccounts", [
-            list(addresses), {"encoding": "base64", "commitment": "processed"}])
+            list(addresses), {"encoding": "base64", "commitment": commitment}])
         values = (got or {}).get("value")
         slot = ((got or {}).get("context") or {}).get("slot")
         if (not isinstance(values, list) or len(values) != len(addresses)
@@ -569,15 +570,18 @@ class HeldVaultStream:
         answer RAISES instead — cached as "unwatchable", one dropped request
         would leave a position on minute-old marks for its whole life.
         """
-        slot, (raw,) = await self.accounts([pool])
-        if not slot:
+        slot, (raw,) = await self.accounts([pool], commitment="confirmed")
+        if not slot or raw is None:
+            # No account yet is not "not a pool": a pool seconds old can be
+            # missing from the node that answered. Asked again next pass.
             raise ConnectionError(f"pool {pool} unread")
         state = parse_pool(raw)
         if state is None:
             return None
-        slot, accounts = await self.accounts([state.base_mint, state.quote_mint,
-                                              state.base_vault, state.quote_vault])
-        if not slot:
+        slot, accounts = await self.accounts(
+            [state.base_mint, state.quote_mint, state.base_vault, state.quote_vault],
+            commitment="confirmed")
+        if not slot or any(a is None for a in accounts):
             raise ConnectionError(f"accounts of pool {pool} unread")
         return held_watch.watch(mint, pool, state, accounts)
 
@@ -588,7 +592,13 @@ class HeldVaultStream:
         address matched DexScreener's pair for 0 of 146 recent graduations;
         the transaction's accounts matched 10 of 10 (2026-09-16). Raises when
         the node did not answer — a transaction too new to read, or a 429 —
-        so the caller asks again; None means no pool for this mint is there.
+        so the caller asks again. None only for a migration that FAILED, which
+        created nothing and never will.
+
+        A confirmed migration with no pool in sight also raises. The first live
+        dry run found no pool for both of its graduations, read seconds after
+        the event; the same lookup found both minutes later. The node that
+        answered had the transaction and not yet the account it created.
         """
         tx = await self._call("getTransaction", [signature, {
             "encoding": "json", "commitment": "confirmed",
@@ -596,14 +606,16 @@ class HeldVaultStream:
         keys = held_watch.transaction_accounts(tx)
         if not keys:
             raise ConnectionError(f"migration {signature[:12]} not readable yet")
-        found: str | None = None
+        if (tx.get("meta") or {}).get("err") is not None:
+            return None
         for start in range(0, len(keys), 100):
             batch = keys[start:start + 100]
-            slot, raws = await self.accounts(batch)
+            slot, raws = await self.accounts(batch, commitment="confirmed")
             if not slot:
                 raise ConnectionError(f"accounts of migration {signature[:12]} unread")
-            found = found or held_watch.pool_among(mint, batch, raws)
-        return found
+            if found := held_watch.pool_among(mint, batch, raws):
+                return found
+        raise ConnectionError(f"pool of migration {signature[:12]} not visible yet")
 
     async def _read(self, helds: Sequence[held_watch.Held]) -> None:
         """Both balances of each pool, straight from the chain."""

@@ -375,16 +375,16 @@ async def test_an_unanswered_read_is_retried_not_cached_as_unwatchable():
     not leave a position on minute-old marks until it closes."""
     stream = HeldVaultStream(url="wss://node")
 
-    async def silent(addresses):
+    async def silent(addresses, *, commitment="processed"):
         return 0, [None] * len(addresses)
 
-    async def empty(addresses):
-        return 42, [None] * len(addresses)    # answered: no such account
+    async def not_a_pool(addresses, *, commitment="processed"):
+        return 42, [b"not a pool account"] * len(addresses)
 
     stream.accounts = silent
     with pytest.raises(ConnectionError):
         await stream.resolve(TOKEN_MINT, "POOL")
-    stream.accounts = empty
+    stream.accounts = not_a_pool                # answered: some other venue
     assert await stream.resolve(TOKEN_MINT, "POOL") is None
 
 
@@ -466,7 +466,8 @@ async def test_the_pool_comes_from_the_migrations_own_transaction(monkeypatch):
         assert params[1]["maxSupportedTransactionVersion"] == 0
         return txs.get(params[0])
 
-    async def accounts(batch):
+    async def accounts(batch, *, commitment="processed"):
+        assert commitment == "confirmed"         # as the transaction was read
         reads.append(len(batch))
         return 7, [b"pool" if k == "K120" else b"x" for k in batch]
 
@@ -476,7 +477,25 @@ async def test_the_pool_comes_from_the_migrations_own_transaction(monkeypatch):
     stream.accounts = accounts
     assert await stream.pool_from_migration(TOKEN_MINT, "sig") == "K120"
     assert reads == [100, 50]                   # the node's 100-account limit
-    decoded.clear()
-    assert await stream.pool_from_migration(TOKEN_MINT, "sig") is None
     with pytest.raises(ConnectionError):        # too new to read: ask again
         await stream.pool_from_migration(TOKEN_MINT, "not-yet")
+    # Confirmed, but the pool it created is not on this node yet: ask again.
+    # The first live dry run gave up on exactly this, twice.
+    decoded.clear()
+    with pytest.raises(ConnectionError):
+        await stream.pool_from_migration(TOKEN_MINT, "sig")
+    # A migration that FAILED created nothing, and never will.
+    txs["failed"] = {"transaction": {"message": {"accountKeys": keys}},
+                     "meta": {"err": {"InstructionError": [0, "Custom"]}}}
+    assert await stream.pool_from_migration(TOKEN_MINT, "failed") is None
+
+
+async def test_a_pool_not_yet_visible_is_asked_again_not_given_up_on():
+    stream = HeldVaultStream(url="wss://node")
+
+    async def missing(addresses, *, commitment="processed"):
+        return 42, [None] * len(addresses)
+
+    stream.accounts = missing
+    with pytest.raises(ConnectionError):
+        await stream.resolve(TOKEN_MINT, "POOL")
