@@ -23,6 +23,20 @@ still exit at 1.25x even if the switch now names something else. Reading the
 nominated strategy here would silently re-write the exit rules of every open
 position the moment the operator changed their mind.
 
+## The clock needs no price
+
+A position with no fresh mark is not marked, and no price rule fires on it.
+Its time exit still does: "sell at five minutes" reads a clock, not a market,
+and 20 of 174 graduation trades had no snapshot at all during their hold — a
+rule that waited for one would have held them for ever.
+
+## An exit that sold nothing is asked for again
+
+A sell refused before it was sent, or reverted on chain, sold nothing, and
+the position is still open with nothing left to close it. Those are asked
+for again, 15s after the first and doubling to half an hour — never while a
+kill switch is on, and never after an outcome that may have sold.
+
 ## What it cannot do
 
 It creates intents. It does not assemble orders, sign, or submit — each of those
@@ -44,10 +58,13 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.lab import execution, spec
 from app.lab.rules import MarkState, evaluate_exit
+from app.labs.graduation import live_spec
 from app.models.real_wallet_execution import RealWalletPosition
 from app.real_wallet.live_repository import (
+    RETRYABLE_EXIT_STATES,
     LiveIntentRepository,
     PositionExitAlreadyRequestedError,
+    SettlementEvidenceError,
 )
 from app.repositories.market import MarketSnapshotRepository
 
@@ -55,6 +72,17 @@ logger = get_logger(__name__)
 
 #: The stagnation band, matching the Lab's. A multiple inside it is "flat".
 FLAT_BAND = (Decimal("0.95"), Decimal("1.05"))
+
+#: The wait before asking again for an exit that sold nothing; it doubles per
+#: attempt up to the ceiling.
+RETRY_FIRST_S = 15
+RETRY_MAX_S = 1800
+
+
+def strategy_for(strategy_id: str | None) -> spec.Strategy | None:
+    """The rules a position was opened under, from whichever registry holds them."""
+    key = (strategy_id or "").upper()
+    return spec.BY_ID.get(key) or live_spec.BY_ID.get(key)
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +112,9 @@ class RealWalletExitDriver:
             .order_by(RealWalletPosition.opened_at)
         )).all())
 
+        # An exit asked for under a kill switch is blocked on its first step
+        # and only pushes the next attempt further away.
+        frozen = bool(await self._repository.active_kill_switches())
         marked = requested = 0
         skipped: dict[str, int] = {}
 
@@ -91,35 +122,53 @@ class RealWalletExitDriver:
             skipped[reason] = skipped.get(reason, 0) + 1
 
         for pos in positions:
-            if pos.exit_intent_id is not None:
-                skip("exit_already_requested")
-                continue
-            strategy = spec.BY_ID.get((pos.strategy_id or "").upper())
+            strategy = strategy_for(pos.strategy_id)
             if strategy is None:
                 # An exit rule we cannot read is not an exit rule we may guess.
                 skip("unknown_strategy")
                 continue
 
-            state = await self._mark(pos, strategy, now)
-            if state is None:
+            if pos.exit_intent_id is not None:
+                # Already decided. Asked again only if nothing was sold, and
+                # never re-judged: the paper book closed when the rule fired.
+                waiting = await self._retry_wait(pos, now)
+                if waiting is not None:
+                    skip(waiting)
+                    continue
+                reason = pos.exit_reason or "retry"
+            elif (state := await self._mark(pos, strategy, now)) is not None:
+                marked += 1
+                verdict = evaluate_exit(strategy.exits, state)
+                if verdict.action is None:
+                    continue
+                # `create_sell_intent` binds the FULL confirmed quantity, so a
+                # partial cannot be expressed yet. Promoting it to a close banks
+                # the profit early rather than letting the position run past a
+                # level its rules said to sell at, and the reason records it.
+                # ponytail: real partials need a fractional-quantity SELL intent.
+                reason = (f"partial_promoted_to_close:{verdict.reason}"
+                          if verdict.action == "PARTIAL" else str(verdict.reason))
+            elif (strategy.exits.time_exit_hours is not None
+                  and _held_hours(pos, now) >= strategy.exits.time_exit_hours):
+                reason = "time_exit_unpriced"
+            else:
                 skip("unpriceable")
                 continue
-            marked += 1
 
-            verdict = evaluate_exit(strategy.exits, state)
-            if verdict.action is None:
+            if frozen:
+                skip("kill_switch_active")
                 continue
-            # `create_sell_intent` binds the FULL confirmed quantity, so a
-            # partial cannot be expressed yet. Promoting it to a close banks the
-            # profit early rather than letting the position run past a level its
-            # rules said to sell at, and the reason records that it happened.
-            # ponytail: real partials need a fractional-quantity SELL intent.
-            reason = (f"partial_promoted_to_close:{verdict.reason}"
-                      if verdict.action == "PARTIAL" else verdict.reason)
             try:
                 await self._request_exit(pos, strategy, reason=reason, now=now)
             except PositionExitAlreadyRequestedError:
                 skip("exit_already_requested")
+                continue
+            except SettlementEvidenceError as exc:
+                # Nothing to size the sell from. Loud, and the rest of the
+                # book still gets its pass.
+                logger.error("real_wallet_exit_unsizable",
+                             position_id=str(pos.id), reason=str(exc))
+                skip("entry_unmeasured")
                 continue
             requested += 1
 
@@ -174,7 +223,7 @@ class RealWalletExitDriver:
         else:
             pos.flat_since = None
 
-        held_hours = (now - _aware(pos.opened_at)).total_seconds() / 3600
+        held_hours = _held_hours(pos, now)
         flat_hours = ((now - _aware(pos.flat_since)).total_seconds() / 3600
                       if pos.flat_since else 0.0)
         return MarkState(
@@ -194,29 +243,48 @@ class RealWalletExitDriver:
             flat_hours=flat_hours,
         )
 
+    async def _retry_wait(self, pos: RealWalletPosition, now: datetime) -> str | None:
+        """Why not to ask again yet, or None when it is time to."""
+        previous = (None if pos.exit_intent_id is None
+                    else await self._repository.by_id(pos.exit_intent_id))
+        if previous is None or previous.state not in RETRYABLE_EXIT_STATES:
+            return "exit_already_requested"
+        attempts = await self._repository.sell_attempts(pos.id)
+        wait = min(RETRY_FIRST_S * 2 ** min(max(attempts - 1, 0), 16), RETRY_MAX_S)
+        if (now - _aware(previous.created_at)).total_seconds() < wait:
+            return "exit_retry_waiting"
+        return None
+
     async def _request_exit(
         self, pos: RealWalletPosition, strategy: spec.Strategy, *,
         reason: str, now: datetime,
     ) -> None:
+        attempt = await self._repository.sell_attempts(pos.id) + 1
         intent = await self._repository.create_sell_intent(
-            # One exit per position, ever. The position id is the key because
-            # the position is the thing being closed; a timestamp here would let
-            # a retry open a second exit for the same holding.
-            idempotency_key=f"v6exit:{pos.id}",
+            # One key per position per ATTEMPT, never per clock reading: two
+            # passes racing to the same attempt get the same intent back, and
+            # the first attempt keeps the key it always had.
+            idempotency_key=(f"v6exit:{pos.id}" if attempt == 1
+                             else f"v6exit:{pos.id}:{attempt}"),
             position_id=pos.id,
             strategy_id=strategy.id,
             strategy_version=settings.REAL_WALLET_SAFETY_POLICY_VERSION,
             wallet_public_key=pos.wallet_public_key,
-            output_mint=settings.JUPITER_USDC_MINT,
+            replaces=pos.exit_intent_id,
         )
         pos.exit_reason = reason[:64]
         logger.warning("real_wallet_exit_requested", position_id=str(pos.id),
                        mint=pos.mint_address, strategy=strategy.id,
-                       reason=reason, intent_id=str(intent.id))
+                       reason=reason, attempt=attempt, intent_id=str(intent.id))
 
 
 def _aware(value: datetime) -> datetime:
     return value if value.tzinfo else value.replace(tzinfo=UTC)
 
 
-__all__ = ["ExitOutcome", "RealWalletExitDriver"]
+def _held_hours(pos: RealWalletPosition, now: datetime) -> float:
+    """Hours held, as a float — the unit and arithmetic `live_spec` pins its bound to."""
+    return (now - _aware(pos.opened_at)).total_seconds() / 3600
+
+
+__all__ = ["ExitOutcome", "RealWalletExitDriver", "strategy_for"]

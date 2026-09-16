@@ -89,9 +89,13 @@ class ProductionOrderFactory:
                 request_id=request_id,
                 ordered_at=now,
                 max_slippage_bps=int(settings.REAL_WALLET_EXIT_MAX_SLIPPAGE_BPS),
-                max_price_impact_pct=Decimal(
-                    str(settings.REAL_WALLET_SAFETY_MAX_BUY_PRICE_IMPACT_PCT)
-                ),
+                # A sell has its own, wider bound: refusing to leave a pool
+                # because it got thin keeps the position in the thin pool.
+                max_price_impact_pct=Decimal(str(
+                    settings.REAL_WALLET_EXIT_MAX_PRICE_IMPACT_PCT
+                    if intent.side.upper() == "SELL"
+                    else settings.REAL_WALLET_SAFETY_MAX_BUY_PRICE_IMPACT_PCT
+                )),
                 max_order_age_seconds=int(
                     settings.REAL_WALLET_EXIT_MAX_QUOTE_AGE_SECONDS
                 ),
@@ -177,13 +181,18 @@ def _authorised_amount_raw(intent: RealWalletLiveIntent) -> int:
     """The exact base units this intent may spend.
 
     A BUY spends lamports derived from the server-set USD size; a SELL spends
-    the confirmed token quantity recorded on the intent. Neither is ever taken
-    from a Jupiter response, which is what makes the comparison meaningful.
+    the base units its entry measurably received, recorded on the intent when
+    it was created. Neither is ever taken from a Jupiter response, which is
+    what makes the comparison meaningful.
+
+    Not `requested_token_quantity`: that is whole tokens, and `int()` of it
+    asked Jupiter to sell 1,640,115 base units of a 1,640,115.44-token bag.
     """
     if intent.side.upper() == "SELL":
-        if intent.requested_token_quantity is None:
+        raw = intent.authorized_input_amount_raw
+        if raw is None or raw <= 0:
             raise JupiterV2OrderUnavailableError("sell_intent_missing_quantity")
-        return int(intent.requested_token_quantity)
+        return int(raw)
     if intent.requested_usd is None or intent.requested_usd <= 0:
         raise JupiterV2OrderUnavailableError("buy_intent_missing_size")
     # SOL in, priced by the wallet's own SOL/USD source at intent creation and

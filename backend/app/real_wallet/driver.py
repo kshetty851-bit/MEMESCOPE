@@ -166,7 +166,7 @@ class RealWalletDriver:
                 open_positions=open_positions,
                 exposure_usd=Decimal(open_positions) * entry_usd,
                 daily_notional_usd=await self._notional_today(now),
-                daily_realised_loss_usd=Decimal(0),
+                daily_realised_loss_usd=await repo.realised_loss_today(now),
                 daily_trades=await self._trades_today(now),
                 wallet_balance_lamports=balance_lamports,
                 equity_usd=equity_usd,
@@ -295,10 +295,13 @@ class RealWalletDriver:
         return rows.scalars().first()
 
     async def _trades_today(self, now: datetime) -> int:
+        """Entries today. Sells are not counted: each would take a buy's place,
+        and an exit asked for again would take several."""
         start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         rows = await self._session.execute(
             select(RealWalletLiveIntent.id).where(
-                RealWalletLiveIntent.created_at >= start
+                RealWalletLiveIntent.created_at >= start,
+                RealWalletLiveIntent.side == "BUY",
             )
         )
         return len(rows.scalars().all())

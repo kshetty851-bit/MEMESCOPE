@@ -75,13 +75,17 @@ def test_the_peak_only_ever_rises():
     assert "if exec_multiple > Decimal(str(pos.peak_exec_multiple or 1))" in src
 
 
-def test_one_exit_per_position_ever():
-    """Keyed by the position, because the position is the thing being closed. A
-    timestamp in the key would let a retry open a second exit for one holding."""
+def test_one_exit_per_position_per_attempt_never_per_clock_reading():
+    """Keyed by the position and the attempt number. An exit that sold nothing
+    is asked for again under the next number; two passes racing to the same
+    attempt get the same intent back. A timestamp in the key would let a race
+    open two exits for one holding."""
     src = ast.unparse(_fn("_request_exit"))
-    assert "f'v6exit:{pos.id}'" in src or 'f"v6exit:{pos.id}"' in src
-    for volatile in ("now", "uuid4", "timestamp"):
-        assert f"idempotency_key=f'v6exit:{{pos.id}}{volatile}" not in src
+    assert "f'v6exit:{pos.id}'" in src
+    assert "f'v6exit:{pos.id}:{attempt}'" in src
+    for volatile in ("now", "uuid4", "timestamp", "time()"):
+        assert f"v6exit:{{pos.id}}:{{{volatile}" not in src
+        assert f"{volatile}}}'" not in src.split("idempotency_key=")[1].split(",")[0]
 
 
 def test_it_creates_intents_and_never_signs_or_submits():

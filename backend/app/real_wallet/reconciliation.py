@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 
+from app.core.config import settings
 from app.models.real_wallet_execution import RealWalletLiveIntent
 from app.real_wallet.live_readiness import ExecutionState
 from app.real_wallet.live_repository import LiveIntentRepository, SettlementEvidenceError
@@ -100,6 +101,88 @@ def extract_wallet_token_delta(
     return WalletBalanceDelta(mint=mint, raw_delta=sum(totals.values()), decimals=decimals)
 
 
+def _account_keys(transaction: dict[str, object]) -> list[str] | None:
+    """Every account the transaction touched, in balance-array order.
+
+    `jsonParsed` lists them as objects and already includes lookup-table
+    addresses; plain `json` lists strings and gives the loaded ones apart.
+    """
+    message = (transaction.get("transaction") or {})
+    message = message.get("message") if isinstance(message, dict) else None
+    raw = message.get("accountKeys") if isinstance(message, dict) else None
+    if not isinstance(raw, list):
+        return None
+    keys: list[str] = []
+    for entry in raw:
+        key = entry.get("pubkey") if isinstance(entry, dict) else entry
+        if not isinstance(key, str):
+            return None
+        keys.append(key)
+    if raw and isinstance(raw[0], str):
+        meta = transaction.get("meta")
+        loaded = (meta.get("loadedAddresses") if isinstance(meta, dict) else None) or {}
+        keys += list(loaded.get("writable") or []) + list(loaded.get("readonly") or [])
+    return keys
+
+
+def extract_wallet_sol_delta(
+    *, transaction: dict[str, object], wallet_public_key: str
+) -> WalletBalanceDelta | None:
+    """The wallet's SOL change from the swap itself, in lamports.
+
+    Native SOL is not a token balance. Jupiter wraps it into a temporary
+    account that is opened and closed inside the transaction, so it appears in
+    neither token list — which is why a SOL-paid buy used to settle as
+    UNKNOWN for ever, and the tokens it bought were never recorded or sold.
+
+    The measure is everything SOL-valued the wallet owns: its own lamports
+    plus the lamports of each token account it owns before or after. Rent
+    moved into a new token account of its own stays owned and nets out, as
+    does the temporary wrapped account and any wrapped SOL it holds. The
+    network fee is added back when the wallet paid it, because a fee is not
+    the swap. What remains is the swap: negative when SOL was spent.
+    """
+    meta = transaction.get("meta")
+    keys = _account_keys(transaction)
+    if not isinstance(meta, dict) or not keys or wallet_public_key not in keys:
+        return None
+    pre, post = meta.get("preBalances"), meta.get("postBalances")
+    if (not isinstance(pre, list) or not isinstance(post, list)
+            or len(pre) != len(keys) or len(post) != len(keys)):
+        return None
+    fee = meta.get("fee") if keys[0] == wallet_public_key else 0
+    if not isinstance(fee, int) or fee < 0:
+        return None
+    owned: set[int] = {keys.index(wallet_public_key)}
+    for field in ("preTokenBalances", "postTokenBalances"):
+        rows = meta.get(field)
+        if not isinstance(rows, list):
+            return None
+        for row in rows:
+            if isinstance(row, dict) and row.get("owner") == wallet_public_key:
+                try:
+                    owned.add(int(row["accountIndex"]))
+                except (KeyError, TypeError, ValueError):
+                    return None
+    try:
+        change = sum(int(post[i]) - int(pre[i]) for i in owned)
+    except (IndexError, TypeError, ValueError):
+        return None
+    return WalletBalanceDelta(mint=settings.EXECUTION_SOL_MINT,
+                              raw_delta=change + fee, decimals=9)
+
+
+def extract_leg_delta(
+    *, transaction: dict[str, object], wallet_public_key: str, mint: str
+) -> WalletBalanceDelta | None:
+    """One side of a swap: native SOL by lamports, anything else by token rows."""
+    if mint == settings.EXECUTION_SOL_MINT:
+        return extract_wallet_sol_delta(transaction=transaction,
+                                        wallet_public_key=wallet_public_key)
+    return extract_wallet_token_delta(transaction=transaction,
+                                      wallet_public_key=wallet_public_key, mint=mint)
+
+
 class TransactionReconciler:
     """Protocol boundary; an RPC implementation arrives in a later release."""
 
@@ -136,12 +219,12 @@ class SolanaRpcTransactionReconciler(TransactionReconciler):
             return ChainReceipt(outcome=ChainOutcome.FAILED, signature=signature)
         if not intent.input_mint or not intent.output_mint:
             return ChainReceipt(outcome=ChainOutcome.UNKNOWN, signature=signature)
-        input_delta = extract_wallet_token_delta(
+        input_delta = extract_leg_delta(
             transaction=transaction,
             wallet_public_key=intent.wallet_public_key,
             mint=intent.input_mint,
         )
-        output_delta = extract_wallet_token_delta(
+        output_delta = extract_leg_delta(
             transaction=transaction,
             wallet_public_key=intent.wallet_public_key,
             mint=intent.output_mint,

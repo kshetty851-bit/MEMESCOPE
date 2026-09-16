@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, cast
 
@@ -285,6 +285,31 @@ class LiveIntentRepository:
             )
         )
 
+    async def realised_loss_today(self, now: datetime) -> Decimal:
+        """What the positions closed since UTC midnight lost, net; zero on an up day.
+
+        Net where it was measured and gross where a fee could not be priced: a
+        loss limit that skipped every unpriced trade would be a limit a missing
+        price could switch off. Flushed first: sessions do not autoflush, and a
+        sell settled earlier in the same pass is exactly the loss to count.
+        """
+        await self._session.flush()
+        start = now.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+        rows = (await self._session.execute(
+            select(RealWalletPosition.realised_net_pnl_usd,
+                   RealWalletPosition.realised_gross_pnl_usd)
+            .where(RealWalletPosition.closed_at >= start))).all()
+        total = sum(((net if net is not None else gross) or Decimal(0)
+                     for net, gross in rows), Decimal(0))
+        return max(Decimal(0), -total)
+
+    async def sell_attempts(self, position_id: uuid.UUID) -> int:
+        """How many exits have been asked for this position, whatever became of them."""
+        return int(await self._session.scalar(
+            select(func.count()).select_from(RealWalletLiveIntent)
+            .where(RealWalletLiveIntent.position_id == position_id,
+                   RealWalletLiveIntent.side == "SELL")) or 0)
+
     async def open_positions_count(self) -> int:
         rows = await self._session.scalars(
             select(RealWalletPosition.id).where(RealWalletPosition.status == "OPEN")
@@ -342,9 +367,18 @@ class LiveIntentRepository:
         strategy_id: str,
         strategy_version: str,
         wallet_public_key: str,
-        output_mint: str,
+        output_mint: str | None = None,
+        replaces: uuid.UUID | None = None,
     ) -> RealWalletLiveIntent:
-        """Bind one SELL to the confirmed position quantity under a row lock."""
+        """Bind one SELL to the confirmed position quantity under a row lock.
+
+        It sells what the entry measurably received, back into what the entry
+        spent, unless `output_mint` says otherwise.
+
+        `replaces` names an earlier exit that ended without selling anything.
+        Only that intent may be replaced, and only while the position still
+        points at it, so two passes racing to retry cannot both win.
+        """
         position = await self._session.scalar(
             select(RealWalletPosition)
             .where(RealWalletPosition.id == position_id)
@@ -356,7 +390,20 @@ class LiveIntentRepository:
         if existing is not None:
             return existing
         if position.exit_intent_id is not None:
-            raise PositionExitAlreadyRequestedError("real_position_exit_already_requested")
+            previous = (await self.by_id(replaces)
+                        if replaces == position.exit_intent_id else None)
+            if previous is None or previous.state not in RETRYABLE_EXIT_STATES:
+                raise PositionExitAlreadyRequestedError(
+                    "real_position_exit_already_requested")
+        entry = (await self._session.execute(
+            select(RealWalletLiveIntent.input_mint,
+                   RealWalletLiveIntent.actual_output_amount_raw,
+                   RealWalletLiveIntent.actual_output_decimals)
+            .where(RealWalletLiveIntent.id == position.opened_live_intent_id)
+        )).first()
+        if (entry is None or not entry.actual_output_amount_raw
+                or entry.actual_output_decimals is None):
+            raise SettlementEvidenceError("position_missing_confirmed_entry_quantity")
         intent = await self.create_intent(
             idempotency_key=idempotency_key,
             mint_address=position.mint_address,
@@ -366,8 +413,12 @@ class LiveIntentRepository:
             wallet_public_key=wallet_public_key,
             position_id=position.id,
             requested_token_quantity=position.quantity,
+            # The base units the entry received. `quantity` is in whole
+            # tokens, and read as base units it sold a millionth of the bag.
+            authorized_input_amount_raw=entry.actual_output_amount_raw,
+            authorized_input_decimals=entry.actual_output_decimals,
             input_mint=position.mint_address,
-            output_mint=output_mint,
+            output_mint=output_mint or entry.input_mint,
         )
         if intent is None:
             found = await self.by_idempotency_key(idempotency_key)
@@ -564,19 +615,26 @@ class LiveIntentRepository:
         sol_price: SolUsdPrice | None = None,
     ) -> RealWalletPosition:
         if (
-            intent.input_mint != settings.JUPITER_USDC_MINT
+            intent.input_mint not in _SETTLEMENT_MINTS
             or intent.output_mint != intent.mint_address
         ):
-            raise SettlementEvidenceError("buy_pair_is_not_usdc_to_intent_mint")
+            raise SettlementEvidenceError("buy_pair_is_not_usdc_or_sol_to_intent_mint")
         input_amount = _ui_amount(actual_input_amount_raw, actual_input_decimals)
         output_amount = _ui_amount(actual_output_amount_raw, actual_output_decimals)
+        # What the entry cost in DOLLARS. A SOL-paid buy — the only kind the
+        # driver creates — is valued at the settlement's SOL price, or at the
+        # rate the driver sized it at; it is recorded either way, because a
+        # confirmed buy left unrecorded is a holding nothing will ever sell.
+        cost_usd = (input_amount * _entry_sol_usd(intent, sol_price)
+                    if intent.input_mint == settings.EXECUTION_SOL_MINT
+                    else input_amount)
         position = RealWalletPosition(
             mint_address=intent.mint_address,
             status="OPEN",
             opened_intent_id=None,
             opened_live_intent_id=intent.id,
             quantity=output_amount,
-            entry_price_usd=input_amount / output_amount,
+            entry_price_usd=cost_usd / output_amount,
             opened_at=at,
             wallet_public_key=intent.wallet_public_key,
             strategy_id=intent.strategy_id,
@@ -631,7 +689,7 @@ class LiveIntentRepository:
             or position.status != "OPEN"
             or position.exit_intent_id != intent.id
             or intent.input_mint != position.mint_address
-            or intent.output_mint != settings.JUPITER_USDC_MINT
+            or intent.output_mint not in _SETTLEMENT_MINTS
         ):
             raise SettlementEvidenceError("sell_position_binding_invalid")
         input_amount = _ui_amount(actual_input_amount_raw, actual_input_decimals)
@@ -643,7 +701,16 @@ class LiveIntentRepository:
             raise SettlementEvidenceError("sell_quantity_does_not_match_confirmed_position")
         if position.entry_actual_input_amount is None:
             raise SettlementEvidenceError("position_missing_confirmed_entry_cost")
-        realised_gross = output_amount - position.entry_actual_input_amount
+        if intent.output_mint == settings.EXECUTION_SOL_MINT:
+            # SOL back in: both sides in dollars, the entry at what it cost
+            # when it was recorded and the proceeds at the settlement's SOL
+            # price — or, without one, the SOL price the entry was valued at.
+            cost_usd = position.entry_price_usd * position.quantity
+            exit_sol_usd = (sol_price.usd if sol_price is not None
+                            else await self._entry_sol_rate(position))
+            realised_gross = output_amount * exit_sol_usd - cost_usd
+        else:
+            realised_gross = output_amount - position.entry_actual_input_amount
         position.status = "CLOSED"
         position.closed_at = at
         position.exit_transaction_signature = signature
@@ -678,12 +745,47 @@ class LiveIntentRepository:
             position.net_pnl_unavailable_reason = None
         return position
 
+    async def _entry_sol_rate(self, position: RealWalletPosition) -> Decimal:
+        """The SOL price a SOL-paid entry was valued at."""
+        if position.entry_sol_price_usd:
+            return Decimal(position.entry_sol_price_usd)
+        opening = (None if position.opened_live_intent_id is None
+                   else await self._session.get(RealWalletLiveIntent,
+                                                position.opened_live_intent_id))
+        if (opening is None or opening.input_mint != settings.EXECUTION_SOL_MINT
+                or not position.entry_actual_input_amount):
+            raise SettlementEvidenceError("sol_exit_unpriceable")
+        return (position.entry_price_usd * position.quantity
+                / position.entry_actual_input_amount)
+
     async def _event(
         self, intent_id: uuid.UUID, event_type: str, detail: dict[str, object]
     ) -> None:
         self._session.add(
             RealWalletExecutionEvent(intent_id=intent_id, event_type=event_type, detail=detail)
         )
+
+
+#: Where an exit can end having sold nothing: refused before it was sent, or
+#: reverted on chain. Anything else — RECONCILIATION_REQUIRED above all — may
+#: have sold, and asking again could sell twice.
+RETRYABLE_EXIT_STATES = frozenset({ExecutionState.BLOCKED, ExecutionState.FAILED})
+
+#: What a trade may be paid with and paid back in: USDC, as the rail was first
+#: built, and native SOL, which is what the wallet holds and trades.
+_SETTLEMENT_MINTS = frozenset({settings.JUPITER_USDC_MINT, settings.EXECUTION_SOL_MINT})
+
+
+def _entry_sol_usd(intent: RealWalletLiveIntent, sol_price: SolUsdPrice | None) -> Decimal:
+    """SOL/USD for a SOL-paid entry: the settlement's reading, else the rate
+    the driver sized the order at (its dollars over the lamports it authorised,
+    read before settlement overwrites them with the measured spend)."""
+    if sol_price is not None and sol_price.usd > 0:
+        return sol_price.usd
+    if intent.requested_usd and intent.actual_input_amount_raw:
+        return Decimal(intent.requested_usd) / Decimal(
+            int(intent.actual_input_amount_raw)).scaleb(-9)
+    raise SettlementEvidenceError("sol_entry_unpriceable")
 
 
 def _ui_amount(raw_amount: int, decimals: int) -> Decimal:

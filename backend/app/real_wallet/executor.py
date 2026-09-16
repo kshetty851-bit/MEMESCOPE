@@ -31,6 +31,15 @@ them. They are held in a local for the length of one call and handed straight to
 the transport. Nothing here persists or logs them — the SIGNED row records a
 fingerprint and a signature, never the transaction.
 
+## A sell is not a buy
+
+The autotrade switch, SEC-2 and the entry limits decide what gets BOUGHT. None
+of them can make an open position safer to hold, so a SELL passes all three:
+switched OFF, the wallet stops buying and still sells what it holds, on time,
+into whatever pool is left. The kill switch still freezes everything, and the
+order still carries its own bounds — a fresh quote, the slippage cap, the exit
+impact cap and the re-check of what Jupiter built.
+
 ## One step per call
 
 `advance` performs at most one state transition and returns the state it reached.
@@ -43,10 +52,12 @@ rather than from anything this process remembers.
 from __future__ import annotations
 
 import uuid
+from base64 import b64decode
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 
+from solders.transaction import VersionedTransaction
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -63,7 +74,10 @@ from app.real_wallet.live_readiness import (
     SubmissionFacts,
 )
 from app.real_wallet import sol_price
-from app.real_wallet.live_repository import LiveIntentRepository
+from app.real_wallet.live_repository import (
+    LiveIntentRepository,
+    SettlementEvidenceError,
+)
 from app.real_wallet.live_transport import (
     JupiterExecuteOutcome,
     JupiterExecuteTransportError,
@@ -103,6 +117,11 @@ MAX_ORDER_AGE_SECONDS = 45
 #: no longer exists.
 MAX_SAFETY_AGE_SECONDS = 120
 
+#: How long a sent transaction may stay unseen before it is asked whether it
+#: can still land. Its blockhash dies in about ninety seconds; this waits
+#: well past that so a slow node reads as slow, not as dropped.
+DROPPED_AFTER_SECONDS = 300
+
 
 @dataclass(frozen=True, slots=True)
 class AdvanceOutcome:
@@ -141,12 +160,13 @@ class RealWalletExecutor:
         if intent is None:
             return AdvanceOutcome("unknown", str(intent_id), False, "intent_not_found")
 
-        # STOP is unconditional and is re-read at every step, not once at the
-        # start of the flight. An operator who presses it while an intent is in
-        # motion stops that intent, which is the only thing that makes the
-        # control worth having.
+        # STOP is re-read at every step, not once at the start of the flight.
+        # An operator who presses it while a BUY is in motion stops that buy,
+        # which is the only thing that makes the control worth having. A SELL
+        # carries on: OFF means "no more", and a sell is how "no more" ends.
         switch = await AutotradeSwitchService(self._session).state()
-        if not switch.enabled and intent.state != ExecutionState.SUBMITTED:
+        if (not switch.enabled and intent.state != ExecutionState.SUBMITTED
+                and not _is_sell(intent)):
             return await self._block(intent, now, "autotrade_switch_off")
 
         if await self._repository.active_kill_switches():
@@ -172,6 +192,14 @@ class RealWalletExecutor:
         self, intent: RealWalletLiveIntent, now: datetime
     ) -> AdvanceOutcome:
         """SEC-2's verdict, from the same evaluator Paper uses."""
+        if _is_sell(intent):
+            # SEC-2 asks whether a token is safe to buy. Refusing the sell
+            # because the pool collapsed is how a collapse becomes a total loss.
+            await self._repository.transition(
+                intent=intent, next_state=ExecutionState.SAFETY_APPROVED, at=now,
+                detail={"safety": "not_applied_to_a_sell"},
+            )
+            return AdvanceOutcome(ExecutionState.SAFETY_APPROVED, str(intent.id), True)
         decision = await RealWalletSafetyGate(self._session).evaluate(
             mint_address=intent.mint_address,
             trade_size_usd=Decimal(str(intent.requested_usd)),
@@ -205,7 +233,8 @@ class RealWalletExecutor:
         self, intent: RealWalletLiveIntent, now: datetime
     ) -> AdvanceOutcome:
         """Real Jupiter order. Read-only: it builds an UNSIGNED transaction."""
-        if not self._fresh(await self._safety_at(intent), now, MAX_SAFETY_AGE_SECONDS):
+        if not _is_sell(intent) and not self._fresh(
+                await self._safety_at(intent), now, MAX_SAFETY_AGE_SECONDS):
             # Back to the gate rather than forward on a stale verdict. Blocking
             # is the honest outcome: the intent's own decision has expired.
             return await self._block(intent, now, "safety_verdict_stale")
@@ -330,6 +359,16 @@ class RealWalletExecutor:
         async with rpc:
             receipt = await SolanaRpcTransactionReconciler(rpc).inspect(intent)
         if receipt.outcome is ChainOutcome.UNKNOWN:
+            if await self._never_landing(intent, now):
+                # Nothing happened on chain and nothing can, so the exit that
+                # was waiting on it may be asked for again.
+                await self._repository.transition(
+                    intent=intent, next_state=ExecutionState.FAILED, at=now,
+                    detail={"chain": "expired_unlanded"},
+                    failure_reason="expired_unlanded",
+                )
+                return AdvanceOutcome(ExecutionState.FAILED, str(intent.id), True,
+                                      "expired_unlanded")
             return AdvanceOutcome(intent.state, str(intent.id), False, "chain_unknown")
         if receipt.outcome is ChainOutcome.FAILED:
             await self._repository.transition(
@@ -349,18 +388,66 @@ class RealWalletExecutor:
                                   str(intent.id), True)
         # One atomic call: the confirmed intent and the position it opens are
         # the same fact, and writing them separately would allow a settled
-        # transaction with no position behind it.
-        await self._repository.confirm_settlement(
-            intent=intent,
-            signature=receipt.signature or intent.transaction_signature or "",
-            actual_input_amount_raw=int(receipt.actual_input_amount or 0),
-            actual_input_decimals=int(receipt.actual_input_decimals or 0),
-            actual_output_amount_raw=int(receipt.actual_output_amount or 0),
-            actual_output_decimals=int(receipt.actual_output_decimals or 0),
-            network_fee_lamports=receipt.network_fee_lamports,
-            at=now,
-        )
+        # transaction with no position behind it. Priced when a fresh SOL
+        # reading exists — without one, gross is still recorded and net is not.
+        try:
+            await self._repository.confirm_settlement(
+                intent=intent,
+                signature=receipt.signature or intent.transaction_signature or "",
+                actual_input_amount_raw=int(receipt.actual_input_amount or 0),
+                actual_input_decimals=int(receipt.actual_input_decimals or 0),
+                actual_output_amount_raw=int(receipt.actual_output_amount or 0),
+                actual_output_decimals=int(receipt.actual_output_decimals or 0),
+                network_fee_lamports=receipt.network_fee_lamports,
+                at=now,
+                sol_price=await sol_price.current(now),
+            )
+        except SettlementEvidenceError as exc:
+            # Landed, and the chain disagrees with what was authorised. That
+            # is a person's to read, not a loop's to retry every few seconds.
+            logger.error("real_wallet_settlement_disputed",
+                         intent_id=str(intent.id), reason=str(exc))
+            await self._repository.transition(
+                intent=intent, next_state=ExecutionState.RECONCILIATION_REQUIRED,
+                at=now, detail={"chain": "confirmed", "unsettled": str(exc)},
+            )
+            return AdvanceOutcome(ExecutionState.RECONCILIATION_REQUIRED,
+                                  str(intent.id), True, str(exc))
         return AdvanceOutcome(ExecutionState.CONFIRMED, str(intent.id), True)
+
+    async def _never_landing(self, intent: RealWalletLiveIntent, now: datetime) -> bool:
+        """True only when this transaction provably cannot land any more.
+
+        Both must hold, and only once it has been gone a while: its blockhash
+        has expired on the confirmed chain, and no node has any record of the
+        signature. The signer makes the wallet the only signer and fee payer,
+        so that signature IS the transaction id. Anything unreadable is False,
+        which leaves the intent waiting rather than risking a second sell.
+        """
+        encoded = (intent.order_evidence or {}).get("unsigned_transaction")
+        signature = intent.transaction_signature
+        sent = intent.submitted_at
+        if not encoded or not signature or sent is None:
+            return False
+        if sent.tzinfo is None:
+            sent = sent.replace(tzinfo=UTC)
+        if (now - sent).total_seconds() < DROPPED_AFTER_SECONDS:
+            return False
+        try:
+            blockhash = str(VersionedTransaction.from_bytes(
+                b64decode(encoded)).message.recent_blockhash)
+            rpc = StandardSolanaRPC(rpc_url=settings.REAL_WALLET_RPC_URL)
+            async with rpc:
+                valid = await rpc.call(
+                    "isBlockhashValid", [blockhash, {"commitment": "confirmed"}])
+                status = await rpc.call(
+                    "getSignatureStatuses",
+                    [[signature], {"searchTransactionHistory": True}])
+        except Exception as exc:  # unreadable is not dropped
+            logger.warning("executor_drop_check_unreadable", error=str(exc)[:120])
+            return False
+        return (isinstance(valid, dict) and valid.get("value") is False
+                and isinstance(status, dict) and status.get("value") == [None])
 
     # --- shared --------------------------------------------------------------
 
@@ -393,6 +480,45 @@ class RealWalletExecutor:
         except Exception as exc:  # noqa: BLE001 - unreadable chain refuses
             logger.warning("executor_chain_unreadable", error=str(exc))
 
+        sell = _is_sell(intent)
+        # The entry limits bound what is BOUGHT. A sell has no dollar size to
+        # judge and only ever shrinks the book, so it is not asked.
+        limits_ok = sell or await self._entry_limits_ok(intent, now, balance_lamports)
+        switch = await AutotradeSwitchService(self._session).state()
+        safety_at = await self._safety_at(intent)
+        evidence = intent.order_evidence or {}
+        return SubmissionFacts(
+            signer_ready=bool(identity.get("can_sign")),
+            signer_matches_pinned_key=bool(identity.get("matches_pinned_key")),
+            safety_passed=sell or intent.safety_evaluation_id is not None,
+            safety_fresh=sell or self._fresh(safety_at, now, MAX_SAFETY_AGE_SECONDS),
+            policy_passed=limits_ok,
+            valid_intent=bool(intent.input_mint and intent.output_mint
+                              and intent.jupiter_request_id),
+            not_previously_submitted=intent.submitted_at is None,
+            order_fresh=self._fresh(
+                intent.order_created_at, now, MAX_ORDER_AGE_SECONDS
+            ),
+            market_fresh=sell or self._fresh(safety_at, now, MAX_SAFETY_AGE_SECONDS),
+            kill_switch_active=bool(await self._repository.active_kill_switches()),
+            daily_loss_within_limit=limits_ok,
+            open_position_within_limit=limits_ok,
+            trade_size_within_limit=limits_ok,
+            mainnet_verified=network_verified,
+            # The order factory verified the assembled programs and fingerprint
+            # when it built this; the signer verifies them again before signing.
+            transaction_approved=bool(evidence.get("intent_fingerprint")),
+            not_previously_signed=intent.transaction_signature is None,
+            canary_limits_satisfied=limits_ok,
+            transport_release_approved=LIVE_TRANSPORT_RELEASE_APPROVED,
+            autotrade_switch_on=switch.enabled or sell,
+        )
+
+    async def _entry_limits_ok(
+        self, intent: RealWalletLiveIntent, now: datetime,
+        balance_lamports: int | None,
+    ) -> bool:
+        """Every bound a BUY must satisfy at the moment it is sent."""
         open_positions = await self._repository.open_positions_count()
         entry_usd = Decimal(str(intent.requested_usd))
         # Equity, recomputed here rather than trusted from the row, because the
@@ -419,7 +545,9 @@ class RealWalletExecutor:
                 open_positions=open_positions,
                 exposure_usd=Decimal(open_positions) * entry_usd,
                 daily_notional_usd=Decimal(0),
-                daily_realised_loss_usd=Decimal(0),
+                # Measured again here, not trusted from the driver: a sell can
+                # settle in the seconds between the two.
+                daily_realised_loss_usd=await self._repository.realised_loss_today(now),
                 daily_trades=0,
                 wallet_balance_lamports=balance_lamports,
                 equity_usd=equity_usd,
@@ -427,35 +555,7 @@ class RealWalletExecutor:
                 spend_lamports=None if raw_spend is None else int(raw_spend),
             ),
         )
-        switch = await AutotradeSwitchService(self._session).state()
-        safety_at = await self._safety_at(intent)
-        evidence = intent.order_evidence or {}
-        return SubmissionFacts(
-            signer_ready=bool(identity.get("can_sign")),
-            signer_matches_pinned_key=bool(identity.get("matches_pinned_key")),
-            safety_passed=intent.safety_evaluation_id is not None,
-            safety_fresh=self._fresh(safety_at, now, MAX_SAFETY_AGE_SECONDS),
-            policy_passed=canary.allowed,
-            valid_intent=bool(intent.input_mint and intent.output_mint
-                              and intent.jupiter_request_id),
-            not_previously_submitted=intent.submitted_at is None,
-            order_fresh=self._fresh(
-                intent.order_created_at, now, MAX_ORDER_AGE_SECONDS
-            ),
-            market_fresh=self._fresh(safety_at, now, MAX_SAFETY_AGE_SECONDS),
-            kill_switch_active=bool(await self._repository.active_kill_switches()),
-            daily_loss_within_limit=canary.allowed,
-            open_position_within_limit=canary.allowed,
-            trade_size_within_limit=canary.allowed,
-            mainnet_verified=network_verified,
-            # The order factory verified the assembled programs and fingerprint
-            # when it built this; the signer verifies them again before signing.
-            transaction_approved=bool(evidence.get("intent_fingerprint")),
-            not_previously_signed=intent.transaction_signature is None,
-            canary_limits_satisfied=canary.allowed,
-            transport_release_approved=LIVE_TRANSPORT_RELEASE_APPROVED,
-            autotrade_switch_on=switch.enabled,
-        )
+        return canary.allowed
 
     async def _safety_at(self, intent: RealWalletLiveIntent) -> datetime | None:
         """When SEC-2 actually looked. Read from the evaluation row, because
@@ -487,6 +587,11 @@ class RealWalletExecutor:
         logger.warning("real_wallet_intent_blocked",
                        intent_id=str(intent.id), reason=reason)
         return AdvanceOutcome(ExecutionState.BLOCKED, str(intent.id), True, reason)
+
+
+def _is_sell(intent: RealWalletLiveIntent) -> bool:
+    """Exactly "SELL". Anything else is treated as a buy and gets every check."""
+    return intent.side == "SELL"
 
 
 __all__ = ["AdvanceOutcome", "RealWalletExecutor"]

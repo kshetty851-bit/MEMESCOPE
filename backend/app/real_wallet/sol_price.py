@@ -210,17 +210,16 @@ class SolPriceReadiness:
     unavailable_reason: str | None
 
 
-async def current_usd(now: datetime) -> Decimal | None:
-    """SOL/USD for sizing, or None. Never a guessed rate.
+async def current(now: datetime) -> SolUsdPrice | None:
+    """A fresh SOL/USD reading, or None. Never a guessed rate.
 
-    Lifted out of `RealWalletDriver` because the executor now needs the same
-    number: the growth ladder scales the policy's money caps from equity, and
-    equity cannot be computed from lamports without a price. Two copies of this
-    would be two freshness rules the moment somebody edited one.
+    One freshness rule for everything that prices SOL — sizing, the executor's
+    equity, and settlement — because two copies would be two rules the moment
+    somebody edited one.
     """
     try:
         price = await JupiterSolUsdPriceSource().current(now=now)
-    except Exception:  # noqa: BLE001 - an unpriced entry refuses
+    except Exception:  # noqa: BLE001 - an unpriced reading is None
         return None
     if price is None or price.usd <= 0:
         return None
@@ -228,4 +227,10 @@ async def current_usd(now: datetime) -> Decimal | None:
         now, max_age_seconds=settings.EXECUTION_SOL_PRICE_MAX_AGE_SECONDS
     ):
         return None
-    return Decimal(str(price.usd))
+    return price
+
+
+async def current_usd(now: datetime) -> Decimal | None:
+    """SOL/USD for sizing, or None."""
+    price = await current(now)
+    return None if price is None else Decimal(str(price.usd))
