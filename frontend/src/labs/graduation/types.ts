@@ -90,7 +90,9 @@ export interface PaperPosition {
   impact_open: string | null;
   impact_close: string | null;
   /** Why this trade counts for nothing: `not_graduation_pool` for a token that
-   * never graduated from pump.fun. Shown struck through, never summed. */
+   * never graduated from pump.fun, `rugged` for a trade whose pool was drained
+   * while it was open (left out on request). Shown struck through, never
+   * summed. */
   excluded: string | null;
   /** Set on a trade rebooked by the 2026-09-16 restatement: `fees` when only
    * the fees changed, otherwise the new exit's reason (`max_hold`,
@@ -260,6 +262,8 @@ export interface Leaderboard {
   restated_excluded: number;
   /** Exits moved to the first price recorded after they were due. */
   restated_repriced: number;
-  /** Of those, exits that fell after the pool had been drained. */
+  /** Of those, exits that fell after the pool had been drained. They are
+   * left out of every figure, and `restated_rugged_usd` is what they lost. */
   restated_collapsed: number;
+  restated_rugged_usd: string;
 }

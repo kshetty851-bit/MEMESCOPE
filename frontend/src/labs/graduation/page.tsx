@@ -112,6 +112,20 @@ const RESTATED: Record<string, string> = {
     "Restated 16 Sep: no price was recorded after the exit was due, so the last one before it is used and flagged.",
 };
 
+/** Why a trade counts for nothing: the badge, and the sentence behind it. */
+const EXCLUDED: Record<string, { label: string; title: string }> = {
+  not_graduation_pool: {
+    label: "not a graduation",
+    title:
+      "Bought as a graduation, but this token never graduated from pump.fun: its pool is not the one a pump.fun migration creates. Shown, counted nowhere.",
+  },
+  rugged: {
+    label: "rugged — left out",
+    title:
+      "The pool was drained while this trade was open. Left out of every figure on request, as if the token had never been bought. No rule here could have avoided it in advance, so the figure shown is what it really lost.",
+  },
+};
+
 /** Exit reasons a reader would otherwise have to decode. */
 const EXIT_LABEL: Record<string, string> = {
   pool_collapsed: "pool drained",
@@ -178,7 +192,9 @@ function TradeRow({ p, closed }: { p: PaperPosition; closed: boolean }) {
         ) : (
           signedUsd(p.pnl_usd)
         )}
-        {p.restated && !p.excluded && p.was_pnl_usd !== p.pnl_usd ? (
+        {p.restated &&
+        p.excluded !== "not_graduation_pool" &&
+        p.was_pnl_usd !== p.pnl_usd ? (
           <span className="block text-micro font-normal text-ink-dim">
             was {signedUsd(p.was_pnl_usd)}
           </span>
@@ -190,7 +206,9 @@ function TradeRow({ p, closed }: { p: PaperPosition; closed: boolean }) {
         ) : (
           signed(p.net_return)
         )}
-        {p.restated && !p.excluded && p.was_net_return !== p.net_return ? (
+        {p.restated &&
+        p.excluded !== "not_graduation_pool" &&
+        p.was_net_return !== p.net_return ? (
           <span className="block text-micro text-ink-dim">
             was {signed(p.was_net_return)}
           </span>
@@ -201,12 +219,11 @@ function TradeRow({ p, closed }: { p: PaperPosition; closed: boolean }) {
           <span
             className="rounded-full bg-down/15 px-2 py-0.5 text-down"
             title={
-              p.excluded
-                ? "Bought as a graduation, but this token never graduated from pump.fun: its pool is not the one a pump.fun migration creates. Shown, counted nowhere."
-                : "The recorded price series for this token crossed pools, so this trade is not counted."
+              EXCLUDED[p.excluded ?? ""]?.title ??
+              "The recorded price series for this token crossed pools, so this trade is not counted."
             }
           >
-            {p.excluded ? "not a graduation" : "voided"}
+            {EXCLUDED[p.excluded ?? ""]?.label ?? "voided"}
           </span>
         ) : closed ? (
           <>
@@ -289,8 +306,9 @@ function TradeTable({
   // Voided trades are shown but never summed: their prices came from two
   // different pools, so the figure would be a number about nothing.
   const counted = ordered.filter((p) => !p.voided);
-  const excluded = ordered.filter((p) => p.excluded).length;
-  const voided = ordered.length - counted.length - excluded;
+  const foreign = ordered.filter((p) => p.excluded === "not_graduation_pool").length;
+  const rugged = ordered.filter((p) => p.excluded === "rugged").length;
+  const voided = ordered.length - counted.length - foreign - rugged;
   const total = counted.reduce((a, p) => a + Number(p.pnl_usd ?? 0), 0);
   const deployed = counted.reduce((a, p) => a + Number(p.notional_usd), 0);
   return (
@@ -329,7 +347,8 @@ function TradeTable({
           <tr className="border-t border-line text-[11px] text-ink-dim">
             <td className="pt-2 pr-3">
               {counted.length} counted
-              {excluded ? `, ${excluded} not graduations` : ""}
+              {foreign ? `, ${foreign} not graduations` : ""}
+              {rugged ? `, ${rugged} rugged left out` : ""}
               {voided ? `, ${voided} voided` : ""}
             </td>
             <td className="pt-2 pr-3 text-right tabular-nums">
@@ -729,14 +748,24 @@ function LeaderboardPanel() {
           <p className="max-w-[78ch] rounded-lg border border-accent/40 bg-accent/[0.05] p-3 text-xs leading-relaxed text-ink-dim">
             <b className="text-ink">Restated 16 Sep.</b>{" "}
             {data.restated_trades} closed trades on this board were rebooked
-            under the rules above. {data.restated_excluded} were never
-            graduations and now count for nothing.{" "}
-            {data.restated_repriced} exits moved to the first price recorded
-            after they were due
-            {data.restated_collapsed
-              ? ` — ${data.restated_collapsed} of them into a pool that had already been drained, which the old book had closed at a normal price`
-              : ""}
-            . Every restated trade shows what it said before.
+            under the rules above, and every one shows what it said before.{" "}
+            {data.restated_excluded} were never graduations and count for
+            nothing. {data.restated_repriced} exits moved to the first price
+            recorded after they were due.
+            {data.restated_collapsed ? (
+              <span className="mt-1 block">
+                <b className="text-ink">
+                  {data.restated_collapsed} trades on tokens whose pool was
+                  drained while the trade was open are left out
+                </b>
+                , as if those tokens had never been bought. That is a what-if:
+                nothing in these rules could have avoided them in advance, and
+                they really lost{" "}
+                {usd(Math.abs(Number(data.restated_rugged_usd)))}, which a real
+                wallet would have lost too. Drains after 16 Sep are counted
+                like any other trade.
+              </span>
+            ) : null}
           </p>
         ) : null}
         {/* Verdict. The headline is the finding; the terms are underneath. */}

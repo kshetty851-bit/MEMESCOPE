@@ -63,7 +63,9 @@ def test_an_exit_booked_before_a_drain_is_rebooked_on_the_drain() -> None:
     position = _closed()
     audit = restate_one(position, pinned_pair=graduation_pool(MINT),
                         marks=[PRE, DRAINED])
-    assert position.excluded is None
+    # Left out of every figure, as instructed — and still showing what it
+    # really lost.
+    assert position.excluded == "rugged"
     assert position.close_reason == audit.reason == "pool_collapsed"
     assert position.net_return < D("-0.99")
     assert position.pnl_usd < D("-99")
@@ -81,6 +83,7 @@ def test_an_exit_booked_before_a_drain_is_rebooked_on_the_drain() -> None:
 def test_a_timed_exit_with_nothing_after_due_is_flagged_stale() -> None:
     position = _closed()
     audit = restate_one(position, pinned_pair=graduation_pool(MINT), marks=[PRE])
+    assert position.excluded is None
     assert position.close_reason == audit.reason == "stale_exit"
     assert position.close_quote == PRE.price
     assert position.closed_at == datetime(2026, 9, 14, 19, 15, 0, 146365, tzinfo=UTC)
