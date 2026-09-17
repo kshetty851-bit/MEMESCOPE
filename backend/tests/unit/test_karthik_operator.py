@@ -943,13 +943,18 @@ class TestBoundSurfaces:
         ledger = await service.ledger(db_session)
         assert not ledger.open_rows
 
-    async def test_the_tick_rides_the_existing_scheduler(self) -> None:
-        """§26: one scheduler. The tick is a task on the beat that already
-        exists, not a second one."""
+    async def test_the_tick_is_retired_from_the_scheduler(self) -> None:
+        """§26 kept it on the one existing beat. The Karthik wallet stopped
+        trading on 2026-08-24 and was retired on 2026-09-17, so neither its
+        review nor this tick is scheduled any more; the task stays registered
+        for a manual run."""
+        from app.hq_ops import tasks as hq_tasks
         from app.workers.celery_app import celery_app
 
-        entry = celery_app.conf.beat_schedule["karthik-ops-tick"]
-        assert entry["task"] == "app.hq_ops.tasks.karthik_ops_tick"
+        tasks = {e["task"] for e in celery_app.conf.beat_schedule.values()}
+        assert "app.hq_ops.tasks.karthik_ops_tick" not in tasks
+        assert "app.karthik.scheduler.karthik_review" not in tasks
+        assert hq_tasks.karthik_ops_tick.name == "app.hq_ops.tasks.karthik_ops_tick"
 
     async def test_the_integrity_score_becomes_a_number_once_there_is_evidence(
         self, db_session, wallet

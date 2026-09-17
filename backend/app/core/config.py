@@ -405,6 +405,13 @@ class Settings(BaseSettings):
     ENRICHMENT_TIER_MATURE_MAX_MINUTES: int = 1440  # 24 hours
     ENRICHMENT_TIER_MATURE_INTERVAL_SECONDS: int = 1800  # 30 minutes
     ENRICHMENT_TIER_OLD_INTERVAL_SECONDS: int = 21600  # 6 hours
+    # A token at least this old whose pool holds less than the floor below, or
+    # that has no pool at all, gets one last poll and is then `paused`, which
+    # nothing claims. On 2026-09-17, 79% of an hour's 72,700 snapshots were for
+    # sub-$1k pools, 28% for sub-$1k pools over two days old, and the backlog
+    # of 1.3M tokens kept enrichment busy for ever. 0 hours disables it.
+    ENRICHMENT_RETIRE_AFTER_HOURS: int = Field(default=48, ge=0)
+    ENRICHMENT_RETIRE_BELOW_LIQUIDITY_USD: Decimal = Decimal("1000")
 
     # --- Retention and disk protection --------------------------------------
     # Raw telemetry is expired; evidence is not. `token_market_snapshots` keeps

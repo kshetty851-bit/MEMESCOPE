@@ -241,6 +241,17 @@ class MarketSnapshotRepository(BaseRepository[TokenMarketSnapshot]):
         rows = await self._newest_per_mint(unique, predicates)
         return {row.mint_address: row for row in rows}
 
+    async def latest_pool_for_mints(self, mints: Sequence[str]) -> dict[str, str]:
+        """Each mint's newest known pool address, one index seek each.
+
+        The scanner used `SELECT DISTINCT mint, pool` over every snapshot a mint
+        ever had, and kept one pool per mint anyway - on prod that read whole
+        histories of every $100k coin, a third of a CPU core, all the time.
+        """
+        rows = await self._newest_per_mint(
+            mints, [TokenMarketSnapshot.pool_address.is_not(None)])
+        return {row.mint_address: row.pool_address for row in rows}
+
     async def price_as_of_for_mints(
         self, mints: Sequence[str], *, as_of: datetime
     ) -> dict[str, Decimal]:
@@ -389,11 +400,16 @@ class MarketSnapshotRepository(BaseRepository[TokenMarketSnapshot]):
     ) -> dict[str, list[TokenMarketSnapshot]]:
         """Up to N recent snapshots for each of several mints, newest first.
 
-        One round trip for a whole scoring batch. `ROW_NUMBER() OVER (PARTITION
-        BY mint_address ORDER BY captured_at DESC)` takes the head of each
-        token's history in a single pass over
-        `ix_snapshots_mint_captured_desc`, where the obvious alternative - a
-        query per mint - would be one round trip per token per cycle.
+        One round trip for a whole scoring batch: one LATERAL seek per mint on
+        `ix_snapshots_mint_captured_desc`, as `recent_context` does, reading N
+        index rows a mint and nothing else.
+
+        It used `ROW_NUMBER() OVER (PARTITION BY mint_address ...)`, which has
+        to read and sort EVERY row of every mint in the window to keep N. For a
+        120-mint batch over three days that was 1.38 million rows, Postgres
+        planned a parallel scan of the whole table for it, and each batch took
+        12-35s - two of them were running at almost any moment. This form
+        answered the same batch in 19ms.
 
         `since` is the widest window in the batch. Tokens whose own tier implies
         a narrower window are trimmed in memory by the caller, because the
@@ -402,28 +418,27 @@ class MarketSnapshotRepository(BaseRepository[TokenMarketSnapshot]):
         if not mint_addresses:
             return {}
 
-        ranked = (
-            select(
-                TokenMarketSnapshot,
-                func.row_number()
-                .over(
-                    partition_by=TokenMarketSnapshot.mint_address,
-                    order_by=TokenMarketSnapshot.captured_at.desc(),
-                )
-                .label("rn"),
-            )
+        wanted = select(
+            func.unnest(
+                literal(list(dict.fromkeys(mint_addresses)), ARRAY(String))
+            ).label("mint")
+        ).subquery("wanted")
+        head = (
+            select(TokenMarketSnapshot)
             .where(
-                TokenMarketSnapshot.mint_address.in_(mint_addresses),
+                TokenMarketSnapshot.mint_address == wanted.c.mint,
                 TokenMarketSnapshot.captured_at >= since,
             )
-            .subquery("ranked")
+            .order_by(TokenMarketSnapshot.captured_at.desc())
+            .limit(limit_per_mint)
+            .lateral("head")
         )
-        Ranked = aliased(TokenMarketSnapshot, ranked)  # noqa: N806 - an ORM alias is a class
-
+        entity = aliased(TokenMarketSnapshot, head)
         stmt = (
-            select(Ranked)
-            .where(ranked.c.rn <= limit_per_mint)
-            .order_by(Ranked.mint_address, Ranked.captured_at.desc())
+            select(entity)
+            .select_from(wanted)
+            .join(head, true())
+            .order_by(entity.mint_address, entity.captured_at.desc())
         )
 
         window: dict[str, list[TokenMarketSnapshot]] = {}
@@ -701,6 +716,7 @@ class EnrichmentStateRepository(BaseRepository[TokenEnrichmentState]):
         had_data: bool,
         error: str | None = None,
         dead_letter: bool = False,
+        paused: bool = False,
     ) -> TokenEnrichmentState:
         state.total_refreshes += 1
         # Track Record quote priority is for acquisition only.  A real quote,
@@ -751,6 +767,8 @@ class EnrichmentStateRepository(BaseRepository[TokenEnrichmentState]):
 
         if dead_letter:
             state.status = EnrichmentStatus.DEAD_LETTER
+        elif paused:
+            state.status = EnrichmentStatus.PAUSED
 
         await self.session.flush()
         return state

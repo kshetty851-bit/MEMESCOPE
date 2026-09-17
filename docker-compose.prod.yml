@@ -96,7 +96,11 @@ services:
     ports: !reset []
     restart: unless-stopped
     deploy:
-      replicas: 2
+      # One (was two): four workers serve one operator's pages, and on a
+      # two-core, 4 GB host that was swapping, the second copy was memory the
+      # database needed. A deploy now drops the API for the seconds a
+      # recreate takes; trading runs in the worker and does not notice.
+      replicas: 1
       resources:
         limits: { cpus: "2", memory: 1G }
 
@@ -285,6 +289,10 @@ services:
     ports: !reset []
     restart: unless-stopped
     deploy:
+      # Not run. The site is served by Vercel and Caddy only proxies the API
+      # (docker/caddy/Caddyfile), so this copy took requests from nobody while
+      # holding memory on a host that was swapping.
+      replicas: 0
       resources:
         limits: { cpus: "1", memory: 512M }
 

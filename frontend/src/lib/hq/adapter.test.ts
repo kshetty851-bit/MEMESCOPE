@@ -592,9 +592,11 @@ describe("Milo — the paper portfolio", () => {
     expect(build().employees.milo.state).toBe("idle");
   });
 
-  it("goes offline when the paper wallet is disabled, not idle", () => {
+  it("is idle, not a fault, when the paper wallet is switched off", () => {
     const state = build({ paperWallet: at(wallet({}, false)) });
-    expect(state.employees.milo.state).toBe("offline");
+    expect(state.employees.milo.state).toBe("idle");
+    expect(state.employees.milo.detail).toContain("switched off");
+    expect(state.employees.rex.state).toBe("idle");
   });
 
   it("falls back to the positions list when the wallet has no count", () => {

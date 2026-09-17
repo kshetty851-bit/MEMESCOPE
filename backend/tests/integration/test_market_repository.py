@@ -379,3 +379,57 @@ async def test_newest_per_mint_ignores_older_rows_and_honours_predicates(
 
     assert await repo.latest_for_mints([]) == {}
     assert await repo.price_as_of_for_mints([], as_of=NOW) == {}
+
+
+async def test_window_for_mints_keeps_the_newest_n_inside_the_window(
+    db_session: AsyncSession,
+) -> None:
+    """Pinned for the same reason. The window function this replaced read and
+    sorted every row of every mint to keep N, and Postgres answered a scoring
+    batch with a scan of the whole table, 12-35 s each. The LATERAL form has to
+    return the same rows: the newest N per mint, inside the window, each once.
+    """
+    repo = MarketSnapshotRepository(db_session)
+    busy = await _token(db_session, "mint-window-busy")
+    quiet = await _token(db_session, "mint-window-quiet")
+    await _token(db_session, "mint-window-empty")
+    for minute in range(5):
+        await repo.add_snapshot(_snapshot(
+            busy, captured_at=NOW - timedelta(minutes=minute),
+            price_usd=Decimal(minute + 1)))
+    await repo.add_snapshot(_snapshot(
+        quiet, captured_at=NOW - timedelta(hours=3), price_usd=Decimal("8")))
+    await repo.add_snapshot(_snapshot(
+        quiet, captured_at=NOW - timedelta(minutes=30), price_usd=Decimal("9")))
+
+    window = await repo.window_for_mints(
+        ["mint-window-busy", "mint-window-quiet", "mint-window-empty",
+         "mint-window-busy"],
+        since=NOW - timedelta(hours=1), limit_per_mint=3)
+
+    assert [s.price_usd for s in window["mint-window-busy"]] == [
+        Decimal("1"), Decimal("2"), Decimal("3")]
+    assert [s.price_usd for s in window["mint-window-quiet"]] == [Decimal("9")]
+    assert "mint-window-empty" not in window
+    assert await repo.window_for_mints(
+        [], since=NOW, limit_per_mint=3) == {}
+
+
+async def test_latest_pool_for_mints_is_the_newest_known_pool(
+    db_session: AsyncSession,
+) -> None:
+    """The scanner's early-buyer flush keys PumpSwap coins by pool. It used a
+    DISTINCT over every snapshot a mint ever had; this is one seek per mint,
+    and a snapshot without a pool never hides the pool before it."""
+    repo = MarketSnapshotRepository(db_session)
+    moved = await _token(db_session, "mint-pool-moved")
+    await _token(db_session, "mint-pool-none")
+    await repo.add_snapshot(_snapshot(
+        moved, captured_at=NOW - timedelta(hours=2), pool_address="pool-old"))
+    await repo.add_snapshot(_snapshot(
+        moved, captured_at=NOW - timedelta(hours=1), pool_address="pool-new"))
+    await repo.add_snapshot(_snapshot(moved, captured_at=NOW, pool_address=None))
+
+    assert await repo.latest_pool_for_mints(
+        ["mint-pool-moved", "mint-pool-none"]) == {"mint-pool-moved": "pool-new"}
+    assert await repo.latest_pool_for_mints([]) == {}

@@ -15,6 +15,7 @@ from decimal import Decimal
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -27,6 +28,7 @@ from app.models.market import (
     TokenEnrichmentState,
     TradingStatus,
 )
+from app.models.radar import RadarToken
 from app.repositories.market import EnrichmentStateRepository, MarketSnapshotRepository
 from app.repositories.token import TokenRepository
 from app.services.market.providers.base import (
@@ -39,6 +41,10 @@ from app.services.market.scheduler import RefreshScheduler
 from app.services.token_images import TokenImageResolver
 
 logger = get_logger(__name__)
+
+#: How long after a Radar admission a token is never retired: Rafiq decides
+#: within 15 minutes of admission and reads prices up to 24 hours after that.
+RADAR_ADMISSION_HOLD = timedelta(hours=25)
 
 
 @dataclass(frozen=True, slots=True)
@@ -266,10 +272,13 @@ class MarketEnrichmentService:
         without_market = 0
         failed = 0
         dead_lettered = 0
+        retired = 0
         refreshed_mints: list[str] = []
 
         # One query for the whole batch; the tier depends on each token's age.
         tokens = await self.tokens.get_many_by_mints(mints)
+        retirable = await self._retirable(
+            states, tokens, results, now=now, answered=error is None)
 
         for state in states:
             token = tokens.get(state.mint_address)
@@ -353,6 +362,9 @@ class MarketEnrichmentService:
                     last_error=error,
                 )
 
+            retire = state.mint_address in retirable
+            retired += retire
+
             logger.debug(
                 "scheduler_decision",
                 mint=state.mint_address,
@@ -370,6 +382,7 @@ class MarketEnrichmentService:
                 had_data=had_data,
                 error=error,
                 dead_letter=should_dead_letter,
+                paused=retire,
             )
 
         if snapshot_rows and settings.FEATURE_SNAPSHOT_SANITY_ENABLED:
@@ -387,6 +400,7 @@ class MarketEnrichmentService:
             without_market=without_market,
             failed=failed,
             dead_lettered=dead_lettered,
+            retired=retired,
             latency_ms=latency_ms,
             degraded=degraded,
         )
@@ -401,6 +415,54 @@ class MarketEnrichmentService:
             degraded=degraded,
             refreshed_mints=tuple(refreshed_mints),
         )
+
+    async def _retirable(
+        self,
+        states: Sequence[TokenEnrichmentState],
+        tokens: dict[str, Any],
+        results: dict[str, MarketData],
+        *,
+        now: datetime,
+        answered: bool,
+    ) -> set[str]:
+        """Mints in this batch that are old and dead: this was their last poll.
+
+        Old is `ENRICHMENT_RETIRE_AFTER_HOURS` since discovery; dead is no pool
+        at all, or a pool under the liquidity floor (an unknown liquidity is not
+        a dead one). Never retired: a displayed token (an open position, a
+        visible rank), and anything the Radar admitted in the last day - Rafiq
+        trades Radar admissions of any age, holds up to 12h and reads prices
+        24h after each decision, and a pool frozen at its last sub-$1k print
+        would be sold at that price instead of at zero. A provider failure
+        proves nothing about the pool, so only an answered batch retires.
+        """
+        if not answered or settings.ENRICHMENT_RETIRE_AFTER_HOURS <= 0:
+            return set()
+        oldest = now - timedelta(hours=settings.ENRICHMENT_RETIRE_AFTER_HOURS)
+        floor = settings.ENRICHMENT_RETIRE_BELOW_LIQUIDITY_USD
+        candidates: set[str] = set()
+        for state in states:
+            token = tokens.get(state.mint_address)
+            data = results.get(state.mint_address)
+            if (
+                token is None
+                or token.discovered_at > oldest
+                or state.priority >= LANE_DISPLAY
+            ):
+                continue
+            if data is None or not data.has_market or (
+                data.liquidity_usd is not None and data.liquidity_usd < floor
+            ):
+                candidates.add(state.mint_address)
+        if not candidates:
+            return candidates
+        admitted = set((await self.session.execute(
+            select(RadarToken.mint_address).where(
+                RadarToken.mint_address.in_(candidates),
+                RadarToken.first_detected_at >= now - RADAR_ADMISSION_HOLD,
+            )
+        )).scalars())
+        return candidates - admitted
 
     async def _defer(
         self,

@@ -127,15 +127,6 @@ celery_app.conf.beat_schedule = {
         "task": "app.hq_ops.tasks.hq_ops_tick",
         "schedule": crontab(minute="*/2"),
     },
-    # Karthik's observation pass. Five minutes rather than two: it watches one
-    # wallet's data quality, not the platform's liveness, and nothing it can
-    # find becomes more urgent for being noticed ninety seconds sooner. Under
-    # OBSERVE_ONLY it opens findings and writes audit rows; it executes no
-    # repair, and there is no code path from here to one.
-    "karthik-ops-tick": {
-        "task": "app.hq_ops.tasks.karthik_ops_tick",
-        "schedule": crontab(minute="*/5"),
-    },
     # Names the tokens discovery could not name. Every minute, 60 at a time:
     # the nameless arrive at ~210/hour, so this keeps up and still eats into
     # the backlog. Each row gets SCANNER_METADATA_ATTEMPTS tries and is then
@@ -173,14 +164,6 @@ celery_app.conf.beat_schedule = {
         "task": "app.radar.scheduler.pumpfun_radar_scan",
         "schedule": crontab(minute="*/15"),
     },
-    # Event detection runs a few minutes *after* the Radar sweep, deliberately.
-    # It compares fresh analyst readings against the cached previous ones, so
-    # running it before the sweep would diff a stale reading against itself and
-    # report nothing — losing the change until the next cycle.
-    "event-cycle": {
-        "task": "app.events.scheduler.event_cycle",
-        "schedule": crontab(minute="3,18,33,48"),
-    },
     # The paper wallet advances on its own beat because nothing else can move
     # it: a position whose token stopped being enriched is exactly the one most
     # likely to be sitting through its stop. Exits are resolved from the stored
@@ -197,16 +180,6 @@ celery_app.conf.beat_schedule = {
     # 2026-08-19, and a shorter window means each pass replays less, not more.
     "paper-review": {
         "task": "app.paper.scheduler.paper_review",
-        "schedule": crontab(minute="*"),
-    },
-    # The Karthik wallet's own beat, beside the paper wallet's rather than
-    # inside it. Every minute for the same reason: Karthik prices both its
-    # entries and its exits from the freshest observation it can see, so the
-    # gap between admission and entry — the number the experiment is measured
-    # on — is bounded by this cadence. Its task takes a different advisory lock
-    # and its own session, so neither wallet can delay or roll back the other.
-    "karthik-review": {
-        "task": "app.karthik.scheduler.karthik_review",
         "schedule": crontab(minute="*"),
     },
     # Membership of the priority enrichment lane is derived from what the
@@ -238,23 +211,16 @@ celery_app.conf.beat_schedule = {
         "task": "app.workers.research_tasks.nursery_sweep",
         "schedule": crontab(minute="*/15"),
     },
-    "research-quotes-sample": {
-        "task": "app.workers.research_tasks.research_quotes_sample",
-        "schedule": crontab(minute="*/5"),
-    },
+    # Retired 2026-09-17 with the features they fed: event-cycle,
+    # karthik-review, karthik-ops-tick, universe-enrol, and the quotes,
+    # universe, regime and executable-outcome collectors. On a two-core box
+    # each still cost CPU for data nothing running reads. The collectors share
+    # FEATURE_RESEARCH_COLLECTORS_ENABLED with the holder snapshots below,
+    # which Rafiq Lab records, so their entries go rather than the flag. The
+    # tasks stay registered and can still be run by hand.
     "holder-snapshots-collect": {
         "task": "app.workers.research_tasks.holder_snapshots_collect",
         "schedule": crontab(minute="*/10"),
-    },
-    "universe-snapshot-daily": {
-        "task": "app.workers.research_tasks.universe_snapshot_daily",
-        "schedule": crontab(hour="2", minute="10"),
-    },
-    # Enrolment follows the snapshot by twenty minutes, then repeats hourly so
-    # a token crossing the liquidity floor mid-day is observed the same day.
-    "universe-enrol": {
-        "task": "app.workers.research_tasks.universe_enrol",
-        "schedule": crontab(minute="30"),
     },
     # Research simulation: judges due checkpoints and advances virtual
     # positions. Cannot touch paper, karthik or real-wallet accounting.
@@ -455,14 +421,6 @@ celery_app.conf.beat_schedule = {
     "real-wallet-close-empty-accounts": {
         "task": "app.real_wallet.scheduler.real_wallet_close_empty_accounts",
         "schedule": crontab(minute="*/5"),
-    },
-    "regime-snapshot-hourly": {
-        "task": "app.workers.research_tasks.regime_snapshot_hourly",
-        "schedule": crontab(minute="7"),
-    },
-    "executable-outcomes-compute": {
-        "task": "app.workers.research_tasks.executable_outcomes_compute",
-        "schedule": crontab(minute="37"),
     },
     "prune-telemetry": {
         "task": "app.workers.retention_tasks.prune_telemetry",
