@@ -314,6 +314,9 @@ class RealWalletAutotradeSwitch(Base, UUIDPrimaryKeyMixin):
     )
     #: A V6 strategy id, e.g. "V6-06". Never a permission.
     nominated_strategy: Mapped[str | None] = mapped_column(String(16))
+    #: What a graduation trade spends, chosen at Start. Never above
+    #: `REAL_WALLET_ENTRY_SIZE_USD`; null trades that configured size.
+    ticket_usd: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     started_by: Mapped[str | None] = mapped_column(String(128))
     start_reason: Mapped[str | None] = mapped_column(String(256))
@@ -333,6 +336,7 @@ class RealWalletAutotradeEvent(Base, UUIDPrimaryKeyMixin):
     actor: Mapped[str | None] = mapped_column(String(128))
     reason: Mapped[str | None] = mapped_column(String(256))
     nominated_strategy: Mapped[str | None] = mapped_column(String(16))
+    ticket_usd: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
     occurred_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )

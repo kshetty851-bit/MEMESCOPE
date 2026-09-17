@@ -69,28 +69,48 @@ function status(overrides: Record<string, unknown> = {}) {
   };
 }
 
+const FIVE = {
+  id: "G-B3-5M",
+  name: "GRADUATION-B3-5MIN",
+  paper_book: "B3_198k_5m",
+  idea: "hold graduations for five minutes",
+  pool_floor_usd: 198000,
+  hold_minutes: 5,
+  take_profit: false,
+  stop_loss: false,
+  max_signal_age_seconds: 60,
+  ticket_usd: "100",
+  min_ticket_usd: "56",
+};
+const FOUR = {
+  ...FIVE,
+  id: "G-B3-4M",
+  name: "GRADUATION-B3-4MIN",
+  paper_book: "B3_198k_4m",
+  idea: "sell a minute sooner",
+  hold_minutes: 4,
+};
+
 function autotrade(overrides: Record<string, unknown> = {}) {
   return {
     enabled: false,
     nominated_strategy: null,
+    ticket_usd: null,
     started_at: null,
     started_by: null,
     stopped_at: null,
     stopped_by: null,
     can_start: false,
-    strategy: {
-      id: "G-B3-5M",
-      name: "GRADUATION-B3-5MIN",
-      paper_book: "B3_198k_5m",
-      idea: "hold graduations for five minutes",
-      pool_floor_usd: 198000,
-      hold_minutes: 5,
-      take_profit: false,
-      stop_loss: false,
-      max_signal_age_seconds: 60,
-      ticket_usd: "100",
-      min_ticket_usd: "56",
-    },
+    strategy: FIVE,
+    strategies: [FIVE, FOUR],
+    ticket_choices: [
+      ["100", "56"],
+      ["50", "28"],
+      ["25", "14"],
+      ["20", "11.2"],
+      ["10", "5.6"],
+      ["5", "2.8"],
+    ].map(([ticket_usd, min_usd]) => ({ ticket_usd, min_usd })),
     history: [],
     ...overrides,
   };
@@ -199,7 +219,7 @@ describe("RealWalletPage without signing in", () => {
   it("names the strategy the wallet trades, in plain words", async () => {
     serve();
     await renderLoaded();
-    const card = screen.getByText("Strategy this wallet trades").closest("section")!;
+    const card = screen.getByText("Strategy Start would trade").closest("section")!;
     expect(within(card).getByText("G-B3-5M")).toBeInTheDocument();
     expect(card.textContent).toContain("copies paper book B3_198k_5m");
     expect(card.textContent).toContain("at least $198,000");
@@ -258,8 +278,60 @@ describe("RealWalletPage signed in as the administrator", () => {
       expect(api.post).toHaveBeenCalledWith("/real-wallet/autotrade/start", {
         strategy_id: "G-B3-5M",
         reason: "funded, going live",
+        ticket_usd: "100",
       }),
     );
+  });
+
+  it("starts the arm and the trade size picked, and describes them first", async () => {
+    signInAsAdmin();
+    serve();
+    vi.mocked(api.post).mockResolvedValue(autotrade({ enabled: true }));
+    await renderLoaded();
+    const panel = screen.getByText("Trading").closest("section")!;
+    fireEvent.click(within(panel).getByRole("button", { name: /B3_198k_4m/ }));
+    fireEvent.click(within(panel).getByRole("button", { name: "$25" }));
+
+    const card = screen.getByText("Strategy Start would trade").closest("section")!;
+    expect(within(card).getByText("G-B3-4M")).toBeInTheDocument();
+    expect(card.textContent).toContain("copies paper book B3_198k_4m");
+    expect(card.textContent).toContain("exactly 4 minutes later");
+    expect(card.textContent).toContain("$25 a trade");
+    expect(card.textContent).toContain("never under $14");
+
+    fireEvent.change(within(panel).getByPlaceholderText(/reason/i), {
+      target: { value: "smaller bets" },
+    });
+    fireEvent.click(within(panel).getByRole("button", { name: "Start G-B3-4M" }));
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith("/real-wallet/autotrade/start", {
+        strategy_id: "G-B3-4M",
+        reason: "smaller bets",
+        ticket_usd: "25",
+      }),
+    );
+  });
+
+  it("shows what is running and will not change it until stopped", async () => {
+    signInAsAdmin();
+    serve({
+      autotrade: autotrade({
+        enabled: true,
+        nominated_strategy: "G-B3-4M",
+        ticket_usd: "25",
+        strategy: { ...FOUR, ticket_usd: "25", min_ticket_usd: "14" },
+      }),
+    });
+    await renderLoaded();
+    const panel = screen.getByText("Trading").closest("section")!;
+    expect(panel.textContent).toContain("ON — G-B3-4M · $25 a trade");
+    expect(within(panel).getByRole("button", { name: "$25" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(within(panel).getByRole("button", { name: "$100" })).toBeDisabled();
+    expect(panel.textContent).toContain("Stop first to change the arm or the size.");
+    expect(screen.getByText("Strategy this wallet trades")).toBeInTheDocument();
   });
 
   it("cannot start twice", async () => {

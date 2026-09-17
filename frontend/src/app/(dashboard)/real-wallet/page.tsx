@@ -103,23 +103,93 @@ type Strategy = {
   min_ticket_usd: string;
 };
 
+/** A trade size Start accepts, and the smallest trade it allows. */
+type TicketChoice = { ticket_usd: string; min_usd: string };
+
 type AutotradeState = {
   enabled: boolean;
   nominated_strategy: string | null;
+  /** The trade size chosen at the last Start; null means the configured one. */
+  ticket_usd?: string | null;
   started_at: string | null;
   started_by: string | null;
   stopped_at: string | null;
   stopped_by: string | null;
+  /** The nominated strategy, else the first, at the size it would trade. */
   strategy: Strategy;
+  /** Every strategy Start can nominate. */
+  strategies?: Strategy[];
+  ticket_choices?: TicketChoice[];
   can_start: boolean;
   history?: Array<{
     action: string;
     actor: string | null;
     reason: string | null;
     nominated_strategy: string | null;
+    ticket_usd?: string | null;
     occurred_at: string;
   }>;
 };
+
+/** What the page is set to start: an arm and a trade size. Null follows the server. */
+type Pick = { id: string | null; ticket: string | null };
+
+/**
+ * The strategy Start would trade, at the size it would trade it.
+ *
+ * While running that is what the server says is running; otherwise it is what
+ * was picked here, defaulting to the last Start. The size's floor comes from
+ * the server with the size, so the page never works out a threshold itself.
+ */
+function chosenStrategy(a: AutotradeState | undefined, pick: Pick): Strategy | null {
+  if (!a?.strategy) return null;
+  if (a.enabled) return a.strategy;
+  const base =
+    (a.strategies ?? []).find((s) => s.id === (pick.id ?? a.strategy.id)) ?? a.strategy;
+  const size = (a.ticket_choices ?? []).find(
+    (c) => c.ticket_usd === (pick.ticket ?? a.strategy.ticket_usd),
+  );
+  return size
+    ? { ...base, ticket_usd: size.ticket_usd, min_ticket_usd: size.min_usd }
+    : { ...base, ticket_usd: a.strategy.ticket_usd, min_ticket_usd: a.strategy.min_ticket_usd };
+}
+
+/** A row of mutually exclusive buttons. */
+function Choices<T extends string>({
+  label,
+  options,
+  value,
+  onChange,
+  disabled,
+}: {
+  label: string;
+  options: Array<{ value: T; text: string }>;
+  value: T;
+  onChange: (value: T) => void;
+  disabled: boolean;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 text-xs" role="group" aria-label={label}>
+      <span className="w-full text-ink-3 sm:w-24 sm:shrink-0">{label}</span>
+      {options.map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          aria-pressed={o.value === value}
+          disabled={disabled}
+          onClick={() => onChange(o.value)}
+          className={`rounded border px-2 py-1.5 tabular-nums disabled:opacity-60 ${
+            o.value === value
+              ? "border-accent bg-accent/[0.08] text-accent"
+              : "border-line text-ink-3 hover:text-ink"
+          }`}
+        >
+          {o.text}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 type ReadinessCheck = {
   key: string;
@@ -539,13 +609,15 @@ function BalanceCard({
 /** Which strategy this wallet trades, in plain words, from its own spec. */
 function StrategyCard({
   autotrade,
+  strategy,
   proven,
 }: {
   autotrade: AutotradeState | undefined;
+  strategy: Strategy | null;
   proven: boolean | undefined;
 }) {
-  if (!autotrade?.strategy) return null;
-  const s = autotrade.strategy;
+  if (!autotrade || !strategy) return null;
+  const s = strategy;
   const other =
     autotrade.enabled && autotrade.nominated_strategy && autotrade.nominated_strategy !== s.id
       ? autotrade.nominated_strategy
@@ -570,7 +642,9 @@ function StrategyCard({
 
   return (
     <section className="mt-6 rounded-lg border border-line p-4">
-      <p className="text-label text-ink-3">Strategy this wallet trades</p>
+      <p className="text-label text-ink-3">
+        {autotrade.enabled ? "Strategy this wallet trades" : "Strategy Start would trade"}
+      </p>
       <h2 className="mt-1 text-xl font-medium text-ink">
         {s.id}{" "}
         <span className="text-sm font-normal text-ink-3">· copies paper book {s.paper_book}</span>
@@ -611,21 +685,34 @@ function TradingControl({
   status,
   autotrade,
   ready,
+  chosen,
+  onPick,
 }: {
   status: WalletStatus | undefined;
   autotrade: AutotradeState | undefined;
   ready: boolean | undefined;
+  chosen: Strategy | null;
+  onPick: (change: Partial<Pick>) => void;
 }) {
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const [reason, setReason] = useState("");
+  const strategies = autotrade?.strategies ?? [];
+  const sizes = autotrade?.ticket_choices ?? [];
 
   const mutate = useMutation({
     mutationFn: (action: "start" | "stop") =>
       api.post<AutotradeState>(
         `/real-wallet/autotrade/${action}`,
         action === "start"
-          ? { strategy_id: autotrade?.strategy.id, reason: reason.trim() }
+          ? {
+              strategy_id: chosen?.id,
+              reason: reason.trim(),
+              // Only a size the server offered; otherwise it trades its configured one.
+              ...(sizes.some((c) => c.ticket_usd === chosen?.ticket_usd)
+                ? { ticket_usd: chosen?.ticket_usd }
+                : {}),
+            }
           : { reason: reason.trim() || "stopped from the wallet page" },
       ),
     onSuccess: () => {
@@ -645,7 +732,13 @@ function TradingControl({
         <div>
           <p className="text-label text-ink-3">Trading</p>
           <p className="mt-1 text-lg font-medium text-ink">
-            {running ? `ON — ${autotrade?.nominated_strategy ?? "—"}` : "OFF"}
+            {running
+              ? `ON — ${autotrade?.nominated_strategy ?? "—"}${
+                  chosen && chosen.id === autotrade?.nominated_strategy
+                    ? ` · $${chosen.ticket_usd} a trade`
+                    : ""
+                }`
+              : "OFF"}
           </p>
         </div>
         <span
@@ -669,6 +762,35 @@ function TradingControl({
               : "Start buys with real money from the next signal."}
       </p>
 
+      {chosen && (strategies.length > 1 || sizes.length > 1) ? (
+        <div className="mt-3 flex flex-col gap-2">
+          {strategies.length > 1 ? (
+            <Choices
+              label="Copies"
+              value={chosen.id}
+              disabled={running}
+              onChange={(id) => onPick({ id })}
+              options={strategies.map((s) => ({
+                value: s.id,
+                text: `${s.paper_book} · sells after ${s.hold_minutes} min`,
+              }))}
+            />
+          ) : null}
+          {sizes.length > 1 ? (
+            <Choices
+              label="Trade size"
+              value={chosen.ticket_usd}
+              disabled={running}
+              onChange={(ticket) => onPick({ ticket })}
+              options={sizes.map((c) => ({ value: c.ticket_usd, text: `$${c.ticket_usd}` }))}
+            />
+          ) : null}
+          {running ? (
+            <p className="text-xs text-ink-3">Stop first to change the arm or the size.</p>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className="mt-3 flex flex-wrap gap-2">
         <input
           className="w-full rounded border border-line bg-transparent px-2 py-2 text-sm text-ink sm:w-auto sm:min-w-0 sm:flex-1"
@@ -685,7 +807,7 @@ function TradingControl({
             onClick={() => mutate.mutate("start")}
             type="button"
           >
-            Start {autotrade?.strategy.id ?? ""}
+            Start {chosen?.id ?? ""}
           </button>
         ) : (
           <Link
@@ -723,7 +845,8 @@ function TradingControl({
         <ul className="mt-3 space-y-0.5 border-t border-line pt-3 font-mono text-[11px] text-ink-3">
           {autotrade.history.slice(0, 5).map((h, i) => (
             <li key={i}>
-              {when(h.occurred_at)} · {h.action} · {h.nominated_strategy ?? "—"} ·{" "}
+              {when(h.occurred_at)} · {h.action} · {h.nominated_strategy ?? "—"}
+              {h.ticket_usd ? ` at $${h.ticket_usd}` : ""} ·{" "}
               {h.actor ?? "system"} · {h.reason ?? ""}
             </li>
           ))}
@@ -915,6 +1038,7 @@ function TokensHeld({ status }: { status: WalletStatus | undefined }) {
 
 export default function RealWalletPage() {
   const { user } = useAuth();
+  const [pick, setPick] = useState<Pick>({ id: null, ticket: null });
   const status = useQuery({
     queryKey: ["real-wallet", "status"],
     queryFn: () => api.get<WalletStatus>("/real-wallet/status"),
@@ -961,6 +1085,7 @@ export default function RealWalletPage() {
   }
 
   const data = status.data;
+  const chosen = chosenStrategy(autotrade.data, pick);
   return (
     <main>
       <p className="text-label text-accent">
@@ -973,11 +1098,17 @@ export default function RealWalletPage() {
       </p>
       <ReadinessPanel data={readiness.data} />
       <BalanceCard data={data} readiness={readiness.data} />
-      <StrategyCard autotrade={autotrade.data} proven={readiness.data?.proven} />
+      <StrategyCard
+        autotrade={autotrade.data}
+        strategy={chosen}
+        proven={readiness.data?.proven}
+      />
       <TradingControl
         status={data}
         autotrade={autotrade.data}
         ready={readiness.data?.ready_to_trade}
+        chosen={chosen}
+        onPick={(change) => setPick((p) => ({ ...p, ...change }))}
       />
       <TodayCard status={data} />
       <TradesTable positions={data?.positions ?? []} />

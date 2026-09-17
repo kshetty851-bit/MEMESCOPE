@@ -62,7 +62,13 @@ from app.real_wallet.network import (
 )
 from app.real_wallet.funding_readiness import as_dict as readiness_as_dict
 from app.real_wallet.funding_readiness import evaluate as evaluate_funding_readiness
-from app.real_wallet.autotrade import AutotradeSwitchService, UnknownStrategyError
+from app.real_wallet.autotrade import (
+    AutotradeSwitchService,
+    InvalidTicketError,
+    UnknownStrategyError,
+    ticket_choices,
+    ticket_for,
+)
 from app.real_wallet.rehearsal import as_dict as rehearsal_as_dict
 from app.real_wallet.rehearsal import rehearse
 from app.real_wallet.policy import configured_entry_size_usd
@@ -90,25 +96,37 @@ def _who(actor: str | None, owner: bool) -> str | None:
     return "signed-in user"
 
 
-def _wallet_strategy() -> dict[str, object]:
-    """The strategy START nominates, stated from its own spec."""
+def _usd(value: Decimal) -> str:
+    """A dollar amount without trailing zeros: 100, 25, 12.5."""
+    return format(value.normalize(), "f")
+
+
+def _wallet_strategies(ticket: Decimal) -> list[dict[str, object]]:
+    """The strategies START can nominate, each stated from its own spec and
+    sized at `ticket`."""
     from app.labs.graduation import config as grad
     from app.labs.graduation import live_spec
 
-    strategy = live_spec.STRATEGIES[0]
-    return {
-        "id": strategy.id,
-        "name": strategy.name,
-        "paper_book": live_spec.PAPER_BOOK,
-        "idea": strategy.hypothesis,
+    return [{
+        "id": s.id,
+        "name": s.name,
+        "paper_book": live_spec.PAPER_BOOKS[s.id],
+        "idea": s.hypothesis,
         "pool_floor_usd": live_spec.POOL_FLOOR_USD,
-        "hold_minutes": live_spec.HOLD_MINUTES,
-        "take_profit": strategy.exits.take_profit is not None,
-        "stop_loss": strategy.exits.stop_loss is not None,
+        "hold_minutes": live_spec.hold_minutes(s),
+        "take_profit": s.exits.take_profit is not None,
+        "stop_loss": s.exits.stop_loss is not None,
         "max_signal_age_seconds": live_spec.MAX_DECISION_AGE_SECONDS,
-        "ticket_usd": _decimal(settings.REAL_WALLET_ENTRY_SIZE_USD),
-        "min_ticket_usd": _decimal(grad.WALLET_MIN_USD),
-    }
+        "ticket_usd": _usd(ticket),
+        "min_ticket_usd": _usd(grad.wallet_floor(ticket)),
+    } for s in live_spec.STRATEGIES]
+
+
+def _wallet_strategy(nominated: str | None, ticket: Decimal) -> dict[str, object]:
+    """The strategy the page describes: the nominated one, else the first."""
+    strategies = _wallet_strategies(ticket)
+    return next((s for s in strategies if s["id"] == (nominated or "").upper()),
+                strategies[0])
 
 
 def _sol_for(usd: Decimal, price: Decimal) -> Decimal:
@@ -180,6 +198,8 @@ class AutotradeStartIn(BaseModel):
 
     strategy_id: str = Field(min_length=2, max_length=16)
     reason: str = Field(min_length=3, max_length=256)
+    #: One of `ticket_choices`; omitted trades `REAL_WALLET_ENTRY_SIZE_USD`.
+    ticket_usd: Decimal | None = Field(default=None, gt=0)
 
 
 class AutotradeStopIn(BaseModel):
@@ -189,18 +209,28 @@ class AutotradeStopIn(BaseModel):
 @router.get("/autotrade", summary="Read the operator start/stop control")
 async def read_autotrade(viewer: OptionalUser, session: DbSession) -> dict[str, object]:
     owner = _is_owner(viewer)
+    from app.labs.graduation.config import wallet_floor
+
     service = AutotradeSwitchService(session)
-    state = (await service.state()).as_dict()
+    current = await service.state()
+    ticket = ticket_for(current, settings.REAL_WALLET_ENTRY_SIZE_USD)
+    state = current.as_dict()
     for key in ("started_by", "stopped_by"):
         state[key] = _who(state[key], owner)
     return {
         **state,
-        "strategy": _wallet_strategy(),
+        "strategy": _wallet_strategy(current.nominated_strategy, ticket),
+        # Every arm START can nominate, and the trade sizes it accepts — each
+        # arm is described at the size the wallet would trade it now.
+        "strategies": _wallet_strategies(ticket),
+        "ticket_choices": [{"ticket_usd": _usd(t), "min_usd": _usd(wallet_floor(t))}
+                           for t in ticket_choices()],
         # START needs the administrator account; everything else here does not.
         "can_start": owner,
         "history": [
             {"action": e.action, "actor": _who(e.actor, owner), "reason": e.reason,
              "nominated_strategy": e.nominated_strategy,
+             "ticket_usd": None if e.ticket_usd is None else _usd(e.ticket_usd),
              "occurred_at": e.occurred_at.isoformat()}
             for e in await service.history(limit=20)
         ],
@@ -224,11 +254,14 @@ async def start_autotrade(
         state = await service.start(
             actor=admin.email, reason=payload.reason,
             strategy_id=payload.strategy_id, at=datetime.now(UTC),
+            ticket_usd=payload.ticket_usd,
         )
     except UnknownStrategyError as exc:
         raise HTTPException(
             status_code=422, detail=f"unknown strategy: {exc}"
         ) from exc
+    except InvalidTicketError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     await session.commit()
     return state.as_dict()
 
@@ -301,22 +334,23 @@ async def funding_readiness(session: DbSession) -> dict[str, object]:
         kill_switch_active = None
 
     # What the next entry would spend, by the driver's own rule.
-    strategy = _wallet_strategy()
     switch = await AutotradeSwitchService(session).state()
+    ticket = ticket_for(switch, settings.REAL_WALLET_ENTRY_SIZE_USD)
+    strategy = _wallet_strategy(switch.nominated_strategy, ticket)
     strategy_id = switch.nominated_strategy or str(strategy["id"])
     price = await sol_usd_now(now)
     next_trade: Decimal | None = None
     min_trade_sol = full_trade_sol = None
     if price is not None:
         min_trade_sol = _sol_for(Decimal(str(strategy["min_ticket_usd"])), price)
-        full_trade_sol = _sol_for(settings.REAL_WALLET_ENTRY_SIZE_USD, price)
+        full_trade_sol = _sol_for(ticket, price)
         if balance_sol is not None:
             open_positions = await live.open_positions_count()
             configured = configured_entry_size_usd(
                 balance_sol * price + await live.open_exposure_usd())
             if configured is not None:
                 next_trade = RealWalletDriver._fundable(
-                    strategy_id, configured,
+                    strategy_id, ticket_for(switch, configured),
                     balance_lamports=lamports_from_sol(balance_sol),
                     sol_price=price, open_positions=open_positions)
 

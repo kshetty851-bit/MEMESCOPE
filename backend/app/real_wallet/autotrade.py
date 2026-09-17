@@ -21,10 +21,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.real_wallet_execution import (
     RealWalletAutotradeEvent,
@@ -40,6 +42,10 @@ class UnknownStrategyError(ValueError):
     """A nomination must name a strategy that exists, or it names nothing."""
 
 
+class InvalidTicketError(ValueError):
+    """A trade size Start cannot accept."""
+
+
 @dataclass(frozen=True, slots=True)
 class AutotradeState:
     enabled: bool
@@ -50,6 +56,8 @@ class AutotradeState:
     stopped_at: datetime | None
     stopped_by: str | None
     stop_reason: str | None
+    #: The graduation trade size chosen at Start; None trades the configured one.
+    ticket_usd: Decimal | None = None
 
     def as_dict(self) -> dict:
         return {
@@ -61,10 +69,29 @@ class AutotradeState:
             "stopped_at": self.stopped_at.isoformat() if self.stopped_at else None,
             "stopped_by": self.stopped_by,
             "stop_reason": self.stop_reason,
+            "ticket_usd": (None if self.ticket_usd is None
+                           else format(self.ticket_usd.normalize(), "f")),
             # Restated on every read so a caller cannot infer permission from
             # `enabled` alone. This is the whole contract of the control.
             "authorises_execution": False,
         }
+
+
+def ticket_choices() -> list[Decimal]:
+    """The trade sizes Start offers: the board's own splits of a $100 ticket,
+    from the configured size down to `live_spec.MIN_TICKET_USD`."""
+    from app.labs.graduation import config as grad
+    from app.labs.graduation.live_spec import MIN_TICKET_USD
+
+    return [t for t in (grad.PAPER_NOTIONAL_USD / n for n in grad.WALLET_SPLITS)
+            if MIN_TICKET_USD <= t <= settings.REAL_WALLET_ENTRY_SIZE_USD]
+
+
+def ticket_for(state: AutotradeState, configured: Decimal) -> Decimal:
+    """What a trade spends: the size chosen at Start, never above `configured`."""
+    if state.ticket_usd is None:
+        return configured
+    return min(configured, state.ticket_usd)
 
 
 def _known_strategy(strategy_id: str) -> bool:
@@ -104,27 +131,45 @@ class AutotradeSwitchService:
             started_at=row.started_at, started_by=row.started_by,
             start_reason=row.start_reason, stopped_at=row.stopped_at,
             stopped_by=row.stopped_by, stop_reason=row.stop_reason,
+            ticket_usd=row.ticket_usd,
         )
 
     async def start(
-        self, *, actor: str, reason: str, strategy_id: str, at: datetime
+        self, *, actor: str, reason: str, strategy_id: str, at: datetime,
+        ticket_usd: Decimal | None = None,
     ) -> AutotradeState:
-        """Record the intent to trade. This grants no permission whatsoever."""
+        """Record the intent to trade. This grants no permission whatsoever.
+
+        `ticket_usd` is the graduation trade size, one of `ticket_choices()`.
+        None trades the configured `REAL_WALLET_ENTRY_SIZE_USD`, as before.
+        """
+        from app.labs.graduation.live_spec import BY_ID as GRAD_BY_ID
+
         if not _known_strategy(strategy_id):
             raise UnknownStrategyError(strategy_id)
+        if ticket_usd is not None:
+            if strategy_id.upper() not in GRAD_BY_ID:
+                raise InvalidTicketError("a trade size is chosen for graduation arms only")
+            if ticket_usd not in ticket_choices():
+                raise InvalidTicketError(
+                    f"trade size must be one of "
+                    f"{', '.join(format(t, 'f') for t in ticket_choices())}")
         row = await self._row()
         row.enabled = True
         row.nominated_strategy = strategy_id.upper()
+        row.ticket_usd = ticket_usd
         row.started_at = at
         row.started_by = actor
         row.start_reason = reason
         self._session.add(RealWalletAutotradeEvent(
             scope=SCOPE, action="started", actor=actor, reason=reason,
-            nominated_strategy=row.nominated_strategy, occurred_at=at,
+            nominated_strategy=row.nominated_strategy, ticket_usd=ticket_usd,
+            occurred_at=at,
         ))
         await self._session.flush()
         logger.info("real_wallet_autotrade_started", actor=actor,
-                    strategy=row.nominated_strategy)
+                    strategy=row.nominated_strategy,
+                    ticket_usd=None if ticket_usd is None else str(ticket_usd))
         return await self.state()
 
     async def stop(self, *, actor: str, reason: str, at: datetime) -> AutotradeState:

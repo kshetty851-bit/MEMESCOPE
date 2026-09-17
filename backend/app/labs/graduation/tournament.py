@@ -1101,8 +1101,9 @@ class Tournament:
                 counts[arm.name] = counts.get(arm.name, 0) + 1
                 taken.add((arm.name, row.mint))
                 opened += 1
-                if arm.name == live_spec.PAPER_BOOK:
+                if arm.name in live_spec.MIRRORS:
                     mirror.append(live_decisions.Mirrored(
+                        strategy_id=live_spec.MIRRORS[arm.name],
                         mint=row.mint, opened_at=row.open_at,
                         liquidity_usd=depth, impact=impact,
                         price_native=price))
@@ -1263,8 +1264,9 @@ class Tournament:
                 # exit clock starts when the WALLET fills: a buy 60s late still
                 # exits five minutes after itself, six minutes after
                 # graduation, which wiped the wallet in 51% of replayed draws.
-                if arm.name == live_spec.PAPER_BOOK:
+                if arm.name in live_spec.MIRRORS:
                     mirror.append(live_decisions.Mirrored(
+                        strategy_id=live_spec.MIRRORS[arm.name],
                         mint=row.mint, opened_at=row.open_at,
                         liquidity_usd=row.liquidity_usd, impact=impact,
                         price_native=row.price_native))

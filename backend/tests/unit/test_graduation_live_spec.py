@@ -69,17 +69,36 @@ def test_the_clock_fires_exactly_at_five_minutes() -> None:
     assert evaluate_exit(exits, _held(300)).action == "CLOSE"
 
 
+def test_the_four_minute_arm_sells_at_exactly_four_minutes() -> None:
+    exits = live_spec.BY_ID["G-B3-4M"].exits
+    assert evaluate_exit(exits, _held(239)).action is None
+    assert evaluate_exit(exits, _held(240)).action == "CLOSE"
+
+
+def test_each_live_arm_copies_its_own_paper_book() -> None:
+    """The live hold is the paper arm's hold, and each book feeds one arm."""
+    from app.labs.graduation.tournament import ARMS
+
+    arms = {a.name: a for a in ARMS}
+    assert set(live_spec.PAPER_BOOKS) == {"G-B3-5M", "G-B3-4M"}
+    for sid, book in live_spec.PAPER_BOOKS.items():
+        assert live_spec.hold_minutes(live_spec.BY_ID[sid]) == arms[book].hold
+        assert arms[book].clock == "entry", "the live clock starts at the entry"
+        assert live_spec.MIRRORS[book] == sid
+
+
 def test_there_is_no_stop_and_no_target() -> None:
     """Both were measured and both were worse; absence here is the finding."""
-    exits = live_spec.STRATEGIES[0].exits
-    assert exits.stop_loss is None
-    assert exits.take_profit is None
-    # A deep pool that has not moved must be held, not exited on liquidity.
-    assert evaluate_exit(exits, _held(60)).action is None
+    for s in live_spec.STRATEGIES:
+        assert s.exits.stop_loss is None
+        assert s.exits.take_profit is None
+        # A deep pool that has not moved must be held, not exited on liquidity.
+        assert evaluate_exit(s.exits, _held(60)).action is None
 
 
 def test_it_is_nominatable_and_nonsense_is_not() -> None:
     assert _known_strategy("G-B3-5M")
+    assert _known_strategy("g-b3-4m"), "ids are matched without case, as Start sends them"
     assert _known_strategy("V7-01"), "the V7 registry must still resolve"
     assert not _known_strategy("B3_198k_5m"), "the long paper name is not an id"
     assert not _known_strategy("NOPE-99")
@@ -88,4 +107,5 @@ def test_it_is_nominatable_and_nonsense_is_not() -> None:
 def test_its_decisions_go_stale_in_a_minute_not_ten() -> None:
     """A decision older than the hold buys the token at the cliff."""
     assert RealWalletDriver._decision_age("G-B3-5M").total_seconds() == 60
+    assert RealWalletDriver._decision_age("G-B3-4M").total_seconds() == 60
     assert RealWalletDriver._decision_age("V7-01").total_seconds() == 600

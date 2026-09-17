@@ -11,13 +11,13 @@ recorder has seen; it ranks nothing and recommends nothing.
 from __future__ import annotations
 
 import random
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from functools import lru_cache
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from math import sqrt
 from statistics import fmean, pstdev
-from typing import Any
+from typing import Any, NamedTuple
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
@@ -570,6 +570,25 @@ async def returns(db: AsyncSession = Depends(get_db)) -> Returns:
     )
 
 
+class SplitWallet(BaseModel):
+    """The funded $100 wallet with the $100 split into `split` equal trades.
+
+    Same trades, same rule (`live_spec.fundable`), a `ticket_usd` of
+    `$100 / split`. A smaller ticket loses less to a rug and makes less on
+    everything else; the flat network fee is a bigger share of it, and it
+    moves the pool less. `split` 1 is `wallet_funded_usd`.
+    """
+
+    split: int
+    ticket_usd: Decimal
+    wallet_usd: Decimal
+    trades_funded: int
+    trades_skipped: int
+    #: The lowest the wallet stood at any close, open trades at cost: what
+    #: the worst run of this arm's history did to an account this size.
+    low_usd: Decimal
+
+
 class ArmRow(BaseModel):
     """One arm's standing. Everything is realised — open positions are not
     counted, because an unrealised number is what every blown-up book in this
@@ -622,6 +641,9 @@ class ArmRow(BaseModel):
     wallet_funded_usd: Decimal = Decimal(0)
     trades_funded: int = 0
     trades_skipped: int = 0
+    #: The same wallet at every split of `config.WALLET_SPLITS`. Shown, never
+    #: ranked on: the leader and the gate stay on the $100 ticket.
+    splits: list[SplitWallet] = []
     #: Hours since this arm's OWN first trade — not the board clock, which
     #: measures from the newest arm so that every arm is compared over a window
     #: they all traded in. A row that has been running three days and one that
@@ -745,10 +767,53 @@ _PROJECTIONS: tuple[datetime, dict[str, dict[str, Any]]] | None = None
 _PROJECTION_TTL = timedelta(minutes=2)
 
 
+class Walk(NamedTuple):
+    cash: float
+    funded: int
+    skipped: int
+    took: list[tuple[datetime, float]]
+    low: float
+
+
+def _multiple(ret: float, impact: Sequence[float], k: float) -> float:
+    """What a trade measured at $100 returns per dollar at `k` times that size,
+    before the network fee (`_size_penalty` charges that).
+
+    Impact is linear in order size (`backtest.amm_impact`), so an order `k`
+    times as large moves the pool `k` times as far on both legs. `impact` is
+    the trade's recorded (open, close) impact, empty when unknown. At k == 1
+    this is exactly `1 + ret`.
+    """
+    gross = 1.0 + ret
+    if impact and k != 1.0:
+        i_open, i_close = impact
+        gross *= ((1 + i_open) / (1 + k * i_open)
+                  * (1 + i_close) / (1 + k * i_close))
+    return gross
+
+
+def _low_through(cash: float, held: list[tuple[datetime, float, float]],
+                 due: list[tuple[datetime, float, float]]) -> float:
+    """The lowest the account stands while `due` closes in time order, with
+    everything still open counted at cost."""
+    equity = cash + sum(h[2] for h in held) + sum(h[2] for h in due)
+    low = equity
+    for _, r, size in sorted(due, key=lambda h: h[0]):
+        equity += size * (r - 1)
+        low = min(low, equity)
+    return low
+
+
 def _funded_walk(
-    trades: list[tuple[datetime, datetime, float]], rate: Decimal | None = None,
-) -> tuple[float, int, int, list[tuple[datetime, float]]]:
-    """What a real $100 account could have taken — equity, funded, skipped.
+    trades: Sequence[tuple], rate: Decimal | None = None,
+    ticket: float | None = None,
+) -> Walk:
+    """What a real $100 account could have taken — equity, funded, skipped,
+    and the lowest it stood.
+
+    `trades` are (opened, closed, return[, impact_open, impact_close]).
+    `ticket` splits the $100: the stake is `ticket` rather than
+    `PAPER_NOTIONAL_USD`, and the floor scales with it (`wallet_floor`).
 
     `_wallet_walk` walks the arm's returns one after another and never asks
     whether the account could have held them at the same time. That is right
@@ -770,20 +835,22 @@ def _funded_walk(
     thing a wallet does. The ticket never grows past `PAPER_NOTIONAL_USD`: the
     returns were measured at that size and a larger order pays more impact.
     """
-    cap = float(config.PAPER_NOTIONAL_USD)
-    floor = float(config.WALLET_MIN_USD)
     base = float(config.PAPER_NOTIONAL_USD)
+    cap = base if ticket is None else ticket
+    floor = config.wallet_floor(cap)
     cash = float(config.WALLET_DEMO_USD)
+    low = cash
     held: list[tuple[datetime, float, float]] = []
     #: (closed_at, return) for every trade the account could pay for. The
     #: projection is built from THESE, so the forecast and the column beside it
     #: describe the same account rather than two different ones.
     took: list[tuple[datetime, float]] = []
     funded = skipped = 0
-    for opened, closed, ret in trades:
+    for opened, closed, ret, *impact in trades:
         due = [h for h in held if h[0] <= opened]
         if due:
             held = [h for h in held if h[0] > opened]
+            low = min(low, _low_through(cash, held, due))
             for _, r, size in due:
                 cash += size * r
         # The wallet's own rule (`live_spec.fundable`), so this balance is the
@@ -795,12 +862,14 @@ def _funded_walk(
             skipped += 1
             continue
         cash -= stake
-        held.append((closed, 1.0 + ret - _size_penalty(stake, base, rate), stake))
+        held.append((closed, _multiple(ret, impact, stake / base)
+                      - _size_penalty(stake, base, rate), stake))
         took.append((closed, ret))
         funded += 1
+    low = min(low, _low_through(cash, [], held))
     for _, r, size in held:
         cash += size * r
-    return cash, funded, skipped, took
+    return Walk(cash, funded, skipped, took, low)
 
 
 def _wallet_walk(returns: Iterable[float],
@@ -956,10 +1025,11 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
     per_arm_hourly: dict[str, dict[datetime, list[float]]] = {}
     #: Entry and exit times as well as the return, because whether an account
     #: could have HELD two trades at once is a fact about their overlap.
-    per_arm_trades: dict[str, list[tuple[datetime, datetime, float]]] = {}
-    for book, ret, closed_at, opened_at in (await db.execute(
+    per_arm_trades: dict[str, list[tuple[datetime, datetime, float, float, float]]] = {}
+    for book, ret, closed_at, opened_at, i_open, i_close in (await db.execute(
             select(GradPaperPosition.book, GradPaperPosition.net_return,
-                   GradPaperPosition.closed_at, GradPaperPosition.opened_at)
+                   GradPaperPosition.closed_at, GradPaperPosition.opened_at,
+                   GradPaperPosition.impact_open, GradPaperPosition.impact_close)
             .where(GradPaperPosition.closed_at.is_not(None),
                    GradPaperPosition.closed_at >= datetime.now(UTC) - timedelta(days=7),
                    GradPaperPosition.notional_usd > 0,
@@ -983,7 +1053,8 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
             .order_by(GradPaperPosition.opened_at, GradPaperPosition.id))).all():
         per_arm.setdefault(book, []).append(float(ret))
         per_arm_trades.setdefault(book, []).append(
-            (opened_at, closed_at, float(ret)))
+            (opened_at, closed_at, float(ret),
+             float(i_open or 0), float(i_close or 0)))
         (per_arm_hourly.setdefault(book, {})
          .setdefault(closed_at.replace(minute=0, second=0, microsecond=0), [])
          .append(float(ret)))
@@ -1202,8 +1273,13 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
                      if first else 0.0)
         open_pnl = unrealised.get(arm.name, Decimal(0)).quantize(Decimal("0.01"))
         wallet, worst = wallet_100(per_arm.get(arm.name, []))
-        funded_usd, n_funded, n_skipped, funded_trades = _funded_walk(
-            per_arm_trades.get(arm.name, []), sol_rate)
+        # ponytail: nine walks per arm per request, O(trades) each; move them
+        # under `_PROJECTIONS` if the board ever slows.
+        mine = per_arm_trades.get(arm.name, [])
+        walks = {n: _funded_walk(mine, sol_rate,
+                                 ticket=float(config.PAPER_NOTIONAL_USD) / n)
+                 for n in (config.WALLET_SPLITS if mine else (1,))}
+        funded_usd, n_funded, n_skipped, funded_trades, _ = walks[1]
         # The forecast now describes the SAME account as the column beside it.
         # Projecting the rule's trade rate onto a $100 wallet overstated by
         # exactly the trades that wallet could never have funded — 73 of 213
@@ -1233,6 +1309,13 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
             wallet_100_usd=wallet, worst_trade_pct=worst,
             wallet_funded_usd=Decimal(str(funded_usd)).quantize(Decimal("0.01")),
             trades_funded=n_funded, trades_skipped=n_skipped,
+            splits=[SplitWallet(
+                split=n,
+                ticket_usd=(config.PAPER_NOTIONAL_USD / n).quantize(Decimal("0.01")),
+                wallet_usd=Decimal(str(w.cash)).quantize(Decimal("0.01")),
+                trades_funded=w.funded, trades_skipped=w.skipped,
+                low_usd=Decimal(str(w.low)).quantize(Decimal("0.01")),
+            ) for n, w in walks.items() if mine],
             arm_hours=Decimal(str(arm_hours)).quantize(Decimal("0.1")),
             first_trade_at=first,
             unrealised_usd=open_pnl,
