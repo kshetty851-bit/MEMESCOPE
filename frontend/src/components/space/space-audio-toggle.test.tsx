@@ -11,15 +11,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const started = vi.fn();
 const stopped = vi.fn();
 const created = vi.fn();
+let events: { onPlay?: () => void; onPause?: () => void } = {};
 
 vi.mock("@/lib/space-audio", () => ({
   audioSupported: () => true,
-  createSpaceAudio: () => {
+  createSpaceAudio: (_src?: string, e: typeof events = {}) => {
+    events = e;
     created();
     return {
       start: async () => void started(),
       stop: () => void stopped(),
       dispose: () => {},
+      position: () => null,
     };
   },
 }));
@@ -78,5 +81,26 @@ describe("SpaceAudioToggle", () => {
     // Re-starting reuses the player rather than building a second one.
     await click(topbar);
     expect(created).toHaveBeenCalledTimes(1);
+  });
+
+  it("follows the track when something else pauses or resumes it", async () => {
+    // A phone call, unplugged headphones, the keyboard's media key. The button
+    // must say what can actually be heard, or the HQ dance floor dances on to
+    // silence — which is how this was found.
+    render(<SpaceAudioToggle />);
+    const [button] = buttons();
+    // Leave it on from wherever the previous test left it.
+    if (button!.getAttribute("aria-pressed") !== "true") {
+      await act(async () => {
+        fireEvent.click(button!);
+      });
+    }
+    expect(button).toHaveAttribute("aria-pressed", "true");
+
+    await act(async () => events.onPause?.());
+    expect(button).toHaveAttribute("aria-pressed", "false");
+
+    await act(async () => events.onPlay?.());
+    expect(button).toHaveAttribute("aria-pressed", "true");
   });
 });

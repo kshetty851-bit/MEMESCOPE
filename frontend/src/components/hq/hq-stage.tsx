@@ -152,6 +152,10 @@ export function HqStage({
   // needs while the office is telling them something is actually wrong. The
   // packets themselves stay visible and clickable; only the transition stops.
   const packetMotion = motion && state.activity !== "HIGH_ALERT";
+  // Read off the frames rather than passed in: anyone on the floor in the
+  // dancing pose means the party is on. The stage needs to know only so it can
+  // get the signage and the name pills out of the dancers' faces.
+  const partying = Object.values(ambient).some((f) => f?.pose === "dancing");
   const scene = [...painted, ...buildCast(ambient, state, focusedZone, onSelectEmployee)].sort(
     (a, b) => a.depth - b.depth,
   );
@@ -163,6 +167,7 @@ export function HqStage({
       data-hq-paused={paused ? "true" : "false"}
       data-hq-phase={phase}
       data-hq-activity={state.activity}
+      data-hq-dance={partying ? "on" : "off"}
     >
       <div className="hq-stage">
         <svg
@@ -597,6 +602,7 @@ function EmployeeAnchor({
     >
       <g
         className="hq-walker"
+        data-pose={pose}
         style={away ? { transform: `translate(${away.x}px, ${away.y}px)` } : undefined}
       >
         {/* Three sources, one bubble, and a fixed order of precedence.

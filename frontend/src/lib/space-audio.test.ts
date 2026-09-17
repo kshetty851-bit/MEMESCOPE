@@ -19,11 +19,24 @@ import {
 class FakeAudio {
   static last: FakeAudio;
   src = "";
+  currentTime = 0;
   loop = false;
   preload = "auto";
   paused = true;
   playResult: Promise<void> = Promise.resolve();
   private _volume = 1;
+  private listeners: Record<string, Set<() => void>> = {};
+  addEventListener(type: string, fn: () => void) {
+    (this.listeners[type] ??= new Set()).add(fn);
+  }
+  removeEventListener(type: string, fn: () => void) {
+    this.listeners[type]?.delete(fn);
+  }
+  /** Something outside the player — a media key, a phone call. */
+  fire(type: "play" | "pause") {
+    this.paused = type === "pause";
+    this.listeners[type]?.forEach((fn) => fn());
+  }
 
   constructor() {
     FakeAudio.last = this;
@@ -134,5 +147,50 @@ describe("the soundtrack", () => {
     await audio.start();
     expect(FakeAudio.last.paused).toBe(true);
     expect(FakeAudio.last.src).toBe("");
+  });
+});
+
+describe("the playback position the dance floor keeps time to", () => {
+  it("is null until the track is playing, and while it is paused", async () => {
+    const audio = createSpaceAudio("/t.mp3");
+    expect(audio.position()).toBeNull();
+    await audio.start();
+    (FakeAudio.last as unknown as { currentTime: number }).currentTime = 12.5;
+    expect(audio.position()).toBe(12.5);
+    audio.stop();
+    vi.advanceTimersByTime(FADE_OUT_SECONDS * 1000 + 100);
+    expect(audio.position()).toBeNull();
+  });
+
+  it("is null once disposed, whatever the element says", async () => {
+    const audio = createSpaceAudio("/t.mp3");
+    await audio.start();
+    audio.dispose();
+    expect(audio.position()).toBeNull();
+  });
+});
+
+describe("playback changed by something other than the button", () => {
+  it("reports a pause it did not ask for", () => {
+    const onPause = vi.fn();
+    createSpaceAudio("/t.mp3", { onPause });
+    FakeAudio.last.fire("pause");
+    expect(onPause).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a resume it did not ask for", () => {
+    const onPlay = vi.fn();
+    createSpaceAudio("/t.mp3", { onPlay });
+    FakeAudio.last.fire("play");
+    expect(onPlay).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops listening once disposed", () => {
+    const onPause = vi.fn();
+    const audio = createSpaceAudio("/t.mp3", { onPause });
+    audio.dispose();
+    onPause.mockClear();
+    FakeAudio.last.fire("pause");
+    expect(onPause).not.toHaveBeenCalled();
   });
 });

@@ -215,6 +215,12 @@ export interface AmbientScheduler {
   readonly reportMode: boolean;
 }
 
+/**
+ * How long each step of an interrupted walk home holds. The report meeting's
+ * brisk pace — see `cutToReturn` for why a stroll is wrong there.
+ */
+export const HURRY_HOME_MS = 620;
+
 export function prefersReducedMotion(): boolean {
   if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false;
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -433,7 +439,16 @@ export function createAmbientScheduler(
       finish(id);
       return;
     }
-    run.frames = rest.slice(home);
+    // Hurried, not strolled. Every caller of this is somebody being needed
+    // elsewhere — real work arriving, the office going to HIGH_ALERT, or the
+    // floor being cleared for a report or the dance. At the ambient pace of
+    // 2.6s a tile, the dance floor measured over twenty seconds between the
+    // music starting and anybody heading for it, which reads as a broken
+    // button. The route home is unchanged; only its tempo.
+    run.frames = rest.slice(home).map((frame) => ({
+      ...frame,
+      hold: Math.min(frame.hold, HURRY_HOME_MS),
+    }));
     run.index = -1;
     run.handle = null;
     step(id);

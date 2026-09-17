@@ -58,7 +58,22 @@ export async function toggleSpaceAudio(): Promise<boolean> {
 
   if (!audio) {
     if (!audioSupported()) return false;
-    audio = createSpaceAudio();
+    audio = createSpaceAudio(undefined, {
+      // Something other than this button paused or resumed the track. Follow
+      // the element: it is what the visitor can actually hear. Both checks
+      // make these no-ops for the button's own changes, which set `playing`
+      // before the element reports.
+      onPause: () => {
+        if (!playing) return;
+        playing = false;
+        emit();
+      },
+      onPlay: () => {
+        if (playing) return;
+        playing = true;
+        emit();
+      },
+    });
   }
 
   try {
@@ -71,6 +86,17 @@ export async function toggleSpaceAudio(): Promise<boolean> {
   }
   emit();
   return playing;
+}
+
+/**
+ * Where the soundtrack is, in seconds, or `null` when it is not playing.
+ *
+ * A plain function rather than state: the HQ dance floor reads it every couple
+ * of seconds to stay on the beat, and routing a playback position through React
+ * would re-render the office several times a second to say nothing new.
+ */
+export function soundtrackPosition(): number | null {
+  return playing ? (audio?.position() ?? null) : null;
 }
 
 export function useSpaceAudio() {

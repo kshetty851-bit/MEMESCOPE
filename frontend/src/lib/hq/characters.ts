@@ -160,7 +160,11 @@ export type Pose =
   // table alone, so every routine that uses them casts a second person.
   | "playing_table"
   | "cue_shot"
-  | "cheering";
+  | "cheering"
+  // The dance floor. One pose for the whole routine: the eight counts are
+  // keyframes on this one figure, so seventeen dancers can be kept in step by
+  // pinning ONE animation clock rather than choreographing pose changes.
+  | "dancing";
 
 /**
  * HOW SOMEBODY FEELS, WHICH IS NEVER HOW THE SYSTEM IS.
@@ -206,6 +210,7 @@ export const STANDING_POSES: ReadonlySet<Pose> = new Set<Pose>([
   "playing_table",
   "cue_shot",
   "cheering",
+  "dancing",
   "holding_tablet",
   "walking_short",
   "returning_to_desk",

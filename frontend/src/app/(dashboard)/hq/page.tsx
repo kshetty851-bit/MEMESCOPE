@@ -9,6 +9,9 @@ import { ReportPanel } from "@/components/hq/report-panel";
 import { buildToday } from "@/lib/hq/today";
 import { useAmbient } from "@/components/hq/use-ambient";
 import { useReportMeeting } from "@/components/hq/use-report-meeting";
+import { useDanceParty } from "@/components/hq/use-dance-party";
+import { useSpaceAudio } from "@/hooks/use-space-audio";
+import { CYCLE_MS } from "@/lib/hq/dance";
 import { useDayPhase, useHqMotion } from "@/components/hq/use-hq-env";
 import { useHqState } from "@/components/hq/use-hq-state";
 import type { HqState } from "@/lib/hq/adapter";
@@ -169,6 +172,17 @@ export default function HqPage() {
     animate: motion && viewport !== "mobile",
   });
 
+  // The music button, wherever it was pressed — the landing page or the
+  // topbar above this page. When it plays, the office goes down to the lobby
+  // and dances. Motion-gated like the meeting's walk, and it yields to a
+  // report: the office cannot be in two places at once.
+  const { on: musicOn } = useSpaceAudio();
+  const dance = useDanceParty(ambient.scheduler, ambient.setOverride, {
+    animate: motion && viewport !== "mobile",
+    musicOn,
+    meetingIdle: meeting.phase === "idle",
+  });
+
   const employee = selected ? EMPLOYEE_BY_ID.get(selected as EmployeeId) : null;
   const reading = employee && selected ? state.employees[selected as EmployeeId] : null;
   const supportNpc = !employee && selected ? SUPPORT_BY_ID.get(selected as SupportId) : null;
@@ -183,7 +197,12 @@ export default function HqPage() {
   const selectedFrame = selected ? frames[selected] : undefined;
 
   return (
-    <div className="flex flex-col gap-6 p-4 lg:p-6">
+    <div
+      className="flex flex-col gap-6 p-4 lg:p-6"
+      // The dance tempo, set once, from the measured track. The stylesheet
+      // reads this rather than repeating the number.
+      style={{ "--hq-dance-cycle": `${CYCLE_MS}ms` } as React.CSSProperties}
+    >
       <header className="flex flex-col gap-1">
         <h1 className="text-lg font-semibold text-[var(--color-ink)]">HQ</h1>
         <p className="max-w-2xl text-sm text-[var(--color-ink-3,var(--color-ink))]">
@@ -240,7 +259,7 @@ export default function HqPage() {
           absolutely still gets the report, and a button that existed only on
           desktop would make the phone a second-class reader of the same
           facts. */}
-      <ReportControl meeting={meeting} />
+      <ReportControl meeting={meeting} dancing={dance.busy} />
 
       {meeting.panelOpen && meeting.report ? (
         <ReportPanel
@@ -448,9 +467,18 @@ function TodayAtHq({ state }: { state: HqState }) {
   );
 }
 
-function ReportControl({ meeting }: { meeting: ReturnType<typeof useReportMeeting> }) {
-  const label =
-    meeting.phase === "idle"
+function ReportControl({
+  meeting,
+  dancing,
+}: {
+  meeting: ReturnType<typeof useReportMeeting>;
+  /** The office is on the dance floor. A report has to wait for the music. */
+  dancing: boolean;
+}) {
+  const busy = meeting.busy || dancing;
+  const label = dancing
+    ? "DANCE PARTY IN PROGRESS — MUSIC OFF FOR A REPORT"
+    : meeting.phase === "idle"
       ? "PROVIDE UPDATED REPORT"
       : meeting.phase === "settling"
         ? "CLEARING THE FLOOR…"
@@ -466,9 +494,9 @@ function ReportControl({ meeting }: { meeting: ReturnType<typeof useReportMeetin
       <button
         type="button"
         className="hq-report-cta"
-        onClick={meeting.start}
-        disabled={meeting.busy}
-        aria-disabled={meeting.busy}
+        onClick={busy ? undefined : meeting.start}
+        disabled={busy}
+        aria-disabled={busy}
         data-testid="hq-report-button"
       >
         {label}

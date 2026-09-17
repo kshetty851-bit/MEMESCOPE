@@ -15,7 +15,7 @@ import {
   type AmbientFrame,
   type AmbientRoutine,
 } from "@/lib/hq/ambient";
-import { createAmbientScheduler } from "@/lib/hq/ambient-scheduler";
+import { createAmbientScheduler, HURRY_HOME_MS } from "@/lib/hq/ambient-scheduler";
 import { EMPLOYEES, EMPLOYEE_BY_ID, type EmployeeId } from "@/lib/hq/employees";
 import { STANDING_POSES } from "@/lib/hq/characters";
 import { isInsideRoom } from "@/lib/hq/geometry";
@@ -519,12 +519,12 @@ describe("ambient yields to real work", () => {
     seed = 5,
   ) {
     const current = new Map<EmployeeId, AmbientFrame | null>();
-    const log: Array<{ who: EmployeeId; frame: AmbientFrame | null }> = [];
+    const log: Array<{ who: EmployeeId; frame: AmbientFrame | null; at: number }> = [];
     const employeeIds = new Set<string>(EMPLOYEES.map((e) => e.id));
     const scheduler = createAmbientScheduler((who, frame) => {
       if (!employeeIds.has(who)) return;
       current.set(who as EmployeeId, frame as AmbientFrame | null);
-      log.push({ who: who as EmployeeId, frame: frame as AmbientFrame | null });
+      log.push({ who: who as EmployeeId, frame: frame as AmbientFrame | null, at: Date.now() });
     }, seeded(seed));
     scheduler.start();
 
@@ -594,6 +594,31 @@ describe("ambient yields to real work", () => {
     }
     expect(after[after.length - 1]!.frame).toBeNull();
     expect(scheduler.animating).not.toContain(found!);
+    scheduler.destroy();
+  });
+
+  it("hurries home when called away, instead of strolling", () => {
+    // Same walk, faster tempo. At the ambient stroll the dance floor measured
+    // twenty-odd seconds between the music starting and anyone moving for it.
+    // Timed by the gaps between frames, which is when each step is taken.
+    vi.useFakeTimers();
+    const { scheduler, log, found } = runUntil((frames) => {
+      for (const [who, frame] of frames) if (frame?.tile) return who;
+      return null;
+    });
+    expect(found).not.toBeNull();
+
+    const from = log.length;
+    const started = Date.now();
+    scheduler.setOperational([found!]);
+    vi.advanceTimersByTime(60_000);
+
+    const home = log.slice(from).filter((entry) => entry.who === found);
+    const steps = home.filter((entry) => entry.frame?.pose === "returning_to_desk").length;
+    expect(steps).toBeGreaterThan(0);
+    const last = home[home.length - 1]!;
+    // Every step at most the hurried pace, so the whole walk fits in that many.
+    expect(last.at - started).toBeLessThanOrEqual(steps * HURRY_HOME_MS + 1);
     scheduler.destroy();
   });
 

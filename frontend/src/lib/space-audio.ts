@@ -36,6 +36,21 @@ import { env } from "@/lib/env";
 export const SOUNDTRACK_URL = `${env.NEXT_PUBLIC_API_URL}/media/montagem-alucinante.mp3`;
 
 /**
+ * The track's tempo and where its first beat lands. MEASURED, not looked up.
+ *
+ * Folded the kick-drum onset envelope of the actual file at every tempo from
+ * 124 to 138 BPM in 0.02 steps. 130.00 is the sharpest by a wide margin (7.01
+ * against 5.39 at 130.02), and the first beat sits 26ms in. The phase holds in
+ * each third of the track separately — 31, 26, 26ms — so there is no drift to
+ * correct for, and 170.76s is 369.98 beats, so the loop lands on a beat too.
+ *
+ * The HQ dance floor steps to these. Change the song and these change with it,
+ * or seventeen people dance confidently to the wrong tempo.
+ */
+export const TEMPO_BPM = 130;
+export const BEAT_OFFSET_SECONDS = 0.026;
+
+/**
  * The two fades are NOT the same length, and that asymmetry is the point.
  *
  * Both were once 2.5s. Fading in over 2.5s is fine; fading OUT over 2.5s is a
@@ -62,6 +77,14 @@ export interface SpaceAudio {
   stop(): void;
   /** Tears the whole thing down. After this the instance is dead. */
   dispose(): void;
+  /**
+   * Where playback is, in seconds, or `null` when nothing is playing.
+   *
+   * Read from the element itself rather than from a clock started on the
+   * click: a track that stalls to buffer stops advancing, and anything keeping
+   * time from a wall clock would carry on without it.
+   */
+  position(): number | null;
 }
 
 /** Whether this browser can play the soundtrack at all. */
@@ -71,10 +94,29 @@ export function audioSupported(win: Window & typeof globalThis = window): boolea
 
 const clamp = (v: number) => Math.min(1, Math.max(0, v));
 
-export function createSpaceAudio(src: string = SOUNDTRACK_URL): SpaceAudio {
+/**
+ * Playback that started or stopped without the button.
+ *
+ * The element is the truth about whether sound is coming out, and plenty
+ * besides the button can change it: a phone call, headphones unplugged, the
+ * keyboard's media key, the OS's own media controls. Without these the button
+ * went on reading "on" over a silent page — found when the HQ dance floor kept
+ * dancing to a track that had stopped.
+ */
+export interface SpaceAudioEvents {
+  onPlay?: () => void;
+  onPause?: () => void;
+}
+
+export function createSpaceAudio(
+  src: string = SOUNDTRACK_URL,
+  events: SpaceAudioEvents = {},
+): SpaceAudio {
   const el = new Audio();
   el.src = src;
   el.loop = true;
+  if (events.onPlay) el.addEventListener("play", events.onPlay);
+  if (events.onPause) el.addEventListener("pause", events.onPause);
   // Nothing is fetched until the first click. The track is 4MB and most
   // visitors never press the button.
   el.preload = "none";
@@ -135,9 +177,14 @@ export function createSpaceAudio(src: string = SOUNDTRACK_URL): SpaceAudio {
       if (disposed) return;
       fade(0, FADE_OUT_SECONDS, () => el.pause());
     },
+    position() {
+      return disposed || el.paused ? null : el.currentTime;
+    },
     dispose() {
       disposed = true;
       clearFade();
+      if (events.onPlay) el.removeEventListener("play", events.onPlay);
+      if (events.onPause) el.removeEventListener("pause", events.onPause);
       el.pause();
       el.removeAttribute("src");
       el.load();

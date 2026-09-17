@@ -8,6 +8,10 @@ import { HqStage } from "@/components/hq/hq-stage";
 import { ROOM } from "@/lib/hq/camera";
 import { EMPLOYEE_BY_ID, type EmployeeId } from "@/lib/hq/employees";
 import { useAmbient } from "@/components/hq/use-ambient";
+import { useDanceParty } from "@/components/hq/use-dance-party";
+import { SpaceAudioToggle } from "@/components/space/space-audio-toggle";
+import { useSpaceAudio } from "@/hooks/use-space-audio";
+import { CYCLE_MS } from "@/lib/hq/dance";
 import { useDayPhase, useHqMotion } from "@/components/hq/use-hq-env";
 import { IdeasPanel } from "@/components/hq/ideas-panel";
 import { UNKNOWN_HQ_STATE, deriveHqState } from "@/lib/hq/adapter";
@@ -103,8 +107,31 @@ function Room() {
   const motion = useHqMotion();
   const phase = useDayPhase();
   const ambient = useAmbient(motion, UNKNOWN_HQ_STATE.operational, UNKNOWN_HQ_STATE.activity, phase);
+  // The dance floor, wired exactly as `/hq` wires it, with the same music
+  // button — so the walk down, the routine and the beat lock can all be
+  // watched here without an API or an alpha cookie.
+  const { on: musicOn } = useSpaceAudio();
+  const dance = useDanceParty(ambient.scheduler, ambient.setOverride, {
+    animate: motion,
+    musicOn,
+    meetingIdle: true,
+  });
   return (
-    <main style={{ padding: "1rem", background: "var(--color-bg)" }}>
+    <main
+      style={
+        {
+          padding: "1rem",
+          background: "var(--color-bg)",
+          "--hq-dance-cycle": `${CYCLE_MS}ms`,
+        } as React.CSSProperties
+      }
+    >
+      <div style={{ display: "flex", gap: "0.75rem", alignItems: "center", marginBottom: "0.5rem" }}>
+        <SpaceAudioToggle />
+        <span data-testid="dance-phase" style={{ color: "var(--color-ink-3)", fontSize: 12 }}>
+          dance: {dance.phase}
+        </span>
+      </div>
       <HqStage
         camera={desk ? { kind: "desk", employee: desk } : ROOM}
         focusedZone={null}

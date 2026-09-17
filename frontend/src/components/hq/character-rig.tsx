@@ -995,10 +995,17 @@ function Arms({ pose, build, shoulderY }: { pose: Pose; build: Build; shoulderY:
   const s = build.shoulder;
   const y = shoulderY + 3;
 
-  if (pose === "standing" || pose === "walking_short" || pose === "returning_to_desk") {
-    // The same arms whether standing or walking. The swing is a CSS rotation on
-    // this group, so a walk costs no extra geometry — which is the only reason
-    // walking was affordable at all.
+  if (
+    pose === "standing" ||
+    pose === "walking_short" ||
+    pose === "returning_to_desk" ||
+    pose === "dancing"
+  ) {
+    // The same arms whether standing, walking or dancing. The swing is a CSS
+    // rotation on this group, so a walk costs no extra geometry — which is the
+    // only reason walking was affordable at all. Dancing is the same trick with
+    // bigger angles: each arm pivots at the shoulder, so the whole eight-count
+    // routine is keyframes on these two groups and not a single new path.
     return (
       <g className="hq-arms">
         <g className="hq-arm hq-arm--left">
