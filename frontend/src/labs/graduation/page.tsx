@@ -14,6 +14,7 @@ import {
 import type {
   ArmRow,
   PaperPosition,
+  SplitWallet,
 } from "./types";
 
 /**
@@ -648,27 +649,30 @@ function LeaderboardPanel() {
   // null = deliberately collapsed. Two states, because falling back to the
   // leader whenever the value is empty makes row one impossible to close.
   const [openArm, setOpenArm] = useState<string | null | undefined>(undefined);
-  // How many equal trades the $100 is split into. 1 is the board as judged.
-  const [split, setSplit] = useState(1);
+  // Which wallet size is shown, as "<ticket>x<count>". $100 x 1 is the board
+  // as judged; the rest split the $100 or trade a bigger wallet.
+  const [size, setSize] = useState("100x1");
   if (!data?.running) return null;
   const band = data.control_band === null ? null : Number(data.control_band);
   const splits = data.arms.find((a) => a.splits?.length)?.splits ?? [];
-  // Each arm's wallet at the chosen split, falling back to the $100 column
-  // (the two are the same walk at split 1).
-  const at = (a: ArmRow) => a.splits?.find((x) => x.split === split);
+  const keyOf = (s: SplitWallet) => `${Number(s.ticket_usd)}x${s.split}`;
+  const official = size === "100x1";
+  // Each arm's wallet at the chosen size, falling back to the $100 column
+  // (the two are the same walk at $100 x 1).
+  const at = (a: ArmRow) => a.splits?.find((x) => keyOf(x) === size);
   const walletOf = (a: ArmRow) => at(a)?.wallet_usd ?? a.wallet_funded_usd;
   const ranked =
-    split === 1
+    official
       ? data.arms
       : [...data.arms].sort(
           (x, y) =>
             Number(y.trades > 0) - Number(x.trades > 0) ||
             Number(walletOf(y)) - Number(walletOf(x)),
         );
-  const top = split === 1 ? data.leader : (ranked[0]?.name ?? "");
-  const ticket = Number(
-    splits.find((x) => x.split === split)?.ticket_usd ?? data.wallet_demo_usd,
-  );
+  const top = official ? data.leader : (ranked[0]?.name ?? "");
+  const chosen = splits.find((x) => keyOf(x) === size);
+  const ticket = Number(chosen?.ticket_usd ?? data.wallet_demo_usd);
+  const start = Number(chosen?.start_usd ?? data.wallet_demo_usd);
   const shown = showAll ? ranked : ranked.slice(0, 12);
   const expanded = openArm === undefined ? (ranked[0]?.name ?? null) : openArm;
   const lead = data.arms.find((a) => a.name === data.leader);
@@ -908,17 +912,17 @@ function LeaderboardPanel() {
             <div
               className="flex flex-wrap items-center gap-1.5 text-xs"
               role="group"
-              aria-label="Split your $100"
+              aria-label="Wallet size"
             >
-              <span className="mr-1 text-ink-dim">Split your $100:</span>
+              <span className="mr-1 text-ink-dim">Wallet size:</span>
               {splits.map((s) => (
                 <button
-                  key={s.split}
+                  key={keyOf(s)}
                   type="button"
-                  onClick={() => setSplit(s.split)}
-                  aria-pressed={split === s.split}
+                  onClick={() => setSize(keyOf(s))}
+                  aria-pressed={size === keyOf(s)}
                   className={`rounded border px-2 py-1 tabular-nums transition-colors ${
-                    split === s.split
+                    size === keyOf(s)
                       ? "border-accent bg-accent/[0.08] text-accent"
                       : "border-line text-ink-dim hover:text-ink"
                   }`}
@@ -928,11 +932,25 @@ function LeaderboardPanel() {
               ))}
             </div>
             <p className="max-w-[78ch] text-xs leading-relaxed text-ink-dim">
-              {split === 1 ? (
+              {official ? (
                 <>
                   Every trade uses the whole $100, so one drained pool can take
                   the lot. Pick a split to see the same trades made with a
-                  smaller part of the wallet each time.
+                  smaller part of the wallet each time, or a bigger wallet to
+                  see what the same trades do at a larger size.
+                </>
+              ) : start > Number(data.wallet_demo_usd) ? (
+                <>
+                  <b className="text-ink">
+                    A ${start} wallet, trading ${ticket} at a time.
+                  </b>{" "}
+                  A bigger order moves the pool further, so every trade pays
+                  more price impact on the way in and out; the network fee is a
+                  smaller share of it. A drained pool still takes the whole
+                  trade. Gains are measured against the ${start} it started
+                  with. <b className="text-ink">Lowest</b> is the least the
+                  wallet held at any sell. The verdict above is judged on $100
+                  trades, and the projections apply only to them.
                 </>
               ) : (
                 <>
@@ -999,6 +1017,7 @@ function LeaderboardPanel() {
                 const isLeader = a.name === top;
                 const wallet = walletOf(a);
                 const here = at(a);
+                const opening = Number(here?.start_usd ?? data.wallet_demo_usd);
                 // Wiped, and kept on the board on purpose: these rows are the
                 // evidence that one slot means one token can end the wallet.
                 const dead = a.trades > 0 && Number(wallet) === 0;
@@ -1105,17 +1124,17 @@ function LeaderboardPanel() {
                         <>
                           <span
                             className={`block text-micro tabular-nums ${
-                              Number(wallet) > Number(data.wallet_demo_usd)
+                              Number(wallet) > opening
                                 ? "text-up"
-                                : Number(wallet) === Number(data.wallet_demo_usd)
+                                : Number(wallet) === opening
                                   ? "text-ink-dim"
                                   : "text-down"
                             }`}
                           >
                             {signedUsd(
-                              String(Number(wallet) - Number(data.wallet_demo_usd)),
+                              String(Number(wallet) - opening),
                             )}{" "}
-                            ({walletPct(wallet, data.wallet_demo_usd)})
+                            ({walletPct(wallet, opening)})
                           </span>
                           <span className="block text-micro tabular-nums text-ink-dim">
                             {here?.trades_funded ?? a.trades_funded} funded
@@ -1156,11 +1175,11 @@ function LeaderboardPanel() {
                         key={i}
                         className="py-2.5 pr-1 text-right align-top"
                       >
-                        {v === null || split !== 1 ? (
+                        {v === null || !official ? (
                           <span
                             className="text-micro text-ink-dim"
                             title={
-                              split !== 1
+                              !official
                                 ? "Projections are for $100 trades only."
                                 : "Not enough history to reach a tenth of the way to this horizon."
                             }

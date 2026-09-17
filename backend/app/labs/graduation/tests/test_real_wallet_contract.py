@@ -374,3 +374,24 @@ def test_a_smaller_order_moves_the_pool_less():
     assert _multiple(0.05, (), 0.25) == 1.05
     assert _multiple(0.05, (0.01, 0.01), 0.25) == pytest.approx(
         1.05 * (1.01 / 1.0025) ** 2)
+
+
+def test_a_bigger_wallet_pays_more_impact_and_a_smaller_fee_share():
+    """$1,000 in one ticket: ten times the order moves the pool ten times as
+    far on both legs, and the flat network fee is a tenth of the share."""
+    from datetime import UTC, datetime, timedelta
+    from decimal import Decimal
+
+    from app.labs.graduation.api import _funded_walk, _multiple
+
+    t0 = datetime(2026, 9, 17, tzinfo=UTC)
+    trade = (t0, t0 + timedelta(minutes=4), 0.02, 0.001, 0.001)
+    big = _funded_walk([trade], Decimal("100"), ticket=1000.0, start=1000.0)
+    assert (big.funded, big.skipped) == (1, 0)
+    measured = _multiple(0.02, (0.001, 0.001), 1.0)
+    at_ten = _multiple(0.02, (0.001, 0.001), 10.0)
+    assert at_ten < measured
+    # Starts at $1,000 and makes the trade's return at ten times the size,
+    # plus a fee credit (the priority fee is flat in SOL).
+    assert big.cash > 1000.0 * at_ten
+    assert big.low == 1000.0
