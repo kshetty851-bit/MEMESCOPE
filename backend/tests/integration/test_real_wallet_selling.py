@@ -470,3 +470,41 @@ async def test_sells_do_not_use_up_the_daily_buy_count(db_session, grad_signal, 
     await grad_signal(db_session, now)
     out = await RealWalletDriver(db_session).tick(now=now)
     assert out.created == 1, out
+
+
+async def test_the_wallet_reports_every_trade_since_its_first(db_session):
+    """Totals over every trade, and a return measured against the wallet's worth
+    when the first buy was created — not its balance now, which a deposit or a
+    withdrawal would move."""
+    from app.models.real_wallet_execution import RealWalletBalanceObservation
+
+    repo = LiveIntentRepository(db_session)
+    assert await repo.since_first_trade() is None
+
+    now = datetime.now(UTC)
+    # 2 SOL before trading, then a later balance that must not be used.
+    for seconds, lamports in ((-600, 2_000_000_000), (-60, 2_000_000_000), (30, 9_000_000_000)):
+        db_session.add(RealWalletBalanceObservation(
+            wallet_public_key=WALLET, observed_at=now + timedelta(seconds=seconds),
+            lamports=lamports))
+    await db_session.flush()
+    position = await _bought(db_session, at=now, price=_usd(now))
+    await _sell(db_session, position, at=now + timedelta(minutes=4), price=_usd(now))
+    await _bought(db_session, at=now + timedelta(minutes=5), price=_usd(now))
+
+    summary = await repo.since_first_trade()
+    assert summary is not None
+    assert (summary["trades"], summary["open"]) == (1, 1)
+    assert summary["first_trade_at"] == position.opened_at
+    assert summary["start_balance_sol"] == Decimal(2)
+    # Worth at the first buy's own price per SOL: cost / SOL spent. The sums
+    # come back from Numeric(38, 18), so compare to that precision.
+    close = lambda a, b: abs(a - b) < Decimal("1e-12")  # noqa: E731
+    per_sol = position.entry_price_usd * position.quantity / position.entry_actual_input_amount
+    assert close(summary["start_value_usd"], Decimal(2) * per_sol)
+    net = position.realised_net_pnl_usd
+    if net is None:
+        net = position.realised_gross_pnl_usd
+    assert close(summary["net_pnl_usd"], net)
+    assert (summary["won"], summary["lost"]) == ((1, 0) if net > 0 else (0, 1))
+    assert close(summary["return_pct"], net / (Decimal(2) * per_sol) * 100)

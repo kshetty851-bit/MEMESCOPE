@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.models.real_wallet_execution import (
+    RealWalletBalanceObservation,
     RealWalletExecutionEvent,
     RealWalletExecutionHealth,
     RealWalletKillSwitch,
@@ -301,6 +302,63 @@ class LiveIntentRepository:
             .where(RealWalletPosition.closed_at >= start))).all()
         return sum(((net if net is not None else gross) or Decimal(0)
                     for net, gross in rows), Decimal(0))
+
+    async def since_first_trade(self) -> dict[str, Any] | None:
+        """Every real trade since the first, and the wallet's worth when it began.
+
+        The starting worth is the last balance the watch recorded before the
+        first buy was created, priced at what that buy paid per SOL — so later
+        deposits, withdrawals and SOL's own price cannot move the return. Net
+        where measured, gross where a fee could not be priced, as the loss limit
+        counts it. None before the first trade.
+        """
+        await self._session.flush()
+        first = (await self._session.execute(
+            select(RealWalletPosition).order_by(RealWalletPosition.opened_at).limit(1)
+        )).scalars().first()
+        if first is None:
+            return None
+        pnl = func.coalesce(RealWalletPosition.realised_net_pnl_usd,
+                            RealWalletPosition.realised_gross_pnl_usd)
+        closed = RealWalletPosition.status == "CLOSED"
+        trades, won, lost, still_open, net, traded = (await self._session.execute(select(
+            func.count().filter(closed),
+            func.count().filter(closed, pnl > 0),
+            func.count().filter(closed, pnl < 0),
+            func.count().filter(RealWalletPosition.status == "OPEN"),
+            func.coalesce(func.sum(pnl).filter(closed), 0),
+            func.coalesce(func.sum(RealWalletPosition.entry_price_usd
+                                   * RealWalletPosition.quantity).filter(closed), 0),
+        ))).one()
+        began = first.opened_at
+        if first.opened_live_intent_id is not None:
+            began = await self._session.scalar(
+                select(RealWalletLiveIntent.created_at)
+                .where(RealWalletLiveIntent.id == first.opened_live_intent_id)) or began
+        watched = select(RealWalletBalanceObservation.lamports).where(
+            RealWalletBalanceObservation.observed_at <= began)
+        if first.wallet_public_key:
+            watched = watched.where(
+                RealWalletBalanceObservation.wallet_public_key == first.wallet_public_key)
+        lamports = await self._session.scalar(
+            watched.order_by(RealWalletBalanceObservation.observed_at.desc()).limit(1))
+        start_sol = start_usd = None
+        if lamports is not None and first.entry_actual_input_amount:
+            start_sol = Decimal(lamports) / Decimal(10**9)
+            start_usd = start_sol * (first.entry_price_usd * first.quantity
+                                     / first.entry_actual_input_amount)
+        net, traded = Decimal(net), Decimal(traded)
+        return {
+            "first_trade_at": first.opened_at,
+            "trades": int(trades), "won": int(won), "lost": int(lost),
+            "open": int(still_open),
+            "net_pnl_usd": net,
+            "traded_usd": traded,
+            "average_return_pct": net / traded * 100 if traded > 0 else None,
+            "start_balance_sol": start_sol,
+            "start_value_usd": start_usd,
+            "return_pct": net / start_usd * 100 if start_usd else None,
+        }
 
     async def realised_loss_today(self, now: datetime) -> Decimal:
         """Today's net realised loss; zero on an up day."""
