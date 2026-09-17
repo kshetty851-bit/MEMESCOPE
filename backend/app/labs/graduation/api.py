@@ -19,7 +19,7 @@ from math import sqrt
 from statistics import fmean, pstdev
 from typing import Any, NamedTuple
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -103,6 +103,11 @@ class PaperPosition(BaseModel):
     #: Why the trade counts for nothing, when it does not: `not_graduation_pool`
     #: for a token that never graduated from pump.fun.
     excluded: str | None = None
+    #: What this trade made or lost for the wallet SIZE the reader picked, and
+    #: whether that wallet could pay for it at all. Both null unless the
+    #: request asked for a size: the book itself always trades $100.
+    size_pnl_usd: Decimal | None = None
+    size_funded: bool | None = None
     #: A restated trade: what the restatement did, and what the row said before.
     restated: str | None = None
     was_pnl_usd: Decimal | None = None
@@ -152,6 +157,14 @@ class PaperBookOut(BaseModel):
     #: them, so a 30-second poll does not carry the whole history each time.
     open_trades: list[PaperPosition] = []
     closed_trades: list[PaperPosition] = []
+    #: Echoed back when a size was asked for, so the panel can say which wallet
+    #: the per-trade dollars belong to and check its own total: the funded
+    #: trades sum to `size_end_usd - size_start_usd`.
+    size_ticket_usd: Decimal | None = None
+    size_start_usd: Decimal | None = None
+    size_end_usd: Decimal | None = None
+    size_funded: int | None = None
+    size_skipped: int | None = None
 
 
 class GraduationStatus(BaseModel):
@@ -367,7 +380,8 @@ def _filter_description() -> str:
 
 
 async def _paper(db: AsyncSession, *, book: str = "E05_hold_5m",
-                 limit: int | None = 10) -> PaperBookOut:
+                 limit: int | None = 10, ticket: float | None = None,
+                 split: int = 1) -> PaperBookOut:
     """One book's state. Read-only: this endpoint never ticks it."""
     account = await PaperBook(db, book=book).account()
     open_rows, closed_rows = await positions(db, book=book, limit=limit)
@@ -408,6 +422,10 @@ async def _paper(db: AsyncSession, *, book: str = "E05_hold_5m",
             was_pnl_usd=restatement.was_pnl_usd if restatement else None,
             was_net_return=restatement.was_net_return if restatement else None)
 
+    closed_out = [out(r) for r in closed_rows]
+    sized = await _size_trades(db, rows=closed_rows, out_rows=closed_out,
+                               ticket=ticket, split=split)
+
     return PaperBookOut(
         running=config.paper_enabled(),
         book=book,
@@ -440,12 +458,78 @@ async def _paper(db: AsyncSession, *, book: str = "E05_hold_5m",
         top_token_share=account.top_token_share,
         cost_pct_per_side=book_costs.side_fraction.quantize(Decimal("0.0001")),
         open_trades=[out(r) for r in open_rows],
-        closed_trades=[out(r) for r in closed_rows],
+        closed_trades=closed_out,
+        **sized,
     )
+
+
+@lru_cache(maxsize=1)
+def _wallet_sizes() -> frozenset[tuple[float, int]]:
+    """The (ticket, split) pairs the board offers, and nothing else.
+
+    The endpoint answers for a size the page can actually show, so a caller
+    cannot invent a wallet the leaderboard never walked and compare the two.
+    """
+    base = float(config.PAPER_NOTIONAL_USD)
+    return frozenset({(base / n, n) for n in config.WALLET_SPLITS}
+                     | {(float(t), 1) for t in config.WALLET_LARGER})
+
+
+async def _size_trades(db: AsyncSession, *, rows: Sequence[Any],
+                       out_rows: list[PaperPosition], ticket: float | None,
+                       split: int) -> dict[str, Any]:
+    """Stamp each trade with what the reader's wallet size made on it.
+
+    The panel used to show $100 fills whatever size the board was set to, so a
+    reader who picked $10 x 10 saw the row say +14% and every trade under it
+    say $100. Both were right and they looked like a contradiction.
+
+    One walk, not a scaling: the same `_funded_walk` the row above runs, over
+    the same trades in the same order, so a trade the small wallet could not
+    pay for is marked rather than silently divided by ten.
+    """
+    if ticket is None:
+        return {}
+    eligible = [r[0] for r in rows
+                if r[0].excluded is None and r[0].net_return is not None
+                and r[0].close_quote and r[0].close_quote > 0
+                and r[0].notional_usd and r[0].notional_usd > 0
+                and r[0].closed_at is not None
+                and r[0].closed_at >= datetime.now(UTC) - timedelta(days=7)
+                and r[0].sol_usd_at_open is not None
+                and config.SOL_USD_MIN <= r[0].sol_usd_at_open <= config.SOL_USD_MAX]
+    eligible.sort(key=lambda p: (p.opened_at, p.id))
+    rate = await db.scalar(
+        select(GradPostgradSample.price_usd / GradPostgradSample.price_native)
+        .where(GradPostgradSample.price_usd > 0,
+               GradPostgradSample.price_native > 0)
+        .order_by(GradPostgradSample.ts.desc()).limit(1))
+    walk = _funded_walk(
+        [(p.opened_at, p.closed_at, float(p.net_return),
+          float(p.impact_open or 0), float(p.impact_close or 0))
+         for p in eligible],
+        rate, ticket=ticket, start=ticket * split)
+    cents = Decimal("0.01")
+    by_mint = {p.mint: value for p, value in zip(eligible, walk.pnl, strict=True)}
+    for row in out_rows:
+        if row.mint not in by_mint:
+            continue
+        value = by_mint[row.mint]
+        row.size_funded = value is not None
+        row.size_pnl_usd = (Decimal(str(value)).quantize(cents)
+                            if value is not None else None)
+    return {
+        "size_ticket_usd": Decimal(str(ticket)),
+        "size_start_usd": Decimal(str(ticket * split)),
+        "size_end_usd": Decimal(str(walk.cash)).quantize(cents),
+        "size_funded": walk.funded,
+        "size_skipped": walk.skipped,
+    }
 
 
 @router.get("/paper/trades", response_model=PaperBookOut)
 async def paper_trades(book: str = "E05_hold_5m",
+                       ticket: float | None = None, split: int = 1,
                        db: AsyncSession = Depends(get_db)) -> PaperBookOut:
     """Every closed trade, not just the recent ones.
 
@@ -460,7 +544,11 @@ async def paper_trades(book: str = "E05_hold_5m",
 
     if book not in BY_NAME:
         return PaperBookOut(book=book)
-    return await _paper(db, book=book, limit=None)
+    if ticket is not None and (ticket, split) not in _wallet_sizes():
+        raise HTTPException(
+            status_code=422,
+            detail="ticket/split must be one of the board's wallet sizes")
+    return await _paper(db, book=book, limit=None, ticket=ticket, split=split)
 
 
 #: How far every graduated token got, from its pool open to its HIGHEST
@@ -777,6 +865,11 @@ class Walk(NamedTuple):
     skipped: int
     took: list[tuple[datetime, float]]
     low: float
+    #: Dollars this wallet made or lost on each trade it was offered, in the
+    #: order it met them; `None` where it had no free money and skipped. The
+    #: trade list renders these, so the rows and the wallet figure beside them
+    #: come from one walk rather than two models that can disagree.
+    pnl: tuple[float | None, ...]
 
 
 def _multiple(ret: float, impact: Sequence[float], k: float) -> float:
@@ -850,6 +943,7 @@ def _funded_walk(
     #: projection is built from THESE, so the forecast and the column beside it
     #: describe the same account rather than two different ones.
     took: list[tuple[datetime, float]] = []
+    pnl: list[float | None] = []
     funded = skipped = 0
     for opened, closed, ret, *impact in trades:
         due = [h for h in held if h[0] <= opened]
@@ -865,16 +959,19 @@ def _funded_walk(
                                    ticket=cap, floor=floor)
         if stake is None:
             skipped += 1
+            pnl.append(None)
             continue
         cash -= stake
-        held.append((closed, _multiple(ret, impact, stake / base)
-                      - _size_penalty(stake, base, rate), stake))
+        multiple = (_multiple(ret, impact, stake / base)
+                    - _size_penalty(stake, base, rate))
+        held.append((closed, multiple, stake))
         took.append((closed, ret))
+        pnl.append(stake * (multiple - 1.0))
         funded += 1
     low = min(low, _low_through(cash, [], held))
     for _, r, size in held:
         cash += size * r
-    return Walk(cash, funded, skipped, took, low)
+    return Walk(cash, funded, skipped, took, low, tuple(pnl))
 
 
 def _wallet_walk(returns: Iterable[float],
@@ -934,8 +1031,13 @@ def _fee_shape(measured_at_usd: float, rate_str: str) -> tuple[float, float]:
 
         side(s) = flat + priority / s
 
-    Verified against the model at four sizes: $100 0.705%, $50 0.909%,
-    $25 1.318%, $10 2.546% a leg.
+    Verified against the model at four sizes, at SOL $100 and the current
+    `BACKTEST_PRIORITY_FEE_QUOTE` (0.0001075 SOL a side): $100 0.611%,
+    $50 0.622%, $25 0.643%, $10 0.708% a leg. The figures this docstring
+    carried before — 0.705%, 0.909%, 1.318%, 2.546% — were measured when that
+    fee was 0.002 SOL, twenty times too high, and they made every small size
+    look far worse than it is. The live wallet's own network fee is smaller
+    still: 14,500 lamports a round trip on 2026-09-17, about $0.0015.
     """
     rate = Decimal(rate_str)
     a, b = 100.0, 10.0
@@ -950,16 +1052,18 @@ def _size_penalty(position_usd: float, measured_at_usd: float,
                   rate: Decimal | None) -> float:
     """What a position of THIS size pays beyond what the measured one did.
 
-    Every return handed to this walk was priced on a $100 order. The wallet
-    trades a TENTH of its equity — $10 at the start — and a $10 order does not
-    cost what a $100 order costs, because the priority fee is flat in SOL and
-    its share explodes as the order shrinks:
+    Every return handed to this walk was priced on a $100 order. A smaller
+    order does not cost what a $100 order costs, because the priority fee is
+    flat in SOL and its share grows as the order shrinks:
 
-        $100  0.705% a leg    $50  0.909%    $25  1.318%    $10  2.546%
+        $100  0.611% a leg    $50  0.622%    $25  0.643%    $10  0.708%
 
-    Charging $100 execution to a $10 position understated the round trip by
-    3.68% PER TRADE, which is larger than any gross edge this lab has ever
-    measured. It turned the leaderboard's best arm from $88.84 into $121.04.
+    Small at today's fee, and the correction matters most at $1-$2 a trade
+    (+2.1% a round trip at $1). It was large when this was written, because
+    the fee was then 0.002 SOL a side: charging $100 execution to a $10
+    position understated the round trip by 3.68% per trade and turned the
+    leaderboard's best arm from $88.84 into $121.04. Kept because the shape is
+    right whatever the fee is, and the fee is a setting.
 
     Returned as the EXCESS over the size the returns were measured at, so a
     wallet whose position happens to be $100 pays nothing extra and the walk

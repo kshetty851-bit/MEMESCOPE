@@ -89,6 +89,11 @@ export interface PaperPosition {
   liq_close_usd: string | null;
   impact_open: string | null;
   impact_close: string | null;
+  /** What this trade made or lost for the wallet SIZE the reader picked, and
+   * whether that wallet could pay for it. Null unless a size was asked for:
+   * the book itself always trades $100. */
+  size_pnl_usd: string | null;
+  size_funded: boolean | null;
   /** Why this trade counts for nothing: `not_graduation_pool` for a token that
    * never graduated from pump.fun, `rugged` for a trade whose pool was drained
    * while it was open (left out on request). Shown struck through, never
@@ -106,6 +111,13 @@ export interface PaperPosition {
 /** The forward paper book. Rules frozen in advance; nothing here is tunable. */
 export interface PaperBook {
   running: boolean;
+  /** Echoed back when a size was asked for. The funded trades below sum to
+   * `size_end_usd - size_start_usd`, which is the row's wallet figure. */
+  size_ticket_usd?: string | null;
+  size_start_usd?: string | null;
+  size_end_usd?: string | null;
+  size_funded?: number | null;
+  size_skipped?: number | null;
   /** `control` or `filtered`. Same rules; the second adds one entry check. */
   book: string;
   filter_description: string;

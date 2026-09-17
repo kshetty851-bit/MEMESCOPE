@@ -140,7 +140,50 @@ const EXIT_LABEL: Record<string, string> = {
  * marks come from, so every figure in the row can be checked against its
  * source rather than taken on trust.
  */
-function TradeRow({ p, closed }: { p: PaperPosition; closed: boolean }) {
+/** The wallet the reader picked on the board: one ticket, so many at a time. */
+type WalletSize = { ticket: number; split: number };
+
+/**
+ * What this trade did for the chosen wallet.
+ *
+ * Blank rather than zero when the wallet never met the trade — older than the
+ * week the walk covers, or left out of the board entirely — because a dash
+ * says "not counted here" and $0.00 says "counted, made nothing".
+ */
+function SizeCell({ p }: { p: PaperPosition }) {
+  if (p.size_funded === false) {
+    return (
+      <td className="py-2 pr-3 text-right text-ink-dim tabular-nums">
+        <span title="Every slot was already in use when this trade appeared, so this wallet could not pay for it.">
+          skipped
+        </span>
+      </td>
+    );
+  }
+  if (p.size_pnl_usd === null || p.size_pnl_usd === undefined) {
+    return <td className="py-2 pr-3 text-right text-ink-dim tabular-nums">—</td>;
+  }
+  const v = Number(p.size_pnl_usd);
+  return (
+    <td
+      className={`py-2 pr-3 text-right font-medium tabular-nums ${
+        v > 0 ? "text-up" : v < 0 ? "text-down" : ""
+      }`}
+    >
+      {signedUsd(p.size_pnl_usd)}
+    </td>
+  );
+}
+
+function TradeRow({
+  p,
+  closed,
+  size,
+}: {
+  p: PaperPosition;
+  closed: boolean;
+  size?: WalletSize | null;
+}) {
   const pnl = p.pnl_usd === null ? null : Number(p.pnl_usd);
   const tone = p.voided
     ? "text-ink-dim"
@@ -186,6 +229,7 @@ function TradeRow({ p, closed }: { p: PaperPosition; closed: boolean }) {
           </span>
         ) : null}
       </td>
+      {size ? <SizeCell p={p} /> : null}
       <td className="py-2 pr-3 text-right tabular-nums">
         {usd(p.notional_usd)}
       </td>
@@ -293,12 +337,14 @@ function TradeTable({
   empty,
   sort = null,
   onSort,
+  size = null,
 }: {
   rows: PaperPosition[];
   closed: boolean;
   empty: string;
   sort?: { key: SortKey; desc: boolean } | null;
   onSort?: (key: SortKey) => void;
+  size?: WalletSize | null;
 }) {
   if (!rows.length) return <p className="text-xs text-ink-dim">{empty}</p>;
   const ordered = sort
@@ -314,12 +360,20 @@ function TradeTable({
   const voided = ordered.length - counted.length - foreign - rugged;
   const total = counted.reduce((a, p) => a + Number(p.pnl_usd ?? 0), 0);
   const deployed = counted.reduce((a, p) => a + Number(p.notional_usd), 0);
+  // The wallet's own total, from the same walk that filled the rows: what it
+  // funded, banked and skipped. Not a scaling of the $100 column — a wallet
+  // that could not pay for a trade made nothing on it, not a tenth.
+  const sized = rows.reduce((a, p) => a + Number(p.size_pnl_usd ?? 0), 0);
+  const skipped = rows.filter((p) => p.size_funded === false).length;
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[520px] text-sm">
         <thead>
           <tr className="text-left text-[11px] uppercase tracking-wider text-ink-dim">
             <SortHead label="Token / mint" sort={sort} align="left" />
+            {size ? (
+              <SortHead label={`At $${size.ticket}×${size.split}`} sort={sort} />
+            ) : null}
             <SortHead label="Size" sort={sort} />
             <SortHead
               label={closed ? "Realised P&L" : "Unrealised P&L"}
@@ -343,7 +397,7 @@ function TradeTable({
         </thead>
         <tbody>
           {ordered.map((p: PaperPosition) => (
-            <TradeRow key={p.mint} p={p} closed={closed} />
+            <TradeRow key={p.mint} p={p} closed={closed} size={size} />
           ))}
         </tbody>
         <tfoot>
@@ -354,6 +408,18 @@ function TradeTable({
               {rugged ? `, ${rugged} rugged left out` : ""}
               {voided ? `, ${voided} voided` : ""}
             </td>
+            {size ? (
+              <td
+                className={`pt-2 pr-3 text-right font-medium tabular-nums ${
+                  sized > 0 ? "text-up" : sized < 0 ? "text-down" : ""
+                }`}
+              >
+                {signedUsd(String(sized))}
+                <span className="block text-micro font-normal text-ink-dim">
+                  {skipped ? `${skipped} unaffordable` : "every trade funded"}
+                </span>
+              </td>
+            ) : null}
             <td className="pt-2 pr-3 text-right tabular-nums">
               {usd(String(deployed))}
               <span className="block text-micro text-ink-dim">
@@ -569,8 +635,8 @@ function Elapsed({ since }: { since: string | null }) {
  * leaderboard's map would change count as rows open and close. Mounting it is
  * what triggers the fetch, so a collapsed arm costs nothing.
  */
-function ArmTrades({ name }: { name: string }) {
-  const { data, isLoading } = useGraduationTrades(name);
+function ArmTrades({ name, size }: { name: string; size: WalletSize }) {
+  const { data, isLoading } = useGraduationTrades(name, size);
   const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({
     key: "closed_at",
     desc: true,
@@ -589,14 +655,20 @@ function ArmTrades({ name }: { name: string }) {
         checked rather than taken on trust.
         <br />
         <span className="mt-1 block">
-          <b className="text-ink">These are $100 fills, not a $100 account.</b>{" "}
-          The totals below sum every trade as a fresh $100 bet — so a
-          hundred-odd trades can total more than any wallet ever held, because
-          the money was deployed again and again. The wallet figure on the row
-          above is one $100 account taking these same trades one at a time,
-          which is what you would actually do with $100. Both are correct. They
-          count different things, and only the per-trade average is free of
-          either.
+          <b className="text-ink">
+            Two columns, two questions.
+          </b>{" "}
+          <b className="text-ink">
+            At ${size.ticket}×{size.split}
+          </b>{" "}
+          is the wallet you picked above: ${size.ticket} a trade out of $
+          {size.ticket * size.split}, so a trade it had no free money for says{" "}
+          <i>skipped</i> and those dollars add up to the wallet figure on the
+          row. <b className="text-ink">Size</b> and{" "}
+          <b className="text-ink">P&amp;L</b> are the book itself, which always
+          bets a fresh $100 — so a hundred-odd trades there can total more than
+          any wallet ever held, because the money was deployed again and again.
+          Both are correct; they count different things.
         </span>
       </p>
       {/* Rendered even when empty. An arm that holds for minutes is FLAT most
@@ -619,6 +691,7 @@ function ArmTrades({ name }: { name: string }) {
         <TradeTable
           rows={closed}
           closed
+          size={size}
           sort={sort}
           onSort={(key) =>
             setSort((s) => ({ key, desc: s.key === key ? !s.desc : true }))
@@ -1203,7 +1276,10 @@ function LeaderboardPanel() {
                   {expanded === a.name ? (
                     <tr>
                       <td colSpan={9} className="p-0">
-                        <ArmTrades name={a.name} />
+                        <ArmTrades
+                          name={a.name}
+                          size={{ ticket, split: chosen?.split ?? 1 }}
+                        />
                       </td>
                     </tr>
                   ) : null}

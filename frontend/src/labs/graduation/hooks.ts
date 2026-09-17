@@ -54,10 +54,16 @@ export function useGraduationStatus() {
  * never changes, so the only new information is the odd exit, and the book
  * ticks once a minute.
  */
-export function useGraduationTrades(book: string) {
+export function useGraduationTrades(
+  book: string,
+  size?: { ticket: number; split: number },
+) {
   return useQuery({
-    queryKey: ["graduation", "paper-trades", book],
-    queryFn: () => fetchPaperTrades(book),
+    // The size is part of the key: the same trades at $10 are a different
+    // answer from the same trades at $100, and caching them as one showed the
+    // previous size's dollars under the new size's heading.
+    queryKey: ["graduation", "paper-trades", book, size?.ticket, size?.split],
+    queryFn: () => fetchPaperTrades(book, size),
     refetchInterval: 60_000,
     ...LIVE,
   });
