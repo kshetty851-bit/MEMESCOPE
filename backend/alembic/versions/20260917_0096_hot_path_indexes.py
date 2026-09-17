@@ -12,8 +12,11 @@
 Built CONCURRENTLY: both tables are written to while a deploy runs, and a
 plain CREATE INDEX would block those writes until it finished.
 
-Revision ID: 0095_hot_path_indexes
-Revises: 0094_rafiq_g1_features
+Numbered 0096, after 0095_real_wallet_trade_alerts: both were written against
+0094 on the same day, and the alerts table reached production first.
+
+Revision ID: 0096_hot_path_indexes
+Revises: 0095_real_wallet_trade_alerts
 """
 
 from __future__ import annotations
@@ -21,8 +24,8 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0095_hot_path_indexes"
-down_revision: str = "0094_rafiq_g1_features"
+revision: str = "0096_hot_path_indexes"
+down_revision: str = "0095_real_wallet_trade_alerts"
 branch_labels = None
 depends_on = None
 
