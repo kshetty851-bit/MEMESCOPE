@@ -260,6 +260,20 @@ class RafiqLabPosition(Base):
     #: The regime multiplier the position was sized with (1 = normal).
     size_multiplier: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))
 
+    # --- G1: the hour after the exit, for the learning layer -------------
+    # Written once the hour has closed, from prints strictly after
+    # `closed_at`, and never into any entry or exit column.
+    #: Best tradeable print in the hour after exit, over `entry_price`. Null
+    #: when nothing tradeable printed.
+    forward_peak_multiple: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
+    #: The token went to zero: no pool at exit, no pool at the end of the
+    #: hour, or a last price at a tenth of entry or less.
+    forward_went_to_zero: Mapped[bool | None] = mapped_column(Boolean)
+    #: When `Learning.on_trade_closed` consumed this trade. Set once; a trade
+    #: is never fed twice.
+    learning_recorded_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True))
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -491,7 +505,8 @@ class RafiqLabRunState(Base):
 
     The ratchet's high-water mark and floor live here because the floor must
     never fall — not across a restart either, and an in-memory ratchet would
-    come back at its initial $950.
+    come back at its initial $950. The learning layer's evidence lives here
+    for the same reason: a restart must not forget what it has seen.
     """
 
     __tablename__ = "rafiq_lab_run_state"
@@ -505,6 +520,10 @@ class RafiqLabRunState(Base):
     lab_run_id: Mapped[str] = mapped_column(_RUN_ID, nullable=False)
     ratchet_high_water: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
     ratchet_floor: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
+    #: `learning.Learning`'s evidence, as JSON: the calibrator's threshold and
+    #: its two buckets, the regime window and its baseline, and the last size
+    #: multiplier handed out. Null until the run first learns something.
+    learning: Mapped[dict | None] = mapped_column(JSONB)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

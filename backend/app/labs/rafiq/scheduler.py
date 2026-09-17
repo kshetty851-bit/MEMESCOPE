@@ -77,6 +77,33 @@ async def tick() -> dict[str, Any]:
         return {"error": "rafiq_lab_tick_failed"}
 
 
+@celery_app.task(name="app.labs.rafiq.scheduler.rafiq_g1_learning_tick")
+def rafiq_g1_learning_tick() -> dict[str, Any]:
+    return run_async(learn())
+
+
+async def learn() -> dict[str, Any]:
+    """G1's post-exit pass on its own: measure each closed trade's hour after
+    exit and feed it to the learning layer.
+
+    The scheduled pass rides `tick` — every minute, and BEFORE entries, so an
+    adjustment is in force for the next decision; a beat entry of its own
+    would live outside this package and could run after the entries it is
+    supposed to inform. This task exists to force the pass from a worker
+    shell. Reads `token_market_snapshots` only.
+    """
+    if not config.enabled():
+        return {"skipped": "rafiq_lab_disabled"}
+    try:
+        async with SessionFactory() as session:
+            result = await RafiqLabService(session).learn(now=datetime.now(UTC))
+            await session.commit()
+            return result
+    except Exception:  # containment is the point
+        logger.exception("rafiq_g1_learning_tick_failed")
+        return {"error": "rafiq_g1_learning_tick_failed"}
+
+
 @celery_app.task(name="app.labs.rafiq.scheduler.rafiq_outcomes_tick")
 def rafiq_outcomes_tick() -> dict[str, Any]:
     return run_async(record_outcomes())

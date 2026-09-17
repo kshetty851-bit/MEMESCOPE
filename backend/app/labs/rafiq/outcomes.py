@@ -35,7 +35,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
-from app.labs.rafiq.feed import RafiqFeed
+from app.labs.rafiq.feed import Mark, RafiqFeed, pool_reading, tradeable
 from app.labs.rafiq.models import RafiqCandidate
 
 logger = get_logger(__name__)
@@ -148,3 +148,36 @@ async def coverage(session: AsyncSession) -> dict[str, Any]:
     return {"candidates": total,
             "non_null_pct": {f: round(c * 100 / total, 1)
                              for f, c in zip(fields, counted, strict=True)}}
+
+
+#: How long a closed G1 trade's token is watched before the learning layer
+#: hears about the trade. The brief's hour, measured from the exit.
+EXIT_WINDOW = timedelta(hours=1)
+
+#: At or below this multiple of its entry price, a token has gone to zero for
+#: every purpose a $10 position has.
+ZERO_MULTIPLE = Decimal("0.10")
+
+
+def exit_outcome(window: list[Mark], *, entry_price: Decimal, exit_price: Decimal | None,
+                 end: datetime, delisted_at: datetime | None) -> tuple[Decimal | None, bool]:
+    """(forward_peak_multiple, went_to_zero) for one trade's hour after exit.
+
+    The peak is the best TRADEABLE print over the entry price — the scale a
+    +30% scale-out is measured on — and None when nothing tradeable printed.
+    A dead pool's leftover price is not a peak: that is the print Phase 0
+    stopped selling into.
+
+    Gone to zero: the exit itself found no pool, the pool reads gone at the
+    end of the hour (the same rule an exit uses), or its last tradeable price
+    is a tenth of entry or less.
+
+    Point-in-time by construction: `window` holds only prints after the exit,
+    and the caller only asks once the hour has closed.
+    """
+    prices = [r.price_usd for r in window if tradeable(r)]
+    peak = max(prices) / entry_price if prices else None
+    last = pool_reading(window, end, delisted_at)
+    gone = (exit_price == 0 or last is None
+            or last.price_usd <= entry_price * ZERO_MULTIPLE)
+    return peak, gone

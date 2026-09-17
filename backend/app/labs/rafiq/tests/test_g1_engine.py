@@ -96,7 +96,7 @@ BLOCKED = [("late0", 60), ("late1", 61)]
 
 async def seed_path(session, tag: str, detected: datetime, rows) -> str:
     """A Radar admission at `detected` with one snapshot a minute along `rows`."""
-    mint = ("G1" + tag).ljust(44, "5")[:44]
+    mint = ("G1" + tag + "X").ljust(44, "5")[:44]   # X ends the tag: cut1 != cut15
     token = DiscoveredToken(
         id=uuid.uuid4(), mint_address=mint, symbol=tag[:10].upper(), name=tag,
         signature=("sig" + uuid.uuid4().hex).ljust(64, "6")[:64], slot=1,

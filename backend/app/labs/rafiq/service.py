@@ -31,10 +31,11 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
-from app.labs.rafiq import config, entry_gate, registry
+from app.labs.rafiq import config, entry_gate, outcomes, registry
 from app.labs.rafiq.adapters import costs, evidence
 from app.labs.rafiq.engine import Geometry, Mark, evaluate, off_band
 from app.labs.rafiq.feed import Candidate, Observation, RafiqFeed
+from app.labs.rafiq.g1 import learning
 from app.labs.rafiq.g1 import strategy_G1 as g1
 from app.labs.rafiq.models import (
     RafiqCandidate,
@@ -64,6 +65,34 @@ _FILED_LOOKBACK = timedelta(hours=6)
 #: `strategy_G1.admits` names the checks it ran; the last one is the refusal.
 _G1_REFUSAL = {"liquidity": "liquidity_too_low", "market_cap": "market_cap_too_low"}
 
+#: How many closed trades one tick feeds the learning layer. A cap, not a
+#: target: the backlog after an outage drains a batch a minute, oldest first.
+_LEARNING_BATCH = 200
+
+
+def _dump_learning(lrn: learning.Learning, size_multiplier: float) -> dict:
+    """`Learning`'s evidence as JSON. Its own fields, nothing derived."""
+    return {
+        "gain_threshold": str(lrn.abandon.gain_threshold),
+        "abandoned": list(lrn.abandon._abandoned),
+        "held": list(lrn.abandon._held),
+        "regime_recent": list(lrn.regime._recent),
+        "regime_baseline": lrn.regime._baseline_rate,
+        "size_multiplier": size_multiplier,
+    }
+
+
+def _load_learning(saved: dict | None, adjustments: list) -> tuple[learning.Learning, float]:
+    lrn = learning.Learning()
+    if saved:
+        lrn.abandon.gain_threshold = Decimal(saved["gain_threshold"])
+        lrn.abandon._abandoned.extend(saved["abandoned"])
+        lrn.abandon._held.extend(saved["held"])
+        lrn.regime._recent.extend(saved["regime_recent"])
+        lrn.regime._baseline_rate = saved["regime_baseline"]
+    lrn.abandon.adjustments.extend(adjustments)
+    return lrn, (saved or {}).get("size_multiplier", 1.0)
+
 
 class RafiqLabService:
     """One tick's worth of work. Holds a session; writes only lab tables."""
@@ -71,6 +100,8 @@ class RafiqLabService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
         self._feed = RafiqFeed(session)
+        #: G1's learner per run, loaded once per tick and saved on change.
+        self._learners: dict[str, tuple[learning.Learning, float]] = {}
 
     # --- activation ---------------------------------------------------------
 
@@ -169,6 +200,10 @@ class RafiqLabService:
         # run: two scanners would be two different markets.
         seen: dict[str, Observation | None] = {}
         archived_closed = await self._drain(seen, run=run, now=now)
+        # The learning layer hears about every trade whose post-exit hour has
+        # closed BEFORE this tick decides anything, so an adjustment it makes
+        # is the one the next entry uses.
+        learned = (await self.learn(now=now, rows=rows))["learned"]
 
         report: dict[str, dict] = {}
         for row in rows:
@@ -196,8 +231,8 @@ class RafiqLabService:
                                 "halted": halted, "halt_reason": reason,
                                 "enters": spec.enters}
         await self._session.flush()
-        return {"at": now.isoformat(), "run": run,
-                "archived_closed": archived_closed, "strategies": report}
+        return {"at": now.isoformat(), "run": run, "archived_closed": archived_closed,
+                "learned": learned, "strategies": report}
 
     async def _drain(self, seen, *, run: str, now: datetime) -> int:
         """Settle what other runs still hold. Opens nothing, asks no breaker.
@@ -420,6 +455,130 @@ class RafiqLabService:
             return True, ratchet_reason
         return (bool(verdict.halted) and spec.daily_breaker), verdict.reason
 
+    async def _run_state(self, row: RafiqLabStrategy, *,
+                         create: bool = True) -> RafiqLabRunState | None:
+        """The run's persisted state, created at the ratchet's opening values
+        unless `create` is off (a reader must not write)."""
+        state = (await self._session.execute(
+            select(RafiqLabRunState)
+            .where(RafiqLabRunState.lab_run_id == row.lab_run_id)
+        )).scalars().first()
+        if state is None and create:
+            state = RafiqLabRunState(lab_run_id=row.lab_run_id,
+                                     ratchet_high_water=row.starting_equity,
+                                     ratchet_floor=registry.G1_INITIAL_FLOOR)
+            self._session.add(state)
+            # Flushed now: sessions here run autoflush=False, and a second
+            # lookup this tick would otherwise insert a duplicate.
+            await self._session.flush()
+        return state
+
+    # --- G1's learning layer -------------------------------------------------
+
+    async def _learner(self, row: RafiqLabStrategy, *,
+                       create: bool = True) -> tuple[learning.Learning, float]:
+        if row.lab_run_id not in self._learners:
+            state = await self._run_state(row, create=create)
+            made = [
+                learning.Adjustment(a.at, a.parameter, a.old_value, a.new_value,
+                                    a.reason, a.sample_size, float(a.z_score))
+                for a in (await self._session.execute(
+                    select(RafiqLabAdjustment)
+                    .where(RafiqLabAdjustment.lab_run_id == row.lab_run_id,
+                           RafiqLabAdjustment.parameter == "abandon_gain_threshold")
+                    .order_by(RafiqLabAdjustment.at)
+                )).scalars()]
+            self._learners[row.lab_run_id] = _load_learning(
+                state.learning if state is not None else None, made)
+        return self._learners[row.lab_run_id]
+
+    async def _save_learner(self, row: RafiqLabStrategy) -> None:
+        lrn, size_multiplier = self._learners[row.lab_run_id]
+        state = await self._run_state(row)
+        state.learning = _dump_learning(lrn, size_multiplier)
+
+    def _audit(self, row: RafiqLabStrategy, *, at: datetime, parameter: str,
+               old, new, reason: str, sample_size: int | None = None,
+               z_score: float | None = None) -> None:
+        """One adjustments row and one log line for a parameter the run moved."""
+        self._session.add(RafiqLabAdjustment(
+            lab_run_id=row.lab_run_id, at=at, parameter=parameter,
+            old_value=Decimal(str(old)), new_value=Decimal(str(new)),
+            sample_size=sample_size,
+            z_score=None if z_score is None else Decimal(str(z_score)),
+            reason=reason))
+        logger.info("rafiq_g1_parameter_moved", run=row.lab_run_id, parameter=parameter,
+                    old=str(old), new=str(new), sample_size=sample_size,
+                    z_score=z_score, reason=reason)
+
+    async def learn(self, *, now: datetime, rows=None) -> dict:
+        """Feed the current run's G1 books everything whose hour has closed."""
+        self._learners.clear()
+        if rows is None:
+            rows = await self.activate(now=now)
+        learned = 0
+        for row in rows:
+            if registry.BY_CODE[row.code].g1:
+                learned += await self._learn(row, now=now)
+        return {"at": now.isoformat(), "learned": learned}
+
+    async def _learn(self, row: RafiqLabStrategy, *, now: datetime) -> int:
+        """Feed `Learning.on_trade_closed` every trade whose hour has closed.
+
+        Every exit path, oldest first, exactly once. The hour after the exit
+        is read from the platform's own snapshots — which already price every
+        admitted token — and written onto the row before the learner sees it.
+        """
+        due = list((await self._session.execute(
+            select(RafiqLabPosition)
+            .where(RafiqLabPosition.strategy_id == row.id,
+                   RafiqLabPosition.status == "closed",
+                   RafiqLabPosition.learning_recorded_at.is_(None),
+                   RafiqLabPosition.closed_at <= now - outcomes.EXIT_WINDOW)
+            .order_by(RafiqLabPosition.closed_at)
+            .limit(_LEARNING_BATCH)
+        )).scalars())
+        if not due:
+            return 0
+        lrn, _ = await self._learner(row)
+        for pos in due:
+            end = pos.closed_at + outcomes.EXIT_WINDOW
+            window = await self._feed.forward_window(
+                mint=pos.mint_address, after=pos.closed_at, until=end)
+            peak, gone = outcomes.exit_outcome(
+                window, entry_price=pos.entry_price, exit_price=pos.exit_price,
+                end=end, delisted_at=await self._feed.delisted_at(pos.mint_address))
+            pos.forward_peak_multiple = peak
+            pos.forward_went_to_zero = gone
+            # "1.0 if it never recovered" — learning.py's own convention for a
+            # token nothing tradeable priced again.
+            made = lrn.on_trade_closed(
+                exit_reason=pos.exit_reason, went_to_zero=gone,
+                later_peak_multiple=1.0 if peak is None else float(peak),
+                reached_take_profit=pos.scaled_out, now=now)
+            pos.learning_recorded_at = now
+            if made is not None:
+                self._audit(row, at=made.at, parameter=made.parameter,
+                            old=made.old_value, new=made.new_value, reason=made.reason,
+                            sample_size=made.sample_size, z_score=made.z_score)
+        await self._save_learner(row)
+        return len(due)
+
+    async def _g1_parameters(self, row: RafiqLabStrategy, *,
+                             now: datetime) -> tuple[Decimal, Decimal]:
+        """`Learning.current_parameters()`, read immediately before an entry
+        decision: (abandon threshold for `evaluate`, size multiplier)."""
+        lrn, last_multiplier = await self._learner(row)
+        params = lrn.current_parameters()
+        multiplier = params["size_multiplier"]
+        if multiplier != last_multiplier:
+            self._audit(row, at=now, parameter="size_multiplier", old=last_multiplier,
+                        new=multiplier, reason=params["regime_note"],
+                        sample_size=lrn.regime.sample_size)
+            self._learners[row.lab_run_id] = (lrn, multiplier)
+        return (Decimal(str(params["abandon_gain_threshold"])),
+                Decimal(str(multiplier)))
+
     async def _ratchet(self, row: RafiqLabStrategy, equity: Decimal, *,
                        now: datetime) -> g1.EquityRatchet:
         """`EquityRatchet.update(equity)` against the run's persisted state.
@@ -429,16 +588,7 @@ class RafiqLabService:
         cannot put it back at $950. Every move is an adjustment row and a log
         line.
         """
-        state = (await self._session.execute(
-            select(RafiqLabRunState)
-            .where(RafiqLabRunState.lab_run_id == row.lab_run_id)
-        )).scalars().first()
-        if state is None:
-            state = RafiqLabRunState(lab_run_id=row.lab_run_id,
-                                     ratchet_high_water=row.starting_equity,
-                                     ratchet_floor=registry.G1_INITIAL_FLOOR)
-            self._session.add(state)
-            await self._session.flush()
+        state = await self._run_state(row)
         ratchet = g1.EquityRatchet(high_water=state.ratchet_high_water,
                                    floor=state.ratchet_floor)
         before = ratchet.floor
@@ -446,13 +596,11 @@ class RafiqLabService:
         state.ratchet_high_water = ratchet.high_water
         if ratchet.floor != before:
             state.ratchet_floor = ratchet.floor
-            reason = (f"equity ${ratchet.high_water:,.2f} is a new high-water mark; "
-                      f"floor = high-water less {ratchet.give_back:.0%}, never down")
-            self._session.add(RafiqLabAdjustment(
-                lab_run_id=row.lab_run_id, at=now, parameter="equity_ratchet_floor",
-                old_value=before, new_value=ratchet.floor, reason=reason))
-            logger.info("rafiq_g1_ratchet_floor_moved", run=row.lab_run_id,
-                        old=str(before), new=str(ratchet.floor), reason=reason)
+            self._audit(row, at=now, parameter="equity_ratchet_floor", old=before,
+                        new=ratchet.floor,
+                        reason=(f"equity ${ratchet.high_water:,.2f} is a new high-water "
+                                f"mark; floor = high-water less "
+                                f"{ratchet.give_back:.0%}, never down"))
         return ratchet
 
     @staticmethod
@@ -511,11 +659,6 @@ class RafiqLabService:
                          if p.opened_at.date() == now.date()})
             remaining = spec.max_trades_per_day - today
 
-        # G1's two adjustable numbers, read once, immediately before this
-        # tick's entry decisions, and frozen onto every position they open.
-        abandon_gain, size_multiplier = (self._g1_parameters() if spec.g1
-                                         else (None, None))
-
         for cand in candidates:
             if cand.mint_address in held:
                 continue
@@ -528,6 +671,7 @@ class RafiqLabService:
             stop_pct = notional = None
             verdict = None
             reason: str | None = None
+            abandon_gain = size_multiplier = None
 
             if (now - cand.detected_at).total_seconds() > config.MAX_CANDIDATE_AGE_SECONDS:
                 reason = "candidate_too_old"
@@ -544,6 +688,11 @@ class RafiqLabService:
                 elif spec.consensus_gate and not self._admitted_by_e(obs, now=now):
                     reason = "consensus_refused"
                 else:
+                    # G1's two adjustable numbers, read immediately before this
+                    # decision and frozen onto the position it opens.
+                    if spec.g1:
+                        abandon_gain, size_multiplier = await self._g1_parameters(
+                            row, now=now)
                     stop_pct, notional, verdict, reason = self._size_and_gate(
                         spec, obs, equity=equity, cash=cash,
                         size_multiplier=size_multiplier)
@@ -669,14 +818,13 @@ class RafiqLabService:
                                           obs.liquidity_usd) - notional
             if remaining is not None:
                 remaining -= 1
-        if spec.g1 and opened:
-            await self._ratchet(row, equity, now=now)
+        if spec.g1:
+            if opened:
+                await self._ratchet(row, equity, now=now)
+            if row.lab_run_id in self._learners:
+                # The regime may have fixed its baseline while being asked.
+                await self._save_learner(row)
         return opened
-
-    @staticmethod
-    def _g1_parameters() -> tuple[Decimal, Decimal]:
-        """(abandon threshold, size multiplier) for G1's next entries."""
-        return g1.ABANDON_UNLESS_GAIN, Decimal(1)
 
     @staticmethod
     def _size_and_gate(spec: LabStrategy, obs: Observation, *, equity: Decimal,
