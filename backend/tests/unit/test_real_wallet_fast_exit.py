@@ -45,11 +45,21 @@ class _FakeScalars:
 
 
 class _FakeSession:
-    def __init__(self, ids: list[str]) -> None:
+    """Counts commits; `locks` answers the advisory-lock queries in order."""
+
+    def __init__(self, ids: list[str], locks: list[bool] | None = None) -> None:
         self._ids = ids
+        self._locks = list(locks or [])
+        self.commits = 0
 
     async def scalars(self, _stmt: object) -> _FakeScalars:
         return _FakeScalars(self._ids)
+
+    async def scalar(self, _stmt: object) -> bool:
+        return self._locks.pop(0) if self._locks else True
+
+    async def commit(self) -> None:
+        self.commits += 1
 
 
 @pytest.mark.asyncio
@@ -87,6 +97,37 @@ async def test_drain_walks_an_intent_past_a_single_transition(monkeypatch) -> No
     assert [m["state"] for m in moved] == [
         "safety_approved", "order_created", "submitted", "reconciled"
     ]
+
+
+@pytest.mark.asyncio
+async def test_drain_commits_each_step_before_the_next(monkeypatch) -> None:
+    """The signer is another process: it reloads the intent by id and sees only
+    committed rows. With the steps chained in one transaction, the first live
+    buy (2026-09-17) was refused `intent_not_found` at the signing step."""
+    session = _FakeSession(["i1"])
+    committed_before: list[int] = []
+
+    class _Recording(_FakeExecutor):
+        async def advance(self, intent_id: object, *, now: object) -> _FakeOutcome:
+            committed_before.append(session.commits)
+            return await super().advance(intent_id, now=now)
+
+    monkeypatch.setattr(scheduler, "RealWalletExecutor", _Recording)
+    await scheduler._drain(session, now_fn=lambda: None)
+    assert committed_before == [0, 1, 2, 3, 4]
+
+
+@pytest.mark.asyncio
+async def test_drain_stops_when_another_pass_holds_the_lock(monkeypatch) -> None:
+    """A commit releases the locks. If the minute tick takes them in that gap,
+    this pass must leave the intent to it rather than advance it alongside."""
+    monkeypatch.setattr(scheduler, "RealWalletExecutor", _FakeExecutor)
+    # Both locks at the start, then the executor's is taken after step one.
+    session = _FakeSession(["i1"], locks=[True, True, True, False])
+    moved = await scheduler._drain(session, now_fn=lambda: None)
+    assert [m["state"] for m in moved] == ["safety_approved"]
+    assert await scheduler._drain(_FakeSession(["i1"], locks=[False]),
+                                  now_fn=lambda: None) == []
 
 
 @pytest.mark.asyncio
