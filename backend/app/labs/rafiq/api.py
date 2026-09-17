@@ -107,6 +107,8 @@ class StrategyOut(BaseModel):
     #: for a book without one.
     ratchet_floor: str | None = None
     ratchet_high_water: str | None = None
+    #: G1 only: `Learning.current_parameters()` as the next entry will read it.
+    learning: dict | None = None
 
 
 class PositionOut(BaseModel):
@@ -316,8 +318,14 @@ async def status(session: AsyncSession = Depends(get_db),
         select(RafiqLabRunState).where(RafiqLabRunState.lab_run_id == run)
     )).scalars().first()
     out: list[StrategyOut] = []
+    reader = RafiqLabService(session)
     for row in rows:
         spec = registry.BY_CODE[row.code]
+        learned = None
+        if spec.g1:
+            # Read-only: loaded without creating state, asked, never saved.
+            lrn, _ = await reader._learner(row, create=False)
+            learned = lrn.current_parameters()
         mine = [p for p in all_positions if p.strategy_id == row.id]
         closed = [p for p in mine if p.status == "closed"]
         openp = [p for p in mine if p.status == "open"]
@@ -362,7 +370,8 @@ async def status(session: AsyncSession = Depends(get_db),
             equity_curve=curve, activated_at=row.activated_at,
             ratchet_floor=_q(state.ratchet_floor) if spec.g1 and state else None,
             ratchet_high_water=(_q(state.ratchet_high_water)
-                                if spec.g1 and state else None)))
+                                if spec.g1 and state else None),
+            learning=learned))
     return StatusOut(running=True, run=run, starting_equity=str(config.STARTING_EQUITY),
                      strategies=out)
 

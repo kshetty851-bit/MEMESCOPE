@@ -418,3 +418,143 @@ venv and database:
 | `tests/integration` | 888 | 32 | yes |
 
 None of these failures come from this work.
+
+## Phase 2 — learning, wired
+
+### What the learner hears, and when
+
+- **Once per closed G1 trade, on every exit path, oldest first, and only
+  after the hour that follows the exit has closed.** `RafiqLabService.learn`
+  selects closed G1 rows with `learning_recorded_at IS NULL` and
+  `closed_at <= now − 1h`, in batches of 200.
+- For each trade it reads the prints in `(closed_at, closed_at + 1h]` and
+  writes `forward_peak_multiple` and `forward_went_to_zero` onto the row.
+  Only then does it call `Learning.on_trade_closed(...)` and stamp
+  `learning_recorded_at`.
+- **`later_peak_multiple`** is `forward_peak_multiple`: the best **tradeable**
+  print in the hour over `entry_price`, which is the same scale G1's +30%
+  scale-out is measured on. When nothing tradeable printed, it is 1.0, which
+  is `learning.py`'s own "never recovered" convention.
+  - A drained pool's leftover price is not a peak; that is the print Phase 0
+    stopped selling into.
+- **`went_to_zero`** is true when any of these holds:
+  - the exit itself found no pool (`exit_price = 0`);
+  - the pool reads gone at the end of the hour (the same `pool_reading` rule
+    an exit uses: an `inactive` reading or a `delisted_at` stamp after the
+    last tradeable print, or nothing tradeable at all);
+  - the last tradeable price is at or below 10% of entry.
+- **`reached_take_profit`** is `scaled_out`. **Decision:** G1's take-profit
+  rung is the +30% scale-out, which is also the "+30% runner" that
+  `RegimeMonitor` describes.
+
+### Decision: how the hour after exit is sampled
+
+The pool is sampled by reading the platform's own `token_market_snapshots`,
+which already prices every discovered token, rather than by polling
+DexScreener from the lab.
+
+- **Why:**
+  - The lab's rule is read-only on the shared feed with no external endpoint
+    (`outcomes.py` says why).
+  - DexScreener and GeckoTerminal punish bursts.
+  - A lab-side poller would be a second, rate-limited copy of the enrichment
+    worker.
+- **The cost, stated plainly:** Rafiq-lab positions are **not** in the
+  platform's priority re-pricing lane (`services/market/priority.py` covers
+  paper and V6 Lab holdings only). So a G1 token is priced:
+  - every **30s** while it is under 30 minutes old;
+  - every **5 min** after that.
+
+  The post-exit hour is therefore a lower bound on the real peak: a spike
+  between two 5-minute prints is missed.
+  - **The fix is outside this brief.** Add open and recently closed
+    `rafiq_lab_positions` to `resolve_membership` in `priority.py`, as
+    HQ INC-056 did for the V6 Lab.
+
+### Decision: where the job runs
+
+- **Scheduled path:** the pass runs inside the existing Celery beat task
+  `rafiq_lab_tick`, every minute, **before** entries. An adjustment is
+  therefore in force for the very next decision.
+- **Why not its own beat entry:** that would have to live in
+  `app/workers/celery_app.py`, outside this package, and it could run after
+  the entries it is meant to inform.
+- **Manual path:** `app.labs.rafiq.scheduler.rafiq_g1_learning_tick`, a
+  Celery task without a beat entry, runs the same pass from a worker shell.
+  It is inert while the flag is off.
+
+### Parameters before every entry
+
+- `Learning.current_parameters()` is read **immediately before each entry
+  decision**, per candidate, just before sizing.
+- `abandon_gain_threshold` is frozen onto the position as `abandon_gain` and
+  handed to `strategy_G1.evaluate(..., abandon_gain=...)` on every later
+  tick.
+- `size_multiplier` scales `position_size(current equity)` and is frozen onto
+  the position.
+- **Decision:** the threshold is frozen at entry rather than read live. A
+  position is judged by the rule it was opened under, the same
+  anti-hindsight rule as the rest of its geometry. A learned change applies
+  to the entries after it.
+
+### Persistence
+
+- **`rafiq_lab_run_state.learning`** (JSONB, keyed by `lab_run_id`) holds the
+  learner's evidence as `learning.py` keeps it:
+  - the calibrator's threshold and its two buckets;
+  - the regime window and its baseline;
+  - the last size multiplier handed out.
+
+  It is saved after each learning pass and after entries, because the regime
+  fixes its baseline when first asked.
+- **Every calibrator `Adjustment`** becomes a `rafiq_lab_adjustments` row:
+  `parameter='abandon_gain_threshold'`, old, new, `sample_size`, `z_score`,
+  reason, plus a log line. On load, those rows are handed back to the
+  calibrator, so `adjustments_made` survives a restart.
+- **Decision:** `RegimeMonitor` produces no `Adjustment` object, but its
+  multiplier is a parameter the run moves. Each change of the handed-out
+  multiplier is therefore also an adjustments row
+  (`parameter='size_multiplier'`, with the regime note as its reason).
+- **Serialization** reads `learning.py`'s dataclass fields directly. The
+  module was not modified; it has no serializer of its own.
+- **The status route** shows G1's `current_parameters()`. It reads them
+  without creating the run's state row, because the request session commits
+  on return and the router is read-only; a test holds that.
+
+### Tests
+
+**`tests/test_g1_learning.py`:**
+
+- **The gate.** Forty closed trades (20 abandoned tokens that later ran,
+  20 held tokens that lived) and one fresh admission, then a single tick.
+  - It learns all 40, and `learning.py` loosens 0.08 → 0.09 once
+    (n = 40, z ≥ 1.96, "cutting winners").
+  - The adjustment is stored.
+  - **The entry made in the same tick carries `abandon_gain = 0.09`.**
+  - The evidence is cleared.
+  - A restarted service reads 0.09 and one adjustment.
+- A trade is fed once, and only after its hour.
+- Every exit path reaches the right bucket; a scale-out counts as reaching
+  take-profit.
+- A halved regime halves the next bet ($5.00 on $1,000), and the change is
+  audited.
+- A pure table test covers `exit_outcome`.
+- The manual task is registered and inert while the flag is off.
+
+**`tests/test_api_runs.py`** gains `learning` on the status route and the
+"GET writes nothing" check.
+
+**`g1/test_learning.py`** passes in place (15 tests), as does
+`g1/test_strategy_G1.py` (22).
+
+**Gate:** lab suite **194 passed**, G1 package 37 passed, and the platform's
+`tests/unit/test_rafiq_analyst.py` 16 passed.
+
+### Migration `0093_rafiq_g1_learning`
+
+Nullable columns only. It is verified four ways:
+
+- upgrade from empty;
+- upgrade over the archive;
+- downgrade to `0092_rafiq_g1_run` and back;
+- zero `rafiq_*` autogenerate drift.

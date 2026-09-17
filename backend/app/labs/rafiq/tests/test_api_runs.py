@@ -12,15 +12,27 @@ from decimal import Decimal
 import httpx
 import pytest
 from fastapi import FastAPI
+from sqlalchemy import select
 
 from app.db.session import get_db
 from app.labs.rafiq import registry
 from app.labs.rafiq.api import router
-from app.labs.rafiq.models import RafiqLabPosition
+from app.labs.rafiq.models import RafiqLabPosition, RafiqLabRunState
 from app.labs.rafiq.service import RafiqLabService
 from app.labs.rafiq.tests.test_full_cycle import seed_candidate
 
 pytestmark = pytest.mark.integration
+
+
+def client_for(lab_session) -> httpx.AsyncClient:
+    app = FastAPI()
+    app.include_router(router)
+
+    async def session_override():
+        yield lab_session
+
+    app.dependency_overrides[get_db] = session_override
+    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://lab")
 
 
 async def test_every_route_reads_one_run(lab_session, monkeypatch) -> None:
@@ -43,15 +55,7 @@ async def test_every_route_reads_one_run(lab_session, monkeypatch) -> None:
     await seed_candidate(lab_session, now, tag="apirun")
     await service.tick(now=now)
 
-    app = FastAPI()
-    app.include_router(router)
-
-    async def session_override():
-        yield lab_session
-
-    app.dependency_overrides[get_db] = session_override
-    transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://lab") as client:
+    async with client_for(lab_session) as client:
         async def get(path, **params):
             response = await client.get(f"/labs/rafiq/{path}", params=params)
             assert response.status_code == 200, (path, params, response.text)
@@ -62,6 +66,8 @@ async def test_every_route_reads_one_run(lab_session, monkeypatch) -> None:
         assert [s["code"] for s in current["strategies"]] == ["G1"]
         g1 = current["strategies"][0]
         assert g1["enters"] is True and g1["open_positions"] == 1
+        assert g1["learning"]["abandon_gain_threshold"] == 0.08
+        assert g1["learning"]["size_multiplier"] == 1.0
         assert g1["ratchet_floor"] is not None and g1["lab_run_id"] == registry.G1_RUN
 
         old = await get("status", run=registry.ARCHIVED_RUN)
@@ -85,3 +91,15 @@ async def test_every_route_reads_one_run(lab_session, monkeypatch) -> None:
 
         unknown = await get("status", run="no-such-run")
         assert unknown["strategies"] == []
+
+
+async def test_reading_the_status_writes_nothing(lab_session, monkeypatch) -> None:
+    """The router is read-only and its session commits on return, so asking
+    for G1's learning state must not create the run's state row."""
+    monkeypatch.setenv("RAFIQ_LAB_ENABLED", "true")
+    await RafiqLabService(lab_session).activate(now=datetime.now(UTC))
+    async with client_for(lab_session) as client:
+        response = await client.get("/labs/rafiq/status")
+    assert response.status_code == 200
+    assert response.json()["strategies"][0]["learning"]["size_multiplier"] == 1.0
+    assert (await lab_session.execute(select(RafiqLabRunState))).first() is None

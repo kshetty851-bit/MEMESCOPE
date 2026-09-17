@@ -106,11 +106,13 @@ class Observation:
 @dataclass(frozen=True, slots=True)
 class Mark:
     """One print, for a forward window. Not the engine's `Mark` — that one
-    carries a decision's worth of derived state, this is three columns."""
+    carries a decision's worth of derived state, this is four columns."""
 
     captured_at: datetime
     price_usd: Decimal | None
     liquidity_usd: Decimal | None
+    #: So a window can tell a dead pool's leftover price from a market.
+    trading_status: TradingStatus | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,7 +150,8 @@ class EntryFeatures:
     error: str | None
 
 
-def _tradeable(row) -> bool:
+def tradeable(row) -> bool:
+    """A print an exit could be sold into: trading, priced, and funded."""
     return (row.trading_status != TradingStatus.INACTIVE
             and bool(row.price_usd) and row.price_usd > 0
             and bool(row.liquidity_usd) and row.liquidity_usd > 0)
@@ -166,7 +169,7 @@ def pool_reading(rows, at: datetime, delisted_at: datetime | None):
     One dead reading is not a death: a tradeable print inside
     `DEATH_CONFIRMATION_SECONDS` still stands.
     """
-    live = next((r for r in reversed(rows) if _tradeable(r)), None)
+    live = next((r for r in reversed(rows) if tradeable(r)), None)
     if live is None:
         return None
     dead = (any(r.trading_status == TradingStatus.INACTIVE
@@ -401,7 +404,7 @@ class RafiqFeed:
         """
         rows = (await self._session.execute(
             select(TokenMarketSnapshot.captured_at, TokenMarketSnapshot.price_usd,
-                   TokenMarketSnapshot.liquidity_usd)
+                   TokenMarketSnapshot.liquidity_usd, TokenMarketSnapshot.trading_status)
             .where(TokenMarketSnapshot.mint_address == mint,
                    TokenMarketSnapshot.captured_at > after,
                    TokenMarketSnapshot.captured_at <= until,
@@ -409,7 +412,15 @@ class RafiqFeed:
             .order_by(TokenMarketSnapshot.captured_at)
         )).all()
         return [Mark(captured_at=r.captured_at, price_usd=r.price_usd,
-                     liquidity_usd=r.liquidity_usd) for r in rows]
+                     liquidity_usd=r.liquidity_usd, trading_status=r.trading_status)
+                for r in rows]
+
+    async def delisted_at(self, mint: str) -> datetime | None:
+        """When the platform last saw this mint's pool disappear, or None."""
+        return (await self._session.execute(
+            select(TokenEnrichmentState.delisted_at)
+            .where(TokenEnrichmentState.mint_address == mint)
+        )).scalar_one_or_none()
 
     async def latest_marks(self, mints: set[str]) -> dict[str, tuple[Decimal, Decimal | None]]:
         """The freshest usable (price, liquidity) for each mint, or absent.
