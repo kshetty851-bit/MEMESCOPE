@@ -27,6 +27,7 @@ import {
   useRafiqStatus,
   useRafiqTrades,
 } from "./hooks";
+import { PLAIN_RULES, type PlainRules, SHARED_RULES } from "./rules";
 import type { RafiqStrategy } from "./types";
 
 /**
@@ -247,6 +248,58 @@ function StrategyCard({
   );
 }
 
+function RuleList({
+  title,
+  items,
+  ordered = false,
+}: {
+  title: string;
+  items: string[];
+  ordered?: boolean;
+}) {
+  const List = ordered ? "ol" : "ul";
+  return (
+    <div className="mt-2">
+      <p className="text-label uppercase text-ink-4">{title}</p>
+      <List
+        className={`mt-1 space-y-1 pl-4 text-xs text-ink-2 ${
+          ordered ? "list-decimal" : "list-disc"
+        }`}
+      >
+        {items.map((item) => (
+          <li key={item}>{item}</li>
+        ))}
+      </List>
+    </div>
+  );
+}
+
+/** One book's rules in plain words, beside its code and name. */
+function PlainRulesCard({
+  strategy,
+  rules,
+}: {
+  strategy: RafiqStrategy;
+  rules: PlainRules;
+}) {
+  return (
+    <div className="rounded border border-line p-3">
+      <div className="flex items-baseline gap-2">
+        <span className="font-mono text-sm text-accent">{strategy.code}</span>
+        <span className="text-sm text-ink">{strategy.name}</span>
+      </div>
+      <p className="mt-1 text-xs text-ink-3">{rules.idea}</p>
+      <RuleList title="Buys" items={rules.buys} />
+      <RuleList
+        title={rules.sellsInOrder ? "Sells (checked in this order)" : "Sells"}
+        items={rules.sells}
+        ordered={rules.sellsInOrder}
+      />
+      {rules.also ? <RuleList title="Also" items={rules.also} /> : null}
+    </div>
+  );
+}
+
 export function RafiqLabPage() {
   const status = useRafiqStatus();
   const positions = useRafiqPositions();
@@ -258,8 +311,9 @@ export function RafiqLabPage() {
   const halts = useMemo(() => {
     const map = new Map<string, { halted: boolean; reason: string | null }>();
     for (const row of breaker.data ?? []) {
-      // Only D and E are GATED by the breaker. The others are evaluated for
-      // comparison, so showing them as halted would misreport what happened.
+      // Only books with `gates_entries` are GATED by the breaker. The others
+      // are evaluated for comparison, so showing them as halted would
+      // misreport what happened.
       map.set(row.strategy_code, {
         halted: row.gates_entries && row.halted,
         reason: row.halted_reason,
@@ -335,6 +389,12 @@ export function RafiqLabPage() {
   }
 
   const metrics = karthik.data?.metrics ?? null;
+  const gatedBooks = (breaker.data ?? [])
+    .filter((b) => b.gates_entries)
+    .map((b) => b.strategy_code)
+    .join(" and ");
+  // Books can join a run later than others, so the clock runs from the first.
+  const firstOpened = status.data.strategies.map((s) => s.activated_at).sort()[0];
 
   return (
     <div className="space-y-4 p-4">
@@ -344,21 +404,17 @@ export function RafiqLabPage() {
           <Label>Research simulation — not the Paper Wallet, not real money</Label>
         </PanelHeader>
         <p className="mt-2 text-sm text-ink-3">
-          Running for{" "}
-          {status.data.strategies[0] ? (
-            <RunningFor since={status.data.strategies[0].activated_at} />
-          ) : (
-            "—"
-          )}{" "}
-          · every book opened together, so the clock is the same for all five.
+          Running for {firstOpened ? <RunningFor since={firstOpened} /> : "—"}, counted
+          from the first book to open.
         </p>
         <p className="mt-2 max-w-3xl text-sm text-ink-2">
-          Five strategies supplied by a collaborator, each on its own{" "}
-          {usd(status.data.starting_equity)} book, fed by the same token stream
-          as the existing wallet. Every constant is the collaborator&apos;s and
-          none has been tuned here. Nothing below is a forecast, and the lab has
-          no target: Strategy D bounds how much a bad day can take away, and
-          nothing bounds the other direction.
+          {status.data.strategies.length} strategies supplied by a collaborator,
+          each on its own {usd(status.data.starting_equity)} book, fed by the
+          same token stream as the existing wallet. Every constant is the
+          collaborator&apos;s and none has been tuned here. Nothing below is a
+          forecast, and the lab has no target: a daily breaker bounds how much a
+          bad day can take from the books that have one, and nothing bounds the
+          other direction.
         </p>
       </Panel>
 
@@ -414,6 +470,25 @@ export function RafiqLabPage() {
           );
         })}
       </div>
+
+      <Panel density="compact">
+        <PanelTitle>How each book trades, in plain words</PanelTitle>
+        <ul className="mt-2 list-disc space-y-1 pl-4 text-sm text-ink-2">
+          {SHARED_RULES.map((rule) => (
+            <li key={rule}>{rule}</li>
+          ))}
+        </ul>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {status.data.strategies
+            .filter((s) => !selected || s.code === selected)
+            .map((s) => {
+              const rules = PLAIN_RULES[s.code];
+              return rules ? (
+                <PlainRulesCard key={s.code} strategy={s} rules={rules} />
+              ) : null;
+            })}
+        </div>
+      </Panel>
 
       <Panel density="flush">
         <div className="p-3">
@@ -658,8 +733,8 @@ export function RafiqLabPage() {
         <div className="p-3">
           <PanelTitle>Daily breaker</PanelTitle>
           <Label>
-            Gates entries for D and E only. Shown for the rest so a reader can
-            see what it would have done to them.
+            Gates new entries for {gatedBooks || "no book"} only. Shown for the
+            rest so a reader can see what it would have done to them.
           </Label>
         </div>
         <div className="overflow-x-auto">
