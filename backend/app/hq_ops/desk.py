@@ -10,6 +10,7 @@ The honest answer is therefore per-desk rather than uniform. Four characters
 sit on top of a real, timestamped, append-only record:
 
     karthik   the Graduation Lab's paper book (re-tasked 2026-09-12)
+    vault     real-wallet trades, and the WhatsApp alert sent for each
     patch     hq_actions, and the incidents he was assigned
     sentinel  hq_incidents he raised
     radar     radar_tokens, whose first_detected_at is an admission log
@@ -185,10 +186,6 @@ NO_LOG: dict[str, str] = {
         "agent that performed it. Quinn's checks appear on those rows rather "
         "than as separate entries of her own."
     ),
-    "vault": (
-        "The vault reports a posture — locked, armed, unlocked — and the balance "
-        "watch writes its own rows. Neither is an activity log for this desk."
-    ),
 }
 
 
@@ -234,6 +231,10 @@ async def build(
         return await _from_graduation(session, employee, since, until)
     if employee == "patch":
         return await _from_actions(session, employee, since, until)
+    # Vault looks after the real wallet: its trades, and the WhatsApp message
+    # sent to Karthik for each one. Added 2026-09-17.
+    if employee == "vault":
+        return await _from_real_wallet(session, employee, since, until)
     if employee == "sentinel":
         return await _from_incidents(session, employee, since, until)
     if employee == "radar":
@@ -688,6 +689,130 @@ async def _from_graduation(
         suggestions=[
             Suggestion(x.title, x.detail, x.outcome, x.supported, x.source)
             for x in analysis.suggestions
+        ],
+    )
+
+
+async def _from_real_wallet(
+    session: AsyncSession, employee: str, since: datetime, until: datetime
+) -> Dossier:
+    """Vault's day: every real trade that opened or closed, and its WhatsApp.
+
+    Read-only, like every desk here. Whether a message went out is read off the
+    alert log `app.real_wallet.trade_alerts` keeps; this function decides
+    nothing about it. The phone number is never shown — only whether alerts
+    are configured.
+    """
+    from app.models.real_wallet_execution import RealWalletPosition, RealWalletTradeAlert
+    from app.models.token import DiscoveredToken
+    from app.real_wallet import trade_alerts
+
+    rows = (
+        await session.execute(
+            select(RealWalletPosition, DiscoveredToken.symbol)
+            .outerjoin(DiscoveredToken, DiscoveredToken.mint_address == RealWalletPosition.mint_address)
+            .where(
+                (RealWalletPosition.opened_at >= since)
+                | (RealWalletPosition.closed_at >= since)
+            )
+            .order_by(RealWalletPosition.opened_at.desc())
+            .limit(TIMELINE_LIMIT)
+        )
+    ).all()
+    alerts = {
+        (a.position_id, a.event): a
+        for a in (
+            await session.execute(
+                select(RealWalletTradeAlert).where(
+                    RealWalletTradeAlert.position_id.in_([p.id for p, _ in rows])
+                )
+            )
+        ).scalars()
+    } if rows else {}
+
+    def whatsapp(position_id, event: str) -> str:
+        alert = alerts.get((position_id, event))
+        if alert is None:
+            return "WhatsApp: not yet" if trade_alerts.enabled() else "WhatsApp: off"
+        return {
+            "sent": "WhatsApp sent",
+            "pending": f"WhatsApp waiting (try {alert.attempts + 1})",
+            "failed": "WhatsApp FAILED — " + (alert.last_error or "no reason recorded"),
+            "baseline": "before alerts were on",
+        }.get(alert.status, alert.status)
+
+    timeline: list[Event] = []
+    opened = closed = 0
+    for position, symbol in rows:
+        name = symbol or position.mint_address[:8]
+        if position.opened_at >= since:
+            opened += 1
+            cost = position.quantity * position.entry_price_usd
+            timeline.append(Event(
+                at=position.opened_at,
+                label=f"bought {name}",
+                detail=f"${cost:,.2f} · {whatsapp(position.id, 'opened')}",
+                kind="trade",
+            ))
+        if position.closed_at is not None and position.closed_at >= since:
+            closed += 1
+            pnl = position.realised_net_pnl_usd
+            basis = "net"
+            if pnl is None:
+                pnl, basis = position.realised_gross_pnl_usd, "gross"
+            result = f"{pnl:+,.2f} USD {basis}" if pnl is not None else "result not recorded"
+            timeline.append(Event(
+                at=position.closed_at,
+                label=f"sold {name}",
+                detail=f"{result} · {whatsapp(position.id, 'closed')}",
+                kind="trade",
+            ))
+    timeline.sort(key=lambda e: e.at, reverse=True)
+
+    sent = (await session.execute(
+        select(func.count()).select_from(RealWalletTradeAlert).where(
+            RealWalletTradeAlert.status == "sent", RealWalletTradeAlert.sent_at >= since,
+        )
+    )).scalar_one()
+    failed = (await session.execute(
+        select(func.count()).select_from(RealWalletTradeAlert).where(
+            RealWalletTradeAlert.status == "failed", RealWalletTradeAlert.created_at >= since,
+        )
+    )).scalar_one()
+
+    on = trade_alerts.enabled()
+    headline = (
+        f"{opened} real trade{'s' if opened != 1 else ''} opened, {closed} closed, "
+        f"{sent} WhatsApp alert{'s' if sent != 1 else ''} sent."
+        if on
+        else f"{opened} real trade{'s' if opened != 1 else ''} opened, {closed} closed. "
+        "WhatsApp alerts are OFF until the server has a phone number and a CallMeBot key."
+    )
+    return Dossier(
+        employee=employee,
+        since=since,
+        until=until,
+        measured=True,
+        headline=headline,
+        detail=(
+            "The real wallet's own position ledger, and the alert log beside it. "
+            "Vault reads both and changes neither — starting and stopping the "
+            "wallet is Karthik's alone."
+        ),
+        sources=["real_wallet_positions", "real_wallet_trade_alerts"],
+        counts=[
+            Count("Real trades opened", opened, "real_wallet_positions.opened_at"),
+            Count("Real trades closed", closed, "real_wallet_positions.closed_at"),
+            Count("WhatsApp alerts sent", sent, "real_wallet_trade_alerts.sent_at"),
+            Count("WhatsApp alerts failed", failed, "real_wallet_trade_alerts.status"),
+        ],
+        timeline=timeline[:TIMELINE_LIMIT],
+        readings=[
+            Reading(
+                "WhatsApp alerts",
+                "on" if on else "off — not configured",
+                "WHATSAPP_PHONE + WHATSAPP_CALLMEBOT_KEY",
+            )
         ],
     )
 

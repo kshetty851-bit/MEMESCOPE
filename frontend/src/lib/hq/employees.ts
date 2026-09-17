@@ -347,9 +347,9 @@ export const EMPLOYEES: Employee[] = [
     // real money in it and no occupant is the one room that needs one.
     desk: { col: 14, row: 3 },
     systemResponsibility:
-      "Execution wallet: balance, intents, the isolated signer, the withdrawal address, the kill switch",
+      "Execution wallet: balance, intents, the isolated signer, the withdrawal address, the kill switch, and a WhatsApp to Karthik for every real trade",
     whatIDo:
-      "I watch the one wallet that can spend real money. I read where each intent stopped and why, whether the signer still holds the pinned key, and whether the balance moved without a confirmed intent behind it. I authorise nothing — the guard and the transport policy decide that, and I only ever report.",
+      "I watch the one wallet that can spend real money. I read where each intent stopped and why, whether the signer still holds the pinned key, and whether the balance moved without a confirmed intent behind it — and I message Karthik on WhatsApp the moment a real trade opens or closes. I authorise nothing — the guard and the transport policy decide that, and I only ever report.",
     // Atlas because safety decides what may be entered at all; Rex because the
     // paper desk runs the same strategies without the money; Nova because an
     // owner-attention item has to reach somebody who can decide.

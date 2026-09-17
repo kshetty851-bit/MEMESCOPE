@@ -495,3 +495,25 @@ async def _real_wallet_close_empty_accounts() -> dict[str, Any]:
     if outcome.closed or outcome.refused:
         logger.warning("real_wallet_close_empty_accounts", **outcome.as_dict())
     return outcome.as_dict()
+
+
+@celery_app.task(name="app.real_wallet.scheduler.real_wallet_trade_alerts")
+def real_wallet_trade_alerts() -> dict[str, Any]:
+    """WhatsApp Karthik about every real-wallet trade that opens or closes.
+
+    Reads positions and writes its own log; it has no path to trading, and an
+    error here stays here. Does nothing at all until WHATSAPP_PHONE and
+    WHATSAPP_CALLMEBOT_KEY are both set. See `app.real_wallet.trade_alerts`.
+    """
+    return run_async(_real_wallet_trade_alerts())
+
+
+async def _real_wallet_trade_alerts() -> dict[str, Any]:
+    from app.real_wallet import trade_alerts
+
+    try:
+        async with SessionFactory() as session:
+            return await trade_alerts.tick(session)
+    except Exception as exc:  # noqa: BLE001 — an alert failure must never escalate
+        logger.warning("real_wallet_trade_alerts_error", error=type(exc).__name__)
+        return {"error": type(exc).__name__}

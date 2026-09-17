@@ -522,3 +522,43 @@ class RealWalletBalanceObservation(Base):
             "observed_at",
         ),
     )
+
+
+class RealWalletTradeAlert(UUIDPrimaryKeyMixin, Base):
+    """One WhatsApp message about one real-wallet trade event, sent at most once.
+
+    A row per position per event, never more: the unique constraint is the
+    exactly-once guarantee, so two workers ticking at the same moment collapse
+    to one row and one message rather than two of each.
+
+    Written only by `app.real_wallet.trade_alerts`, which reads positions and
+    writes nothing else. The row is also the audit trail Vault's desk reads:
+    what was sent, when, and what failed.
+    """
+
+    __tablename__ = "real_wallet_trade_alerts"
+    __table_args__ = (
+        UniqueConstraint("position_id", "event", name="uq_real_wallet_trade_alerts_event"),
+        Index("ix_real_wallet_trade_alerts_pending", "status", "created_at"),
+    )
+
+    position_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("real_wallet_positions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    #: `opened` | `closed`.
+    event: Mapped[str] = mapped_column(String(16), nullable=False)
+    #: `pending` | `sent` | `failed` | `baseline`. A `baseline` row stands for a
+    #: trade that already existed when alerts were switched on: it is recorded
+    #: so it is never announced, rather than filling the phone with history.
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    #: When the last send was tried. Retries back off from this, not from
+    #: `created_at`, or every retry after the first would fire at once.
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )

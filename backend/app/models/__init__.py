@@ -82,6 +82,7 @@ from app.models.real_wallet_execution import (
     RealWalletPosition,
     RealWalletAutotradeEvent,
     RealWalletAutotradeSwitch,
+    RealWalletTradeAlert,
 )
 from app.models.real_wallet_safety import RealWalletSafetyEvaluation
 from app.models.token_security import TokenSecurityEvaluationRow
@@ -168,6 +169,7 @@ __all__ = [
     "RealWalletKillSwitch",
     "RealWalletLiveIntent",
     "RealWalletPosition",
+    "RealWalletTradeAlert",
     "RealWalletSafetyEvaluation",
     "TokenSecurityEvaluationRow",
     "RefreshToken",
