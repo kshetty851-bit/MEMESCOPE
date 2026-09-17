@@ -144,3 +144,54 @@ describe("what it refuses to follow", () => {
     expect(result.current.auto).toBe(false);
   });
 });
+
+describe("the dance floor", () => {
+  type Props = { state: HqState; party: boolean };
+  const mount = (initial: Props) =>
+    renderHook(({ state, party }: Props) => useCamera(state, true, party), {
+      initialProps: initial,
+    });
+
+  it("frames the floor while the office is dancing, and the room after", () => {
+    const { result, rerender } = mount({ state: UNKNOWN_HQ_STATE, party: false });
+    expect(result.current.target.kind).toBe("room");
+    rerender({ state: UNKNOWN_HQ_STATE, party: true });
+    expect(result.current.target.kind).toBe("floor");
+    rerender({ state: UNKNOWN_HQ_STATE, party: false });
+    expect(result.current.target.kind).toBe("room");
+  });
+
+  it("does not cut to an empty desk when somebody reacts mid-party", () => {
+    // The first live run: the camera followed reactions to desks whose owners
+    // were all out dancing, and the party never made it into shot.
+    const { result, rerender } = mount({ state: UNKNOWN_HQ_STATE, party: true });
+    rerender({ state: reacting("radar"), party: true });
+    expect(result.current.target.kind).toBe("floor");
+    expect(result.current.auto).toBe(false);
+  });
+
+  it("does not replay that reaction once the music stops", () => {
+    const { result, rerender } = mount({ state: UNKNOWN_HQ_STATE, party: true });
+    rerender({ state: reacting("radar"), party: true });
+    rerender({ state: reacting("radar"), party: false });
+    expect(result.current.target.kind).toBe("room");
+  });
+
+  it("drops a visit that was in progress when the music started", () => {
+    const { result, rerender } = mount({ state: reacting("byte"), party: false });
+    expect(result.current.target).toEqual({ kind: "desk", employee: "byte" });
+    rerender({ state: reacting("byte"), party: true });
+    expect(result.current.target.kind).toBe("floor");
+  });
+
+  it("still lets the reader look at whoever they click", () => {
+    const { result } = mount({ state: UNKNOWN_HQ_STATE, party: true });
+    act(() => result.current.select("nova"));
+    expect(result.current.target).toEqual({ kind: "desk", employee: "nova" });
+  });
+
+  it("stays on the room for someone who asked for stillness", () => {
+    const { result } = renderHook(() => useCamera(UNKNOWN_HQ_STATE, false, true));
+    expect(result.current.target.kind).toBe("room");
+  });
+});

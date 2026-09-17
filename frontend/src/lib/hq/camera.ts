@@ -1,3 +1,4 @@
+import { FLOOR } from "./dance";
 import { EMPLOYEE_BY_ID, type EmployeeId } from "./employees";
 import { ROOM_H, ROOM_W, TILE_H, toScreen, type Point } from "./geometry";
 import { ZONE_BY_ID, type ZoneId } from "./zones";
@@ -34,7 +35,13 @@ import { ZONE_BY_ID, type ZoneId } from "./zones";
  * it. The camera decides what is comfortable to look at, nothing else.
  */
 
-export type CameraTargetKind = "room" | "zone" | "desk";
+/**
+ * `floor` is the dance floor. Added after the first live test of the dance:
+ * at room scale sixteen dancers are eight pixels tall each, a jump is three
+ * pixels, and what a reader actually saw was every desk in the building empty.
+ * The party was running and looked like an evacuation.
+ */
+export type CameraTargetKind = "room" | "zone" | "desk" | "floor";
 
 export interface CameraTarget {
   kind: CameraTargetKind;
@@ -58,7 +65,14 @@ export const SCALE: Record<CameraTargetKind, number> = {
   room: 1,
   zone: 1.75,
   desk: 2.6,
+  // Close enough to see arms move, far enough to keep all sixteen in frame:
+  // the formation is about a fifth of the room's width, so this makes it just
+  // over half the frame with the name-less state dots clear of the top edge.
+  floor: 2.5,
 };
+
+/** The dance floor, as a target. */
+export const FLOOR_SHOT: CameraTarget = { kind: "floor" };
 
 /** The viewBox the stage declares. The camera works inside it. */
 export const VIEW = {
@@ -87,6 +101,15 @@ export function focalPoint(target: CameraTarget): Point {
       const at = toScreen(employee.desk);
       return { x: at.x, y: at.y - 52 };
     }
+  }
+  if (target.kind === "floor") {
+    // The middle of the formation, raised like a desk shot: dancers are drawn
+    // upward from the tile they stand on, and a jump goes higher still.
+    const middle = toScreen({
+      col: FLOOR.col + (FLOOR.cols - 1) / 2,
+      row: FLOOR.row + (FLOOR.rows - 1) / 2,
+    });
+    return { x: middle.x, y: middle.y - 48 };
   }
   if (target.kind === "zone" && target.zone) {
     const zone = ZONE_BY_ID.get(target.zone);

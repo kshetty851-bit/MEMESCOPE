@@ -1,5 +1,6 @@
 import type { AmbientFrame } from "./ambient";
 import { isWalkable } from "./ambient";
+import { CHARACTERS } from "./characters";
 import { EMPLOYEES, EMPLOYEE_BY_ID, type EmployeeId } from "./employees";
 import type { Tile } from "./geometry";
 import { BEAT_OFFSET_SECONDS, TEMPO_BPM } from "@/lib/space-audio";
@@ -266,7 +267,6 @@ function legs(): Map<EmployeeId, DanceLeg> {
   }
 
   const out = new Map<EmployeeId, DanceLeg>();
-  const floorLeaves = Math.max(...leave.values());
   for (const id of AT_THEIR_POST) {
     out.set(id, {
       // No tile anywhere: every frame is at the desk.
@@ -274,7 +274,9 @@ function legs(): Map<EmployeeId, DanceLeg> {
         { pose: "cheering", hold: STEP_MS, emotion: "happy" },
         { ...dancing(CYCLE_MS), detail: "Dancing at the vault door." },
       ],
-      depart: [{ ...dancing(Math.max(1, floorLeaves)), detail: "Dancing at the vault door." }],
+      // The music has stopped, so he stops. He used to dance on, alone and in
+      // silence, until everyone else had walked the length of the building.
+      depart: [{ pose: CHARACTERS[id].defaultPose, hold: STEP_MS }],
     });
   }
   for (const id of ids) {
@@ -290,7 +292,10 @@ function legs(): Map<EmployeeId, DanceLeg> {
       depart: [
         dancing(Math.max(1, leave.get(id)!), spot),
         ...walk([...path].reverse().slice(1), "returning_to_desk"),
-        { pose: "returning_to_desk", hold: STEP_MS },
+        // Back in their usual pose the moment they reach the desk. This frame
+        // is held until the LAST dancer is home, and a walking pose held that
+        // long was people marching on the spot at their desks for ten seconds.
+        { pose: CHARACTERS[id].defaultPose, hold: STEP_MS },
       ],
     });
   }

@@ -12,6 +12,7 @@ import {
   route,
   SPOTS,
 } from "@/lib/hq/dance";
+import { CHARACTERS } from "@/lib/hq/characters";
 import { EMPLOYEES, EMPLOYEE_BY_ID } from "@/lib/hq/employees";
 import { isInsideRoom } from "@/lib/hq/geometry";
 import { BEAT_OFFSET_SECONDS, TEMPO_BPM } from "@/lib/space-audio";
@@ -160,6 +161,18 @@ describe("the walk to the floor", () => {
         ).toBeLessThanOrEqual(step.at);
       }
     }
+  });
+
+  it("stops everybody dancing the moment the music stops", () => {
+    // Vault used to dance on, alone and in silence, while the others walked
+    // home — and everyone else marched on the spot once home. The last frame
+    // of every departure is the person's ordinary pose, at their desk.
+    for (const [id, leg] of DANCE_LEGS) {
+      const last = leg.depart[leg.depart.length - 1]!;
+      expect(last.pose, id).toBe(CHARACTERS[id].defaultPose);
+      expect(last.tile, id).toBeUndefined();
+    }
+    expect(DANCE_LEGS.get("vault")!.depart.some((f) => f.pose === "dancing")).toBe(false);
   });
 
   it("ends every gather dancing on the spot, and every depart back at the desk", () => {

@@ -2,18 +2,25 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { AUTO_HOLD_MS, ROOM, sameTarget, type CameraTarget } from "@/lib/hq/camera";
+import { AUTO_HOLD_MS, FLOOR_SHOT, ROOM, sameTarget, type CameraTarget } from "@/lib/hq/camera";
 import type { HqState } from "@/lib/hq/adapter";
 import { EMPLOYEES, type EmployeeId } from "@/lib/hq/employees";
 
 /**
  * WHERE THE CAMERA LOOKS, AND WHO DECIDES.
  *
- * Three sources, in a strict order that never changes:
+ * Four sources, in a strict order that never changes:
  *
  *   1. the reader        — a manual selection holds until they clear it
- *   2. a real reaction   — the camera visits, holds, and comes back
- *   3. the room          — the default, and where it always returns
+ *   2. the dance floor   — while the music plays and the office is dancing
+ *   3. a real reaction   — the camera visits, holds, and comes back
+ *   4. the room          — the default, and where it always returns
+ *
+ * Reactions are not followed at all during the party, rather than merely
+ * outranked: a reaction is framed on the reacting person's DESK, and during
+ * the party every desk is empty. The first live run of the dance was exactly
+ * that — a camera cutting between empty chairs while the whole office danced
+ * out of shot.
  *
  * ── WHY THE READER ALWAYS WINS ──────────────────────────────────────────
  *
@@ -50,7 +57,7 @@ export interface CameraHandle {
   auto: boolean;
 }
 
-export function useCamera(state: HqState, follow: boolean): CameraHandle {
+export function useCamera(state: HqState, follow: boolean, party = false): CameraHandle {
   const [manual, setManual] = useState<EmployeeId | null>(null);
   const [auto, setAuto] = useState<EmployeeId | null>(null);
   const lastSpeech = useRef<Partial<Record<EmployeeId, string>>>({});
@@ -80,9 +87,17 @@ export function useCamera(state: HqState, follow: boolean): CameraHandle {
     if (!follow || manual || !reacting) return;
     const speech = state.employees[reacting]?.speech;
     if (lastSpeech.current[reacting] === speech) return;
+    // Recorded even during the party, so the reaction that was happening when
+    // the music started is not replayed the moment it stops.
     lastSpeech.current[reacting] = speech;
-    setAuto(reacting);
-  }, [follow, manual, reacting, state]);
+    if (!party) setAuto(reacting);
+  }, [follow, manual, reacting, state, party]);
+
+  // The music starting cancels any visit in progress: that desk is about to
+  // be empty.
+  useEffect(() => {
+    if (party) setAuto(null);
+  }, [party]);
 
   /**
    * The hold. Keyed on who the camera is visiting, so a re-render that changes
@@ -101,8 +116,12 @@ export function useCamera(state: HqState, follow: boolean): CameraHandle {
     setManual(employee);
   }
 
-  const who = manual ?? (follow ? auto : null);
-  const target: CameraTarget = who ? { kind: "desk", employee: who } : ROOM;
+  const who = manual ?? (follow && !party ? auto : null);
+  const target: CameraTarget = who
+    ? { kind: "desk", employee: who }
+    : follow && party
+      ? FLOOR_SHOT
+      : ROOM;
 
   return {
     target,

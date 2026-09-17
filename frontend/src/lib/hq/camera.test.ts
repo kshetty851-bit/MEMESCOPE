@@ -99,3 +99,28 @@ describe("what the camera aims at", () => {
     expect(VIEW.height).toBeGreaterThan(ROOM_H);
   });
 });
+
+describe("the dance floor shot", () => {
+  it("is centred on the formation and pushed in far enough to see the moves", async () => {
+    const { FLOOR_SHOT, frame, SCALE } = await import("@/lib/hq/camera");
+    const { FLOOR, SPOTS } = await import("@/lib/hq/dance");
+    const { toScreen } = await import("@/lib/hq/geometry");
+
+    const shot = frame(FLOOR_SHOT);
+    expect(shot.scale).toBe(SCALE.floor);
+    expect(SCALE.floor).toBeGreaterThan(SCALE.zone);
+
+    // Every dancer's spot lands inside the visible frame.
+    const { VIEW } = await import("@/lib/hq/camera");
+    const halfW = VIEW.width / (2 * shot.scale);
+    const halfH = VIEW.height / (2 * shot.scale);
+    for (const [id, spot] of SPOTS) {
+      const p = toScreen(spot);
+      expect(Math.abs(p.x - shot.at.x), `${id} is out of shot sideways`).toBeLessThan(halfW);
+      // Feet on screen, and the head (about 110 units up) too.
+      expect(p.y - shot.at.y, `${id}'s feet are below the frame`).toBeLessThan(halfH);
+      expect(shot.at.y - (p.y - 110), `${id}'s head is above the frame`).toBeLessThan(halfH);
+    }
+    expect(FLOOR.cols * FLOOR.rows).toBeGreaterThanOrEqual(SPOTS.size);
+  });
+});

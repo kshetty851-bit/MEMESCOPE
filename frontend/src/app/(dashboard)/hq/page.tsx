@@ -115,10 +115,6 @@ export default function HqPage() {
   const [selected, setSelected] = useState<ActorId | null>(null);
   const [selectedMint, setSelectedMint] = useState<string | null>(null);
   const { packets, overflow } = useVisiblePackets();
-  // The camera follows real reactions and obeys a click. `follow` is off
-  // under reduced motion: an unrequested camera move is exactly the motion
-  // that setting exists to suppress.
-  const camera = useCamera(state, motion && viewport !== "mobile");
 
   // Exactly as many case-file fetches as §29 allows: one per visible packet
   // slot (a fixed count, so these stay legal hook calls regardless of how
@@ -182,6 +178,18 @@ export default function HqPage() {
     musicOn,
     meetingIdle: meeting.phase === "idle",
   });
+
+  // The camera follows real reactions and obeys a click. `follow` is off
+  // under reduced motion: an unrequested camera move is exactly the motion
+  // that setting exists to suppress. While the office is out on the dance
+  // floor it frames the floor — declared after the dance for that reason.
+  // (`openCase` and `openActor` above use it only from click handlers, which
+  // run after this render has finished.)
+  const camera = useCamera(
+    state,
+    motion && viewport !== "mobile",
+    dance.phase === "gathering" || dance.phase === "dancing",
+  );
 
   const employee = selected ? EMPLOYEE_BY_ID.get(selected as EmployeeId) : null;
   const reading = employee && selected ? state.employees[selected as EmployeeId] : null;

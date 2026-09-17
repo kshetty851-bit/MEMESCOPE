@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 
 import { Character, RigDefs } from "@/components/hq/character-rig";
 import { HqStage } from "@/components/hq/hq-stage";
-import { ROOM } from "@/lib/hq/camera";
+import { FLOOR_SHOT, ROOM } from "@/lib/hq/camera";
 import { EMPLOYEE_BY_ID, type EmployeeId } from "@/lib/hq/employees";
 import { useAmbient } from "@/components/hq/use-ambient";
 import { useDanceParty } from "@/components/hq/use-dance-party";
@@ -133,7 +133,13 @@ function Room() {
         </span>
       </div>
       <HqStage
-        camera={desk ? { kind: "desk", employee: desk } : ROOM}
+        camera={
+          desk
+            ? { kind: "desk", employee: desk }
+            : motion && (dance.phase === "gathering" || dance.phase === "dancing")
+              ? FLOOR_SHOT
+              : ROOM
+        }
         focusedZone={null}
         onFocusZone={() => {}}
         onSelectEmployee={() => {}}
