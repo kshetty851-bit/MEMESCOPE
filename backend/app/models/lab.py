@@ -146,6 +146,8 @@ class LabDecision(Base, UUIDPrimaryKeyMixin, TimestampMixin):
             name="ck_lab_decision_route",
         ),
         Index("ix_lab_decisions_strategy_checkpoint", "strategy_row_id", "checkpoint_at"),
+        # The real wallet looks decisions up by strategy CODE every 3s (0095).
+        Index("ix_lab_decisions_strategy_id_checkpoint", "strategy_id", "checkpoint_at"),
         Index("ix_lab_decisions_mint", "mint_address"),
     )
 
