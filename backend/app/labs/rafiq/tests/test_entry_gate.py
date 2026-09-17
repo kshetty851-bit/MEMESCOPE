@@ -111,9 +111,10 @@ def test_every_reason_the_gate_returns_is_a_countable_one() -> None:
 
 def test_the_gate_is_identical_across_the_four_books_that_share_it() -> None:
     """A2's comparison against v1's A only reads if B2-D2 ran the same gate."""
-    shared = [s for s in registry.STRATEGIES if s.code != "E2"]
+    shared = [registry.BY_CODE[c] for c in ("A2", "B2", "C2", "D2")]
     assert {s.gate for s in shared} == {entry_gate.DEFAULT}
     assert registry.BY_CODE["E2"].gate == entry_gate.STRICT
+    assert registry.BY_CODE["F2"].gate == entry_gate.F2
 
 
 def test_the_gate_thresholds_are_inside_the_profile_digest() -> None:

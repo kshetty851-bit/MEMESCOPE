@@ -36,7 +36,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.labs.rafiq.adapters.safety import SafetyVerdict
-from app.models.market import TokenMarketSnapshot
+from app.labs.rafiq.config import DEATH_CONFIRMATION_SECONDS
+from app.models.market import TokenEnrichmentState, TokenMarketSnapshot, TradingStatus
 from app.models.radar import RadarToken
 from app.models.research_data import HolderSnapshot, WalletFlowSnapshot
 from app.models.token import DiscoveredToken
@@ -95,6 +96,12 @@ class Observation:
     def is_priceable(self) -> bool:
         return self.price_usd is not None and self.price_usd > 0
 
+    @property
+    def is_tradeable(self) -> bool:
+        """A price AND the depth to sell into, from the same reading. The only
+        observation an exit may be valued against."""
+        return self.is_priceable and self.liquidity_usd is not None
+
 
 @dataclass(frozen=True, slots=True)
 class Mark:
@@ -139,6 +146,35 @@ class EntryFeatures:
     #: Comma-joined store names that had nothing to say. `None` when both
     #: answered.
     error: str | None
+
+
+def _tradeable(row) -> bool:
+    return (row.trading_status != TradingStatus.INACTIVE
+            and bool(row.price_usd) and row.price_usd > 0
+            and bool(row.liquidity_usd) and row.liquidity_usd > 0)
+
+
+def pool_reading(rows, at: datetime, delisted_at: datetime | None):
+    """The newest tradeable print, or None when the pool is gone.
+
+    `rows` are oldest-first. The pool is gone when an `inactive` reading
+    (DexScreener's sub-$100 pool, or the placeholder the platform writes once a
+    pool stops being returned) or a delisting stamp comes after the last
+    tradeable print. Rows with a trading status but no price or depth are
+    provider gaps, not deaths, and decide nothing either way.
+
+    One dead reading is not a death: a tradeable print inside
+    `DEATH_CONFIRMATION_SECONDS` still stands.
+    """
+    live = next((r for r in reversed(rows) if _tradeable(r)), None)
+    if live is None:
+        return None
+    dead = (any(r.trading_status == TradingStatus.INACTIVE
+                and r.captured_at > live.captured_at for r in rows)
+            or (delisted_at is not None and live.captured_at < delisted_at <= at))
+    if dead and (at - live.captured_at).total_seconds() > DEATH_CONFIRMATION_SECONDS:
+        return None
+    return live
 
 
 def _median(values: list[Decimal]) -> Decimal | None:
@@ -211,7 +247,8 @@ class RafiqFeed:
         rows = (await self._session.execute(
             select(TokenMarketSnapshot.captured_at, TokenMarketSnapshot.price_usd,
                    TokenMarketSnapshot.liquidity_usd, TokenMarketSnapshot.market_cap,
-                   TokenMarketSnapshot.volume_5m, TokenMarketSnapshot.pool_address)
+                   TokenMarketSnapshot.volume_5m, TokenMarketSnapshot.pool_address,
+                   TokenMarketSnapshot.trading_status)
             .where(TokenMarketSnapshot.token_id == token_id,
                    TokenMarketSnapshot.captured_at <= at,
                    TokenMarketSnapshot.captured_at >= at - timedelta(hours=2),
@@ -221,7 +258,16 @@ class RafiqFeed:
         if not rows:
             return None
 
-        last = rows[-1]
+        # Price and depth come from ONE reading, the pool's newest tradeable
+        # print, or from none at all when the pool is gone. An exit valued
+        # against a price from one reading and a depth from another — or from
+        # the entry — is how a vanished pool used to sell at full value.
+        delisted_at = (await self._session.execute(
+            select(TokenEnrichmentState.delisted_at)
+            .where(TokenEnrichmentState.token_id == token_id)
+        )).scalar_one_or_none()
+        live = pool_reading(rows, at, delisted_at)
+        last = live or rows[-1]
         cut = at - _CHANGE_WINDOW
         prior = next((r for r in reversed(rows) if r.captured_at <= cut), None)
         change = None
@@ -273,9 +319,8 @@ class RafiqFeed:
         return Observation(
             mint_address=mint,
             observed_at=last.captured_at,
-            price_usd=last.price_usd if last.price_usd and last.price_usd > 0 else None,
-            liquidity_usd=(last.liquidity_usd
-                           if last.liquidity_usd and last.liquidity_usd > 0 else None),
+            price_usd=live.price_usd if live else None,
+            liquidity_usd=live.liquidity_usd if live else None,
             market_cap=last.market_cap if last.market_cap and last.market_cap > 0 else None,
             volume_m5=last.volume_5m,
             liquidity_change_15m=change,

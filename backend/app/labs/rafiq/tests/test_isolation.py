@@ -110,7 +110,7 @@ def test_lab_tables_are_visible_to_the_platform_metadata() -> None:
 
     assert {t for t in PlatformBase.metadata.tables if t.startswith("rafiq")} == {
         "rafiq_lab_strategies", "rafiq_lab_positions", "rafiq_lab_daily_state",
-        "rafiq_lab_gate_rejections"}
+        "rafiq_lab_gate_rejections", "rafiq_lab_candidates"}
 
 
 def test_every_lab_table_carries_the_prefix() -> None:

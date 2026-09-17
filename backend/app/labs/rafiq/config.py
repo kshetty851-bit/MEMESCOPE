@@ -42,3 +42,7 @@ GLITCH_BAND = Decimal(3)
 FILL_DRIFT_CAP = Decimal("1.15")
 #: Nothing is acted on across an observation gap longer than this.
 STALE_GUARD_SECONDS = 900
+#: One dead reading is not a dead pool. A tradeable print this recent still
+#: marks the position — the platform's own Lab measured 6.9% of its dead_zero
+#: exits as tokens still trading, and chose this window (`app.lab.marks`).
+DEATH_CONFIRMATION_SECONDS = 120
