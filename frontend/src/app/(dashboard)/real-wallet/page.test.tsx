@@ -332,6 +332,8 @@ describe("RealWalletPage signed in as the administrator", () => {
     expect(within(panel).getByRole("button", { name: "$100" })).toBeDisabled();
     expect(panel.textContent).toContain("Stop first to change the arm or the size.");
     expect(screen.getByText("Strategy this wallet trades")).toBeInTheDocument();
+    // The limits card states the size actually traded, not only the ceiling.
+    expect(screen.getByText("$25 (up to $100 allowed)")).toBeInTheDocument();
   });
 
   it("cannot start twice", async () => {
@@ -435,6 +437,65 @@ describe("RealWalletPage trades and limits", () => {
     expect(table.textContent).toContain("0.0292 SOL");
     expect(table.textContent).toContain("−$0.11");
     expect(within(table).getByText("DoneMint")).toBeInTheDocument();
+  });
+
+  it("lays the trades out like the lab: open, closed, and the totals", async () => {
+    serve({
+      status: status({
+        open_positions: 1,
+        positions: [
+          {
+            id: "p-open", mint_address: "OpenMint1111", symbol: "OPEN", status: "OPEN",
+            strategy_id: "G-B3-4M", quantity: "10", cost_usd: "25", spent: "0.2512",
+            received: null, realised_gross_pnl_usd: null, realised_net_pnl_usd: null,
+            exit_reason: null, exit_state: null,
+            opened_at: "2026-09-17T10:00:00Z", closed_at: null,
+            entry_signature: "sigOpenBuy", exit_signature: null,
+          },
+          {
+            id: "p-won", mint_address: "WonMint33333", symbol: "WIN", status: "CLOSED",
+            strategy_id: "G-B3-4M", quantity: "10", cost_usd: "25", spent: "0.2512",
+            received: "0.2574", realised_gross_pnl_usd: "0.70",
+            realised_net_pnl_usd: "0.50", exit_reason: "time_0.0667h",
+            exit_state: null, opened_at: "2026-09-17T09:00:00Z",
+            closed_at: "2026-09-17T09:04:07Z", entry_signature: "sigWonBuy",
+            exit_signature: "sigWonSell",
+          },
+          {
+            id: "p-lost", mint_address: "DoneMint2222", symbol: null, status: "CLOSED",
+            strategy_id: "G-B3-5M", quantity: "10", cost_usd: "3.0075", spent: "0.030075",
+            received: "0.029185068", realised_gross_pnl_usd: "-0.0889932",
+            realised_net_pnl_usd: "-0.1099932", exit_reason: "time_0.0833h",
+            exit_state: null, opened_at: "2026-09-16T09:00:00Z",
+            closed_at: "2026-09-16T09:05:00Z", entry_signature: "sig2",
+            exit_signature: "sig3",
+          },
+        ],
+      }),
+    });
+    await renderLoaded();
+    const table = screen.getByText("Real trades").closest("section")!;
+    // Totals, net of fees: +$0.50 and -$0.11.
+    expect(table.textContent).toContain("2 closed · 1 won · 1 lost · $0.39 · 1 open");
+    expect(table.textContent).toContain("Open — 1");
+    expect(table.textContent).toContain("Closed — 2");
+    // Held, and the return on what the trade cost.
+    expect(table.textContent).toContain("4m 07s");
+    expect(table.textContent).toContain("5m 00s");
+    expect(table.textContent).toContain("+2.00%");
+    expect(table.textContent).toContain("−3.66%");
+    // The token opens its chart; each leg opens its transaction.
+    expect(within(table).getByRole("link", { name: "WIN" })).toHaveAttribute(
+      "href",
+      "https://dexscreener.com/solana/WonMint33333",
+    );
+    expect(
+      within(table)
+        .getAllByRole("link", { name: "sell" })
+        .map((a) => a.getAttribute("href")),
+    ).toEqual(["https://solscan.io/tx/sigWonSell", "https://solscan.io/tx/sig3"]);
+    expect(within(table).getAllByRole("link", { name: "buy" })).toHaveLength(3);
+    expect(table.textContent).toContain("G-B3-4M");
   });
 
   it("says so plainly when the daily loss limit has stopped buying", async () => {
