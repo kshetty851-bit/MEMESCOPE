@@ -20,6 +20,7 @@ from typing import Any, cast
 import httpx
 
 from app.core.config import settings
+from app.core.logging import get_logger
 from app.real_wallet.live_readiness import SubmissionDecision
 from app.real_wallet.transport_policy import (
     ExecuteNotPermittedError,
@@ -53,6 +54,8 @@ class TestOnlyExternalExecuteBlockedError(ExecuteNotPermittedError):
 
     __test__ = False
 
+
+logger = get_logger(__name__)
 
 @dataclass(frozen=True, slots=True)
 class JupiterExecutionResult:
@@ -121,6 +124,15 @@ class JupiterLiveExecutionTransport:
             outcome = JupiterExecuteOutcome.FAILED
         else:
             outcome = JupiterExecuteOutcome.UNKNOWN
+        # V2 names its error `code` (0 = success); `errorCode` is the older name.
+        code = body.get("errorCode") or body.get("code") or None
+        if outcome is not JupiterExecuteOutcome.SUCCESS:
+            # Jupiter's reason, never the transaction: a 422 used to leave
+            # nothing but "outcome unknown" behind.
+            logger.warning("jupiter_execute_not_successful",
+                           http_status=response.status_code, status=status,
+                           code=code, error=str(body.get("error", ""))[:200],
+                           request_id=request_id)
         return JupiterExecutionResult(
             outcome=outcome,
             signature=body.get("signature")
@@ -132,7 +144,7 @@ class JupiterLiveExecutionTransport:
             total_output_amount=str(body["totalOutputAmount"])
             if body.get("totalOutputAmount") is not None
             else None,
-            error_code=str(body["errorCode"]) if body.get("errorCode") else None,
+            error_code=str(code) if code else None,
         )
 
     def _authorise(self, guard: SubmissionDecision) -> None:

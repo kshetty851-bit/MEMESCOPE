@@ -226,6 +226,10 @@ def test_signer_returns_the_signature_before_submission() -> None:
     # The signature is verifiable against the message the signer claims it signed.
     decoded = VersionedTransaction.from_bytes(b64decode(signed.signed_transaction))
     assert str(decoded.signatures[0]) == signed.signature
+    # ...cryptographically, the way the network checks it. Comparing strings
+    # passed while every live buy was refused for an invalid signature: a v0
+    # message must be signed with its version prefix (2026-09-17).
+    assert decoded.verify_with_results() == [True]
 
 
 # --------------------------------------------------------------------------
