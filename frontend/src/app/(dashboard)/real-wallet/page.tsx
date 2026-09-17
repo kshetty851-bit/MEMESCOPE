@@ -1119,13 +1119,110 @@ function TradesTable({ positions }: { positions: Position[] }) {
   );
 }
 
+/**
+ * One armed emergency stop, and the administrator's way to clear it.
+ *
+ * Clearing removes one barrier and nothing else, and the failed-send count is
+ * not reset — one more failed send turns this stop straight back on. The
+ * server requires a reason and a fixed confirmation phrase; the phrase is sent
+ * by the button, the reason is the operator's.
+ */
+function EmergencyStop({
+  sw,
+  canClear,
+}: {
+  sw: WalletStatus["kill_switches"][number];
+  canClear: boolean;
+}) {
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
+  const clear = useMutation({
+    mutationFn: () =>
+      api.post(`/real-wallet/kill-switches/${encodeURIComponent(sw.kind)}/clear`, {
+        confirmation_phrase: "CLEAR_REAL_WALLET_KILL_SWITCH",
+        reason: reason.trim(),
+      }),
+    onSuccess: () => {
+      setOpen(false);
+      setReason("");
+      void queryClient.invalidateQueries({ queryKey: ["real-wallet"] });
+    },
+  });
+
+  return (
+    <li>
+      EMERGENCY STOP ON: <span className="font-medium">{sw.kind}</span> —{" "}
+      {sw.reason ?? "no reason"}. Nothing buys or sells until it is cleared.
+      {canClear ? (
+        open ? (
+          <div className="mt-2 flex flex-col gap-2 text-ink">
+            <p className="text-xs text-ink-3">
+              Clear it only once the cause is fixed. The failed-send count is not
+              reset, so one more failed send turns this stop straight back on.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <input
+                className="w-full rounded border border-line bg-transparent px-2 py-2 text-sm text-ink sm:w-auto sm:min-w-0 sm:flex-1"
+                onChange={(e) => setReason(e.target.value)}
+                placeholder="Why it is safe to clear (8+ characters)"
+                value={reason}
+              />
+              <button
+                className="rounded border border-down/40 px-3 py-2 text-sm text-down disabled:opacity-40"
+                disabled={reason.trim().length < 8 || clear.isPending}
+                onClick={() => clear.mutate()}
+                type="button"
+              >
+                Clear this stop
+              </button>
+              <button
+                className="rounded border border-line px-3 py-2 text-sm text-ink-3"
+                onClick={() => setOpen(false)}
+                type="button"
+              >
+                Cancel
+              </button>
+            </div>
+            {clear.error ? (
+              <p className="text-sm text-warn">
+                Refused:{" "}
+                {clear.error instanceof ApiError && clear.error.status === 401
+                  ? "sign in first."
+                  : clear.error instanceof ApiError
+                    ? clear.error.message
+                    : "unavailable"}
+              </p>
+            ) : null}
+          </div>
+        ) : (
+          <button
+            className="ml-2 rounded border border-line px-2 py-1 text-xs text-ink"
+            onClick={() => setOpen(true)}
+            type="button"
+          >
+            Clear…
+          </button>
+        )
+      ) : (
+        <Link className="ml-2 text-xs text-accent underline" href="/login?next=/real-wallet">
+          Sign in to clear
+        </Link>
+      )}
+    </li>
+  );
+}
+
 function SafetyCard({
   status,
   ticket,
+  canClear,
 }: {
   status: WalletStatus | undefined;
   /** The size the running wallet trades, when Start chose one. */
   ticket: string | null;
+  /** Signed in as the administrator — the only one the server lets clear a stop. */
+  canClear: boolean;
 }) {
   if (!status) return null;
   const l = status.limits;
@@ -1149,10 +1246,7 @@ function SafetyCard({
       {status.kill_switches.length ? (
         <ul className="mt-2 space-y-1 text-sm text-down">
           {status.kill_switches.map((sw) => (
-            <li key={sw.kind}>
-              EMERGENCY STOP ON: <span className="font-medium">{sw.kind}</span> —{" "}
-              {sw.reason ?? "no reason"}. Nothing buys or sells until it is cleared.
-            </li>
+            <EmergencyStop key={sw.kind} sw={sw} canClear={canClear} />
           ))}
         </ul>
       ) : (
@@ -1271,6 +1365,7 @@ export default function RealWalletPage() {
       <SafetyCard
         status={data}
         ticket={autotrade.data?.enabled ? autotrade.data.strategy.ticket_usd : null}
+        canClear={user?.role === "admin" || autotrade.data?.can_start === true}
       />
       <TokensHeld status={data} />
     </main>
