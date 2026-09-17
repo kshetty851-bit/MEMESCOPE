@@ -59,7 +59,7 @@ def test_the_tournament_is_a_hold_sweep_with_a_baseline_on_every_hold() -> None:
     One baseline per hold, so no hold is judged without an unselected twin on
     its own clock. Nothing on this board decides by hashing a mint.
     """
-    assert len(ARMS) == 10
+    assert len(ARMS) == 12
     # The BASELINE is back (2026-09-16). Without one the board could not tell a
     # profitable arm from a rising market — every arm here is a SUBSET of the
     # floor arm's population, so beating it is the claim each one makes.
@@ -68,6 +68,10 @@ def test_the_tournament_is_a_hold_sweep_with_a_baseline_on_every_hold() -> None:
     # was the worst hold in every band this lab has run, and what it showed —
     # leaving earlier is worse — is still shown by 4m against 5m.
     assert not any(a.name == "B3_198k_3m" for a in ARMS)
+    # Three minutes came back on 2026-09-17 on the OTHER clock, counted from
+    # the graduation rather than the fill, beside a two-minute twin. Different
+    # rule, different name, and the retired book's history stays retired.
+    assert {a.hold for a in ARMS if a.clock == "graduation"} == {2, 3, 4}
     assert len({a.name for a in ARMS}) == len(ARMS)
     assert all(len(a.name) <= 32 for a in ARMS)
 
@@ -879,10 +883,12 @@ async def test_a_token_that_never_graduated_is_not_bought(monkeypatch) -> None:
         return 0
 
     monkeypatch.setattr(tournament.live_decisions, "record", no_mirror)
-    # Seven arms take a $250k pool: the baseline, the five B3 arms and the
+    # Nine arms take a $250k pool: the baseline, the seven B3 arms — five on
+    # the entry clock plus g2/g3/g4 on the graduation clock, which this
+    # candidate graduated 40s ago so all three still have time — and the
     # all-graduations A/B control. B5 needs $500k; B3E and the night A/B do not
     # buy from this query.
-    for pair, bought in ((OTHER_POOL, 0), (REAL_POOL, 7)):
+    for pair, bought in ((OTHER_POOL, 0), (REAL_POOL, 9)):
         session = _Answers([], [], [])
         session.statements = []
         t = Tournament(session, now=NIGHT)
@@ -901,6 +907,8 @@ def test_the_rug_arms_say_what_they_do() -> None:
     assert BY_NAME["B3_198k_5m_DR"].exit_rule == (
         "whichever comes first: the pool loses 20% of its SOL, or 5 minutes")
     assert BY_NAME["B3_198k_g4"].exit_rule == "at 4 minutes after graduating"
+    assert BY_NAME["B3_198k_g2"].exit_rule == "at 2 minutes after graduating"
+    assert BY_NAME["B3_198k_g3"].exit_rule == "at 3 minutes after graduating"
     # Variants of B3, never baselines.
     assert not BY_NAME["B3_198k_5m_DR"].is_control
     assert not BY_NAME["B3_198k_g4"].is_control
@@ -923,6 +931,29 @@ def test_a_graduation_clock_counts_from_the_graduation() -> None:
     assert not _time_left(g4, graduated + timedelta(minutes=3, seconds=1), graduated)
     assert not _time_left(g4, NIGHT, None)
     assert _time_left(b3, graduated + timedelta(minutes=30), None)
+
+
+def test_the_short_graduation_clocks_only_take_a_pool_listed_in_time() -> None:
+    """g2 sells two minutes after the graduation, so it can only buy a pool
+    the feed reports inside the first minute — and DexScreener reports a B3
+    pool a median 52s in. It will therefore fund fewer trades than g3 or g4,
+    which is the rule rather than a fault: an exit a wallet cannot reach in
+    time is not a rule it can run."""
+    from app.labs.graduation.tournament import _due, _time_left
+
+    graduated = NIGHT - timedelta(seconds=50)
+    g2, g3 = BY_NAME["B3_198k_g2"], BY_NAME["B3_198k_g3"]
+
+    position = _open_position(NIGHT, book="B3_198k_g2")
+    position.graduated_at = graduated
+    assert _due(position) == graduated + timedelta(minutes=2)
+
+    assert _time_left(g2, graduated + timedelta(seconds=52), graduated)
+    assert _time_left(g2, graduated + timedelta(minutes=1), graduated)
+    assert not _time_left(g2, graduated + timedelta(minutes=1, seconds=1), graduated)
+    # g3 takes the same pool with a minute to spare.
+    assert _time_left(g3, graduated + timedelta(minutes=2), graduated)
+    assert not _time_left(g3, graduated + timedelta(minutes=2, seconds=1), graduated)
 
 
 async def test_a_drain_stop_sells_on_the_market_after_it_fires() -> None:
