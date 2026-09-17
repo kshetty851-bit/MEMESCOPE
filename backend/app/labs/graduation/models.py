@@ -106,6 +106,9 @@ class GradToken(Base):
     __tablename__ = "grad_tokens"
     __table_args__ = (
         Index("ix_grad_tokens_status_first_seen", "status", "first_seen_at"),
+        # The paper book's symbol-reuse count, as it is written (0095).
+        Index("ix_grad_tokens_symbol_norm", text("lower(trim(symbol))"),
+              "first_seen_at"),
         Index("ix_grad_tokens_tracked_at", "tracked_at"),
         Index("ix_grad_tokens_migrated_at", "migrated_at"),
     )
