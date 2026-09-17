@@ -40,7 +40,7 @@ from __future__ import annotations
 import hashlib
 import json
 import pathlib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import timedelta
 from decimal import Decimal
 
@@ -366,8 +366,7 @@ ARCHIVED_STRATEGIES: tuple[LabStrategy, ...] = (
                 max_trades_per_day=strategy_f2.MAX_TRADES_PER_DAY, enters=False),
 )
 
-#: G1 replaces F2 in the sixth slot and is the only book that opens
-#: positions. One leg: its partial sale is bookkeeping on the row, not a
+#: G1 replaces F2 in the sixth slot. One leg: its partial sale is bookkeeping on the row, not a
 #: second position, because the 25% it keeps is decided at +30%, not at entry.
 #: No static floor — the ratchet is its floor — and E's daily breaker, which
 #: is the 5% mark-to-market line the config asks for.
@@ -378,8 +377,15 @@ G1 = LabStrategy(
     MOONSHOT, legs=(Leg(_WHOLE, None, g1.RUNNER_TRAIL),), gate=G1_GATE,
     daily_breaker=True, g1=True)
 
+#: A2-E2 trade again, next to G1 in its run: Karthik's call on 2026-09-17,
+#: after the brief had archived them. Same rules and digests as their archived
+#: rows (`enters` is outside the hash), on fresh $1,000 books. F2 stays
+#: retired and G1 holds its slot — last, so HQ's five desks seat on A2-E2.
+REARMED: tuple[LabStrategy, ...] = tuple(
+    replace(s, enters=True) for s in ARCHIVED_STRATEGIES if s.code != "F2")
+
 RUNS: dict[str, tuple[LabStrategy, ...]] = {ARCHIVED_RUN: ARCHIVED_STRATEGIES,
-                                             G1_RUN: (G1,)}
+                                             G1_RUN: (*REARMED, G1)}
 
 #: The books the lab trades NOW. HQ's analyst desks seat themselves from this
 #: name (`app.hq_ops.desk.strategy_for`) and read "as the lab is registered
@@ -387,6 +393,9 @@ RUNS: dict[str, tuple[LabStrategy, ...]] = {ARCHIVED_RUN: ARCHIVED_STRATEGIES,
 #: desk reported "not registered" for books the analyst looks up in G1's run.
 STRATEGIES: tuple[LabStrategy, ...] = RUNS[CURRENT_RUN]
 
+#: One spec per code. A code in two runs names the same rules (asserted
+#: below); the current run's copy is listed last and wins, so `enters` reads
+#: as the book trades now. An archived row never enters whatever it says.
 BY_CODE = {s.code: s for run in RUNS.values() for s in run}
 
 
@@ -431,10 +440,11 @@ def max_hold_for(strategy: LabStrategy) -> timedelta:
 
 assert {s.code for s in ARCHIVED_STRATEGIES} == {"A2", "B2", "C2", "D2", "E2", "F2"}, \
     "the archived run must hold exactly the six v2 books"
-assert len(BY_CODE) == sum(len(run) for run in RUNS.values()), \
-    "a code may name one book only, across every run"
-assert [s.code for s in RUNS[CURRENT_RUN] if s.enters] == ["G1"], \
-    "G1 is the only book that opens positions"
+assert list(RUNS)[-1] == CURRENT_RUN, "BY_CODE must resolve to the current run's copy"
+assert all(BY_CODE[s.code].digest == s.digest for run in RUNS.values() for s in run), \
+    "a code must name the same rules in every run"
+assert [s.code for s in STRATEGIES if s.enters] == ["A2", "B2", "C2", "D2", "E2", "G1"], \
+    "the current run trades A2-E2 and G1; F2 stays retired"
 assert all(sum((leg.fraction for leg in s.legs), Decimal(0)) == 1
            for s in BY_CODE.values()), \
     "every book's legs must account for exactly the whole position"

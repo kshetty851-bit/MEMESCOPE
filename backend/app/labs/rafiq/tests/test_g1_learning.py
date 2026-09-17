@@ -24,7 +24,7 @@ from app.labs.rafiq.models import (
     RafiqLabRunState,
 )
 from app.labs.rafiq.service import RafiqLabService
-from app.labs.rafiq.tests.test_g1_engine import DEEP, g1_book, path, seed_path
+from app.labs.rafiq.tests.test_g1_engine import DEEP, g1_book, g1_row, path, seed_path
 from app.models.market import TradingStatus
 
 NOW = datetime(2026, 9, 17, 18, 0, tzinfo=UTC)
@@ -102,9 +102,7 @@ async def test_an_adjustment_learned_is_the_one_the_next_entry_uses(
     assert adj.z_score >= Decimal(str(learning.SIGNIFICANCE_Z))
     assert "cutting winners" in adj.reason
 
-    entered = (await lab_session.execute(
-        select(RafiqLabPosition).where(RafiqLabPosition.mint_address == fresh)
-    )).scalars().one()
+    entered = await g1_row(lab_session, RafiqLabPosition, fresh)
     assert entered.abandon_gain == Decimal("0.09"), \
         "the entry did not use the threshold learning had just moved"
 
@@ -199,9 +197,7 @@ async def test_a_halved_regime_halves_the_next_bet(lab_session, monkeypatch) -> 
 
     await service.tick(now=NOW)
 
-    row = (await lab_session.execute(
-        select(RafiqLabPosition).where(RafiqLabPosition.mint_address == mint)
-    )).scalars().one()
+    row = await g1_row(lab_session, RafiqLabPosition, mint)
     assert row.size_multiplier == Decimal("0.5")
     assert row.cost_basis == g1.position_size(Decimal(1000)) * Decimal("0.5") \
         == Decimal("5.00")

@@ -20,6 +20,7 @@ from app.labs.rafiq.api import router
 from app.labs.rafiq.models import RafiqLabPosition, RafiqLabRunState
 from app.labs.rafiq.service import RafiqLabService
 from app.labs.rafiq.tests.test_full_cycle import seed_candidate
+from app.labs.rafiq.tests.test_g1_engine import CURRENT_BOOKS
 
 pytestmark = pytest.mark.integration
 
@@ -63,9 +64,10 @@ async def test_every_route_reads_one_run(lab_session, monkeypatch) -> None:
 
         current = await get("status")
         assert current["run"] == registry.G1_RUN
-        assert [s["code"] for s in current["strategies"]] == ["G1"]
-        g1 = current["strategies"][0]
-        assert g1["enters"] is True and g1["open_positions"] == 1
+        assert [s["code"] for s in current["strategies"]] == CURRENT_BOOKS
+        assert all(s["enters"] for s in current["strategies"])
+        g1 = current["strategies"][-1]
+        assert g1["open_positions"] == 1
         assert g1["learning"]["abandon_gain_threshold"] == 0.08
         assert g1["learning"]["size_multiplier"] == 1.0
         assert g1["ratchet_floor"] is not None and g1["lab_run_id"] == registry.G1_RUN
@@ -77,16 +79,16 @@ async def test_every_route_reads_one_run(lab_session, monkeypatch) -> None:
         assert f2_out["ratchet_floor"] is None and f2_out["enters"] is False
 
         positions = await get("positions")
-        assert [p["strategy_code"] for p in positions] == ["G1"]
-        assert positions[0]["fraction_open"] == "1.0000"
+        g1_open = [p for p in positions if p["strategy_code"] == "G1"]
+        assert len(g1_open) == 1 and g1_open[0]["fraction_open"] == "1.0000"
         assert await get("positions", run=registry.ARCHIVED_RUN) == []
 
         assert await get("trades") == []
         old_trades = await get("trades", run=registry.ARCHIVED_RUN)
         assert [(t["strategy_code"], t["exit_reason"]) for t in old_trades] == [("F2", "stop")]
 
-        assert [b["strategy_code"] for b in await get("breaker")] == ["G1"]
-        assert [a["code"] for a in await get("analysis")] == ["G1"]
+        assert [b["strategy_code"] for b in await get("breaker")] == CURRENT_BOOKS
+        assert [a["code"] for a in await get("analysis")] == CURRENT_BOOKS
         assert len(await get("analysis", run=registry.ARCHIVED_RUN)) == 6
 
         unknown = await get("status", run="no-such-run")
@@ -101,7 +103,8 @@ async def test_reading_the_status_writes_nothing(lab_session, monkeypatch) -> No
     async with client_for(lab_session) as client:
         response = await client.get("/labs/rafiq/status")
     assert response.status_code == 200
-    assert response.json()["strategies"][0]["learning"]["size_multiplier"] == 1.0
+    g1_out = next(s for s in response.json()["strategies"] if s["code"] == "G1")
+    assert g1_out["learning"]["size_multiplier"] == 1.0
     assert (await lab_session.execute(select(RafiqLabRunState))).first() is None
 
 
@@ -113,7 +116,7 @@ async def test_a_scale_out_is_realised_while_its_runner_is_open(
     the book has gained — they used to leave the sale out until the runner
     closed."""
     from app.labs.rafiq.g1 import strategy_G1 as g1
-    from app.labs.rafiq.tests.test_g1_engine import T0, path, seed_path
+    from app.labs.rafiq.tests.test_g1_engine import T0, g1_row, path, seed_path
 
     monkeypatch.setenv("RAFIQ_LAB_ENABLED", "true")
     service = RafiqLabService(lab_session)
@@ -122,14 +125,14 @@ async def test_a_scale_out_is_realised_while_its_runner_is_open(
                            path((0, 1), (5, "1.32"), length=10))
     await service.tick(now=T0)
     await service.tick(now=T0 + timedelta(minutes=5))
-    row = (await lab_session.execute(
-        select(RafiqLabPosition).where(RafiqLabPosition.mint_address == mint)
-    )).scalars().one()
+    row = await g1_row(lab_session, RafiqLabPosition, mint)
     assert (row.status, row.scaled_out, row.fraction_open) == ("open", True, Decimal("0.25"))
 
     async with client_for(lab_session) as client:
-        g1_out = (await client.get("/labs/rafiq/status")).json()["strategies"][0]
-        desk = (await client.get("/labs/rafiq/analysis")).json()[0]
+        g1_out = next(s for s in (await client.get("/labs/rafiq/status")).json()["strategies"]
+                      if s["code"] == "G1")
+        desk = next(a for a in (await client.get("/labs/rafiq/analysis")).json()
+                    if a["code"] == "G1")
 
     equity, start = Decimal(g1_out["equity"]), Decimal(g1_out["starting_equity"])
     realised, unrealised = Decimal(g1_out["realised_pnl"]), Decimal(g1_out["unrealised_pnl"])
@@ -146,7 +149,8 @@ async def test_a_scale_out_is_realised_while_its_runner_is_open(
 def test_the_hq_desks_sit_at_the_books_the_lab_trades_now() -> None:
     """HQ seats its analysts from `registry.STRATEGIES`, "as the lab is
     registered now". Pointed at the archive, every desk looked its book up in
-    G1's run and reported it as not registered."""
+    G1's run and reported it as not registered. Five desks, six books: A2-E2
+    are seated as before G1, and G1 has no desk, as F2 had none."""
     desk = pytest.importorskip("app.hq_ops.desk")
-    assert desk.strategy_for("anchor") == "G1"
-    assert desk.strategy_for("tempo") is None
+    assert [desk.strategy_for(e) for e in desk.ANALYST_ORDER] == [
+        "A2", "B2", "C2", "D2", "E2"]

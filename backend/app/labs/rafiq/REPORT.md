@@ -1,7 +1,13 @@
 # Rafiq Lab — G1 (MOONSHOT) build report
 
-Built 2026-09-17. G1 replaces F2 as the lab's sixth book and is the only book
-that opens positions. A2–F2 are archived under run id `F2-and-earlier`.
+Built 2026-09-17. G1 replaces F2 as the lab's sixth book. A2–F2 are
+archived under run id `F2-and-earlier`.
+
+**Changed after deploy, the same day:** A2–E2 trade again next to G1, on
+fresh $1,000 books inside G1's run. F2 stays retired. See
+[A2–E2 re-armed next to G1](#after-deploy-a2e2-re-armed-next-to-g1) at the
+end. Where the sections below say G1 is the only book that opens positions,
+that was true until this change.
 
 ## Where this was built, and why not on `karthik-hq`
 
@@ -209,7 +215,8 @@ than editing them:
   - Their digests are unchanged, because `enters` is outside the hash:
     A2 `bba07d8c`, B2 `068d3a0e`, C2 `9809be8c`, D2 `5fa3c4e2`,
     E2 `6c42fd38`, F2 `a753e73d`.
-  - A module-level assert pins that G1 is the only entering book.
+  - A module-level assert pins which books enter: G1 alone at first, and
+    A2–E2 plus G1 since the re-arm.
 
 ### Decision: what happens to positions A2–F2 still hold
 
@@ -836,11 +843,13 @@ JOIN rafiq_lab_strategies s ON s.id = p.strategy_id
 WHERE p.lab_run_id = 'G1-2026-09-17'
 GROUP BY s.code;
 
--- G1's exits by reason.
+-- G1's exits by reason. A2-E2 trade in the same run, so name the book.
 SELECT exit_reason, scaled_out, count(*),
        round(avg(exit_proceeds_usd - cost_basis), 4) AS mean_net
 FROM rafiq_lab_positions
-WHERE lab_run_id = 'G1-2026-09-17' AND status = 'closed'
+WHERE strategy_id = (SELECT id FROM rafiq_lab_strategies
+                     WHERE lab_run_id = 'G1-2026-09-17' AND code = 'G1')
+  AND status = 'closed'
 GROUP BY 1, 2 ORDER BY 3 DESC;
 
 -- What G1 learned and every floor move.
@@ -848,12 +857,12 @@ SELECT at, parameter, old_value, new_value, sample_size, z_score, reason
 FROM rafiq_lab_adjustments WHERE lab_run_id = 'G1-2026-09-17' ORDER BY at;
 
 -- Refusals, with both features and what the token did next.
-SELECT reject_reason, count(*), avg(top10_holder_pct) AS top10,
+SELECT strategy_code, reject_reason, count(*), avg(top10_holder_pct) AS top10,
        count(*) FILTER (WHERE lp_locked) AS locked,
        avg(forward_max_return_1h) AS mean_max_1h
 FROM rafiq_lab_rejected_candidates
 WHERE lab_run_id = 'G1-2026-09-17'
-GROUP BY 1 ORDER BY 2 DESC;
+GROUP BY 1, 2 ORDER BY 1, 3 DESC;
 ```
 
 The API reads the same split: `GET /api/v1/labs/rafiq/status` (the current
@@ -878,7 +887,9 @@ SELECT count(*)                                   AS trades,
        round(sum((exit_proceeds_usd - realised_usd) - cost_basis * fraction_open)
              FILTER (WHERE scaled_out), 4)                          AS runner_leg_net_total
 FROM rafiq_lab_positions
-WHERE lab_run_id = 'G1-2026-09-17' AND status = 'closed';
+WHERE strategy_id = (SELECT id FROM rafiq_lab_strategies
+                     WHERE lab_run_id = 'G1-2026-09-17' AND code = 'G1')
+  AND status = 'closed';
 ```
 
 Run against the demo database above, it returned 23 trades, 8 of them
@@ -890,9 +901,19 @@ final exit sold (0.25 after a scale-out). With the Phase 0 fix in, the full
 mean is also trustworthy; the ex-runner figure is the one G1's own config
 asked for while the valuation was in doubt.
 
-## Deploying this: not done, and not mine to do
+## Deploying this
 
-Nothing was pushed or deployed. To ship it:
+**Done 2026-09-17.** PR #14 was rebase-merged to `main` (`6a6568a`) and
+deployed with a lab-only procedure instead of `deploy.sh`:
+
+- it backed up `rafiq_lab_*` only;
+- it rebuilt and recreated only `backend` and `worker`;
+- it restarted only once the real wallet had no open position and no order
+  in flight.
+
+`0092`–`0094` were applied, and G1's book was activated at 08:26:26Z. The
+real wallet's switch row was unchanged. The steps below are the general
+procedure as first written.
 
 1. **Merge.** Open a PR from `rafiq-g1` to `main`. Renumber `0092`–`0094` if
    `main` has moved past `0091` by then, and check `alembic heads` shows one
@@ -975,3 +996,42 @@ The review found the core money path, the ratchet, the learning pass, the
 run scoping, the API's read-only behaviour and migrations 0092–0094 correct.
 
 Lab suite: **205 passed.**
+
+## After deploy: A2–E2 re-armed next to G1
+
+The brief said *"A2–E2 stay archived and do not run. G1 is the only active
+book after this work."* That is what shipped. Karthik then asked for six
+strategies running from $1,000, and chose this layout.
+
+What was not said before the deploy: A2–E2 had been trading since `50e2ca0`
+(13 Sep, "so all six books trade"). The deploy stopped all five of them,
+not only F2.
+
+- **The books.** The current run is A2, B2, C2, D2, E2 and G1.
+  - A2–E2 are `registry.REARMED`: the archived specs with `enters=True`, so
+    the rules and digests are unchanged.
+  - Each gets a new `(G1-2026-09-17, code)` row at $1,000 on its first tick.
+  - Their archived rows keep their history and drain what they still hold.
+    `/status?run=F2-and-earlier` still reports them with `enters: false`.
+- **F2 stays retired.** G1 holds its slot. G1 is last in the tuple, so HQ's
+  five desks seat on A2–E2 as they did before G1, and G1 has no desk, as F2
+  had none.
+- **`BY_CODE`.** A code in two runs must name the same rules, and a
+  module-level assert now checks that. The current run's copy is the one
+  kept.
+- **A boundary this exposed.** `candidates()` opens at the run's *earliest*
+  activation, which is G1's. A book that joins a live run would otherwise
+  see admissions from up to 15 minutes before it existed. `_enter` now also
+  skips anything detected at or before the book's own `activated_at`.
+  `test_a_book_that_joins_a_run_late_trades_nothing_from_before_it_joined`
+  fails without that line.
+- **G1 alone keeps its own machinery.**
+  - The ratchet, the learning pass and the adjustments table are unchanged,
+    and they read and write G1's rows only.
+  - The G1 tests now look rows up by G1's book instead of by mint, since
+    A2–E2 trade the same admissions.
+  - The SQL above names the G1 book where it means G1.
+- **No migration.** The registry, one line in `service.py`, the `enters`
+  flag on `/status` and the tests are the whole change.
+
+Lab suite: **206 passed.**

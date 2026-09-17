@@ -1,7 +1,8 @@
 # Rafiq Lab
 
-> **Current state (2026-09-17): G1 (MOONSHOT, `g1/`) is the only book that
-> opens positions**, on run `G1-2026-09-17`. A2–F2 are archived under run
+> **Current state (2026-09-17): six books trade on run `G1-2026-09-17`**, each
+> from $1,000: A2–E2 (re-armed, rules unchanged) and G1 (MOONSHOT, `g1/`),
+> which replaced F2. The earlier A2–F2 books are archived under run
 > `F2-and-earlier`: kept, drained on their own rules, never reopened. Every
 > route takes `?run=`. What changed, why, and how to query each run is in
 > [`REPORT.md`](REPORT.md). The sections below describe the lab as first
