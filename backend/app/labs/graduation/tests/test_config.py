@@ -61,5 +61,7 @@ def test_the_paper_book_ticks_as_often_as_its_config_says() -> None:
     assert entry["schedule"] == float(config.PAPER_INTERVAL_SECONDS)
     # A tick stuck behind slow tasks must be dropped, not run late in a pile.
     assert entry["options"]["expires"] == entry["schedule"]
+    # Its own worker; compose runs `worker-paper` on exactly this queue.
+    assert entry["options"]["queue"] == "graduation_paper"
     from app.labs.graduation.live_spec import MAX_DECISION_AGE_SECONDS
     assert config.PAPER_INTERVAL_SECONDS * 3 <= MAX_DECISION_AGE_SECONDS
