@@ -25,7 +25,8 @@ from app.labs.rafiq.service import RafiqLabService
 from app.labs.rafiq.strategies import strategy_f2
 from app.labs.rafiq.tests.test_full_cycle import seed_candidate
 
-pytestmark = pytest.mark.integration
+#: Mechanisms of the archived A2-F2 run, driven as that run traded.
+pytestmark = [pytest.mark.integration, pytest.mark.usefixtures("v2_run")]
 
 
 def test_the_floor_is_nine_hundred_not_a_thousand() -> None:
@@ -74,7 +75,8 @@ async def test_the_breaker_trips_at_nine_hundred(lab_session, monkeypatch) -> No
     # position, which is the only thing the runner counts as cash movement.
     for cost, proceeds in ((Decimal(100), Decimal(0)),):
         lab_session.add(RafiqLabPosition(
-            strategy_id=row.id, mint_address="Floor".ljust(44, "1"), leg=1,
+            strategy_id=row.id, lab_run_id=row.lab_run_id,
+            mint_address="Floor".ljust(44, "1"), leg=1,
             opened_at=now - timedelta(hours=2), entry_price=Decimal(1),
             entry_observed_price=Decimal(1), quantity=Decimal(100),
             cost_basis=cost, stop_price=Decimal("0.88"), stop_pct=Decimal(12),
@@ -114,7 +116,8 @@ async def test_a_halted_book_opens_nothing_and_closes_nothing(
     await service.activate(now=now - timedelta(hours=1))
     row = await _f2(lab_session)
     lab_session.add(RafiqLabPosition(
-        strategy_id=row.id, mint_address="Drained".ljust(44, "2"), leg=1,
+        strategy_id=row.id, lab_run_id=row.lab_run_id,
+        mint_address="Drained".ljust(44, "2"), leg=1,
         opened_at=now - timedelta(hours=2), entry_price=Decimal(1),
         entry_observed_price=Decimal(1), quantity=Decimal(150),
         cost_basis=Decimal(150), stop_price=Decimal("0.88"),
@@ -148,15 +151,21 @@ async def test_the_daily_cap_binds_against_what_was_opened(
     await service.activate(now=now - timedelta(hours=1))
     row = await _f2(lab_session)
 
+    # Each held position gets a live market. Open positions are valued at
+    # what their pool would pay, and a position nothing prices is worth
+    # nothing — twenty of those would sink the book through its floor and the
+    # cap would never be reached.
     for index in range(20):
+        held = await seed_candidate(lab_session, now, tag=f"cap{index:02d}")
         lab_session.add(RafiqLabPosition(
-            strategy_id=row.id,
-            mint_address=f"Cap{index:02d}".ljust(44, "3"), leg=1,
-            opened_at=now - timedelta(minutes=30), entry_price=Decimal(1),
-            entry_observed_price=Decimal(1), quantity=Decimal(10),
-            cost_basis=Decimal(10), stop_price=Decimal("0.88"),
+            strategy_id=row.id, lab_run_id=row.lab_run_id,
+            mint_address=held, leg=1,
+            opened_at=now - timedelta(minutes=30), entry_price=Decimal("0.001"),
+            entry_observed_price=Decimal("0.001"), quantity=Decimal(10_000),
+            cost_basis=Decimal(10), entry_liquidity_usd=Decimal(250_000),
+            stop_price=Decimal("0.00088"),
             stop_pct=Decimal(12), max_hold_seconds=28800, status="open",
-            peak_price=Decimal(1), last_mark_price=Decimal(1),
+            peak_price=Decimal("0.001"), last_mark_price=Decimal("0.001"),
             last_evaluated_at=now))
     mint = await seed_candidate(lab_session, now, tag="capped")
     await lab_session.flush()
@@ -190,7 +199,7 @@ async def test_the_cap_resets_on_a_new_day(lab_session, monkeypatch) -> None:
     row = await _f2(lab_session)
     for index in range(20):
         lab_session.add(RafiqLabPosition(
-            strategy_id=row.id,
+            strategy_id=row.id, lab_run_id=row.lab_run_id,
             mint_address=f"Yday{index:02d}".ljust(44, "4"), leg=1,
             opened_at=now - timedelta(days=1), entry_price=Decimal(1),
             entry_observed_price=Decimal(1), quantity=Decimal(10),

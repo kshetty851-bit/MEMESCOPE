@@ -33,7 +33,8 @@ from app.models.market import TokenEnrichmentState, TokenMarketSnapshot, Trading
 from app.models.radar import RadarToken
 from app.models.token import DiscoveredToken
 
-pytestmark = pytest.mark.integration
+#: Mechanisms of the archived A2-F2 run, driven as that run traded.
+pytestmark = [pytest.mark.integration, pytest.mark.usefixtures("v2_run")]
 
 ENTRY = Decimal("0.001")
 QTY = Decimal(50_000)
@@ -77,7 +78,8 @@ async def _open(session, strategy: RafiqLabStrategy, mint: str, *, opened_at: da
                 peak: Decimal = ENTRY) -> RafiqLabPosition:
     """An open position frozen as the runner writes one: no target, a 25% trail."""
     pos = RafiqLabPosition(
-        strategy_id=strategy.id, mint_address=mint, leg=1, opened_at=opened_at,
+        strategy_id=strategy.id, lab_run_id=strategy.lab_run_id, mint_address=mint,
+        leg=1, opened_at=opened_at,
         entry_price=ENTRY, entry_observed_price=ENTRY, quantity=QTY,
         cost_basis=Decimal(50), entry_liquidity_usd=DEEP,
         stop_price=ENTRY * Decimal("0.88"), target_price=None,
@@ -269,6 +271,8 @@ def test_friction_is_fee_and_impact_only() -> None:
     fill, printed = Decimal("0.0015"), Decimal("0.004")   # a capped target
     proceeds = costs.sell_proceeds(QTY, fill, liquidity)
     pos = RafiqLabPosition(status="closed", cost_basis=Decimal(50), quantity=QTY,
+                           fraction_open=Decimal(1), scaled_out=False,
+                           realised_usd=Decimal(0),
                            entry_observed_price=Decimal(50) / QTY,
                            exit_price=fill, exit_observed_price=printed,
                            exit_proceeds_usd=proceeds)

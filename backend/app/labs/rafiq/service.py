@@ -1,10 +1,15 @@
 """The tick. Reads the shared feed, writes only `rafiq_lab_*`.
 
-WHAT ONE TICK DOES, PER STRATEGY
---------------------------------
-1. settle open positions against the freshest observation at or before now;
-2. roll the daily state and ask the breaker (D and E only);
-3. consider fresh Radar admissions, and enter the ones the strategy admits.
+WHAT ONE TICK DOES
+------------------
+1. activate the CURRENT run's books — config rows are selected by run id, so
+   an archived book's row is never re-used or rewritten;
+2. settle whatever ARCHIVED runs still hold open, under the rules frozen on
+   each row, opening nothing;
+3. per current book: settle its open positions against the freshest tradeable
+   reading at or before now, roll the daily state, ask the breaker (and, for
+   G1, move and check the equity ratchet), then consider fresh Radar
+   admissions and enter the ones the book admits.
 
 Settling runs BEFORE entering, on purpose: the breaker's mark-to-market
 equity, and the cash a new entry is sized against, must both reflect what
@@ -28,13 +33,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.logging import get_logger
 from app.labs.rafiq import config, entry_gate, registry
 from app.labs.rafiq.adapters import costs, evidence
-from app.labs.rafiq.engine import Geometry, Mark, evaluate
+from app.labs.rafiq.engine import Geometry, Mark, evaluate, off_band
 from app.labs.rafiq.feed import Candidate, Observation, RafiqFeed
+from app.labs.rafiq.g1 import strategy_G1 as g1
 from app.labs.rafiq.models import (
     RafiqCandidate,
+    RafiqLabAdjustment,
     RafiqLabDailyState,
     RafiqLabGateRejection,
     RafiqLabPosition,
+    RafiqLabRunState,
     RafiqLabStrategy,
 )
 from app.labs.rafiq.registry import LabStrategy
@@ -53,6 +61,9 @@ logger = get_logger(__name__)
 #: so a decision that could still be re-made is always in the set.
 _FILED_LOOKBACK = timedelta(hours=6)
 
+#: `strategy_G1.admits` names the checks it ran; the last one is the refusal.
+_G1_REFUSAL = {"liquidity": "liquidity_too_low", "market_cap": "market_cap_too_low"}
+
 
 class RafiqLabService:
     """One tick's worth of work. Holds a session; writes only lab tables."""
@@ -63,33 +74,40 @@ class RafiqLabService:
 
     # --- activation ---------------------------------------------------------
 
-    async def activate(self, *, now: datetime) -> list[RafiqLabStrategy]:
-        """Create the five books once. Re-running returns what exists.
+    async def activate(self, *, now: datetime,
+                       run: str | None = None) -> list[RafiqLabStrategy]:
+        """Create one run's books once. Re-running returns what exists.
 
         `activated_at` never moves, so the eligibility boundary is immutable
         across restarts: an admission that predates activation is never
         entered, and backfill can therefore never look like forward trading.
+
+        A new run is new rows at $1,000 — that is the reset. Earlier runs'
+        rows are neither read nor rewritten here.
         """
-        for spec in registry.STRATEGIES:
+        run = run or registry.CURRENT_RUN
+        specs = registry.RUNS[run]
+        for spec in specs:
             await self._session.execute(
                 pg_insert(RafiqLabStrategy)
-                .values(code=spec.code, lane=spec.profile.lane,
+                .values(lab_run_id=run, code=spec.code, lane=spec.profile.lane,
                         starting_equity=config.STARTING_EQUITY,
                         profile_digest=spec.digest, activated_at=now)
-                .on_conflict_do_nothing(index_elements=["code"])
+                .on_conflict_do_nothing(index_elements=["lab_run_id", "code"])
             )
         await self._session.flush()
         rows = list((await self._session.execute(
-            select(RafiqLabStrategy).order_by(RafiqLabStrategy.code)
+            select(RafiqLabStrategy).where(RafiqLabStrategy.lab_run_id == run)
+            .order_by(RafiqLabStrategy.code)
         )).scalars())
 
-        unknown = [r.code for r in rows if r.code not in registry.BY_CODE]
+        unknown = [r.code for r in rows if r.code not in {s.code for s in specs}]
         if unknown:
-            # The ledger holds a book this build does not define — v1's A-E
-            # under a v2 image, for instance. Refuse: the old rows are somebody
-            # else's record and this code cannot manage them.
+            # The run holds a book this build does not define for it. Refuse:
+            # those rows are somebody else's record and this code cannot
+            # manage them.
             raise RuntimeError(
-                f"rafiq lab ledger holds unknown strategy codes {unknown} — "
+                f"rafiq lab run {run} holds unknown strategy codes {unknown} — "
                 "archive and remove them before running this build")
 
         drifted = [r.code for r in rows
@@ -113,10 +131,15 @@ class RafiqLabService:
 
     @staticmethod
     def cash(row: RafiqLabStrategy, positions) -> Decimal:
-        """Starting capital, minus what every entry cost, plus what every exit
-        returned. Derived — never stored, so it cannot drift from the rows."""
+        """Starting capital, minus what every entry cost, plus what every sale
+        returned. Derived — never stored, so it cannot drift from the rows.
+
+        A closed row's `exit_proceeds_usd` already includes any partial sale;
+        an open row contributes the partial sales it has made so far.
+        """
         spent = sum((p.cost_basis for p in positions), Decimal(0))
-        back = sum((p.exit_proceeds_usd or Decimal(0) for p in positions), Decimal(0))
+        back = sum((p.exit_proceeds_usd if p.exit_proceeds_usd is not None
+                    else p.realised_usd for p in positions), Decimal(0))
         return row.starting_equity - spent + back
 
     @staticmethod
@@ -129,16 +152,23 @@ class RafiqLabService:
 
     # --- the tick -----------------------------------------------------------
 
-    async def tick(self, *, now: datetime | None = None) -> dict:
-        """One pass over every strategy. Safe to run again; safe to run late."""
+    async def tick(self, *, now: datetime | None = None,
+                   run: str | None = None) -> dict:
+        """One pass over one run's books. Safe to run again; safe to run late.
+
+        `run` is for tests of an archived run's mechanisms; the beat always
+        trades the current run.
+        """
         now = now or datetime.now(UTC)
-        rows = await self.activate(now=now)
+        run = run or registry.CURRENT_RUN
+        rows = await self.activate(now=now, run=run)
         candidates = await self._feed.candidates(
             since=min(r.activated_at for r in rows),
             not_before=now - timedelta(seconds=config.MAX_CANDIDATE_AGE_SECONDS))
-        # One observation per token per tick, shared by all five strategies:
-        # five scanners would be five different markets.
+        # One observation per token per tick, shared by every book and every
+        # run: two scanners would be two different markets.
         seen: dict[str, Observation | None] = {}
+        archived_closed = await self._drain(seen, run=run, now=now)
 
         report: dict[str, dict] = {}
         for row in rows:
@@ -166,7 +196,29 @@ class RafiqLabService:
                                 "halted": halted, "halt_reason": reason,
                                 "enters": spec.enters}
         await self._session.flush()
-        return {"at": now.isoformat(), "strategies": report}
+        return {"at": now.isoformat(), "run": run,
+                "archived_closed": archived_closed, "strategies": report}
+
+    async def _drain(self, seen, *, run: str, now: datetime) -> int:
+        """Settle what other runs still hold. Opens nothing, asks no breaker.
+
+        A closed run is closed out under the geometry frozen on each row,
+        never force-closed: selling a whole book at once is the drained-pool
+        fill this lab exists to avoid. Once its last position exits it costs
+        one empty query a tick.
+        """
+        rows = (await self._session.execute(
+            select(RafiqLabPosition, RafiqLabStrategy.code)
+            .join(RafiqLabStrategy, RafiqLabStrategy.id == RafiqLabPosition.strategy_id)
+            .where(RafiqLabPosition.status == "open",
+                   RafiqLabStrategy.lab_run_id != run)
+            .order_by(RafiqLabPosition.opened_at)
+        )).all()
+        closed = 0
+        for pos, code in rows:
+            closed += await self._settle(registry.BY_CODE.get(code), [pos], seen,
+                                         now=now)
+        return closed
 
     async def _mark(self, mint: str, token_id: uuid.UUID | None,
                     seen: dict, *, now: datetime) -> Observation | None:
@@ -175,7 +227,7 @@ class RafiqLabService:
                           await self._feed.observe(token_id=token_id, mint=mint, at=now))
         return seen[mint]
 
-    async def _settle(self, spec: LabStrategy, positions, seen, *,
+    async def _settle(self, spec: LabStrategy | None, positions, seen, *,
                       now: datetime) -> int:
         """Evaluate every open position. Returns how many closed."""
         closed = 0
@@ -185,10 +237,24 @@ class RafiqLabService:
             mark = None
             if obs is not None and obs.is_tradeable:
                 mark = Mark(obs.price_usd, obs.observed_at, obs.median_price_10m)
+                if off_band(mark.price, mark.median_price_10m):
+                    # A glitch print is not a market: it fills nothing, and it
+                    # must not become the peak a trail is measured from either.
+                    continue
                 if obs.price_usd > pos.peak_price:
                     pos.peak_price = obs.price_usd
                 pos.last_mark_price = obs.price_usd
+                pos.last_mark_liquidity_usd = obs.liquidity_usd
                 pos.last_evaluated_at = now
+            else:
+                # The pool reads as gone, or nothing reads it: nothing to sell
+                # into, so the open slice is worth nothing to the breaker until
+                # the box closes it.
+                pos.last_mark_liquidity_usd = Decimal(0)
+
+            if spec is not None and spec.g1:
+                closed += self._settle_g1(pos, mark, obs, now=now)
+                continue
 
             decision = evaluate(
                 Geometry(pos.entry_price, pos.stop_price, pos.target_price,
@@ -203,19 +269,89 @@ class RafiqLabService:
             # Never the depth at entry: that fallback sold vanished pools at
             # their entry-day depth. No tradeable reading means no depth, and
             # `sell_proceeds` values that at zero.
-            liquidity = obs.liquidity_usd if mark is not None else None
-            pos.status = "closed"
-            pos.closed_at = now
-            pos.exit_price = decision.fill_price
-            pos.exit_observed_price = decision.observed_price
-            pos.exit_proceeds_usd = costs.sell_proceeds(
-                pos.quantity, decision.fill_price, liquidity)
-            pos.exit_price_impact_pct = entry_gate.impact_pct(
-                pos.quantity * decision.fill_price, liquidity)
-            pos.exit_reason = decision.reason
-            pos.exit_evidence = decision.evidence
-            closed += 1
+            closed += self._close(
+                pos, fraction=pos.fraction_open, fill=decision.fill_price,
+                observed=decision.observed_price,
+                liquidity=obs.liquidity_usd if mark is not None else None,
+                reason=decision.reason, evidence=decision.evidence, now=now)
         return closed
+
+    def _settle_g1(self, pos: RafiqLabPosition, mark: Mark | None,
+                   obs: Observation | None, *, now: datetime) -> int:
+        """One G1 position, one observation, through `strategy_G1.evaluate`.
+
+        A partial sale (`scale_out`) is booked on the row and the row stays
+        open with a quarter left; every other answer sells what remains.
+        """
+        age = now - pos.opened_at
+        if mark is None:
+            # `evaluate` needs a price. Without a tradeable reading the
+            # position holds — until the box, where it is worth what the pool
+            # can pay for it, which is nothing.
+            if age < timedelta(seconds=pos.max_hold_seconds):
+                return 0
+            return self._close(
+                pos, fraction=pos.fraction_open, fill=Decimal(0), observed=Decimal(0),
+                liquidity=None, reason=g1.Exit.MAX_HOLD, now=now,
+                evidence=(f"held {age} at or past max {g1.MAX_HOLD}; no tradeable "
+                          "pool reading — valued at nothing to sell into (last "
+                          f"priced print {pos.last_mark_price:.10f})"))
+
+        position = g1.Position(
+            entry_price=pos.entry_price, opened_at=pos.opened_at,
+            stake_usd=pos.cost_basis, fraction_open=pos.fraction_open,
+            peak_price=pos.peak_price, scaled_out=pos.scaled_out,
+            realised_usd=pos.realised_usd)
+        abandon_gain = (g1.ABANDON_UNLESS_GAIN if pos.abandon_gain is None
+                        else pos.abandon_gain)
+        decision = g1.evaluate(position, mark.price, now, abandon_gain=abandon_gain)
+        if decision is None:
+            return 0
+        _, fraction, reason = decision
+        seen = (f"price {mark.price:.10f} = {mark.price / pos.entry_price:.4f}x "
+                f"entry after {age}")
+
+        if reason == g1.Exit.SCALE_OUT:
+            # A level exit, so the same drift cap as every target: a gap-up
+            # print is a real fill, an unlimited one is fiction.
+            fill = min(mark.price, pos.entry_price * g1.SCALE_OUT_AT * config.FILL_DRIFT_CAP)
+            proceeds = costs.sell_proceeds(pos.quantity * fraction, fill,
+                                           obs.liquidity_usd)
+            pos.scaled_out, pos.scaled_out_at, pos.scale_out_price = True, now, fill
+            pos.fraction_open -= fraction
+            pos.realised_usd += proceeds
+            logger.info("rafiq_g1_scale_out", mint=pos.mint_address,
+                        position=str(pos.id), sold=str(fraction), fill=str(fill),
+                        proceeds=str(proceeds), evidence=seen)
+            return 0
+
+        if reason == g1.Exit.ABANDON:
+            seen += f"; under {abandon_gain} gain at {g1.ABANDON_AFTER}"
+        elif reason == g1.Exit.RUNNER_TRAIL:
+            seen += f"; {g1.RUNNER_TRAIL} off the peak {pos.peak_price:.10f}"
+        return self._close(pos, fraction=fraction, fill=mark.price,
+                           observed=mark.price, liquidity=obs.liquidity_usd,
+                           reason=reason, evidence=f"{reason}: {seen}", now=now)
+
+    @staticmethod
+    def _close(pos: RafiqLabPosition, *, fraction: Decimal, fill: Decimal,
+               observed: Decimal, liquidity: Decimal | None, reason: str,
+               evidence: str, now: datetime) -> int:
+        """Sell what is still held into `liquidity` at `fill`, and close.
+
+        The one exit valuation, for every book and every reason. The row's
+        proceeds are the whole position's: any partial sale plus this one.
+        """
+        sold = pos.quantity * fraction
+        pos.status = "closed"
+        pos.closed_at = now
+        pos.exit_price = fill
+        pos.exit_observed_price = observed
+        pos.exit_proceeds_usd = pos.realised_usd + costs.sell_proceeds(sold, fill, liquidity)
+        pos.exit_price_impact_pct = entry_gate.impact_pct(sold * fill, liquidity)
+        pos.exit_reason = reason
+        pos.exit_evidence = evidence
+        return 1
 
     # --- Strategy D's breaker ----------------------------------------------
 
@@ -223,9 +359,10 @@ class RafiqLabService:
                        now: datetime) -> tuple[bool, str | None]:
         """Rafiq's own `evaluate`, over this strategy's live book.
 
-        Runs for every strategy so the page can show what the breaker WOULD
-        have said, but only D and E are gated by the answer — that is the
-        difference the two columns exist to measure.
+        Runs for every current book so the page can show what the breaker
+        WOULD have said; only books with `daily_breaker` are gated by it. G1
+        is, and its 5% line is mark-to-market including open positions,
+        valued at what they would fetch from the pool.
         """
         state_row = (await self._session.execute(
             select(RafiqLabDailyState)
@@ -235,10 +372,11 @@ class RafiqLabService:
 
         open_values = [self._value(p) for p in positions if p.status == "open"]
         cash = self.cash(row, positions)
+        equity = cash + sum(open_values, Decimal(0))
         if state_row is None or state_row.day != now.date():
             state_row = RafiqLabDailyState(
-                strategy_id=row.id, day=now.date(),
-                day_open_equity=cash + sum(open_values, Decimal(0)),
+                strategy_id=row.id, lab_run_id=row.lab_run_id, day=now.date(),
+                day_open_equity=equity,
                 realised_today=Decimal(0), halted=False)
             self._session.add(state_row)
             await self._session.flush()
@@ -259,39 +397,94 @@ class RafiqLabService:
         # it must not be restarted by a new calendar day.
         floor_halt, floor_reason = False, None
         if spec.equity_floor is not None:
-            equity = cash + sum(open_values, Decimal(0))
             floor_halt, floor_reason = strategy_f2.EquityFloor(
                 floor_usd=spec.equity_floor).check(equity)
 
-        if (verdict.halted or floor_halt) and not state_row.halted:
+        # G1's ratchet: moved by this tick's equity, then asked. Like the
+        # floor it halts entries and nothing else, whatever the daily breaker
+        # says.
+        ratchet_halt, ratchet_reason = False, None
+        if spec.g1:
+            ratchet = await self._ratchet(row, equity, now=now)
+            ratchet_halt, ratchet_reason = ratchet.check(equity)
+
+        if (verdict.halted or floor_halt or ratchet_halt) and not state_row.halted:
             state_row.halted, state_row.halted_at = True, now
-            state_row.halted_reason = floor_reason or verdict.reason
+            state_row.halted_reason = floor_reason or ratchet_reason or verdict.reason
         # The floor binds whether or not this book is gated on the daily
         # breaker. `daily_breaker` says "consult E's loss policy"; the floor is
         # a property of the book's own capital.
         if floor_halt:
             return True, floor_reason
+        if ratchet_halt:
+            return True, ratchet_reason
         return (bool(verdict.halted) and spec.daily_breaker), verdict.reason
+
+    async def _ratchet(self, row: RafiqLabStrategy, equity: Decimal, *,
+                       now: datetime) -> g1.EquityRatchet:
+        """`EquityRatchet.update(equity)` against the run's persisted state.
+
+        Called on every equity change — after settling, and before and after
+        each entry — so the floor follows the high-water mark and a restart
+        cannot put it back at $950. Every move is an adjustment row and a log
+        line.
+        """
+        state = (await self._session.execute(
+            select(RafiqLabRunState)
+            .where(RafiqLabRunState.lab_run_id == row.lab_run_id)
+        )).scalars().first()
+        if state is None:
+            state = RafiqLabRunState(lab_run_id=row.lab_run_id,
+                                     ratchet_high_water=row.starting_equity,
+                                     ratchet_floor=registry.G1_INITIAL_FLOOR)
+            self._session.add(state)
+            await self._session.flush()
+        ratchet = g1.EquityRatchet(high_water=state.ratchet_high_water,
+                                   floor=state.ratchet_floor)
+        before = ratchet.floor
+        ratchet.update(equity)
+        state.ratchet_high_water = ratchet.high_water
+        if ratchet.floor != before:
+            state.ratchet_floor = ratchet.floor
+            reason = (f"equity ${ratchet.high_water:,.2f} is a new high-water mark; "
+                      f"floor = high-water less {ratchet.give_back:.0%}, never down")
+            self._session.add(RafiqLabAdjustment(
+                lab_run_id=row.lab_run_id, at=now, parameter="equity_ratchet_floor",
+                old_value=before, new_value=ratchet.floor, reason=reason))
+            logger.info("rafiq_g1_ratchet_floor_moved", run=row.lab_run_id,
+                        old=str(before), new=str(ratchet.floor), reason=reason)
+        return ratchet
 
     @staticmethod
     def _realised_on(positions, day) -> Decimal:
-        return sum(
-            ((p.exit_proceeds_usd or Decimal(0)) - p.cost_basis for p in positions
-             if p.status == "closed" and p.closed_at and p.closed_at.date() == day),
-            Decimal(0),
-        )
+        """P&L realised on `day`, each sale on the day it happened: a G1
+        scale-out on the day it sold, the rest of that position on the day it
+        closed. For a single-sale row that is simply proceeds less cost."""
+        total = Decimal(0)
+        for p in positions:
+            if p.scaled_out and p.scaled_out_at and p.scaled_out_at.date() == day:
+                total += p.realised_usd - p.cost_basis * (1 - p.fraction_open)
+            if p.status == "closed" and p.closed_at and p.closed_at.date() == day:
+                total += ((p.exit_proceeds_usd or Decimal(0)) - p.realised_usd
+                          - p.cost_basis * p.fraction_open)
+        return total
 
     @staticmethod
     def _value(pos: RafiqLabPosition) -> Decimal:
-        """A position's CURRENT mark, never its cost basis.
+        """What the open slice would fetch from the pool as last read.
 
-        Cost-basis accounting is exactly what let a dashboard here show
-        $200.00 allocated beside a book actually worth $8.55, and a breaker
-        built on it would never see the hole.
+        The exit valuation, applied now: never its cost basis, and not
+        `quantity x price` either. Cost-basis accounting is what let a
+        dashboard here show $200.00 allocated beside a book worth $8.55, and a
+        naive mark keeps a drained pool at its last price until it closes —
+        the same hole, a tick later.
         """
-        # `entry_price` is the fallback for exactly one tick — between an
-        # entry and its first evaluation — and never after.
-        return pos.quantity * (pos.last_mark_price or pos.entry_price)
+        # The entry reading stands in for exactly one tick — between an entry
+        # and its first evaluation — and on rows older than this column.
+        price = pos.last_mark_price or pos.entry_price
+        liquidity = (pos.entry_liquidity_usd if pos.last_mark_liquidity_usd is None
+                     else pos.last_mark_liquidity_usd)
+        return costs.sell_proceeds(pos.quantity * pos.fraction_open, price, liquidity)
 
     # --- entries ------------------------------------------------------------
 
@@ -317,6 +510,11 @@ class RafiqLabService:
             today = len({p.mint_address for p in positions
                          if p.opened_at.date() == now.date()})
             remaining = spec.max_trades_per_day - today
+
+        # G1's two adjustable numbers, read once, immediately before this
+        # tick's entry decisions, and frozen onto every position they open.
+        abandon_gain, size_multiplier = (self._g1_parameters() if spec.g1
+                                         else (None, None))
 
         for cand in candidates:
             if cand.mint_address in held:
@@ -346,26 +544,11 @@ class RafiqLabService:
                 elif spec.consensus_gate and not self._admitted_by_e(obs, now=now):
                     reason = "consensus_refused"
                 else:
-                    stop_pct = registry.stop_pct_for(spec, obs.liquidity_usd)
-                    if stop_pct is None:
-                        reason = "no_stop_available"
-                    else:
-                        notional = registry.notional_for(
-                            spec, equity=equity, liquidity_usd=obs.liquidity_usd,
-                            stop_pct=stop_pct)
-                        if notional <= 0:
-                            reason = "size_is_zero"
-                        elif notional > cash:
-                            reason = "insufficient_cash"
-                        else:
-                            verdict = entry_gate.check_entry(
-                                liquidity_usd=obs.liquidity_usd,
-                                market_cap_usd=obs.market_cap,
-                                notional_usd=notional, thresholds=spec.gate)
-                            if not verdict.allowed:
-                                reason = verdict.reason
-                                await self._count_rejection(row.id, verdict.reason,
-                                                            now=now)
+                    stop_pct, notional, verdict, reason = self._size_and_gate(
+                        spec, obs, equity=equity, cash=cash,
+                        size_multiplier=size_multiplier)
+                    if verdict is not None and not verdict.allowed:
+                        await self._count_rejection(row.id, verdict.reason, now=now)
 
             if reason is not None:
                 # First rejection wins: its feature snapshot is the one the
@@ -409,6 +592,17 @@ class RafiqLabService:
                     filed.add(cand.mint_address)
                 continue
 
+            # "check() before every entry". Equity moves with every entry this
+            # tick, so the ratchet is updated and asked again here rather than
+            # only once before the loop.
+            if spec.g1:
+                ratchet = await self._ratchet(row, equity, now=now)
+                ratchet_halt, why = ratchet.check(equity)
+                if ratchet_halt:
+                    logger.info("rafiq_g1_entries_halted", run=row.lab_run_id,
+                                reason=why)
+                    break
+
             # Read AFTER the decision is settled and BEFORE the row exists, so
             # the reading is the one the decision was made under and cannot be
             # mistaken for a later state of the store. It cannot change the
@@ -430,7 +624,7 @@ class RafiqLabService:
             for index, (leg, leg_id) in enumerate(
                     zip(spec.legs, leg_ids, strict=True), start=1):
                 self._session.add(RafiqLabPosition(
-                    id=leg_id,
+                    id=leg_id, lab_run_id=row.lab_run_id,
                     strategy_id=row.id, mint_address=cand.mint_address,
                     symbol=cand.symbol, detected_at=cand.detected_at, opened_at=now,
                     leg=index,
@@ -452,7 +646,11 @@ class RafiqLabService:
                     stop_pct=stop_pct, trailing_frac=leg.trailing_frac,
                     max_hold_seconds=int(exits.max_hold.total_seconds()),
                     status="open", peak_price=obs.price_usd,
-                    last_mark_price=obs.price_usd, last_evaluated_at=now))
+                    last_mark_price=obs.price_usd,
+                    last_mark_liquidity_usd=obs.liquidity_usd, last_evaluated_at=now,
+                    scaled_out=False, fraction_open=Decimal(1),
+                    realised_usd=Decimal(0), abandon_gain=abandon_gain,
+                    size_multiplier=size_multiplier))
                 opened += 1
             # Flushed before the candidate row is written, because that row
             # carries a foreign key to leg 1 and `_file` issues a Core INSERT
@@ -467,9 +665,55 @@ class RafiqLabService:
             filed.add(cand.mint_address)
             held.add(cand.mint_address)
             cash -= notional
+            equity += costs.sell_proceeds(quantity, obs.price_usd,
+                                          obs.liquidity_usd) - notional
             if remaining is not None:
                 remaining -= 1
+        if spec.g1 and opened:
+            await self._ratchet(row, equity, now=now)
         return opened
+
+    @staticmethod
+    def _g1_parameters() -> tuple[Decimal, Decimal]:
+        """(abandon threshold, size multiplier) for G1's next entries."""
+        return g1.ABANDON_UNLESS_GAIN, Decimal(1)
+
+    @staticmethod
+    def _size_and_gate(spec: LabStrategy, obs: Observation, *, equity: Decimal,
+                       cash: Decimal, size_multiplier: Decimal | None):
+        """(stop_pct, notional, verdict, reject_reason) for one candidate.
+
+        The gate runs after sizing because it needs the notional, and after
+        the cash check so a book that simply ran out of money does not record
+        a gate rejection it never made. `verdict` is the gate's, when it ran.
+
+        G1 sizes with `strategy_G1.position_size` — 1% of CURRENT equity —
+        times the learning layer's multiplier, and is admitted by
+        `strategy_G1.admits` before the shared impact ceiling is priced.
+        """
+        if spec.g1:
+            stop_pct = (1 - g1.STOP_MULT) * 100
+            notional = (g1.position_size(equity) * size_multiplier).quantize(
+                Decimal("0.01"))
+        else:
+            stop_pct = registry.stop_pct_for(spec, obs.liquidity_usd)
+            if stop_pct is None:
+                return None, None, None, "no_stop_available"
+            notional = registry.notional_for(
+                spec, equity=equity, liquidity_usd=obs.liquidity_usd, stop_pct=stop_pct)
+        if notional <= 0:
+            return stop_pct, notional, None, "size_is_zero"
+        if notional > cash:
+            return stop_pct, notional, None, "insufficient_cash"
+        if spec.g1:
+            admitted, _, checks = g1.admits(obs.liquidity_usd, obs.market_cap)
+            if not admitted:
+                refusal = _G1_REFUSAL[checks[-1]] if checks else "liquidity_unknown"
+                return stop_pct, notional, entry_gate.GateVerdict(False, refusal), refusal
+        verdict = entry_gate.check_entry(
+            liquidity_usd=obs.liquidity_usd, market_cap_usd=obs.market_cap,
+            notional_usd=notional, thresholds=spec.gate)
+        return stop_pct, notional, verdict, (None if verdict.allowed else verdict.reason)
 
     async def _filed(self, strategy_id: uuid.UUID, *, now: datetime) -> set[str]:
         """Mints this book filed a decision on recently.

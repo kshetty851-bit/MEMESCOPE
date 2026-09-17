@@ -31,7 +31,8 @@ from app.models.market import TokenMarketSnapshot, TradingStatus
 from app.models.radar import RadarToken
 from app.models.token import DiscoveredToken
 
-pytestmark = pytest.mark.integration
+#: Mechanisms of the archived A2-F2 run, driven as that run traded.
+pytestmark = [pytest.mark.integration, pytest.mark.usefixtures("v2_run")]
 
 WALLET_TABLES = ("karthik_wallets", "karthik_opportunities", "karthik_positions")
 

@@ -31,7 +31,8 @@ from app.labs.rafiq.tests.test_full_cycle import seed_candidate
 from app.models.research_data import HolderSnapshot
 from app.models.token_security import TokenSecurityEvaluationRow
 
-pytestmark = pytest.mark.integration
+#: Mechanisms of the archived A2-F2 run, driven as that run traded.
+pytestmark = [pytest.mark.integration, pytest.mark.usefixtures("v2_run")]
 
 
 def _holder(mint: str, at: datetime, pct: Decimal | None) -> HolderSnapshot:

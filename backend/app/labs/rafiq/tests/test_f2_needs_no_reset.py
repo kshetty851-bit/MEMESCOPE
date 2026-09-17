@@ -21,7 +21,8 @@ from app.labs.rafiq.models import RafiqLabPosition, RafiqLabStrategy
 from app.labs.rafiq.service import RafiqLabService
 from app.labs.rafiq.tests.test_full_cycle import seed_candidate
 
-pytestmark = pytest.mark.integration
+#: Mechanisms of the archived A2-F2 run, driven as that run traded.
+pytestmark = [pytest.mark.integration, pytest.mark.usefixtures("v2_run")]
 
 #: The five books as they stand on prod, so this test fails if a later change
 #: would have required a reset after all.
@@ -53,7 +54,7 @@ async def test_activating_f2_leaves_the_five_books_byte_identical(
     for code in EXISTING:
         spec = registry.BY_CODE[code]
         lab_session.add(RafiqLabStrategy(
-            code=code, lane=spec.profile.lane,
+            lab_run_id=registry.ARCHIVED_RUN, code=code, lane=spec.profile.lane,
             starting_equity=config.STARTING_EQUITY,
             profile_digest=spec.digest, activated_at=yesterday))
     await lab_session.flush()
@@ -124,7 +125,8 @@ async def test_a_retired_book_keeps_settling_but_opens_nothing(
     # mark it against and the test would pass for the wrong reason.
     legacy_mint = await seed_candidate(lab_session, now, tag="legacyopen")
     lab_session.add(RafiqLabPosition(
-        strategy_id=a2.id, mint_address=legacy_mint, leg=1,
+        strategy_id=a2.id, lab_run_id=a2.lab_run_id, mint_address=legacy_mint,
+        leg=1,
         opened_at=now - timedelta(minutes=30),
         # Priced at the seeded market, so the mark neither stops it out nor
         # takes profit and the only thing under test is whether it is still

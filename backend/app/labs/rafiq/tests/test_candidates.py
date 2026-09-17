@@ -18,7 +18,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import select
 
-from app.labs.rafiq import outcomes, registry
+from app.labs.rafiq import outcomes
 from app.labs.rafiq.models import (
     RafiqCandidate,
     RafiqLabPosition,
@@ -29,7 +29,8 @@ from app.labs.rafiq.tests.test_full_cycle import seed_candidate
 from app.models.market import TokenMarketSnapshot
 from app.models.token import DiscoveredToken
 
-pytestmark = pytest.mark.integration
+#: Mechanisms of the archived A2-F2 run, driven as that run traded.
+pytestmark = [pytest.mark.integration, pytest.mark.usefixtures("v2_run")]
 
 
 async def _rows(session, mint: str | None = None, *,
@@ -258,17 +259,6 @@ async def test_coverage_reports_the_non_null_rate(lab_session, monkeypatch) -> N
     # today; the report has to say so rather than omit them.
     assert report["non_null_pct"]["top10_holder_pct"] == 0.0
     assert report["non_null_pct"]["lp_status"] == 0.0
-
-
-def test_every_entering_book_files_its_decisions() -> None:
-    """Each entering book files its own decisions, keyed by `strategy_id`, so
-    six books produce six separate populations rather than one mixed one.
-
-    Pinned rather than computed: if a book is ever retired, the row it stops
-    producing is a change to what the table can answer, and that should be a
-    visible edit rather than a silent narrowing of the sample."""
-    entering = sorted(s.code for s in registry.STRATEGIES if s.enters)
-    assert entering == ["A2", "B2", "C2", "D2", "E2", "F2"]
 
 
 def test_every_reject_reason_is_short_enough_to_store() -> None:
