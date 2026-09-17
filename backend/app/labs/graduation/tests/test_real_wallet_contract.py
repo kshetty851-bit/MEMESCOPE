@@ -331,14 +331,14 @@ def test_the_board_stops_where_the_real_wallet_does():
     minutes = timedelta(minutes=1)
     trades = [(t0, t0 + 5 * minutes, -0.50),
               (t0 + 10 * minutes, t0 + 15 * minutes, 0.10)]
-    cash, funded, skipped, _, _ = _funded_walk(trades)
+    cash, funded, skipped, *_ = _funded_walk(trades)
     assert (funded, skipped) == (1, 1)
     assert cash < float(config.WALLET_MIN_USD)
 
     # A drawdown that stays above the floor keeps trading, at a smaller size.
     trades = [(t0, t0 + 5 * minutes, -0.10),
               (t0 + 10 * minutes, t0 + 15 * minutes, 0.10)]
-    cash, funded, skipped, _, _ = _funded_walk(trades)
+    cash, funded, skipped, *_ = _funded_walk(trades)
     assert (funded, skipped) == (2, 0)
     assert round(cash, 2) == 99.0
 
@@ -395,3 +395,30 @@ def test_a_bigger_wallet_pays_more_impact_and_a_smaller_fee_share():
     # plus a fee credit (the priority fee is flat in SOL).
     assert big.cash > 1000.0 * at_ten
     assert big.low == 1000.0
+
+
+def test_each_trade_carries_what_the_chosen_wallet_made_on_it():
+    """The trade panel prints these, so they must come from the SAME walk as
+    the wallet figure beside it: funded trades sum to the wallet's change, and
+    a trade it could not pay for is None rather than a scaled-down number."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.labs.graduation.api import _funded_walk
+
+    t0 = datetime(2026, 9, 17, tzinfo=UTC)
+    minutes = timedelta(minutes=1)
+    trades = [(t0, t0 + 4 * minutes, 0.10),
+              (t0 + minutes, t0 + 5 * minutes, -0.50),
+              (t0 + 30 * minutes, t0 + 34 * minutes, 0.20)]
+
+    whole = _funded_walk(trades)                      # $100, one at a time
+    assert [v is None for v in whole.pnl] == [False, True, False]
+    assert len(whole.pnl) == len(trades)
+    assert round(sum(v for v in whole.pnl if v is not None), 2) == round(
+        whole.cash - 100.0, 2)
+
+    split = _funded_walk(trades, ticket=25.0, start=100.0)   # $25 x 4
+    assert all(v is not None for v in split.pnl)
+    assert round(sum(split.pnl), 2) == round(split.cash - 100.0, 2)
+    # A quarter-size stake loses a quarter as much on the same rug.
+    assert -13 < split.pnl[1] < -12

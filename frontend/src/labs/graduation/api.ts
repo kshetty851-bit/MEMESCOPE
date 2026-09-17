@@ -22,9 +22,15 @@ export function fetchStatus(): Promise<GraduationStatus> {
  * Every closed trade, not the handful `/status` carries. Its own call because
  * the board polls status every thirty seconds and this list only grows.
  */
-export function fetchPaperTrades(book: string): Promise<PaperBook> {
+export function fetchPaperTrades(
+  book: string,
+  size?: { ticket: number; split: number },
+): Promise<PaperBook> {
+  const wallet = size
+    ? `&ticket=${encodeURIComponent(size.ticket)}&split=${encodeURIComponent(size.split)}`
+    : "";
   return api.get<PaperBook>(
-    `/labs/graduation/paper/trades?book=${encodeURIComponent(book)}`,
+    `/labs/graduation/paper/trades?book=${encodeURIComponent(book)}${wallet}`,
   );
 }
 
