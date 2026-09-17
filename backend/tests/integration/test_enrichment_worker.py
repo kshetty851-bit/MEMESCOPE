@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.models.market import (
+    LANE_DISPLAY,
     LANE_NORMAL,
     LANE_NURSERY,
     LANE_TRACK_RECORD,
@@ -407,6 +408,58 @@ async def test_scheduler_tier_is_recorded(db_session: AsyncSession) -> None:
     assert old.tier == "old"
     # Old tokens are scheduled much further out than fresh ones.
     assert old.next_refresh_at > fresh.next_refresh_at
+
+
+async def test_old_dead_tokens_get_one_last_poll_and_are_paused(
+    db_session: AsyncSession,
+) -> None:
+    """Two days old and under $1k of liquidity, or no pool at all: paused, so no
+    lane claims it again. A deep pool, a young token, a displayed token and a
+    provider failure all stay active."""
+    old = datetime.now(UTC) - timedelta(days=3)
+    thin = await _token_with_state(db_session, "MintOldThin", discovered_at=old)
+    gone = await _token_with_state(db_session, "MintOldGone", discovered_at=old)
+    deep = await _token_with_state(db_session, "MintOldDeep", discovered_at=old)
+    young = await _token_with_state(db_session, "MintYoungThin")
+    shown = await _token_with_state(db_session, "MintOldShown", discovered_at=old)
+    shown.priority = LANE_DISPLAY
+    provider = FakeProvider(data={
+        "MintOldThin": _market("MintOldThin", liquidity_usd=Decimal("999")),
+        "MintOldDeep": _market("MintOldDeep"),
+        "MintYoungThin": _market("MintYoungThin", liquidity_usd=Decimal("5")),
+        "MintOldShown": _market("MintOldShown", liquidity_usd=Decimal("5")),
+    })
+
+    await MarketEnrichmentService(db_session, provider).enrich(
+        [thin, gone, deep, young, shown])
+
+    assert thin.status == EnrichmentStatus.PAUSED
+    assert gone.status == EnrichmentStatus.PAUSED
+    assert {deep.status, young.status, shown.status} == {EnrichmentStatus.ACTIVE}
+    # The last reading is still written.
+    assert len(await _snapshots(db_session, "MintOldThin")) == 1
+
+    # The Radar admitted it within the day: Rafiq may be holding it.
+    admitted = await _token_with_state(db_session, "MintOldAdmitted", discovered_at=old)
+    seen = datetime.now(UTC) - timedelta(hours=20)
+    db_session.add(RadarToken(
+        token_id=admitted.token_id, mint_address="MintOldAdmitted",
+        first_detected_at=seen, first_opportunity_score=Decimal("75"),
+        first_confidence=Decimal("40"), detection_reason=["test"],
+        category="early_momentum", current_opportunity_score=Decimal("75"),
+        current_confidence=Decimal("40"), current_category="early_momentum",
+        current_multiple=Decimal("1"), peak_multiple=Decimal("1"),
+        model_version="test", last_evaluated_at=seen))
+    await db_session.flush()
+    await MarketEnrichmentService(db_session, FakeProvider(data={
+        "MintOldAdmitted": _market("MintOldAdmitted", liquidity_usd=Decimal("5")),
+    })).enrich([admitted])
+    assert admitted.status == EnrichmentStatus.ACTIVE
+
+    failing = await _token_with_state(db_session, "MintOldDown", discovered_at=old)
+    await MarketEnrichmentService(
+        db_session, FakeProvider(raises=ProviderError("boom"))).enrich([failing])
+    assert failing.status == EnrichmentStatus.ACTIVE
 
 
 async def test_register_token_enrols_it(db_session: AsyncSession) -> None:

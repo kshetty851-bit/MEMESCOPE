@@ -488,8 +488,9 @@ class TestTheLabsBookIsProtected:
         await session.flush()
 
     async def test_an_open_lab_holding_joins_the_lane(
-        self, db_session: AsyncSession
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        monkeypatch.setattr(settings, "FEATURE_LAB_ENABLED", True)
         mint = "LabHeld" + "1" * 30
         await _token_with_state(db_session, mint, due_in_seconds=9_000)
         await self._lab_position(db_session, mint)
@@ -499,6 +500,22 @@ class TestTheLabsBookIsProtected:
 
         assert mint in members, "an open Lab position must be kept priced"
         assert membership.lab >= 1
+
+    async def test_a_switched_off_labs_holdings_are_not_kept_priced(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Off, the Lab neither marks nor exits: its stranded positions have
+        no dependent, and re-pricing them every 15s is pure load."""
+        monkeypatch.setattr(settings, "FEATURE_LAB_ENABLED", False)
+        mint = "LabOff" + "1" * 31
+        await _token_with_state(db_session, mint, due_in_seconds=9_000)
+        await self._lab_position(db_session, mint)
+        await db_session.flush()
+
+        members, membership = await resolve_membership(db_session)
+
+        assert mint not in members
+        assert membership.lab == 0
 
     async def test_a_token_the_lab_does_not_hold_is_not_pulled_in(
         self, db_session: AsyncSession

@@ -632,14 +632,22 @@ async def open_incident(
 async def _attempts_so_far(
     session: AsyncSession, incident: HqIncident, action_key: str
 ) -> int:
-    """How many times this repair has already been tried for this incident."""
+    """How many times this repair has already run for this incident.
+
+    Successes count too. A repair "succeeds" when it was carried out, not when
+    the condition cleared, and the condition re-opens the same incident on the
+    next tick if it has not. Counting only failures let `disk.run_retention`
+    succeed 29 times an hour on prod: deleting rows does not shrink the files,
+    so the disk stayed past the line and the prune was re-queued every tick. A
+    refused (`skipped`) run did nothing, so it still does not count.
+    """
     result = await session.execute(
         select(func.count())
         .select_from(HqAction)
         .where(
             HqAction.incident_id == incident.id,
             HqAction.action == action_key,
-            HqAction.outcome.in_(("failed", "attempted")),
+            HqAction.outcome != "skipped",
         )
     )
     return int(result.scalar_one())
@@ -848,8 +856,9 @@ async def tick(session: AsyncSession) -> dict[str, Any]:
             if incident.status != "awaiting_owner":
                 incident.status = "awaiting_owner"
                 incident.owner_rationale = (
-                    f"{action.key} failed {attempts} times. HQ has no further "
-                    f"permitted action for this condition and it needs a person."
+                    f"{action.key} ran {attempts} times and the condition "
+                    f"persists. HQ has no further permitted action for it and it "
+                    f"needs a person."
                 )
                 await session.commit()
                 logger.warning(

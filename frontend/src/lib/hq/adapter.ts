@@ -687,8 +687,10 @@ function deriveMilo(s: HqSources): EmployeeReading {
   if (!wallet && !positions) {
     return unknown(absence(s.paperWallet, STALE_AFTER_MS.paper, s.now, "Paper wallet"), metrics);
   }
+  // Switched off on purpose (2026-09-17), not broken: "offline" is a fault and
+  // would hold the whole office at HIGH_ALERT for a wallet nobody runs.
   if (wallet && !wallet.enabled) {
-    return reading("offline", "Paper wallet is disabled.", metrics, at);
+    return reading("idle", "Paper wallet is switched off.", metrics, at);
   }
 
   const open = wallet?.metrics.open_positions ?? positions?.items.length ?? null;
@@ -768,7 +770,7 @@ function deriveRex(s: HqSources): EmployeeReading {
   if (!wallet) {
     return unknown(absence(s.paperWallet, STALE_AFTER_MS.paper, s.now, "Paper wallet"), metrics);
   }
-  if (!wallet.enabled) return reading("offline", "Paper wallet is disabled.", metrics, at);
+  if (!wallet.enabled) return reading("idle", "Paper wallet is switched off.", metrics, at);
 
   return reading("idle", "No paper execution recorded just now.", metrics, at);
 }

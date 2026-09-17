@@ -27,6 +27,7 @@ from app.models.token import DiscoveredToken
 from app.models.market import TokenMarketSnapshot
 from app.models.radar import RadarToken
 from app.models.research_data import NurseryAdmission, WalletFlowSnapshot
+from app.repositories.market import MarketSnapshotRepository
 from app.services.scanner.wallet_flow import FlowStats, WalletFlowTracker
 
 logger = get_logger(__name__)
@@ -196,14 +197,8 @@ async def flush_early_buyers(
         )).all()
         discovered = {m: d for m, d in meta}
 
-        pools = (await session.execute(
-            select(TokenMarketSnapshot.mint_address,
-                   TokenMarketSnapshot.pool_address)
-            .distinct()
-            .where(TokenMarketSnapshot.mint_address.in_(qualified),
-                   TokenMarketSnapshot.pool_address.is_not(None))
-        )).all()
-        pool_of: dict[str, str] = {m: p for m, p in pools}
+        pool_of = await MarketSnapshotRepository(session).latest_pool_for_mints(
+            list(qualified))
 
         rows: list[dict] = []
         for mint in qualified:

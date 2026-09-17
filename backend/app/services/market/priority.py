@@ -190,13 +190,16 @@ async def resolve_membership(session: AsyncSession) -> tuple[set[str], PriorityM
         ).all()
     )
 
+    # Only while the Lab runs. Switched off (2026-09-17) it neither marks nor
+    # exits, and its 21 stranded positions were being re-priced every 15s for
+    # nothing - 5,000 snapshots an hour on a server that was out of CPU.
     lab_mints = list(
         (
             await session.scalars(
                 select(LabPosition.mint_address).where(LabPosition.status == "open")
             )
         ).all()
-    )
+    ) if settings.FEATURE_LAB_ENABLED else []
 
     # Open paper positions first. A paper holding is not merely displayed: its
     # next quote can settle an existing position, so allowing the Radar or an
