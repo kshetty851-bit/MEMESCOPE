@@ -568,7 +568,7 @@ async def test_a_live_socket_mark_beats_a_later_stamped_dexscreener_row() -> Non
 
 
 async def test_a_tick_that_finds_another_running_steps_aside(monkeypatch) -> None:
-    """At a ten-second cadence a slow tick can still be running when the next
+    """At a three-second cadence a slow tick can still be running when the next
     begins. Both would fill the same graduation, and the (book, mint)
     constraint would roll back the whole second tick, its closes included."""
     from app.labs.graduation import scheduler
