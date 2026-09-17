@@ -970,10 +970,15 @@ class Settings(BaseSettings):
     REAL_WALLET_MAX_TOTAL_EXPOSURE_USD: Decimal = Field(default=Decimal("10"), gt=0)
     REAL_WALLET_MAX_DAILY_NOTIONAL_USD: Decimal = Field(default=Decimal("20"), gt=0)
     REAL_WALLET_MAX_DAILY_LOSS_USD: Decimal = Field(default=Decimal("10"), gt=0)
-    #: How many real submissions may happen in one day, both sides counted. A
-    #: notional cap bounds how much a bug can spend; only a count bounds how
-    #: many times it can fire, and fee-only churn is invisible to the former.
-    REAL_WALLET_MAX_DAILY_TRADES: int = Field(default=4, ge=1, le=100)
+    #: How many real BUYS may be created in one UTC day, refused ones included
+    #: (`RealWalletDriver._trades_today`); sells are not counted. A notional
+    #: cap bounds how much a bug can spend; only a count bounds how many times
+    #: it can fire, and fee-only churn is invisible to the former.
+    #:
+    #: The `le` is a typo guard, not the setting. It was 100, and the graduation
+    #: arm the wallet copies made 109 buys on its busiest day (2026-09-14), so
+    #: the guard itself refused a legitimate day's trading.
+    REAL_WALLET_MAX_DAILY_TRADES: int = Field(default=4, ge=1, le=500)
     #: The most SOL the execution wallet may hold and still open new positions.
     #: Compared in integer lamports. This is the bound that makes the blast
     #: radius a number rather than a promise: over-funding is refused instead of
