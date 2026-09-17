@@ -40,6 +40,7 @@ values before it is kept.
 from __future__ import annotations
 
 import asyncio
+import html
 import re
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -82,12 +83,26 @@ BACKOFF = (
 )
 MAX_ATTEMPTS = len(BACKOFF)
 
+#: What CallMeBot says when a message went through: "Message queued. You will
+#: receive it in a few seconds" (or "Message queued with ID: …").
+_QUEUED = re.compile(r"message queued", re.I)
+#: Its rate limit, answered with HTTP 200: "There is currently a limit of 25
+#: messages per 240 minutes. Please try to reduce the number of messages sent."
+_RATE_LIMITED = re.compile(r"limit of \d+ messages", re.I)
 #: Words in a reply that mean it did not send, even when the status was 200.
 _REFUSED = re.compile(r"error|invalid|not valid|wrong|blocked|wait|denied|forbidden", re.I)
 
 
 class AlertSendError(Exception):
     """A send that did not go through. The message never contains a secret."""
+
+    def __init__(self, message: str, *, blocked: bool = False, rate_limited: bool = False) -> None:
+        super().__init__(message)
+        #: HTTP 403 from CallMeBot's web firewall: it refused this TEXT, so
+        #: sending the same words again can never work.
+        self.blocked = blocked
+        #: Over the rate limit: waiting always works, giving up never does.
+        self.rate_limited = rate_limited
 
 
 def enabled() -> bool:
@@ -111,7 +126,7 @@ def _visible_text(page: str) -> str:
     turn every successful send into a failure.
     """
     page = re.sub(r"(?is)<(script|style)\b.*?</\1>", " ", page)
-    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", page)).strip()
+    return re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", page))).strip()
 
 
 async def send_whatsapp(text: str) -> str:
@@ -134,11 +149,24 @@ async def send_whatsapp(text: str) -> str:
         # Anything that walks the chain (a traceback, an error tracker) would
         # have published it. A test holds this.
         raise AlertSendError(f"could not reach CallMeBot ({unreachable})")
-    reply = _scrub(_visible_text(response.text))[:300]
+    page = _scrub(_visible_text(response.text))
+    reply = page[:300]
+    # The reply repeats the message ("Text to send: …"). Judge only CallMeBot's
+    # own words, or a token called WAIT turns a delivered message into a resend.
+    said = page.replace(" ".join(text.split()), " ")
+    if response.status_code == 403:
+        raise AlertSendError(f"CallMeBot's firewall refused the text (HTTP 403): {reply}", blocked=True)
     if response.status_code != 200:
         raise AlertSendError(f"CallMeBot answered HTTP {response.status_code}: {reply}")
-    if _REFUSED.search(reply):
+    if _QUEUED.search(said):
+        return reply
+    if _RATE_LIMITED.search(said):
+        raise AlertSendError(f"CallMeBot rate limit: {reply}", rate_limited=True)
+    if _REFUSED.search(said):
         raise AlertSendError(f"CallMeBot refused: {reply}")
+    # Neither "queued" nor a known refusal. Counted as sent: resending on a
+    # reply nobody has seen before would spam Karthik; the log keeps it.
+    logger.warning("real_wallet_trade_alert_unconfirmed", reply=reply[:200])
     return reply
 
 
@@ -152,7 +180,8 @@ _EXIT_WORDS = {
     "break_even": "fell back to break-even",
     "trailing_stop": "trailing stop",
     "stagnation": "the price went flat",
-    "time_exit_unpriced": "time limit (no price to mark)",
+    # Never "time limit": CallMeBot's firewall 403s a line that starts with it.
+    "time_exit_unpriced": "timed out (no price to mark)",
     "partial_taken": "partial take-profit",
     "retry": "retrying an earlier sell",
 }
@@ -162,7 +191,8 @@ def _duration(delta: timedelta) -> str:
     seconds = int(delta.total_seconds())
     if seconds < 60:
         return f"{seconds}s"
-    minutes, _ = divmod(seconds, 60)
+    # Nearest, not floor: a 4-minute exit that fired at 3m42s reads "held 4m".
+    minutes = round(seconds / 60)
     hours, minutes = divmod(minutes, 60)
     if hours < 24:
         return f"{hours}h {minutes}m" if hours else f"{minutes}m"
@@ -181,7 +211,7 @@ def describe_exit(reason: str | None) -> str:
     if m := re.fullmatch(r"target_(\d+)(?:_(\d+))?x", reason):
         return f"hit the {m.group(1)}{'.' + m.group(2) if m.group(2) else ''}x target"
     if m := re.fullmatch(r"time_([\d.]+)h", reason):
-        return f"time limit ({_duration(timedelta(hours=float(m.group(1))))})"
+        return f"timed out after {_duration(timedelta(hours=float(m.group(1))))}"
     return reason
 
 
@@ -253,6 +283,15 @@ def closed_message(position: RealWalletPosition, symbol: str | None, now: dateti
     return "\n".join(lines) + _late(position.closed_at or now, now)
 
 
+def short_form(message: str) -> str:
+    """What is left when CallMeBot's firewall refuses a message: the headline
+    and the amount, plus how late it is. Build `message` with no symbol — a
+    token's name is text nobody here chose, so it is the likeliest trigger."""
+    lines = message.split("\n")
+    late = lines[-1:] if len(lines) > 2 and lines[-1].endswith(" ago)") else []
+    return "\n".join(lines[:2] + late)
+
+
 # --- the log --------------------------------------------------------------------
 
 
@@ -309,7 +348,8 @@ async def deliver_pending(
         (RealWalletTradeAlert.event == "opened", RealWalletPosition.opened_at),
         else_=RealWalletPosition.closed_at,
     )
-    skipped: list = []
+    #: Trades whose earlier message is still waiting out its backoff.
+    waiting: list = []
 
     for _ in range(MAX_PER_TICK):
         query = (
@@ -321,28 +361,41 @@ async def deliver_pending(
             .limit(1)
             .with_for_update(of=RealWalletTradeAlert, skip_locked=True)
         )
-        if skipped:
-            query = query.where(RealWalletTradeAlert.id.not_in(skipped))
+        if waiting:
+            query = query.where(RealWalletTradeAlert.position_id.not_in(waiting))
         row = (await session.execute(query)).first()
         if row is None:
             break
         alert, position, symbol = row
 
         if not _due(alert, now):
-            # Still in its backoff. Everything after it waits too: a message about
-            # a close must never arrive before the message about its open.
+            # Still in its backoff. That trade's later message waits with it — a
+            # close must never arrive before its open — but other trades' messages
+            # go ahead: one refused message once held up every alert for an hour.
             # Commit, not rollback: nothing changed, and this releases the row
             # lock without discarding anything the caller had in progress.
+            waiting.append(alert.position_id)
             await session.commit()
-            break
+            continue
 
-        text = (opened_message if alert.event == "opened" else closed_message)(position, symbol, now)
+        build = opened_message if alert.event == "opened" else closed_message
         try:
-            await send(text)
+            try:
+                await send(build(position, symbol, now))
+            except AlertSendError as exc:
+                if not exc.blocked:
+                    raise
+                # The firewall refused these words, and would refuse them again
+                # on every retry. The short form carries the news without them.
+                await send(short_form(build(position, None, now)))
         except AlertSendError as exc:
             alert.attempts += 1
             alert.last_attempt_at = now
             alert.last_error = _scrub(str(exc))[:500]
+            if exc.rate_limited:
+                # Keep the longest wait and never give up: the limit is 25 per
+                # 240 minutes, so the message goes out late rather than never.
+                alert.attempts = min(alert.attempts, MAX_ATTEMPTS - 1)
             if alert.attempts >= MAX_ATTEMPTS:
                 alert.status = "failed"
                 counts["failed"] += 1

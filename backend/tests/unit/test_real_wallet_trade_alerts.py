@@ -12,6 +12,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from html import escape
 
 import httpx
 import pytest
@@ -63,14 +64,14 @@ class TestWords:
     @pytest.mark.parametrize(
         ("reason", "words"),
         [
-            ("time_0.06666666666666667h", "time limit (4m)"),
-            ("time_2h", "time limit (2h 0m)"),
+            ("time_0.06666666666666667h", "timed out after 4m"),
+            ("time_2h", "timed out after 2h 0m"),
             ("target_1_5x", "hit the 1.5x target"),
             ("target_2x", "hit the 2x target"),
             ("trailing_stop", "trailing stop"),
             ("dead_zero", "the token died"),
             ("partial_promoted_to_close:partial_taken", "partial take-profit, sold in full"),
-            ("time_exit_unpriced", "time limit (no price to mark)"),
+            ("time_exit_unpriced", "timed out (no price to mark)"),
             ("something_new", "something_new"),
             (None, "reason not recorded"),
         ],
@@ -83,8 +84,30 @@ class TestWords:
         text = ta.closed_message(_position(), "DUKE", NOW)
         assert text.splitlines()[0] == "✅ REAL WALLET SOLD DUKE"
         assert "+$0.30 (+0.6%) after fees" in text
-        assert "time limit (4m) · held 4m" in text
+        assert "timed out after 4m · held 4m" in text
         assert "https://solscan.io/tx/EXIT" in text
+
+    def test_no_line_starts_the_way_callmebots_firewall_refuses(self):
+        """It answers HTTP 403 to any line starting "time limit" (measured
+        2026-09-17 against the live service), so that message never arrived."""
+        reasons = [*ta._EXIT_WORDS, "time_0.06666666666666667h", "time_2h", "target_2x", None]
+        for reason in reasons:
+            text = ta.closed_message(_position(exit_reason=reason), "DUKE", NOW)
+            assert not any(line.lower().startswith("time limit") for line in text.splitlines()), reason
+
+    def test_held_rounds_to_the_nearest_minute(self):
+        """NTDA, 2026-09-17: a 4-minute exit that fired at 3m42s once read "held 3m"."""
+        opened = NOW - timedelta(minutes=10)
+        text = ta.closed_message(
+            _position(opened_at=opened, closed_at=opened + timedelta(minutes=3, seconds=42)), "NTDA", NOW
+        )
+        assert "timed out after 4m · held 4m" in text
+
+    def test_the_short_form_keeps_the_news_and_drops_the_rest(self):
+        late = ta.short_form(ta.closed_message(_position(closed_at=NOW - timedelta(minutes=10)), None, NOW))
+        assert late.splitlines() == ["✅ REAL WALLET SOLD N1wF…pump", "+$0.30 (+0.6%) after fees", "(10m ago)"]
+        fresh = ta.short_form(ta.opened_message(_position(opened_at=NOW), None, NOW))
+        assert fresh.splitlines() == ["🟢 REAL WALLET BOUGHT N1wF…pump", "$49.97 at $0.02449"]
 
     def test_never_calls_gross_net(self):
         text = ta.closed_message(
@@ -165,6 +188,42 @@ class TestSending:
             await ta.send_whatsapp("hello")
 
     @pytest.mark.asyncio
+    async def test_the_rate_limit_is_a_failure_that_says_so(self, configured, monkeypatch):
+        """CallMeBot's own words, answered with HTTP 200. The old check read them as sent."""
+        page = ("There is currently a limit of 25 messages per 240 minutes. Please try to "
+                "reduce the number of messages sent. For example, group them into one message.")
+        _mock_client(monkeypatch, lambda r: httpx.Response(200, text=page))
+        with pytest.raises(ta.AlertSendError) as err:
+            await ta.send_whatsapp("hello")
+        assert err.value.rate_limited and not err.value.blocked
+
+    @pytest.mark.asyncio
+    async def test_a_403_is_the_firewall_refusing_the_words(self, configured, monkeypatch):
+        page = "<h1>Forbidden</h1><p>You don't have permission to access this resource.</p>"
+        _mock_client(monkeypatch, lambda r: httpx.Response(403, text=page))
+        with pytest.raises(ta.AlertSendError) as err:
+            await ta.send_whatsapp("time limit (4m)")
+        assert err.value.blocked and not err.value.rate_limited
+
+    @pytest.mark.asyncio
+    async def test_words_in_our_own_message_never_decide_the_outcome(self, configured, monkeypatch):
+        """The reply repeats the text we sent; only CallMeBot's own words count."""
+        text = "🟢 REAL WALLET BOUGHT WAIT\nERROR & <invalid>"
+
+        def echo(outcome):
+            return lambda r: httpx.Response(
+                200, text=f"Message to: {PHONE}<br>Text to send: {escape(r.url.params['text'])}<br>{outcome}"
+            )
+
+        # A delivered message whose confirmation wording we have never seen.
+        _mock_client(monkeypatch, echo("Some brand new success wording."))
+        assert "brand new" in await ta.send_whatsapp(text)
+        # And a refused one, even though our text says "Message queued".
+        _mock_client(monkeypatch, echo("APIKey is invalid."))
+        with pytest.raises(ta.AlertSendError, match="refused"):
+            await ta.send_whatsapp("Message queued")
+
+    @pytest.mark.asyncio
     async def test_a_stylesheet_saying_error_does_not_fail_a_good_send(self, configured, monkeypatch):
         page = "<style>.error{color:red}</style><script>var e='error'</script><b>Message queued</b>"
         _mock_client(monkeypatch, lambda r: httpx.Response(200, text=page))
@@ -200,11 +259,19 @@ class _Phone:
 
     def __init__(self):
         self.inbox: list[str] = []
-        self.failing = False
+        #: True, or a piece of text: down for every message, or just those.
+        self.failing: bool | str = False
+        self.rate_limited = False
+        #: The firewall 403s any message containing this.
+        self.refuses: str | None = None
 
     async def __call__(self, text: str) -> str:
-        if self.failing:
+        if self.failing is True or (self.failing and self.failing in text):
             raise ta.AlertSendError(f"CallMeBot answered HTTP 503: down, key {KEY}")
+        if self.rate_limited:
+            raise ta.AlertSendError("CallMeBot rate limit: 25 per 240 minutes", rate_limited=True)
+        if self.refuses and self.refuses in text:
+            raise ta.AlertSendError("CallMeBot's firewall refused the text (HTTP 403)", blocked=True)
         self.inbox.append(text)
         return "Message queued"
 
@@ -294,6 +361,68 @@ class TestTheLog:
 
         await ta.tick(db_session, now=NOW + timedelta(seconds=40), send=phone, pause=0)
         assert ["BOUGHT" in m for m in phone.inbox] == [True, False]
+
+    @pytest.mark.asyncio
+    async def test_a_firewall_refusal_sends_the_short_form(self, configured, db_session):
+        db_session.add(_position(opened_at=NOW - timedelta(seconds=20), closed_at=None))
+        await db_session.flush()
+        phone = _Phone()
+        # The firewall objects to something in the full message — here the link.
+        phone.refuses = "https://"
+        result = await ta.tick(db_session, now=NOW, send=phone, pause=0)
+        assert result["delivered"]["sent"] == 1
+        assert phone.inbox == ["🟢 REAL WALLET BOUGHT N1wF…pump\n$49.97 at $0.02449"]
+        (alert,) = await _alerts(db_session)
+        assert alert.status == "sent"
+
+    @pytest.mark.asyncio
+    async def test_when_even_the_short_form_is_refused_it_retries_later(self, configured, db_session):
+        db_session.add(_position(opened_at=NOW - timedelta(seconds=20), closed_at=None))
+        await db_session.flush()
+        phone = _Phone()
+        phone.refuses = "REAL WALLET"
+        result = await ta.tick(db_session, now=NOW, send=phone, pause=0)
+        assert result["delivered"] == {"sent": 0, "failed": 0, "retrying": 1}
+        (alert,) = await _alerts(db_session)
+        assert alert.status == "pending" and "403" in alert.last_error
+
+    @pytest.mark.asyncio
+    async def test_one_stuck_trade_does_not_hold_up_another(self, configured, db_session):
+        """NTDA, 2026-09-17: a refused sell message blocked every later alert."""
+        db_session.add(_position(mint_address="STUCK" + "1" * 38, opened_at=NOW - timedelta(seconds=50),
+                                 closed_at=NOW - timedelta(seconds=40)))
+        db_session.add(_position(mint_address="FRESH" + "2" * 38, opened_at=NOW - timedelta(seconds=10),
+                                 closed_at=None))
+        await db_session.flush()
+        phone = _Phone()
+        phone.failing = "STUC"
+
+        await ta.tick(db_session, now=NOW, send=phone, pause=0)
+        assert phone.inbox == []  # one failure per tick, never a burst
+
+        await ta.tick(db_session, now=NOW + timedelta(seconds=5), send=phone, pause=0)
+        assert len(phone.inbox) == 1 and "BOUGHT FRES…2222" in phone.inbox[0]
+        # The stuck trade's close still waits behind its own open.
+        stuck = [a for a in await _alerts(db_session) if a.status == "pending"]
+        assert sorted(a.event for a in stuck) == ["closed", "opened"]
+
+    @pytest.mark.asyncio
+    async def test_a_rate_limited_message_waits_instead_of_giving_up(self, configured, db_session):
+        db_session.add(_position(opened_at=NOW, closed_at=None))
+        await db_session.flush()
+        phone = _Phone()
+        phone.rate_limited = True
+        at = NOW
+        for _ in range(ta.MAX_ATTEMPTS + 4):
+            await ta.tick(db_session, now=at, send=phone, pause=0)
+            at += timedelta(hours=1)
+        (alert,) = await _alerts(db_session)
+        assert alert.status == "pending"
+        assert alert.attempts == ta.MAX_ATTEMPTS - 1
+
+        phone.rate_limited = False
+        await ta.tick(db_session, now=at, send=phone, pause=0)
+        assert len(phone.inbox) == 1 and phone.inbox[0].endswith("(12h 0m ago)")
 
     @pytest.mark.asyncio
     async def test_gives_up_after_the_last_attempt_and_says_so(self, configured, db_session):
