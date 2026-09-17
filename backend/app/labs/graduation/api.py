@@ -1392,7 +1392,13 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
                        key=lambda size: -size[0]) if mine else [(base, 1)]
         walks = {(t, n): _funded_walk(mine, sol_rate, ticket=t, start=t * n)
                  for t, n in sizes}
-        funded_usd, n_funded, n_skipped, funded_trades, _ = walks[(base, 1)]
+        # By NAME, not by position: this unpacked five fields and broke the
+        # whole board for fifteen minutes on 2026-09-17 when `Walk` grew a
+        # sixth. Nothing here needs the tuple's shape.
+        official = walks[(base, 1)]
+        funded_usd = official.cash
+        n_funded, n_skipped = official.funded, official.skipped
+        funded_trades = official.took
         # The forecast now describes the SAME account as the column beside it.
         # Projecting the rule's trade rate onto a $100 wallet overstated by
         # exactly the trades that wallet could never have funded — 73 of 213

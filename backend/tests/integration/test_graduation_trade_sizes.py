@@ -68,3 +68,31 @@ async def test_the_panel_answers_for_the_wallet_size_it_was_asked_about(
         D("0.01"))
     # A quarter-size stake loses about a quarter as much on the same rug.
     assert D("-13") < sized["MintRug"] < D("-12")
+
+
+async def test_the_leaderboard_itself_renders(db_session: AsyncSession, monkeypatch) -> None:
+    """The board, end to end, because the pieces passing is not the board
+    passing: `_funded_walk` grew a sixth field on 2026-09-17, `row()` still
+    unpacked five, every unit test passed and `/tournament` returned 500 for
+    fifteen minutes. This calls the endpoint's own function."""
+    from app.labs.graduation import config
+    from app.labs.graduation.api import tournament
+
+    monkeypatch.setenv("LAB_GRADUATION_ENABLED", "1")
+    assert config.enabled()
+    db_session.add_all([
+        _trade("MintBoardA", opened=NOW, minutes=4, ret="0.10"),
+        _trade("MintBoardB", opened=NOW + timedelta(minutes=1), minutes=4, ret="-0.50"),
+        _trade("MintBoardC", opened=NOW + timedelta(minutes=30), minutes=4, ret="0.20"),
+    ])
+    await db_session.flush()
+
+    board = await tournament(db_session)
+
+    arm = next(a for a in board.arms if a.name == BOOK)
+    assert arm.trades == 3
+    # Every size the board offers, and the $100 column is the one it ranks on.
+    assert {(str(s.ticket_usd), s.split) for s in arm.splits}
+    official = next(s for s in arm.splits if s.split == 1 and float(s.ticket_usd) == 100)
+    assert official.trades_funded + official.trades_skipped == 3
+    assert float(official.wallet_usd) > 0
