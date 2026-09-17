@@ -257,15 +257,41 @@ def real_wallet_fast_exit_tick() -> dict[str, Any]:
     return run_async(_real_wallet_fast_exit_tick())
 
 
+async def _locked(session: Any) -> bool:
+    """This transaction holds the fast loop's lock AND the executor's.
+
+    The executor's too, so the minute tick never advances an intent this loop is
+    part-way through. Both are transaction-scoped and re-entrant, so taking them
+    again in a transaction that already holds them succeeds.
+    """
+    for key in (FAST_EXIT_LOCK_KEY, EXECUTOR_LOCK_KEY):
+        if not await session.scalar(select(func.pg_try_advisory_xact_lock(
+                DRY_RUN_LOCK_NAMESPACE, key))):
+            return False
+    return True
+
+
 async def _drain(session: Any, *, now_fn: Any) -> list[dict[str, object]]:
-    """Walk every unfinished intent to a terminal state, not one step of it."""
+    """Walk every unfinished intent to a terminal state, not one step of it.
+
+    COMMITTED AFTER EVERY STEP. The executor's contract is that every state is a
+    committed row, and the signer depends on it: it is another process and
+    reloads the intent by id, so a step still inside this transaction does not
+    exist for it. Chained in one transaction, the wallet's first live buy
+    (2026-09-17) was refused `intent_not_found`, and every buy or sell this loop
+    created would have been. A commit releases the transaction's locks, so they
+    are taken again before the next step; if another pass holds them, this one
+    stops and leaves the rest to it.
+    """
+    moved: list[dict[str, object]] = []
+    if not await _locked(session):
+        return moved
     ids = list((await session.scalars(
         select(RealWalletLiveIntent.id)
         .where(RealWalletLiveIntent.state.in_(UNFINISHED_STATES))
         .order_by(RealWalletLiveIntent.created_at)
     )).all())
     executor = RealWalletExecutor(session)
-    moved: list[dict[str, object]] = []
     for intent_id in ids:
         for _ in range(settings.REAL_WALLET_FAST_EXIT_MAX_STEPS):
             # One intent's failure must not strand the rest of the book — and in
@@ -279,6 +305,9 @@ async def _drain(session: Any, *, now_fn: Any) -> list[dict[str, object]]:
             if not outcome.changed:
                 break
             moved.append(outcome.as_dict())
+            await session.commit()
+            if not await _locked(session):
+                return moved
     return moved
 
 
