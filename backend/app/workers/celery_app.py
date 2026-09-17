@@ -379,7 +379,10 @@ celery_app.conf.beat_schedule = {
         # entries mirrored to the real wallet were already past its 60s
         # staleness limit when written. The lab's own knob, which this entry
         # used to ignore.
-        "schedule": _seconds("LAB_GRADUATION_PAPER_TICK_S", 10.0),
+        "schedule": _seconds("LAB_GRADUATION_PAPER_TICK_S", 3.0),
+        # A tick left waiting behind slow tasks for a whole interval is
+        # dropped, not run late: the next one is already queued and fresher.
+        "options": {"expires": _seconds("LAB_GRADUATION_PAPER_TICK_S", 3.0)},
     },
     # NSE Breakout Tracker. The exchange publishes the day's bhavcopy after
     # the close, so ingest runs at 13:00 UTC (18:30 IST) and retries hourly to

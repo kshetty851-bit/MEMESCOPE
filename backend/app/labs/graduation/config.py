@@ -523,7 +523,8 @@ PAPER_MAX_HOLD_MINUTES = _int("LAB_GRADUATION_PAPER_MAX_HOLD_MIN", 2)
 #: A position is only opened on a token whose pool opened within this long, so
 #: the book enters near the open rather than halfway through a window.
 PAPER_ENTRY_GRACE_MINUTES = _int("LAB_GRADUATION_PAPER_ENTRY_GRACE_MIN", 3)
-#: How often the book ticks. TEN seconds — a tenth of the shortest hold.
+#: How often the book ticks. THREE seconds (it was ten, a tenth of the
+#: shortest hold).
 #:
 #: At sixty the book was breaking its own rule: a position due out at five
 #: minutes is not noticed until the next tick, so 104 closed trades averaged
@@ -538,7 +539,12 @@ PAPER_ENTRY_GRACE_MINUTES = _int("LAB_GRADUATION_PAPER_ENTRY_GRACE_MIN", 3)
 #: It costs nothing to fix: the tick is database-only, no external call. The
 #: floor on accuracy is now the sampler's 60-second mark, not the book's
 #: inattention.
-PAPER_INTERVAL_SECONDS = _int("LAB_GRADUATION_PAPER_TICK_S", 10)
+#:
+#: Ten was still too slow for the real wallet, which copies this book and
+#: cannot start a buy until a tick has seen the pool open: over its first 15
+#: trades that wait was a median 7.6s of a 17.4s entry lag, and one buy
+#: 14s behind the paper price paid 1.0% more for it.
+PAPER_INTERVAL_SECONDS = _int("LAB_GRADUATION_PAPER_TICK_S", 3)
 
 # --- the A/B: an entry filter, tested rather than adopted ---------------------
 #

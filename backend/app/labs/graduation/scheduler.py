@@ -103,7 +103,7 @@ async def paper_tick() -> dict[str, Any]:
         return {"skipped": "graduation_paper_disabled"}
     try:
         async with SessionFactory() as session:
-            # One tick at a time. At a ten-second cadence a slow tick can still
+            # One tick at a time. At a three-second cadence a slow tick can still
             # be running when the next begins; both would fill the same
             # graduation, and the (book, mint) constraint would then roll back
             # the whole second tick, its closes included.
