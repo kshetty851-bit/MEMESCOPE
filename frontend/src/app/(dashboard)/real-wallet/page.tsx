@@ -36,6 +36,21 @@ type Position = {
   exit_signature: string | null;
 };
 
+/** Every real trade since the first, from the server — not the latest 50. */
+type SinceFirstTrade = {
+  first_trade_at: string;
+  trades: number;
+  won: number;
+  lost: number;
+  open: number;
+  net_pnl_usd: string;
+  traded_usd: string;
+  average_return_pct: string | null;
+  start_balance_sol: string | null;
+  start_value_usd: string | null;
+  return_pct: string | null;
+};
+
 type WalletStatus = {
   public_key: string | null;
   network: "devnet" | "mainnet";
@@ -87,6 +102,7 @@ type WalletStatus = {
   failures_before_kill_switch: number;
   last_failure_reason: string | null;
   positions: Position[];
+  since_first_trade?: SinceFirstTrade | null;
 };
 
 type Strategy = {
@@ -967,6 +983,97 @@ function TxLinks({ p }: { p: Position }) {
   );
 }
 
+/** A live d HH:MM:SS clock counting up from `from`. */
+function Clock({ from }: { from: string }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const secs = Math.max(0, Math.floor((now - new Date(from).getTime()) / 1000));
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const days = Math.floor(secs / 86400);
+  return (
+    <span className="tabular-nums">
+      {days ? `${days}d ` : ""}
+      {pad(Math.floor((secs % 86400) / 3600))}:{pad(Math.floor((secs % 3600) / 60))}:
+      {pad(secs % 60)}
+    </span>
+  );
+}
+
+const pct = (value: string | null) =>
+  value == null
+    ? "—"
+    : `${Number(value) >= 0 ? "+" : "−"}${Math.abs(Number(value)).toFixed(2)}%`;
+
+const tone = (value: number) =>
+  value > 0 ? "text-up" : value < 0 ? "text-down" : "text-ink";
+
+/**
+ * The wallet since it began trading: how long, what it made, and what that is
+ * on the wallet's worth at the first buy — the lab's "since first trade", with
+ * real money. Totals are the server's, over every trade.
+ */
+function SinceFirstTradeCard({ since }: { since: SinceFirstTrade | null | undefined }) {
+  if (!since) return null;
+  const pnl = Number(since.net_pnl_usd);
+  return (
+    <section className="mt-6 rounded-lg border border-line p-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p className="text-label text-ink-3">Since the first trade</p>
+        <p className="text-sm text-ink-3">
+          <span className="rounded bg-ink/[0.06] px-1.5 py-px font-mono text-ink">
+            <Clock from={since.first_trade_at} />
+          </span>{" "}
+          since {when(since.first_trade_at)}
+        </p>
+      </div>
+      <div className="mt-3 grid gap-4 sm:grid-cols-3">
+        <div>
+          <p className="text-xs text-ink-3">Profit after fees</p>
+          <p className={`text-2xl font-medium tabular-nums ${tone(pnl)}`}>
+            {pnl > 0 ? "+" : ""}
+            {usd(pnl)}
+          </p>
+          <p className="text-xs text-ink-3">
+            {since.trades} trades · {since.won} won · {since.lost} lost
+            {since.open ? ` · ${since.open} open` : ""}
+          </p>
+        </div>
+        <div>
+          <p className="text-xs text-ink-3">Return on the wallet</p>
+          <p
+            className={`text-2xl font-medium tabular-nums ${tone(Number(since.return_pct ?? 0))}`}
+          >
+            {pct(since.return_pct)}
+          </p>
+          <p className="text-xs text-ink-3">
+            {since.start_value_usd && since.start_balance_sol
+              ? `on $${Number(since.start_value_usd).toFixed(2)} (${Number(
+                  since.start_balance_sol,
+                ).toFixed(4)} SOL) when trading began`
+              : "the wallet's starting worth was not recorded"}
+          </p>
+        </div>
+        <div>
+          <p className="text-xs text-ink-3">Average per trade</p>
+          <p
+            className={`text-2xl font-medium tabular-nums ${tone(
+              Number(since.average_return_pct ?? 0),
+            )}`}
+          >
+            {pct(since.average_return_pct)}
+          </p>
+          <p className="text-xs text-ink-3">
+            on ${Number(since.traded_usd).toFixed(2)} traded
+          </p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 const sol = (value: string | null) => (value ? `${Number(value).toFixed(4)} SOL` : "—");
 
 /**
@@ -1361,6 +1468,7 @@ export default function RealWalletPage() {
         onPick={(change) => setPick((p) => ({ ...p, ...change }))}
       />
       <TodayCard status={data} />
+      <SinceFirstTradeCard since={data?.since_first_trade} />
       <TradesTable positions={data?.positions ?? []} />
       <SafetyCard
         status={data}

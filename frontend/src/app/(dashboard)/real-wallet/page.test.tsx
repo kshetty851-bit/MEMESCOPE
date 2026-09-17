@@ -439,6 +439,36 @@ describe("RealWalletPage trades and limits", () => {
     expect(within(table).getByText("DoneMint")).toBeInTheDocument();
   });
 
+  it("totals every trade since the first, with a live clock and the wallet's return", async () => {
+    serve({
+      status: status({
+        since_first_trade: {
+          first_trade_at: "2026-09-17T08:18:30Z",
+          trades: 2, won: 2, lost: 0, open: 0,
+          net_pnl_usd: "0.7633", traded_usd: "50.04",
+          average_return_pct: "1.53", start_balance_sol: "1.448694113",
+          start_value_usd: "144.85", return_pct: "0.53",
+        },
+      }),
+    });
+    await renderLoaded();
+    const card = screen.getByText("Since the first trade").closest("section")!;
+    expect(card.textContent).toContain("+$0.76");
+    expect(card.textContent).toContain("2 trades · 2 won · 0 lost");
+    expect(card.textContent).toContain("+0.53%");
+    expect(card.textContent).toContain("on $144.85 (1.4487 SOL) when trading began");
+    expect(card.textContent).toContain("+1.53%");
+    expect(card.textContent).toContain("on $50.04 traded");
+    // A running clock in d HH:MM:SS form.
+    expect(card.textContent).toMatch(/\d{2}:\d{2}:\d{2}/);
+  });
+
+  it("shows no totals before the first trade", async () => {
+    serve({ status: status({ since_first_trade: null }) });
+    await renderLoaded();
+    expect(screen.queryByText("Since the first trade")).toBeNull();
+  });
+
   it("lays the trades out like the lab: open, closed, and the totals", async () => {
     serve({
       status: status({

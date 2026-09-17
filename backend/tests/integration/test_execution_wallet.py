@@ -202,6 +202,7 @@ async def test_status_carries_no_secret_and_states_today(
     assert body["today"]["buys"] == 0
     assert Decimal(body["today"]["realised_pnl_usd"]) == 0
     assert body["today"]["loss_limit_hit"] is False
+    assert body["since_first_trade"] is None, "no trade yet, so nothing to total"
     encoded = str(body).lower()
     assert "secret_file" not in encoded
     assert "private_key" not in encoded

@@ -537,6 +537,7 @@ async def status(viewer: OptionalUser, session: DbSession) -> dict[str, object]:
     symbols = await TokenRepository(session).get_many_by_mints(
         list({p.mint_address for p in positions}))
     pnl_today = await live.realised_pnl_today(now)
+    since = await live.since_first_trade()
     tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
 
     def amount(value: Decimal | None) -> str | None:
@@ -627,6 +628,21 @@ async def status(viewer: OptionalUser, session: DbSession) -> dict[str, object]:
         ),
         "failures_before_kill_switch": settings.REAL_WALLET_MAX_CONSECUTIVE_EXECUTION_FAILURES,
         "last_failure_reason": None if health is None else health.last_failure_reason,
+        # Every real trade, not the latest 50 below, and the wallet's worth
+        # when the first began; None until there is a first trade.
+        "since_first_trade": None if since is None else {
+            "first_trade_at": since["first_trade_at"],
+            "trades": since["trades"], "won": since["won"], "lost": since["lost"],
+            "open": since["open"],
+            **{key: None if since[key] is None
+               else _decimal(since[key].quantize(Decimal(places)))
+               for key, places in (("net_pnl_usd", "0.0001"),
+                                   ("traded_usd", "0.01"),
+                                   ("average_return_pct", "0.01"),
+                                   ("start_balance_sol", "0.000000001"),
+                                   ("start_value_usd", "0.01"),
+                                   ("return_pct", "0.01"))},
+        },
         "positions": [
             {
                 "id": str(position.id),
