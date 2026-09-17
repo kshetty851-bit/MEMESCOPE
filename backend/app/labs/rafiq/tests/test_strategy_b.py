@@ -62,21 +62,25 @@ def test_before_the_box_a_quiet_position_is_held() -> None:
 
 
 def test_a_token_that_stops_printing_still_hits_the_box() -> None:
-    """The zombie case, and the one B exists for. No current market at all —
-    not a stale print, NOTHING — and the position still closes at the box, at
-    the last price anyone actually observed.
+    """The zombie case, and the one B exists for. No tradeable market at all —
+    not a stale print, NOTHING — and the position still closes at the box.
 
     Found by running the lab rather than by reading it: an earlier version
     returned `None` whenever the mark was missing, so a token that simply
     stopped printing outlived the 2-hour box for ever.
+
+    It closes at what the pool can pay, which is nothing. It used to fill at
+    the last price anyone saw, and 180 archived A2-E2 exits booked vanished
+    pools at full value that way. That price stays in the evidence only.
     """
     at = T0 + timedelta(hours=5)
     decision = evaluate(geometry(), None, peak_price=ENTRY,
                         last_mark_price=Decimal("0.93"), now=at)
     assert decision is not None
     assert decision.reason == "max_hold"
-    assert decision.fill_price == Decimal("0.93")
-    assert "no current market" in decision.evidence
+    assert decision.fill_price == Decimal(0)
+    assert "no tradeable pool" in decision.evidence
+    assert "0.93" in decision.evidence
 
 
 def test_a_position_never_priced_at_all_is_held_not_zeroed() -> None:

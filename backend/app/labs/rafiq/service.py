@@ -183,7 +183,7 @@ class RafiqLabService:
             token_id = await self._feed.token_id(pos.mint_address)
             obs = await self._mark(pos.mint_address, token_id, seen, now=now)
             mark = None
-            if obs is not None and obs.is_priceable:
+            if obs is not None and obs.is_tradeable:
                 mark = Mark(obs.price_usd, obs.observed_at, obs.median_price_10m)
                 if obs.price_usd > pos.peak_price:
                     pos.peak_price = obs.price_usd
@@ -199,12 +199,11 @@ class RafiqLabService:
             if decision is None:
                 continue
 
-            # With no current observation the exit still has to be priced.
-            # The pool's depth AT ENTRY is the stated assumption — it is a
-            # number that was measured, unlike a zero, which is a claim that
-            # nothing could be sold and is only true if someone checked.
-            liquidity = (obs.liquidity_usd if obs and obs.liquidity_usd
-                         else pos.entry_liquidity_usd)
+            # Every exit is sold into the SAME reading its price came from.
+            # Never the depth at entry: that fallback sold vanished pools at
+            # their entry-day depth. No tradeable reading means no depth, and
+            # `sell_proceeds` values that at zero.
+            liquidity = obs.liquidity_usd if mark is not None else None
             pos.status = "closed"
             pos.closed_at = now
             pos.exit_price = decision.fill_price

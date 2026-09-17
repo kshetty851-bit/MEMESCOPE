@@ -80,26 +80,27 @@ def evaluate(geometry: Geometry, mark: Mark | None, *, peak_price: Decimal,
              last_mark_price: Decimal | None, now: datetime) -> Exit | None:
     """The one decision. None means hold.
 
-    `mark` is None when nothing priced the token at this tick. That is NOT an
-    exit at zero — this project closed real positions at $0 for ever on a
-    single unpriced observation, and 6.9% of those tokens were still trading.
+    `mark` is None when the pool has no tradeable reading at this tick. Before
+    the box that is NOT an exit — one dead poll is not a death (6.9% of this
+    platform's dead_zero exits were tokens still trading), so the position
+    holds.
 
-    But it is not an exit at never, either. A token that simply stops printing
-    is precisely the zombie Strategy B exists to kill, so once the max hold has
-    passed the position closes at `last_mark_price` — the last price anyone
-    actually observed — and says so in its evidence. With nothing ever
-    observed there is no price to exit at, and only then does it hold.
+    At the box it is an exit, and it is valued at what the pool can pay: with
+    no tradeable reading, nothing. It used to fill at `last_mark_price` and be
+    sold into the depth the pool had at entry, which booked vanished pools at
+    full value — 180 of 559 closed A2-E2 trades, on prices 95 to 630 minutes
+    old. The last price anyone saw is kept in the evidence, never in the fill.
+    With nothing ever observed there is nothing to say, and it holds.
     """
     age = now - geometry.opened_at
     expired = age >= geometry.max_hold
 
     if mark is None:
         if expired and last_mark_price is not None:
-            return Exit("max_hold", last_mark_price, last_mark_price,
+            return Exit("max_hold", Decimal(0), Decimal(0),
                         f"held {age} at or past max {geometry.max_hold}; "
-                        "no current market — exited at the last observed price "
-                        f"{last_mark_price:.10f}, priced against the pool's "
-                        "depth at entry")
+                        "no tradeable pool reading — valued at nothing to sell "
+                        f"into (last priced print {last_mark_price:.10f})")
         return None
 
     if off_band(mark.price, mark.median_price_10m):

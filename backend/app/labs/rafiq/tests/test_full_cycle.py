@@ -152,7 +152,7 @@ async def test_a_full_cycle_leaves_the_existing_wallet_byte_identical(
     # The cycle has to have DONE something, or the assertion above is vacuous.
     strategies = list((await lab_session.execute(
         select(RafiqLabStrategy))).scalars())
-    assert len(strategies) == 5
+    assert len(strategies) == 6
     positions = list((await lab_session.execute(
         select(RafiqLabPosition))).scalars())
     assert positions, f"no strategy entered anything: {result}"
@@ -170,7 +170,7 @@ async def test_a_full_cycle_leaves_the_existing_wallet_byte_identical(
     # the seeded market (k liquidity, $2m cap) clears even STRICT.
     by_code = {r.id: r.code for r in strategies}
     entered = {by_code[p.strategy_id] for p in positions}
-    assert entered == {"A2", "B2", "C2", "D2"}, entered
+    assert entered == {"A2", "B2", "C2", "D2", "F2"}, entered
 
     # C2 is the only book that splits, and the split is its whole question.
     c2 = [p for p in positions if by_code[p.strategy_id] == "C2"]

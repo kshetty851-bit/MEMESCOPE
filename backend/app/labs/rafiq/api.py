@@ -226,16 +226,24 @@ def _execution_cost(positions) -> Decimal:
     """Fee and price impact already deducted from this book.
 
     Entry drag is what the fill cost above the observed price; exit drag is
-    what the sale returned below it. Both are computed from columns written at
-    the time, so this is a measurement rather than an assumed slippage figure.
+    what the sale returned below its FILL price. Both are computed from columns
+    written at the time, so this is a measurement rather than an assumed
+    slippage figure.
+
+    Exit drag is measured from the fill, not the observed print, so it is fee
+    and impact and nothing else. Measured from the print it also counted the
+    take-profit fill cap and, worst, a dead pool's leftover price — a print
+    nobody could sell into, booked as "execution cost". That is how the
+    published friction ran at several times the cost model (4.08% of notional
+    across A2-F2, of which 1.57% was dead pools and 1.12% the cap).
     """
     total = Decimal(0)
     for p in positions:
         if p.entry_observed_price and p.entry_observed_price > 0:
             ideal = p.cost_basis / p.entry_observed_price
             total += (ideal - p.quantity) * p.entry_observed_price
-        if p.status == "closed" and p.exit_observed_price is not None:
-            gross = p.quantity * p.exit_observed_price
+        if p.status == "closed" and p.exit_price is not None:
+            gross = p.quantity * p.exit_price
             total += gross - (p.exit_proceeds_usd or Decimal(0))
     return total
 
