@@ -1,130 +1,138 @@
-import { describe, expect, it } from "vitest";
+import fs from "node:fs";
+import path from "node:path";
+
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  DECAY_SECONDS,
+  createSpaceAudio,
   FADE_IN_SECONDS,
   FADE_OUT_SECONDS,
-  GAP_MAX_SECONDS,
-  GAP_MIN_SECONDS,
-  MASTER_GAIN,
-  NOTES,
-  PARTIALS,
-  impulseResponse,
-  nextGap,
-  pickNote,
+  MAX_VOLUME,
+  SOUNDTRACK_URL,
 } from "./space-audio";
 
 /**
- * The brief was "sparse and quiet": mostly silence, occasional soft tones.
- * The way that decays back into the thing it replaced is by the gaps closing
- * up or the level creeping — so those are what is asserted here. The sound
- * itself is measured in a real browser, not in jsdom, which has no Web Audio.
+ * jsdom has an HTMLMediaElement but no playback, so the element is replaced
+ * with a stand-in that records what the player asked of it. That is the whole
+ * contract: what gets fetched, when it plays, how loud, and when it stops.
  */
+class FakeAudio {
+  static last: FakeAudio;
+  src = "";
+  loop = false;
+  preload = "auto";
+  paused = true;
+  playResult: Promise<void> = Promise.resolve();
+  private _volume = 1;
 
-describe("the strikes", () => {
-  it("leaves real silence between notes", () => {
-    // A note is inaudible well before its nominal decay ends, so a gap
-    // shorter than the decay still reads as space. What must not happen is
-    // strikes arriving so often that they overlap into a continuous bed.
-    expect(GAP_MIN_SECONDS).toBeGreaterThanOrEqual(4);
-    expect(GAP_MAX_SECONDS).toBeGreaterThan(GAP_MIN_SECONDS);
-  });
+  constructor() {
+    FakeAudio.last = this;
+  }
+  get volume() {
+    return this._volume;
+  }
+  set volume(v: number) {
+    // The real element throws outside [0, 1]; so does this one.
+    if (v < 0 || v > 1) throw new RangeError(`volume ${v}`);
+    this._volume = v;
+  }
+  play() {
+    this.paused = false;
+    return this.playResult;
+  }
+  pause() {
+    this.paused = true;
+  }
+  load() {}
+  removeAttribute(name: string) {
+    if (name === "src") this.src = "";
+  }
+}
 
-  it("never falls into a rhythm", () => {
-    const gaps = new Set<number>();
-    for (let i = 0; i < 200; i += 1) gaps.add(nextGap());
-    // Random, not a fixed interval dressed up as one.
-    expect(gaps.size).toBeGreaterThan(150);
-    for (const g of gaps) {
-      expect(g).toBeGreaterThanOrEqual(GAP_MIN_SECONDS);
-      expect(g).toBeLessThanOrEqual(GAP_MAX_SECONDS);
-    }
-  });
-
-  it("uses the whole range it is given", () => {
-    expect(nextGap(() => 0)).toBeCloseTo(GAP_MIN_SECONDS);
-    expect(nextGap(() => 1)).toBeCloseTo(GAP_MAX_SECONDS);
-  });
-
-  it("rings long enough to fade rather than stop", () => {
-    expect(DECAY_SECONDS).toBeGreaterThanOrEqual(4);
-  });
-
-  it("is a bell, not an organ — the partials are inharmonic", () => {
-    const ratios = PARTIALS.map((p) => p.ratio);
-    // At least one partial must be a non-integer multiple, or this is a
-    // harmonic stack and sounds like a pipe.
-    expect(ratios.some((r) => Math.abs(r - Math.round(r)) > 0.1)).toBe(true);
-    // Upper partials must be quieter AND shorter, the way a real bell sheds
-    // them; otherwise the tone stays bright all the way down and rings harsh.
-    const upper = PARTIALS.filter((p) => p.ratio > 1);
-    const fundamental = PARTIALS.find((p) => p.ratio === 1)!;
-    for (const p of upper) {
-      expect(p.gain).toBeLessThan(fundamental.gain);
-      expect(p.decay).toBeLessThan(fundamental.decay);
-    }
-  });
-
-  it("always picks a real note, including at the ends of the range", () => {
-    // `random()` may return exactly 0, and in principle 1 — the second would
-    // index past the array and hand an `undefined` frequency to an oscillator,
-    // which is a silent strike rather than a crash, and so would go unnoticed.
-    expect(pickNote(() => 0)).toBe(NOTES[0]);
-    expect(pickNote(() => 1)).toBe(NOTES[NOTES.length - 1]);
-    expect(pickNote(() => 0.999999)).toBe(NOTES[NOTES.length - 1]);
-    for (let i = 0; i < 100; i += 1) {
-      expect(NOTES).toContain(pickNote());
-    }
-  });
-
-  it("draws from a scale, so no two notes clash", () => {
-    expect(new Set(NOTES).size).toBe(NOTES.length);
-    for (const hz of NOTES) {
-      expect(hz).toBeGreaterThan(100);
-      expect(hz).toBeLessThan(1200);
-    }
-  });
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.stubGlobal("Audio", FakeAudio);
 });
 
-describe("the mix", () => {
-  it("stays quiet enough to sit behind the page", () => {
-    expect(MASTER_GAIN).toBeLessThanOrEqual(0.15);
-    // Even with every partial at full tilt, the strike must not clip.
-    const summed = PARTIALS.reduce((acc, p) => acc + p.gain, 0);
-    expect(summed * MASTER_GAIN).toBeLessThan(1);
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
+
+describe("the soundtrack", () => {
+  it("is served from the media route, not from this repository", () => {
+    expect(SOUNDTRACK_URL).toMatch(/\/media\/montagem-alucinante\.mp3$/);
+    // The repo is public: a commercial recording committed to it would be
+    // downloadable from GitHub. None may live where the site bundles assets.
+    const pub = path.join(process.cwd(), "public");
+    const audio = fs.existsSync(pub)
+      ? fs.readdirSync(pub, { recursive: true }).filter((f) =>
+          /\.(mp3|m4a|ogg|wav|aac|opus)$/i.test(String(f)),
+        )
+      : [];
+    expect(audio).toEqual([]);
   });
 
-  it("fades out fast enough that off sounds like off", () => {
-    // Both fades were 2.5s and the off button was reported as not working:
-    // 2.0s after the click the sound was still plainly audible.
+  it("downloads nothing until someone asks for it", () => {
+    createSpaceAudio("/t.mp3");
+    expect(FakeAudio.last.preload).toBe("none");
+    expect(FakeAudio.last.paused).toBe(true);
+  });
+
+  it("loops, because it is background music and the track is under three minutes", () => {
+    createSpaceAudio("/t.mp3");
+    expect(FakeAudio.last.loop).toBe(true);
+  });
+
+  it("fades in to the ceiling and no further", async () => {
+    const audio = createSpaceAudio("/t.mp3");
+    await audio.start();
+    expect(FakeAudio.last.paused).toBe(false);
+    vi.advanceTimersByTime(FADE_IN_SECONDS * 1000 + 100);
+    expect(FakeAudio.last.volume).toBeCloseTo(MAX_VOLUME, 5);
+    expect(MAX_VOLUME).toBeLessThan(1);
+  });
+
+  it("goes quiet fast enough that off sounds like off", async () => {
+    // Karthik once pressed off, kept hearing music, and reported it broken.
     expect(FADE_OUT_SECONDS).toBeLessThanOrEqual(0.5);
-    // ...but not so abrupt that it clicks.
-    expect(FADE_OUT_SECONDS).toBeGreaterThanOrEqual(0.15);
-    expect(FADE_IN_SECONDS).toBeGreaterThan(FADE_OUT_SECONDS);
+
+    const audio = createSpaceAudio("/t.mp3");
+    await audio.start();
+    vi.advanceTimersByTime(FADE_IN_SECONDS * 1000 + 100);
+
+    audio.stop();
+    vi.advanceTimersByTime(FADE_OUT_SECONDS * 1000 + 100);
+    expect(FakeAudio.last.volume).toBe(0);
+    expect(FakeAudio.last.paused).toBe(true);
   });
-});
 
-describe("impulseResponse", () => {
-  it("decays to near silence, so the tail does not ring forever", () => {
-    // A stub context: only what the function actually touches.
-    const ctx = {
-      sampleRate: 8000,
-      createBuffer: (channels: number, length: number) => {
-        const data = Array.from({ length: channels }, () => new Float32Array(length));
-        return {
-          length,
-          numberOfChannels: channels,
-          getChannelData: (i: number) => data[i],
-        };
-      },
-    } as unknown as BaseAudioContext;
+  it("does not let an old fade-out pause a track that was turned back on", async () => {
+    const audio = createSpaceAudio("/t.mp3");
+    await audio.start();
+    audio.stop();
+    // Back on before the fade-out finished.
+    vi.advanceTimersByTime(100);
+    await audio.start();
+    vi.advanceTimersByTime(FADE_IN_SECONDS * 1000 + 100);
+    expect(FakeAudio.last.paused).toBe(false);
+    expect(FakeAudio.last.volume).toBeCloseTo(MAX_VOLUME, 5);
+  });
 
-    const buffer = impulseResponse(ctx, 1, 2.2);
-    const data = buffer.getChannelData(0);
+  it("reports failure when the browser or the file refuses, so the button reads off", async () => {
+    const audio = createSpaceAudio("/missing.mp3");
+    FakeAudio.last.playResult = Promise.reject(new DOMException("no source", "NotSupportedError"));
+    await expect(audio.start()).rejects.toThrow("no source");
+    // And it is left silent, so a retry fades in rather than blaring.
+    vi.advanceTimersByTime(FADE_IN_SECONDS * 1000 + 100);
+    expect(FakeAudio.last.volume).toBe(0);
+  });
 
-    const head = Math.max(...Array.from(data.slice(0, 100), Math.abs));
-    const tail = Math.max(...Array.from(data.slice(-100), Math.abs));
-    expect(head).toBeGreaterThan(0.1);
-    expect(tail).toBeLessThan(0.05);
+  it("stays dead once disposed", async () => {
+    const audio = createSpaceAudio("/t.mp3");
+    audio.dispose();
+    await audio.start();
+    expect(FakeAudio.last.paused).toBe(true);
+    expect(FakeAudio.last.src).toBe("");
   });
 });

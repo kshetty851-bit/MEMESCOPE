@@ -303,6 +303,9 @@ services:
       ACME_EMAIL: ${ACME_EMAIL:?ACME_EMAIL is required for Let's Encrypt expiry notices}
     volumes:
       - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # The site soundtrack. Read-only, and kept out of git: see the Media block
+      # in the Caddyfile for why it is served from here.
+      - ./media:/srv/media:ro
       # Certificates and ACME account keys. Losing this volume means
       # re-requesting every certificate, which Let's Encrypt rate-limits to
       # five per week per domain — enough to lock out a bad afternoon.

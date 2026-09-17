@@ -6,7 +6,7 @@ import { useSpaceAudio, spaceAudioSupported } from "@/hooks/use-space-audio";
 import { cn } from "@/lib/utils";
 
 /**
- * The switch for the drone in `lib/space-audio`. It owns no audio itself —
+ * The switch for the soundtrack in `lib/space-audio`. It owns no audio itself —
  * `use-space-audio` holds the one instance at module scope so this can appear
  * on the launch screen and in the dashboard topbar at once, agreeing with
  * itself and playing through the navigation between them.
@@ -65,8 +65,8 @@ export function SpaceAudioToggle({
     <button
       type="button"
       aria-pressed={on}
-      aria-label={on ? "Turn the ambient soundtrack off" : "Turn the ambient soundtrack on"}
-      title={on ? "Sound on" : "Ambient sound"}
+      aria-label={on ? "Turn the soundtrack off" : "Turn the soundtrack on"}
+      title={on ? "Sound on" : "Play music"}
       onClick={() => void toggle()}
       className={cn(
         "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2 text-label uppercase",

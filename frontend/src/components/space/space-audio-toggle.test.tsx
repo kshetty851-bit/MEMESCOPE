@@ -4,9 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 /**
  * The control appears twice — launch screen and dashboard topbar — and the
  * reason `use-space-audio` holds the instance at module scope is that those
- * two must agree and must not each build their own AudioContext. That is what
- * is tested here; the sound itself is measured in the browser, not in jsdom,
- * which has no Web Audio at all.
+ * two must agree and must not each build their own player. That is what is
+ * tested here; the player itself is covered in `lib/space-audio.test.ts`.
  */
 
 const started = vi.fn();
@@ -14,7 +13,7 @@ const stopped = vi.fn();
 const created = vi.fn();
 
 vi.mock("@/lib/space-audio", () => ({
-  audioContextCtor: () => class {},
+  audioSupported: () => true,
   createSpaceAudio: () => {
     created();
     return {
@@ -28,7 +27,7 @@ vi.mock("@/lib/space-audio", () => ({
 const { SpaceAudioToggle } = await import("./space-audio-toggle");
 
 function buttons() {
-  return screen.getAllByRole("button", { name: /ambient soundtrack/i });
+  return screen.getAllByRole("button", { name: /soundtrack/i });
 }
 
 describe("SpaceAudioToggle", () => {
@@ -64,7 +63,7 @@ describe("SpaceAudioToggle", () => {
     const [launch, topbar] = buttons();
     await click(launch);
 
-    // Both report on, and only ONE audio graph was ever built.
+    // Both report on, and only ONE player was ever built.
     expect(launch).toHaveAttribute("aria-pressed", "true");
     expect(topbar).toHaveAttribute("aria-pressed", "true");
     expect(created).toHaveBeenCalledTimes(1);
@@ -76,7 +75,7 @@ describe("SpaceAudioToggle", () => {
     expect(launch).toHaveAttribute("aria-pressed", "false");
     expect(topbar).toHaveAttribute("aria-pressed", "false");
 
-    // Re-starting reuses the graph rather than building a second one.
+    // Re-starting reuses the player rather than building a second one.
     await click(topbar);
     expect(created).toHaveBeenCalledTimes(1);
   });

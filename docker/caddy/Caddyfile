@@ -40,15 +40,43 @@
 		-Server
 	}
 
+	# --- Media -------------------------------------------------------------
+	#
+	# The site soundtrack, served straight off the host. Three reasons it is
+	# here rather than in the frontend bundle or behind the API:
+	#
+	#   * It is a commercial recording and the repository is public. A file in
+	#     `frontend/public` is a file anyone can download from GitHub. This one
+	#     lives in `media/` on the host, which is gitignored.
+	#   * The API sits behind the alpha gate and answers 401 to anyone who has
+	#     not unlocked it. The music button is on the landing page, which is
+	#     exactly where nobody has unlocked anything yet. Caddy answers first.
+	#   * Images are rebuilt on every deploy, so a file copied into a container
+	#     would vanish on the next one. A bind mount survives them all.
+	#
+	# `handle_path` strips `/media` before the lookup; `file_server` answers the
+	# range requests an <audio> element makes as it seeks and buffers.
+	handle_path /media/* {
+		root * /srv/media
+		header Cache-Control "public, max-age=604800"
+		file_server
+	}
+
 	# --- API ---------------------------------------------------------------
 	#
 	# WebSockets need no special directive in Caddy v2 - reverse_proxy upgrades
 	# the connection automatically - but the long-lived stream needs its read
 	# timeout lifted, or the token feed is severed every 30 seconds.
-	reverse_proxy backend:8000 {
-		header_up X-Real-IP {remote_host}
-		transport http {
-			read_timeout 3600s
+	#
+	# Inside `handle` so the media block above can claim its paths first:
+	# `handle` blocks are mutually exclusive, and one with no matcher is the
+	# fallback for everything the others did not take.
+	handle {
+		reverse_proxy backend:8000 {
+			header_up X-Real-IP {remote_host}
+			transport http {
+				read_timeout 3600s
+			}
 		}
 	}
 }

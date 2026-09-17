@@ -1,259 +1,146 @@
+import { env } from "@/lib/env";
+
 /**
- * SPACE MUSIC, SYNTHESISED RATHER THAN SHIPPED.
+ * THE SITE'S SOUNDTRACK: "MONTAGEM ALUCINANTE" (Rushex, DJ Orbital).
  *
- * There is no audio file here and there deliberately isn't one. A few minutes
- * of ambient audio is several megabytes, it would have to be licensed, and
- * this project spent a whole day getting a 38GB disk back under control. The
- * Web Audio API can make this sound directly, so the entire soundtrack costs a
- * few kilobytes of JavaScript and nothing on disk.
+ * This used to be a bell synthesiser — struck notes generated in the browser,
+ * no audio file at all. Karthik replaced it with this track on 2026-09-17.
  *
- * WHAT IT PLAYS — and what it used to
+ * WHERE THE FILE LIVES, AND WHERE IT MUST NOT
  *
- * This was a continuous five-voice drone. Karthik didn't like it, and asked
- * for sparse and quiet instead: mostly silence, with occasional soft bell
- * tones that ring out and fade. So there is now NO CONTINUOUS TONE AT ALL. A
- * single note is struck every few seconds, left to decay for as long as eight
- * seconds through a generated reverb, and then nothing until the next one.
+ * Not in this repository. The repo is public, so a file committed here is a
+ * file anyone can download from GitHub, and this is a commercial recording.
+ * It is served by Caddy from a folder on the production host
+ * (`~/MEMESCOPE/media`, gitignored) — see `docker/caddy/Caddyfile`. That also
+ * puts it in front of the alpha gate, which matters: the button is on the
+ * landing page, where nobody has unlocked anything yet, and the API would
+ * answer 401.
  *
- * If you are tempted to add a pad back underneath "just to fill the gaps":
- * the gaps are the request. Silence is the majority of this piece.
+ * WHY A PLAIN <audio> ELEMENT
  *
- * A struck metal tone is not a sine wave — its partials are inharmonic, which
- * is exactly what makes a bell sound like a bell rather than an organ. The
- * ratios in `PARTIALS` are the usual approximation, with the higher partials
- * both quieter and shorter-lived, because real bells shed their upper
- * partials first.
+ * Routing the element through Web Audio would give smooth fades everywhere,
+ * but a cross-origin source inside a Web Audio graph plays as silence unless
+ * the file carries CORS headers for every range request the browser makes.
+ * The element on its own streams cross-origin with no configuration at all.
+ * The cost is that iOS Safari ignores `volume`, so on an iPhone the track
+ * starts and stops without a fade — it still starts and stops.
  *
  * WHY IT NEVER STARTS ON ITS OWN
  *
  * Every browser blocks audio until a real user gesture, and a site that plays
  * sound at someone unasked deserves the block. `start()` must be called from
- * a click handler. That is also why nothing here is persisted: a remembered
- * "on" could not be honoured on the next visit without a gesture anyway.
+ * a click handler, and it calls `play()` before anything else for that reason:
+ * an `await` in front of it would move the call out of the gesture.
  */
 
-/** The scale struck notes are drawn from: A minor pentatonic, in Hz. */
-export const NOTES: readonly number[] = [
-  220.0, // A3
-  261.63, // C4
-  293.66, // D4
-  329.63, // E4
-  392.0, // G4
-  440.0, // A4
-  523.25, // C5
-];
-
-/**
- * One partial of a struck tone: its frequency as a multiple of the note, how
- * loud it starts, and how long it rings relative to the note's decay.
- *
- * The inharmonic ratios are what make this a bell. Equal-tempered multiples
- * (1, 2, 3) would give an organ pipe.
- */
-export const PARTIALS: readonly { ratio: number; gain: number; decay: number }[] = [
-  { ratio: 0.5, gain: 0.35, decay: 1.0 }, // hum tone, rings longest
-  { ratio: 1.0, gain: 1.0, decay: 0.85 }, // the note you hear
-  { ratio: 2.76, gain: 0.28, decay: 0.45 },
-  { ratio: 5.4, gain: 0.11, decay: 0.22 },
-];
-
-/** How long the fundamental takes to fall away, in seconds. */
-export const DECAY_SECONDS = 8;
-
-/** Silence between strikes, in seconds. The gaps are the point. */
-export const GAP_MIN_SECONDS = 5;
-export const GAP_MAX_SECONDS = 13;
+export const SOUNDTRACK_URL = `${env.NEXT_PUBLIC_API_URL}/media/montagem-alucinante.mp3`;
 
 /**
  * The two fades are NOT the same length, and that asymmetry is the point.
  *
- * Both were 2.5s. Fading in over 2.5s is fine; fading OUT over 2.5s is a
+ * Both were once 2.5s. Fading in over 2.5s is fine; fading OUT over 2.5s is a
  * broken button — Karthik pressed off, kept hearing music, and reported it as
- * still playing. Measured: 2.0s after the click it was still at RMS 0.011,
- * plainly audible. Off has to sound like off.
+ * still playing. Off has to sound like off.
  */
 export const FADE_IN_SECONDS = 1.2;
 export const FADE_OUT_SECONDS = 0.3;
 
 /**
- * Ceiling on the master gain. Lower than the drone's was: these are transients
- * with a lot of high content, so they carry further than a steady tone at the
- * same nominal level, and "very quiet" was the request.
+ * Ceiling on the element's volume. This is a full-range club track rather than
+ * the quiet bells it replaced, and it starts on a click — at full volume the
+ * first bar would be a jolt, not a soundtrack.
  */
-export const MASTER_GAIN = 0.11;
+export const MAX_VOLUME = 0.5;
 
-type Ctor = typeof AudioContext;
-
-/**
- * Safari still only has the prefixed constructor.
- *
- * The parameter is `Window & typeof globalThis`, not `Window`: the global
- * constructors hang off `globalThis`, and the bare `Window` interface does not
- * declare `AudioContext` at all — which `tsc` only complains about once
- * `next build` runs it.
- */
-export function audioContextCtor(win: Window & typeof globalThis = window): Ctor | null {
-  const w = win as typeof win & { webkitAudioContext?: Ctor };
-  return w.AudioContext ?? w.webkitAudioContext ?? null;
-}
-
-/**
- * A long synthetic impulse response: white noise under an exponential decay,
- * which is the standard cheap way to get a plausible reverb tail without
- * shipping one. Long here on purpose — the reverb is most of what fills the
- * space between strikes.
- */
-export function impulseResponse(ctx: BaseAudioContext, seconds = 5, decay = 2.2): AudioBuffer {
-  const rate = ctx.sampleRate;
-  const length = Math.max(1, Math.floor(rate * seconds));
-  const buffer = ctx.createBuffer(2, length, rate);
-  for (let channel = 0; channel < 2; channel += 1) {
-    const data = buffer.getChannelData(channel);
-    for (let i = 0; i < length; i += 1) {
-      data[i] = (Math.random() * 2 - 1) * (1 - i / length) ** decay;
-    }
-  }
-  return buffer;
-}
-
-/** Seconds until the next strike. Random, so no rhythm emerges. */
-export function nextGap(random: () => number = Math.random): number {
-  return GAP_MIN_SECONDS + random() * (GAP_MAX_SECONDS - GAP_MIN_SECONDS);
-}
-
-/**
- * One note from the scale. The clamp and the fallback are for
- * `noUncheckedIndexedAccess`, which types every array read as possibly
- * undefined — and is right to, since `random()` returning exactly 1 would
- * index past the end.
- */
-export function pickNote(random: () => number = Math.random): number {
-  const i = Math.min(NOTES.length - 1, Math.floor(random() * NOTES.length));
-  return NOTES[i] ?? 440;
-}
+/** How often a fade takes a step. Degrades to ~1s in a background tab. */
+const STEP_MS = 25;
 
 export interface SpaceAudio {
-  /** Must be called from a user gesture. Resumes and fades in. */
+  /** Must be called from a user gesture. Starts playing and fades in. */
   start(): Promise<void>;
-  /** Fades out, stops scheduling, and suspends. start() is cheap again. */
+  /** Fades out, then pauses. `start()` resumes from where it stopped. */
   stop(): void;
   /** Tears the whole thing down. After this the instance is dead. */
   dispose(): void;
 }
 
-export function createSpaceAudio(ctx: AudioContext): SpaceAudio {
-  const master = ctx.createGain();
-  master.gain.value = 0;
-  master.connect(ctx.destination);
+/** Whether this browser can play the soundtrack at all. */
+export function audioSupported(win: Window & typeof globalThis = window): boolean {
+  return typeof win.Audio === "function";
+}
 
-  // Strikes go to both the dry bus and a long reverb. The reverb is what makes
-  // the silence sound like a room rather than a mute.
-  const dry = ctx.createGain();
-  dry.gain.value = 0.55;
-  dry.connect(master);
+const clamp = (v: number) => Math.min(1, Math.max(0, v));
 
-  const reverb = ctx.createConvolver();
-  reverb.buffer = impulseResponse(ctx);
-  const wet = ctx.createGain();
-  wet.gain.value = 0.8;
-  reverb.connect(wet);
-  wet.connect(master);
-
-  // Takes the glassiest edge off the upper partials.
-  const tone = ctx.createBiquadFilter();
-  tone.type = "lowpass";
-  tone.frequency.value = 2600;
-  tone.connect(dry);
-  tone.connect(reverb);
+export function createSpaceAudio(src: string = SOUNDTRACK_URL): SpaceAudio {
+  const el = new Audio();
+  el.src = src;
+  el.loop = true;
+  // Nothing is fetched until the first click. The track is 4MB and most
+  // visitors never press the button.
+  el.preload = "none";
+  el.volume = 0;
 
   let disposed = false;
   let timer: number | null = null;
-  // Every start/stop takes a ticket. A pending suspend only fires if it still
-  // holds the current one — otherwise turning the sound back on during a
-  // fade-out gets silently suspended a moment later by the old timer, which
-  // looks exactly like the button failing.
-  let ticket = 0;
 
-  /** One struck note: a stack of decaying inharmonic partials. */
-  function strike(hz: number): void {
-    const now = ctx.currentTime;
-    for (const partial of PARTIALS) {
-      const osc = ctx.createOscillator();
-      osc.type = "sine";
-      osc.frequency.value = hz * partial.ratio;
-
-      const env = ctx.createGain();
-      const decay = DECAY_SECONDS * partial.decay;
-      // Fast but not instant: a true step would click.
-      env.gain.setValueAtTime(0, now);
-      env.gain.linearRampToValueAtTime(partial.gain, now + 0.006);
-      // Exponential, because that is how a struck object actually decays. It
-      // cannot reach zero, so it is cut to zero once inaudible.
-      env.gain.exponentialRampToValueAtTime(0.0001, now + decay);
-      env.gain.setValueAtTime(0, now + decay + 0.01);
-
-      osc.connect(env);
-      env.connect(tone);
-      osc.start(now);
-      // Stopped and dropped: nothing accumulates between strikes.
-      osc.stop(now + decay + 0.05);
-    }
-  }
-
-  function scheduleNext(): void {
-    if (disposed) return;
-    timer = window.setTimeout(() => {
-      if (disposed) return;
-      strike(pickNote());
-      scheduleNext();
-    }, nextGap() * 1000);
-  }
-
-  function ramp(to: number, seconds: number): void {
-    const now = ctx.currentTime;
-    // Pin the curve to where the gain actually is, or a toggle mid-fade jumps.
-    master.gain.cancelScheduledValues(now);
-    master.gain.setValueAtTime(master.gain.value, now);
-    master.gain.linearRampToValueAtTime(to, now + seconds);
-  }
-
-  function clearTimer(): void {
+  function clearFade(): void {
     if (timer !== null) {
-      window.clearTimeout(timer);
+      window.clearInterval(timer);
       timer = null;
     }
+  }
+
+  // An interval rather than requestAnimationFrame: rAF does not run at all in
+  // a background tab, so a fade-out started there would never reach its
+  // pause and the track would keep playing where nobody can see the button.
+  //
+  // Every fade cancels the one before it, callback included. That is what
+  // stops a fade-out's pending pause from silencing a track that was turned
+  // back on mid-fade — which would look exactly like the button failing.
+  function fade(to: number, seconds: number, done?: () => void): void {
+    clearFade();
+    const from = el.volume;
+    const steps = Math.max(1, Math.round((seconds * 1000) / STEP_MS));
+    let step = 0;
+    timer = window.setInterval(() => {
+      step += 1;
+      el.volume = clamp(from + ((to - from) * step) / steps);
+      if (step >= steps) {
+        clearFade();
+        done?.();
+      }
+    }, STEP_MS);
   }
 
   return {
     async start() {
       if (disposed) return;
-      ticket += 1;
-      // Autoplay policy: the context starts suspended and only a gesture-borne
-      // resume() will run it.
-      if (ctx.state !== "running") await ctx.resume();
-      ramp(MASTER_GAIN, FADE_IN_SECONDS);
-      clearTimer();
-      // One note straight away, so pressing the button is answered rather than
-      // met with up to thirteen seconds of nothing.
-      strike(pickNote());
-      scheduleNext();
+      const playing = el.play();
+      // The fade starts now rather than once playback begins, deliberately: a
+      // press of "off" while the track is still buffering then cancels this
+      // fade, and the pause it schedules wins when playback finally starts.
+      fade(MAX_VOLUME, FADE_IN_SECONDS);
+      try {
+        await playing;
+      } catch (err) {
+        // Refused by the browser, or the file would not load. Leave the
+        // element silent and at rest, so the next attempt fades in from zero,
+        // and let the caller report "off" — off is what can be heard.
+        clearFade();
+        el.volume = 0;
+        throw err;
+      }
     },
     stop() {
       if (disposed) return;
-      ticket += 1;
-      const mine = ticket;
-      clearTimer();
-      ramp(0, FADE_OUT_SECONDS);
-      // Suspend only after the fade has finished, or it cuts itself off.
-      window.setTimeout(() => {
-        if (!disposed && mine === ticket && ctx.state === "running") void ctx.suspend();
-      }, FADE_OUT_SECONDS * 1000 + 80);
+      fade(0, FADE_OUT_SECONDS, () => el.pause());
     },
     dispose() {
-      if (disposed) return;
       disposed = true;
-      clearTimer();
-      void ctx.close();
+      clearFade();
+      el.pause();
+      el.removeAttribute("src");
+      el.load();
     },
   };
 }

@@ -2,21 +2,21 @@
 
 import { useCallback, useSyncExternalStore } from "react";
 
-import { audioContextCtor, createSpaceAudio, type SpaceAudio } from "@/lib/space-audio";
+import { audioSupported, createSpaceAudio, type SpaceAudio } from "@/lib/space-audio";
 
 /**
- * WHO OWNS THE DRONE.
+ * WHO OWNS THE SOUNDTRACK.
  *
  * Module scope, not a component ref, and that is the whole point of this file.
  * The control appears on the launch screen and again in the dashboard topbar,
- * which live in different layouts — so a ref-owned AudioContext would be
- * disposed the moment you entered the terminal, cutting the music off at
- * exactly the moment the visitor is going somewhere to look at it, and the
- * second button would then disagree with the first about whether sound was on.
+ * which live in different layouts — so a ref-owned player would be disposed
+ * the moment you entered the terminal, cutting the music off at exactly the
+ * moment the visitor is going somewhere to look at it, and the second button
+ * would then disagree with the first about whether sound was on.
  *
- * Module state survives client navigation, so one context is created at most
+ * Module state survives client navigation, so one player is created at most
  * once per page load, both buttons read the same snapshot, and crossing from
- * the launch screen into the dashboard does not interrupt the sound.
+ * the launch screen into the dashboard does not interrupt the track.
  *
  * This follows `use-space.ts` and `use-nav-rail.ts`: an external store read
  * through `useSyncExternalStore`. It does NOT follow their persistence, and
@@ -40,11 +40,11 @@ function subscribe(listener: () => void): () => void {
 
 /** Whether a soundtrack is possible at all here. */
 export function spaceAudioSupported(): boolean {
-  return typeof window !== "undefined" && audioContextCtor() !== null;
+  return typeof window !== "undefined" && audioSupported();
 }
 
 /**
- * Must be called from a user gesture — the AudioContext is constructed here,
+ * Must be called from a user gesture — `start()` calls `play()` synchronously,
  * inside the click, because that is the only place a browser will let it run.
  * Returns the state it settled on.
  */
@@ -57,17 +57,16 @@ export async function toggleSpaceAudio(): Promise<boolean> {
   }
 
   if (!audio) {
-    const Ctor = audioContextCtor();
-    if (!Ctor) return false;
-    audio = createSpaceAudio(new Ctor());
+    if (!audioSupported()) return false;
+    audio = createSpaceAudio();
   }
 
   try {
     await audio.start();
     playing = true;
   } catch {
-    // A browser that refused the resume. Report off, because off is what the
-    // visitor can hear.
+    // A browser that refused playback, or a file that would not load. Report
+    // off, because off is what the visitor can hear.
     playing = false;
   }
   emit();

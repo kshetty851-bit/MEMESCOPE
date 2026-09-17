@@ -162,3 +162,7 @@ frontend/.env.local
 # Forex Lab: derived data, rebuilt by `python -m app.labs.forex_lab export`.
 backend/app/labs/forex_lab/output/
 backend/.fxweb.env
+
+# Site media served by Caddy from the host (docker/caddy/Caddyfile). Kept out
+# of this public repository: the soundtrack is a commercial recording.
+/media/
