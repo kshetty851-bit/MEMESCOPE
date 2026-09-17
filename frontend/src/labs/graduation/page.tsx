@@ -430,44 +430,6 @@ function Freshness({ at }: { at: number }) {
   );
 }
 
-const ARM_FAMILIES: { prefix: string; title: string; blurb: string }[] = [
-  {
-    prefix: "E",
-    title: "Exit only",
-    blurb:
-      "Every graduation, nothing filtered. These isolate the one variable that " +
-      "earlier replay work found mattered — how long you hold.",
-  },
-  {
-    prefix: "X",
-    title: "Exit rules",
-    blurb:
-      "Targets and trailing stops layered on the 15- and 60-minute holds, to " +
-      "see whether capping the upside pays for the drawdown it avoids.",
-  },
-  {
-    prefix: "F",
-    title: "One entry filter each",
-    blurb:
-      "A single condition at the pool open, all exiting at five minutes so the " +
-      "filter is the only difference. Each filter's inverse is here too — a " +
-      "signal that works must beat its own opposite.",
-  },
-  {
-    prefix: "C",
-    title: "Combinations",
-    blurb:
-      "Filters stacked, and the same filters at other hold lengths.",
-  },
-  {
-    prefix: "R",
-    title: "Controls — these cannot have an edge",
-    blurb:
-      "They decide by hashing the token address. Same graduations, same costs, " +
-      "same exits; the rule is provably meaningless. Any arm that cannot beat " +
-      "them has shown nothing.",
-  },
-];
 
 /**
  * THE FIFTY RULES
@@ -482,7 +444,11 @@ function RulesPanel() {
   const { data } = useGraduationTournament();
   const [open, setOpen] = useState(false);
   if (!data?.running || !data.arms.length) return null;
-  const byName = [...data.arms].sort((a, b) => a.name.localeCompare(b.name));
+  // Strategies by name, then the baseline — the arm every other must beat.
+  const byName = [...data.arms].sort(
+    (a, b) => Number(a.is_control) - Number(b.is_control) || a.name.localeCompare(b.name),
+  );
+  const baselines = byName.filter((a) => a.is_control).length;
   return (
     <Panel>
       <PanelHeader>
@@ -506,63 +472,60 @@ function RulesPanel() {
           which graduations they accept, and when they leave.
         </p>
 
-        {open
-          ? ARM_FAMILIES.map((fam) => {
-              const arms = byName.filter((a) => a.name.startsWith(fam.prefix));
-              if (!arms.length) return null;
-              return (
-                <div key={fam.prefix} className="flex flex-col gap-2">
-                  <h3 className="text-label uppercase tracking-[0.08em] text-ink-dim">
-                    {fam.title} · {arms.length}
-                  </h3>
-                  <p className="max-w-[70ch] text-xs text-ink-dim">{fam.blurb}</p>
-                  <div className="overflow-x-auto">
-                    <table className="w-full min-w-[620px] table-fixed text-sm">
-                      <colgroup>
-                        <col className="w-44" />
-                        <col />
-                        <col className="w-56" />
-                      </colgroup>
-                      <thead>
-                        <tr className="text-label uppercase tracking-[0.08em] text-ink-dim">
-                          <th className="pb-2 pr-3 text-left font-medium">Arm</th>
-                          <th className="pb-2 pr-3 text-left font-medium">Buys</th>
-                          <th className="pb-2 text-left font-medium">Sells</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {arms.map((a: ArmRow) => (
-                          <tr
-                            key={a.name}
-                            className={`border-t border-line align-top ${
-                              a.is_control ? "text-ink-dim" : ""
-                            }`}
-                          >
-                            <td className="py-2 pr-3 font-mono text-xs">
-                              {a.name}
-                            </td>
-                            <td className="py-2 pr-3 text-xs">{a.entry_rule}</td>
-                            <td className="py-2 text-xs">{a.exit_rule}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              );
-            })
-          : (
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-              {ARM_FAMILIES.map((fam) => (
-                <div key={fam.prefix} className="flex flex-col">
-                  <span className="font-mono text-heading font-semibold text-ink">
-                    {byName.filter((a) => a.name.startsWith(fam.prefix)).length}
-                  </span>
-                  <span className="text-micro text-ink-dim">{fam.title}</span>
-                </div>
-              ))}
+        {open ? (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[620px] table-fixed text-sm">
+              <colgroup>
+                <col className="w-44" />
+                <col />
+                <col className="w-56" />
+              </colgroup>
+              <thead>
+                <tr className="text-label uppercase tracking-[0.08em] text-ink-dim">
+                  <th className="pb-2 pr-3 text-left font-medium">Arm</th>
+                  <th className="pb-2 pr-3 text-left font-medium">Buys</th>
+                  <th className="pb-2 text-left font-medium">Sells</th>
+                </tr>
+              </thead>
+              <tbody>
+                {byName.map((a: ArmRow) => (
+                  <tr
+                    key={a.name}
+                    className={`border-t border-line align-top ${
+                      a.is_control ? "text-ink-dim" : ""
+                    }`}
+                  >
+                    <td className="py-2 pr-3 font-mono text-xs break-all">
+                      {a.name}
+                      {a.is_control ? (
+                        <span className="ml-1 whitespace-nowrap font-sans text-micro uppercase tracking-[0.08em] text-down">
+                          baseline
+                        </span>
+                      ) : null}
+                    </td>
+                    <td className="py-2 pr-3 text-xs">{a.entry_rule}</td>
+                    <td className="py-2 text-xs">{a.exit_rule}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="flex gap-6">
+            <div className="flex flex-col">
+              <span className="font-mono text-heading font-semibold text-ink">
+                {byName.length - baselines}
+              </span>
+              <span className="text-micro text-ink-dim">strategies</span>
             </div>
-          )}
+            <div className="flex flex-col">
+              <span className="font-mono text-heading font-semibold text-ink">
+                {baselines}
+              </span>
+              <span className="text-micro text-ink-dim">baseline</span>
+            </div>
+          </div>
+        )}
       </div>
     </Panel>
   );
@@ -914,16 +877,23 @@ function LeaderboardPanel() {
           Every arm sees the same graduations, pays the same costs and uses the
           same clock; they differ only in which tokens they accept and when they
           leave.{" "}
-          <b className="text-ink">
-            Eight of them (R1–R8) decide by hashing the token address
-          </b>{" "}
-          and cannot have an edge — run fifty strategies and one leads whether or
-          not any is good, so their best result is the bar a real arm must
-          clear. To be called, an arm needs {data.min_trades}+ closed trades,
-          no single token above{" "}
+          {data.arms.some((a) => a.is_control) ? (
+            <>
+              <b className="text-ink">
+                {data.arms
+                  .filter((a) => a.is_control)
+                  .map((a) => a.name)
+                  .join(", ")}{" "}
+                is the baseline
+              </b>{" "}
+              (tagged below): it buys every graduation above its pool floor with
+              no other rule, so it is the bar a real arm must clear.{" "}
+            </>
+          ) : null}
+          To be called, an arm needs {data.min_trades}+ closed trades, no
+          single token above{" "}
           {(Number(data.max_token_share) * 100).toFixed(0)}% of its profit, it
-          must beat the baseline — buying every graduation above the floor with no
-          selection — and its profit factor must clear{" "}
+          must beat the baseline, and its profit factor must clear{" "}
           <b className="text-ink">
             {Number(data.required_profit_factor).toFixed(2)}
           </b>{" "}
@@ -985,7 +955,7 @@ function LeaderboardPanel() {
           <table className="w-full min-w-[900px] table-fixed border-collapse text-sm">
             <colgroup>
               <col className="w-10" />
-              <col />
+              <col className="w-48" />
               <col className="w-36" />
               <col className="w-16" />
               <col className="w-20" />
@@ -1049,13 +1019,13 @@ function LeaderboardPanel() {
                       {ranked.findIndex((x) => x.name === a.name) + 1}
                     </td>
                     <td className="py-2.5 pr-3">
-                      <span className="flex items-center gap-2">
+                      <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
                         <button
                           type="button"
                           onClick={() =>
                             setOpenArm(expanded === a.name ? null : a.name)
                           }
-                          className={`truncate font-mono text-xs hover:text-accent ${
+                          className={`break-all text-left font-mono text-xs hover:text-accent ${
                             isLeader ? "font-semibold text-ink" : ""
                           }`}
                           title="show every trade this arm has made"
