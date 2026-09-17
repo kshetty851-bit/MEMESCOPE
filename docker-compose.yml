@@ -631,6 +631,36 @@ services:
       retries: 3
       start_period: 60s
 
+  # The graduation paper book's 3-second tick, on its own. On the shared
+  # worker it queued behind the once-a-minute tasks that all fire at :00 and
+  # waited up to 11s (ZCAT, 2026-09-17), and the real wallet cannot buy a
+  # graduation before this tick has seen its pool open. Solo pool: one
+  # process, one task at a time - all a tick that must never overlap needs.
+  # Keeps the default node name: the healthcheck pings celery@<hostname>.
+  worker-paper:
+    build:
+      context: ./backend
+      target: development
+    restart: unless-stopped
+    command: celery -A app.workers.celery_app worker --loglevel=info --pool=solo -Q graduation_paper
+    environment:
+      <<: *backend-env
+      RUN_MIGRATIONS: "false"
+    volumes:
+      - ./backend:/app
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      # The image's HEALTHCHECK curls the API's /live, which does not exist in
+      # this container — so it always failed and the status meant nothing while
+      # a wedged worker consumed nothing for fifty minutes on 2026-08-21.
+      test: ["CMD", "python", "-m", "app.health.worker_probe", "worker"]
+      interval: 60s
+      timeout: 20s
+      retries: 3
+      start_period: 60s
+
   scheduler:
     build:
       context: ./backend

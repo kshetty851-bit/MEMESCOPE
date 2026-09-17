@@ -348,7 +348,10 @@ celery_app.conf.beat_schedule = {
         "schedule": _seconds("LAB_GRADUATION_PAPER_TICK_S", 3.0),
         # A tick left waiting behind slow tasks for a whole interval is
         # dropped, not run late: the next one is already queued and fresher.
-        "options": {"expires": _seconds("LAB_GRADUATION_PAPER_TICK_S", 3.0)},
+        "options": {"expires": _seconds("LAB_GRADUATION_PAPER_TICK_S", 3.0),
+                    # Its own worker (compose `worker-paper`): on the shared
+                    # one it waited behind the :00 minute tasks.
+                    "queue": "graduation_paper"},
     },
     # NSE Breakout Tracker. The exchange publishes the day's bhavcopy after
     # the close, so ingest runs at 13:00 UTC (18:30 IST) and retries hourly to
