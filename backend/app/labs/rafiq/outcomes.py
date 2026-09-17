@@ -116,8 +116,13 @@ async def _settle(feed: RafiqFeed, row: RafiqCandidate, *, label: str,
     funded = [r for r in window if r.liquidity_usd is not None]
     base = row.price_usd
     if priced and base and base > 0:
-        setattr(row, f"max_return_{label}",
-                max(r.price_usd for r in priced) / base - 1)
+        # The ceiling counts only prints a seller could have hit: a drained
+        # pool keeps printing its last price, and that print is not a run.
+        # Empty when nothing tradeable printed, and then the ceiling stays
+        # null rather than borrowing a dead pool's number.
+        reachable = [r.price_usd for r in window if tradeable(r)]
+        if reachable:
+            setattr(row, f"max_return_{label}", max(reachable) / base - 1)
         setattr(row, f"final_return_{label}", priced[-1].price_usd / base - 1)
     if funded:
         setattr(row, f"dead_{label}",

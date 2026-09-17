@@ -149,6 +149,25 @@ class EntryFeatures:
     #: answered.
     error: str | None
 
+    @property
+    def lp_locked(self) -> bool | None:
+        """Can nobody withdraw the pool's reserves, as far as the check says?
+
+        True only on PASS, which the evaluator reaches two ways: the pump.fun
+        migration pool's LP supply is burned, or the token is still on its
+        bonding curve and no LP exists (the mechanism is in the evaluation's
+        `evidence`, recoverable by `lp_checked_at`). False on
+        `LP_OUTSTANDING` — a redeemable claim exists, the unlocked case, filed
+        as UNKNOWN — and on FAIL, which this evaluator does not emit today.
+        Everything else, including other venues (`POOL_CUSTODY_OUT_OF_SCOPE`)
+        and no evaluation at all, is None: not established.
+        """
+        if self.lp_status == "PASS":
+            return True
+        if self.lp_status == "FAIL" or "LP_OUTSTANDING" in (self.lp_reason_codes or ()):
+            return False
+        return None
+
 
 def tradeable(row) -> bool:
     """A print an exit could be sold into: trading, priced, and funded."""

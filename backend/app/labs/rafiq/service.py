@@ -788,6 +788,7 @@ class RafiqLabService:
                     entry_lp_status=features.lp_status,
                     entry_lp_reason_codes=features.lp_reason_codes,
                     entry_lp_checked_at=features.lp_checked_at,
+                    entry_lp_locked=features.lp_locked,
                     entry_features_error=features.error,
                     stop_price=entry_price * (Decimal(100) - stop_pct) / 100,
                     target_price=(None if leg.take_profit_mult is None
@@ -932,6 +933,7 @@ class RafiqLabService:
             "lp_status": features.lp_status,
             "lp_reason_codes": features.lp_reason_codes,
             "lp_checked_at": features.lp_checked_at,
+            "lp_locked": features.lp_locked,
             "features_error": features.error,
         }
         stmt = pg_insert(RafiqCandidate).values(**values)
