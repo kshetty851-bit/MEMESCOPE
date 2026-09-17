@@ -117,6 +117,10 @@ type Strategy = {
   max_signal_age_seconds: number;
   ticket_usd: string;
   min_ticket_usd: string;
+  /** The sizes THIS arm may be started at. An arm may be capped below the rest. */
+  ticket_choices?: TicketChoice[];
+  /** The cap, when the arm has one, to say why the sizes above it are missing. */
+  max_ticket_usd?: string | null;
 };
 
 /** A trade size Start accepts, and the smallest trade it allows. */
@@ -162,9 +166,12 @@ function chosenStrategy(a: AutotradeState | undefined, pick: Pick): Strategy | n
   if (a.enabled) return a.strategy;
   const base =
     (a.strategies ?? []).find((s) => s.id === (pick.id ?? a.strategy.id)) ?? a.strategy;
-  const size = (a.ticket_choices ?? []).find(
-    (c) => c.ticket_usd === (pick.ticket ?? a.strategy.ticket_usd),
-  );
+  // The arm's own sizes when it has them: one arm is capped below the others,
+  // so a size picked on B3 must not survive a switch to it. Biggest allowed wins.
+  const choices = base.ticket_choices ?? a.ticket_choices ?? [];
+  const size =
+    choices.find((c) => c.ticket_usd === (pick.ticket ?? a.strategy.ticket_usd)) ??
+    choices.at(0);
   return size
     ? { ...base, ticket_usd: size.ticket_usd, min_ticket_usd: size.min_usd }
     : { ...base, ticket_usd: a.strategy.ticket_usd, min_ticket_usd: a.strategy.min_ticket_usd };
@@ -714,7 +721,7 @@ function TradingControl({
   const { user } = useAuth();
   const [reason, setReason] = useState("");
   const strategies = autotrade?.strategies ?? [];
-  const sizes = autotrade?.ticket_choices ?? [];
+  const sizes = chosen?.ticket_choices ?? autotrade?.ticket_choices ?? [];
 
   const mutate = useMutation({
     mutationFn: (action: "start" | "stop") =>
@@ -800,6 +807,12 @@ function TradingControl({
               onChange={(ticket) => onPick({ ticket })}
               options={sizes.map((c) => ({ value: c.ticket_usd, text: `$${c.ticket_usd}` }))}
             />
+          ) : null}
+          {chosen.max_ticket_usd ? (
+            <p className="text-xs text-ink-3">
+              {chosen.id} is capped at ${chosen.max_ticket_usd} a trade: on its own paper
+              week a $100 wallet trading it bigger was wiped out by the rugs.
+            </p>
           ) : null}
           {running ? (
             <p className="text-xs text-ink-3">Stop first to change the arm or the size.</p>

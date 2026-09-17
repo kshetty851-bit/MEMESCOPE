@@ -80,11 +80,28 @@ def test_each_live_arm_copies_its_own_paper_book() -> None:
     from app.labs.graduation.tournament import ARMS
 
     arms = {a.name: a for a in ARMS}
-    assert set(live_spec.PAPER_BOOKS) == {"G-B3-5M", "G-B3-4M"}
+    assert set(live_spec.PAPER_BOOKS) == {"G-B3-5M", "G-B3-4M", "G-BAS-5M"}
     for sid, book in live_spec.PAPER_BOOKS.items():
         assert live_spec.hold_minutes(live_spec.BY_ID[sid]) == arms[book].hold
         assert arms[book].clock == "entry", "the live clock starts at the entry"
         assert live_spec.MIRRORS[book] == sid
+
+
+def test_the_baseline_arm_is_capped_at_ten_dollars(monkeypatch) -> None:
+    """Karthik added the board's BASELINE on 2026-09-17. Walked over its own
+    week with every rug counted it wiped out a $100 wallet trading $25, so
+    Start offers it $10 and $5 and nothing larger — and its floor is the $75k
+    that admits the population B3 excludes, not B3's $198k."""
+    from app.core.config import settings
+    from app.real_wallet.autotrade import ticket_choices
+
+    monkeypatch.setattr(settings, "REAL_WALLET_ENTRY_SIZE_USD", Decimal("100"))
+    assert live_spec.max_ticket("G-BAS-5M") == Decimal("10")
+    assert live_spec.max_ticket("G-B3-4M") is None
+    assert live_spec.pool_floor("G-BAS-5M") == 75_000
+    assert live_spec.pool_floor("G-B3-4M") == live_spec.POOL_FLOOR_USD
+    assert [str(t) for t in ticket_choices("G-BAS-5M")] == ["10", "5"]
+    assert "100" in [str(t) for t in ticket_choices("G-B3-4M")]
 
 
 def test_there_is_no_stop_and_no_target() -> None:

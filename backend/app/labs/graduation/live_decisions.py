@@ -162,7 +162,7 @@ async def _record(session: AsyncSession, s: spec.Strategy,
             # against the paper position rather than taken on trust.
             features={
                 "paper_book": spec.PAPER_BOOKS[s.id],
-                "pool_floor_usd": spec.POOL_FLOOR_USD,
+                "pool_floor_usd": spec.pool_floor(s.id),
                 "liquidity_usd": (None if e.liquidity_usd is None
                                   else str(e.liquidity_usd)),
                 "impact_open": None if e.impact is None else str(e.impact),

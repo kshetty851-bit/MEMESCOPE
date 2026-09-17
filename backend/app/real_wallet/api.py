@@ -107,18 +107,27 @@ def _wallet_strategies(ticket: Decimal) -> list[dict[str, object]]:
     from app.labs.graduation import config as grad
     from app.labs.graduation import live_spec
 
+    def _cap(strategy_id: str) -> str | None:
+        cap = live_spec.max_ticket(strategy_id)
+        return None if cap is None else _usd(cap)
+
     return [{
         "id": s.id,
         "name": s.name,
         "paper_book": live_spec.PAPER_BOOKS[s.id],
         "idea": s.hypothesis,
-        "pool_floor_usd": live_spec.POOL_FLOOR_USD,
+        "pool_floor_usd": live_spec.pool_floor(s.id),
         "hold_minutes": live_spec.hold_minutes(s),
         "take_profit": s.exits.take_profit is not None,
         "stop_loss": s.exits.stop_loss is not None,
         "max_signal_age_seconds": live_spec.MAX_DECISION_AGE_SECONDS,
         "ticket_usd": _usd(ticket),
         "min_ticket_usd": _usd(grad.wallet_floor(ticket)),
+        # Per arm: the baseline is capped at $10, so the picker must not offer
+        # this one the sizes it offers B3.
+        "ticket_choices": [{"ticket_usd": _usd(t), "min_usd": _usd(grad.wallet_floor(t))}
+                           for t in ticket_choices(s.id)],
+        "max_ticket_usd": _cap(s.id),
     } for s in live_spec.STRATEGIES]
 
 
