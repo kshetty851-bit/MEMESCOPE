@@ -114,6 +114,20 @@ class Settings(BaseSettings):
     #: through a DST change.
     DAILY_REPORT_TIMEZONE: str = "Asia/Dubai"
 
+    # --- Real-wallet trade alerts (WhatsApp, via CallMeBot) --------------------
+    #
+    # Karthik's phone gets a message for every real-wallet trade that opens and
+    # every one that closes. Off until BOTH values are set on the server; they are
+    # environment-only, and the repository is public, so neither may ever have a
+    # default here.
+    #
+    # CallMeBot takes the key and the number in the query string — that is its
+    # API, not a choice — so the request URL is never logged anywhere.
+    #: Your WhatsApp number, with the country code and a leading plus.
+    WHATSAPP_PHONE: str = ""
+    #: The key CallMeBot sends back after "I allow callmebot to send me messages".
+    WHATSAPP_CALLMEBOT_KEY: SecretStr = SecretStr("")
+
     # --- Outbound email -----------------------------------------------------
     #
     # There was no email infrastructure before this feature. Credentials are

@@ -42,7 +42,7 @@ class TestUnloggedDesks:
         # the "no log" answer for ever.
         from app.hq_ops.desk import NO_LOG
 
-        logged = {"karthik", "patch", "sentinel", "radar"}
+        logged = {"karthik", "patch", "sentinel", "radar", "vault"}
         assert not (logged & set(NO_LOG)), "a desk is both logged and logless"
 
 
@@ -63,11 +63,14 @@ class TestActionDesks:
     async def test_counts_every_outcome_not_just_the_successes(self, db_session) -> None:
         """A day of `skipped` is observe-only working as designed; a day of
         `failed` needs a person. A bare action count cannot tell them apart."""
+        # Patch, not Karthik: Karthik's desk has read the Graduation Lab since
+        # 2026-09-12, and these three tests kept asking his desk for the action
+        # log. The broken test database hid it — they errored, never failed.
         for i in range(5):
-            await self._action(db_session, "karthik", "skipped", "karthik.quote_retry", i)
-        await self._action(db_session, "karthik", "failed", "karthik.read_model_refresh", 6)
+            await self._action(db_session, "patch", "skipped", "worker.quote_retry", i)
+        await self._action(db_session, "patch", "failed", "worker.read_model_refresh", 6)
 
-        result = await desk.build(db_session, "karthik")
+        result = await desk.build(db_session, "patch")
         assert result.measured is True
         by_label = {c.label.strip(): c.value for c in result.counts}
         assert by_label["Actions attempted"] == 6
@@ -77,11 +80,11 @@ class TestActionDesks:
     async def test_ignores_another_agent_and_anything_older_than_the_window(
         self, db_session
     ) -> None:
-        await self._action(db_session, "karthik", "skipped", "a", 10)
         await self._action(db_session, "patch", "skipped", "a", 10)
-        await self._action(db_session, "karthik", "skipped", "a", 60 * 30)  # 30h ago
+        await self._action(db_session, "sentinel", "skipped", "a", 10)
+        await self._action(db_session, "patch", "skipped", "a", 60 * 30)  # 30h ago
 
-        result = await desk.build(db_session, "karthik")
+        result = await desk.build(db_session, "patch")
         assert {c.label.strip(): c.value for c in result.counts}["Actions attempted"] == 1
 
     async def test_caps_the_timeline_without_capping_the_counts(self, db_session) -> None:
@@ -98,7 +101,7 @@ class TestActionDesks:
 
     async def test_a_quiet_logged_desk_says_so_and_stays_measured(self, db_session) -> None:
         # The distinction the whole module exists for: measured AND empty.
-        result = await desk.build(db_session, "karthik")
+        result = await desk.build(db_session, "patch")
         assert result.measured is True
         assert result.timeline == []
         assert "Nothing recorded" in result.headline

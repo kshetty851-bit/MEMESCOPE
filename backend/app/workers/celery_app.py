@@ -418,6 +418,14 @@ celery_app.conf.beat_schedule = {
     },
     # Rent back from the wallet's emptied token accounts. Five minutes is
     # plenty: a few cents per trade, and the sweep waits while one is in flight.
+    # WhatsApp alerts for every real trade. Half-minute, not beat's usual minute
+    # floor via crontab: a "bought" message that lands after the "sold" one
+    # reads as a bug, and this wallet can close a trade in four minutes.
+    # Inert until WHATSAPP_PHONE and WHATSAPP_CALLMEBOT_KEY are both set.
+    "real-wallet-trade-alerts": {
+        "task": "app.real_wallet.scheduler.real_wallet_trade_alerts",
+        "schedule": timedelta(seconds=30),
+    },
     "real-wallet-close-empty-accounts": {
         "task": "app.real_wallet.scheduler.real_wallet_close_empty_accounts",
         "schedule": crontab(minute="*/5"),

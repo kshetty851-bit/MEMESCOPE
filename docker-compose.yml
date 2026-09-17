@@ -31,6 +31,12 @@ x-backend-env: &backend-env
   SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
   SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
   SMTP_FROM_NAME: ${SMTP_FROM_NAME:-}
+  # Real-wallet trade alerts on WhatsApp (CallMeBot). Empty by default, which
+  # keeps the alerts task inert; the values live only in the host's env file.
+  # In the anchor because the worker sends them — a value set in the env file
+  # and absent here would never reach the container that needs it.
+  WHATSAPP_PHONE: ${WHATSAPP_PHONE:-}
+  WHATSAPP_CALLMEBOT_KEY: ${WHATSAPP_CALLMEBOT_KEY:-}
   CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
   # In the anchor because a password-reset link is built from it. It was set in
   # .env.production and absent here, so the container fell back to the code
