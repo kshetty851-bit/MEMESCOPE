@@ -823,6 +823,23 @@ class Settings(BaseSettings):
     REAL_WALLET_SAFETY_MAX_POSITION_LIQUIDITY_RATIO: Decimal = Field(
         default=Decimal("0.01"), gt=Decimal("0"), le=Decimal("1")
     )
+    #: Refuse a token whose SYMBOL has already rugged, anywhere this platform
+    #: has watched — the graduation books or the wallet's own history.
+    #:
+    #: Karthik's call on 2026-09-17, after ZBCN cost the wallet $46.38, and
+    #: made against the measurement rather than because of it: over 2,830
+    #: graduations in the week to 2026-09-17, trades on a name that had rugged
+    #: before rugged LESS often than the rest (4.41% against 8.23%), the rule
+    #: would have skipped about 12% of trades, and it would not have stopped
+    #: ZBCN, whose name had not rugged in our records. Names recycle constantly
+    #: on pump.fun and a reused name is a different token with different
+    #: holders. Off by default in code; production sets it.
+    REAL_WALLET_BLOCK_RUGGED_SYMBOLS: bool = False
+    #: What counts as a rug for that rule: a closed trade at or below this
+    #: fraction of its stake. -50% is the line the lab's own rug counts use.
+    REAL_WALLET_RUG_RETURN: Decimal = Field(
+        default=Decimal("-0.50"), gt=Decimal("-1"), lt=Decimal("0")
+    )
     #: The most of a token's SUPPLY one position may buy, as a fraction.
     #:
     #: A different question from the liquidity ratio above, and both are kept.

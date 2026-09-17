@@ -12,10 +12,13 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.labs.graduation.models import GradPaperPosition, GradToken
 from app.models.market import TokenMarketSnapshot, TradingStatus
+from app.models.real_wallet_execution import RealWalletPosition
 from app.models.real_wallet_safety import RealWalletSafetyEvaluation
 from app.models.token import DiscoveredToken
 from app.repositories.market import MarketSnapshotRepository
@@ -87,6 +90,7 @@ class Reason:
     SELL_PRICE_IMPACT_TOO_HIGH = "SELL_PRICE_IMPACT_TOO_HIGH"
     EXECUTION_PRICE_DEVIATION_TOO_HIGH = "EXECUTION_PRICE_DEVIATION_TOO_HIGH"
     ROUND_TRIP_LOSS_TOO_HIGH = "ROUND_TRIP_LOSS_TOO_HIGH"
+    SYMBOL_RUGGED_BEFORE = "SYMBOL_RUGGED_BEFORE"
     SAFETY_CALCULATION_FAILED = "SAFETY_CALCULATION_FAILED"
 
 
@@ -174,6 +178,9 @@ class RealWalletSafetyGate:
             value.lower() for value in settings.REAL_WALLET_SAFETY_SUPPORTED_VENUES
         }:
             reasons.append(Reason.VENUE_UNSUPPORTED)
+
+        if await self._symbol_has_rugged(mint_address, token):
+            reasons.append(Reason.SYMBOL_RUGGED_BEFORE)
 
         market_age, price, liquidity = self._market_reasons(snapshot, evaluated_at, reasons)
         ratio = None if liquidity is None or liquidity <= 0 else trade_size_usd / liquidity
@@ -336,6 +343,51 @@ class RealWalletSafetyGate:
             "discovery_slot": token.slot if token else None,
             "venue": snapshot.dex_name if snapshot else None,
         }
+
+    async def _symbol_has_rugged(
+        self, mint_address: str, token: DiscoveredToken | None
+    ) -> bool:
+        """Has a token by this NAME already rugged, here or in the books?
+
+        The wallet already refuses a mint it has traded, so this is only about
+        the name. Karthik asked for it after ZBCN; the measurement is in
+        `REAL_WALLET_BLOCK_RUGGED_SYMBOLS` and does not support it, which is
+        why it is a setting rather than a rule of the gate.
+
+        The name comes from the graduation lab first: `grad_tokens` carries the
+        symbol from the launch message, minutes before `discovered_tokens` has
+        one, and a gate that cannot name the token cannot refuse it. An unnamed
+        token is allowed through — refusing every nameless mint would refuse
+        most of the book, which is a different rule nobody asked for.
+        """
+        if not settings.REAL_WALLET_BLOCK_RUGGED_SYMBOLS:
+            return False
+        symbol = await self._session.scalar(
+            select(func.coalesce(GradToken.symbol, ""))
+            .where(GradToken.mint == mint_address)
+        ) or (token.symbol if token is not None else None)
+        name = (symbol or "").strip().lower()
+        if not name:
+            return False
+        floor = settings.REAL_WALLET_RUG_RETURN
+        paper = select(GradPaperPosition.id).where(
+            func.lower(func.trim(GradPaperPosition.symbol)) == name,
+            GradPaperPosition.closed_at.is_not(None),
+            GradPaperPosition.net_return <= floor,
+            GradPaperPosition.mint != mint_address)
+        mine = (select(RealWalletPosition.id)
+                .join(DiscoveredToken,
+                      DiscoveredToken.mint_address == RealWalletPosition.mint_address)
+                .where(func.lower(func.trim(DiscoveredToken.symbol)) == name,
+                       RealWalletPosition.status == "CLOSED",
+                       RealWalletPosition.realised_net_pnl_usd.is_not(None),
+                       RealWalletPosition.entry_price_usd * RealWalletPosition.quantity > 0,
+                       RealWalletPosition.realised_net_pnl_usd
+                       / (RealWalletPosition.entry_price_usd
+                          * RealWalletPosition.quantity) <= floor,
+                       RealWalletPosition.mint_address != mint_address))
+        return bool(await self._session.scalar(
+            select(func.count()).select_from(paper.union_all(mine).subquery())))
 
     async def _supply_reasons(
         self,

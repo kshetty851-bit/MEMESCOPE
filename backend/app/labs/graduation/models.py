@@ -664,6 +664,8 @@ class GradPaperPosition(Base):
         UniqueConstraint("book", "mint", name="uq_grad_paper_positions_book_mint"),
         Index("ix_grad_paper_positions_open", "closed_at"),
         Index("ix_grad_paper_positions_book", "book", "closed_at"),
+        # The real wallet's rugged-name check, on the buy path (0097).
+        Index("ix_grad_paper_positions_symbol_norm", text("lower(trim(symbol))")),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
