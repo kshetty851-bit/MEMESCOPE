@@ -526,6 +526,45 @@ describe("RealWalletPage trades and limits", () => {
     await renderLoaded();
     expect(screen.getByText(/EMERGENCY STOP ON/)).toBeInTheDocument();
     expect(screen.getByText(/Failed sends in a row: 2 of 2/)).toBeInTheDocument();
+    // Clearing needs the administrator; everyone else is pointed at sign-in.
+    expect(screen.queryByRole("button", { name: /clear/i })).toBeNull();
+    expect(screen.getByRole("link", { name: /sign in to clear/i })).toHaveAttribute(
+      "href",
+      "/login?next=/real-wallet",
+    );
+  });
+
+  it("lets the administrator clear a stop, with a reason and the phrase", async () => {
+    signInAsAdmin();
+    serve({
+      status: status({
+        kill_switches: [{
+          kind: "consecutive_execution_failures", reason: "failure_threshold_reached",
+          activated_at: null, activated_by: null,
+        }],
+        consecutive_execution_failures: 2,
+      }),
+    });
+    vi.mocked(api.post).mockResolvedValue({ cleared: true });
+    await renderLoaded();
+    fireEvent.click(screen.getByRole("button", { name: "Clear…" }));
+    expect(screen.getByText(/one more failed send turns this stop straight back on/)).toBeInTheDocument();
+    const confirm = screen.getByRole("button", { name: "Clear this stop" });
+    expect(confirm).toBeDisabled();
+    fireEvent.change(screen.getByPlaceholderText(/why it is safe to clear/i), {
+      target: { value: "signing fixed in 09e755e" },
+    });
+    expect(confirm).toBeEnabled();
+    fireEvent.click(confirm);
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith(
+        "/real-wallet/kill-switches/consecutive_execution_failures/clear",
+        {
+          confirmation_phrase: "CLEAR_REAL_WALLET_KILL_SWITCH",
+          reason: "signing fixed in 09e755e",
+        },
+      ),
+    );
   });
 
   it("asks for the site code, not an account, when the gate refuses", async () => {
