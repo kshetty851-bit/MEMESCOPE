@@ -660,7 +660,10 @@ class RafiqLabService:
             remaining = spec.max_trades_per_day - today
 
         for cand in candidates:
-            if cand.mint_address in held:
+            # `candidates` starts at the run's earliest activation; a book
+            # activated later (A2-E2 joined G1's run) still never trades an
+            # admission from before its own.
+            if cand.mint_address in held or cand.detected_at <= row.activated_at:
                 continue
 
             # Every `continue` below is a decision, and a decision nobody

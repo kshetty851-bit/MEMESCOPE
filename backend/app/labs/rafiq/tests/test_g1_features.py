@@ -11,13 +11,12 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import select
 
 from app.labs.rafiq import outcomes
 from app.labs.rafiq.feed import _LP_CHECK, EntryFeatures
 from app.labs.rafiq.models import RafiqCandidate, RafiqLabPosition
 from app.labs.rafiq.service import RafiqLabService
-from app.labs.rafiq.tests.test_g1_engine import DEEP, g1_book, path, seed_path
+from app.labs.rafiq.tests.test_g1_engine import DEEP, g1_book, g1_row, path, seed_path
 from app.models.research_data import HolderSnapshot
 from app.models.token_security import TokenSecurityEvaluationRow
 
@@ -39,9 +38,7 @@ def verdict(mint: str, at: datetime, status: str,
 
 
 async def candidate(session, mint: str) -> RafiqCandidate:
-    return (await session.execute(
-        select(RafiqCandidate).where(RafiqCandidate.mint_address == mint)
-    )).scalars().one()
+    return await g1_row(session, RafiqCandidate, mint)
 
 
 @pytest.mark.integration
@@ -72,9 +69,7 @@ async def test_an_entry_and_a_refusal_both_carry_the_two_features(
     await service.tick(now=NOW)
 
     book = await g1_book(lab_session)
-    trade = (await lab_session.execute(
-        select(RafiqLabPosition).where(RafiqLabPosition.mint_address == entered)
-    )).scalars().one()
+    trade = await g1_row(lab_session, RafiqLabPosition, entered)
     assert trade.strategy_id == book.id
     assert trade.entry_top10_holder_pct == Decimal("34.5000")
     assert trade.entry_top10_captured_at == before
@@ -108,9 +103,7 @@ async def test_a_silent_store_never_blocks_an_entry_and_names_itself(
 
     await service.tick(now=NOW)
 
-    trade = (await lab_session.execute(
-        select(RafiqLabPosition).where(RafiqLabPosition.mint_address == mint)
-    )).scalars().one()
+    trade = await g1_row(lab_session, RafiqLabPosition, mint)
     assert trade.entry_top10_holder_pct is None and trade.entry_lp_locked is None
     assert trade.entry_features_error == "no_holder_snapshot,no_security_evaluation"
     assert trade.cost_basis == Decimal("10.00") and trade.entry_liquidity_usd == DEEP

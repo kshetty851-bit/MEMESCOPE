@@ -14,13 +14,14 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.labs.rafiq import config, registry
 from app.labs.rafiq.adapters import costs
 from app.labs.rafiq.g1 import learning
 from app.labs.rafiq.g1 import strategy_G1 as g1
 from app.labs.rafiq.models import (
+    RafiqCandidate,
     RafiqLabAdjustment,
     RafiqLabDailyState,
     RafiqLabPosition,
@@ -122,10 +123,22 @@ async def seed_path(session, tag: str, detected: datetime, rows) -> str:
     return mint
 
 
+#: The current run's books, in registry order.
+CURRENT_BOOKS = ["A2", "B2", "C2", "D2", "E2", "G1"]
+
+
 async def g1_book(session) -> RafiqLabStrategy:
     return (await session.execute(
         select(RafiqLabStrategy).where(RafiqLabStrategy.lab_run_id == registry.G1_RUN,
                                        RafiqLabStrategy.code == "G1")
+    )).scalars().one()
+
+
+async def g1_row(session, model, mint: str):
+    """G1's own row for `mint`: A2-E2 trade the same admissions in its run."""
+    book = await g1_book(session)
+    return (await session.execute(
+        select(model).where(model.strategy_id == book.id, model.mint_address == mint)
     )).scalars().one()
 
 
@@ -298,9 +311,7 @@ async def test_the_bet_is_one_percent_of_the_current_book(lab_session, monkeypat
 
     await service.tick(now=T0)
 
-    row = (await lab_session.execute(
-        select(RafiqLabPosition).where(RafiqLabPosition.mint_address == mint)
-    )).scalars().one()
+    row = await g1_row(lab_session, RafiqLabPosition, mint)
     assert row.cost_basis == g1.position_size(Decimal(1100)) == Decimal("11.00")
 
 
@@ -355,7 +366,7 @@ async def test_archived_books_are_kept_drained_and_never_reopened(
     result = await service.tick(now=now)
 
     assert result["run"] == registry.G1_RUN
-    assert set(result["strategies"]) == {"G1"}
+    assert sorted(result["strategies"]) == CURRENT_BOOKS
     g1_row = await g1_book(lab_session)
     assert g1_row.starting_equity == Decimal("1000.00")
     assert g1_row.activated_at == now
@@ -407,15 +418,52 @@ async def test_a_g1_cycle_leaves_the_existing_wallet_byte_identical(
     assert days and {d.lab_run_id for d in days} == {registry.G1_RUN}
 
 
-def test_only_g1_files_decisions() -> None:
+def test_the_current_run_trades_a2_to_e2_and_g1() -> None:
     """Each entering book files its own decisions, keyed by `strategy_id`.
 
-    Pinned rather than computed: when G1 replaced F2 the population the
-    candidates table collects narrowed to one book, and that is a visible
-    edit rather than a silent narrowing of the sample."""
-    entering = sorted(s.code for run in registry.RUNS.values() for s in run if s.enters)
-    assert entering == ["G1"]
-    assert registry.RUNS[registry.CURRENT_RUN] == (registry.G1,)
+    Pinned rather than computed: G1 replaced F2 and the brief archived A2-E2,
+    then Karthik re-armed A2-E2 next to G1 the same day. Which books collect
+    the sample is a visible edit, never a silent one."""
+    current = registry.RUNS[registry.CURRENT_RUN]
+    assert [s.code for s in current if s.enters] == CURRENT_BOOKS
+    assert not any(s.enters for s in registry.RUNS[registry.ARCHIVED_RUN])
+    # Last, so HQ's five desks pair with A2-E2 as they did before G1.
+    assert registry.STRATEGIES[-1] is registry.G1
+
+
+@pytest.mark.integration
+async def test_a_book_that_joins_a_run_late_trades_nothing_from_before_it_joined(
+    lab_session, monkeypatch
+) -> None:
+    """Prod, 2026-09-17: A2-E2 joined G1's run after G1 had started. The run's
+    candidate window opens at its EARLIEST activation, so a fresh admission
+    from before A2-E2 existed reached them too; only each book's own
+    `activated_at` keeps it out."""
+    monkeypatch.setenv("RAFIQ_LAB_ENABLED", "true")
+    service = RafiqLabService(lab_session)
+    now = datetime.now(UTC)
+    monkeypatch.setitem(registry.RUNS, registry.G1_RUN, (registry.G1,))
+    await service.activate(now=now - timedelta(hours=1))
+    monkeypatch.setitem(registry.RUNS, registry.G1_RUN,
+                        (*registry.REARMED, registry.G1))
+    await service.activate(now=now - timedelta(minutes=10))
+
+    before = await seed_candidate(lab_session, now, tag="joinbefore")
+    await lab_session.execute(
+        update(RadarToken).where(RadarToken.mint_address == before)
+        .values(first_detected_at=now - timedelta(minutes=12)))
+    after = await seed_candidate(lab_session, now, tag="joinafter")
+    await service.tick(now=now)
+
+    async def books(mint):
+        return set((await lab_session.execute(
+            select(RafiqLabStrategy.code)
+            .join(RafiqCandidate, RafiqCandidate.strategy_id == RafiqLabStrategy.id)
+            .where(RafiqCandidate.mint_address == mint)
+        )).scalars())
+
+    assert await books(before) == {"G1"}, "a late book traded from before it joined"
+    assert await books(after) == set(CURRENT_BOOKS), "a late book saw nothing at all"
 
 
 def test_the_canonical_config_and_the_code_agree() -> None:
