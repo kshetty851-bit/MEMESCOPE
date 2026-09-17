@@ -422,6 +422,14 @@ def test_zero_is_not_a_way_to_disable_the_ceiling() -> None:
         Settings(REAL_WALLET_MAX_BALANCE_SOL=Decimal("0"))
 
 
+def test_the_daily_buy_cap_admits_a_busy_day_and_refuses_a_typo() -> None:
+    """The graduation arm made 109 buys on its busiest day; a guard at 100
+    refused that day. 200 is a setting, 5,000 is a typo."""
+    assert Settings(REAL_WALLET_MAX_DAILY_TRADES=200).REAL_WALLET_MAX_DAILY_TRADES == 200
+    with pytest.raises(ValueError):
+        Settings(REAL_WALLET_MAX_DAILY_TRADES=5000)
+
+
 def test_an_unreadable_balance_still_refuses_with_no_ceiling(monkeypatch) -> None:
     """Disabling the ceiling must not turn an unmeasured balance into a pass."""
     monkeypatch.setattr(settings, "REAL_WALLET_BALANCE_CEILING_ENABLED", False)
