@@ -326,6 +326,9 @@ x-backend-env: &backend-env
   # The three controls stay disabled here. Enabling execution is a deliberate,
   # separately reviewed act, not a side effect of editing this file.
   REAL_WALLET_EXECUTION_MODE: ${REAL_WALLET_EXECUTION_MODE:-disabled}
+  # Refuse a token whose NAME has already rugged (see config.py for the
+  # measurement that does not support it and whose wallet it is).
+  REAL_WALLET_BLOCK_RUGGED_SYMBOLS: ${REAL_WALLET_BLOCK_RUGGED_SYMBOLS:-false}
   REAL_WALLET_EXECUTION_ENABLED: ${REAL_WALLET_EXECUTION_ENABLED:-false}
   REAL_WALLET_AUTOTRADE_ENABLED: ${REAL_WALLET_AUTOTRADE_ENABLED:-false}
   REAL_WALLET_NETWORK: ${REAL_WALLET_NETWORK:-devnet}
