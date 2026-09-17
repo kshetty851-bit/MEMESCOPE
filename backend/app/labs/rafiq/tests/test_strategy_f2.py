@@ -189,8 +189,8 @@ class TestF2IsWiredAsTheActiveBook:
         opened under the old hash could never be traded again."""
         import dataclasses
 
-        from app.labs.rafiq.registry import STRATEGIES
-        for book in STRATEGIES:
+        from app.labs.rafiq.registry import BY_CODE
+        for book in BY_CODE.values():
             assert dataclasses.replace(book, enters=True).digest == book.digest
             assert dataclasses.replace(book, enters=False).digest == book.digest
 

@@ -88,10 +88,12 @@ class StrategyOut(BaseModel):
     closed_trades: int
     wins: int
     losses: int
-    #: Realised P&L BEFORE fee and price impact. v1 could not answer "why did
+    #: Realised P&L BEFORE fee and price impact — including an open G1 row's
+    #: scale-out, like `realised_pnl`. v1 could not answer "why did
     #: this lose" without hand arithmetic; this is the number that separated
     #: "everything loses" from "B is nearly breakeven and dying to friction".
     gross_pnl_ex_fees: str
+    #: Per CLOSED trade: a G1 trade counts once, when its last quarter sells.
     mean_pnl_per_trade_net: str | None
     mean_pnl_per_trade_gross: str | None
     #: How often the gate refused this book an entry, and for which condition.
@@ -248,6 +250,27 @@ def _q(v: Decimal | None) -> str | None:
     return None if v is None else str(v)
 
 
+def _realised_pnl(positions) -> Decimal:
+    """P&L already taken: every closed trade, and the scale-out of a G1
+    position whose remaining quarter is still open. With `unrealised_pnl`
+    over what is still held, the two add up to equity less the start."""
+    return sum(
+        (((p.exit_proceeds_usd or Decimal(0)) - p.cost_basis) if p.status == "closed"
+         else (p.realised_usd - p.cost_basis * (1 - p.fraction_open))
+         for p in positions if p.status == "closed" or p.scaled_out),
+        Decimal(0),
+    )
+
+
+def _scale_out_cost(p) -> Decimal:
+    """Fee and impact behind an open G1 row's scale-out: the sold share of
+    the entry's drag, and the partial sale's own."""
+    sold = 1 - p.fraction_open
+    entry = (p.cost_basis - p.quantity * p.entry_observed_price
+             if p.entry_observed_price else Decimal(0))
+    return entry * sold + p.quantity * sold * p.scale_out_price - p.realised_usd
+
+
 def _execution_cost(positions) -> Decimal:
     """Fee and price impact already deducted from this book.
 
@@ -268,12 +291,14 @@ def _execution_cost(positions) -> Decimal:
         if p.entry_observed_price and p.entry_observed_price > 0:
             ideal = p.cost_basis / p.entry_observed_price
             total += (ideal - p.quantity) * p.entry_observed_price
+        if p.scaled_out:
+            # The scale-out's drag counts when it sells, open row or not.
+            sold = p.quantity * (1 - p.fraction_open)
+            total += sold * p.scale_out_price - p.realised_usd
         if p.status == "closed" and p.exit_price is not None:
-            # A G1 row that scaled out sold in two parts, at two fills.
-            gross = p.quantity * p.fraction_open * p.exit_price
-            if p.scaled_out:
-                gross += p.quantity * (1 - p.fraction_open) * p.scale_out_price
-            total += gross - (p.exit_proceeds_usd or Decimal(0))
+            final = p.quantity * p.fraction_open
+            total += final * p.exit_price - ((p.exit_proceeds_usd or Decimal(0))
+                                             - p.realised_usd)
     return total
 
 
@@ -333,6 +358,11 @@ async def status(session: AsyncSession = Depends(get_db),
         marked = sum((RafiqLabService._value(p) for p in openp), Decimal(0))
         pnl = [(p.exit_proceeds_usd or Decimal(0)) - p.cost_basis for p in closed]
         still_at_risk = sum((p.cost_basis * p.fraction_open for p in openp), Decimal(0))
+        realised = _realised_pnl(mine)
+        # What execution cost the realised part: closed trades whole, and an
+        # open G1 row's scale-out.
+        realised_cost = _execution_cost(closed) + sum(
+            (_scale_out_cost(p) for p in openp if p.scaled_out), Decimal(0))
         curve, running_equity = [str(row.starting_equity)], row.starting_equity
         for delta in pnl:
             running_equity += delta
@@ -353,11 +383,11 @@ async def status(session: AsyncSession = Depends(get_db),
             gate={k: str(v) for k, v in spec.gate.canonical.items()},
             starting_equity=str(row.starting_equity),
             execution_cost_usd=str(_execution_cost(mine)), cash=str(cash),
-            equity=str(cash + marked), realised_pnl=str(sum(pnl, Decimal(0))),
+            equity=str(cash + marked), realised_pnl=str(realised),
             unrealised_pnl=str(marked - still_at_risk),
             open_positions=len(openp), closed_trades=len(closed),
             wins=sum(1 for d in pnl if d > 0), losses=sum(1 for d in pnl if d <= 0),
-            gross_pnl_ex_fees=str(sum(pnl, Decimal(0)) + _execution_cost(closed)),
+            gross_pnl_ex_fees=str(realised + realised_cost),
             mean_pnl_per_trade_net=(
                 None if not pnl else str(sum(pnl, Decimal(0)) / len(pnl))),
             mean_pnl_per_trade_gross=(

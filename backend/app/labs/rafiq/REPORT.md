@@ -195,8 +195,8 @@ than editing them:
   records when it actually started trading.
 - **Config selection is by run.** `activate()` and `tick()` only create and
   read rows of `registry.CURRENT_RUN`. The strategies' unique key moved from
-  `code` to `(lab_run_id, code)`. F2's row is never re-read, re-hashed or
-  rewritten. A test compares its id, lane, starting equity, digest and
+  `code` to `(lab_run_id, code)`. F2's row is never re-activated, re-hashed or
+  rewritten; the drain only reads its code. A test compares its id, lane, starting equity, digest and
   `activated_at` before and after a G1 tick.
 - **Reset.** A new run is a new strategy row at $1,000, and cash is derived
   per book, so G1 starts from a clean $1,000 while A2–F2 keep their numbers.
@@ -941,3 +941,37 @@ Nothing was pushed or deployed. To ship it:
   database (unit 4,108 passed / 8 failed; integration 888 passed / 32
   failed), with **identical failure sets on `main` at 7045b2f**. None comes
   from this work.
+
+## Review fixes (after phase 3)
+
+An independent correctness review of the four phase commits found two real
+defects. Neither corrupted the ledger. Both are fixed in one follow-up
+commit:
+
+1. **HQ's analyst desks went dark.**
+   - **Cause:** `app.hq_ops.desk.strategy_for` seats its analysts from
+     `registry.STRATEGIES` "as the lab is registered now", which still meant
+     the archived A2–F2. Meanwhile `analyst.analyse` now looks books up in
+     the current run. Every desk therefore reported "not registered", and G1
+     sat at no desk.
+   - **Fix, inside the lab:** `registry.STRATEGIES` is now the current run's
+     books (G1). The archived tuple is `ARCHIVED_STRATEGIES`. The anchor desk
+     answers for G1, and the others say they have no book.
+2. **`/status` left out a scale-out's profit while its runner was open.**
+   `realised_pnl` counted closed rows only and `unrealised_pnl` covered the
+   held quarter, so the 75% sale sat in cash and equity but in neither
+   figure. That was about $2.33 on a $10 trade, for up to 45 minutes.
+   - `realised_pnl` and `gross_pnl_ex_fees` now include an open row's
+     scale-out, and `execution_cost_usd` counts the partial sale when it
+     sells.
+   - Equity less the start now equals realised plus unrealised, which a test
+     holds.
+   - The analyst's "Capital in open trades" counts only the share still
+     held.
+   - Per-trade means, wins/losses and the equity curve stay per **closed**
+     trade.
+
+The review found the core money path, the ratchet, the learning pass, the
+run scoping, the API's read-only behaviour and migrations 0092–0094 correct.
+
+Lab suite: **205 passed.**

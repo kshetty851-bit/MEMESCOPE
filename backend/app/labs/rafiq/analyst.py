@@ -263,7 +263,8 @@ async def analyse(session: AsyncSession, code: str, *, now: datetime | None = No
     # ---- P&L, and what it is worth at this sample size -------------------
     gross = sum((r.exit_proceeds_usd - r.cost_basis for r in settled), Decimal(0))
     winners = [r for r in settled if (r.exit_proceeds_usd or Decimal(0)) > r.cost_basis]
-    allocated = sum((r.cost_basis for r in live), Decimal(0))
+    # The share still held: a G1 row that scaled out has a quarter at risk.
+    allocated = sum((r.cost_basis * r.fraction_open for r in live), Decimal(0))
 
     figures = [
         Figure("Closed trades", str(len(closed)), "rafiq_lab_positions.closed_at"),

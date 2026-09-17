@@ -298,7 +298,7 @@ CURRENT_RUN = G1_RUN
 
 #: A2-F2, as they traded. Kept so an archived book still renders and its
 #: digest still verifies; `enters` is off because the run is closed.
-STRATEGIES: tuple[LabStrategy, ...] = (
+ARCHIVED_STRATEGIES: tuple[LabStrategy, ...] = (
     # A2 changes exactly one thing against v1's A: the gate. It is the control,
     # and if it does not clearly beat A's -53% the rest of this tells us little.
     LabStrategy("A2", "Gate only",
@@ -378,7 +378,14 @@ G1 = LabStrategy(
     MOONSHOT, legs=(Leg(_WHOLE, None, g1.RUNNER_TRAIL),), gate=G1_GATE,
     daily_breaker=True, g1=True)
 
-RUNS: dict[str, tuple[LabStrategy, ...]] = {ARCHIVED_RUN: STRATEGIES, G1_RUN: (G1,)}
+RUNS: dict[str, tuple[LabStrategy, ...]] = {ARCHIVED_RUN: ARCHIVED_STRATEGIES,
+                                             G1_RUN: (G1,)}
+
+#: The books the lab trades NOW. HQ's analyst desks seat themselves from this
+#: name (`app.hq_ops.desk.strategy_for`) and read "as the lab is registered
+#: now", so it must follow the current run: pointed at the archive, every
+#: desk reported "not registered" for books the analyst looks up in G1's run.
+STRATEGIES: tuple[LabStrategy, ...] = RUNS[CURRENT_RUN]
 
 BY_CODE = {s.code: s for run in RUNS.values() for s in run}
 
@@ -422,7 +429,7 @@ def max_hold_for(strategy: LabStrategy) -> timedelta:
     return strategy.profile.exits.max_hold
 
 
-assert {s.code for s in STRATEGIES} == {"A2", "B2", "C2", "D2", "E2", "F2"}, \
+assert {s.code for s in ARCHIVED_STRATEGIES} == {"A2", "B2", "C2", "D2", "E2", "F2"}, \
     "the archived run must hold exactly the six v2 books"
 assert len(BY_CODE) == sum(len(run) for run in RUNS.values()), \
     "a code may name one book only, across every run"

@@ -1,5 +1,12 @@
 # Rafiq Lab
 
+> **Current state (2026-09-17): G1 (MOONSHOT, `g1/`) is the only book that
+> opens positions**, on run `G1-2026-09-17`. A2–F2 are archived under run
+> `F2-and-earlier`: kept, drained on their own rules, never reopened. Every
+> route takes `?run=`. What changed, why, and how to query each run is in
+> [`REPORT.md`](REPORT.md). The sections below describe the lab as first
+> built and remain accurate about its mechanisms.
+
 Five strategies supplied by a collaborator, run beside the existing paper
 engine on the same token feed, each on its own **$1,000** book.
 
@@ -77,7 +84,7 @@ Read-only API:
 
 | Route | What it answers |
 |---|---|
-| `GET /api/v1/labs/rafiq/status` | five books: equity, cash, realised, the frozen rules, the equity curve |
+| `GET /api/v1/labs/rafiq/status` | one run's books (`?run=`, default the current run): equity, cash, realised, the frozen rules, the equity curve |
 | `GET /api/v1/labs/rafiq/positions` | what is open, with age and current mark-to-market value |
 | `GET /api/v1/labs/rafiq/trades` | every closed trade, with the evidence for its exit |
 | `GET /api/v1/labs/rafiq/breaker` | today's daily state per strategy |
