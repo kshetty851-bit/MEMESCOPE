@@ -103,3 +103,50 @@ async def test_reading_the_status_writes_nothing(lab_session, monkeypatch) -> No
     assert response.status_code == 200
     assert response.json()["strategies"][0]["learning"]["size_multiplier"] == 1.0
     assert (await lab_session.execute(select(RafiqLabRunState))).first() is None
+
+
+async def test_a_scale_out_is_realised_while_its_runner_is_open(
+    lab_session, monkeypatch
+) -> None:
+    """75% sold at +32%, 25% still riding. The sale's profit is realised now,
+    the quarter still held is what is unrealised, and the two add up to what
+    the book has gained — they used to leave the sale out until the runner
+    closed."""
+    from app.labs.rafiq.g1 import strategy_G1 as g1
+    from app.labs.rafiq.tests.test_g1_engine import T0, path, seed_path
+
+    monkeypatch.setenv("RAFIQ_LAB_ENABLED", "true")
+    service = RafiqLabService(lab_session)
+    await service.activate(now=T0 - timedelta(hours=1))
+    mint = await seed_path(lab_session, "runneropen", T0,
+                           path((0, 1), (5, "1.32"), length=10))
+    await service.tick(now=T0)
+    await service.tick(now=T0 + timedelta(minutes=5))
+    row = (await lab_session.execute(
+        select(RafiqLabPosition).where(RafiqLabPosition.mint_address == mint)
+    )).scalars().one()
+    assert (row.status, row.scaled_out, row.fraction_open) == ("open", True, Decimal("0.25"))
+
+    async with client_for(lab_session) as client:
+        g1_out = (await client.get("/labs/rafiq/status")).json()["strategies"][0]
+        desk = (await client.get("/labs/rafiq/analysis")).json()[0]
+
+    equity, start = Decimal(g1_out["equity"]), Decimal(g1_out["starting_equity"])
+    realised, unrealised = Decimal(g1_out["realised_pnl"]), Decimal(g1_out["unrealised_pnl"])
+    assert g1_out["closed_trades"] == 0 and realised > 0
+    # Equal to Decimal's 28 significant digits, which round a $1,003 sum
+    # and a $3 one at different places.
+    assert abs((equity - start) - (realised + unrealised)) < Decimal("1e-12")
+    assert realised == row.realised_usd - row.cost_basis * g1.SCALE_OUT_FRACTION
+    assert Decimal(g1_out["gross_pnl_ex_fees"]) > realised     # fees came off it
+    capital = next(f for f in desk["figures"] if f["label"] == "Capital in open trades")
+    assert capital["value"] == f"${row.cost_basis * Decimal('0.25'):,.2f}"
+
+
+def test_the_hq_desks_sit_at_the_books_the_lab_trades_now() -> None:
+    """HQ seats its analysts from `registry.STRATEGIES`, "as the lab is
+    registered now". Pointed at the archive, every desk looked its book up in
+    G1's run and reported it as not registered."""
+    desk = pytest.importorskip("app.hq_ops.desk")
+    assert desk.strategy_for("anchor") == "G1"
+    assert desk.strategy_for("tempo") is None
