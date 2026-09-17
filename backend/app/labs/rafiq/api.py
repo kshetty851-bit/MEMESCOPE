@@ -11,14 +11,18 @@ actually followed, and the two would disagree the first time either changed.
 With the flag off every route answers `running: false` rather than an empty
 book: "the lab is not running" and "the lab ran and found nothing" are
 different facts and must not render identically.
+
+Every route reads ONE run: the current one by default (G1), or any archived
+run by `?run=<lab_run_id>` — `F2-and-earlier` for A2-F2.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,9 +32,10 @@ from app.labs.rafiq import analyst, config, entry_gate, registry
 from app.labs.rafiq.adapters import costs
 from app.labs.rafiq.feed import RafiqFeed
 from app.labs.rafiq.models import (
-    RafiqLabGateRejection,
     RafiqLabDailyState,
+    RafiqLabGateRejection,
     RafiqLabPosition,
+    RafiqLabRunState,
     RafiqLabStrategy,
 )
 from app.labs.rafiq.service import RafiqLabService
@@ -44,6 +49,7 @@ class StrategyOut(BaseModel):
     lane: str
     #: The one-line question this book exists to answer.
     question: str
+    lab_run_id: str
     #: Rafiq's frozen constants, published so the page never restates them.
     #: Null for a book with no take profit at all — D2, and C2's second leg.
     take_profit_mult: str | None
@@ -97,10 +103,15 @@ class StrategyOut(BaseModel):
     #: can never disagree with them.
     equity_curve: list[str]
     activated_at: datetime
+    #: G1 only: the ratchet's floor and the high-water mark it follows. Null
+    #: for a book without one.
+    ratchet_floor: str | None = None
+    ratchet_high_water: str | None = None
 
 
 class PositionOut(BaseModel):
     strategy_code: str
+    lab_run_id: str
     mint_address: str
     symbol: str | None
     opened_at: datetime
@@ -119,13 +130,20 @@ class PositionOut(BaseModel):
     peak_price: str
     #: Null when nothing has priced this mint yet — never zero.
     last_mark_price: str | None
+    #: What the part still held would fetch from the pool as last read.
     current_value: str | None
     unrealised_pnl: str | None
     status: str
+    #: G1: the share still held (0.25 after the scale-out) and what the
+    #: scale-out already returned.
+    fraction_open: str
+    scaled_out: bool
+    realised_usd: str
 
 
 class TradeOut(BaseModel):
     strategy_code: str
+    lab_run_id: str
     mint_address: str
     symbol: str | None
     opened_at: datetime
@@ -141,6 +159,10 @@ class TradeOut(BaseModel):
     exit_reason: str
     exit_evidence: str | None
     leg: int
+    #: G1: whether 75% was sold at +30% first, and what that sale returned.
+    #: `proceeds_usd` above is the whole position's, that sale included.
+    scaled_out: bool
+    scale_out_proceeds_usd: str
     #: What the gate saw, and what execution actually cost on each side.
     entry_liquidity_usd: str | None
     entry_market_cap_usd: str | None
@@ -214,6 +236,8 @@ class AnalysisOut(BaseModel):
 
 class StatusOut(BaseModel):
     running: bool
+    #: The run these books belong to.
+    run: str
     starting_equity: str
     strategies: list[StrategyOut]
 
@@ -243,31 +267,54 @@ def _execution_cost(positions) -> Decimal:
             ideal = p.cost_basis / p.entry_observed_price
             total += (ideal - p.quantity) * p.entry_observed_price
         if p.status == "closed" and p.exit_price is not None:
-            gross = p.quantity * p.exit_price
+            # A G1 row that scaled out sold in two parts, at two fills.
+            gross = p.quantity * p.fraction_open * p.exit_price
+            if p.scaled_out:
+                gross += p.quantity * (1 - p.fraction_open) * p.scale_out_price
             total += gross - (p.exit_proceeds_usd or Decimal(0))
     return total
 
 
-async def _rows(session: AsyncSession):
+def _run(run: str | None) -> str:
+    return run or registry.CURRENT_RUN
+
+
+#: `?run=` on every route. Omitted, it is the run the beat trades.
+RunParam = Annotated[str | None, Query(max_length=32,
+                                       description="lab_run_id; defaults to the current run")]
+
+
+async def _rows(session: AsyncSession, run: str):
     strategies = list((await session.execute(
-        select(RafiqLabStrategy).order_by(RafiqLabStrategy.code)
+        select(RafiqLabStrategy).where(RafiqLabStrategy.lab_run_id == run)
+        .order_by(RafiqLabStrategy.code)
     )).scalars())
+    ids = [s.id for s in strategies]
     positions = list((await session.execute(
-        select(RafiqLabPosition).order_by(RafiqLabPosition.opened_at)
+        select(RafiqLabPosition).where(RafiqLabPosition.strategy_id.in_(ids))
+        .order_by(RafiqLabPosition.opened_at)
     )).scalars())
     rejected: dict = {}
-    for r in (await session.execute(select(RafiqLabGateRejection))).scalars():
+    for r in (await session.execute(
+        select(RafiqLabGateRejection).where(RafiqLabGateRejection.strategy_id.in_(ids))
+    )).scalars():
         rejected.setdefault(r.strategy_id, {})[r.reason] = r.rejections
     return strategies, positions, rejected
 
 
 @router.get("/status", response_model=StatusOut)
-async def status(session: AsyncSession = Depends(get_db)) -> StatusOut:
-    """Five books, each from its own $1,000. Nothing is recomputed downstream."""
+async def status(session: AsyncSession = Depends(get_db),
+                 run: RunParam = None) -> StatusOut:
+    """One run's books, each from its own $1,000. Nothing is recomputed
+    downstream."""
+    run = _run(run)
     if not config.enabled():
-        return StatusOut(running=False, starting_equity=str(config.STARTING_EQUITY),
-                         strategies=[])
-    rows, all_positions, rejected = await _rows(session)
+        return StatusOut(running=False, run=run,
+                         starting_equity=str(config.STARTING_EQUITY), strategies=[])
+    rows, all_positions, rejected = await _rows(session, run)
+    state = (await session.execute(
+        select(RafiqLabRunState).where(RafiqLabRunState.lab_run_id == run)
+    )).scalars().first()
     out: list[StrategyOut] = []
     for row in rows:
         spec = registry.BY_CODE[row.code]
@@ -277,13 +324,15 @@ async def status(session: AsyncSession = Depends(get_db)) -> StatusOut:
         cash = RafiqLabService.cash(row, mine)
         marked = sum((RafiqLabService._value(p) for p in openp), Decimal(0))
         pnl = [(p.exit_proceeds_usd or Decimal(0)) - p.cost_basis for p in closed]
+        still_at_risk = sum((p.cost_basis * p.fraction_open for p in openp), Decimal(0))
         curve, running_equity = [str(row.starting_equity)], row.starting_equity
         for delta in pnl:
             running_equity += delta
             curve.append(str(running_equity))
         x = spec.profile.exits
         out.append(StrategyOut(
-            code=row.code, name=spec.name, lane=row.lane, question=spec.question,
+            code=row.code, lab_run_id=row.lab_run_id, name=spec.name, lane=row.lane,
+            question=spec.question,
             take_profit_mult=_q(x.take_profit_mult), stop_mult=str(x.stop_mult),
             trailing_frac=_q(x.trailing_frac),
             max_hold_hours=str(Decimal(x.max_hold.total_seconds()) / 3600),
@@ -297,7 +346,7 @@ async def status(session: AsyncSession = Depends(get_db)) -> StatusOut:
             starting_equity=str(row.starting_equity),
             execution_cost_usd=str(_execution_cost(mine)), cash=str(cash),
             equity=str(cash + marked), realised_pnl=str(sum(pnl, Decimal(0))),
-            unrealised_pnl=str(marked - sum((p.cost_basis for p in openp), Decimal(0))),
+            unrealised_pnl=str(marked - still_at_risk),
             open_positions=len(openp), closed_trades=len(closed),
             wins=sum(1 for d in pnl if d > 0), losses=sum(1 for d in pnl if d <= 0),
             gross_pnl_ex_fees=str(sum(pnl, Decimal(0)) + _execution_cost(closed)),
@@ -310,24 +359,29 @@ async def status(session: AsyncSession = Depends(get_db)) -> StatusOut:
             rejection_reason_counts={
                 reason: rejected.get(row.id, {}).get(reason, 0)
                 for reason in entry_gate.REASONS},
-            equity_curve=curve, activated_at=row.activated_at))
-    return StatusOut(running=True, starting_equity=str(config.STARTING_EQUITY),
+            equity_curve=curve, activated_at=row.activated_at,
+            ratchet_floor=_q(state.ratchet_floor) if spec.g1 and state else None,
+            ratchet_high_water=(_q(state.ratchet_high_water)
+                                if spec.g1 and state else None)))
+    return StatusOut(running=True, run=run, starting_equity=str(config.STARTING_EQUITY),
                      strategies=out)
 
 
 @router.get("/positions", response_model=list[PositionOut])
-async def positions(session: AsyncSession = Depends(get_db)) -> list[PositionOut]:
+async def positions(session: AsyncSession = Depends(get_db),
+                    run: RunParam = None) -> list[PositionOut]:
     """Everything still open, with its age and what it is worth right now."""
     if not config.enabled():
         return []
-    rows, all_positions, rejected = await _rows(session)
+    rows, all_positions, _ = await _rows(session, _run(run))
     codes = {r.id: r.code for r in rows}
     now = datetime.now(UTC)
     out = []
     for p in [x for x in all_positions if x.status == "open"]:
         value = RafiqLabService._value(p)
         out.append(PositionOut(
-            strategy_code=codes[p.strategy_id], mint_address=p.mint_address,
+            strategy_code=codes[p.strategy_id], lab_run_id=p.lab_run_id,
+            mint_address=p.mint_address,
             symbol=p.symbol, opened_at=p.opened_at,
             age_seconds=int((now - p.opened_at).total_seconds()),
             entry_price=str(p.entry_price), quantity=str(p.quantity), leg=p.leg,
@@ -336,17 +390,20 @@ async def positions(session: AsyncSession = Depends(get_db)) -> list[PositionOut
             trailing_frac=_q(p.trailing_frac),
             max_hold_hours=str(Decimal(p.max_hold_seconds) / 3600),
             peak_price=str(p.peak_price), last_mark_price=_q(p.last_mark_price),
-            current_value=str(value), unrealised_pnl=str(value - p.cost_basis),
-            status=p.status))
+            current_value=str(value),
+            unrealised_pnl=str(value - p.cost_basis * p.fraction_open),
+            status=p.status, fraction_open=str(p.fraction_open),
+            scaled_out=p.scaled_out, realised_usd=str(p.realised_usd)))
     return out
 
 
 @router.get("/trades", response_model=list[TradeOut])
-async def trades(session: AsyncSession = Depends(get_db)) -> list[TradeOut]:
+async def trades(session: AsyncSession = Depends(get_db),
+                 run: RunParam = None) -> list[TradeOut]:
     """Every closed trade, newest first, with the evidence for its exit."""
     if not config.enabled():
         return []
-    rows, all_positions, rejected = await _rows(session)
+    rows, all_positions, _ = await _rows(session, _run(run))
     codes = {r.id: r.code for r in rows}
     closed = sorted([p for p in all_positions if p.status == "closed"],
                     key=lambda p: p.closed_at, reverse=True)
@@ -366,7 +423,8 @@ async def trades(session: AsyncSession = Depends(get_db)) -> list[TradeOut]:
                       else costs.sell_proceeds(p.quantity, mark[0], mark[1]))
         proceeds = p.exit_proceeds_usd or Decimal(0)
         out.append(TradeOut(
-            strategy_code=codes[p.strategy_id], mint_address=p.mint_address,
+            strategy_code=codes[p.strategy_id], lab_run_id=p.lab_run_id,
+            mint_address=p.mint_address,
             symbol=p.symbol, opened_at=p.opened_at, closed_at=p.closed_at,
             hold_seconds=int((p.closed_at - p.opened_at).total_seconds()),
             entry_price=str(p.entry_price), exit_price=str(p.exit_price),
@@ -375,7 +433,8 @@ async def trades(session: AsyncSession = Depends(get_db)) -> list[TradeOut]:
             realised_pnl=str(proceeds - p.cost_basis),
             return_pct=str((proceeds / p.cost_basis - 1) * 100),
             exit_reason=p.exit_reason or "", exit_evidence=p.exit_evidence,
-            leg=p.leg,
+            leg=p.leg, scaled_out=p.scaled_out,
+            scale_out_proceeds_usd=str(p.realised_usd),
             entry_liquidity_usd=_q(p.entry_liquidity_usd),
             entry_market_cap_usd=_q(p.entry_market_cap_usd),
             entry_price_impact_pct=_q(p.entry_price_impact_pct),
@@ -390,15 +449,18 @@ async def trades(session: AsyncSession = Depends(get_db)) -> list[TradeOut]:
 
 
 @router.get("/breaker", response_model=list[BreakerOut])
-async def breaker(session: AsyncSession = Depends(get_db)) -> list[BreakerOut]:
-    """Today's daily state per strategy. D and E are gated by it; the rest are
-    shown so a reader can see what the breaker would have done to them."""
+async def breaker(session: AsyncSession = Depends(get_db),
+                  run: RunParam = None) -> list[BreakerOut]:
+    """Today's daily state per book in the run. Books with `daily_breaker` are
+    gated by it; the rest are shown so a reader can see what it would have
+    done to them."""
     if not config.enabled():
         return []
-    rows, _, _ = await _rows(session)
+    rows, _, _ = await _rows(session, _run(run))
     codes = {r.id: r.code for r in rows}
     states = list((await session.execute(
-        select(RafiqLabDailyState).order_by(RafiqLabDailyState.day.desc())
+        select(RafiqLabDailyState).where(RafiqLabDailyState.strategy_id.in_(list(codes)))
+        .order_by(RafiqLabDailyState.day.desc())
     )).scalars())
     latest: dict[str, RafiqLabDailyState] = {}
     for s in states:
@@ -412,7 +474,8 @@ async def breaker(session: AsyncSession = Depends(get_db)) -> list[BreakerOut]:
 
 
 @router.get("/analysis", response_model=list[AnalysisOut])
-async def analysis(session: AsyncSession = Depends(get_db)) -> list[AnalysisOut]:
+async def analysis(session: AsyncSession = Depends(get_db),
+                   run: RunParam = None) -> list[AnalysisOut]:
     """One reading per strategy, computed from that strategy's own trades.
 
     The desk that a person would ask "why is this losing money?". It answers
@@ -430,11 +493,11 @@ async def analysis(session: AsyncSession = Depends(get_db)) -> list[AnalysisOut]
         return []
     from app.hq_ops.desk import ANALYST_ORDER
 
-    codes = [s.code for s in registry.STRATEGIES]
+    run = _run(run)
+    codes = [s.code for s in registry.RUNS.get(run, ())]
     rows = []
     for seat, code in enumerate(codes):
         who = ANALYST_ORDER[seat] if seat < len(ANALYST_ORDER) else None
-        rows.append(
-            AnalysisOut(analyst=who, **analyst.as_dict(await analyst.analyse(session, code)))
-        )
+        reading = await analyst.analyse(session, code, run=run)
+        rows.append(AnalysisOut(analyst=who, **analyst.as_dict(reading)))
     return rows

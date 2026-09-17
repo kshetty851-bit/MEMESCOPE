@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import pathlib
 from dataclasses import dataclass
 from datetime import timedelta
 from decimal import Decimal
@@ -46,7 +47,9 @@ from decimal import Decimal
 from app.labs.rafiq import entry_gate
 from app.labs.rafiq.adapters.engine import ExitRules
 from app.labs.rafiq.adapters.profiles import StrategyProfile
+from app.labs.rafiq.adapters.sizing import SizingPolicy
 from app.labs.rafiq.entry_gate import GateThresholds
+from app.labs.rafiq.g1 import strategy_G1 as g1
 from app.labs.rafiq.strategies import strategy_e_ensemble as e
 from app.labs.rafiq.strategies import strategy_f2
 from app.labs.rafiq.strategies.strategy_a_hard_stop import HARD_STOP_GUARD
@@ -157,6 +160,10 @@ class LabStrategy:
     #: against positions actually opened, because an in-memory counter would
     #: reset on every worker restart and the cap would quietly stop binding.
     max_trades_per_day: int | None = None
+    #: G1 only. Exits come from `strategy_G1.evaluate` (partial sale, uncapped
+    #: runner), sizing from `strategy_G1.position_size`, and the book carries
+    #: `strategy_G1.EquityRatchet`. The digest is then the canonical JSON's.
+    g1: bool = False
 
     @property
     def digest(self) -> str:
@@ -166,7 +173,14 @@ class LabStrategy:
         Changing a number here is not a tweak — it is a new record. The gate
         thresholds are inside the hash because a gate that admits a different
         population produces a different book.
+
+        G1's rules live in its canonical JSON, so G1 hashes that — every value
+        in it, and none of the `_`-prefixed prose.
         """
+        if self.g1:
+            return hashlib.sha256(json.dumps(
+                {"code": self.code, "config": _rules(G1_CONFIG)},
+                sort_keys=True, separators=(",", ":")).encode()).hexdigest()
         x, s = self.profile.exits, self.profile.sizing
         canonical = {
             "code": self.code, "lane": self.profile.lane,
@@ -215,16 +229,83 @@ def _breaker_canonical() -> dict:
             "max_daily_realised_loss": str(p.max_daily_realised_loss)}
 
 
+def _rules(node):
+    """The config without its commentary: every `_`-prefixed key dropped."""
+    if isinstance(node, dict):
+        return {k: _rules(v) for k, v in node.items() if not k.startswith("_")}
+    return node
+
+
+#: G1's canonical config, as delivered. The runner reads the values that
+#: `strategy_G1.py` does not carry (the impact ceiling, the score floor, the
+#: ratchet's opening floor, the breaker level) from here, and
+#: `test_g1_engine.py` holds the ones it does carry equal to it.
+G1_CONFIG: dict = json.loads(
+    (pathlib.Path(__file__).parent / "g1" / "strategy_G1.json").read_text())
+
+
+def _pct(value) -> Decimal:
+    return Decimal(str(value)) / 100
+
+
+_G1_EXITS = G1_CONFIG["exits"]
+_G1_GATE = G1_CONFIG["entry_gate"]
+
+#: The impact ceiling and the two floors are F2's; what differs is that a
+#: missing market cap does not refuse — `strategy_G1.admits` reports it as a
+#: check it could not run, and the runner honours that.
+G1_GATE = GateThresholds(
+    min_liquidity_usd=Decimal(str(_G1_GATE["min_liquidity_usd"])),
+    min_market_cap_usd=Decimal(str(_G1_GATE["min_market_cap_usd"])),
+    max_entry_price_impact_pct=Decimal(str(_G1_GATE["max_impact_pct"])),
+    reject_if_market_cap_unknown=False,
+)
+
+#: The ratchet's opening state: high-water at the starting book, floor at the
+#: config's $950 — `EquityRatchet`'s own defaults, which the JSON restates.
+G1_STARTING_EQUITY = Decimal(str(G1_CONFIG["starting_capital_usd"]))
+G1_INITIAL_FLOOR = Decimal(str(G1_CONFIG["equity_ratchet"]["initial_floor_usd"]))
+
+#: What the page shows for G1. Only `entry_threshold` and `max_hold` are read
+#: by the runner; the exits themselves are `strategy_G1.evaluate`'s.
+MOONSHOT = StrategyProfile(
+    lane="moonshot",
+    exits=ExitRules(take_profit_mult=None, stop_mult=Decimal(str(_G1_EXITS["stop"])),
+                    trailing_frac=Decimal(str(_G1_EXITS["runner"]["trail_frac"])),
+                    max_hold=timedelta(minutes=_G1_EXITS["max_hold_minutes"])),
+    sizing=SizingPolicy(
+        risk_per_trade=_pct(G1_CONFIG["sizing"]["position_pct_of_book"]),
+        max_pool_fraction=strategy_f2.LOSS_BOUNDED.sizing.max_pool_fraction,
+        max_impact_pct=Decimal(str(_G1_GATE["max_impact_pct"])),
+        exit_stress_factor=strategy_f2.LOSS_BOUNDED.sizing.exit_stress_factor,
+        max_notional_usd=Decimal(str(G1_CONFIG["sizing"]["position_usd"])),
+    ),
+    sim=strategy_f2.LOSS_BOUNDED.sim,
+    entry_threshold=Decimal(G1_CONFIG["entry_score_min"]),
+)
+
+
 _WHOLE = Decimal(1)
 _HALF = Decimal("0.5")
 
+#: The run A2-F2 traded in. Archived: nothing in it opens a position again.
+ARCHIVED_RUN = "F2-and-earlier"
+#: G1's run. The date is the day its config was frozen (`generated` in the
+#: JSON); `activated_at` on the row records when it actually started.
+G1_RUN = f"G1-{G1_CONFIG['generated']}"
+#: The only run the beat trades.
+CURRENT_RUN = G1_RUN
+
+#: A2-F2, as they traded. Kept so an archived book still renders and its
+#: digest still verifies; `enters` is off because the run is closed.
 STRATEGIES: tuple[LabStrategy, ...] = (
     # A2 changes exactly one thing against v1's A: the gate. It is the control,
     # and if it does not clearly beat A's -53% the rest of this tells us little.
     LabStrategy("A2", "Gate only",
                 "What does the entry gate alone do, against v1's A?",
                 HARD_STOP_GUARD,
-                legs=(Leg(_WHOLE, Decimal("1.30"), Decimal("0.20")),)),
+                legs=(Leg(_WHOLE, Decimal("1.30"), Decimal("0.20")),),
+                enters=False),
 
     # B was v1's only book near breakeven before costs (-0.3%/trade gross over
     # 151 trades), so v2 treats B as the template rather than A. Same rules,
@@ -232,7 +313,7 @@ STRATEGIES: tuple[LabStrategy, ...] = (
     LabStrategy("B2", "Fast and cheap, gated",
                 "Does the gate push the best v1 book over the line?",
                 TIME_BOXED_EXIT,
-                legs=(Leg(_WHOLE, Decimal("1.20"), None),)),
+                legs=(Leg(_WHOLE, Decimal("1.20"), None),), enters=False),
 
     # C2's two legs ARE the question. Half takes the same +30% A2 takes; half
     # has no target and can only leave on the trail, the stop or the hold.
@@ -240,14 +321,14 @@ STRATEGIES: tuple[LabStrategy, ...] = (
                 "Does scaling out beat a hard cap, given losers go to -100%?",
                 PARTIAL_EXIT,
                 legs=(Leg(_HALF, Decimal("1.30"), None),
-                      Leg(_HALF, None, Decimal("0.25")))),
+                      Leg(_HALF, None, Decimal("0.25"))), enters=False),
 
     # v1 closed trades at +29% that would have run to +352%, +373%, +261%.
     # D2 removes the cap entirely and shortens the hold to pay for it.
     LabStrategy("D2", "No cap",
                 "Is the +30% cap cutting off the tail that pays for the rugs?",
                 NO_CAP,
-                legs=(Leg(_WHOLE, None, Decimal("0.25")),)),
+                legs=(Leg(_WHOLE, None, Decimal("0.25")),), enters=False),
 
     # E2 keeps v1 E's three guards and runs the gate far stricter on top. It is
     # expected to trade rarely — v1's E closed nothing at all in 19 hours on
@@ -258,7 +339,7 @@ STRATEGIES: tuple[LabStrategy, ...] = (
                 legs=(Leg(_WHOLE, Decimal("1.30"), Decimal("0.20")),),
                 gate=entry_gate.STRICT,
                 liquidity_derived_risk=True, daily_breaker=True,
-                consensus_gate=True),
+                consensus_gate=True, enters=False),
 
     # F2 is the active book, and it is NOT a sixth exit variant. A2-E2 settled
     # that question: 98 of their 102 total losses exited on `stop`, at a median
@@ -282,10 +363,24 @@ STRATEGIES: tuple[LabStrategy, ...] = (
                 legs=(Leg(_WHOLE, Decimal("1.30"), Decimal("0.20")),),
                 gate=entry_gate.F2, daily_breaker=True,
                 equity_floor=strategy_f2.FLOOR_WITH_ROOM.floor_usd,
-                max_trades_per_day=strategy_f2.MAX_TRADES_PER_DAY),
+                max_trades_per_day=strategy_f2.MAX_TRADES_PER_DAY, enters=False),
 )
 
-BY_CODE = {s.code: s for s in STRATEGIES}
+#: G1 replaces F2 in the sixth slot and is the only book that opens
+#: positions. One leg: its partial sale is bookkeeping on the row, not a
+#: second position, because the 25% it keeps is decided at +30%, not at entry.
+#: No static floor — the ratchet is its floor — and E's daily breaker, which
+#: is the 5% mark-to-market line the config asks for.
+G1 = LabStrategy(
+    "G1", "Moonshot",
+    "Does resolving in 45 minutes, with an uncapped runner and a floor that "
+    "only moves up, make money per trade?",
+    MOONSHOT, legs=(Leg(_WHOLE, None, g1.RUNNER_TRAIL),), gate=G1_GATE,
+    daily_breaker=True, g1=True)
+
+RUNS: dict[str, tuple[LabStrategy, ...]] = {ARCHIVED_RUN: STRATEGIES, G1_RUN: (G1,)}
+
+BY_CODE = {s.code: s for run in RUNS.values() for s in run}
 
 
 def stop_pct_for(strategy: LabStrategy,
@@ -328,7 +423,11 @@ def max_hold_for(strategy: LabStrategy) -> timedelta:
 
 
 assert {s.code for s in STRATEGIES} == {"A2", "B2", "C2", "D2", "E2", "F2"}, \
-    "the registry must hold exactly the five v2 books"
+    "the archived run must hold exactly the six v2 books"
+assert len(BY_CODE) == sum(len(run) for run in RUNS.values()), \
+    "a code may name one book only, across every run"
+assert [s.code for s in RUNS[CURRENT_RUN] if s.enters] == ["G1"], \
+    "G1 is the only book that opens positions"
 assert all(sum((leg.fraction for leg in s.legs), Decimal(0)) == 1
-           for s in STRATEGIES), \
+           for s in BY_CODE.values()), \
     "every book's legs must account for exactly the whole position"

@@ -103,11 +103,15 @@ class Position:
         return price / self.entry_price
 
 
-def evaluate(position: Position, price: Decimal, now: datetime):
+def evaluate(position: Position, price: Decimal, now: datetime,
+             abandon_gain: Decimal = ABANDON_UNLESS_GAIN):
     """One observation. Returns (action, fraction_to_sell, reason) or None.
 
     Order matters and is deliberate: the stop is checked before the abandon
     rule so a token that is collapsing exits as a stop, not as 'flat'.
+
+    `abandon_gain` is the flat-at-ten-minutes threshold, supplied per call so
+    the learning layer can move it; the default is the starting value.
     """
     position.mark(price)
     mult = position.multiple(price)
@@ -118,7 +122,7 @@ def evaluate(position: Position, price: Decimal, now: datetime):
 
     if not position.scaled_out:
         # The moon-or-nothing cut, only while the whole position is still on.
-        if age >= ABANDON_AFTER and mult < (1 + ABANDON_UNLESS_GAIN):
+        if age >= ABANDON_AFTER and mult < (1 + abandon_gain):
             return ("sell", position.fraction_open, Exit.ABANDON)
         if mult >= SCALE_OUT_AT:
             return ("sell", SCALE_OUT_FRACTION, Exit.SCALE_OUT)

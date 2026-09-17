@@ -48,6 +48,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.labs.rafiq import registry
 from app.labs.rafiq.models import RafiqLabPosition, RafiqLabStrategy
 
 #: Below this many closed trades, a win rate is a coin flip with a decimal
@@ -144,7 +145,8 @@ class Overlap:
     different_rule: int
 
 
-async def _overlaps(session: AsyncSession, strategy_id, mine: list) -> list[Overlap]:
+async def _overlaps(session: AsyncSession, strategy_id, mine: list,
+                    run: str) -> list[Overlap]:
     """Compare this arm's settled trades against every other arm's, by token.
 
     ── WHY THIS EXISTS ──────────────────────────────────────────────────
@@ -176,6 +178,9 @@ async def _overlaps(session: AsyncSession, strategy_id, mine: list) -> list[Over
             .join(RafiqLabPosition, RafiqLabPosition.strategy_id == RafiqLabStrategy.id)
             .where(
                 RafiqLabPosition.strategy_id != strategy_id,
+                # Neighbours in the same run only: a book in another run traded
+                # other hours, and "same token" there is not a paired trade.
+                RafiqLabStrategy.lab_run_id == run,
                 RafiqLabPosition.closed_at.is_not(None),
                 RafiqLabPosition.exit_proceeds_usd.is_not(None),
             )
@@ -209,12 +214,15 @@ async def _overlaps(session: AsyncSession, strategy_id, mine: list) -> list[Over
     return out
 
 
-async def analyse(session: AsyncSession, code: str, *, now: datetime | None = None) -> Analysis:
-    """One strategy's own trades, read as an analyst would read them."""
+async def analyse(session: AsyncSession, code: str, *, now: datetime | None = None,
+                  run: str | None = None) -> Analysis:
+    """One strategy's own trades in one run, read as an analyst would read them."""
     observed_at = now or datetime.now(UTC)
+    run = run or registry.CURRENT_RUN
 
     strategy = (
-        await session.execute(select(RafiqLabStrategy).where(RafiqLabStrategy.code == code))
+        await session.execute(select(RafiqLabStrategy).where(
+            RafiqLabStrategy.code == code, RafiqLabStrategy.lab_run_id == run))
     ).scalar_one_or_none()
     if strategy is None:
         return Analysis(
@@ -488,7 +496,7 @@ async def analyse(session: AsyncSession, code: str, *, now: datetime | None = No
     # fires: if an arm cannot be distinguished from its neighbour, every other
     # finding about it is a finding about the neighbour too, and the reader
     # needs to know that before acting on any of them.
-    for overlap in await _overlaps(session, strategy.id, settled):
+    for overlap in await _overlaps(session, strategy.id, settled, run):
         if overlap.shared < MIN_SHARED_TRADES:
             continue
         agreement = Decimal(overlap.identical) / Decimal(overlap.shared)

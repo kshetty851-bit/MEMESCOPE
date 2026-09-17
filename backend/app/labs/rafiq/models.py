@@ -1,4 +1,4 @@
-"""The Rafiq Lab's own four tables. Prefix `rafiq_lab_`.
+"""The Rafiq Lab's own tables. Prefix `rafiq_lab_`.
 
 WHY `rafiq_lab_` AND NOT `rafiq_`
 ---------------------------------
@@ -64,24 +64,34 @@ _MONEY = Numeric(24, 4)
 _QUANTITY = Numeric(48, 18)
 
 
+#: How long a run id may be. `G1-2026-09-17` is 13; `F2-and-earlier` is 14.
+_RUN_ID = String(32)
+
+
 class RafiqLabStrategy(Base):
-    """One strategy's book. Five rows, created once at first tick.
+    """One strategy's book in one run. Created once, at its run's first tick.
 
     `starting_equity` and `profile_digest` are copied onto the row rather than
     read from code at display time: changing a constant later must not restate
     a return that was already published under the old one.
+
+    `lab_run_id` is the config selector. The runner only ever activates and
+    trades the current run's rows; a new run is new rows, so an archived
+    book's config row is never overwritten.
     """
 
     __tablename__ = "rafiq_lab_strategies"
     __table_args__ = (
-        UniqueConstraint("code", name="uq_rafiq_lab_strategies_code"),
+        UniqueConstraint("lab_run_id", "code", name="uq_rafiq_lab_strategies_run_code"),
         Index("ix_rafiq_lab_strategies_created_at", "created_at"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
     )
-    #: `A2` | `B2` | `C2` | `D2` | `E2`.
+    #: `F2-and-earlier` for A2-F2, `G1-2026-09-17` for G1.
+    lab_run_id: Mapped[str] = mapped_column(_RUN_ID, nullable=False)
+    #: `A2` | `B2` | `C2` | `D2` | `E2` | `F2` | `G1`.
     code: Mapped[str] = mapped_column(String(4), nullable=False)
     #: Rafiq's own `StrategyProfile.lane`, copied verbatim.
     lane: Mapped[str] = mapped_column(String(48), nullable=False)
@@ -130,6 +140,8 @@ class RafiqLabPosition(Base):
         ForeignKey("rafiq_lab_strategies.id", ondelete="CASCADE"),
         nullable=False,
     )
+    #: Copied from the strategy row, so a trade names its run on its own.
+    lab_run_id: Mapped[str] = mapped_column(_RUN_ID, nullable=False)
     mint_address: Mapped[str] = mapped_column(String(44), nullable=False)
     symbol: Mapped[str | None] = mapped_column(String(32))
     #: 1-based slice of the position. 1 for every book but C2, which opens
@@ -196,6 +208,11 @@ class RafiqLabPosition(Base):
     last_evaluated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
+    #: The depth of the reading `last_mark_price` came from, and 0 once the
+    #: pool reads as gone. An open position is valued by selling into THIS —
+    #: the exit valuation, applied now — so a dead pool is worth nothing to
+    #: the breaker before the box closes it. Null on rows older than G1.
+    last_mark_liquidity_usd: Mapped[Decimal | None] = mapped_column(_MONEY)
     #: The last price actually observed while open. Mark-to-market equity is
     #: computed from THIS, never from `peak_price` and never from the cost
     #: basis: a book marked at its peak is the same lie as a book marked at
@@ -208,10 +225,40 @@ class RafiqLabPosition(Base):
     exit_observed_price: Mapped[Decimal | None] = mapped_column(_PRICE)
     exit_proceeds_usd: Mapped[Decimal | None] = mapped_column(_MONEY)
     exit_price_impact_pct: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))
-    #: `stop` | `take_profit` | `trailing` | `max_hold`. There are no others:
-    #: these are the four ways out Rafiq's `ExitRules` defines.
+    #: `stop` | `take_profit` | `trailing` | `max_hold` for A2-F2, and
+    #: `strategy_G1.Exit`'s strings verbatim for G1: `abandon_flat` |
+    #: `runner_trail` | `stop` | `max_hold`. G1's `scale_out` is a partial
+    #: sale, never a close — see `scaled_out` below.
     exit_reason: Mapped[str | None] = mapped_column(String(16))
     exit_evidence: Mapped[str | None] = mapped_column(Text)
+
+    # --- G1: a position that sells in two parts -------------------------
+    # At +30% G1 sells 75% and lets 25% run. The row stays open; the sale is
+    # booked here. On close, `exit_proceeds_usd` is the WHOLE position's
+    # proceeds (this sale included), so every "exit_proceeds - cost_basis"
+    # in the lab stays right, and `fraction_open` is left at the slice the
+    # final exit sold. Defaults describe every A2-F2 row exactly.
+    scaled_out: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
+    #: Share of `quantity` still held; on a closed row, the share the final
+    #: exit sold (1, or 0.25 after a scale-out).
+    fraction_open: Mapped[Decimal] = mapped_column(
+        Numeric(10, 4), nullable=False, default=Decimal(1), server_default=text("1")
+    )
+    #: USD already received from partial sales. Proceeds, not P&L.
+    realised_usd: Mapped[Decimal] = mapped_column(
+        _MONEY, nullable=False, default=Decimal(0), server_default=text("0")
+    )
+    scaled_out_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    #: The scale-out's fill, after the same drift cap every level exit gets.
+    scale_out_price: Mapped[Decimal | None] = mapped_column(_PRICE)
+    #: The flat-at-ten-minutes threshold this position was opened under,
+    #: frozen like the rest of the geometry. The learning layer may move the
+    #: threshold for later entries; it never re-opens this one.
+    abandon_gain: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))
+    #: The regime multiplier the position was sized with (1 = normal).
+    size_multiplier: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
@@ -242,6 +289,7 @@ class RafiqLabDailyState(Base):
         ForeignKey("rafiq_lab_strategies.id", ondelete="CASCADE"),
         nullable=False,
     )
+    lab_run_id: Mapped[str] = mapped_column(_RUN_ID, nullable=False)
     day: Mapped[date] = mapped_column(Date, nullable=False)
     #: Mark-to-market equity at the day's first tick. Never a cost basis.
     day_open_equity: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
@@ -435,4 +483,64 @@ class RafiqCandidate(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class RafiqLabRunState(Base):
+    """What a run has to remember between ticks. One row per run.
+
+    The ratchet's high-water mark and floor live here because the floor must
+    never fall — not across a restart either, and an in-memory ratchet would
+    come back at its initial $950.
+    """
+
+    __tablename__ = "rafiq_lab_run_state"
+    __table_args__ = (
+        UniqueConstraint("lab_run_id", name="uq_rafiq_lab_run_state_run"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    lab_run_id: Mapped[str] = mapped_column(_RUN_ID, nullable=False)
+    ratchet_high_water: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
+    ratchet_floor: Mapped[Decimal] = mapped_column(_MONEY, nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class RafiqLabAdjustment(Base):
+    """Every parameter a run moved on its own, and the evidence for it.
+
+    The ratchet's floor moves, and (from the learning layer) the abandon
+    threshold. Append-only: a row is what changed, from what, to what, when,
+    on how many observations and at what z. `sample_size` and `z_score` are
+    null for the floor, which moves on a new high-water mark, not a test.
+    """
+
+    __tablename__ = "rafiq_lab_adjustments"
+    __table_args__ = (
+        Index("ix_rafiq_lab_adjustments_run_at", "lab_run_id", "at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    lab_run_id: Mapped[str] = mapped_column(_RUN_ID, nullable=False)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    #: `equity_ratchet_floor` | `abandon_gain_threshold`.
+    parameter: Mapped[str] = mapped_column(String(48), nullable=False)
+    old_value: Mapped[Decimal] = mapped_column(Numeric(24, 6), nullable=False)
+    new_value: Mapped[Decimal] = mapped_column(Numeric(24, 6), nullable=False)
+    sample_size: Mapped[int | None] = mapped_column(Integer)
+    z_score: Mapped[Decimal | None] = mapped_column(Numeric(10, 3))
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )

@@ -174,15 +174,14 @@ class TestCalibrationAgainstProductionData:
 class TestF2IsWiredAsTheActiveBook:
     """The port is inert unless the runner actually uses it."""
 
-    def test_every_book_enters(self):
-        """All six trade. F2 ran alone from 2026-09-12 13:45Z until Karthik
-        re-armed A2-E2 the next day; the books do not compete for candidates
-        (each gets its own positions, cash and `held` set, and the candidate
-        list is read-only), so running them together costs F2's sample
-        nothing. Pinned so that turning one off is a deliberate edit."""
-        from app.labs.rafiq.registry import STRATEGIES
-        entering = {s.code for s in STRATEGIES if s.enters}
-        assert entering == {"A2", "B2", "C2", "D2", "E2", "F2"}, entering
+    def test_only_g1_enters(self):
+        """A2-F2 traded together from 2026-09-13 until G1 replaced F2 on
+        2026-09-17 and their run was archived. They still settle what they
+        hold; nothing but G1 opens a position. Pinned so that turning a book
+        on is a deliberate edit."""
+        from app.labs.rafiq.registry import BY_CODE
+        entering = {code for code, s in BY_CODE.items() if s.enters}
+        assert entering == {"G1"}, entering
 
     def test_enters_stays_out_of_the_digest_in_both_directions(self):
         """Retiring or re-arming a book must not move its hash. If it did,

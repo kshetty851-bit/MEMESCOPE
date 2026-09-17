@@ -63,3 +63,27 @@ async def lab_session(lab_engine) -> AsyncGenerator[AsyncSession]:
         await session.close()
         await transaction.rollback()
         await connection.close()
+
+
+@pytest.fixture
+def v2_run(monkeypatch):
+    """The archived A2-F2 run, as it traded until G1 replaced it: all six
+    books entering, and the default run pointed at it.
+
+    The tests that use this hold mechanisms the runner still carries — the
+    legs, the floor, the daily cap, the candidate ledger, the valuation — and
+    they were written against those books. Archiving the run changed which
+    books the beat trades, not what the mechanisms do.
+    """
+    import dataclasses
+
+    from app.labs.rafiq import registry
+
+    armed = tuple(dataclasses.replace(s, enters=True)
+                  for s in registry.RUNS[registry.ARCHIVED_RUN])
+    monkeypatch.setitem(registry.RUNS, registry.ARCHIVED_RUN, armed)
+    monkeypatch.setattr(registry, "STRATEGIES", armed)
+    for spec in armed:
+        monkeypatch.setitem(registry.BY_CODE, spec.code, spec)
+    monkeypatch.setattr(registry, "CURRENT_RUN", registry.ARCHIVED_RUN)
+    return registry.ARCHIVED_RUN
