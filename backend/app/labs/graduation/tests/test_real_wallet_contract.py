@@ -331,13 +331,46 @@ def test_the_board_stops_where_the_real_wallet_does():
     minutes = timedelta(minutes=1)
     trades = [(t0, t0 + 5 * minutes, -0.50),
               (t0 + 10 * minutes, t0 + 15 * minutes, 0.10)]
-    cash, funded, skipped, _ = _funded_walk(trades)
+    cash, funded, skipped, _, _ = _funded_walk(trades)
     assert (funded, skipped) == (1, 1)
     assert cash < float(config.WALLET_MIN_USD)
 
     # A drawdown that stays above the floor keeps trading, at a smaller size.
     trades = [(t0, t0 + 5 * minutes, -0.10),
               (t0 + 10 * minutes, t0 + 15 * minutes, 0.10)]
-    cash, funded, skipped, _ = _funded_walk(trades)
+    cash, funded, skipped, _, _ = _funded_walk(trades)
     assert (funded, skipped) == (2, 0)
     assert round(cash, 2) == 99.0
+
+
+def test_a_split_wallet_loses_one_ticket_to_a_rug_not_the_account():
+    """The same two trades at a $100 ticket and at $25. The rug ends the whole
+    wallet; the split one loses a quarter and keeps trading."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.labs.graduation.api import _funded_walk
+
+    t0 = datetime(2026, 9, 17, tzinfo=UTC)
+    minutes = timedelta(minutes=1)
+    trades = [(t0, t0 + 5 * minutes, -1.0),
+              (t0 + 10 * minutes, t0 + 15 * minutes, 0.10)]
+    whole = _funded_walk(trades)
+    assert (whole.funded, whole.skipped, whole.cash, whole.low) == (1, 1, 0.0, 0.0)
+
+    split = _funded_walk(trades, ticket=25.0)
+    assert (split.funded, split.skipped) == (2, 0)
+    assert round(split.cash, 2) == 77.5
+    assert round(split.low, 2) == 75.0
+
+
+def test_a_smaller_order_moves_the_pool_less():
+    """Impact is linear in order size, so a quarter-size order pays a quarter of
+    it on each leg; at full size the return is exactly what was measured."""
+    import pytest
+
+    from app.labs.graduation.api import _multiple
+
+    assert _multiple(0.05, (0.01, 0.01), 1.0) == 1.05
+    assert _multiple(0.05, (), 0.25) == 1.05
+    assert _multiple(0.05, (0.01, 0.01), 0.25) == pytest.approx(
+        1.05 * (1.01 / 1.0025) ** 2)

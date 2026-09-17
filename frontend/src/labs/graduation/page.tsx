@@ -685,10 +685,29 @@ function LeaderboardPanel() {
   // null = deliberately collapsed. Two states, because falling back to the
   // leader whenever the value is empty makes row one impossible to close.
   const [openArm, setOpenArm] = useState<string | null | undefined>(undefined);
+  // How many equal trades the $100 is split into. 1 is the board as judged.
+  const [split, setSplit] = useState(1);
   if (!data?.running) return null;
   const band = data.control_band === null ? null : Number(data.control_band);
-  const shown = showAll ? data.arms : data.arms.slice(0, 12);
-  const expanded = openArm === undefined ? (data.arms[0]?.name ?? null) : openArm;
+  const splits = data.arms.find((a) => a.splits?.length)?.splits ?? [];
+  // Each arm's wallet at the chosen split, falling back to the $100 column
+  // (the two are the same walk at split 1).
+  const at = (a: ArmRow) => a.splits?.find((x) => x.split === split);
+  const walletOf = (a: ArmRow) => at(a)?.wallet_usd ?? a.wallet_funded_usd;
+  const ranked =
+    split === 1
+      ? data.arms
+      : [...data.arms].sort(
+          (x, y) =>
+            Number(y.trades > 0) - Number(x.trades > 0) ||
+            Number(walletOf(y)) - Number(walletOf(x)),
+        );
+  const top = split === 1 ? data.leader : (ranked[0]?.name ?? "");
+  const ticket = Number(
+    splits.find((x) => x.split === split)?.ticket_usd ?? data.wallet_demo_usd,
+  );
+  const shown = showAll ? ranked : ranked.slice(0, 12);
+  const expanded = openArm === undefined ? (ranked[0]?.name ?? null) : openArm;
   const lead = data.arms.find((a) => a.name === data.leader);
   const margin =
     lead && band !== null ? Number(lead.wallet_funded_usd) - band : null;
@@ -914,6 +933,54 @@ function LeaderboardPanel() {
           20; at 250 it is about 2.3.
         </p>
 
+        {splits.length > 1 ? (
+          <div className="flex flex-col gap-2">
+            <div
+              className="flex flex-wrap items-center gap-1.5 text-xs"
+              role="group"
+              aria-label="Split your $100"
+            >
+              <span className="mr-1 text-ink-dim">Split your $100:</span>
+              {splits.map((s) => (
+                <button
+                  key={s.split}
+                  type="button"
+                  onClick={() => setSplit(s.split)}
+                  aria-pressed={split === s.split}
+                  className={`rounded border px-2 py-1 tabular-nums transition-colors ${
+                    split === s.split
+                      ? "border-accent bg-accent/[0.08] text-accent"
+                      : "border-line text-ink-dim hover:text-ink"
+                  }`}
+                >
+                  ${Number(s.ticket_usd)}×{s.split}
+                </button>
+              ))}
+            </div>
+            <p className="max-w-[78ch] text-xs leading-relaxed text-ink-dim">
+              {split === 1 ? (
+                <>
+                  Every trade uses the whole $100, so one drained pool can take
+                  the lot. Pick a split to see the same trades made with a
+                  smaller part of the wallet each time.
+                </>
+              ) : (
+                <>
+                  <b className="text-ink">
+                    Each trade uses ${ticket} of the $100.
+                  </b>{" "}
+                  A drained pool costs ${ticket} instead of $100, and every win is
+                  smaller too; the network fee takes a bigger share of a smaller
+                  trade, and the trade moves the pool less. Ranked by balance at
+                  this size. <b className="text-ink">Lowest</b> is the least the
+                  wallet held at any sell. The verdict above is judged on $100
+                  trades, and the projections apply only to them.
+                </>
+              )}
+            </p>
+          </div>
+        ) : null}
+
         <div className="overflow-x-auto">
           <table className="w-full min-w-[900px] table-fixed border-collapse text-sm">
             <colgroup>
@@ -959,10 +1026,12 @@ function LeaderboardPanel() {
             </thead>
             <tbody>
               {shown.map((a: ArmRow, i: number) => {
-                const isLeader = a.name === data.leader;
+                const isLeader = a.name === top;
+                const wallet = walletOf(a);
+                const here = at(a);
                 // Wiped, and kept on the board on purpose: these rows are the
                 // evidence that one slot means one token can end the wallet.
-                const dead = a.trades > 0 && Number(a.wallet_funded_usd) === 0;
+                const dead = a.trades > 0 && Number(wallet) === 0;
                 return (
                   <Fragment key={a.name}>
                   <tr
@@ -977,7 +1046,7 @@ function LeaderboardPanel() {
                       {/* The arm's TRUE rank, not its position in this list.
                           A pinned row appended after the top twelve would
                           otherwise read as 13th when it is fortieth. */}
-                      {data.arms.findIndex((x) => x.name === a.name) + 1}
+                      {ranked.findIndex((x) => x.name === a.name) + 1}
                     </td>
                     <td className="py-2.5 pr-3">
                       <span className="flex items-center gap-2">
@@ -1051,43 +1120,47 @@ function LeaderboardPanel() {
                     <td className="py-2.5 pr-3 text-right">
                       <span
                         className={`grad-figure font-semibold tabular-nums ${
-                          a.trades === 0 || Number(a.wallet_funded_usd) === 0
+                          a.trades === 0 || Number(wallet) === 0
                             ? "text-ink-dim"
                             : "text-ink"
                         }`}
                       >
                         {a.trades === 0
                           ? "—"
-                          : Number(a.wallet_funded_usd) === 0
+                          : Number(wallet) === 0
                             ? "WIPED"
-                            : usd(a.wallet_funded_usd)}
+                            : usd(wallet)}
                       </span>
-                      {a.trades === 0 || Number(a.wallet_funded_usd) === 0 ? null : (
+                      {a.trades === 0 || Number(wallet) === 0 ? null : (
                         <>
                           <span
                             className={`block text-micro tabular-nums ${
-                              Number(a.wallet_funded_usd) > Number(data.wallet_demo_usd)
+                              Number(wallet) > Number(data.wallet_demo_usd)
                                 ? "text-up"
-                                : Number(a.wallet_funded_usd) ===
-                                    Number(data.wallet_demo_usd)
+                                : Number(wallet) === Number(data.wallet_demo_usd)
                                   ? "text-ink-dim"
                                   : "text-down"
                             }`}
                           >
                             {signedUsd(
-                              String(
-                                Number(a.wallet_funded_usd) -
-                                  Number(data.wallet_demo_usd),
-                              ),
+                              String(Number(wallet) - Number(data.wallet_demo_usd)),
                             )}{" "}
-                            ({walletPct(a.wallet_funded_usd, data.wallet_demo_usd)})
+                            ({walletPct(wallet, data.wallet_demo_usd)})
                           </span>
                           <span className="block text-micro tabular-nums text-ink-dim">
-                            {a.trades_funded} funded
-                            {a.trades_skipped
-                              ? `, ${a.trades_skipped} unaffordable`
+                            {here?.trades_funded ?? a.trades_funded} funded
+                            {(here?.trades_skipped ?? a.trades_skipped)
+                              ? `, ${here?.trades_skipped ?? a.trades_skipped} unaffordable`
                               : ""}
                           </span>
+                          {here ? (
+                            <span
+                              className="block text-micro tabular-nums text-ink-dim"
+                              title="The least the wallet held at any sell, open trades at cost."
+                            >
+                              lowest {usd(here.low_usd)}
+                            </span>
+                          ) : null}
                         </>
                       )}
                     </td>
@@ -1113,10 +1186,14 @@ function LeaderboardPanel() {
                         key={i}
                         className="py-2.5 pr-1 text-right align-top"
                       >
-                        {v === null ? (
+                        {v === null || split !== 1 ? (
                           <span
                             className="text-micro text-ink-dim"
-                            title="Not enough history to reach a tenth of the way to this horizon."
+                            title={
+                              split !== 1
+                                ? "Projections are for $100 trades only."
+                                : "Not enough history to reach a tenth of the way to this horizon."
+                            }
                           >
                             &mdash;
                           </span>

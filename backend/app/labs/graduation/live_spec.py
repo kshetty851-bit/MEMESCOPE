@@ -1,4 +1,4 @@
-"""The graduation arm the real wallet is allowed to know about.
+"""The graduation arms the real wallet is allowed to know about.
 
 ## Why this is a registry of its own
 
@@ -20,10 +20,10 @@ rows and this cannot see V7's.
 ## Why the id is short and ugly
 
 `lab_decisions.strategy_id` is `String(8)`. `B3_198k_5m` is eleven characters
-and would be truncated or rejected, so the live arm carries a short name and
-`PAPER_BOOK` records which paper arm it mirrors.
+and would be truncated or rejected, so each live arm carries a short name and
+`PAPER_BOOKS` records which paper arm it mirrors.
 
-## The five-minute hold
+## The hold
 
 `Exits.time_exit_hours` is annotated `int`, but `evaluate_exit` compares it
 against `MarkState.held_hours`, which is a float — the comparison is ordinary
@@ -50,12 +50,20 @@ from app.lab.spec import Exits, Strategy
 D = Decimal
 _Money = TypeVar("_Money", float, Decimal)
 
-SPEC_VERSION = "gradlive-1.0.0"
+SPEC_VERSION = "gradlive-1.1.0"
 
-#: The paper arm this mirrors. Recorded so a reader can put the real book
-#: beside the arm it is supposed to be copying, and so nothing has to infer
-#: the mapping from a truncated id.
-PAPER_BOOK = "B3_198k_5m"
+#: Each live arm and the paper arm it mirrors. Recorded so a reader can put the
+#: real book beside the arm it is supposed to be copying, and so nothing has to
+#: infer the mapping from a truncated id.
+#:
+#: The four-minute twin was added 2026-09-17 (1.1.0). Counting every trade,
+#: including the pre-fix rugs the board leaves out, it was the only B3 hold
+#: still ahead: those pools drained between minute four and six, and the
+#: five-minute hold sat through four of them where the four-minute one sat
+#: through one. Three events decide that, so it is an option, not a finding.
+PAPER_BOOKS = {"G-B3-5M": "B3_198k_5m", "G-B3-4M": "B3_198k_4m"}
+#: The same mapping read the other way: the live arm a paper entry feeds.
+MIRRORS = {book: sid for sid, book in PAPER_BOOKS.items()}
 
 #: The pool floor the paper arm buys above. Not enforced here — the graduation
 #: recorder's own entry rule decides, and this registry only mirrors what it
@@ -64,17 +72,24 @@ PAPER_BOOK = "B3_198k_5m"
 #: within five minutes at 0.47% against 13.85% for the whole population.
 POOL_FLOOR_USD = 198_000
 
-#: Five minutes, as hours, because that is the unit the shared exit rule reads.
-#:
-#: A float, not a Decimal, and the difference is 6 seconds of a 28-second
-#: margin. `exit_driver` computes `held_hours` as `total_seconds() / 3600`, so
-#: at exactly five minutes it holds the float 300/3600. Decimal(5)/Decimal(60)
-#: carries more digits than that float and is fractionally LARGER, so
-#: `held >= exit` stayed false at 5m00s and the position left on the next pass
-#: instead. Computing the bound the same way the mark does makes the
-#: comparison exact at the boundary.
-HOLD_MINUTES = 5
-HOLD_HOURS = HOLD_MINUTES / 60
+def _hours(minutes: int) -> float:
+    """A hold in minutes, as the hours the shared exit rule reads.
+
+    A float, not a Decimal, and the difference is 6 seconds of a 28-second
+    margin. `exit_driver` computes `held_hours` as `total_seconds() / 3600`, so
+    at exactly five minutes it holds the float 300/3600. Decimal(5)/Decimal(60)
+    carries more digits than that float and is fractionally LARGER, so
+    `held >= exit` stayed false at 5m00s and the position left on the next pass
+    instead. `minutes / 60` is the same double as `minutes * 60 / 3600`, so the
+    comparison is exact at the boundary.
+    """
+    return minutes / 60
+
+
+def hold_minutes(strategy: Strategy) -> int:
+    """The strategy's hold, in the minutes a reader is told."""
+    return round((strategy.exits.time_exit_hours or 0) * 60)
+
 
 #: How stale a decision may be when the wallet acts on it.
 #:
@@ -84,6 +99,14 @@ HOLD_HOURS = HOLD_MINUTES / 60
 #: minutes late buys a token at the edge of the cliff the strategy exists to
 #: stay in front of. Sixty seconds is one driver tick.
 MAX_DECISION_AGE_SECONDS = 60
+
+#: The smallest trade size the operator may choose at Start.
+#:
+#: The network fee is flat in SOL, so it takes a bigger share of a smaller
+#: trade. On the 2026-09-17 split replay, $2 and $1 trades lost money on every
+#: arm and $4 left the best one about even; $5 is the smallest size at which
+#: that arm still came out ahead.
+MIN_TICKET_USD = D("5")
 
 STARTING_EQUITY = D("1000")
 FAILURE_EQUITY_FLOOR = D("500")
@@ -114,7 +137,7 @@ STRATEGIES: tuple[Strategy, ...] = (
         # over the arm's own trades, the best changed one trade of 136. No
         # stop: the feed refreshes every 43s, so a -10% stop touched two trades
         # and made both worse (-19.7% to -23.3%, -28.5% to -30.0%).
-        exits=Exits(take_profit=None, stop_loss=None, time_exit_hours=HOLD_HOURS),
+        exits=Exits(take_profit=None, stop_loss=None, time_exit_hours=_hours(5)),
         evidence="FORWARD_PAPER_145_TRADES_OVER_29_HOURS",
         overfit_risk="HIGH",
         note=(
@@ -123,6 +146,31 @@ STRATEGIES: tuple[Strategy, ...] = (
             "expectancy is NEGATIVE once the rug rate is priced in — 0.47% of "
             "qualifying tokens collapse inside five minutes against a "
             "break-even of 0.284%. Registered so it CAN be nominated; "
+            "nominating it is a separate decision and starting it is the "
+            "operator's alone."
+        ),
+    ),
+    Strategy(
+        id="G-B3-4M",
+        name="GRADUATION-B3-4MIN",
+        hypothesis=(
+            "The same deep-pool graduation, sold a minute sooner: the pools "
+            "that drained under the five-minute hold did it between minute "
+            "four and minute six."
+        ),
+        checkpoint_minutes=0,
+        entry=(),
+        size_usd=D("100"),
+        max_concurrent=10,
+        max_exposure_usd=D("1000"),
+        exits=Exits(take_profit=None, stop_loss=None, time_exit_hours=_hours(4)),
+        evidence="FORWARD_PAPER_255_TRADES_OVER_3_DAYS",
+        overfit_risk="HIGH",
+        note=(
+            "NOT CALLED by the graduation lab's own gate. With every trade "
+            "counted, the pre-fix rugs included, B3_198k_4m took a $100 wallet "
+            "to $196 where the five-minute hold ended at $53 (2026-09-17) — a "
+            "gap made by three rugs. Registered so it CAN be nominated; "
             "nominating it is a separate decision and starting it is the "
             "operator's alone."
         ),
@@ -170,7 +218,7 @@ def _canonical() -> str:
         {"version": SPEC_VERSION,
          "starting_equity": str(STARTING_EQUITY),
          "failure_floor": str(FAILURE_EQUITY_FLOOR),
-         "paper_book": PAPER_BOOK,
+         "paper_books": PAPER_BOOKS,
          "pool_floor_usd": POOL_FLOOR_USD,
          "max_decision_age_s": MAX_DECISION_AGE_SECONDS,
          "strategies": [clean(s) for s in STRATEGIES]},
@@ -184,25 +232,25 @@ SPEC_HASH = hashlib.sha256(_canonical().encode()).hexdigest()
 # Each of these is a property something downstream relies on, asserted here so a
 # later edit fails at import rather than in production.
 
-assert len(STRATEGIES) == 1, "one arm mirrors one paper book"
+assert set(PAPER_BOOKS) == set(BY_ID) and len(MIRRORS) == len(PAPER_BOOKS), (
+    "every live arm mirrors exactly one paper book, and no book feeds two arms"
+)
 assert all(len(s.id) <= 8 for s in STRATEGIES), (
     "lab_decisions.strategy_id is String(8); a longer id does not round-trip"
 )
-assert STRATEGIES[0].exits.time_exit_hours == HOLD_HOURS, (
-    "the clock is the strategy; without it there is no exit at all"
-)
-assert STRATEGIES[0].exits.take_profit is None, (
-    "58 exit rules were replayed and the best changed one trade of 136"
-)
-assert STRATEGIES[0].exits.stop_loss is None, (
-    "a stop on a 43-second feed fills below its own trigger; measured worse"
-)
-assert MAX_DECISION_AGE_SECONDS <= 300, (
-    "a decision older than the hold buys the token at the cliff, not before it"
-)
-assert (STRATEGIES[0].size_usd * STRATEGIES[0].max_concurrent
-        <= STARTING_EQUITY), "the book cannot fund its own concurrency"
+for _s in STRATEGIES:
+    assert _s.exits.time_exit_hours, (
+        "the clock is the strategy; without it there is no exit at all")
+    assert _s.exits.take_profit is None, (
+        "58 exit rules were replayed and the best changed one trade of 136")
+    assert _s.exits.stop_loss is None, (
+        "a stop on a 43-second feed fills below its own trigger; measured worse")
+    assert _s.size_usd * _s.max_concurrent <= STARTING_EQUITY, (
+        "the book cannot fund its own concurrency")
+    assert MAX_DECISION_AGE_SECONDS < hold_minutes(_s) * 60, (
+        "a decision older than the hold buys the token at the cliff, not before it")
+del _s
 
-__all__ = ["BY_ID", "FAILURE_EQUITY_FLOOR", "HOLD_HOURS", "HOLD_MINUTES",
-           "MAX_DECISION_AGE_SECONDS", "PAPER_BOOK", "POOL_FLOOR_USD",
-           "SPEC_HASH", "SPEC_VERSION", "STARTING_EQUITY", "STRATEGIES"]
+__all__ = ["BY_ID", "FAILURE_EQUITY_FLOOR", "MAX_DECISION_AGE_SECONDS",
+           "MIN_TICKET_USD", "MIRRORS", "PAPER_BOOKS", "POOL_FLOOR_USD", "SPEC_HASH",
+           "SPEC_VERSION", "STARTING_EQUITY", "STRATEGIES", "hold_minutes"]

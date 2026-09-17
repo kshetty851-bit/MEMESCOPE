@@ -52,6 +52,7 @@ def _funded(monkeypatch, sol: str) -> None:
 
 async def _signal(session, now: datetime) -> None:
     await live_decisions.record(session, [live_decisions.Mirrored(
+        strategy_id="G-B3-5M",
         mint=MINT, opened_at=now - timedelta(seconds=5),
         liquidity_usd=Decimal("250000"), impact=None,
         price_native=Decimal("0.000001"))])

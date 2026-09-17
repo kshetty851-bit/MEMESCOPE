@@ -1,4 +1,4 @@
-"""Mirror the graduation arm's entries into `lab_decisions`.
+"""Mirror the graduation arms' entries into `lab_decisions`.
 
 `RealWalletDriver` does not choose anything. It buys the most recent mint a Lab
 strategy already chose, read from `lab_decisions` and keyed by `strategy_id`.
@@ -8,7 +8,8 @@ wallet no matter what was nominated. This is the only thing that connects them.
 ## It mirrors, it does not decide
 
 A row is written here only because `tournament.py` already opened a paper
-position under `live_spec.PAPER_BOOK`. The band rule, the impact refusal and the
+position under one of `live_spec.PAPER_BOOKS`, and it is written under the live
+arm that book feeds. The band rule, the impact refusal and the
 slot cap were all evaluated there. Writing a second copy of the entry rule would
 be a second answer, and the first time the two disagreed the real book and the
 paper record would stop describing the same strategy.
@@ -47,6 +48,8 @@ SNAPSHOT_HOURS = 24
 class Mirrored:
     """One paper entry worth telling the real wallet about."""
 
+    #: The live arm this entry feeds (`live_spec.MIRRORS[book]`).
+    strategy_id: str
     mint: str
     opened_at: datetime
     liquidity_usd: Decimal | None
@@ -54,7 +57,8 @@ class Mirrored:
     price_native: Decimal | None
 
 
-async def strategy_row_id(session: AsyncSession) -> uuid.UUID:
+async def strategy_row_id(session: AsyncSession,
+                          s: spec.Strategy) -> uuid.UUID:
     """The `lab_strategies` row this registry writes under, created on first use.
 
     Its own tournament, with its own `spec_version` and `spec_hash`. Every
@@ -75,7 +79,8 @@ async def strategy_row_id(session: AsyncSession) -> uuid.UUID:
             snapshot_at=started + timedelta(hours=SNAPSHOT_HOURS),
             status="active",
             protocol_note=(
-                "Graduation lab B3_198k_5m, mirrored for the real wallet. "
+                "Graduation lab " + " and ".join(spec.PAPER_BOOKS.values())
+                + ", mirrored for the real wallet. "
                 "NOT CALLED by the lab's own gate; registration is not a "
                 "recommendation."),
         )
@@ -85,7 +90,6 @@ async def strategy_row_id(session: AsyncSession) -> uuid.UUID:
                        spec_version=spec.SPEC_VERSION,
                        spec_hash=spec.SPEC_HASH[:16])
 
-    s = spec.STRATEGIES[0]
     row = (await session.execute(
         select(LabStrategy).where(
             LabStrategy.tournament_id == tournament.id,
@@ -115,9 +119,23 @@ async def record(session: AsyncSession, entries: list[Mirrored]) -> int:
     `checkpoint_at` is the paper position's `opened_at`, so a replayed tick
     cannot double-write and a mint the arm re-enters later is a new row.
     """
+    written = 0
+    now = datetime.now(UTC)
+    for s in spec.STRATEGIES:
+        written += await _record(session, s, [e for e in entries
+                                              if e.strategy_id == s.id], now)
+    if written:
+        logger.warning("gradlive_decisions_written", count=written,
+                       mints=[e.mint for e in entries][:5])
+    return written
+
+
+async def _record(session: AsyncSession, s: spec.Strategy,
+                  entries: list[Mirrored], now: datetime) -> int:
+    """`record` for one live arm."""
     if not entries:
         return 0
-    row_id = await strategy_row_id(session)
+    row_id = await strategy_row_id(session, s)
     seen = set((await session.execute(
         select(LabDecision.mint_address, LabDecision.checkpoint_at)
         .where(LabDecision.strategy_row_id == row_id,
@@ -125,13 +143,12 @@ async def record(session: AsyncSession, entries: list[Mirrored]) -> int:
     )).all())
 
     written = 0
-    now = datetime.now(UTC)
     for e in entries:
         if (e.mint, e.opened_at) in seen:
             continue
         session.add(LabDecision(
             strategy_row_id=row_id,
-            strategy_id=spec.STRATEGIES[0].id,
+            strategy_id=s.id,
             mint_address=e.mint,
             # Graduation mints are not necessarily in `discovered_tokens`, and
             # the column is nullable precisely so a lab with its own universe
@@ -144,19 +161,16 @@ async def record(session: AsyncSession, entries: list[Mirrored]) -> int:
             # Exactly what the entry rule read, so the decision can be checked
             # against the paper position rather than taken on trust.
             features={
-                "paper_book": spec.PAPER_BOOK,
+                "paper_book": spec.PAPER_BOOKS[s.id],
                 "pool_floor_usd": spec.POOL_FLOOR_USD,
                 "liquidity_usd": (None if e.liquidity_usd is None
                                   else str(e.liquidity_usd)),
                 "impact_open": None if e.impact is None else str(e.impact),
                 "price_native": (None if e.price_native is None
                                  else str(e.price_native)),
-                "hold_minutes": spec.HOLD_MINUTES,
+                "hold_minutes": spec.hold_minutes(s),
             },
-            requested_size_usd=spec.STRATEGIES[0].size_usd,
+            requested_size_usd=s.size_usd,
         ))
         written += 1
-    if written:
-        logger.warning("gradlive_decisions_written", count=written,
-                       mints=[e.mint for e in entries][:5])
     return written

@@ -24,6 +24,9 @@ import os
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from itertools import pairwise
+from typing import TypeVar
+
+_Money = TypeVar("_Money", float, Decimal)
 
 
 def _flag(name: str) -> bool:
@@ -812,6 +815,23 @@ WALLET_DEMO_USD = _dec("LAB_GRADUATION_WALLET_DEMO_USD", "100")
 #: about $2.65, and compounding lets that $2.65 "recover" to nine figures on
 #: later winners it could never have placed.
 WALLET_MIN_USD = _dec("LAB_GRADUATION_WALLET_MIN_USD", "56")
+#: The ways the board splits that $100: `n` equal trades of `$100 / n`.
+#: 1 is the wallet above; the rest ask what a smaller bet per trade would do.
+WALLET_SPLITS = (1, 2, 4, 5, 10, 20, 25, 50, 100)
+
+
+def wallet_floor(ticket: _Money) -> _Money:
+    """The smallest entry worth placing on a `ticket`-sized trade.
+
+    `WALLET_MIN_USD` is the floor of a whole `PAPER_NOTIONAL_USD` ticket. A
+    smaller ticket stops at the same share of itself — a $25 ticket is not
+    refused for being under $56. Floats (the board) and Decimals (the wallet)
+    both work, and $100 gives exactly $56 in either.
+    """
+    kind = type(ticket)
+    return ticket * kind(WALLET_MIN_USD) / kind(PAPER_NOTIONAL_USD)
+
+
 #: How many positions that wallet spreads itself over. ONE.
 #:
 #: It was TEN, on a measurement that compared survival across sizes but did

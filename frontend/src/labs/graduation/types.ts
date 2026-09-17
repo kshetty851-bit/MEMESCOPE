@@ -167,6 +167,17 @@ export interface Returns {
 
 
 /** One arm's standing. Realised only — an open position is not a result. */
+/** The funded $100 wallet with the $100 split into `split` equal trades. */
+export interface SplitWallet {
+  split: number;
+  ticket_usd: string;
+  wallet_usd: string;
+  trades_funded: number;
+  trades_skipped: number;
+  /** The least the wallet held at any sell, open trades at cost. */
+  low_usd: string;
+}
+
 export interface ArmRow {
   name: string;
   note: string;
@@ -206,6 +217,9 @@ export interface ArmRow {
   wallet_funded_usd: string;
   trades_funded: number;
   trades_skipped: number;
+  /** The same wallet at every split the board offers; split 1 is the column
+   * above. Empty for an arm with no trades. */
+  splits: SplitWallet[];
   /** Hours since THIS arm's first trade, not the board clock. */
   arm_hours: string;
   /** ISO time of this arm's first position — the anchor a live clock ticks from. */

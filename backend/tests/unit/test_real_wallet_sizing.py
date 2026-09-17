@@ -149,6 +149,23 @@ class TestTheGraduationArmSizesLikeTheBoard:
         assert self.fund("1.5", holding=1) == Decimal("100")
         assert self.fund("0.9", holding=1) is None
 
+    def test_a_smaller_ticket_stops_at_the_same_share_of_itself(self) -> None:
+        """$25 chosen at Start: the floor is $14, not $56, or it never trades."""
+        from app.real_wallet.driver import RealWalletDriver
+
+        def fund(sol: str, holding: int = 0) -> Decimal | None:
+            return RealWalletDriver._fundable(
+                "G-B3-4M", Decimal("25"),
+                balance_lamports=int(Decimal(sol) * 1_000_000_000),
+                sol_price=self.PRICE, open_positions=holding)
+
+        assert fund("1") == Decimal("25")
+        assert fund("0.2") == Decimal("19.00")
+        assert fund("0.15") == Decimal("14.00")
+        assert fund("0.1499") is None
+        assert fund("0.3", holding=1) == Decimal("25")
+        assert fund("0.25", holding=1) is None
+
     def test_other_strategies_keep_their_fixed_ticket(self) -> None:
         assert self.fund("0.2", strategy="V6-06") == Decimal("100")
 
@@ -179,3 +196,28 @@ class TestTheGraduationArmSizesLikeTheBoard:
 
         assert PolicyReason.MIN_SOL_FEE_RESERVE in reasons(Decimal("100"))
         assert PolicyReason.MIN_SOL_FEE_RESERVE not in reasons(self.fund("1"))
+
+
+class TestTheTradeSizeChosenAtStart:
+    def test_the_choices_are_the_board_splits_from_the_configured_size_down_to_five(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from app.real_wallet.autotrade import ticket_choices
+
+        monkeypatch.setattr(settings, "REAL_WALLET_ENTRY_SIZE_USD", Decimal("100"))
+        assert ticket_choices() == [Decimal(x) for x in ("100", "50", "25", "20", "10", "5")]
+        monkeypatch.setattr(settings, "REAL_WALLET_ENTRY_SIZE_USD", Decimal("30"))
+        assert ticket_choices() == [Decimal(x) for x in ("25", "20", "10", "5")]
+
+    def test_a_chosen_size_never_exceeds_the_configured_one(self) -> None:
+        from dataclasses import replace
+
+        from app.real_wallet.autotrade import AutotradeState, ticket_for
+
+        state = AutotradeState(
+            enabled=True, nominated_strategy="G-B3-4M", started_at=None,
+            started_by=None, start_reason=None, stopped_at=None, stopped_by=None,
+            stop_reason=None, ticket_usd=Decimal("25"))
+        assert ticket_for(state, Decimal("100")) == Decimal("25")
+        assert ticket_for(state, Decimal("10")) == Decimal("10")
+        assert ticket_for(replace(state, ticket_usd=None), Decimal("100")) == Decimal("100")

@@ -173,6 +173,7 @@ async def test_a_graduation_sale_follows_the_paper_clock_not_the_fill(db_session
     filled = now - timedelta(seconds=200)
     decided = filled - timedelta(seconds=40)
     await live_decisions.record(db_session, [live_decisions.Mirrored(
+        strategy_id="G-B3-5M",
         mint=MINT, opened_at=decided, liquidity_usd=Decimal("250000"),
         impact=None, price_native=Decimal("0.000001"))])
     position = await _bought(db_session, at=filled, price=_usd(now))
@@ -188,6 +189,7 @@ async def test_only_the_graduation_arm_counts_from_the_decision(db_session):
     now = datetime.now(UTC)
     filled = now - timedelta(seconds=200)
     await live_decisions.record(db_session, [live_decisions.Mirrored(
+        strategy_id="G-B3-5M",
         mint=MINT, opened_at=filled - timedelta(seconds=40),
         liquidity_usd=Decimal("250000"), impact=None,
         price_native=Decimal("0.000001"))])
@@ -434,6 +436,7 @@ def grad_signal(monkeypatch, live):
 
     async def signal(session: Any, now: datetime) -> None:
         await live_decisions.record(session, [live_decisions.Mirrored(
+            strategy_id="G-B3-5M",
             mint="DriverLossTestMint111111111111111111111pump",
             opened_at=now - timedelta(seconds=5), liquidity_usd=Decimal("250000"),
             impact=None, price_native=Decimal("0.000001"))])

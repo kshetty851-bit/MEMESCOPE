@@ -33,7 +33,7 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.lab import LabDecision
 from app.models.real_wallet_execution import RealWalletLiveIntent
-from app.real_wallet.autotrade import AutotradeSwitchService
+from app.real_wallet.autotrade import AutotradeSwitchService, ticket_for
 from app.real_wallet.live_repository import LiveIntentRepository
 from app.real_wallet.policy import (
     AutonomousExecutionPolicy,
@@ -138,7 +138,7 @@ class RealWalletDriver:
         if entry_usd is None or entry_usd <= 0:
             return DriverOutcome(0, "entry_size_not_configured")
         entry_usd = self._fundable(
-            switch.nominated_strategy, entry_usd,
+            switch.nominated_strategy, ticket_for(switch, entry_usd),
             balance_lamports=balance_lamports, sol_price=sol_price,
             open_positions=open_positions)
         if entry_usd is None:
@@ -266,6 +266,10 @@ class RealWalletDriver:
 
         Other strategies keep their fixed ticket: how they size is the Paper
         position-size work's decision, not this one.
+
+        The floor scales with the ticket (`grad.wallet_floor`): $56 on the
+        board's $100, $14 on a $25 ticket chosen at Start. A fixed $56 refused
+        every trade smaller than itself.
         """
         from app.labs.graduation import config as grad
         from app.labs.graduation import live_spec
@@ -279,7 +283,8 @@ class RealWalletDriver:
         cash = (Decimal(max(balance_lamports - reserve, 0)) / _LAMPORTS_PER_SOL
                 * sol_price).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
         return live_spec.fundable(cash, holding=open_positions > 0,
-                                  ticket=configured, floor=grad.WALLET_MIN_USD)
+                                  ticket=configured,
+                                  floor=grad.wallet_floor(configured))
 
     async def _next_candidate(self, *, strategy_id: str, now: datetime) -> str | None:
         """The most recent mint this strategy chose and this wallet has not traded."""

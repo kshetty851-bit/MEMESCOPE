@@ -132,6 +132,49 @@ async def test_the_administrator_can_start_the_wallet_strategy(
     assert response.json()["nominated_strategy"] == "G-B3-5M"
 
 
+async def test_start_records_the_arm_and_the_trade_size(
+    client: AsyncClient, user: User, db_session, monkeypatch
+) -> None:
+    monkeypatch.setattr(settings, "REAL_WALLET_ENTRY_SIZE_USD", Decimal("100"))
+    headers = await _admin_headers(client, user, db_session)
+    response = await client.post(
+        f"{API}/real-wallet/autotrade/start", headers=headers,
+        json={"strategy_id": "G-B3-4M", "reason": "test start", "ticket_usd": "25"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["nominated_strategy"] == "G-B3-4M"
+    assert response.json()["ticket_usd"] == "25"
+
+    body = (await client.get(f"{API}/real-wallet/autotrade")).json()
+    assert [s["id"] for s in body["strategies"]] == ["G-B3-5M", "G-B3-4M"]
+    running = body["strategy"]
+    assert (running["id"], running["paper_book"], running["hold_minutes"]) == (
+        "G-B3-4M", "B3_198k_4m", 4)
+    assert (running["ticket_usd"], running["min_ticket_usd"]) == ("25", "14")
+    assert body["ticket_choices"][0] == {"ticket_usd": "100", "min_usd": "56"}
+    assert [c["ticket_usd"] for c in body["ticket_choices"]] == [
+        "100", "50", "25", "20", "10", "5"]
+    assert body["history"][0]["ticket_usd"] == "25"
+
+
+@pytest.mark.parametrize("payload", [
+    {"strategy_id": "G-B3-5M", "ticket_usd": "30"},
+    {"strategy_id": "G-B3-5M", "ticket_usd": "1"},
+    {"strategy_id": "V7-01", "ticket_usd": "25"},
+])
+async def test_start_refuses_a_size_it_does_not_offer(
+    client: AsyncClient, user: User, db_session, monkeypatch, payload
+) -> None:
+    monkeypatch.setattr(settings, "REAL_WALLET_ENTRY_SIZE_USD", Decimal("100"))
+    headers = await _admin_headers(client, user, db_session)
+    response = await client.post(
+        f"{API}/real-wallet/autotrade/start", headers=headers,
+        json={**payload, "reason": "test start"},
+    )
+    assert response.status_code == 422, response.text
+    assert (await client.get(f"{API}/real-wallet/autotrade")).json()["enabled"] is False
+
+
 async def test_phase_two_manual_devnet_endpoints_require_admin(client: AsyncClient) -> None:
     response = await client.get(f"{API}/real-wallet/devnet/intents")
     assert response.status_code == 401
@@ -179,3 +222,22 @@ async def test_readiness_says_what_a_trade_needs(client: AsyncClient, monkeypatc
     assert checks["strategy_signals"]["detail"] == "no buy signal recorded yet"
     assert checks["real_round_trip"]["status"] == "BLOCKED"
     assert body["proven"] is False
+
+
+async def test_readiness_prices_the_size_chosen_at_start(
+    client: AsyncClient, db_session, monkeypatch
+) -> None:
+    async def usd(now):
+        return Decimal("100")
+
+    monkeypatch.setattr(wallet_api, "sol_usd_now", usd)
+    monkeypatch.setattr(settings, "REAL_WALLET_ENTRY_SIZE_USD", Decimal("100"))
+    await AutotradeSwitchService(db_session).start(
+        actor="op@x.com", reason="size test", strategy_id="G-B3-4M",
+        at=datetime.now(UTC), ticket_usd=Decimal("25"))
+    await db_session.flush()
+    body = (await client.get(f"{API}/real-wallet/funding-readiness")).json()
+    # 0.01 SOL reserve plus $14 or $25 at $100 a SOL.
+    assert body["min_trade_sol"] == "0.150"
+    assert body["full_trade_sol"] == "0.260"
+    assert body["strategy_id"] == "G-B3-4M"
