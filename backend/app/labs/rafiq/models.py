@@ -187,6 +187,10 @@ class RafiqLabPosition(Base):
     entry_lp_reason_codes: Mapped[list | None] = mapped_column(JSONB)
     entry_lp_checked_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True))
+    #: The same reading, answered: True when the LP claim on the reserves is
+    #: burned, False when a redeemable one exists, null when the evaluator
+    #: did not or could not say. `feed.lp_locked` holds the mapping.
+    entry_lp_locked: Mapped[bool | None] = mapped_column(Boolean)
     entry_features_error: Mapped[str | None] = mapped_column(String(64))
 
     #: The geometry, frozen. `stop_price` is C's liquidity-derived level for
@@ -471,6 +475,8 @@ class RafiqCandidate(Base):
     lp_status: Mapped[str | None] = mapped_column(String(16))
     lp_reason_codes: Mapped[list | None] = mapped_column(JSONB)
     lp_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    #: `feed.lp_locked` over the two columns above.
+    lp_locked: Mapped[bool | None] = mapped_column(Boolean)
     features_error: Mapped[str | None] = mapped_column(String(64))
 
     # --- forward outcomes, written by the beat once each horizon closes ---

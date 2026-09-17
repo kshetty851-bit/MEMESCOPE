@@ -558,3 +558,386 @@ Nullable columns only. It is verified four ways:
 - upgrade over the archive;
 - downgrade to `0092_rafiq_g1_run` and back;
 - zero `rafiq_*` autogenerate drift.
+
+## Phase 3 — top-10 concentration and LP lock at every decision
+
+### What already existed, and was reused rather than duplicated
+
+F2's build (migrations 0080/0081) already reads both features point-in-time
+at every decision. It never blocks an entry, and it records every candidate,
+entered **and** rejected, in `rafiq_lab_candidates`, together with forward
+returns.
+
+**Decision:** G1 inherits all of that unchanged. Adding a second
+`top10_holder_pct` column next to `entry_top10_holder_pct`, or a second
+rejection table next to `rafiq_lab_candidates`, would store every value
+twice, and the copies could disagree. What was genuinely missing is the LP
+answer as a boolean, plus a relation named for the rejected set.
+
+### New columns (0094) and the relation the brief names
+
+- **`rafiq_lab_positions.entry_lp_locked`** and
+  **`rafiq_lab_candidates.lp_locked`**: `true` / `false` / `null`.
+  - The name is `entry_`-prefixed on the trade row, like its neighbours
+    `entry_top10_holder_pct` and `entry_lp_status`.
+  - Both are derived by `feed.EntryFeatures.lp_locked` from the same reading
+    that fills `lp_status` and `lp_reason_codes`, so they cannot disagree.
+- **Top-10 holder concentration:** `rafiq_lab_positions.entry_top10_holder_pct`
+  and `rafiq_lab_candidates.top10_holder_pct`, both existing since 0080/0081.
+  They are a percent from 0 to 100, and each has a `*_captured_at` beside it.
+- **`rafiq_lab_rejected_candidates`**, a **view** over `rafiq_lab_candidates`
+  (`outcome = 'rejected'`). Each row carries:
+  - `lab_run_id` and `strategy_code`;
+  - `reject_reason`;
+  - the market the decision saw;
+  - `top10_holder_pct`, `lp_locked` and `lp_status`;
+  - `forward_max_return_1h` (= `max_return_1h`), `forward_final_return_1h`
+    and `forward_dead_1h`.
+
+  **Decision:** it is a view, not a table, so a rejection is written once. It
+  includes every refusal reason, not only the liquidity/cap/impact gate,
+  because "never looked at it" and "looked and the pool was thin" are both
+  decisions. Filter on `reject_reason` for the gate alone.
+- **Forward 1h return.** It is filled by `outcomes.record`, which runs inside
+  the Celery `rafiq_lab_tick` every tenth minute and can also be forced with
+  `rafiq_outcomes_tick`. It reads snapshots in `(decided_at, decided_at + 1h]`.
+  - **Changed here:** the maximum now counts only tradeable prints. A drained
+    pool keeps printing its last price, and that print was being reported as
+    a run: the same fiction Phase 0 removed from exits. This applies to rows
+    filled after deploy. `final_return_*` and `dead_*` are unchanged.
+
+### Sources and reliability
+
+**`top10_holder_pct`**
+
+- **Where it comes from.** `holder_snapshots.top10_pct`, the newest snapshot
+  at or before the decision. The platform's research collector writes it
+  (`app/workers/research_tasks.py`, beat `holder-snapshots-collect`):
+  - using `getTokenLargestAccounts` plus `getTokenSupply`;
+  - on the keyed research RPC: Chainstack, then Helius, never the public
+    node, which refuses this method;
+  - every 10 minutes, 10 tokens a pass, nursery tokens first and then Radar
+    admissions from the last 24h;
+  - once per token, never refreshed.
+
+  It is gated by `FEATURE_RESEARCH_COLLECTORS_ENABLED` (code default off;
+  prod env turns it on).
+- **Why not a live RPC call at entry.** It is free but not live: calling
+  `getTokenLargestAccounts` inside the tick would put a rate-limited call
+  (429s measured even on Helius) in front of every decision. The brief
+  allows "whatever free source the repo already uses", and this is it.
+- **Reliability.**
+  - On prod, 99.2% of 489 F2 decisions had it (24h to 2026-09-12 13:17Z;
+    session memory, not re-measured here).
+  - In the restored archive, 16 of 16 F2 decisions had it, read 35–46
+    minutes before the decision (at admission or nursery entry).
+- **Caveat: it probably includes the pool's own vault.** The collector's
+  pool exclusion compares token-account addresses with DexScreener's pair
+  address, which are different accounts, so the pool vault is almost never
+  excluded. Read it as raw concentration including AMM vaults.
+  - The snapshot keeps the raw top 20 in `accounts`, so this can be
+    re-audited later by resolving each account's owner.
+  - The fix belongs in the collector, outside this lab.
+- **When it is null:** `entry_features_error` contains `no_holder_snapshot`.
+  The collector had not reached the token by the decision, or it is off.
+
+**`lp_locked`**
+
+- **Where it comes from.** The platform's `LIQUIDITY_SECURITY` check
+  (`app/security/liquidity_verifier.py`) in `token_security_evaluations`, the
+  newest evaluation at or before the decision.
+  - The beat `security-lab-coverage` evaluates Radar admissions within 20
+    minutes of detection that have at least $100k liquidity, every minute.
+    G1's $200k floor sits inside that coverage.
+  - The check reads the chain: the pump.fun curve, and the derived PumpSwap
+    migration pool's LP mint.
+- **Mapping** (`EntryFeatures.lp_locked`):
+
+  | check result | `lp_locked` | meaning |
+  |---|---|---|
+  | PASS, LP burned | `true` | the pump.fun migration pool's LP supply is zero |
+  | PASS, on the bonding curve | `true` | no LP exists and the curve holds the reserves |
+  | UNKNOWN + `LP_OUTSTANDING` | `false` | a redeemable claim exists; its holder is not checked |
+  | FAIL | `false` | defensive only; this evaluator never emits it |
+  | UNKNOWN (any other code) | `null` | including `TRADED_POOL_UNVERIFIED`, `POOL_NOT_PROTOCOL_MIGRATED`, `LIQUIDITY_SECURITY_UNVERIFIED` |
+  | NOT_APPLICABLE `POOL_CUSTODY_OUT_OF_SCOPE` | `null` | Raydium, Meteora or Orca, which the evaluator cannot read |
+  | no evaluation | `null` | nothing on file |
+
+  **Decision:** both PASS mechanisms map to `true`, because in both cases
+  nobody can withdraw the reserves. They differ only in whether an LP token
+  ever existed. The PASS mechanism is not stored on the row, but it is
+  recoverable by joining `token_security_evaluations` on mint and
+  `lp_checked_at`.
+- **Reliability.**
+  - On prod, 73.4% of those 489 F2 decisions had an LP reading. The gap is
+    coverage, not freshness: 129 of 130 misses were never evaluated.
+  - In the archive, 10 of 16.
+  - The check only understands pump.fun custody, so **most non-pump.fun
+    pools will always be `null`**.
+  - An earlier finding in this project (**memory, not re-run**) is that on
+    traded mints the verdict did not separate total losses (p = 0.75).
+    Treat `lp_locked` as a feature to test, not a known predictor.
+- **When it is null:** `entry_features_error` contains
+  `no_security_evaluation` (no row) or `no_lp_check` (a row without this
+  check). Otherwise `lp_status` / `lp_reason_codes` show which undetermined
+  result it was.
+
+### Gate
+
+**Test: `tests/test_g1_features.py`.** One G1 tick with two admissions:
+
+- One enters. Its trade row and candidate row carry `top10 = 34.5` and
+  `lp_status = PASS`, so `lp_locked = true`.
+- One is refused for `liquidity_too_low`. It carries `top10 = 61.2` and
+  UNKNOWN / `POOL_NOT_PROTOCOL_MIGRATED`, so `lp_locked = null`.
+- A later reading (99% top-10, and a FAIL) is **not** read into either.
+- After the outcomes pass, the refused candidate has
+  `max_return_1h = 0.60`.
+
+It also covers a silent store (the entry still happens, the columns are
+null, and the error names both stores) and a seven-case table for the
+mapping.
+
+**In a database migrated by alembic to 0094**, with the real tick committed
+(a scratch Postgres, not dev or prod):
+
+```
+== the live entry (trade row) ==
+ symbol   | lab_run_id    | status | exit_reason  | cost_basis | entry_top10_holder_pct | entry_lp_status | entry_lp_locked
+ DEMOGOOD | G1-2026-09-17 | closed | abandon_flat |    10.0000 |                34.5000 | PASS            | t
+
+== the rejected candidate (rafiq_lab_rejected_candidates) ==
+ strategy_code | lab_run_id    | symbol   | reject_reason     | liquidity_usd | top10_holder_pct | lp_status | lp_locked | forward_max_return_1h | forward_dead_1h
+ G1            | G1-2026-09-17 | DEMOTHIN | liquidity_too_low |   150000.0000 |          61.2000 | UNKNOWN   | f         |              0.600000 | f
+```
+
+(DEMOTHIN's verdict in that run was UNKNOWN + `LP_OUTSTANDING`, hence
+`false`.)
+
+**On prod, and why not measured here.** Neither a live G1 entry nor a live
+rejection exists yet, because G1 is not deployed. Once deployed, the same
+two queries show them. Expected null rates are the reliability figures
+above.
+
+The view was also checked against the restored archive: F2's 13 real
+rejections all carry `top10_holder_pct`.
+
+**Suite:** lab suite 203 passed, G1 package 37 passed.
+
+## Reference: every column and table this work added
+
+| table | column | phase | meaning |
+|---|---|---|---|
+| `rafiq_lab_strategies` | `lab_run_id` | 1 | run this config row belongs to; unique with `code` |
+| `rafiq_lab_positions` | `lab_run_id` | 1 | run of the trade |
+| | `last_mark_liquidity_usd` | 1 | depth of the last tradeable reading, 0 once the pool reads gone |
+| | `scaled_out`, `scaled_out_at`, `scale_out_price` | 1 | G1's 75% sale at +30% |
+| | `fraction_open` | 1 | share still held; on a closed row, the share its final exit sold |
+| | `realised_usd` | 1 | proceeds of partial sales (included in `exit_proceeds_usd` once closed) |
+| | `abandon_gain`, `size_multiplier` | 1 | learning parameters frozen at entry |
+| | `forward_peak_multiple`, `forward_went_to_zero` | 2 | the hour after exit |
+| | `learning_recorded_at` | 2 | fed to `Learning.on_trade_closed` (once) |
+| | `entry_lp_locked` | 3 | LP lock at entry |
+| `rafiq_lab_daily_state` | `lab_run_id` | 1 | run of the day row |
+| `rafiq_lab_candidates` | `lp_locked` | 3 | LP lock at the decision |
+| `rafiq_lab_run_state` (new) | `ratchet_high_water`, `ratchet_floor`, `learning` | 1, 2 | a run's memory |
+| `rafiq_lab_adjustments` (new) | `parameter`, `old_value`, `new_value`, `sample_size`, `z_score`, `reason`, `at` | 1 | every floor move, abandon-threshold change and size-multiplier change |
+| `rafiq_lab_rejected_candidates` (view) | | 3 | refused candidates with both features and forward returns |
+
+Migrations: `0092_rafiq_g1_run`, `0093_rafiq_g1_learning` and
+`0094_rafiq_g1_features`, chained after `main`'s `0091_real_wallet_ticket`.
+All are additive except one unique key, which moves from `code` to
+`(lab_run_id, code)`.
+
+## Every decision made without asking
+
+1. **Built on `rafiq-g1` off `origin/main`, not on `karthik-hq`.**
+   `karthik-hq` has no A2–F2. Migrations are numbered after `main`'s head.
+   Nothing was pushed.
+2. **Exits.**
+   - An exit is valued only against a tradeable reading.
+   - A pool is dead on an `inactive` reading or a delisting stamp after its
+     last tradeable print, with the platform Lab's 120-second confirmation.
+     Staleness alone is not death, because of the 30-minute re-price
+     cadence.
+3. **Friction** (`execution_cost_usd`) is measured from the fill, so it is
+   fee plus impact only.
+4. **Open positions are valued at what their pool would pay** (mark-to-pool)
+   for equity, the breaker, the ratchet and the API. The last price times
+   quantity is no longer used.
+5. **An off-band (glitch) print updates nothing**, not even a trail's peak.
+6. **Three stale inventory tests** that `main` left red on purpose were
+   updated to the real inventory, because this brief asks for a green suite.
+7. **Run ids.**
+   - `F2-and-earlier` for everything before, `G1-2026-09-17` for G1. The
+     date is the config's `generated` date.
+   - Config rows are unique per `(run, code)`.
+   - A2–F2 stay in the registry with `enters=False`, for display and digest
+     checks.
+8. **A2–F2's open positions are drained** on their own rules, never
+   reopened and never force-closed.
+9. **`scale_out` is a partial sale, not an `exit_reason`.** A closed row's
+   `exit_proceeds_usd` is the whole position's proceeds, and `fraction_open`
+   keeps the slice the final exit sold.
+10. **The scale-out fill carries the lab's 1.15× drift cap**, like every
+    level exit.
+11. **G1's gate** is `strategy_G1.admits` (a missing market cap does not
+    refuse), plus F2's 1.5% impact ceiling, a score of at least 70, and the
+    lab's freshness guards.
+12. **The daily breaker is the lab's existing one** (5% mark-to-market
+    including open positions, plus an 8% realised line), re-evaluated every
+    tick and not latched, as it always ran for E2 and F2.
+13. **The ratchet's state is persisted per run.** Every floor move is an
+    adjustments row.
+14. **G1's digest hashes the canonical JSON's rules, not its prose.**
+15. **The learning `at` is the tick time.** `later_peak_multiple` is the
+    best tradeable print in the hour after exit over the entry price, and
+    1.0 when nothing tradeable printed. `went_to_zero` uses the exit's
+    dead-pool rule or a price at or below 10% of entry.
+    `reached_take_profit` is `scaled_out`.
+16. **The post-exit hour is read from the platform's snapshots**, not polled
+    from DexScreener.
+17. **The learning pass rides the minute tick, before entries.** A manual
+    Celery task exists; no beat entry was added, because that lives outside
+    the lab.
+18. **The abandon threshold and size multiplier are frozen per position** at
+    entry.
+19. **Size-multiplier changes are audited** alongside calibrator
+    adjustments.
+20. **Top-10 concentration reuses the existing entry columns and
+    `holder_snapshots`.** LP lock is a derived boolean, with both PASS
+    mechanisms counted as locked. The rejected set is a view; it covers
+    every refusal reason. The forward maximum counts tradeable prints only.
+21. **The G1 test count is 37, not 55**: the delivered `test_learning.py`
+    has 15 tests. A lab-local `g1/ruff.toml` accepts the delivered files'
+    lint rather than editing them.
+22. **New files follow the lab's hand formatting.** The lab and the
+    migrations folder are not `ruff format`-clean on `main` (43 of 58 and
+    46 of 95 files), so I did not reformat.
+
+## Querying the G1 run and the archived runs
+
+```sql
+-- Every book, per run.
+SELECT lab_run_id, code, lane, starting_equity, activated_at
+FROM rafiq_lab_strategies ORDER BY lab_run_id, code;
+
+-- One run's closed-trade summary per book. Swap the id for
+-- 'F2-and-earlier' to read A2-F2.
+SELECT s.code,
+       count(*) FILTER (WHERE p.status = 'closed')                          AS closed,
+       count(*) FILTER (WHERE p.status = 'open')                            AS open,
+       round(sum(p.exit_proceeds_usd - p.cost_basis)
+             FILTER (WHERE p.status = 'closed'), 2)                         AS realised_pnl,
+       round(avg(p.exit_proceeds_usd - p.cost_basis)
+             FILTER (WHERE p.status = 'closed'), 4)                         AS mean_net_per_trade
+FROM rafiq_lab_positions p
+JOIN rafiq_lab_strategies s ON s.id = p.strategy_id
+WHERE p.lab_run_id = 'G1-2026-09-17'
+GROUP BY s.code;
+
+-- G1's exits by reason.
+SELECT exit_reason, scaled_out, count(*),
+       round(avg(exit_proceeds_usd - cost_basis), 4) AS mean_net
+FROM rafiq_lab_positions
+WHERE lab_run_id = 'G1-2026-09-17' AND status = 'closed'
+GROUP BY 1, 2 ORDER BY 3 DESC;
+
+-- What G1 learned and every floor move.
+SELECT at, parameter, old_value, new_value, sample_size, z_score, reason
+FROM rafiq_lab_adjustments WHERE lab_run_id = 'G1-2026-09-17' ORDER BY at;
+
+-- Refusals, with both features and what the token did next.
+SELECT reject_reason, count(*), avg(top10_holder_pct) AS top10,
+       count(*) FILTER (WHERE lp_locked) AS locked,
+       avg(forward_max_return_1h) AS mean_max_1h
+FROM rafiq_lab_rejected_candidates
+WHERE lab_run_id = 'G1-2026-09-17'
+GROUP BY 1 ORDER BY 2 DESC;
+```
+
+The API reads the same split: `GET /api/v1/labs/rafiq/status` (the current
+run) and `GET /api/v1/labs/rafiq/status?run=F2-and-earlier`, and likewise
+for `/positions`, `/trades`, `/breaker` and `/analysis`.
+
+## Mean net per trade, runner leg excluded
+
+The runner leg is the 25% a scaled-out position kept after its +30% sale.
+
+- For a position that scaled out, the non-runner part is the scale-out:
+  `realised_usd` against the three quarters of cost it sold.
+- A position that never scaled out has no runner leg, so it counts whole.
+
+```sql
+SELECT count(*)                                   AS trades,
+       count(*) FILTER (WHERE scaled_out)         AS scaled_out,
+       round(avg(CASE WHEN scaled_out
+                      THEN realised_usd - cost_basis * (1 - fraction_open)
+                      ELSE exit_proceeds_usd - cost_basis END), 4) AS mean_net_ex_runner,
+       round(avg(exit_proceeds_usd - cost_basis), 4)               AS mean_net_all,
+       round(sum((exit_proceeds_usd - realised_usd) - cost_basis * fraction_open)
+             FILTER (WHERE scaled_out), 4)                          AS runner_leg_net_total
+FROM rafiq_lab_positions
+WHERE lab_run_id = 'G1-2026-09-17' AND status = 'closed';
+```
+
+Run against the demo database above, it returned 23 trades, 8 of them
+scaled out, `mean_net_ex_runner = −0.9613`, `mean_net_all = −0.9670` and
+`runner_leg_net_total = −0.1308`.
+
+This works because a closed G1 row keeps `fraction_open` at the slice its
+final exit sold (0.25 after a scale-out). With the Phase 0 fix in, the full
+mean is also trustworthy; the ex-runner figure is the one G1's own config
+asked for while the valuation was in doubt.
+
+## Deploying this: not done, and not mine to do
+
+Nothing was pushed or deployed. To ship it:
+
+1. **Merge.** Open a PR from `rafiq-g1` to `main`. Renumber `0092`–`0094` if
+   `main` has moved past `0091` by then, and check `alembic heads` shows one
+   head.
+2. **Migrate.** `deploy.sh` runs `alembic upgrade head`. That backfills
+   A2–F2 to `F2-and-earlier`; no data changes.
+3. **Flag.** `RAFIQ_LAB_ENABLED` is unchanged and already wired. On the first
+   tick after deploy:
+   - the runner creates G1's $1,000 row and starts trading;
+   - it drains whatever A2–F2 hold;
+   - A2–F2 stop opening positions.
+4. **Collectors G1's features depend on** (both are platform settings, not
+   this lab's):
+   - `FEATURE_RESEARCH_COLLECTORS_ENABLED` for top-10;
+   - `TOKEN_SECURITY_EVALUATION_ENABLED` plus the `security-lab-coverage`
+     beat for LP.
+5. **Check after deploy:**
+   - `SELECT lab_run_id, code FROM rafiq_lab_strategies` shows a G1 row;
+   - `GET /labs/rafiq/status` shows G1 alone, with `learning` and
+     `ratchet_floor`.
+
+## Known gaps and suggested follow-ups (outside this brief's scope)
+
+- **Re-pricing lane.** Rafiq positions are not in the platform's priority
+  re-pricing lane (`app/services/market/priority.py` → `resolve_membership`).
+  G1's marks and its post-exit hour are sampled every 30s only while a token
+  is under 30 minutes old, then every 5 minutes. Adding open and recently
+  closed `rafiq_lab_positions` there is the single biggest data-quality
+  improvement available to G1.
+- **Top-10 pool exclusion.** The holder collector compares token-account
+  addresses with a pair address, so its pool exclusion almost never fires.
+- **Frontend.** `frontend/src/labs/rafiq` renders G1 without changes, but
+  shows none of the new fields (`learning`, `ratchet_floor`, `scaled_out`,
+  `fraction_open`, `?run=`).
+- **F2's 9.3% friction** was not re-measured on prod: the read-only query was
+  refused by this session's permission policy. This query splits exit drag
+  by cause:
+
+  ```sql
+  SELECT round(100*sum(quantity*(exit_observed_price-exit_price))/sum(cost_basis),2) AS cap_or_leftover_pct,
+         round(100*sum(quantity*exit_price-exit_proceeds_usd)/sum(cost_basis),2)     AS fee_and_impact_pct
+  FROM rafiq_lab_positions p JOIN rafiq_lab_strategies s ON s.id=p.strategy_id
+  WHERE s.code='F2' AND p.status='closed';
+  ```
+- **Platform test suites.** Both were run before and after on the same
+  database (unit 4,108 passed / 8 failed; integration 888 passed / 32
+  failed), with **identical failure sets on `main` at 7045b2f**. None comes
+  from this work.
