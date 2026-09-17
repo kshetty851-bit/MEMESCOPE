@@ -818,6 +818,10 @@ WALLET_MIN_USD = _dec("LAB_GRADUATION_WALLET_MIN_USD", "56")
 #: The ways the board splits that $100: `n` equal trades of `$100 / n`.
 #: 1 is the wallet above; the rest ask what a smaller bet per trade would do.
 WALLET_SPLITS = (1, 2, 4, 5, 10, 20, 25, 50, 100)
+#: Wallets bigger than $100 the board also shows, each trading its whole
+#: balance as one ticket ($200 x 1 ...). A bigger order moves the pool further;
+#: the walk charges that from each trade's recorded impact.
+WALLET_LARGER = (200, 300, 500, 1000)
 
 
 def wallet_floor(ticket: _Money) -> _Money:

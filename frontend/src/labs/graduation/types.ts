@@ -167,10 +167,11 @@ export interface Returns {
 
 
 /** One arm's standing. Realised only — an open position is not a result. */
-/** The funded $100 wallet with the $100 split into `split` equal trades. */
+/** The funded wallet at another size: `start_usd` in `split` tickets of `ticket_usd`. */
 export interface SplitWallet {
   split: number;
   ticket_usd: string;
+  start_usd: string;
   wallet_usd: string;
   trades_funded: number;
   trades_skipped: number;
