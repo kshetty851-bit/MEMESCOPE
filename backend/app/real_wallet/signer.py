@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Protocol
 
 from solders.keypair import Keypair
+from solders.message import to_bytes_versioned
 from solders.transaction import Transaction, VersionedTransaction
 
 from app.real_wallet import tx_inspect
@@ -151,14 +152,24 @@ class FileExecutionSigner:
         try:
             transaction = VersionedTransaction.from_bytes(b64decode(encoded_transaction))
             message = transaction.message
-            signature = self._keypair.sign_message(bytes(message))
+            # A v0 message is signed WITH its version prefix. `bytes(message)`
+            # leaves it off, and a signature over those bytes does not verify:
+            # Jupiter refused the wallet's first two live buys (2026-09-17)
+            # with a 422 before anything reached the chain.
+            signature = self._keypair.sign_message(to_bytes_versioned(message))
             signed = VersionedTransaction.populate(message, [signature])
+            # Checked here, where it is cheap, rather than learned from a
+            # refusal after the order has been spent.
+            if not all(signed.verify_with_results()):
+                raise ExecutionTransactionValidationError("signature_does_not_verify")
             return SignedTransaction(
                 signed_transaction=b64encode(bytes(signed)).decode("ascii"),
                 signature=str(signature),
                 message_fingerprint=facts.message_fingerprint,
                 program_ids=facts.program_ids,
             )
+        except ExecutionTransactionValidationError:
+            raise
         except Exception as exc:
             raise ExecutionTransactionValidationError("malformed_jupiter_transaction") from exc
 
