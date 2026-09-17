@@ -90,6 +90,20 @@ const FOUR = {
   idea: "sell a minute sooner",
   hold_minutes: 4,
 };
+/** The baseline: a shallower pool floor and, because of it, a $10 ceiling. */
+const BASE = {
+  ...FIVE,
+  id: "G-BAS-5M",
+  name: "GRADUATION-BASELINE-5MIN",
+  paper_book: "BASE_75k_5m",
+  idea: "every graduation over $75k",
+  pool_floor_usd: 75000,
+  max_ticket_usd: "10",
+  ticket_choices: [
+    { ticket_usd: "10", min_usd: "5.6" },
+    { ticket_usd: "5", min_usd: "2.8" },
+  ],
+};
 
 function autotrade(overrides: Record<string, unknown> = {}) {
   return {
@@ -310,6 +324,55 @@ describe("RealWalletPage signed in as the administrator", () => {
         ticket_usd: "25",
       }),
     );
+  });
+
+  it("offers a capped arm only the sizes it allows, and says why", async () => {
+    signInAsAdmin();
+    serve({ autotrade: autotrade({ strategies: [FIVE, FOUR, BASE] }) });
+    vi.mocked(api.post).mockResolvedValue(autotrade({ enabled: true }));
+    await renderLoaded();
+    const panel = screen.getByText("Trading").closest("section")!;
+    fireEvent.click(within(panel).getByRole("button", { name: /B3_198k_4m/ }));
+    fireEvent.click(within(panel).getByRole("button", { name: "$25" }));
+    fireEvent.click(within(panel).getByRole("button", { name: /BASE_75k_5m/ }));
+
+    // $25 is gone with the arm that allowed it, and the pick fell to $10.
+    expect(within(panel).queryByRole("button", { name: "$25" })).not.toBeInTheDocument();
+    expect(within(panel).queryByRole("button", { name: "$100" })).not.toBeInTheDocument();
+    expect(within(panel).getByRole("button", { name: "$10" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(within(panel).getByRole("button", { name: "$5" })).toBeInTheDocument();
+    expect(panel.textContent).toContain("G-BAS-5M is capped at $10 a trade");
+
+    fireEvent.change(within(panel).getByPlaceholderText(/reason/i), {
+      target: { value: "baseline, small" },
+    });
+    fireEvent.click(within(panel).getByRole("button", { name: "Start G-BAS-5M" }));
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith("/real-wallet/autotrade/start", {
+        strategy_id: "G-BAS-5M",
+        reason: "baseline, small",
+        ticket_usd: "10",
+      }),
+    );
+  });
+
+  it("gives the bigger sizes back when the arm that allows them is picked again", async () => {
+    signInAsAdmin();
+    serve({ autotrade: autotrade({ strategies: [FIVE, FOUR, BASE] }) });
+    await renderLoaded();
+    const panel = screen.getByText("Trading").closest("section")!;
+    fireEvent.click(within(panel).getByRole("button", { name: "$25" }));
+    fireEvent.click(within(panel).getByRole("button", { name: /BASE_75k_5m/ }));
+    fireEvent.click(within(panel).getByRole("button", { name: /B3_198k_4m/ }));
+
+    expect(within(panel).getByRole("button", { name: "$25" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(panel.textContent).not.toContain("capped at");
   });
 
   it("shows what is running and will not change it until stopped", async () => {

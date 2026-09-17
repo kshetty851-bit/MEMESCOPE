@@ -146,7 +146,16 @@ async def test_start_records_the_arm_and_the_trade_size(
     assert response.json()["ticket_usd"] == "25"
 
     body = (await client.get(f"{API}/real-wallet/autotrade")).json()
-    assert [s["id"] for s in body["strategies"]] == ["G-B3-5M", "G-B3-4M"]
+    assert [s["id"] for s in body["strategies"]] == ["G-B3-5M", "G-B3-4M", "G-BAS-5M"]
+    # The baseline states its own floor and its own sizes: $10 and $5 only.
+    baseline = next(s for s in body["strategies"] if s["id"] == "G-BAS-5M")
+    assert baseline["pool_floor_usd"] == 75_000
+    assert baseline["max_ticket_usd"] == "10"
+    assert [c["ticket_usd"] for c in baseline["ticket_choices"]] == ["10", "5"]
+    b3 = next(s for s in body["strategies"] if s["id"] == "G-B3-4M")
+    assert b3["max_ticket_usd"] is None
+    assert [c["ticket_usd"] for c in b3["ticket_choices"]] == [
+        "100", "50", "25", "20", "10", "5"]
     running = body["strategy"]
     assert (running["id"], running["paper_book"], running["hold_minutes"]) == (
         "G-B3-4M", "B3_198k_4m", 4)
@@ -157,10 +166,29 @@ async def test_start_records_the_arm_and_the_trade_size(
     assert body["history"][0]["ticket_usd"] == "25"
 
 
+async def test_the_baseline_starts_at_the_size_it_allows(
+    client: AsyncClient, user: User, db_session, monkeypatch
+) -> None:
+    """$10 is the largest Start offers for G-BAS-5M, and it takes it."""
+    monkeypatch.setattr(settings, "REAL_WALLET_ENTRY_SIZE_USD", Decimal("100"))
+    headers = await _admin_headers(client, user, db_session)
+    response = await client.post(
+        f"{API}/real-wallet/autotrade/start", headers=headers,
+        json={"strategy_id": "G-BAS-5M", "ticket_usd": "10",
+              "reason": "baseline at the capped size"},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert (body["nominated_strategy"], body["ticket_usd"]) == ("G-BAS-5M", "10")
+
+
 @pytest.mark.parametrize("payload", [
     {"strategy_id": "G-B3-5M", "ticket_usd": "30"},
     {"strategy_id": "G-B3-5M", "ticket_usd": "1"},
     {"strategy_id": "V7-01", "ticket_usd": "25"},
+    # The baseline is capped at $10: a size B3 accepts, this arm does not.
+    {"strategy_id": "G-BAS-5M", "ticket_usd": "25"},
+    {"strategy_id": "G-BAS-5M", "ticket_usd": "100"},
 ])
 async def test_start_refuses_a_size_it_does_not_offer(
     client: AsyncClient, user: User, db_session, monkeypatch, payload

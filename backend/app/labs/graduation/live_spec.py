@@ -50,7 +50,7 @@ from app.lab.spec import Exits, Strategy
 D = Decimal
 _Money = TypeVar("_Money", float, Decimal)
 
-SPEC_VERSION = "gradlive-1.1.0"
+SPEC_VERSION = "gradlive-1.2.0"
 
 #: Each live arm and the paper arm it mirrors. Recorded so a reader can put the
 #: real book beside the arm it is supposed to be copying, and so nothing has to
@@ -61,7 +61,8 @@ SPEC_VERSION = "gradlive-1.1.0"
 #: still ahead: those pools drained between minute four and six, and the
 #: five-minute hold sat through four of them where the four-minute one sat
 #: through one. Three events decide that, so it is an option, not a finding.
-PAPER_BOOKS = {"G-B3-5M": "B3_198k_5m", "G-B3-4M": "B3_198k_4m"}
+PAPER_BOOKS = {"G-B3-5M": "B3_198k_5m", "G-B3-4M": "B3_198k_4m",
+               "G-BAS-5M": "BASE_75k_5m"}
 #: The same mapping read the other way: the live arm a paper entry feeds.
 MIRRORS = {book: sid for sid, book in PAPER_BOOKS.items()}
 
@@ -71,6 +72,31 @@ MIRRORS = {book: sid for sid, book in PAPER_BOOKS.items()}
 #: strategy: measured over 2,087 graduations, tokens above it collapse >80%
 #: within five minutes at 0.47% against 13.85% for the whole population.
 POOL_FLOOR_USD = 198_000
+#: Per arm, because the baseline buys a different population: every graduation
+#: over $75k, which is where its 4.8% rug rate comes from against B3's 0.3%.
+POOL_FLOORS = {"G-B3-5M": POOL_FLOOR_USD, "G-B3-4M": POOL_FLOOR_USD,
+               "G-BAS-5M": 75_000}
+
+#: The largest trade size Start offers for an arm, where that is smaller than
+#: `REAL_WALLET_ENTRY_SIZE_USD`.
+#:
+#: G-BAS-5M only. Walked over its own week with every rug counted, a $100
+#: wallet trading $25 at a time was WIPED OUT by it; $20 survived at a low of
+#: $14, $10 at $48, $5 at $72. Karthik chose to run it at $10 or less
+#: (2026-09-17), and the picker enforces that rather than trusting the choice
+#: to be remembered.
+MAX_TICKET_USD = {"G-BAS-5M": D("10")}
+
+
+def pool_floor(strategy_id: str) -> int:
+    """The pool depth this arm's paper book buys above."""
+    return POOL_FLOORS.get(strategy_id.upper(), POOL_FLOOR_USD)
+
+
+def max_ticket(strategy_id: str) -> Decimal | None:
+    """The largest ticket this arm may be started at, or None for no cap."""
+    return MAX_TICKET_USD.get(strategy_id.upper())
+
 
 def _hours(minutes: int) -> float:
     """A hold in minutes, as the hours the shared exit rule reads.
@@ -175,6 +201,35 @@ STRATEGIES: tuple[Strategy, ...] = (
             "operator's alone."
         ),
     ),
+    Strategy(
+        id="G-BAS-5M",
+        name="GRADUATION-BASELINE-5MIN",
+        hypothesis=(
+            "Every pump.fun graduation whose pool clears $75k, held five "
+            "minutes. The board's BASELINE: it selects nothing, so it is the "
+            "population each selection rule claims to beat."
+        ),
+        checkpoint_minutes=0,
+        entry=(),
+        size_usd=D("100"),
+        max_concurrent=10,
+        max_exposure_usd=D("1000"),
+        exits=Exits(take_profit=None, stop_loss=None, time_exit_hours=_hours(5)),
+        evidence="FORWARD_PAPER_356_TRADES_OVER_5_DAYS",
+        overfit_risk="HIGH",
+        note=(
+            "REGISTERED AT KARTHIK'S REQUEST, 2026-09-17, against its own "
+            "numbers. Its board return is one trade: +1,044% of a +1,195-point "
+            "total, and without its best three trades 356 of them come to +84 "
+            "points, about a quarter of a percent each. It rugs at 4.8% "
+            "against B3's 0.3%, because a $75k floor admits the population B3 "
+            "excludes. Walked with every rug counted it WIPED OUT a $100 "
+            "wallet trading $25, which is why `MAX_TICKET_USD` caps it at $10. "
+            "It is also the board's control: an arm that exists to be the "
+            "comparison is not evidence of an edge. Nominating it is a "
+            "separate decision and starting it is the operator's alone."
+        ),
+    ),
 )
 
 BY_ID = {s.id: s for s in STRATEGIES}
@@ -232,6 +287,11 @@ SPEC_HASH = hashlib.sha256(_canonical().encode()).hexdigest()
 # Each of these is a property something downstream relies on, asserted here so a
 # later edit fails at import rather than in production.
 
+assert set(POOL_FLOORS) == set(BY_ID), "every arm states the floor it buys above"
+assert set(MAX_TICKET_USD) <= set(BY_ID), "a ticket cap names an arm that exists"
+assert all(cap >= MIN_TICKET_USD for cap in MAX_TICKET_USD.values()), (
+    "a cap below the smallest ticket Start offers would leave an arm that "
+    "cannot be started at all")
 assert set(PAPER_BOOKS) == set(BY_ID) and len(MIRRORS) == len(PAPER_BOOKS), (
     "every live arm mirrors exactly one paper book, and no book feeds two arms"
 )

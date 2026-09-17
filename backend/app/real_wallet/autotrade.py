@@ -77,21 +77,39 @@ class AutotradeState:
         }
 
 
-def ticket_choices() -> list[Decimal]:
+def ticket_choices(strategy_id: str | None = None) -> list[Decimal]:
     """The trade sizes Start offers: the board's own splits of a $100 ticket,
-    from the configured size down to `live_spec.MIN_TICKET_USD`."""
-    from app.labs.graduation import config as grad
-    from app.labs.graduation.live_spec import MIN_TICKET_USD
+    from the configured size down to `live_spec.MIN_TICKET_USD`.
 
+    An arm may cap it lower. G-BAS-5M is capped at $10 because a $100 wallet
+    trading $25 of it was wiped out over its own week with the rugs counted,
+    and a picker that offers a size the evidence rules out is an invitation."""
+    from app.labs.graduation import config as grad
+    from app.labs.graduation import live_spec
+
+    ceiling = settings.REAL_WALLET_ENTRY_SIZE_USD
+    if strategy_id:
+        cap = live_spec.max_ticket(strategy_id)
+        if cap is not None:
+            ceiling = min(ceiling, cap)
     return [t for t in (grad.PAPER_NOTIONAL_USD / n for n in grad.WALLET_SPLITS)
-            if MIN_TICKET_USD <= t <= settings.REAL_WALLET_ENTRY_SIZE_USD]
+            if live_spec.MIN_TICKET_USD <= t <= ceiling]
 
 
 def ticket_for(state: AutotradeState, configured: Decimal) -> Decimal:
-    """What a trade spends: the size chosen at Start, never above `configured`."""
-    if state.ticket_usd is None:
-        return configured
-    return min(configured, state.ticket_usd)
+    """What a trade spends: the size chosen at Start, never above `configured`,
+    and never above the nominated arm's own cap.
+
+    The cap belongs here rather than at Start alone: `ticket_usd` may be None,
+    which means "trade the configured size", and for a capped arm that would be
+    $100 — the very size its evidence rules out. Every caller that spends money
+    reads this function, so one guard covers them all.
+    """
+    from app.labs.graduation import live_spec
+
+    size = configured if state.ticket_usd is None else min(configured, state.ticket_usd)
+    cap = live_spec.max_ticket(state.nominated_strategy or "")
+    return size if cap is None else min(size, cap)
 
 
 def _known_strategy(strategy_id: str) -> bool:
@@ -140,8 +158,10 @@ class AutotradeSwitchService:
     ) -> AutotradeState:
         """Record the intent to trade. This grants no permission whatsoever.
 
-        `ticket_usd` is the graduation trade size, one of `ticket_choices()`.
-        None trades the configured `REAL_WALLET_ENTRY_SIZE_USD`, as before.
+        `ticket_usd` is the graduation trade size, one of the choices for THAT
+        arm: the baseline is capped at $10 and offering it $25 here would let
+        a request set a size the page will not show. None trades the
+        configured `REAL_WALLET_ENTRY_SIZE_USD`, as before.
         """
         from app.labs.graduation.live_spec import BY_ID as GRAD_BY_ID
 
@@ -150,10 +170,11 @@ class AutotradeSwitchService:
         if ticket_usd is not None:
             if strategy_id.upper() not in GRAD_BY_ID:
                 raise InvalidTicketError("a trade size is chosen for graduation arms only")
-            if ticket_usd not in ticket_choices():
+            allowed = ticket_choices(strategy_id)
+            if ticket_usd not in allowed:
                 raise InvalidTicketError(
-                    f"trade size must be one of "
-                    f"{', '.join(format(t, 'f') for t in ticket_choices())}")
+                    f"trade size for {strategy_id.upper()} must be one of "
+                    f"{', '.join(format(t, 'f') for t in allowed)}")
         row = await self._row()
         row.enabled = True
         row.nominated_strategy = strategy_id.upper()
