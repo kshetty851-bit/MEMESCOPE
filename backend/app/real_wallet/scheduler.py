@@ -23,7 +23,7 @@ from app.real_wallet.driver import RealWalletDriver
 from app.real_wallet.dry_run import RealWalletDryRunService
 from app.real_wallet.executor import RealWalletExecutor
 from app.real_wallet.exit_driver import RealWalletExitDriver
-from app.real_wallet_safety import holders
+from app.real_wallet_safety import holders, sources
 from app.services.rpc.registry import get_rpc
 from app.workers.celery_app import celery_app
 from app.workers.runtime import run_async
@@ -534,6 +534,11 @@ def real_wallet_record_entry_holders() -> dict[str, Any]:
     wallet copies, joined later to how the paper trade ended, says how many
     winners the line would also have refused. Read within ~10s of the entry,
     where the wallet's own read would land.
+
+    It also traces who funded the two biggest wallets (`sources`). That is what
+    the money-source block matches on: when this coin later rugs, its wallets
+    and funders are blocked, so every entry must be traced, not only the ones
+    the wallet buys.
     """
     return run_async(_record_entry_holders())
 
@@ -560,13 +565,21 @@ async def _record_entry_holders() -> dict[str, Any]:
             try:
                 for mint in mints:
                     view: holders.Holders | None = None
+                    traced: sources.Sources | None = None
                     failure: str | None = None
                     try:
                         view = await holders.read(rpc, mint)
                     except Exception as exc:  # a failed read is a row too
                         failure = type(exc).__name__
-                    session.add(holders.to_row(view, mint, "paper_entry",
-                                               at=utcnow(), failure=failure))
+                    if view is not None:
+                        try:
+                            traced = await sources.trace(rpc, [w for w, _ in view.wallets[:2]])
+                        except Exception as exc:  # holders still kept; this rug teaches nothing
+                            logger.warning("real_wallet_entry_sources_failed",
+                                           mint=mint, error=type(exc).__name__)
+                    session.add(holders.to_row(
+                        view, mint, "paper_entry", at=utcnow(), failure=failure,
+                        sources=traced.as_json() if traced is not None else None))
             finally:
                 await rpc.close()
             await session.commit()

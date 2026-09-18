@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 
 from sqlalchemy import func, select
@@ -21,7 +21,7 @@ from app.models.market import TokenMarketSnapshot, TradingStatus
 from app.models.real_wallet_execution import RealWalletPosition
 from app.models.real_wallet_safety import RealWalletSafetyEvaluation
 from app.models.token import DiscoveredToken
-from app.real_wallet_safety import holders
+from app.real_wallet_safety import holders, sources
 from app.repositories.market import MarketSnapshotRepository
 from app.repositories.token import TokenRepository
 from app.security.liquidity import PUMPSWAP_PROGRAM
@@ -94,6 +94,8 @@ class Reason:
     SYMBOL_RUGGED_BEFORE = "SYMBOL_RUGGED_BEFORE"
     HOLDER_TOO_LARGE = "HOLDER_TOO_LARGE"
     HOLDERS_UNREADABLE = "HOLDERS_UNREADABLE"
+    LINKED_TO_RECENT_RUG = "LINKED_TO_RECENT_RUG"
+    SOURCES_UNREADABLE = "SOURCES_UNREADABLE"
     SAFETY_CALCULATION_FAILED = "SAFETY_CALCULATION_FAILED"
 
 
@@ -211,6 +213,10 @@ class RealWalletSafetyGate:
             view = await self._holder_reasons(mint_address, evaluated_at, reasons)
             if view is not None:
                 provenance = {**provenance, "holders": view.summary()}
+
+        if settings.REAL_WALLET_SOURCE_BLOCK_ENABLED:
+            provenance = {**provenance, "sources": await self._source_reasons(
+                mint_address, evaluated_at, reasons)}
 
         inspection: TokenInspection | None = None
         if token is not None:
@@ -377,6 +383,35 @@ class RealWalletSafetyGate:
             reasons.extend(holders.reasons(view, max_pct=settings.REAL_WALLET_MAX_HOLDER_PCT))
         self._session.add(holders.to_row(view, mint, "wallet_gate", at=at, failure=failure))
         return view
+
+    async def _source_reasons(
+        self, mint: str, at: datetime, reasons: list[str]
+    ) -> dict[str, object]:
+        """Is this coin's money the money behind a rug that just closed? See
+        `sources`. With no rug in the window there is nothing to match, so
+        nothing is read and nothing can refuse; inside one, a coin whose
+        wallets cannot be traced refuses, as every unreadable fact here does."""
+        blocked = await sources.recent_rug_ids(
+            self._session,
+            since=at - timedelta(hours=settings.REAL_WALLET_SOURCE_BLOCK_HOURS),
+            rug_return=settings.REAL_WALLET_RUG_RETURN)
+        if not blocked:
+            return {"recent_rug_ids": 0}
+        rpc = self._holders_rpc or get_rpc("helius")
+        try:
+            await rpc.start()
+            try:
+                view = await holders.read(rpc, mint)
+                mine = await sources.trace(rpc, [w for w, _ in view.wallets[:2]])
+            finally:
+                await rpc.close()
+        except Exception as exc:  # an untraceable coin refuses inside a rug window
+            reasons.append(Reason.SOURCES_UNREADABLE)
+            return {"recent_rug_ids": len(blocked), "failure": type(exc).__name__}
+        matched = sorted(mine.ids() & blocked)
+        if matched:
+            reasons.append(Reason.LINKED_TO_RECENT_RUG)
+        return {"recent_rug_ids": len(blocked), **mine.as_json(), "matched": matched}
 
     async def _symbol_has_rugged(
         self, mint_address: str, token: DiscoveredToken | None

@@ -152,11 +152,14 @@ async def read(rpc: SolanaRPC, mint: str) -> Holders:
 
 
 def to_row(h: Holders | None, mint: str, context: str, *, at: datetime,
-           failure: str | None = None) -> HolderSnapshot:
+           failure: str | None = None, sources: dict[str, list[str]] | None = None,
+           ) -> HolderSnapshot:
     """One `holder_snapshots` row: `largest_nonpool_pct` is the figure the gate
     judges; `top1_pct` includes the pool, as the older collector's rows do. The
     ten largest wallets, the pool's tokens and the bundle go in `accounts`, so a
-    pool or bundle rule can be tried against them later without a re-read."""
+    pool or bundle rule can be tried against them later without a re-read.
+    `sources` (the big wallets and their funders, see `sources`) goes there too:
+    it is what a later rug of this coin blocks."""
     if h is None:
         return HolderSnapshot(mint_address=mint, captured_at=at, provider="helius",
                               context=context, failure_reason=(failure or "unreadable")[:64])
@@ -166,6 +169,7 @@ def to_row(h: Holders | None, mint: str, context: str, *, at: datetime,
         top1_pct=round(h.pct(max(h.top, h.pool or 0)), 4),
         largest_nonpool_pct=round(h.pct(h.top), 4),
         accounts={"wallets": [[o, a] for o, a in h.wallets[:10]],
-                  "pool_raw": h.pool, "bundle_raw": h.bundle},
+                  "pool_raw": h.pool, "bundle_raw": h.bundle,
+                  **({"sources": sources} if sources is not None else {})},
         rpc_latency_ms=h.latency_ms, rpc_fallback_used=False,
     )
