@@ -32,7 +32,7 @@ fifty of them affordable at a fifteen-second tick.
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Iterable, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -58,6 +58,7 @@ from app.labs.graduation.backtest import (
     amm_impact,
     amm_sell,
 )
+from app.labs.graduation.held_watch import Held
 from app.labs.graduation.models import (
     SOURCE_HELD_WS,
     GradCurveSample,
@@ -742,12 +743,41 @@ def _drained(mark: Mark | None, position: GradPaperPosition,
             and mark.depth < position.liq_open_usd * (1 - share))
 
 
+#: Reads a pool's own vaults: (mint, pool) -> the pool now, or None.
+PoolReader = Callable[[str, str], Awaitable[Held | None]]
+
+
+def chain_entry(pool: Held | None, sol_usd: Decimal,
+                feed_price: Decimal) -> tuple[Decimal, Decimal] | None:
+    """The price and depth a pool-open buy fills at: the pool's own, now.
+
+    None when that cannot be trusted - the pool unread, not quoted in SOL (the
+    SOL rate cannot state its depth), or so far from the feed's price that a
+    scale error is likelier than the market (`PAPER_ENTRY_CHAIN_BAND`).
+    """
+    if pool is None or pool.quote_mint != config.WSOL_MINT:
+        return None
+    price, depth = pool.price(), pool.depth_usd(sol_usd)
+    if not price or not depth:
+        return None
+    band = config.PAPER_ENTRY_CHAIN_BAND
+    if not feed_price / band <= price <= feed_price * band:
+        return None
+    return price, depth
+
+
 class Tournament:
     """Every arm, one tick, six queries."""
 
-    def __init__(self, session: AsyncSession, *, now: datetime | None = None) -> None:
+    def __init__(self, session: AsyncSession, *, now: datetime | None = None,
+                 pool_reader: PoolReader | None = None) -> None:
         self._session = session
         self._now = now or datetime.now(UTC)
+        # With a reader, a pool-open buy fills at the pool's own price the
+        # moment it is taken, not at DexScreener's first report (which can
+        # predate the pool's first big buy - see `chain_entry`). Without one,
+        # as before: the scheduler passes it; replays and old tests do not.
+        self._pool_reader = pool_reader
 
     async def tick(self) -> dict[str, Any]:
         if not config.paper_enabled():
@@ -1216,6 +1246,7 @@ class Tournament:
         opened = 0
         refused = 0
         foreign = 0
+        unpriced = 0
         mirror: list[live_decisions.Mirrored] = []
         for row in rows:
             if row.price_native is None or row.price_native <= 0:
@@ -1228,49 +1259,63 @@ class Tournament:
             rate = _rate(row.price_usd, row.price_native)
             if rate is None:
                 continue
+            # WHO takes it is decided on the feed's numbers, as every arm was
+            # defined; WHAT it costs is the pool's own price at the moment it is
+            # taken. The feed's first report can predate the pool's first big
+            # buy: Bluey (2026-09-17) was booked at +1,044% on a price 11x under
+            # where the pool already traded, and made +4% on-chain.
+            entry_at = self._now if self._pool_reader is not None else row.open_at
+            wanted = [arm for arm in ARMS
+                      if (arm.name, row.mint) not in taken
+                      and counts.get(arm.name, 0) < config.PAPER_MAX_SLOTS
+                      and accepts(arm, mint=row.mint, open_at=row.open_at,
+                                  liquidity=row.liquidity_usd, fdv=row.fdv,
+                                  sells=row.txns_m5_sells, buys=row.txns_m5_buys,
+                                  reuse=reuse.get(row.mint))
+                      and _time_left(arm, entry_at, row.graduated_at)]
+            if not wanted:
+                continue
+            price, depth = row.price_native, row.liquidity_usd
+            if self._pool_reader is not None:
+                priced = chain_entry(await self._pool_reader(row.mint, row.pair_address),
+                                     rate, row.price_native)
+                if priced is None:
+                    # Not bought on a guess. Still inside the grace window, so
+                    # the next tick asks the pool again.
+                    unpriced += 1
+                    continue
+                price, depth = priced
             # Could a real wallet have filled this at all? A transaction whose
             # price move exceeds the slippage tolerance REVERTS — it does not
             # fill badly, it does not fill. Refusing here is the difference
             # between a book that informs a real wallet and one that cannot.
-            impact = amm_impact(config.PAPER_NOTIONAL_USD, row.liquidity_usd)
+            impact = amm_impact(config.PAPER_NOTIONAL_USD, depth)
             if impact is None or impact > config.PAPER_MAX_IMPACT:
                 refused += 1
                 logger.info("graduation_tournament_unfillable", mint=row.mint,
-                            liquidity=float(row.liquidity_usd or 0),
+                            liquidity=float(depth or 0),
                             impact=float(impact) if impact is not None else None)
                 continue
             notional_quote = (config.PAPER_NOTIONAL_USD / rate).quantize(_Q)
-            fee_bps = config.pool_fee_bps(row.price_native)
+            fee_bps = config.pool_fee_bps(price)
             leg = costs(notional_quote, pool_fee_bps=fee_bps)
-            fill = amm_buy(row.price_native, order_usd=config.PAPER_NOTIONAL_USD,
-                           liquidity_usd=row.liquidity_usd,
-                           fee_fraction=leg.fee_fraction)
+            fill = amm_buy(price, order_usd=config.PAPER_NOTIONAL_USD,
+                           liquidity_usd=depth, fee_fraction=leg.fee_fraction)
             if fill is None or fill <= 0:
                 continue
-            for arm in ARMS:
-                if (arm.name, row.mint) in taken:
-                    continue
-                if counts.get(arm.name, 0) >= config.PAPER_MAX_SLOTS:
-                    continue
-                if not accepts(arm, mint=row.mint, open_at=row.open_at,
-                               liquidity=row.liquidity_usd, fdv=row.fdv,
-                               sells=row.txns_m5_sells,
-                               buys=row.txns_m5_buys,
-                               reuse=reuse.get(row.mint)):
-                    continue
-                if not _time_left(arm, row.open_at, row.graduated_at):
-                    continue
+            for arm in wanted:
                 self._session.add(GradPaperPosition(
                     book=arm.name, mint=row.mint, symbol=row.symbol,
-                    opened_at=row.open_at,
-                    open_quote=row.price_native.quantize(_P),
+                    opened_at=entry_at,
+                    open_quote=price.quantize(_P),
                     open_fill=fill.quantize(_P),
                     notional_usd=config.PAPER_NOTIONAL_USD,
                     sol_usd_at_open=rate.quantize(Decimal("0.000001")),
                     notional_quote=notional_quote,
                     tokens=(notional_quote / fill).quantize(_Q),
-                    peak_quote=row.price_native.quantize(_P),
-                    last_quote=row.price_native.quantize(_P),
+                    peak_quote=price.quantize(_P),
+                    last_quote=price.quantize(_P),
+                    # The feed's depth: the number the arm was chosen on.
                     liq_open_usd=row.liquidity_usd,
                     impact_open=impact.quantize(Decimal("0.000001")),
                     pool_fee_bps=fee_bps,
@@ -1287,13 +1332,13 @@ class Tournament:
                 if arm.name in live_spec.MIRRORS:
                     mirror.append(live_decisions.Mirrored(
                         strategy_id=live_spec.MIRRORS[arm.name],
-                        mint=row.mint, opened_at=row.open_at,
+                        mint=row.mint, opened_at=entry_at,
                         liquidity_usd=row.liquidity_usd, impact=impact,
-                        price_native=row.price_native))
+                        price_native=price))
         await live_decisions.record(self._session, mirror)
         opened += opened_curve
-        if opened or refused or foreign:
+        if opened or refused or foreign or unpriced:
             logger.info("graduation_tournament_filled", opened=opened,
                         refused_unfillable=refused, not_graduation=foreign,
-                        candidates=len(rows))
+                        pool_unpriced=unpriced, candidates=len(rows))
         return opened

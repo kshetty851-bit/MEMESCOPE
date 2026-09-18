@@ -1005,3 +1005,143 @@ async def test_a_price_stop_also_sells_on_the_mark_after_it() -> None:
     assert await Tournament(session, now=NIGHT + timedelta(seconds=10))._manage() == 1
     assert position.close_reason == "hard_stop"
     assert position.close_quote == D("0.00040")
+
+
+# --- pool-open buys are priced off the pool ----------------------------------
+
+def _pool(price: str, sol: str, *, quote_mint: str = config.WSOL_MINT):
+    """A pool whose vaults hold `sol` SOL against tokens trading at `price`."""
+    from app.labs.graduation.held_watch import Held
+
+    tokens = Decimal(sol) / Decimal(price)
+    return Held(mint=REAL_MINT, pool=REAL_POOL, base_vault="BaseVault",
+                quote_vault="QuoteVault", base_decimals=6, quote_decimals=9,
+                base=int(tokens * 10**6), quote=int(Decimal(sol) * 10**9),
+                quote_mint=quote_mint)
+
+
+async def _buy(monkeypatch, *, feed_price: str, pool, liquidity: str = "250000",
+               full: bool = False):
+    """One pool-open candidate through `_fill`, with the pool read as `pool`.
+    The tick runs 12s after the feed first listed the pool."""
+    from types import SimpleNamespace
+
+    from app.labs.graduation import tournament
+    from app.labs.graduation.tournament import Tournament
+
+    mirrored, reads = [], []
+
+    async def record(session, entries):
+        mirrored.extend(entries)
+        return len(entries)
+
+    async def reader(mint, pool_address):
+        reads.append((mint, pool_address))
+        return pool
+
+    monkeypatch.setattr(tournament.live_decisions, "record", record)
+    session = _Answers([], [], [])
+    t = Tournament(session, now=NIGHT + timedelta(seconds=12), pool_reader=reader)
+
+    async def rows():
+        return [SimpleNamespace(
+            mint=REAL_MINT, open_at=NIGHT, price_native=Decimal(feed_price),
+            graduated_at=NIGHT - timedelta(seconds=40),
+            price_usd=Decimal(feed_price) * 100, pair_address=REAL_POOL,
+            liquidity_usd=Decimal(liquidity), fdv=Decimal("8000000"),
+            txns_m5_sells=1, txns_m5_buys=50, symbol=None, first_seen_at=None)]
+
+    monkeypatch.setattr(t, "_candidates", rows)
+    if full:  # every arm already at its slot limit
+        from app.labs.graduation.tournament import ARMS
+
+        async def counts():
+            return {arm.name: config.PAPER_MAX_SLOTS for arm in ARMS}
+
+        monkeypatch.setattr(t, "_open_counts", counts)
+    return await t._fill(), session.added, mirrored, reads
+
+
+async def test_a_buy_fills_at_the_pools_own_price_not_the_feeds_first_report(
+    monkeypatch,
+) -> None:
+    """Bluey, 2026-09-17: DexScreener's first report said 0.000004773 SOL while
+    the pool already traded near 0.0000541 after its first big buy. Bought at
+    the report, the book booked +1,044%; on-chain the trade made +4%."""
+    bought, added, mirrored, reads = await _buy(
+        monkeypatch, feed_price="0.000004773", pool=_pool("0.0000541", "980"))
+    assert bought == 9
+    assert reads == [(REAL_MINT, REAL_POOL)], "one read prices every arm"
+    for p in added:
+        assert abs(p.open_quote / Decimal("0.0000541") - 1) < Decimal("0.001")
+        assert p.open_fill > p.open_quote, "a buy pays above spot"
+        # The clock starts when the price was taken, not when the feed listed.
+        assert p.opened_at == NIGHT + timedelta(seconds=12)
+        assert p.liq_open_usd == Decimal("250000"), "the arm's own number is kept"
+    assert mirrored and {m.opened_at for m in mirrored} == {NIGHT + timedelta(seconds=12)}
+    assert all(abs(m.price_native / Decimal("0.0000541") - 1) < Decimal("0.001")
+               for m in mirrored)
+
+
+async def test_a_pool_that_cannot_be_read_is_not_bought_on_the_feeds_price(
+    monkeypatch,
+) -> None:
+    bought, added, mirrored, reads = await _buy(monkeypatch, feed_price="0.00008", pool=None)
+    assert (bought, added, mirrored, len(reads)) == (0, [], [], 1)
+
+
+async def test_a_pool_price_a_scale_error_away_is_not_bought(monkeypatch) -> None:
+    """A thousandfold is what the decimals error produced on 2026-09-15. Eleven
+    times (Bluey) was the market; fifty is where the band stops believing it."""
+    assert (await _buy(monkeypatch, feed_price="0.00008", pool=_pool("0.08", "980")))[0] == 0
+    assert (await _buy(monkeypatch, feed_price="0.00008",
+                       pool=_pool("0.00000008", "980")))[0] == 0
+    assert (await _buy(monkeypatch, feed_price="0.00008",
+                       pool=_pool("0.00088", "980")))[0] == 9
+
+
+async def test_a_pool_not_quoted_in_sol_is_not_bought(monkeypatch) -> None:
+    usdc = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+    pool = _pool("0.00008", "980", quote_mint=usdc)
+    assert (await _buy(monkeypatch, feed_price="0.00008", pool=pool))[0] == 0
+
+
+async def test_the_pool_is_only_read_for_a_candidate_an_arm_would_take(monkeypatch) -> None:
+    """Candidates come back every tick for three minutes. Reading the chain for
+    ones no arm wants would be a read per candidate per tick for nothing."""
+    bought, _, _, reads = await _buy(monkeypatch, feed_price="0.00008",
+                                     pool=_pool("0.00008", "980"), full=True)
+    assert (bought, reads) == (0, [])
+
+
+async def test_the_scheduler_prices_pool_opens_off_the_pool(monkeypatch) -> None:
+    from app.labs.graduation import scheduler, sources
+
+    built: dict = {}
+
+    class Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return None
+
+        async def scalar(self, statement):
+            return True
+
+        async def commit(self):
+            return None
+
+    class Recorded:
+        def __init__(self, session, **kwargs):
+            built.update(kwargs)
+
+        async def tick(self):
+            return {"ticked": True}
+
+    monkeypatch.setenv("LAB_GRADUATION_ENABLED", "1")
+    monkeypatch.setenv("LAB_GRADUATION_PAPER_ENABLED", "1")
+    monkeypatch.setattr(scheduler, "SessionFactory", Session)
+    monkeypatch.setattr(scheduler, "Tournament", Recorded)
+    assert await scheduler.paper_tick() == {"ticked": True}
+    assert built["pool_reader"] is sources.pool_now

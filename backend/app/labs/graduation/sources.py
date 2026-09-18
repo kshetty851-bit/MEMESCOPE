@@ -495,6 +495,25 @@ def _retry_after(response: httpx.Response) -> float:
         return 0.0
 
 
+async def pool_now(mint: str, pool: str) -> held_watch.Held | None:
+    """A pool's own price and depth this moment, off its two vaults.
+
+    What a paper buy is priced at. DexScreener's first report on a new pool can
+    predate the pool's first big buy, and a book that buys at it books a jump
+    that never happened. None when the pool cannot be read or decoded: the
+    caller does not buy on a guess, and asks again next tick.
+    """
+    stream = HeldVaultStream()
+    try:
+        held = await stream.resolve(mint, pool)
+    except ConnectionError:
+        return None
+    if held is None:
+        return None
+    await stream._read([held])
+    return held if held.price() is not None else None
+
+
 class HeldVaultStream:
     """Sub-second prices for the positions actually open.
 
