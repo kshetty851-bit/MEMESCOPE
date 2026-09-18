@@ -861,9 +861,10 @@ class Settings(BaseSettings):
     #: place; rugs come in waves. Replayed on-chain over 485 BASE_75k_5m trades
     #: (2026-09-15..18, $20 a trade): -$3 without it, +$127 with a 3-hour block
     #: (any length from 3h to forever gave +$117..+$130). Almost all of it is
-    #: the 16-Sep wave; other days are about even. With no rug in the window
-    #: the check asks nothing of Helius and cannot refuse; inside one, a coin
-    #: that cannot be traced refuses. Off by default in code; production sets it.
+    #: the 16-Sep wave; other days are about even. The money behind the worst
+    #: waves is also blocked for good (`sources.ALWAYS_BLOCKED`), so every buy
+    #: is traced; a coin that cannot be traced refuses only inside a rug window.
+    #: Off by default in code; production sets it.
     REAL_WALLET_SOURCE_BLOCK_ENABLED: bool = False
     REAL_WALLET_SOURCE_BLOCK_HOURS: int = Field(default=3, ge=1, le=72)
     #: The most of a token's SUPPLY one position may buy, as a fraction.

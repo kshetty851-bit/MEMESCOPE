@@ -95,6 +95,7 @@ class Reason:
     HOLDER_TOO_LARGE = "HOLDER_TOO_LARGE"
     HOLDERS_UNREADABLE = "HOLDERS_UNREADABLE"
     LINKED_TO_RECENT_RUG = "LINKED_TO_RECENT_RUG"
+    KNOWN_RUG_MONEY = "KNOWN_RUG_MONEY"
     SOURCES_UNREADABLE = "SOURCES_UNREADABLE"
     SAFETY_CALCULATION_FAILED = "SAFETY_CALCULATION_FAILED"
 
@@ -387,16 +388,16 @@ class RealWalletSafetyGate:
     async def _source_reasons(
         self, mint: str, at: datetime, reasons: list[str]
     ) -> dict[str, object]:
-        """Is this coin's money the money behind a rug that just closed? See
-        `sources`. With no rug in the window there is nothing to match, so
-        nothing is read and nothing can refuse; inside one, a coin whose
-        wallets cannot be traced refuses, as every unreadable fact here does."""
-        blocked = await sources.recent_rug_ids(
+        """Is this coin's money the money behind a rug? See `sources`: a rug
+        that closed in the window (`LINKED_TO_RECENT_RUG`), or the standing
+        list (`KNOWN_RUG_MONEY`). Every buy is traced for the standing list.
+        A coin that cannot be traced refuses inside a rug window, as every
+        unreadable fact here does; outside one it is let through, so a Helius
+        hiccup cannot stop the wallet for a list of three operators."""
+        recent = await sources.recent_rug_ids(
             self._session,
             since=at - timedelta(hours=settings.REAL_WALLET_SOURCE_BLOCK_HOURS),
             rug_return=settings.REAL_WALLET_RUG_RETURN)
-        if not blocked:
-            return {"recent_rug_ids": 0}
         rpc = self._holders_rpc or get_rpc("helius")
         try:
             await rpc.start()
@@ -405,13 +406,17 @@ class RealWalletSafetyGate:
                 mine = await sources.trace(rpc, [w for w, _ in view.wallets[:2]])
             finally:
                 await rpc.close()
-        except Exception as exc:  # an untraceable coin refuses inside a rug window
-            reasons.append(Reason.SOURCES_UNREADABLE)
-            return {"recent_rug_ids": len(blocked), "failure": type(exc).__name__}
-        matched = sorted(mine.ids() & blocked)
-        if matched:
+        except Exception as exc:
+            if recent:
+                reasons.append(Reason.SOURCES_UNREADABLE)
+            return {"recent_rug_ids": len(recent), "failure": type(exc).__name__}
+        ids = mine.ids()
+        matched = sorted(ids & (recent | sources.ALWAYS_BLOCKED))
+        if ids & recent:
             reasons.append(Reason.LINKED_TO_RECENT_RUG)
-        return {"recent_rug_ids": len(blocked), **mine.as_json(), "matched": matched}
+        if ids & sources.ALWAYS_BLOCKED:
+            reasons.append(Reason.KNOWN_RUG_MONEY)
+        return {"recent_rug_ids": len(recent), **mine.as_json(), "matched": matched}
 
     async def _symbol_has_rugged(
         self, mint_address: str, token: DiscoveredToken | None
