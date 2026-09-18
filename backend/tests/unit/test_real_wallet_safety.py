@@ -724,3 +724,55 @@ async def test_the_source_block_is_off_unless_switched_on(
     assert decision.decision == "ALLOW"
     assert chain.started == 0
     assert "sources" not in decision.provenance
+
+
+# A quote is judged against the pool's own price when the lab is reading it.
+# GitHub, 2026-09-18 18:14: DexScreener's snapshot still carried the price from
+# before an 88% crash; the pool's vaults and Jupiter's quote agreed on the real
+# one, and the paper book the wallet copies made +346%.
+_STALE_FEED = {"price_usd": Decimal("0.005498"), "price_native": Decimal("0.00004894")}
+
+
+def _buy_at(price: str) -> _Quotes:
+    from dataclasses import replace
+
+    return _Quotes(replace(_quote(side="entry", output="100000000"),
+                           estimated_price_usd=Decimal(price)),
+                   _quote(side="exit", output="98000000"))
+
+
+def _pool_reads(monkeypatch: pytest.MonkeyPatch, price: str | None) -> None:
+    async def pool_price(self, mint, snapshot, at):
+        return None if price is None else Decimal(price)
+
+    monkeypatch.setattr(service.RealWalletSafetyGate, "_pool_price", pool_price)
+
+
+async def test_a_quote_is_judged_against_the_pools_price_not_a_stale_feed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _pool_reads(monkeypatch, "0.000634")
+    decision = await _decision(monkeypatch, snapshot=_snapshot(**_STALE_FEED),
+                               quotes=_buy_at("0.000644"))
+    assert decision.decision == "ALLOW", decision.reason_codes
+    assert decision.provenance["pool_price_usd"] == "0.000634"
+    assert decision.provenance["feed_price_usd"] == "0.005498"
+
+
+async def test_without_a_pool_reading_the_feed_still_judges_the_quote(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _pool_reads(monkeypatch, None)
+    decision = await _decision(monkeypatch, snapshot=_snapshot(**_STALE_FEED),
+                               quotes=_buy_at("0.000644"))
+    assert Reason.EXECUTION_PRICE_DEVIATION_TOO_HIGH in decision.reason_codes
+
+
+async def test_a_quote_far_from_the_pools_own_price_is_still_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """What the check is for: paying far more than the pool itself asks."""
+    _pool_reads(monkeypatch, "0.000634")
+    decision = await _decision(monkeypatch, snapshot=_snapshot(**_STALE_FEED),
+                               quotes=_buy_at("0.0012"))
+    assert Reason.EXECUTION_PRICE_DEVIATION_TOO_HIGH in decision.reason_codes
