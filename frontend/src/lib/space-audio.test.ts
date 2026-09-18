@@ -74,7 +74,7 @@ afterEach(() => {
 
 describe("the soundtrack", () => {
   it("is served from the media route, not from this repository", () => {
-    expect(SOUNDTRACK_URL).toMatch(/\/media\/montagem-alucinante\.mp3$/);
+    expect(SOUNDTRACK_URL).toMatch(/\/media\/leokarlo-catwoman-instrumental\.mp3$/);
     // The repo is public: a commercial recording committed to it would be
     // downloadable from GitHub. None may live where the site bundles assets.
     const pub = path.join(process.cwd(), "public");

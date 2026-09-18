@@ -33,22 +33,28 @@ import { env } from "@/lib/env";
  * an `await` in front of it would move the call out of the gesture.
  */
 
-export const SOUNDTRACK_URL = `${env.NEXT_PUBLIC_API_URL}/media/montagem-alucinante.mp3`;
+export const SOUNDTRACK_URL = `${env.NEXT_PUBLIC_API_URL}/media/leokarlo-catwoman-instrumental.mp3`;
 
 /**
  * The track's tempo and where its first beat lands. MEASURED, not looked up.
  *
- * Folded the kick-drum onset envelope of the actual file at every tempo from
- * 124 to 138 BPM in 0.02 steps. 130.00 is the sharpest by a wide margin (7.01
- * against 5.39 at 130.02), and the first beat sits 26ms in. The phase holds in
- * each third of the track separately — 31, 26, 26ms — so there is no drift to
- * correct for, and 170.76s is 369.98 beats, so the loop lands on a beat too.
+ * "Catwoman (Instrumental)" by LeoKarlo, since 2026-09-18. Folded the
+ * kick-drum onset envelope of the actual file at every tempo from 100 to 180
+ * BPM, then in 0.02 steps around the winner: 125.00 is the sharpest by a wide
+ * margin (9.78 against 4.06 at 125.06), and the first beat sits 34ms in. The
+ * phase is 34ms in each third of the track separately, so there is no drift.
+ * The search is held to the dance range because a fold at half tempo is always
+ * at least as sharp (62.5 scores 9.72) — the octave is chosen, not measured.
+ * The same method gives the previous track's documented 130 BPM / 26ms.
+ *
+ * 184.39s is 384.15 beats, so the loop does NOT land on a beat: the dance
+ * re-pins once per loop, by ~70ms, when `position` jumps back to the start.
  *
  * The HQ dance floor steps to these. Change the song and these change with it,
  * or seventeen people dance confidently to the wrong tempo.
  */
-export const TEMPO_BPM = 130;
-export const BEAT_OFFSET_SECONDS = 0.026;
+export const TEMPO_BPM = 125;
+export const BEAT_OFFSET_SECONDS = 0.034;
 
 /**
  * The two fades are NOT the same length, and that asymmetry is the point.

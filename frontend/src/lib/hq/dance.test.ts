@@ -196,10 +196,10 @@ describe("the walk to the floor", () => {
 
 describe("the beat", () => {
   it("keeps time to the measured tempo, in eight counts", () => {
-    expect(TEMPO_BPM).toBe(130);
-    expect(BEAT_MS).toBeCloseTo(461.538, 2);
+    expect(TEMPO_BPM).toBe(125);
+    expect(BEAT_MS).toBe(480);
     expect(COUNTS).toBe(8);
-    expect(CYCLE_MS).toBeCloseTo(3692.31, 1);
+    expect(CYCLE_MS).toBe(3840);
   });
 
   it("gives every dancer the same epoch at the same moment", () => {

@@ -964,16 +964,16 @@
      moments, so `use-dance-party` pins every one of these animations to one
      start time taken from where the music actually is. */
   .hq[data-hq-motion="on"] .hq-character[data-pose="dancing"] {
-    animation: hq-dance var(--hq-dance-cycle, 3.6923s) linear infinite;
+    animation: hq-dance var(--hq-dance-cycle, 3.84s) linear infinite;
     animation-delay: 0s;
   }
 
   .hq[data-hq-motion="on"] .hq-character[data-pose="dancing"] .hq-arm--left {
-    animation: hq-dance-arm-left var(--hq-dance-cycle, 3.6923s) linear infinite;
+    animation: hq-dance-arm-left var(--hq-dance-cycle, 3.84s) linear infinite;
   }
 
   .hq[data-hq-motion="on"] .hq-character[data-pose="dancing"] .hq-arm--right {
-    animation: hq-dance-arm-right var(--hq-dance-cycle, 3.6923s) linear infinite;
+    animation: hq-dance-arm-right var(--hq-dance-cycle, 3.84s) linear infinite;
   }
 
   /* ---- easter eggs -----------------------------------------------------
