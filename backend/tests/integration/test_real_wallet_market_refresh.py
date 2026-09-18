@@ -12,9 +12,10 @@ from decimal import Decimal
 
 import pytest
 
+from app.labs.graduation.models import GradPostgradSample
 from app.models.market import TradingStatus
 from app.models.token import DiscoveredToken
-from app.real_wallet.market_refresh import FRESH_S, ensure_fresh
+from app.real_wallet.market_refresh import FRESH_S, LAB_PROVIDER, ensure_fresh
 from app.repositories.market import MarketSnapshotRepository
 from app.services.market.providers.base import (
     MarketData,
@@ -33,15 +34,19 @@ class Provider(MarketDataProvider):
     name = "fake"
     batch_size = 30
 
-    def __init__(self, *, fails: bool = False, at: datetime = NOW) -> None:
+    def __init__(self, *, fails: bool = False, listed: bool = True,
+                 at: datetime = NOW) -> None:
         self.calls: list[list[str]] = []
         self.fails = fails
+        self.listed = listed
         self.at = at
 
     async def fetch_many(self, mint_addresses: Sequence[str]) -> dict[str, MarketData]:
         self.calls.append(list(mint_addresses))
         if self.fails:
             raise ProviderError("down")
+        if not self.listed:  # DexScreener answers, with no pair for a pool this new
+            return {}
         return {m: MarketData(
             mint_address=m, price_usd=Decimal("0.007655"),
             price_native=Decimal("0.00007898"), liquidity_usd=Decimal("226957.33"),
@@ -141,3 +146,69 @@ async def test_the_gate_judges_a_new_reading_from_when_it_was_taken(db_session, 
                              requested_usd=Decimal("100"), state="created")
     await executor._run_safety(intent, NOW)
     assert seen == [taken]
+
+
+# --- the graduation lab's own poll, when the provider has not listed the pool --
+
+LAB_PAIR = "8xQ3uUoLabPairPumpSwap1111111111111111111111"
+
+
+async def _lab_poll(session, *, age_s: float, liquidity: str = "91799.00",
+                    source: str = "dexscreener") -> datetime:
+    """The lab's DexScreener sample of the pool its paper book just bought."""
+    ts = NOW - timedelta(seconds=age_s)
+    session.add(GradPostgradSample(
+        ts=ts, mint=MINT, source=source, pair_address=LAB_PAIR, dex_id="pumpswap",
+        price_usd=Decimal("0.001227"), price_native=Decimal("0.00001211"),
+        liquidity_usd=Decimal(liquidity)))
+    await session.flush()
+    return ts
+
+
+async def test_a_pool_the_provider_has_not_listed_is_read_from_the_lab(db_session):
+    """ChatGPT, 2026-09-17 20:30: the lab's poll had the pool three seconds
+    before the wallet refused it for having no reading at all."""
+    await _token(db_session)
+    taken = await _lab_poll(db_session, age_s=3)
+    reading = await ensure_fresh(db_session, MINT, now=NOW, provider=Provider(listed=False))
+    assert reading == ("refreshed_from_lab", taken)
+    snapshot = await MarketSnapshotRepository(db_session).latest_for_mint(MINT)
+    assert snapshot is not None
+    # Its own source and its own time: the gate ages it from when it was polled.
+    assert (snapshot.provider, snapshot.captured_at) == (LAB_PROVIDER, taken)
+    assert (snapshot.price_usd, snapshot.liquidity_usd) == (
+        Decimal("0.001227"), Decimal("91799.00"))
+    assert (snapshot.dex_name, snapshot.pool_address) == ("pumpswap", LAB_PAIR)
+    assert snapshot.trading_status is TradingStatus.TRADING
+
+
+async def test_the_providers_own_reading_wins_when_it_has_one(db_session):
+    await _token(db_session)
+    await _lab_poll(db_session, age_s=3)
+    reading = await ensure_fresh(db_session, MINT, now=NOW, provider=Provider())
+    assert reading.status == "refreshed"
+    snapshot = await MarketSnapshotRepository(db_session).latest_for_mint(MINT)
+    assert snapshot is not None and snapshot.provider == "fake"
+
+
+@pytest.mark.parametrize("age_s, source", [
+    (FRESH_S + 1, "dexscreener"),   # older than a reading this module would reuse
+    (3, "geckoterminal"),           # a candle backfilled later, not a live poll
+])
+async def test_only_a_current_live_poll_stands_in(db_session, age_s, source):
+    await _token(db_session)
+    await _lab_poll(db_session, age_s=age_s, source=source)
+    reading = await ensure_fresh(db_session, MINT, now=NOW, provider=Provider(listed=False))
+    assert reading.status == "no_reading"
+    assert await MarketSnapshotRepository(db_session).latest_for_mint(MINT) is None
+
+
+async def test_a_lab_reading_is_judged_by_the_providers_own_rule(db_session):
+    """Shallower than DexScreener calls tradeable: written as INACTIVE, which
+    the gate refuses exactly as it would refuse the provider's own print."""
+    await _token(db_session)
+    await _lab_poll(db_session, age_s=3, liquidity="42.00")
+    await ensure_fresh(db_session, MINT, now=NOW, provider=Provider(listed=False))
+    snapshot = await MarketSnapshotRepository(db_session).latest_for_mint(MINT)
+    assert snapshot is not None
+    assert snapshot.trading_status is TradingStatus.INACTIVE
