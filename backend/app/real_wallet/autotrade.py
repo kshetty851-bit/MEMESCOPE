@@ -81,9 +81,8 @@ def ticket_choices(strategy_id: str | None = None) -> list[Decimal]:
     """The trade sizes Start offers: the board's own splits of a $100 ticket,
     from the configured size down to `live_spec.MIN_TICKET_USD`.
 
-    An arm may cap it lower. G-BAS-5M is capped at $10 because a $100 wallet
-    trading $25 of it was wiped out over its own week with the rugs counted,
-    and a picker that offers a size the evidence rules out is an invitation."""
+    An arm may cap it lower: `live_spec.MAX_TICKET_USD`, whose comment says
+    why G-BAS-5M is capped where it is."""
     from app.labs.graduation import config as grad
     from app.labs.graduation import live_spec
 
@@ -159,8 +158,8 @@ class AutotradeSwitchService:
         """Record the intent to trade. This grants no permission whatsoever.
 
         `ticket_usd` is the graduation trade size, one of the choices for THAT
-        arm: the baseline is capped at $10 and offering it $25 here would let
-        a request set a size the page will not show. None trades the
+        arm: the baseline is capped below B3, and accepting a larger size here
+        would let a request set a size the page will not show. None trades the
         configured `REAL_WALLET_ENTRY_SIZE_USD`, as before.
         """
         from app.labs.graduation.live_spec import BY_ID as GRAD_BY_ID

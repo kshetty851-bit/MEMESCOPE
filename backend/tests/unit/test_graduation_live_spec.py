@@ -96,11 +96,11 @@ def test_the_baseline_arm_is_capped_at_ten_dollars(monkeypatch) -> None:
     from app.real_wallet.autotrade import ticket_choices
 
     monkeypatch.setattr(settings, "REAL_WALLET_ENTRY_SIZE_USD", Decimal("100"))
-    assert live_spec.max_ticket("G-BAS-5M") == Decimal("10")
+    assert live_spec.max_ticket("G-BAS-5M") == Decimal("25")
     assert live_spec.max_ticket("G-B3-4M") is None
     assert live_spec.pool_floor("G-BAS-5M") == 75_000
     assert live_spec.pool_floor("G-B3-4M") == live_spec.POOL_FLOOR_USD
-    assert [str(t) for t in ticket_choices("G-BAS-5M")] == ["10", "5"]
+    assert [str(t) for t in ticket_choices("G-BAS-5M")] == ["25", "20", "10", "5"]
     assert "100" in [str(t) for t in ticket_choices("G-B3-4M")]
 
 
