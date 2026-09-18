@@ -620,7 +620,7 @@ async def _source_decision(
 
     asked: list[object] = []
 
-    async def recent_rug_ids(session, *, since, rug_return):  # noqa: ANN001
+    async def recent_rug_ids(session, *, since, rug_return):
         asked.append((since, rug_return))
         return blocked
 
@@ -630,8 +630,9 @@ async def _source_decision(
     monkeypatch.setattr(service.sources, "recent_rug_ids", recent_rug_ids)
     monkeypatch.setattr(service, "TokenRepository",
                         lambda _: SimpleNamespace(get_by_mint=lambda __: _return(_token())))
-    monkeypatch.setattr(service, "MarketSnapshotRepository",
-                        lambda _: SimpleNamespace(latest_for_mint=lambda __: _return(_snapshot())))
+    monkeypatch.setattr(
+        service, "MarketSnapshotRepository",
+        lambda _: SimpleNamespace(latest_for_mint=lambda __: _return(_snapshot())))
     gate = _Gate(_inspection(), _Quotes(_quote(side="entry", output="100000000"),
                                         _quote(side="exit", output="98000000")))
     gate._holders_rpc = chain  # type: ignore[assignment]
@@ -683,16 +684,27 @@ async def test_money_behind_no_recent_rug_passes(monkeypatch: pytest.MonkeyPatch
     assert decision.provenance["sources"]["matched"] == []
 
 
-async def test_with_no_recent_rug_nothing_is_read_and_nothing_refuses(
+async def test_with_no_recent_rug_a_failed_read_lets_the_buy_through(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Most of the time there is no rug in the window: no Helius call, no delay,
-    and a Helius outage cannot refuse a buy."""
+    """Outside a rug window only the standing list is in play, and a Helius
+    hiccup must not stop the wallet for a list of three operators."""
     chain = _Helius(_COIN, fail=True)
     decision = await _source_decision(monkeypatch, chain, blocked=set())
     assert decision.decision == "ALLOW", decision.reason_codes
-    assert chain.started == 0
-    assert decision.provenance["sources"] == {"recent_rug_ids": 0}
+    assert decision.provenance["sources"] == {"recent_rug_ids": 0, "failure": "RpcError"}
+
+
+async def test_money_on_the_standing_list_is_refused_without_a_recent_rug(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The 16-Sep operator's funders are blocked for good, not three hours."""
+    monkeypatch.setattr(service.sources, "ALWAYS_BLOCKED", frozenset({"FunderA"}))
+    chain = _Helius(_COIN, funders=_FUNDED)
+    decision = await _source_decision(monkeypatch, chain, blocked=set())
+    assert decision.decision == "REJECT"
+    assert decision.reason_codes == (Reason.KNOWN_RUG_MONEY,)
+    assert decision.provenance["sources"]["matched"] == ["FunderA"]
 
 
 async def test_an_untraceable_coin_refuses_inside_a_rug_window(
