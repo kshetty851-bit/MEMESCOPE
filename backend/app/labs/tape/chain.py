@@ -444,6 +444,8 @@ async def harvest(h: Helius, db: sqlite3.Connection, *, t_from: int, t_to: int,
     Stops 15 minutes short of now: a point read for a moment still in the
     future would return today's pool and call it the past."""
     t_to = min(t_to, int(time.time()) - 900)
+    if t_to <= t_from:  # a span that has not happened yet: Helius errors on it
+        return {"listed": 0, "harvested": 0, "failed": 0, "calls": 0, "credits": 0}
     listed = await graduations(h, db, t_from=t_from, t_to=t_to)
     todo = db.execute(
         "SELECT mint, pool, t0, creator, tape, tape_end, points, funders FROM grads "
