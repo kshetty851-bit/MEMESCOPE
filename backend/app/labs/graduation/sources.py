@@ -42,6 +42,7 @@ import httpx
 import websockets
 
 from app.core.backoff import BackoffPolicy
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.labs.graduation import config, held_watch, curve
 from app.security.liquidity import parse_pool
@@ -495,6 +496,10 @@ def _retry_after(response: httpx.Response) -> float:
         return 0.0
 
 
+#: Tries at a pool read before a candidate waits for the next tick.
+POOL_READ_ATTEMPTS = 3
+
+
 async def pool_now(mint: str, pool: str) -> held_watch.Held | None:
     """A pool's own price and depth this moment, off its two vaults.
 
@@ -502,17 +507,92 @@ async def pool_now(mint: str, pool: str) -> held_watch.Held | None:
     predate the pool's first big buy, and a book that buys at it books a jump
     that never happened. None when the pool cannot be read or decoded: the
     caller does not buy on a guess, and asks again next tick.
-    """
-    stream = HeldVaultStream()
-    try:
-        held = await stream.resolve(mint, pool)
-    except ConnectionError:
-        return None
-    if held is None:
-        return None
-    await stream._read([held])
-    return held if held.price() is not None else None
 
+    Read on Helius. The public node refused a third of these reads on
+    2026-09-18 even one at a time, and the lab's own node is spent on the curve
+    poll; Helius is paid for and this is a handful of reads a minute. Asked up
+    to `POOL_READ_ATTEMPTS` times, since a refused read costs the entry a tick.
+    """
+    stream = HeldVaultStream(
+        url=settings.HELIUS_RPC_URL if settings.helius_configured else None)
+    for attempt in range(POOL_READ_ATTEMPTS):
+        try:
+            held = await stream.resolve(mint, pool)
+        except ConnectionError:
+            await asyncio.sleep(0.4 * (attempt + 1))
+            continue
+        if held is None:
+            return None
+        await stream._read([held])
+        if held.price() is not None:
+            return held
+        await asyncio.sleep(0.4 * (attempt + 1))
+    return None
+
+
+def swap_reserves(tx: dict[str, Any], *, mint: str, pool: str) -> tuple[int, int] | None:
+    """(token, SOL) the pool held after this transaction, off its own balance
+    records, or None when the transaction left neither in them."""
+    base = quote = None
+    for b in (tx.get("meta") or {}).get("postTokenBalances") or []:
+        if b.get("owner") != pool:
+            continue
+        if b.get("mint") == mint:
+            base = int(b["uiTokenAmount"]["amount"])
+        elif b.get("mint") == config.WSOL_MINT:
+            quote = int(b["uiTokenAmount"]["amount"])
+    return None if base is None or quote is None else (base, quote)
+
+
+async def reserves_at(rpc: Any, *, mint: str, pool: str, at: datetime,
+                      pages: int = 3) -> tuple[int, int] | None:
+    """The pool's reserves after its last swap at or before `at`: what a trade
+    at that moment would have met. Newest first through Helius's own history
+    call, stopping at the first transaction that recorded both balances."""
+    token = None
+    for _ in range(pages):
+        opts: dict[str, Any] = {
+            "transactionDetails": "full", "encoding": "jsonParsed",
+            "maxSupportedTransactionVersion": 1, "sortOrder": "desc", "limit": 20,
+            "filters": {"blockTime": {"lte": int(at.timestamp())}, "status": "succeeded"}}
+        if token:
+            opts["paginationToken"] = token
+        page = await rpc.call("getTransactionsForAddress", [pool, opts]) or {}
+        for tx in page.get("data") or []:
+            if (found := swap_reserves(tx, mint=mint, pool=pool)) is not None:
+                return found
+        token = page.get("paginationToken")
+        if not token:
+            return None
+    return None
+
+
+
+async def reserves_after(rpc: Any, *, mint: str, pool: str, at: datetime,
+                         within_s: int, pages: int = 3) -> tuple[int, int] | None:
+    """The pool's reserves after its FIRST swap at or after `at`, within
+    `within_s`: the book's own exit rule (the first mark at or after the exit
+    was due), read off the swaps. A drain that lands seconds after a sell was
+    due is booked as the loss it would most likely have been. None when the
+    pool did not trade in that window - its state then is `reserves_at(at)`."""
+    start = int(at.timestamp())
+    token = None
+    for _ in range(pages):
+        opts: dict[str, Any] = {
+            "transactionDetails": "full", "encoding": "jsonParsed",
+            "maxSupportedTransactionVersion": 1, "sortOrder": "asc", "limit": 20,
+            "filters": {"blockTime": {"gte": start, "lte": start + within_s},
+                        "status": "succeeded"}}
+        if token:
+            opts["paginationToken"] = token
+        page = await rpc.call("getTransactionsForAddress", [pool, opts]) or {}
+        for tx in page.get("data") or []:
+            if (found := swap_reserves(tx, mint=mint, pool=pool)) is not None:
+                return found
+        token = page.get("paginationToken")
+        if not token:
+            return None
+    return None
 
 class HeldVaultStream:
     """Sub-second prices for the positions actually open.

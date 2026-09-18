@@ -167,6 +167,14 @@ def main(argv: list[str] | None = None) -> int:
                       help="ISO time the fixed tick went live; later trades are left alone")
     rest.add_argument("--apply", action="store_true",
                       help="write it (default: report what would change)")
+    ron = sub.add_parser(
+        "restate-onchain",
+        help="re-price BASE_75k_5m's closed trades off their pools' own swaps (2026-09-18)")
+    ron.add_argument("--opened-before", required=True,
+                     help="ISO time entries began to be priced off the pool; "
+                          "later trades are left alone")
+    ron.add_argument("--apply", action="store_true",
+                     help="write it (default: report what would change)")
     one = sub.add_parser("curve", help="derive, fetch and decode one mint's curve")
     one.add_argument("--mint", required=True)
     progress = sub.add_parser("progress", help="what a reserve reading means")
@@ -224,6 +232,15 @@ def main(argv: list[str] | None = None) -> int:
             raise SystemExit("--opened-before needs a timezone, e.g. 2026-09-16T16:30:00+00:00")
         _emit(asyncio.run(_restate(apply=args.apply, opened_before=cutoff)))
         return 0
+    if args.command == "restate-onchain":
+        from datetime import datetime
+
+        cutoff = datetime.fromisoformat(args.opened_before)
+        if cutoff.tzinfo is None:
+            raise SystemExit(
+                "--opened-before needs a timezone, e.g. 2026-09-18T13:36:00+00:00")
+        _emit(asyncio.run(_restate_onchain(apply=args.apply, opened_before=cutoff)))
+        return 0
     _emit(_progress(args.tokens))
     return 0
 
@@ -237,6 +254,30 @@ async def _restate(*, apply: bool, opened_before) -> dict:
         if apply:
             await session.commit()
         return result
+
+
+async def _restate_onchain(*, apply: bool, opened_before) -> dict:
+    from app.core.config import settings
+    from app.db.session import SessionFactory
+    from app.labs.graduation.restate import restate_onchain
+    from app.labs.graduation.sources import HeldVaultStream
+    from app.services.rpc.standard import StandardSolanaRPC
+
+    if not settings.helius_configured:
+        raise SystemExit("restate-onchain reads pool history through Helius; "
+                         "HELIUS_API_KEY is not set")
+    rpc = StandardSolanaRPC(rpc_url=settings.HELIUS_RPC_URL)
+    pools = HeldVaultStream(url=settings.HELIUS_RPC_URL)
+    await rpc.start()
+    try:
+        async with SessionFactory() as session:
+            result = await restate_onchain(session, rpc=rpc, resolve=pools.resolve,
+                                           apply=apply, opened_before=opened_before)
+            if apply:
+                await session.commit()
+            return result
+    finally:
+        await rpc.close()
 
 
 async def _judge_ab() -> dict:

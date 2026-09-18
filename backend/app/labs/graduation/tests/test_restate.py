@@ -107,3 +107,107 @@ def test_the_pre_registered_ab_is_never_restated() -> None:
     assert BOOKS == tuple(a.name for a in ARMS if not a.ab_experiment)
     assert "B3_198k_5m" in BOOKS
     assert not {"F01_all_2m", "F14_symnight_2m"} & set(BOOKS)
+
+
+# --- onchain-2026-09-18 -----------------------------------------------------
+
+BLUEY = "4qcmHsARuTi2ki1wcmNRdTmVqdUmN5LkU9DK4wsKpump"
+BLUEY_AT = datetime(2026, 9, 17, 14, 24, 46, 300000, tzinfo=UTC)
+
+
+def _reserves(sol: str, price: str) -> tuple[int, int]:
+    """A pool holding `sol` SOL with its token at `price` SOL: raw units."""
+    return int(D(sol) / D(price) * 10**6), int(D(sol) * 10**9)
+
+
+def _held():
+    from app.labs.graduation.held_watch import Held
+
+    return Held(mint=BLUEY, pool="BlueyPool", base_vault="Vb", quote_vault="Vq",
+                base_decimals=6, quote_decimals=9, quote_mint=config.WSOL_MINT)
+
+
+def _bluey(**kw) -> GradPaperPosition:
+    """Bluey on BASE_75k_5m as it was booked: bought at DexScreener's first
+    report, 0.000004773, while the pool already traded near 0.0000541."""
+    fields = {
+        "id": uuid.uuid4(), "book": "BASE_75k_5m", "mint": BLUEY, "symbol": "Bluey",
+        "opened_at": BLUEY_AT, "open_quote": D("0.000004773"), "open_fill": D("0.00000481"),
+        "notional_usd": D(100), "sol_usd_at_open": D("100"), "notional_quote": D("1"),
+        "tokens": D("207900.2079"), "peak_quote": D("0.0000563"),
+        "last_quote": D("0.0000563"), "liq_open_usd": D("105824"),
+        "liq_close_usd": D("198283"),
+        "closed_at": BLUEY_AT + timedelta(minutes=5, seconds=11),
+        "close_quote": D("0.0000563"), "close_fill": D("0.0000559"),
+        "close_reason": "max_hold", "pnl_quote": D("10.4415"), "pnl_usd": D("1044.16"),
+        "net_return": D("10.44157267")}
+    fields.update(kw)
+    return GradPaperPosition(**fields)
+
+
+def test_a_stale_entry_is_rebooked_at_the_pools_own_price() -> None:
+    from app.labs.graduation.restate import ONCHAIN, ONCHAIN_RULE, restate_one_onchain
+
+    position = _bluey()
+    audit = restate_one_onchain(position, held=_held(),
+                                entry=_reserves("980", "0.0000541"),
+                                exit=_reserves("1000", "0.0000563"), prior=None)
+    assert audit is not None and (audit.rule, audit.reason) == (ONCHAIN_RULE, ONCHAIN)
+    assert abs(position.open_quote / D("0.0000541") - 1) < D("0.001")
+    # +4.1% on the pool, less the round trip: a small win, not +1,044%.
+    assert D("0.01") < position.net_return < D("0.04")
+    assert audit.was_net_return == D("10.44157267"), "the first booking is kept"
+    assert position.excluded is None
+    assert audit.exit_source == "chain"
+    assert audit.exit_seen_at == BLUEY_AT + timedelta(minutes=5)
+
+
+def test_a_trade_an_earlier_rule_restated_keeps_its_first_booking() -> None:
+    from app.labs.graduation.models import GradPaperRestatement
+    from app.labs.graduation.restate import ONCHAIN_RULE, restate_one_onchain
+
+    position = _bluey(net_return=D("0.03"), pnl_usd=D("3.00"))
+    prior = GradPaperRestatement(
+        position_id=position.id, rule="exit-fees-2026-09-16", reason="fees",
+        was_open_fill=D("0.0000048"), was_tokens=D("208333"), was_pnl_usd=D("1050.00"),
+        was_net_return=D("10.5"))
+    audit = restate_one_onchain(position, held=_held(),
+                                entry=_reserves("980", "0.0000541"),
+                                exit=_reserves("1000", "0.0000563"), prior=prior)
+    assert audit is prior and audit.rule == ONCHAIN_RULE
+    assert (audit.was_net_return, audit.was_pnl_usd) == (D("10.5"), D("1050.00"))
+
+
+def test_a_drain_the_feed_missed_is_booked_and_counted() -> None:
+    """HLDM: booked -2.5% on a stale exit; its pool had been drained to about
+    a tenth of the entry price. Drains after 16 Sep count like any trade."""
+    from app.labs.graduation.restate import ONCHAIN, restate_one_onchain
+
+    position = _bluey(open_quote=D("0.0000541"), close_reason="stale_exit",
+                      net_return=D("-0.025"), pnl_usd=D("-2.50"))
+    audit = restate_one_onchain(position, held=_held(),
+                                entry=_reserves("980", "0.0000541"),
+                                exit=_reserves("30", "0.0000049"), prior=None)
+    assert audit.reason == ONCHAIN
+    assert position.net_return < D("-0.8")
+    assert position.excluded is None, "a drain after 16 Sep is counted"
+
+
+def test_a_trade_the_16_sep_what_if_left_out_stays_out() -> None:
+    from app.labs.graduation.restate import RUGGED, restate_one_onchain
+
+    position = _bluey(open_quote=D("0.0000541"), excluded=RUGGED)
+    audit = restate_one_onchain(position, held=_held(),
+                                entry=_reserves("980", "0.0000541"),
+                                exit=_reserves("3", "0.0000001"), prior=None)
+    assert position.excluded == RUGGED and audit.reason == "pool_collapsed"
+
+
+def test_a_reading_that_cannot_be_priced_leaves_the_trade_as_booked() -> None:
+    from app.labs.graduation.restate import restate_one_onchain
+
+    position = _bluey()
+    assert restate_one_onchain(position, held=_held(), entry=(0, 0),
+                               exit=_reserves("1000", "0.0000563"), prior=None) is None
+    assert position.net_return == D("10.44157267")
+    assert position.open_quote == D("0.000004773")
