@@ -35,8 +35,9 @@ from app.services.rpc.base import SolanaRPC
 FUNDING_PAGES = 2
 
 #: Money blocked for good, not for three hours: funders whose coins MOSTLY
-#: rugged, found by replaying BASE_75k_5m's trades on-chain (15-18 Sep 2026).
-#: Blocking them costs almost no winners. Karthik asked for it, 2026-09-18.
+#: rugged, found by replaying BASE_75k_5m's trades on-chain (15-18 Sep 2026),
+#: and the wallets that pulled a pool themselves. On the trades replayed, each
+#: cost less blocked than traded. Karthik asked for it, 2026-09-18.
 #:
 #: The big launch funders behind a single rug are deliberately NOT here: ZBCN's
 #: funded 65 of the book's coins and one rugged, and four more funded 26-44
@@ -51,6 +52,21 @@ ALWAYS_BLOCKED = frozenset({
     "5W84xUtSNhMutNbT8XdgWrMShMgmjxjbQKK7zebdLaSn",
     # The pool buyer of SUUB and SOLCAT, 18 Sep: 2 rugs of its 3 coins.
     "xZJADxiqWhDneh6wUtAfRM3gRRpj4tjw7V7ExTPXQ7z",
+    # The wallets that pulled the pool THEMSELVES in B3_198k_4m's two on-chain
+    # rugs: each put ~99% of its pool's SOL in at launch and took 82-96% of it
+    # back in one sale ~2 min after the buy. Karthik asked, 2026-09-18.
+    # ZBCN (17 Sep, -$46.38 on the wallet): its pool buyer, still launching
+    # (26 of the book's 379 trades, -$11 at $25 with its dump counted), and
+    # the one-shot account that funded it.
+    "GBdQ1Vz6Mw2Nx5TLs61KS3GsJBwccKGj9zxZZD4FWuaK",
+    "6JqtR1h3QZ5BumnbKhtUXPsFaZcrRrBoi5ae3HLB8iVT",
+    # WWR (18 Sep, -$9.92): its pool buyer and its curve buyer, both emptied
+    # since. Their funders are left out on purpose: 34nDrS holds ~2,950 SOL and
+    # sends 1,000 transactions in 6 minutes (an exchange), 96UiVw seeded wallets
+    # at 1,000 in 12 minutes (a service). Blocking either could refuse coins
+    # that have nothing to do with WWR.
+    "6cb6cF9EeDvjuerUR3h9zWNFL3bKmNnvnomJ24qhKUJ7",
+    "8EdVxQ78Y4DQJsqSmnkH1ySPGu1sqab8WAYL8mgFCt9j",
 })
 
 
