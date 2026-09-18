@@ -299,6 +299,13 @@ HELD_TRUST_S = _int("LAB_GRADUATION_HELD_TRUST_S", 30)
 #: an honest price 17% away on a fresh graduate. Below is never refused — that
 #: is a rug, which DexScreener can lag for minutes. See `MarkWriter`.
 HELD_SCALE_BAND = _dec("LAB_GRADUATION_HELD_SCALE_BAND", "2")
+#: A pool-open buy is priced off the pool's own vaults, not DexScreener's first
+#: report, which can predate the pool's first big buy: Bluey (2026-09-17) was
+#: booked at +1,044% because the feed's first price sat 11x under where the pool
+#: already traded; on-chain it made +4%. The pool's price may differ from the
+#: feed's by up to this factor either way before a scale error is the likelier
+#: explanation and the buy is skipped. Wide on purpose: 11x was the market.
+PAPER_ENTRY_CHAIN_BAND = _dec("LAB_GRADUATION_PAPER_ENTRY_CHAIN_BAND", "50")
 #: Keepalive on the socket, seconds. A half-open connection reads exactly like
 #: a quiet market; a missed pong turns it into a drop within two of these.
 HELD_PING_S = _int("LAB_GRADUATION_HELD_PING_S", 5)

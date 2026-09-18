@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.db.session import SessionFactory
-from app.labs.graduation import config
+from app.labs.graduation import config, sources
 from app.labs.graduation.features import FeatureEngine
 from app.labs.graduation.models import GradCurveSample, GradToken
 from app.labs.graduation.tournament import Tournament
@@ -112,7 +112,8 @@ async def paper_tick() -> dict[str, Any]:
                 return {"skipped": "graduation_paper_tick_running"}
             # Every arm, one clock, one commit: they see the same graduations
             # at the same instant, which is what makes them comparable.
-            result = await Tournament(session, now=datetime.now(UTC)).tick()
+            result = await Tournament(session, now=datetime.now(UTC),
+                                      pool_reader=sources.pool_now).tick()
             await session.commit()
             return result
     except Exception:  # containment: never raise into the beat
