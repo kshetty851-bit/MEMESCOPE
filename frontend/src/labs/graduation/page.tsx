@@ -830,6 +830,17 @@ function LeaderboardPanel() {
             ) : null}
           </p>
         ) : null}
+        {data.restated_rule.startsWith("onchain") ? (
+          <p className="max-w-[78ch] rounded-lg border border-accent/40 bg-accent/[0.05] p-3 text-xs leading-relaxed text-ink-dim">
+            <b className="text-ink">Re-priced 18 Sep.</b> BASE_75k_5m had
+            been buying at DexScreener&apos;s first report on each new pool,
+            which can come before the pool&apos;s first big buy. Its closed
+            trades are rebooked at the pool&apos;s own prices &mdash; the buy
+            at its reserves when taken, the sale when it was due &mdash; and
+            new trades are priced that way. Bluey (17 Sep) had been booked at
+            +1,044%; its pool says +4%.
+          </p>
+        ) : null}
         {/* Verdict. The headline is the finding; the terms are underneath. */}
         <div
           className={`grad-row rounded-lg border p-4 ${

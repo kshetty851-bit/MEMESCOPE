@@ -129,3 +129,115 @@ async def test_an_absent_account_is_none_not_missing() -> None:
     got = await rpc.fetch(MINTS)
     assert set(got) == set(MINTS)
     assert all(v is None for v in got.values())
+
+
+# --- the pool's own reserves: now, and at a past moment ----------------------
+
+def _swap(pool: str, mint: str, base: int, quote: int) -> dict:
+    """A swap's record: the pool's two vaults, and a trader's account of the
+    same token, which must not be mistaken for the pool's."""
+    wsol = "So11111111111111111111111111111111111111112"
+    return {"meta": {"postTokenBalances": [
+        {"owner": "Trader", "mint": mint, "uiTokenAmount": {"amount": "5"}},
+        {"owner": pool, "mint": mint, "uiTokenAmount": {"amount": str(base)}},
+        {"owner": pool, "mint": wsol, "uiTokenAmount": {"amount": str(quote)}}]}}
+
+
+def test_swap_reserves_reads_the_pools_own_vaults() -> None:
+    from app.labs.graduation.sources import swap_reserves
+
+    assert swap_reserves(_swap("Pool", "Mint", 900, 45), mint="Mint", pool="Pool") == (900, 45)
+    assert swap_reserves({"meta": {}}, mint="Mint", pool="Pool") is None
+
+
+async def test_reserves_at_is_the_last_swap_at_or_before_the_moment() -> None:
+    from datetime import UTC, datetime
+
+    from app.labs.graduation.sources import reserves_at
+
+    at = datetime(2026, 9, 17, 14, 29, 46, tzinfo=UTC)
+    asked: list[dict] = []
+
+    class Helius:
+        async def call(self, method, params):
+            assert method == "getTransactionsForAddress" and params[0] == "Pool"
+            opts = params[1]
+            asked.append(opts)
+            assert opts["sortOrder"] == "desc"
+            assert opts["filters"]["blockTime"] == {"lte": int(at.timestamp())}
+            if "paginationToken" not in opts:  # a page of transfers, then more
+                return {"data": [{"meta": {"postTokenBalances": []}}],
+                        "paginationToken": "next"}
+            return {"data": [_swap("Pool", "Mint", 700, 60), _swap("Pool", "Mint", 1, 1)]}
+
+    assert await reserves_at(Helius(), mint="Mint", pool="Pool", at=at) == (700, 60)
+    assert len(asked) == 2
+
+
+async def test_a_refused_pool_read_is_asked_again(monkeypatch) -> None:
+    """The public node refused a third of these reads on 2026-09-18; a refusal
+    costs the entry a tick, so the read is tried again first."""
+    from app.labs.graduation import held_watch, sources
+
+    tries: list[str] = []
+
+    class Stream:
+        def __init__(self, url=None):
+            pass
+
+        async def resolve(self, mint, pool):
+            tries.append(mint)
+            if len(tries) < 3:
+                raise ConnectionError("refused")
+            return held_watch.Held(mint=mint, pool=pool, base_vault="Vb",
+                                   quote_vault="Vq", base_decimals=6, quote_decimals=9)
+
+        async def _read(self, helds):
+            for h in helds:
+                h.apply("base", 10**12, 1)
+                h.apply("quote", 10**11, 1)
+
+    async def no_wait(_s):
+        return None
+
+    monkeypatch.setattr(sources, "HeldVaultStream", Stream)
+    monkeypatch.setattr(sources.asyncio, "sleep", no_wait)
+    held = await sources.pool_now("Mint", "Pool")
+    from decimal import Decimal
+
+    assert held is not None and held.price() == Decimal("0.0001")
+    assert len(tries) == 3
+
+    tries.clear()
+
+    class Down(Stream):
+        async def resolve(self, mint, pool):
+            tries.append(mint)
+            raise ConnectionError("refused")
+
+    monkeypatch.setattr(sources, "HeldVaultStream", Down)
+    assert await sources.pool_now("Mint", "Pool") is None
+    assert len(tries) == sources.POOL_READ_ATTEMPTS
+
+
+async def test_reserves_after_is_the_first_swap_at_or_after_the_moment() -> None:
+    """FAIR (14 Sep): drained four seconds after its exit was due. The book
+    prices an exit at the first mark at or after due, so the drain is it."""
+    from datetime import UTC, datetime
+
+    from app.labs.graduation.sources import reserves_after
+
+    at = datetime(2026, 9, 14, 19, 14, 46, tzinfo=UTC)
+
+    class Helius:
+        async def call(self, method, params):
+            opts = params[1]
+            assert opts["sortOrder"] == "asc"
+            assert opts["filters"]["blockTime"] == {"gte": int(at.timestamp()),
+                                                     "lte": int(at.timestamp()) + 600}
+            return {"data": [{"meta": {}}, _swap("Pool", "Mint", 9000, 2),
+                             _swap("Pool", "Mint", 1, 1)]}
+
+    assert await reserves_after(Helius(), mint="Mint", pool="Pool", at=at,
+                                within_s=600) == (9000, 2)
+
