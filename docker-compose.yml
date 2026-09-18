@@ -329,6 +329,10 @@ x-backend-env: &backend-env
   # Refuse a token whose NAME has already rugged (see config.py for the
   # measurement that does not support it and whose wallet it is).
   REAL_WALLET_BLOCK_RUGGED_SYMBOLS: ${REAL_WALLET_BLOCK_RUGGED_SYMBOLS:-false}
+  # The buy-time holder check. Here and not only in config.py: a value the
+  # anchor does not name never reaches a container.
+  REAL_WALLET_HOLDER_GATE_ENABLED: ${REAL_WALLET_HOLDER_GATE_ENABLED:-false}
+  REAL_WALLET_MAX_HOLDER_PCT: ${REAL_WALLET_MAX_HOLDER_PCT:-10}
   REAL_WALLET_EXECUTION_ENABLED: ${REAL_WALLET_EXECUTION_ENABLED:-false}
   REAL_WALLET_AUTOTRADE_ENABLED: ${REAL_WALLET_AUTOTRADE_ENABLED:-false}
   REAL_WALLET_NETWORK: ${REAL_WALLET_NETWORK:-devnet}

@@ -462,3 +462,132 @@ def test_every_rpc_implementation_can_read_a_token_supply():
         own = inspect.getsource(impl.get_token_supply)
         assert own != base, f"{impl.__name__} inherits the refusing default"
         assert "getTokenSupply" in own, impl.__name__
+
+
+# --- who already holds the coin, at the buy ------------------------------------
+
+SUPPLY_RAW = 10**15  # pump.fun: 1B tokens, 6 decimals
+
+
+def _pct(p: str) -> int:
+    return int(Decimal(p) * SUPPLY_RAW / 100)
+
+
+class _Helius:
+    """One coin's chain. `bags` are (owner, raw amount, owned by a program)."""
+
+    def __init__(self, bags: list[tuple[str, int, bool]], *, fail: bool = False,
+                 mint: str = MINT) -> None:
+        self.bags, self.fail, self.started, self.mint = bags, fail, 0, mint
+
+    async def start(self) -> None:
+        self.started += 1
+
+    async def close(self) -> None: ...
+
+    async def call(self, method: str, params: list) -> dict:
+        assert self.started, "holder read before start()"
+        if self.fail:
+            raise RpcError("getTokenLargestAccounts rate limited")
+        if method == "getTokenLargestAccounts":
+            return {"value": [{"address": f"acct{i}", "amount": str(a)}
+                              for i, (_, a, _) in enumerate(self.bags)]}
+        keys = params[0]
+        if keys[0] == self.mint:  # the mint, then each token account
+            return {"value": [{"data": {"parsed": {"info": {"supply": str(SUPPLY_RAW)}}}}]
+                    + [{"data": {"parsed": {"info": {"owner": o}}}} for o, _, _ in self.bags]}
+        program = {o: p for o, _, p in self.bags}
+        return {"value": [{"owner": PUMPSWAP_PROGRAM if program[k]
+                           else "11111111111111111111111111111111"} for k in keys]}
+
+
+async def _holder_decision(
+    monkeypatch: pytest.MonkeyPatch, chain: _Helius, *, enabled: bool = True
+) -> service.SafetyDecision:
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "REAL_WALLET_HOLDER_GATE_ENABLED", enabled)
+    monkeypatch.setattr(settings, "REAL_WALLET_MAX_HOLDER_PCT", Decimal("10"))
+    monkeypatch.setattr(service, "TokenRepository",
+                        lambda _: SimpleNamespace(get_by_mint=lambda __: _return(_token())))
+    monkeypatch.setattr(service, "MarketSnapshotRepository",
+                        lambda _: SimpleNamespace(latest_for_mint=lambda __: _return(_snapshot())))
+    gate = _Gate(_inspection(), _Quotes(_quote(side="entry", output="100000000"),
+                                        _quote(side="exit", output="98000000")))
+    gate._holders_rpc = chain  # type: ignore[assignment]
+    return await gate.evaluate(mint_address=MINT, trade_size_usd=Decimal("100"), now=NOW)
+
+
+async def test_a_wallet_already_holding_a_sixth_of_the_coin_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SUUB, 2026-09-18: one wallet held 16.94% when the wallet bought, beside a
+    pool of 3.54%, did not move for three minutes, then dumped for -82%."""
+    chain = _Helius([("Whale", _pct("16.94"), False), ("PoolPDA", _pct("3.54"), True),
+                     ("Small", _pct("0.40"), False)])
+    decision = await _holder_decision(monkeypatch, chain)
+    assert decision.decision == "REJECT"
+    assert decision.reason_codes == (Reason.HOLDER_TOO_LARGE,)
+    assert decision.provenance["holders"]["top_pct"] == "16.94"
+    assert decision.provenance["holders"]["pool_pct"] == "3.54"
+
+
+async def test_holders_under_the_line_do_not_refuse(monkeypatch: pytest.MonkeyPatch) -> None:
+    chain = _Helius([("Holder", _pct("7.01"), False), ("PoolPDA", _pct("3.52"), True)])
+    decision = await _holder_decision(monkeypatch, chain)
+    assert decision.decision == "ALLOW", decision.reason_codes
+
+
+async def test_an_unreadable_holder_list_refuses(monkeypatch: pytest.MonkeyPatch) -> None:
+    decision = await _holder_decision(monkeypatch, _Helius([], fail=True))
+    assert decision.reason_codes == (Reason.HOLDERS_UNREADABLE,)
+
+
+async def test_the_holder_check_is_off_unless_switched_on(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chain = _Helius([("Whale", _pct("40"), False)])
+    decision = await _holder_decision(monkeypatch, chain, enabled=False)
+    assert decision.decision == "ALLOW"
+    assert chain.started == 0, "Helius asked while the check is off"
+
+
+async def test_the_pool_is_found_by_its_owner_not_an_address(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The pool is the biggest account on a fresh coin. Counted as a wallet it
+    would refuse every buy; it is told apart by being a program's account."""
+    chain = _Helius([("PoolPDA", _pct("45"), True), ("Holder", _pct("4"), False)])
+    decision = await _holder_decision(monkeypatch, chain)
+    assert decision.decision == "ALLOW", decision.reason_codes
+
+
+async def test_one_wallets_several_accounts_are_one_bag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chain = _Helius([("Whale", _pct("6"), False), ("Whale", _pct("6"), False),
+                     ("PoolPDA", _pct("3"), True)])
+    decision = await _holder_decision(monkeypatch, chain)
+    assert decision.reason_codes == (Reason.HOLDER_TOO_LARGE,)
+
+
+def test_bags_split_evenly_are_counted_as_a_bundle() -> None:
+    """16 Sep: pairs and fours of near-identical bags, sold together."""
+    from app.real_wallet_safety.holders import Holders
+
+    h = Holders(supply=SUPPLY_RAW, pool=_pct("3.3"), latency_ms=1,
+                wallets=(("A", _pct("1.26")), ("B", _pct("1.259")), ("C", _pct("0.30"))))
+    assert h.pct(h.bundle) == Decimal("2.519")
+    assert Holders(supply=SUPPLY_RAW, pool=None, latency_ms=1,
+                   wallets=(("A", _pct("2")), ("B", _pct("1.5")))).bundle == 0
+
+
+def test_the_pool_rules_only_refuse_when_given_a_line() -> None:
+    from app.real_wallet_safety.holders import Holders, reasons
+
+    h = Holders(supply=SUPPLY_RAW, pool=_pct("1.5"), latency_ms=1,
+                wallets=(("A", _pct("7")), ("B", _pct("3")), ("C", _pct("2.99"))))
+    assert reasons(h, max_pct=Decimal("10")) == []
+    assert reasons(h, max_pct=Decimal("10"), max_vs_pool=Decimal("1"),
+                   max_bundle_vs_pool=Decimal("1")) == [
+        "HOLDER_BIGGER_THAN_POOL", "BUNDLE_BIGGER_THAN_POOL"]

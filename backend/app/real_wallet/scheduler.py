@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import timedelta
 from typing import Any
 
 from sqlalchemy import func, select
@@ -11,15 +12,19 @@ from app.core.config import settings
 from app.core.events import publish_live_update
 from app.core.logging import get_logger
 from app.db.session import SessionFactory
+from app.labs.graduation import live_spec
+from app.labs.graduation.models import GradPaperPosition
 from app.models.lab import LabDecision
-from app.models.real_wallet_execution import RealWalletLiveIntent
-from app.models.real_wallet_execution import RealWalletPosition
+from app.models.real_wallet_execution import RealWalletLiveIntent, RealWalletPosition
+from app.models.research_data import HolderSnapshot
 from app.paper.service import utcnow
 from app.real_wallet.autotrade import AutotradeSwitchService
 from app.real_wallet.driver import RealWalletDriver
 from app.real_wallet.dry_run import RealWalletDryRunService
 from app.real_wallet.executor import RealWalletExecutor
 from app.real_wallet.exit_driver import RealWalletExitDriver
+from app.real_wallet_safety import holders
+from app.services.rpc.registry import get_rpc
 from app.workers.celery_app import celery_app
 from app.workers.runtime import run_async
 
@@ -517,3 +522,55 @@ async def _real_wallet_trade_alerts() -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001 — an alert failure must never escalate
         logger.warning("real_wallet_trade_alerts_error", error=type(exc).__name__)
         return {"error": type(exc).__name__}
+
+
+@celery_app.task(name="app.real_wallet.scheduler.real_wallet_record_entry_holders")
+def real_wallet_record_entry_holders() -> dict[str, Any]:
+    """Who held each coin when the paper book bought it — every signal, the
+    wallet on or off.
+
+    The holder gate refuses a buy when one wallet already holds too much. This
+    measures what that costs: the same reading for every entry of the book the
+    wallet copies, joined later to how the paper trade ended, says how many
+    winners the line would also have refused. Read within ~10s of the entry,
+    where the wallet's own read would land.
+    """
+    return run_async(_record_entry_holders())
+
+
+async def _record_entry_holders() -> dict[str, Any]:
+    if not settings.HELIUS_API_KEY:
+        return {"skipped": "no_helius_key"}
+    now = utcnow()
+    try:
+        async with SessionFactory() as session:
+            seen = select(HolderSnapshot.mint_address).where(
+                HolderSnapshot.context == "paper_entry",
+                HolderSnapshot.captured_at >= now - timedelta(minutes=10))
+            mints = list((await session.scalars(
+                select(GradPaperPosition.mint).where(
+                    GradPaperPosition.book == live_spec.PAPER_BOOKS["G-BAS-5M"],
+                    GradPaperPosition.opened_at >= now - timedelta(seconds=90),
+                    GradPaperPosition.mint.not_in(seen))
+                .distinct().limit(10))).all())
+            if not mints:
+                return {"recorded": 0}
+            rpc = get_rpc("helius")
+            await rpc.start()
+            try:
+                for mint in mints:
+                    view: holders.Holders | None = None
+                    failure: str | None = None
+                    try:
+                        view = await holders.read(rpc, mint)
+                    except Exception as exc:  # a failed read is a row too
+                        failure = type(exc).__name__
+                    session.add(holders.to_row(view, mint, "paper_entry",
+                                               at=utcnow(), failure=failure))
+            finally:
+                await rpc.close()
+            await session.commit()
+    except Exception:
+        logger.exception("real_wallet_record_entry_holders_failed")
+        return {"failed": True}
+    return {"recorded": len(mints)}
