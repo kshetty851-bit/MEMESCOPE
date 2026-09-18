@@ -3,6 +3,8 @@ time anything did."""
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 from app.real_wallet_safety import sources
 
 
@@ -38,6 +40,9 @@ async def test_the_funder_is_who_paid_the_most_the_first_time_the_wallet_was_pai
         _tx({"Later": (9_000_000_000, 1_000_000_000), "Wallet": (0, 8_000_000_000)}),
     ]])
     assert await sources.funder(history, "Wallet") == "Operator"
+    history.asked.clear()
+    # ...and how much it put in: 25 SOL, what the wallet received.
+    assert await sources.funding(history, "Wallet") == ("Operator", Decimal("25"))
 
 
 async def test_the_search_turns_the_page_and_stops_after_two() -> None:
@@ -59,5 +64,7 @@ async def test_trace_keeps_the_wallets_and_drops_the_untraceable_funders() -> No
             return {"data": []}
 
     found = await sources.trace(Chain(), ["Traced", "Silent"])
-    assert found == sources.Sources(wallets=("Traced", "Silent"), funders=("Operator",))
+    assert found == sources.Sources(wallets=("Traced", "Silent"), funders=("Operator",),
+                                    funded_sol=(Decimal("1E-8"), None))
+    assert found.as_json()["funded_sol"] == [0.0, None]
     assert found.ids() == {"Traced", "Silent", "Operator"}
