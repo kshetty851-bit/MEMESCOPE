@@ -26,6 +26,7 @@ from solders.message import MessageV0
 from solders.pubkey import Pubkey
 from solders.signature import Signature
 from solders.transaction import VersionedTransaction
+from sqlalchemy.orm.attributes import set_committed_value
 
 from app.core.config import settings
 from app.labs.graduation import live_decisions
@@ -37,7 +38,10 @@ from app.real_wallet.driver import RealWalletDriver
 from app.real_wallet.executor import RealWalletExecutor
 from app.real_wallet.exit_driver import RealWalletExitDriver
 from app.real_wallet.live_readiness import ExecutionState, LiveSubmissionGuard
-from app.real_wallet.live_repository import LiveIntentRepository
+from app.real_wallet.live_repository import (
+    LiveIntentRepository,
+    PositionExitAlreadyRequestedError,
+)
 from app.real_wallet.reconciliation import ChainOutcome, ChainReceipt
 from app.real_wallet.sol_price import SolUsdPrice
 
@@ -508,3 +512,39 @@ async def test_the_wallet_reports_every_trade_since_its_first(db_session):
     assert close(summary["net_pnl_usd"], net)
     assert (summary["won"], summary["lost"]) == ((1, 0) if net > 0 else (0, 1))
     assert close(summary["return_pct"], net / (Decimal(2) * per_sol) * 100)
+
+
+async def test_a_sell_in_flight_is_not_replaced_by_a_pass_holding_a_stale_copy(db_session):
+    """Two exit passes fired at the same five-minute mark on 2026-09-18. The
+    second had loaded the position before the first bound its sell, and its row
+    lock handed back that stale in-memory copy: it saw no exit in flight, made
+    a second sell and re-pointed the position at it. The first sell had
+    already landed - 2,492.8 tokens out, 0.1055 SOL back - and could no longer
+    be booked (`sell_position_binding_invalid`), so the position read OPEN for
+    hours while the wallet retried selling tokens it no longer held."""
+    now = datetime.now(UTC)
+    position = await _bought(db_session, at=now, price=_usd(now))
+    repo = LiveIntentRepository(db_session)
+    first = await repo.create_sell_intent(
+        idempotency_key=f"v6exit:{position.id}", position_id=position.id,
+        strategy_id="G-B3-5M", strategy_version="test", wallet_public_key=WALLET)
+    await db_session.flush()  # the other pass's commit: the row says `first`
+    # This pass's view: loaded before `first` was bound, and clean, so nothing
+    # here will write it back.
+    set_committed_value(position, "exit_intent_id", None)
+
+    with pytest.raises(PositionExitAlreadyRequestedError):
+        await repo.create_sell_intent(
+            idempotency_key=f"v6exit:{position.id}:2", position_id=position.id,
+            strategy_id="G-B3-5M", strategy_version="test", wallet_public_key=WALLET,
+            replaces=None)
+
+    # And the sale that actually landed is the one that closes the position.
+    await _to_submitted(repo, first, now)
+    closed = await repo.confirm_settlement(
+        intent=first, signature=first.transaction_signature or "",
+        actual_input_amount_raw=TOKENS_RAW, actual_input_decimals=6,
+        actual_output_amount_raw=RECEIVED, actual_output_decimals=9,
+        network_fee_lamports=FEE, at=now, sol_price=_usd(now))
+    assert closed.status == "CLOSED"
+    assert closed.exit_transaction_signature == first.transaction_signature

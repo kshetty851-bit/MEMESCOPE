@@ -440,10 +440,19 @@ class LiveIntentRepository:
         Only that intent may be replaced, and only while the position still
         points at it, so two passes racing to retry cannot both win.
         """
+        # Flushed, then read fresh, or the lock guards nothing. A position this
+        # session already loaded comes back as its in-memory copy, not the row
+        # just locked: on 2026-09-18 an exit pass holding a copy from before
+        # another pass bound its sell saw no exit in flight, made a second one
+        # and re-pointed the position — and the first, which had landed, could
+        # never be booked. The flush comes first because autoflush is off and
+        # `populate_existing` would otherwise discard this session's own writes.
+        await self._session.flush()
         position = await self._session.scalar(
             select(RealWalletPosition)
             .where(RealWalletPosition.id == position_id)
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
         if position is None or position.status != "OPEN":
             raise PositionExitAlreadyRequestedError("real_position_not_open")
@@ -740,10 +749,13 @@ class LiveIntentRepository:
     ) -> RealWalletPosition:
         if intent.position_id is None:
             raise SettlementEvidenceError("sell_missing_position")
+        # Flushed, then read fresh: see `create_sell_intent`.
+        await self._session.flush()
         position = await self._session.scalar(
             select(RealWalletPosition)
             .where(RealWalletPosition.id == intent.position_id)
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
         if (
             position is None
