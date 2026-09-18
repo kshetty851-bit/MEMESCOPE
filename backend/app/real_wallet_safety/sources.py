@@ -58,12 +58,21 @@ ALWAYS_BLOCKED = frozenset({
 class Sources:
     wallets: tuple[str, ...]
     funders: tuple[str, ...]
+    #: SOL each wallet got in that first payment, in `wallets` order; None
+    #: where it could not be traced. Recorded, not yet judged: on BASE's
+    #: replayed trades the coins whose big wallets were funded with under
+    #: 100 SOL held 15 of 23 rugs (-$177 at $20 a trade) while the rest made
+    #: money every day - but 16 Sep alone was -$168 of it, so it is being
+    #: measured forward before it is allowed to refuse anything.
+    funded_sol: tuple[Decimal | None, ...] = ()
 
     def ids(self) -> set[str]:
         return set(self.wallets) | set(self.funders)
 
-    def as_json(self) -> dict[str, list[str]]:
-        return {"wallets": list(self.wallets), "funders": list(self.funders)}
+    def as_json(self) -> dict[str, list]:
+        return {"wallets": list(self.wallets), "funders": list(self.funders),
+                "funded_sol": [None if x is None else float(round(x, 4))
+                               for x in self.funded_sol]}
 
 
 def _keys(tx: dict[str, Any]) -> list[str]:
@@ -72,9 +81,16 @@ def _keys(tx: dict[str, Any]) -> list[str]:
 
 
 async def funder(rpc: SolanaRPC, wallet: str) -> str | None:
-    """Who paid SOL into `wallet` the first time it got any: the account whose
-    balance fell most in that transaction. None when its oldest transactions
-    never paid it (a wallet that only ever spent is not one we can trace)."""
+    """Who paid SOL into `wallet` the first time it got any; see `funding`."""
+    found = await funding(rpc, wallet)
+    return found[0] if found else None
+
+
+async def funding(rpc: SolanaRPC, wallet: str) -> tuple[str, Decimal] | None:
+    """Who paid SOL into `wallet` the first time it got any - the account whose
+    balance fell most in that transaction - and how much SOL `wallet` got.
+    None when its oldest transactions never paid it (a wallet that only ever
+    spent is not one we can trace)."""
     token: str | None = None
     for _ in range(FUNDING_PAGES):
         opts: dict[str, Any] = {
@@ -96,7 +112,7 @@ async def funder(rpc: SolanaRPC, wallet: str) -> str | None:
             span = range(min(len(keys), len(pre), len(post)))
             paid = [(pre[j] - post[j], keys[j]) for j in span if j != i and pre[j] > post[j]]
             if paid:
-                return max(paid)[1]
+                return max(paid)[1], Decimal(post[i] - pre[i]) / 10**9
         token = page.get("paginationToken")
         if not token:
             break
@@ -104,9 +120,10 @@ async def funder(rpc: SolanaRPC, wallet: str) -> str | None:
 
 
 async def trace(rpc: SolanaRPC, wallets: list[str]) -> Sources:
-    """The given wallets and whoever funded each."""
-    found = await asyncio.gather(*(funder(rpc, w) for w in wallets))
-    return Sources(wallets=tuple(wallets), funders=tuple(f for f in found if f))
+    """The given wallets, whoever funded each, and with how much."""
+    found = await asyncio.gather(*(funding(rpc, w) for w in wallets))
+    return Sources(wallets=tuple(wallets), funders=tuple(f[0] for f in found if f),
+                   funded_sol=tuple(None if f is None else f[1] for f in found))
 
 
 async def recent_rug_ids(

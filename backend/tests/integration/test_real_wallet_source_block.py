@@ -92,5 +92,6 @@ async def test_every_entry_records_who_funded_its_big_wallets(
     async with factory() as s:
         row = await s.scalar(select(HolderSnapshot).where(HolderSnapshot.mint_address == mint))
     assert row.accounts["sources"] == {"wallets": ["CurveBuyer", "PoolBuyer"],
-                                       "funders": ["FunderA", "FunderB"]}
+                                       "funders": ["FunderA", "FunderB"],
+                                       "funded_sol": [1.0, 1.0]}
     assert row.largest_nonpool_pct == Decimal("79.31")

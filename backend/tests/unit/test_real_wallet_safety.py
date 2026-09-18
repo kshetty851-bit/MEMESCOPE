@@ -654,7 +654,8 @@ async def test_a_coin_funded_by_the_money_behind_a_recent_rug_is_refused(
     assert decision.reason_codes == (Reason.LINKED_TO_RECENT_RUG,)
     assert decision.provenance["sources"] == {
         "recent_rug_ids": 2, "wallets": ["CurveBuyer", "PoolBuyer"],
-        "funders": ["FunderA", "FunderB"], "matched": ["FunderB"]}
+        "funders": ["FunderA", "FunderB"], "funded_sol": [1.0, 1.0],
+        "matched": ["FunderB"]}
 
 
 async def test_a_wallet_that_was_itself_behind_a_recent_rug_is_refused(
