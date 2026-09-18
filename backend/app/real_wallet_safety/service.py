@@ -16,7 +16,12 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.labs.graduation.models import GradPaperPosition, GradToken
+from app.labs.graduation.models import (
+    SOURCE_HELD_WS,
+    GradPaperPosition,
+    GradPostgradSample,
+    GradToken,
+)
 from app.models.market import TokenMarketSnapshot, TradingStatus
 from app.models.real_wallet_execution import RealWalletPosition
 from app.models.real_wallet_safety import RealWalletSafetyEvaluation
@@ -66,6 +71,10 @@ _HUNDRED = Decimal(100)
 #: token is real is somebody else's evidence, and `slot > 0` below is what
 #: makes that distinction load-bearing rather than decorative.
 VERIFIED_DISCOVERY_PROGRAMS = frozenset({PUMP_FUN_PROGRAM, PUMPSWAP_PROGRAM})
+
+#: How recent the graduation lab's own read of a pool's vaults must be to stand
+#: as the price a quote is judged against (the lab's own `HELD_TRUST_S`).
+POOL_PRICE_TRUST_S = 30
 
 
 class Reason:
@@ -193,6 +202,12 @@ class RealWalletSafetyGate:
             reasons.append(Reason.SYMBOL_RUGGED_BEFORE)
 
         market_age, price, liquidity = self._market_reasons(snapshot, evaluated_at, reasons)
+        pool_price = await self._pool_price(mint_address, snapshot, evaluated_at)
+        if pool_price is not None:
+            provenance = {**provenance,
+                          "feed_price_usd": None if price is None else str(price),
+                          "pool_price_usd": str(pool_price)}
+            price = pool_price
         ratio = None if liquidity is None or liquidity <= 0 else trade_size_usd / liquidity
         if (
             ratio is not None
@@ -507,6 +522,40 @@ class RealWalletSafetyGate:
         if ratio > settings.REAL_WALLET_SAFETY_MAX_SUPPLY_RATIO:
             reasons.append(Reason.POSITION_TOO_LARGE_FOR_SUPPLY)
         return supply, ratio
+
+    async def _pool_price(self, mint: str, snapshot: TokenMarketSnapshot | None,
+                          at: datetime) -> Decimal | None:
+        """The pool's own price in dollars, from the graduation lab's live read of
+        its vaults, when there is one this recent; None otherwise.
+
+        A feed snapshot can carry a price from before a move: DexScreener stamps
+        a row with its FETCH time, and the price in it is ~27s older. GitHub,
+        2026-09-18 18:14: a 7s-old snapshot still showed the price from before
+        an 88% crash; the vaults, read 3s earlier, had the real one. Jupiter's
+        quote matched the vaults, the gate compared it with the feed and refused
+        EXECUTION_PRICE_DEVIATION_TOO_HIGH, and the paper book the wallet copies
+        made +346% on that coin. So a quote is judged against the pool's own
+        price when the lab is reading it - it reads every coin its book holds -
+        and against the feed's otherwise. A quote far from the POOL is still
+        refused, which is what the check is for.
+
+        Dollars through the feed's own SOL rate (price_usd over price_native),
+        which a stale print still carries correctly.
+        """
+        feed_usd = None if snapshot is None else snapshot.price_usd
+        feed_native = None if snapshot is None else getattr(snapshot, "price_native", None)
+        if not feed_usd or not feed_native or feed_usd <= 0 or feed_native <= 0:
+            return None
+        native = await self._session.scalar(
+            select(GradPostgradSample.price_native)
+            .where(GradPostgradSample.mint == mint,
+                   GradPostgradSample.source == SOURCE_HELD_WS,
+                   GradPostgradSample.price_native > 0,
+                   GradPostgradSample.ts <= at,
+                   GradPostgradSample.ts >= at - timedelta(seconds=POOL_PRICE_TRUST_S))
+            .order_by(GradPostgradSample.ts.desc())
+            .limit(1))
+        return None if native is None else native * feed_usd / feed_native
 
     @staticmethod
     def _market_reasons(
