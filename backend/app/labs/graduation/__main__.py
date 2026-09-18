@@ -8,6 +8,7 @@
     prune                   one prune pass
     health                  recorder_health() as JSON
     curve --mint MINT       derive the PDA, read the account, decode it
+    seed-operators --file F load the Tape Lab's operator records (dry run without --apply)
     progress --tokens N     what N virtual token reserves means, as a percentage
 
 Exists so the lab is runnable without registering anything in the platform's
@@ -142,6 +143,51 @@ def _progress(tokens: str) -> dict[str, str]:
     }
 
 
+def _operator_rows(path: str) -> list[dict[str, Any]]:
+    """The Tape Lab's export (`python -m app.labs.tape export-operators`): one
+    graduation per line, epoch seconds, ids space-separated, rugged 0/1."""
+    import csv
+    from datetime import UTC, datetime
+
+    at = lambda v: datetime.fromtimestamp(int(v), UTC) if v else None  # noqa: E731
+    rows = []
+    with pathlib.Path(path).open() as fh:
+        read = list(csv.DictReader(fh))
+    for r in read:
+        rows.append({
+            "mint": r["mint"], "pool": r["pool"], "migrated_at": at(r["migrated_at"]),
+            "entry_at": at(r["entry_at"]), "price_native": Decimal(r["price_native"]),
+            "depth_usd": Decimal(r["depth_usd"]) if r["depth_usd"] else None,
+            "ids": r["ids"].split() or None,
+            "label_due_at": at(r["labelled_at"]),
+            "rugged": None if r["rugged"] == "" else r["rugged"] == "1",
+            "labelled_at": at(r["labelled_at"]), "source": "tape"})
+    return rows
+
+
+async def _seed_operators(path: str, apply: bool) -> dict[str, Any]:
+    """Load operator records harvested before the fast arms existed, so the
+    trusted arm knows the operators of the last weeks from its first tick.
+    Existing rows are never overwritten."""
+    from sqlalchemy import func, select
+    from sqlalchemy.dialects.postgresql import insert
+
+    from app.labs.graduation.models import GradOperator
+
+    rows = _operator_rows(path)
+    async with SessionFactory() as session:
+        before = await session.scalar(select(func.count()).select_from(GradOperator))
+        if apply:
+            for i in range(0, len(rows), 1000):
+                await session.execute(insert(GradOperator).values(rows[i:i + 1000])
+                                      .on_conflict_do_nothing(index_elements=["mint"]))
+            await session.commit()
+        after = await session.scalar(select(func.count()).select_from(GradOperator))
+    return {"file_rows": len(rows), "labelled": sum(r["rugged"] is not None for r in rows),
+            "rugged": sum(bool(r["rugged"]) for r in rows), "applied": apply,
+            "table_rows_before": before, "table_rows_after": after}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m app.labs.graduation")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -175,6 +221,11 @@ def main(argv: list[str] | None = None) -> int:
                           "later trades are left alone")
     ron.add_argument("--apply", action="store_true",
                      help="write it (default: report what would change)")
+    seed = sub.add_parser(
+        "seed-operators", help="load the Tape Lab's operator records (2026-09-19)")
+    seed.add_argument("--file", required=True)
+    seed.add_argument("--apply", action="store_true",
+                      help="write it (default: count what would be loaded)")
     one = sub.add_parser("curve", help="derive, fetch and decode one mint's curve")
     one.add_argument("--mint", required=True)
     progress = sub.add_parser("progress", help="what a reserve reading means")
@@ -223,6 +274,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if v["ready"] else 2
     if args.command == "curve":
         _emit(asyncio.run(_curve(args.mint)))
+        return 0
+    if args.command == "seed-operators":
+        _emit(asyncio.run(_seed_operators(args.file, args.apply)))
         return 0
     if args.command == "restate":
         from datetime import datetime

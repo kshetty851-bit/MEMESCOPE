@@ -31,6 +31,7 @@ fifty of them affordable at a fifteen-second tick.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass
@@ -64,6 +65,7 @@ from app.labs.graduation.models import (
     GradCurveSample,
     GradEarlyOpen,
     GradMigration,
+    GradOperator,
     GradPaperPosition,
     GradPostgradSample,
     GradToken,
@@ -327,6 +329,9 @@ BAND_BY_KEY: dict[str, tuple[int, int]] = {
 
 #: What each entry key MEANS, in the words the page prints.
 #:
+#: The fast arms' entries: bought in `_fill_fast`, never from the pool-open query.
+FAST_ENTRIES = frozenset({"fast75", "fast75_trust"})
+
 #: Kept beside `accepts` rather than in the frontend so the description cannot
 #: drift from the rule it describes — `test_every_entry_filter_is_described`
 #: fails if a filter gains a branch and loses its sentence, or vice versa.
@@ -361,6 +366,13 @@ ENTRY_RULES: dict[str, str] = {
     "early_B3": f"the pool's OWN reserves showed over ${LIQ_BANDS[-1][1]:,} within "
                 f"{config.EARLY_WINDOW_S}s of graduating — bought the moment that "
                 f"was visible, not when DexScreener first listed the pool",
+    "fast75": f"the pool's OWN reserves showed over ${LIQ_BANDS[0][1]:,} between "
+              f"{config.FAST_MIN_AGE_S}s and {config.FAST_MAX_AGE_S}s after graduating, "
+              f"read on-chain every tick — bought then, not when DexScreener listed "
+              f"the pool (a median 50s for the real wallet)",
+    "fast75_trust": f"as fast75, AND its operator — every wallet holding 1%+ at entry and "
+                    f"whoever funded them — had {config.OPERATOR_TRUST_MIN_COINS}+ earlier "
+                    f"graduations here and none of them rugged (-50% inside five minutes)",
     "rand25": "a hash of the token address, taking a quarter of them — CONTROL",
     "rand50": "a hash of the token address, taking half of them — CONTROL",
     "rand75": "a hash of the token address, taking three quarters — CONTROL",
@@ -387,6 +399,10 @@ def accepts(arm: Arm, *, mint: str, open_at: datetime, liquidity: Decimal | None
         # `_fill_early`, priced off the pool's own reserves before DexScreener
         # has listed it; buying here as well would add tokens the early watch
         # never saw, at DexScreener's later price — B3 again, under a new name.
+        return False
+    if e in FAST_ENTRIES:
+        # Never from the pool-open query either: these arms read the pool
+        # themselves in `_fill_fast`, seconds after the migration.
         return False
     if e == "floor":
         # The baseline: every graduation the grid is allowed to touch, with no
@@ -590,6 +606,23 @@ ARMS: tuple[Arm, ...] = (
     Arm("B3E_198k_5m", "early_B3", 5,
         note="pool's own reserves over $198k within 90s of graduating, "
              "bought on sight, out at 5m"),
+    # FAST AND TRUSTED, 2026-09-19: the Tape Lab's two passing findings,
+    # tested forward (`backend/app/labs/tape/README.md`). Rebuilt off the chain,
+    # 18 days of graduations bought 15s after the pool opened made +0.59% a
+    # trade more than the same coins bought at 45s, and keeping only coins
+    # whose operator had 2+ earlier coins and no rug made +1.24% a trade on
+    # days the rule never saw, against -0.45% for all of them.
+    #
+    # E75 buys every graduation whose pool's own reserves show $75k, read
+    # on-chain 5-30s after the migration; E75T is the same with ONE extra
+    # condition, a clean operator record. E75 is E75T's matched control, and
+    # E75 against BASE_75k_5m is what the seconds are worth. Four minutes
+    # because the backtest held four.
+    Arm("E75_4m", "fast75", 4,
+        note="pool's own reserves over $75k within 30s of graduating, "
+             "bought on sight, out at 4m"),
+    Arm("E75T_4m", "fast75_trust", 4,
+        note="as E75_4m, only when the operator's earlier coins (2+) never rugged"),
     # NOT part of the tournament, and kept when everything else went. These
     # two are a PRE-REGISTERED A/B on the rug signals — a never-seen symbol
     # rugs 18% against 3%, a daytime-UTC open 15% against 5% — opened
@@ -617,12 +650,13 @@ CONTROLS: tuple[Arm, ...] = tuple(a for a in ARMS if a.is_control)
 #: returned no edge. The count is pinned rather than free because an arm that
 #: appears mid-tournament changes what every other number means — so changing
 #: it must be a deliberate edit with a date, not a side effect.
-assert len(ARMS) == 12, (
+assert len(ARMS) == 14, (
     "three B3 arms (3m FROM ENTRY retired 2026-09-16 at -$58.90), B3 bought "
     "early (added 2026-09-16), the two rug arms (added 2026-09-16), the two "
-    "shorter graduation clocks g2 and g3 (added 2026-09-17), the BASELINE, "
-    "the $500k+flow candidate, and the two pre-registered A/B arms — which run "
-    f"but are flagged off the tournament board — not {len(ARMS)}")
+    "shorter graduation clocks g2 and g3 (added 2026-09-17), the fast pair "
+    "E75/E75T (added 2026-09-19), the BASELINE, the $500k+flow candidate, and "
+    "the two pre-registered A/B arms — which run but are flagged off the "
+    f"tournament board — not {len(ARMS)}")
 assert len([a for a in ARMS if a.ab_experiment]) == 2, (
     "the rug-signal A/B is exactly F01_all_2m and F14_symnight_2m; flagging a "
     "tournament arm as an experiment would hide it from its own comparison")
@@ -643,10 +677,10 @@ assert all(a.tp is None and a.trail is None for a in ARMS), (
 assert all(a.stop is None or a.stop == Decimal("0.10") for a in ARMS), (
     "one stop level, so the twins differ in ONE thing. Sweeping levels here "
     "would be fitting a parameter on the same data that suggested it")
-assert len([a for a in ARMS if not a.is_control]) == 11, (
+assert len([a for a in ARMS if not a.is_control]) == 13, (
     "`config.required_pf` is calibrated on the maximum of FORTY-TWO noise "
-    "draws. Eleven arms are now judged against it, so the bar is if anything "
-    "CONSERVATIVE — the luckiest of eleven reaches less than the luckiest "
+    "draws. Thirteen arms are now judged against it, so the bar is if anything "
+    "CONSERVATIVE — the luckiest of thirteen reaches less than the luckiest "
     "of forty-two. Left as it is deliberately: a bar that is too hard costs a "
     "real finding some time, where one that is too easy costs a false one nothing")
 assert all(a.clock in {"entry", "graduation"} for a in ARMS), "a clock is one of two"
@@ -745,6 +779,9 @@ def _drained(mark: Mark | None, position: GradPaperPosition,
 
 #: Reads a pool's own vaults: (mint, pool) -> the pool now, or None.
 PoolReader = Callable[[str, str], Awaitable[Held | None]]
+#: Reads a coin's operator: (mint, pool) -> its wallets and their funders,
+#: or None when the holders could not be read.
+OperatorReader = Callable[[str, str], Awaitable[frozenset[str] | None]]
 
 
 def chain_entry(pool: Held | None, sol_usd: Decimal,
@@ -770,7 +807,8 @@ class Tournament:
     """Every arm, one tick, six queries."""
 
     def __init__(self, session: AsyncSession, *, now: datetime | None = None,
-                 pool_reader: PoolReader | None = None) -> None:
+                 pool_reader: PoolReader | None = None,
+                 operator_reader: OperatorReader | None = None) -> None:
         self._session = session
         self._now = now or datetime.now(UTC)
         # With a reader, a pool-open buy fills at the pool's own price the
@@ -778,6 +816,9 @@ class Tournament:
         # predate the pool's first big buy - see `chain_entry`). Without one,
         # as before: the scheduler passes it; replays and old tests do not.
         self._pool_reader = pool_reader
+        # The fast arms need both readers; without them they sit out, as the
+        # replays and old tests do.
+        self._operator_reader = operator_reader
 
     async def tick(self) -> dict[str, Any]:
         if not config.paper_enabled():
@@ -1232,8 +1273,141 @@ class Tournament:
             logger.info("graduation_tournament_early_filled", opened=opened)
         return opened
 
+    async def _fill_fast(self) -> int:
+        """E75_4m and E75T_4m: graduations bought seconds after the migration,
+        off the pool's own reserves, and - for E75T - only from operators with
+        a clean record here.
+
+        Every graduation between `FAST_MIN_AGE_S` and `FAST_MAX_AGE_S` old is
+        read each tick until its pool shows `OPERATOR_RECORD_FLOOR_USD`. Then
+        its operator is read and recorded whether or not anything buys it, and
+        the arms buy at this tick's price if the pool holds the $75k floor.
+        """
+        arms = [a for a in ARMS if a.entry in FAST_ENTRIES]
+        if not arms or self._pool_reader is None or self._operator_reader is None:
+            return 0
+        await self._label_operators()
+        rows = await self._fast_candidates()
+        rate = await self._sol_rate() if rows else None
+        if not rows or rate is None:
+            return 0
+        pools = {r.mint: graduation_pool(r.mint) for r in rows}
+        rows = [r for r in rows if pools[r.mint]]
+        helds = await asyncio.gather(*(self._pool_reader(r.mint, pools[r.mint]) for r in rows),
+                                     return_exceptions=True)
+        deep = []
+        for row, held in zip(rows, helds, strict=True):
+            price = held.price() if isinstance(held, Held) else None
+            depth = held.depth_usd(rate) if isinstance(held, Held) and price else None
+            if price and depth and depth >= config.OPERATOR_RECORD_FLOOR_USD:
+                deep.append((row, price, depth))
+        found = await asyncio.gather(*(self._operator_reader(r.mint, pools[r.mint])
+                                       for r, _, _ in deep), return_exceptions=True)
+        counts = await self._open_counts()
+        opened = 0
+        for (row, price, depth), ids in zip(deep, found, strict=True):
+            ids = ids if isinstance(ids, frozenset) else None
+            self._session.add(GradOperator(
+                mint=row.mint, pool=pools[row.mint], migrated_at=row.ts,
+                entry_at=self._now, price_native=price.quantize(_P),
+                depth_usd=depth.quantize(Decimal("0.01")),
+                ids=sorted(ids) if ids else None,
+                label_due_at=self._now + timedelta(seconds=config.OPERATOR_LABEL_AFTER_S),
+                source="live"))
+            if depth < LIQ_BANDS[0][1]:
+                continue  # recorded for the operator's record, too shallow to buy
+            trusted = bool(ids) and await self._trusted(row.mint, ids)
+            for arm in arms:
+                if arm.entry == "fast75_trust" and not trusted:
+                    continue
+                if counts.get(arm.name, 0) >= config.PAPER_MAX_SLOTS:
+                    continue
+                if self._open_fast(arm, row, price, depth, rate):
+                    counts[arm.name] = counts.get(arm.name, 0) + 1
+                    opened += 1
+        if deep:
+            logger.info("graduation_tournament_fast_filled", recorded=len(deep), opened=opened)
+        return opened
+
+    async def _fast_candidates(self) -> Sequence[Any]:
+        """Graduations young enough to be read, not yet recorded."""
+        return (await self._session.execute(
+            select(GradMigration.mint, GradMigration.ts, GradToken.symbol)
+            .outerjoin(GradToken, GradToken.mint == GradMigration.mint)
+            .where(GradMigration.pool == config.PUMPSWAP_VENUE,
+                   GradMigration.ts >= self._now - timedelta(seconds=config.FAST_MAX_AGE_S),
+                   GradMigration.ts <= self._now - timedelta(seconds=config.FAST_MIN_AGE_S),
+                   ~select(1).where(GradOperator.mint == GradMigration.mint).exists())
+            .order_by(GradMigration.ts)
+            .limit(config.FAST_MAX_PER_TICK))).all()
+
+    async def _trusted(self, mint: str, ids: frozenset[str]) -> bool:
+        """At least `OPERATOR_TRUST_MIN_COINS` earlier coins share one of these
+        wallets or funders, and none of them rugged. Only labels already known
+        at this tick count: a rug five minutes from now is not evidence yet."""
+        known, rugs = (await self._session.execute(
+            select(func.count(), func.count().filter(GradOperator.rugged.is_(True)))
+            .where(GradOperator.ids.overlap(sorted(ids)),
+                   GradOperator.mint != mint,
+                   GradOperator.rugged.is_not(None),
+                   GradOperator.labelled_at <= self._now))).one()
+        return known >= config.OPERATOR_TRUST_MIN_COINS and rugs == 0
+
+    async def _label_operators(self) -> None:
+        """Whether each recorded coin rugged, `OPERATOR_LABEL_AFTER_S` after its
+        entry, off its pool's own reserves. A pool still unreadable
+        `OPERATOR_LABEL_GIVE_UP_S` later is closed unlabelled and never counts."""
+        due = (await self._session.scalars(
+            select(GradOperator)
+            .where(GradOperator.labelled_at.is_(None),
+                   GradOperator.label_due_at <= self._now)
+            .order_by(GradOperator.label_due_at)
+            .limit(config.FAST_MAX_PER_TICK))).all()
+        if not due or self._pool_reader is None:
+            return
+        helds = await asyncio.gather(*(self._pool_reader(o.mint, o.pool) for o in due),
+                                     return_exceptions=True)
+        for op, held in zip(due, helds, strict=True):
+            price = held.price() if isinstance(held, Held) else None
+            if price is None:
+                late = (self._now - op.label_due_at).total_seconds()
+                if late > config.OPERATOR_LABEL_GIVE_UP_S:
+                    op.labelled_at = self._now
+                continue
+            op.exit_price_native = price.quantize(_P)
+            op.rugged = price / op.price_native - 1 <= config.OPERATOR_RUG_MOVE
+            op.labelled_at = self._now
+
+    def _open_fast(self, arm: Arm, row: Any, price: Decimal, depth: Decimal,
+                   rate: Decimal) -> bool:
+        """One fast position at this tick's pool price, costed like every
+        other pool-open buy: the pool's fee tier, impact against its depth."""
+        impact = amm_impact(config.PAPER_NOTIONAL_USD, depth)
+        if impact is None or impact > config.PAPER_MAX_IMPACT:
+            return False
+        notional_quote = (config.PAPER_NOTIONAL_USD / rate).quantize(_Q)
+        fee_bps = config.pool_fee_bps(price)
+        leg = costs(notional_quote, pool_fee_bps=fee_bps)
+        fill = amm_buy(price, order_usd=config.PAPER_NOTIONAL_USD, liquidity_usd=depth,
+                       fee_fraction=leg.fee_fraction)
+        if fill is None or fill <= 0:
+            return False
+        self._session.add(GradPaperPosition(
+            book=arm.name, mint=row.mint, symbol=row.symbol, opened_at=self._now,
+            open_quote=price.quantize(_P), open_fill=fill.quantize(_P),
+            notional_usd=config.PAPER_NOTIONAL_USD,
+            sol_usd_at_open=rate.quantize(Decimal("0.000001")),
+            notional_quote=notional_quote,
+            tokens=(notional_quote / fill).quantize(_Q),
+            peak_quote=price.quantize(_P), last_quote=price.quantize(_P),
+            liq_open_usd=depth.quantize(Decimal("0.01")),
+            impact_open=impact.quantize(Decimal("0.000001")),
+            pool_fee_bps=fee_bps, graduated_at=row.ts, marked_at=self._now))
+        return True
+
     async def _fill(self) -> int:
-        opened_curve = await self._fill_curve() + await self._fill_early()
+        opened_curve = (await self._fill_curve() + await self._fill_early()
+                        + await self._fill_fast())
         rows = await self._candidates()
         if not rows:
             return opened_curve

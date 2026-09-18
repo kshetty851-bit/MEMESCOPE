@@ -113,7 +113,8 @@ async def paper_tick() -> dict[str, Any]:
             # Every arm, one clock, one commit: they see the same graduations
             # at the same instant, which is what makes them comparable.
             result = await Tournament(session, now=datetime.now(UTC),
-                                      pool_reader=sources.pool_now).tick()
+                                      pool_reader=sources.pool_now,
+                                      operator_reader=sources.operators_now).tick()
             await session.commit()
             return result
     except Exception:  # containment: never raise into the beat

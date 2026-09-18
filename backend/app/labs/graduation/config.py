@@ -328,6 +328,38 @@ WSOL_MINT = "So11111111111111111111111111111111111111112"
 #: The migration feed's name for a pumpswap graduation — the only venue whose
 #: pool `parse_pool` reads.
 PUMPSWAP_VENUE = "pump-amm"
+
+#: THE FAST ARMS, E75_4m and E75T_4m (2026-09-19). The Tape Lab rebuilt 18
+#: days of graduations off the chain (5,716 coins, `backend/app/labs/tape/`):
+#: bought 15s after the pool opened instead of 45s, the same coins made +0.59%
+#: a trade more (t 3.17 on unseen days), and keeping only coins whose operator
+#: had 2+ earlier coins and no rug made +1.24% a trade on unseen days against
+#: -0.45% for all of them. Both are pre-registered there; these arms test them
+#: forward.
+#:
+#: A graduation is read on every tick from this many seconds after its
+#: migration message until FAST_MAX_AGE_S, and bought the first time its pool's
+#: own reserves show the BASE floor. The backtest bought at 5-15s.
+FAST_MIN_AGE_S = _int("LAB_GRADUATION_FAST_MIN_AGE_S", 5)
+FAST_MAX_AGE_S = _int("LAB_GRADUATION_FAST_MAX_AGE_S", 30)
+#: Graduations read per tick, so a tick stays inside its 3-second cadence.
+FAST_MAX_PER_TICK = _int("LAB_GRADUATION_FAST_MAX_PER_TICK", 8)
+#: Operators are RECORDED from this depth, below the $75k the arms buy at: the
+#: backtest learned reputations from every coin over ~$50k, and a record kept
+#: only from the coins bought would learn only from what the rule let through.
+OPERATOR_RECORD_FLOOR_USD = Decimal(50_000)
+#: A wallet holding this share of supply at entry is the operator's.
+OPERATOR_MIN_SHARE = Decimal("0.01")
+#: A coin rugged when its pool price is down this much this long after entry.
+#: It counts against its operator only from then on, never before.
+OPERATOR_LABEL_AFTER_S = 300
+OPERATOR_RUG_MOVE = Decimal("-0.5")
+#: A pool still unreadable this long after its label was due stays unlabelled
+#: and is left out of every operator's record.
+OPERATOR_LABEL_GIVE_UP_S = 120
+#: Trusted: at least this many earlier labelled coins share one of the
+#: operator's wallets or funders, and none of them rugged.
+OPERATOR_TRUST_MIN_COINS = 2
 #: DexScreener's name for the pump.fun bonding curve, which is not a pool.
 #: See `PostGradSampler._accept`.
 CURVE_DEX_ID = "pumpfun"

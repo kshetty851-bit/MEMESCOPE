@@ -33,7 +33,7 @@ MIGRATIONS = (
     BACKEND / "alembic" / "versions" / "20260916_0088_grad_early_opens.py",
 )
 TABLES = ["grad_checkpoints", "grad_curve_samples", "grad_early_opens",
-          "grad_features", "grad_migrations", "grad_paper_positions",
+          "grad_features", "grad_migrations", "grad_operators", "grad_paper_positions",
           "grad_paper_restatements",
           "grad_postgrad_samples", "grad_tokens", "grad_trades"]
 
