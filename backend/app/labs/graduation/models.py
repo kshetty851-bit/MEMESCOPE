@@ -51,7 +51,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -358,6 +358,45 @@ class GradEarlyOpen(Base):
     price_native: Mapped[Decimal] = mapped_column(_PRICE, nullable=False)
     depth_usd: Mapped[Decimal] = mapped_column(Numeric(24, 2), nullable=False)
     sol_usd: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
+
+
+class GradOperator(Base):
+    """A graduation the fast arms looked at, who ran it, and whether it rugged.
+
+    The trusted arm buys a coin only when its operator has a clean record
+    here, so EVERY coin that reached `OPERATOR_RECORD_FLOOR_USD` gets a row,
+    bought or not: a record kept only from the coins a rule let through
+    learns only what that rule already believed.
+
+    `ids` is the operator: every wallet holding `OPERATOR_MIN_SHARE` of the
+    supply at entry, and whoever first funded each. Operators make fresh
+    wallets for every coin and fund them from the same place (Tape Lab,
+    18 days replayed on-chain), so a shared funder is the same operator.
+    NULL = could not be read, which the trusted arm treats as a stranger.
+
+    `rugged` is written once, `OPERATOR_LABEL_AFTER_S` after entry, and counts
+    against the operator only from `labelled_at` on — never before it was
+    known. Rows with `source='tape'` were seeded from the Tape Lab's harvest.
+    """
+
+    __tablename__ = "grad_operators"
+    __table_args__ = (
+        Index("ix_grad_operators_ids", "ids", postgresql_using="gin"),
+        Index("ix_grad_operators_label_due_at", "label_due_at"),
+    )
+
+    mint: Mapped[str] = mapped_column(_ADDRESS, primary_key=True)
+    pool: Mapped[str] = mapped_column(_ADDRESS, nullable=False)
+    migrated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    entry_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    price_native: Mapped[Decimal] = mapped_column(_PRICE, nullable=False)
+    depth_usd: Mapped[Decimal | None] = mapped_column(Numeric(24, 2))
+    ids: Mapped[list[str] | None] = mapped_column(ARRAY(String(64)))
+    label_due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    rugged: Mapped[bool | None] = mapped_column(Boolean)
+    labelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    exit_price_native: Mapped[Decimal | None] = mapped_column(_PRICE)
+    source: Mapped[str] = mapped_column(String(8), nullable=False, server_default="live")
 
 
 class GradCheckpoint(Base):

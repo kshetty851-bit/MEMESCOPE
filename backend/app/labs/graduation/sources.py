@@ -594,6 +594,104 @@ async def reserves_after(rpc: Any, *, mint: str, pool: str, at: datetime,
             return None
     return None
 
+#: Pages of 25 of a wallet's oldest transactions searched for its funding.
+FUNDING_PAGES = 2
+#: Seconds one operator read may take before the arm treats the coin as a
+#: stranger; it runs inside a tick with a three-second cadence.
+OPERATOR_READ_TIMEOUT_S = 6.0
+
+
+def _account_keys(tx: dict[str, Any]) -> list[str]:
+    keys = ((tx.get("transaction") or {}).get("message") or {}).get("accountKeys") or []
+    return [k["pubkey"] if isinstance(k, dict) else k for k in keys]
+
+
+async def funder(rpc: Any, wallet: str) -> str | None:
+    """Who paid SOL into `wallet` the first time it got any: the account whose
+    balance fell most in that transaction. None when its oldest transactions
+    never paid it.
+
+    The real wallet's source block uses the same rule
+    (`app.real_wallet_safety.sources.funding`); it is restated here because
+    this lab may not import the wallet's code (`tests/test_isolation.py`).
+    """
+    token: str | None = None
+    for _ in range(FUNDING_PAGES):
+        opts: dict[str, Any] = {
+            "transactionDetails": "full", "encoding": "jsonParsed",
+            "maxSupportedTransactionVersion": 1, "sortOrder": "asc", "limit": 25,
+            "filters": {"status": "succeeded"}}
+        if token:
+            opts["paginationToken"] = token
+        page = await rpc.call("getTransactionsForAddress", [wallet, opts]) or {}
+        for tx in page.get("data") or []:
+            keys = _account_keys(tx)
+            meta = tx.get("meta") or {}
+            pre, post = meta.get("preBalances") or [], meta.get("postBalances") or []
+            if wallet not in keys:
+                continue
+            i = keys.index(wallet)
+            if i >= len(post) or i >= len(pre) or post[i] <= pre[i]:
+                continue
+            span = range(min(len(keys), len(pre), len(post)))
+            paid = [(pre[j] - post[j], keys[j]) for j in span if j != i and pre[j] > post[j]]
+            if paid:
+                return max(paid)[1]
+        token = page.get("paginationToken")
+        if not token:
+            break
+    return None
+
+
+async def operator_ids(rpc: Any, mint: str, pool: str) -> frozenset[str] | None:
+    """The operator behind a coin right now: every wallet holding
+    `OPERATOR_MIN_SHARE` of its supply, and whoever first funded each.
+
+    None when the holders cannot be read — never a partial answer, which would
+    make a known operator look like a stranger with a clean record. The pool
+    and the bonding curve hold tokens too and are not anyone's wallet.
+    """
+    supply = await rpc.get_token_supply(mint)
+    if not supply:
+        return None
+    largest = ((await rpc.call("getTokenLargestAccounts", [mint])) or {}).get("value")
+    if largest is None:
+        return None
+    share = lambda row: Decimal(str(row.get("uiAmountString") or 0)) / supply  # noqa: E731
+    big = [row["address"] for row in largest if share(row) >= config.OPERATOR_MIN_SHARE]
+    if not big:
+        return frozenset()
+    accounts = ((await rpc.call("getMultipleAccounts", [big, {"encoding": "jsonParsed"}]))
+                or {}).get("value") or []
+    if len(accounts) != len(big):
+        return None
+    owners = {((a.get("data") or {}).get("parsed") or {}).get("info", {}).get("owner")
+              for a in accounts if isinstance(a, dict)}
+    curve = bonding_curve_address(mint, program_id=config.PUMP_PROGRAM_ID)
+    owners = {o for o in owners if o and o not in {pool, curve}}
+    funders = await asyncio.gather(*(funder(rpc, o) for o in owners))
+    return frozenset(owners | {f for f in funders if f})
+
+
+async def operators_now(mint: str, pool: str) -> frozenset[str] | None:
+    """`operator_ids` on Helius, bounded in time. `getTransactionsForAddress`
+    exists nowhere else, and the public node refuses `getTokenLargestAccounts`."""
+    if not settings.helius_configured:
+        return None
+    from app.services.rpc.standard import StandardSolanaRPC
+
+    rpc = StandardSolanaRPC(rpc_url=settings.HELIUS_RPC_URL)
+    await rpc.start()
+    try:
+        return await asyncio.wait_for(operator_ids(rpc, mint, pool),
+                                      timeout=OPERATOR_READ_TIMEOUT_S)
+    except Exception as exc:  # a stranger, not a crash: the tick goes on
+        logger.info("graduation_operator_unread", mint=mint, error=type(exc).__name__)
+        return None
+    finally:
+        await rpc.close()
+
+
 class HeldVaultStream:
     """Sub-second prices for the positions actually open.
 

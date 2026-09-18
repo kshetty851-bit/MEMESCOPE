@@ -59,7 +59,13 @@ def test_the_tournament_is_a_hold_sweep_with_a_baseline_on_every_hold() -> None:
     One baseline per hold, so no hold is judged without an unselected twin on
     its own clock. Nothing on this board decides by hashing a mint.
     """
-    assert len(ARMS) == 12
+    assert len(ARMS) == 14
+    # The fast pair (2026-09-19): E75T is E75 plus ONE condition, a clean
+    # operator record, so E75 is its matched control on the same clock.
+    fast = {a.name: a for a in ARMS if a.entry in ("fast75", "fast75_trust")}
+    assert set(fast) == {"E75_4m", "E75T_4m"}
+    assert {(a.hold, a.clock, a.stop, a.drain)
+            for a in fast.values()} == {(4, "entry", None, None)}
     # The BASELINE is back (2026-09-16). Without one the board could not tell a
     # profitable arm from a rising market — every arm here is a SUBSET of the
     # floor arm's population, so beating it is the claim each one makes.
