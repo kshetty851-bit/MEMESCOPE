@@ -223,8 +223,8 @@ class TestTheTradeSizeChosenAtStart:
         assert ticket_for(replace(state, ticket_usd=None), Decimal("100")) == Decimal("100")
 
     def test_a_capped_arm_never_spends_above_its_cap(self) -> None:
-        """Start refuses $25 for G-BAS-5M, but no size at all means the
-        configured $100 — which is the one thing its own walk rules out."""
+        """Start refuses $50 for G-BAS-5M, but no size at all means the
+        configured $100 — above the cap the operator set for it."""
         from dataclasses import replace
 
         from app.real_wallet.autotrade import AutotradeState, ticket_for
@@ -233,6 +233,6 @@ class TestTheTradeSizeChosenAtStart:
             enabled=True, nominated_strategy="G-BAS-5M", started_at=None,
             started_by=None, start_reason=None, stopped_at=None, stopped_by=None,
             stop_reason=None, ticket_usd=None)
-        assert ticket_for(state, Decimal("100")) == Decimal("10")
+        assert ticket_for(state, Decimal("100")) == Decimal("25")
         assert ticket_for(replace(state, ticket_usd=Decimal("5")), Decimal("100")) == (
             Decimal("5"))

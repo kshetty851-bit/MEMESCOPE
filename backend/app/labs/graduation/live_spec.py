@@ -50,7 +50,7 @@ from app.lab.spec import Exits, Strategy
 D = Decimal
 _Money = TypeVar("_Money", float, Decimal)
 
-SPEC_VERSION = "gradlive-1.2.0"
+SPEC_VERSION = "gradlive-1.3.0"
 
 #: Each live arm and the paper arm it mirrors. Recorded so a reader can put the
 #: real book beside the arm it is supposed to be copying, and so nothing has to
@@ -85,7 +85,14 @@ POOL_FLOORS = {"G-B3-5M": POOL_FLOOR_USD, "G-B3-4M": POOL_FLOOR_USD,
 #: $14, $10 at $48, $5 at $72. Karthik chose to run it at $10 or less
 #: (2026-09-17), and the picker enforces that rather than trusting the choice
 #: to be remembered.
-MAX_TICKET_USD = {"G-BAS-5M": D("10")}
+#:
+#: Raised to $25 at Karthik's request on 2026-09-18, after being shown the
+#: same walk re-run over 447 trades: $25 still WIPED OUT a $100 wallet, $20
+#: ended +225% but fell to $17, $10 +115% with a low of $52. The board's own
+#: size walk leaves rugged trades out and showed $25 at +360%; the cap is his
+#: decision against the rugs-counted numbers, not a finding that $25 is safe.
+#: It still stops $50 and $100.
+MAX_TICKET_USD = {"G-BAS-5M": D("25")}
 
 
 def pool_floor(strategy_id: str) -> int:
@@ -224,7 +231,8 @@ STRATEGIES: tuple[Strategy, ...] = (
             "points, about a quarter of a percent each. It rugs at 4.8% "
             "against B3's 0.3%, because a $75k floor admits the population B3 "
             "excludes. Walked with every rug counted it WIPED OUT a $100 "
-            "wallet trading $25, which is why `MAX_TICKET_USD` caps it at $10. "
+            "wallet trading $25; `MAX_TICKET_USD` caps it at $25 all the same, "
+            "at Karthik's request on 2026-09-18 (see its comment). "
             "It is also the board's control: an arm that exists to be the "
             "comparison is not evidence of an edge. Nominating it is a "
             "separate decision and starting it is the operator's alone."

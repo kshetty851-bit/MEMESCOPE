@@ -810,8 +810,7 @@ function TradingControl({
           ) : null}
           {chosen.max_ticket_usd ? (
             <p className="text-xs text-ink-3">
-              {chosen.id} is capped at ${chosen.max_ticket_usd} a trade: on its own paper
-              week a $100 wallet trading it bigger was wiped out by the rugs.
+              {chosen.id} is capped at ${chosen.max_ticket_usd} a trade.
             </p>
           ) : null}
           {running ? (
