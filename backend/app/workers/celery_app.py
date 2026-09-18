@@ -429,6 +429,14 @@ celery_app.conf.beat_schedule = {
         "task": "app.real_wallet.scheduler.real_wallet_trade_alerts",
         "schedule": timedelta(seconds=30),
     },
+    # Who held each coin when the paper book bought it: the holder gate's cost,
+    # measured on every signal. Every 10s so the read lands where the wallet's
+    # would; expiring, so a backlog never reads a coin late.
+    "real-wallet-record-entry-holders": {
+        "task": "app.real_wallet.scheduler.real_wallet_record_entry_holders",
+        "schedule": timedelta(seconds=10),
+        "options": {"expires": 10},
+    },
     "real-wallet-close-empty-accounts": {
         "task": "app.real_wallet.scheduler.real_wallet_close_empty_accounts",
         "schedule": crontab(minute="*/5"),

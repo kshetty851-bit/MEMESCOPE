@@ -21,6 +21,7 @@ from app.models.market import TokenMarketSnapshot, TradingStatus
 from app.models.real_wallet_execution import RealWalletPosition
 from app.models.real_wallet_safety import RealWalletSafetyEvaluation
 from app.models.token import DiscoveredToken
+from app.real_wallet_safety import holders
 from app.repositories.market import MarketSnapshotRepository
 from app.repositories.token import TokenRepository
 from app.security.liquidity import PUMPSWAP_PROGRAM
@@ -91,6 +92,8 @@ class Reason:
     EXECUTION_PRICE_DEVIATION_TOO_HIGH = "EXECUTION_PRICE_DEVIATION_TOO_HIGH"
     ROUND_TRIP_LOSS_TOO_HIGH = "ROUND_TRIP_LOSS_TOO_HIGH"
     SYMBOL_RUGGED_BEFORE = "SYMBOL_RUGGED_BEFORE"
+    HOLDER_TOO_LARGE = "HOLDER_TOO_LARGE"
+    HOLDERS_UNREADABLE = "HOLDERS_UNREADABLE"
     SAFETY_CALCULATION_FAILED = "SAFETY_CALCULATION_FAILED"
 
 
@@ -149,10 +152,14 @@ class RealWalletSafetyGate:
         *,
         rpc: SolanaRPC | None = None,
         jupiter: JupiterExecutionClient | None = None,
+        holders_rpc: SolanaRPC | None = None,
     ) -> None:
         self._session = session
         self._rpc = rpc or get_rpc()
         self._jupiter = jupiter or JupiterExecutionClient()
+        # Helius, not `get_rpc()`: the platform's node refuses the holder read
+        # (public 429s it, this Chainstack plan 403s it). Made on first use.
+        self._holders_rpc = holders_rpc
 
     async def evaluate(
         self, *, mint_address: str, trade_size_usd: Decimal, now: datetime | None = None
@@ -199,6 +206,11 @@ class RealWalletSafetyGate:
         supply, supply_ratio = await self._supply_reasons(
             mint_address, trade_size_usd, price, reasons
         )
+
+        if settings.REAL_WALLET_HOLDER_GATE_ENABLED:
+            view = await self._holder_reasons(mint_address, evaluated_at, reasons)
+            if view is not None:
+                provenance = {**provenance, "holders": view.summary()}
 
         inspection: TokenInspection | None = None
         if token is not None:
@@ -343,6 +355,28 @@ class RealWalletSafetyGate:
             "discovery_slot": token.slot if token else None,
             "venue": snapshot.dex_name if snapshot else None,
         }
+
+    async def _holder_reasons(
+        self, mint: str, at: datetime, reasons: list[str]
+    ) -> holders.Holders | None:
+        """Who already holds the coin, at the buy; see `holders`. Every reading,
+        refused or not, is kept as a `holder_snapshots` row."""
+        rpc = self._holders_rpc or get_rpc("helius")
+        view: holders.Holders | None = None
+        failure: str | None = None
+        try:
+            await rpc.start()
+            try:
+                view = await holders.read(rpc, mint)
+            finally:
+                await rpc.close()
+        except Exception as exc:  # an unreadable holder list refuses
+            failure = type(exc).__name__
+            reasons.append(Reason.HOLDERS_UNREADABLE)
+        else:
+            reasons.extend(holders.reasons(view, max_pct=settings.REAL_WALLET_MAX_HOLDER_PCT))
+        self._session.add(holders.to_row(view, mint, "wallet_gate", at=at, failure=failure))
+        return view
 
     async def _symbol_has_rugged(
         self, mint_address: str, token: DiscoveredToken | None

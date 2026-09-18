@@ -840,6 +840,19 @@ class Settings(BaseSettings):
     REAL_WALLET_RUG_RETURN: Decimal = Field(
         default=Decimal("-0.50"), gt=Decimal("-1"), lt=Decimal("0")
     )
+    #: Refuse a buy when one wallet ALREADY holds more than this % of the
+    #: supply, read from Helius at the moment of the buy (`holders.read`).
+    #:
+    #: Karthik's line, 2026-09-18. Every rug that cost real money was one wallet
+    #: sitting on a sixth to a fifth of the coin when the wallet bought — ZBCN
+    #: 19.1%, WWR 19.9%, SUUB 16.9% — and 10% leaves a margin under all three.
+    #: Too strict costs a missed trade, never money; an unreadable holder list
+    #: refuses, as every other unreadable fact at this gate does. Off by
+    #: default in code; production sets it.
+    REAL_WALLET_HOLDER_GATE_ENABLED: bool = False
+    REAL_WALLET_MAX_HOLDER_PCT: Decimal = Field(
+        default=Decimal("10"), gt=Decimal("0"), le=Decimal("100")
+    )
     #: The most of a token's SUPPLY one position may buy, as a fraction.
     #:
     #: A different question from the liquidity ratio above, and both are kept.
