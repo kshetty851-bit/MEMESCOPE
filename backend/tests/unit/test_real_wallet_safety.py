@@ -474,11 +474,13 @@ def _pct(p: str) -> int:
 
 
 class _Helius:
-    """One coin's chain. `bags` are (owner, raw amount, owned by a program)."""
+    """One coin's chain. `bags` are (owner, raw amount, owned by a program);
+    `funders` maps a wallet to the account that first paid SOL into it."""
 
     def __init__(self, bags: list[tuple[str, int, bool]], *, fail: bool = False,
-                 mint: str = MINT) -> None:
+                 mint: str = MINT, funders: dict[str, str] | None = None) -> None:
         self.bags, self.fail, self.started, self.mint = bags, fail, 0, mint
+        self.funders = funders or {}
 
     async def start(self) -> None:
         self.started += 1
@@ -489,6 +491,15 @@ class _Helius:
         assert self.started, "holder read before start()"
         if self.fail:
             raise RpcError("getTokenLargestAccounts rate limited")
+        if method == "getTransactionsForAddress":
+            wallet = params[0]
+            if wallet not in self.funders:
+                return {"data": []}
+            return {"data": [{
+                "transaction": {"message": {"accountKeys": [
+                    {"pubkey": self.funders[wallet]}, {"pubkey": wallet}]}},
+                "meta": {"preBalances": [9_000_000_000, 0],
+                         "postBalances": [7_999_995_000, 1_000_000_000]}}]}
         if method == "getTokenLargestAccounts":
             return {"value": [{"address": f"acct{i}", "amount": str(a)}
                               for i, (_, a, _) in enumerate(self.bags)]}
@@ -591,3 +602,112 @@ def test_the_pool_rules_only_refuse_when_given_a_line() -> None:
     assert reasons(h, max_pct=Decimal("10"), max_vs_pool=Decimal("1"),
                    max_bundle_vs_pool=Decimal("1")) == [
         "HOLDER_BIGGER_THAN_POOL", "BUNDLE_BIGGER_THAN_POOL"]
+
+
+# The money-source block: after a rug, the wallets and funders behind it are
+# blocked for a few hours. A fresh coin always has the same shape (the curve
+# buyer, the pool buyer, the pool), so the chain below is that shape.
+_COIN = [("CurveBuyer", _pct("79.31"), False), ("PoolBuyer", _pct("17.01"), False),
+         ("PoolPDA", _pct("3.68"), True)]
+_FUNDED = {"CurveBuyer": "FunderA", "PoolBuyer": "FunderB"}
+
+
+async def _source_decision(
+    monkeypatch: pytest.MonkeyPatch, chain: _Helius, *, blocked: set[str],
+    enabled: bool = True,
+) -> service.SafetyDecision:
+    from app.core.config import settings
+
+    asked: list[object] = []
+
+    async def recent_rug_ids(session, *, since, rug_return):  # noqa: ANN001
+        asked.append((since, rug_return))
+        return blocked
+
+    monkeypatch.setattr(settings, "REAL_WALLET_HOLDER_GATE_ENABLED", False)
+    monkeypatch.setattr(settings, "REAL_WALLET_SOURCE_BLOCK_ENABLED", enabled)
+    monkeypatch.setattr(settings, "REAL_WALLET_SOURCE_BLOCK_HOURS", 3)
+    monkeypatch.setattr(service.sources, "recent_rug_ids", recent_rug_ids)
+    monkeypatch.setattr(service, "TokenRepository",
+                        lambda _: SimpleNamespace(get_by_mint=lambda __: _return(_token())))
+    monkeypatch.setattr(service, "MarketSnapshotRepository",
+                        lambda _: SimpleNamespace(latest_for_mint=lambda __: _return(_snapshot())))
+    gate = _Gate(_inspection(), _Quotes(_quote(side="entry", output="100000000"),
+                                        _quote(side="exit", output="98000000")))
+    gate._holders_rpc = chain  # type: ignore[assignment]
+    decision = await gate.evaluate(mint_address=MINT, trade_size_usd=Decimal("100"), now=NOW)
+    if enabled:
+        assert asked == [(NOW - timedelta(hours=3), settings.REAL_WALLET_RUG_RETURN)]
+    else:
+        assert not asked, "rugs looked up while the block is off"
+    return decision
+
+
+async def test_a_coin_funded_by_the_money_behind_a_recent_rug_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SUUB then SOLCAT, 18 Sep: new wallets, the same two funders, both rugs."""
+    chain = _Helius(_COIN, funders=_FUNDED)
+    decision = await _source_decision(monkeypatch, chain, blocked={"FunderB", "Elsewhere"})
+    assert decision.decision == "REJECT"
+    assert decision.reason_codes == (Reason.LINKED_TO_RECENT_RUG,)
+    assert decision.provenance["sources"] == {
+        "recent_rug_ids": 2, "wallets": ["CurveBuyer", "PoolBuyer"],
+        "funders": ["FunderA", "FunderB"], "matched": ["FunderB"]}
+
+
+async def test_a_wallet_that_was_itself_behind_a_recent_rug_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chain = _Helius(_COIN, funders=_FUNDED)
+    decision = await _source_decision(monkeypatch, chain, blocked={"CurveBuyer"})
+    assert decision.reason_codes == (Reason.LINKED_TO_RECENT_RUG,)
+
+
+async def test_the_pool_is_never_one_of_the_wallets_traced(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The pool's own account is not a wallet: blocking it would block the coin
+    for having a pool."""
+    chain = _Helius([("PoolPDA", _pct("40"), True), ("CurveBuyer", _pct("55"), False)],
+                    funders=_FUNDED)
+    decision = await _source_decision(monkeypatch, chain, blocked={"PoolPDA"})
+    assert decision.decision == "ALLOW", decision.reason_codes
+    assert decision.provenance["sources"]["wallets"] == ["CurveBuyer"]
+
+
+async def test_money_behind_no_recent_rug_passes(monkeypatch: pytest.MonkeyPatch) -> None:
+    chain = _Helius(_COIN, funders=_FUNDED)
+    decision = await _source_decision(monkeypatch, chain, blocked={"SomeoneElse"})
+    assert decision.decision == "ALLOW", decision.reason_codes
+    assert decision.provenance["sources"]["matched"] == []
+
+
+async def test_with_no_recent_rug_nothing_is_read_and_nothing_refuses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Most of the time there is no rug in the window: no Helius call, no delay,
+    and a Helius outage cannot refuse a buy."""
+    chain = _Helius(_COIN, fail=True)
+    decision = await _source_decision(monkeypatch, chain, blocked=set())
+    assert decision.decision == "ALLOW", decision.reason_codes
+    assert chain.started == 0
+    assert decision.provenance["sources"] == {"recent_rug_ids": 0}
+
+
+async def test_an_untraceable_coin_refuses_inside_a_rug_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    decision = await _source_decision(monkeypatch, _Helius(_COIN, fail=True),
+                                      blocked={"FunderB"})
+    assert decision.reason_codes == (Reason.SOURCES_UNREADABLE,)
+
+
+async def test_the_source_block_is_off_unless_switched_on(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chain = _Helius(_COIN, funders=_FUNDED)
+    decision = await _source_decision(monkeypatch, chain, blocked={"FunderB"}, enabled=False)
+    assert decision.decision == "ALLOW"
+    assert chain.started == 0
+    assert "sources" not in decision.provenance

@@ -853,6 +853,19 @@ class Settings(BaseSettings):
     REAL_WALLET_MAX_HOLDER_PCT: Decimal = Field(
         default=Decimal("10"), gt=Decimal("0"), le=Decimal("100")
     )
+    #: Refuse a buy whose big wallets, or whoever funded them, were behind a
+    #: rug that closed in the last REAL_WALLET_SOURCE_BLOCK_HOURS (a book or
+    #: wallet trade at REAL_WALLET_RUG_RETURN or worse). See `sources`.
+    #:
+    #: Operators make fresh wallets for every coin but fund them from the same
+    #: place; rugs come in waves. Replayed on-chain over 485 BASE_75k_5m trades
+    #: (2026-09-15..18, $20 a trade): -$3 without it, +$127 with a 3-hour block
+    #: (any length from 3h to forever gave +$117..+$130). Almost all of it is
+    #: the 16-Sep wave; other days are about even. With no rug in the window
+    #: the check asks nothing of Helius and cannot refuse; inside one, a coin
+    #: that cannot be traced refuses. Off by default in code; production sets it.
+    REAL_WALLET_SOURCE_BLOCK_ENABLED: bool = False
+    REAL_WALLET_SOURCE_BLOCK_HOURS: int = Field(default=3, ge=1, le=72)
     #: The most of a token's SUPPLY one position may buy, as a fraction.
     #:
     #: A different question from the liquidity ratio above, and both are kept.
