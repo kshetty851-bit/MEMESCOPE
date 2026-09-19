@@ -50,6 +50,12 @@ JUPITER_URL = "https://lite-api.jup.ag/tokens/v2"
 JUPITER_LISTS: tuple[str, ...] = ("toptraded", "toptrending", "toporganicscore")
 JUPITER_WINDOWS: tuple[str, ...] = ("5m", "1h", "6h", "24h")
 JUPITER_LIMIT = 100
+#: Jupiter tags whose WHOLE list joins the universe, one call each. "verified"
+#: is ~3,500 tokens; on 2026-09-19 it took the universe from 142 (the lists
+#: above, capped at 100 each whatever `limit` asks) to ~540 tokens older than
+#: seven days with a $50k pool. Most of them are quiet, and the 20-trade floor
+#: means a quiet one only counts on the day it wakes up.
+JUPITER_TAGS: tuple[str, ...] = ("verified",)
 #: Not momentum trades: dollars, staked SOL, lending receipts, wrapped majors
 #: and tokenised stocks (which move with their exchange's hours, not this
 #: market). Matched against Jupiter's own tags.
@@ -70,8 +76,15 @@ MIN_LIQUIDITY_USD = _dec("LAB_MOMENTUM_MIN_LIQUIDITY_USD", "50000")
 MIN_PAIR_LIQUIDITY_USD = _dec("LAB_MOMENTUM_MIN_PAIR_LIQUIDITY_USD", "25000")
 #: A token stays polled this long after it last appeared on any list.
 UNIVERSE_TTL_HOURS = _int("LAB_MOMENTUM_UNIVERSE_TTL_HOURS", 48)
-#: Hard cap on the polled set: 30 pools a DexScreener call.
-MAX_PAIRS = _int("LAB_MOMENTUM_MAX_PAIRS", 450)
+#: Hard cap on the polled set: 30 pools a DexScreener call, so 700 is 24 calls
+#: a tick (~8s of pacing inside a 30s tick).
+MAX_PAIRS = _int("LAB_MOMENTUM_MAX_PAIRS", 700)
+#: New tokens given a pool per refresh, and the pace of those lookups. They run
+#: with NO lock held (`plan_universe`), so a tick never waits on them, and
+#: slower than a tick polls, because the host's DexScreener allowance is shared
+#: with enrichment and the graduation lab.
+UNIVERSE_MAX_RESOLVE = _int("LAB_MOMENTUM_UNIVERSE_MAX_RESOLVE", 300)
+RESOLVE_CALLS_PER_MINUTE = _int("LAB_MOMENTUM_RESOLVE_CALLS_PER_MINUTE", 100)
 
 # --- DexScreener ----------------------------------------------------------------
 DEXSCREENER_URL = "https://api.dexscreener.com"
