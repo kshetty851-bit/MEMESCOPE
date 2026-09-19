@@ -25,7 +25,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
-from app.labs.graduation import config, live_spec
+from app.labs.graduation import config, live_spec, moneyblock
 from app.labs.graduation.models import (
     GradCheckpoint,
     GradCurveSample,
@@ -842,6 +842,10 @@ class Leaderboard(BaseModel):
     #: `restated_rugged_usd` is what they really lost.
     restated_collapsed: int = 0
     restated_rugged_usd: Decimal = Decimal(0)
+    #: Closed trades the real wallet's money checks would have refused
+    #: (`moneyblock`, from 18 Sep): left out of every figure, and what they made.
+    blocked_trades: int = 0
+    blocked_pnl_usd: Decimal = Decimal(0)
 
 
 #: Thirty-day projections, memoised. `(computed_at, {arm: fields})`.
@@ -1533,6 +1537,12 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
                GradPaperPosition.book.in_([a.name for a in ARMS
                                            if not a.ab_experiment])))
 
+    blocked_n, blocked_usd = (await db.execute(
+        select(func.count(), func.coalesce(func.sum(GradPaperPosition.pnl_usd), 0))
+        .where(GradPaperPosition.excluded == moneyblock.EXCLUDED,
+               GradPaperPosition.book.in_([a.name for a in ARMS
+                                           if not a.ab_experiment])))).one()
+
     board = Leaderboard(
         restated_rule=rule or "",
         restated_trades=sum(restated.values()),
@@ -1541,6 +1551,8 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
                               if k not in ("fees", "not_graduation_pool")),
         restated_collapsed=restated.get("pool_collapsed", 0),
         restated_rugged_usd=Decimal(rugged_usd or 0).quantize(Decimal("0.01")),
+        blocked_trades=blocked_n,
+        blocked_pnl_usd=Decimal(blocked_usd or 0).quantize(Decimal("0.01")),
         running=config.paper_enabled(), started_at=started, arms=rows,
         controls=control_rows, control_band=band, best_control=best_control,
         leader=leader.name if leader else "",

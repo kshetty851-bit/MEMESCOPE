@@ -59,6 +59,10 @@ ALLOWED_PLATFORM = (
     # inside this package would be a second thing to get wrong.
     "app.security.liquidity",
     "app.core.config",
+    # The money the real wallet refuses for good. A plain list shared on
+    # purpose, so the books refuse exactly the coins the wallet refuses and
+    # the two can never drift apart (2026-09-19).
+    "app.core.rug_money",
     # THE BRIDGE, and the only two modules allowed across it.
     #
     # `live_spec.py` and `live_decisions.py` exist to make one graduation arm
@@ -83,7 +87,7 @@ MODULES = ("config.py", "curve.py", "parse.py", "watchset.py", "sources.py",
            "held_watch.py",
            "postgrad.py", "recorder.py", "features.py", "backtest.py",
            "scheduler.py", "models.py", "api.py", "paper.py", "analyst.py",
-           "tournament.py", "ab.py", "restate.py", "__main__.py",
+           "tournament.py", "ab.py", "restate.py", "moneyblock.py", "__main__.py",
            *BRIDGE_MODULES)
 
 

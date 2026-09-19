@@ -114,7 +114,8 @@ async def paper_tick() -> dict[str, Any]:
             # at the same instant, which is what makes them comparable.
             result = await Tournament(session, now=datetime.now(UTC),
                                       pool_reader=sources.pool_now,
-                                      operator_reader=sources.operators_now).tick()
+                                      operator_reader=sources.operators_now,
+                                      money_checks=True).tick()
             await session.commit()
             return result
     except Exception:  # containment: never raise into the beat

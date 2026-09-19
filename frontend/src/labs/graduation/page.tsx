@@ -120,6 +120,11 @@ const EXCLUDED: Record<string, { label: string; title: string }> = {
     title:
       "Bought as a graduation, but this token never graduated from pump.fun: its pool is not the one a pump.fun migration creates. Shown, counted nowhere.",
   },
+  wallet_blocked: {
+    label: "blocked — left out",
+    title:
+      "Your real wallet's safety checks would have refused this coin: the money behind it was on the block list, or behind a rug in the three hours before. So no book here counts it, as if it had never been bought.",
+  },
   rugged: {
     label: "rugged — left out",
     title:
@@ -357,7 +362,8 @@ function TradeTable({
   const counted = ordered.filter((p) => !p.voided);
   const foreign = ordered.filter((p) => p.excluded === "not_graduation_pool").length;
   const rugged = ordered.filter((p) => p.excluded === "rugged").length;
-  const voided = ordered.length - counted.length - foreign - rugged;
+  const blocked = ordered.filter((p) => p.excluded === "wallet_blocked").length;
+  const voided = ordered.length - counted.length - foreign - rugged - blocked;
   const total = counted.reduce((a, p) => a + Number(p.pnl_usd ?? 0), 0);
   const deployed = counted.reduce((a, p) => a + Number(p.notional_usd), 0);
   // The wallet's own total, from the same walk that filled the rows: what it
@@ -406,6 +412,7 @@ function TradeTable({
               {counted.length} counted
               {foreign ? `, ${foreign} not graduations` : ""}
               {rugged ? `, ${rugged} rugged left out` : ""}
+              {blocked ? `, ${blocked} blocked by the wallet's checks` : ""}
               {voided ? `, ${voided} voided` : ""}
             </td>
             {size ? (
@@ -839,6 +846,19 @@ function LeaderboardPanel() {
             at its reserves when taken, the sale when it was due &mdash; and
             new trades are priced that way. Bluey (17 Sep) had been booked at
             +1,044%; its pool says +4%.
+          </p>
+        ) : null}
+        {data.blocked_trades > 0 ? (
+          <p className="max-w-[78ch] rounded-lg border border-accent/40 bg-accent/[0.05] p-3 text-xs leading-relaxed text-ink-dim">
+            <b className="text-ink">Your wallet&apos;s checks, applied here.</b>{" "}
+            No book trades a coin your real wallet would refuse: money on its
+            block list, or behind a rug in the three hours before. Since those
+            checks went live on 18 Sep,{" "}
+            <b className="text-ink">
+              {data.blocked_trades} closed trades they would have turned away
+              are left out of every figure
+            </b>
+            ; together those trades made {usd(data.blocked_pnl_usd)}.
           </p>
         ) : null}
         {/* Verdict. The headline is the finding; the terms are underneath. */}
