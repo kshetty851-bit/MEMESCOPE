@@ -67,6 +67,18 @@ ALWAYS_BLOCKED = frozenset({
     # that have nothing to do with WWR.
     "6cb6cF9EeDvjuerUR3h9zWNFL3bKmNnvnomJ24qhKUJ7",
     "8EdVxQ78Y4DQJsqSmnkH1ySPGu1sqab8WAYL8mgFCt9j",
+    # Each of these rugs was ONE operator: its curve buyer (funded off an
+    # exchange) sent ~5,000 SOL through a one-shot account to its pool buyer,
+    # which filled the pool and later pulled it. ZBCN's curve buyer, left out
+    # above, is that operator's main wallet. Karthik asked, 2026-09-19.
+    "8eEQ6s6gNykb9sFhS5aihsxMenTTqZkm25EqNNFaDvwf",
+    # COST (18 Sep 21:35, -$43.24 on the wallet at $50): the pool buyer took
+    # 702 of its 989 SOL back 15 s after the wallet's buy. Its curve buyer, the
+    # one-shot account between them, and the pool buyer. Their other funder,
+    # 5tzFki, is an exchange hot wallet (~2M SOL) and stays OFF this list.
+    "2Cghr56XrPXRAJhzVRor2pSnDFYVe2t2guKgdzNSjQsT",
+    "wqcTmHNuzxihz8bSckYd5e7n8zBUgtLGEWhXfuoS1gv",
+    "EvfSd1qWRKLmCzoD66mi64fehEikgHYdJv5s67FBqtmE",
 })
 
 
