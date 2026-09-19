@@ -59,7 +59,10 @@ def test_the_tournament_is_a_hold_sweep_with_a_baseline_on_every_hold() -> None:
     One baseline per hold, so no hold is judged without an unselected twin on
     its own clock. Nothing on this board decides by hashing a mint.
     """
-    assert len(ARMS) == 14
+    assert len(ARMS) == 15
+    # Karthik's $10k book (2026-09-19): the baseline's rule on a $10k floor,
+    # out at two minutes. Not a control, so the baseline below is unchanged.
+    assert any(a.name == "BASE_10k_2m" and not a.is_control for a in ARMS)
     # The fast pair (2026-09-19): E75T is E75 plus ONE condition, a clean
     # operator record, so E75 is its matched control on the same clock.
     fast = {a.name: a for a in ARMS if a.entry in ("fast75", "fast75_trust")}
@@ -894,7 +897,7 @@ async def test_a_token_that_never_graduated_is_not_bought(monkeypatch) -> None:
     # candidate graduated 40s ago so all three still have time — and the
     # all-graduations A/B control. B5 needs $500k; B3E and the night A/B do not
     # buy from this query.
-    for pair, bought in ((OTHER_POOL, 0), (REAL_POOL, 9)):
+    for pair, bought in ((OTHER_POOL, 0), (REAL_POOL, 10)):   # 10 with BASE_10k_2m
         session = _Answers([], [], [])
         session.statements = []
         t = Tournament(session, now=NIGHT)
@@ -1076,7 +1079,7 @@ async def test_a_buy_fills_at_the_pools_own_price_not_the_feeds_first_report(
     the report, the book booked +1,044%; on-chain the trade made +4%."""
     bought, added, mirrored, reads = await _buy(
         monkeypatch, feed_price="0.000004773", pool=_pool("0.0000541", "980"))
-    assert bought == 9
+    assert bought == 10   # every arm this coin qualifies for, BASE_10k_2m included
     assert reads == [(REAL_MINT, REAL_POOL)], "one read prices every arm"
     for p in added:
         assert abs(p.open_quote / Decimal("0.0000541") - 1) < Decimal("0.001")
@@ -1103,7 +1106,7 @@ async def test_a_pool_price_a_scale_error_away_is_not_bought(monkeypatch) -> Non
     assert (await _buy(monkeypatch, feed_price="0.00008",
                        pool=_pool("0.00000008", "980")))[0] == 0
     assert (await _buy(monkeypatch, feed_price="0.00008",
-                       pool=_pool("0.00088", "980")))[0] == 9
+                       pool=_pool("0.00088", "980")))[0] == 10
 
 
 async def test_a_pool_not_quoted_in_sol_is_not_bought(monkeypatch) -> None:

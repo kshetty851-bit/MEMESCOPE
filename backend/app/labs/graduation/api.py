@@ -534,7 +534,7 @@ async def _size_trades(db: AsyncSession, *, rows: Sequence[Any],
 @router.get("/paper/trades", response_model=PaperBookOut)
 async def paper_trades(book: str = "E05_hold_5m",
                        ticket: float | None = None, split: int = 1,
-                       fresh: bool = False,
+                       fresh: str | None = None,
                        db: AsyncSession = Depends(get_db)) -> PaperBookOut:
     """Every closed trade, not just the recent ones.
 
@@ -546,13 +546,17 @@ async def paper_trades(book: str = "E05_hold_5m",
     if not config.enabled():
         return PaperBookOut()
     if fresh:
-        # Karthik's fresh book (`config.FRESH_*`): its own start and its own
-        # wallet, fixed here so a caller cannot ask for any other.
+        # One of Karthik's fresh books (`config.FRESH_BOOKS`), by its arm's
+        # name: its own start and its own wallet, fixed here so a caller
+        # cannot ask for any other. "true" is the first book, as it was asked
+        # for before there were two.
+        specs = {s.book: s for s in config.FRESH_BOOKS}
+        spec = (config.FRESH_BOOKS[0] if fresh in ("true", "1") else specs.get(fresh))
+        if spec is None:
+            raise HTTPException(status_code=404, detail="no such fresh book")
         return await _paper(
-            db, book=config.FRESH_BOOK, limit=None,
-            ticket=float(config.FRESH_TICKET_USD),
-            split=int(config.FRESH_CAPITAL_USD / config.FRESH_TICKET_USD),
-            since=config.FRESH_START)
+            db, book=spec.book, limit=None, ticket=float(spec.ticket_usd),
+            split=int(spec.capital_usd / spec.ticket_usd), since=spec.start)
     from app.labs.graduation.tournament import BY_NAME
 
     if book not in BY_NAME:
@@ -859,8 +863,10 @@ class Leaderboard(BaseModel):
     #: (`moneyblock`, from 18 Sep): left out of every figure, and what they made.
     blocked_trades: int = 0
     blocked_pnl_usd: Decimal = Decimal(0)
-    #: Karthik's fresh $500 BASE 75k book (`config.FRESH_*`).
+    #: Karthik's fresh books (`config.FRESH_BOOKS`); `fresh` is the first,
+    #: for the page that read it before there were two.
     fresh: FreshBook | None = None
+    fresh_books: list[FreshBook] = []
 
 
 #: Thirty-day projections, memoised. `(computed_at, {arm: fields})`.
@@ -879,9 +885,10 @@ _PROJECTION_TTL = timedelta(minutes=2)
 
 
 class FreshBook(BaseModel):
-    """A book restarted from a moment with its own money (`config.FRESH_*`)."""
+    """A book restarted from a moment with its own money (`config.FRESH_BOOKS`)."""
 
     book: str
+    hold_minutes: int
     started_at: datetime
     capital_usd: Decimal
     ticket_usd: Decimal
@@ -896,17 +903,18 @@ class FreshBook(BaseModel):
     lowest_usd: Decimal
 
 
-def fresh_book(trades: Sequence[tuple], rate: Decimal | None = None) -> FreshBook:
-    """`config.FRESH_BOOK`'s closed trades since `config.FRESH_START`, walked
-    through a `FRESH_CAPITAL_USD` wallet at `FRESH_TICKET_USD` a trade."""
-    since = [t for t in trades if t[0] >= config.FRESH_START]
-    start = float(config.FRESH_CAPITAL_USD)
-    walk = _funded_walk(since, rate, ticket=float(config.FRESH_TICKET_USD), start=start)
+def fresh_book(trades: Sequence[tuple], rate: Decimal | None,
+               spec: config.FreshBookSpec) -> FreshBook:
+    """`spec.book`'s closed trades since `spec.start`, walked through a
+    `spec.capital_usd` wallet at `spec.ticket_usd` a trade."""
+    since = [t for t in trades if t[0] >= spec.start]
+    start = float(spec.capital_usd)
+    walk = _funded_walk(since, rate, ticket=float(spec.ticket_usd), start=start)
     taken = [(t, p) for t, p in zip(since, walk.pnl, strict=True) if p is not None]
     cents = Decimal("0.01")
     return FreshBook(
-        book=config.FRESH_BOOK, started_at=config.FRESH_START,
-        capital_usd=config.FRESH_CAPITAL_USD, ticket_usd=config.FRESH_TICKET_USD,
+        book=spec.book, hold_minutes=next(a.hold for a in ARMS if a.name == spec.book),
+        started_at=spec.start, capital_usd=spec.capital_usd, ticket_usd=spec.ticket_usd,
         balance_usd=Decimal(str(walk.cash)).quantize(cents),
         pnl_usd=Decimal(str(walk.cash - start)).quantize(cents),
         return_pct=Decimal(str((walk.cash / start - 1) * 100)).quantize(cents),
@@ -1605,7 +1613,8 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
         restated_rugged_usd=Decimal(rugged_usd or 0).quantize(Decimal("0.01")),
         blocked_trades=blocked_n,
         blocked_pnl_usd=Decimal(blocked_usd or 0).quantize(Decimal("0.01")),
-        fresh=fresh_book(per_arm_trades.get(config.FRESH_BOOK, []), sol_rate),
+        fresh_books=[fresh_book(per_arm_trades.get(spec.book, []), sol_rate, spec)
+                     for spec in config.FRESH_BOOKS],
         running=config.paper_enabled(), started_at=started, arms=rows,
         controls=control_rows, control_band=band, best_control=best_control,
         leader=leader.name if leader else "",
@@ -1622,6 +1631,7 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
         wallet_demo_slots=config.WALLET_DEMO_SLOTS,
         hours_running=Decimal(str(round(hours, 1))),
     )
+    board.fresh = board.fresh_books[0] if board.fresh_books else None
     if leader is None:
         board.verdict = (
             f"{len(traded)} arms have closed trades; none of them is a "

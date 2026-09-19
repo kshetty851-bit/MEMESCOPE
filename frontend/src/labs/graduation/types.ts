@@ -262,6 +262,7 @@ export interface ArmRow {
  */
 export interface FreshBook {
   book: string;
+  hold_minutes: number;
   started_at: string;
   capital_usd: string;
   ticket_usd: string;
@@ -313,7 +314,8 @@ export interface Leaderboard {
    * of every figure since 18 Sep, and what they made together. */
   blocked_trades: number;
   blocked_pnl_usd: string;
-  /** Karthik's fresh $500 BASE 75k book: the baseline's trades from its start,
-   * walked through a $500 wallet at $100 a trade. */
+  /** Karthik's fresh books: an arm's trades from its start, walked through
+   * that book's own wallet. `fresh` is the first, as before. */
   fresh: FreshBook | null;
+  fresh_books: FreshBook[];
 }

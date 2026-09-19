@@ -21,6 +21,7 @@ computing none. Every one of them is an environment variable.
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from itertools import pairwise
@@ -909,15 +910,28 @@ def wallet_floor(ticket: _Money) -> _Money:
 #: that sent Karthik round this loop three times.
 WALLET_DEMO_SLOTS = _int("LAB_GRADUATION_WALLET_DEMO_SLOTS", 1)
 
-#: Karthik's fresh BASE 75k book (2026-09-19): the baseline's own trades from
-#: this moment, walked through a $500 wallet at $100 a trade - up to five at
-#: once, fewer after losses, exactly as the real wallet funds them. Every trade
-#: the baseline takes since 09:58 that day has passed the real wallet's money
-#: checks (`moneyblock`), so this book never holds a coin the wallet refuses.
-FRESH_BOOK = "BASE_75k_5m"
-FRESH_START = datetime(2026, 9, 19, 13, 0, tzinfo=UTC)
-FRESH_CAPITAL_USD = Decimal(500)
-FRESH_TICKET_USD = Decimal(100)
+@dataclass(frozen=True, slots=True)
+class FreshBookSpec:
+    """An arm's own trades from `start`, walked through a `capital_usd` wallet
+    at `ticket_usd` a trade: up to capital / ticket at once, fewer after losses,
+    exactly as the real wallet funds them."""
+
+    book: str
+    start: datetime
+    capital_usd: Decimal
+    ticket_usd: Decimal
+
+
+#: Karthik's fresh books (2026-09-19). Every trade an arm has taken since 09:58
+#: that day passed the real wallet's money checks (`moneyblock`), so none of
+#: these holds a coin the wallet refuses.
+FRESH_BOOKS: tuple[FreshBookSpec, ...] = (
+    FreshBookSpec("BASE_75k_5m", datetime(2026, 9, 19, 13, 0, tzinfo=UTC),
+                  Decimal(500), Decimal(100)),
+    # A new arm, so it has nothing before its first deploy.
+    FreshBookSpec("BASE_10k_2m", datetime(2026, 9, 19, 13, 45, tzinfo=UTC),
+                  Decimal(500), Decimal(50)),
+)
 
 # --- the kill gate, stated before this run produced a single trade ------------
 #

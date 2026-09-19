@@ -106,8 +106,8 @@ async def test_the_fresh_book_lists_only_its_own_trades_sized_as_its_wallet(
 
     start = NOW + timedelta(minutes=10)
     monkeypatch.setattr(config, "enabled", lambda: True)
-    monkeypatch.setattr(config, "FRESH_BOOK", BOOK)
-    monkeypatch.setattr(config, "FRESH_START", start)
+    monkeypatch.setattr(config, "FRESH_BOOKS", (
+        config.FreshBookSpec(BOOK, start, D(500), D(100)),))
     before = _trade("MintBefore", opened=start - timedelta(minutes=5), minutes=4, ret="0.30")
     # Six at once: a $500 wallet at $100 a trade funds five and skips the sixth.
     six = [_trade(f"Mint{i}", opened=start + timedelta(seconds=i), minutes=20, ret="0.01")
@@ -117,7 +117,7 @@ async def test_the_fresh_book_lists_only_its_own_trades_sized_as_its_wallet(
     db_session.add_all([before, *six, still_open])
     await db_session.flush()
 
-    book = await api.paper_trades(fresh=True, db=db_session)
+    book = await api.paper_trades(fresh=BOOK, db=db_session)
     assert {t.mint for t in book.closed_trades} == {f"Mint{i}" for i in range(6)}
     assert [t.mint for t in book.open_trades] == ["MintOpen"]
     assert book.size_start_usd == D(500) and book.size_ticket_usd == D(100)

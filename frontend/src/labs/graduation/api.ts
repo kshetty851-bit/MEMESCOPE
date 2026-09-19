@@ -35,12 +35,14 @@ export function fetchPaperTrades(
 }
 
 /**
- * Karthik's fresh $500 book: its trades since it started, open and closed,
- * each stamped with what the $500 wallet made on it. The server fixes the start
- * and the wallet, so there is nothing to pass.
+ * One of Karthik's fresh books, by its arm's name: its trades since it started,
+ * open and closed, each stamped with what its wallet made on it. The server
+ * fixes the start and the wallet, so the name is all there is to pass.
  */
-export function fetchFreshTrades(): Promise<PaperBook> {
-  return api.get<PaperBook>("/labs/graduation/paper/trades?fresh=true");
+export function fetchFreshTrades(book: string): Promise<PaperBook> {
+  return api.get<PaperBook>(
+    `/labs/graduation/paper/trades?fresh=${encodeURIComponent(book)}`,
+  );
 }
 
 /**
