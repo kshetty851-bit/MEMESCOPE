@@ -96,3 +96,29 @@ async def test_the_leaderboard_itself_renders(db_session: AsyncSession, monkeypa
     official = next(s for s in arm.splits if s.split == 1 and float(s.ticket_usd) == 100)
     assert official.trades_funded + official.trades_skipped == 3
     assert float(official.wallet_usd) > 0
+
+
+async def test_the_fresh_book_lists_only_its_own_trades_sized_as_its_wallet(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Karthik's fresh $500 book: trades from its start, $100 a trade."""
+    from app.labs.graduation import api, config
+
+    start = NOW + timedelta(minutes=10)
+    monkeypatch.setattr(config, "enabled", lambda: True)
+    monkeypatch.setattr(config, "FRESH_BOOK", BOOK)
+    monkeypatch.setattr(config, "FRESH_START", start)
+    before = _trade("MintBefore", opened=start - timedelta(minutes=5), minutes=4, ret="0.30")
+    # Six at once: a $500 wallet at $100 a trade funds five and skips the sixth.
+    six = [_trade(f"Mint{i}", opened=start + timedelta(seconds=i), minutes=20, ret="0.01")
+           for i in range(6)]
+    still_open = _trade("MintOpen", opened=start + timedelta(minutes=30), minutes=0, ret="0")
+    still_open.closed_at = None
+    db_session.add_all([before, *six, still_open])
+    await db_session.flush()
+
+    book = await api.paper_trades(fresh=True, db=db_session)
+    assert {t.mint for t in book.closed_trades} == {f"Mint{i}" for i in range(6)}
+    assert [t.mint for t in book.open_trades] == ["MintOpen"]
+    assert book.size_start_usd == D(500) and book.size_ticket_usd == D(100)
+    assert (book.size_funded, book.size_skipped) == (5, 1)

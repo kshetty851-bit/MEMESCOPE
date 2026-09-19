@@ -7,6 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/states";
 
 import {
+  useFreshTrades,
   useGraduationStatus,
   useGraduationTournament,
   useGraduationTrades,
@@ -636,6 +637,53 @@ function Elapsed({ since }: { since: string | null }) {
 }
 
 /**
+ * The fresh $500 book's trades, open and closed. The closed ones carry what
+ * the $500 wallet made on each, so they add up to the balance above them; a
+ * trade it had no free money for says skipped.
+ */
+function FreshTrades({ size }: { size: WalletSize }) {
+  const { data, isLoading } = useFreshTrades();
+  const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({
+    key: "closed_at",
+    desc: true,
+  });
+  if (isLoading) {
+    return <p className="text-xs text-ink-dim">Loading trades…</p>;
+  }
+  const closed = data?.closed_trades ?? [];
+  const open = data?.open_trades ?? [];
+  return (
+    <div className="mt-3 flex flex-col gap-3">
+      <div className="flex flex-col gap-1">
+        <h4 className="text-label uppercase tracking-[0.08em] text-ink-dim">
+          Open — {open.length} · marked, nothing banked
+        </h4>
+        <TradeTable
+          rows={open}
+          closed={false}
+          empty="Nothing open right now. Each trade is held for five minutes, so the book sits in cash between them."
+        />
+      </div>
+      <div className="flex flex-col gap-1">
+        <h4 className="text-label uppercase tracking-[0.08em] text-ink-dim">
+          Closed — {closed.length}
+        </h4>
+        <TradeTable
+          rows={closed}
+          closed
+          size={size}
+          sort={sort}
+          onSort={(key) =>
+            setSort((s) => ({ key, desc: s.key === key ? !s.desc : true }))
+          }
+          empty="nothing closed yet"
+        />
+      </div>
+    </div>
+  );
+}
+
+/**
  * One arm's own trades, fetched on expand.
  *
  * Its own component so the hook is called unconditionally — a hook inside the
@@ -894,6 +942,14 @@ function LeaderboardPanel() {
               rugs; {data.fresh.skipped} skipped for lack of free money. Lowest
               balance {usd(data.fresh.lowest_usd)}.
             </p>
+            <FreshTrades
+              size={{
+                ticket: Number(data.fresh.ticket_usd),
+                split: Math.round(
+                  Number(data.fresh.capital_usd) / Number(data.fresh.ticket_usd),
+                ),
+              }}
+            />
           </div>
         ) : null}
         {/* Verdict. The headline is the finding; the terms are underneath. */}
