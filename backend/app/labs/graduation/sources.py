@@ -803,11 +803,17 @@ class HeldVaultStream:
         if state is None:
             return None
         slot, accounts = await self.accounts(
-            [state.base_mint, state.quote_mint, state.base_vault, state.quote_vault],
+            [state.base_mint, state.quote_mint, state.base_vault, state.quote_vault,
+             state.lp_mint],
             commitment="confirmed")
-        if not slot or any(a is None for a in accounts):
+        # The LP mint only answers the lock rule: unread, it leaves the pool
+        # priceable and not proven locked.
+        if not slot or any(a is None for a in accounts[:4]):
             raise ConnectionError(f"accounts of pool {pool} unread")
-        return held_watch.watch(mint, pool, state, accounts)
+        held = held_watch.watch(mint, pool, state, accounts[:4])
+        if held is not None:
+            held.lp_supply = held_watch.mint_supply(accounts[4])
+        return held
 
     async def pool_from_migration(self, mint: str, signature: str) -> str | None:
         """The pumpswap pool a graduation created, read off its own transaction.

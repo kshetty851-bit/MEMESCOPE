@@ -176,6 +176,9 @@ class Arm:
     #: a pre-registered experiment has, which is that nobody chose when to stop.
     ab_experiment: bool = False
     note: str = ""
+    #: Buy only a pool whose liquidity is locked: its LP supply read zero on
+    #: the buy's own pool read (`Held.lp_supply`). Unread is not locked.
+    locked: bool = False
 
     @property
     def is_control(self) -> bool:
@@ -630,10 +633,13 @@ ARMS: tuple[Arm, ...] = (
              "bought on sight, out at 4m"),
     Arm("E75T_4m", "fast75_trust", 4,
         note="as E75_4m, only when the operator's earlier coins (2+) never rugged"),
-    # Karthik, 2026-09-19: every graduation over $10k, out at two minutes,
-    # shown as a fresh $500 wallet at $50 a trade (`config.FRESH_BOOKS`).
-    Arm("BASE_10k_2m", "floor10k", 2,
-        note="every graduation over $10k, no selection, out at 2m"),
+    # Karthik, 2026-09-19: every graduation over $10k with its liquidity
+    # locked, out at two minutes, shown as a fresh $500 wallet at $50 a trade
+    # (`config.FRESH_BOOKS`). The lock was added an hour after the arm went
+    # live; its seven trades before then were checked on-chain and all locked.
+    Arm("BASE_10k_2m", "floor10k", 2, locked=True,
+        note="every graduation over $10k with its liquidity locked (LP burned), "
+             "out at 2m"),
     # NOT part of the tournament, and kept when everything else went. These
     # two are a PRE-REGISTERED A/B on the rug signals — a never-seen symbol
     # rugs 18% against 3%, a daytime-UTC open 15% against 5% — opened
@@ -1451,6 +1457,7 @@ class Tournament:
         foreign = 0
         unpriced = 0
         money_blocked = 0
+        unlocked = 0
         mirror: list[live_decisions.Mirrored] = []
         for row in rows:
             if row.price_native is None or row.price_native <= 0:
@@ -1485,15 +1492,23 @@ class Tournament:
                             reason=blocked[row.mint])
                 continue
             price, depth = row.price_native, row.liquidity_usd
+            pool = None
             if self._pool_reader is not None:
-                priced = chain_entry(await self._pool_reader(row.mint, row.pair_address),
-                                     rate, row.price_native)
+                pool = await self._pool_reader(row.mint, row.pair_address)
+                priced = chain_entry(pool, rate, row.price_native)
                 if priced is None:
                     # Not bought on a guess. Still inside the grace window, so
                     # the next tick asks the pool again.
                     unpriced += 1
                     continue
                 price, depth = priced
+            if pool is None or pool.lp_supply != 0:
+                # Liquidity not proven locked on this read: the arms that ask
+                # for a lock pass; the rest buy as they always have.
+                wanted = [arm for arm in wanted if not arm.locked]
+                if not wanted:
+                    unlocked += 1
+                    continue
             # Could a real wallet have filled this at all? A transaction whose
             # price move exceeds the slippage tolerance REVERTS — it does not
             # fill badly, it does not fill. Refusing here is the difference
@@ -1546,9 +1561,9 @@ class Tournament:
                         price_native=price))
         await live_decisions.record(self._session, mirror)
         opened += opened_curve
-        if opened or refused or foreign or unpriced or money_blocked:
+        if opened or refused or foreign or unpriced or money_blocked or unlocked:
             logger.info("graduation_tournament_filled", opened=opened,
                         refused_unfillable=refused, not_graduation=foreign,
                         pool_unpriced=unpriced, money_blocked=money_blocked,
-                        candidates=len(rows))
+                        lp_unlocked=unlocked, candidates=len(rows))
         return opened
