@@ -300,6 +300,10 @@ x-backend-env: &backend-env
   # .env alone does nothing — this file enumerates every variable that reaches
   # a container, and a value not named here never arrives.
   RAFIQ_LAB_ENABLED: ${RAFIQ_LAB_ENABLED:-false}
+  # Momentum Lab. In the anchor for the same reason: beat schedules it, the
+  # worker runs it and the API reads it, and a value this file does not name
+  # never reaches a container.
+  LAB_MOMENTUM_ENABLED: ${LAB_MOMENTUM_ENABLED:-false}
   NSE_BREAKOUT_ENABLED: ${NSE_BREAKOUT_ENABLED:-false}
   KARTHIK_CANDIDATE_LIMIT: ${KARTHIK_CANDIDATE_LIMIT:-250}
   KARTHIK_REVIEW_BATCH_LIMIT: ${KARTHIK_REVIEW_BATCH_LIMIT:-2000}

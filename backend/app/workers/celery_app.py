@@ -57,6 +57,8 @@ celery_app = Celery(
         # Graduation Lab. Gated by LAB_GRADUATION_ENABLED (default off):
         # with the flag down its beat tasks return before opening a session.
         "app.labs.graduation.scheduler",
+        # Momentum Lab. Gated by LAB_MOMENTUM_ENABLED (default off).
+        "app.labs.momentum.scheduler",
         "app.hq_ops.tasks",
     ],
 )
@@ -352,6 +354,26 @@ celery_app.conf.beat_schedule = {
                     # Its own worker (compose `worker-paper`): on the shared
                     # one it waited behind the :00 minute tasks.
                     "queue": "graduation_paper"},
+    },
+    # Momentum Lab: fifty paper strategies buying the momentum candle on tokens
+    # older than seven days. All three return before opening a session while
+    # LAB_MOMENTUM_ENABLED is off, so registering them starts nothing.
+    #
+    # The tick is SECONDS, not a crontab: a crontab cannot run more than once a
+    # minute, and a buy decided on one tick fills on the next tick's price. A
+    # tick left waiting a whole interval is dropped, not run late.
+    "momentum-lab-tick": {
+        "task": "app.labs.momentum.scheduler.momentum_tick",
+        "schedule": _seconds("LAB_MOMENTUM_TICK_S", 30.0),
+        "options": {"expires": _seconds("LAB_MOMENTUM_TICK_S", 30.0)},
+    },
+    "momentum-lab-universe": {
+        "task": "app.labs.momentum.scheduler.momentum_universe",
+        "schedule": crontab(minute="7,37"),
+    },
+    "momentum-lab-prune": {
+        "task": "app.labs.momentum.scheduler.momentum_prune",
+        "schedule": crontab(minute=17),
     },
     # NSE Breakout Tracker. The exchange publishes the day's bhavcopy after
     # the close, so ingest runs at 13:00 UTC (18:30 IST) and retries hourly to
