@@ -28,6 +28,7 @@ class Status(BaseModel):
     running: bool
     min_age_days: int = config.MIN_AGE_DAYS
     min_liquidity_usd: float = float(config.MIN_LIQUIDITY_USD)
+    min_trades_5m: int = config.MIN_TRADES_PER_5M
     start_usd: float = float(config.START_USD)
     ticket_usd: float = float(config.TICKET_USD)
     arms: int = len(ARMS)

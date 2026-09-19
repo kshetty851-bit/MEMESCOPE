@@ -20,7 +20,7 @@ from app.labs.momentum.arms import (
     fires,
     fires_rolling,
 )
-from app.labs.momentum.candles import Bar, bucket, features
+from app.labs.momentum.candles import Bar, bucket, busy, features
 from app.labs.momentum.lab import buy, sell
 from app.labs.momentum.sources import PairRow, best_pair, parse_listed
 
@@ -263,3 +263,13 @@ def test_rule_words_are_the_rule() -> None:
     assert "10% off the high" in BY_NAME["X5_TRAIL10"].exit_words
     rolling = Rule(min_ret=0.04, min_vol_x=3.0, rolling=True)
     assert rolling.words().startswith("the last 5 minutes")
+
+
+def test_only_busy_candles_count() -> None:
+    """Twenty trades per five minutes the bar spans: four a minute."""
+    need = config.MIN_TRADES_PER_5M
+    assert busy(bar(0, 1, 1.05, buys=need - 5, sells=5))
+    assert not busy(bar(0, 1, 1.05, buys=2, sells=0)), "the first live trade: two buys"
+    fifteen = replace(bar(0, 1, 1.05, buys=need, sells=need), parts=3)
+    assert not busy(fifteen), "a 15m bar needs three times as many"
+    assert busy(replace(fifteen, buys=2 * need))
