@@ -599,6 +599,16 @@ FUNDING_PAGES = 2
 #: Seconds one operator read may take before the arm treats the coin as a
 #: stranger; it runs inside a tick with a three-second cadence.
 OPERATOR_READ_TIMEOUT_S = 6.0
+#: The operator is read at the latest confirmed block. The RPC default,
+#: finalized, trails it by ~13 s, and an instant graduation is read 5-8 s after
+#: its launch: finalized has no such mint yet ("could not find account"), which
+#: emptied 54 of the first 124 live reads (18-19 Sep 2026), every one of them
+#: read under 8 s after the migration.
+CONFIRMED = {"commitment": "confirmed"}
+#: Even at confirmed, a mint seconds old reaches the holder index a few seconds
+#: late ("not a Token mint" at +5.5 s, readable at +8 s, probed live 19 Sep),
+#: so a read that early is asked again at this pause until the timeout.
+OPERATOR_RETRY_PAUSE_S = 1.0
 
 
 def _account_keys(tx: dict[str, Any]) -> list[str]:
@@ -651,17 +661,20 @@ async def operator_ids(rpc: Any, mint: str, pool: str) -> frozenset[str] | None:
     make a known operator look like a stranger with a clean record. The pool
     and the bonding curve hold tokens too and are not anyone's wallet.
     """
-    supply = await rpc.get_token_supply(mint)
+    supply = Decimal(str((((await rpc.call("getTokenSupply", [mint, CONFIRMED])) or {})
+                          .get("value") or {}).get("uiAmountString") or 0))
     if not supply:
         return None
-    largest = ((await rpc.call("getTokenLargestAccounts", [mint])) or {}).get("value")
+    largest = ((await rpc.call("getTokenLargestAccounts", [mint, CONFIRMED]))
+               or {}).get("value")
     if largest is None:
         return None
     share = lambda row: Decimal(str(row.get("uiAmountString") or 0)) / supply  # noqa: E731
     big = [row["address"] for row in largest if share(row) >= config.OPERATOR_MIN_SHARE]
     if not big:
         return frozenset()
-    accounts = ((await rpc.call("getMultipleAccounts", [big, {"encoding": "jsonParsed"}]))
+    accounts = ((await rpc.call("getMultipleAccounts",
+                                [big, {"encoding": "jsonParsed", **CONFIRMED}]))
                 or {}).get("value") or []
     if len(accounts) != len(big):
         return None
@@ -671,6 +684,20 @@ async def operator_ids(rpc: Any, mint: str, pool: str) -> frozenset[str] | None:
     owners = {o for o in owners if o and o not in {pool, curve}}
     funders = await asyncio.gather(*(funder(rpc, o) for o in owners))
     return frozenset(owners | {f for f in funders if f})
+
+
+async def operator_ids_when_visible(rpc: Any, mint: str, pool: str, *,
+                                    pause_s: float = OPERATOR_RETRY_PAUSE_S
+                                    ) -> frozenset[str] | None:
+    """`operator_ids`, asked again while the chain does not know the mint yet.
+    Never ends on its own: the caller's timeout does."""
+    from app.services.rpc.standard import RpcError
+
+    while True:
+        try:
+            return await operator_ids(rpc, mint, pool)
+        except RpcError:
+            await asyncio.sleep(pause_s)
 
 
 async def operators_now(mint: str, pool: str) -> frozenset[str] | None:
@@ -683,7 +710,7 @@ async def operators_now(mint: str, pool: str) -> frozenset[str] | None:
     rpc = StandardSolanaRPC(rpc_url=settings.HELIUS_RPC_URL)
     await rpc.start()
     try:
-        return await asyncio.wait_for(operator_ids(rpc, mint, pool),
+        return await asyncio.wait_for(operator_ids_when_visible(rpc, mint, pool),
                                       timeout=OPERATOR_READ_TIMEOUT_S)
     except Exception as exc:  # a stranger, not a crash: the tick goes on
         logger.info("graduation_operator_unread", mint=mint, error=type(exc).__name__)
