@@ -79,6 +79,19 @@ ALWAYS_BLOCKED = frozenset({
     "2Cghr56XrPXRAJhzVRor2pSnDFYVe2t2guKgdzNSjQsT",
     "wqcTmHNuzxihz8bSckYd5e7n8zBUgtLGEWhXfuoS1gv",
     "EvfSd1qWRKLmCzoD66mi64fehEikgHYdJv5s67FBqtmE",
+    # Repeat operators among BASE_75k_5m's 31 rugs (15-19 Sep): 18 of the 30
+    # traced came from three, linked by shared wallets. Karthik asked, 2026-09-19.
+    # The 16 Sep wave's pool buyers (its funders are listed above): on 8 and 3
+    # of its 11 rugs.
+    "E7mdTgYspRGRAE1zJoUW8zdxNU5VjpQbivXU6huB7oqJ",
+    "5MYVpHEiLHkddGHQhZMfhwSVqYi3yzmpmGfRxSeavBvL",
+    # SUUB, SOLCAT, WEN, Pump, ELIEN (18 Sep): this pool buyer bought all five
+    # (xZJADx above funded it). Its curve funder, 8zxkme, stays off: ~930 SOL and
+    # 1,000 transactions in half an hour looks like a service.
+    "BGCbX7bcXAnbKuUP9uUfAGzQyZRz158kAzYPNKpTLCe2",
+    # FOMO and AMAZON (18 Sep, an hour apart): the same big wallet. Their shared
+    # funder, BZXZ8d, stays off: 578 transactions in 36 minutes, a seeder.
+    "DdtsVPAnET6MqDPvDumgUBsTYpYcn7UZpKMG8uwJzJyo",
 })
 
 
