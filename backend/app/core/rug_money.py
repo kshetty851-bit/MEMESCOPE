@@ -83,6 +83,15 @@ BLOCKED_SINCE: dict[str, datetime] = {
     "9x2N1MHxs5NxAYnpkNi1QbyE3ayk6oqh53p9vpVjDdHa": _at("2026-09-19 09:02"),
     "FtvDtRoKP7vBPwwow1W5uttUVnXoskZ5bFnpkijb1iwL": _at("2026-09-19 09:02"),
     "3YfWwbV9QZbGfyQWHKGANdK8iwnMcpdWj1E2SqMvWkc6": _at("2026-09-19 09:02"),
+    # ECTF (19 Sep 17:23, -96.7% in BASE_75k_5m's fresh $500 book): the same
+    # move again. Its pool wallet put 493 SOL in at launch (560 of the pool's
+    # 564 SOL at the buy) and took 472 back in one sale 4 min after the buy;
+    # its launch wallet bought 79% of the coins and sold into the empty pool
+    # for 106 more. Both were new, gassed off exchanges (is6MTR, 5tzFki), and
+    # their money came from and went back to 34nDrS (WWR's exchange, above)
+    # through one-shot accounts: all of those stay off.
+    "6MzSwDcwB4PsHnLzh6gq6TmcwuogbJZH1Qg8o24xuZwK": _at("2026-09-19 18:00"),
+    "7PoS8EagdxcYgKM3xz7q6tEBKGVyPUynHFFnjfvBgTr8": _at("2026-09-19 18:00"),
 }
 
 ALWAYS_BLOCKED: frozenset[str] = frozenset(BLOCKED_SINCE)
