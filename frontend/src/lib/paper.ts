@@ -164,9 +164,10 @@ export function byMint(items: PaperPosition[]): Map<string, PaperPosition> {
  * make every such row read "+0s", which is the one wrong answer that looks
  * like a right one.
  *
- * Times render in the reader's own zone, like every other clock in MEMESCOPE.
- * The backend keeps UTC; `Date` does the conversion, and `stamp()` carries the
- * unambiguous version into the title for anyone comparing against the API.
+ * Times render in Dubai time, like every other clock in MEMESCOPE
+ * (`lib/site-time.ts`). The backend keeps UTC; `Date` does the conversion, and
+ * `stamp()` carries the UTC version into the title for anyone comparing
+ * against the API.
  */
 export function clock(iso: string | null | undefined): string | null {
   const date = iso ? new Date(iso) : null;

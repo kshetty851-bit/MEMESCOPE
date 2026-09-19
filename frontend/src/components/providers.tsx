@@ -4,6 +4,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import { ApiError } from "@/lib/api-client";
+// Every clock on the site in Dubai time: sets the default zone of every Date
+// formatter, on the server render and in the browser alike.
+import "@/lib/site-time";
 import { useAuthStore } from "@/stores/auth-store";
 
 function makeQueryClient(): QueryClient {

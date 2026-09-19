@@ -890,7 +890,7 @@ function TodayCard({ status }: { status: WalletStatus | undefined }) {
   return (
     <section className="mt-6 grid gap-3 sm:grid-cols-3">
       <div className="rounded-lg border border-line p-4">
-        <p className="text-label text-ink-3">Today (UTC)</p>
+        <p className="text-label text-ink-3">Today (from 04:00 Dubai)</p>
         <p
           className={`mt-1 text-2xl tabular-nums ${
             pnl > 0 ? "text-up" : pnl < 0 ? "text-down" : "text-ink"
@@ -900,7 +900,7 @@ function TodayCard({ status }: { status: WalletStatus | undefined }) {
         </p>
         <p className={`mt-1 text-xs ${status.today.loss_limit_hit ? "text-down" : "text-ink-3"}`}>
           {status.today.loss_limit_hit
-            ? `Loss limit of $${status.today.loss_limit_usd} reached — no new buys until 00:00 UTC.`
+            ? `Loss limit of $${status.today.loss_limit_usd} reached — no new buys until 04:00 Dubai.`
             : `Stops buying for the day at a $${status.today.loss_limit_usd} loss.`}
         </p>
       </div>
