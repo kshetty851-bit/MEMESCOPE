@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 
 import {
+  fetchFreshTrades,
   fetchPaperTrades,
   fetchReturns,
   fetchStatus,
@@ -64,6 +65,16 @@ export function useGraduationTrades(
     // previous size's dollars under the new size's heading.
     queryKey: ["graduation", "paper-trades", book, size?.ticket, size?.split],
     queryFn: () => fetchPaperTrades(book, size),
+    refetchInterval: 60_000,
+    ...LIVE,
+  });
+}
+
+/** The fresh $500 book's own trades, on the same minute as any arm's. */
+export function useFreshTrades() {
+  return useQuery({
+    queryKey: ["graduation", "fresh-trades"],
+    queryFn: fetchFreshTrades,
     refetchInterval: 60_000,
     ...LIVE,
   });

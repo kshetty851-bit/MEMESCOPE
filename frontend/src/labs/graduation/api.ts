@@ -35,6 +35,15 @@ export function fetchPaperTrades(
 }
 
 /**
+ * Karthik's fresh $500 book: its trades since it started, open and closed,
+ * each stamped with what the $500 wallet made on it. The server fixes the start
+ * and the wallet, so there is nothing to pass.
+ */
+export function fetchFreshTrades(): Promise<PaperBook> {
+  return api.get<PaperBook>("/labs/graduation/paper/trades?fresh=true");
+}
+
+/**
  * The peak-multiple distribution. Its own call because it scans the whole
  * sample table and the board polls every thirty seconds.
  */

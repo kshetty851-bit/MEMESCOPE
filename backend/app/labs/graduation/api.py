@@ -381,10 +381,14 @@ def _filter_description() -> str:
 
 async def _paper(db: AsyncSession, *, book: str = "E05_hold_5m",
                  limit: int | None = 10, ticket: float | None = None,
-                 split: int = 1) -> PaperBookOut:
-    """One book's state. Read-only: this endpoint never ticks it."""
+                 split: int = 1, since: datetime | None = None) -> PaperBookOut:
+    """One book's state. Read-only: this endpoint never ticks it. With `since`,
+    only the trades opened from then, so a wallet walked over them starts there."""
     account = await PaperBook(db, book=book).account()
     open_rows, closed_rows = await positions(db, book=book, limit=limit)
+    if since is not None:
+        open_rows = [r for r in open_rows if r[0].opened_at >= since]
+        closed_rows = [r for r in closed_rows if r[0].opened_at >= since]
     # The headline cost is a real position's, not a nominal one: the priority
     # fee is flat in SOL, so its share depends entirely on the size traded.
     # With no positions yet there is no rate to convert $100 with, and the
@@ -530,6 +534,7 @@ async def _size_trades(db: AsyncSession, *, rows: Sequence[Any],
 @router.get("/paper/trades", response_model=PaperBookOut)
 async def paper_trades(book: str = "E05_hold_5m",
                        ticket: float | None = None, split: int = 1,
+                       fresh: bool = False,
                        db: AsyncSession = Depends(get_db)) -> PaperBookOut:
     """Every closed trade, not just the recent ones.
 
@@ -540,6 +545,14 @@ async def paper_trades(book: str = "E05_hold_5m",
     """
     if not config.enabled():
         return PaperBookOut()
+    if fresh:
+        # Karthik's fresh book (`config.FRESH_*`): its own start and its own
+        # wallet, fixed here so a caller cannot ask for any other.
+        return await _paper(
+            db, book=config.FRESH_BOOK, limit=None,
+            ticket=float(config.FRESH_TICKET_USD),
+            split=int(config.FRESH_CAPITAL_USD / config.FRESH_TICKET_USD),
+            since=config.FRESH_START)
     from app.labs.graduation.tournament import BY_NAME
 
     if book not in BY_NAME:
