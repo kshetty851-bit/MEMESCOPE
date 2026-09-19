@@ -279,6 +279,35 @@ export interface FreshBook {
   lowest_usd: string;
 }
 
+/** One closed trade of a fresh book, as if it had never been sold. */
+export interface HeldRow {
+  mint: string;
+  symbol: string | null;
+  opened_at: string;
+  closed_at: string | null;
+  /** What the book's wallet got back selling at its exit. */
+  sold_usd: string | null;
+  /** The same coins never sold: what the pool pays for them now. */
+  held_usd: string | null;
+  /** The pool's total value now; a drained pool is why a coin is worth nothing. */
+  depth_usd: string | null;
+}
+
+/** A fresh book's closed coins if nothing had been sold, read on-chain now. */
+export interface FreshHeld {
+  book: string;
+  ticket_usd: string;
+  capital_usd: string;
+  read_at: string | null;
+  rows: HeldRow[];
+  sold_usd: string;
+  held_usd: string;
+  unreadable: number;
+  /** A wallet that never sold could only buy its first capital / ticket trades. */
+  wallet_trades: number;
+  wallet_held_usd: string;
+}
+
 export interface Leaderboard {
   running: boolean;
   started_at: string | null;
