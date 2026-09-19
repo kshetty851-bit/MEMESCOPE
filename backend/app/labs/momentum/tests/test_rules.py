@@ -89,7 +89,6 @@ def test_the_base_rule_takes_a_momentum_candle_and_nothing_less() -> None:
     assert fires(M5, f(impulse(48, o)), CTX)
     assert not fires(M5, f(impulse(48, o, 0.015)), CTX), "under 2%"
     assert not fires(M5, f(impulse(48, o, vol=2_000)), CTX), "2x volume"
-    assert not fires(M5, f(impulse(48, o, buys=5, sells=10)), CTX), "sellers won"
     wick = bar(48, o, o * 1.03, hi=o * 1.08, lo=o * 0.99, vol=5_000, buys=30, sells=10)
     assert not fires(M5, f(wick), CTX), "gave most of it back: closed low in its range"
 
@@ -140,7 +139,7 @@ def test_the_rolling_rule_reads_the_feeds_own_window() -> None:
     assert fires_rolling(rule, s, CTX)
     assert not fires_rolling(rule, replace(s, change_m5=3.0), CTX)
     assert not fires_rolling(rule, replace(s, volume_m5=2_000), CTX)
-    assert not fires_rolling(rule, replace(s, buys_m5=5), CTX)
+    assert fires_rolling(rule, replace(s, buys_m5=5), CTX), "counts hide size"
 
 
 def test_the_book_is_fifty_frozen_strategies_with_controls() -> None:
@@ -273,3 +272,15 @@ def test_only_busy_candles_count() -> None:
     fifteen = replace(bar(0, 1, 1.05, buys=need, sells=need), parts=3)
     assert not busy(fifteen), "a 15m bar needs three times as many"
     assert busy(replace(fifteen, buys=2 * need))
+
+
+def test_a_pump_with_more_sellers_is_still_momentum() -> None:
+    """ANONCOIN, 08:15 UTC 2026-09-19: +11.2% on 16x volume, closing at its high,
+    two buys and thirty sells — one big buyer among many small sellers. The
+    first rule refused it on the count; only `M5_BUYERS` asks about counts now."""
+    history = quiet()
+    o = history[-1].close
+    anoncoin = impulse(48, o, 0.112, vol=16_000, buys=2, sells=30)
+    f = features(anoncoin, history, 300, impulse_ret=0.02)
+    assert fires(M5, f, CTX)
+    assert not fires(BY_NAME["M5_BUYERS"].rule, f, CTX)

@@ -77,8 +77,8 @@ class Rule:
         """Buy when — in the words the page prints."""
         if self.rolling:
             return (f"the last 5 minutes are up {self.min_ret:.0%}+ on "
-                    f"{self.min_vol_x:g}x normal volume with more buys than "
-                    "sells — bought mid-move, not at a candle close")
+                    f"{self.min_vol_x:g}x normal volume — bought mid-move, not at "
+                    "a candle close")
         if self.side == "down":
             parts = [f"a red candle down {self.min_ret:.0%}+"]
         else:
@@ -199,9 +199,7 @@ def fires_rolling(rule: Rule, s: Rolling, ctx: Context) -> bool:
         return False
     if not s.volume_m5 or not s.volume_h24:
         return False
-    if s.volume_m5 / (s.volume_h24 / 288) < (rule.min_vol_x or 0):
-        return False
-    return (s.buys_m5 or 0) > (s.sells_m5 or 0)
+    return s.volume_m5 / (s.volume_h24 / 288) >= (rule.min_vol_x or 0)
 
 
 @dataclass(frozen=True, slots=True)
@@ -292,9 +290,16 @@ def bar_key(pair: str, start: datetime) -> str:
 # --- the base rules --------------------------------------------------------------
 #: THE momentum candle, on 5m bars. A strong green candle — big for the token
 #: (3x its usual body), big in absolute terms (2%, well above the ~1% round
-#: trip), on 3x normal volume, closing in the top 40% of its range with more
-#: buys than sells.
-M5 = Rule(min_ret=0.02, min_body_x=3.0, min_vol_x=3.0, min_clv=0.6, min_buy_ratio=1.01)
+#: trip), on 3x normal volume, closing in the top 40% of its range.
+#:
+#: NOT "more buys than sells". It was in the first version and blocked every
+#: real pump of the first live hours (2026-09-19): ANONCOIN +11.2% on 16x
+#: volume with 2 buys and 30 sells, ROUTER +10.4% (6 / 19), EMBER +6.0%
+#: (51 / 104), BP +3.9% on 41x volume (2 / 91). A couple of large buys move a
+#: pool while many small trades go the other way, on every venue, so a COUNT
+#: of trades says nothing about which side is bigger. `M5_BUYERS` still tests
+#: the count on its own.
+M5 = Rule(min_ret=0.02, min_body_x=3.0, min_vol_x=3.0, min_clv=0.6)
 #: The same shape on slower bars, with the absolute floor scaled up: a 15m
 #: bar is three 5m bars and a 1h bar twelve.
 M15 = replace(M5, min_ret=0.03)
