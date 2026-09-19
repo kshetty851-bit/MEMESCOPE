@@ -92,6 +92,15 @@ ALWAYS_BLOCKED = frozenset({
     # FOMO and AMAZON (18 Sep, an hour apart): the same big wallet. Their shared
     # funder, BZXZ8d, stays off: 578 transactions in 36 minutes, a seeder.
     "DdtsVPAnET6MqDPvDumgUBsTYpYcn7UZpKMG8uwJzJyo",
+    # KIBA (19 Sep 07:00, -99% in every book incl. B3_198k_4m and E75T_4m): its
+    # launch wallet put 1,534 SOL in (4 clean coins before, so it looked
+    # proven); a new wallet funded through a one-shot account sold 28% of the
+    # coins from 47 s after the buy and took 1,953 SOL. Launch wallet, dumper,
+    # one-shot funder. Karthik asked, 2026-09-19. The busy funder behind the
+    # launch wallet (4gwSSV, 272 coins) stays off.
+    "9x2N1MHxs5NxAYnpkNi1QbyE3ayk6oqh53p9vpVjDdHa",
+    "FtvDtRoKP7vBPwwow1W5uttUVnXoskZ5bFnpkijb1iwL",
+    "3YfWwbV9QZbGfyQWHKGANdK8iwnMcpdWj1E2SqMvWkc6",
 })
 
 
