@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 
 import {
+  fetchFreshHeld,
   fetchFreshTrades,
   fetchPaperTrades,
   fetchReturns,
@@ -66,6 +67,19 @@ export function useGraduationTrades(
     queryKey: ["graduation", "paper-trades", book, size?.ticket, size?.split],
     queryFn: () => fetchPaperTrades(book, size),
     refetchInterval: 60_000,
+    ...LIVE,
+  });
+}
+
+/**
+ * A fresh book's closed coins, never sold. Two minutes, the server's own
+ * cache: every refresh reads each coin's pool on-chain.
+ */
+export function useFreshHeld(book: string) {
+  return useQuery({
+    queryKey: ["graduation", "fresh-held", book],
+    queryFn: () => fetchFreshHeld(book),
+    refetchInterval: 120_000,
     ...LIVE,
   });
 }

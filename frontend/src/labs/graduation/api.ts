@@ -1,6 +1,7 @@
 import { api } from "@/lib/api-client";
 
 import type {
+  FreshHeld,
   GraduationStatus,
   Leaderboard,
   PaperBook,
@@ -42,6 +43,16 @@ export function fetchPaperTrades(
 export function fetchFreshTrades(book: string): Promise<PaperBook> {
   return api.get<PaperBook>(
     `/labs/graduation/paper/trades?fresh=${encodeURIComponent(book)}`,
+  );
+}
+
+/**
+ * A fresh book's closed coins as if it had never sold, every pool read
+ * on-chain by the server (cached two minutes there).
+ */
+export function fetchFreshHeld(book: string): Promise<FreshHeld> {
+  return api.get<FreshHeld>(
+    `/labs/graduation/fresh/held?book=${encodeURIComponent(book)}`,
   );
 }
 

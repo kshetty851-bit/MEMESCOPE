@@ -1143,6 +1143,134 @@ def _size_penalty(position_usd: float, measured_at_usd: float,
     return 2.0 * (priority / position_usd - priority / measured_at_usd)
 
 
+class HeldRow(BaseModel):
+    """One closed trade of a fresh book, as if it had never been sold."""
+
+    mint: str
+    symbol: str | None = None
+    opened_at: datetime
+    closed_at: datetime | None = None
+    #: What the book's wallet got back selling at its exit, for its ticket.
+    sold_usd: Decimal | None = None
+    #: The same coins never sold: what the pool pays for them NOW, after its
+    #: fee, the router's cut and the sale's own price move. Null: pool unread.
+    held_usd: Decimal | None = None
+    #: The pool's total value now. A drained pool is why a held coin is worth
+    #: nothing, and the row says so rather than printing a price nobody pays.
+    depth_usd: Decimal | None = None
+
+
+class FreshHeld(BaseModel):
+    """A fresh book's closed trades if nothing had been sold, every pool read
+    on-chain now (`sources.pool_now`, Helius). Cached `_HELD_TTL`."""
+
+    book: str
+    ticket_usd: Decimal
+    capital_usd: Decimal
+    read_at: datetime | None = None
+    rows: list[HeldRow] = []
+    sold_usd: Decimal = Decimal(0)
+    held_usd: Decimal = Decimal(0)
+    unreadable: int = 0
+    #: A wallet of `capital_usd` that never sold could only ever buy its first
+    #: capital / ticket trades: nothing sold, so nothing freed the money.
+    wallet_trades: int = 0
+    wallet_held_usd: Decimal = Decimal(0)
+
+
+#: Every pool read costs two Helius calls; the page polls every two minutes.
+_HELD: dict[str, tuple[datetime, FreshHeld]] = {}
+_HELD_TTL = timedelta(minutes=2)
+#: Newest trades read per refresh (the wallet's first trades always are).
+# ponytail: a cap, not paging; page the list once a book outgrows it.
+_HELD_MAX = 60
+
+
+def held_value(base: int, quote: int, base_decimals: int, quote_decimals: int,
+               tokens: Decimal, sol_usd: Decimal) -> tuple[Decimal, Decimal] | None:
+    """(dollars a sale of `tokens` gets now, pool's total value now), from the
+    pool's own vault balances. The sale is the constant product over the SOL
+    actually in the vault — the virtual quote is not money anyone can take out
+    of a drained pool — less the pool's fee tier and the router's."""
+    if base <= 0 or quote < 0 or tokens <= 0:
+        return None
+    b = Decimal(base).scaleb(-base_decimals)
+    q = Decimal(quote).scaleb(-quote_decimals)
+    fee = Decimal(config.pool_fee_bps(q / b) + config.ROUTER_FEE_BPS) / 10_000
+    return q * tokens / (b + tokens) * (1 - fee) * sol_usd, 2 * q * sol_usd
+
+
+@router.get("/fresh/held", response_model=FreshHeld)
+async def fresh_held(book: str, db: AsyncSession = Depends(get_db)) -> FreshHeld:
+    """What a fresh book's closed coins would be worth now, never sold."""
+    import asyncio
+
+    from app.labs.graduation import sources
+    from app.labs.graduation.tournament import graduation_pool
+
+    spec = {s.book: s for s in config.FRESH_BOOKS}.get(book)
+    if spec is None:
+        raise HTTPException(status_code=404, detail="no such fresh book")
+    out = FreshHeld(book=book, ticket_usd=spec.ticket_usd, capital_usd=spec.capital_usd)
+    if not config.enabled():
+        return out
+    now = datetime.now(UTC)
+    hit = _HELD.get(book)
+    if hit is not None and now - hit[0] < _HELD_TTL:
+        return hit[1]
+    tickets = int(spec.capital_usd / spec.ticket_usd)
+    paper = await _paper(db, book=spec.book, limit=None, ticket=float(spec.ticket_usd),
+                         split=tickets, since=spec.start)
+    funded = sorted((r for r in paper.closed_trades if r.size_funded),
+                    key=lambda r: r.opened_at)
+    first = funded[:tickets]
+    rows = first + [r for r in funded[-_HELD_MAX:] if r not in first]
+    held_tokens = {m: t * spec.ticket_usd / n for m, t, n in (await db.execute(
+        select(GradPaperPosition.mint, GradPaperPosition.tokens,
+               GradPaperPosition.notional_usd)
+        .where(GradPaperPosition.book == spec.book,
+               GradPaperPosition.mint.in_([r.mint for r in rows])))).all() if n}
+    sol = await db.scalar(
+        select(GradPostgradSample.price_usd / GradPostgradSample.price_native)
+        .where(GradPostgradSample.price_usd > 0, GradPostgradSample.price_native > 0)
+        .order_by(GradPostgradSample.ts.desc()).limit(1))
+    gate = asyncio.Semaphore(16)
+
+    async def read(mint: str) -> Any:
+        pool = graduation_pool(mint)
+        async with gate:
+            try:
+                return await sources.pool_now(mint, pool) if pool else None
+            except Exception:  # an unreadable pool is a row, not an outage
+                return None
+
+    helds = await asyncio.gather(*(read(r.mint) for r in rows))
+    cents = Decimal("0.01")
+    for r, held in zip(rows, helds, strict=True):
+        got = None
+        if (held is not None and sol and held.base is not None and held.quote is not None
+                and held.quote_mint == config.WSOL_MINT and r.mint in held_tokens):
+            got = held_value(held.base, held.quote, held.base_decimals,
+                             held.quote_decimals, held_tokens[r.mint], Decimal(str(sol)))
+        sold = (spec.ticket_usd + r.size_pnl_usd) if r.size_pnl_usd is not None else None
+        out.rows.append(HeldRow(
+            mint=r.mint, symbol=r.symbol, opened_at=r.opened_at, closed_at=r.closed_at,
+            sold_usd=None if sold is None else sold.quantize(cents),
+            held_usd=None if got is None else got[0].quantize(cents),
+            depth_usd=None if got is None else got[1].quantize(Decimal(1))))
+    readable = [r for r in out.rows if r.held_usd is not None and r.sold_usd is not None]
+    out.sold_usd = sum((r.sold_usd for r in readable), Decimal(0))
+    out.held_usd = sum((r.held_usd for r in readable), Decimal(0))
+    out.unreadable = len(out.rows) - len(readable)
+    wallet = [r for r in out.rows[:len(first)] if r.held_usd is not None]
+    out.wallet_trades = len(wallet)
+    out.wallet_held_usd = sum((r.held_usd for r in wallet), Decimal(0))
+    out.rows.sort(key=lambda r: r.opened_at, reverse=True)
+    out.read_at = now
+    _HELD[book] = (now, out)
+    return out
+
+
 @router.get("/tournament", response_model=Leaderboard)
 async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
     """The leaderboard. One grouped read, not fifty."""

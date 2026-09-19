@@ -7,6 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/states";
 
 import {
+  useFreshHeld,
   useFreshTrades,
   useGraduationStatus,
   useGraduationTournament,
@@ -684,6 +685,90 @@ function FreshTrades({ book, size }: { book: string; size: WalletSize }) {
 }
 
 /**
+ * The fresh book's closed coins as if it had never sold: each one priced by
+ * selling it into its pool NOW, read on-chain by the server. A drained pool
+ * pays next to nothing, and its "pool now" column says why.
+ */
+export function FreshHeld({ book }: { book: string }) {
+  const { data, isLoading, isError } = useFreshHeld(book);
+  if (isLoading) {
+    return <p className="text-xs text-ink-dim">Reading every coin&rsquo;s pool on-chain…</p>;
+  }
+  if (isError || !data || data.rows.length === 0) return null;
+  const sold = Number(data.sold_usd);
+  const heldNow = Number(data.held_usd);
+  const diff = heldNow - sold;
+  return (
+    <div className="mt-3 flex flex-col gap-2">
+      <h4 className="text-label uppercase tracking-[0.08em] text-ink-dim">
+        If it had never sold — held until now
+      </h4>
+      <p className="max-w-[78ch] text-xs leading-relaxed text-ink-dim">
+        Every closed coin, priced by selling it into its pool right now
+        {data.read_at
+          ? ` (read on-chain ${new Date(data.read_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })} Dubai)`
+          : ""}
+        , after the pool&rsquo;s fee, the router&rsquo;s and the sale&rsquo;s own price move.{" "}
+        <b className="text-ink">Sold: {usd(sold)}</b> ·{" "}
+        <b className={diff >= 0 ? "text-up" : "text-down"}>
+          Held: {usd(heldNow)} ({diff >= 0 ? "+" : ""}
+          {usd(diff)})
+        </b>
+        . A {usd(data.capital_usd)} wallet that never sold could only have bought its first{" "}
+        {data.wallet_trades} coins: {usd(data.wallet_held_usd)} now.
+        {data.unreadable ? ` ${data.unreadable} pool(s) could not be read.` : ""}
+      </p>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[560px] text-xs">
+          <thead>
+            <tr className="text-left text-ink-dim">
+              <th className="pb-1 pr-3 font-medium">Coin</th>
+              <th className="pb-1 pr-3 font-medium">Bought</th>
+              <th className="pb-1 pr-3 text-right font-medium">Sold for</th>
+              <th className="pb-1 pr-3 text-right font-medium">Held now</th>
+              <th className="pb-1 pr-3 text-right font-medium">vs sold</th>
+              <th className="pb-1 text-right font-medium">Pool now</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.rows.map((r) => {
+              const s = r.sold_usd === null ? null : Number(r.sold_usd);
+              const h = r.held_usd === null ? null : Number(r.held_usd);
+              const d = s !== null && h !== null ? h - s : null;
+              return (
+                <tr key={r.mint} className="border-t border-line tabular-nums">
+                  <td className="py-1 pr-3">
+                    <a className="text-accent hover:underline" href={dexscreener(r.mint)}
+                       target="_blank" rel="noreferrer">
+                      {r.symbol ?? r.mint.slice(0, 6)}
+                    </a>
+                  </td>
+                  <td className="py-1 pr-3 text-ink-dim">
+                    {new Date(r.opened_at).toLocaleString("en-GB", {
+                      day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
+                    })}
+                  </td>
+                  <td className="py-1 pr-3 text-right">{usd(s)}</td>
+                  <td className={`py-1 pr-3 text-right ${h === null ? "text-ink-dim" : ""}`}>
+                    {h === null ? "unread" : usd(h)}
+                  </td>
+                  <td className={`py-1 pr-3 text-right ${d === null ? "" : d >= 0 ? "text-up" : "text-down"}`}>
+                    {d === null ? "—" : `${d >= 0 ? "+" : ""}${usd(d)}`}
+                  </td>
+                  <td className="py-1 text-right text-ink-dim">
+                    {r.depth_usd === null ? "—" : usd(r.depth_usd).replace(/\.00$/, "")}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/**
  * One arm's own trades, fetched on expand.
  *
  * Its own component so the hook is called unconditionally — a hook inside the
@@ -953,6 +1038,7 @@ function LeaderboardPanel() {
                 book={fresh.book}
                 size={{ ticket: Number(fresh.ticket_usd), split: tickets }}
               />
+              <FreshHeld book={fresh.book} />
             </div>
           );
         })}
