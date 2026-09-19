@@ -108,11 +108,17 @@ USER_AGENT = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.3
 #: by the graduation lab). Every sample is filed at that market moment, and a
 #: fill may only use a sample whose market moment is AFTER the decision.
 FEED_LAG_S = _int("LAB_MOMENTUM_FEED_LAG_S", 27)
-#: A sample more than this many times the previous one, inside two minutes,
-#: is refused as a glitch print. Upward only: a long-only book is flattered
-#: by a false spike and hurt by a false crash, so only the flattering kind is
-#: filtered.
-GLITCH_UP_X = Decimal(3)
+#: A sample this many times above OR below the previous one, inside two
+#: minutes, is refused as a bad print; after two minutes the new level is
+#: taken, so a real crash is recognised, late.
+#:
+#: Both ways since 2026-09-19. It was upward only, on the idea that a false
+#: crash only ever hurts a long book. It does worse than hurt: DexScreener
+#: printed ANTFUN at $0.0000005 against $0.083 (and XMR, UNI, ENA, SUI and
+#: KNOTS likewise, 40 of 54,028 bars) — a buy filled on such a print books a
+#: gain of millions of percent, a stop fires on a pool that never moved, and a
+#: time exit on one books -100%. None had yet; the replay of a 25% stop found them.
+GLITCH_X = Decimal(3)
 
 # --- candles --------------------------------------------------------------------
 #: The stored candle. 15m and 1h are aggregated from it when they close.
