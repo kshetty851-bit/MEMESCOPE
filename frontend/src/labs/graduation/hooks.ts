@@ -70,11 +70,11 @@ export function useGraduationTrades(
   });
 }
 
-/** The fresh $500 book's own trades, on the same minute as any arm's. */
-export function useFreshTrades() {
+/** A fresh book's own trades, on the same minute as any arm's. */
+export function useFreshTrades(book: string) {
   return useQuery({
-    queryKey: ["graduation", "fresh-trades"],
-    queryFn: fetchFreshTrades,
+    queryKey: ["graduation", "fresh-trades", book],
+    queryFn: () => fetchFreshTrades(book),
     refetchInterval: 60_000,
     ...LIVE,
   });
