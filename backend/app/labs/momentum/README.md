@@ -10,8 +10,15 @@ Flag: `LAB_MOMENTUM_ENABLED` (default off; it is in the compose anchor).
 ## The universe
 
 * **Where tokens come from:** Jupiter's `toptraded`, `toptrending` and
-  `toporganicscore` lists, each at 5m / 1h / 6h / 24h — twelve keyless calls
-  every 30 minutes. Measured 2026-09-19: 358 tokens listed, 142 eligible.
+  `toporganicscore` lists, each at 5m / 1h / 6h / 24h (capped at 100 each,
+  whatever `limit` asks), plus its whole `verified` tag list (~3,500 tokens,
+  one call) — thirteen keyless calls every 30 minutes. Measured 2026-09-19:
+  the lists alone gave 142 eligible tokens; with `verified`, ~540 (~510 with
+  a usable pool). Most of the added ones are quiet: the 20-trade floor means
+  they count only when they wake up.
+* **A refresh never stalls a tick:** the lookups (`plan_universe`, up to 300
+  new tokens at 100 calls a minute) run with no lock and no open transaction;
+  only the write (`apply_universe`) takes the lab's lock.
 * **The rule:** first pool created more than `MIN_AGE_DAYS` (7) ago —
   Jupiter's `firstPool.createdAt`, falling back to the mint's `createdAt`.
 * **Dropped at the door:** stables, staked SOL, lending receipts, wrapped

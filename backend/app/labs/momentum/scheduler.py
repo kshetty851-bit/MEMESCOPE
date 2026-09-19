@@ -36,19 +36,26 @@ async def run(step: str) -> dict[str, Any]:
         return {"skipped": "momentum_lab_disabled"}
     try:
         async with SessionFactory() as session:
-            # A tick that finds the lock taken is skipped: the next one is 30s
-            # away. The half-hourly steps WAIT for it instead — a tick holds it
-            # for seconds, and a skipped refresh would cost half an hour.
-            if step != "tick":
-                await session.execute(select(func.pg_advisory_xact_lock(LOCK_KEY)))
-            elif not await session.scalar(select(func.pg_try_advisory_xact_lock(LOCK_KEY))):
-                return {"skipped": "momentum_lab_busy"}
-            async with Feeds() as feeds:
+            pace = config.RESOLVE_CALLS_PER_MINUTE if step == "universe" else None
+            async with Feeds(dex_per_minute=pace) as feeds:
                 lab = MomentumLab(session, feeds=feeds)
+                # The universe's HTTP half runs BEFORE the lock: minutes of
+                # lookups must not stall the ticks.
+                plan = await lab.plan_universe() if step == "universe" else None
+                if step == "universe" and plan is None:
+                    return {"listed": 0, "skipped": "no_lists_answered"}
+                # A tick that finds the lock taken is skipped: the next one is
+                # 30s away. The other steps WAIT for it — a tick holds it for
+                # seconds, and a skipped refresh would cost half an hour.
+                if step != "tick":
+                    await session.execute(select(func.pg_advisory_xact_lock(LOCK_KEY)))
+                elif not await session.scalar(
+                        select(func.pg_try_advisory_xact_lock(LOCK_KEY))):
+                    return {"skipped": "momentum_lab_busy"}
                 if step == "tick":
                     result = await lab.tick()
-                elif step == "universe":
-                    result = await lab.refresh_universe()
+                elif plan is not None:
+                    result = await lab.apply_universe(plan)
                 else:
                     result = await lab.prune()
             await session.commit()

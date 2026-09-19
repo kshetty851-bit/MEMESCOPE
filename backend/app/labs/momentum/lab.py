@@ -108,6 +108,16 @@ class Sample:
     fetched_at: datetime
 
 
+@dataclass(frozen=True, slots=True)
+class Plan:
+    """What a universe refresh found before touching the table: every eligible
+    token, and the pool picked for each new one (None: no usable pool)."""
+
+    listed: int
+    eligible: dict[str, dict[str, Any]]
+    resolved: dict[str, PairRow | None]
+
+
 def _q(value: Decimal | None, places: Decimal = _P) -> Decimal | None:
     return None if value is None else value.quantize(places)
 
@@ -128,10 +138,14 @@ class MomentumLab:
 
     # ==== the universe (every 30 minutes) =====================================
 
-    async def refresh_universe(self, *, max_resolve: int = 200) -> dict[str, Any]:
+    async def plan_universe(self, *, max_resolve: int = config.UNIVERSE_MAX_RESOLVE
+                            ) -> Plan | None:
+        """The slow half of a refresh — every HTTP call — with no lock held and
+        no transaction left open. Giving a few hundred new tokens a pool takes
+        minutes, and a tick must never wait for that."""
         listed = await self._feeds.listed()
         if not listed:
-            return {"listed": 0, "skipped": "no_lists_answered"}
+            return None
         cutoff = self._now - timedelta(days=config.MIN_AGE_DAYS)
         by_mint: dict[str, dict[str, Any]] = {}
         for item in listed:
@@ -149,20 +163,32 @@ class MomentumLab:
                     and not (e["tags"] & config.EXCLUDED_TAGS)
                     and e["born"] is not None and e["born"] <= cutoff
                     and (e["liq"] or 0) >= config.MIN_LIQUIDITY_USD}
+        known = set((await self._s.scalars(
+            select(MomPair.mint).where(MomPair.status == "active",
+                                       MomPair.mint.in_(list(eligible))))).all())
+        # End the read's transaction before minutes of HTTP: an open snapshot
+        # that long holds back vacuum for the whole database.
+        await self._s.rollback()
+        fresh = [m for m in eligible if m not in known][:max_resolve]
+        resolved = {m: best_pair(await self._feeds.token_pairs(m), m) for m in fresh}
+        return Plan(listed=len(by_mint), eligible=eligible, resolved=resolved)
+
+    async def apply_universe(self, plan: Plan) -> dict[str, Any]:
+        """The quick half, under the lab's lock: write what the plan found."""
         rows = (await self._s.scalars(
-            select(MomPair).where(MomPair.mint.in_(list(eligible))))).all()
+            select(MomPair).where(MomPair.mint.in_(list(plan.eligible))))).all()
         active = {r.mint: r for r in rows if r.status == "active"}
         admitted = refreshed = unresolved = 0
-        for mint, e in eligible.items():
+        for mint, e in plan.eligible.items():
             row = active.get(mint)
             if row is not None:
                 row.listed_at = self._now
                 row.lists = sorted(e["lists"])
                 refreshed += 1
                 continue
-            if admitted + unresolved >= max_resolve:
-                continue
-            pair = best_pair(await self._feeds.token_pairs(mint), mint)
+            if mint not in plan.resolved:
+                continue  # past this refresh's lookup budget: the next one
+            pair = plan.resolved[mint]
             if pair is None:
                 unresolved += 1
                 continue
@@ -195,12 +221,20 @@ class MomentumLab:
         if over:
             await self._s.execute(update(MomPair).where(MomPair.pair_address.in_(over))
                                   .values(status="dropped", drop_reason="cap"))
-        result = {"listed": len(by_mint), "eligible": len(eligible),
+        result = {"listed": plan.listed, "eligible": len(plan.eligible),
                   "admitted": admitted, "refreshed": refreshed,
-                  "unresolved": unresolved, "unlisted": stale.rowcount or 0,
+                  "unresolved": unresolved, "waiting": len(plan.eligible) - refreshed
+                  - admitted - unresolved, "unlisted": stale.rowcount or 0,
                   "capped": len(over), "calls": dict(self._feeds.calls)}
         logger.info("momentum_universe", **result)
         return result
+
+    async def refresh_universe(self) -> dict[str, Any]:
+        """Plan and apply in one go, with no lock: for tests and a quiet shell."""
+        plan = await self.plan_universe()
+        if plan is None:
+            return {"listed": 0, "skipped": "no_lists_answered"}
+        return await self.apply_universe(plan)
 
     # ==== the tick =============================================================
 

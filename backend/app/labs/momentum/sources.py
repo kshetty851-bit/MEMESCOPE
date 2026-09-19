@@ -215,6 +215,17 @@ class Feeds:
                 for row in body or []:
                     if isinstance(row, dict) and (item := parse_listed(row, label)):
                         out.append(item)
+        for tag in config.JUPITER_TAGS:
+            label = f"tag/{tag}"
+            try:
+                body = await self._get(f"{config.JUPITER_URL}/tag?query={tag}", "jup")
+            except Exception as exc:
+                self.failures += 1
+                logger.warning("momentum_jupiter_failed", list=label, error=repr(exc))
+                continue
+            for row in body or []:
+                if isinstance(row, dict) and (item := parse_listed(row, label)):
+                    out.append(item)
         return out
 
     async def token_pairs(self, mint: str) -> list[PairRow]:
