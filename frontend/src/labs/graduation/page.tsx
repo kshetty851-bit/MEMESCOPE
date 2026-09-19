@@ -861,6 +861,41 @@ function LeaderboardPanel() {
             ; together those trades made {usd(data.blocked_pnl_usd)}.
           </p>
         ) : null}
+        {/* Karthik's fresh book: BASE 75k restarted at $500 with the wallet's
+            checks on every trade. The baseline's own trades, so its row on
+            the board below stays whole for comparison. */}
+        {data.fresh ? (
+          <div className="grad-row max-w-[78ch] rounded-lg border border-line bg-ink/[0.02] p-4">
+            <div className="text-[11px] uppercase tracking-wider text-ink-dim">
+              Fresh book &middot; BASE 75k &middot; from{" "}
+              {new Date(data.fresh.started_at).toLocaleString("en-GB", {
+                day: "numeric", month: "short", hour: "2-digit",
+                minute: "2-digit", timeZone: "UTC",
+              })}{" "}
+              UTC
+            </div>
+            <div className="mt-1 text-2xl font-semibold text-ink">
+              {usd(data.fresh.balance_usd)}{" "}
+              <span
+                className={`text-base ${
+                  Number(data.fresh.pnl_usd) >= 0 ? "text-up" : "text-down"
+                }`}
+              >
+                {Number(data.fresh.pnl_usd) >= 0 ? "+" : ""}
+                {usd(data.fresh.pnl_usd)} ({Number(data.fresh.pnl_usd) >= 0 ? "+" : ""}
+                {data.fresh.return_pct}%)
+              </span>
+            </div>
+            <p className="mt-1 text-xs leading-relaxed text-ink-dim">
+              Started with {usd(data.fresh.capital_usd)}, {usd(data.fresh.ticket_usd)} a
+              trade: up to five at once, fewer after losses, exactly as your
+              real wallet funds them, with its safety checks on every trade.{" "}
+              {data.fresh.trades} trades, {data.fresh.wins} wins, {data.fresh.rugs}{" "}
+              rugs; {data.fresh.skipped} skipped for lack of free money. Lowest
+              balance {usd(data.fresh.lowest_usd)}.
+            </p>
+          </div>
+        ) : null}
         {/* Verdict. The headline is the finding; the terms are underneath. */}
         <div
           className={`grad-row rounded-lg border p-4 ${

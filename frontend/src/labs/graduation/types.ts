@@ -260,6 +260,22 @@ export interface ArmRow {
  * realised P&L among those eight; a leader that has not cleared it has not
  * beaten chance.
  */
+export interface FreshBook {
+  book: string;
+  started_at: string;
+  capital_usd: string;
+  ticket_usd: string;
+  balance_usd: string;
+  pnl_usd: string;
+  return_pct: string;
+  trades: number;
+  wins: number;
+  rugs: number;
+  /** Signals it had no free money for. */
+  skipped: number;
+  lowest_usd: string;
+}
+
 export interface Leaderboard {
   running: boolean;
   started_at: string | null;
@@ -297,4 +313,7 @@ export interface Leaderboard {
    * of every figure since 18 Sep, and what they made together. */
   blocked_trades: number;
   blocked_pnl_usd: string;
+  /** Karthik's fresh $500 BASE 75k book: the baseline's trades from its start,
+   * walked through a $500 wallet at $100 a trade. */
+  fresh: FreshBook | null;
 }
