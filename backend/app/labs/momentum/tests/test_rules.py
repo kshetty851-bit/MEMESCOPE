@@ -284,3 +284,35 @@ def test_a_pump_with_more_sellers_is_still_momentum() -> None:
     f = features(anoncoin, history, 300, impulse_ret=0.02)
     assert fires(M5, f, CTX)
     assert not fires(BY_NAME["M5_BUYERS"].rule, f, CTX)
+
+
+def test_a_bad_print_is_refused_either_way() -> None:
+    """ANTFUN, 19 Sep: DexScreener printed $0.0000005 for a coin at $0.083.
+    A buy filled on that print books millions of percent, a stop fires on a
+    pool that never moved. Refused both ways; a real level is taken after two
+    minutes."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.labs.momentum.lab import MomentumLab
+    from app.labs.momentum.models import MomPair
+
+    now = datetime(2026, 9, 19, 13, 0, tzinfo=UTC)
+    pair = MomPair(pair_address="P", mint="M", quote_mint=config.WSOL_MINT,
+                   born_at=now - timedelta(days=30), admitted_at=now, listed_at=now,
+                   last_price=Decimal("0.083"), last_sample_at=now - timedelta(seconds=30),
+                   glitches=0)
+
+    def row(price: str, at: datetime) -> PairRow:
+        return replace(PairRow("P", "M", config.WSOL_MINT, "X", "raydium", Decimal(price),
+                               None, Decimal(1_000_000), None, None, None, None, None,
+                               None, None, None, None, None),
+                       fetched_at=at + timedelta(seconds=config.FEED_LAG_S))
+
+    lab = MomentumLab(None, feeds=None, now=now)  # type: ignore[arg-type]
+    assert lab._accept({"P": pair}, {"P": row("0.0000005", now)}) == {}
+    assert lab._accept({"P": pair}, {"P": row("0.30", now)}) == {}
+    assert pair.glitches == 2
+    assert "P" in lab._accept({"P": pair}, {"P": row("0.084", now)})
+    later = now + timedelta(minutes=3)
+    crash = lab._accept({"P": pair}, {"P": row("0.02", later)})
+    assert "P" in crash, "a real crash, taken late"

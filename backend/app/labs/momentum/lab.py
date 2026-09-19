@@ -291,7 +291,7 @@ class MomentumLab:
             at = row.fetched_at - lag
             last, last_at = pair.last_price, pair.last_sample_at
             if (last and last_at and at - last_at < timedelta(minutes=2)
-                    and price > last * config.GLITCH_UP_X):
+                    and (price > last * config.GLITCH_X or price * config.GLITCH_X < last)):
                 pair.glitches = (pair.glitches or 0) + 1
                 logger.warning("momentum_glitch_refused", pair=address,
                                last=str(last), price=str(price))
