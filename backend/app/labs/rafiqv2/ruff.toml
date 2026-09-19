@@ -1,0 +1,5 @@
+# The delivered test file is kept as delivered: only its import paths changed.
+extend = "../../../pyproject.toml"
+
+[lint.per-file-ignores]
+"tests/test_common_and_learning.py" = ["I001", "F401", "RUF034", "B007", "SIM211"]

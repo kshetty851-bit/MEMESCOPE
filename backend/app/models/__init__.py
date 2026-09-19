@@ -17,6 +17,12 @@ from app.labs.rafiq.models import (  # noqa: F401
     RafiqLabPosition,
     RafiqLabStrategy,
 )
+# Rafiqv2's three `rafiqv2_*` tables, for the same reason.
+from app.labs.rafiqv2.models import (  # noqa: F401
+    Rafiqv2Adjustment,
+    Rafiqv2Book,
+    Rafiqv2Position,
+)
 # NSE Breakout Tracker's five `bt_*` tables, for the same reason.
 from app.labs.nse_breakout.models import (  # noqa: F401
     BtCandle,

@@ -304,6 +304,8 @@ x-backend-env: &backend-env
   # worker runs it and the API reads it, and a value this file does not name
   # never reaches a container.
   LAB_MOMENTUM_ENABLED: ${LAB_MOMENTUM_ENABLED:-false}
+  # Rafiqv2, the same way and for the same reason.
+  RAFIQV2_LAB_ENABLED: ${RAFIQV2_LAB_ENABLED:-false}
   NSE_BREAKOUT_ENABLED: ${NSE_BREAKOUT_ENABLED:-false}
   KARTHIK_CANDIDATE_LIMIT: ${KARTHIK_CANDIDATE_LIMIT:-250}
   KARTHIK_REVIEW_BATCH_LIMIT: ${KARTHIK_REVIEW_BATCH_LIMIT:-2000}

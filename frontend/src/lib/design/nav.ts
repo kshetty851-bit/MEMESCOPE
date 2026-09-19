@@ -89,6 +89,15 @@ export const NAV_GROUPS: NavGroup[] = [
         status: "ready",
         note: "Research simulation. Five supplied strategies, $1,000 each.",
       },
+      // Rafiqv2: the same collaborator's six books rebuilt on one engine, with
+      // their own tables and flag. Paper only, beside the Rafiq Lab.
+      {
+        href: "/rafiqv2-lab",
+        label: "Rafiqv2 Lab",
+        icon: IconSpark,
+        status: "ready",
+        note: "Research simulation. Six books on one engine, $1,000 each.",
+      },
       // Forex Lab. EUR/USD, not Solana — and a BACKTEST, not a book: it
       // replays a hedged grid over stored candles and holds no wallet, live or
       // paper. Listed beside the labs because that is where a reader looks for
