@@ -35,6 +35,7 @@ from app.labs.momentum import api as momentum_lab
 from app.labs.forex_lab import api as forex_lab
 from app.labs.nse_breakout import api as nse_tracker
 from app.labs.rafiq import api as rafiq_lab
+from app.labs.rafiqv2 import api as rafiqv2_lab
 from app.momentum import api as momentum
 from app.paper import api as paper
 from app.pumpfun import api as pumpfun
@@ -125,6 +126,9 @@ api_router.include_router(karthik_ops.router)
 # Read-only and additive: no existing route changes shape, and with the flag
 # off every route here answers `running: false` rather than an empty book.
 api_router.include_router(rafiq_lab.router)
+# Rafiqv2. Six books on one engine, over their own `rafiqv2_*` tables and
+# `RAFIQV2_LAB_ENABLED` flag. Read-only and additive.
+api_router.include_router(rafiqv2_lab.router)
 # NSE Breakout Tracker. Indian equities, not Solana: its own `bt_*` tables and
 # its own flag. Read-only and additive.
 api_router.include_router(nse_tracker.router)

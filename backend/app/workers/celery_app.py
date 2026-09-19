@@ -53,6 +53,7 @@ celery_app = Celery(
         "app.social.scheduler",
         "app.copycontrol.scheduler",
         "app.labs.rafiq.scheduler",
+        "app.labs.rafiqv2.scheduler",
         "app.labs.nse_breakout.scheduler",
         # Graduation Lab. Gated by LAB_GRADUATION_ENABLED (default off):
         # with the flag down its beat tasks return before opening a session.
@@ -315,6 +316,16 @@ celery_app.conf.beat_schedule = {
     "rafiq-lab-tick": {
         "task": "app.labs.rafiq.scheduler.rafiq_lab_tick",
         "schedule": crontab(minute="*"),
+    },
+    # Rafiqv2: six books on one engine. Every 30s, not the crontab minute: its
+    # rug ladder has rungs at 30s and 60s. Expires after one interval so a tick
+    # stuck behind the minute burst is dropped, not run late. Gated by
+    # RAFIQV2_LAB_ENABLED (default off): the task returns before opening a
+    # session, so registering it starts nothing.
+    "rafiqv2-lab-tick": {
+        "task": "app.labs.rafiqv2.scheduler.rafiqv2_lab_tick",
+        "schedule": timedelta(seconds=30),
+        "options": {"expires": 30},
     },
     # Graduation Lab. Both gated by LAB_GRADUATION_ENABLED, which ships off:
     # each task returns before it opens a session, so registering them here

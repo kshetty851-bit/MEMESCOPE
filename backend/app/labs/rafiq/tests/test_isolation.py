@@ -108,7 +108,7 @@ def test_lab_tables_are_visible_to_the_platform_metadata() -> None:
     """
     from app.models import Base as PlatformBase
 
-    assert {t for t in PlatformBase.metadata.tables if t.startswith("rafiq")} == {
+    assert {t for t in PlatformBase.metadata.tables if t.startswith("rafiq_lab")} == {
         "rafiq_lab_strategies", "rafiq_lab_positions", "rafiq_lab_daily_state",
         "rafiq_lab_gate_rejections", "rafiq_lab_candidates",
         "rafiq_lab_run_state", "rafiq_lab_adjustments"}

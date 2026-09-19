@@ -1,0 +1,164 @@
+{
+  "book": "B2",
+  "name": "FAST_CHEAP_V2",
+  "version": "2.0",
+  "generated": "2026-09-19",
+  "_identity": "Quick trades, small target. Its 2h box is already the shortest; the rug ladder makes the first two minutes decisive. Was -87.4%.",
+  "starting_capital_usd": 1000.0,
+  "entry_gate": {
+    "min_liquidity_usd": 50000,
+    "min_market_cap_usd": 200000,
+    "max_impact_pct": 1.5
+  },
+  "entry_score_min": 68,
+  "exits": {
+    "stop": 0.9,
+    "max_hold_minutes": 120,
+    "scale_out": {
+      "at_multiple": 1.2,
+      "sell_fraction": 0.8,
+      "_why": "0.80 x 1.20 returns the stake whole; the rest rides free."
+    },
+    "runner_trail_frac": 0.45,
+    "runner_take_profit": null,
+    "_ordering": "stop -> profit lock -> scale out -> rug ladder -> max hold"
+  },
+  "learning": {
+    "enabled": true,
+    "module": "learning.py",
+    "per_book_state": true,
+    "_wiring": "on_entry() on EVERY buy, on_exit() on every close, current_parameters() before every entry. State is per book - A2's evidence never adapts G2.",
+    "learns": {
+      "rug_strictness": {
+        "bounded": [
+          -0.05,
+          0.1
+        ],
+        "step": 0.01,
+        "_how": "Compares how often CUT tokens later recovered (>=+25%) against how often KEPT tokens died. Cutting winners -> loosen. Missing killers -> tighten."
+      },
+      "lock_giveback": {
+        "starts_at": 0.15,
+        "bounded": [
+          0.05,
+          0.4
+        ],
+        "step": 0.03,
+        "_how": "Compares locked exits that kept running against unlocked winners that round-tripped to a loss. Too tight -> allow more give-back. Too loose -> tighten."
+      },
+      "size_multiplier": {
+        "values": [
+          0.5,
+          1.0
+        ],
+        "_how": "Halves position size when the runner rate falls significantly below baseline. NEVER scales up on a hot streak."
+      }
+    },
+    "safety": {
+      "min_sample_before_any_change": 40,
+      "requires_significance": "two-proportion z >= 1.96, not a point estimate",
+      "one_step_per_window": true,
+      "evidence_cleared_after_each_change": true,
+      "audit_trail": "old value, new value, sample size, z-score, reason",
+      "_why": "A $300k liquidity floor was once fitted to n=28 from one day, and a positive F2 read to 14 trades that reversed by n=109. An unbounded learner automates that mistake."
+    },
+    "_what_is_NOT_learned": {
+      "which_token_to_buy": "Not built. Permutation tests over 559 trades: liquidity p=0.3914, entry slippage p=0.4517, detect-to-open p=0.4500, stake p=0.1133. And in the 17-19 Sep window every gate from $50k to $200k admitted tokens that died - G1 bought 18 and 18 died. A classifier over these features learns noise.",
+      "what_would_unlock_it": "top-10 holder concentration and LP lock status at entry. Still not recorded anywhere."
+    }
+  },
+  "fast_rug_gates": {
+    "enabled": true,
+    "_why": "Most of these tokens die in the first minutes. The lab's own ledger closes trades at 0m and 1m, so sub-minute action is executable.",
+    "_caveat": "These gates fire only as fast as the price feed ticks. If observations arrive every 30s, the 30s check is a one-tick check. Nothing can act faster than the data.",
+    "ladder": [
+      {
+        "after_seconds": 30,
+        "min_multiple": 0.97,
+        "label": "rug_30s"
+      },
+      {
+        "after_seconds": 60,
+        "min_multiple": 0.99,
+        "label": "rug_60s"
+      },
+      {
+        "after_seconds": 120,
+        "min_multiple": 1.0,
+        "label": "rug_120s"
+      },
+      {
+        "after_seconds": 600,
+        "min_multiple": 1.08,
+        "label": "abandon_10m"
+      },
+      {
+        "after_seconds": 1200,
+        "min_multiple": 1.15,
+        "label": "abandon_20m"
+      }
+    ],
+    "_clearing_one_is_not_a_pass_for_the_next": "G1's entire loss was 3 tokens that cleared +8% at minute 10 and died before minute 45."
+  },
+  "profit_lock": {
+    "enabled": true,
+    "_why": "'Exit profitably, not just exit.' A wide trailing stop lets a +28% position come back to -1%. This does not: once the PEAK touches a rung, the position can never be sold below that rung.",
+    "ladder": [
+      {
+        "once_peak_reaches_pct": 3,
+        "never_sell_below_pct": 1.0
+      },
+      {
+        "once_peak_reaches_pct": 10,
+        "never_sell_below_pct": 4
+      },
+      {
+        "once_peak_reaches_pct": 25,
+        "never_sell_below_pct": 14
+      },
+      {
+        "once_peak_reaches_pct": 50,
+        "never_sell_below_pct": 32
+      },
+      {
+        "once_peak_reaches_pct": 100,
+        "never_sell_below_pct": 70
+      }
+    ],
+    "_first_rung_is_friction": "1.0% is the round-trip cost at these sizes. Below that a 'winner' is not one.",
+    "_it_never_forces_a_sale": "It raises the price at which the position must be sold. The stop and rug gates still do the selling."
+  },
+  "death_rate_breaker": {
+    "enabled": true,
+    "window": 20,
+    "halt_at_death_rate_pct": 60.0,
+    "min_sample": 8,
+    "halt_for_hours": 6,
+    "clear_evidence_after_halt": true,
+    "_why": "G1 bought 18 tokens and 18 died with nothing to stop it. This fires on the 8th."
+  },
+  "equity_ratchet": {
+    "enabled": true,
+    "give_back_pct": 3.0,
+    "floor_never_falls": true,
+    "initial_floor_usd": 950.0,
+    "on_breach": "halt_all_new_entries",
+    "force_close_open_positions": false,
+    "_evidence": "Halted G1 at -2.6% while unprotected books ran to -99.9%."
+  },
+  "sizing": {
+    "position_pct_of_book": 1.0,
+    "usual_position_usd": 10.0,
+    "max_position_usd": 50.0,
+    "min_position_usd": 5.0,
+    "scale_with_book": true,
+    "_why_min": "C2 was opening $0.12 positions at -99.7%. That is noise, not trading."
+  },
+  "daily_breaker": {
+    "enabled": true,
+    "max_daily_drawdown_pct": 5.0,
+    "max_daily_realised_loss_pct": 8.0,
+    "basis": "mark_to_market_including_open_positions"
+  },
+  "_HONEST_CAVEAT": "Nothing in this lab has made money. These changes bound the losses, keep the winners that appear, and stop early when the window turns. Profit is not promised by any of it."
+}
