@@ -46,6 +46,7 @@ _AMOUNT_AT = 64
 #: An SPL mint: a 36-byte optional authority and the u64 supply, then
 #: `decimals` at byte 44 and `is_initialized` at 45. Token-2022 mints share
 #: these 82 bytes and append their extensions after them.
+_SUPPLY_AT = 36
 _DECIMALS_AT = 44
 _INITIALIZED_AT = 45
 _MINT_SIZE = 82
@@ -72,6 +73,16 @@ def mint_decimals(data: bytes | None) -> int | None:
     return data[_DECIMALS_AT]
 
 
+def mint_supply(data: bytes | None) -> int | None:
+    """A mint's supply. For a pool's LP mint, the claims on its reserves that
+    anyone holds: zero means the migration's LP was burned and nobody can
+    withdraw the liquidity (`app.security.liquidity`, verified on mainnet)."""
+    if not data or len(data) < _MINT_SIZE or data[_INITIALIZED_AT] != 1:
+        return None
+    (supply,) = struct.unpack_from("<Q", data, _SUPPLY_AT)
+    return supply
+
+
 @dataclass(slots=True)
 class Held:
     """One watched position: its pool's two vaults, their scale, their balances."""
@@ -93,6 +104,9 @@ class Held:
     #: if this sat in the quote vault, so a price from the vaults alone reads
     #: low by virtual/quote — 1.5% on a 1,200 SOL pool.
     virtual_quote: int = 0
+    #: The pool's LP supply when it was resolved: 0 is locked (burned), None
+    #: unread. Read for the buy's lock rule, never refreshed.
+    lp_supply: int | None = None
 
     def apply(self, side: str, amount: int, slot: int) -> bool:
         if slot < self.slot:

@@ -889,6 +889,8 @@ class FreshBook(BaseModel):
 
     book: str
     hold_minutes: int
+    #: The arm's rule in words, as its board row shows it.
+    rule: str
     started_at: datetime
     capital_usd: Decimal
     ticket_usd: Decimal
@@ -907,14 +909,15 @@ def fresh_book(trades: Sequence[tuple], rate: Decimal | None,
                spec: config.FreshBookSpec) -> FreshBook:
     """`spec.book`'s closed trades since `spec.start`, walked through a
     `spec.capital_usd` wallet at `spec.ticket_usd` a trade."""
+    arm = next(a for a in ARMS if a.name == spec.book)
     since = [t for t in trades if t[0] >= spec.start]
     start = float(spec.capital_usd)
     walk = _funded_walk(since, rate, ticket=float(spec.ticket_usd), start=start)
     taken = [(t, p) for t, p in zip(since, walk.pnl, strict=True) if p is not None]
     cents = Decimal("0.01")
     return FreshBook(
-        book=spec.book, hold_minutes=next(a.hold for a in ARMS if a.name == spec.book),
-        started_at=spec.start, capital_usd=spec.capital_usd, ticket_usd=spec.ticket_usd,
+        book=spec.book, hold_minutes=arm.hold, rule=arm.note, started_at=spec.start,
+        capital_usd=spec.capital_usd, ticket_usd=spec.ticket_usd,
         balance_usd=Decimal(str(walk.cash)).quantize(cents),
         pnl_usd=Decimal(str(walk.cash - start)).quantize(cents),
         return_pct=Decimal(str((walk.cash / start - 1) * 100)).quantize(cents),

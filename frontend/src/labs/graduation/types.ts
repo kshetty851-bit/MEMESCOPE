@@ -263,6 +263,8 @@ export interface ArmRow {
 export interface FreshBook {
   book: string;
   hold_minutes: number;
+  /** The arm's rule in words, as its board row shows it. */
+  rule: string;
   started_at: string;
   capital_usd: string;
   ticket_usd: string;

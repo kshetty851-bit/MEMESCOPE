@@ -94,9 +94,11 @@ def test_arms_differ_only_in_entry_and_exit() -> None:
     # it sells. The rug-signal A/B runs on its own pre-registered clock and
     # competes with nothing here, so ranking it beside the arms invited
     # "delete the losing ones" — which would have ended it three weeks early.
+    # `locked` is part of the entry: whether a pool's liquidity is locked is
+    # read on-chain at the buy, where `accepts` cannot see it.
     assert set(Arm.__dataclass_fields__) == {
         "name", "entry", "hold", "tp", "trail", "stop", "drain", "clock",
-        "note", "ab_experiment"}
+        "note", "ab_experiment", "locked"}
     assert all(a.ab_experiment is False for a in ARMS if a.entry.startswith("liq_")), (
         "a tournament arm flagged as an experiment would vanish from its own "
         "comparison")
@@ -897,7 +899,9 @@ async def test_a_token_that_never_graduated_is_not_bought(monkeypatch) -> None:
     # candidate graduated 40s ago so all three still have time — and the
     # all-graduations A/B control. B5 needs $500k; B3E and the night A/B do not
     # buy from this query.
-    for pair, bought in ((OTHER_POOL, 0), (REAL_POOL, 10)):   # 10 with BASE_10k_2m
+    # BASE_10k_2m does not: its lock is proven by a pool read, and this tick
+    # reads no pool.
+    for pair, bought in ((OTHER_POOL, 0), (REAL_POOL, 9)):
         session = _Answers([], [], [])
         session.statements = []
         t = Tournament(session, now=NIGHT)
@@ -1026,7 +1030,7 @@ def _pool(price: str, sol: str, *, quote_mint: str = config.WSOL_MINT):
     return Held(mint=REAL_MINT, pool=REAL_POOL, base_vault="BaseVault",
                 quote_vault="QuoteVault", base_decimals=6, quote_decimals=9,
                 base=int(tokens * 10**6), quote=int(Decimal(sol) * 10**9),
-                quote_mint=quote_mint)
+                quote_mint=quote_mint, lp_supply=0)   # a migration pool: LP burned
 
 
 async def _buy(monkeypatch, *, feed_price: str, pool, liquidity: str = "250000",
@@ -1069,6 +1073,20 @@ async def _buy(monkeypatch, *, feed_price: str, pool, liquidity: str = "250000",
 
         monkeypatch.setattr(t, "_open_counts", counts)
     return await t._fill(), session.added, mirrored, reads
+
+
+async def test_the_10k_book_buys_only_a_pool_whose_liquidity_is_locked(
+    monkeypatch,
+) -> None:
+    """LP supply zero on the buy's own read is locked; outstanding LP or an
+    unread LP mint is not. The lock binds BASE_10k_2m alone."""
+    for lp_supply, locked in ((0, True), (5_000, False), (None, False)):
+        pool = _pool("0.00050", "500")
+        pool.lp_supply = lp_supply
+        _, added, _, _ = await _buy(monkeypatch, feed_price="0.00050", pool=pool)
+        books = {p.book for p in added}
+        assert ("BASE_10k_2m" in books) is locked, lp_supply
+        assert "F01_all_2m" in books
 
 
 async def test_a_buy_fills_at_the_pools_own_price_not_the_feeds_first_report(

@@ -940,7 +940,8 @@ function LeaderboardPanel() {
                 </span>
               </div>
               <p className="mt-1 text-xs leading-relaxed text-ink-dim">
-                Started with {usd(fresh.capital_usd)}, {usd(fresh.ticket_usd)} a
+                Rule: {fresh.rule}. Started with {usd(fresh.capital_usd)},{" "}
+                {usd(fresh.ticket_usd)} a
                 trade: up to {tickets} at once, fewer after losses, exactly as
                 your real wallet funds them, with its safety checks on every
                 trade the lab records an operator for.{" "}
