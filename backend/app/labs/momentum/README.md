@@ -53,7 +53,10 @@ floor went live are `void` (shown, counted nowhere).
 
 **The momentum candle (`M5_BASE`):** green, up 2%+, 3x the token's median
 5m body over the last 24 bars, on 3x normal volume (DexScreener's own 24h
-volume / 288), closing in the top 40% of its range, more buys than sells.
+volume / 288), closing in the top 40% of its range. Not "more buys than
+sells": that was the first version, and it blocked every real pump of the first
+hours (ANONCOIN +11.2% on 2 buys / 30 sells, BP +3.9% on 41x volume with 2 / 91)
+because a trade COUNT hides trade size; `M5_BUYERS` tests it on its own.
 Calibrated for RATE only, on 4,020 real 5m candles of 22 universe tokens
 (GeckoTerminal, 2026-09-19): it fires on ~1% of bars.
 
