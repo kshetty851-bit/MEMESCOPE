@@ -47,7 +47,7 @@ from sqlalchemy.orm import aliased
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.labs.graduation import config
-from app.labs.graduation import live_decisions, live_spec
+from app.labs.graduation import live_decisions, live_spec, moneyblock
 from app.labs.graduation.backtest import (
     HardStop,
     ExitPolicy,
@@ -808,7 +808,8 @@ class Tournament:
 
     def __init__(self, session: AsyncSession, *, now: datetime | None = None,
                  pool_reader: PoolReader | None = None,
-                 operator_reader: OperatorReader | None = None) -> None:
+                 operator_reader: OperatorReader | None = None,
+                 money_checks: bool = False) -> None:
         self._session = session
         self._now = now or datetime.now(UTC)
         # With a reader, a pool-open buy fills at the pool's own price the
@@ -819,6 +820,10 @@ class Tournament:
         # The fast arms need both readers; without them they sit out, as the
         # replays and old tests do.
         self._operator_reader = operator_reader
+        # The real wallet's money checks (`moneyblock`): a coin the wallet would
+        # refuse, no book buys. The scheduler turns them on; replays and the
+        # tests that script every query do not.
+        self._money_checks = money_checks
 
     async def tick(self) -> dict[str, Any]:
         if not config.paper_enabled():
@@ -1304,7 +1309,9 @@ class Tournament:
         found = await asyncio.gather(*(self._operator_reader(r.mint, pools[r.mint])
                                        for r, _, _ in deep), return_exceptions=True)
         counts = await self._open_counts()
-        opened = 0
+        recent = (await moneyblock.recent_rug_ids(self._session, self._now)
+                  if self._money_checks else set())
+        opened = blocked = 0
         for (row, price, depth), ids in zip(deep, found, strict=True):
             ids = ids if isinstance(ids, frozenset) else None
             self._session.add(GradOperator(
@@ -1316,6 +1323,11 @@ class Tournament:
                 source="live"))
             if depth < LIQ_BANDS[0][1]:
                 continue  # recorded for the operator's record, too shallow to buy
+            # The real wallet would refuse it, so no book here buys it either.
+            if ids and (why := moneyblock.refused(ids, self._now, recent)):
+                blocked += 1
+                logger.info("graduation_tournament_money_blocked", mint=row.mint, reason=why)
+                continue
             trusted = bool(ids) and await self._trusted(row.mint, ids)
             for arm in arms:
                 if arm.entry == "fast75_trust" and not trusted:
@@ -1326,7 +1338,8 @@ class Tournament:
                     counts[arm.name] = counts.get(arm.name, 0) + 1
                     opened += 1
         if deep:
-            logger.info("graduation_tournament_fast_filled", recorded=len(deep), opened=opened)
+            logger.info("graduation_tournament_fast_filled", recorded=len(deep), opened=opened,
+                        money_blocked=blocked)
         return opened
 
     async def _fast_candidates(self) -> Sequence[Any]:
@@ -1413,6 +1426,10 @@ class Tournament:
             return opened_curve
         reuse = await self._symbol_reuse(rows)
         mints = [r.mint for r in rows]
+        # The real wallet's money checks, on the addresses `_fill_fast` recorded
+        # for each coin: a coin the wallet would refuse, no book here buys.
+        blocked = (await moneyblock.refusals(self._session, mints, self._now)
+                   if self._money_checks else {})
         taken = {(b, m) for b, m in (await self._session.execute(
             select(GradPaperPosition.book, GradPaperPosition.mint)
             .where(GradPaperPosition.mint.in_(mints)))).all()}
@@ -1421,6 +1438,7 @@ class Tournament:
         refused = 0
         foreign = 0
         unpriced = 0
+        money_blocked = 0
         mirror: list[live_decisions.Mirrored] = []
         for row in rows:
             if row.price_native is None or row.price_native <= 0:
@@ -1448,6 +1466,11 @@ class Tournament:
                                   reuse=reuse.get(row.mint))
                       and _time_left(arm, entry_at, row.graduated_at)]
             if not wanted:
+                continue
+            if row.mint in blocked:
+                money_blocked += 1
+                logger.info("graduation_tournament_money_blocked", mint=row.mint,
+                            reason=blocked[row.mint])
                 continue
             price, depth = row.price_native, row.liquidity_usd
             if self._pool_reader is not None:
@@ -1511,8 +1534,9 @@ class Tournament:
                         price_native=price))
         await live_decisions.record(self._session, mirror)
         opened += opened_curve
-        if opened or refused or foreign or unpriced:
+        if opened or refused or foreign or unpriced or money_blocked:
             logger.info("graduation_tournament_filled", opened=opened,
                         refused_unfillable=refused, not_graduation=foreign,
-                        pool_unpriced=unpriced, candidates=len(rows))
+                        pool_unpriced=unpriced, money_blocked=money_blocked,
+                        candidates=len(rows))
         return opened

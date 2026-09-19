@@ -221,6 +221,14 @@ def main(argv: list[str] | None = None) -> int:
                           "later trades are left alone")
     ron.add_argument("--apply", action="store_true",
                      help="write it (default: report what would change)")
+    mblock = sub.add_parser(
+        "money-restate",
+        help="leave out closed trades the real wallet's money checks would have "
+             "refused (2026-09-19)")
+    mblock.add_argument("--since", required=True,
+                        help="ISO time the wallet's money-source block went live")
+    mblock.add_argument("--apply", action="store_true",
+                        help="write it (default: report what would change)")
     seed = sub.add_parser(
         "seed-operators", help="load the Tape Lab's operator records (2026-09-19)")
     seed.add_argument("--file", required=True)
@@ -286,6 +294,15 @@ def main(argv: list[str] | None = None) -> int:
             raise SystemExit("--opened-before needs a timezone, e.g. 2026-09-16T16:30:00+00:00")
         _emit(asyncio.run(_restate(apply=args.apply, opened_before=cutoff)))
         return 0
+    if args.command == "money-restate":
+        from datetime import datetime
+
+        since = datetime.fromisoformat(args.since)
+        if since.tzinfo is None:
+            raise SystemExit(
+                "--since needs a timezone, e.g. 2026-09-18T13:08:00+00:00")
+        _emit(asyncio.run(_money_restate(apply=args.apply, since=since)))
+        return 0
     if args.command == "restate-onchain":
         from datetime import datetime
 
@@ -305,6 +322,17 @@ async def _restate(*, apply: bool, opened_before) -> dict:
 
     async with SessionFactory() as session:
         result = await restate(session, apply=apply, opened_before=opened_before)
+        if apply:
+            await session.commit()
+        return result
+
+
+async def _money_restate(*, apply: bool, since) -> dict:
+    from app.db.session import SessionFactory
+    from app.labs.graduation.moneyblock import restate
+
+    async with SessionFactory() as session:
+        result = await restate(session, since=since, apply=apply)
         if apply:
             await session.commit()
         return result

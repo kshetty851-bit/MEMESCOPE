@@ -293,4 +293,8 @@ export interface Leaderboard {
    * left out of every figure, and `restated_rugged_usd` is what they lost. */
   restated_collapsed: number;
   restated_rugged_usd: string;
+  /** Closed trades the real wallet's money checks would have refused: left out
+   * of every figure since 18 Sep, and what they made together. */
+  blocked_trades: number;
+  blocked_pnl_usd: string;
 }

@@ -1,0 +1,88 @@
+"""Money blocked for good: the addresses behind rug pulls that are refused
+outright, each with the moment it went live.
+
+The real wallet refuses a coin whose big wallets or their funders are on this
+list (`app.real_wallet_safety.sources`), and so does the graduation lab, so a
+lab book never trades a coin the wallet would not (Karthik, 2026-09-19). It
+lives here, not in the wallet, because the lab may not import the wallet's
+code; one list for both means the two can never drift apart.
+
+Funders whose coins MOSTLY rugged, found by replaying BASE_75k_5m's trades
+on-chain (15-18 Sep 2026), and the wallets that pulled a pool themselves. On the
+trades replayed, each cost less blocked than traded. Big launch funders behind
+a single rug are deliberately NOT here: ZBCN's funded 65 of the book's coins
+and one rugged. Nor are exchanges and wallet-seeding services, whose coins are
+anyone's. The three-hour block catches a new operator's repeats.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+
+
+def _at(text: str) -> datetime:
+    return datetime.fromisoformat(text).replace(tzinfo=UTC)
+
+
+#: Address -> when the wallet started refusing it. A book restated after the
+#: fact applies each entry only from here, never with hindsight.
+BLOCKED_SINCE: dict[str, datetime] = {
+    # One operator, 16 Sep 02:08-11:38: TRUMP, POT, baton, ALLINU, Benz,
+    # TikTok, ARCH, FAIR, USWS, PONYX, YouTube. It funded the curve buyer
+    # (11 rugs of its 20 coins) ...
+    "DyaESzDfBLtbvKz7iM5Th6nsbsGSpjt5NLXuieigRcZX": _at("2026-09-18 14:54"),
+    # ... and the pool buyer (11 rugs of 19).
+    "5W84xUtSNhMutNbT8XdgWrMShMgmjxjbQKK7zebdLaSn": _at("2026-09-18 14:54"),
+    # The pool buyer of SUUB and SOLCAT, 18 Sep: 2 rugs of its 3 coins.
+    "xZJADxiqWhDneh6wUtAfRM3gRRpj4tjw7V7ExTPXQ7z": _at("2026-09-18 14:54"),
+    # The wallets that pulled the pool THEMSELVES in B3_198k_4m's two on-chain
+    # rugs: each put ~99% of its pool's SOL in at launch and took 82-96% of it
+    # back in one sale ~2 min after the buy.
+    # ZBCN (17 Sep, -$46.38 on the wallet): its pool buyer, still launching
+    # (26 of the book's 379 trades, -$11 at $25 with its dump counted), and
+    # the one-shot account that funded it.
+    "GBdQ1Vz6Mw2Nx5TLs61KS3GsJBwccKGj9zxZZD4FWuaK": _at("2026-09-18 19:34"),
+    "6JqtR1h3QZ5BumnbKhtUXPsFaZcrRrBoi5ae3HLB8iVT": _at("2026-09-18 19:34"),
+    # WWR (18 Sep, -$9.92): its pool buyer and its curve buyer, both emptied
+    # since. Their funders are left out on purpose: 34nDrS holds ~2,950 SOL and
+    # sends 1,000 transactions in 6 minutes (an exchange), 96UiVw seeded wallets
+    # at 1,000 in 12 minutes (a service).
+    "6cb6cF9EeDvjuerUR3h9zWNFL3bKmNnvnomJ24qhKUJ7": _at("2026-09-18 19:34"),
+    "8EdVxQ78Y4DQJsqSmnkH1ySPGu1sqab8WAYL8mgFCt9j": _at("2026-09-18 19:34"),
+    # Each of these rugs was ONE operator: its curve buyer (funded off an
+    # exchange) sent ~5,000 SOL through a one-shot account to its pool buyer,
+    # which filled the pool and later pulled it. ZBCN's curve buyer is that
+    # operator's main wallet.
+    "8eEQ6s6gNykb9sFhS5aihsxMenTTqZkm25EqNNFaDvwf": _at("2026-09-19 03:21"),
+    # COST (18 Sep 21:35, -$43.24 on the wallet at $50): the pool buyer took
+    # 702 of its 989 SOL back 15 s after the wallet's buy. Its curve buyer, the
+    # one-shot account between them, and the pool buyer. Their other funder,
+    # 5tzFki, is an exchange hot wallet (~2M SOL) and stays OFF this list.
+    "2Cghr56XrPXRAJhzVRor2pSnDFYVe2t2guKgdzNSjQsT": _at("2026-09-19 03:21"),
+    "wqcTmHNuzxihz8bSckYd5e7n8zBUgtLGEWhXfuoS1gv": _at("2026-09-19 03:21"),
+    "EvfSd1qWRKLmCzoD66mi64fehEikgHYdJv5s67FBqtmE": _at("2026-09-19 03:21"),
+    # Repeat operators among BASE_75k_5m's 31 rugs (15-19 Sep): 18 of the 30
+    # traced came from three, linked by shared wallets.
+    # The 16 Sep wave's pool buyers (its funders are listed above): on 8 and 3
+    # of its 11 rugs.
+    "E7mdTgYspRGRAE1zJoUW8zdxNU5VjpQbivXU6huB7oqJ": _at("2026-09-19 06:48"),
+    "5MYVpHEiLHkddGHQhZMfhwSVqYi3yzmpmGfRxSeavBvL": _at("2026-09-19 06:48"),
+    # SUUB, SOLCAT, WEN, Pump, ELIEN (18 Sep): this pool buyer bought all five
+    # (xZJADx above funded it). Its curve funder, 8zxkme, stays off: ~930 SOL and
+    # 1,000 transactions in half an hour looks like a service.
+    "BGCbX7bcXAnbKuUP9uUfAGzQyZRz158kAzYPNKpTLCe2": _at("2026-09-19 06:48"),
+    # FOMO and AMAZON (18 Sep, an hour apart): the same big wallet. Their shared
+    # funder, BZXZ8d, stays off: 578 transactions in 36 minutes, a seeder.
+    "DdtsVPAnET6MqDPvDumgUBsTYpYcn7UZpKMG8uwJzJyo": _at("2026-09-19 06:48"),
+    # KIBA (19 Sep 07:00, -99% in every book incl. B3_198k_4m and E75T_4m): its
+    # launch wallet put 1,534 SOL in (4 clean coins before, so it looked
+    # proven); a new wallet funded through a one-shot account sold 28% of the
+    # coins from 47 s after the buy and took 1,953 SOL. Launch wallet, dumper,
+    # one-shot funder. The busy funder behind the launch wallet (4gwSSV, 272
+    # coins) stays off.
+    "9x2N1MHxs5NxAYnpkNi1QbyE3ayk6oqh53p9vpVjDdHa": _at("2026-09-19 09:02"),
+    "FtvDtRoKP7vBPwwow1W5uttUVnXoskZ5bFnpkijb1iwL": _at("2026-09-19 09:02"),
+    "3YfWwbV9QZbGfyQWHKGANdK8iwnMcpdWj1E2SqMvWkc6": _at("2026-09-19 09:02"),
+}
+
+ALWAYS_BLOCKED: frozenset[str] = frozenset(BLOCKED_SINCE)
