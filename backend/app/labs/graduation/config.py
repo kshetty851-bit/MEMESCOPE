@@ -693,6 +693,10 @@ AB_RANDOM_SEED = 20261010
 #: has since rugged today's distribution is the wreckage. Measuring it after the
 #: outcome and finding that rugs were concentrated would be reading the answer,
 #: not predicting it.
+#: Seconds to wait before each retry of a refused holder read: four tries,
+#: the last about 85s after the first. Short on purpose: later than that the
+#: distribution describes a different token.
+HOLDER_RETRY_S: tuple[float, ...] = (5.0, 20.0, 60.0)
 HOLDER_COLLECT_ENABLED = (
     os.getenv("LAB_GRADUATION_HOLDER_COLLECT", "1").strip().lower()
     in {"1", "true", "yes", "on"})

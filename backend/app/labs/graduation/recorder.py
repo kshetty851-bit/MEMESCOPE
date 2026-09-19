@@ -100,6 +100,8 @@ class GraduationRecorder:
         #: A set, so a mint the chain and the websocket both report is asked
         #: about once.
         self._owe_holders: set[str] = set()
+        #: Mints whose read came back empty -> (failures, earliest retry).
+        self._holder_retry: dict[str, tuple[int, datetime]] = {}
         #: Readings taken by `_holders_loop`, waiting for the next flush.
         self._holders_ready: dict[str, Any] = {}
         #: New pumpswap graduations whose pool is watched for B3's depth, and
@@ -559,17 +561,21 @@ class GraduationRecorder:
             # Watched whether or not the lab saw its curve: the feed is global,
             # and most deep pools belong to tokens nobody was watching.
             self.early.add(row.mint, row.ts, row.signature)
+        # Holder concentration is read HERE and nowhere else, because it can
+        # only be read here: `getTokenLargestAccounts` answers about today, and
+        # for a token that later rugs today's distribution is the wreckage.
+        # Asked after the outcome it would be reading the answer.
+        #
+        # Before the watch check, not after it: the feed is global, and on
+        # 2026-09-17 only ~1 graduation in 4 was still in the watch set when it
+        # migrated, so three in four were never asked at all.
+        self._owe_holders.add(row.mint)
         if state is None:
             return
         state.migrated_at = row.ts
         state.max_progress = Decimal(100)
         self._dirty.add(row.mint)
         self._owe_checkpoints(state, None, ts=row.ts)
-        # Holder concentration is read HERE and nowhere else, because it can
-        # only be read here: `getTokenLargestAccounts` answers about today, and
-        # for a token that later rugs today's distribution is the wreckage.
-        # Asked after the outcome it would be reading the answer.
-        self._owe_holders.add(row.mint)
         logger.info("graduation_migrated", mint=row.mint, tracked=state.tracked)
 
     # --- polling ------------------------------------------------------------
@@ -694,22 +700,43 @@ class GraduationRecorder:
         holding a database transaction open across an RPC round trip is how a
         slow node becomes a lock nobody can explain.
 
-        A failure is dropped, not retried. The read is only meaningful close to
-        graduation — asked an hour later it describes a different token — so a
-        mint that could not be read keeps a NULL, which is the honest record of
-        a question that went unanswered.
+        A failure is retried only briefly (`HOLDER_RETRY_S`, about a minute and
+        a half in all), then dropped. The read is only meaningful close to
+        graduation, since asked an hour later it describes a different token,
+        so a mint that still could not be read keeps a NULL: the honest record
+        of a question that went unanswered.
+
+        Retried at all because the node refuses reads in bursts. On 2026-09-17
+        every read for a day came back empty, and nothing said so: an empty
+        answer was not logged, so a collector that had never collected looked
+        like one that was running. Every pass now reports what it got.
         """
-        if not config.HOLDER_COLLECT_ENABLED or not self._owe_holders:
+        if not config.HOLDER_COLLECT_ENABLED:
             self._owe_holders.clear()
+            self._holder_retry.clear()
             return {}
-        owed, self._owe_holders = self._owe_holders, set()
+        now = self._now()
+        due = {m for m, (_, at) in self._holder_retry.items() if at <= now}
+        owed, self._owe_holders = self._owe_holders | due, set()
+        if not owed:
+            return {}
         out: dict[str, Any] = {}
+        dropped = 0
         for mint in owed:
             got = await self._rpc.holders(mint)
             if got is not None:
                 out[mint] = got
-        if out:
-            logger.info("graduation_holders_read", asked=len(owed), got=len(out))
+                self._holder_retry.pop(mint, None)
+                continue
+            failures = self._holder_retry.get(mint, (0, now))[0] + 1
+            if failures > len(config.HOLDER_RETRY_S):
+                self._holder_retry.pop(mint, None)
+                dropped += 1
+            else:
+                wait = timedelta(seconds=config.HOLDER_RETRY_S[failures - 1])
+                self._holder_retry[mint] = (failures, now + wait)
+        logger.info("graduation_holders_read", asked=len(owed), got=len(out),
+                    dropped=dropped, retrying=len(self._holder_retry))
         return out
 
     async def flush(self, *, now: datetime | None = None) -> dict[str, int]:
