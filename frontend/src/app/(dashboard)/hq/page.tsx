@@ -450,7 +450,7 @@ function TodayAtHq({ state }: { state: HqState }) {
     <section className="hq-today" aria-label="Today at HQ">
       <h2 className="hq-today-title">TODAY AT HQ</h2>
       <p className="hq-today-note">
-        Completed paper trades since 00:00 UTC, from the permanent record. Other
+        Completed paper trades since 04:00 Dubai (00:00 UTC), from the permanent record. Other
         desks publish a latest reading rather than an event log, so they are not
         listed here.
       </p>
