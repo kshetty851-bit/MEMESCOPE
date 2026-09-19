@@ -110,6 +110,16 @@ export const NAV_GROUPS: NavGroup[] = [
         status: "ready",
         note: "Watch only. pump.fun curves into graduation; no book.",
       },
+      // Fifty paper strategies buying the momentum candle on Solana tokens
+      // older than seven days, each from a $1,000 wallet. Its own route: the
+      // old `/momentum-lab` was a different, deleted lab and stays retired.
+      {
+        href: "/momentum-candles",
+        label: "Momentum Lab",
+        icon: IconSpark,
+        status: "ready",
+        note: "Paper only. 50 strategies on momentum candles, $1,000 each.",
+      },
       // Indian equities, not Solana, and the only destination here with no
       // book at all — it watches and records. Listed beside the labs because
       // that is where a reader looks for one, and named for the market so it

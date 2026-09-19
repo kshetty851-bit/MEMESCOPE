@@ -28,6 +28,14 @@ from app.labs.nse_breakout.models import (  # noqa: F401
     BtState,
     BtUniverseMember,
 )
+# Momentum Lab's five `mom_*` tables, for the same reason.
+from app.labs.momentum.models import (  # noqa: F401
+    MomCandle,
+    MomClose,
+    MomPair,
+    MomPosition,
+    MomSignal,
+)
 # Forex Lab's three `fx_*` tables, for the same reason.
 from app.labs.forex_lab.models import (  # noqa: F401
     FxCandle,
