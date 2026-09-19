@@ -846,6 +846,8 @@ class Leaderboard(BaseModel):
     #: (`moneyblock`, from 18 Sep): left out of every figure, and what they made.
     blocked_trades: int = 0
     blocked_pnl_usd: Decimal = Decimal(0)
+    #: Karthik's fresh $500 BASE 75k book (`config.FRESH_*`).
+    fresh: FreshBook | None = None
 
 
 #: Thirty-day projections, memoised. `(computed_at, {arm: fields})`.
@@ -861,6 +863,43 @@ class Leaderboard(BaseModel):
 #: P&L, trade counts, the gate — stays live on every request.
 _PROJECTIONS: tuple[datetime, dict[str, dict[str, Any]]] | None = None
 _PROJECTION_TTL = timedelta(minutes=2)
+
+
+class FreshBook(BaseModel):
+    """A book restarted from a moment with its own money (`config.FRESH_*`)."""
+
+    book: str
+    started_at: datetime
+    capital_usd: Decimal
+    ticket_usd: Decimal
+    balance_usd: Decimal
+    pnl_usd: Decimal
+    return_pct: Decimal
+    trades: int
+    wins: int
+    rugs: int
+    #: Signals it had no free money for: a sixth at once, or after losses.
+    skipped: int
+    lowest_usd: Decimal
+
+
+def fresh_book(trades: Sequence[tuple], rate: Decimal | None = None) -> FreshBook:
+    """`config.FRESH_BOOK`'s closed trades since `config.FRESH_START`, walked
+    through a `FRESH_CAPITAL_USD` wallet at `FRESH_TICKET_USD` a trade."""
+    since = [t for t in trades if t[0] >= config.FRESH_START]
+    start = float(config.FRESH_CAPITAL_USD)
+    walk = _funded_walk(since, rate, ticket=float(config.FRESH_TICKET_USD), start=start)
+    taken = [(t, p) for t, p in zip(since, walk.pnl, strict=True) if p is not None]
+    cents = Decimal("0.01")
+    return FreshBook(
+        book=config.FRESH_BOOK, started_at=config.FRESH_START,
+        capital_usd=config.FRESH_CAPITAL_USD, ticket_usd=config.FRESH_TICKET_USD,
+        balance_usd=Decimal(str(walk.cash)).quantize(cents),
+        pnl_usd=Decimal(str(walk.cash - start)).quantize(cents),
+        return_pct=Decimal(str((walk.cash / start - 1) * 100)).quantize(cents),
+        trades=walk.funded, wins=sum(1 for _, p in taken if p > 0),
+        rugs=sum(1 for t, _ in taken if t[2] <= float(config.OPERATOR_RUG_MOVE)),
+        skipped=walk.skipped, lowest_usd=Decimal(str(walk.low)).quantize(cents))
 
 
 class Walk(NamedTuple):
@@ -1553,6 +1592,7 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
         restated_rugged_usd=Decimal(rugged_usd or 0).quantize(Decimal("0.01")),
         blocked_trades=blocked_n,
         blocked_pnl_usd=Decimal(blocked_usd or 0).quantize(Decimal("0.01")),
+        fresh=fresh_book(per_arm_trades.get(config.FRESH_BOOK, []), sol_rate),
         running=config.paper_enabled(), started_at=started, arms=rows,
         controls=control_rows, control_band=band, best_control=best_control,
         leader=leader.name if leader else "",
