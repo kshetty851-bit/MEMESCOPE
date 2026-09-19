@@ -177,8 +177,13 @@ function Trades({ arm }: { arm: string }) {
             const ret = typeof f.ret === "number" ? f.ret * 100 : null;
             const live =
               t.open_price && t.last_price ? (t.last_price / t.open_price - 1) * 100 : null;
+            // Decided under a rule that has since changed: shown, counted nowhere.
+            const voided = t.status === "void";
             return (
-              <tr key={`${t.pair_address}-${t.decided_at}`} className="border-t border-line align-top tabular-nums">
+              <tr
+                key={`${t.pair_address}-${t.decided_at}`}
+                className={`border-t border-line align-top tabular-nums ${voided ? "text-ink-dim line-through" : ""}`}
+              >
                 <td className="py-1.5 pr-3">
                   <a className="text-accent hover:underline" href={dex(t.pair_address)} target="_blank" rel="noreferrer">
                     {t.symbol ?? t.mint.slice(0, 6)}
@@ -213,7 +218,9 @@ function Trades({ arm }: { arm: string }) {
                     </>
                   )}
                 </td>
-                <td className="py-1.5 pr-3 text-ink-dim">{t.exit_reason ?? (t.status === "open" ? "holding" : t.status)}</td>
+                <td className="py-1.5 pr-3 text-ink-dim">
+                  {voided ? "not counted: before the 20-trade rule" : (t.exit_reason ?? (t.status === "open" ? "holding" : t.status))}
+                </td>
                 <td className={`py-1.5 text-right ${tone(t.net_return_pct ?? live)}`}>
                   {t.net_return_pct !== null ? pct(t.net_return_pct) : live !== null ? `${pct(live)} open` : "—"}
                 </td>
@@ -478,8 +485,8 @@ export function MomentumLabPage() {
           Solana tokens whose market is more than {data.min_age_days} days old, with at least $
           {Math.round(data.min_liquidity_usd / 1000)}k of liquidity, priced every 30 seconds. When
           a <b className="text-ink">momentum candle</b> closes — a big green candle for that token,
-          on heavy volume, closing near its high — {data.arms} paper strategies decide whether to
-          buy. Each starts with {usd(data.start_usd).replace(".00", "")}. No real funds.
+          on heavy volume, closing near its high, with at least {data.min_trades_5m} trades in
+          five minutes — {data.arms} paper strategies decide whether to buy. Each starts with {usd(data.start_usd).replace(".00", "")}. No real funds.
         </p>
       </header>
       <Health s={data} />

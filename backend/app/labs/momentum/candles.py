@@ -59,6 +59,16 @@ def ret(bar: Bar) -> float:
     return bar.close / bar.open - 1 if bar.open > 0 else 0.0
 
 
+def trades(bar: Bar) -> int:
+    return (bar.buys or 0) + (bar.sells or 0)
+
+
+def busy(bar: Bar) -> bool:
+    """Enough trades to be a market move rather than one buyer: at least
+    `MIN_TRADES_PER_5M` for every five minutes the bar spans."""
+    return trades(bar) >= config.MIN_TRADES_PER_5M * bar.parts
+
+
 @dataclass(frozen=True, slots=True)
 class Features:
     """Everything a rule may read, measured at the close of `bar`."""
@@ -98,6 +108,7 @@ class Features:
         return {
             "ret": r(self.ret), "clv": r(self.clv, 3), "body_x": r(self.body_x, 2),
             "vol_x": r(self.vol_x, 2), "buy_ratio": r(self.buy_ratio, 2),
+            "trades": trades(self.bar),
             "volume": r(self.bar.volume, 2), "liquidity": r(self.bar.liquidity, 0),
             "change_h24": r(self.bar.change_h24, 2), "breakout": int(self.breakout),
             "recent_impulses": self.recent_impulses, "history": self.history,

@@ -4,6 +4,7 @@ export interface MomentumStatus {
   running: boolean;
   min_age_days: number;
   min_liquidity_usd: number;
+  min_trades_5m: number;
   start_usd: number;
   ticket_usd: number;
   arms: number;

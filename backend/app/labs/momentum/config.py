@@ -116,6 +116,18 @@ TREND_BARS = 48
 #: A 5m bar is judged only if at least this many samples built it; a bar made
 #: of one sample is a single price, not a candle.
 MIN_SAMPLES_5M = 3
+#: A candle counts only with real trading: at least this many trades for every
+#: five minutes it spans (20 = four a minute; 60 on a 15m bar, 240 on 1h). The
+#: rolling rule needs the same in its five-minute window, and the random
+#: controls draw only from candles that pass it.
+#:
+#: Added 2026-09-19, 40 minutes after launch. On prod the median watched coin
+#: averaged 12 trades per 5 minutes over a day and 3 in a quiet hour, and 13 of
+#: the first 16 candles that moved 2%+ had fewer than 10 trades: one or two
+#: buyers in a thin pool, not momentum. The lab's first trade was one of them
+#: (+9.5% on two buys). "3x normal volume" cannot catch it, because on a quiet
+#: coin three times normal is still a handful of trades.
+MIN_TRADES_PER_5M = _int("LAB_MOMENTUM_MIN_TRADES_PER_5M", 20)
 #: The share of an aggregated bar's 5m bars that must exist.
 MIN_COVERAGE = Decimal("0.75")
 CANDLE_RETENTION_DAYS = _int("LAB_MOMENTUM_CANDLE_RETENTION_DAYS", 3)

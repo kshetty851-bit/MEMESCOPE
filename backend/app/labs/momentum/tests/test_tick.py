@@ -29,6 +29,7 @@ class FakeFeeds:
         self.failures = 0
         self.price = D("1.05")
         self.now = B
+        self.buys, self.sells = 30, 10
 
     async def pairs(self, addresses):
         self.calls["dex"] += 1
@@ -36,12 +37,12 @@ class FakeFeeds:
             pair_address=PAIR, base_mint=MINT, quote_mint=config.WSOL_MINT,
             symbol="MOMO", dex_id="raydium", price_usd=self.price,
             price_native=self.price / 100, liquidity=D(500_000), volume_m5=D(5_000),
-            volume_h1=D(20_000), volume_h24=D(288_000), buys_m5=30, sells_m5=10,
+            volume_h1=D(20_000), volume_h24=D(288_000), buys_m5=self.buys, sells_m5=self.sells,
             change_m5=D(5), change_h1=D(1), change_h24=D(5), market_cap=D(10_000_000),
             created_at=B - timedelta(days=60), fetched_at=self.now + timedelta(seconds=1))}
 
 
-async def _seed(session) -> None:
+async def _seed(session, *, buys: int = 30, sells: int = 10) -> None:
     session.add(MomPair(pair_address=PAIR, mint=MINT, symbol="MOMO", dex_id="raydium",
                         quote_mint=config.WSOL_MINT, born_at=B - timedelta(days=60),
                         status="active", admitted_at=B - timedelta(days=1),
@@ -58,7 +59,7 @@ async def _seed(session) -> None:
     # THE momentum candle: +5% on 5x volume, closing at its high, 3 buys a sell.
     session.add(MomCandle(pair_address=PAIR, start=B, open=price, high=price * D("1.05"),
                           low=price * D("0.995"), close=price * D("1.05"),
-                          volume_usd=D(5_000), buys=30, sells=10, volume_h24=D(288_000),
+                          volume_usd=D(5_000), buys=buys, sells=sells, volume_h24=D(288_000),
                           liquidity_usd=D(500_000), change_h24=D(5), samples=10))
     await session.commit()
 
@@ -149,3 +150,17 @@ async def test_a_momentum_candle_through_the_book(session, monkeypatch) -> None:
     assert rows["M5_BASE"].wallet.end == pytest.approx(
         1000 + float(base.net_return) * 100, abs=0.01)
     assert rows["X5_MID_2R"].wallet.end < 1000
+
+
+async def test_a_candle_made_by_two_buyers_is_not_momentum(session, monkeypatch) -> None:
+    """The lab's first live trade: +9.5% on two buys. Same candle, same price
+    move, same volume multiple - but two trades, so nothing may judge it, the
+    controls included, and the rolling rule may not buy the window either."""
+    monkeypatch.setenv("LAB_MOMENTUM_ENABLED", "true")
+    await _seed(session, buys=2, sells=0)
+    feeds = FakeFeeds()
+    feeds.buys, feeds.sells = 2, 0
+    first = await _tick(session, feeds, B + FIVE + timedelta(seconds=config.FEED_LAG_S + 3),
+                        "1.05")
+    assert first["judged"]["5m"]["eligible"] == 0
+    assert (await session.scalar(select(func.count()).select_from(MomPosition))) == 0

@@ -36,6 +36,14 @@ A bar is judged once (`mom_closes` is the lock), only after it has closed, and
 only against bars that closed before it, and only once the token has 20 bars
 of its own history (~100 minutes on 5m, 5 hours on 15m, 20 hours on 1h).
 
+**Only busy candles count:** a bar is judged only with at least 20 trades per
+five minutes it spans (60 on 15m, 240 on 1h); the rolling rule needs 20 in its
+window, and the random controls draw from the same busy bars. Added 40 minutes
+after launch: the median watched coin does 12 trades per 5 minutes (3 in a
+quiet hour), 13 of the first 16 candles that moved 2%+ had under 10 trades,
+and the first live trade was +9.5% on two buys. Positions decided before the
+floor went live are `void` (shown, counted nowhere).
+
 **The momentum candle (`M5_BASE`):** green, up 2%+, 3x the token's median
 5m body over the last 24 bars, on 3x normal volume (DexScreener's own 24h
 volume / 288), closing in the top 40% of its range, more buys than sells.

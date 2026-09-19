@@ -47,7 +47,7 @@ from app.labs.momentum.arms import (
     fires,
     fires_rolling,
 )
-from app.labs.momentum.candles import Bar, Features, bucket, features
+from app.labs.momentum.candles import Bar, Features, bucket, busy, features
 from app.labs.momentum.models import (
     MomCandle,
     MomClose,
@@ -478,7 +478,7 @@ class MomentumLab:
         eligible: list[Judged] = []
         for address, bars in history.items():
             bar = bars[-1] if bars and bars[-1].start == start else None
-            if bar is None or not self._judgeable(bar, tf):
+            if bar is None or not self._judgeable(bar, tf) or not busy(bar):
                 continue
             pair = active[address]
             if bar.liquidity is None or bar.liquidity < float(config.MIN_LIQUIDITY_USD):
@@ -681,6 +681,8 @@ class MomentumLab:
             pair = pairs[address]
             if pair.status != "active" or s.row.liquidity is None \
                     or s.row.liquidity < config.MIN_LIQUIDITY_USD:
+                continue
+            if (s.row.buys_m5 or 0) + (s.row.sells_m5 or 0) < config.MIN_TRADES_PER_5M:
                 continue
             roll = Rolling(
                 change_m5=None if s.row.change_m5 is None else float(s.row.change_m5),
