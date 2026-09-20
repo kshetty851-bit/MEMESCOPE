@@ -115,6 +115,7 @@ async def paper_tick() -> dict[str, Any]:
             result = await Tournament(session, now=datetime.now(UTC),
                                       pool_reader=sources.pool_now,
                                       operator_reader=sources.operators_now,
+                                      tx_reader=sources.pool_txs_now,
                                       money_checks=True).tick()
             await session.commit()
             return result
