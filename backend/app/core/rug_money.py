@@ -92,6 +92,12 @@ BLOCKED_SINCE: dict[str, datetime] = {
     # through one-shot accounts: all of those stay off.
     "6MzSwDcwB4PsHnLzh6gq6TmcwuogbJZH1Qg8o24xuZwK": _at("2026-09-19 18:00"),
     "7PoS8EagdxcYgKM3xz7q6tEBKGVyPUynHFFnjfvBgTr8": _at("2026-09-19 18:00"),
+    # HYPED (19 Sep 18:03, -63.4% in the fresh $75k book). This one funded the
+    # SUUB group and was left OFF on 19 Sep because ~930 SOL and 1,000
+    # transactions in half an hour looked like a service. Its record says
+    # otherwise: 186 coins, 36 of them rugged (19%), against a base rate of
+    # 3-5%, and 11 trades of this book, 4 of them rugs, -$235.
+    "8zxkmeqHrpmqyzCSGxLNWZ4W7ZgjwHuo4HV11ALceNAg": _at("2026-09-20 08:30"),
 }
 
 ALWAYS_BLOCKED: frozenset[str] = frozenset(BLOCKED_SINCE)
