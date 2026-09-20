@@ -10,7 +10,22 @@ from app.labs.graduation import config
 from app.labs.graduation.api import fresh_book
 from app.labs.graduation.tournament import ARMS, CONTROLS, accepts
 
-B75, B4, BQ, B10 = config.FRESH_BOOKS
+(BQ,) = config.FRESH_BOOKS          # the one book the page shows
+
+#: The books the panel dropped on 2026-09-20. Their arms still run, so the
+#: walk that fed them is still worth testing.
+B75 = config.FreshBookSpec("BASE_75k_5m", BQ.start, Decimal(500), Decimal(100))
+B4 = config.FreshBookSpec("BASE_75k_4m", BQ.start, Decimal(500), Decimal(100))
+B10 = config.FreshBookSpec("BASE_10k_2m", BQ.start, Decimal(500), Decimal(50))
+
+
+def test_the_page_shows_the_quiet_book_alone() -> None:
+    assert (BQ.book, BQ.capital_usd, BQ.ticket_usd) == (
+        "BASE_75k_quiet_5m", Decimal(500), Decimal(100))
+    arm = next(a for a in ARMS if a.name == BQ.book)
+    assert arm.quiet and arm.hold == 5 and not arm.is_control
+    # The control it is judged against still trades, panel or no panel.
+    assert [c.name for c in CONTROLS] == ["BASE_75k_5m"]
 
 
 def trade(spec: config.FreshBookSpec, minute: int, ret: float, hold: int = 5) -> tuple:
