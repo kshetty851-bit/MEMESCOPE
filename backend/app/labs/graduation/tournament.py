@@ -366,6 +366,8 @@ ENTRY_RULES: dict[str, str] = {
     # No live arm since 2026-09-20: BASE_10k_2m was retired when its $500 ran
     # out, and BASE_75k_4m shared `floor75` with the quiet arm.
     "floor10k": "every graduation with a pool at or above $10,000, no selection",
+    "floor25": "every graduation with a pool at or above $25,000 whose liquidity "
+               "is locked, no selection",
     "floor75": "every graduation with a pool at or above $75,000, no selection — "
                "the baseline's own rule",
     "sym_night": "symbol used before AND the pool opened 18:00-06:00 UTC",
@@ -427,6 +429,13 @@ def accepts(arm: Arm, *, mint: str, open_at: datetime, liquidity: Decimal | None
         # band selection. Same floor, same universe — so the only difference
         # between this and a grid arm is the band, which is the thing on trial.
         return liquidity is not None and liquidity >= LIQ_BANDS[0][1]
+    if e == "floor25":
+        # Karthik's $25k sweep (2026-09-20). Between $25k and $75k the coins
+        # are no more dangerous than the deep ones — over the two days after
+        # the entry fix, 441 such trades rugged 2.9% against 3.0% for $75k+,
+        # and lost less on a short hold (-0.42% against -1.82% at two minutes).
+        # Four holds, one floor, so the only thing that differs is the clock.
+        return liquidity is not None and liquidity >= 25_000
     if e == "floor75":
         # Karthik's 4-minute twin (2026-09-20). The baseline's rule exactly, so
         # the pair differs in ONE thing, the clock. A separate entry key because
@@ -653,6 +662,20 @@ ARMS: tuple[Arm, ...] = (
              "bought on sight, out at 4m"),
     Arm("E75T_4m", "fast75_trust", 4,
         note="as E75_4m, only when the operator's earlier coins (2+) never rugged"),
+    # Karthik, 2026-09-20: one floor at $25k, liquidity locked, four clocks.
+    # A holder cap was asked for and left out on the evidence: of 200 coins
+    # over $25k read at the buy, "no wallet over 5%" admits 2 (the launch
+    # wallet holds a median 79.5% and the pool wallet 15.1% on every pump.fun
+    # graduation), and capping everyone else at 5% keeps 185 of 200 and leaves
+    # the rug rate where it was. See `memescope-graduation-rug-anatomy`.
+    Arm("BASE_25k_2m", "floor25", 2, locked=True,
+        note="every graduation over $25k with locked liquidity, out at 2m"),
+    Arm("BASE_25k_3m", "floor25", 3, locked=True,
+        note="every graduation over $25k with locked liquidity, out at 3m"),
+    Arm("BASE_25k_4m", "floor25", 4, locked=True,
+        note="every graduation over $25k with locked liquidity, out at 4m"),
+    Arm("BASE_25k_5m", "floor25", 5, locked=True,
+        note="every graduation over $25k with locked liquidity, out at 5m"),
     # Karthik, 2026-09-20. PRE-REGISTERED: the baseline's rule, refusing any
     # coin whose pool has already had `QUIET_MAX_POOL_TXS` transactions when
     # the book buys (see that constant for the measurement it was frozen on).
@@ -690,12 +713,13 @@ CONTROLS: tuple[Arm, ...] = tuple(a for a in ARMS if a.is_control)
 #: returned no edge. The count is pinned rather than free because an arm that
 #: appears mid-tournament changes what every other number means — so changing
 #: it must be a deliberate edit with a date, not a side effect.
-assert len(ARMS) == 15, (
+assert len(ARMS) == 19, (
     "three B3 arms (3m FROM ENTRY retired 2026-09-16 at -$58.90), B3 bought "
     "early (added 2026-09-16), the two rug arms (added 2026-09-16), the two "
     "shorter graduation clocks g2 and g3 (added 2026-09-17), the fast pair "
-    "E75/E75T (added 2026-09-19), the quiet-pool arm BASE_75k_quiet_5m (added "
-    "2026-09-20), the BASELINE, the $500k+flow candidate, and the two "
+    "E75/E75T (added 2026-09-19), the quiet-pool arm BASE_75k_quiet_5m and the "
+    "four $25k clocks (all added 2026-09-20), the BASELINE, the $500k+flow "
+    "candidate, and the two "
     "pre-registered A/B arms — which run but are flagged off the tournament "
     f"board — not {len(ARMS)}. Karthik retired BASE_10k_2m (out of money after "
     "277 trades) and BASE_75k_4m (five trades, four hours old) on 2026-09-20: "
@@ -722,10 +746,10 @@ assert all(a.tp is None and a.trail is None for a in ARMS), (
 assert all(a.stop is None or a.stop == Decimal("0.10") for a in ARMS), (
     "one stop level, so the twins differ in ONE thing. Sweeping levels here "
     "would be fitting a parameter on the same data that suggested it")
-assert len([a for a in ARMS if not a.is_control]) == 14, (
+assert len([a for a in ARMS if not a.is_control]) == 18, (
     "`config.required_pf` is calibrated on the maximum of FORTY-TWO noise "
-    "draws. Fourteen arms are now judged against it, so the bar is if anything "
-    "CONSERVATIVE — the luckiest of fourteen reaches less than the luckiest "
+    "draws. Eighteen arms are now judged against it, so the bar is if anything "
+    "CONSERVATIVE — the luckiest of eighteen reaches less than the luckiest "
     "of forty-two. Left as it is deliberately: a bar that is too hard costs a "
     "real finding some time, where one that is too easy costs a false one nothing")
 assert all(a.clock in {"entry", "graduation"} for a in ARMS), "a clock is one of two"

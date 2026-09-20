@@ -44,3 +44,21 @@ def test_it_starts_at_500_and_ignores_everything_before_the_start() -> None:
 def test_a_sixth_trade_at_once_finds_no_money_and_is_skipped() -> None:
     book = fresh_book([trade(B75, 0, 0.01, hold=30) for _ in range(6)], None, B75)
     assert (book.trades, book.skipped) == (5, 1)
+
+def test_the_25k_sweep_is_one_floor_and_four_clocks() -> None:
+    """Karthik, 2026-09-20: $25k, locked liquidity, sold at 2, 3, 4 and 5
+    minutes. One floor, four holds, so the only thing that differs is the
+    clock. No holder cap: of 200 coins read at the buy, "no wallet over 5%"
+    admitted two, because every pump.fun graduation has a launch wallet near
+    79% and a pool wallet near 15%."""
+    sweep = sorted((a for a in ARMS if a.name.startswith("BASE_25k")), key=lambda a: a.hold)
+    assert [a.name for a in sweep] == [
+        "BASE_25k_2m", "BASE_25k_3m", "BASE_25k_4m", "BASE_25k_5m"]
+    assert [a.hold for a in sweep] == [2, 3, 4, 5]
+    assert all(a.locked and a.entry == "floor25" and not a.is_control for a in sweep)
+    assert all((a.tp, a.trail, a.stop, a.drain, a.clock) == (None, None, None, None, "entry")
+               for a in sweep)
+    kw = {"mint": "m", "open_at": BQ.start, "fdv": None, "sells": None, "reuse": None}
+    assert accepts(sweep[0], liquidity=Decimal(25_000), **kw)
+    assert not accepts(sweep[0], liquidity=Decimal(24_999), **kw)
+    assert not accepts(sweep[0], liquidity=None, **kw)
