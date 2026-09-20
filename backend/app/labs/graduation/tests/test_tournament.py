@@ -59,10 +59,12 @@ def test_the_tournament_is_a_hold_sweep_with_a_baseline_on_every_hold() -> None:
     One baseline per hold, so no hold is judged without an unselected twin on
     its own clock. Nothing on this board decides by hashing a mint.
     """
-    assert len(ARMS) == 17
-    # Karthik's $10k book (2026-09-19): the baseline's rule on a $10k floor,
-    # out at two minutes. Not a control, so the baseline below is unchanged.
-    assert any(a.name == "BASE_10k_2m" and not a.is_control for a in ARMS)
+    assert len(ARMS) == 15
+    # Karthik's quiet-pool arm (2026-09-20): the baseline's rule, refusing a
+    # pool already past `QUIET_MAX_POOL_TXS` transactions. Not a control, so
+    # the baseline below is unchanged and it has something to be judged against.
+    assert any(a.name == "BASE_75k_quiet_5m" and a.quiet and not a.is_control
+               for a in ARMS)
     # The fast pair (2026-09-19): E75T is E75 plus ONE condition, a clean
     # operator record, so E75 is its matched control on the same clock.
     fast = {a.name: a for a in ARMS if a.entry in ("fast75", "fast75_trust")}
@@ -900,9 +902,7 @@ async def test_a_token_that_never_graduated_is_not_bought(monkeypatch) -> None:
     # candidate graduated 40s ago so all three still have time — and the
     # all-graduations A/B control. B5 needs $500k; B3E and the night A/B do not
     # buy from this query.
-    # BASE_75k_4m takes it too. BASE_10k_2m does not: its lock is proven by a
-    # pool read, and this tick reads no pool.
-    for pair, bought in ((OTHER_POOL, 0), (REAL_POOL, 10)):
+    for pair, bought in ((OTHER_POOL, 0), (REAL_POOL, 9)):
         session = _Answers([], [], [])
         session.statements = []
         t = Tournament(session, now=NIGHT)
@@ -1102,17 +1102,21 @@ async def test_the_quiet_arm_buys_only_a_pool_that_is_still_quiet(
         assert len(reads) == 1               # one read per coin, not per arm
 
 
-async def test_the_10k_book_buys_only_a_pool_whose_liquidity_is_locked(
-    monkeypatch,
-) -> None:
+async def test_an_arm_that_asks_for_locked_liquidity_gets_it(monkeypatch) -> None:
     """LP supply zero on the buy's own read is locked; outstanding LP or an
-    unread LP mint is not. The lock binds BASE_10k_2m alone."""
+    unread LP mint is not. No arm has asked since BASE_10k_2m was retired on
+    2026-09-20, so the rule is driven here by an arm of this test's own."""
+    from app.labs.graduation import tournament
+    from app.labs.graduation.tournament import ARMS, Arm
+
+    mine = Arm("TEST_locked_2m", "all", 2, locked=True)
+    monkeypatch.setattr(tournament, "ARMS", (*ARMS, mine))
     for lp_supply, locked in ((0, True), (5_000, False), (None, False)):
         pool = _pool("0.00050", "500")
         pool.lp_supply = lp_supply
         _, added, _, _ = await _buy(monkeypatch, feed_price="0.00050", pool=pool)
         books = {p.book for p in added}
-        assert ("BASE_10k_2m" in books) is locked, lp_supply
+        assert ("TEST_locked_2m" in books) is locked, lp_supply
         assert "F01_all_2m" in books
 
 
@@ -1124,7 +1128,7 @@ async def test_a_buy_fills_at_the_pools_own_price_not_the_feeds_first_report(
     the report, the book booked +1,044%; on-chain the trade made +4%."""
     bought, added, mirrored, reads = await _buy(
         monkeypatch, feed_price="0.000004773", pool=_pool("0.0000541", "980"))
-    assert bought == 11   # every arm this coin qualifies for, both new books included
+    assert bought == 9   # every arm this coin qualifies for
     assert reads == [(REAL_MINT, REAL_POOL)], "one read prices every arm"
     for p in added:
         assert abs(p.open_quote / Decimal("0.0000541") - 1) < Decimal("0.001")
@@ -1151,7 +1155,7 @@ async def test_a_pool_price_a_scale_error_away_is_not_bought(monkeypatch) -> Non
     assert (await _buy(monkeypatch, feed_price="0.00008",
                        pool=_pool("0.00000008", "980")))[0] == 0
     assert (await _buy(monkeypatch, feed_price="0.00008",
-                       pool=_pool("0.00088", "980")))[0] == 11
+                       pool=_pool("0.00088", "980")))[0] == 9
 
 
 async def test_a_pool_not_quoted_in_sol_is_not_bought(monkeypatch) -> None:

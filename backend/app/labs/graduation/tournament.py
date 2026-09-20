@@ -363,6 +363,8 @@ ENTRY_RULES: dict[str, str] = {
     "newsym": "the symbol had never been seen before (the rug side of the split)",
     "night": "the pool opened between 18:00 and 06:00 UTC",
     "day": "the pool opened between 06:00 and 18:00 UTC",
+    # No live arm since 2026-09-20: BASE_10k_2m was retired when its $500 ran
+    # out, and BASE_75k_4m shared `floor75` with the quiet arm.
     "floor10k": "every graduation with a pool at or above $10,000, no selection",
     "floor75": "every graduation with a pool at or above $75,000, no selection — "
                "the baseline's own rule",
@@ -651,17 +653,6 @@ ARMS: tuple[Arm, ...] = (
              "bought on sight, out at 4m"),
     Arm("E75T_4m", "fast75_trust", 4,
         note="as E75_4m, only when the operator's earlier coins (2+) never rugged"),
-    # Karthik, 2026-09-19: every graduation over $10k with its liquidity
-    # locked, out at two minutes, shown as a fresh $500 wallet at $50 a trade
-    # (`config.FRESH_BOOKS`). The lock was added an hour after the arm went
-    # live; its seven trades before then were checked on-chain and all locked.
-    # Karthik, 2026-09-20: the baseline on a 4-minute clock, to settle 4 vs 5
-    # minutes forward. Two of the fresh book's four rugs (ECTF, HYPED) were
-    # still up at four minutes and gone by five; over the 171 trades since the
-    # 18 Sep entry fix five minutes made more (+$301 against +$51), on one coin
-    # that ran 7x. Picking either from that is fitting; running both is not.
-    Arm("BASE_75k_4m", "floor75", 4,
-        note="every graduation over $75k, no selection, out at 4m"),
     # Karthik, 2026-09-20. PRE-REGISTERED: the baseline's rule, refusing any
     # coin whose pool has already had `QUIET_MAX_POOL_TXS` transactions when
     # the book buys (see that constant for the measurement it was frozen on).
@@ -672,9 +663,6 @@ ARMS: tuple[Arm, ...] = (
     Arm("BASE_75k_quiet_5m", "floor75", 5, quiet=True,
         note="every graduation over $75k whose pool is still quiet (under "
              "100 trades) when it is bought, out at 5m"),
-    Arm("BASE_10k_2m", "floor10k", 2, locked=True,
-        note="every graduation over $10k with its liquidity locked (LP burned), "
-             "out at 2m"),
     # NOT part of the tournament, and kept when everything else went. These
     # two are a PRE-REGISTERED A/B on the rug signals — a never-seen symbol
     # rugs 18% against 3%, a daytime-UTC open 15% against 5% — opened
@@ -702,15 +690,18 @@ CONTROLS: tuple[Arm, ...] = tuple(a for a in ARMS if a.is_control)
 #: returned no edge. The count is pinned rather than free because an arm that
 #: appears mid-tournament changes what every other number means — so changing
 #: it must be a deliberate edit with a date, not a side effect.
-assert len(ARMS) == 17, (
+assert len(ARMS) == 15, (
     "three B3 arms (3m FROM ENTRY retired 2026-09-16 at -$58.90), B3 bought "
     "early (added 2026-09-16), the two rug arms (added 2026-09-16), the two "
     "shorter graduation clocks g2 and g3 (added 2026-09-17), the fast pair "
-    "E75/E75T (added 2026-09-19), the $10k book BASE_10k_2m (added 2026-09-19), "
-    "the 4-minute twin BASE_75k_4m and the quiet-pool arm BASE_75k_quiet_5m "
-    "(both added 2026-09-20), the BASELINE, the $500k+flow candidate, and the "
-    "two pre-registered A/B arms — which run but are flagged off the "
-    f"tournament board — not {len(ARMS)}")
+    "E75/E75T (added 2026-09-19), the quiet-pool arm BASE_75k_quiet_5m (added "
+    "2026-09-20), the BASELINE, the $500k+flow candidate, and the two "
+    "pre-registered A/B arms — which run but are flagged off the tournament "
+    f"board — not {len(ARMS)}. Karthik retired BASE_10k_2m (out of money after "
+    "277 trades) and BASE_75k_4m (five trades, four hours old) on 2026-09-20: "
+    "their rules stay in ENTRY_RULES as every retired arm's does, their trades "
+    "stay in the table, and `_manage` settles what they still held as "
+    "`arm_retired`")
 assert len([a for a in ARMS if a.ab_experiment]) == 2, (
     "the rug-signal A/B is exactly F01_all_2m and F14_symnight_2m; flagging a "
     "tournament arm as an experiment would hide it from its own comparison")
@@ -731,10 +722,10 @@ assert all(a.tp is None and a.trail is None for a in ARMS), (
 assert all(a.stop is None or a.stop == Decimal("0.10") for a in ARMS), (
     "one stop level, so the twins differ in ONE thing. Sweeping levels here "
     "would be fitting a parameter on the same data that suggested it")
-assert len([a for a in ARMS if not a.is_control]) == 16, (
+assert len([a for a in ARMS if not a.is_control]) == 14, (
     "`config.required_pf` is calibrated on the maximum of FORTY-TWO noise "
-    "draws. Sixteen arms are now judged against it, so the bar is if anything "
-    "CONSERVATIVE — the luckiest of sixteen reaches less than the luckiest "
+    "draws. Fourteen arms are now judged against it, so the bar is if anything "
+    "CONSERVATIVE — the luckiest of fourteen reaches less than the luckiest "
     "of forty-two. Left as it is deliberately: a bar that is too hard costs a "
     "real finding some time, where one that is too easy costs a false one nothing")
 assert all(a.clock in {"entry", "graduation"} for a in ARMS), "a clock is one of two"
