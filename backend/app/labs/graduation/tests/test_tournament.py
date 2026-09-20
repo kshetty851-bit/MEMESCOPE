@@ -59,7 +59,7 @@ def test_the_tournament_is_a_hold_sweep_with_a_baseline_on_every_hold() -> None:
     One baseline per hold, so no hold is judged without an unselected twin on
     its own clock. Nothing on this board decides by hashing a mint.
     """
-    assert len(ARMS) == 16
+    assert len(ARMS) == 17
     # Karthik's $10k book (2026-09-19): the baseline's rule on a $10k floor,
     # out at two minutes. Not a control, so the baseline below is unchanged.
     assert any(a.name == "BASE_10k_2m" and not a.is_control for a in ARMS)
@@ -94,11 +94,12 @@ def test_arms_differ_only_in_entry_and_exit() -> None:
     # it sells. The rug-signal A/B runs on its own pre-registered clock and
     # competes with nothing here, so ranking it beside the arms invited
     # "delete the losing ones" — which would have ended it three weeks early.
-    # `locked` is part of the entry: whether a pool's liquidity is locked is
-    # read on-chain at the buy, where `accepts` cannot see it.
+    # `locked` and `quiet` are part of the entry: whether a pool's liquidity is
+    # locked, and how many transactions it has already had, are read on-chain
+    # at the buy, where `accepts` cannot see them.
     assert set(Arm.__dataclass_fields__) == {
         "name", "entry", "hold", "tp", "trail", "stop", "drain", "clock",
-        "note", "ab_experiment", "locked"}
+        "note", "ab_experiment", "locked", "quiet"}
     assert all(a.ab_experiment is False for a in ARMS if a.entry.startswith("liq_")), (
         "a tournament arm flagged as an experiment would vanish from its own "
         "comparison")
@@ -1034,7 +1035,7 @@ def _pool(price: str, sol: str, *, quote_mint: str = config.WSOL_MINT):
 
 
 async def _buy(monkeypatch, *, feed_price: str, pool, liquidity: str = "250000",
-               full: bool = False):
+               full: bool = False, tx_reader=None):
     """One pool-open candidate through `_fill`, with the pool read as `pool`.
     The tick runs 12s after the feed first listed the pool."""
     from types import SimpleNamespace
@@ -1053,8 +1054,10 @@ async def _buy(monkeypatch, *, feed_price: str, pool, liquidity: str = "250000",
         return pool
 
     monkeypatch.setattr(tournament.live_decisions, "record", record)
+    tournament._POOL_TXS.clear()
     session = _Answers([], [], [])
-    t = Tournament(session, now=NIGHT + timedelta(seconds=12), pool_reader=reader)
+    t = Tournament(session, now=NIGHT + timedelta(seconds=12), pool_reader=reader,
+                   tx_reader=tx_reader)
 
     async def rows():
         return [SimpleNamespace(
@@ -1073,6 +1076,30 @@ async def _buy(monkeypatch, *, feed_price: str, pool, liquidity: str = "250000",
 
         monkeypatch.setattr(t, "_open_counts", counts)
     return await t._fill(), session.added, mirrored, reads
+
+
+async def test_the_quiet_arm_buys_only_a_pool_that_is_still_quiet(
+    monkeypatch,
+) -> None:
+    """Under the pre-registered line it buys, at or over it the arm sits out,
+    and an unread count is not proven quiet. The other arms are untouched."""
+    from app.labs.graduation.tournament import Tournament
+
+    cut = config.QUIET_MAX_POOL_TXS
+    for count, buys in ((0, True), (cut - 1, True), (cut, False), (None, False)):
+        reads = []
+
+        async def reader(pool, at, count=count):
+            reads.append(pool)
+            return count
+
+        monkeypatch.setattr(Tournament, "_tx_reader", None, raising=False)
+        _, added, _, _ = await _buy(monkeypatch, feed_price="0.00050",
+                                    pool=_pool("0.00050", "500"), tx_reader=reader)
+        books = {p.book for p in added}
+        assert ("BASE_75k_quiet_5m" in books) is buys, count
+        assert "BASE_75k_5m" in books        # the baseline takes it either way
+        assert len(reads) == 1               # one read per coin, not per arm
 
 
 async def test_the_10k_book_buys_only_a_pool_whose_liquidity_is_locked(

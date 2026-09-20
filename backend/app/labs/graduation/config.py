@@ -365,6 +365,25 @@ REPEAT_MIN_RUG_PCT = _int("LAB_GRADUATION_REPEAT_MIN_RUG_PCT", 10)
 #: How long that list is held before it is read again. The labels behind it
 #: arrive minutes apart; the tick runs every three seconds.
 REPEAT_TTL_S = _int("LAB_GRADUATION_REPEAT_TTL_S", 300)
+#: PRE-REGISTERED, 2026-09-20, and frozen before BASE_75k_quiet_5m took a
+#: trade: a coin whose pool has already had this many transactions when the
+#: book is about to buy is refused by the arms that ask for a quiet pool.
+#:
+#: Measured on 579 of BASE_75k_5m's own trades since 14 Sep, counting each
+#: pool's transactions from its migration to the moment of that buy (on-chain,
+#: nothing the book did not already know): rug rate 2.8% under 40 txs, 3.1%
+#: at 40-70, 0% at 70-100, then 11.1% at 100-150 and 17.1% over 250. The jump
+#: sits at 100, the gradient survives dropping the 16 Sep rug campaign
+#: (2.6/3.7/0.0/11.1/10.3%) and the last three days alone (4.9 -> 18.2%), and
+#: refusing at 100 is the best of the cuts tried on the five non-campaign days
+#: (+$301 at $100 a trade, positive on four of them).
+#:
+#: It is a RISK GRADIENT, not a filter: quiet pools rug too (RICH on 19 Sep had
+#: 25 transactions), and busy ones win (three +30% trades on 17 Sep). That is
+#: why this runs as its own arm against the baseline instead of being added to
+#: a live book.
+QUIET_MAX_POOL_TXS = _int("LAB_GRADUATION_QUIET_MAX_POOL_TXS", 100)
+
 #: A pool-open candidate the fast path never recorded is read at the buy
 #: instead, up to this many a tick. One deep coin in five had no record at all,
 #: and a coin with no record is bought with no money check (EVO, 20 Sep).
@@ -955,6 +974,9 @@ FRESH_BOOKS: tuple[FreshBookSpec, ...] = (
     FreshBookSpec("BASE_75k_5m", datetime(2026, 9, 20, 8, 30, tzinfo=UTC),
                   Decimal(500), Decimal(100)),
     FreshBookSpec("BASE_75k_4m", datetime(2026, 9, 20, 8, 30, tzinfo=UTC),
+                  Decimal(500), Decimal(100)),
+    # The quiet-pool arm, from its own first minute (2026-09-20 15:00 UTC).
+    FreshBookSpec("BASE_75k_quiet_5m", datetime(2026, 9, 20, 15, 0, tzinfo=UTC),
                   Decimal(500), Decimal(100)),
     # Out of money on 20 Sep after 277 trades; kept as its own record.
     FreshBookSpec("BASE_10k_2m", datetime(2026, 9, 19, 13, 45, tzinfo=UTC),

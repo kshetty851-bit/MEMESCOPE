@@ -91,6 +91,12 @@ def graduation_pool(mint: str) -> str | None:
     return derived[0] if derived else None
 
 
+#: Each coin's pool transaction count at the first tick that could buy it.
+#: Bounded: the oldest goes when it is full.
+_POOL_TXS: dict[str, int] = {}
+_POOL_TXS_KEEP = 4096
+
+
 class Mark(NamedTuple):
     """A price for a held token, with the moment it was read and by whom."""
 
@@ -179,6 +185,10 @@ class Arm:
     #: Buy only a pool whose liquidity is locked: its LP supply read zero on
     #: the buy's own pool read (`Held.lp_supply`). Unread is not locked.
     locked: bool = False
+    #: Buy only a pool that is still quiet: fewer than `QUIET_MAX_POOL_TXS`
+    #: transactions since its migration when the book is about to buy. Unread
+    #: is not quiet.
+    quiet: bool = False
 
     @property
     def is_control(self) -> bool:
@@ -355,7 +365,7 @@ ENTRY_RULES: dict[str, str] = {
     "day": "the pool opened between 06:00 and 18:00 UTC",
     "floor10k": "every graduation with a pool at or above $10,000, no selection",
     "floor75": "every graduation with a pool at or above $75,000, no selection — "
-               "the baseline's own rule, on a shorter clock",
+               "the baseline's own rule",
     "sym_night": "symbol used before AND the pool opened 18:00-06:00 UTC",
     "band": "the pool held between $95,000 and $222,000 at the open — a band, "
             "not a floor, because tail risk rises again above it",
@@ -652,6 +662,16 @@ ARMS: tuple[Arm, ...] = (
     # that ran 7x. Picking either from that is fitting; running both is not.
     Arm("BASE_75k_4m", "floor75", 4,
         note="every graduation over $75k, no selection, out at 4m"),
+    # Karthik, 2026-09-20. PRE-REGISTERED: the baseline's rule, refusing any
+    # coin whose pool has already had `QUIET_MAX_POOL_TXS` transactions when
+    # the book buys (see that constant for the measurement it was frozen on).
+    # Judged against BASE_75k_5m, its own control, on trades from 21 Sep and no
+    # earlier than 150 closed trades or seven days: it has to beat the baseline
+    # over the same window AND without its single best day. Activity is a risk
+    # GRADIENT, so a win here is "fewer of the worst", not "no rugs".
+    Arm("BASE_75k_quiet_5m", "floor75", 5, quiet=True,
+        note="every graduation over $75k whose pool is still quiet (under "
+             "100 trades) when it is bought, out at 5m"),
     Arm("BASE_10k_2m", "floor10k", 2, locked=True,
         note="every graduation over $10k with its liquidity locked (LP burned), "
              "out at 2m"),
@@ -682,14 +702,15 @@ CONTROLS: tuple[Arm, ...] = tuple(a for a in ARMS if a.is_control)
 #: returned no edge. The count is pinned rather than free because an arm that
 #: appears mid-tournament changes what every other number means — so changing
 #: it must be a deliberate edit with a date, not a side effect.
-assert len(ARMS) == 16, (
+assert len(ARMS) == 17, (
     "three B3 arms (3m FROM ENTRY retired 2026-09-16 at -$58.90), B3 bought "
     "early (added 2026-09-16), the two rug arms (added 2026-09-16), the two "
     "shorter graduation clocks g2 and g3 (added 2026-09-17), the fast pair "
     "E75/E75T (added 2026-09-19), the $10k book BASE_10k_2m (added 2026-09-19), "
-    "the 4-minute twin BASE_75k_4m (added 2026-09-20), the BASELINE, the "
-    "$500k+flow candidate, and the two pre-registered A/B arms — which run but "
-    f"are flagged off the tournament board — not {len(ARMS)}")
+    "the 4-minute twin BASE_75k_4m and the quiet-pool arm BASE_75k_quiet_5m "
+    "(both added 2026-09-20), the BASELINE, the $500k+flow candidate, and the "
+    "two pre-registered A/B arms — which run but are flagged off the "
+    f"tournament board — not {len(ARMS)}")
 assert len([a for a in ARMS if a.ab_experiment]) == 2, (
     "the rug-signal A/B is exactly F01_all_2m and F14_symnight_2m; flagging a "
     "tournament arm as an experiment would hide it from its own comparison")
@@ -710,10 +731,10 @@ assert all(a.tp is None and a.trail is None for a in ARMS), (
 assert all(a.stop is None or a.stop == Decimal("0.10") for a in ARMS), (
     "one stop level, so the twins differ in ONE thing. Sweeping levels here "
     "would be fitting a parameter on the same data that suggested it")
-assert len([a for a in ARMS if not a.is_control]) == 15, (
+assert len([a for a in ARMS if not a.is_control]) == 16, (
     "`config.required_pf` is calibrated on the maximum of FORTY-TWO noise "
-    "draws. Fifteen arms are now judged against it, so the bar is if anything "
-    "CONSERVATIVE — the luckiest of fifteen reaches less than the luckiest "
+    "draws. Sixteen arms are now judged against it, so the bar is if anything "
+    "CONSERVATIVE — the luckiest of sixteen reaches less than the luckiest "
     "of forty-two. Left as it is deliberately: a bar that is too hard costs a "
     "real finding some time, where one that is too easy costs a false one nothing")
 assert all(a.clock in {"entry", "graduation"} for a in ARMS), "a clock is one of two"
@@ -812,6 +833,8 @@ def _drained(mark: Mark | None, position: GradPaperPosition,
 
 #: Reads a pool's own vaults: (mint, pool) -> the pool now, or None.
 PoolReader = Callable[[str, str], Awaitable[Held | None]]
+#: Counts a pool's transactions before a moment: (pool, at) -> count or None.
+TxReader = Callable[[str, datetime], Awaitable[int | None]]
 #: Reads a coin's operator: (mint, pool) -> its wallets and their funders,
 #: or None when the holders could not be read.
 OperatorReader = Callable[[str, str], Awaitable[frozenset[str] | None]]
@@ -842,6 +865,7 @@ class Tournament:
     def __init__(self, session: AsyncSession, *, now: datetime | None = None,
                  pool_reader: PoolReader | None = None,
                  operator_reader: OperatorReader | None = None,
+                 tx_reader: TxReader | None = None,
                  money_checks: bool = False) -> None:
         self._session = session
         self._now = now or datetime.now(UTC)
@@ -853,6 +877,9 @@ class Tournament:
         # The fast arms need both readers; without them they sit out, as the
         # replays and old tests do.
         self._operator_reader = operator_reader
+        # Counts a pool's transactions at the buy, for the arms that ask for a
+        # quiet pool. Without it they sit out rather than buy unmeasured.
+        self._tx_reader = tx_reader
         # The real wallet's money checks (`moneyblock`): a coin the wallet would
         # refuse, no book buys. The scheduler turns them on; replays and the
         # tests that script every query do not.
@@ -1389,6 +1416,25 @@ class Tournament:
             .order_by(GradMigration.ts)
             .limit(config.FAST_MAX_PER_TICK))).all()
 
+    async def _pool_busy(self, mint: str, pool: str) -> int | None:
+        """How many transactions this pool had when the book first looked at it.
+
+        Read ONCE per coin and kept: the count only grows, and the number that
+        decides the buy is the one at the first chance to take it. A coin the
+        node would not answer for stays unread, and an arm that asks for a
+        quiet pool does not buy what it could not measure.
+        """
+        if mint in _POOL_TXS:
+            return _POOL_TXS[mint]
+        if self._tx_reader is None:
+            return None
+        got = await self._tx_reader(pool, self._now)
+        if got is not None:
+            if len(_POOL_TXS) >= _POOL_TXS_KEEP:
+                del _POOL_TXS[next(iter(_POOL_TXS))]
+            _POOL_TXS[mint] = got
+        return got
+
     async def _record_late(self, rows: Sequence[Any]) -> int:
         """Read and record the operator of a deep candidate the fast path never
         recorded, so the money checks have something to check.
@@ -1517,6 +1563,7 @@ class Tournament:
         unpriced = 0
         money_blocked = 0
         unlocked = 0
+        too_busy = 0
         mirror: list[live_decisions.Mirrored] = []
         for row in rows:
             if row.price_native is None or row.price_native <= 0:
@@ -1561,6 +1608,13 @@ class Tournament:
                     unpriced += 1
                     continue
                 price, depth = priced
+            if any(arm.quiet for arm in wanted):
+                busy = await self._pool_busy(row.mint, row.pair_address)
+                if busy is None or busy >= config.QUIET_MAX_POOL_TXS:
+                    wanted = [arm for arm in wanted if not arm.quiet]
+                    too_busy += 1
+                    if not wanted:
+                        continue
             if pool is None or pool.lp_supply != 0:
                 # Liquidity not proven locked on this read: the arms that ask
                 # for a lock pass; the rest buy as they always have.
@@ -1620,10 +1674,10 @@ class Tournament:
                         price_native=price))
         await live_decisions.record(self._session, mirror)
         opened += opened_curve
-        if opened or refused or foreign or unpriced or money_blocked or unlocked:
+        if opened or refused or foreign or unpriced or money_blocked or unlocked or too_busy:
             logger.info("graduation_tournament_filled", opened=opened,
                         refused_unfillable=refused, not_graduation=foreign,
                         pool_unpriced=unpriced, money_blocked=money_blocked,
-                        lp_unlocked=unlocked, recorded_late=recorded,
-                        candidates=len(rows))
+                        lp_unlocked=unlocked, pool_too_busy=too_busy,
+                        recorded_late=recorded, candidates=len(rows))
         return opened

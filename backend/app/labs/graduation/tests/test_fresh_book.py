@@ -10,7 +10,7 @@ from app.labs.graduation import config
 from app.labs.graduation.api import fresh_book
 from app.labs.graduation.tournament import ARMS, CONTROLS, accepts
 
-B75, B4, B10 = config.FRESH_BOOKS
+B75, B4, BQ, B10 = config.FRESH_BOOKS
 
 
 def trade(spec: config.FreshBookSpec, minute: int, ret: float, hold: int = 5) -> tuple:
