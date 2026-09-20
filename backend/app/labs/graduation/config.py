@@ -970,17 +970,14 @@ class FreshBookSpec:
 #: first $500 ended at $341 on four rugs, two of which the new rules refuse.
 #: Its 5-minute and 4-minute books hold the same coins and differ in one thing,
 #: the clock, which is what they are there to settle.
+#: Karthik, 2026-09-20 17:40 Dubai: one book on the page, the quiet-pool arm.
+#: The other three panels are gone, NOT their arms — BASE_75k_5m keeps trading
+#: because it is this arm's control and the thing it has to beat, and
+#: BASE_75k_4m and BASE_10k_2m keep their rows on the board below. Their trades
+#: are all still there; putting a panel back is one line here.
 FRESH_BOOKS: tuple[FreshBookSpec, ...] = (
-    FreshBookSpec("BASE_75k_5m", datetime(2026, 9, 20, 8, 30, tzinfo=UTC),
-                  Decimal(500), Decimal(100)),
-    FreshBookSpec("BASE_75k_4m", datetime(2026, 9, 20, 8, 30, tzinfo=UTC),
-                  Decimal(500), Decimal(100)),
-    # The quiet-pool arm, from its own first minute (2026-09-20 15:00 UTC).
     FreshBookSpec("BASE_75k_quiet_5m", datetime(2026, 9, 20, 15, 0, tzinfo=UTC),
                   Decimal(500), Decimal(100)),
-    # Out of money on 20 Sep after 277 trades; kept as its own record.
-    FreshBookSpec("BASE_10k_2m", datetime(2026, 9, 19, 13, 45, tzinfo=UTC),
-                  Decimal(500), Decimal(50)),
 )
 
 # --- the kill gate, stated before this run produced a single trade ------------
