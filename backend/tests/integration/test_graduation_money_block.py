@@ -1,5 +1,6 @@
 """The lab refuses what the real wallet's money checks refuse: in the fast
-arms' buy, and in a restatement of trades already booked."""
+arms' buy, in a restatement of trades already booked, and - from 2026-09-20 -
+on an operator's own record of earlier rugs."""
 
 from __future__ import annotations
 
@@ -11,7 +12,7 @@ import pytest
 from sqlalchemy import select
 
 from app.core import rug_money
-from app.labs.graduation import moneyblock
+from app.labs.graduation import config, moneyblock
 from app.labs.graduation.models import GradOperator, GradPaperPosition
 from app.labs.graduation.tournament import Tournament
 from tests.integration.test_graduation_fast_arms import (
@@ -100,3 +101,72 @@ async def test_booked_trades_are_restated_as_the_checks_stood_when_opened(db_ses
     assert sorted(marked) == ["NEXT", "NEXT"]    # EARLY: the block was not live yet
     again = await moneyblock.restate(db_session, since=min(since, before_live), apply=True)
     assert again["marked"] == {}
+
+
+def operator(mint: str, ids: set[str], rugged: bool | None, at) -> GradOperator:
+    return GradOperator(mint=mint, pool="p", entry_at=at, price_native=Decimal("0.0001"),
+                        ids=sorted(ids), label_due_at=at + timedelta(minutes=5),
+                        rugged=rugged, labelled_at=None if rugged is None else at,
+                        source="tape")
+
+
+async def test_an_address_with_a_record_of_rugs_is_refused(db_session) -> None:
+    """Three of the four rugs that cost the fresh $75k book came from wallets
+    nobody had seen. This refuses the ones with a record, on the record."""
+    moneyblock._REPEAT = None
+    old = NOW - timedelta(days=1)
+    rows = []
+    for i in range(config.REPEAT_MIN_COINS):
+        share = i * 100 < config.REPEAT_MIN_COINS * config.REPEAT_MIN_RUG_PCT
+        rows.append(operator(f"dirty{i}", {"Dirty"}, share, old))
+        rows.append(operator(f"clean{i}", {"Clean"}, False, old))
+    # A rug nobody has labelled yet is not evidence.
+    rows.append(operator("late", {"Slow"}, None, old))
+    rows += [operator(f"slow{i}", {"Slow"}, None, old) for i in range(config.REPEAT_MIN_COINS)]
+    rows += [operator("coinD", {"Dirty", "Friend"}, None, NOW),
+             operator("coinC", {"Clean"}, None, NOW),
+             operator("coinS", {"Slow"}, None, NOW)]
+    db_session.add_all(rows)
+    await db_session.flush()
+
+    dirty = await moneyblock.repeat_rug_ids(db_session, NOW)
+    assert "Dirty" in dirty and "Clean" not in dirty and "Slow" not in dirty
+    moneyblock._REPEAT = None
+    got = await moneyblock.refusals(db_session, ["coinD", "coinC", "coinS"], NOW)
+    assert got == {"coinD": moneyblock.REPEAT}
+    # ... and not with hindsight: before those rugs existed, nothing is refused.
+    moneyblock._REPEAT = None
+    assert await moneyblock.repeat_rug_ids(db_session, old - timedelta(days=1)) == frozenset()
+    moneyblock._REPEAT = None
+
+
+async def test_a_deep_coin_the_fast_path_missed_is_read_at_the_buy(db_session) -> None:
+    """EVO (20 Sep) was bought by three books with no record at all, so no
+    check ran on it. One deep coin in five was in that state."""
+    from types import SimpleNamespace
+
+    from app.labs.graduation.tournament import Tournament, graduation_pool
+
+    deep = SimpleNamespace(mint=MINT["A"], liquidity_usd=Decimal(120_000),
+                           graduated_at=NOW - timedelta(seconds=40),
+                           price_native=Decimal("0.0001"))
+    shallow = SimpleNamespace(mint=MINT["B"], liquidity_usd=Decimal(20_000),
+                              graduated_at=NOW, price_native=Decimal("0.0001"))
+
+    async def operator_reader(mint: str, pool: str) -> frozenset[str]:
+        return frozenset({BLOCKED, "Someone"})
+
+    t = Tournament(db_session, now=NOW, operator_reader=operator_reader, money_checks=True)
+    assert await t._record_late([deep, shallow]) == 1
+    await db_session.flush()
+    row = await db_session.get(GradOperator, MINT["A"])
+    assert row is not None and row.source == "entry" and BLOCKED in row.ids
+    assert row.pool == graduation_pool(MINT["A"]) and row.depth_usd == Decimal(120_000)
+    assert await db_session.get(GradOperator, MINT["B"]) is None   # too shallow to record
+    # The point of recording it: the checks can now refuse it.
+    moneyblock._REPEAT = None
+    got = await moneyblock.refusals(db_session, [MINT["A"]], NOW)
+    assert got == {MINT["A"]: moneyblock.KNOWN}
+    moneyblock._REPEAT = None
+    # Read once: a second tick finds it recorded and reads nothing.
+    assert await t._record_late([deep]) == 0

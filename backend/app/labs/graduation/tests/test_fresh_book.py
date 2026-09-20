@@ -10,7 +10,7 @@ from app.labs.graduation import config
 from app.labs.graduation.api import fresh_book
 from app.labs.graduation.tournament import ARMS, CONTROLS, accepts
 
-B75, B10 = config.FRESH_BOOKS
+B75, B4, B10 = config.FRESH_BOOKS
 
 
 def trade(spec: config.FreshBookSpec, minute: int, ret: float, hold: int = 5) -> tuple:
@@ -38,6 +38,19 @@ def test_the_10k_book_is_ten_tickets_of_50() -> None:
         "BASE_10k_2m", Decimal(500), Decimal(50))
     book = fresh_book([trade(B10, 0, 0.01, hold=10) for _ in range(11)], None, B10)
     assert (book.hold_minutes, book.trades, book.skipped) == (2, 10, 1)
+
+
+def test_the_4_minute_twin_is_the_baselines_rule_on_a_shorter_clock() -> None:
+    """One difference, the clock: same floor, same universe, same $500 wallet
+    from the same moment - and not a second control."""
+    base = next(a for a in ARMS if a.name == B75.book)
+    twin = next(a for a in ARMS if a.name == B4.book)
+    assert (twin.name, twin.hold, twin.locked, twin.is_control) == ("BASE_75k_4m", 4, False, False)
+    assert (base.hold, base.is_control) == (5, True)
+    kw = {"mint": "m", "open_at": B4.start, "fdv": None, "sells": None, "reuse": None}
+    for liquidity in (Decimal(74_999), Decimal(75_000), Decimal(250_000)):
+        assert accepts(twin, liquidity=liquidity, **kw) == accepts(base, liquidity=liquidity, **kw)
+    assert (B4.start, B4.capital_usd, B4.ticket_usd) == (B75.start, Decimal(500), Decimal(100))
 
 
 def test_the_10k_arm_buys_every_pool_over_10k_and_is_not_the_baseline() -> None:

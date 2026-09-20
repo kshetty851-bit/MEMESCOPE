@@ -354,6 +354,8 @@ ENTRY_RULES: dict[str, str] = {
     "night": "the pool opened between 18:00 and 06:00 UTC",
     "day": "the pool opened between 06:00 and 18:00 UTC",
     "floor10k": "every graduation with a pool at or above $10,000, no selection",
+    "floor75": "every graduation with a pool at or above $75,000, no selection — "
+               "the baseline's own rule, on a shorter clock",
     "sym_night": "symbol used before AND the pool opened 18:00-06:00 UTC",
     "band": "the pool held between $95,000 and $222,000 at the open — a band, "
             "not a floor, because tail risk rises again above it",
@@ -412,6 +414,12 @@ def accepts(arm: Arm, *, mint: str, open_at: datetime, liquidity: Decimal | None
         # The baseline: every graduation the grid is allowed to touch, with no
         # band selection. Same floor, same universe — so the only difference
         # between this and a grid arm is the band, which is the thing on trial.
+        return liquidity is not None and liquidity >= LIQ_BANDS[0][1]
+    if e == "floor75":
+        # Karthik's 4-minute twin (2026-09-20). The baseline's rule exactly, so
+        # the pair differs in ONE thing, the clock. A separate entry key because
+        # `is_control` names "floor": a second control would move the board's
+        # control band, which is not what a twin is for.
         return liquidity is not None and liquidity >= LIQ_BANDS[0][1]
     if e == "floor10k":
         # Karthik's $10k book (2026-09-19): the baseline's rule on a lower
@@ -637,6 +645,13 @@ ARMS: tuple[Arm, ...] = (
     # locked, out at two minutes, shown as a fresh $500 wallet at $50 a trade
     # (`config.FRESH_BOOKS`). The lock was added an hour after the arm went
     # live; its seven trades before then were checked on-chain and all locked.
+    # Karthik, 2026-09-20: the baseline on a 4-minute clock, to settle 4 vs 5
+    # minutes forward. Two of the fresh book's four rugs (ECTF, HYPED) were
+    # still up at four minutes and gone by five; over the 171 trades since the
+    # 18 Sep entry fix five minutes made more (+$301 against +$51), on one coin
+    # that ran 7x. Picking either from that is fitting; running both is not.
+    Arm("BASE_75k_4m", "floor75", 4,
+        note="every graduation over $75k, no selection, out at 4m"),
     Arm("BASE_10k_2m", "floor10k", 2, locked=True,
         note="every graduation over $10k with its liquidity locked (LP burned), "
              "out at 2m"),
@@ -667,14 +682,14 @@ CONTROLS: tuple[Arm, ...] = tuple(a for a in ARMS if a.is_control)
 #: returned no edge. The count is pinned rather than free because an arm that
 #: appears mid-tournament changes what every other number means — so changing
 #: it must be a deliberate edit with a date, not a side effect.
-assert len(ARMS) == 15, (
+assert len(ARMS) == 16, (
     "three B3 arms (3m FROM ENTRY retired 2026-09-16 at -$58.90), B3 bought "
     "early (added 2026-09-16), the two rug arms (added 2026-09-16), the two "
     "shorter graduation clocks g2 and g3 (added 2026-09-17), the fast pair "
     "E75/E75T (added 2026-09-19), the $10k book BASE_10k_2m (added 2026-09-19), "
-    "the BASELINE, the $500k+flow candidate, and the two pre-registered A/B "
-    "arms — which run but are flagged off the tournament board — not "
-    f"{len(ARMS)}")
+    "the 4-minute twin BASE_75k_4m (added 2026-09-20), the BASELINE, the "
+    "$500k+flow candidate, and the two pre-registered A/B arms — which run but "
+    f"are flagged off the tournament board — not {len(ARMS)}")
 assert len([a for a in ARMS if a.ab_experiment]) == 2, (
     "the rug-signal A/B is exactly F01_all_2m and F14_symnight_2m; flagging a "
     "tournament arm as an experiment would hide it from its own comparison")
@@ -695,10 +710,10 @@ assert all(a.tp is None and a.trail is None for a in ARMS), (
 assert all(a.stop is None or a.stop == Decimal("0.10") for a in ARMS), (
     "one stop level, so the twins differ in ONE thing. Sweeping levels here "
     "would be fitting a parameter on the same data that suggested it")
-assert len([a for a in ARMS if not a.is_control]) == 14, (
+assert len([a for a in ARMS if not a.is_control]) == 15, (
     "`config.required_pf` is calibrated on the maximum of FORTY-TWO noise "
-    "draws. Fourteen arms are now judged against it, so the bar is if anything "
-    "CONSERVATIVE — the luckiest of fourteen reaches less than the luckiest "
+    "draws. Fifteen arms are now judged against it, so the bar is if anything "
+    "CONSERVATIVE — the luckiest of fifteen reaches less than the luckiest "
     "of forty-two. Left as it is deliberately: a bar that is too hard costs a "
     "real finding some time, where one that is too easy costs a false one nothing")
 assert all(a.clock in {"entry", "graduation"} for a in ARMS), "a clock is one of two"
@@ -1329,6 +1344,8 @@ class Tournament:
         counts = await self._open_counts()
         recent = (await moneyblock.recent_rug_ids(self._session, self._now)
                   if self._money_checks else set())
+        repeat = (await moneyblock.repeat_rug_ids(self._session, self._now)
+                  if self._money_checks else frozenset())
         opened = blocked = 0
         for (row, price, depth), ids in zip(deep, found, strict=True):
             ids = ids if isinstance(ids, frozenset) else None
@@ -1342,7 +1359,7 @@ class Tournament:
             if depth < LIQ_BANDS[0][1]:
                 continue  # recorded for the operator's record, too shallow to buy
             # The real wallet would refuse it, so no book here buys it either.
-            if ids and (why := moneyblock.refused(ids, self._now, recent)):
+            if ids and (why := moneyblock.refused(ids, self._now, recent, repeat)):
                 blocked += 1
                 logger.info("graduation_tournament_money_blocked", mint=row.mint, reason=why)
                 continue
@@ -1371,6 +1388,43 @@ class Tournament:
                    ~select(1).where(GradOperator.mint == GradMigration.mint).exists())
             .order_by(GradMigration.ts)
             .limit(config.FAST_MAX_PER_TICK))).all()
+
+    async def _record_late(self, rows: Sequence[Any]) -> int:
+        """Read and record the operator of a deep candidate the fast path never
+        recorded, so the money checks have something to check.
+
+        The fast path records a graduation only while it is `FAST_MIN_AGE_S` to
+        `FAST_MAX_AGE_S` old AND its pool reads over the floor at that moment.
+        A read that fails in that window is never retried, and the coin is then
+        bought with no check at all. Bounded to `ENTRY_OPERATOR_MAX_READS` a
+        tick because each read is a Helius call inside a three-second tick.
+        """
+        if not self._money_checks or self._operator_reader is None:
+            return 0
+        deep = [r for r in rows
+                if (r.liquidity_usd or 0) >= config.OPERATOR_RECORD_FLOOR_USD]
+        if not deep:
+            return 0
+        known = set((await self._session.scalars(
+            select(GradOperator.mint)
+            .where(GradOperator.mint.in_([r.mint for r in deep])))).all())
+        missing = [(r, pool) for r in deep if r.mint not in known
+                   and (pool := graduation_pool(r.mint))][:config.ENTRY_OPERATOR_MAX_READS]
+        if not missing:
+            return 0
+        found = await asyncio.gather(
+            *(self._operator_reader(r.mint, pool) for r, pool in missing),
+            return_exceptions=True)
+        for (row, pool), ids in zip(missing, found, strict=True):
+            ids = ids if isinstance(ids, frozenset) else None
+            self._session.add(GradOperator(
+                mint=row.mint, pool=pool, migrated_at=row.graduated_at,
+                entry_at=self._now, price_native=row.price_native.quantize(_P),
+                depth_usd=row.liquidity_usd,
+                ids=sorted(ids) if ids else None,
+                label_due_at=self._now + timedelta(seconds=config.OPERATOR_LABEL_AFTER_S),
+                source="entry"))
+        return len(missing)
 
     async def _trusted(self, mint: str, ids: frozenset[str]) -> bool:
         """At least `OPERATOR_TRUST_MIN_COINS` earlier coins share one of these
@@ -1444,6 +1498,11 @@ class Tournament:
             return opened_curve
         reuse = await self._symbol_reuse(rows)
         mints = [r.mint for r in rows]
+        # A deep coin the fast path never recorded is read HERE, before the
+        # checks look it up. Without this the checks simply do not run on it:
+        # EVO (20 Sep, -99.8% in three books) had no record at all, and one
+        # deep coin in five was in the same state.
+        recorded = await self._record_late(rows)
         # The real wallet's money checks, on the addresses `_fill_fast` recorded
         # for each coin: a coin the wallet would refuse, no book here buys.
         blocked = (await moneyblock.refusals(self._session, mints, self._now)
@@ -1565,5 +1624,6 @@ class Tournament:
             logger.info("graduation_tournament_filled", opened=opened,
                         refused_unfillable=refused, not_graduation=foreign,
                         pool_unpriced=unpriced, money_blocked=money_blocked,
-                        lp_unlocked=unlocked, candidates=len(rows))
+                        lp_unlocked=unlocked, recorded_late=recorded,
+                        candidates=len(rows))
         return opened

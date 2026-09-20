@@ -349,6 +349,26 @@ FAST_MAX_PER_TICK = _int("LAB_GRADUATION_FAST_MAX_PER_TICK", 8)
 #: backtest learned reputations from every coin over ~$50k, and a record kept
 #: only from the coins bought would learn only from what the rule let through.
 OPERATOR_RECORD_FLOOR_USD = Decimal(50_000)
+
+#: The repeat-rugger refusal (Karthik, 2026-09-20). An address the lab has
+#: already seen on this many coins, this share of them rugged by the time of
+#: the buy, refuses the coin. Replayed point-in-time over BASE_75k_5m's 655
+#: trades since 14 Sep it refuses 30 of them, 12 of the 32 rugs, and the book
+#: goes from +$132 to +$894 at $100 a trade. Every threshold pair from
+#: (10, 5%) to (50, 20%) improves it, so these two are not a fitted edge.
+REPEAT_MIN_COINS = _int("LAB_GRADUATION_REPEAT_MIN_COINS", 20)
+#: Whole per cent, not a fraction: the driver infers a bind parameter's type
+#: from what it is multiplied by, so `0.10 * count(*)` arrives as 0 and refuses
+#: every address on the list. Integers cannot be truncated into a different
+#: rule.
+REPEAT_MIN_RUG_PCT = _int("LAB_GRADUATION_REPEAT_MIN_RUG_PCT", 10)
+#: How long that list is held before it is read again. The labels behind it
+#: arrive minutes apart; the tick runs every three seconds.
+REPEAT_TTL_S = _int("LAB_GRADUATION_REPEAT_TTL_S", 300)
+#: A pool-open candidate the fast path never recorded is read at the buy
+#: instead, up to this many a tick. One deep coin in five had no record at all,
+#: and a coin with no record is bought with no money check (EVO, 20 Sep).
+ENTRY_OPERATOR_MAX_READS = _int("LAB_GRADUATION_ENTRY_OPERATOR_MAX_READS", 4)
 #: A wallet holding this share of supply at entry is the operator's.
 OPERATOR_MIN_SHARE = Decimal("0.01")
 #: A coin rugged when its pool price is down this much this long after entry.
@@ -922,13 +942,21 @@ class FreshBookSpec:
     ticket_usd: Decimal
 
 
-#: Karthik's fresh books (2026-09-19). Every trade an arm has taken since 09:58
-#: that day passed the real wallet's money checks (`moneyblock`), so none of
-#: these holds a coin the wallet refuses.
+#: Karthik's fresh books. Every trade an arm has taken since 2026-09-19 09:58
+#: passed the real wallet's money checks (`moneyblock`), so none of these holds
+#: a coin the wallet refuses.
+#:
+#: The $75k pair restarts at 2026-09-20 08:30 UTC, when the repeat-rugger
+#: refusal, the entry-time operator read and the 4-minute twin went live: the
+#: first $500 ended at $341 on four rugs, two of which the new rules refuse.
+#: Its 5-minute and 4-minute books hold the same coins and differ in one thing,
+#: the clock, which is what they are there to settle.
 FRESH_BOOKS: tuple[FreshBookSpec, ...] = (
-    FreshBookSpec("BASE_75k_5m", datetime(2026, 9, 19, 13, 0, tzinfo=UTC),
+    FreshBookSpec("BASE_75k_5m", datetime(2026, 9, 20, 8, 30, tzinfo=UTC),
                   Decimal(500), Decimal(100)),
-    # A new arm, so it has nothing before its first deploy.
+    FreshBookSpec("BASE_75k_4m", datetime(2026, 9, 20, 8, 30, tzinfo=UTC),
+                  Decimal(500), Decimal(100)),
+    # Out of money on 20 Sep after 277 trades; kept as its own record.
     FreshBookSpec("BASE_10k_2m", datetime(2026, 9, 19, 13, 45, tzinfo=UTC),
                   Decimal(500), Decimal(50)),
 )
