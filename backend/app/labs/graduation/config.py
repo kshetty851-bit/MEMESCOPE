@@ -356,7 +356,21 @@ OPERATOR_RECORD_FLOOR_USD = Decimal(50_000)
 #: trades since 14 Sep it refuses 30 of them, 12 of the 32 rugs, and the book
 #: goes from +$132 to +$894 at $100 a trade. Every threshold pair from
 #: (10, 5%) to (50, 20%) improves it, so these two are not a fitted edge.
-REPEAT_MIN_COINS = _int("LAB_GRADUATION_REPEAT_MIN_COINS", 20)
+#:
+#: 20 -> 10 COINS, 2026-09-21, on Karthik's "block all address related to rugs".
+#: Re-measured point-in-time over 772 trades with a negative control, because
+#: the blunt reading of that — refuse any address that ever touched a rug, all
+#: 1,136 of them — turned out to be the WEAKER rule: it refuses 41% of trades
+#: (23-56% by day), keeps +$901, and reaches only the 98th percentile against
+#: refusing the same number at random. The rate rules beat ALL 2,000 draws and
+#: hold in both halves: (20, 10%) refuses 30 and keeps +$1,112, (10, 10%)
+#: refuses 35 and keeps +$1,218 with two fewer rugs, (10, 5%) refuses 132 and
+#: keeps +$1,216. Lowering the coin bar is worth 5 extra refusals; lowering the
+#: RATE bar costs a hundred for nothing, so only the first moved. Why the blunt
+#: rule fails: its biggest addresses sit on 200-320 coins each and rug at 0.4%,
+#: 1.7%, 2.2% — bots and funders, not crews. The ones this catches rug at 21%,
+#: 27%, 31%. See `memescope-quiet-is-not-a-shield` for the full table.
+REPEAT_MIN_COINS = _int("LAB_GRADUATION_REPEAT_MIN_COINS", 10)
 #: Whole per cent, not a fraction: the driver infers a bind parameter's type
 #: from what it is multiplied by, so `0.10 * count(*)` arrives as 0 and refuses
 #: every address on the list. Integers cannot be truncated into a different

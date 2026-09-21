@@ -29,3 +29,16 @@ def test_the_wallet_and_the_lab_share_one_list() -> None:
 
     assert sources.ALWAYS_BLOCKED is rug_money.ALWAYS_BLOCKED
     assert frozenset(rug_money.BLOCKED_SINCE) == rug_money.ALWAYS_BLOCKED
+
+
+def test_the_repeat_rugger_thresholds_are_the_measured_ones() -> None:
+    """Pinned because both numbers were chosen against a negative control and
+    a blunter rule was measured and rejected (see the constants' comment). A
+    silent move here would change what the live books and the real wallet buy,
+    since the wallet only ever buys a coin a paper arm already opened."""
+    from app.labs.graduation import config
+
+    assert (config.REPEAT_MIN_COINS, config.REPEAT_MIN_RUG_PCT) == (10, 10)
+    # Whole per cent: a fraction here arrives at the driver as 0 and refuses
+    # every address on the list.
+    assert isinstance(config.REPEAT_MIN_RUG_PCT, int)
