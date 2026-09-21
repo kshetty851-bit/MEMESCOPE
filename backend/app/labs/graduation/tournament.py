@@ -366,8 +366,12 @@ ENTRY_RULES: dict[str, str] = {
     # No live arm since 2026-09-20: BASE_10k_2m was retired when its $500 ran
     # out, and BASE_75k_4m shared `floor75` with the quiet arm.
     "floor10k": "every graduation with a pool at or above $10,000, no selection",
+    # No live arm since 2026-09-21: the four $25k clocks were retired when the
+    # depth split showed where their money went.
     "floor25": "every graduation with a pool at or above $25,000 whose liquidity "
                "is locked, no selection",
+    "band55": "every graduation whose pool is between $55,000 and $75,000 and "
+              "whose liquidity is locked, no selection",
     "floor75": "every graduation with a pool at or above $75,000, no selection — "
                "the baseline's own rule",
     "sym_night": "symbol used before AND the pool opened 18:00-06:00 UTC",
@@ -429,6 +433,14 @@ def accepts(arm: Arm, *, mint: str, open_at: datetime, liquidity: Decimal | None
         # band selection. Same floor, same universe — so the only difference
         # between this and a grid arm is the band, which is the thing on trial.
         return liquidity is not None and liquidity >= LIQ_BANDS[0][1]
+    if e == "band55":
+        # Karthik, 2026-09-21. The $25k books lost their money in one slice:
+        # bought at two minutes, $25-40k pools ran -4.1%, -5.0%, -18.3% and
+        # -21.0% a trade on the four days to 21 Sep, while $55-75k ran +6.4%,
+        # +2.5%, +1.7% and +1.7% — positive on every one of them, and above
+        # $75k was mixed. A BAND, not a floor: the band beat the deeper
+        # population on three days of four.
+        return liquidity is not None and 55_000 <= liquidity < 75_000
     if e == "floor25":
         # Karthik's $25k sweep (2026-09-20). Between $25k and $75k the coins
         # are no more dangerous than the deep ones — over the two days after
@@ -603,8 +615,11 @@ ARMS: tuple[Arm, ...] = (
     # show — that leaving earlier is worse — is still shown by 4m against 5m.
     Arm("B3_198k_4m", "liq_B3", 4, note="pool over $198k, out at 4m"),
     Arm("B3_198k_5m", "liq_B3", 5, note="pool over $198k, out at 5m"),
-    Arm("B3_198k_5m_SL", "liq_B3", 5, stop=Decimal("0.10"),
-        note="pool over $198k, 10% stop, out at 5m"),
+    # B3_198k_5m_SL RETIRED 2026-09-21: it existed to ask whether a 10% stop
+    # helps, and it answered. Over 400+ trades it made $404 where the same arm
+    # without the stop made $508, it still took 8 rugs against 9, and on the
+    # nine trades that ever crossed -10% five finished HIGHER than their worst
+    # moment. A rug crosses -10% and -99% in the same instant.
     # RETIRED 2026-09-21, Karthik: "delete the ones who has lost". Over the
     # week to 21 Sep, at $100 a trade: the drain exit -$310 (it fired five
     # times and still took nine rugs), g4 -$361, g2 -$542, g3 -$406, B3 bought
@@ -636,21 +651,21 @@ ARMS: tuple[Arm, ...] = (
     # The 3m (-$1,061) and 4m (-$766) clocks were retired on 2026-09-21 with
     # the rest of the losers. 2m and 5m stay as the matched controls for the
     # quiet pair below: without them, "did the quiet rule help?" has no answer.
-    Arm("BASE_25k_2m", "floor25", 2, locked=True,
-        note="every graduation over $25k with locked liquidity, out at 2m"),
-    Arm("BASE_25k_5m", "floor25", 5, locked=True,
-        note="every graduation over $25k with locked liquidity, out at 5m"),
-    # Karthik, 2026-09-21: the same rule with the quiet-pool refusal, at both
-    # ends of the clock. Their first night said the $25k books lose because the
-    # rugs cost more than everything else makes (at five minutes: 23 rugs cost
-    # $1,754 against $1,186 from the other 147 trades), and the one thing
-    # measured to separate rugs from winners is how busy the pool already is.
-    Arm("BASE_25k_quiet_2m", "floor25", 2, locked=True, quiet=True,
-        note="every graduation over $25k with locked liquidity whose pool is "
-             "still quiet (under 100 trades) when it is bought, out at 2m"),
-    Arm("BASE_25k_quiet_5m", "floor25", 5, locked=True, quiet=True,
-        note="every graduation over $25k with locked liquidity whose pool is "
-             "still quiet (under 100 trades) when it is bought, out at 5m"),
+    # RETIRED 2026-09-21, Karthik: "delete the lose ones". Their own depth
+    # split is why: of $500 each, the 2-minute book ended at $332 and the
+    # 5-minute at $84, and the $25-40k slice alone cost $1,136 and $1,174 of
+    # that — more than the four books lost in total. The quiet twins went with
+    # them: at this floor the filter did not reduce rugs (20% against 13%).
+    Arm("BAND_55k_2m", "band55", 2, locked=True,
+        note="every graduation with a $55-75k pool and locked liquidity, out at 2m"),
+    Arm("BAND_55k_5m", "band55", 5, locked=True,
+        note="every graduation with a $55-75k pool and locked liquidity, out at 5m"),
+    # The quiet filter, tested where the rugs actually are. At $75k it looks
+    # good and has met no rug; at $25k it made things worse. The band is where
+    # that question has an answer worth having.
+    Arm("BAND_55k_quiet_5m", "band55", 5, locked=True, quiet=True,
+        note="every graduation with a $55-75k pool and locked liquidity whose "
+             "pool is still quiet (under 100 trades) when it is bought, out at 5m"),
     # Karthik, 2026-09-20. PRE-REGISTERED: the baseline's rule, refusing any
     # coin whose pool has already had `QUIET_MAX_POOL_TXS` transactions when
     # the book buys (see that constant for the measurement it was frozen on).
@@ -688,7 +703,7 @@ CONTROLS: tuple[Arm, ...] = tuple(a for a in ARMS if a.is_control)
 #: returned no edge. The count is pinned rather than free because an arm that
 #: appears mid-tournament changes what every other number means — so changing
 #: it must be a deliberate edit with a date, not a side effect.
-assert len(ARMS) == 14, (
+assert len(ARMS) == 12, (
     "three B3 arms (3m FROM ENTRY retired 2026-09-16 at -$58.90), B3 bought "
     "early (added 2026-09-16), the two rug arms (added 2026-09-16), the two "
     "shorter graduation clocks g2 and g3 (added 2026-09-17), the fast pair "
@@ -723,10 +738,10 @@ assert all(a.tp is None and a.trail is None for a in ARMS), (
 assert all(a.stop is None or a.stop == Decimal("0.10") for a in ARMS), (
     "one stop level, so the twins differ in ONE thing. Sweeping levels here "
     "would be fitting a parameter on the same data that suggested it")
-assert len([a for a in ARMS if not a.is_control]) == 13, (
+assert len([a for a in ARMS if not a.is_control]) == 11, (
     "`config.required_pf` is calibrated on the maximum of FORTY-TWO noise "
-    "draws. Thirteen arms are now judged against it, so the bar is if anything "
-    "CONSERVATIVE — the luckiest of thirteen reaches less than the luckiest "
+    "draws. Eleven arms are now judged against it, so the bar is if anything "
+    "CONSERVATIVE — the luckiest of eleven reaches less than the luckiest "
     "of forty-two. Left as it is deliberately: a bar that is too hard costs a "
     "real finding some time, where one that is too easy costs a false one nothing")
 assert all(a.clock in {"entry", "graduation"} for a in ARMS), "a clock is one of two"

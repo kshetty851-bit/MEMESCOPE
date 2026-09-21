@@ -10,25 +10,25 @@ from app.labs.graduation import config
 from app.labs.graduation.api import fresh_book
 from app.labs.graduation.tournament import ARMS, CONTROLS, accepts
 
-BQ, *SWEEP = config.FRESH_BOOKS     # the quiet arm, then the four $25k clocks
+BQ, *SWEEP = config.FRESH_BOOKS     # the quiet arm, then the three band books
 
 #: The book the panel dropped on 2026-09-20, whose arm still runs as this
 #: one's control: the wallet walk that fed it is what this file tests.
 B75 = config.FreshBookSpec("BASE_75k_5m", BQ.start, Decimal(500), Decimal(100))
 
 
-def test_the_page_shows_the_quiet_book_and_the_25k_clocks() -> None:
+def test_the_page_shows_the_quiet_book_and_the_band_books() -> None:
     assert (BQ.book, BQ.capital_usd, BQ.ticket_usd) == (
         "BASE_75k_quiet_5m", Decimal(500), Decimal(100))
-    # Two pairs that differ in one thing each, so the columns compare like for
-    # like: same floor, same money, same start, plain against quiet.
+    # Three books on one band, same money from the same minute: two clocks,
+    # and the quiet filter tested against the five-minute one.
     assert [s.book for s in SWEEP] == [
-        "BASE_25k_2m", "BASE_25k_quiet_2m", "BASE_25k_5m", "BASE_25k_quiet_5m"]
+        "BAND_55k_2m", "BAND_55k_5m", "BAND_55k_quiet_5m"]
     assert {(s.capital_usd, s.ticket_usd, s.start) for s in SWEEP} == {
         (Decimal(500), Decimal(100), SWEEP[0].start)}
     arms = [next(a for a in ARMS if a.name == s.book) for s in SWEEP]
-    assert [a.hold for a in arms] == [2, 2, 5, 5]
-    assert [a.quiet for a in arms] == [False, True, False, True]
+    assert [a.hold for a in arms] == [2, 5, 5]
+    assert [a.quiet for a in arms] == [False, False, True]
     arm = next(a for a in ARMS if a.name == BQ.book)
     assert arm.quiet and arm.hold == 5 and not arm.is_control
     # The control it is judged against still trades, panel or no panel.
@@ -54,21 +54,22 @@ def test_a_sixth_trade_at_once_finds_no_money_and_is_skipped() -> None:
     book = fresh_book([trade(B75, 0, 0.01, hold=30) for _ in range(6)], None, B75)
     assert (book.trades, book.skipped) == (5, 1)
 
-def test_the_25k_arms_are_one_floor_two_clocks_and_the_quiet_rule() -> None:
-    """$25k and locked liquidity throughout; 2m and 5m; plain against quiet.
-    No holder cap: of 200 coins read at the buy, "no wallet over 5%" admitted
-    two, because every pump.fun graduation has a launch wallet near 79% and a
-    pool wallet near 15%."""
-    sweep = sorted((a for a in ARMS if a.name.startswith("BASE_25k")),
-                   key=lambda a: (a.hold, a.quiet))
-    assert [a.name for a in sweep] == [
-        "BASE_25k_2m", "BASE_25k_quiet_2m", "BASE_25k_5m", "BASE_25k_quiet_5m"]
-    assert [a.hold for a in sweep] == [2, 2, 5, 5]
-    assert [a.quiet for a in sweep] == [False, True, False, True]
-    assert all(a.locked and a.entry == "floor25" and not a.is_control for a in sweep)
+def test_the_band_arms_buy_between_55k_and_75k_and_nothing_else() -> None:
+    """The one slice positive on all four days measured to 21 Sep: $55-75k at
+    two minutes ran +6.4%, +2.5%, +1.7%, +1.7% a trade while $25-40k ran -4.1%,
+    -5.0%, -18.3%, -21.0%. A band, not a floor: above $75k was mixed."""
+    band = sorted((a for a in ARMS if a.name.startswith("BAND_55k")),
+                  key=lambda a: (a.hold, a.quiet))
+    assert [a.name for a in band] == [
+        "BAND_55k_2m", "BAND_55k_5m", "BAND_55k_quiet_5m"]
+    assert [a.hold for a in band] == [2, 5, 5]
+    assert [a.quiet for a in band] == [False, False, True]
+    assert all(a.locked and a.entry == "band55" and not a.is_control for a in band)
     assert all((a.tp, a.trail, a.stop, a.drain, a.clock) == (None, None, None, None, "entry")
-               for a in sweep)
+               for a in band)
     kw = {"mint": "m", "open_at": BQ.start, "fdv": None, "sells": None, "reuse": None}
-    assert accepts(sweep[0], liquidity=Decimal(25_000), **kw)
-    assert not accepts(sweep[0], liquidity=Decimal(24_999), **kw)
-    assert not accepts(sweep[0], liquidity=None, **kw)
+    assert not accepts(band[0], liquidity=Decimal(54_999), **kw)
+    assert accepts(band[0], liquidity=Decimal(55_000), **kw)
+    assert accepts(band[0], liquidity=Decimal(74_999), **kw)
+    assert not accepts(band[0], liquidity=Decimal(75_000), **kw)   # the baseline's floor
+    assert not accepts(band[0], liquidity=None, **kw)

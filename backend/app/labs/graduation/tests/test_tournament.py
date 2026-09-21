@@ -59,7 +59,7 @@ def test_the_tournament_is_a_hold_sweep_with_a_baseline_on_every_hold() -> None:
     One baseline per hold, so no hold is judged without an unselected twin on
     its own clock. Nothing on this board decides by hashing a mint.
     """
-    assert len(ARMS) == 14
+    assert len(ARMS) == 12
     # Karthik's quiet-pool arm (2026-09-20): the baseline's rule, refusing a
     # pool already past `QUIET_MAX_POOL_TXS` transactions. Not a control, so
     # the baseline below is unchanged and it has something to be judged against.
@@ -910,7 +910,7 @@ async def test_a_token_that_never_graduated_is_not_bought(monkeypatch) -> None:
     # candidate graduated 40s ago so all three still have time — and the
     # all-graduations A/B control. B5 needs $500k; B3E and the night A/B do not
     # buy from this query.
-    for pair, bought in ((OTHER_POOL, 0), (REAL_POOL, 5)):
+    for pair, bought in ((OTHER_POOL, 0), (REAL_POOL, 4)):
         session = _Answers([], [], [])
         session.statements = []
         t = Tournament(session, now=NIGHT)
@@ -1036,10 +1036,15 @@ async def test_a_pool_that_holds_its_depth_does_not_trip_the_drain_stop(
     assert position.exit_signal is None
 
 
-async def test_a_price_stop_also_sells_on_the_mark_after_it() -> None:
-    from app.labs.graduation.tournament import Tournament
+async def test_a_price_stop_also_sells_on_the_mark_after_it(monkeypatch) -> None:
+    from app.labs.graduation import tournament
+    from app.labs.graduation.tournament import Arm, Tournament
 
-    position = _open_position(NIGHT - timedelta(minutes=1), book="B3_198k_5m_SL")
+    # B3_198k_5m_SL was retired on 2026-09-21; the hard stop itself still
+    # works for any arm that asks, so this drives it with one of its own.
+    stopper = Arm("TEST_SL", "liq_B3", 5, stop=Decimal("0.10"))
+    monkeypatch.setattr(tournament, "BY_NAME", {**BY_NAME, stopper.name: stopper})
+    position = _open_position(NIGHT - timedelta(minutes=1), book=stopper.name)
     fell = _row(NIGHT - timedelta(seconds=40), "0.00042", "600000")
     assert await Tournament(_Tick([position], [fell], []), now=NIGHT)._manage() == 0
     assert position.exit_signal == "hard_stop"
@@ -1160,7 +1165,8 @@ async def test_a_buy_fills_at_the_pools_own_price_not_the_feeds_first_report(
     the report, the book booked +1,044%; on-chain the trade made +4%."""
     bought, added, mirrored, reads = await _buy(
         monkeypatch, feed_price="0.000004773", pool=_pool("0.0000541", "980"))
-    assert bought == 7   # every arm this coin qualifies for
+    assert bought == 4   # every arm this coin qualifies for; a $250k pool is
+    # above the band arms' ceiling, so only the deep books take it
     assert reads == [(REAL_MINT, REAL_POOL)], "one read prices every arm"
     for p in added:
         assert abs(p.open_quote / Decimal("0.0000541") - 1) < Decimal("0.001")
@@ -1187,7 +1193,7 @@ async def test_a_pool_price_a_scale_error_away_is_not_bought(monkeypatch) -> Non
     assert (await _buy(monkeypatch, feed_price="0.00008",
                        pool=_pool("0.00000008", "980")))[0] == 0
     assert (await _buy(monkeypatch, feed_price="0.00008",
-                       pool=_pool("0.00088", "980")))[0] == 7
+                       pool=_pool("0.00088", "980")))[0] == 4
 
 
 async def test_a_pool_not_quoted_in_sol_is_not_bought(monkeypatch) -> None:
