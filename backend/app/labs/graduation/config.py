@@ -977,12 +977,16 @@ class FreshBookSpec:
 #: The four $25k books start at 14:11 UTC, the minute their arms went live, so
 #: each holds every trade its arm ever made. They differ in ONE thing, the
 #: clock, so the money columns are a like-for-like answer to "when to sell".
+#: The $25k books restart at 2026-09-21 03:00 UTC, when the quiet pair goes
+#: live: plain and quiet, two clocks each, same $500 from the same minute, so
+#: the four columns answer one question — does refusing a busy pool pay?
 FRESH_BOOKS: tuple[FreshBookSpec, ...] = (
     FreshBookSpec("BASE_75k_quiet_5m", datetime(2026, 9, 20, 15, 0, tzinfo=UTC),
                   Decimal(500), Decimal(100)),
-    *(FreshBookSpec(f"BASE_25k_{hold}m", datetime(2026, 9, 20, 14, 11, tzinfo=UTC),
+    *(FreshBookSpec(book, datetime(2026, 9, 21, 3, 0, tzinfo=UTC),
                     Decimal(500), Decimal(100))
-      for hold in (2, 3, 4, 5)),
+      for book in ("BASE_25k_2m", "BASE_25k_quiet_2m",
+                   "BASE_25k_5m", "BASE_25k_quiet_5m")),
 )
 
 # --- the kill gate, stated before this run produced a single trade ------------

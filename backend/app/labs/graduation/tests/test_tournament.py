@@ -59,7 +59,7 @@ def test_the_tournament_is_a_hold_sweep_with_a_baseline_on_every_hold() -> None:
     One baseline per hold, so no hold is judged without an unselected twin on
     its own clock. Nothing on this board decides by hashing a mint.
     """
-    assert len(ARMS) == 19
+    assert len(ARMS) == 14
     # Karthik's quiet-pool arm (2026-09-20): the baseline's rule, refusing a
     # pool already past `QUIET_MAX_POOL_TXS` transactions. Not a control, so
     # the baseline below is unchanged and it has something to be judged against.
@@ -79,10 +79,9 @@ def test_the_tournament_is_a_hold_sweep_with_a_baseline_on_every_hold() -> None:
     # was the worst hold in every band this lab has run, and what it showed —
     # leaving earlier is worse — is still shown by 4m against 5m.
     assert not any(a.name == "B3_198k_3m" for a in ARMS)
-    # Three minutes came back on 2026-09-17 on the OTHER clock, counted from
-    # the graduation rather than the fill, beside a two-minute twin. Different
-    # rule, different name, and the retired book's history stays retired.
-    assert {a.hold for a in ARMS if a.clock == "graduation"} == {2, 3, 4}
+    # The graduation-clock arms (g2, g3, g4) were retired on 2026-09-21 as
+    # losers, so every live arm now counts its hold from its own fill.
+    assert {a.clock for a in ARMS} == {"entry"}
     assert len({a.name for a in ARMS}) == len(ARMS)
     assert all(len(a.name) <= 32 for a in ARMS)
 
@@ -633,9 +632,13 @@ class _Answers:
 
 
 def test_the_early_arm_is_b3_bought_earlier_not_a_new_rule() -> None:
-    from app.labs.graduation.tournament import BAND_BY_KEY
+    """B3E_198k_5m was retired on 2026-09-21 at -$412, so the rule it used is
+    driven here by an arm of this test's own: the early path still runs for
+    any arm that asks, and what it must and must not buy is still pinned."""
+    from app.labs.graduation.tournament import BAND_BY_KEY, Arm
 
-    early, b3 = BY_NAME["B3E_198k_5m"], BY_NAME["B3_198k_5m"]
+    early = Arm("TEST_early_5m", "early_B3", 5)
+    b3 = BY_NAME["B3_198k_5m"]
     assert (early.hold, early.stop, early.tp, early.trail) == (
         b3.hold, b3.stop, b3.tp, b3.trail)
     assert BAND_BY_KEY[b3.entry][0] == config.EARLY_FLOOR_USD
@@ -644,21 +647,26 @@ def test_the_early_arm_is_b3_bought_earlier_not_a_new_rule() -> None:
     assert not accepts(early, open_at=NIGHT, **{**TOKEN, "liquidity": D(5_000_000)})
 
 
-async def test_the_early_arm_buys_the_crossing_at_the_pools_own_price() -> None:
+async def test_the_early_arm_buys_the_crossing_at_the_pools_own_price(
+    monkeypatch,
+) -> None:
     from types import SimpleNamespace
 
     from sqlalchemy.dialects import postgresql
 
-    from app.labs.graduation.tournament import Tournament
+    from app.labs.graduation import tournament
+    from app.labs.graduation.tournament import Arm, Tournament
 
     crossing = SimpleNamespace(
         mint=REAL_MINT, pool=REAL_POOL, crossed_at=NIGHT - timedelta(seconds=4),
         migrated_at=NIGHT - timedelta(seconds=30),
         price_native=D("0.0000012"), depth_usd=D("250000"), sol_usd=D("100"))
+    mine = Arm("TEST_early_5m", "early_B3", 5)
+    monkeypatch.setattr(tournament, "ARMS", (*tournament.ARMS, mine))
     session = _Answers([(crossing, "EARLY")], [], [])
     assert await Tournament(session, now=NIGHT)._fill_early() == 1
     (position,) = session.added
-    assert position.book == "B3E_198k_5m"
+    assert position.book == "TEST_early_5m"
     assert position.opened_at == crossing.crossed_at
     assert position.open_quote == crossing.price_native
     assert position.open_fill > position.open_quote     # fee and impact paid
@@ -669,7 +677,7 @@ async def test_the_early_arm_buys_the_crossing_at_the_pools_own_price() -> None:
     assert "grad_early_opens.crossed_at <=" in query
 
     # Already held: not bought twice.
-    again = _Answers([(crossing, "EARLY")], [("B3E_198k_5m", REAL_MINT)], [])
+    again = _Answers([(crossing, "EARLY")], [("TEST_early_5m", REAL_MINT)], [])
     assert await Tournament(again, now=NIGHT)._fill_early() == 0
     # A pool too shallow for $100 to fill is refused, as B3's would be.
     thin = SimpleNamespace(**{**crossing.__dict__, "depth_usd": D("500")})
@@ -902,7 +910,7 @@ async def test_a_token_that_never_graduated_is_not_bought(monkeypatch) -> None:
     # candidate graduated 40s ago so all three still have time — and the
     # all-graduations A/B control. B5 needs $500k; B3E and the night A/B do not
     # buy from this query.
-    for pair, bought in ((OTHER_POOL, 0), (REAL_POOL, 9)):
+    for pair, bought in ((OTHER_POOL, 0), (REAL_POOL, 5)):
         session = _Answers([], [], [])
         session.statements = []
         t = Tournament(session, now=NIGHT)
@@ -918,27 +926,37 @@ async def test_a_token_that_never_graduated_is_not_bought(monkeypatch) -> None:
 # --- the rug arms ------------------------------------------------------------
 
 def test_the_rug_arms_say_what_they_do() -> None:
-    assert BY_NAME["B3_198k_5m_DR"].exit_rule == (
+    """The drain exit and the graduation clocks were retired on 2026-09-21
+    (drain -$310, g2 -$542, g3 -$406, g4 -$361, against +$508 for the B3 they
+    vary). The sentences they printed are still what those rules say, so they
+    are pinned on arms of this test's own rather than dropped."""
+    from app.labs.graduation.tournament import Arm
+
+    drain = Arm("TEST_DR", "liq_B3", 5, drain=Decimal("0.20"))
+    assert drain.exit_rule == (
         "whichever comes first: the pool loses 20% of its SOL, or 5 minutes")
-    assert BY_NAME["B3_198k_g4"].exit_rule == "at 4 minutes after graduating"
-    assert BY_NAME["B3_198k_g2"].exit_rule == "at 2 minutes after graduating"
-    assert BY_NAME["B3_198k_g3"].exit_rule == "at 3 minutes after graduating"
-    # Variants of B3, never baselines.
-    assert not BY_NAME["B3_198k_5m_DR"].is_control
-    assert not BY_NAME["B3_198k_g4"].is_control
+    assert Arm("TEST_g4", "liq_B3", 4, clock="graduation").exit_rule == (
+        "at 4 minutes after graduating")
+    assert not drain.is_control
 
 
-def test_a_graduation_clock_counts_from_the_graduation() -> None:
-    from app.labs.graduation.tournament import _due, _time_left
+def test_a_graduation_clock_counts_from_the_graduation(monkeypatch) -> None:
+    """The graduation clocks (g2, g3, g4) were retired on 2026-09-21 as
+    losers. The clock itself is still in `_due` and `_time_left` for any arm
+    that asks, so it is pinned here on an arm of this test's own."""
+    from app.labs.graduation import tournament
+    from app.labs.graduation.tournament import Arm, _due, _time_left
 
+    g4 = Arm("TEST_g4", "liq_B3", 4, clock="graduation")
+    monkeypatch.setattr(tournament, "BY_NAME", {**BY_NAME, g4.name: g4})
     graduated = NIGHT - timedelta(seconds=50)
-    position = _open_position(NIGHT, book="B3_198k_g4")
+    position = _open_position(NIGHT, book=g4.name)
     position.graduated_at = graduated
     assert _due(position) == graduated + timedelta(minutes=4)
     # Unknown graduation: the entry is all there is to count from.
     position.graduated_at = None
     assert _due(position) == NIGHT + timedelta(minutes=4)
-    g4, b3 = BY_NAME["B3_198k_g4"], BY_NAME["B3_198k_5m"]
+    b3 = BY_NAME["B3_198k_5m"]
     # A pool listed three minutes in still has a minute to hold; one listed
     # later would be bought and sold in the same breath.
     assert _time_left(g4, graduated + timedelta(minutes=3), graduated)
@@ -947,18 +965,21 @@ def test_a_graduation_clock_counts_from_the_graduation() -> None:
     assert _time_left(b3, graduated + timedelta(minutes=30), None)
 
 
-def test_the_short_graduation_clocks_only_take_a_pool_listed_in_time() -> None:
+def test_the_short_graduation_clocks_only_take_a_pool_listed_in_time(monkeypatch) -> None:
     """g2 sells two minutes after the graduation, so it can only buy a pool
     the feed reports inside the first minute — and DexScreener reports a B3
     pool a median 52s in. It will therefore fund fewer trades than g3 or g4,
     which is the rule rather than a fault: an exit a wallet cannot reach in
     time is not a rule it can run."""
-    from app.labs.graduation.tournament import _due, _time_left
+    from app.labs.graduation import tournament
+    from app.labs.graduation.tournament import Arm, _due, _time_left
 
     graduated = NIGHT - timedelta(seconds=50)
-    g2, g3 = BY_NAME["B3_198k_g2"], BY_NAME["B3_198k_g3"]
+    g2 = Arm("TEST_g2", "liq_B3", 2, clock="graduation")
+    g3 = Arm("TEST_g3", "liq_B3", 3, clock="graduation")
+    monkeypatch.setattr(tournament, "BY_NAME", {**BY_NAME, g2.name: g2, g3.name: g3})
 
-    position = _open_position(NIGHT, book="B3_198k_g2")
+    position = _open_position(NIGHT, book=g2.name)
     position.graduated_at = graduated
     assert _due(position) == graduated + timedelta(minutes=2)
 
@@ -970,15 +991,21 @@ def test_the_short_graduation_clocks_only_take_a_pool_listed_in_time() -> None:
     assert not _time_left(g3, graduated + timedelta(minutes=2, seconds=1), graduated)
 
 
-async def test_a_drain_stop_sells_on_the_market_after_it_fires() -> None:
+async def test_a_drain_stop_sells_on_the_market_after_it_fires(monkeypatch) -> None:
     """FAIR went from 2,960 SOL to 41 in one second; USGR took twenty. A stop
     that fired on a drained mark and sold AT that mark would book a price the
     drain had already left behind, so the sale is the first mark after the
-    stop plus the time a wallet needs to act."""
-    from app.labs.graduation.tournament import Tournament
+    stop plus the time a wallet needs to act.
 
+    B3_198k_5m_DR was retired on 2026-09-21 at -$310, so the rule is pinned
+    here on an arm of this test's own."""
+    from app.labs.graduation import tournament
+    from app.labs.graduation.tournament import Arm, Tournament
+
+    drain = Arm("TEST_DR", "liq_B3", 5, drain=Decimal("0.20"))
+    monkeypatch.setattr(tournament, "BY_NAME", {**BY_NAME, drain.name: drain})
     opened = NIGHT - timedelta(minutes=1)
-    position = _open_position(opened, book="B3_198k_5m_DR")
+    position = _open_position(opened, book=drain.name)
     draining = _row(NIGHT - timedelta(seconds=2), "0.00031", "440000", source="held_ws")
     first = await Tournament(_Tick([position], [draining], [draining]),
                              now=NIGHT)._manage()
@@ -995,10 +1022,15 @@ async def test_a_drain_stop_sells_on_the_market_after_it_fires() -> None:
     assert position.close_quote == D("0.00020")
 
 
-async def test_a_pool_that_holds_its_depth_does_not_trip_the_drain_stop() -> None:
-    from app.labs.graduation.tournament import Tournament
+async def test_a_pool_that_holds_its_depth_does_not_trip_the_drain_stop(
+    monkeypatch,
+) -> None:
+    from app.labs.graduation import tournament
+    from app.labs.graduation.tournament import Arm, Tournament
 
-    position = _open_position(NIGHT - timedelta(minutes=1), book="B3_198k_5m_DR")
+    drain = Arm("TEST_DR", "liq_B3", 5, drain=Decimal("0.20"))
+    monkeypatch.setattr(tournament, "BY_NAME", {**BY_NAME, drain.name: drain})
+    position = _open_position(NIGHT - timedelta(minutes=1), book=drain.name)
     dip = _row(NIGHT - timedelta(seconds=2), "0.00045", "560000", source="held_ws")
     assert await Tournament(_Tick([position], [dip], [dip]), now=NIGHT)._manage() == 0
     assert position.exit_signal is None
@@ -1128,7 +1160,7 @@ async def test_a_buy_fills_at_the_pools_own_price_not_the_feeds_first_report(
     the report, the book booked +1,044%; on-chain the trade made +4%."""
     bought, added, mirrored, reads = await _buy(
         monkeypatch, feed_price="0.000004773", pool=_pool("0.0000541", "980"))
-    assert bought == 13   # every arm this coin qualifies for, the four $25k too
+    assert bought == 7   # every arm this coin qualifies for
     assert reads == [(REAL_MINT, REAL_POOL)], "one read prices every arm"
     for p in added:
         assert abs(p.open_quote / Decimal("0.0000541") - 1) < Decimal("0.001")
@@ -1155,7 +1187,7 @@ async def test_a_pool_price_a_scale_error_away_is_not_bought(monkeypatch) -> Non
     assert (await _buy(monkeypatch, feed_price="0.00008",
                        pool=_pool("0.00000008", "980")))[0] == 0
     assert (await _buy(monkeypatch, feed_price="0.00008",
-                       pool=_pool("0.00088", "980")))[0] == 13
+                       pool=_pool("0.00088", "980")))[0] == 7
 
 
 async def test_a_pool_not_quoted_in_sol_is_not_bought(monkeypatch) -> None:
