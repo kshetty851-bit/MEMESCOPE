@@ -1014,7 +1014,7 @@ function LeaderboardPanel() {
                   day: "numeric", month: "short", hour: "2-digit",
                   minute: "2-digit",
                 })}{" "}
-                Dubai
+                Dubai &middot; running <Elapsed since={fresh.started_at} />
               </div>
               <div className="mt-1 text-2xl font-semibold text-ink">
                 {usd(fresh.balance_usd)}{" "}
