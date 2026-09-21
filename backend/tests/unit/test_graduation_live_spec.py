@@ -80,7 +80,7 @@ def test_each_live_arm_copies_its_own_paper_book() -> None:
     from app.labs.graduation.tournament import ARMS
 
     arms = {a.name: a for a in ARMS}
-    assert set(live_spec.PAPER_BOOKS) == {"G-B3-5M", "G-B3-4M", "G-BAS-5M"}
+    assert set(live_spec.PAPER_BOOKS) == {"G-B3-5M", "G-B3-4M", "G-BAS-5M", "G-QUIET"}
     for sid, book in live_spec.PAPER_BOOKS.items():
         assert live_spec.hold_minutes(live_spec.BY_ID[sid]) == arms[book].hold
         assert arms[book].clock == "entry", "the live clock starts at the entry"

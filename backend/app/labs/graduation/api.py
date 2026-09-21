@@ -1293,16 +1293,25 @@ async def _refresh_held(book: str) -> None:
 
 
 @router.get("/fresh/held", response_model=FreshHeld)
-async def fresh_held(book: str, db: AsyncSession = Depends(get_db)) -> FreshHeld:
-    """What a fresh book's closed coins would be worth now, never sold."""
+async def fresh_held(book: str = "", db: AsyncSession = Depends(get_db)) -> FreshHeld:
+    """What a fresh book's closed coins would be worth now, never sold.
+
+    `book` defaults to the first fresh book rather than being required: a
+    mandatory query parameter answers 422 to a bare request, which
+    `test_every_route_reaches_the_endpoint_it_names` refuses for exactly the
+    reason it was written - a route nobody can call without reading the source.
+    """
     import asyncio
 
     from app.labs.graduation import sources
     from app.labs.graduation.tournament import graduation_pool
 
-    spec = {s.book: s for s in config.FRESH_BOOKS}.get(book)
+    specs = {s.book: s for s in config.FRESH_BOOKS}
+    spec = (config.FRESH_BOOKS[0] if not book and config.FRESH_BOOKS
+            else specs.get(book))
     if spec is None:
         raise HTTPException(status_code=404, detail="no such fresh book")
+    book = spec.book
     out = FreshHeld(book=book, ticket_usd=spec.ticket_usd, capital_usd=spec.capital_usd)
     if not config.enabled():
         return out
