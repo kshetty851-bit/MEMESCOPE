@@ -605,46 +605,11 @@ ARMS: tuple[Arm, ...] = (
     Arm("B3_198k_5m", "liq_B3", 5, note="pool over $198k, out at 5m"),
     Arm("B3_198k_5m_SL", "liq_B3", 5, stop=Decimal("0.10"),
         note="pool over $198k, 10% stop, out at 5m"),
-    # THE RUG ARMS, 2026-09-16. Eleven board trades were drained while open,
-    # every one five to seven minutes after its graduation — B3 sells at about
-    # six. Two ways out, tested FORWARD because both were picked on those same
-    # trades:
-    #  * DR leaves the moment the pool has lost a fifth of its SOL, on the
-    #    socket's sub-second reserves. It never fired on the recorded history,
-    #    whose DexScreener rows are 30-60s apart and see a drain only once it
-    #    is over; the socket is the whole reason it can work now. A two-second
-    #    cascade like FAIR's is still faster than any sell.
-    #  * g4 sells four minutes after GRADUATION instead of five after entry.
-    #    Replayed with rugs counted: +$89 on 215 trades and no drain, where B3
-    #    lost $175 with four.
-    Arm("B3_198k_5m_DR", "liq_B3", 5, drain=Decimal("0.20"),
-        note="pool over $198k, out at 5m or once the pool loses a fifth of its SOL"),
-    Arm("B3_198k_g4", "liq_B3", 4, clock="graduation",
-        note="pool over $198k, out four minutes after graduating"),
-    # TWO SHORTER GRADUATION CLOCKS, 2026-09-17, at Karthik's request after
-    # ZBCN: it graduated at 17:24:30, the book bought at 17:25:07, and the
-    # pool was dumped 93% in one instant at 17:27:08 — 2m38s after graduating,
-    # which g4 sits past and these two sit in front of. Registered FORWARD and
-    # nothing else: one rug is not evidence for a hold, and choosing 2m
-    # BECAUSE it clears that one crash is the fit this lab keeps refusing.
-    #
-    # `_time_left` binds hardest on g2: an entry must leave a minute on the
-    # clock, and DexScreener first reports a B3 pool a median 52s after the
-    # migration, so g2 will fund about half of what g3 does and less than g4.
-    # That is the arm, not a defect: a rule that cannot be entered in time is
-    # a rule a wallet cannot run either.
-    Arm("B3_198k_g2", "liq_B3", 2, clock="graduation",
-        note="pool over $198k, out two minutes after graduating"),
-    Arm("B3_198k_g3", "liq_B3", 3, clock="graduation",
-        note="pool over $198k, out three minutes after graduating"),
-    # B3, bought EARLY, 2026-09-16. DexScreener first reports a B3 pool a
-    # median 52s after the migration, and that is where B3 buys. The pool's
-    # own reserves say it is deep the moment it is — this arm buys then, and
-    # holds five minutes from THAT entry. Same depth, same hold, earlier fill:
-    # the one question is whether those seconds are worth anything.
-    Arm("B3E_198k_5m", "early_B3", 5,
-        note="pool's own reserves over $198k within 90s of graduating, "
-             "bought on sight, out at 5m"),
+    # RETIRED 2026-09-21, Karthik: "delete the ones who has lost". Over the
+    # week to 21 Sep, at $100 a trade: the drain exit -$310 (it fired five
+    # times and still took nine rugs), g4 -$361, g2 -$542, g3 -$406, B3 bought
+    # early -$412. B3_198k_5m, which they all vary, made +$508 on the same
+    # coins, so what each variation was there to test has its answer.
     # FAST AND TRUSTED, 2026-09-19: the Tape Lab's two passing findings,
     # tested forward (`backend/app/labs/tape/README.md`). Rebuilt off the chain,
     # 18 days of graduations bought 15s after the pool opened made +0.59% a
@@ -668,14 +633,24 @@ ARMS: tuple[Arm, ...] = (
     # wallet holds a median 79.5% and the pool wallet 15.1% on every pump.fun
     # graduation), and capping everyone else at 5% keeps 185 of 200 and leaves
     # the rug rate where it was. See `memescope-graduation-rug-anatomy`.
+    # The 3m (-$1,061) and 4m (-$766) clocks were retired on 2026-09-21 with
+    # the rest of the losers. 2m and 5m stay as the matched controls for the
+    # quiet pair below: without them, "did the quiet rule help?" has no answer.
     Arm("BASE_25k_2m", "floor25", 2, locked=True,
         note="every graduation over $25k with locked liquidity, out at 2m"),
-    Arm("BASE_25k_3m", "floor25", 3, locked=True,
-        note="every graduation over $25k with locked liquidity, out at 3m"),
-    Arm("BASE_25k_4m", "floor25", 4, locked=True,
-        note="every graduation over $25k with locked liquidity, out at 4m"),
     Arm("BASE_25k_5m", "floor25", 5, locked=True,
         note="every graduation over $25k with locked liquidity, out at 5m"),
+    # Karthik, 2026-09-21: the same rule with the quiet-pool refusal, at both
+    # ends of the clock. Their first night said the $25k books lose because the
+    # rugs cost more than everything else makes (at five minutes: 23 rugs cost
+    # $1,754 against $1,186 from the other 147 trades), and the one thing
+    # measured to separate rugs from winners is how busy the pool already is.
+    Arm("BASE_25k_quiet_2m", "floor25", 2, locked=True, quiet=True,
+        note="every graduation over $25k with locked liquidity whose pool is "
+             "still quiet (under 100 trades) when it is bought, out at 2m"),
+    Arm("BASE_25k_quiet_5m", "floor25", 5, locked=True, quiet=True,
+        note="every graduation over $25k with locked liquidity whose pool is "
+             "still quiet (under 100 trades) when it is bought, out at 5m"),
     # Karthik, 2026-09-20. PRE-REGISTERED: the baseline's rule, refusing any
     # coin whose pool has already had `QUIET_MAX_POOL_TXS` transactions when
     # the book buys (see that constant for the measurement it was frozen on).
@@ -713,7 +688,7 @@ CONTROLS: tuple[Arm, ...] = tuple(a for a in ARMS if a.is_control)
 #: returned no edge. The count is pinned rather than free because an arm that
 #: appears mid-tournament changes what every other number means — so changing
 #: it must be a deliberate edit with a date, not a side effect.
-assert len(ARMS) == 19, (
+assert len(ARMS) == 14, (
     "three B3 arms (3m FROM ENTRY retired 2026-09-16 at -$58.90), B3 bought "
     "early (added 2026-09-16), the two rug arms (added 2026-09-16), the two "
     "shorter graduation clocks g2 and g3 (added 2026-09-17), the fast pair "
@@ -729,11 +704,13 @@ assert len(ARMS) == 19, (
 assert len([a for a in ARMS if a.ab_experiment]) == 2, (
     "the rug-signal A/B is exactly F01_all_2m and F14_symnight_2m; flagging a "
     "tournament arm as an experiment would hide it from its own comparison")
-assert {a.hold for a in ARMS} == {2, 3, 4, 5}, (
+assert {a.hold for a in ARMS} == {2, 4, 5}, (
     "Four and five minutes, the A/B pair's two, and — from 2026-09-17 — two "
     "and three counted from GRADUATION rather than from entry, which is a "
     "different rule on a different clock: B3_198k_3m measured three minutes "
-    "from the fill and was retired at -$58.90. The baseline "
+    "from the fill and was retired at -$58.90; the last two three-minute arms "
+    "(B3_198k_g3 and BASE_25k_3m) went on 2026-09-21 as losers, so the live "
+    "clocks are two, four and five. The baseline "
     "and the $500k candidate are both five. Two and six from entry "
     "were retired after both wiped in every band. Longer is measurably worse "
     "(5m is +3.33% at a 1.6% tail; 30m is -6.48% at 14.6%), and one minute is "
@@ -746,10 +723,10 @@ assert all(a.tp is None and a.trail is None for a in ARMS), (
 assert all(a.stop is None or a.stop == Decimal("0.10") for a in ARMS), (
     "one stop level, so the twins differ in ONE thing. Sweeping levels here "
     "would be fitting a parameter on the same data that suggested it")
-assert len([a for a in ARMS if not a.is_control]) == 18, (
+assert len([a for a in ARMS if not a.is_control]) == 13, (
     "`config.required_pf` is calibrated on the maximum of FORTY-TWO noise "
-    "draws. Eighteen arms are now judged against it, so the bar is if anything "
-    "CONSERVATIVE — the luckiest of eighteen reaches less than the luckiest "
+    "draws. Thirteen arms are now judged against it, so the bar is if anything "
+    "CONSERVATIVE — the luckiest of thirteen reaches less than the luckiest "
     "of forty-two. Left as it is deliberately: a bar that is too hard costs a "
     "real finding some time, where one that is too easy costs a false one nothing")
 assert all(a.clock in {"entry", "graduation"} for a in ARMS), "a clock is one of two"

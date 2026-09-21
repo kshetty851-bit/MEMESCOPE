@@ -20,14 +20,15 @@ B75 = config.FreshBookSpec("BASE_75k_5m", BQ.start, Decimal(500), Decimal(100))
 def test_the_page_shows_the_quiet_book_and_the_25k_clocks() -> None:
     assert (BQ.book, BQ.capital_usd, BQ.ticket_usd) == (
         "BASE_75k_quiet_5m", Decimal(500), Decimal(100))
-    # Four books that differ in one thing, so their columns compare like for
-    # like: same floor, same money, same start, four clocks.
+    # Two pairs that differ in one thing each, so the columns compare like for
+    # like: same floor, same money, same start, plain against quiet.
     assert [s.book for s in SWEEP] == [
-        "BASE_25k_2m", "BASE_25k_3m", "BASE_25k_4m", "BASE_25k_5m"]
+        "BASE_25k_2m", "BASE_25k_quiet_2m", "BASE_25k_5m", "BASE_25k_quiet_5m"]
     assert {(s.capital_usd, s.ticket_usd, s.start) for s in SWEEP} == {
         (Decimal(500), Decimal(100), SWEEP[0].start)}
-    assert all(next(a for a in ARMS if a.name == s.book).hold == hold
-               for s, hold in zip(SWEEP, (2, 3, 4, 5), strict=True))
+    arms = [next(a for a in ARMS if a.name == s.book) for s in SWEEP]
+    assert [a.hold for a in arms] == [2, 2, 5, 5]
+    assert [a.quiet for a in arms] == [False, True, False, True]
     arm = next(a for a in ARMS if a.name == BQ.book)
     assert arm.quiet and arm.hold == 5 and not arm.is_control
     # The control it is judged against still trades, panel or no panel.
@@ -53,16 +54,17 @@ def test_a_sixth_trade_at_once_finds_no_money_and_is_skipped() -> None:
     book = fresh_book([trade(B75, 0, 0.01, hold=30) for _ in range(6)], None, B75)
     assert (book.trades, book.skipped) == (5, 1)
 
-def test_the_25k_sweep_is_one_floor_and_four_clocks() -> None:
-    """Karthik, 2026-09-20: $25k, locked liquidity, sold at 2, 3, 4 and 5
-    minutes. One floor, four holds, so the only thing that differs is the
-    clock. No holder cap: of 200 coins read at the buy, "no wallet over 5%"
-    admitted two, because every pump.fun graduation has a launch wallet near
-    79% and a pool wallet near 15%."""
-    sweep = sorted((a for a in ARMS if a.name.startswith("BASE_25k")), key=lambda a: a.hold)
+def test_the_25k_arms_are_one_floor_two_clocks_and_the_quiet_rule() -> None:
+    """$25k and locked liquidity throughout; 2m and 5m; plain against quiet.
+    No holder cap: of 200 coins read at the buy, "no wallet over 5%" admitted
+    two, because every pump.fun graduation has a launch wallet near 79% and a
+    pool wallet near 15%."""
+    sweep = sorted((a for a in ARMS if a.name.startswith("BASE_25k")),
+                   key=lambda a: (a.hold, a.quiet))
     assert [a.name for a in sweep] == [
-        "BASE_25k_2m", "BASE_25k_3m", "BASE_25k_4m", "BASE_25k_5m"]
-    assert [a.hold for a in sweep] == [2, 3, 4, 5]
+        "BASE_25k_2m", "BASE_25k_quiet_2m", "BASE_25k_5m", "BASE_25k_quiet_5m"]
+    assert [a.hold for a in sweep] == [2, 2, 5, 5]
+    assert [a.quiet for a in sweep] == [False, True, False, True]
     assert all(a.locked and a.entry == "floor25" and not a.is_control for a in sweep)
     assert all((a.tp, a.trail, a.stop, a.drain, a.clock) == (None, None, None, None, "entry")
                for a in sweep)
