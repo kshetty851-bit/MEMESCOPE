@@ -103,7 +103,12 @@ def _anchor_fallback(key: str) -> str:
 #: deliberately overrides DEBUG, LOG_FORMAT and the rest. These are discovery
 #: settings with no prod override, which makes the anchor the only thing that
 #: decides them.
-MUST_MATCH_CODE_DEFAULT = ("SCANNER_WATCH_PROGRAMS", "SCANNER_COMMITMENT")
+MUST_MATCH_CODE_DEFAULT = ("SCANNER_WATCH_PROGRAMS", "SCANNER_COMMITMENT",
+                           # Retention, added 2026-09-22 when the window went
+                           # 7 days -> 1. The anchor's fallback is what
+                           # production actually prunes on, so a window changed
+                           # only in `config.py` deploys green and frees nothing.
+                           "MARKET_SNAPSHOT_RETENTION_DAYS")
 
 
 @pytest.mark.parametrize("key", MUST_MATCH_CODE_DEFAULT)

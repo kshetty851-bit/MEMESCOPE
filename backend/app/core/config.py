@@ -440,7 +440,27 @@ class Settings(BaseSettings):
     # than 7 days). At these windows the three settle near 14 GB combined with
     # the nursery running, against a 38 GB disk.
     SCORING_HISTORY_RETENTION_DAYS: int = 7
-    MARKET_SNAPSHOT_RETENTION_DAYS: int = Field(default=7, ge=1, le=365)
+    #: 7 -> 1 DAY, 2026-09-22, Karthik, with the disk at 88% and 4.9 GB left.
+    #: This knob was measured and rejected once (see PROTECT_DAYS below): at 7
+    #: days it freed 8.7 MB because almost everything past the cutoff was
+    #: already protected. What changed is that the protection was BOUNDED on
+    #: 2026-09-15, so the knob now has the weight it lacked. Re-measured on
+    #: production the day it moved: 11.0M of 16.3M rows sit past 24 hours and
+    #: outside both carve-outs — about 6.0 GB, a third of the disk. The daily
+    #: pruner is keeping up at 7 days (11,336 rows past policy), so this is
+    #: real headroom, not a backlog.
+    #:
+    #: What it costs: untraded coins keep one day of price history instead of
+    #: seven. The carve-outs are untouched — a coin any book holds, or traded
+    #: in the last MARKET_SNAPSHOT_PROTECT_DAYS, keeps its whole series, and so
+    #: does any snapshot a decision referenced. The graduation lab's own
+    #: research reads `grad_postgrad_samples`, a different table this does not
+    #: touch.
+    #:
+    #: The compose anchor carries its own default and WINS over this one, so
+    #: both moved together; changing only this line deploys green and does
+    #: nothing.
+    MARKET_SNAPSHOT_RETENTION_DAYS: int = Field(default=1, ge=1, le=365)
     #: How long a TRADED mint keeps its snapshots after its last position
     #: closed. Traded mints used to be protected FOREVER, which made the
     #: carve-out unbounded: 1,292 mints held 1,986,783 rows — 34% of the table
