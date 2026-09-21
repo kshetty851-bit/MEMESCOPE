@@ -676,6 +676,26 @@ ARMS: tuple[Arm, ...] = (
     Arm("BASE_75k_quiet_5m", "floor75", 5, quiet=True,
         note="every graduation over $75k whose pool is still quiet (under "
              "100 trades) when it is bought, out at 5m"),
+    # Karthik, 2026-09-21, after the quiet arm's first rugs were traced. Of the
+    # 18 coins that fell 80%+ INSIDE the five minutes, ten were busy pools the
+    # quiet rule already refuses and eight were quiet ones it would buy again.
+    # Replaying all 771 baseline trades minute by minute, gross of the ~1.1%
+    # round trip: +0.89% at 2m, +1.19% at 3m, +1.93% at 4m, +1.76% at 5m, with
+    # 14 coins already wiped out by 4m against 20 by 5m. The fifth minute is
+    # where the rugs land and the gains have stopped growing, so this is the
+    # same rule on a four-minute clock, with its five-minute twin left running
+    # as its matched control.
+    #
+    # SEEDED, not fresh (Karthik: "juz copy the closed trades and assume sold
+    # at 4m and continue"). `scripts/seed_quiet_4m.py` copied every closed
+    # BASE_75k_quiet_5m trade into this book and re-priced it at its own
+    # four-minute mark through `exit_mark`/`valued`/`settle`, so the first
+    # stretch of this book is a REPLAY of the twin's coins, not trades it took
+    # by itself. Read the board accordingly: only rows opened after the deploy
+    # are forward evidence.
+    Arm("BASE_75k_quiet_4m", "floor75", 4, quiet=True,
+        note="every graduation over $75k whose pool is still quiet (under "
+             "100 trades) when it is bought, out at 4m"),
     # NOT part of the tournament, and kept when everything else went. These
     # two are a PRE-REGISTERED A/B on the rug signals — a never-seen symbol
     # rugs 18% against 3%, a daytime-UTC open 15% against 5% — opened
@@ -703,12 +723,13 @@ CONTROLS: tuple[Arm, ...] = tuple(a for a in ARMS if a.is_control)
 #: returned no edge. The count is pinned rather than free because an arm that
 #: appears mid-tournament changes what every other number means — so changing
 #: it must be a deliberate edit with a date, not a side effect.
-assert len(ARMS) == 12, (
+assert len(ARMS) == 13, (
     "three B3 arms (3m FROM ENTRY retired 2026-09-16 at -$58.90), B3 bought "
     "early (added 2026-09-16), the two rug arms (added 2026-09-16), the two "
     "shorter graduation clocks g2 and g3 (added 2026-09-17), the fast pair "
     "E75/E75T (added 2026-09-19), the quiet-pool arm BASE_75k_quiet_5m and the "
-    "four $25k clocks (all added 2026-09-20), the BASELINE, the $500k+flow "
+    "four $25k clocks (all added 2026-09-20), its four-minute twin "
+    "BASE_75k_quiet_4m (added 2026-09-21), the BASELINE, the $500k+flow "
     "candidate, and the two "
     "pre-registered A/B arms — which run but are flagged off the tournament "
     f"board — not {len(ARMS)}. Karthik retired BASE_10k_2m (out of money after "
@@ -738,10 +759,10 @@ assert all(a.tp is None and a.trail is None for a in ARMS), (
 assert all(a.stop is None or a.stop == Decimal("0.10") for a in ARMS), (
     "one stop level, so the twins differ in ONE thing. Sweeping levels here "
     "would be fitting a parameter on the same data that suggested it")
-assert len([a for a in ARMS if not a.is_control]) == 11, (
+assert len([a for a in ARMS if not a.is_control]) == 12, (
     "`config.required_pf` is calibrated on the maximum of FORTY-TWO noise "
-    "draws. Eleven arms are now judged against it, so the bar is if anything "
-    "CONSERVATIVE — the luckiest of eleven reaches less than the luckiest "
+    "draws. Twelve arms are now judged against it, so the bar is if anything "
+    "CONSERVATIVE — the luckiest of twelve reaches less than the luckiest "
     "of forty-two. Left as it is deliberately: a bar that is too hard costs a "
     "real finding some time, where one that is too easy costs a false one nothing")
 assert all(a.clock in {"entry", "graduation"} for a in ARMS), "a clock is one of two"

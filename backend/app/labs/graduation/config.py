@@ -985,6 +985,12 @@ class FreshBookSpec:
 FRESH_BOOKS: tuple[FreshBookSpec, ...] = (
     FreshBookSpec("BASE_75k_quiet_5m", datetime(2026, 9, 20, 15, 0, tzinfo=UTC),
                   Decimal(500), Decimal(100)),
+    # The four-minute twin starts from the same minute on purpose: its early
+    # trades are the five-minute book's own coins re-priced at four minutes
+    # (`scripts/seed_quiet_4m.py`), so the two walks are comparable only if
+    # they are funded from the same start with the same money.
+    FreshBookSpec("BASE_75k_quiet_4m", datetime(2026, 9, 20, 15, 0, tzinfo=UTC),
+                  Decimal(500), Decimal(100)),
     *(FreshBookSpec(book, datetime(2026, 9, 21, 14, 15, tzinfo=UTC),
                     Decimal(500), Decimal(100))
       for book in ("BAND_55k_2m", "BAND_55k_5m", "BAND_55k_quiet_5m")),

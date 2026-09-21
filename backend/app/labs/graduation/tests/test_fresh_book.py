@@ -10,7 +10,8 @@ from app.labs.graduation import config
 from app.labs.graduation.api import fresh_book
 from app.labs.graduation.tournament import ARMS, CONTROLS, accepts
 
-BQ, *SWEEP = config.FRESH_BOOKS     # the quiet arm, then the three band books
+# the quiet pair on one start, then the three band books
+BQ, BQ4, *SWEEP = config.FRESH_BOOKS
 
 #: The book the panel dropped on 2026-09-20, whose arm still runs as this
 #: one's control: the wallet walk that fed it is what this file tests.
@@ -20,6 +21,12 @@ B75 = config.FreshBookSpec("BASE_75k_5m", BQ.start, Decimal(500), Decimal(100))
 def test_the_page_shows_the_quiet_book_and_the_band_books() -> None:
     assert (BQ.book, BQ.capital_usd, BQ.ticket_usd) == (
         "BASE_75k_quiet_5m", Decimal(500), Decimal(100))
+    # The four-minute twin is funded from the SAME minute with the same money:
+    # its early trades are this book's own coins re-priced at four minutes
+    # (`scripts/seed_quiet_4m.py`), so two walks from different starts would
+    # not be comparable.
+    assert (BQ4.book, BQ4.start, BQ4.capital_usd, BQ4.ticket_usd) == (
+        "BASE_75k_quiet_4m", BQ.start, Decimal(500), Decimal(100))
     # Three books on one band, same money from the same minute: two clocks,
     # and the quiet filter tested against the five-minute one.
     assert [s.book for s in SWEEP] == [
