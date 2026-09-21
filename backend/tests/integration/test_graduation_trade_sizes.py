@@ -122,3 +122,22 @@ async def test_the_fresh_book_lists_only_its_own_trades_sized_as_its_wallet(
     assert [t.mint for t in book.open_trades] == ["MintOpen"]
     assert book.size_start_usd == D(500) and book.size_ticket_usd == D(100)
     assert (book.size_funded, book.size_skipped) == (5, 1)
+
+
+async def test_the_slow_page_calls_are_read_once_and_shared(db_session, monkeypatch) -> None:
+    """`returns` scans every sample the lab holds and `status` counts four
+    whole tables; the page asked for both on every load, and `returns` took
+    253 seconds. Each is now read once and handed to everyone until it goes
+    stale, so a second viewer costs nothing."""
+    from app.labs.graduation import api, config
+
+    monkeypatch.setattr(config, "enabled", lambda: True)
+    for attr, call in (("_RETURNS", api.returns), ("_STATUS", api.status)):
+        setattr(api, attr, None)
+        first = await call(db=db_session)
+        cached = getattr(api, attr)
+        assert cached is not None and cached[1] == first
+        # A second viewer gets exactly what the first one read, not a new scan.
+        setattr(api, attr, (cached[0], first))
+        assert await call(db=db_session) is first
+        setattr(api, attr, None)

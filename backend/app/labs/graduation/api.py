@@ -10,6 +10,7 @@ recorder has seen; it ranks nothing and recommends nothing.
 
 from __future__ import annotations
 
+import asyncio
 import random
 from collections.abc import Iterable, Sequence
 from functools import lru_cache
@@ -218,9 +219,30 @@ class GraduationStatus(BaseModel):
     stall_threshold_s: int = 0
 
 
+#: `status` counts four whole tables - 1.5M postgrad samples among them - and
+#: took 11.7 s, for a line the page refreshes every 30 s. Thirty seconds of
+#: staleness on a health readout costs nothing; the scans cost the database.
+_STATUS: tuple[datetime, GraduationStatus] | None = None
+_STATUS_TTL = timedelta(seconds=30)
+_STATUS_LOCK = asyncio.Lock()
+
+
 @router.get("/status", response_model=GraduationStatus)
 async def status(db: AsyncSession = Depends(get_db)) -> GraduationStatus:
     """Everything the board renders, in one call."""
+    global _STATUS
+    if _STATUS is not None and datetime.now(UTC) - _STATUS[0] < _STATUS_TTL:
+        return _STATUS[1]
+    async with _STATUS_LOCK:
+        if _STATUS is not None and datetime.now(UTC) - _STATUS[0] < _STATUS_TTL:
+            return _STATUS[1]
+        out = await _status_now(db)
+        _STATUS = (datetime.now(UTC), out)
+        return out
+
+
+async def _status_now(db: AsyncSession) -> GraduationStatus:
+    """The counts themselves, called with `_STATUS_LOCK` held."""
     base = GraduationStatus(
         running=config.enabled(),
         rpc_host=config.safe_rpc_url(),
@@ -578,27 +600,25 @@ async def paper_trades(book: str = "E05_hold_5m",
 #: Multi-pool series are excluded: a mint whose marks crossed pools shows a
 #: "peak" that is a change of denomination, which is how one token appeared
 #: to do 162x in a minute.
+#: ONE pass over the samples, 2026-09-21. It was four - a GROUP BY for the
+#: pair count, a DISTINCT ON for the open, a GROUP BY for the peak and another
+#: DISTINCT ON for the close - each reading all 1.5M rows, and the page waited
+#: 253 seconds for them. The same numbers come out of a single GROUP BY whose
+#: first and last price are `array_agg` picks: 25.9 seconds, proved equal to
+#: the old query row for row on a slice of the table before it was swapped in.
+#: The mint count comes out of the same pass rather than a fifth scan.
 _RETURNS_SQL = text("""
-WITH pairs AS (
-    SELECT mint, count(DISTINCT pair_address) AS np
+WITH m AS (
+    SELECT mint,
+           count(DISTINCT pair_address) AS np,
+           max(price_native) AS pk,
+           (array_agg(price_native ORDER BY ts ASC))[1] AS op,
+           (array_agg(price_native ORDER BY ts DESC))[1] AS lp
       FROM grad_postgrad_samples WHERE price_native > 0 GROUP BY mint),
-opened AS (
-    SELECT DISTINCT ON (mint) mint, price_native AS op
-      FROM grad_postgrad_samples WHERE price_native > 0 ORDER BY mint, ts),
-peaked AS (
-    SELECT mint, max(price_native) AS pk
-      FROM grad_postgrad_samples WHERE price_native > 0 GROUP BY mint),
-ended AS (
-    SELECT DISTINCT ON (mint) mint, price_native AS lp
-      FROM grad_postgrad_samples WHERE price_native > 0 ORDER BY mint, ts DESC),
-m AS (
-    SELECT o.mint, p.pk / o.op AS x, e.lp / o.op AS final
-      FROM opened o
-      JOIN peaked p USING (mint)
-      JOIN ended e USING (mint)
-      JOIN pairs USING (mint)
-     WHERE pairs.np = 1)
+m2 AS (
+    SELECT pk / op AS x, lp / op AS final FROM m WHERE np = 1 AND op > 0)
 SELECT
+    (SELECT count(*) FROM m)                                   AS priced,
     count(*)                                                   AS usable,
     count(*) FILTER (WHERE x >= 1.5)                           AS over_1_5x,
     count(*) FILTER (WHERE x >= 2)                             AS over_2x,
@@ -610,7 +630,7 @@ SELECT
     count(*) FILTER (WHERE final < 1)                          AS ended_below,
     count(*) FILTER (WHERE final < 0.1)                        AS ended_down_90,
     max(x)                                                     AS best
-  FROM m
+  FROM m2
 """)
 
 
@@ -642,16 +662,26 @@ class Returns(BaseModel):
     best_multiple: Decimal | None = None
 
 
+#: The last answer and when it was read. This is a lifetime count over every
+#: sample the lab holds, it moves by a coin at a time, and it is the slowest
+#: thing the page asks for: one viewer refreshing every five minutes used to
+#: put a four-minute scan on the database each time.
+_RETURNS: tuple[datetime, Returns] | None = None
+_RETURNS_TTL = timedelta(minutes=10)
+
+
 @router.get("/returns", response_model=Returns)
 async def returns(db: AsyncSession = Depends(get_db)) -> Returns:
     """How far each graduated token got, and where it ended up."""
+    global _RETURNS
     if not config.enabled():
         return Returns()
+    now = datetime.now(UTC)
+    if _RETURNS is not None and now - _RETURNS[0] < _RETURNS_TTL:
+        return _RETURNS[1]
     row = (await db.execute(_RETURNS_SQL)).one()
-    priced = int(await db.scalar(
-        select(func.count(func.distinct(GradPostgradSample.mint)))
-        .where(GradPostgradSample.price_native > 0)) or 0)
-    return Returns(
+    priced = int(row.priced or 0)
+    out = Returns(
         running=True,
         seen=int(await db.scalar(select(func.count()).select_from(GradToken)) or 0),
         migrated=int(await db.scalar(
@@ -673,6 +703,8 @@ async def returns(db: AsyncSession = Depends(get_db)) -> Returns:
         best_multiple=(Decimal(row.best).quantize(Decimal("0.1"))
                        if row.best is not None else None),
     )
+    _RETURNS = (now, out)
+    return out
 
 
 class SplitWallet(BaseModel):
