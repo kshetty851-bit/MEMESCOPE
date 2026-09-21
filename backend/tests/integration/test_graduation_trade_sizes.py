@@ -132,12 +132,19 @@ async def test_the_slow_page_calls_are_read_once_and_shared(db_session, monkeypa
     from app.labs.graduation import api, config
 
     monkeypatch.setattr(config, "enabled", lambda: True)
+    first_returns = None
     for attr, call in (("_RETURNS", api.returns), ("_STATUS", api.status)):
         setattr(api, attr, None)
         first = await call(db=db_session)
+        first_returns = first_returns or first
         cached = getattr(api, attr)
         assert cached is not None and cached[1] == first
         # A second viewer gets exactly what the first one read, not a new scan.
         setattr(api, attr, (cached[0], first))
         assert await call(db=db_session) is first
         setattr(api, attr, None)
+    # ... and a stale answer is handed over at once rather than making the
+    # viewer wait for the new one: `returns` reads every sample the lab holds.
+    api._RETURNS = (datetime.now(UTC) - timedelta(days=1), first_returns)
+    assert await api.returns(db=db_session) is first_returns
+    api._RETURNS = None
