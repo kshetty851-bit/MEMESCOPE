@@ -251,7 +251,9 @@ def test_a_stop_is_only_real_if_the_price_is_fresh_enough_to_fire_it():
     from app.labs.graduation.tournament import ARMS
 
     stops = [a for a in ARMS if a.stop is not None]
-    assert stops, "no stop arms to protect"
+    # No arm has carried a stop since B3_198k_5m_SL was retired on 2026-09-21
+    # (it made $404 where its stopless twin made $508). The rules below still
+    # bind the day one comes back, so they are asserted either way.
     assert config.HELD_INTERVAL_S <= 5, (
         f"open positions are re-priced every {config.HELD_INTERVAL_S}s; at "
         "1.14% a second a stop cannot fill near its level")
