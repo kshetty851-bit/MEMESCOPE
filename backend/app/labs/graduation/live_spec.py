@@ -50,7 +50,12 @@ from app.lab.spec import Exits, Strategy
 D = Decimal
 _Money = TypeVar("_Money", float, Decimal)
 
-SPEC_VERSION = "gradlive-1.3.0"
+#: 1.4.0 adds G-QUIET (2026-09-21). The version MUST be bumped with a new
+#: strategy: `strategy_row_id` finds the tournament row by version, so adding
+#: one under the old version leaves that row holding the old `SPEC_HASH`, and
+#: `app.lab.health` then reads the difference as drift and halts every arm on
+#: it. A new version means a new tournament row, which is what 1.1.0 did.
+SPEC_VERSION = "gradlive-1.4.0"
 
 #: Each live arm and the paper arm it mirrors. Recorded so a reader can put the
 #: real book beside the arm it is supposed to be copying, and so nothing has to
@@ -62,7 +67,7 @@ SPEC_VERSION = "gradlive-1.3.0"
 #: five-minute hold sat through four of them where the four-minute one sat
 #: through one. Three events decide that, so it is an option, not a finding.
 PAPER_BOOKS = {"G-B3-5M": "B3_198k_5m", "G-B3-4M": "B3_198k_4m",
-               "G-BAS-5M": "BASE_75k_5m"}
+               "G-BAS-5M": "BASE_75k_5m", "G-QUIET": "BASE_75k_quiet_5m"}
 #: The same mapping read the other way: the live arm a paper entry feeds.
 MIRRORS = {book: sid for sid, book in PAPER_BOOKS.items()}
 
@@ -75,7 +80,7 @@ POOL_FLOOR_USD = 198_000
 #: Per arm, because the baseline buys a different population: every graduation
 #: over $75k, which is where its 4.8% rug rate comes from against B3's 0.3%.
 POOL_FLOORS = {"G-B3-5M": POOL_FLOOR_USD, "G-B3-4M": POOL_FLOOR_USD,
-               "G-BAS-5M": 75_000}
+               "G-BAS-5M": 75_000, "G-QUIET": 75_000}
 
 #: The largest trade size Start offers for an arm, where that is smaller than
 #: `REAL_WALLET_ENTRY_SIZE_USD`.
@@ -236,6 +241,38 @@ STRATEGIES: tuple[Strategy, ...] = (
             "It is also the board's control: an arm that exists to be the "
             "comparison is not evidence of an edge. Nominating it is a "
             "separate decision and starting it is the operator's alone."
+        ),
+    ),
+    Strategy(
+        id="G-QUIET",
+        name="GRADUATION-QUIET-5MIN",
+        hypothesis=(
+            "The baseline's own coins, minus the ones a crowd has already "
+            "found: a graduation over $75k whose pool has had fewer than 100 "
+            "transactions when the book buys, held five minutes. Measured "
+            "over 579 of the baseline's trades, the rug rate runs 3.1% under "
+            "60 transactions and 23.7% over 400."
+        ),
+        checkpoint_minutes=0,
+        entry=(),
+        size_usd=D("100"),
+        max_concurrent=10,
+        max_exposure_usd=D("1000"),
+        exits=Exits(take_profit=None, stop_loss=None, time_exit_hours=_hours(5)),
+        evidence="FORWARD_PAPER_63_TRADES_OVER_16_HOURS",
+        overfit_risk="HIGH",
+        note=(
+            "REGISTERED AT KARTHIK'S REQUEST, 2026-09-21, with its evidence "
+            "stated against it. ITS TEST IS NOT FINISHED: the pre-registered "
+            "judge is 150 closed trades or seven days, beating BASE_75k_5m "
+            "over the same window AND without its best day. At registration "
+            "it had 63 trades and was BEHIND that control on money ($103 "
+            "against $112), and neither book had met a rug — the window has "
+            "had none to dodge, so the rule has not been tested at all. The "
+            "same rule on a $25k floor is the worst arm on the board "
+            "(-13.8% a trade over 41 trades), which is the opposite of what "
+            "the hypothesis predicts. Nominating it is a separate decision "
+            "and starting it is the operator's alone."
         ),
     ),
 )
