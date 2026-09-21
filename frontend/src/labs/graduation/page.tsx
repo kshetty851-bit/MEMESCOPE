@@ -665,21 +665,29 @@ function FreshTrades({ book, size }: { book: string; size: WalletSize }) {
           empty="Nothing open right now. Each trade is held for only a few minutes, so the book sits in cash between them."
         />
       </div>
-      <div className="flex flex-col gap-1">
-        <h4 className="text-label uppercase tracking-[0.08em] text-ink-dim">
-          Closed — {closed.length}
-        </h4>
-        <TradeTable
-          rows={closed}
-          closed
-          size={size}
-          sort={sort}
-          onSort={(key) =>
-            setSort((s) => ({ key, desc: s.key === key ? !s.desc : true }))
-          }
-          empty="nothing closed yet"
-        />
-      </div>
+      {/* Folded away by default: a book runs to hundreds of closed trades,
+          and four of them on one page is a wall of rows between the reader
+          and the next book's balance. The count stays visible either way. */}
+      <details className="flex flex-col gap-1">
+        <summary className="grad-row cursor-pointer list-none text-label uppercase tracking-[0.08em] text-ink-dim hover:text-ink">
+          <span className="mr-1 inline-block transition-transform [[open]_&]:rotate-90">
+            &#9656;
+          </span>
+          Closed — {closed.length} · click to {closed.length ? "open" : "check"}
+        </summary>
+        <div className="mt-1">
+          <TradeTable
+            rows={closed}
+            closed
+            size={size}
+            sort={sort}
+            onSort={(key) =>
+              setSort((s) => ({ key, desc: s.key === key ? !s.desc : true }))
+            }
+            empty="nothing closed yet"
+          />
+        </div>
+      </details>
     </div>
   );
 }
