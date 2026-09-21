@@ -59,12 +59,18 @@ def test_the_tournament_is_a_hold_sweep_with_a_baseline_on_every_hold() -> None:
     One baseline per hold, so no hold is judged without an unselected twin on
     its own clock. Nothing on this board decides by hashing a mint.
     """
-    assert len(ARMS) == 12
+    assert len(ARMS) == 13
     # Karthik's quiet-pool arm (2026-09-20): the baseline's rule, refusing a
     # pool already past `QUIET_MAX_POOL_TXS` transactions. Not a control, so
     # the baseline below is unchanged and it has something to be judged against.
-    assert any(a.name == "BASE_75k_quiet_5m" and a.quiet and not a.is_control
-               for a in ARMS)
+    # Its four-minute twin (2026-09-21) differs in the clock and NOTHING else,
+    # so the pair measures the fifth minute — where the rugs land — on its own.
+    quiet75 = sorted((a for a in ARMS if a.entry == "floor75"), key=lambda a: a.hold)
+    assert [a.name for a in quiet75] == ["BASE_75k_quiet_4m", "BASE_75k_quiet_5m"]
+    assert [a.hold for a in quiet75] == [4, 5]
+    assert all(a.quiet and not a.is_control for a in quiet75)
+    assert len({(a.entry, a.tp, a.trail, a.stop, a.drain, a.clock, a.locked, a.quiet)
+                for a in quiet75}) == 1
     # The fast pair (2026-09-19): E75T is E75 plus ONE condition, a clean
     # operator record, so E75 is its matched control on the same clock.
     fast = {a.name: a for a in ARMS if a.entry in ("fast75", "fast75_trust")}
