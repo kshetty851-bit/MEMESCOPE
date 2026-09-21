@@ -186,10 +186,12 @@ function TradeRow({
   p,
   closed,
   size,
+  since = null,
 }: {
   p: PaperPosition;
   closed: boolean;
   size?: WalletSize | null;
+  since?: string | null;
 }) {
   const pnl = p.pnl_usd === null ? null : Number(p.pnl_usd);
   const tone = p.voided
@@ -283,6 +285,22 @@ function TradeRow({
           <>
             {EXIT_LABEL[p.close_reason ?? ""] ?? p.close_reason}
             <span className="block">{minutes}m held</span>
+            {p.closed_at ? (
+              <span
+                className="block tabular-nums"
+                title={
+                  since
+                    ? `Closed ${new Date(p.closed_at).toLocaleString()} — ${runHour(
+                        p.closed_at, since)} into this book's run`
+                    : `Closed ${new Date(p.closed_at).toLocaleString()}`
+                }
+              >
+                {new Date(p.closed_at).toLocaleTimeString("en-GB", {
+                  hour: "2-digit", minute: "2-digit",
+                })}
+                {since ? ` · ${runHour(p.closed_at, since)}` : ""}
+              </span>
+            ) : null}
             {p.restated ? (
               <span
                 className="mt-0.5 inline-block rounded-full bg-accent/15 px-2 py-0.5 text-accent"
@@ -345,6 +363,7 @@ function TradeTable({
   sort = null,
   onSort,
   size = null,
+  since = null,
 }: {
   rows: PaperPosition[];
   closed: boolean;
@@ -352,6 +371,7 @@ function TradeTable({
   sort?: { key: SortKey; desc: boolean } | null;
   onSort?: (key: SortKey) => void;
   size?: WalletSize | null;
+  since?: string | null;
 }) {
   if (!rows.length) return <p className="text-xs text-ink-dim">{empty}</p>;
   const ordered = sort
@@ -405,7 +425,7 @@ function TradeTable({
         </thead>
         <tbody>
           {ordered.map((p: PaperPosition) => (
-            <TradeRow key={p.mint} p={p} closed={closed} size={size} />
+            <TradeRow key={p.mint} p={p} closed={closed} size={size} since={since} />
           ))}
         </tbody>
         <tfoot>
@@ -616,6 +636,12 @@ function RulesPanel() {
  * reader cannot recover from the page otherwise because the tournament has
  * been reset when its rules changed.
  */
+/** How far into a book's run a moment falls, in the timer's own terms. */
+function runHour(at: string, since: string): string {
+  const hours = (new Date(at).getTime() - new Date(since).getTime()) / 3_600_000;
+  return hours < 1 ? `${Math.max(0, Math.round(hours * 60))}m in` : `h+${Math.floor(hours)}`;
+}
+
 function Elapsed({ since }: { since: string | null }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -642,7 +668,8 @@ function Elapsed({ since }: { since: string | null }) {
  * the $500 wallet made on each, so they add up to the balance above them; a
  * trade it had no free money for says skipped.
  */
-function FreshTrades({ book, size }: { book: string; size: WalletSize }) {
+function FreshTrades({ book, size, since }:
+  { book: string; size: WalletSize; since: string }) {
   const { data, isLoading } = useFreshTrades(book);
   const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({
     key: "closed_at",
@@ -680,6 +707,7 @@ function FreshTrades({ book, size }: { book: string; size: WalletSize }) {
             rows={closed}
             closed
             size={size}
+            since={since}
             sort={sort}
             onSort={(key) =>
               setSort((s) => ({ key, desc: s.key === key ? !s.desc : true }))
@@ -1044,6 +1072,7 @@ function LeaderboardPanel() {
               </p>
               <FreshTrades
                 book={fresh.book}
+                since={fresh.started_at}
                 size={{ ticket: Number(fresh.ticket_usd), split: tickets }}
               />
               <FreshHeld book={fresh.book} />
