@@ -25,6 +25,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.logging import get_logger
 from app.db.session import get_db
 from app.labs.graduation import config, live_spec, moneyblock
 from app.labs.graduation.models import (
@@ -40,6 +41,8 @@ from app.labs.graduation.paper import PaperBook, costs, net_return, positions
 from app.labs.graduation.tournament import ARMS
 
 router = APIRouter(prefix="/labs/graduation", tags=["graduation-lab"])
+
+logger = get_logger(__name__)
 
 
 class Funnel(BaseModel):
@@ -668,6 +671,17 @@ class Returns(BaseModel):
 #: put a four-minute scan on the database each time.
 _RETURNS: tuple[datetime, Returns] | None = None
 _RETURNS_TTL = timedelta(minutes=10)
+#: One scan at a time, and never in front of a viewer after the first one.
+_RETURNS_LOCK = asyncio.Lock()
+
+#: Background refreshes, held so the event loop cannot drop one mid-flight.
+_TASKS: set[asyncio.Task[Any]] = set()
+
+
+def _spawn(coro: Any) -> None:
+    task = asyncio.create_task(coro)
+    _TASKS.add(task)
+    task.add_done_callback(_TASKS.discard)
 
 
 @router.get("/returns", response_model=Returns)
@@ -677,8 +691,38 @@ async def returns(db: AsyncSession = Depends(get_db)) -> Returns:
     if not config.enabled():
         return Returns()
     now = datetime.now(UTC)
-    if _RETURNS is not None and now - _RETURNS[0] < _RETURNS_TTL:
+    if _RETURNS is not None:
+        # STALE WHILE IT REFRESHES. Only the first caller after a restart waits
+        # for the scan; everyone after gets the last answer at once and the new
+        # one is read behind them. These are lifetime counts over every sample
+        # the lab holds: ten minutes out of date is not a difference anyone can
+        # see, and a minute of waiting is.
+        if now - _RETURNS[0] >= _RETURNS_TTL and not _RETURNS_LOCK.locked():
+            _spawn(_refresh_returns())
         return _RETURNS[1]
+    async with _RETURNS_LOCK:
+        if _RETURNS is not None:
+            return _RETURNS[1]
+        return await _returns_now(db)
+
+
+async def _refresh_returns() -> None:
+    """Re-read the returns behind whoever asked, on a session of its own: a
+    request's session is closed the moment its response is sent."""
+    from app.db.session import SessionFactory
+
+    async with _RETURNS_LOCK:
+        try:
+            async with SessionFactory() as session:
+                await _returns_now(session)
+        except Exception as exc:   # a stale answer beats an error page
+            logger.info("graduation_returns_refresh_failed", error=type(exc).__name__)
+
+
+async def _returns_now(db: AsyncSession) -> Returns:
+    """The scan itself. Callers hold `_RETURNS_LOCK`."""
+    global _RETURNS
+    now = datetime.now(UTC)
     row = (await db.execute(_RETURNS_SQL)).one()
     priced = int(row.priced or 0)
     out = Returns(
@@ -1212,6 +1256,8 @@ class FreshHeld(BaseModel):
 
 #: Every pool read costs two Helius calls; the page polls every two minutes.
 _HELD: dict[str, tuple[datetime, FreshHeld]] = {}
+#: One on-chain sweep at a time, whichever book asked for it.
+_HELD_LOCK = asyncio.Lock()
 _HELD_TTL = timedelta(minutes=2)
 #: Newest trades read per refresh (the wallet's first trades always are).
 # ponytail: a cap, not paging; page the list once a book outgrows it.
@@ -1232,6 +1278,20 @@ def held_value(base: int, quote: int, base_decimals: int, quote_decimals: int,
     return q * tokens / (b + tokens) * (1 - fee) * sol_usd, 2 * q * sol_usd
 
 
+async def _refresh_held(book: str) -> None:
+    """Re-read a held book behind whoever asked, on a session of its own."""
+    from app.db.session import SessionFactory
+
+    async with _HELD_LOCK:
+        try:
+            async with SessionFactory() as session:
+                _HELD.pop(book, None)          # take the reading, not the cache
+                await fresh_held(book=book, db=session)
+        except Exception as exc:
+            logger.info("graduation_held_refresh_failed", book=book,
+                        error=type(exc).__name__)
+
+
 @router.get("/fresh/held", response_model=FreshHeld)
 async def fresh_held(book: str, db: AsyncSession = Depends(get_db)) -> FreshHeld:
     """What a fresh book's closed coins would be worth now, never sold."""
@@ -1248,7 +1308,12 @@ async def fresh_held(book: str, db: AsyncSession = Depends(get_db)) -> FreshHeld
         return out
     now = datetime.now(UTC)
     hit = _HELD.get(book)
-    if hit is not None and now - hit[0] < _HELD_TTL:
+    if hit is not None:
+        # Stale while it refreshes, as `returns` is: this one reads up to sixty
+        # pools on-chain and took 19.5s cold, which is 19.5s of a viewer's life
+        # every two minutes.
+        if now - hit[0] >= _HELD_TTL and not _HELD_LOCK.locked():
+            _spawn(_refresh_held(book))
         return hit[1]
     tickets = int(spec.capital_usd / spec.ticket_usd)
     paper = await _paper(db, book=spec.book, limit=None, ticket=float(spec.ticket_usd),
