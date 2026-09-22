@@ -2,6 +2,7 @@ import { api } from "@/lib/api-client";
 
 import type {
   MomentumBoard,
+  MomentumOpenBook,
   MomentumSignals,
   MomentumStatus,
   MomentumTrades,
@@ -18,6 +19,10 @@ export function fetchBoard(): Promise<MomentumBoard> {
 
 export function fetchTrades(arm: string): Promise<MomentumTrades> {
   return api.get<MomentumTrades>(`/labs/momentum/trades?arm=${encodeURIComponent(arm)}`);
+}
+
+export function fetchOpenBook(): Promise<MomentumOpenBook> {
+  return api.get<MomentumOpenBook>("/labs/momentum/open");
 }
 
 export function fetchSignals(): Promise<MomentumSignals> {

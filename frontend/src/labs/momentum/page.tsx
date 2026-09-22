@@ -8,11 +8,12 @@ import { EmptyState, ErrorState } from "@/components/ui/states";
 
 import {
   useMomentumBoard,
+  useMomentumOpenBook,
   useMomentumSignals,
   useMomentumStatus,
   useMomentumTrades,
 } from "./hooks";
-import type { ArmRow, MomentumStatus, SplitRow, TradeRow } from "./types";
+import type { ArmRow, MomentumStatus, OpenRow, SplitRow, TradeRow } from "./types";
 
 /**
  * MOMENTUM LAB
@@ -74,6 +75,11 @@ function time(iso: string | null): string {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+function clock(iso: string | null): string {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
 }
 
 const dex = (pair: string) => `https://dexscreener.com/solana/${pair}`;
@@ -230,6 +236,105 @@ function Trades({ arm }: { arm: string }) {
         </tbody>
       </table>
     </div>
+  );
+}
+
+/** What the book is holding right now, valued at what selling it would fetch.
+ *  One row per BUY: the same candle usually puts several strategies into the
+ *  same coin at the same price, so they share a row. */
+function Holding() {
+  const { data, isLoading } = useMomentumOpenBook();
+  if (isLoading) return <Skeleton className="h-40 w-full" />;
+  if (!data?.running) return null;
+  const buys = new Map<string, OpenRow[]>();
+  for (const p of data.positions) {
+    const key = `${p.pair_address}|${p.opened_at ?? p.decided_at}|${p.open_price ?? "x"}`;
+    buys.set(key, [...(buys.get(key) ?? []), p]);
+  }
+  const pnl = data.value_usd - data.staked_usd;
+  return (
+    <Panel>
+      <PanelHeader>
+        <PanelTitle>Holding now — {data.positions.length} open trades</PanelTitle>
+        <span className="text-xs text-ink-dim">
+          {usd(data.staked_usd)} in, worth{" "}
+          <b className={tone(pnl)}>{usd(data.value_usd)}</b> if sold now ({usd(pnl)})
+        </span>
+      </PanelHeader>
+      <div className="p-4">
+        {!buys.size ? (
+          <p className="text-xs text-ink-dim">Nothing open. Every strategy is in cash.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[720px] text-xs">
+              <thead>
+                <tr className="text-left text-ink-dim">
+                  <th className="pb-1 pr-3 font-medium">Token</th>
+                  <th className="pb-1 pr-3 font-medium">Bought</th>
+                  <th className="pb-1 pr-3 text-right font-medium">Buy</th>
+                  <th className="pb-1 pr-3 text-right font-medium">Now</th>
+                  <th className="pb-1 pr-3 text-right font-medium">Move</th>
+                  <th className="pb-1 pr-3 text-right font-medium">Worth each</th>
+                  <th className="pb-1 pr-3 text-right font-medium">Sells by</th>
+                  <th className="pb-1 font-medium">Strategies</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[...buys.values()]
+                  .sort((a, b) => (b[0]?.move_pct ?? 0) - (a[0]?.move_pct ?? 0))
+                  .map((group) => {
+                    const p = group[0];
+                    if (!p) return null;
+                    const held = group.filter((g) => g.value_usd !== null);
+                    const due = group
+                      .map((g) => g.due_at)
+                      .filter((d): d is string => d !== null)
+                      .sort();
+                    const first = due[0];
+                    const last = due[due.length - 1];
+                    return (
+                      <tr key={`${p.pair_address}-${p.opened_at ?? p.decided_at}`}
+                          className="border-t border-line tabular-nums">
+                        <td className="py-1 pr-3">
+                          <a className="text-accent hover:underline" href={dex(p.pair_address)}
+                             target="_blank" rel="noreferrer">
+                            {p.symbol ?? p.mint.slice(0, 6)}
+                          </a>
+                          <span className="ml-1 text-ink-dim">{p.dex_id}</span>
+                        </td>
+                        <td className="py-1 pr-3 text-ink-dim">
+                          {held.length ? `${clock(p.opened_at)} · ${ago(p.opened_at)}` : "buying…"}
+                        </td>
+                        <td className="py-1 pr-3 text-right">{price(p.open_price)}</td>
+                        <td className="py-1 pr-3 text-right">{price(p.last_price)}</td>
+                        <td className={`py-1 pr-3 text-right ${tone(p.move_pct)}`}>
+                          {pct(p.move_pct, 1)}
+                        </td>
+                        <td className={`py-1 pr-3 text-right ${tone(p.pnl_usd)}`}>
+                          {usd(p.value_usd)}
+                        </td>
+                        <td className="py-1 pr-3 text-right text-ink-dim">
+                          {first ? clock(first) : "—"}
+                          {last && last !== first ? `–${clock(last)}` : ""}
+                        </td>
+                        <td className="py-1 text-ink-dim">
+                          {group.map((g) => g.arm).sort().join(", ")}
+                        </td>
+                      </tr>
+                    );
+                  })}
+              </tbody>
+            </table>
+            <p className="pt-2 text-xs text-ink-dim">
+              &ldquo;Worth&rdquo; is what one {usd(data.ticket_usd).replace(".00", "")} trade would
+              fetch if it were sold into the pool this second — the fee, the router and the price its
+              own sale would move, all paid. A coin that has not moved is worth a little under its
+              ticket for that reason. A take-profit strategy can also sell before the time shown.
+            </p>
+          </div>
+        )}
+      </div>
+    </Panel>
   );
 }
 
@@ -496,6 +601,7 @@ export function MomentumLabPage() {
         </p>
       </header>
       <Health s={data} />
+      <Holding />
       <Board start={data.start_usd} ticket={data.ticket_usd} />
       <Radar />
     </div>
