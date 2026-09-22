@@ -51,12 +51,12 @@ D = Decimal
 _Money = TypeVar("_Money", float, Decimal)
 
 #: 1.4.0 adds G-QUIET (2026-09-21); 1.5.0 adds its four-minute twin
-#: G-QUIET4 (2026-09-22). The version MUST be bumped with a new
-#: strategy: `strategy_row_id` finds the tournament row by version, so adding
+#: G-QUIET4 (2026-09-22); 1.6.0 adds G-BAND5 the same day. The version MUST be
+#: bumped with a new strategy: `strategy_row_id` finds the tournament row by version, so adding
 #: one under the old version leaves that row holding the old `SPEC_HASH`, and
 #: `app.lab.health` then reads the difference as drift and halts every arm on
 #: it. A new version means a new tournament row, which is what 1.1.0 did.
-SPEC_VERSION = "gradlive-1.5.0"
+SPEC_VERSION = "gradlive-1.6.0"
 
 #: Each live arm and the paper arm it mirrors. Recorded so a reader can put the
 #: real book beside the arm it is supposed to be copying, and so nothing has to
@@ -69,7 +69,7 @@ SPEC_VERSION = "gradlive-1.5.0"
 #: through one. Three events decide that, so it is an option, not a finding.
 PAPER_BOOKS = {"G-B3-5M": "B3_198k_5m", "G-B3-4M": "B3_198k_4m",
                "G-BAS-5M": "BASE_75k_5m", "G-QUIET": "BASE_75k_quiet_5m",
-               "G-QUIET4": "BASE_75k_quiet_4m"}
+               "G-QUIET4": "BASE_75k_quiet_4m", "G-BAND5": "BAND_55k_5m"}
 #: The same mapping read the other way: the live arm a paper entry feeds.
 MIRRORS = {book: sid for sid, book in PAPER_BOOKS.items()}
 
@@ -82,7 +82,12 @@ POOL_FLOOR_USD = 198_000
 #: Per arm, because the baseline buys a different population: every graduation
 #: over $75k, which is where its 4.8% rug rate comes from against B3's 0.3%.
 POOL_FLOORS = {"G-B3-5M": POOL_FLOOR_USD, "G-B3-4M": POOL_FLOOR_USD,
-               "G-BAS-5M": 75_000, "G-QUIET": 75_000, "G-QUIET4": 75_000}
+               "G-BAS-5M": 75_000, "G-QUIET": 75_000, "G-QUIET4": 75_000,
+               #: A BAND, not a floor: this arm also refuses anything at or
+               #: above $75k, which no other live arm does. Reported here as
+               #: its lower edge because the field has nowhere to say "and
+               #: under" — the arm's own rule is what decides.
+               "G-BAND5": 55_000}
 
 #: The largest trade size Start offers for an arm, where that is smaller than
 #: `REAL_WALLET_ENTRY_SIZE_USD`.
@@ -313,6 +318,47 @@ STRATEGIES: tuple[Strategy, ...] = (
             "opened after 2026-09-21 18:49 UTC are forward evidence. "
             "Nominating it is a separate decision and starting it is the "
             "operator's alone."
+        ),
+    ),
+    Strategy(
+        id="G-BAND5",
+        name="GRADUATION-BAND-55K-5MIN",
+        hypothesis=(
+            "A depth BAND, not a floor: a graduation whose pool holds $55-75k "
+            "with its liquidity locked, held five minutes. Measured over 5,918 "
+            "graduations the lab bought with no filter at all, this slice is "
+            "the only one robustly positive — median +5.83% against a mean of "
+            "+3.37%, 85% winners, and it keeps +$1,564 of its +$2,254 with its "
+            "best trade removed and +$1,580 with its best day removed. The "
+            "slice above it ($75-150k) shows a mean five times higher and is "
+            "97% ONE TRADE: take that fill out and its +$12,266 becomes +$407."
+        ),
+        checkpoint_minutes=0,
+        entry=(),
+        size_usd=D("100"),
+        max_concurrent=10,
+        max_exposure_usd=D("1000"),
+        exits=Exits(take_profit=None, stop_loss=None, time_exit_hours=_hours(5)),
+        evidence="FORWARD_PAPER_34_TRADES_OVER_15_HOURS",
+        overfit_risk="HIGH",
+        note=(
+            "REGISTERED AT KARTHIK'S REQUEST, 2026-09-22, with its evidence "
+            "stated against it. ITS BOOK IS FIFTEEN HOURS OLD: 34 closed "
+            "trades, $500 to $801 at $100 a trade — and it has ALREADY TAKEN "
+            "TWO LOSSES, Spider-Man at -58.9% and FOMO at -100%, whose $71,289 "
+            "pool was emptied to $93. The band is not a safe slice: its rug "
+            "rate is 4.34%, against 1.75% at $75-150k and 0.50% above $400k. "
+            "Rugs fall as pools deepen; this band is where the MONEY is, not "
+            "where the safety is. "
+            "A STOP LOSS DOES NOT HELP IT: replayed on its own trades through "
+            "the lab's exit machinery, every level from -5% to -30% cost "
+            "$145-166 and prevented ZERO rugs, because a drain removes the "
+            "buyer rather than moving the price. "
+            "Its five-minute hold is also the one the quiet arm just left, "
+            "after twelve of thirty-two timed drains landed in the fifth "
+            "minute; there is no four-minute twin of this band to compare it "
+            "against yet. Nominating it is a separate decision and starting "
+            "it is the operator's alone."
         ),
     ),
 )

@@ -81,7 +81,12 @@ def test_each_live_arm_copies_its_own_paper_book() -> None:
 
     arms = {a.name: a for a in ARMS}
     assert set(live_spec.PAPER_BOOKS) == {"G-B3-5M", "G-B3-4M", "G-BAS-5M",
-                                          "G-QUIET", "G-QUIET4"}
+                                          "G-QUIET", "G-QUIET4", "G-BAND5"}
+    # The band is the one live arm with an UPPER bound. Its reported floor is
+    # the band's lower edge; the arm's own rule refuses $75k and above, which a
+    # single number cannot express and a reader must not take for a floor.
+    assert live_spec.pool_floor("G-BAND5") == 55_000
+    assert live_spec.hold_minutes(live_spec.BY_ID["G-BAND5"]) == 5
     # The quiet pair differs ONLY in the clock, live as well as on paper: the
     # four-minute twin exists because AROS drained inside the fifth minute
     # (2026-09-22), so a wrong hold here would silently make them the same arm.
