@@ -14,7 +14,7 @@ import asyncio
 import random
 from collections.abc import Iterable, Sequence
 from functools import lru_cache
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from math import sqrt
 from statistics import fmean, pstdev
@@ -556,6 +556,35 @@ async def _size_trades(db: AsyncSession, *, rows: Sequence[Any],
     }
 
 
+def start_walks(trades: Sequence[tuple], rate: Decimal | None,
+                spec: config.RollingStart, *, today: date) -> list[StartWalk]:
+    """The same wallet opened on each day from `spec.first_day` to today.
+
+    One `_funded_walk` per start, over the arm's own closed trades — not a
+    scaling of one result, because a wallet that starts poorer skips different
+    trades. Rows stop being added after `spec.last_day`; the ones already there
+    keep running, since each is a wallet that was never closed.
+    """
+    out: list[StartWalk] = []
+    start = float(spec.capital_usd)
+    cents = Decimal("0.01")
+    last = min(today, spec.last_day)
+    day = spec.first_day
+    while day <= last:
+        since = [t for t in trades if t[0].date() >= day]
+        if since:
+            walk = _funded_walk(since, rate, ticket=float(spec.ticket_usd), start=start)
+            out.append(StartWalk(
+                started_on=day, trades=walk.funded,
+                rugs=sum(1 for t in since if t[2] <= float(config.OPERATOR_RUG_MOVE)),
+                balance_usd=Decimal(str(walk.cash)).quantize(cents),
+                pnl_usd=Decimal(str(walk.cash - start)).quantize(cents),
+                return_pct=Decimal(str((walk.cash / start - 1) * 100)).quantize(cents),
+                lowest_usd=Decimal(str(walk.low)).quantize(cents)))
+        day += timedelta(days=1)
+    return out
+
+
 @router.get("/paper/trades", response_model=PaperBookOut)
 async def paper_trades(book: str = "E05_hold_5m",
                        ticket: float | None = None, split: int = 1,
@@ -886,6 +915,21 @@ class ArmRow(BaseModel):
     ruin_days: int = 0
 
 
+class StartWalk(BaseModel):
+    """One $500 wallet, opened on one day and still running."""
+
+    started_on: date
+    trades: int
+    rugs: int
+    balance_usd: Decimal
+    pnl_usd: Decimal
+    return_pct: Decimal
+    #: The least it was ever worth. The point of the whole table: the 19 Sep
+    #: start on B3's own record reached +35%, but sat at $99.55 on the way,
+    #: and nobody holds through that by accident.
+    lowest_usd: Decimal
+
+
 class Leaderboard(BaseModel):
     """Fifty arms, eight of which cannot have an edge.
 
@@ -897,6 +941,13 @@ class Leaderboard(BaseModel):
 
     running: bool = False
     started_at: datetime | None = None
+    #: One $500 wallet per start day on `rolling_book`, so the reader can see
+    #: how much of a result is the strategy and how much is the day it began.
+    start_walks: list[StartWalk] = []
+    rolling_book: str = ""
+    rolling_capital_usd: Decimal = Decimal(0)
+    rolling_ticket_usd: Decimal = Decimal(0)
+    rolling_last_day: date | None = None
     arms: list[ArmRow] = []
     controls: list[ArmRow] = []
     control_band: Decimal | None = None
@@ -1852,6 +1903,13 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
         blocked_pnl_usd=Decimal(blocked_usd or 0).quantize(Decimal("0.01")),
         fresh_books=[fresh_book(per_arm_trades.get(spec.book, []), sol_rate, spec)
                      for spec in config.FRESH_BOOKS],
+        start_walks=start_walks(
+            per_arm_trades.get(config.ROLLING_START.book, []), sol_rate,
+            config.ROLLING_START, today=datetime.now(UTC).date()),
+        rolling_book=config.ROLLING_START.book,
+        rolling_capital_usd=config.ROLLING_START.capital_usd,
+        rolling_ticket_usd=config.ROLLING_START.ticket_usd,
+        rolling_last_day=config.ROLLING_START.last_day,
         running=config.paper_enabled(), started_at=started, arms=rows,
         controls=control_rows, control_band=band, best_control=best_control,
         leader=leader.name if leader else "",

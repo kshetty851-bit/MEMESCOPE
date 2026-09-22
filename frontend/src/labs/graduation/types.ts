@@ -260,6 +260,18 @@ export interface ArmRow {
  * realised P&L among those eight; a leader that has not cleared it has not
  * beaten chance.
  */
+export interface StartWalk {
+  started_on: string;
+  trades: number;
+  rugs: number;
+  balance_usd: string;
+  pnl_usd: string;
+  return_pct: string;
+  /** The least it was ever worth — the column that decides whether a person
+      would still have been holding it. */
+  lowest_usd: string;
+}
+
 export interface FreshBook {
   book: string;
   hold_minutes: number;
@@ -349,4 +361,11 @@ export interface Leaderboard {
    * that book's own wallet. `fresh` is the first, as before. */
   fresh: FreshBook | null;
   fresh_books: FreshBook[];
+  /** One $500 wallet per start day, so a reader can see how much of a result
+      is the strategy and how much is the day they happened to begin. */
+  start_walks?: StartWalk[];
+  rolling_book?: string;
+  rolling_capital_usd?: string;
+  rolling_ticket_usd?: string;
+  rolling_last_day?: string | null;
 }

@@ -1030,6 +1030,73 @@ function LeaderboardPanel() {
             ; together those trades made {usd(data.blocked_pnl_usd)}.
           </p>
         ) : null}
+        {/* Karthik's rolling start (2026-09-22): the SAME strategy begun on
+            every day, so the spread between the rows is how much a result
+            depends on the day rather than the rule. The `lowest` column is the
+            one that matters — a wallet that reached +35% by way of $99 is not
+            one anybody would still have been holding. */}
+        {(data.start_walks ?? []).length > 0 ? (
+          <div className="grad-row max-w-[78ch] rounded-lg border border-line bg-ink/[0.02] p-4">
+            <div className="text-[11px] uppercase tracking-wider text-ink-dim">
+              Every start day &middot; {data.rolling_book} &middot;{" "}
+              {usd(data.rolling_capital_usd ?? null)} at{" "}
+              {usd(data.rolling_ticket_usd ?? null)} a
+              trade &middot; new row daily until{" "}
+              {data.rolling_last_day
+                ? new Date(data.rolling_last_day).toLocaleDateString("en-GB", {
+                    day: "numeric",
+                    month: "short",
+                  })
+                : "the end"}
+            </div>
+            <p className="mt-2 text-[13px] leading-relaxed text-ink-dim">
+              One wallet opened each day and never closed. They all run the same
+              rule on the same coins &mdash; the only difference is the day they
+              began.
+            </p>
+            <div className="mt-3 overflow-x-auto">
+              <table className="w-full text-[13px] tabular-nums">
+                <thead className="text-[11px] uppercase tracking-wider text-ink-dim">
+                  <tr>
+                    <th className="py-1 text-left font-normal">started</th>
+                    <th className="py-1 text-right font-normal">trades</th>
+                    <th className="py-1 text-right font-normal">rugs</th>
+                    <th className="py-1 text-right font-normal">worth now</th>
+                    <th className="py-1 text-right font-normal">return</th>
+                    <th className="py-1 text-right font-normal">lowest</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(data.start_walks ?? []).map((walk) => {
+                    const up = Number(walk.pnl_usd) >= 0;
+                    return (
+                      <tr key={walk.started_on} className="border-t border-line/60">
+                        <td className="py-1">
+                          {new Date(walk.started_on).toLocaleDateString("en-GB", {
+                            day: "numeric",
+                            month: "short",
+                          })}
+                        </td>
+                        <td className="py-1 text-right">{walk.trades}</td>
+                        <td className="py-1 text-right">{walk.rugs}</td>
+                        <td className="py-1 text-right">{usd(walk.balance_usd)}</td>
+                        <td
+                          className={`py-1 text-right ${up ? "text-up" : "text-down"}`}
+                        >
+                          {up ? "+" : ""}
+                          {Number(walk.return_pct).toFixed(1)}%
+                        </td>
+                        <td className="py-1 text-right text-ink-dim">
+                          {usd(walk.lowest_usd)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : null}
         {/* Karthik's fresh books: an arm restarted with its own money and the
             wallet's checks on every trade. The arm's own trades, so its row on
             the board below stays whole for comparison. */}
