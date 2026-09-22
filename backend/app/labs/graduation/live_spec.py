@@ -51,12 +51,13 @@ D = Decimal
 _Money = TypeVar("_Money", float, Decimal)
 
 #: 1.4.0 adds G-QUIET (2026-09-21); 1.5.0 adds its four-minute twin
-#: G-QUIET4 (2026-09-22); 1.6.0 adds G-BAND5 the same day. The version MUST be
-#: bumped with a new strategy: `strategy_row_id` finds the tournament row by version, so adding
+#: G-QUIET4 (2026-09-22); 1.6.0 adds G-BAND5 and 1.7.0 its pump-only twin
+#: G-BANDP, the same day. The version MUST be bumped with a new
+#: strategy: `strategy_row_id` finds the tournament row by version, so adding
 #: one under the old version leaves that row holding the old `SPEC_HASH`, and
 #: `app.lab.health` then reads the difference as drift and halts every arm on
 #: it. A new version means a new tournament row, which is what 1.1.0 did.
-SPEC_VERSION = "gradlive-1.6.0"
+SPEC_VERSION = "gradlive-1.7.0"
 
 #: Each live arm and the paper arm it mirrors. Recorded so a reader can put the
 #: real book beside the arm it is supposed to be copying, and so nothing has to
@@ -69,7 +70,8 @@ SPEC_VERSION = "gradlive-1.6.0"
 #: through one. Three events decide that, so it is an option, not a finding.
 PAPER_BOOKS = {"G-B3-5M": "B3_198k_5m", "G-B3-4M": "B3_198k_4m",
                "G-BAS-5M": "BASE_75k_5m", "G-QUIET": "BASE_75k_quiet_5m",
-               "G-QUIET4": "BASE_75k_quiet_4m", "G-BAND5": "BAND_55k_5m"}
+               "G-QUIET4": "BASE_75k_quiet_4m", "G-BAND5": "BAND_55k_5m",
+               "G-BANDP": "BAND_55k_pump_5m"}
 #: The same mapping read the other way: the live arm a paper entry feeds.
 MIRRORS = {book: sid for sid, book in PAPER_BOOKS.items()}
 
@@ -87,7 +89,7 @@ POOL_FLOORS = {"G-B3-5M": POOL_FLOOR_USD, "G-B3-4M": POOL_FLOOR_USD,
                #: above $75k, which no other live arm does. Reported here as
                #: its lower edge because the field has nowhere to say "and
                #: under" — the arm's own rule is what decides.
-               "G-BAND5": 55_000}
+               "G-BAND5": 55_000, "G-BANDP": 55_000}
 
 #: The largest trade size Start offers for an arm, where that is smaller than
 #: `REAL_WALLET_ENTRY_SIZE_USD`.
@@ -359,6 +361,42 @@ STRATEGIES: tuple[Strategy, ...] = (
             "minute; there is no four-minute twin of this band to compare it "
             "against yet. Nominating it is a separate decision and starting "
             "it is the operator's alone."
+        ),
+    ),
+    Strategy(
+        id="G-BANDP",
+        name="GRADUATION-BAND-55K-PUMP-5MIN",
+        hypothesis=(
+            "G-BAND5's rule with one more condition: the mint must be a "
+            "pump.fun address, ending 'pump'. Over 5,929 graduations the lab "
+            "bought with no filter at all, such mints rugged 9.20% against "
+            "13.58% for every other launchpad."
+        ),
+        checkpoint_minutes=0,
+        entry=(),
+        size_usd=D("100"),
+        max_concurrent=10,
+        max_exposure_usd=D("1000"),
+        exits=Exits(take_profit=None, stop_loss=None, time_exit_hours=_hours(5)),
+        evidence="FORWARD_PAPER_25_TRADES_PLUS_A_SEEDED_REPLAY",
+        overfit_risk="HIGH",
+        note=(
+            "REGISTERED AT KARTHIK'S REQUEST, 2026-09-22, hours after he found "
+            "the rule himself in the band's closed trades. ITS BOOK IS ONE DAY "
+            "OLD and 24 of its 25 trades are a SEEDED REPLAY of G-BAND5's own "
+            "coins with the filter applied afterwards — only rows opened after "
+            "2026-09-22 06:10 UTC are forward evidence. "
+            "IT IS AHEAD BY ONE COIN: $848 against its control's $801, and the "
+            "whole $47 is dodging FOMO at -100% while giving up six winners it "
+            "also refused (+20.7, +17.9, +16.5, +16.5, +15.2, +13.9%). The "
+            "launchpad rates above are the reason to run it, not that $47. "
+            "Everything true of G-BAND5 is true here: the band is where the "
+            "money is and not where the safety is (4.34% rugs against 1.75% at "
+            "$75-150k), a stop loss costs $145-166 and prevents none of them, "
+            "and the five-minute hold is the one the quiet arm left after 12 of "
+            "32 timed drains landed in the fifth minute. G-BAND5 is its matched "
+            "control and should be read beside it. Nominating it is a separate "
+            "decision and starting it is the operator's alone."
         ),
     ),
 )
