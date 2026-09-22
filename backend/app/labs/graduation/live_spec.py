@@ -52,12 +52,12 @@ _Money = TypeVar("_Money", float, Decimal)
 
 #: 1.4.0 adds G-QUIET (2026-09-21); 1.5.0 adds its four-minute twin
 #: G-QUIET4 (2026-09-22); 1.6.0 adds G-BAND5 and 1.7.0 its pump-only twin
-#: G-BANDP, the same day. The version MUST be bumped with a new
-#: strategy: `strategy_row_id` finds the tournament row by version, so adding
+#: G-BANDP, the same day; 1.8.0 adds G-B5-5M. The version MUST be bumped with
+#: a new strategy: `strategy_row_id` finds the tournament row by version, so adding
 #: one under the old version leaves that row holding the old `SPEC_HASH`, and
 #: `app.lab.health` then reads the difference as drift and halts every arm on
 #: it. A new version means a new tournament row, which is what 1.1.0 did.
-SPEC_VERSION = "gradlive-1.7.0"
+SPEC_VERSION = "gradlive-1.8.0"
 
 #: Each live arm and the paper arm it mirrors. Recorded so a reader can put the
 #: real book beside the arm it is supposed to be copying, and so nothing has to
@@ -71,7 +71,7 @@ SPEC_VERSION = "gradlive-1.7.0"
 PAPER_BOOKS = {"G-B3-5M": "B3_198k_5m", "G-B3-4M": "B3_198k_4m",
                "G-BAS-5M": "BASE_75k_5m", "G-QUIET": "BASE_75k_quiet_5m",
                "G-QUIET4": "BASE_75k_quiet_4m", "G-BAND5": "BAND_55k_5m",
-               "G-BANDP": "BAND_55k_pump_5m"}
+               "G-BANDP": "BAND_55k_pump_5m", "G-B5-5M": "B5_500k_flow_5m"}
 #: The same mapping read the other way: the live arm a paper entry feeds.
 MIRRORS = {book: sid for sid, book in PAPER_BOOKS.items()}
 
@@ -89,7 +89,7 @@ POOL_FLOORS = {"G-B3-5M": POOL_FLOOR_USD, "G-B3-4M": POOL_FLOOR_USD,
                #: above $75k, which no other live arm does. Reported here as
                #: its lower edge because the field has nowhere to say "and
                #: under" — the arm's own rule is what decides.
-               "G-BAND5": 55_000, "G-BANDP": 55_000}
+               "G-BAND5": 55_000, "G-BANDP": 55_000, "G-B5-5M": 500_000}
 
 #: The largest trade size Start offers for an arm, where that is smaller than
 #: `REAL_WALLET_ENTRY_SIZE_USD`.
@@ -397,6 +397,44 @@ STRATEGIES: tuple[Strategy, ...] = (
             "32 timed drains landed in the fifth minute. G-BAND5 is its matched "
             "control and should be read beside it. Nominating it is a separate "
             "decision and starting it is the operator's alone."
+        ),
+    ),
+    Strategy(
+        id="G-B5-5M",
+        name="GRADUATION-DEEP-500K-FLOW-5MIN",
+        hypothesis=(
+            "A graduation whose pool holds over $500,000 AND is being bought "
+            "more than sold, held five minutes. It is the ONLY arm on the "
+            "board that makes money from ordinary trades: strip every trade "
+            "over +100% from every arm and this one keeps +$251 of its +$251 "
+            "over 159 trades, where B3 falls to -$50 over 610 and the "
+            "baseline to -$491 over 841. Depth is why — rugs fall from 15% "
+            "under $55k to 0.5% above $400k."
+        ),
+        checkpoint_minutes=0,
+        entry=(),
+        size_usd=D("100"),
+        max_concurrent=10,
+        max_exposure_usd=D("1000"),
+        exits=Exits(take_profit=None, stop_loss=None, time_exit_hours=_hours(5)),
+        evidence="FORWARD_PAPER_159_TRADES_OVER_8_DAYS_NO_RUGS",
+        overfit_risk="HIGH",
+        note=(
+            "REGISTERED AT KARTHIK'S REQUEST, 2026-09-22, as the arm this "
+            "session would actually pick. Walked as a $500 wallet it ends at "
+            "$751 at $100 a trade or $561 at $25, EVERY DAY GREEN and never "
+            "once below its starting balance — a profile a person can hold, "
+            "unlike B3, which reached +192% by way of two coins and two losing "
+            "days. It is also the only arm whose first 33 trades PREDICTED "
+            "what it did next (+$225 projected against +$323 actual); the same "
+            "method got the direction wrong on four of the other six. "
+            "WHAT IS NOT PROVEN: zero rugs in 159 trades is UNOBSERVED, not "
+            "measured — at this depth the rate is about 0.5%, so roughly one "
+            "per 200 trades is the expectation and it has simply not arrived. "
+            "It also trades a third as often as B3 (21 a day against 66) "
+            "because pools this deep are rare, and it has no monster trade, so "
+            "its ceiling is the grind. Nominating it is a separate decision "
+            "and starting it is the operator's alone."
         ),
     ),
 )

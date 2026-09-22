@@ -82,7 +82,12 @@ def test_each_live_arm_copies_its_own_paper_book() -> None:
     arms = {a.name: a for a in ARMS}
     assert set(live_spec.PAPER_BOOKS) == {"G-B3-5M", "G-B3-4M", "G-BAS-5M",
                                           "G-QUIET", "G-QUIET4", "G-BAND5",
-                                          "G-BANDP"}
+                                          "G-BANDP", "G-B5-5M"}
+    # The deep arm: its floor is the one number that separates it from the
+    # baseline's population, and a reader taking it for B3's $198k would have
+    # the wrong strategy.
+    assert live_spec.pool_floor("G-B5-5M") == 500_000
+    assert live_spec.hold_minutes(live_spec.BY_ID["G-B5-5M"]) == 5
     # The band pair differs in the ENTRY only, live as on paper: same band,
     # same lock, same five-minute clock, and the launchpad is what it measures.
     assert live_spec.hold_minutes(live_spec.BY_ID["G-BANDP"]) == 5
