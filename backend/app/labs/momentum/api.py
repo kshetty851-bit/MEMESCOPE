@@ -234,6 +234,76 @@ def _f(v: Any) -> float | None:
     return None if v is None else float(v)
 
 
+class OpenRow(BaseModel):
+    """One live position, valued at what selling it now would fetch."""
+
+    arm: str
+    status: str
+    symbol: str | None
+    mint: str
+    pair_address: str
+    dex_id: str | None
+    decided_at: datetime
+    opened_at: datetime | None
+    open_price: float | None
+    last_price: float | None
+    #: Move in the token itself since the fill, before the selling cost.
+    move_pct: float | None
+    notional_usd: float
+    #: Proceeds of selling into the pool as it is now, fees and impact paid.
+    value_usd: float | None
+    pnl_usd: float | None
+    #: When the clock sells it, and the take profit that could sell it sooner.
+    due_at: datetime | None
+    target_pct: float | None
+
+
+class OpenBook(BaseModel):
+    running: bool
+    generated_at: datetime | None = None
+    ticket_usd: float = float(config.TICKET_USD)
+    staked_usd: float = 0.0
+    value_usd: float = 0.0
+    positions: list[OpenRow] = []
+
+
+@router.get("/open", response_model=OpenBook)
+async def open_book(db: AsyncSession = Depends(get_db)) -> OpenBook:
+    """Every live position of every strategy, valued now: what the book is
+    holding, not what it has closed."""
+    if not config.enabled():
+        return OpenBook(running=False)
+    rows = (await db.execute(
+        select(MomPosition, MomPair.last_price, MomPair.liquidity_usd)
+        .join(MomPair, MomPair.pair_address == MomPosition.pair_address)
+        .where(MomPosition.status.in_(LIVE),
+               MomPosition.arm.in_([a.name for a in ARMS]))
+        .order_by(MomPosition.decided_at.desc()))).all()
+    out: list[OpenRow] = []
+    staked = held = 0.0
+    for p, price, liq in rows:
+        arm = BY_NAME[p.arm]
+        value = move = None
+        if p.status in ("open", "closing") and price and p.tokens and p.open_price:
+            _, proceeds, _ = sell(price, liq, p.fee_bps or config.FEE_BPS, p.tokens)
+            value = float(proceeds + (p.scaled_usd or 0))
+            move = round(float(price / p.open_price - 1) * 100, 2)
+            staked += float(p.notional_usd)
+            held += value
+        out.append(OpenRow(
+            arm=p.arm, status=p.status, symbol=p.symbol, mint=p.mint,
+            pair_address=p.pair_address, dex_id=p.dex_id, decided_at=p.decided_at,
+            opened_at=p.opened_at, open_price=_f(p.open_price), last_price=_f(price),
+            move_pct=move, notional_usd=float(p.notional_usd),
+            value_usd=None if value is None else round(value, 2),
+            pnl_usd=None if value is None else round(value - float(p.notional_usd), 2),
+            due_at=(p.opened_at + timedelta(seconds=arm.hold * config.BASE_BAR_S)
+                    if p.opened_at else None),
+            target_pct=None if arm.tp is None else round(float(arm.tp) * 100, 2)))
+    return OpenBook(running=True, generated_at=datetime.now(UTC),
+                    staked_usd=round(staked, 2), value_usd=round(held, 2), positions=out)
+
+
 @router.get("/trades", response_model=Trades)
 async def arm_trades(arm: str, limit: int = 200,
                      db: AsyncSession = Depends(get_db)) -> Trades:

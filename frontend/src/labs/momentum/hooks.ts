@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 
-import { fetchBoard, fetchSignals, fetchStatus, fetchTrades } from "./api";
+import { fetchBoard, fetchOpenBook, fetchSignals, fetchStatus, fetchTrades } from "./api";
 
 /**
  * Nothing pushes this page: every figure is polled, and the book trades on a
@@ -25,6 +25,15 @@ export function useMomentumBoard() {
   return useQuery({
     queryKey: ["momentum", "board"],
     queryFn: fetchBoard,
+    refetchInterval: 30_000,
+    ...LIVE,
+  });
+}
+
+export function useMomentumOpenBook() {
+  return useQuery({
+    queryKey: ["momentum", "open"],
+    queryFn: fetchOpenBook,
     refetchInterval: 30_000,
     ...LIVE,
   });

@@ -95,6 +95,34 @@ export interface MomentumTrades {
   trades: TradeRow[];
 }
 
+export interface OpenRow {
+  arm: string;
+  status: string;
+  symbol: string | null;
+  mint: string;
+  pair_address: string;
+  dex_id: string | null;
+  decided_at: string;
+  opened_at: string | null;
+  open_price: number | null;
+  last_price: number | null;
+  move_pct: number | null;
+  notional_usd: number;
+  value_usd: number | null;
+  pnl_usd: number | null;
+  due_at: string | null;
+  target_pct: number | null;
+}
+
+export interface MomentumOpenBook {
+  running: boolean;
+  generated_at: string | null;
+  ticket_usd: number;
+  staked_usd: number;
+  value_usd: number;
+  positions: OpenRow[];
+}
+
 export interface SignalRow {
   symbol: string | null;
   mint: string;

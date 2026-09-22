@@ -113,6 +113,18 @@ async def test_a_momentum_candle_through_the_book(session, monkeypatch) -> None:
                                  .where(MomPosition.arm == "BASE_60"))) == 1, \
         "one position per pool per strategy"
 
+    # the open book values what is held, at what selling it now would fetch
+    book_now = await api.open_book(db=session)
+    held = {r.arm: r for r in book_now.positions}
+    assert held["BASE_60"].value_usd is not None
+    assert held["BASE_60"].value_usd < float(config.TICKET_USD), "the toll, on the way out"
+    assert held["BASE_60"].move_pct == pytest.approx(0.0, abs=0.01), "1.06 is the fill"
+    assert held["BASE_60"].due_at == base.opened_at + timedelta(minutes=60)
+    assert held["BASE_TP15"].target_pct == 15
+    assert book_now.staked_usd == pytest.approx(4 * float(config.TICKET_USD)), \
+        "two strategies and two controls are holding"
+    assert book_now.value_usd < book_now.staked_usd
+
     # --- tick 3: +18%, so the take profit decides and the hour arm runs on -------
     t3 = t2 + timedelta(seconds=30)
     await _tick(session, feeds, t3, "1.25")
