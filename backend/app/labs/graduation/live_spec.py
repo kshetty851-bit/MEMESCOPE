@@ -50,12 +50,13 @@ from app.lab.spec import Exits, Strategy
 D = Decimal
 _Money = TypeVar("_Money", float, Decimal)
 
-#: 1.4.0 adds G-QUIET (2026-09-21). The version MUST be bumped with a new
+#: 1.4.0 adds G-QUIET (2026-09-21); 1.5.0 adds its four-minute twin
+#: G-QUIET4 (2026-09-22). The version MUST be bumped with a new
 #: strategy: `strategy_row_id` finds the tournament row by version, so adding
 #: one under the old version leaves that row holding the old `SPEC_HASH`, and
 #: `app.lab.health` then reads the difference as drift and halts every arm on
 #: it. A new version means a new tournament row, which is what 1.1.0 did.
-SPEC_VERSION = "gradlive-1.4.0"
+SPEC_VERSION = "gradlive-1.5.0"
 
 #: Each live arm and the paper arm it mirrors. Recorded so a reader can put the
 #: real book beside the arm it is supposed to be copying, and so nothing has to
@@ -67,7 +68,8 @@ SPEC_VERSION = "gradlive-1.4.0"
 #: five-minute hold sat through four of them where the four-minute one sat
 #: through one. Three events decide that, so it is an option, not a finding.
 PAPER_BOOKS = {"G-B3-5M": "B3_198k_5m", "G-B3-4M": "B3_198k_4m",
-               "G-BAS-5M": "BASE_75k_5m", "G-QUIET": "BASE_75k_quiet_5m"}
+               "G-BAS-5M": "BASE_75k_5m", "G-QUIET": "BASE_75k_quiet_5m",
+               "G-QUIET4": "BASE_75k_quiet_4m"}
 #: The same mapping read the other way: the live arm a paper entry feeds.
 MIRRORS = {book: sid for sid, book in PAPER_BOOKS.items()}
 
@@ -80,7 +82,7 @@ POOL_FLOOR_USD = 198_000
 #: Per arm, because the baseline buys a different population: every graduation
 #: over $75k, which is where its 4.8% rug rate comes from against B3's 0.3%.
 POOL_FLOORS = {"G-B3-5M": POOL_FLOOR_USD, "G-B3-4M": POOL_FLOOR_USD,
-               "G-BAS-5M": 75_000, "G-QUIET": 75_000}
+               "G-BAS-5M": 75_000, "G-QUIET": 75_000, "G-QUIET4": 75_000}
 
 #: The largest trade size Start offers for an arm, where that is smaller than
 #: `REAL_WALLET_ENTRY_SIZE_USD`.
@@ -273,6 +275,44 @@ STRATEGIES: tuple[Strategy, ...] = (
             "(-13.8% a trade over 41 trades), which is the opposite of what "
             "the hypothesis predicts. Nominating it is a separate decision "
             "and starting it is the operator's alone."
+        ),
+    ),
+    Strategy(
+        id="G-QUIET4",
+        name="GRADUATION-QUIET-4MIN",
+        hypothesis=(
+            "G-QUIET's coins on a four-minute clock. Replayed minute by "
+            "minute over 771 baseline trades, gross of the ~1.1% round trip: "
+            "+0.89% at two minutes, +1.19% at three, +1.93% at four, +1.76% "
+            "at five, with 14 coins already down 80% by four minutes against "
+            "20 by five. The fifth minute is where the drains land and the "
+            "gains have stopped growing."
+        ),
+        checkpoint_minutes=0,
+        entry=(),
+        size_usd=D("100"),
+        max_concurrent=10,
+        max_exposure_usd=D("1000"),
+        exits=Exits(take_profit=None, stop_loss=None, time_exit_hours=_hours(4)),
+        evidence="FORWARD_PAPER_108_TRADES_PLUS_A_SEEDED_REPLAY",
+        overfit_risk="HIGH",
+        note=(
+            "REGISTERED AT KARTHIK'S REQUEST, 2026-09-22, the morning after "
+            "AROS: its pool held $365,302 at the buy and $372,041 at four "
+            "minutes, then $404 at five. The four-minute book sold it at "
+            "+3.1%; G-QUIET sat through the drain and the real wallet lost "
+            "$25.00, the whole ticket. Over that whole day the four-minute "
+            "book ran -1.20% a trade against -4.65%. "
+            "WHAT IS NOT SETTLED: this is one drain. On the previous quiet "
+            "day the same replay had four minutes BEHIND five (+1.45% "
+            "against +2.21% a trade) — a shorter hold gives up real upside "
+            "and only pays when a pool is drained inside the fifth minute, "
+            "and it is defenceless against one drained in the third. Its "
+            "book's first 82 trades are a SEEDED REPLAY of G-QUIET's coins "
+            "re-priced at four minutes, not trades it took itself; only rows "
+            "opened after 2026-09-21 18:49 UTC are forward evidence. "
+            "Nominating it is a separate decision and starting it is the "
+            "operator's alone."
         ),
     ),
 )

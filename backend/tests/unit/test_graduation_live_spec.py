@@ -80,7 +80,15 @@ def test_each_live_arm_copies_its_own_paper_book() -> None:
     from app.labs.graduation.tournament import ARMS
 
     arms = {a.name: a for a in ARMS}
-    assert set(live_spec.PAPER_BOOKS) == {"G-B3-5M", "G-B3-4M", "G-BAS-5M", "G-QUIET"}
+    assert set(live_spec.PAPER_BOOKS) == {"G-B3-5M", "G-B3-4M", "G-BAS-5M",
+                                          "G-QUIET", "G-QUIET4"}
+    # The quiet pair differs ONLY in the clock, live as well as on paper: the
+    # four-minute twin exists because AROS drained inside the fifth minute
+    # (2026-09-22), so a wrong hold here would silently make them the same arm.
+    assert live_spec.hold_minutes(live_spec.BY_ID["G-QUIET"]) == 5
+    assert live_spec.hold_minutes(live_spec.BY_ID["G-QUIET4"]) == 4
+    assert (live_spec.pool_floor("G-QUIET") == live_spec.pool_floor("G-QUIET4")
+            == 75_000)
     for sid, book in live_spec.PAPER_BOOKS.items():
         assert live_spec.hold_minutes(live_spec.BY_ID[sid]) == arms[book].hold
         assert arms[book].clock == "entry", "the live clock starts at the entry"
