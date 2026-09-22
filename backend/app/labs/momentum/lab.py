@@ -256,6 +256,8 @@ class MomentumLab:
         judged = {}
         m_now = self._now - timedelta(seconds=config.FEED_LAG_S)
         for tf, secs in config.TIMEFRAMES.items():
+            if not any(a.tf == tf for a in ARMS):  # run 2 is 5m only
+                continue
             start = bucket(m_now, secs) - timedelta(seconds=secs)
             judged[tf] = await self._judge(tf, secs, start, pairs, live, opened)
         await self._catch(pairs, samples, live, opened)
@@ -517,6 +519,11 @@ class MomentumLab:
             pair = active[address]
             if bar.liquidity is None or bar.liquidity < float(config.MIN_LIQUIDITY_USD):
                 continue
+            # The venue gate, before anything is judged, so the strategies and
+            # the controls draw from one population (run 1: pump.fun's AMM cost
+            # 185 bps a round trip and its coins fell more).
+            if config.fee_bps(pair.dex_id, None) > config.MAX_FEE_BPS:
+                continue
             prior = bars[:-1]
             f = features(bar, prior, secs, impulse_ret=IMPULSE_RET[tf])
             if f.history < config.MIN_HISTORY_BARS:
@@ -543,6 +550,8 @@ class MomentumLab:
                 continue
             base = counts.get(arm.matches or "", 0)
             pool = [e for e in eligible if e[1].green] if arm.control == "green" else eligible
+            if arm.pool == "down":  # only coins already down 10%+ on the day
+                pool = [e for e in pool if (e[1].bar.change_h24 or 0) <= -10]
             if arm.control == "same":
                 ranked = sorted(pool, key=lambda e: coin(arm.name, bar_key(e[0], start)))
                 fired[arm.name] = [e[0] for e in ranked[:base]]
@@ -551,6 +560,11 @@ class MomentumLab:
                 denominator = ((greens + green) if arm.control == "green"
                                else (seen + len(eligible)))
                 p = (hits + base) / denominator if denominator else 0.0
+                if arm.pool and pool:
+                    # A sliced control has to fire as OFTEN as the arm it
+                    # matches, not as often per candle: the rate is measured
+                    # over the whole eligible set, so scale it to the slice.
+                    p = min(1.0, p * len(eligible) / len(pool))
                 fired[arm.name] = [e[0] for e in pool
                                    if coin(arm.name, bar_key(e[0], start)) < p]
         by_address = {e[0]: e for e in eligible}

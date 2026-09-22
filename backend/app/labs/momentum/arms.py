@@ -1,21 +1,34 @@
-"""Fifty strategies on one universe, and five of them are dice.
+"""Thirteen strategies on one universe, and three of them are dice.
+
+## Run 2, from 22 September 2026
+
+Run 1 ran fifty strategies for three days and closed 23,911 trades. It found
+no edge in the momentum candle: replayed over its 890 entries, every take
+profit from 3% to 30% and every hold from 30 minutes to 6 hours lost money.
+What it DID find was mechanical, so run 2 is built on it:
+
+* **Cost decides.** A round trip is 77 bps on a 30 bps venue and 185 bps on
+  pump.fun's AMM, whose coins also fell more (gross -0.78% against raydium's
+  +0.50%). `config.MAX_FEE_BPS` now refuses that venue outright.
+* **Stops lose** (-7.6% over 1,644 stopped trades) and small take profits
+  sell the winners. Run 2 has no stops and one take profit, at 15%.
+* **Loud candles are the worst ones**: over 15%, -5.4% a trade.
+
+So the arms test the three things that were not negative — a coin down on
+the day, a pool over $1m, the quiet end of the rule — plus the base and the
+opposite bet, each on two exits.
 
 ## One factor at a time
 
-Every strategy is the BASE strategy with ONE thing changed — a threshold, a
-filter, a slice of the universe, the timeframe or the exit. So each one
-answers a single question ("does a bigger candle help?", "does a stop at the
-candle's low help?") against the base, instead of fifty rules racing each
-other, where the leader is simply whichever got luckiest.
+Every strategy is BASE with ONE thing changed. Each answers a single question
+against its yardstick instead of thirteen rules racing, where the leader is
+whichever got luckiest.
 
 ## The dice are the point
 
-A leaderboard of fifty always has a leader. The controls buy the same
-universe at random (`R5_TIME`), at the same moments as the base with random
-tokens (`R5_SAME`), or any green candle at random (`R5_GREEN`) — same costs,
-same exits, provably no edge. A strategy has shown something only when it
-beats the control on its own timeframe by more than chance allows across
-fifty comparisons.
+`RND_60` and `RND_TP15` buy the same universe at random, same costs, same
+exits, provably no edge. `RND_DOWN` draws at random from coins already down
+10%+ on the day, so `DOWN_60` has to beat the COIN, not just the clock.
 
 ## Frozen
 
@@ -44,8 +57,12 @@ class Rule:
     #: opposite bet: the move reverts).
     side: str = "up"
     min_ret: float = 0.0
+    #: A ceiling on the move and on the volume: the QUIET arms. Run 1 found
+    #: the loud candles were the worst of the lot (over 15%: -5.4% a trade).
+    max_ret: float | None = None
     min_body_x: float | None = None
     min_vol_x: float | None = None
+    max_vol_x: float | None = None
     #: Where in its range it closed (1.0 = at the high). For `down`, the
     #: mirror: closed at most this far UP its range.
     min_clv: float | None = None
@@ -79,14 +96,16 @@ class Rule:
             return (f"the last 5 minutes are up {self.min_ret:.0%}+ on "
                     f"{self.min_vol_x:g}x normal volume — bought mid-move, not at "
                     "a candle close")
-        if self.side == "down":
-            parts = [f"a red candle down {self.min_ret:.0%}+"]
-        else:
-            parts = [f"a green candle up {self.min_ret:.0%}+"]
+        colour, way = ("red", "down") if self.side == "down" else ("green", "up")
+        span = (f"{self.min_ret:.0%}+" if self.max_ret is None
+                else f"{self.min_ret:.0%}-{self.max_ret:.0%}")
+        parts = [f"a {colour} candle {way} {span}"]
         if self.min_body_x:
             parts.append(f"{self.min_body_x:g}x the token's usual candle")
         if self.min_vol_x:
-            parts.append(f"on {self.min_vol_x:g}x normal volume")
+            volume = (f"{self.min_vol_x:g}x" if self.max_vol_x is None
+                      else f"{self.min_vol_x:g}-{self.max_vol_x:g}x")
+            parts.append(f"on {volume} normal volume")
         if self.min_clv is not None:
             if self.side == "down":
                 parts.append(f"closing in the bottom {1 - self.min_clv:.0%} of its range")
@@ -155,9 +174,13 @@ def fires(rule: Rule, f: Features, ctx: Context, *, prev: Features | None = None
     sign = -1 if rule.side == "down" else 1
     if sign * f.ret < rule.min_ret:
         return False
+    if rule.max_ret is not None and sign * f.ret >= rule.max_ret:
+        return False
     if rule.min_body_x is not None and (f.body_x is None or f.body_x < rule.min_body_x):
         return False
     if rule.min_vol_x is not None and (f.vol_x is None or f.vol_x < rule.min_vol_x):
+        return False
+    if rule.max_vol_x is not None and (f.vol_x is None or f.vol_x >= rule.max_vol_x):
         return False
     if rule.min_clv is not None:
         clv = f.clv if sign > 0 else 1 - f.clv
@@ -225,6 +248,10 @@ class Arm:
     #: Controls: `time` (random bar at the base rate), `same` (the base's
     #: moments, random tokens), `green` (random green bar at the base rate).
     control: str | None = None
+    #: A control drawing from a SLICE of the universe instead of all of it.
+    #: `down` = only coins down 10%+ on the day, so DOWN_60's control answers
+    #: "is it the candle, or just the beaten-down coin?".
+    pool: str | None = None
     #: The arm whose rate or moments a control matches.
     matches: str | None = None
     #: Judged against this arm.
@@ -239,7 +266,9 @@ class Arm:
     @property
     def entry_words(self) -> str:
         if self.control == "time":
-            return (f"a random {self.tf} candle of a random token, at the rate "
+            where = (" of a token already down 10%+ on the day" if self.pool == "down"
+                     else " of a random token")
+            return (f"a random {self.tf} candle{where}, at the rate "
                     f"{self.matches} fires — CONTROL")
         if self.control == "same":
             return (f"at the moments {self.matches} buys, the same number of "
@@ -307,133 +336,76 @@ M1H = replace(M5, min_ret=0.05)
 #: The impulse a PRIOR bar must have been to count as one (first/second leg).
 IMPULSE_RET: dict[str, float] = {"5m": M5.min_ret, "15m": M15.min_ret, "1h": M1H.min_ret}
 
-TRADE_HOLD = 6  # bars: 30 minutes on 5m, 90 on 15m, six hours on 1h
+#: Holds, in 5m bars. Run 1 tested 30 minutes to 12 hours: nothing beyond an
+#: hour or two helped, and the 6-hour hold is kept only for the snap-back.
+HOUR, TWO_HOURS, SIX_HOURS = 12, 24, 72
+#: Run 1's exit evidence, over 890 entries replayed against their real paths:
+#: a stop made every cell worse (-7.6% on 1,644 stopped trades), a 3-5% take
+#: profit was worse than none, 15%+ was better. So: one take profit, no stop.
+TP15 = D("0.15")
+
+#: Run 2's five entries. Every one is BASE with ONE thing changed.
+BASE = M5
+#: Down 10%+ on the day. Run 1's best cell: +4.9% a trade on 44 cheap-pool
+#: trades, positive in both halves (+2.9 / +6.9).
+DOWN = replace(M5, counter=True)
+#: A pool over $1m. +0.77% a trade on 107 trades with the 15% take profit,
+#: positive in both halves (+1.05 / +0.50).
+DEEP = replace(M5, liq=(1_000_000.0, 1e12))
+#: The quiet end of the rule: 2-5% on 3-10x volume. Run 1's loud candles were
+#: its worst trades (over 15%: -5.4%; 200+ trades in the bar: -4.4%).
+QUIET = replace(M5, max_ret=0.05, max_vol_x=10.0)
+#: The opposite bet, carried over from DIP5: buy the RED candle.
+SNAP = replace(M5, side="down", min_buy_ratio=None)
 
 ARMS: tuple[Arm, ...] = (
     # ---- controls: they cannot have an edge -------------------------------------
-    Arm("R5_TIME", "control", "5m", TRADE_HOLD, control="time", matches="M5_BASE",
-        note="random 5m candle, random token, base rate"),
-    Arm("R5_SAME", "control", "5m", TRADE_HOLD, control="same", matches="M5_BASE",
-        note="the base's moments, random tokens"),
-    Arm("R5_GREEN", "control", "5m", TRADE_HOLD, control="green", matches="M5_BASE",
-        note="random green 5m candle, base rate"),
-    Arm("R15_TIME", "control", "15m", TRADE_HOLD, control="time", matches="M15_BASE",
-        note="random 15m candle, 15m base rate"),
-    Arm("R1H_TIME", "control", "1h", TRADE_HOLD, control="time", matches="M1H_BASE",
-        note="random 1h candle, 1h base rate"),
+    Arm("RND_60", "control", "5m", HOUR, control="time", matches="BASE_60",
+        note="random candle, random token, at the rate BASE_60 fires"),
+    Arm("RND_TP15", "control", "5m", TWO_HOURS, tp=TP15, control="time",
+        matches="BASE_TP15", note="the same dice, sold at +15%: the exit on its own"),
+    Arm("RND_DOWN", "control", "5m", HOUR, control="time", matches="DOWN_60",
+        pool="down", note="random candle of a coin already down 10%+ on the day"),
 
-    # ---- 5m: the base, then one entry condition changed each ----------------------
-    Arm("M5_BASE", "entry", "5m", TRADE_HOLD, M5, vs="R5_TIME",
-        note="THE momentum candle, out after 30 minutes"),
-    Arm("M5_LOOSE", "entry", "5m", TRADE_HOLD,
-        Rule(min_ret=0.01, min_body_x=2.0, min_vol_x=2.0, min_clv=0.5), vs="R5_TIME",
-        note="weaker candles: 1%, 2x body, 2x volume"),
-    Arm("M5_BIG", "entry", "5m", TRADE_HOLD, replace(M5, min_ret=0.04, min_body_x=5.0),
-        vs="M5_BASE", note="bigger: 4%, 5x the usual body"),
-    Arm("M5_HUGE", "entry", "5m", TRADE_HOLD, replace(M5, min_ret=0.08, min_body_x=5.0),
-        vs="M5_BASE", note="8%+ in five minutes: continuation or exhaustion?"),
-    Arm("M5_VOL6", "entry", "5m", TRADE_HOLD, replace(M5, min_vol_x=6.0),
-        vs="M5_BASE", note="volume climax: 6x normal"),
-    Arm("M5_NOVOL", "entry", "5m", TRADE_HOLD, replace(M5, min_vol_x=None),
-        vs="M5_BASE", note="price only, volume ignored"),
-    Arm("M5_TOPCLOSE", "entry", "5m", TRADE_HOLD, replace(M5, min_clv=0.9),
-        vs="M5_BASE", note="closes at its high: no upper wick"),
-    Arm("M5_BUYERS", "entry", "5m", TRADE_HOLD, replace(M5, min_buy_ratio=2.0),
-        vs="M5_BASE", note="twice as many buys as sells"),
-    Arm("M5_BREAKOUT", "entry", "5m", TRADE_HOLD, replace(M5, breakout=True),
-        vs="M5_BASE", note="and closes above the 2-hour high"),
-    Arm("M5_FIRST", "entry", "5m", TRADE_HOLD, replace(M5, first=True),
-        vs="M5_BASE", note="first impulse after two quiet hours"),
-    Arm("M5_SECOND", "entry", "5m", TRADE_HOLD, replace(M5, second=True),
-        vs="M5_BASE", note="second leg: another impulse in the last hour"),
-    Arm("M5_TREND", "entry", "5m", TRADE_HOLD, replace(M5, trend=True),
-        vs="M5_BASE", note="with the trend: above the 4h average, up on the day"),
-    Arm("M5_COUNTER", "entry", "5m", TRADE_HOLD, replace(M5, counter=True),
-        vs="M5_BASE", note="against the day: down 10%+ on 24h"),
-    Arm("M5_BREADTH", "entry", "5m", TRADE_HOLD, replace(M5, breadth=True),
-        vs="M5_BASE", note="only when most of the market is up"),
-    Arm("M5_CONFIRM", "entry", "5m", TRADE_HOLD, replace(M5, confirm=True),
-        vs="M5_BASE", note="wait for the next candle to close green too"),
-    Arm("M5_PULLBACK", "entry", "5m", TRADE_HOLD, replace(M5, pullback=True),
-        vs="M5_BASE", note="limit buy at the candle's midpoint, 15 min to fill"),
+    # ---- the reference: the momentum candle, priced honestly ---------------------
+    Arm("BASE_60", "entry", "5m", HOUR, BASE, vs="RND_60",
+        note="THE momentum candle, out after an hour"),
+    Arm("BASE_TP15", "entry", "5m", TWO_HOURS, BASE, tp=TP15, vs="RND_TP15",
+        note="the same entry, sold at +15% or after two hours"),
 
-    # ---- the universe, sliced -------------------------------------------------------
-    Arm("M5_LIQ_S", "universe", "5m", TRADE_HOLD, replace(M5, liq=(5e4, 2.5e5)),
-        vs="M5_BASE", note="small pools: $50k-$250k"),
-    Arm("M5_LIQ_M", "universe", "5m", TRADE_HOLD, replace(M5, liq=(2.5e5, 1e6)),
-        vs="M5_BASE", note="mid pools: $250k-$1M"),
-    Arm("M5_LIQ_L", "universe", "5m", TRADE_HOLD, replace(M5, liq=(1e6, 1e15)),
-        vs="M5_BASE", note="deep pools: $1M+"),
-    Arm("M5_AGE_1M", "universe", "5m", TRADE_HOLD, replace(M5, age=(7, 30)),
-        vs="M5_BASE", note="young: 7-30 days old"),
-    Arm("M5_AGE_6M", "universe", "5m", TRADE_HOLD, replace(M5, age=(30, 180)),
-        vs="M5_BASE", note="1-6 months old"),
-    Arm("M5_AGE_OLD", "universe", "5m", TRADE_HOLD, replace(M5, age=(180, 1e9)),
-        vs="M5_BASE", note="6 months and older"),
+    # ---- is a beaten-down coin the place to buy strength? -----------------------
+    Arm("DOWN_60", "down", "5m", HOUR, DOWN, vs="RND_DOWN",
+        note="the candle, but only while the coin is down 10%+ on the day"),
+    Arm("DOWN_TP15", "down", "5m", TWO_HOURS, DOWN, tp=TP15, vs="DOWN_60",
+        note="the same, sold at +15% or after two hours"),
 
-    # ---- the base entry, one exit changed each ----------------------------------------
-    Arm("X5_HOLD3", "exit", "5m", 3, M5, vs="M5_BASE", note="out after 15 minutes"),
-    Arm("X5_HOLD12", "exit", "5m", 12, M5, vs="M5_BASE", note="out after 1 hour"),
-    Arm("X5_HOLD48", "exit", "5m", 48, M5, vs="M5_BASE", note="out after 4 hours"),
-    Arm("X5_LOW_1R", "exit", "5m", 24, M5, stop="low", target_r=D(1),
-        vs="M5_BASE", note="stop at the candle's low, target 1R"),
-    Arm("X5_LOW_2R", "exit", "5m", 24, M5, stop="low", target_r=D(2),
-        vs="M5_BASE", note="stop at the candle's low, target 2R"),
-    Arm("X5_LOW_3R", "exit", "5m", 48, M5, stop="low", target_r=D(3),
-        vs="M5_BASE", note="stop at the candle's low, target 3R"),
-    Arm("X5_MID_2R", "exit", "5m", 24, M5, stop="mid", target_r=D(2),
-        vs="M5_BASE", note="tight stop at the candle's midpoint, target 2R"),
-    Arm("X5_TRAIL5", "exit", "5m", 48, M5, trail=D("0.05"),
-        vs="M5_BASE", note="5% trailing stop"),
-    Arm("X5_TRAIL10", "exit", "5m", 96, M5, trail=D("0.10"),
-        vs="M5_BASE", note="10% trailing stop, up to 8 hours"),
-    Arm("X5_TP5", "exit", "5m", 24, M5, tp=D("0.05"),
-        vs="M5_BASE", note="take +5%"),
-    Arm("X5_TP10", "exit", "5m", 48, M5, tp=D("0.10"),
-        vs="M5_BASE", note="take +10%"),
-    Arm("X5_RED", "exit", "5m", 24, M5, red_exit=True,
-        vs="M5_BASE", note="ride it until a candle closes red"),
-    Arm("X5_SCALE", "exit", "5m", 48, M5, stop="low", target_r=D(3), scale=True,
-        vs="M5_BASE", note="split exit: half at +1R, rest at +3R or breakeven"),
+    # ---- does a deep pool carry the move? ---------------------------------------
+    Arm("DEEP_60", "universe", "5m", HOUR, DEEP, vs="BASE_60",
+        note="the candle in a pool over $1m"),
+    Arm("DEEP_TP15", "universe", "5m", TWO_HOURS, DEEP, tp=TP15, vs="BASE_TP15",
+        note="pool over $1m, sold at +15% or after two hours"),
 
-    # ---- slower candles -----------------------------------------------------------------
-    Arm("M15_BASE", "m15", "15m", TRADE_HOLD, M15, vs="R15_TIME",
-        note="the momentum candle on 15m bars, out after 90 minutes"),
-    Arm("M15_BREAKOUT", "m15", "15m", TRADE_HOLD, replace(M15, breakout=True),
-        vs="M15_BASE", note="and above the 6-hour high"),
-    Arm("M15_LOW_2R", "m15", "15m", 24, M15, stop="low", target_r=D(2),
-        vs="M15_BASE", note="stop at the candle's low, target 2R"),
-    Arm("M15_TRAIL10", "m15", "15m", 48, M15, trail=D("0.10"),
-        vs="M15_BASE", note="10% trailing stop, up to 12 hours"),
-    Arm("M1H_BASE", "m1h", "1h", TRADE_HOLD, M1H, vs="R1H_TIME",
-        note="the momentum candle on 1h bars, out after 6 hours"),
-    Arm("M1H_BREAKOUT", "m1h", "1h", TRADE_HOLD, replace(M1H, breakout=True),
-        vs="M1H_BASE", note="and above the 24-hour high"),
-    Arm("M1H_TRAIL15", "m1h", "1h", 48, M1H, trail=D("0.15"),
-        vs="M1H_BASE", note="15% trailing stop, up to 2 days"),
-
-    # ---- caught mid-candle ------------------------------------------------------------------
-    Arm("CATCH_4", "catch", "tick", TRADE_HOLD,
-        Rule(min_ret=0.04, min_vol_x=3.0, rolling=True), vs="R5_TIME",
-        note="up 4%+ in the last 5 minutes, bought on the spot"),
-    Arm("CATCH_8", "catch", "tick", TRADE_HOLD,
-        Rule(min_ret=0.08, min_vol_x=3.0, rolling=True), vs="CATCH_4",
-        note="up 8%+ in the last 5 minutes, bought on the spot"),
+    # ---- is the quiet candle the better one? ------------------------------------
+    Arm("QUIET_60", "quiet", "5m", HOUR, QUIET, vs="BASE_60",
+        note="the small move: 2-5% on 3-10x volume, nothing louder"),
+    Arm("QUIET_TP15", "quiet", "5m", TWO_HOURS, QUIET, tp=TP15, vs="BASE_TP15",
+        note="the same small move, sold at +15% or after two hours"),
 
     # ---- the opposite bet -------------------------------------------------------
-    Arm("DIP5", "dip", "5m", TRADE_HOLD,
-        replace(M5, side="down", min_buy_ratio=None), vs="R5_TIME",
+    Arm("SNAP_60", "dip", "5m", HOUR, SNAP, vs="RND_60",
         note="buy the RED momentum candle: bet on the snap-back"),
+    Arm("SNAP_6H", "dip", "5m", SIX_HOURS, SNAP, vs="SNAP_60",
+        note="the same red candle, given six hours to come back"),
 )
 
 BY_NAME: dict[str, Arm] = {a.name: a for a in ARMS}
 CONTROLS: tuple[Arm, ...] = tuple(a for a in ARMS if a.is_control)
 
-assert len(ARMS) == 50, f"fifty strategies, not {len(ARMS)}"
+assert len(ARMS) == 13, f"thirteen arms, not {len(ARMS)}"
 assert len({a.name for a in ARMS}) == len(ARMS), "names are unique"
 assert all(len(a.name) <= 32 for a in ARMS), "a name must fit the column"
 assert all((a.rule is None) == a.is_control for a in ARMS), "controls have no rule"
 assert all(a.vs in BY_NAME or a.is_control for a in ARMS), "every strategy has a yardstick"
 assert all(a.matches in BY_NAME for a in CONTROLS), "a control matches a real strategy"
 assert all(a.target_r is None or a.stop for a in ARMS), "an R target needs a stop"
-assert {a.tf for a in ARMS} == {"5m", "15m", "1h", "tick"}
+assert all(a.stop is None for a in ARMS), "run 2 has no stops: run 1 priced them at -7.6%"
