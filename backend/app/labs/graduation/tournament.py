@@ -372,6 +372,8 @@ ENTRY_RULES: dict[str, str] = {
                "is locked, no selection",
     "band55": "every graduation whose pool is between $55,000 and $75,000 and "
               "whose liquidity is locked, no selection",
+    "band55_pump": "as band55, and only a pump.fun mint — an address ending "
+                   "'pump'",
     "floor75": "every graduation with a pool at or above $75,000, no selection — "
                "the baseline's own rule",
     "sym_night": "symbol used before AND the pool opened 18:00-06:00 UTC",
@@ -441,6 +443,24 @@ def accepts(arm: Arm, *, mint: str, open_at: datetime, liquidity: Decimal | None
         # $75k was mixed. A BAND, not a floor: the band beat the deeper
         # population on three days of four.
         return liquidity is not None and 55_000 <= liquidity < 75_000
+    if e == "band55_pump":
+        # Karthik, 2026-09-22, from his own reading of the band's closed
+        # trades. The band's only total loss was FOMO, whose mint ends
+        # `hgrySG` — a different launchpad — and dropping the ten non-pump
+        # mints took the book from +$301 to +$348 with the -100% removed.
+        #
+        # That is ONE trade, so it was checked against the whole record
+        # before being built: over 5,929 graduations the lab bought with no
+        # filter at all, mints ending `pump` rugged 9.20% against 13.58% for
+        # every other launchpad. The direction holds independently of the
+        # trade that suggested it, which is why this exists; the MONEY does
+        # not follow as cleanly (the non-pump population lost only $237 over
+        # 972 trades), so this cuts how often a rug lands, not the bleed.
+        #
+        # The suffix is the mint's own address, fixed at creation and not a
+        # label anyone can change afterwards.
+        return (liquidity is not None and 55_000 <= liquidity < 75_000
+                and mint.endswith("pump"))
     if e == "floor25":
         # Karthik's $25k sweep (2026-09-20). Between $25k and $75k the coins
         # are no more dangerous than the deep ones — over the two days after
@@ -663,6 +683,15 @@ ARMS: tuple[Arm, ...] = (
     # The quiet filter, tested where the rugs actually are. At $75k it looks
     # good and has met no rug; at $25k it made things worse. The band is where
     # that question has an answer worth having.
+    # Karthik, 2026-09-22. Its matched control is BAND_55k_5m: same band, same
+    # lock, same five-minute clock, and the launchpad is the only difference.
+    # SEEDED from that control's 24 pump-mint trades by
+    # `scripts/seed_band_pump.py` — a pure copy, since the rule only refuses
+    # coins and changes nothing about the ones it keeps. Only rows opened
+    # after the deploy are forward evidence.
+    Arm("BAND_55k_pump_5m", "band55_pump", 5, locked=True,
+        note="every graduation with a $55-75k pool, locked liquidity and a "
+             "pump.fun mint, out at 5m"),
     Arm("BAND_55k_quiet_5m", "band55", 5, locked=True, quiet=True,
         note="every graduation with a $55-75k pool and locked liquidity whose "
              "pool is still quiet (under 100 trades) when it is bought, out at 5m"),
@@ -723,13 +752,14 @@ CONTROLS: tuple[Arm, ...] = tuple(a for a in ARMS if a.is_control)
 #: returned no edge. The count is pinned rather than free because an arm that
 #: appears mid-tournament changes what every other number means — so changing
 #: it must be a deliberate edit with a date, not a side effect.
-assert len(ARMS) == 13, (
+assert len(ARMS) == 14, (
     "three B3 arms (3m FROM ENTRY retired 2026-09-16 at -$58.90), B3 bought "
     "early (added 2026-09-16), the two rug arms (added 2026-09-16), the two "
     "shorter graduation clocks g2 and g3 (added 2026-09-17), the fast pair "
     "E75/E75T (added 2026-09-19), the quiet-pool arm BASE_75k_quiet_5m and the "
     "four $25k clocks (all added 2026-09-20), its four-minute twin "
-    "BASE_75k_quiet_4m (added 2026-09-21), the BASELINE, the $500k+flow "
+    "BASE_75k_quiet_4m (added 2026-09-21), the band's pump-only twin "
+    "BAND_55k_pump_5m (added 2026-09-22), the BASELINE, the $500k+flow "
     "candidate, and the two "
     "pre-registered A/B arms — which run but are flagged off the tournament "
     f"board — not {len(ARMS)}. Karthik retired BASE_10k_2m (out of money after "
@@ -759,10 +789,10 @@ assert all(a.tp is None and a.trail is None for a in ARMS), (
 assert all(a.stop is None or a.stop == Decimal("0.10") for a in ARMS), (
     "one stop level, so the twins differ in ONE thing. Sweeping levels here "
     "would be fitting a parameter on the same data that suggested it")
-assert len([a for a in ARMS if not a.is_control]) == 12, (
+assert len([a for a in ARMS if not a.is_control]) == 13, (
     "`config.required_pf` is calibrated on the maximum of FORTY-TWO noise "
-    "draws. Twelve arms are now judged against it, so the bar is if anything "
-    "CONSERVATIVE — the luckiest of twelve reaches less than the luckiest "
+    "draws. Thirteen arms are now judged against it, so the bar is if anything "
+    "CONSERVATIVE — the luckiest of thirteen reaches less than the luckiest "
     "of forty-two. Left as it is deliberately: a bar that is too hard costs a "
     "real finding some time, where one that is too easy costs a false one nothing")
 assert all(a.clock in {"entry", "graduation"} for a in ARMS), "a clock is one of two"
