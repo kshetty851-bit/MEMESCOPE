@@ -1,8 +1,23 @@
 # Momentum Lab
 
-Fifty paper strategies that buy the **momentum candle** on Solana tokens whose
-market is **older than seven days**, each from a **$1,000 wallet**. Paper
-only: nothing in this package can reach a key, a signer or a chain.
+Thirteen paper strategies on Solana tokens whose market is **older than seven
+days**, each from a **$500 wallet**, on **30 bps pools only**. Paper only:
+nothing in this package can reach a key, a signer or a chain.
+
+**Run 1 (19-22 Sep 2026, fifty strategies, 23,911 closed trades) found no edge
+in the momentum candle.** Replayed over its 890 entries, every take profit
+from 3% to 30% and every hold from 30 minutes to 6 hours lost money. What it
+found instead was mechanical, and run 2 is built on it:
+
+| run 1 measured | run 2 does |
+|---|---|
+| a round trip costs 77 bps on a 30 bps venue, 185 bps on pump.fun's AMM — whose coins also fell more (gross -0.78% against raydium's +0.50%) | `MAX_FEE_BPS` refuses that venue before judging, so strategies and controls share one population |
+| 1,644 stopped trades lost 7.6% each; a 3-5% take profit sells the winners | no stops anywhere, one take profit, at 15% |
+| the loudest candles were the worst (over 15%: -5.4% a trade; 200+ trades in the bar: -4.4%) | the `QUIET` arms cap the move at 5% and volume at 10x |
+| three things were not negative in either half of the sample: a coin down 10%+ on the day (+4.9%, n=44), a pool over $1m with a 15% take profit (+0.77%, n=107), and the red-candle snap-back (+0.10%) | `DOWN`, `DEEP` and `SNAP` test exactly those, forward |
+
+Those three came out of the same data that suggested them. They are
+hypotheses on test, not findings.
 
 Page: `/momentum-candles` ("Momentum Lab" in the nav). API: `/api/v1/labs/momentum/*`.
 Flag: `LAB_MOMENTUM_ENABLED` (default off; it is in the compose anchor).
@@ -34,24 +49,24 @@ Flag: `LAB_MOMENTUM_ENABLED` (default off; it is in the compose anchor).
 
 Every 30 seconds each pool is sampled once (~15 DexScreener calls at most).
 A sample is filed at its **market** moment — fetch time minus the feed's ~27s
-lag — into a stored 5m candle (`mom_candles`, 3 days kept). 15m and 1h bars
-are aggregated from the 5m ones in SQL when they close. Highs and lows are
+lag — into a stored 5m candle (`mom_candles`, 3 days kept). The SQL that
+aggregates 15m and 1h bars is still there, but run 2 judges 5m bars only:
+run 1's 15m and 1h arms were worse than its 5m ones. Highs and lows are
 **sampled**, so wicks between samples are missed; a chart's candle low sits at
 or under the one a stop here uses.
 
 A bar is judged once (`mom_closes` is the lock), only after it has closed, and
 only against bars that closed before it, and only once the token has 20 bars
-of its own history (~100 minutes on 5m, 5 hours on 15m, 20 hours on 1h).
+of its own history (~100 minutes on 5m).
 
 **Only busy candles count:** a bar is judged only with at least 20 trades per
-five minutes it spans (60 on 15m, 240 on 1h); the rolling rule needs 20 in its
-window, and the random controls draw from the same busy bars. Added 40 minutes
+five minutes it spans, and the random controls draw from the same busy bars. Added 40 minutes
 after launch: the median watched coin does 12 trades per 5 minutes (3 in a
 quiet hour), 13 of the first 16 candles that moved 2%+ had under 10 trades,
 and the first live trade was +9.5% on two buys. Positions decided before the
 floor went live are `void` (shown, counted nowhere).
 
-**The momentum candle (`M5_BASE`):** green, up 2%+, 3x the token's median
+**The momentum candle (`BASE_60`):** green, up 2%+, 3x the token's median
 5m body over the last 24 bars, on 3x normal volume (DexScreener's own 24h
 volume / 288), closing in the top 40% of its range. Not "more buys than
 sells": that was the first version, and it blocked every real pump of the first
@@ -75,39 +90,44 @@ Calibrated for RATE only, on 4,020 real 5m candles of 22 universe tokens
 * A pool that returns nothing for an hour closes at its last price as
   `no_data` — never at zero.
 
-## The fifty
+## The thirteen
 
-One factor at a time from the base, so each strategy answers one question:
+One factor at a time from the base, on 5m candles only, each on two exits:
+out after **an hour**, or **+15% or two hours**, whichever comes first.
 
 | family | strategies | yardstick |
 |---|---|---|
-| controls | `R5_TIME` random bar at the base's measured rate, `R5_SAME` the base's moments with random tokens, `R5_GREEN` random green bar, `R15_TIME`, `R1H_TIME` | — |
-| 5m entry | base, looser, bigger, 8%+, 6x volume, no volume, closes at high, 2x buyers, 2h breakout, first impulse, second leg, trend, counter-trend, breadth, confirm, pullback | base / `R5_TIME` |
-| universe | pool $50k-250k / $250k-1M / $1M+, age 7-30d / 30-180d / 180d+ | base |
-| exits | hold 15m / 1h / 4h, stop at low + 1R/2R/3R, stop at midpoint + 2R, 5% / 10% trail, +5% / +10% take-profit, first red candle, **split exit** (half at +1R, rest at +3R or breakeven) | base |
-| 15m, 1h | base, breakout, stop/target or trail | own random control |
-| catch | DexScreener's own last-5-minutes window up 4% / 8% on 3x volume, bought mid-move | `R5_TIME` |
-| dip | buy the RED momentum candle | `R5_TIME` |
+| controls | `RND_60` random bar at the base's measured rate, `RND_TP15` the same with the take profit, `RND_DOWN` random bar of a coin already down 10%+ on the day | — |
+| base | `BASE_60`, `BASE_TP15` — the momentum candle itself | `RND_60` / `RND_TP15` |
+| down | `DOWN_60`, `DOWN_TP15` — only while the coin is down 10%+ on the day | `RND_DOWN` / `DOWN_60` |
+| universe | `DEEP_60`, `DEEP_TP15` — only in pools over $1m | base |
+| quiet | `QUIET_60`, `QUIET_TP15` — 2-5% on 3-10x volume, nothing louder | base |
+| dip | `SNAP_60`, `SNAP_6H` — buy the RED candle, an hour or six | `RND_60` / `SNAP_60` |
+
+`RND_DOWN` is the one that matters most: `DOWN_60` has to beat a random buy
+of the SAME beaten-down coins, not just a random buy.
 
 `python -m app.labs.momentum arms` prints every rule in the words the page uses.
 
 ## The board
 
-* Every trade is measured at $100 (`TICKET_USD`).
+* Every trade is measured at $50 (`TICKET_USD`).
 * **Wallets and splits:** the trades are re-walked in the order they opened
-  through a $1,000 wallet cut into 1 x $1,000, 2 x $500, 5 x $200, 10 x $100
-  (the headline) or 20 x $50. A wallet with no free ticket skips the signal; a
+  through a $500 wallet cut into 1 x $500, 2 x $250, 5 x $100, 10 x $50
+  (the headline) or 20 x $25. Run 1 showed what few tickets do: the same
+  strategy ended at $229 on one ticket and $1,156 on ten, because with two
+  slots it is luck which signals get funded. Read the board at 10 x $50. A wallet with no free ticket skips the signal; a
   bigger ticket pays proportionally more impact.
 * **Error between hours**, not trades: trades in one hour are one market.
-* **The bar is z >= 3 against the yardstick.** Fifty comparisons at z >= 2
-  pass one or two by luck. `verdict` says "waiting" under 30 trades.
+* **The bar is z >= 3 against the yardstick.** Thirteen comparisons at z >= 2
+  pass one by luck. `verdict` says "waiting" under 30 trades.
 
 ## Run it
 
     python -m app.labs.momentum universe   # refresh the token list
     python -m app.labs.momentum tick       # one 30-second tick
     python -m app.labs.momentum prune      # candles > 3 days, signals > 14
-    python -m app.labs.momentum arms       # print the fifty rules
+    python -m app.labs.momentum arms       # print the thirteen rules
 
 Beat (in `celery_app.py`): `momentum-lab-tick` every `LAB_MOMENTUM_TICK_S`
 (30) seconds, `momentum-lab-universe` at :07/:37, `momentum-lab-prune` at :17.

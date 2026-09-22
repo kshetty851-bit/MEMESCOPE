@@ -57,9 +57,12 @@ async def status(db: AsyncSession = Depends(get_db)) -> Status:
         select(MomClose.tf, func.max(MomClose.start)).group_by(MomClose.tf))).all())
     signals = await db.scalar(select(func.count()).select_from(MomSignal)
                               .where(MomSignal.at >= now - timedelta(days=1))) or 0
+    # Run 1's book is still in the table; the page counts the arms that exist.
+    mine = MomPosition.arm.in_([a.name for a in ARMS])
     by_status = dict((await db.execute(
-        select(MomPosition.status, func.count()).group_by(MomPosition.status))).all())
-    started = await db.scalar(select(func.min(MomPosition.opened_at)))
+        select(MomPosition.status, func.count()).where(mine)
+        .group_by(MomPosition.status))).all())
+    started = await db.scalar(select(func.min(MomPosition.opened_at)).where(mine))
     return Status(
         running=True, pools_active=active, pools_sampled_5m=sampled,
         last_sample_at=last,
@@ -142,7 +145,8 @@ async def leaderboard(db: AsyncSession = Depends(get_db)) -> Board:
                    MomPosition.impact_close, MomPosition.open_price,
                    MomPosition.close_price)
             .where(MomPosition.status == "closed", MomPosition.net_return.is_not(None),
-                   MomPosition.opened_at.is_not(None))
+                   MomPosition.opened_at.is_not(None),
+                   MomPosition.arm.in_([a.name for a in ARMS]))
             .order_by(MomPosition.opened_at, MomPosition.id))).all():
         trades[r.arm].append(board.Trade(
             r.opened_at, r.closed_at, float(r.net_return),
@@ -154,7 +158,8 @@ async def leaderboard(db: AsyncSession = Depends(get_db)) -> Board:
     for p, price, liq in (await db.execute(
             select(MomPosition, MomPair.last_price, MomPair.liquidity_usd)
             .join(MomPair, MomPair.pair_address == MomPosition.pair_address)
-            .where(MomPosition.status.in_(LIVE)))).all():
+            .where(MomPosition.status.in_(LIVE),
+                   MomPosition.arm.in_([a.name for a in ARMS])))).all():
         open_n[p.arm] += 1
         if p.status in ("open", "closing") and price and p.tokens:
             _, proceeds, _ = sell(price, liq, p.fee_bps or config.FEE_BPS, p.tokens)
@@ -185,7 +190,8 @@ async def leaderboard(db: AsyncSession = Depends(get_db)) -> Board:
             wallet=headline, splits=split_rows,
             z_vs=None if z is None else round(z, 2),
             verdict=board.verdict(s, z, yardstick, is_control=arm.is_control)))
-    started = await db.scalar(select(func.min(MomPosition.opened_at)))
+    started = await db.scalar(select(func.min(MomPosition.opened_at))
+                              .where(MomPosition.arm.in_([a.name for a in ARMS])))
     out = Board(running=True, generated_at=now, started_at=started, arms=rows)
     _CACHE = (now, out)
     return out

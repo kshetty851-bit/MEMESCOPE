@@ -1,5 +1,5 @@
 """One momentum candle through the whole book: judged once, bought on the NEXT
-price, stopped, pulled back into, and timed out — against a real database."""
+price, taken at the take profit and timed out — against a real database."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from app.labs.momentum import api, config
 from app.labs.momentum.lab import MomentumLab
@@ -30,6 +30,7 @@ class FakeFeeds:
         self.price = D("1.05")
         self.now = B
         self.buys, self.sells = 30, 10
+        self.dex = "raydium"
 
     async def pairs(self, addresses):
         self.calls["dex"] += 1
@@ -85,71 +86,83 @@ async def test_a_momentum_candle_through_the_book(session, monkeypatch) -> None:
     # --- tick 1: the 5m bar at B has closed; every rule it meets decides -----
     first = await _tick(session, feeds, t1, "1.05")
     assert first["judged"]["5m"]["eligible"] == 1
+    assert set(first["judged"]) == {"5m"}, "run 2 judges 5m bars only"
     book = await _positions(session)
-    for arm in ("M5_BASE", "M5_BREAKOUT", "M5_FIRST", "M5_TREND", "M5_LIQ_M",
-                "M5_AGE_6M", "X5_HOLD3", "X5_MID_2R", "X5_TRAIL5",
-                "R5_SAME", "R5_TIME", "R5_GREEN", "CATCH_4"):
+    for arm in ("BASE_60", "BASE_TP15", "RND_60", "RND_TP15"):
         assert book[arm].status == "pending", arm
         assert book[arm].opened_at is None, "never filled on the price it decided on"
-    assert book["M5_PULLBACK"].status == "armed"
-    for arm in ("M5_HUGE", "M5_VOL6", "M5_SECOND", "M5_COUNTER", "M5_LIQ_S",
-                "M5_AGE_1M", "M5_CONFIRM", "DIP5", "CATCH_8"):
+    # 5% is not the quiet end, $500k is not a deep pool, the coin is UP on the
+    # day, and the candle is green — so four arms and one control stand off.
+    for arm in ("QUIET_60", "QUIET_TP15", "DEEP_60", "DEEP_TP15",
+                "DOWN_60", "DOWN_TP15", "SNAP_60", "SNAP_6H", "RND_DOWN"):
         assert arm not in book, arm
     closes = (await session.execute(select(MomClose.fired).where(
         MomClose.tf == "5m", MomClose.start == B))).scalar_one()
-    assert closes["M5_BASE"] == 1
+    assert closes["BASE_60"] == 1
 
     # --- tick 2: filled at THIS price; the bar is not judged twice ---------------
     t2 = t1 + timedelta(seconds=30)
     second = await _tick(session, feeds, t2, "1.06")
     assert "5m" not in second["judged"]
     book = await _positions(session)
-    base = book["M5_BASE"]
+    base = book["BASE_60"]
     assert base.status == "open" and base.open_price == D("1.06")
     assert base.open_fill > D("1.06"), "fees and impact on the way in"
     assert base.opened_at == t2 + timedelta(seconds=1 - config.FEED_LAG_S)
-    assert book["M5_PULLBACK"].status == "armed", "1.06 is above the midpoint"
     assert (await session.scalar(select(func.count()).select_from(MomPosition)
-                                 .where(MomPosition.arm == "CATCH_4"))) == 1, \
+                                 .where(MomPosition.arm == "BASE_60"))) == 1, \
         "one position per pool per strategy"
 
-    # --- tick 3: under the candle's midpoint -------------------------------------
+    # --- tick 3: +18%, so the take profit decides and the hour arm runs on -------
     t3 = t2 + timedelta(seconds=30)
-    await _tick(session, feeds, t3, "1.02")
+    await _tick(session, feeds, t3, "1.25")
     book = await _positions(session)
-    assert book["X5_MID_2R"].status == "closing"
-    assert book["X5_MID_2R"].exit_reason == "stop"
-    assert book["X5_LOW_2R"].status == "open", "the low is further down"
-    assert book["M5_PULLBACK"].status == "pending", "dipped to the midpoint"
+    assert book["BASE_TP15"].status == "closing"
+    assert book["BASE_TP15"].exit_reason == "take_profit"
+    assert book["BASE_60"].status == "open", "its only exit is the clock"
 
-    # --- tick 4: the stop sells on the NEXT price, the pullback buys on it -------
+    # --- tick 4: the sale fills on the NEXT price, never the one that decided ----
     t4 = t3 + timedelta(seconds=30)
-    await _tick(session, feeds, t4, "1.00")
+    await _tick(session, feeds, t4, "1.24")
     book = await _positions(session)
-    stopped = book["X5_MID_2R"]
-    assert stopped.status == "closed" and stopped.close_price == D("1.00")
-    assert stopped.net_return < D("-0.05")
-    assert book["M5_PULLBACK"].status == "open"
-    assert book["M5_PULLBACK"].open_price == D("1.00")
-    assert book["X5_TRAIL5"].status == "closing", "5% off the 1.06 high"
+    sold = book["BASE_TP15"]
+    assert sold.status == "closed" and sold.close_price == D("1.24")
+    gross = D("1.24") / D("1.06") - 1
+    assert gross - D("0.009") < sold.net_return < gross - D("0.006"), "the toll, both legs"
 
-    # --- tick 5: thirty minutes after the fill, the clock sells ------------------
-    t5 = t2 + timedelta(minutes=31)
+    # --- tick 5: an hour after the fill, the clock sells ------------------------
+    t5 = t2 + timedelta(minutes=61)
     await _tick(session, feeds, t5, "1.10")
     book = await _positions(session)
-    base = book["M5_BASE"]
+    base = book["BASE_60"]
     assert base.status == "closed" and base.exit_reason == "time"
     gross = D("1.10") / D("1.06") - 1
     assert gross - D("0.009") < base.net_return < gross - D("0.006"), "the toll, both legs"
-    assert book["X5_HOLD12"].status == "open", "an hour has not passed"
 
     board = await api.leaderboard(db=session)
     rows = {r.name: r for r in board.arms}
-    assert len(rows) == 50
-    assert rows["M5_BASE"].trades == 1
-    assert rows["M5_BASE"].wallet.end == pytest.approx(
-        1000 + float(base.net_return) * 100, abs=0.01)
-    assert rows["X5_MID_2R"].wallet.end < 1000
+    assert len(rows) == 13
+    assert rows["BASE_60"].trades == 1
+    start, ticket = float(config.START_USD), float(config.TICKET_USD)
+    assert rows["BASE_60"].wallet.end == pytest.approx(
+        start + float(base.net_return) * ticket, abs=0.01)
+    assert rows["BASE_TP15"].wallet.end > start
+
+
+async def test_an_expensive_pool_is_never_judged(session, monkeypatch) -> None:
+    """pump.fun's AMM charged 185 bps a round trip in run 1 and its coins fell
+    more. The gate sits before the judging, so the controls cannot draw from
+    there either — both still trade one population."""
+    monkeypatch.setenv("LAB_MOMENTUM_ENABLED", "true")
+    await _seed(session)
+    await session.execute(update(MomPair).values(dex_id="pumpswap"))
+    await session.commit()
+    feeds = FakeFeeds()
+    feeds.dex = "pumpswap"
+    first = await _tick(session, feeds, B + FIVE + timedelta(seconds=config.FEED_LAG_S + 3),
+                        "1.05")
+    assert first["judged"]["5m"]["eligible"] == 0
+    assert (await session.scalar(select(func.count()).select_from(MomPosition))) == 0
 
 
 async def test_a_candle_made_by_two_buyers_is_not_momentum(session, monkeypatch) -> None:

@@ -17,19 +17,19 @@ import type { ArmRow, MomentumStatus, SplitRow, TradeRow } from "./types";
 /**
  * MOMENTUM LAB
  *
- * Fifty paper strategies that buy the momentum candle on Solana tokens older
- * than seven days, each from a $1,000 wallet. Every number is computed on the
- * backend; nothing here applies a rule of its own.
+ * Run 2 (22 Sep 2026): thirteen paper strategies on Solana tokens older than
+ * seven days, each from a $500 wallet, on 30 bps pools only. Run 1 ran fifty
+ * for three days and closed 23,911 trades without finding an edge; what it
+ * did find — cost, stops, loud candles — is built into these rules. Every
+ * number is computed on the backend; nothing here applies a rule of its own.
  */
 
 const FAMILIES: [string, string][] = [
   ["control", "Controls — random rules that cannot have an edge"],
-  ["entry", "5-minute candle — the base rule, one entry condition changed each"],
-  ["universe", "5-minute candle — the universe sliced by pool size and token age"],
-  ["exit", "5-minute candle — the base entry, one exit changed each"],
-  ["m15", "15-minute candles"],
-  ["m1h", "1-hour candles"],
-  ["catch", "Caught mid-candle — bought while the move is happening"],
+  ["entry", "The momentum candle itself — run 2's reference"],
+  ["down", "Bought only when the coin is already down 10%+ on the day"],
+  ["universe", "Bought only in pools over $1m"],
+  ["quiet", "The quiet end of the rule — small moves, ordinary volume"],
   ["dip", "The opposite bet — buy the red candle"],
 ];
 
@@ -233,7 +233,7 @@ function Trades({ arm }: { arm: string }) {
   );
 }
 
-function Board({ start }: { start: number }) {
+function Board({ start, ticket }: { start: number; ticket: number }) {
   const { data, isLoading, isError } = useMomentumBoard();
   const [split, setSplit] = useState(10);
   const [open, setOpen] = useState<string | null>(null);
@@ -246,7 +246,7 @@ function Board({ start }: { start: number }) {
       <PanelHeader>
         <PanelTitle>The {data.arms.length} strategies</PanelTitle>
         <span className="flex flex-wrap items-center gap-1 text-xs">
-          <span className="mr-1 text-ink-dim">each $1,000 wallet split</span>
+          <span className="mr-1 text-ink-dim">each {usd(start).replace(".00", "")} wallet split</span>
           {splits.map((s) => (
             <button
               key={s.split}
@@ -266,11 +266,11 @@ function Board({ start }: { start: number }) {
           <b className="text-ink">Paper only, priced like a real wallet.</b> A buy is decided when
           a candle closes and filled at the <b className="text-ink">next price recorded after
           the decision</b>, never the price it was decided on. Every fill pays the pool&rsquo;s fee
-          (0.30%, or pump.fun&rsquo;s market-cap tier), the router&rsquo;s cut and the price move
+          (0.30%), the router&rsquo;s cut and the price move
           its own order makes — the <b className="text-ink">toll</b> column. Each trade is measured
-          at $100; the wallet column re-walks them in order, skipping any signal that arrives while
+          at {usd(ticket).replace(".00", "")}; the wallet column re-walks them in order, skipping any signal that arrives while
           every ticket is in use. A strategy has shown something only when it beats its yardstick by
-          three standard errors (measured between hours) — with fifty strategies, one or two will beat
+          three standard errors (measured between hours) — with thirteen strategies, one will beat
           it at two by luck alone.
         </p>
         <div className="overflow-x-auto">
@@ -487,10 +487,16 @@ export function MomentumLabPage() {
           a <b className="text-ink">momentum candle</b> closes — a big green candle for that token,
           on heavy volume, closing near its high, with at least {data.min_trades_5m} trades in
           five minutes — {data.arms} paper strategies decide whether to buy. Each starts with {usd(data.start_usd).replace(".00", "")}. No real funds.
+          <br />
+          <b className="text-ink">Run 2, since 22 September:</b> only pools charging 30 bps a side.
+          Run 1 closed 23,911 trades and priced pump.fun&rsquo;s AMM at 1.85% a round trip against
+          0.77% elsewhere, on coins that fell further — so that venue is refused outright, for the
+          strategies and the dice alike. No strategy carries a stop: run 1&rsquo;s 1,644 stopped
+          trades lost 7.6% each.
         </p>
       </header>
       <Health s={data} />
-      <Board start={data.start_usd} />
+      <Board start={data.start_usd} ticket={data.ticket_usd} />
       <Radar />
     </div>
   );

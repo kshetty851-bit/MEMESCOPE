@@ -94,19 +94,22 @@ def test_the_base_rule_takes_a_momentum_candle_and_nothing_less() -> None:
 
 
 def test_one_condition_changed_each() -> None:
+    """Run 2: each arm is the base rule with ONE thing changed."""
     history = quiet()
     o = history[-1].close
-    sig = features(impulse(48, o, 0.05), history, 300, impulse_ret=0.02)
-    assert fires(BY_NAME["M5_BIG"].rule, sig, CTX)
-    assert not fires(BY_NAME["M5_HUGE"].rule, sig, CTX)
-    assert fires(BY_NAME["M5_LIQ_M"].rule, sig, CTX)
-    assert not fires(BY_NAME["M5_LIQ_S"].rule, sig, CTX)
-    assert not fires(BY_NAME["M5_AGE_1M"].rule, sig, CTX)
-    assert fires(BY_NAME["M5_AGE_6M"].rule, sig, CTX)
-    assert not fires(BY_NAME["M5_BREADTH"].rule, sig, replace(CTX, breadth=0.3))
-    assert not fires(BY_NAME["M5_COUNTER"].rule, sig, CTX), "up on the day"
-    assert fires(BY_NAME["M5_FIRST"].rule, sig, CTX)
-    assert not fires(BY_NAME["M5_SECOND"].rule, sig, CTX)
+    loud = features(impulse(48, o, 0.08, vol=20_000), history, 300, impulse_ret=0.02)
+    small = features(impulse(48, o, 0.03), history, 300, impulse_ret=0.02)
+    assert fires(BY_NAME["BASE_60"].rule, loud, CTX)
+    # QUIET takes the small move and refuses the loud one, on size and volume.
+    assert fires(BY_NAME["QUIET_60"].rule, small, CTX)
+    assert not fires(BY_NAME["QUIET_60"].rule, loud, CTX), "8% is over the 5% ceiling"
+    assert not fires(BY_NAME["QUIET_60"].rule,
+                     features(impulse(48, o, 0.03, vol=20_000), history, 300,
+                              impulse_ret=0.02), CTX), "20x volume is over the ceiling"
+    # DEEP needs the pool, DOWN needs the coin to be down on the day.
+    assert not fires(BY_NAME["DEEP_60"].rule, loud, CTX), "a $200k pool is not deep"
+    assert fires(BY_NAME["DEEP_60"].rule, loud, replace(CTX, liquidity=2_000_000))
+    assert not fires(BY_NAME["DOWN_60"].rule, loud, CTX), "up on the day"
 
 
 def test_confirmation_needs_the_next_candle_green() -> None:
@@ -114,7 +117,7 @@ def test_confirmation_needs_the_next_candle_green() -> None:
     o = history[-1].close
     sig = impulse(48, o)
     prev = features(sig, history, 300, impulse_ret=0.02)
-    rule = BY_NAME["M5_CONFIRM"].rule
+    rule = replace(M5, confirm=True)
     up = features(bar(49, sig.close, sig.close * 1.001), [*history, sig], 300,
                   impulse_ret=0.02)
     down = features(bar(49, sig.close, sig.close * 0.999), [*history, sig], 300,
@@ -129,12 +132,12 @@ def test_the_dip_rule_is_the_mirror() -> None:
     o = history[-1].close
     red = bar(48, o, o * 0.95, hi=o * 1.005, lo=o * 0.95, vol=5_000, buys=5, sells=30)
     f = features(red, history, 300, impulse_ret=0.02)
-    assert fires(BY_NAME["DIP5"].rule, f, CTX)
+    assert fires(BY_NAME["SNAP_60"].rule, f, CTX)
     assert not fires(M5, f, CTX)
 
 
 def test_the_rolling_rule_reads_the_feeds_own_window() -> None:
-    rule = BY_NAME["CATCH_4"].rule
+    rule = Rule(min_ret=0.04, min_vol_x=3.0, rolling=True)
     s = Rolling(change_m5=6.0, volume_m5=5_000, volume_h24=288_000, buys_m5=40, sells_m5=10)
     assert fires_rolling(rule, s, CTX)
     assert not fires_rolling(rule, replace(s, change_m5=3.0), CTX)
@@ -142,24 +145,29 @@ def test_the_rolling_rule_reads_the_feeds_own_window() -> None:
     assert fires_rolling(rule, replace(s, buys_m5=5), CTX), "counts hide size"
 
 
-def test_the_book_is_fifty_frozen_strategies_with_controls() -> None:
-    assert len(ARMS) == 50
+def test_the_book_is_thirteen_frozen_strategies_with_controls() -> None:
+    assert len(ARMS) == 13
     controls = [a for a in ARMS if a.is_control]
-    assert {a.control for a in controls} == {"time", "same", "green"}
+    assert len(controls) == 3 and {a.control for a in controls} == {"time"}
     for arm in ARMS:
         assert arm.entry_words and arm.exit_words, arm.name
-        # Every strategy is judged against a yardstick on its own clock.
+        assert arm.tf == "5m", f"{arm.name}: run 2 is 5m only"
+        # Run 1 priced stops at -7.6% a trade; run 2 carries none.
+        assert arm.stop is None and arm.target_r is None, arm.name
         if not arm.is_control:
             assert BY_NAME[arm.vs].tf in {arm.tf, "5m"}, arm.name
-    # Every rule arm except the base itself changes exactly what it says: the
-    # base's rule object is reused by the exit family unchanged.
-    assert all(a.rule == M5 for a in ARMS if a.family == "exit")
+    # Every entry is the base rule with one thing changed.
+    for arm in ARMS:
+        if arm.rule and arm.rule != M5:
+            changed = [f for f in M5.__slots__
+                       if getattr(arm.rule, f) != getattr(M5, f)]
+            assert changed, arm.name
 
 
 def test_a_coin_is_the_same_every_time() -> None:
-    assert coin("R5_TIME", "p:1") == coin("R5_TIME", "p:1")
-    assert coin("R5_TIME", "p:1") != coin("R5_SAME", "p:1")
-    draws = [coin("R5_TIME", f"p:{i}") for i in range(4000)]
+    assert coin("RND_60", "p:1") == coin("RND_60", "p:1")
+    assert coin("RND_60", "p:1") != coin("RND_DOWN", "p:1")
+    draws = [coin("RND_60", f"p:{i}") for i in range(4000)]
     assert 0.45 < sum(d < 0.5 for d in draws) / len(draws) < 0.55
 
 
@@ -215,26 +223,29 @@ def trade(minute: int, hold: int, ret: float, impact: float = 0.0) -> board.Trad
                        T0 + timedelta(minutes=minute + hold), ret, impact, impact)
 
 
+START = float(config.START_USD)
+
+
 def test_a_split_wallet_skips_what_it_cannot_fund() -> None:
-    # Three trades open at once; a 1 x $1,000 wallet can hold one of them.
+    # Three trades open at once; a whole-wallet ticket can hold one of them.
     trades = [trade(0, 30, 0.10), trade(1, 30, 0.10), trade(2, 30, 0.10)]
     one = board.walk(trades, 1)
     assert (one.funded, one.skipped) == (1, 2)
-    assert one.end == pytest.approx(1100)
+    assert one.end == pytest.approx(START * 1.10)
     ten = board.walk(trades, 10)
     assert (ten.funded, ten.skipped) == (3, 0)
-    assert ten.end == pytest.approx(1030)
+    assert ten.end == pytest.approx(START * 1.03)
 
 
 def test_a_bigger_ticket_pays_more_impact() -> None:
     t = [trade(0, 5, 0.0, impact=0.002)]
-    assert board.walk(t, 1).end < board.walk(t, 10).end == pytest.approx(1000)
+    assert board.walk(t, 1).end < board.walk(t, 10).end == pytest.approx(START)
 
 
 def test_the_wallet_low_counts_losses_as_they_close() -> None:
     w = board.walk([trade(0, 5, -0.5), trade(10, 5, 0.5)], 1)
-    assert w.low == pytest.approx(500)
-    assert w.end == pytest.approx(750)
+    assert w.low == pytest.approx(START * 0.5)
+    assert w.end == pytest.approx(START * 0.75)
 
 
 def test_error_is_measured_between_hours() -> None:
@@ -247,19 +258,21 @@ def test_error_is_measured_between_hours() -> None:
 
 def test_a_verdict_never_claims_more_than_the_numbers() -> None:
     few = board.stats([trade(60 * i, 1, 0.05) for i in range(10)])
-    assert board.verdict(few, 9.9, "R5_TIME", is_control=False).startswith("waiting")
+    assert board.verdict(few, 9.9, "RND_60", is_control=False).startswith("waiting")
     many = board.stats([trade(60 * i, 1, 0.01 + 0.001 * (i % 3)) for i in range(40)])
-    verdict = lambda z: board.verdict(many, z, "R5_TIME", is_control=False)  # noqa: E731
-    assert verdict(2.9) == "no different from R5_TIME yet"
-    assert verdict(3.1) == "beats R5_TIME and makes money"
-    assert board.verdict(many, 3.1, "R5_TIME", is_control=True).startswith("control")
+    verdict = lambda z: board.verdict(many, z, "RND_60", is_control=False)  # noqa: E731
+    assert verdict(2.9) == "no different from RND_60 yet"
+    assert verdict(3.1) == "beats RND_60 and makes money"
+    assert board.verdict(many, 3.1, "RND_60", is_control=True).startswith("control")
 
 
 def test_rule_words_are_the_rule() -> None:
     assert "3x normal volume" in M5.words()
-    assert "$50k-$250k" in BY_NAME["M5_LIQ_S"].entry_words
-    assert "$1M+" in BY_NAME["M5_LIQ_L"].entry_words
-    assert "10% off the high" in BY_NAME["X5_TRAIL10"].exit_words
+    assert "$1M+" in BY_NAME["DEEP_60"].entry_words
+    assert "up 2%-5%" in BY_NAME["QUIET_60"].entry_words
+    assert "3-10x normal volume" in BY_NAME["QUIET_60"].entry_words
+    assert "+15%" in BY_NAME["BASE_TP15"].exit_words
+    assert "down 10%+ on the day" in BY_NAME["RND_DOWN"].entry_words
     rolling = Rule(min_ret=0.04, min_vol_x=3.0, rolling=True)
     assert rolling.words().startswith("the last 5 minutes")
 
@@ -277,13 +290,13 @@ def test_only_busy_candles_count() -> None:
 def test_a_pump_with_more_sellers_is_still_momentum() -> None:
     """ANONCOIN, 08:15 UTC 2026-09-19: +11.2% on 16x volume, closing at its high,
     two buys and thirty sells — one big buyer among many small sellers. The
-    first rule refused it on the count; only `M5_BUYERS` asks about counts now."""
+    first rule refused it on the count; run 2 asks about counts nowhere."""
     history = quiet()
     o = history[-1].close
     anoncoin = impulse(48, o, 0.112, vol=16_000, buys=2, sells=30)
     f = features(anoncoin, history, 300, impulse_ret=0.02)
     assert fires(M5, f, CTX)
-    assert not fires(BY_NAME["M5_BUYERS"].rule, f, CTX)
+    assert all(a.rule.min_buy_ratio is None for a in ARMS if a.rule)
 
 
 def test_a_bad_print_is_refused_either_way() -> None:

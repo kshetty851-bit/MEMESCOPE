@@ -153,12 +153,12 @@ CANDLE_RETENTION_DAYS = _int("LAB_MOMENTUM_CANDLE_RETENTION_DAYS", 3)
 SIGNAL_RETENTION_DAYS = 14
 
 # --- the book -------------------------------------------------------------------
-#: Every strategy's wallet starts here.
-START_USD = Decimal("1000")
+#: Every strategy's wallet starts here. Run 2 (22 Sep 2026) restarted at $500.
+START_USD = Decimal("500")
 #: The size every trade is MEASURED at. The board's splits re-price the same
 #: trades at other sizes; the impact each trade paid scales with the ticket.
-TICKET_USD = Decimal("100")
-#: The wallet's splits: tickets the $1,000 is cut into. 10 x $100 is the
+TICKET_USD = Decimal("50")
+#: The wallet's splits: tickets the $500 is cut into. 10 x $50 is the
 #: headline because it is the size the trades were measured at.
 SPLITS: tuple[int, ...] = (1, 2, 5, 10, 20)
 HEADLINE_SPLIT = 10
@@ -191,6 +191,14 @@ NETWORK_FEE_USD = Decimal("0.02")
 #: A buy that would move the pool further than this is refused: past a
 #: slippage limit a real swap reverts, it does not fill badly.
 MAX_IMPACT = Decimal("0.03")
+
+
+#: Run 1 measured the toll on 23,911 closed trades: 77 bps a round trip on
+#: 30 bps venues, 185 bps on pump.fun's AMM, whose coins ALSO fell more
+#: (gross -0.78% against raydium's +0.50%). Every pumpswap tier is 40 bps a
+#: side or worse, so this refuses the whole venue — for the strategies and
+#: for the controls alike, so both still trade one population.
+MAX_FEE_BPS = _int("LAB_MOMENTUM_MAX_FEE_BPS", 30)
 
 
 def fee_bps(dex_id: str | None, market_cap_sol: Decimal | None) -> int:
