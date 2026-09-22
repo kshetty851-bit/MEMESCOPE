@@ -1029,6 +1029,33 @@ FRESH_BOOKS: tuple[FreshBookSpec, ...] = (
                   Decimal(500), Decimal(100)),
 )
 
+
+@dataclass(frozen=True, slots=True)
+class RollingStart:
+    """One $500 book opened on EVERY day, so the reader can see how much the
+    answer depends on the day they happened to begin.
+
+    Karthik, 2026-09-22: "assume we started today, then tomorrow, then day
+    after, like this until Oct 31". Its point is the spread, not the best row.
+    Walked over the arm's existing record, the nine possible start days
+    between 14 and 22 Sep ended between +35% and +192% — the same strategy,
+    and the 19 Sep start fell to $99.55 on the way, which is the number that
+    decides whether a person keeps it running.
+    """
+
+    book: str
+    first_day: date
+    #: Inclusive. New rows appear each day until this one and then stop; the
+    #: rows already there keep updating, because each is a live wallet.
+    last_day: date
+    capital_usd: Decimal
+    ticket_usd: Decimal
+
+
+#: B3 is the arm Karthik is deciding on (`FRESH_BOOKS` above, judged 30 Sep).
+ROLLING_START = RollingStart("B3_198k_5m", date(2026, 9, 22), date(2026, 10, 31),
+                             Decimal(500), Decimal(100))
+
 # --- the kill gate, stated before this run produced a single trade ------------
 #
 # Written down on 2026-09-12, the day the book was re-armed, so that a good

@@ -3,11 +3,11 @@ own wallet would fund them."""
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 from app.labs.graduation import config
-from app.labs.graduation.api import fresh_book
+from app.labs.graduation.api import fresh_book, start_walks
 from app.labs.graduation.tournament import ARMS, CONTROLS, accepts
 
 # the quiet pair on one start, then the three band books
@@ -98,3 +98,35 @@ def test_the_band_arms_buy_between_55k_and_75k_and_nothing_else() -> None:
     assert accepts(band[0], liquidity=Decimal(74_999), **kw)
     assert not accepts(band[0], liquidity=Decimal(75_000), **kw)   # the baseline's floor
     assert not accepts(band[0], liquidity=None, **kw)
+
+
+def rolling(first: int, last: int) -> config.RollingStart:
+    return config.RollingStart("B3_198k_5m", date(2026, 9, first), date(2026, 9, last),
+                               Decimal(500), Decimal(100))
+
+
+def day_trade(day: int, ret: float) -> tuple:
+    opened = datetime(2026, 9, day, 9, 0, tzinfo=UTC)
+    return (opened, opened + timedelta(minutes=5), ret, 0.0, 0.0)
+
+
+def test_each_start_day_is_its_own_wallet_not_a_share_of_one() -> None:
+    """Karthik's rolling start (2026-09-22). A wallet opened later meets fewer
+    trades, so the rows must differ by WHICH trades they saw, not by dividing
+    one result — the whole question is how much a result depends on the day."""
+    trades = [day_trade(22, 0.10), day_trade(23, -0.90)]
+    rows = start_walks(trades, Decimal("120"), rolling(22, 27), today=date(2026, 9, 23))
+    assert [r.started_on for r in rows] == [date(2026, 9, 22), date(2026, 9, 23)]
+    # The 22nd took both; the 23rd only met the loser.
+    assert [r.trades for r in rows] == [2, 1]
+    assert [r.balance_usd for r in rows] == [Decimal("420.00"), Decimal("410.00")]
+
+
+def test_it_stops_adding_rows_after_the_last_day_but_keeps_the_old_ones() -> None:
+    """The table ends on 31 Oct; the wallets already in it keep running, because
+    a wallet that was never closed does not stop having a balance."""
+    trades = [day_trade(22, 0.10), day_trade(25, 0.10)]
+    rows = start_walks(trades, Decimal("120"), rolling(22, 23), today=date(2026, 9, 30))
+    assert [r.started_on for r in rows] == [date(2026, 9, 22), date(2026, 9, 23)]
+    # The 23rd's wallet still sees the trade from the 25th — it was not closed.
+    assert rows[1].trades == 1
