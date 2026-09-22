@@ -30,12 +30,14 @@ def test_the_page_shows_the_quiet_book_and_the_band_books() -> None:
     # Three books on one band, same money from the same minute: two clocks,
     # and the quiet filter tested against the five-minute one.
     assert [s.book for s in SWEEP] == [
-        "BAND_55k_2m", "BAND_55k_5m", "BAND_55k_quiet_5m"]
+        "BAND_55k_2m", "BAND_55k_5m", "BAND_55k_quiet_5m", "BAND_55k_pump_5m"]
     assert {(s.capital_usd, s.ticket_usd, s.start) for s in SWEEP} == {
         (Decimal(500), Decimal(100), SWEEP[0].start)}
     arms = [next(a for a in ARMS if a.name == s.book) for s in SWEEP]
-    assert [a.hold for a in arms] == [2, 5, 5]
-    assert [a.quiet for a in arms] == [False, False, True]
+    assert [a.hold for a in arms] == [2, 5, 5, 5]
+    assert [a.quiet for a in arms] == [False, False, True, False]
+    # The pump twin differs from BAND_55k_5m in the ENTRY, not the exit.
+    assert [a.entry for a in arms] == ["band55", "band55", "band55", "band55_pump"]
     arm = next(a for a in ARMS if a.name == BQ.book)
     assert arm.quiet and arm.hold == 5 and not arm.is_control
     # The control it is judged against still trades, panel or no panel.
@@ -66,12 +68,16 @@ def test_the_band_arms_buy_between_55k_and_75k_and_nothing_else() -> None:
     two minutes ran +6.4%, +2.5%, +1.7%, +1.7% a trade while $25-40k ran -4.1%,
     -5.0%, -18.3%, -21.0%. A band, not a floor: above $75k was mixed."""
     band = sorted((a for a in ARMS if a.name.startswith("BAND_55k")),
-                  key=lambda a: (a.hold, a.quiet))
+                  key=lambda a: (a.hold, a.quiet, a.entry))
     assert [a.name for a in band] == [
-        "BAND_55k_2m", "BAND_55k_5m", "BAND_55k_quiet_5m"]
-    assert [a.hold for a in band] == [2, 5, 5]
-    assert [a.quiet for a in band] == [False, False, True]
-    assert all(a.locked and a.entry == "band55" and not a.is_control for a in band)
+        "BAND_55k_2m", "BAND_55k_5m", "BAND_55k_pump_5m", "BAND_55k_quiet_5m"]
+    assert [a.hold for a in band] == [2, 5, 5, 5]
+    assert [a.quiet for a in band] == [False, False, False, True]
+    # Karthik's pump-only twin (2026-09-22) narrows the ENTRY and nothing else:
+    # same band, same lock, same clock, so the launchpad is what it measures.
+    assert [a.entry for a in band] == [
+        "band55", "band55", "band55_pump", "band55"]
+    assert all(a.locked and not a.is_control for a in band)
     assert all((a.tp, a.trail, a.stop, a.drain, a.clock) == (None, None, None, None, "entry")
                for a in band)
     kw = {"mint": "m", "open_at": BQ.start, "fdv": None, "sells": None, "reuse": None}

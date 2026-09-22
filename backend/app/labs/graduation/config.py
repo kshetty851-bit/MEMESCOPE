@@ -1007,7 +1007,11 @@ FRESH_BOOKS: tuple[FreshBookSpec, ...] = (
                   Decimal(500), Decimal(100)),
     *(FreshBookSpec(book, datetime(2026, 9, 21, 14, 15, tzinfo=UTC),
                     Decimal(500), Decimal(100))
-      for book in ("BAND_55k_2m", "BAND_55k_5m", "BAND_55k_quiet_5m")),
+      for book in ("BAND_55k_2m", "BAND_55k_5m", "BAND_55k_quiet_5m",
+                   # Same start as its control on purpose: its first 24 trades
+                   # ARE that control's, copied, so two walks from different
+                   # minutes would not be comparable.
+                   "BAND_55k_pump_5m")),
 )
 
 # --- the kill gate, stated before this run produced a single trade ------------
