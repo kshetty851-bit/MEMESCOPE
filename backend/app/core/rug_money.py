@@ -98,6 +98,32 @@ BLOCKED_SINCE: dict[str, datetime] = {
     # otherwise: 186 coins, 36 of them rugged (19%), against a base rate of
     # 3-5%, and 11 trades of this book, 4 of them rugs, -$235.
     "8zxkmeqHrpmqyzCSGxLNWZ4W7ZgjwHuo4HV11ALceNAg": _at("2026-09-20 08:30"),
+    # The night of 21-22 Sep, both taken by the REAL wallet on G-QUIET, at
+    # Karthik's request the morning after ("block rug and loss address").
+    #
+    # AROS (22 Sep 03:53 UTC, -100%, -$25.00 real). The pool held $365,302 at
+    # the buy and $372,041 at four minutes; at five it held $404. Drained
+    # inside the fifth minute. One of TEN coins called AROS this book bought
+    # between 01:10 and 04:21; the other nine paid +0.8% to +5.8%. They share
+    # no wallets — the one address on two of them sits on 86 coins with no
+    # rugs — so the campaign used fresh money per coin and nothing here can
+    # reach the next one. Each of these four sits on 1-2 coins, so blocking
+    # them refuses nothing else.
+    "2fX4U2QU3qtNypGzYKBEsHfQEzY7uL4kcSdzeiUDYiX9": _at("2026-09-22 05:00"),
+    "72iwPTUy71ed9SfniyhBTHvSdxBcB5YS1cjArzQH3PbP": _at("2026-09-22 05:00"),
+    "7RHdPkKj6zZb5A7kSvtANDiy8GSySybped3m6LYjGGan": _at("2026-09-22 05:00"),
+    "AkAqdGxJRnpEWdGQGZ4N559pfY77nbZVZDsf2gAyTXfk": _at("2026-09-22 05:00"),
+    # RICH (22 Sep 00:27 UTC, -66.4%, -$16.59 real). A bleed, not a drain: the
+    # pool went $135,734 -> $76,981 over the five minutes, and a four-minute
+    # exit would have been WORSE (-68.2%). 5QDtfF is the one with a record —
+    # 18 coins, 4 rugged (22%) — and the repeat-rugger rule already refuses it
+    # since the coin bar moved to 10 on 2026-09-21; it is named here so it
+    # stays refused if that rule is ever loosened. The other three sit on 1-2
+    # coins each.
+    "2275c6uqPKnp6oUP9LbadzUCxMtTiXktogsU8QGDBaUi": _at("2026-09-22 05:00"),
+    "5QDtfFdBxaUP3vT7bK5F1MHRUnkpTFW1Wj4GqCU7kk9X": _at("2026-09-22 05:00"),
+    "9vCfhjuALLBfP8LuaaCYFWMVLzoxF1KpCbJdqjC5BA1X": _at("2026-09-22 05:00"),
+    "wsyZWfNxvmY1a4B3sGrBSMtHCZAwUB9Fk5jbHjCS9Pk": _at("2026-09-22 05:00"),
 }
 
 ALWAYS_BLOCKED: frozenset[str] = frozenset(BLOCKED_SINCE)
