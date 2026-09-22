@@ -1012,6 +1012,21 @@ FRESH_BOOKS: tuple[FreshBookSpec, ...] = (
                    # ARE that control's, copied, so two walks from different
                    # minutes would not be comparable.
                    "BAND_55k_pump_5m")),
+    # Karthik's decision book, 2026-09-22: "let it continue and also start a
+    # fresh one with $500 ... let this run until end of month then I will put
+    # real $500". B3 is the deepest arm on the board and the only one that
+    # keeps most of its result when its best trade and its best day are taken
+    # away (+$382 and +$425 of +$958 over 593 trades), and its 1.7% rug rate
+    # is the reason: a winning trade on the real wallet has been worth $0.39
+    # and a rug -$26.26, so the rug INTERVAL is the whole economics.
+    #
+    # STARTS FORWARD, not backdated: 08:00 UTC is the first round hour after
+    # this was written, so no trade already closed can be counted into it.
+    # JUDGED 2026-09-30, on Karthik's own terms — he stakes real money on the
+    # result, so the date was fixed before the first trade rather than after a
+    # good week.
+    FreshBookSpec("B3_198k_5m", datetime(2026, 9, 22, 8, 0, tzinfo=UTC),
+                  Decimal(500), Decimal(100)),
 )
 
 # --- the kill gate, stated before this run produced a single trade ------------
