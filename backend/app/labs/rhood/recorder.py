@@ -234,7 +234,14 @@ async def record(session: AsyncSession) -> dict[str, Any]:
         for lock in watching:
             pairs = await _pairs(client, lock.token)
             # The PINNED pair, not the deepest one now.
-            pair = next((p for p in pairs if p.get("pairAddress") == lock.pair_address), None)
+            # CASE-INSENSITIVE, and that is not a nicety. The chain gives an
+            # address lower-cased; DexScreener gives it checksummed. Compared
+            # as strings they never match, so every launch was recorded and
+            # then silently skipped for pricing — 96 readings existed and all
+            # 96 belonged to the two tokens we do not care about.
+            pinned = (lock.pair_address or "").lower()
+            pair = next(
+                (p for p in pairs if (p.get("pairAddress") or "").lower() == pinned), None)
             if pair is None:
                 continue
             session.add(_sample(lock.token, pair))

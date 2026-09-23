@@ -39,7 +39,9 @@ async def status(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     hour = datetime.now(UTC) - timedelta(hours=1)
 
     async def count(*where: Any) -> int:
-        return int(await db.scalar(select(func.count()).select_from(RhoodLock).where(*where)) or 0)
+        total = await db.scalar(
+            select(func.count()).select_from(RhoodLock).where(*where))
+        return int(total or 0)
 
     launches = RhoodLock.pairs_seen <= LAUNCH_MAX_PAIRS
     rows = (await db.scalars(
