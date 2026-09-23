@@ -57,3 +57,15 @@ def test_it_ships_dark_in_the_repository() -> None:
     """The committed default is off; production sets it on the host."""
     import os
     assert os.getenv("LAB_RHOOD_ENABLED") is None or config.ENABLED in (True, False)
+
+
+def test_a_pinned_pair_matches_whatever_case_the_feed_returns() -> None:
+    """The chain gives an address lower-cased and DexScreener gives it
+    checksummed. Compared as strings they never match, and the symptom is not
+    an error: every launch is recorded and then skipped for pricing, leaving a
+    table full of readings for the coins that were NOT launches. That is what
+    happened on 2026-09-23 — 96 samples, none of them a launch."""
+    chain = "0x2fd51ed155e11fb9d5ee6ca8f5099d344e0f6848"
+    feed = "0x2FD51ed155E11fB9D5eE6Ca8F5099D344E0F6848"
+    assert chain != feed
+    assert chain.lower() == feed.lower()
