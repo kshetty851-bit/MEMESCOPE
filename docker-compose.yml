@@ -304,6 +304,10 @@ x-backend-env: &backend-env
   # worker runs it and the API reads it, and a value this file does not name
   # never reaches a container.
   LAB_MOMENTUM_ENABLED: ${LAB_MOMENTUM_ENABLED:-false}
+  # The Robinhood Chain recorder (2026-09-23). Records only — it has no
+  # book and nothing reads its tables. Default false so the beat entry
+  # that ships with it does nothing until this is set on the host.
+  LAB_RHOOD_ENABLED: ${LAB_RHOOD_ENABLED:-false}
   # Rafiqv2, the same way and for the same reason.
   RAFIQV2_LAB_ENABLED: ${RAFIQV2_LAB_ENABLED:-false}
   NSE_BREAKOUT_ENABLED: ${NSE_BREAKOUT_ENABLED:-false}
