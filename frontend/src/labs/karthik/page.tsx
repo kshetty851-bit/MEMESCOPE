@@ -1,5 +1,8 @@
 "use client";
 
+import { useEffect, useState } from "react";
+
+import { inr } from "@/labs/nse-tracker/format";
 import { Panel, PanelHeader, PanelTitle } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/states";
@@ -28,7 +31,59 @@ import type { KarthikTrade } from "./types";
  *
  * The JUDGE DATE is fixed in the backend and printed here rather than computed
  * from today, so it cannot quietly move to whenever the number looks best.
+ *
+ * RUPEES sit beside every dollar, because that is the currency Karthik reads
+ * money in. The rate is a fixed constant rather than a live feed: it is there
+ * to give the numbers a familiar size, and a book judged on whether it beat
+ * its own starting balance cannot be changed by the rate used to print it.
  */
+
+/**
+ * Dollars to rupees. Checked against three sources on 23 Sep 2026, which
+ * agreed within 0.1% (95.65 / 95.74 / 95.76).
+ *
+ * ponytail: a constant, not a live feed. A drifting rate would move every
+ * number on the page for reasons that have nothing to do with the strategy;
+ * swap in a fetched rate only if rupees ever become the currency a decision
+ * is made in.
+ */
+const RUPEES_PER_DOLLAR = 95.7;
+
+function rupees(value: string | number | null | undefined): string {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "—";
+  return inr(n * RUPEES_PER_DOLLAR, 0);
+}
+
+/**
+ * How long the book has been running, ticking every second.
+ *
+ * It counts UP from the start rather than down to the judge date, because the
+ * question this page answers is "how much has it seen so far" — thirty days is
+ * the promise, but a balance is only worth reading against the time that made
+ * it.
+ */
+export function formatElapsed(ms: number): string {
+  if (ms < 0) return "not started yet";
+  const s = Math.floor(ms / 1000);
+  const days = Math.floor(s / 86_400);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const clock = `${pad(Math.floor((s % 86_400) / 3600))}:${pad(
+    Math.floor((s % 3600) / 60),
+  )}:${pad(s % 60)}`;
+  return days > 0 ? `${days}d ${clock}` : clock;
+}
+
+function useElapsed(startIso: string | undefined): string {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  if (!startIso) return "—";
+  return formatElapsed(now - new Date(startIso).getTime());
+}
 
 function usd(value: string | number | null | undefined): string {
   const n = Number(value);
@@ -46,11 +101,14 @@ function day(iso: string): string {
 function Figure({
   label,
   value,
+  sub,
   hint,
   tone,
 }: {
   label: string;
   value: string;
+  /** The same money in rupees, under the dollars rather than instead of them. */
+  sub?: string;
   hint?: string;
   tone?: "up" | "down";
 }) {
@@ -64,6 +122,9 @@ function Figure({
       >
         {value}
       </div>
+      {sub ? (
+        <div className="text-[13px] tabular-nums text-ink-dim">{sub}</div>
+      ) : null}
       {hint ? <div className="mt-1 text-[12px] text-ink-dim">{hint}</div> : null}
     </div>
   );
@@ -97,6 +158,7 @@ function Row({ trade }: { trade: KarthikTrade }) {
         }`}
       >
         {usd(trade.pnl_usd)}
+        <div className="text-[11px] text-ink-dim">{rupees(trade.pnl_usd)}</div>
       </td>
     </tr>
   );
@@ -104,6 +166,9 @@ function Row({ trade }: { trade: KarthikTrade }) {
 
 export function KarthikLabPage() {
   const { data, isLoading, isError, refetch } = useKarthikBook();
+  // Before the early returns: a hook may not sit behind a condition, and the
+  // loading and error branches below are exactly that.
+  const elapsed = useElapsed(data?.started_at);
 
   if (isLoading) return <Skeleton className="h-64 w-full" />;
   if (isError || !data) {
@@ -128,12 +193,21 @@ export function KarthikLabPage() {
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="text-xl font-semibold">Karthik&apos;s Lab</h1>
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h1 className="text-xl font-semibold">Karthik&apos;s Lab</h1>
+          <div className="text-right">
+            <div className="text-lg font-semibold tabular-nums">{elapsed}</div>
+            <div className="text-[11px] uppercase tracking-wider text-ink-dim">
+              running &middot; {days} days to judgement
+            </div>
+          </div>
+        </div>
         <p className="mt-1 max-w-[78ch] text-[13px] leading-relaxed text-ink-dim">
-          {usd(data.capital_usd)} at {usd(data.ticket_usd)} a trade on one rule:{" "}
-          <b>{data.rule}</b>. Started {day(data.started_at)}, <b>judged{" "}
-          {day(data.judge_at)}</b> — {days} days to go. Paper only: this book
-          holds no wallet and has never placed an order.
+          {usd(data.capital_usd)} ({rupees(data.capital_usd)}) at{" "}
+          {usd(data.ticket_usd)} ({rupees(data.ticket_usd)}) a trade on one
+          rule: <b>{data.rule}</b>. Started {day(data.started_at)},{" "}
+          <b>judged {day(data.judge_at)}</b>. Paper only: this book holds no
+          wallet and has never placed an order.
         </p>
       </div>
 
@@ -142,17 +216,20 @@ export function KarthikLabPage() {
           label="Balance"
           value={usd(data.balance_usd)}
           tone={up ? "up" : "down"}
+          sub={rupees(data.balance_usd)}
           hint={`${up ? "+" : ""}${usd(data.pnl_usd)} on ${usd(data.capital_usd)}`}
         />
         <Figure
           label="Without its best trade"
           value={usd(withoutBest)}
           tone={withoutBest >= 0 ? "up" : "down"}
+          sub={rupees(withoutBest)}
           hint="the same book minus one coin"
         />
         <Figure
           label="Lowest it has been"
           value={usd(data.lowest_usd)}
+          sub={rupees(data.lowest_usd)}
           hint="what holding it actually felt like"
         />
         <Figure
