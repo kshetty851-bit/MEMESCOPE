@@ -1027,6 +1027,16 @@ FRESH_BOOKS: tuple[FreshBookSpec, ...] = (
     # good week.
     FreshBookSpec("B3_198k_5m", datetime(2026, 9, 22, 8, 0, tzinfo=UTC),
                   Decimal(500), Decimal(100)),
+    # The arm the wallet is set to, and the one missing from every comparison
+    # the board could make (Karthik, 2026-09-23: "add b5 to the lab board").
+    # It is the only arm that stays positive with every +100% trade removed —
+    # +$251 of +$251 over 159 trades — where the two books above it fall to
+    # +$42 and +$72 and B3 to -$58. Zero rugs so far, which is UNOBSERVED
+    # rather than measured: at this depth the rate is about 0.5%.
+    #
+    # Starts FORWARD at 05:00 UTC, the first round hour after this was written.
+    FreshBookSpec("B5_500k_flow_5m", datetime(2026, 9, 23, 5, 0, tzinfo=UTC),
+                  Decimal(500), Decimal(100)),
 )
 
 
