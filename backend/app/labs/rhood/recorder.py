@@ -1,4 +1,4 @@
-"""Watch the Pons locker, resolve each token, record what it is worth.
+"""Watch the pool factory, resolve each new token, record what it is worth.
 
 RECORDS ONLY. There is no book, no arm and no order path in this package, and
 nothing else in the platform reads its tables — so this cannot open a position
@@ -12,17 +12,24 @@ has different fees, pool sizes and operators, and porting those thresholds
 would be assuming the answer rather than measuring it. So this writes down what
 happens and decides nothing.
 
-WHAT IS NOT YET KNOWN, and is the first thing the record will settle: whether a
-locker event means a coin has just graduated. The first one sampled by hand
-resolved to a token whose deepest pair was five months old.
+WHY THE FACTORY AND NOT THE LOCKER
+─────────────────────────────────
+The first version watched the Pons locker, on the reasonable-looking grounds
+that it fired ~13 times per 34 minutes. Switched on, it recorded the same TWO
+established tokens over and over — pairs 54 and 66 days old — every five
+minutes. Re-locks, not launches. Four minutes of real data killed an
+assumption that would otherwise have sat under a whole lab.
 
-THE PAIR IS PINNED
-──────────────────
-A token can have many pairs — one had SEVEN, with liquidity from $1,146 to
-$157,675. The deepest at first sight is chosen once, written to the lock row,
-and every later sample reads that same pair. Re-choosing per sample is what
-fabricated $2,414 of profit in a Solana book, and it does it by looking like
-a price move.
+The factory is the right signal: `PoolCreated` is a token meeting WETH in a
+pool for the first time, which is what graduating means here.
+
+THE PAIR IS PINNED BY THE CHAIN
+───────────────────────────────
+The event carries the pool address it just created, so the pair is not chosen
+at all — it is the one the graduation made. That removes the trap entirely: a
+token can have many pairs (one had SEVEN, $1,146 to $157,675 of liquidity),
+and picking between them per sample is how an unpinned Solana book fabricated
+$2,414 of profit while looking like a price move.
 """
 
 from __future__ import annotations
@@ -109,8 +116,8 @@ class Rpc:
 
     async def logs(self, from_block: int, to_block: int) -> list[dict[str, Any]]:
         return await self.call("eth_getLogs", [{
-            "address": config.LOCKER,
-            "topics": [config.LOCK_TOPIC],
+            "address": config.FACTORY,
+            "topics": [config.POOL_CREATED_TOPIC],
             "fromBlock": hex(from_block), "toBlock": hex(to_block)}]) or []
 
     async def block_time(self, number: int) -> datetime | None:
@@ -170,41 +177,59 @@ async def record(session: AsyncSession) -> dict[str, Any]:
         times: dict[int, datetime | None] = {}
         for log in logs:
             topics = log.get("topics") or []
-            if len(topics) < 2:
+            if len(topics) < 3:
                 continue
-            token = _addr(topics[1])
+            token0, token1 = _addr(topics[1]), _addr(topics[2])
+            # The coin is whichever side is not the quote. A pool of two
+            # unknown tokens is not a graduation and is skipped rather than
+            # guessed at.
+            if token0 == config.WETH:
+                token, quote = token1, token0
+            elif token1 == config.WETH:
+                token, quote = token0, token1
+            else:
+                continue
             data = (log.get("data") or "0x")[2:]
+            # PoolCreated's data is (int24 tickSpacing, address pool).
+            pool = _addr(data[64:128]) if len(data) >= 128 else None
             block = int(log["blockNumber"], 16)
             if block not in times:
                 times[block] = await rpc.block_time(block)
             pairs = await _pairs(client, token)
-            deepest = _deepest(pairs)
+            listed = next((p for p in pairs if (p.get("pairAddress") or "").lower() == pool),
+                          None)
             row = {
                 "block_number": block,
                 "block_at": times[block] or datetime.now(UTC),
                 "tx_hash": log["transactionHash"],
                 "log_index": int(log["logIndex"], 16),
                 "token": token,
-                "quote": _addr(data[:64]) if len(data) >= 64 else None,
+                "quote": quote,
                 "symbol": await rpc.text(token, _SYMBOL),
                 "name": await rpc.text(token, _NAME),
                 "pairs_seen": len(pairs),
-                "priced": deepest is not None,
+                # The pool the event made, not the deepest one we could find.
+                "pair_address": pool,
+                # DexScreener may not have indexed a pool this new yet. That is
+                # recorded rather than waited for: `priced` false with a pool
+                # address says "too new to price", which is itself a finding.
+                "priced": listed is not None,
             }
-            if deepest is not None:
-                row["pair_address"] = deepest.get("pairAddress")
-                created = deepest.get("pairCreatedAt")
-                if created:
-                    row["pair_created_at"] = datetime.fromtimestamp(created / 1000, tz=UTC)
+            if listed is not None and listed.get("pairCreatedAt"):
+                row["pair_created_at"] = datetime.fromtimestamp(
+                    listed["pairCreatedAt"] / 1000, tz=UTC)
             result = await session.execute(
                 insert(RhoodLock).values(**row)
                 .on_conflict_do_nothing(index_elements=["tx_hash", "log_index"]))
             new += result.rowcount or 0
 
-        # Everything locked inside the window gets one reading, newest first.
+        # Everything launched inside the window gets one reading, newest first.
         since = datetime.now(UTC) - timedelta(minutes=config.SAMPLE_WINDOW_MINUTES)
+        # Not filtered on `priced`: a pool DexScreener had not indexed when it
+        # was created is exactly the one worth asking about again a minute
+        # later, and dropping it would lose every coin's first minutes.
         watching = (await session.scalars(
-            select(RhoodLock).where(RhoodLock.block_at >= since, RhoodLock.priced.is_(True))
+            select(RhoodLock).where(RhoodLock.block_at >= since)
             .order_by(RhoodLock.block_at.desc()).limit(config.SAMPLE_PER_PASS))).all()
         for lock in watching:
             pairs = await _pairs(client, lock.token)
