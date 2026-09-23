@@ -36,7 +36,9 @@ def test_the_page_shows_the_quiet_book_and_the_band_books() -> None:
         # would let a run that already happened decide that.
         "B3_198k_5m",
         # The deep arm the real wallet mirrors (2026-09-23). Also forward.
-        "B5_500k_flow_5m"]
+        "B5_500k_flow_5m",
+        # The rug-money-blocked band (2026-09-23), beside its control.
+        "BAND_55k_blk_5m"]
     # Named, not indexed: the last entry moves every time a book is added, and
     # this pair is pinned because both are decision books that start FORWARD.
     by_book = {spec.book: spec for spec in SWEEP}
@@ -52,11 +54,13 @@ def test_the_page_shows_the_quiet_book_and_the_band_books() -> None:
     assert all(s.capital_usd == Decimal(500) and s.ticket_usd == Decimal(100)
                for s in SWEEP)
     arms = [next(a for a in ARMS if a.name == s.book) for s in SWEEP]
-    assert [a.hold for a in arms] == [2, 5, 5, 5, 5, 5]
-    assert [a.quiet for a in arms] == [False, False, True, False, False, False]
+    assert [a.hold for a in arms] == [2, 5, 5, 5, 5, 5, 5]
+    assert [a.quiet for a in arms] == [
+        False, False, True, False, False, False, False]
     # The pump twin differs from BAND_55k_5m in the ENTRY, not the exit.
     assert [a.entry for a in arms] == [
-        "band55", "band55", "band55", "band55_pump", "liq_B3", "deep500_flow"]
+        "band55", "band55", "band55", "band55_pump", "liq_B3", "deep500_flow",
+        "band55"]
     arm = next(a for a in ARMS if a.name == BQ.book)
     assert arm.quiet and arm.hold == 5 and not arm.is_control
     # The control it is judged against still trades, panel or no panel.
@@ -89,13 +93,16 @@ def test_the_band_arms_buy_between_55k_and_75k_and_nothing_else() -> None:
     band = sorted((a for a in ARMS if a.name.startswith("BAND_55k")),
                   key=lambda a: (a.hold, a.quiet, a.entry))
     assert [a.name for a in band] == [
-        "BAND_55k_2m", "BAND_55k_5m", "BAND_55k_pump_5m", "BAND_55k_quiet_5m"]
-    assert [a.hold for a in band] == [2, 5, 5, 5]
-    assert [a.quiet for a in band] == [False, False, False, True]
+        "BAND_55k_2m", "BAND_55k_5m", "BAND_55k_blk_5m", "BAND_55k_pump_5m",
+        "BAND_55k_quiet_5m"]
+    assert [a.hold for a in band] == [2, 5, 5, 5, 5]
+    assert [a.quiet for a in band] == [False, False, False, False, True]
+    # Karthik's rug-money block (2026-09-23) is on exactly one of them.
+    assert [a.rug_blocked for a in band] == [False, False, True, False, False]
     # Karthik's pump-only twin (2026-09-22) narrows the ENTRY and nothing else:
     # same band, same lock, same clock, so the launchpad is what it measures.
     assert [a.entry for a in band] == [
-        "band55", "band55", "band55_pump", "band55"]
+        "band55", "band55", "band55", "band55_pump", "band55"]
     assert all(a.locked and not a.is_control for a in band)
     assert all((a.tp, a.trail, a.stop, a.drain, a.clock) == (None, None, None, None, "entry")
                for a in band)

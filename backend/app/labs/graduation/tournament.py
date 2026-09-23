@@ -185,6 +185,13 @@ class Arm:
     #: Buy only a pool whose liquidity is locked: its LP supply read zero on
     #: the buy's own pool read (`Held.lp_supply`). Unread is not locked.
     locked: bool = False
+    #: Refuse a coin whose recorded addresses appear on ANY coin that has
+    #: already rugged (`moneyblock.rug_linked_ids`). Per-arm, not board-wide,
+    #: because it is worth having only where rugs are frequent: measured
+    #: 2026-09-23 it took the baseline from +$978 to +$1,609 and its rugs from
+    #: 41 to 18, and took B5_500k_flow_5m from +$256 to +$229 while preventing
+    #: none at all — B5 has never had a rug for it to prevent.
+    rug_blocked: bool = False
     #: Buy only a pool that is still quiet: fewer than `QUIET_MAX_POOL_TXS`
     #: transactions since its migration when the book is about to buy. Unread
     #: is not quiet.
@@ -692,6 +699,16 @@ ARMS: tuple[Arm, ...] = (
     Arm("BAND_55k_pump_5m", "band55_pump", 5, locked=True,
         note="every graduation with a $55-75k pool, locked liquidity and a "
              "pump.fun mint, out at 5m"),
+    # Karthik, 2026-09-23: "only block books with high rug rate". A NEW arm
+    # rather than a change to BAND_55k_5m, which keeps running untouched as its
+    # matched control — the band is the highest-rug arm on the board (7 rugs in
+    # 70 trades, 10%) and the one where blocking should pay. Measured on that
+    # book the wide list refuses 36 of 70 and takes it from +$342 to +$219, so
+    # this is not expected to win; it is expected to ANSWER, which the numbers
+    # so far cannot (65th percentile against a random refusal of the same size).
+    Arm("BAND_55k_blk_5m", "band55", 5, locked=True, rug_blocked=True,
+        note="every graduation with a $55-75k pool and locked liquidity, "
+             "refusing any coin whose money has been behind a rug, out at 5m"),
     Arm("BAND_55k_quiet_5m", "band55", 5, locked=True, quiet=True,
         note="every graduation with a $55-75k pool and locked liquidity whose "
              "pool is still quiet (under 100 trades) when it is bought, out at 5m"),
@@ -752,14 +769,15 @@ CONTROLS: tuple[Arm, ...] = tuple(a for a in ARMS if a.is_control)
 #: returned no edge. The count is pinned rather than free because an arm that
 #: appears mid-tournament changes what every other number means — so changing
 #: it must be a deliberate edit with a date, not a side effect.
-assert len(ARMS) == 14, (
+assert len(ARMS) == 15, (
     "three B3 arms (3m FROM ENTRY retired 2026-09-16 at -$58.90), B3 bought "
     "early (added 2026-09-16), the two rug arms (added 2026-09-16), the two "
     "shorter graduation clocks g2 and g3 (added 2026-09-17), the fast pair "
     "E75/E75T (added 2026-09-19), the quiet-pool arm BASE_75k_quiet_5m and the "
     "four $25k clocks (all added 2026-09-20), its four-minute twin "
     "BASE_75k_quiet_4m (added 2026-09-21), the band's pump-only twin "
-    "BAND_55k_pump_5m (added 2026-09-22), the BASELINE, the $500k+flow "
+    "BAND_55k_pump_5m (added 2026-09-22), the band's rug-money-blocked "
+    "twin BAND_55k_blk_5m (added 2026-09-23), the BASELINE, the $500k+flow "
     "candidate, and the two "
     "pre-registered A/B arms — which run but are flagged off the tournament "
     f"board — not {len(ARMS)}. Karthik retired BASE_10k_2m (out of money after "
@@ -789,10 +807,10 @@ assert all(a.tp is None and a.trail is None for a in ARMS), (
 assert all(a.stop is None or a.stop == Decimal("0.10") for a in ARMS), (
     "one stop level, so the twins differ in ONE thing. Sweeping levels here "
     "would be fitting a parameter on the same data that suggested it")
-assert len([a for a in ARMS if not a.is_control]) == 13, (
+assert len([a for a in ARMS if not a.is_control]) == 14, (
     "`config.required_pf` is calibrated on the maximum of FORTY-TWO noise "
-    "draws. Thirteen arms are now judged against it, so the bar is if anything "
-    "CONSERVATIVE — the luckiest of thirteen reaches less than the luckiest "
+    "draws. Fourteen arms are now judged against it, so the bar is if anything "
+    "CONSERVATIVE — the luckiest of fourteen reaches less than the luckiest "
     "of forty-two. Left as it is deliberately: a bar that is too hard costs a "
     "real finding some time, where one that is too easy costs a false one nothing")
 assert all(a.clock in {"entry", "graduation"} for a in ARMS), "a clock is one of two"
@@ -1611,6 +1629,21 @@ class Tournament:
         # for each coin: a coin the wallet would refuse, no book here buys.
         blocked = (await moneyblock.refusals(self._session, mints, self._now)
                    if self._money_checks else {})
+        # The WIDE list is read LAZILY, on the first candidate that actually
+        # reaches a `rug_blocked` arm. It is a scan over every closed trade,
+        # and most ticks never offer such a candidate anything — paying for it
+        # on every tick would be the runaway query this platform has already
+        # fixed three times.
+        wide: dict[str, object] = {}
+
+        async def rug_money_hits(mint: str) -> bool:
+            if "ids" not in wide:
+                wide["ids"] = await moneyblock.rug_linked_ids(self._session, self._now)
+                wide["ops"] = dict((await self._session.execute(
+                    select(GradOperator.mint, GradOperator.ids)
+                    .where(GradOperator.mint.in_(mints),
+                           GradOperator.ids.is_not(None)))).all())
+            return bool(set(wide["ops"].get(mint) or ()) & wide["ids"])
         taken = {(b, m) for b, m in (await self._session.execute(
             select(GradPaperPosition.book, GradPaperPosition.mint)
             .where(GradPaperPosition.mint.in_(mints)))).all()}
@@ -1620,6 +1653,7 @@ class Tournament:
         foreign = 0
         unpriced = 0
         money_blocked = 0
+        rug_money = 0
         unlocked = 0
         too_busy = 0
         mirror: list[live_decisions.Mirrored] = []
@@ -1666,6 +1700,14 @@ class Tournament:
                     unpriced += 1
                     continue
                 price, depth = priced
+            # `and` short-circuits, so the wide list is still never read for a
+            # candidate no blocked arm wanted.
+            if (any(arm.rug_blocked for arm in wanted)
+                    and await rug_money_hits(row.mint)):
+                wanted = [arm for arm in wanted if not arm.rug_blocked]
+                rug_money += 1
+                if not wanted:
+                    continue
             if any(arm.quiet for arm in wanted):
                 busy = await self._pool_busy(row.mint, row.pair_address)
                 if busy is None or busy >= config.QUIET_MAX_POOL_TXS:

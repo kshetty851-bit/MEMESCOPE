@@ -59,12 +59,22 @@ def test_the_tournament_is_a_hold_sweep_with_a_baseline_on_every_hold() -> None:
     One baseline per hold, so no hold is judged without an unselected twin on
     its own clock. Nothing on this board decides by hashing a mint.
     """
-    assert len(ARMS) == 14
+    assert len(ARMS) == 15
     # Karthik's quiet-pool arm (2026-09-20): the baseline's rule, refusing a
     # pool already past `QUIET_MAX_POOL_TXS` transactions. Not a control, so
     # the baseline below is unchanged and it has something to be judged against.
     # Its four-minute twin (2026-09-21) differs in the clock and NOTHING else,
     # so the pair measures the fifth minute — where the rugs land — on its own.
+    # Karthik's rug-money block (2026-09-23) is a NEW arm beside the band, not
+    # a change to it: BAND_55k_5m keeps running untouched as its control, so
+    # the pair differs in that one filter and nothing else.
+    blk, ctl = BY_NAME["BAND_55k_blk_5m"], BY_NAME["BAND_55k_5m"]
+    assert blk.rug_blocked and not ctl.rug_blocked
+    assert ((blk.entry, blk.hold, blk.locked, blk.quiet)
+            == (ctl.entry, ctl.hold, ctl.locked, ctl.quiet))
+    assert sum(a.rug_blocked for a in ARMS) == 1, (
+        "one arm asks for the wide list; it is a tax on any arm whose rugs are "
+        "rare (B5: +$256 -> +$229 while preventing none)")
     quiet75 = sorted((a for a in ARMS if a.entry == "floor75"), key=lambda a: a.hold)
     assert [a.name for a in quiet75] == ["BASE_75k_quiet_4m", "BASE_75k_quiet_5m"]
     assert [a.hold for a in quiet75] == [4, 5]
@@ -101,12 +111,13 @@ def test_arms_differ_only_in_entry_and_exit() -> None:
     # it sells. The rug-signal A/B runs on its own pre-registered clock and
     # competes with nothing here, so ranking it beside the arms invited
     # "delete the losing ones" — which would have ended it three weeks early.
-    # `locked` and `quiet` are part of the entry: whether a pool's liquidity is
-    # locked, and how many transactions it has already had, are read on-chain
-    # at the buy, where `accepts` cannot see them.
+    # `locked`, `quiet` and `rug_blocked` are part of the entry: whether a
+    # pool's liquidity is locked, how many transactions it has already had, and
+    # whether its money has been behind a rug, are all read at the buy, where
+    # `accepts` cannot see them.
     assert set(Arm.__dataclass_fields__) == {
         "name", "entry", "hold", "tp", "trail", "stop", "drain", "clock",
-        "note", "ab_experiment", "locked", "quiet"}
+        "note", "ab_experiment", "locked", "quiet", "rug_blocked"}
     assert all(a.ab_experiment is False for a in ARMS if a.entry.startswith("liq_")), (
         "a tournament arm flagged as an experiment would vanish from its own "
         "comparison")
