@@ -34,8 +34,15 @@ def test_the_page_shows_the_quiet_book_and_the_band_books() -> None:
         # Karthik's decision book (2026-09-22), judged 30 Sep, on which he has
         # said he will stake real money. It starts FORWARD — a backdated start
         # would let a run that already happened decide that.
-        "B3_198k_5m"]
-    b3 = SWEEP[-1]
+        "B3_198k_5m",
+        # The deep arm the real wallet mirrors (2026-09-23). Also forward.
+        "B5_500k_flow_5m"]
+    # Named, not indexed: the last entry moves every time a book is added, and
+    # this pair is pinned because both are decision books that start FORWARD.
+    by_book = {spec.book: spec for spec in SWEEP}
+    assert by_book["B5_500k_flow_5m"].start == datetime(2026, 9, 23, 5, 0, tzinfo=UTC)
+    assert next(a for a in ARMS if a.name == "B5_500k_flow_5m").hold == 5
+    b3 = by_book["B3_198k_5m"]
     assert b3.start == datetime(2026, 9, 22, 8, 0, tzinfo=UTC)
     assert (b3.capital_usd, b3.ticket_usd) == (Decimal(500), Decimal(100))
     # The four band books share one start; B3 has its own, because it is a
@@ -45,11 +52,11 @@ def test_the_page_shows_the_quiet_book_and_the_band_books() -> None:
     assert all(s.capital_usd == Decimal(500) and s.ticket_usd == Decimal(100)
                for s in SWEEP)
     arms = [next(a for a in ARMS if a.name == s.book) for s in SWEEP]
-    assert [a.hold for a in arms] == [2, 5, 5, 5, 5]
-    assert [a.quiet for a in arms] == [False, False, True, False, False]
+    assert [a.hold for a in arms] == [2, 5, 5, 5, 5, 5]
+    assert [a.quiet for a in arms] == [False, False, True, False, False, False]
     # The pump twin differs from BAND_55k_5m in the ENTRY, not the exit.
     assert [a.entry for a in arms] == [
-        "band55", "band55", "band55", "band55_pump", "liq_B3"]
+        "band55", "band55", "band55", "band55_pump", "liq_B3", "deep500_flow"]
     arm = next(a for a in ARMS if a.name == BQ.book)
     assert arm.quiet and arm.hold == 5 and not arm.is_control
     # The control it is judged against still trades, panel or no panel.
