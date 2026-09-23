@@ -119,6 +119,17 @@ export const NAV_GROUPS: NavGroup[] = [
         status: "ready",
         note: "Watch only. pump.fun curves into graduation; no book.",
       },
+      // Karthik's own book: $500 on one rule, judged thirty days after it
+      // started. Its own destination rather than a ninth panel on the
+      // graduation board, so that his money's record and a pre-registered
+      // experiment cannot have their dates confused with one another.
+      {
+        href: "/karthik-lab",
+        label: "Karthik's Lab",
+        icon: IconSpark,
+        status: "ready",
+        note: "Paper only. $500 on the quiet rule, judged 23 Oct.",
+      },
       // Robinhood Chain, not Solana, and a RECORDER rather than a lab: it
       // watches the pool factory on chain 4663 and writes down every token
       // that meets the market. No arms, no book, no wallet. Listed here

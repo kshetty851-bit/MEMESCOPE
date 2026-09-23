@@ -59,7 +59,7 @@ def test_the_tournament_is_a_hold_sweep_with_a_baseline_on_every_hold() -> None:
     One baseline per hold, so no hold is judged without an unselected twin on
     its own clock. Nothing on this board decides by hashing a mint.
     """
-    assert len(ARMS) == 15
+    assert len(ARMS) == 16
     # Karthik's quiet-pool arm (2026-09-20): the baseline's rule, refusing a
     # pool already past `QUIET_MAX_POOL_TXS` transactions. Not a control, so
     # the baseline below is unchanged and it has something to be judged against.
@@ -75,9 +75,11 @@ def test_the_tournament_is_a_hold_sweep_with_a_baseline_on_every_hold() -> None:
     assert sum(a.rug_blocked for a in ARMS) == 1, (
         "one arm asks for the wide list; it is a tax on any arm whose rugs are "
         "rare (B5: +$256 -> +$229 while preventing none)")
-    quiet75 = sorted((a for a in ARMS if a.entry == "floor75"), key=lambda a: a.hold)
-    assert [a.name for a in quiet75] == ["BASE_75k_quiet_4m", "BASE_75k_quiet_5m"]
-    assert [a.hold for a in quiet75] == [4, 5]
+    quiet75 = sorted((a for a in ARMS if a.entry == "floor75"),
+                     key=lambda a: (a.hold, a.name))
+    assert [a.name for a in quiet75] == [
+        "BASE_75k_quiet_4m", "BASE_75k_quiet_5m", "KARTHIK_QUIET_5M"]
+    assert [a.hold for a in quiet75] == [4, 5, 5]
     assert all(a.quiet and not a.is_control for a in quiet75)
     assert len({(a.entry, a.tp, a.trail, a.stop, a.drain, a.clock, a.locked, a.quiet)
                 for a in quiet75}) == 1

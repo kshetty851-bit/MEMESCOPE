@@ -1046,7 +1046,19 @@ FRESH_BOOKS: tuple[FreshBookSpec, ...] = (
     # two can be read together. Starts FORWARD at 10:00 UTC.
     FreshBookSpec("BAND_55k_blk_5m", datetime(2026, 9, 23, 10, 0, tzinfo=UTC),
                   Decimal(500), Decimal(100)),
+    # KARTHIK'S BOOK. His own $500 on the quiet rule, opened when he asked for
+    # it and JUDGED 2026-10-23 — thirty days, fixed before its first trade
+    # because he intends to act on the result. It has its own page at
+    # `/karthik-lab`; it appears here too so the board it copies can be read
+    # beside it.
+    FreshBookSpec("KARTHIK_QUIET_5M", datetime(2026, 9, 23, 12, 0, tzinfo=UTC),
+                  Decimal(500), Decimal(100)),
 )
+
+#: When Karthik's book is judged. Thirty days from its start, written down
+#: before it had a single trade: a date chosen afterwards is chosen by the
+#: result.
+KARTHIK_JUDGE_AT = datetime(2026, 10, 23, 12, 0, tzinfo=UTC)
 
 
 @dataclass(frozen=True, slots=True)
