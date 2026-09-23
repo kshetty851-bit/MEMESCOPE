@@ -1458,7 +1458,16 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
           float(p.impact_open or 0), float(p.impact_close or 0)) for p in rows],
         sol, ticket=float(spec.ticket_usd), start=float(spec.capital_usd))
     cents = Decimal("0.01")
-    pnl = [float(p.pnl_usd or 0) for p in rows]
+    # EVERY FIGURE BELOW COUNTS THE SAME TRADES: the ones this $500 book could
+    # actually fund. `walk.pnl` is aligned to `rows` and is None where the book
+    # was already fully invested and had to skip. Counting wins and rugs over
+    # all of `rows` while the balance counts only the funded ones put two
+    # populations on one line -- it read "0 rugs of 11 trades, 12 wins" -- and
+    # would have credited the book with dodging a rug it simply had no money
+    # for, or blamed it for one it never bought.
+    took = [(row, money) for row, money in zip(rows, walk.pnl, strict=True)
+            if money is not None]
+    pnl = [money for _, money in took]
     return {
         "book": spec.book,
         "rule": arm.note,
@@ -1472,22 +1481,25 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
         "lowest_usd": Decimal(str(walk.low)).quantize(cents),
         "trades": walk.funded,
         "skipped": walk.skipped,
-        "wins": sum(1 for p in rows if float(p.net_return) > 0),
-        "rugs": sum(1 for p in rows
-                    if float(p.net_return) <= float(config.OPERATOR_RUG_MOVE)),
+        "wins": sum(1 for money in pnl if money > 0),
+        "rugs": sum(1 for row, _ in took
+                    if float(row.net_return) <= float(config.OPERATOR_RUG_MOVE)),
         # What is left without the single luckiest trade. On the arm this
         # copies, that one number is the difference between +$1,060 and about
         # $100 over the same trades.
         "without_best_usd": (Decimal(str(sum(pnl) - max(pnl, default=0.0)))
                              .quantize(cents) if pnl else Decimal(0)),
+        # The rows the BOOK bought, with the money the book made on them --
+        # not the arm's $100-notional figure, which is the same only while the
+        # ticket is $100 and silently diverges the moment it is not.
         "trades_list": [{
-            "symbol": p.symbol,
-            "opened_at": p.opened_at,
-            "closed_at": p.closed_at,
-            "pct": (Decimal(str(100 * float(p.net_return))).quantize(cents)),
-            "pnl_usd": Decimal(str(float(p.pnl_usd or 0))).quantize(cents),
-            "pool_usd": p.liq_open_usd,
-        } for p in reversed(rows[-60:])],
+            "symbol": row.symbol,
+            "opened_at": row.opened_at,
+            "closed_at": row.closed_at,
+            "pct": (Decimal(str(100 * float(row.net_return))).quantize(cents)),
+            "pnl_usd": Decimal(str(money)).quantize(cents),
+            "pool_usd": row.liq_open_usd,
+        } for row, money in reversed(took[-60:])],
     }
 
 

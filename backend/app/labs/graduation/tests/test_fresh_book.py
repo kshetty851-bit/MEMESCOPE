@@ -46,7 +46,7 @@ def test_the_page_shows_the_quiet_book_and_the_band_books() -> None:
     assert karthik.start == datetime(2026, 9, 23, 12, 0, tzinfo=UTC)
     # Thirty days, fixed BEFORE its first trade: a judge date chosen afterwards
     # is chosen by the result.
-    assert config.KARTHIK_JUDGE_AT == datetime(2026, 10, 23, 12, 0, tzinfo=UTC)
+    assert datetime(2026, 10, 23, 12, 0, tzinfo=UTC) == config.KARTHIK_JUDGE_AT
     assert (config.KARTHIK_JUDGE_AT - karthik.start).days == 30
     # It copies BASE_75k_quiet_5m's RULE, not its record: same entry, hold and
     # filter, its own trades from its own start.
@@ -158,3 +158,74 @@ def test_it_stops_adding_rows_after_the_last_day_but_keeps_the_old_ones() -> Non
     assert [r.started_on for r in rows] == [date(2026, 9, 22), date(2026, 9, 23)]
     # The 23rd's wallet still sees the trade from the 25th — it was not closed.
     assert rows[1].trades == 1
+
+
+class _Rows:
+    """What `db.scalars(...)` gives back."""
+
+    def __init__(self, rows: list[object]) -> None:
+        self._rows = rows
+
+    def all(self) -> list[object]:
+        return self._rows
+
+
+class _StubDb:
+    """The two reads `karthik_book` makes: the book's closed positions, then
+    the SOL rate. No engine, because the thing under test is arithmetic."""
+
+    def __init__(self, rows: list[object]) -> None:
+        self._rows = rows
+
+    async def scalars(self, _statement: object) -> _Rows:
+        return _Rows(self._rows)
+
+    async def scalar(self, _statement: object) -> None:
+        return None
+
+
+class _Pos:
+    """A closed paper position, with only the columns the endpoint reads."""
+
+    def __init__(self, symbol: str, opened: datetime, ret: float) -> None:
+        self.symbol = symbol
+        self.opened_at = opened
+        self.closed_at = opened + timedelta(minutes=5)
+        self.net_return = ret
+        self.pnl_usd = Decimal(str(100 * ret))
+        self.impact_open = self.impact_close = Decimal(0)
+        self.liq_open_usd = Decimal(100_000)
+
+
+async def test_karthik_book_counts_only_the_trades_it_could_fund() -> None:
+    """Every figure describes the SAME trades: the ones the book bought.
+
+    A $500 book at $100 a ticket funds five positions at once, so when six
+    signals overlap the sixth is skipped. Counting wins and rugs over all the
+    arm's trades while the balance counted only the funded ones is what made
+    the page read "0 rugs of 11 trades, 12 wins" on its first afternoon: it
+    would credit the book with dodging a rug it merely had no money for.
+    """
+    from app.labs.graduation.api import karthik_book
+
+    start = next(s for s in config.FRESH_BOOKS
+                 if s.book == "KARTHIK_QUIET_5M").start
+    # Eight signals inside one five-minute hold: the book can fund five.
+    rows = [_Pos(f"C{i}", start + timedelta(seconds=30 * i), 0.02)
+            for i in range(8)]
+    # The last one is a rug, and it is one the book cannot afford.
+    rows[-1].net_return = -0.99
+    rows[-1].pnl_usd = Decimal("-99")
+
+    book = await karthik_book(db=_StubDb(rows))  # type: ignore[arg-type]
+
+    assert book["trades"] + book["skipped"] == len(rows)
+    assert book["trades"] == 5 and book["skipped"] == 3
+    # The three it could not buy are absent from every count, including the
+    # rug -- which it did not dodge, it just had no money left.
+    assert book["wins"] == 5
+    assert book["rugs"] == 0
+    assert len(book["trades_list"]) == 5
+    assert {t["symbol"] for t in book["trades_list"]} == {f"C{i}" for i in range(5)}
+    # The invariant the defect broke: no figure may exceed the trade count.
+    assert book["wins"] <= book["trades"] and book["rugs"] <= book["trades"]
