@@ -34,6 +34,10 @@ from app.labs.nse_breakout.models import (  # noqa: F401
     BtState,
     BtUniverseMember,
 )
+# The Robinhood Chain recorder's two `rhood_*` tables. Imported here or
+# alembic autogenerate does not see them and writes a migration that drops
+# them — the same trap a second Base once set for the Rafiq Lab.
+from app.labs.rhood.models import RhoodLock, RhoodSample  # noqa: F401
 # Momentum Lab's five `mom_*` tables, for the same reason.
 from app.labs.momentum.models import (  # noqa: F401
     MomCandle,

@@ -60,6 +60,7 @@ celery_app = Celery(
         "app.labs.graduation.scheduler",
         # Momentum Lab. Gated by LAB_MOMENTUM_ENABLED (default off).
         "app.labs.momentum.scheduler",
+        "app.labs.rhood.scheduler",
         "app.hq_ops.tasks",
     ],
 )
@@ -263,6 +264,14 @@ celery_app.conf.beat_schedule = {
     "momentum-tick": {
         "task": "app.momentum.scheduler.momentum_tick",
         "schedule": crontab(minute="*"),
+    },
+
+    # Robinhood Chain recorder (2026-09-23). Records only; it has no book
+    # and nothing reads its tables. Gated by LAB_RHOOD_ENABLED, off by
+    # default, so scheduling it changes nothing until that is set.
+    "rhood-record": {
+        "task": "app.labs.rhood.scheduler.rhood_record",
+        "schedule": timedelta(minutes=1),
     },
     # The Depth Lab: twenty wallets differing only in their liquidity floor.
     "depth-tick": {
