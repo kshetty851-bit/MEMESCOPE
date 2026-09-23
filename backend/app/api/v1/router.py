@@ -30,12 +30,13 @@ from app.hq_ops import api as hq_ops
 from app.karthik import api as karthik
 from app.karthik_ops import api as karthik_ops
 from app.lab import api as lab
+from app.labs.forex_lab import api as forex_lab
 from app.labs.graduation import api as graduation_lab
 from app.labs.momentum import api as momentum_lab
-from app.labs.forex_lab import api as forex_lab
 from app.labs.nse_breakout import api as nse_tracker
 from app.labs.rafiq import api as rafiq_lab
 from app.labs.rafiqv2 import api as rafiqv2_lab
+from app.labs.rhood import api as rhood_lab
 from app.momentum import api as momentum
 from app.paper import api as paper
 from app.pumpfun import api as pumpfun
@@ -144,3 +145,4 @@ api_router.include_router(momentum_lab.router)
 # live or paper. Listed here beside the other labs because that is where a
 # reader looks for one.
 api_router.include_router(forex_lab.router)
+api_router.include_router(rhood_lab.router)
