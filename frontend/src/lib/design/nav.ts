@@ -119,6 +119,18 @@ export const NAV_GROUPS: NavGroup[] = [
         status: "ready",
         note: "Watch only. pump.fun curves into graduation; no book.",
       },
+      // Robinhood Chain, not Solana, and a RECORDER rather than a lab: it
+      // watches the pool factory on chain 4663 and writes down every token
+      // that meets the market. No arms, no book, no wallet. Listed here
+      // because a lab nobody can find is a lab that is not running — this one
+      // existed and worked for an afternoon before anyone could reach it.
+      {
+        href: "/rhood-lab",
+        label: "Robinhood Chain",
+        icon: IconSpark,
+        status: "ready",
+        note: "Records only. Launches on chain 4663; no book, no wallet.",
+      },
       // Fifty paper strategies buying the momentum candle on Solana tokens
       // older than seven days, each from a $1,000 wallet. Its own route: the
       // old `/momentum-lab` was a different, deleted lab and stays retired.
