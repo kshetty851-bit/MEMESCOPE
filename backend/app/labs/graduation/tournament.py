@@ -719,6 +719,21 @@ ARMS: tuple[Arm, ...] = (
     # earlier than 150 closed trades or seven days: it has to beat the baseline
     # over the same window AND without its single best day. Activity is a risk
     # GRADIENT, so a win here is "fewer of the worst", not "no rugs".
+    # KARTHIK'S OWN BOOK (2026-09-23). The same rule as BASE_75k_quiet_5m, as
+    # its own arm rather than a second book on that one: a fresh book is keyed
+    # by its arm's name, so two of them on one arm would collide. It therefore
+    # buys the same coins at the same moments, which is the point — this is his
+    # money's record, kept apart from a pre-registered experiment so that
+    # neither one's dates can be moved to flatter the other.
+    #
+    # STARTS EMPTY AND FORWARD. Its $500 book opens at 12:00 UTC on the day it
+    # was asked for, JUDGED 2026-10-23. What it inherits from the arm it copies
+    # is the rule, not the record: BASE_75k_quiet_5m's +$1,060 is two coins
+    # (+429% and +527%) carrying 177 trades that made about $100 between them,
+    # and four rugs that all landed on one day.
+    Arm("KARTHIK_QUIET_5M", "floor75", 5, quiet=True,
+        note="Karthik's book — every graduation over $75k whose pool is still "
+             "quiet (under 100 trades) when it is bought, out at 5m"),
     Arm("BASE_75k_quiet_5m", "floor75", 5, quiet=True,
         note="every graduation over $75k whose pool is still quiet (under "
              "100 trades) when it is bought, out at 5m"),
@@ -769,7 +784,7 @@ CONTROLS: tuple[Arm, ...] = tuple(a for a in ARMS if a.is_control)
 #: returned no edge. The count is pinned rather than free because an arm that
 #: appears mid-tournament changes what every other number means — so changing
 #: it must be a deliberate edit with a date, not a side effect.
-assert len(ARMS) == 15, (
+assert len(ARMS) == 16, (
     "three B3 arms (3m FROM ENTRY retired 2026-09-16 at -$58.90), B3 bought "
     "early (added 2026-09-16), the two rug arms (added 2026-09-16), the two "
     "shorter graduation clocks g2 and g3 (added 2026-09-17), the fast pair "
@@ -807,10 +822,10 @@ assert all(a.tp is None and a.trail is None for a in ARMS), (
 assert all(a.stop is None or a.stop == Decimal("0.10") for a in ARMS), (
     "one stop level, so the twins differ in ONE thing. Sweeping levels here "
     "would be fitting a parameter on the same data that suggested it")
-assert len([a for a in ARMS if not a.is_control]) == 14, (
+assert len([a for a in ARMS if not a.is_control]) == 15, (
     "`config.required_pf` is calibrated on the maximum of FORTY-TWO noise "
-    "draws. Fourteen arms are now judged against it, so the bar is if anything "
-    "CONSERVATIVE — the luckiest of fourteen reaches less than the luckiest "
+    "draws. Fifteen arms are now judged against it, so the bar is if anything "
+    "CONSERVATIVE — the luckiest of fifteen reaches less than the luckiest "
     "of forty-two. Left as it is deliberately: a bar that is too hard costs a "
     "real finding some time, where one that is too easy costs a false one nothing")
 assert all(a.clock in {"entry", "graduation"} for a in ARMS), "a clock is one of two"

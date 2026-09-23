@@ -1428,6 +1428,69 @@ async def fresh_held(book: str = "", db: AsyncSession = Depends(get_db)) -> Fres
     return out
 
 
+@router.get("/karthik", summary="Karthik's own $500 book, and its judge date")
+async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+    """His book alone, with the two things a balance cannot say.
+
+    `judge_at` is fixed in config and reported rather than computed, because a
+    date that moves is not a judge. `without_best` is here because this arm's
+    control made +$1,060 of which two coins were +429% and +527%: a reader
+    seeing only the balance would be reading a lottery as a business.
+    """
+    spec = next((s for s in config.FRESH_BOOKS if s.book == "KARTHIK_QUIET_5M"), None)
+    if spec is None:                                  # pragma: no cover
+        raise HTTPException(status_code=404, detail="no such book")
+    arm = next(a for a in ARMS if a.name == spec.book)
+    rows = (await db.scalars(
+        select(GradPaperPosition)
+        .where(GradPaperPosition.book == spec.book,
+               GradPaperPosition.closed_at.is_not(None),
+               GradPaperPosition.excluded.is_(None),
+               GradPaperPosition.net_return.is_not(None),
+               GradPaperPosition.opened_at >= spec.start)
+        .order_by(GradPaperPosition.opened_at))).all()
+    sol = await db.scalar(
+        select(GradPostgradSample.price_usd / GradPostgradSample.price_native)
+        .where(GradPostgradSample.price_usd > 0, GradPostgradSample.price_native > 0)
+        .order_by(GradPostgradSample.ts.desc()).limit(1))
+    walk = _funded_walk(
+        [(p.opened_at, p.closed_at, float(p.net_return),
+          float(p.impact_open or 0), float(p.impact_close or 0)) for p in rows],
+        sol, ticket=float(spec.ticket_usd), start=float(spec.capital_usd))
+    cents = Decimal("0.01")
+    pnl = [float(p.pnl_usd or 0) for p in rows]
+    return {
+        "book": spec.book,
+        "rule": arm.note,
+        "hold_minutes": arm.hold,
+        "started_at": spec.start,
+        "judge_at": config.KARTHIK_JUDGE_AT,
+        "capital_usd": spec.capital_usd,
+        "ticket_usd": spec.ticket_usd,
+        "balance_usd": Decimal(str(walk.cash)).quantize(cents),
+        "pnl_usd": Decimal(str(walk.cash - float(spec.capital_usd))).quantize(cents),
+        "lowest_usd": Decimal(str(walk.low)).quantize(cents),
+        "trades": walk.funded,
+        "skipped": walk.skipped,
+        "wins": sum(1 for p in rows if float(p.net_return) > 0),
+        "rugs": sum(1 for p in rows
+                    if float(p.net_return) <= float(config.OPERATOR_RUG_MOVE)),
+        # What is left without the single luckiest trade. On the arm this
+        # copies, that one number is the difference between +$1,060 and about
+        # $100 over the same trades.
+        "without_best_usd": (Decimal(str(sum(pnl) - max(pnl, default=0.0)))
+                             .quantize(cents) if pnl else Decimal(0)),
+        "trades_list": [{
+            "symbol": p.symbol,
+            "opened_at": p.opened_at,
+            "closed_at": p.closed_at,
+            "pct": (Decimal(str(100 * float(p.net_return))).quantize(cents)),
+            "pnl_usd": Decimal(str(float(p.pnl_usd or 0))).quantize(cents),
+            "pool_usd": p.liq_open_usd,
+        } for p in reversed(rows[-60:])],
+    }
+
+
 @router.get("/tournament", response_model=Leaderboard)
 async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
     """The leaderboard. One grouped read, not fifty."""

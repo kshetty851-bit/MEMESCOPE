@@ -38,10 +38,24 @@ def test_the_page_shows_the_quiet_book_and_the_band_books() -> None:
         # The deep arm the real wallet mirrors (2026-09-23). Also forward.
         "B5_500k_flow_5m",
         # The rug-money-blocked band (2026-09-23), beside its control.
-        "BAND_55k_blk_5m"]
+        "BAND_55k_blk_5m",
+        # Karthik's own book (2026-09-23), judged thirty days later.
+        "KARTHIK_QUIET_5M"]
+    by_book = {spec.book: spec for spec in SWEEP}
+    karthik = by_book["KARTHIK_QUIET_5M"]
+    assert karthik.start == datetime(2026, 9, 23, 12, 0, tzinfo=UTC)
+    # Thirty days, fixed BEFORE its first trade: a judge date chosen afterwards
+    # is chosen by the result.
+    assert config.KARTHIK_JUDGE_AT == datetime(2026, 10, 23, 12, 0, tzinfo=UTC)
+    assert (config.KARTHIK_JUDGE_AT - karthik.start).days == 30
+    # It copies BASE_75k_quiet_5m's RULE, not its record: same entry, hold and
+    # filter, its own trades from its own start.
+    mine = next(a for a in ARMS if a.name == "KARTHIK_QUIET_5M")
+    theirs = next(a for a in ARMS if a.name == "BASE_75k_quiet_5m")
+    assert ((mine.entry, mine.hold, mine.quiet, mine.locked)
+            == (theirs.entry, theirs.hold, theirs.quiet, theirs.locked))
     # Named, not indexed: the last entry moves every time a book is added, and
     # this pair is pinned because both are decision books that start FORWARD.
-    by_book = {spec.book: spec for spec in SWEEP}
     assert by_book["B5_500k_flow_5m"].start == datetime(2026, 9, 23, 5, 0, tzinfo=UTC)
     assert next(a for a in ARMS if a.name == "B5_500k_flow_5m").hold == 5
     b3 = by_book["B3_198k_5m"]
@@ -54,13 +68,13 @@ def test_the_page_shows_the_quiet_book_and_the_band_books() -> None:
     assert all(s.capital_usd == Decimal(500) and s.ticket_usd == Decimal(100)
                for s in SWEEP)
     arms = [next(a for a in ARMS if a.name == s.book) for s in SWEEP]
-    assert [a.hold for a in arms] == [2, 5, 5, 5, 5, 5, 5]
+    assert [a.hold for a in arms] == [2, 5, 5, 5, 5, 5, 5, 5]
     assert [a.quiet for a in arms] == [
-        False, False, True, False, False, False, False]
+        False, False, True, False, False, False, False, True]
     # The pump twin differs from BAND_55k_5m in the ENTRY, not the exit.
     assert [a.entry for a in arms] == [
         "band55", "band55", "band55", "band55_pump", "liq_B3", "deep500_flow",
-        "band55"]
+        "band55", "floor75"]
     arm = next(a for a in ARMS if a.name == BQ.book)
     assert arm.quiet and arm.hold == 5 and not arm.is_control
     # The control it is judged against still trades, panel or no panel.
