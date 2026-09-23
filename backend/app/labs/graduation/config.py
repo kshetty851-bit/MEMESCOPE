@@ -379,6 +379,11 @@ REPEAT_MIN_RUG_PCT = _int("LAB_GRADUATION_REPEAT_MIN_RUG_PCT", 10)
 #: How long that list is held before it is read again. The labels behind it
 #: arrive minutes apart; the tick runs every three seconds.
 REPEAT_TTL_S = _int("LAB_GRADUATION_REPEAT_TTL_S", 300)
+#: How long the WIDE rug-linked list is held before it is read again. It is a
+#: whole-table scan over every closed trade, so it is cached harder than the
+#: repeat list; the arms that use it (`Arm.rug_blocked`) do not need it fresher
+#: than the rate at which coins rug.
+RUG_LINKED_TTL_S = _int("LAB_GRADUATION_RUG_LINKED_TTL_S", 900)
 #: PRE-REGISTERED, 2026-09-20, and frozen before BASE_75k_quiet_5m took a
 #: trade: a coin whose pool has already had this many transactions when the
 #: book is about to buy is refused by the arms that ask for a quiet pool.
@@ -1036,6 +1041,10 @@ FRESH_BOOKS: tuple[FreshBookSpec, ...] = (
     #
     # Starts FORWARD at 05:00 UTC, the first round hour after this was written.
     FreshBookSpec("B5_500k_flow_5m", datetime(2026, 9, 23, 5, 0, tzinfo=UTC),
+                  Decimal(500), Decimal(100)),
+    # Karthik's rug-money block (2026-09-23), beside the band it copies so the
+    # two can be read together. Starts FORWARD at 10:00 UTC.
+    FreshBookSpec("BAND_55k_blk_5m", datetime(2026, 9, 23, 10, 0, tzinfo=UTC),
                   Decimal(500), Decimal(100)),
 )
 

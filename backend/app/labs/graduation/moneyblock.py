@@ -89,6 +89,43 @@ async def repeat_rug_ids(session: AsyncSession, at: datetime) -> frozenset[str]:
     return _REPEAT[1]
 
 
+#: Every address behind a coin that ever rugged on any book, and when it was
+#: read. Held for `config.RUG_LINKED_TTL_S`.
+_RUG_LINKED: tuple[datetime, frozenset[str]] | None = None
+
+#: Addresses behind a trade that had ALREADY CLOSED at a rug's loss. The
+#: `closed_at < :at` is the whole point — a list built from the future would
+#: refuse a coin for something that had not happened yet.
+_RUG_LINKED_SQL = text("""
+    select distinct w
+    from grad_paper_positions p
+    join grad_operators o on o.mint = p.mint, unnest(o.ids) as w
+    where p.closed_at is not null and p.closed_at < :at
+      and p.net_return <= :rug
+""")
+
+
+async def rug_linked_ids(session: AsyncSession, at: datetime) -> frozenset[str]:
+    """Every address seen on a coin that has already rugged.
+
+    WIDER than `repeat_rug_ids` on purpose, and only some arms ask for it
+    (`Arm.rug_blocked`). Measured 2026-09-23 over four books: it takes the
+    BASELINE from +$978 to +$1,609 and its rugs from 41 to 18, and it takes
+    B5_500k_flow_5m from +$256 to +$229 while preventing none, because B5 has
+    never had a rug to prevent. So it is worth having where rugs are frequent
+    and a pure tax where they are not — which is why it is per-arm rather than
+    a rule for the whole board.
+    """
+    global _RUG_LINKED
+    if (_RUG_LINKED is not None
+            and (at - _RUG_LINKED[0]).total_seconds() < config.RUG_LINKED_TTL_S):
+        return _RUG_LINKED[1]
+    rows = await session.scalars(
+        _RUG_LINKED_SQL, {"at": at, "rug": float(settings.REAL_WALLET_RUG_RETURN)})
+    _RUG_LINKED = (at, frozenset(rows))
+    return _RUG_LINKED[1]
+
+
 async def recent_rug_ids(session: AsyncSession, at: datetime) -> set[str]:
     """Every address behind a lab trade that closed at a rug's loss in the
     window before `at`: the wallet's three-hour list, off the lab's own books."""
