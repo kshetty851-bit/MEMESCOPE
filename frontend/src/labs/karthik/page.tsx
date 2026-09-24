@@ -8,7 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/states";
 
 import { useKarthikBook } from "./hooks";
-import type { KarthikDay, KarthikTrade } from "./types";
+import type { KarthikDay, KarthikHold, KarthikTrade } from "./types";
 
 /**
  * KARTHIK'S LAB — ONE BOOK, PAPER ONLY.
@@ -218,6 +218,92 @@ function Row({ trade }: { trade: KarthikTrade }) {
   );
 }
 
+/**
+ * Would holding longer have paid? The same coins and the same entries, sold on
+ * later clocks.
+ *
+ * The five-minute row is the book's OWN result, net of the fees and pool impact
+ * it really paid. The later rows are raw price moves, so they FLATTER -- a real
+ * exit at thirty minutes would pay that toll again. Said on the page rather
+ * than in a comment, because a reader comparing them is comparing a net number
+ * with gross ones.
+ */
+function Holds({ holds }: { holds: KarthikHold[] }) {
+  if (holds.length === 0) return null;
+  return (
+    <Panel>
+      <PanelHeader>
+        <PanelTitle>
+          If it had sold later{" "}
+          <span className="font-normal text-ink-dim">
+            &middot; same coins, same entries, a different clock
+          </span>
+        </PanelTitle>
+      </PanelHeader>
+      <div className="overflow-x-auto p-3">
+        <table className="w-full text-[13px]">
+          <thead className="text-[11px] uppercase tracking-wider text-ink-dim">
+            <tr>
+              <th className="py-1 pr-3 text-left font-normal">sell after</th>
+              <th className="py-1 pr-3 text-right font-normal">coins</th>
+              <th className="py-1 pr-3 text-right font-normal">per trade</th>
+              <th className="py-1 pr-3 text-right font-normal">total</th>
+              <th className="py-1 text-right font-normal">wiped out</th>
+            </tr>
+          </thead>
+          <tbody>
+            {holds.map((h) => {
+              const pct = Number(h.per_trade_pct);
+              return (
+                <tr
+                  key={h.minutes}
+                  className={`border-t border-line/60 ${h.book ? "font-medium" : ""}`}
+                >
+                  <td className="py-1.5 pr-3">
+                    {h.minutes} min
+                    {h.book ? (
+                      <span className="ml-2 text-[11px] font-normal text-ink-dim">
+                        what it does
+                      </span>
+                    ) : null}
+                  </td>
+                  <td className="py-1.5 pr-3 text-right tabular-nums text-ink-dim">
+                    {h.coins}
+                  </td>
+                  <td
+                    className={`py-1.5 pr-3 text-right tabular-nums ${
+                      pct >= 0 ? "text-up" : "text-down"
+                    }`}
+                  >
+                    {pct >= 0 ? "+" : ""}
+                    {pct.toFixed(2)}%
+                  </td>
+                  <td
+                    className={`py-1.5 pr-3 text-right tabular-nums ${
+                      Number(h.pnl_usd) >= 0 ? "text-up" : "text-down"
+                    }`}
+                  >
+                    {usd(h.pnl_usd)}
+                  </td>
+                  <td className="py-1.5 text-right tabular-nums text-ink-dim">
+                    {h.wiped}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        <p className="mt-2 max-w-[78ch] text-[12px] leading-relaxed text-ink-dim">
+          Only the 5-minute row is net of what the book paid to trade. The later
+          rows are raw price moves, so they are kinder than a real exit would
+          be &mdash; selling at 30 minutes would pay the same costs again. Even
+          flattered, they lose.
+        </p>
+      </div>
+    </Panel>
+  );
+}
+
 export function KarthikLabPage() {
   const { data, isLoading, isError, refetch } = useKarthikBook();
   // Before the early returns: a hook may not sit behind a condition, and the
@@ -300,6 +386,8 @@ export function KarthikLabPage() {
           hint={`of ${data.trades} trades · ${data.wins} wins`}
         />
       </div>
+
+      <Holds holds={data.holds} />
 
       <Panel>
         <PanelHeader>
