@@ -284,7 +284,10 @@
   z-index: 0;
   width: 64px;
   transform: translateY(-58%);
-  transition: transform 450ms cubic-bezier(0.3, 1.6, 0.5, 1);
+  /* A hover response on a card: a smooth ease-out-quint, not a spring. The
+     springs elsewhere here are the characters' own jumps, which are meant to
+     overshoot; this is interface feedback, which is not. */
+  transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
   pointer-events: none;
 }
 .crew-peek--right { right: 18px; }
