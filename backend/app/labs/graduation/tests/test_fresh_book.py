@@ -72,7 +72,7 @@ def test_the_page_shows_the_quiet_book_and_the_band_books() -> None:
     # recorded, so the page can mark what came before as in sample.
     assert (by_book["KARTHIK_QUIET_5M"].capital_usd,
             by_book["KARTHIK_QUIET_5M"].ticket_usd) == (Decimal(600), Decimal(200))
-    assert config.KARTHIK_PREVIOUS_SIZE == (Decimal(500), Decimal(100))
+    assert (Decimal(500), Decimal(100)) == config.KARTHIK_PREVIOUS_SIZE
     assert (by_book["KARTHIK_QUIET_5M"].start < config.KARTHIK_RESIZED_AT
             < config.KARTHIK_JUDGE_AT)
     arms = [next(a for a in ARMS if a.name == s.book) for s in SWEEP]
@@ -288,3 +288,27 @@ async def test_karthik_days_are_24h_from_the_open_not_calendar_days() -> None:
     assert days[2]["pct"] == Decimal("-12.50")
     # The days reconcile to the book: last day's balance is the book's balance.
     assert days[max(days)]["balance_usd"] == book["balance_usd"]
+
+
+async def test_the_public_summary_gives_headline_figures_and_nothing_else() -> None:
+    """The homepage is public, so this is everything anyone without the site
+    code can learn about Karthik's Lab: no trades, no coins, no timings."""
+    from app.labs.graduation import api as _api
+    from app.middleware.alpha_access import AlphaAccessMiddleware
+
+    _no_hold_cache()
+    _api._KARTHIK_PUBLIC = None
+    start = next(s for s in config.FRESH_BOOKS if s.book == "KARTHIK_QUIET_5M").start
+    rows = [_Pos("C0", start + timedelta(hours=1), 0.10)]
+    out = await _api.karthik_summary(db=_StubDb(rows))  # type: ignore[arg-type]
+    assert set(out) == {"started_at", "judge_at", "capital_usd", "ticket_usd", "balance_usd",
+                        "pnl_usd", "pnl_pct", "trades", "wins", "rugs"}
+    assert out["pnl_usd"] == Decimal("20.00")          # one $200 ticket at +10%
+    assert out["pnl_pct"] == Decimal("3.33")           # of the $600 it started with
+    # Only that one path opens; the full book and anything beside it stay shut.
+    exempt = AlphaAccessMiddleware._is_exempt
+    assert exempt("/api/v1/labs/graduation/karthik/summary")
+    assert not exempt("/api/v1/labs/graduation/karthik")
+    assert not exempt("/api/v1/labs/graduation/karthik/summary/x")
+    assert not exempt("/api/v1/real-wallet/status")
+    _api._KARTHIK_PUBLIC = None

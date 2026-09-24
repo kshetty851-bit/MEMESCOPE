@@ -8,8 +8,8 @@ import { Wordmark, WordmarkSubtitle } from "@/components/brand/wordmark";
 import { Crew, EnterHq } from "@/components/alpha/crew";
 import { AlphaAccess } from "@/components/alpha/alpha-access";
 import { HeroMascot, type MascotState } from "@/components/alpha/hero-mascot";
-import { HomepageIntelligence } from "@/components/alpha/homepage-intelligence";
 import { LaunchOverlay, useLaunchSequence } from "@/components/alpha/launch-sequence";
+import { SiteFooter, WhatRunsHere } from "@/components/alpha/what-runs-here";
 import { HomeUniverse } from "@/components/space/home-universe";
 import { SpaceAudioToggle } from "@/components/space/space-audio-toggle";
 import { useReducedMotion } from "@/hooks/use-reduced-motion";
@@ -133,13 +133,16 @@ export function LandingPage() {
               <Wordmark title="MEMESCOPE" className="text-[clamp(2.4rem,7vw,4.6rem)]" />
             </h1>
             <WordmarkSubtitle className="mt-4" />
+            <p className="mt-2 text-sm text-ink-2">
+              Built by <span className="font-medium text-ink">Karthik Shetty</span>
+            </p>
             <p className="mt-6 text-[clamp(1.125rem,2vw,1.5rem)] font-medium leading-snug tracking-tight text-ink">
-              Not a scanner. A command centre.
+              Every pump.fun graduation, tested before it&apos;s traded.
             </p>
             <p className="mt-3 max-w-md text-sm leading-relaxed text-ink-2">
-              Real-time Pump.fun intelligence, run by a crew who each watch one
-              subsystem. Every launch tracked, scored deterministically, and
-              published — winners and losers alike.
+              MEMESCOPE watches around 1,500 graduations a day, runs each strategy
+              on paper against a fair comparison, and lets real money follow only
+              what earns it.
             </p>
           </div>
 
@@ -168,7 +171,8 @@ export function LandingPage() {
       */}
       <Crew />
       <EnterHq />
-      <HomepageIntelligence />
+      <WhatRunsHere />
+      <SiteFooter />
     </main>
   );
 }
