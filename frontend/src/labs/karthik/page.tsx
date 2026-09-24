@@ -94,6 +94,18 @@ function usd(value: string | number | null | undefined): string {
   })}`;
 }
 
+/** A figure as a percentage of the money the book started with. */
+export function pctOfCapital(value: string | number | null | undefined,
+                      capital: string | number): string {
+  // Number(null) is 0, so a missing figure would otherwise print "+0.00%" --
+  // "the book is exactly flat" -- which is a claim, not an absence.
+  if (value === null || value === undefined || value === "") return "—";
+  const n = Number(value);
+  const c = Number(capital);
+  if (!Number.isFinite(n) || !Number.isFinite(c) || c === 0) return "—";
+  return `${n >= 0 ? "+" : ""}${((100 * n) / c).toFixed(2)}%`;
+}
+
 function day(iso: string): string {
   return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 }
@@ -116,7 +128,7 @@ function Figure({
     <div className="rounded-lg border border-line bg-ink/[0.02] p-3">
       <div className="text-[11px] uppercase tracking-wider text-ink-dim">{label}</div>
       <div
-        className={`mt-1 text-xl font-semibold tabular-nums ${
+        className={`mt-1 text-lg font-semibold tabular-nums ${
           tone === "up" ? "text-up" : tone === "down" ? "text-down" : ""
         }`}
       >
@@ -214,21 +226,22 @@ export function KarthikLabPage() {
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <Figure
           label="Balance"
-          value={usd(data.balance_usd)}
+          value={`${usd(data.balance_usd)}  ${pctOfCapital(data.pnl_usd, data.capital_usd)}`}
           tone={up ? "up" : "down"}
           sub={rupees(data.balance_usd)}
           hint={`${up ? "+" : ""}${usd(data.pnl_usd)} on ${usd(data.capital_usd)}`}
         />
         <Figure
           label="Without its best trade"
-          value={usd(withoutBest)}
+          value={`${usd(withoutBest)}  ${pctOfCapital(withoutBest, data.capital_usd)}`}
           tone={withoutBest >= 0 ? "up" : "down"}
           sub={rupees(withoutBest)}
           hint="the same book minus one coin"
         />
         <Figure
           label="Lowest it has been"
-          value={usd(data.lowest_usd)}
+          value={`${usd(data.lowest_usd)}  ${pctOfCapital(
+            Number(data.lowest_usd) - Number(data.capital_usd), data.capital_usd)}`}
           sub={rupees(data.lowest_usd)}
           hint="what holding it actually felt like"
         />
