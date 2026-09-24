@@ -13,7 +13,8 @@ import type { KarthikDay, KarthikHold, KarthikTrade } from "./types";
 /**
  * KARTHIK'S LAB — ONE BOOK, PAPER ONLY.
  *
- * $500 on one rule, started when he asked for it and judged thirty days later.
+ * His own money on one rule, started when he asked for it and judged thirty
+ * days later. Resized once, on 24 Sep, from $500 at $100 to $600 at $200.
  * It holds no wallet and has never placed an order; the real wallet is its own
  * page and its own switch.
  *
@@ -348,6 +349,13 @@ export function KarthikLabPage() {
           rule: <b>{data.rule}</b>. Started {day(data.started_at)},{" "}
           <b>judged {day(data.judge_at)}</b>. Paper only: this book holds no
           wallet and has never placed an order.
+        </p>
+        <p className="mt-1 max-w-[78ch] text-[12px] leading-relaxed text-ink-dim">
+          Resized on {day(data.resized_at)} from {usd(data.previous_capital_usd)} at{" "}
+          {usd(data.previous_ticket_usd)} a trade, after its first day had been
+          seen, and replayed from the same start at the new size. That makes the
+          first day a look back rather than a test: only what happens from{" "}
+          {day(data.resized_at)} on is a fair measure of this size.
         </p>
       </div>
 
