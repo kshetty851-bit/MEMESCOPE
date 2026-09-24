@@ -1046,14 +1046,25 @@ FRESH_BOOKS: tuple[FreshBookSpec, ...] = (
     # two can be read together. Starts FORWARD at 10:00 UTC.
     FreshBookSpec("BAND_55k_blk_5m", datetime(2026, 9, 23, 10, 0, tzinfo=UTC),
                   Decimal(500), Decimal(100)),
-    # KARTHIK'S BOOK. His own $500 on the quiet rule, opened when he asked for
-    # it and JUDGED 2026-10-23 — thirty days, fixed before its first trade
+    # KARTHIK'S BOOK. His own money on the quiet rule, opened when he asked
+    # for it and JUDGED 2026-10-23 — thirty days, fixed before its first trade
     # because he intends to act on the result. It has its own page at
     # `/karthik-lab`; it appears here too so the board it copies can be read
     # beside it.
+    #
+    # RESIZED 2026-09-24 from $500 at $100 a trade to $600 at $200, at his
+    # request, after its first day had been seen — see `KARTHIK_RESIZED_AT`.
+    # The start and the judge date did not move; the walk replays the same
+    # trades at the new size.
     FreshBookSpec("KARTHIK_QUIET_5M", datetime(2026, 9, 23, 12, 0, tzinfo=UTC),
-                  Decimal(500), Decimal(100)),
+                  Decimal(600), Decimal(200)),
 )
+
+#: When Karthik's book changed size, and what it was before. The new size was
+#: chosen AFTER its first day was seen, so everything before this moment is in
+#: sample for the size and the page says so; only what follows is a fair test.
+KARTHIK_RESIZED_AT = datetime(2026, 9, 24, 9, 34, tzinfo=UTC)
+KARTHIK_PREVIOUS_SIZE = (Decimal(500), Decimal(100))
 
 #: When Karthik's book is judged. Thirty days from its start, written down
 #: before it had a single trade: a date chosen afterwards is chosen by the

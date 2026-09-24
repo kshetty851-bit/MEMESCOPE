@@ -1437,7 +1437,7 @@ KARTHIK_HOLDS = (5, 10, 15, 30, 60)
 #: table would be unusable on a page that refreshes every minute.
 _HOLD_SQL = text("""
     with recent as (
-        select id, mint, opened_at, net_return,
+        select id, mint, opened_at, net_return, impact_open, impact_close,
                coalesce(open_fill, open_quote) as entry
         from grad_paper_positions
         where book = :book and closed_at is not null and excluded is null
@@ -1447,7 +1447,8 @@ _HOLD_SQL = text("""
         limit :cap
     )
     select distinct on (p.id)
-           p.id, p.net_return, p.entry, s.price_native as later
+           p.id, p.net_return, p.impact_open, p.impact_close, p.entry,
+           s.price_native as later
     from recent p
     join grad_postgrad_samples s
       on s.mint = p.mint
@@ -1493,7 +1494,14 @@ async def _karthik_holds(db: AsyncSession, spec: Any, ticket: float,
             "cap": KARTHIK_HOLD_CAP})).all()
         if not rows:
             continue
-        rets = [float(r.net_return) if mins == 5
+        # The book's own row at the book's own size: `net_return` was measured
+        # at $100, and a bigger ticket moves the pool further both ways, so it
+        # is re-sized exactly as the balance is (`_multiple`). The later rows
+        # are raw price moves at any size.
+        k = ticket / float(config.PAPER_NOTIONAL_USD)
+        rets = [_multiple(float(r.net_return),
+                          (float(r.impact_open or 0), float(r.impact_close or 0)), k) - 1.0
+                if mins == 5
                 else float(r.later) / float(r.entry) - 1.0 for r in rows]
         out.append({
             "minutes": mins,
@@ -1591,6 +1599,9 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
         "hold_minutes": arm.hold,
         "started_at": spec.start,
         "judge_at": config.KARTHIK_JUDGE_AT,
+        "resized_at": config.KARTHIK_RESIZED_AT,
+        "previous_capital_usd": config.KARTHIK_PREVIOUS_SIZE[0],
+        "previous_ticket_usd": config.KARTHIK_PREVIOUS_SIZE[1],
         "capital_usd": spec.capital_usd,
         "ticket_usd": spec.ticket_usd,
         "balance_usd": Decimal(str(walk.cash)).quantize(cents),

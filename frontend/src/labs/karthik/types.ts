@@ -15,6 +15,11 @@ export interface KarthikBook {
   /** Fixed in config before the first trade. A judge date that moves is not a
       judge — it is the result choosing when to be measured. */
   judge_at: string;
+  /** When the book changed size. Chosen after its first day was seen, so what
+   *  came before is in sample for the size; only what follows is a fair test. */
+  resized_at: string;
+  previous_capital_usd: string;
+  previous_ticket_usd: string;
   capital_usd: string;
   ticket_usd: string;
   balance_usd: string;
