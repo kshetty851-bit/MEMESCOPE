@@ -36,8 +36,15 @@
      up-and-right run also gives the flight a clearer line toward the
      destination.
   */
+  /*
+     12%, not 16% (2026-09-24), together with the hero copy aligned to the TOP
+     of its column (`landing-page.tsx`, `lg:items-start`). Vertically centred
+     copy ends near the middle of the frame, and a 16% station put the ship's
+     nose behind the headline and paragraph at every desktop size measured:
+     1024x768, 1280x800, 1366x768, 1440x900 and 1920x1080.
+  */
   --station-x: 26%;
-  --station-y: 16%;
+  --station-y: 12%;
   --station-w: clamp(90px, 9vw, 150px);
 
   /* Where the destination rests before the flight, measured from the centre of
@@ -1035,6 +1042,39 @@
 @media (max-width: 1279px) {
   .home-universe__comet {
     display: none;
+  }
+}
+
+/*
+   THE HERO COPY IS CLEAR OF THE SCENE (2026-09-24). Measured at 1024x768,
+   1280x800, 1366x768, 1440x900 and 1920x1080 with the copy top-aligned:
+
+   * A short desktop frame has no room below the copy for a 9vw ship, so the
+     station shrinks there rather than standing behind the paragraph.
+   * Saturn sat behind the copy's left edge. On 1280px and wider there is a
+     constant 256px corridor between the wordmark and the access panel, centred
+     about 100px right of the viewport's middle whatever its width (both are
+     laid out in the same centred 80rem container). A 200px planet plus its
+     1.3vw drift fits inside it with room either side. Below 1280 the corridor
+     closes, and the planet stands down there like the comet above.
+*/
+@media (min-width: 1024px) and (max-height: 820px) {
+  .home-universe {
+    --station-w: clamp(70px, 7vw, 110px);
+  }
+}
+
+@media (min-width: 1024px) and (max-width: 1279px) {
+  .home-universe__body--ringed {
+    display: none;
+  }
+}
+
+@media (min-width: 1280px) {
+  .home-universe__body--ringed {
+    left: calc(50% - 10px);
+    top: 14%;
+    width: 200px;
   }
 }
 

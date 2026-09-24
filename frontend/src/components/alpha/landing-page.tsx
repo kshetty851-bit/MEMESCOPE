@@ -122,7 +122,9 @@ export function LandingPage() {
 
         <div
           data-alpha-content
-          className="relative z-10 grid flex-1 items-center gap-10 py-10 lg:grid-cols-[minmax(0,1fr)_23rem] lg:gap-16"
+          // Top-aligned on desktop: centred copy ends mid-frame, right where the
+          // launch station stands (see home-universe.css, 2026-09-24).
+          className="relative z-10 grid flex-1 items-center gap-10 py-10 lg:grid-cols-[minmax(0,1fr)_23rem] lg:items-start lg:gap-16"
         >
           <div className="max-w-xl">
             {/* The wordmark *is* the headline, at hero scale. It used to be the
