@@ -124,6 +124,18 @@ BLOCKED_SINCE: dict[str, datetime] = {
     "5QDtfFdBxaUP3vT7bK5F1MHRUnkpTFW1Wj4GqCU7kk9X": _at("2026-09-22 05:00"),
     "9vCfhjuALLBfP8LuaaCYFWMVLzoxF1KpCbJdqjC5BA1X": _at("2026-09-22 05:00"),
     "wsyZWfNxvmY1a4B3sGrBSMtHCZAwUB9Fk5jbHjCS9Pk": _at("2026-09-22 05:00"),
+    # EVO (24 Sep 15:41 UTC, -100%, -$25.00 real on G-QUIET), at Karthik's
+    # request that evening ("block EVO funders"). A $146k pool, quiet, passing
+    # every rule; it fell under half its entry price 211 seconds in, so the
+    # four-minute book died too. Fresh money: none of these four was on the
+    # permanent list, the wide rug-linked list or the repeat-rugger rule when
+    # it was bought. Each sits on 1-3 coins, EVO the only death among them, so
+    # blocking them refuses almost nothing else. Not the same money as the
+    # EVO that died on 20 Sep (that one's funders were never recorded).
+    "21jNtCAap2pRH3eFSP7tJ61BVYk3wXxx7XQ6XtQTnHZZ": _at("2026-09-24 15:55"),
+    "6CKChsMihpXSNPn5aLYEgryhbtEQSF1dZPBGRKbsA688": _at("2026-09-24 15:55"),
+    "3jih9qfEA1EmwJ3B2VUp5ouL67ezHdGyzCoE2hDSy3WA": _at("2026-09-24 15:55"),
+    "9mtcjpPBiTKZQucbzXpMKLb7o237LyQy7r9W3MvXDz4M": _at("2026-09-24 15:55"),
 }
 
 ALWAYS_BLOCKED: frozenset[str] = frozenset(BLOCKED_SINCE)
