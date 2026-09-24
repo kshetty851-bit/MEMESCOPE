@@ -1,0 +1,463 @@
+/* ============================================================================
+   THE SPACE CREW — animal astronauts on and around the hero (2026-09-24).
+   See components/space/space-crew.tsx for which layer each one lives in.
+
+   Motion is transform and opacity only. A wrapper and its image carry
+   different transforms on purpose: the WRAPPER takes parallax (`translate`),
+   scroll-away and launch moves (`transform`, transitioned); the IMAGE takes the
+   idle loop and the hover trick (`animation`). Two elements, so none of those
+   ever overwrites another.
+   ========================================================================== */
+
+/* --- 1. SITTING ON MEMESCOPE ---------------------------------------------
+   The perch box is the wordmark box; everything is in `em` of the wordmark
+   size. The letters' top edge is 0.37em below the box top (the lens glyph,
+   exactly cap height, starts there), so a seat's bottom sits at
+   100% - 0.42em: on the letters, sunk 0.05em as if resting on them. */
+
+/* inline-flex around the one wordmark child, so the host box IS the wordmark
+   box and the em offsets below land on the letters. */
+.crew-perch-host {
+  position: relative;
+  display: inline-flex;
+  vertical-align: top;
+}
+
+.crew-perch {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.crew-perch__seat {
+  position: absolute;
+  bottom: calc(100% - 0.42em);
+  transform-origin: 50% 100%;
+  pointer-events: auto;
+}
+
+.crew-perch__img {
+  display: block;
+  width: 100%;
+  height: auto;
+  transform-origin: 50% 100%;
+  filter: drop-shadow(0 0.06em 0.08em rgb(0 0 0 / 0.45));
+  cursor: pointer;
+}
+
+/* Lying along the top of "ME". */
+.crew-perch__seat--hippo {
+  left: 3%;
+  width: 1.12em;
+  animation: crew-breathe 3.4s ease-in-out infinite;
+}
+
+/* Sitting on "SC", rocking, and now and then hopping. */
+.crew-perch__seat--panda {
+  left: 50.5%;
+  width: 0.84em;
+  animation: crew-panda 8s ease-in-out infinite;
+  animation-delay: -1.5s;
+}
+
+/* Standing on the last "E", waddling, with a hop. */
+.crew-perch__seat--penguin {
+  left: 87%;
+  width: 0.72em;
+  animation: crew-penguin 5.2s ease-in-out infinite;
+  animation-delay: -2.4s;
+}
+
+.crew-perch__seat:hover .crew-perch__img {
+  animation: crew-hop-flip 0.9s cubic-bezier(0.3, 0.9, 0.4, 1) 1;
+}
+
+/* The code is accepted: everybody on the letters cheers. */
+.alpha-landing[data-sequence] .crew-perch__img {
+  animation: crew-cheer 0.55s cubic-bezier(0.3, 1.4, 0.5, 1) 3;
+}
+.alpha-landing[data-sequence] .crew-perch__seat--panda .crew-perch__img { animation-delay: 0.08s; }
+.alpha-landing[data-sequence] .crew-perch__seat--penguin .crew-perch__img { animation-delay: 0.16s; }
+
+/* --- 2. THE SKY LAYERS ----------------------------------------------------
+   Desktop only, like the rest of the scene's figures: below `lg` the copy and
+   the form fill the frame. FRONT is above the copy (hoverable) and holds only
+   parked figures measured clear of the copy and the form at 1024x768,
+   1280x800, 1366x768, 1440x900 and 1920x1080. BACK is between the scene and
+   the copy, for the fly-bys that cross everything. */
+
+.crew-sky {
+  position: fixed;
+  inset: 0;
+  display: none;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+@media (min-width: 1024px) {
+  .crew-sky {
+    display: block;
+  }
+}
+
+.crew-sky--back {
+  z-index: 1;
+  transition: opacity 600ms var(--ease-standard, ease);
+}
+
+.crew-sky--front {
+  z-index: 20;
+}
+
+.crew-sky--back[data-away],
+.crew-sky--back[data-sequence] {
+  opacity: 0;
+}
+
+.crew-float {
+  position: absolute;
+  pointer-events: auto;
+  /* The scene's own pointer parallax, one depth nearer than its near layer. */
+  translate: calc(var(--uv-px, 0) * -30px) calc(var(--uv-py, 0) * -18px);
+  transition:
+    transform 900ms cubic-bezier(0.5, 0, 0.3, 1),
+    opacity 700ms var(--ease-standard, ease);
+}
+
+.crew-float__img {
+  display: block;
+  width: 100%;
+  height: auto;
+  filter: drop-shadow(0 12px 22px rgb(0 0 0 / 0.5));
+  cursor: pointer;
+}
+
+/* Fox: under the access form, right. `max()` keeps it below the form's
+   bottom edge on short frames (the form ends at 378px at 800 and 768 tall,
+   and the fox drifts and parallaxes up to ~34px above its box). */
+.crew-float--fox {
+  right: 5%;
+  top: max(50%, 420px);
+  width: clamp(96px, 8.5vw, 150px);
+  --away: translateX(170%) rotate(20deg);
+  --fly: translate(40vw, -130vh) rotate(40deg);
+}
+.crew-float--fox .crew-float__img {
+  animation: crew-drift-a 9s ease-in-out infinite;
+}
+
+/* Toucan in its bubble, above the form, beside Mars. Small and near the top
+   edge: with its bob and the pointer parallax it must stay above the form's
+   top edge (116px), which at 2% and 80px it touched. */
+.crew-float--toucan-bubble {
+  right: 20%;
+  top: 1%;
+  width: clamp(48px, 4vw, 64px);
+  --away: translateY(-190%);
+  --fly: translate(10vw, -120vh) rotate(-30deg);
+}
+.crew-float--toucan-bubble .crew-float__img {
+  animation: crew-bob 5.5s ease-in-out infinite;
+  animation-delay: -1.2s;
+}
+
+/* Monkey: swings down from the top into the corridor between the wordmark
+   and the form, peeks, and goes back up. Only where that corridor exists
+   (1280px and wider: a constant 256px, centred ~104px right of the middle).
+   Pivot at the top edge, so the swing is a pendulum. At its lowest it shows
+   45% of itself (79px) and parallax adds 18, clear of Saturn's top edge
+   (14% down: 107px at 768 tall, 112 at 800). */
+.crew-float--monkey {
+  display: none;
+  left: calc(50% + 104px - 45px);
+  top: 0;
+  width: 90px;
+  --away: translateY(-120%);
+  --fly: translateY(-130%);
+}
+@media (min-width: 1280px) {
+  .crew-float--monkey {
+    display: block;
+  }
+}
+.crew-float--monkey .crew-float__img {
+  transform-origin: 50% 0;
+  animation: crew-monkey 17s ease-in-out infinite;
+  animation-delay: 3s;
+  transform: translateY(-100%);
+}
+
+/* Giraffe: its neck comes up from the bottom-left edge now and then. */
+.crew-float--giraffe {
+  left: 1.5%;
+  bottom: 0;
+  width: clamp(56px, 5vw, 84px);
+  --away: translateY(110%);
+  --fly: translateY(120%);
+}
+.crew-float--giraffe .crew-float__img {
+  transform-origin: 50% 100%;
+  animation: crew-giraffe 14s ease-in-out infinite;
+  animation-delay: 6s;
+  transform: translateY(100%);
+}
+
+/* Hover tricks. The monkey and giraffe keep their peekaboo loop: a hover
+   there only adds a wiggle on the wrapper. */
+.crew-float--fox:hover .crew-float__img,
+.crew-float--toucan-bubble:hover .crew-float__img {
+  animation: crew-spin 1s cubic-bezier(0.3, 0.9, 0.4, 1) 1;
+}
+.crew-float--monkey:hover,
+.crew-float--giraffe:hover {
+  animation: crew-wiggle 0.6s ease-in-out 1;
+}
+
+/* Scrolled away: each figure leaves by its nearest edge, and comes back. */
+.crew-sky--front[data-away] .crew-float {
+  transform: var(--away);
+  opacity: 0;
+}
+
+/* The code is accepted: a cheer, then everyone scatters as the rocket goes.
+   Not the monkey or giraffe: a cheer resets their peekaboo offset, which
+   would bring them fully into the frame. */
+.crew-sky--front[data-sequence] .crew-float--fox .crew-float__img,
+.crew-sky--front[data-sequence] .crew-float--toucan-bubble .crew-float__img {
+  animation: crew-cheer-px 0.55s cubic-bezier(0.3, 1.4, 0.5, 1) 3;
+}
+.crew-sky--front[data-flying] .crew-float {
+  transform: var(--fly);
+  opacity: 0;
+  transition:
+    transform 1.6s cubic-bezier(0.6, 0, 0.9, 0.5),
+    opacity 1.6s ease-in;
+}
+
+/* --- 3. FLY-BYS (back layer, behind the copy) --------------------------- */
+
+.crew-flyby {
+  position: absolute;
+  left: 0;
+  will-change: transform;
+}
+
+.crew-flyby__img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* Hamster: a quick dash along the ground every 26 seconds, with a streak. */
+.crew-flyby--hamster {
+  top: 84%;
+  width: clamp(44px, 3.6vw, 60px);
+  animation: crew-dash 26s linear infinite;
+  animation-delay: 4s;
+  transform: translateX(-20vw);
+}
+.crew-flyby--hamster .crew-flyby__img {
+  filter: drop-shadow(-18px 0 10px rgb(255 190 120 / 0.35)) drop-shadow(0 8px 14px rgb(0 0 0 / 0.5));
+  animation: crew-bounce 0.32s ease-in-out infinite;
+}
+
+/* Toucan: flies across the top, right to left, every 38 seconds. */
+.crew-flyby--toucan {
+  top: 3%;
+  width: clamp(54px, 4.4vw, 76px);
+  animation: crew-flyover 38s linear infinite;
+  animation-delay: 12s;
+  transform: translateX(120vw);
+}
+.crew-flyby--toucan .crew-flyby__img {
+  filter: drop-shadow(0 10px 16px rgb(0 0 0 / 0.45));
+  animation: crew-flap 0.5s ease-in-out infinite;
+}
+
+/* --- 4. PEEKING OVER THE CARDS -------------------------------------------
+   Behind the card (z-index 0 against the card's 10), so only what rises over
+   its top edge shows. The card's `group` hover lifts it further. */
+
+.crew-peek {
+  position: absolute;
+  top: 2.5rem;
+  z-index: 0;
+  width: 64px;
+  transform: translateY(-58%);
+  transition: transform 450ms cubic-bezier(0.3, 1.6, 0.5, 1);
+  pointer-events: none;
+}
+.crew-peek--right { right: 18px; }
+.crew-peek--left { left: 18px; }
+
+.group:hover .crew-peek,
+.group:focus-within .crew-peek {
+  transform: translateY(-82%);
+}
+
+.crew-peek__img {
+  display: block;
+  width: 100%;
+  height: auto;
+  transform-origin: 50% 100%;
+  animation: crew-bob 4.8s ease-in-out infinite;
+  filter: drop-shadow(0 8px 14px rgb(0 0 0 / 0.45));
+}
+
+.group:hover .crew-peek__img {
+  animation: crew-wave 0.8s ease-in-out 2;
+}
+
+/* --- 5. KEYFRAMES --------------------------------------------------------- */
+
+@keyframes crew-breathe {
+  0%, 100% { transform: scale(1, 1) rotate(-1deg); }
+  50% { transform: scale(1.02, 1.045) rotate(1deg); }
+}
+
+@keyframes crew-panda {
+  0%, 60%, 100% { transform: rotate(-4deg); }
+  30% { transform: rotate(4deg); }
+  70% { transform: translateY(0) scale(1.06, 0.92); }
+  78% { transform: translateY(-0.28em) scale(0.96, 1.06) rotate(-3deg); }
+  86% { transform: translateY(0) scale(1.07, 0.9); }
+  92% { transform: translateY(0) scale(1, 1) rotate(-4deg); }
+}
+
+@keyframes crew-penguin {
+  0%, 100% { transform: rotate(-6deg); }
+  20% { transform: rotate(6deg); }
+  40% { transform: rotate(-6deg); }
+  55% { transform: translateY(0) scale(1.08, 0.9); }
+  63% { transform: translateY(-0.34em) scale(0.94, 1.08) rotate(4deg); }
+  71% { transform: translateY(0) scale(1.08, 0.9); }
+  78% { transform: rotate(6deg); }
+}
+
+@keyframes crew-hop-flip {
+  0% { transform: translateY(0) rotate(0); }
+  20% { transform: translateY(0) scale(1.1, 0.86); }
+  55% { transform: translateY(-0.7em) rotate(-360deg) scale(1); }
+  85% { transform: translateY(0) scale(1.08, 0.9) rotate(-360deg); }
+  100% { transform: translateY(0) rotate(-360deg); }
+}
+
+@keyframes crew-cheer {
+  0%, 100% { transform: translateY(0) scale(1); }
+  40% { transform: translateY(-0.35em) scale(1.08); }
+}
+@keyframes crew-cheer-px {
+  0%, 100% { transform: translateY(0) scale(1); }
+  40% { transform: translateY(-24px) scale(1.08); }
+}
+
+@keyframes crew-drift-a {
+  0%, 100% { transform: translate(0, 0) rotate(-2deg); }
+  33% { transform: translate(-10px, -16px) rotate(3deg); }
+  66% { transform: translate(8px, 10px) rotate(-4deg); }
+}
+
+@keyframes crew-bob {
+  0%, 100% { transform: translateY(0) rotate(-3deg); }
+  50% { transform: translateY(-10px) rotate(3deg); }
+}
+
+@keyframes crew-spin {
+  0% { transform: rotate(0) scale(1); }
+  45% { transform: rotate(200deg) scale(1.15); }
+  100% { transform: rotate(360deg) scale(1); }
+}
+
+@keyframes crew-wiggle {
+  0%, 100% { rotate: 0deg; }
+  25% { rotate: -8deg; }
+  75% { rotate: 8deg; }
+}
+
+/* Hidden up top most of the time; drops in to peek, swings, goes home. */
+@keyframes crew-monkey {
+  0%, 60%, 100% { transform: translateY(-100%) rotate(0); }
+  10% { transform: translateY(-66%) rotate(0); }
+  17% { transform: translateY(-66%) rotate(9deg); }
+  24% { transform: translateY(-66%) rotate(-9deg); }
+  32% { transform: translateY(-55%) rotate(5deg); }
+  40% { transform: translateY(-55%) rotate(-5deg); }
+  48% { transform: translateY(-70%) rotate(2deg); }
+}
+
+@keyframes crew-giraffe {
+  0%, 55%, 100% { transform: translateY(100%) rotate(0); }
+  12% { transform: translateY(34%) rotate(0); }
+  20% { transform: translateY(34%) rotate(-7deg); }
+  28% { transform: translateY(34%) rotate(5deg); }
+  36% { transform: translateY(30%) rotate(-3deg); }
+  44% { transform: translateY(36%) rotate(0); }
+}
+
+@keyframes crew-dash {
+  0% { transform: translateX(-20vw); }
+  14% { transform: translateX(120vw); }
+  100% { transform: translateX(120vw); }
+}
+
+@keyframes crew-bounce {
+  0%, 100% { transform: translateY(0) rotate(-4deg); }
+  50% { transform: translateY(-6px) rotate(4deg); }
+}
+
+@keyframes crew-flyover {
+  0% { transform: translate(120vw, 0); }
+  3% { transform: translate(92vw, -8px); }
+  6% { transform: translate(62vw, 6px); }
+  9% { transform: translate(32vw, -6px); }
+  12% { transform: translate(2vw, 4px); }
+  15% { transform: translate(-20vw, 0); }
+  100% { transform: translate(-20vw, 0); }
+}
+
+@keyframes crew-flap {
+  0%, 100% { transform: rotate(-5deg) scaleY(1); }
+  50% { transform: rotate(3deg) scaleY(0.94); }
+}
+
+@keyframes crew-wave {
+  0%, 100% { transform: rotate(0); }
+  25% { transform: rotate(-9deg); }
+  75% { transform: rotate(9deg); }
+}
+
+/* --- 6. WHEN MOTION IS OFF ------------------------------------------------
+   Parked figures stand still; the fly-bys and peekaboos are events, and with
+   motion off there is no event to show, as the scene already rules for its
+   meteors and satellite. The same for the owner's "minimal" space setting. */
+
+@media (prefers-reduced-motion: reduce) {
+  .crew-perch__seat,
+  .crew-perch__img,
+  .crew-float,
+  .crew-float__img,
+  .crew-peek,
+  .crew-peek__img {
+    animation: none !important;
+    transition: none !important;
+    translate: none !important;
+  }
+  .crew-flyby,
+  .crew-float--monkey,
+  .crew-float--giraffe {
+    display: none !important;
+  }
+}
+
+[data-space="minimal"] .crew-flyby,
+[data-space="minimal"] .crew-float--monkey,
+[data-space="minimal"] .crew-float--giraffe {
+  display: none;
+}
+
+/* The zebra in the scene's astronaut slot (home-universe.tsx). */
+.home-universe__astronaut img {
+  display: block;
+  width: 100%;
+  height: auto;
+}

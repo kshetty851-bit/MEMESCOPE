@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
+import { CardPeeker } from "@/components/space/space-crew";
 import { api } from "@/lib/api-client";
 
 /**
@@ -83,21 +84,25 @@ const PLACES = [
   {
     href: "/graduation-lab",
     name: "Graduation Lab",
+    peek: "/crew/lion.webp",
     what: "Every pump.fun graduation over the depth line is bought on paper by a set of rules at once, each beside a control it has to beat.",
   },
   {
     href: "/karthik-lab",
     name: "Karthik's Lab",
+    peek: "/crew/koala.webp",
     what: null, // the live figure stands in for the description
   },
   {
     href: "/real-wallet",
     name: "Real wallet",
+    peek: "/crew/bear-elephant.webp",
     what: "Real SOL follows a rule only once it has earned it, sells after five minutes, and can only ever withdraw to its owner.",
   },
   {
     href: "/hq",
     name: "HQ",
+    peek: "/crew/tiger.webp",
     what: "The office where each desk watches one part of the machine, live, and says what it sees.",
   },
 ] as const;
@@ -116,12 +121,13 @@ export function WhatRunsHere() {
         Most strategies tested here have not worked, and the lab keeps those results
         beside the ones that did. Real money only follows what has earned it.
       </p>
-      <ul className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <ul className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {PLACES.map((place) => (
-          <li key={place.href}>
+          <li key={place.href} className="group relative pt-10">
+            <CardPeeker src={place.peek} />
             <Link
               href={place.href}
-              className="block h-full rounded-lg border border-line bg-canvas p-5 transition-colors hover:border-accent/60"
+              className="relative z-10 block h-full rounded-lg border border-line bg-canvas p-5 transition-colors hover:border-accent/60"
             >
               <p className="text-base font-medium text-ink">{place.name} →</p>
               {place.what ? (

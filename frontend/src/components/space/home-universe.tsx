@@ -4,7 +4,6 @@ import type { CSSProperties } from "react";
 
 import { PointerParallax } from "@/components/space/parallax";
 import {
-  AstronautArt,
   BluePlanetArt,
   CometArt,
   LaunchPadArt,
@@ -114,7 +113,10 @@ export function HomeUniverse({ phase = "idle" }: { phase?: ScenePhase }) {
               overlapped both the mascot and the access panel. This one is a
               distant companion, not a second lead. */}
           <div className="home-universe__astronaut home-universe__astronaut--one">
-            <AstronautArt />
+            {/* The zebra from the space crew (2026-09-24), in the slot and
+                on the float the plain astronaut had. */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/crew/zebra.webp" alt="" draggable={false} decoding="async" />
           </div>
         </div>
 
