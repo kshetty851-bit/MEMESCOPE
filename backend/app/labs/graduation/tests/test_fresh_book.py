@@ -229,3 +229,39 @@ async def test_karthik_book_counts_only_the_trades_it_could_fund() -> None:
     assert {t["symbol"] for t in book["trades_list"]} == {f"C{i}" for i in range(5)}
     # The invariant the defect broke: no figure may exceed the trade count.
     assert book["wins"] <= book["trades"] and book["rugs"] <= book["trades"]
+
+
+async def test_karthik_days_are_24h_from_the_open_not_calendar_days() -> None:
+    """The book opened at noon, so calendar days would make its first and last
+    half-length and every comparison between days a lie.
+
+    The percentage is of the balance each day OPENED with, so the days
+    multiply out to the book's own total instead of each being measured off a
+    different number.
+    """
+    from app.labs.graduation.api import karthik_book
+
+    start = next(s for s in config.FRESH_BOOKS
+                 if s.book == "KARTHIK_QUIET_5M").start
+    rows = [
+        _Pos("A", start + timedelta(hours=1), 0.10),        # day 1
+        _Pos("B", start + timedelta(hours=20), 0.10),       # day 1
+        # Opened on day 1, sold on day 2: it counts where the money landed.
+        _Pos("C", start + timedelta(hours=23, minutes=58), 0.10),
+        _Pos("D", start + timedelta(hours=30), -0.50),      # day 2
+    ]
+    book = await karthik_book(db=_StubDb(rows))  # type: ignore[arg-type]
+    days = {d["n"]: d for d in book["days"]}
+
+    assert [d["n"] for d in book["days"]] == sorted(days, reverse=True)
+    assert days[1]["trades"] == 2                      # not 3: C closed on day 2
+    assert days[2]["trades"] == 2
+    # Day 1: two $100 tickets at +10% on a $500 book.
+    assert days[1]["pnl_usd"] == Decimal("20.00")
+    assert days[1]["pct"] == Decimal("4.00")           # 20 of the 500 it opened with
+    assert days[1]["balance_usd"] == Decimal("520.00")
+    # Day 2 is measured off 520, the balance it inherited -- not off 500.
+    assert days[2]["pnl_usd"] == Decimal("-40.00")     # +10 then -50
+    assert days[2]["pct"] == Decimal("-7.69")
+    # The days reconcile to the book: last day's balance is the book's balance.
+    assert days[max(days)]["balance_usd"] == book["balance_usd"]

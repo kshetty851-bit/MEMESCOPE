@@ -1428,6 +1428,44 @@ async def fresh_held(book: str = "", db: AsyncSession = Depends(get_db)) -> Fres
     return out
 
 
+def _karthik_days(took: Sequence[tuple[Any, float]], start: datetime,
+                  capital: float, cents: Decimal) -> list[dict[str, Any]]:
+    """One row per 24 hours since the book opened, newest first.
+
+    A trade counts on the day it CLOSED, because that is when its money landed:
+    a position opened at 23:59 and sold at 00:04 made its money in the second
+    day, and splitting it would leave a day holding a cost with no proceeds.
+    """
+    out: list[dict[str, Any]] = []
+    balance = capital
+    # Up to now, or to the last trade if one closed later -- a day holding
+    # trades must never be dropped for being in the future by a few seconds.
+    now = datetime.now(UTC)
+    end = max([now, *(row.closed_at for row, _ in took)]) if took else now
+    for n in range(1, 400):
+        lo, hi = start + timedelta(days=n - 1), start + timedelta(days=n)
+        if lo > end:
+            break
+        money = [m for row, m in took if lo <= row.closed_at < hi]
+        opened = balance
+        balance += sum(money)
+        out.append({
+            "n": n,
+            "from": lo,
+            "to": hi,
+            "running": hi > now,
+            "trades": len(money),
+            "pnl_usd": Decimal(str(sum(money))).quantize(cents),
+            # Of the balance this day OPENED with, so the days multiply out to
+            # the book's total rather than each being measured off a different
+            # number.
+            "pct": (Decimal(str(100 * sum(money) / opened)).quantize(cents)
+                    if opened else Decimal(0)),
+            "balance_usd": Decimal(str(balance)).quantize(cents),
+        })
+    return list(reversed(out))
+
+
 @router.get("/karthik", summary="Karthik's own $500 book, and its judge date")
 async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     """His book alone, with the two things a balance cannot say.
@@ -1489,6 +1527,15 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
         # $100 over the same trades.
         "without_best_usd": (Decimal(str(sum(pnl) - max(pnl, default=0.0)))
                              .quantize(cents) if pnl else Decimal(0)),
+        # EACH 24 HOURS SINCE IT STARTED, not each calendar day: the book began
+        # at noon, so calendar days would make its first and last days half
+        # length and every comparison between them a lie.
+        #
+        # The percentage is of the balance the book HELD when that day opened,
+        # which is what a day's return means. The figures above are percentages
+        # of the starting $500, a different denominator for a different
+        # question, so this one carries its own label on the page.
+        "days": _karthik_days(took, spec.start, float(spec.capital_usd), cents),
         # The rows the BOOK bought, with the money the book made on them --
         # not the arm's $100-notional figure, which is the same only while the
         # ticket is $100 and silently diverges the moment it is not.

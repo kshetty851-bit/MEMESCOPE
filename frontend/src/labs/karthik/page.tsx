@@ -8,7 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/states";
 
 import { useKarthikBook } from "./hooks";
-import type { KarthikTrade } from "./types";
+import type { KarthikDay, KarthikTrade } from "./types";
 
 /**
  * KARTHIK'S LAB — ONE BOOK, PAPER ONLY.
@@ -142,6 +142,48 @@ function Figure({
   );
 }
 
+/**
+ * What each 24 hours made, as a strip across the top so it is the second thing
+ * read after the balance and needs no scrolling on a phone.
+ *
+ * Newest on the left. The day in progress is marked, because a part-day's
+ * percentage sitting unlabelled beside whole ones invites reading a quiet
+ * morning as a bad day.
+ */
+function Days({ days }: { days: KarthikDay[] }) {
+  if (days.length === 0) return null;
+  return (
+    <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
+      {days.map((d) => {
+        const pct = Number(d.pct);
+        return (
+          <div
+            key={d.n}
+            className={`min-w-[104px] shrink-0 rounded-lg border p-2 ${
+              d.running ? "border-dashed border-line" : "border-line"
+            } bg-ink/[0.02]`}
+          >
+            <div className="text-[10px] uppercase tracking-wider text-ink-dim">
+              {d.running ? `Day ${d.n} · so far` : `Day ${d.n}`}
+            </div>
+            <div
+              className={`mt-0.5 text-base font-semibold tabular-nums ${
+                pct >= 0 ? "text-up" : "text-down"
+              }`}
+            >
+              {pct >= 0 ? "+" : ""}
+              {pct.toFixed(2)}%
+            </div>
+            <div className="text-[11px] tabular-nums text-ink-dim">
+              {usd(d.pnl_usd)} · {d.trades} trades
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function Row({ trade }: { trade: KarthikTrade }) {
   const pct = Number(trade.pct);
   return (
@@ -221,6 +263,13 @@ export function KarthikLabPage() {
           <b>judged {day(data.judge_at)}</b>. Paper only: this book holds no
           wallet and has never placed an order.
         </p>
+      </div>
+
+      <div>
+        <div className="mb-1 text-[11px] uppercase tracking-wider text-ink-dim">
+          Every 24 hours · percent of the balance that day started with
+        </div>
+        <Days days={data.days} />
       </div>
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
