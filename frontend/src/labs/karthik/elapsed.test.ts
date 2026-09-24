@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatElapsed } from "./page";
+import { formatElapsed, pctOfCapital } from "./page";
 
 /**
  * The timer reads a duration, and a duration is the one number on this page
@@ -23,5 +23,27 @@ describe("formatElapsed", () => {
 
   it("says so rather than counting backwards before the start", () => {
     expect(formatElapsed(-5000)).toBe("not started yet");
+  });
+});
+
+/**
+ * The percentage is the number Karthik reads first, and it is a percentage OF
+ * THE STARTING CAPITAL -- not of the current balance, which would shrink the
+ * headline every time the book made money.
+ */
+describe("pctOfCapital", () => {
+  it("measures against what the book started with", () => {
+    expect(pctOfCapital(72.45, 500)).toBe("+14.49%");
+    expect(pctOfCapital(-50, 500)).toBe("-10.00%");
+    expect(pctOfCapital(0, 500)).toBe("+0.00%");
+  });
+
+  it("takes the strings the API sends, not just numbers", () => {
+    expect(pctOfCapital("72.45", "500")).toBe("+14.49%");
+  });
+
+  it("refuses to divide by a capital of zero", () => {
+    expect(pctOfCapital(10, 0)).toBe("—");
+    expect(pctOfCapital(null, 500)).toBe("—");
   });
 });
