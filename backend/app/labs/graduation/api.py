@@ -1428,6 +1428,85 @@ async def fresh_held(book: str = "", db: AsyncSession = Depends(get_db)) -> Fres
     return out
 
 
+#: The exit clocks the page compares, in minutes. 5 is what the book does.
+KARTHIK_HOLDS = (5, 10, 15, 30, 60)
+
+#: One row per position: the sample nearest `mins` after the buy, within two
+#: minutes of it. DISTINCT ON keeps the query proportional to the number of
+#: TRADES rather than to the quarter-million samples behind them -- the whole
+#: table would be unusable on a page that refreshes every minute.
+_HOLD_SQL = text("""
+    with recent as (
+        select id, mint, opened_at, net_return,
+               coalesce(open_fill, open_quote) as entry
+        from grad_paper_positions
+        where book = :book and closed_at is not null and excluded is null
+          and net_return is not null and opened_at >= :start
+          and coalesce(open_fill, open_quote) > 0
+        order by opened_at desc
+        limit :cap
+    )
+    select distinct on (p.id)
+           p.id, p.net_return, p.entry, s.price_native as later
+    from recent p
+    join grad_postgrad_samples s
+      on s.mint = p.mint
+     and s.price_native > 0
+     and s.ts between p.opened_at + make_interval(mins => :m) - interval '2 minutes'
+                  and p.opened_at + make_interval(mins => :m) + interval '2 minutes'
+    order by p.id, abs(extract(epoch from
+             (s.ts - (p.opened_at + make_interval(mins => :m)))))
+""")
+
+#: The most recent trades only. The question -- does holding longer pay? -- is
+#: answered as well by three hundred coins as by three thousand, and an
+#: unbounded scan on a page that reloads every minute is how this platform has
+#: hurt its own server before. It also keeps the answer CURRENT rather than
+#: averaging October's market with September's.
+KARTHIK_HOLD_CAP = 300
+
+#: (computed at, rows). Recomputing five scans per page load, once a minute,
+#: for a number that moves in hours, is how this platform has hurt its own
+#: server before.
+_HOLDS: tuple[datetime, list[dict[str, Any]]] | None = None
+_HOLDS_TTL_S = 900
+
+
+async def _karthik_holds(db: AsyncSession, spec: Any, ticket: float,
+                         cents: Decimal) -> list[dict[str, Any]]:
+    """What the same coins would have returned on later clocks.
+
+    The five-minute row is the book's OWN result -- net of the fees and pool
+    impact it actually paid. The later rows are raw price moves against the
+    entry fill, so they FLATTER: a real exit at 30 minutes would pay the same
+    toll again. They are here to answer "would holding longer have helped",
+    and holding longer has to beat the honest number by more than that toll.
+    """
+    global _HOLDS
+    now = datetime.now(UTC)
+    if _HOLDS is not None and (now - _HOLDS[0]).total_seconds() < _HOLDS_TTL_S:
+        return _HOLDS[1]
+    out: list[dict[str, Any]] = []
+    for mins in KARTHIK_HOLDS:
+        rows = (await db.execute(_HOLD_SQL, {
+            "m": mins, "book": spec.book, "start": spec.start,
+            "cap": KARTHIK_HOLD_CAP})).all()
+        if not rows:
+            continue
+        rets = [float(r.net_return) if mins == 5
+                else float(r.later) / float(r.entry) - 1.0 for r in rows]
+        out.append({
+            "minutes": mins,
+            "coins": len(rets),
+            "pnl_usd": Decimal(str(ticket * sum(rets))).quantize(cents),
+            "per_trade_pct": Decimal(str(100 * sum(rets) / len(rets))).quantize(cents),
+            "wiped": sum(1 for r in rets if r <= -0.9),
+            "book": mins == 5,
+        })
+    _HOLDS = (now, out)
+    return out
+
+
 def _karthik_days(took: Sequence[tuple[Any, float]], start: datetime,
                   capital: float, cents: Decimal) -> list[dict[str, Any]]:
     """One row per 24 hours since the book opened, newest first.
@@ -1536,6 +1615,8 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
         # of the starting $500, a different denominator for a different
         # question, so this one carries its own label on the page.
         "days": _karthik_days(took, spec.start, float(spec.capital_usd), cents),
+        # Would holding longer have paid? Same coins, same entries, later exits.
+        "holds": await _karthik_holds(db, spec, float(spec.ticket_usd), cents),
         # The rows the BOOK bought, with the money the book made on them --
         # not the arm's $100-notional figure, which is the same only while the
         # ticket is $100 and silently diverges the moment it is not.

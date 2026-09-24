@@ -28,6 +28,7 @@ export interface KarthikBook {
       that one number is the difference between +$1,060 and about $100. */
   without_best_usd: string;
   days: KarthikDay[];
+  holds: KarthikHold[];
   trades_list: KarthikTrade[];
 }
 
@@ -44,4 +45,16 @@ export interface KarthikDay {
    *  of the starting $500 like the figures above it. */
   pct: string;
   balance_usd: string;
+}
+
+/** The same coins, sold on a later clock. */
+export interface KarthikHold {
+  minutes: number;
+  coins: number;
+  pnl_usd: string;
+  per_trade_pct: string;
+  /** Coins worth under a tenth of the entry by then. */
+  wiped: number;
+  /** True for the row the book actually trades, which is net of its costs. */
+  book: boolean;
 }
