@@ -9,6 +9,11 @@ import { ApiError, api } from "@/lib/api-client";
 import { useAuthStore } from "@/stores/auth-store";
 
 // `api` is mocked; `ApiError` is not. The page branches on the real error type.
+// The Family section navigates to a member's page after the password.
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
+}));
+
 vi.mock("@/lib/api-client", async (importOriginal) => ({
   ...(await importOriginal<typeof ApiClientModule>()),
   api: { get: vi.fn(), post: vi.fn() },
@@ -270,6 +275,34 @@ describe("RealWalletPage without signing in", () => {
         reason: "stopped from the wallet page",
       }),
     );
+  });
+});
+
+describe("RealWalletPage family shares", () => {
+  it("lists the three family members and asks for the password before anything opens", async () => {
+    serve();
+    await renderLoaded();
+    const family = screen.getByText("Family").closest("section") as HTMLElement;
+    for (const name of ["Jaya", "Asha", "Apoorva"]) {
+      expect(within(family).getByRole("button", { name })).toBeInTheDocument();
+    }
+    expect(within(family).queryByLabelText(/password for/i)).not.toBeInTheDocument();
+    fireEvent.click(within(family).getByRole("button", { name: "Asha" }));
+    expect(within(family).getByLabelText("Password for Asha")).toHaveAttribute("type", "password");
+  });
+
+  it("says so plainly when the password is wrong", async () => {
+    serve();
+    vi.mocked(api.post).mockRejectedValueOnce(
+      new ApiError(401, "http_error", "wrong password"),
+    );
+    await renderLoaded();
+    const family = screen.getByText("Family").closest("section") as HTMLElement;
+    fireEvent.click(within(family).getByRole("button", { name: "Jaya" }));
+    fireEvent.change(within(family).getByLabelText("Password for Jaya"),
+      { target: { value: "nope" } });
+    fireEvent.click(within(family).getByRole("button", { name: "Log in" }));
+    expect(await within(family).findByRole("alert")).toHaveTextContent("Wrong password.");
   });
 });
 

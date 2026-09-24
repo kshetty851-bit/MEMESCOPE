@@ -155,6 +155,12 @@ MAX_DECISION_AGE_SECONDS = 60
 #: that arm still came out ahead.
 MIN_TICKET_USD = D("5")
 
+#: Sizes offered at Start ABOVE the board's own splits of a $100 ticket.
+#: Karthik asked for $200 on 2026-09-24. Still bounded by
+#: `REAL_WALLET_ENTRY_SIZE_USD`, so a deployment that has not raised it offers
+#: nothing new.
+EXTRA_TICKETS_USD: tuple[Decimal, ...] = (D("200"),)
+
 STARTING_EQUITY = D("1000")
 FAILURE_EQUITY_FLOOR = D("500")
 
@@ -440,6 +446,13 @@ STRATEGIES: tuple[Strategy, ...] = (
 )
 
 BY_ID = {s.id: s for s in STRATEGIES}
+
+#: The arms the real wallet OFFERS at Start. Karthik, 2026-09-24: "keep G-QUIET
+#: 4m and 5m". The others stay in `STRATEGIES` rather than being deleted,
+#: because `BY_ID` is how the exit driver finds the hold of a position an arm
+#: already opened - removing an arm would strand anything it still held, and
+#: its history would lose its rules.
+OFFERED: tuple[str, ...] = ("G-QUIET", "G-QUIET4")
 
 
 def fundable(cash: _Money, *, holding: bool, ticket: _Money,

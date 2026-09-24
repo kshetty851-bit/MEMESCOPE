@@ -128,7 +128,7 @@ def _wallet_strategies(ticket: Decimal) -> list[dict[str, object]]:
         "ticket_choices": [{"ticket_usd": _usd(t), "min_usd": _usd(grad.wallet_floor(t))}
                            for t in ticket_choices(s.id)],
         "max_ticket_usd": _cap(s.id),
-    } for s in live_spec.STRATEGIES]
+    } for s in live_spec.STRATEGIES if s.id in live_spec.OFFERED]
 
 
 def _wallet_strategy(nominated: str | None, ticket: Decimal) -> dict[str, object]:

@@ -21,7 +21,6 @@ lifecycle's, and each has its own barrier.
 
 from __future__ import annotations
 
-import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import ROUND_DOWN, Decimal
@@ -33,6 +32,7 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.lab import LabDecision
 from app.models.real_wallet_execution import RealWalletLiveIntent
+from app.real_wallet import family, sol_price
 from app.real_wallet.autotrade import AutotradeSwitchService, ticket_for
 from app.real_wallet.live_repository import LiveIntentRepository
 from app.real_wallet.policy import (
@@ -40,7 +40,6 @@ from app.real_wallet.policy import (
     PolicyState,
     configured_entry_size_usd,
 )
-from app.real_wallet import sol_price
 from app.real_wallet.tx_inspect import lamports_from_sol
 
 #: Lamports in one SOL. Named rather than inline so the conversion in
@@ -137,12 +136,31 @@ class RealWalletDriver:
         entry_usd = configured_entry_size_usd(equity_usd)
         if entry_usd is None or entry_usd <= 0:
             return DriverOutcome(0, "entry_size_not_configured")
-        entry_usd = self._fundable(
-            switch.nominated_strategy, ticket_for(switch, entry_usd),
+
+        # FAMILY SHARES. The order is the owner's ticket plus every member who
+        # is on and can pay for theirs (`family.split`); with nobody on it is
+        # the owner's ticket exactly, as it always was. If the wallet cannot
+        # fund the whole order, the members sit this one out and the owner's
+        # own order is tried alone, so a family setting can never cost the
+        # owner a trade they would have taken.
+        own = ticket_for(switch, entry_usd)
+        order = family.split(own, await family.seats(self._session))
+        fundable = self._fundable(
+            switch.nominated_strategy, order.total,
             balance_lamports=balance_lamports, sol_price=sol_price,
             open_positions=open_positions)
-        if entry_usd is None:
+        if fundable is None and order.members:
+            order = family.split(own, ())
+            fundable = self._fundable(
+                switch.nominated_strategy, order.total,
+                balance_lamports=balance_lamports, sol_price=sol_price,
+                open_positions=open_positions)
+        if fundable is None:
             return DriverOutcome(0, "entry_not_fundable")
+        # A wallet holding nothing may spend less than the ticket when that is
+        # all its cash is; every share shrinks with it, in proportion.
+        order = family.scale(order, fundable)
+        entry_usd = order.total
 
         # Price the entry in the asset the wallet actually holds, and store it.
         #
@@ -203,9 +221,18 @@ class RealWalletDriver:
         )
         if intent is None:
             return DriverOutcome(0, "already_traded", candidate)
+        # Same session, same commit as the intent: an order and the record of
+        # whose money is in it cannot exist one without the other.
+        family.record(self._session, intent.id, order)
+        if order.members:
+            # Written now, not at the caller's commit: this session does not
+            # autoflush, and a share that fails to write must fail HERE, beside
+            # its order, not later where the two could be separated.
+            await self._session.flush()
 
         logger.warning("real_wallet_intent_created", mint=candidate,
-                       strategy=switch.nominated_strategy, usd=str(entry_usd))
+                       strategy=switch.nominated_strategy, usd=str(entry_usd),
+                       family={k: str(v) for k, v in order.members.items()} or None)
         return DriverOutcome(1, None, candidate)
 
     async def _sol_usd(self, now: datetime) -> Decimal | None:

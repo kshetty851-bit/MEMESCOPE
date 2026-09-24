@@ -440,12 +440,12 @@ def grad_signal(monkeypatch, live):
 
     async def signal(session: Any, now: datetime) -> None:
         await live_decisions.record(session, [live_decisions.Mirrored(
-            strategy_id="G-B3-5M",
+            strategy_id="G-QUIET",
             mint="DriverLossTestMint111111111111111111111pump",
             opened_at=now - timedelta(seconds=5), liquidity_usd=Decimal("250000"),
             impact=None, price_native=Decimal("0.000001"))])
         await AutotradeSwitchService(session).start(
-            actor="op@x.com", reason="loss limit test", strategy_id="G-B3-5M", at=now)
+            actor="op@x.com", reason="loss limit test", strategy_id="G-QUIET", at=now)
 
     return signal
 

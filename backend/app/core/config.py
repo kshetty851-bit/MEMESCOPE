@@ -1015,6 +1015,10 @@ class Settings(BaseSettings):
     #: nominated destination refuses rather than accepting any address, which is
     #: the same fail-closed direction as the RPC host list.
     REAL_WALLET_WITHDRAWAL_ADDRESS: str = ""
+    #: The family pages' password, as `salt_hex:hash_hex` (PBKDF2-SHA256; see
+    #: `real_wallet.family.hash_password`). Never the password itself: the
+    #: repository is public. Empty lets nobody in.
+    REAL_WALLET_FAMILY_PASSWORD_HASH: str = ""
     # Phase 2 is a separate, deliberately tiny manual-devnet workflow. These
     # values are used by the API and signer to enforce the same small envelope;
     # the signer-file *path* is intentionally not a Settings field because the
