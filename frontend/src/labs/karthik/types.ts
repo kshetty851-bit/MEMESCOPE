@@ -27,5 +27,21 @@ export interface KarthikBook {
   /** The balance without its single luckiest trade. On the arm this copies,
       that one number is the difference between +$1,060 and about $100. */
   without_best_usd: string;
+  days: KarthikDay[];
   trades_list: KarthikTrade[];
+}
+
+/** One 24-hour period since the book opened, newest first. */
+export interface KarthikDay {
+  n: number;
+  from: string;
+  to: string;
+  /** True for the period still in progress, which is not yet a full day. */
+  running: boolean;
+  trades: number;
+  pnl_usd: string;
+  /** Of the balance this period OPENED with -- a day's return, not a share
+   *  of the starting $500 like the figures above it. */
+  pct: string;
+  balance_usd: string;
 }
