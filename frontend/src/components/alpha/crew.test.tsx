@@ -73,6 +73,18 @@ describe("meet the MEMESCOPE team", () => {
     expect(/\d/.test(text.replace(/MEMESCOPE/g, "")), text.slice(0, 200)).toBe(false);
   });
 
+  it("counts the specialists from the list and names the founder", () => {
+    // It said "Thirteen" while the grid showed seventeen. Now it is counted.
+    render(<Crew />);
+    const words = ["No", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight",
+      "Nine", "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen",
+      "Seventeen", "Eighteen", "Nineteen", "Twenty"];
+    const lede = screen.getByText(/specialists, one per subsystem/);
+    expect(lede.textContent).toContain(`${words[EMPLOYEES.length - 1]} specialists`);
+    expect(lede.textContent).toContain("Karthik Shetty, who built MEMESCOPE");
+    expect(EMPLOYEE_BY_ID.get("karthik")!.role).toBe("Founder");
+  });
+
   it("never claims how any subsystem is doing", () => {
     const { container } = render(<Crew />);
     const text = (container.textContent ?? "").toLowerCase();

@@ -42,7 +42,20 @@ import { cn } from "@/lib/utils";
  * it — the grid maps `EMPLOYEES`, so a new desk appears here the moment it
  * appears in HQ. Only the lede's count is a literal, and that is the one thing
  * worth keeping a human in the loop on.
+ *
+ * It said "Thirteen" while the grid showed seventeen, so it is now
+ * counted from `EMPLOYEES` too (minus the founder, named separately).
  */
+const WORDS = ["No", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine",
+  "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen",
+  "Eighteen", "Nineteen", "Twenty"];
+
+/** A count as a word: this section carries no digits (see its test), and a
+ *  typed-in word is what drifted to "Thirteen" while the grid showed more. */
+function inWords(n: number): string {
+  return WORDS[n] ?? "Many";
+}
+
 export function Crew() {
   const [open, setOpen] = useState<EmployeeId | null>(null);
   const nova = EMPLOYEE_BY_ID.get("nova")!;
@@ -56,10 +69,10 @@ export function Crew() {
           Meet the MEMESCOPE team
         </h2>
         <p className="crew-lede">
-          Thirteen specialists, one per subsystem, and one operator dedicated
-          to a single experiment. Each is a desk you can open in HQ and watch
-          working — the same characters, the same names, reading the same live
-          evidence.
+          {inWords(EMPLOYEES.length - 1)} specialists, one per subsystem, and Karthik
+          Shetty, who built MEMESCOPE, at the graduation desk. Each is a desk you
+          can open in HQ and watch working — the same characters, the same names,
+          reading the same live evidence.
         </p>
       </div>
 

@@ -1553,6 +1553,35 @@ def _karthik_days(took: Sequence[tuple[Any, float]], start: datetime,
     return list(reversed(out))
 
 
+#: (computed at, summary). The homepage is public and anyone can reload it, so
+#: its one live figure is served from memory for a minute rather than walking
+#: the whole book on every visit.
+_KARTHIK_PUBLIC: tuple[datetime, dict[str, Any]] | None = None
+_KARTHIK_PUBLIC_TTL_S = 60
+
+
+@router.get("/karthik/summary",
+            summary="Karthik's Lab headline figures, for the public homepage")
+async def karthik_summary(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+    """The ONLY graduation-lab read the site-code gate lets through
+    (`middleware.alpha_access.EXEMPT_EXACT_PATHS`), by the owner's choice on
+    2026-09-24: Karthik's paper book, headline figures only. No trade list, no
+    coins, no timings, and nothing from the real wallet."""
+    global _KARTHIK_PUBLIC
+    now = datetime.now(UTC)
+    if (_KARTHIK_PUBLIC is not None
+            and (now - _KARTHIK_PUBLIC[0]).total_seconds() < _KARTHIK_PUBLIC_TTL_S):
+        return _KARTHIK_PUBLIC[1]
+    book = await karthik_book(db)
+    capital = float(book["capital_usd"])
+    out = {k: book[k] for k in ("started_at", "judge_at", "capital_usd", "ticket_usd",
+                                "balance_usd", "pnl_usd", "trades", "wins", "rugs")}
+    out["pnl_pct"] = (Decimal(str(100 * float(book["pnl_usd"]) / capital))
+                      .quantize(Decimal("0.01")) if capital else Decimal(0))
+    _KARTHIK_PUBLIC = (now, out)
+    return out
+
+
 @router.get("/karthik", summary="Karthik's own $500 book, and its judge date")
 async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     """His book alone, with the two things a balance cannot say.

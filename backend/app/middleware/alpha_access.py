@@ -16,6 +16,9 @@ EXEMPT_EXACT_PATHS = frozenset(
         "/ready",
         "/api/v1/health",
         "/api/v1/health/pipeline",
+        # Karthik's Lab headline figures, for the public homepage (owner's
+        # choice, 2026-09-24). An EXACT path: nothing else under the lab opens.
+        "/api/v1/labs/graduation/karthik/summary",
     }
 )
 

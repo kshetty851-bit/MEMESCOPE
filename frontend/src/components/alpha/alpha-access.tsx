@@ -3,7 +3,7 @@
 import type { FormEvent } from "react";
 import { useEffect, useState } from "react";
 
-import { ALPHA_ACCESS, BUILD } from "@/lib/env";
+import { ALPHA_ACCESS } from "@/lib/env";
 import { ApiError, api } from "@/lib/api-client";
 import type { GatePhase } from "@/lib/launch";
 import { cn } from "@/lib/utils";
@@ -134,11 +134,6 @@ export function AlphaAccess({ onPhase }: { onPhase: (phase: GatePhase | "approve
         >
           Enter the terminal
         </a>
-        <div className="mt-4 border-t border-line-subtle pt-3">
-          <p data-numeric className="text-xs text-ink-3">
-            Version {BUILD.version.replace(/^v/i, "")} · alpha
-          </p>
-        </div>
       </div>
     );
   }
@@ -211,10 +206,7 @@ export function AlphaAccess({ onPhase }: { onPhase: (phase: GatePhase | "approve
       </button>
 
       <div className="mt-4 border-t border-line-subtle pt-3">
-        <p data-numeric className="text-xs text-ink-3">
-          Version {BUILD.version.replace(/^v/i, "")} · alpha
-        </p>
-        <p className="mt-1.5 text-xs leading-relaxed text-ink-3">
+        <p className="text-xs leading-relaxed text-ink-3">
           During alpha testing, MEMESCOPE records basic session activity and page
           usage to improve the product.
         </p>

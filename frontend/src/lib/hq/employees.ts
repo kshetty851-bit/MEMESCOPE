@@ -361,8 +361,11 @@ export const EMPLOYEES: Employee[] = [
   },
   {
     id: "karthik",
+    // The founder, 2026-09-24: Karthik Shetty built MEMESCOPE and asked for
+    // this desk to be him. The short name stays because it is drawn on the
+    // nameplate in the office; the full name is on the homepage.
     name: "Karthik",
-    role: "Graduation Lab Analyst",
+    role: "Founder",
     zone: "karthik",
     department: "karthik_lab",
     // Centre of the lab, with all four neighbours clear: north to the deck and
@@ -381,7 +384,7 @@ export const EMPLOYEES: Employee[] = [
     // not here: the two Lab repairs re-enqueue the Lab's own beat tasks and can
     // open nothing, close nothing, pick no strategy and reach no wallet.
     whatIDo:
-      "I read every trade the graduation book closes and say what the record supports changing. Most of what I report is what would NOT help: the profit is one trade, and every take-profit level I replay makes the book worse.",
+      "I built MEMESCOPE to test meme-coin strategies on real data instead of hype, including the ones that fail. At this desk I read every trade my graduation book closes and say what the record supports changing, which is mostly what would NOT help.",
     // Radar and Atlas because the wallet's universe is theirs; Byte because
     // the machinery underneath is his; Nova because an owner-attention item
     // has to reach somebody who can decide.

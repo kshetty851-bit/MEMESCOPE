@@ -35,11 +35,13 @@ export const metadata: Metadata = {
   // The wordmark is MEMESCOPE, always. The env var carries a legacy display
   // name and must not be allowed to leak into brand surfaces.
   title: {
-    default: "MEMESCOPE — Pump.fun Intelligence",
+    default: "MEMESCOPE — pump.fun graduation lab",
     template: "%s · MEMESCOPE",
   },
   description:
-    "MEMESCOPE tracks every Pump.fun launch, scores it deterministically, and publishes the result — winners and losers alike.",
+    "MEMESCOPE tests pump.fun graduation strategies on paper against a fair comparison before any real money follows them. Built by Karthik Shetty.",
+  authors: [{ name: "Karthik Shetty" }],
+  creator: "Karthik Shetty",
   robots:
     env.NEXT_PUBLIC_ENVIRONMENT === "production" ? "index,follow" : "noindex,nofollow",
 };
