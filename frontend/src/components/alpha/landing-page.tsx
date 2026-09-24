@@ -11,6 +11,7 @@ import { HeroMascot, type MascotState } from "@/components/alpha/hero-mascot";
 import { LaunchOverlay, useLaunchSequence } from "@/components/alpha/launch-sequence";
 import { SiteFooter, WhatRunsHere } from "@/components/alpha/what-runs-here";
 import { HomeUniverse } from "@/components/space/home-universe";
+import { FloatingCrew, PerchedCrew } from "@/components/space/space-crew";
 import { SpaceAudioToggle } from "@/components/space/space-audio-toggle";
 import { useReducedMotion } from "@/hooks/use-reduced-motion";
 import { ALPHA_ACCESS } from "@/lib/env";
@@ -94,6 +95,7 @@ export function LandingPage() {
       )}
     >
       <HomeUniverse phase={phase} />
+      <FloatingCrew phase={phase} />
 
       <section className="relative mx-auto flex min-h-dvh w-full max-w-[80rem] flex-col px-6 py-8 lg:px-10">
         {/* `data-alpha-content` marks what `?scene=1` hides — a capture mode for
@@ -124,7 +126,7 @@ export function LandingPage() {
           data-alpha-content
           // Top-aligned on desktop: centred copy ends mid-frame, right where the
           // launch station stands (see home-universe.css, 2026-09-24).
-          className="relative z-10 grid flex-1 items-center gap-10 py-10 lg:grid-cols-[minmax(0,1fr)_23rem] lg:items-start lg:gap-16"
+          className="relative z-10 grid flex-1 items-center gap-10 py-10 lg:grid-cols-[minmax(0,1fr)_23rem] lg:items-start lg:gap-16 lg:pt-14"
         >
           <div className="max-w-xl">
             {/* The wordmark *is* the headline, at hero scale. It used to be the
@@ -132,7 +134,12 @@ export function LandingPage() {
                 appeared twice on the page in two different shapes — once in
                 the header as a lockup and once here as text. One mark. */}
             <h1 className="hero-mark">
-              <Wordmark title="MEMESCOPE" className="text-[clamp(2.4rem,7vw,4.6rem)]" />
+              {/* The animals sit ON the letters: the host shrink-wraps the
+                  wordmark so their em offsets land on the glyphs. */}
+              <span className="crew-perch-host text-[clamp(2.4rem,7vw,4.6rem)]">
+                <Wordmark title="MEMESCOPE" className="text-[clamp(2.4rem,7vw,4.6rem)]" />
+                <PerchedCrew />
+              </span>
             </h1>
             <WordmarkSubtitle className="mt-4" />
             <p className="mt-2 text-sm text-ink-2">
