@@ -126,10 +126,10 @@ async def test_the_administrator_can_start_the_wallet_strategy(
     headers = await _admin_headers(client, user, db_session)
     response = await client.post(
         f"{API}/real-wallet/autotrade/start", headers=headers,
-        json={"strategy_id": "G-B3-5M", "reason": "test start"},
+        json={"strategy_id": "G-QUIET", "reason": "test start"},
     )
     assert response.status_code == 200, response.text
-    assert response.json()["nominated_strategy"] == "G-B3-5M"
+    assert response.json()["nominated_strategy"] == "G-QUIET"
 
 
 async def test_start_records_the_arm_and_the_trade_size(
@@ -139,26 +139,22 @@ async def test_start_records_the_arm_and_the_trade_size(
     headers = await _admin_headers(client, user, db_session)
     response = await client.post(
         f"{API}/real-wallet/autotrade/start", headers=headers,
-        json={"strategy_id": "G-B3-4M", "reason": "test start", "ticket_usd": "25"},
+        json={"strategy_id": "G-QUIET4", "reason": "test start", "ticket_usd": "25"},
     )
     assert response.status_code == 200, response.text
-    assert response.json()["nominated_strategy"] == "G-B3-4M"
+    assert response.json()["nominated_strategy"] == "G-QUIET4"
     assert response.json()["ticket_usd"] == "25"
 
     body = (await client.get(f"{API}/real-wallet/autotrade")).json()
-    assert [s["id"] for s in body["strategies"]] == ["G-B3-5M", "G-B3-4M", "G-BAS-5M"]
-    # The baseline states its own floor and its own sizes: $10 and $5 only.
-    baseline = next(s for s in body["strategies"] if s["id"] == "G-BAS-5M")
-    assert baseline["pool_floor_usd"] == 75_000
-    assert baseline["max_ticket_usd"] == "25"
-    assert [c["ticket_usd"] for c in baseline["ticket_choices"]] == ["25", "20", "10", "5"]
-    b3 = next(s for s in body["strategies"] if s["id"] == "G-B3-4M")
-    assert b3["max_ticket_usd"] is None
-    assert [c["ticket_usd"] for c in b3["ticket_choices"]] == [
+    # Karthik, 2026-09-24: the wallet offers the two quiet arms and nothing else.
+    assert [s["id"] for s in body["strategies"]] == ["G-QUIET", "G-QUIET4"]
+    quiet4 = next(s for s in body["strategies"] if s["id"] == "G-QUIET4")
+    assert quiet4["max_ticket_usd"] is None
+    assert [c["ticket_usd"] for c in quiet4["ticket_choices"]] == [
         "100", "50", "25", "20", "10", "5"]
     running = body["strategy"]
     assert (running["id"], running["paper_book"], running["hold_minutes"]) == (
-        "G-B3-4M", "B3_198k_4m", 4)
+        "G-QUIET4", "BASE_75k_quiet_4m", 4)
     assert (running["ticket_usd"], running["min_ticket_usd"]) == ("25", "14")
     assert body["ticket_choices"][0] == {"ticket_usd": "100", "min_usd": "56"}
     assert [c["ticket_usd"] for c in body["ticket_choices"]] == [
@@ -166,29 +162,43 @@ async def test_start_records_the_arm_and_the_trade_size(
     assert body["history"][0]["ticket_usd"] == "25"
 
 
-async def test_the_baseline_starts_at_the_size_it_allows(
+async def test_a_retired_arm_cannot_be_started(
     client: AsyncClient, user: User, db_session, monkeypatch
 ) -> None:
-    """$25 is the largest Start offers for G-BAS-5M, and it takes it."""
+    """Hidden on the page AND refused here: a request cannot start an arm the
+    owner retired, even one that is still registered for its old positions."""
     monkeypatch.setattr(settings, "REAL_WALLET_ENTRY_SIZE_USD", Decimal("100"))
     headers = await _admin_headers(client, user, db_session)
     response = await client.post(
         f"{API}/real-wallet/autotrade/start", headers=headers,
         json={"strategy_id": "G-BAS-5M", "ticket_usd": "25",
-              "reason": "baseline at the capped size"},
+              "reason": "a retired arm"},
+    )
+    assert response.status_code == 422, response.text
+    assert "no longer offered" in response.text
+    assert (await client.get(f"{API}/real-wallet/autotrade")).json()["enabled"] is False
+
+
+async def test_two_hundred_is_a_size_once_the_ceiling_is_two_hundred(
+    client: AsyncClient, user: User, db_session, monkeypatch
+) -> None:
+    monkeypatch.setattr(settings, "REAL_WALLET_ENTRY_SIZE_USD", Decimal("200"))
+    monkeypatch.setattr(settings, "REAL_WALLET_MAX_TRADE_USD", Decimal("400"))
+    headers = await _admin_headers(client, user, db_session)
+    response = await client.post(
+        f"{API}/real-wallet/autotrade/start", headers=headers,
+        json={"strategy_id": "G-QUIET", "ticket_usd": "200", "reason": "the $200 size"},
     )
     assert response.status_code == 200, response.text
-    body = response.json()
-    assert (body["nominated_strategy"], body["ticket_usd"]) == ("G-BAS-5M", "25")
+    assert response.json()["ticket_usd"] == "200"
 
 
 @pytest.mark.parametrize("payload", [
-    {"strategy_id": "G-B3-5M", "ticket_usd": "30"},
-    {"strategy_id": "G-B3-5M", "ticket_usd": "1"},
+    {"strategy_id": "G-QUIET", "ticket_usd": "30"},
+    {"strategy_id": "G-QUIET", "ticket_usd": "1"},
+    # $200 exists, but not while the ceiling is $100.
+    {"strategy_id": "G-QUIET", "ticket_usd": "200"},
     {"strategy_id": "V7-01", "ticket_usd": "25"},
-    # The baseline is capped at $25: sizes B3 accepts, this arm does not.
-    {"strategy_id": "G-BAS-5M", "ticket_usd": "50"},
-    {"strategy_id": "G-BAS-5M", "ticket_usd": "100"},
 ])
 async def test_start_refuses_a_size_it_does_not_offer(
     client: AsyncClient, user: User, db_session, monkeypatch, payload

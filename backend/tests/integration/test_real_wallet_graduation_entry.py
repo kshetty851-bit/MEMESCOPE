@@ -52,13 +52,13 @@ def _funded(monkeypatch, sol: str) -> None:
 
 async def _signal(session, now: datetime) -> None:
     await live_decisions.record(session, [live_decisions.Mirrored(
-        strategy_id="G-B3-5M",
+        strategy_id="G-QUIET",
         mint=MINT, opened_at=now - timedelta(seconds=5),
         liquidity_usd=Decimal("250000"), impact=None,
         price_native=Decimal("0.000001"))])
     await AutotradeSwitchService(session).start(
         actor="op@x.com", reason="graduation sizing test",
-        strategy_id="G-B3-5M", at=now)
+        strategy_id="G-QUIET", at=now)
 
 
 async def test_a_hundred_dollar_wallet_buys_what_the_reserve_leaves(db_session, monkeypatch):
@@ -91,7 +91,7 @@ async def test_with_no_fresh_decision_the_chain_is_never_asked(db_session, monke
     monkeypatch.setattr(RealWalletDriver, "_wallet_lamports", _no_rpc)
     now = datetime.now(UTC)
     await AutotradeSwitchService(db_session).start(
-        actor="op@x.com", reason="empty ask", strategy_id="G-B3-5M", at=now)
+        actor="op@x.com", reason="empty ask", strategy_id="G-QUIET", at=now)
     outcome = await RealWalletDriver(db_session).tick(now=now)
     assert outcome.as_dict() == {"created": 0, "skipped": "no_fresh_candidate",
                                  "mint": None}

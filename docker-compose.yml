@@ -390,6 +390,9 @@ x-backend-env: &backend-env
   # The ceiling that makes the blast radius a number rather than a promise.
   # Compared in integer lamports; over-funding is refused, not traded.
   REAL_WALLET_MAX_BALANCE_SOL: ${REAL_WALLET_MAX_BALANCE_SOL:-0.25}
+  # The family pages' password HASH (salt_hex:hash_hex, no `$` in it on
+  # purpose). Empty keeps the family pages locked.
+  REAL_WALLET_FAMILY_PASSWORD_HASH: ${REAL_WALLET_FAMILY_PASSWORD_HASH:-}
   # Whether that ceiling applies at all. Defaults TRUE so a compose file that
   # has not heard of it keeps the bound — the safe direction, and the reason
   # this is a named flag rather than a sentinel value on the number above.

@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
+import { FamilySection } from "@/components/real-wallet/family";
 import { useAuth } from "@/hooks/use-auth";
 import { ApiError, api } from "@/lib/api-client";
 
@@ -1482,6 +1483,7 @@ export default function RealWalletPage() {
       <TodayCard status={data} />
       <SinceFirstTradeCard since={data?.since_first_trade} />
       <TradesTable positions={data?.positions ?? []} />
+      <FamilySection />
       <SafetyCard
         status={data}
         ticket={autotrade.data?.enabled ? autotrade.data.strategy.ticket_usd : null}

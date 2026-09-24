@@ -91,8 +91,10 @@ def ticket_choices(strategy_id: str | None = None) -> list[Decimal]:
         cap = live_spec.max_ticket(strategy_id)
         if cap is not None:
             ceiling = min(ceiling, cap)
-    return [t for t in (grad.PAPER_NOTIONAL_USD / n for n in grad.WALLET_SPLITS)
-            if live_spec.MIN_TICKET_USD <= t <= ceiling]
+    sizes = {grad.PAPER_NOTIONAL_USD / n for n in grad.WALLET_SPLITS}
+    sizes |= set(live_spec.EXTRA_TICKETS_USD)
+    return sorted((t for t in sizes if live_spec.MIN_TICKET_USD <= t <= ceiling),
+                  reverse=True)
 
 
 def ticket_for(state: AutotradeState, configured: Decimal) -> Decimal:
@@ -163,9 +165,15 @@ class AutotradeSwitchService:
         configured `REAL_WALLET_ENTRY_SIZE_USD`, as before.
         """
         from app.labs.graduation.live_spec import BY_ID as GRAD_BY_ID
+        from app.labs.graduation.live_spec import OFFERED
 
         if not _known_strategy(strategy_id):
             raise UnknownStrategyError(strategy_id)
+        # A graduation arm must be one the wallet still offers. Refused here,
+        # not only hidden on the page, so a request cannot start an arm the
+        # owner has retired.
+        if strategy_id.upper() in GRAD_BY_ID and strategy_id.upper() not in OFFERED:
+            raise UnknownStrategyError(f"{strategy_id.upper()} is no longer offered")
         if ticket_usd is not None:
             if strategy_id.upper() not in GRAD_BY_ID:
                 raise InvalidTicketError("a trade size is chosen for graduation arms only")
