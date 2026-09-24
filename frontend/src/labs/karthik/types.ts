@@ -29,9 +29,6 @@ export interface KarthikBook {
   skipped: number;
   wins: number;
   rugs: number;
-  /** The balance without its single luckiest trade. On the arm this copies,
-      that one number is the difference between +$1,060 and about $100. */
-  without_best_usd: string;
   days: KarthikDay[];
   holds: KarthikHold[];
   trades_list: KarthikTrade[];

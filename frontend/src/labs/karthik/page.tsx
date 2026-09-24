@@ -18,13 +18,10 @@ import type { KarthikDay, KarthikHold, KarthikTrade } from "./types";
  * It holds no wallet and has never placed an order; the real wallet is its own
  * page and its own switch.
  *
- * THREE FIGURES SIT BESIDE THE BALANCE, because the balance alone has misled
- * every reading of this lab so far:
+ * TWO FIGURES SIT BESIDE THE BALANCE, because the balance alone has misled
+ * every reading of this lab so far. (A third, the balance WITHOUT ITS BEST
+ * TRADE, was removed on 2026-09-24 at Karthik's request.)
  *
- *  - WITHOUT ITS BEST TRADE. The arm this copies made +$1,060, of which two
- *    coins were +429% and +527%; the other 177 trades made about $100 between
- *    them. A balance that is one coin is not a strategy, and the only way to
- *    see that on a page is to print the number with the coin removed.
  *  - LOWEST. A book that reached its balance by way of half its money is one
  *    nobody would still have been holding.
  *  - RUGS. On the copied arm all four landed on a single day. They cluster,
@@ -323,7 +320,6 @@ export function KarthikLabPage() {
   }
 
   const up = Number(data.pnl_usd) >= 0;
-  const withoutBest = Number(data.without_best_usd);
   const days = Math.max(
     0,
     Math.ceil(
@@ -366,20 +362,13 @@ export function KarthikLabPage() {
         <Days days={data.days} />
       </div>
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
         <Figure
           label="Balance"
           value={`${usd(data.balance_usd)}  ${pctOfCapital(data.pnl_usd, data.capital_usd)}`}
           tone={up ? "up" : "down"}
           sub={rupees(data.balance_usd)}
           hint={`${up ? "+" : ""}${usd(data.pnl_usd)} on ${usd(data.capital_usd)}`}
-        />
-        <Figure
-          label="Without its best trade"
-          value={`${usd(withoutBest)}  ${pctOfCapital(withoutBest, data.capital_usd)}`}
-          tone={withoutBest >= 0 ? "up" : "down"}
-          sub={rupees(withoutBest)}
-          hint="the same book minus one coin"
         />
         <Figure
           label="Lowest it has been"
@@ -434,13 +423,6 @@ export function KarthikLabPage() {
         )}
       </Panel>
 
-      <p className="max-w-[78ch] text-[12px] leading-relaxed text-ink-dim">
-        Read the second figure before the first. The arm this copies made
-        +$1,060 over 179 trades — and two coins, up 429% and 527%, are almost
-        all of it; the other 177 made about $100 between them, while four rugs
-        all landed on one day. A balance that is one coin is a lottery ticket,
-        not a strategy, and thirty days is long enough for that to show.
-      </p>
     </div>
   );
 }
