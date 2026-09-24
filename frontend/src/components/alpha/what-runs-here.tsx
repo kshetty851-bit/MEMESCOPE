@@ -121,7 +121,7 @@ export function WhatRunsHere() {
           <li key={place.href}>
             <Link
               href={place.href}
-              className="block h-full rounded-lg border border-line bg-canvas/70 p-5 transition-colors hover:border-accent/60"
+              className="block h-full rounded-lg border border-line bg-canvas p-5 transition-colors hover:border-accent/60"
             >
               <p className="text-base font-medium text-ink">{place.name} →</p>
               {place.what ? (
