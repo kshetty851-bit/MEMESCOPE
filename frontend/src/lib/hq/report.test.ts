@@ -24,7 +24,6 @@ describe("a report with nothing behind it", () => {
       "scoring",
       "security",
       "paper",
-      "execution",
       "queues",
       "operations",
       "incidents",

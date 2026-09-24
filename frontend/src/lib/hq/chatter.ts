@@ -53,7 +53,6 @@ export const CHATTER: Chatter[] = [
   { actor: "radar", lines: ["Back in a sec.", "Long morning.", "Need a refill.", "Nearly there.", "One more pass.", "Where'd I put that.", "Right, again."] },
   { actor: "atlas", lines: ["Hm.", "Not yet.", "Let me check first.", "I'd rather be sure.", "Slow down.", "Say that again.", "I want it in writing."] },
   { actor: "milo", lines: ["Thinking.", "Long game.", "Fair enough.", "Let's see.", "Give it time.", "No rush.", "That'll keep."] },
-  { actor: "rex", lines: ["Standing by.", "On it.", "Understood.", "Sure thing.", "Ready when you are.", "Say the word.", "Clean."] },
   { actor: "echo", lines: ["Two seconds.", "Coming through.", "Almost done.", "On my way.", "Behind you.", "Just squeezing past.", "Got it, got it."] },
   { actor: "byte", lines: ["Rebooting my brain.", "Coffee first.", "Yep.", "Give it a moment.", "Kettle's on.", "Don't ask.", "It's a Monday thing."] },
   // The reliability trio. Same rule as everyone else: nothing here may hint

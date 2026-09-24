@@ -61,12 +61,12 @@ export function buildToday(state: HqState): TodayEvent[] {
     const exit = parse(item.exit_at);
     const label = item.symbol ?? `${item.mint_address.slice(0, 4)}…`;
 
-    // Rex opens and closes; the row says which. No adjective — "a good exit"
+    // Milo's desk opens and closes; the row says which. No adjective — "a good exit"
     // is a judgement, and the net figure is already on the Track Record.
     if (entry !== null && entry >= since) {
       events.push({
         at: entry,
-        who: "rex",
+        who: "milo",
         label: `Paper entry — ${label}`,
         symbol: item.symbol,
         mint: item.mint_address,
@@ -76,7 +76,7 @@ export function buildToday(state: HqState): TodayEvent[] {
       const reason = item.exit_reason ? ` (${item.exit_reason})` : "";
       events.push({
         at: exit,
-        who: "rex",
+        who: "milo",
         label: `Paper exit${reason} — ${label}`,
         symbol: item.symbol,
         mint: item.mint_address,

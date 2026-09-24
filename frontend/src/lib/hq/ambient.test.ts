@@ -529,7 +529,9 @@ describe("ambient yields to real work", () => {
     scheduler.start();
 
     let found: EmployeeId | null = null;
-    for (let i = 0; i < 400 && !found; i += 1) {
+    // Ten simulated minutes. Across seeds 1-20 the first walk lands between
+    // 4s and ~330s (seed 5 is the slow one since Rex retired, 2026-09-24).
+    for (let i = 0; i < 1200 && !found; i += 1) {
       vi.advanceTimersByTime(500);
       found = predicate(current);
     }

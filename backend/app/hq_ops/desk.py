@@ -163,11 +163,6 @@ NO_LOG: dict[str, str] = {
         "recently, how many are unknown — not a row per evaluation. There is no "
         "table of decisions to read back."
     ),
-    "rex": (
-        "Execution publishes a posture, not a log: whether the rail is armed and "
-        "what would block it. The Real Wallet's own intents are the nearest "
-        "thing to a history and they are reported on the wallet's own surface."
-    ),
     "milo": (
         "Portfolio figures are derived from open positions at read time. The "
         "positions have their own timestamps, but they belong to the wallet that "

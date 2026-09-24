@@ -314,7 +314,7 @@ export function HqStage({
           {/* Token case packets, above every desk and every character —
               always the topmost readable layer, since a case in progress is
               exactly what a reader clicked into this room to find. Docked
-              packets are grouped by employee so two sharing Rex's desk stack
+              packets are grouped by employee so two sharing Milo's desk stack
               rather than overlap. */}
           {visibleCases.length > 0 || caseOverflow ? (
             <g className="hq-packets">

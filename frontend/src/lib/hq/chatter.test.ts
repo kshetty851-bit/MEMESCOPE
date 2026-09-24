@@ -114,7 +114,7 @@ describe("reactions fire on observed change and never on a timer", () => {
       [{ queueDepth: 21 }, "echo"],
       [{ pipelineOverall: "degraded" }, "byte"],
       [{ radarOpportunities: 101 }, "milo"],
-      [{ auditTotal: 11 }, "rex"],
+      [{ auditTotal: 11 }, "milo"],
     ];
     for (const [change, who] of cases) {
       const out = react(base(), base(change), NOW);

@@ -63,7 +63,7 @@ export function RecentCases({ onSelectCase }: RecentCasesProps) {
                     className="hq-case-chip shrink-0"
                     data-status={bought ? "PASSED" : "PENDING"}
                   >
-                    {bought ? "Rex · Bought" : "Radar · Discovered"}
+                    {bought ? "Milo · Bought" : "Radar · Discovered"}
                   </span>
                 </button>
               </li>

@@ -121,10 +121,10 @@ describe("Mission Board", () => {
     render(<MissionBoard state={deriveHqState({ now: NOW })} />);
     // "Market data", "Scoring" and "Track record" went with Luna, Dex and
     // Sage on 2026-09-08: three rows reading one `activity` source between
-    // them. What each remaining row reports is a distinct measurement.
+    // them. "Paper execution" went with Rex on 2026-09-24 — it is the Paper
+    // Wallet row's. What each remaining row reports is a distinct measurement.
     for (const label of [
-      "Scanner / discovery", "Enrichment queue",
-      "Paper Wallet", "Security gate", "Paper execution",
+      "Scanner / discovery", "Enrichment queue", "Paper Wallet", "Security gate",
     ]) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }

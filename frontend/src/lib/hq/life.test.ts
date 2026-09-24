@@ -88,10 +88,14 @@ describe("an emotion is about a person, never about MEMESCOPE", () => {
 
   it("suppresses every argument while the office is actually in trouble", () => {
     // An argument during a real incident is the coincidence that reads as
-    // causation. The one routine where two people are angry at each other must
-    // never be able to play over the top of a genuine alert.
-    const argument = SOCIAL_ROUTINES.find((r) => r.id === "rex-atlas-disagree")!;
-    expect(argument.suppressOnAlert).toBe(true);
+    // causation, so any routine where somebody is angry must never be able to
+    // play over a genuine alert. There is none since Rex (and his argument
+    // with Atlas) retired on 2026-09-24; this keeps the rule for the next one.
+    const angry = (r: (typeof SOCIAL_ROUTINES)[number]) =>
+      [...r.frames, ...(r.cast ?? []).flatMap((c) => c.frames)].some((f) => f.emotion === "angry");
+    for (const routine of SOCIAL_ROUTINES.filter(angry)) {
+      expect(routine.suppressOnAlert, routine.id).toBe(true);
+    }
   });
 });
 

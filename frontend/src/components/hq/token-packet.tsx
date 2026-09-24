@@ -22,8 +22,9 @@ import type { EmployeeId } from "@/lib/hq/employees";
  * Docked beside whichever employee's desk corresponds to the case's current
  * stage — never animated through a stage the case has no evidence for. The
  * `decision` stage has no desk of its own (§10's panel lists it as a row
- * between Atlas and Rex, not a department); it docks at Rex's desk, one step
- * ahead of `execution`, because that is the real next stop in the pipeline
+ * between Atlas and paper execution, not a department); it docks at Milo's
+ * desk, one step ahead of `execution`, because that is the real next stop in
+ * the pipeline
  * and it is the honest place to put a case still waiting on evidence nobody
  * has published.
  *
@@ -45,17 +46,15 @@ const STAGE_ANCHOR: Record<keyof TokenCaseFile["stages"], EmployeeId> = {
   scoring: "radar",
   market: "radar",
   safety: "atlas",
-  decision: "rex",
-  execution: "rex",
+  // Milo since 2026-09-24, when Rex (paper execution) was retired: the paper
+  // wallet's entries and exits are Milo's desk now.
+  decision: "milo",
+  execution: "milo",
 };
 
-/** Small per-employee offsets so packets from different stages never overlap
- * an employee's own desk instruments or nameplate, and two packets docked at
- * the same desk (decision → execution) still read as distinct. */
-const DOCK_OFFSET: Partial<Record<EmployeeId, { x: number; y: number }>> = {
-  rex: { x: -46, y: -18 },
-};
-const DEFAULT_OFFSET = { x: -46, y: -46 };
+/** Up and to the left of the desk, clear of its instruments and nameplate.
+ * Two packets at one desk (decision → execution) stack via `stackIndex`. */
+const DOCK_OFFSET = { x: -46, y: -46 };
 
 export function packetDockTile(stage: keyof TokenCaseFile["stages"]) {
   const employee = EMPLOYEE_BY_ID.get(STAGE_ANCHOR[stage])!;
@@ -91,7 +90,7 @@ export interface TokenPacketProps {
   onSelect: (mint: string) => void;
   /**
    * How many other visible packets share this same dock. `decision` and
-   * `execution` both anchor at Rex, so with three visible packets two could
+   * `execution` both anchor at Milo, so with three visible packets two could
    * legitimately land on the same desk at once — this stacks them instead
    * of letting them overlap.
    */
@@ -100,8 +99,7 @@ export interface TokenPacketProps {
 
 export function TokenPacket({ file, motion, onSelect, stackIndex = 0 }: TokenPacketProps) {
   const employee = EMPLOYEE_BY_ID.get(STAGE_ANCHOR[file.currentStage])!;
-  const base = DOCK_OFFSET[employee.id] ?? DEFAULT_OFFSET;
-  const offset = { x: base.x, y: base.y - stackIndex * 26 };
+  const offset = { x: DOCK_OFFSET.x, y: DOCK_OFFSET.y - stackIndex * 26 };
   const anchor = toScreen(employee.desk);
   const status = file.stages[file.currentStage].status;
   const label = `${file.symbol ?? file.mint.slice(0, 6)}, case file. ${file.overallState}. Currently at ${file.currentStage}: ${status}.`;

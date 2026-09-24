@@ -524,8 +524,8 @@ describe("Atlas — the shared security evaluation", () => {
 
 /* ── the uncomfortable truth this phase exists to record ─────────────── */
 
-describe("Atlas and Rex may disagree, and HQ must say so", () => {
-  it("shows ATLAS UNKNOWN alongside REX BOUGHT", () => {
+describe("Atlas and the paper desk may disagree, and HQ must say so", () => {
+  it("shows ATLAS UNKNOWN alongside MILO BOUGHT", () => {
     const file = build({
       tokenSecurity: at(tokenSecurity([evaluation()])),
       paperPositions: at(positions([position()])),
@@ -535,7 +535,7 @@ describe("Atlas and Rex may disagree, and HQ must say so", () => {
     expect(file.overallState).toBe("bought");
   });
 
-  it("shows ATLAS FAILED alongside DECISION PASSED and REX BOUGHT", () => {
+  it("shows ATLAS FAILED alongside DECISION PASSED and MILO BOUGHT", () => {
     // Paper's `judge()` reads market facts only and never consults security,
     // so this combination is what the live system genuinely produces. HQ must
     // not resolve it into a tidier story.
@@ -664,7 +664,7 @@ describe("Candidate decision — read back, never recomputed", () => {
   });
 });
 
-describe("Rex — Paper BOUGHT requires a real position", () => {
+describe("Milo — Paper BOUGHT requires a real position", () => {
   it("is PASSED only when the mint is in the positions record", () => {
     const file = build({ paperPositions: at(positions([position()])) });
     expect(file.stages.execution.status).toBe("PASSED");

@@ -315,22 +315,6 @@ function renderTheme(theme: DeskTheme, x: number, y: number) {
         </g>
       );
 
-    /* Rex — one execution terminal, plainly marked as the paper one. */
-    case "execution":
-      return (
-        <g>
-          <Panel x={x - 22} y={y - 28} w={44} h={24} />
-          {/* Two stacked entry rows and a wide action bar: a terminal shape,
-              with no ticker and no direction. */}
-          <rect className="hq-cell" x={x - 17} y={y - 23} width={34} height={4} />
-          <rect className="hq-cell" x={x - 17} y={y - 17} width={22} height={4} />
-          <rect className="hq-action" x={x - 17} y={y - 10} width={34} height={5} rx={1} />
-          <text className="hq-desk-plate" x={x} y={y + 2}>
-            PAPER
-          </text>
-        </g>
-      );
-
     /* Echo — a queue board. Columns of pending work, no depths. */
     case "operations":
       return (

@@ -111,19 +111,14 @@ describe("floor plan", () => {
   it("reads the trading floor west to east in journey order", () => {
     // The room's geometry is meant to teach the pipeline. If someone reorders
     // the desks this fails, which is the point.
-    // Luna and Dex retired 2026-09-08; discovery is one desk now, so the
+    // Luna and Dex retired 2026-09-08, Rex (paper execution) 2026-09-24; the
     // journey the room teaches is shorter but still runs west to east.
-    const order = ["radar", "rex", "vault"];
+    const order = ["radar", "vault"];
     const columns = order.map(
       (id) => EMPLOYEES.find((employee) => employee.id === id)!.desk.col,
     );
     const sorted = [...columns].sort((a, b) => a - b);
     expect(columns).toEqual(sorted);
-  });
-
-  it("puts the vault east of execution", () => {
-    const rex = EMPLOYEES.find((employee) => employee.id === "rex")!;
-    expect(ZONE_BY_ID.get("vault")!.rect.col).toBeGreaterThanOrEqual(rex.desk.col);
   });
 
   it("centres a zone label inside its own rect", () => {

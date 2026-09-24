@@ -49,7 +49,7 @@ export const EVENT_CAP = 240;
  * Which stream events HQ reads, and as what.
  *
  * `real_wallet.changed` and `real_wallet.dry_run.changed` are deliberately
- * absent. Real Wallet is the Vault's subject, not Rex's, and a mapping here
+ * absent. Real Wallet is the Vault's subject, not the paper desk's, and a mapping here
  * would be the shortest path to a paper trader appearing to move real money.
  * A test asserts this table does not grow one.
  */

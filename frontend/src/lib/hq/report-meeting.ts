@@ -64,7 +64,6 @@ export const REPORT_ORDER: EmployeeId[] = [
   "radar",
   "atlas",
   "milo",
-  "rex",
   "echo",
   "byte",
   "patch",
@@ -137,7 +136,6 @@ export const REPORT_STATIONS: Station[] = [
   // the doorway tile itself, is last in and first out.
   { employee: "echo", tile: { col: 21, row: 1 }, seated: false },
   { employee: "byte", tile: { col: 21, row: 2 }, seated: false },
-  { employee: "rex", tile: { col: 17, row: 1 }, seated: false },
   { employee: "patch", tile: { col: 17, row: 2 }, seated: false },
 ];
 

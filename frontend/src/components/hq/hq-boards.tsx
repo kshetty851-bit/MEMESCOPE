@@ -204,7 +204,6 @@ const MISSION_ROWS: Array<{ id: keyof HqState["employees"]; label: string }> = [
   { id: "echo", label: "Enrichment queue" },
   { id: "milo", label: "Paper Wallet" },
   { id: "atlas", label: "Security gate" },
-  { id: "rex", label: "Paper execution" },
   { id: "byte", label: "Platform / stream" },
   { id: "sentinel", label: "Production watch" },
   { id: "patch", label: "Incidents" },

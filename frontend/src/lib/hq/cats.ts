@@ -139,14 +139,6 @@ const COSMO_TO_RECEPTION: Tile[] = [
   { col: 10, row: 13.2 },
 ];
 
-const COSMO_TO_REX: Tile[] = [
-  { col: 10.6, row: 7.7 },
-  { col: 11.2, row: 6.8 },
-  { col: 11.8, row: 5.8 },
-  { col: 12.4, row: 5 },
-  { col: 12.6, row: 4.7 },
-];
-
 const MOCHI_TO_PATCH: Tile[] = [
   { col: 10.6, row: 10.6 },
   { col: 11.5, row: 10.9 },
@@ -214,31 +206,6 @@ export const CAT_ROUTINES: CatRoutine[] = [
       ...slink(COSMO_TO_RECEPTION),
       { pose: "cat_sit", tile: { col: 10, row: 13.2 }, hold: 10_000, detail: "Guarding the front mat." },
       ...slinkHome(COSMO_TO_RECEPTION),
-    ],
-  },
-  {
-    // Rex's desk is the Paper desk, and the cat is not allowed on it. The
-    // shooing is a gesture and a retreat — nothing here touches a control,
-    // and the panel line says so in cat terms, not trading terms.
-    id: "cosmo-rex",
-    actor: "cosmo",
-    weight: 0.8,
-    suppressOnAlert: true,
-    frames: [
-      ...slink(COSMO_TO_REX),
-      { pose: "cat_sit", tile: { col: 12.6, row: 4.7 }, hold: 5_000, detail: "Sitting much too close to Rex's desk." },
-      { pose: "cat_walk", tile: { col: 12.4, row: 5 }, hold: 2_500, detail: "Escorted away from the Paper desk, again." },
-      ...slinkHome(COSMO_TO_REX.slice(0, -1)),
-    ],
-    cast: [
-      {
-        actor: "rex",
-        frames: [
-          { pose: "seated_working", hold: CAT_STEP_MS * 5 },
-          { pose: "talking_briefly", hold: 5_000, detail: "Gently relocating Cosmo." },
-          { pose: "seated_working", hold: 2_500 },
-        ],
-      },
     ],
   },
   {

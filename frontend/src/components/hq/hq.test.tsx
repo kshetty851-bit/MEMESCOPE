@@ -250,15 +250,6 @@ describe("the cast", () => {
     expect(container.querySelectorAll("#hq-seated-legs")).toHaveLength(1);
   });
 
-  it("marks Rex's terminal as the paper one", () => {
-    // The simulation/real-money distinction is the one thing in this room that
-    // must never be ambiguous, and it is present from the first drawn frame.
-    const { container } = render(
-      <HqStage focusedZone={null} onFocusZone={noop} onSelectEmployee={noop} density="full" />,
-    );
-    expect(container.textContent).toContain("PAPER");
-  });
-
   it("renders no numeric value anywhere in the room", () => {
     // Desk screens are abstract shapes. A digit drawn as decoration would be
     // indistinguishable from a measured one once the adapter lands.

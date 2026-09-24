@@ -237,15 +237,13 @@ export type DeskTheme =
   | "market"
   | "risk"
   | "portfolio"
-  | "execution"
   | "operations"
   | "infrastructure"
   | "performance"
   | "sentry"
   | "reliability"
-  // Vault. Its own theme rather than a second "execution": Rex's desk is a
-  // paper simulator and this one is a room with real money in it. Two desks
-  // that mean different things must not look the same.
+  // Vault. A room with real money in it; the paper simulator's desk (Rex,
+  // retired 2026-09-24) never looked like it, and nothing else may either.
   | "vault"
   | "verification"
   // Karthik's six-monitor wall. The only desk in the office with a screen
@@ -365,20 +363,6 @@ export const CHARACTERS: Record<EmployeeId, CharacterDefinition> = {
     defaultPose: "standing",
     deskTheme: "portfolio",
     personalityLine: "Thinks in weeks. Watches what capital is doing.",
-  },
-  rex: {
-    id: "rex",
-    bodyType: "compact",
-    headShape: "square",
-    skinTone: "s3",
-    hair: "ponytail",
-    hairTone: "h5",
-    outfit: "rolled-shirt",
-    accessory: "wrist-terminal",
-    palette: "crimson",
-    defaultPose: "seated_working",
-    deskTheme: "execution",
-    personalityLine: "Precise, not reckless. Never trades on a hunch.",
   },
   echo: {
     id: "echo",

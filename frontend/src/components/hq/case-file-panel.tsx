@@ -24,7 +24,7 @@ const STAGE_ROWS: Array<{
   { key: "market", employee: "Dex", label: "Market / Liquidity" },
   { key: "safety", employee: "Atlas", label: "Safety" },
   { key: "decision", employee: "—", label: "Candidate Decision" },
-  { key: "execution", employee: "Rex", label: "Paper Execution" },
+  { key: "execution", employee: "Milo", label: "Paper Execution" },
 ];
 
 const STATUS_TEXT: Record<CaseStageStatus, string> = {
@@ -101,7 +101,7 @@ const EVIDENCE_GROUPS: Array<{
   { key: "scoring", title: "Scoring", note: "Luna" },
   { key: "market", title: "Market", note: "Dex — depth and price only, never a safety claim" },
   { key: "security", title: "Security", note: "Atlas — on-chain evidence" },
-  { key: "paper", title: "Paper position", note: "Rex" },
+  { key: "paper", title: "Paper position", note: "Milo" },
 ];
 
 export function CaseFilePanel({ file, onClose }: CaseFilePanelProps) {

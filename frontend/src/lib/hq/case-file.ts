@@ -72,7 +72,7 @@ import type {
  *
  *     ATLAS    — FAILED or UNKNOWN
  *     DECISION — PASSED
- *     REX      — BOUGHT
+ *     MILO     — BOUGHT
  *
  * all at once, and this file must render exactly that when it happens. The
  * inconsistency is real, it is the evidence HQ-6 exists to collect, and
@@ -530,7 +530,7 @@ function deriveDecision(
 }
 
 /**
- * REX — Paper execution, strictly from the exhaustive positions record.
+ * MILO — Paper execution, strictly from the exhaustive positions record.
  *
  * BOUGHT is PASSED. Never FAILED — see the module header on why "attempted
  * and refused" cannot be attributed to one mint. Absence from the list,
@@ -666,7 +666,7 @@ function deriveOverall(stages: CaseStages): { state: CaseOverallState; current: 
   // Execution first, and deliberately ahead of every judgement above it. If a
   // position exists, the token was bought — whatever Atlas concluded and
   // whatever the decision log says. That ordering is what lets a case file
-  // read ATLAS FAILED / REX BOUGHT instead of quietly resolving the conflict
+  // read ATLAS FAILED / MILO BOUGHT instead of quietly resolving the conflict
   // in favour of the tidier story. See the module header.
   if (stages.execution.status === "PASSED") {
     const closed = stages.execution.summary.includes("closed");

@@ -401,44 +401,6 @@ export const AMBIENT_ROUTINES: AmbientRoutine[] = [
     ],
   },
 
-  /* ---- Rex: terminal input, wrist check, restrained confidence -------- */
-  { id: "rex-terminal", employee: "rex", weight: 5, frames: [{ pose: "seated_working", hold: 8000 }] },
-  {
-    id: "rex-wrist",
-    employee: "rex",
-    weight: 3,
-    frames: [
-      { pose: "seated_working", hold: 2200 },
-      { pose: "seated_reviewing", hold: 3000 },
-      { pose: "seated_working", hold: 2200 },
-    ],
-  },
-  {
-    id: "rex-focus",
-    employee: "rex",
-    weight: 3,
-    frames: [
-      { pose: "looking_at_screen", hold: 4000 },
-      { pose: "seated_working", hold: 3000 },
-    ],
-  },
-  {
-    id: "rex-milo",
-    employee: "rex",
-    weight: 1,
-    frames: [
-      { pose: "talking_briefly", hold: 2800 },
-      { pose: "seated_working", hold: 2400 },
-    ],
-    cast: [{
-      employee: "milo",
-      frames: [
-        { pose: "talking_briefly", hold: 2800 },
-        { pose: "standing", hold: 2400 },
-      ],
-    }],
-  },
-
   /* ---- Echo: never at one terminal for long -------------------------- */
   {
     id: "echo-terminals",
@@ -623,24 +585,14 @@ const TO_CONFERENCE: Partial<Record<EmployeeId, Tile[]>> = {
     ...ROW1_TO_DOOR,
   ],
   byte: [{ col: 9, row: 7 }, { col: 9, row: 6 }, ...SPINE_UP, ...ROW2_EAST, ...ROW1_TO_DOOR],
-  // Atlas and Rex were the two nobody ever invited: the ambient syncs are
-  // three- and four-person, and neither was ever cast. The report meeting is
-  // the whole company, so both need a route, authored to the same rule as the
-  // rest — join the walkway, take the spine, then the row-1 corridor.
+  // Atlas was the one nobody ever invited: the ambient syncs are three- and
+  // four-person, and he was never cast. The report meeting is the whole
+  // company, so he needs a route, authored to the same rule as the rest —
+  // join the walkway, take the spine, then the row-1 corridor.
   atlas: [
     { col: 2, row: 5 },
     { col: 2, row: 6 },
     ...walkwayEast(3),
-    ...SPINE_UP,
-    ...ROW2_EAST,
-    ...ROW1_TO_DOOR,
-  ],
-  rex: [
-    { col: 12, row: 5 },
-    { col: 12, row: 6 },
-    { col: 11, row: 6 },
-    { col: 10, row: 6 },
-    { col: 9, row: 6 },
     ...SPINE_UP,
     ...ROW2_EAST,
     ...ROW1_TO_DOOR,
@@ -810,17 +762,6 @@ export const MEETING_ROUTINES: AmbientRoutine[] = [
  * poses at tiles — which is the entire reason the expansion could reuse the
  * scheduler instead of growing a second one.
  */
-const DECK_TO_18: Tile[] = [
-  { col: 12, row: 5 },
-  { col: 12, row: 6 },
-  { col: 13, row: 6 },
-  { col: 14, row: 6 },
-  { col: 15, row: 6 },
-  { col: 16, row: 6 },
-  { col: 17, row: 6 },
-  { col: 18, row: 6 },
-];
-
 
 /** Milo's authored path to the lounge chair. */
 const MILO_TO_LOUNGE: Tile[] = [
@@ -838,20 +779,6 @@ const MILO_TO_LOUNGE: Tile[] = [
 ];
 
 export const EXPANSION_ROUTINES: AmbientRoutine[] = [
-  {
-    // Rex steps out through the airlock. The one routine that uses the deck's
-    // whole length, and the reason the airlock sits where the walkway ends.
-    id: "rex-deck",
-    employee: "rex",
-    weight: 1,
-    suppressOnAlert: true,
-    nightFactor: 0.4,
-    frames: [
-      ...walk(DECK_TO_18),
-      { pose: "standing", tile: { col: 18, row: 6 }, hold: 9_000, detail: "Out on the deck, watching the black." },
-      ...walkHome(DECK_TO_18),
-    ],
-  },
   {
     id: "echo-deck",
     employee: "echo",
@@ -1021,20 +948,6 @@ export const CEO_ROUTINES: AmbientRoutine[] = [
     "Atlas, when you can.",
     "On it.",
   ),
-  novaAssign(
-    "nova-assign-rex",
-    "rex",
-    [
-      { col: 9, row: 1 },
-      { col: 10, row: 1 },
-      { col: 11, row: 1 },
-      { col: 12, row: 1 },
-      { col: 12, row: 2 },
-      { col: 12, row: 3 },
-    ],
-    "Rex, anything I should know?",
-    "Standing by.",
-  ),
   {
     // The CEO's version of reading the room: a slow lap of the Mission Board
     // and back. Longer holds than anybody else's idle — she is looking, not
@@ -1075,7 +988,7 @@ export const CEO_ROUTINES: AmbientRoutine[] = [
  * The deck's standing spots.
  *
  * (19,6) is blocked — the airlock frame stands there — so the rail positions
- * are (18,6), which `rex-deck` already uses, and (20,6) reached around it via
+ * are (18,6) and (20,6), the second reached around the airlock frame via
  * row 5. Both were guessed wrong first and caught by the furniture test, which
  * is the entire reason that test walks every frame of every routine.
  */
@@ -1863,24 +1776,6 @@ export const GAME_ROUTINES: AmbientRoutine[] = [
  * person walking somewhere and a colleague nodding. These are conversations
  * with a *shape*: somebody arrives with something, the other reacts, and the
  * feeling changes between the first frame and the last.
- *
- * ── THE ARGUMENT, AND WHY IT IS SAFE ────────────────────────────────────
- *
- * `atlas-rex-disagree` is the one routine in the building where two people are
- * angry at each other. It is also the most carefully bounded, for a reason
- * that is easy to miss: Atlas is the desk that refuses trades and Rex is the
- * desk that places them, so a reader who saw them arguing could reasonably
- * conclude something had gone wrong with a trade.
- *
- * Three things stop that. It is `suppressOnAlert`, so it can never play while
- * the office is actually in trouble — an argument during a real incident is
- * exactly the coincidence that would read as causation. It resolves: the last
- * two frames are both `neutral` and the detail says so, so nobody is left
- * frozen mid-row. And not one line or detail mentions a trade, a token, a
- * wallet or a number, which a test enforces across this whole block.
- *
- * What is left is two colleagues who disagree about something and get over it,
- * which is what an office looks like.
  */
 
 /** Two people facing each other at a tile each, for the length of a talk. */
@@ -1897,20 +1792,6 @@ function conversation(
     speech: beat.speech,
   }));
 }
-
-/** Rex's desk to the Risk Room's edge. BFS-verified, like the games routes. */
-const REX_TO_RISK: Tile[] = [
-  { col: 11, row: 4 },
-  { col: 10, row: 4 },
-  { col: 10, row: 5 },
-  { col: 9, row: 5 },
-  { col: 8, row: 5 },
-  { col: 7, row: 5 },
-  { col: 6, row: 5 },
-  { col: 5, row: 5 },
-  { col: 4, row: 5 },
-  { col: 4, row: 4 },
-];
 
 const MILO_TO_SENTINEL: Tile[] = [
   { col: 3, row: 8 },
@@ -1930,46 +1811,7 @@ const NOVA_TO_BYTE: Tile[] = [
 
 export const SOCIAL_ROUTINES: AmbientRoutine[] = [
   {
-    // Rex walks to Atlas, and not the other way round.
-    //
-    // I wrote it the other way first and a test failed: Atlas is the stillest
-    // figure in the office — `keeps Atlas still and Echo mobile` measures the
-    // fraction of his frames that stay at his desk — and sending him across
-    // the building to argue dropped him under the floor. The fix is also the
-    // better scene. Atlas is the desk that refuses; people come to *him* to be
-    // told no, and he does not chase anyone to say it.
-    id: "rex-atlas-disagree",
-    employee: "rex",
-    weight: 0.7,
-    suppressOnAlert: true,
-    nightFactor: 0.3,
-    frames: [
-      ...walk(REX_TO_RISK),
-      ...conversation({ col: 4, row: 4 }, [
-        { pose: "talking_briefly", emotion: "angry", hold: 3_400, detail: "Arguing a call with Atlas.", speech: "It held last time." },
-        { pose: "standing", emotion: "angry", hold: 2_600, detail: "Arguing a call with Atlas." },
-        { pose: "talking_briefly", emotion: "neutral", hold: 3_200, detail: "Talking it through with Atlas.", speech: "Alright. Show me." },
-        { pose: "standing", emotion: "happy", hold: 2_400, detail: "Sorted it out with Atlas." },
-      ]),
-      ...walkHome(REX_TO_RISK),
-    ],
-    cast: [
-      {
-        employee: "atlas",
-        frames: [
-          { pose: "seated_reviewing", hold: STEP * REX_TO_RISK.length, emotion: "neutral" },
-          { pose: "standing", hold: 3_400, emotion: "neutral", detail: "Hearing Rex out." },
-          { pose: "talking_briefly", hold: 2_600, emotion: "angry", detail: "Not persuaded.", speech: "No. Not like that." },
-          { pose: "standing", hold: 3_200, emotion: "neutral", detail: "Hearing Rex out." },
-          { pose: "seated_reviewing", hold: 2_400, emotion: "neutral", detail: "Back to the review." },
-        ],
-      },
-    ],
-  },
-  {
-    // Milo cheers Sentinel up. The counterweight to the argument: the office
-    // needs somebody being kind in it or the only relationship on show is
-    // conflict.
+    // Milo cheers Sentinel up: the office needs somebody being kind in it.
     id: "milo-sentinel-check-in",
     employee: "milo",
     weight: 1,

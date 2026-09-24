@@ -391,13 +391,12 @@ describe("fail-closed", () => {
     expect(never.employees.radar.detail).toContain("has not been read yet");
   });
 
-  it("turns a failed paper request into UNKNOWN for Milo and Rex", () => {
+  it("turns a failed paper request into UNKNOWN for Milo", () => {
     const state = build({
       paperWallet: { data: null, observedAt: null, failed: true },
       paperPositions: { data: null, observedAt: null, failed: true },
     });
     expect(state.employees.milo.state).toBe("unknown");
-    expect(state.employees.rex.state).toBe("unknown");
     expect(state.employees.milo.detail).toContain("could not be read");
   });
 
@@ -596,7 +595,6 @@ describe("Milo — the paper portfolio", () => {
     const state = build({ paperWallet: at(wallet({}, false)) });
     expect(state.employees.milo.state).toBe("idle");
     expect(state.employees.milo.detail).toContain("switched off");
-    expect(state.employees.rex.state).toBe("idle");
   });
 
   it("falls back to the positions list when the wallet has no count", () => {
@@ -617,28 +615,33 @@ describe("Milo — the paper portfolio", () => {
   });
 });
 
-describe("Rex — paper execution only", () => {
-  it("is idle without evidence of a fill", () => {
-    expect(build().employees.rex.state).toBe("idle");
+// Rex's desk until 2026-09-24; Milo already owned the wallet these fills are in.
+describe("Milo — paper execution only", () => {
+  it("says first on his panel that the desk is simulated", () => {
+    const first = build().employees.milo.metrics[0];
+    expect(first?.label).toBe("Desk");
+    expect(first?.value).toContain("simulated");
   });
 
-  it("says on his own panel that the desk is simulated", () => {
-    const desk = build().employees.rex.metrics.find((m) => m.label === "Desk");
-    expect(desk?.value).toContain("simulated");
+  it("carries the paper wallet's closes on his panel", () => {
+    const labels = build().employees.milo.metrics.map((m) => m.label);
+    for (const label of ["Closed positions", "Realised P&L", "Last close", "Last close net"]) {
+      expect(labels).toContain(label);
+    }
   });
 
   it("reacts to a close only when the permanent record actually grew", () => {
     const before = witness({ paperAudit: at(audit(4, "12.50")), paperWallet: at(wallet()) });
     const after = witness({ paperAudit: at(audit(5, "12.50")), paperWallet: at(wallet()) });
 
-    expect(react(before, before, NOW).rex).toBeUndefined();
-    expect(react(before, after, NOW).rex?.state).toBe("success");
+    expect(react(before, before, NOW).milo).toBeUndefined();
+    expect(react(before, after, NOW).milo?.state).toBe("success");
   });
 
   it("reviews a losing close rather than dramatising it", () => {
     const before = witness({ paperAudit: at(audit(4, "-8.00")) });
     const after = witness({ paperAudit: at(audit(5, "-8.00")) });
-    const reaction = react(before, after, NOW).rex;
+    const reaction = react(before, after, NOW).milo;
     expect(reaction?.state).toBe("reviewing");
     expect(reaction?.detail).not.toMatch(/lost|fail|bad/i);
   });
@@ -646,7 +649,7 @@ describe("Rex — paper execution only", () => {
   it("works when a position opens", () => {
     const before = witness({ paperWallet: at(wallet({ open_positions: 1 })), paperAudit: at(audit(2)) });
     const after = witness({ paperWallet: at(wallet({ open_positions: 2 })), paperAudit: at(audit(2)) });
-    expect(react(before, after, NOW).rex?.state).toBe("working");
+    expect(react(before, after, NOW).milo?.state).toBe("working");
   });
 
   it("reacts to nothing on the first reading", () => {
@@ -658,14 +661,13 @@ describe("Rex — paper execution only", () => {
   it("does not pretend to trade on a Real Wallet event", () => {
     // The distance between a simulated fill and a real one is the most
     // important thing this product communicates. Real Wallet is the Vault's
-    // subject, not Rex's, and no path exists from those events to this desk.
+    // subject, not the paper desk's, and no path exists from those events to it.
     expect(kindOf("real_wallet.changed")).toBeNull();
     expect(kindOf("real_wallet.dry_run.changed")).toBeNull();
 
     const meter = createEventMeter(NOW - 120_000);
     for (let i = 0; i < 50; i += 1) meter.record("real_wallet.changed", NOW);
     const state = build({ activity: meter.snapshot(NOW) });
-    expect(state.employees.rex.state).toBe("idle");
     expect(state.employees.milo.state).toBe("idle");
   });
 });
@@ -767,7 +769,14 @@ describe("Nova — the roll-up", () => {
   });
 
   it("is never healthy while a sourced department has no reading", () => {
-    const state = build({ paperWallet: { data: null, observedAt: null, failed: true } });
+    // Both paper requests fail, so Milo has nothing to read. (Failing only the
+    // wallet once blanked Rex, retired 2026-09-24; Milo falls back to the
+    // positions list, which is a reading.)
+    const state = build({
+      paperWallet: { data: null, observedAt: null, failed: true },
+      paperPositions: { data: null, observedAt: null, failed: true },
+    });
+    expect(state.employees.milo.state).toBe("unknown");
     expect(["idle", "success"]).not.toContain(state.employees.nova.state);
     expect(state.employees.nova.state).toBe("reviewing");
   });
@@ -873,17 +882,17 @@ describe("state priority", () => {
 
   it("drops a reaction once it has expired", () => {
     const state = build({
-      transients: { rex: { state: "success", detail: "closed in profit", until: NOW - 1 } },
+      transients: { milo: { state: "success", detail: "closed in profit", until: NOW - 1 } },
     });
-    expect(state.employees.rex.state).toBe("idle");
+    expect(state.employees.milo.state).toBe("idle");
   });
 
   it("applies a live reaction over an ordinary state", () => {
     const state = build({
-      transients: { rex: { state: "success", detail: "closed in profit", until: NOW + 5_000 } },
+      transients: { milo: { state: "success", detail: "closed in profit", until: NOW + 5_000 } },
     });
-    expect(state.employees.rex.state).toBe("success");
-    expect(state.employees.rex.detail).toBe("closed in profit");
+    expect(state.employees.milo.state).toBe("success");
+    expect(state.employees.milo.detail).toBe("closed in profit");
   });
 
   it("never applies a reaction to an unsourced department", () => {
@@ -922,7 +931,7 @@ describe("panels", () => {
     for (const employee of EMPLOYEES) {
       for (const metric of state.employees[employee.id].metrics) {
         // Two exceptions, and both are facts the browser holds on its own
-        // rather than readings from a backend: Rex's fixed desk label, and the
+        // rather than readings from a backend: Milo's fixed desk label, and the
         // state of this tab's own WebSocket. Neither can be unavailable
         // because neither was ever fetched.
         if (metric.source === "HQ" || metric.source === "browser WebSocket") continue;

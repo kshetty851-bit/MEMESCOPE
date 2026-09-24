@@ -21,8 +21,8 @@ import { BEAT_OFFSET_SECONDS, TEMPO_BPM } from "@/lib/space-audio";
  *
  * ── "IN STEP" IS TWO PROBLEMS ───────────────────────────────────────────
  *
- * In step with each other: sixteen people arrive on the floor at sixteen
- * different moments, so their CSS animations start at sixteen different times.
+ * In step with each other: fifteen people arrive on the floor at fifteen
+ * different moments, so their CSS animations start at fifteen different times.
  * Identical keyframes would still leave them out of phase. The fix is to pin
  * every dance animation's `startTime` to ONE shared epoch — see `danceEpochMs`.
  *
@@ -32,11 +32,14 @@ import { BEAT_OFFSET_SECONDS, TEMPO_BPM } from "@/lib/space-audio";
  *
  * ── THE FLOOR ───────────────────────────────────────────────────────────
  *
- * Columns 16-21, rows 12-14: the east end of reception and the corridor in
- * front of it. The only clear rectangle in the building big enough for
- * everyone — six by three, eighteen spots, no furniture, nothing to step
- * round. Sixteen dancers take it; the two back corners stay empty, which
- * turns the block into a deliberate shape rather than a crowd with a gap.
+ * Columns 16-20, rows 12-14: the east end of reception and the corridor in
+ * front of it — five by three, fifteen spots, no furniture, nothing to step
+ * round, and exactly fifteen dancers, so the block is full and symmetric with
+ * Nova at the centre of the front row. It was six wide with the two back
+ * corners left empty for sixteen dancers; Rex's retirement (2026-09-24) left
+ * fifteen, and fifteen cannot be mirror-symmetric on six columns (every row
+ * of a mirrored six-wide shape holds an even number), so the floor narrowed
+ * by one column rather than leaving a lopsided gap. Column 21 is still clear.
  *
  * ── EVERYONE DANCES. ONE OF THEM DANCES AT THE POST. ────────────────────
  *
@@ -44,21 +47,15 @@ import { BEAT_OFFSET_SECONDS, TEMPO_BPM } from "@/lib/space-audio";
  * as well as to funds: every tile of it is blocked, so there is no walk out,
  * and no Vault routine anywhere in the office has ever moved him. The report
  * meeting already respects that — Vault holds the floor. So does this. Vault
- * dances where he sits, on the same beat as the other sixteen, behind glass.
+ * dances where he sits, on the same beat as the other fifteen, behind glass.
  */
 
-export const FLOOR = { col: 16, row: 12, cols: 6, rows: 3 } as const;
-
-/** The two back corners, left empty so the formation is symmetric. */
-const EMPTY_SPOTS: readonly Tile[] = [
-  { col: 16, row: 12 },
-  { col: 21, row: 12 },
-];
+export const FLOOR = { col: 16, row: 12, cols: 5, rows: 3 } as const;
 
 /** Dances at their own desk, in step, and never walks. See the header. */
 export const AT_THEIR_POST: readonly EmployeeId[] = ["vault"];
 
-/** Where the CEO dances: front row, near the middle. */
+/** Where the CEO dances: the centre of the front row. */
 const LEAD_SPOT: Tile = { col: 18, row: 14 };
 
 export const BEAT_MS = 60_000 / TEMPO_BPM;
@@ -77,10 +74,7 @@ const key = (t: Tile) => `${t.col},${t.row}`;
 function spotsFrontToBack(): Tile[] {
   const spots: Tile[] = [];
   for (let row = FLOOR.row + FLOOR.rows - 1; row >= FLOOR.row; row -= 1) {
-    for (let col = FLOOR.col; col < FLOOR.col + FLOOR.cols; col += 1) {
-      const spot = { col, row };
-      if (!EMPTY_SPOTS.some((e) => key(e) === key(spot))) spots.push(spot);
-    }
+    for (let col = FLOOR.col; col < FLOOR.col + FLOOR.cols; col += 1) spots.push({ col, row });
   }
   return spots;
 }
@@ -126,7 +120,7 @@ export const SPOTS: ReadonlyMap<EmployeeId, Tile> = assign();
  * a test can check none of them passes through a desk. A breadth-first search
  * over `isWalkable` keeps that property by construction — it can only ever
  * step on a tile `isWalkable` allows — and its output is the same plain data
- * the tests read. What changed is the count: sixteen routes to one place is
+ * the tests read. What changed is the count: fifteen routes to one place is
  * where hand-authoring stops being the careful option and becomes the
  * error-prone one.
  *

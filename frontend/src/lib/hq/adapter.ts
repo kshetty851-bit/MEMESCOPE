@@ -420,7 +420,6 @@ export function deriveHqState(sources: Partial<HqSources> = {}): HqState {
     radar: deriveRadar(s, pipeline, pipelineGone, pipelineAt),
     atlas: deriveAtlas(s),
     milo: deriveMilo(s),
-    rex: deriveRex(s),
     echo: deriveEcho(pipeline, pipelineGone, pipelineAt),
     byte: deriveByte(s, pipeline, pipelineGone, pipelineAt),
     sentinel: deriveSentinel(operations, operationsGone, operationsAt),
@@ -681,7 +680,8 @@ function deriveAtlas(s: HqSources): EmployeeReading {
 function deriveMilo(s: HqSources): EmployeeReading {
   const wallet = fresh(s.paperWallet, STALE_AFTER_MS.paper, s.now);
   const positions = fresh(s.paperPositions, STALE_AFTER_MS.paper, s.now);
-  const metrics = miloMetrics(wallet, positions, s.activity);
+  const audit = fresh(s.paperAudit, STALE_AFTER_MS.paper, s.now);
+  const metrics = miloMetrics(wallet, positions, audit, s.activity);
   const at = wallet ? s.paperWallet.observedAt : s.paperPositions.observedAt;
 
   if (!wallet && !positions) {
@@ -712,10 +712,17 @@ function deriveMilo(s: HqSources): EmployeeReading {
 function miloMetrics(
   wallet: PaperWallet | null,
   positions: PaperPositions | null,
+  audit: PaperAudit | null,
   activity: EventActivity,
 ): Metric[] {
   const m = wallet?.metrics;
+  // Rex's figures, since 2026-09-24: the paper execution desk was retired and
+  // its record is this wallet's, so it is read here rather than lost.
+  const last = audit?.items[0];
   return [
+    // Fixed, and first — inherited from Rex's panel. Everything on it is about
+    // a simulator, and the panel has to say so before it says anything else.
+    { label: "Desk", value: "Paper — simulated execution", source: "HQ" },
     {
       label: "Open positions",
       value: num(m?.open_positions ?? positions?.items.length),
@@ -746,42 +753,6 @@ function miloMetrics(
       value: num(rate(activity, "paper")),
       source: "live stream · paper.changed",
     },
-  ];
-}
-
-/**
- * REX — paper execution, and only paper.
- *
- * His desk is the simulator. `real_wallet.changed` is not read here, is not in
- * the event table, and has a test of its own: the distance between a simulated
- * fill and a real one is the most important thing this product communicates,
- * and a character who moves on both would erase it.
- *
- * He is idle by default and reacts only to evidence — a row appearing in the
- * permanent trade record, or an open position count that went up. Neither is an
- * event announcement; both are the data itself having changed.
- */
-function deriveRex(s: HqSources): EmployeeReading {
-  const wallet = fresh(s.paperWallet, STALE_AFTER_MS.paper, s.now);
-  const audit = fresh(s.paperAudit, STALE_AFTER_MS.paper, s.now);
-  const metrics = rexMetrics(wallet, audit);
-  const at = s.paperWallet.observedAt;
-
-  if (!wallet) {
-    return unknown(absence(s.paperWallet, STALE_AFTER_MS.paper, s.now, "Paper wallet"), metrics);
-  }
-  if (!wallet.enabled) return reading("idle", "Paper wallet is switched off.", metrics, at);
-
-  return reading("idle", "No paper execution recorded just now.", metrics, at);
-}
-
-function rexMetrics(wallet: PaperWallet | null, audit: PaperAudit | null): Metric[] {
-  const m = wallet?.metrics;
-  const last = audit?.items[0];
-  return [
-    // Fixed, and first. Everything else on this panel is about a simulator, and
-    // the panel has to say so before it says anything else.
-    { label: "Desk", value: "Paper — simulated execution", source: "HQ" },
     { label: "Closed positions", value: num(m?.closed_positions), source: "paper.metrics" },
     { label: "Realised P&L", value: m?.realised_pnl ?? null, source: "paper.metrics" },
     { label: "Last close", value: last?.exit_reason ?? null, source: "paper/audit" },
@@ -1813,7 +1784,7 @@ export function witness(sources: Partial<HqSources>): HqWitness {
 /**
  * What changed, and who should notice.
  *
- * Restrained on purpose. A losing trade puts Rex in `reviewing`, not in any
+ * Restrained on purpose. A losing trade puts Milo in `reviewing`, not in any
  * kind of failure state — the simulator closing a position at a loss is the
  * strategy working, and dramatising it would be editorialising about a system
  * whose results people are trying to read honestly.
@@ -1835,7 +1806,7 @@ export function react(
   if (closed) {
     const net = Number(next.lastCloseNet);
     const profitable = next.lastCloseNet !== null && Number.isFinite(net) && net > 0;
-    out.rex = profitable
+    out.milo = profitable
       ? {
           state: "success",
           detail: "A paper position closed in profit.",
@@ -1848,12 +1819,6 @@ export function react(
           until,
           speech: "Reviewing the exit.",
         };
-    out.milo = {
-      state: "working",
-      detail: "The portfolio changed — a position closed.",
-      until,
-      speech: "Capital updated.",
-    };
   }
 
   const opened =
@@ -1912,13 +1877,7 @@ export function react(
   }
 
   if (opened && !closed) {
-    out.rex = { state: "working", detail: "A paper position opened.", until, speech: "Entry filled." };
-    out.milo = {
-      state: "working",
-      detail: "The portfolio changed — a position opened.",
-      until,
-      speech: "Capital updated.",
-    };
+    out.milo = { state: "working", detail: "A paper position opened.", until, speech: "Entry filled." };
   }
 
   const recorded =

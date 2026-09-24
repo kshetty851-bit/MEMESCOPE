@@ -1614,12 +1614,6 @@
   fill: oklch(from var(--hq-screen-glow) l c h / 0.7);
 }
 
-/* Deliberately the accent, not green. A green action bar on an execution
-   terminal reads as "approved", which is a claim nothing has made. */
-.hq-action {
-  fill: oklch(from var(--hq-screen-glow) l c h / 0.8);
-}
-
 .hq-sweep {
   stroke: var(--hq-screen-glow);
   stroke-width: 1.4;
@@ -1649,9 +1643,9 @@
   fill: var(--hq-paper);
 }
 
-/* The plate that distinguishes Rex's paper terminal from the vault. Present
-   from the first phase on purpose: the simulation/real-money distinction is
-   the one thing in this room that must never be ambiguous. */
+/* The vault's SEALED plate. It once also marked Rex's PAPER terminal (retired
+   2026-09-24): the simulation/real-money distinction is the one thing in this
+   room that must never be ambiguous. */
 .hq-desk-plate {
   fill: var(--hq-ink-soft);
   /* 9px, matching `hq-anchor-state` — the smallest tier of in-world text that

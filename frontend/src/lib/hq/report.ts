@@ -195,7 +195,8 @@ export function buildReport(state: HqState): HqReport {
     { id: "scoring", title: "SCORING", owner: "radar", lines: lines(state, "radar") },
     { id: "security", title: "SECURITY / SEC-2", owner: "atlas", lines: lines(state, "atlas") },
     paperSection(state),
-    { id: "execution", title: "EXECUTION / EXITS", owner: "rex", lines: lines(state, "rex") },
+    // EXECUTION / EXITS was Rex's until 2026-09-24. The paper wallet's entries
+    // and exits are Milo's readings now, so the PAPER section above says them.
     { id: "queues", title: "QUEUES / INFRASTRUCTURE", owner: "echo", lines: lines(state, "echo") },
     // The production watch. Sentinel does not attend the briefing — somebody
     // has to keep watching while everyone else is in a room — so her section
@@ -291,7 +292,6 @@ export function buildDialogue(report: HqReport): DialogueLine[] {
     speak("radar", "discovery"),
     speak("atlas", "security"),
     speak("milo", "paper"),
-    speak("rex", "execution"),
     speak("echo", "queues"),
     speak("byte", "health"),
     // Patch reports the reliability desk. There is no incident surface behind

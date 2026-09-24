@@ -71,7 +71,7 @@ describe("today at HQ", () => {
     // history fabricated from a scalar.
     const events = buildToday(withAudit([trade()]));
     for (const event of events) {
-      expect(event.who).toBe("rex");
+      expect(event.who).toBe("milo");
     }
   });
 

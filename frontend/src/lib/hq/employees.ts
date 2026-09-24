@@ -31,7 +31,10 @@ export type EmployeeId =
   | "radar"
   | "atlas"
   | "milo"
-  | "rex"
+  // Rex (paper execution) was retired on 2026-09-24: his only source was the
+  // Original Paper Wallet, switched off since 2026-08-25, so he read "Paper
+  // wallet is switched off" for a month. Paper execution is Milo's now — he
+  // already owned that wallet's positions — and real execution is Vault's.
   | "echo"
   | "byte"
   // The reliability trio. Added when HQ stopped being a window onto MEMESCOPE
@@ -198,25 +201,10 @@ export const EMPLOYEES: Employee[] = [
       "Safety gate, liquidity security, mint and freeze authority, price impact",
     whatIDo:
       "Checks mint and freeze authority, the venue and the liquidity behind a token before any entry is allowed.",
-    worksWith: ["rex","nova"],
+    worksWith: ["milo","nova"],
     personality: "Serious and still. Deliberate scans. Rarely moves.",
     accessory: "shield",
     palette: "steel",
-  },
-  {
-    id: "rex",
-    name: "Rex",
-    role: "Execution Specialist",
-    zone: "floor",
-    department: "market",
-    desk: { col: 12, row: 4 },
-    systemResponsibility: "Paper Wallet entries and exits; Real Wallet state display",
-    whatIDo:
-      "Watches Paper Wallet entries and exits, the execution quotes behind them and how each position actually closed.",
-    worksWith: ["atlas","milo"],
-    personality: "Confident and fast. Drums fingers, rolls the chair back.",
-    accessory: "wrist-terminal",
-    palette: "crimson",
   },
   {
     id: "milo",
@@ -225,10 +213,10 @@ export const EMPLOYEES: Employee[] = [
     zone: "portfolio",
     department: "portfolio",
     desk: { col: 2, row: 8 },
-    systemResponsibility: "Open positions, exposure, holding period, capital efficiency",
+    systemResponsibility: "Paper Wallet entries, exits and open positions; exposure, holding period, capital efficiency",
     whatIDo:
-      "Tracks what capital is doing: open positions, exposure, holding periods and which generation is trading.",
-    worksWith: ["rex","nova"],
+      "Tracks what capital is doing: every Paper Wallet entry and exit, open positions, exposure, holding periods and which generation is trading.",
+    worksWith: ["atlas","nova"],
     personality: "Patient and strategic. Steps back from the wall, arms folded.",
     accessory: "clipboard",
     palette: "forest",
@@ -350,10 +338,10 @@ export const EMPLOYEES: Employee[] = [
       "Execution wallet: balance, intents, the isolated signer, the withdrawal address, the kill switch, and a WhatsApp to Karthik for every real trade",
     whatIDo:
       "I watch the one wallet that can spend real money. I read where each intent stopped and why, whether the signer still holds the pinned key, and whether the balance moved without a confirmed intent behind it — and I message Karthik on WhatsApp the moment a real trade opens or closes. I authorise nothing — the guard and the transport policy decide that, and I only ever report.",
-    // Atlas because safety decides what may be entered at all; Rex because the
+    // Atlas because safety decides what may be entered at all; Milo because the
     // paper desk runs the same strategies without the money; Nova because an
     // owner-attention item has to reach somebody who can decide.
-    worksWith: ["atlas", "rex", "nova"],
+    worksWith: ["atlas", "milo", "nova"],
     personality:
       "Still, and slow to speak. Sits facing the door rather than the floor. Says the reason, never the reassurance.",
     accessory: "keyring",
