@@ -164,7 +164,7 @@ def test_wrong_passwords_are_throttled_per_caller():
 # --- what the wallet offers -------------------------------------------------
 
 def test_only_the_two_quiet_arms_are_offered_and_both_still_exist():
-    assert live_spec.OFFERED == ("G-QUIET", "G-QUIET4")
+    assert live_spec.OFFERED == ("G-QUIET", "G-QUIET4", "G-Q150")
     assert all(sid in live_spec.BY_ID for sid in live_spec.OFFERED)
     # Retired arms stay registered: the exit driver finds a held position's
     # rules through BY_ID.

@@ -82,7 +82,7 @@ def test_each_live_arm_copies_its_own_paper_book() -> None:
     arms = {a.name: a for a in ARMS}
     assert set(live_spec.PAPER_BOOKS) == {"G-B3-5M", "G-B3-4M", "G-BAS-5M",
                                           "G-QUIET", "G-QUIET4", "G-BAND5",
-                                          "G-BANDP", "G-B5-5M"}
+                                          "G-BANDP", "G-B5-5M", "G-Q150"}
     # The deep arm: its floor is the one number that separates it from the
     # baseline's population, and a reader taking it for B3's $198k would have
     # the wrong strategy.
@@ -104,6 +104,18 @@ def test_each_live_arm_copies_its_own_paper_book() -> None:
     assert live_spec.hold_minutes(live_spec.BY_ID["G-QUIET4"]) == 4
     assert (live_spec.pool_floor("G-QUIET") == live_spec.pool_floor("G-QUIET4")
             == 75_000)
+    # G-Q150 (2026-09-25): G-QUIET's rule and clock on $150k+ pools. Checked on
+    # the paper arm's own entry rule, which is what actually decides.
+    from datetime import UTC, datetime
+    from decimal import Decimal
+
+    from app.labs.graduation.tournament import accepts
+    q150 = arms[live_spec.PAPER_BOOKS["G-Q150"]]
+    assert (q150.quiet, q150.hold, live_spec.pool_floor("G-Q150")) == (True, 5, 150_000)
+    def buys(liq: int) -> bool:
+        return accepts(q150, mint="x", open_at=datetime.now(UTC), liquidity=Decimal(liq),
+                       fdv=None, sells=None, reuse=None)
+    assert (buys(149_999), buys(150_000)) == (False, True)
     for sid, book in live_spec.PAPER_BOOKS.items():
         assert live_spec.hold_minutes(live_spec.BY_ID[sid]) == arms[book].hold
         assert arms[book].clock == "entry", "the live clock starts at the entry"
