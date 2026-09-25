@@ -400,7 +400,14 @@ function pageLines(pathname: string): readonly string[] {
   return hit?.[1] ?? [];
 }
 
-export function DockCrew({ pathname }: { pathname: string }) {
+export function DockCrew({
+  pathname,
+  placement = "floating",
+}: {
+  pathname: string;
+  /** "rail": inside the desktop sidebar. "floating": the phone corner. */
+  placement?: "floating" | "rail";
+}) {
   const { bubble, say, soundOn, toggleSound } = useCrewVoice(DOCK);
   const [hidden, setHidden] = useState(false);
   const [hop, setHop] = useState<string | null>(null);
@@ -452,14 +459,14 @@ export function DockCrew({ pathname }: { pathname: string }) {
 
   if (hidden) {
     return (
-      <button type="button" className="dock-crew__paw" aria-label="Bring the crew back" onClick={() => setDock(false)}>
+      <button type="button" className={cn("dock-crew__paw", `dock-crew__paw--${placement}`)} aria-label="Bring the crew back" onClick={() => setDock(false)}>
         🐾
       </button>
     );
   }
 
   return (
-    <div className="dock-crew" data-hop={hop ?? undefined}>
+    <div className={cn("dock-crew", `dock-crew--${placement}`)} data-hop={hop ?? undefined}>
       <div className="dock-crew__row" aria-hidden>
         <Mates
           mates={DOCK}
