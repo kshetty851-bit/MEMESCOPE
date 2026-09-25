@@ -3,6 +3,7 @@
 import type { CSSProperties } from "react";
 
 import { PointerParallax } from "@/components/space/parallax";
+import { Planets } from "@/components/space/planets";
 import {
   BluePlanetArt,
   CometArt,
@@ -78,6 +79,10 @@ export function HomeUniverse({ phase = "idle" }: { phase?: ScenePhase }) {
           <div className="universe__stars universe__stars--near" />
           <div className="universe__dust" />
         </div>
+
+        {/* Karthik's wandering planets: in front of the stars, behind the
+            rocket, the frog and everything else in the scene. */}
+        <Planets />
 
         {/* --- MID: the planetary system -------------------------------- */}
         <div className="universe__depth universe__depth--mid">
