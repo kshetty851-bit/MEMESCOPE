@@ -244,8 +244,36 @@ function WhatIf({ data }: { data: KarthikBook }) {
   const w = data.whatif;
   if (!w) return null;
   const deepUp = Number(w.deep.pnl_usd) >= 0;
+  const old = data.every_trade;
   return (
     <aside className="space-y-4 lg:sticky lg:top-4">
+      {old ? (
+        <Panel>
+          <PanelHeader>
+            <PanelTitle>Check: every trade (the old rule)</PanelTitle>
+          </PanelHeader>
+          <div className="space-y-3 p-3">
+            <div>
+              <div className="text-[11px] uppercase tracking-wider text-ink-dim">Balance</div>
+              <div className={`text-xl font-semibold tabular-nums ${Number(old.pnl_usd) >= 0 ? "text-up" : "text-down"}`}>
+                {usd(old.balance_usd)} {pctOfCapital(old.pnl_usd, data.capital_usd)}
+              </div>
+              <div className="text-[12px] tabular-nums text-ink-dim">{rupees(old.balance_usd)}</div>
+            </div>
+            <div className="grid grid-cols-3 gap-2 text-[12px] tabular-nums">
+              <div><div className="text-ink-dim">trades</div>{old.trades}</div>
+              <div><div className="text-ink-dim">rugs</div>{old.rugs}</div>
+              <div><div className="text-ink-dim">lowest</div>{usd(old.lowest_usd)}</div>
+            </div>
+            <p className="text-[12px] leading-relaxed text-ink-dim">
+              The same start, buying every signal the cash allowed, as the book did
+              before {day(data.one_at_a_time_since)}. Kept here so the change of rule
+              stays visible.
+            </p>
+          </div>
+        </Panel>
+      ) : null}
+
       <Panel>
         <PanelHeader>
           <PanelTitle>
@@ -389,6 +417,7 @@ export function TradeList({ data }: { data: KarthikBook }) {
           Every trade{" "}
           <span className="font-normal text-ink-dim">
             &middot; {data.trades_list.length} closed &middot; sells at {data.hold_minutes} minutes
+            {data.busy_skipped ? ` · ${data.busy_skipped} let go while holding one` : ""}
             {data.skipped ? ` · ${data.skipped} skipped for want of cash` : ""}
           </span>
         </PanelTitle>
@@ -487,6 +516,15 @@ export function KarthikLabPage() {
           first day a look back rather than a test: only what happens from{" "}
           {day(data.resized_at)} on is a fair measure of this size.
         </p>
+        {data.one_at_a_time_since ? (
+          <p className="mt-1 max-w-[78ch] text-[12px] leading-relaxed text-ink-dim">
+            <b className="text-ink-2">One trade at a time:</b> it buys only when nothing is
+            held, and lets a signal go while a trade is open. Chosen on{" "}
+            {day(data.one_at_a_time_since)} and replayed from day 1, so every figure here
+            and in the checks beside it follows this rule; only trades from{" "}
+            {day(data.one_at_a_time_since)} on test it.
+          </p>
+        ) : null}
       </div>
 
       <div>
