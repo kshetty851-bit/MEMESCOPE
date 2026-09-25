@@ -312,3 +312,31 @@ async def test_the_public_summary_gives_headline_figures_and_nothing_else() -> N
     assert not exempt("/api/v1/labs/graduation/karthik/summary/x")
     assert not exempt("/api/v1/real-wallet/status")
     _api._KARTHIK_PUBLIC = None
+
+
+
+async def test_the_page_compares_sizes_and_a_150k_floor_without_changing_the_book() -> None:
+    """Every what-if is the book's own walk on other terms; the book's own
+    figures are untouched, and the $150k check leaves out shallower pools."""
+    from app.labs.graduation.api import karthik_book
+
+    _no_hold_cache()
+    start = next(s for s in config.FRESH_BOOKS if s.book == "KARTHIK_QUIET_5M").start
+    deep = _Pos("DEEP", start + timedelta(hours=1), 0.10)
+    deep.liq_open_usd = Decimal(300_000)
+    shallow = _Pos("SHALLOW", start + timedelta(hours=2), -0.99)   # a rug, $100k pool
+    book = await karthik_book(db=_StubDb([deep, shallow]))  # type: ignore[arg-type]
+
+    w = book["whatif"]
+    assert w["floor_usd"] == 150_000
+    assert [s["ticket_usd"] for s in w["sizes"]] == [10, 20, 25, 50, 100, 200]
+    assert [s["current"] for s in w["sizes"]] == [False] * 5 + [True]
+    # The $150k check never bought the shallow rug.
+    assert (w["deep"]["trades"], w["deep"]["rugs"]) == (1, 0)
+    assert w["deep"]["pnl_usd"] == Decimal("20.00")          # $200 at +10%
+    # At $10 a ticket the same two trades make and lose a twentieth as much.
+    ten = w["sizes"][0]
+    assert (ten["all"]["trades"], ten["all"]["rugs"]) == (2, 1)
+    assert ten["all"]["pnl_usd"] == Decimal("1.00") + Decimal("-9.90")
+    # The book itself is still both trades at $200.
+    assert (book["trades"], book["rugs"]) == (2, 1)

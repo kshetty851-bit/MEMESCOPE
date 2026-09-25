@@ -1515,6 +1515,50 @@ async def _karthik_holds(db: AsyncSession, spec: Any, ticket: float,
     return out
 
 
+#: The trade sizes Karthik's page compares, and the pool floor it checks.
+KARTHIK_WHATIF_TICKETS = (10, 20, 25, 50, 100, 200)
+KARTHIK_WHATIF_FLOOR_USD = 150_000
+
+
+def _karthik_whatif(rows: Sequence[Any], sol: Decimal | None, *, capital: float,
+                    ticket: float, cents: Decimal) -> dict[str, Any]:
+    """The same book on other terms, for comparison only: its trades at other
+    ticket sizes, and restricted to pools of $150k and up (asked for 24 Sep,
+    after EVO; see the quiet rule's record: 3 deaths in 41 trades under $150k,
+    2 in 223 above).
+
+    Each line is the book's OWN walk (`_funded_walk`) on the same capital and
+    start, so skips, pool impact at that size and the cash limit are all the
+    real book's. Nothing here changes what the book trades.
+    """
+    deep = [r for r in rows if float(r.liq_open_usd or 0) >= KARTHIK_WHATIF_FLOOR_USD]
+
+    def run(sub: Sequence[Any], size: float) -> dict[str, Any]:
+        w = _funded_walk([(r.opened_at, r.closed_at, float(r.net_return),
+                           float(r.impact_open or 0), float(r.impact_close or 0))
+                          for r in sub], sol, ticket=size, start=capital)
+        took = [(r, m) for r, m in zip(sub, w.pnl, strict=True) if m is not None]
+        return {
+            "balance_usd": Decimal(str(w.cash)).quantize(cents),
+            "pnl_usd": Decimal(str(w.cash - capital)).quantize(cents),
+            "pnl_pct": (Decimal(str(100 * (w.cash - capital) / capital)).quantize(cents)
+                        if capital else Decimal(0)),
+            "trades": w.funded,
+            "skipped": w.skipped,
+            "rugs": sum(1 for r, _ in took
+                        if float(r.net_return) <= float(config.OPERATOR_RUG_MOVE)),
+            "lowest_usd": Decimal(str(w.low)).quantize(cents),
+        }
+
+    return {
+        "floor_usd": KARTHIK_WHATIF_FLOOR_USD,
+        "deep": run(deep, ticket),
+        "sizes": [{"ticket_usd": t, "current": t == ticket,
+                   "all": run(rows, float(t)), "deep": run(deep, float(t))}
+                  for t in KARTHIK_WHATIF_TICKETS],
+    }
+
+
 def _karthik_days(took: Sequence[tuple[Any, float]], start: datetime,
                   capital: float, cents: Decimal) -> list[dict[str, Any]]:
     """One row per 24 hours since the book opened, newest first.
@@ -1655,6 +1699,10 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
         # of the starting $500, a different denominator for a different
         # question, so this one carries its own label on the page.
         "days": _karthik_days(took, spec.start, float(spec.capital_usd), cents),
+        # The same trades at other sizes, and on $150k+ pools only. A check,
+        # shown beside the book; the book itself stays on its own rule.
+        "whatif": _karthik_whatif(rows, sol, capital=float(spec.capital_usd),
+                                  ticket=float(spec.ticket_usd), cents=cents),
         # Would holding longer have paid? Same coins, same entries, later exits.
         "holds": await _karthik_holds(db, spec, float(spec.ticket_usd), cents),
         # The rows the BOOK bought, with the money the book made on them --
