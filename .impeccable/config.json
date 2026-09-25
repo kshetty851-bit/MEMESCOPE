@@ -1,0 +1,20 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "bounce-easing",
+        "value": "cubic-bezier(0.3, 1.5, 0.5, 1)",
+        "createdAt": "2026-09-25T06:19:41.276Z",
+        "reason": "User confirmed cubic-bezier(0.3, 1.5, 0.5, 1) is intentional (cartoon crew speech-bubble pop, 2026-09-25)"
+      },
+      {
+        "rule": "bounce-easing",
+        "value": "cubic-bezier(0.3, 1.4, 0.5, 1)",
+        "createdAt": "2026-09-25T06:19:41.307Z",
+        "reason": "User confirmed cubic-bezier(0.3, 1.4, 0.5, 1) is intentional (cartoon crew cheer hop, 2026-09-25)"
+      }
+    ]
+  }
+}
