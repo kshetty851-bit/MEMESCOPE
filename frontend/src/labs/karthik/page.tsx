@@ -14,7 +14,8 @@ import type { KarthikBook, KarthikDay, KarthikTrade, KarthikWhatIfLine } from ".
  * KARTHIK'S LAB — ONE BOOK, PAPER ONLY.
  *
  * His own money on one rule, started when he asked for it and judged thirty
- * days later. Resized once, on 24 Sep, from $500 at $100 to $600 at $200.
+ * days later. Resized on 24 Sep from $500 at $100 to $600 at $200, and on
+ * 25 Sep to $400 at $200.
  * It holds no wallet and has never placed an order; the real wallet is its own
  * page and its own switch.
  *
@@ -293,6 +294,9 @@ function WhatIf({ data }: { data: KarthikBook }) {
                 <tr key={s.ticket_usd} className={`border-t border-line/60 ${s.current ? "font-semibold" : ""}`}>
                   <td className="py-1.5 pr-2">
                     {usd(s.ticket_usd).replace(".00", "")}
+                    <span className="font-normal text-ink-dim">
+                      {" "}on {usd(s.capital_usd).replace(".00", "")}
+                    </span>
                     {s.current ? <span className="ml-1 text-[10px] font-normal text-ink-dim">now</span> : null}
                   </td>
                   <td className="py-1.5 pr-2 text-right"><Signed line={s.all} /></td>
@@ -302,9 +306,8 @@ function WhatIf({ data }: { data: KarthikBook }) {
             </tbody>
           </table>
           <p className="mt-2 text-[11px] leading-relaxed text-ink-dim">
-            On the same {usd(data.capital_usd)}. Smaller trades move the pool less, so
-            each one keeps a little more of its move; a rug costs the whole trade at
-            any size.
+            Each size runs on its own balance from the same start, and its % is of
+            that balance. A rug costs the whole trade at any size.
           </p>
         </div>
       </Panel>

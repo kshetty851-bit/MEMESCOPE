@@ -1054,17 +1054,18 @@ FRESH_BOOKS: tuple[FreshBookSpec, ...] = (
     #
     # RESIZED 2026-09-24 from $500 at $100 a trade to $600 at $200, at his
     # request, after its first day had been seen — see `KARTHIK_RESIZED_AT`.
-    # The start and the judge date did not move; the walk replays the same
+    # RESIZED AGAIN 2026-09-25 to $400 at $200, at his request. The start and
+    # the judge date did not move either time; the walk replays the same
     # trades at the new size.
     FreshBookSpec("KARTHIK_QUIET_5M", datetime(2026, 9, 23, 12, 0, tzinfo=UTC),
-                  Decimal(600), Decimal(200)),
+                  Decimal(400), Decimal(200)),
 )
 
 #: When Karthik's book changed size, and what it was before. The new size was
 #: chosen AFTER its first day was seen, so everything before this moment is in
 #: sample for the size and the page says so; only what follows is a fair test.
-KARTHIK_RESIZED_AT = datetime(2026, 9, 24, 9, 34, tzinfo=UTC)
-KARTHIK_PREVIOUS_SIZE = (Decimal(500), Decimal(100))
+KARTHIK_RESIZED_AT = datetime(2026, 9, 25, 4, 50, tzinfo=UTC)
+KARTHIK_PREVIOUS_SIZE = (Decimal(600), Decimal(200))
 
 #: When Karthik's book is judged. Thirty days from its start, written down
 #: before it had a single trade: a date chosen afterwards is chosen by the

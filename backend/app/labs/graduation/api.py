@@ -1428,8 +1428,10 @@ async def fresh_held(book: str = "", db: AsyncSession = Depends(get_db)) -> Fres
     return out
 
 
-#: The trade sizes Karthik's page compares, and the pool floor it checks.
-KARTHIK_WHATIF_TICKETS = (10, 20, 25, 50, 100, 200)
+#: The trade sizes Karthik's page compares, each on the balance he chose for
+#: it (25 Sep): $100 behind the small sizes, $200 behind $100, $400 behind
+#: $200. And the pool floor it checks.
+KARTHIK_WHATIF_SIZES = ((10, 100), (20, 100), (25, 100), (50, 100), (100, 200), (200, 400))
 KARTHIK_WHATIF_FLOOR_USD = 150_000
 
 
@@ -1440,13 +1442,14 @@ def _karthik_whatif(rows: Sequence[Any], sol: Decimal | None, *, capital: float,
     after EVO; see the quiet rule's record: 3 deaths in 41 trades under $150k,
     2 in 223 above).
 
-    Each line is the book's OWN walk (`_funded_walk`) on the same capital and
-    start, so skips, pool impact at that size and the cash limit are all the
-    real book's. Nothing here changes what the book trades.
+    Each line is the book's OWN walk (`_funded_walk`) from the same start, on
+    the balance that size is paired with, so skips, pool impact at that size
+    and the cash limit are all the real book's. Nothing here changes what the
+    book trades.
     """
     deep = [r for r in rows if float(r.liq_open_usd or 0) >= KARTHIK_WHATIF_FLOOR_USD]
 
-    def run(sub: Sequence[Any], size: float) -> dict[str, Any]:
+    def run(sub: Sequence[Any], size: float, capital: float) -> dict[str, Any]:
         w = _funded_walk([(r.opened_at, r.closed_at, float(r.net_return),
                            float(r.impact_open or 0), float(r.impact_close or 0))
                           for r in sub], sol, ticket=size, start=capital)
@@ -1465,10 +1468,12 @@ def _karthik_whatif(rows: Sequence[Any], sol: Decimal | None, *, capital: float,
 
     return {
         "floor_usd": KARTHIK_WHATIF_FLOOR_USD,
-        "deep": run(deep, ticket),
-        "sizes": [{"ticket_usd": t, "current": t == ticket,
-                   "all": run(rows, float(t)), "deep": run(deep, float(t))}
-                  for t in KARTHIK_WHATIF_TICKETS],
+        "deep": run(deep, ticket, capital),
+        "sizes": [{"ticket_usd": t, "capital_usd": c,
+                   "current": (t, c) == (ticket, capital),
+                   "all": run(rows, float(t), float(c)),
+                   "deep": run(deep, float(t), float(c))}
+                  for t, c in KARTHIK_WHATIF_SIZES],
     }
 
 
