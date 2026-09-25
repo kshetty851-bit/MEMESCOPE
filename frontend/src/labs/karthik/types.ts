@@ -31,6 +31,7 @@ export interface KarthikBook {
   rugs: number;
   days: KarthikDay[];
   holds: KarthikHold[];
+  whatif: KarthikWhatIf;
   trades_list: KarthikTrade[];
 }
 
@@ -59,4 +60,23 @@ export interface KarthikHold {
   wiped: number;
   /** True for the row the book actually trades, which is net of its costs. */
   book: boolean;
+}
+
+/** One way of trading the same book: its balance and record on those terms. */
+export interface KarthikWhatIfLine {
+  balance_usd: string;
+  pnl_usd: string;
+  pnl_pct: string;
+  trades: number;
+  skipped: number;
+  rugs: number;
+  lowest_usd: string;
+}
+
+/** The same trades at other sizes, and on $150k+ pools only. A check shown
+ *  beside the book; the book itself stays on its own rule. */
+export interface KarthikWhatIf {
+  floor_usd: number;
+  deep: KarthikWhatIfLine;
+  sizes: { ticket_usd: number; current: boolean; all: KarthikWhatIfLine; deep: KarthikWhatIfLine }[];
 }

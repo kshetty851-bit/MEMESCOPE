@@ -8,7 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/states";
 
 import { useKarthikBook } from "./hooks";
-import type { KarthikDay, KarthikHold, KarthikTrade } from "./types";
+import type { KarthikBook, KarthikDay, KarthikHold, KarthikTrade, KarthikWhatIfLine } from "./types";
 
 /**
  * KARTHIK'S LAB — ONE BOOK, PAPER ONLY.
@@ -302,6 +302,102 @@ function Holds({ holds }: { holds: KarthikHold[] }) {
   );
 }
 
+function Signed({ line }: { line: KarthikWhatIfLine }) {
+  const n = Number(line.pnl_usd);
+  return (
+    <span className={n >= 0 ? "text-up" : "text-down"}>
+      {n >= 0 ? "+" : ""}
+      {usd(line.pnl_usd)}{" "}
+      <span className="text-[11px] opacity-80">
+        ({Number(line.pnl_pct) >= 0 ? "+" : ""}
+        {Number(line.pnl_pct).toFixed(1)}%)
+      </span>
+    </span>
+  );
+}
+
+/**
+ * THE SIDE PANEL: the same book on other terms, to check, never to trade.
+ *
+ * "Pools $150k+ only" was asked for after EVO (24 Sep): on the quiet rule's
+ * record the $75k-$150k pools died 3 times in 41 trades, those above 2 in 223.
+ * The trade-size table answers "what if I had used $10, $20...". Every line is
+ * the book's own walk on the same capital and start, so skips, pool impact at
+ * that size and the cash limit are the real book's.
+ */
+function WhatIf({ data }: { data: KarthikBook }) {
+  const w = data.whatif;
+  if (!w) return null;
+  const deepUp = Number(w.deep.pnl_usd) >= 0;
+  return (
+    <aside className="space-y-4 lg:sticky lg:top-4">
+      <Panel>
+        <PanelHeader>
+          <PanelTitle>
+            Check: pools {usd(w.floor_usd).replace(".00", "")}+ only
+          </PanelTitle>
+        </PanelHeader>
+        <div className="space-y-3 p-3">
+          <div>
+            <div className="text-[11px] uppercase tracking-wider text-ink-dim">Balance</div>
+            <div className={`text-xl font-semibold tabular-nums ${deepUp ? "text-up" : "text-down"}`}>
+              {usd(w.deep.balance_usd)} {pctOfCapital(w.deep.pnl_usd, data.capital_usd)}
+            </div>
+            <div className="text-[12px] tabular-nums text-ink-dim">{rupees(w.deep.balance_usd)}</div>
+          </div>
+          <div className="grid grid-cols-3 gap-2 text-[12px] tabular-nums">
+            <div><div className="text-ink-dim">trades</div>{w.deep.trades}</div>
+            <div><div className="text-ink-dim">rugs</div>{w.deep.rugs}</div>
+            <div><div className="text-ink-dim">lowest</div>{usd(w.deep.lowest_usd)}</div>
+          </div>
+          <p className="text-[12px] leading-relaxed text-ink-dim">
+            The same {usd(data.capital_usd)}, {usd(data.ticket_usd)} a trade and start
+            date, buying only pools of {usd(w.floor_usd).replace(".00", "")} and up. A
+            what-if to watch: the book on the left stays on its own rule. The floor was
+            chosen after seeing EVO die at $146k, so only the days from now on test it.
+          </p>
+        </div>
+      </Panel>
+
+      <Panel>
+        <PanelHeader>
+          <PanelTitle>If each trade had been</PanelTitle>
+        </PanelHeader>
+        <div className="overflow-x-auto p-3">
+          <table className="w-full text-[12px] tabular-nums">
+            <thead className="text-[11px] uppercase tracking-wider text-ink-dim">
+              <tr>
+                <th className="py-1 pr-2 text-left font-normal">size</th>
+                <th className="py-1 pr-2 text-right font-normal">this book</th>
+                <th className="py-1 text-right font-normal">
+                  {usd(w.floor_usd).replace(".00", "")}+ only
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {w.sizes.map((s) => (
+                <tr key={s.ticket_usd} className={`border-t border-line/60 ${s.current ? "font-semibold" : ""}`}>
+                  <td className="py-1.5 pr-2">
+                    {usd(s.ticket_usd).replace(".00", "")}
+                    {s.current ? <span className="ml-1 text-[10px] font-normal text-ink-dim">now</span> : null}
+                  </td>
+                  <td className="py-1.5 pr-2 text-right"><Signed line={s.all} /></td>
+                  <td className="py-1.5 text-right"><Signed line={s.deep} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="mt-2 text-[11px] leading-relaxed text-ink-dim">
+            On the same {usd(data.capital_usd)}. Smaller trades move the pool less, so
+            each one keeps a little more of its move; a rug costs the whole trade at
+            any size.
+          </p>
+        </div>
+      </Panel>
+    </aside>
+  );
+}
+
 export function KarthikLabPage() {
   const { data, isLoading, isError, refetch } = useKarthikBook();
   // Before the early returns: a hook may not sit behind a condition, and the
@@ -328,7 +424,8 @@ export function KarthikLabPage() {
   );
 
   return (
-    <div className="space-y-4">
+    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_21rem] lg:items-start">
+    <div className="min-w-0 space-y-4">
       <div>
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h1 className="text-xl font-semibold">Karthik&apos;s Lab</h1>
@@ -423,6 +520,8 @@ export function KarthikLabPage() {
         )}
       </Panel>
 
+    </div>
+    <WhatIf data={data} />
     </div>
   );
 }
