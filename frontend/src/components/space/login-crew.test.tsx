@@ -50,14 +50,6 @@ describe("the crew at the airlock", () => {
     expect(container.querySelector(".login-crew__bubble")).toHaveTextContent("Welcome back");
   });
 
-  it("remembers the mute choice", () => {
-    render(<LoginCrew />);
-    const button = screen.getByRole("button", { name: /mute the crew/i });
-    expect(button).toHaveAttribute("aria-pressed", "true");
-    fireEvent.click(button);
-    expect(screen.getByRole("button", { name: /sound on/i })).toHaveAttribute("aria-pressed", "false");
-    expect(window.localStorage.getItem("memescope.loginCrewSound")).toBe("off");
-  });
 });
 
 describe("the crew after sign-in", () => {
@@ -128,19 +120,13 @@ describe("sound", () => {
     expect(tones).toHaveBeenCalled();
   });
 
-  it("stays silent when muted", () => {
-    window.localStorage.setItem("memescope.loginCrewSound", "off");
+  it("has no mute button, and whooshes when an animal is tapped", () => {
     const tones = fakeAudio();
-    vi.useFakeTimers();
     const { container } = render(<DockCrew pathname="/karthik-lab" />);
+    expect(screen.queryByRole("button", { name: /mute|sound/i })).toBeNull();
     fireEvent.pointerDown(window);
-    act(() => {
-      vi.advanceTimersByTime(20_000);
-    });
     fireEvent.click(container.querySelector(".dock-crew__mate--tiger img")!);
-    // Muted means the master gain is zero; nothing is scheduled at all when
-    // the say() path sees the switch off.
-    expect(tones).not.toHaveBeenCalled();
+    expect(tones.mock.calls.length).toBeGreaterThanOrEqual(3);  // whoosh + two-tone pop
   });
 });
 
