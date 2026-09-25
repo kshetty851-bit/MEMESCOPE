@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { FeedbackWidget } from "@/components/alpha/feedback-widget";
 import { ActivityHeartbeat } from "@/components/alpha/activity-heartbeat";
 import { AppShell } from "@/components/layout/app-shell";
+import { DockCrew } from "@/components/space/login-crew";
 import { LiveUpdatesProvider } from "@/hooks/use-live-updates";
 import { ALPHA_ACCESS } from "@/lib/env";
 import { api } from "@/lib/api-client";
@@ -70,6 +71,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         {/* Every page, because the moment a tester notices something is the
             only moment they will report it. */}
         <FeedbackWidget />
+        {/* The animal crew keeps Karthik company on every page (2026-09-25). */}
+        <DockCrew pathname={pathname} />
       </div>
     </LiveUpdatesProvider>
   );
