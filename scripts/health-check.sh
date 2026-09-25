@@ -121,9 +121,12 @@ check "token feed" "${BASE_URL}/api/v1/tokens/latest?limit=1"
 echo
 echo "Frontend"
 check "landing" "${FRONTEND_URL}/"
-check "command centre" "${FRONTEND_URL}/command"
-check "track record" "${FRONTEND_URL}/record"
-check "paper wallet" "${FRONTEND_URL}/wallet"
+check "karthik lab" "${FRONTEND_URL}/karthik-lab"
+check "real wallet" "${FRONTEND_URL}/real-wallet"
+check "hq" "${FRONTEND_URL}/hq"
+# FOUR TIMES: /command, /record and /wallet were deleted on 2026-09-25 at
+# Karthik's request, and this list named all three. Karthik's Lab is where
+# the site opens after login now; the real wallet and HQ are what he runs.
 # THREE TIMES NOW. `/lab` went in 2b09263, `/launches` in bb6c21c, and
 # `/graduation` on 2026-09-09 — each time the check outlived the page it
 # named, so verification 404'd on every deploy whatever the release contained.
@@ -135,7 +138,7 @@ check "paper wallet" "${FRONTEND_URL}/wallet"
 # enough on its own.
 #
 # The list is now only pages with no plausible reason to be deleted: the
-# terminal, the record, the wallet and settings are the product. LAB PAGES
+# ones the owner runs day to day. LAB PAGES
 # ARE NOT CHECKED HERE — they are experiments and experiments get retired,
 # which is exactly the thing that keeps breaking this.
 check "settings" "${FRONTEND_URL}/settings"
