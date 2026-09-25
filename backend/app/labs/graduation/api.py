@@ -1433,6 +1433,8 @@ async def fresh_held(book: str = "", db: AsyncSession = Depends(get_db)) -> Fres
 #: $200. And the pool floor it checks.
 KARTHIK_WHATIF_SIZES = ((10, 100), (20, 100), (25, 100), (50, 100), (100, 200), (200, 400))
 KARTHIK_WHATIF_FLOOR_USD = 150_000
+#: Deeper floors shown beside it, to check (Karthik, 25 Sep).
+KARTHIK_WHATIF_FLOORS = (150_000, 200_000, 300_000, 500_000)
 
 
 def _karthik_whatif(rows: Sequence[Any], sol: Decimal | None, *, capital: float,
@@ -1469,6 +1471,10 @@ def _karthik_whatif(rows: Sequence[Any], sol: Decimal | None, *, capital: float,
     return {
         "floor_usd": KARTHIK_WHATIF_FLOOR_USD,
         "deep": run(deep, ticket, capital),
+        "floors": [{"floor_usd": f, **run([r for r in rows
+                                           if float(r.liq_open_usd or 0) >= f],
+                                          ticket, capital)}
+                   for f in KARTHIK_WHATIF_FLOORS],
         "sizes": [{"ticket_usd": t, "capital_usd": c,
                    "current": (t, c) == (ticket, capital),
                    "all": run(rows, float(t), float(c)),

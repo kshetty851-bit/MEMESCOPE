@@ -274,6 +274,46 @@ function WhatIf({ data }: { data: KarthikBook }) {
         </div>
       </Panel>
 
+      {w.floors ? (
+        <Panel>
+          <PanelHeader>
+            <PanelTitle>Check: deeper pools</PanelTitle>
+          </PanelHeader>
+          <div className="overflow-x-auto p-3">
+            <table className="w-full text-[12px] tabular-nums">
+              <thead className="text-[11px] uppercase tracking-wider text-ink-dim">
+                <tr>
+                  <th className="py-1 pr-2 text-left font-normal">pools</th>
+                  <th className="py-1 pr-2 text-right font-normal">balance</th>
+                  <th className="py-1 pr-2 text-right font-normal">trades</th>
+                  <th className="py-1 text-right font-normal">rugs</th>
+                </tr>
+              </thead>
+              <tbody>
+                {w.floors.map((f) => (
+                  <tr key={f.floor_usd} className="border-t border-line/60">
+                    <td className="py-1.5 pr-2">{usd(f.floor_usd).replace(".00", "")}+</td>
+                    <td className="py-1.5 pr-2 text-right">
+                      {usd(f.balance_usd)}{" "}
+                      <span className={Number(f.pnl_usd) >= 0 ? "text-up" : "text-down"}>
+                        {pctOfCapital(f.pnl_usd, data.capital_usd)}
+                      </span>
+                    </td>
+                    <td className="py-1.5 pr-2 text-right">{f.trades}</td>
+                    <td className="py-1.5 text-right">{f.rugs}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="mt-2 text-[11px] leading-relaxed text-ink-dim">
+              The same {usd(data.capital_usd)} at {usd(data.ticket_usd)} a trade, buying
+              only pools at or above each line. Deeper pools rug less but move less, so
+              wins shrink as the line rises. A look back, not a test.
+            </p>
+          </div>
+        </Panel>
+      ) : null}
+
       <Panel>
         <PanelHeader>
           <PanelTitle>If each trade had been</PanelTitle>
