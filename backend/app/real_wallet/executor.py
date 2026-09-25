@@ -513,9 +513,10 @@ class RealWalletExecutor:
         # judge and only ever shrinks the book, so it is not asked.
         limits_ok = sell or await self._entry_limits_ok(intent, now, balance_lamports)
         switch = await AutotradeSwitchService(self._session).state()
-        # A family wallet's buys run on its OWN switch; the owner's switch is
-        # the owner's. A sell always runs, as before.
-        switch_on = switch.enabled if account is None else account.enabled
+        # A family wallet's buys need its OWN switch on AND the owner's: when
+        # the owner stops, every family wallet stops buying too. A sell always
+        # runs, as before.
+        switch_on = switch.enabled if account is None else (switch.enabled and account.enabled)
         safety_at = await self._safety_at(intent)
         evidence = intent.order_evidence or {}
         return SubmissionFacts(

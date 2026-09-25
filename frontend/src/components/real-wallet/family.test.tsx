@@ -96,6 +96,7 @@ describe("trading from a member's own wallet", () => {
     const start = await screen.findByRole("button", { name: "Start trading" });
     expect(start).toBeDisabled();
     expect(screen.getByText(/Only Karthik, signed in, can start this wallet/)).toBeInTheDocument();
+    expect(screen.getByText(/when he stops his, this\s+one stops buying too/)).toBeInTheDocument();
   });
 
   it("starts when Karthik is signed in, at the size he picked", async () => {

@@ -85,12 +85,13 @@ class RealWalletDriver:
     async def _family_ticks(self, now: datetime) -> dict[str, str]:
         """One pass per family member's OWN wallet (stage 2, 2026-09-25).
 
-        Independent of the owner's on/off: each wallet has its own switch,
-        which only Karthik can turn on. It trades the strategy he nominated at
-        Start — there is one strategy on this platform worth real money at a
-        time — and every bound is that wallet's own: its balance, its open
-        positions, today's trades and losses. The kill switches still stop
-        everything.
+        A family wallet buys only while the OWNER's wallet is on AND its own
+        switch is on (Karthik, 2026-09-25: "stop family wallets when I stop
+        mine"). Stopping the owner's wallet therefore stops every family
+        wallet's buying; starting it again resumes the ones still switched on.
+        It trades the strategy he nominated at Start, and every bound is that
+        wallet's own: its balance, its open positions, today's trades and
+        losses. The kill switches still stop everything.
         """
         accounts = await family_wallets.accounts(self._session)
         if not accounts:
@@ -102,6 +103,8 @@ class RealWalletDriver:
         for account in accounts:
             if not account.enabled:
                 out[account.member] = "own_wallet_off"
+            elif not switch.enabled:
+                out[account.member] = "owner_wallet_stopped"
             elif not switch.nominated_strategy:
                 out[account.member] = "no_strategy_nominated"
             elif halted:
