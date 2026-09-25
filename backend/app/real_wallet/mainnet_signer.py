@@ -47,7 +47,7 @@ from typing import Any
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.db.session import SessionFactory
-from app.real_wallet import account_close, tx_inspect
+from app.real_wallet import account_close, family_wallets, tx_inspect
 from app.real_wallet.live_readiness import ExecutionState
 from app.real_wallet.live_repository import LiveIntentRepository
 from app.real_wallet.network import require_verified_network
@@ -85,7 +85,24 @@ def _secret_file() -> Path:
     value = os.environ.get("MAINNET_SIGNER_FILE", "").strip()
     if not value:
         raise MainnetSignerError("mainnet_signer_secret_file_not_configured")
-    path = Path(value)
+    return _private(Path(value))
+
+
+def _family_file(member: str) -> Path:
+    """One family member's key: ``<FAMILY_SIGNER_DIR>/<member>.json``.
+
+    The directory, like the owner's key path, is read from THIS process's
+    environment and never from settings, so no application container can
+    name it.
+    """
+    folder = os.environ.get("FAMILY_SIGNER_DIR", "").strip()
+    if not folder:
+        raise MainnetSignerError("family_signer_dir_not_configured")
+    return _private(Path(folder) / f"{member.lower()}.json")
+
+
+def _private(path: Path) -> Path:
+    """The file, if only its owner can read it."""
     try:
         mode = path.stat().st_mode
     except OSError as exc:
@@ -110,6 +127,54 @@ async def _verified_chain() -> str:
             allowed_rpc_hosts=settings.REAL_WALLET_ALLOWED_RPC_HOSTS,
         )
     return status.observed_genesis_hash or ""
+
+
+def _signer_for(wallet: str) -> FileExecutionSigner:
+    """The key for exactly this wallet, or a refusal.
+
+    The owner's wallet loads the owner's file; a family wallet loads that
+    member's file. Either way `load` derives the public key from the secret
+    and refuses unless it equals the one pinned for that wallet, so a key file
+    swapped between members signs nothing. A wallet that is neither is refused
+    before any file is opened, and so is a malformed family map.
+    """
+    owner = settings.REAL_WALLET_PUBLIC_KEY.strip()
+    if not owner:
+        raise MainnetSignerError("mainnet_signer_pinned_key_not_configured")
+    if wallet == owner:
+        return FileExecutionSigner.load(secret_file=_secret_file(),
+                                        expected_public_key=owner)
+    try:
+        member = family_wallets.member_for(wallet)
+    except family_wallets.FamilyWalletConfigError as exc:
+        raise MainnetSignerError(f"family_wallets_misconfigured:{exc}") from exc
+    if member is None:
+        raise MainnetSignerError("wallet_is_not_pinned")
+    return FileExecutionSigner.load(secret_file=_family_file(member),
+                                    expected_public_key=wallet)
+
+
+async def identity_family() -> dict[str, Any]:
+    """Which family keys are mounted, and does each match its pinned address?
+
+    Public keys only, per member. A member whose file is missing or does not
+    match reports why rather than failing the whole answer.
+    """
+    await _verified_chain()
+    try:
+        pinned = family_wallets.pinned()
+    except family_wallets.FamilyWalletConfigError as exc:
+        raise MainnetSignerError(f"family_wallets_misconfigured:{exc}") from exc
+    out: dict[str, Any] = {}
+    for member, key in pinned.items():
+        try:
+            signer = _signer_for(key)
+            out[member] = {"public_key": signer.public_key,
+                           "matches_pinned_key": signer.public_key == key}
+        except Exception as exc:  # reported, per member
+            out[member] = {"public_key": key, "matches_pinned_key": False,
+                           "error": str(exc) or type(exc).__name__}
+    return {"family": out}
 
 
 async def identity() -> dict[str, Any]:
@@ -214,7 +279,9 @@ async def sign_intent(intent_id: uuid.UUID) -> dict[str, Any]:
     }
 
 
-async def sign_withdrawal(encoded_transaction: str) -> dict[str, Any]:
+async def sign_withdrawal(
+    encoded_transaction: str, wallet: str | None = None
+) -> dict[str, Any]:
     """Sign a native SOL transfer, after proving for itself where it goes.
 
     The caller sends bytes here rather than an id, which is the opposite of
@@ -228,11 +295,19 @@ async def sign_withdrawal(encoded_transaction: str) -> dict[str, Any]:
     count, order, program and discriminator. `inspect_native_transfer` does all
     of that against a spec this function builds from its own settings, never
     from anything received.
+
+    ``wallet`` is which wallet PAYS: the owner's by default, or a family
+    member's own wallet (2026-09-25). It chooses the key and the fee payer and
+    nothing else — the destination is still this process's own setting, so a
+    family withdrawal can only ever reach the owner's nominated address.
     """
     genesis = await _verified_chain()
-    expected = settings.REAL_WALLET_PUBLIC_KEY.strip()
-    if not expected:
+    owner = settings.REAL_WALLET_PUBLIC_KEY.strip()
+    if not owner:
         raise MainnetSignerError("mainnet_signer_pinned_key_not_configured")
+    expected = (wallet or owner).strip()
+    # Proves the wallet is pinned (owner or family) before anything is parsed.
+    signer = _signer_for(expected)
 
     destination = settings.REAL_WALLET_WITHDRAWAL_ADDRESS.strip()
     if not destination:
@@ -258,12 +333,10 @@ async def sign_withdrawal(encoded_transaction: str) -> dict[str, Any]:
         logger.warning("mainnet_signer_refused_withdrawal", reason=str(exc))
         raise MainnetSignerError(f"withdrawal_rejected:{exc}") from exc
 
-    signer = FileExecutionSigner.load(
-        secret_file=_secret_file(), expected_public_key=expected
-    )
     signed, signature = signer.sign_native_transaction(encoded_transaction)
     logger.warning("mainnet_signer_signed_withdrawal", genesis=genesis[:12],
-                   destination=inspected.destination, lamports=inspected.lamports)
+                   payer=expected, destination=inspected.destination,
+                   lamports=inspected.lamports)
     return {
         "signed_transaction": signed,
         "signature": signature,
@@ -316,12 +389,20 @@ async def _handle_connection(
         op = body.get("op")
         if op == IDENTITY:
             response: dict[str, Any] = {"ok": True, **(await identity())}
-        elif op in ("sign_withdrawal", "sign_close_accounts"):
+        elif op == "identity_family":
+            response = {"ok": True, **(await identity_family())}
+        elif op == "sign_withdrawal":
+            encoded, wallet = body.get("transaction"), body.get("wallet")
+            if not isinstance(encoded, str) or not encoded:
+                raise MainnetSignerError("invalid_signer_request")
+            if wallet is not None and (not isinstance(wallet, str) or not wallet):
+                raise MainnetSignerError("invalid_signer_request")
+            response = {"ok": True, **(await sign_withdrawal(encoded, wallet))}
+        elif op == "sign_close_accounts":
             encoded = body.get("transaction")
             if not isinstance(encoded, str) or not encoded:
                 raise MainnetSignerError("invalid_signer_request")
-            sign_bytes = sign_withdrawal if op == "sign_withdrawal" else sign_close_accounts
-            response = {"ok": True, **(await sign_bytes(encoded))}
+            response = {"ok": True, **(await sign_close_accounts(encoded))}
         elif op == "sign":
             raw_id = body.get("intent_id")
             if not isinstance(raw_id, str):

@@ -1019,6 +1019,13 @@ class Settings(BaseSettings):
     #: `real_wallet.family.hash_password`). Never the password itself: the
     #: repository is public. Empty lets nobody in.
     REAL_WALLET_FAMILY_PASSWORD_HASH: str = ""
+    #: Each family member's OWN wallet, public keys only:
+    #: `jaya=<pubkey>,asha=<pubkey>,apoorva=<pubkey>`. The secrets are 0600 files
+    #: only the isolated signer mounts (`FAMILY_SIGNER_DIR`); it checks each one
+    #: against this map before signing. Set in the host's env file, never here:
+    #: the repository is public. Empty means no family wallets. See
+    #: `real_wallet.family_wallets`.
+    REAL_WALLET_FAMILY_WALLETS: str = ""
     # Phase 2 is a separate, deliberately tiny manual-devnet workflow. These
     # values are used by the API and signer to enforce the same small envelope;
     # the signer-file *path* is intentionally not a Settings field because the
