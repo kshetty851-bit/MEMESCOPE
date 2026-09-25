@@ -902,3 +902,62 @@
   .rail-top-crew__mate,
   .dock-news__dot { animation: none !important; }
 }
+
+/* --- 11. THE PLANETS (2026-09-25) ------------------------------------------
+   Karthik's cartoon planets, wandering behind the homepage and the sign-in
+   pages (components/space/planets.tsx). Every value that makes a planet's
+   path its own comes in as a custom property picked on the client; the motion
+   itself is transform only. Above the starfield, below every word. */
+
+.planets {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.planets__body {
+  position: absolute;
+  left: var(--x);
+  top: var(--y);
+  width: calc(var(--size) * 1px);
+  animation: planet-wander var(--wander) ease-in-out var(--delay) infinite alternate;
+  will-change: transform;
+}
+.planets__img {
+  display: block;
+  width: 100%;
+  height: auto;
+  user-select: none;
+  animation: planet-spin var(--spin) linear var(--delay) infinite;
+  animation-direction: var(--spin-dir);
+}
+/* A ring turning end over end looks broken; ringed planets rock instead. */
+.planets__img--ringed {
+  animation: planet-rock calc(var(--spin) / 4) ease-in-out var(--delay) infinite alternate;
+}
+
+@keyframes planet-wander {
+  0% { transform: translate(0, 0); }
+  33% { transform: translate(var(--x1), var(--y1)); }
+  66% { transform: translate(var(--x2), var(--y2)); }
+  100% { transform: translate(var(--x3), var(--y3)); }
+}
+@keyframes planet-spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes planet-rock {
+  from { transform: rotate(-8deg); }
+  to { transform: rotate(8deg); }
+}
+
+/* A phone gets the first seven, smaller. */
+@media (max-width: 640px) {
+  .planets__body { width: calc(var(--size) * 0.6px); }
+  .planets__body:nth-child(n + 8) { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .planets__body,
+  .planets__img { animation: none; }
+}

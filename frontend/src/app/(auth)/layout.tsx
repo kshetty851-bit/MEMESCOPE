@@ -4,6 +4,7 @@ import { AiCore } from "@/components/brand/ai-core";
 import { Universe } from "@/components/brand/universe/universe";
 import { Logo } from "@/components/brand/logo";
 import { LoginCrew } from "@/components/space/login-crew";
+import { Planets } from "@/components/space/planets";
 import { Label } from "@/components/ui/panel";
 
 /**
@@ -15,6 +16,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
   return (
     <div className="relative grid min-h-screen lg:grid-cols-2">
       <Universe minimal />
+      <Planets />
       <LoginCrew />
 
       {/* Left: the instrument */}
@@ -39,11 +41,15 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
       </aside>
 
       {/* Right: credentials */}
-      <main className="flex flex-col items-center justify-center px-6 py-12">
+      <main className="relative flex flex-col items-center justify-center px-6 py-12">
         <Link href="/" className="mb-10 lg:hidden">
           <Logo />
         </Link>
-        <div className="w-full max-w-sm">{children}</div>
+        {/* Frosted like the left panel, so a planet drifting behind the
+            form softens instead of sitting under its words. */}
+        <div className="w-full max-w-sm rounded-2xl border border-line/50 bg-abyss/55 p-6 backdrop-blur-md">
+          {children}
+        </div>
       </main>
     </div>
   );
