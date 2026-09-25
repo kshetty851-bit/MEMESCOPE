@@ -129,12 +129,11 @@ const UNAVAILABLE_CASE = caseFile("MintGhost11111111111111111111111111111", null
 
 describe("the physical room stays frozen", () => {
   it("keeps the world-expansion geometry, untouched by HQ-5", () => {
-    // 22×17 since the Rafiq Analytics wing took rows 14-17. The width is the
-    // number that matters to everything in this file: the token journey runs
-    // west to east across the trading floor, and the wing was added to the
-    // SOUTH precisely so no route in this test crosses it.
+    // 22×14 again since the Rafiq Analytics wing (rows 14-17) was removed on
+    // 2026-09-25. The width is the number that matters to everything in this
+    // file: the token journey runs west to east across the trading floor.
     expect(GRID_COLS).toBe(22);
-    expect(GRID_ROWS).toBe(17);
+    expect(GRID_ROWS).toBe(14);
   });
 
   it("keeps every working department's rectangle where it was", () => {

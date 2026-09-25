@@ -31,14 +31,14 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
-from app.labs.rafiq import entry_gate, outcomes
-from app.labs.rafiq.adapters import costs
-from app.labs.rafiq.config import MAX_CANDIDATE_AGE_SECONDS, STALE_GUARD_SECONDS
-from app.labs.rafiq.engine import off_band
-from app.labs.rafiq.feed import Candidate, Observation, RafiqFeed, tradeable
-from app.labs.rafiq.strategies.strategy_d_daily_breaker import DailyState
-from app.labs.rafiq.strategies.strategy_d_daily_breaker import evaluate as daily_verdict
 from app.labs.rafiqv2 import config, engine, learning
+from app.labs.rafiqv2.base import config as base_config
+from app.labs.rafiqv2.base import costs, entry_gate
+from app.labs.rafiqv2.base.config import MAX_CANDIDATE_AGE_SECONDS, STALE_GUARD_SECONDS
+from app.labs.rafiqv2.base.daily_breaker import DailyState
+from app.labs.rafiqv2.base.daily_breaker import evaluate as daily_verdict
+from app.labs.rafiqv2.base.engine import off_band
+from app.labs.rafiqv2.base.feed import Candidate, Observation, RafiqFeed, tradeable
 from app.labs.rafiqv2.config import Book
 from app.labs.rafiqv2.models import Rafiqv2Adjustment, Rafiqv2Book, Rafiqv2Position
 from app.labs.rafiqv2.strategy_common import DeathRateBreaker, EquityRatchet, ProfitLock
@@ -360,7 +360,7 @@ class Rafiqv2Service:
         pos.exit_price, pos.exit_reason, pos.exit_evidence = fill, reason, evidence
         pos.exit_proceeds_usd = _money(pos.realised_usd + costs.sell_proceeds(
             pos.quantity * pos.fraction_open, fill, liquidity))
-        pos.died = fill <= pos.entry_price * outcomes.ZERO_MULTIPLE
+        pos.died = fill <= pos.entry_price * base_config.ZERO_MULTIPLE
         halt = st.death.record(token_died=pos.died, now=now)
         if halt:
             self._audit(row, now, "entries_halted", 0, 1, f"death-rate breaker: {halt}")
@@ -383,12 +383,12 @@ class Rafiqv2Service:
             select(Rafiqv2Position)
             .where(Rafiqv2Position.book_id == row.id, Rafiqv2Position.status == "closed",
                    Rafiqv2Position.learning_recorded_at.is_(None),
-                   Rafiqv2Position.closed_at <= now - outcomes.EXIT_WINDOW)
+                   Rafiqv2Position.closed_at <= now - base_config.EXIT_WINDOW)
             .order_by(Rafiqv2Position.closed_at).limit(_LEARNING_BATCH))).scalars())
         for pos in due:
             window = await self._feed.forward_window(
                 mint=pos.mint_address, after=pos.closed_at,
-                until=pos.closed_at + outcomes.EXIT_WINDOW)
+                until=pos.closed_at + base_config.EXIT_WINDOW)
             prices = [r.price_usd for r in window if tradeable(r)]
             pos.forward_peak_multiple = max(prices) / pos.entry_price if prices else None
             held_peak = pos.peak_price / pos.entry_price

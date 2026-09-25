@@ -1,8 +1,0 @@
-# The delivered G1 files are kept as delivered: their names are what their
-# tests import, and the brief allows only import fixes and one refactor.
-extend = "../../../../pyproject.toml"
-
-[lint.per-file-ignores]
-"strategy_G1.py" = ["N999", "F401"]
-"test_strategy_G1.py" = ["N999", "SIM300"]
-"test_learning.py" = ["F401"]

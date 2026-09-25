@@ -30,13 +30,9 @@ from app.hq_ops import api as hq_ops
 from app.karthik import api as karthik
 from app.karthik_ops import api as karthik_ops
 from app.lab import api as lab
-from app.labs.forex_lab import api as forex_lab
 from app.labs.graduation import api as graduation_lab
-from app.labs.momentum import api as momentum_lab
 from app.labs.nse_breakout import api as nse_tracker
-from app.labs.rafiq import api as rafiq_lab
 from app.labs.rafiqv2 import api as rafiqv2_lab
-from app.labs.rhood import api as rhood_lab
 from app.momentum import api as momentum
 from app.paper import api as paper
 from app.pumpfun import api as pumpfun
@@ -126,11 +122,6 @@ api_router.include_router(hq_ops.router)
 # able to shadow the other on a route table. Read-only — there is no POST, PUT,
 # PATCH or DELETE on this router — and additive: no existing route changes.
 api_router.include_router(karthik_ops.router)
-# Rafiq Lab. A collaborator's five strategies on their own $1,000 books, over
-# their own `rafiq_lab_*` tables, behind their own `RAFIQ_LAB_ENABLED` flag.
-# Read-only and additive: no existing route changes shape, and with the flag
-# off every route here answers `running: false` rather than an empty book.
-api_router.include_router(rafiq_lab.router)
 # Rafiqv2. Six books on one engine, over their own `rafiqv2_*` tables and
 # `RAFIQV2_LAB_ENABLED` flag. Read-only and additive.
 api_router.include_router(rafiqv2_lab.router)
@@ -140,13 +131,3 @@ api_router.include_router(nse_tracker.router)
 # Graduation Lab. Read-only status board; every route answers
 # `running: false` without a query when LAB_GRADUATION_ENABLED is off.
 api_router.include_router(graduation_lab.router)
-# Momentum Lab. Fifty paper strategies on tokens older than seven days, over
-# their own `mom_*` tables. Read-only; `running: false` while
-# LAB_MOMENTUM_ENABLED is off.
-api_router.include_router(momentum_lab.router)
-# Forex Lab. BACKTEST ONLY and read-only: it
-# replays a hedged grid on EUR/USD over stored candles and holds no wallet,
-# live or paper. Listed here beside the other labs because that is where a
-# reader looks for one.
-api_router.include_router(forex_lab.router)
-api_router.include_router(rhood_lab.router)

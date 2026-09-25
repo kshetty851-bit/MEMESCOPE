@@ -13,7 +13,7 @@ import {
   TONE_CLASS,
   tone,
   usd,
-} from "@/labs/rafiq/format";
+} from "./format";
 
 import {
   type Rafiqv2Book,

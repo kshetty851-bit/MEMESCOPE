@@ -3,10 +3,8 @@ import type { ComponentType, SVGProps } from "react";
 import {
   IconHq,
   IconLedger,
-  IconScanner,
   IconSettings,
   IconSpark,
-  IconWallet,
 } from "@/components/layout/nav-icons";
 
 /**
@@ -47,67 +45,24 @@ export interface NavGroup {
 
 export const NAV_GROUPS: NavGroup[] = [
   {
-    label: "Markets",
-    items: [
-      {
-        href: "/command",
-        label: "Scanner",
-        icon: IconScanner,
-        status: "ready",
-      },
-    ],
-  },
-  {
-    label: "Intelligence",
-    items: [
-      {
-        href: "/record",
-        label: "Track record",
-        icon: IconLedger,
-        status: "ready",
-      },
-    ],
-  },
-  {
     label: "Strategy",
     items: [
-      { href: "/wallet", label: "Paper wallet", icon: IconWallet, status: "ready" },
       // Per-lab pages are removed by default; the ones below are listed
       // deliberately rather than by drift, and hq.test.tsx records that.
       //
       // The Movers, Matrix and KOL Labs held that exception until 2026-09-10,
       // the Breakout Lab until 2026-09-12 and the Dex Lab until 2026-09-13 —
       // each deleted on the operator's instruction, code and records together.
-      // A collaborator's five strategies, on five separate $1,000 paper books
-      // over their own tables. Named for whose rules it runs so it can never be
-      // read as another generation of the labs above it, and listed beside them
-      // because that is where a reader looks for a lab.
-      {
-        href: "/rafiq-lab",
-        label: "Rafiq Lab",
-        icon: IconSpark,
-        status: "ready",
-        note: "Research simulation. Five supplied strategies, $1,000 each.",
-      },
-      // Rafiqv2: the same collaborator's six books rebuilt on one engine, with
-      // their own tables and flag. Paper only, beside the Rafiq Lab.
+      // The Rafiq, Forex and Momentum Labs, the Robinhood Chain recorder and
+      // the paper wallet went the same way on 2026-09-25.
+      // Rafiqv2: a collaborator's six books on one engine, with their own
+      // tables and flag. Paper only.
       {
         href: "/rafiqv2-lab",
         label: "Rafiqv2 Lab",
         icon: IconSpark,
         status: "ready",
         note: "Research simulation. Six books on one engine, $1,000 each.",
-      },
-      // Forex Lab. EUR/USD, not Solana — and a BACKTEST, not a book: it
-      // replays a hedged grid over stored candles and holds no wallet, live or
-      // paper. Listed beside the labs because that is where a reader looks for
-      // one, and named for the market so it cannot be read as a Solana strategy.
-      {
-        href: "/forex-lab",
-        label: "Forex Lab",
-        icon: IconSpark,
-        status: "ready",
-        note: "Backtest only. EUR/USD hedged grid; no book, no wallet.",
       },
       // pump.fun launches climbing the bonding curve. Watch only, like the
       // NSE tracker below — no book, nothing ranked — so it is named for what
@@ -128,29 +83,7 @@ export const NAV_GROUPS: NavGroup[] = [
         label: "Karthik's Lab",
         icon: IconSpark,
         status: "ready",
-        note: "Paper only. $600 at $200 a trade on the quiet rule, judged 23 Oct.",
-      },
-      // Robinhood Chain, not Solana, and a RECORDER rather than a lab: it
-      // watches the pool factory on chain 4663 and writes down every token
-      // that meets the market. No arms, no book, no wallet. Listed here
-      // because a lab nobody can find is a lab that is not running — this one
-      // existed and worked for an afternoon before anyone could reach it.
-      {
-        href: "/rhood-lab",
-        label: "Robinhood Chain",
-        icon: IconSpark,
-        status: "ready",
-        note: "Records only. Launches on chain 4663; no book, no wallet.",
-      },
-      // Fifty paper strategies buying the momentum candle on Solana tokens
-      // older than seven days, each from a $1,000 wallet. Its own route: the
-      // old `/momentum-lab` was a different, deleted lab and stays retired.
-      {
-        href: "/momentum-candles",
-        label: "Momentum Lab",
-        icon: IconSpark,
-        status: "ready",
-        note: "Paper only. 50 strategies on momentum candles, $1,000 each.",
+        note: "Paper only. $400 at $200 a trade on the quiet rule, judged 23 Oct.",
       },
       // Indian equities, not Solana, and the only destination here with no
       // book at all — it watches and records. Listed beside the labs because

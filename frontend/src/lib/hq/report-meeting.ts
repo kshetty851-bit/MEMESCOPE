@@ -96,17 +96,6 @@ export const HOLDS_THE_FLOOR: EmployeeId[] = [
   "quinn",
   "karthik",
   "vault",
-  // Rafiq Analytics. The same argument that keeps Karthik at his bench, and it
-  // applies five times over: the conference room seats eleven and is already
-  // full, and this briefing is about the platform. The Rafiq Lab is a separate
-  // experiment with its own books — a report on it is a different meeting with
-  // a different attendance, and five analysts standing at the back of a
-  // briefing they have nothing to contribute to is worse staffing, not better.
-  "anchor",
-  "tempo",
-  "sigma",
-  "halt",
-  "chorus",
 ];
 
 export interface Station {

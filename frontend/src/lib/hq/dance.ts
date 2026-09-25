@@ -41,6 +41,11 @@ import { BEAT_OFFSET_SECONDS, TEMPO_BPM } from "@/lib/space-audio";
  * of a mirrored six-wide shape holds an even number), so the floor narrowed
  * by one column rather than leaving a lopsided gap. Column 21 is still clear.
  *
+ * Five by TWO since 2026-09-25: the five Rafiq analysts left with their lab,
+ * leaving ten dancers, and the corridor that was row 14 went with their wing.
+ * Rows 12-13 are the east end of reception, so the block is still full and
+ * symmetric with Nova at the centre of the front row.
+ *
  * ── EVERYONE DANCES. ONE OF THEM DANCES AT THE POST. ────────────────────
  *
  * Vault's desk is inside the execution vault, and the vault is sealed to feet
@@ -50,13 +55,13 @@ import { BEAT_OFFSET_SECONDS, TEMPO_BPM } from "@/lib/space-audio";
  * dances where he sits, on the same beat as the other fifteen, behind glass.
  */
 
-export const FLOOR = { col: 16, row: 12, cols: 5, rows: 3 } as const;
+export const FLOOR = { col: 16, row: 12, cols: 5, rows: 2 } as const;
 
 /** Dances at their own desk, in step, and never walks. See the header. */
 export const AT_THEIR_POST: readonly EmployeeId[] = ["vault"];
 
 /** Where the CEO dances: the centre of the front row. */
-const LEAD_SPOT: Tile = { col: 18, row: 14 };
+const LEAD_SPOT: Tile = { col: 18, row: 13 };
 
 export const BEAT_MS = 60_000 / TEMPO_BPM;
 /** One full routine is eight counts — a phrase, the way dancers count. */
@@ -85,8 +90,8 @@ function spotsFrontToBack(): Tile[] {
  * Nova leads. Everyone else is placed by where their desk is: the southern
  * desks take the front row and the northern ones the back, and within a row
  * west stays west. The point is that nobody has to walk THROUGH somebody who
- * is already dancing — the Rafiq analysts come up from the south, so they
- * fill the southern row, and the rest come down from the north behind them.
+ * is already dancing — the southern desks fill the front row, and the rest
+ * come down from the north behind them.
  */
 function assign(): Map<EmployeeId, Tile> {
   const out = new Map<EmployeeId, Tile>([["nova", LEAD_SPOT]]);

@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from decimal import Decimal
 
-from app.labs.rafiq.g1.strategy_G1 import EquityRatchet
+from app.labs.rafiqv2.base.equity_ratchet import EquityRatchet
 
 __all__ = ["FRICTION_PCT", "LOCK_GIVEBACK_DEFAULT", "LOCK_LADDER", "RUG_LADDER",
            "DeathRateBreaker", "EquityRatchet", "FastRugGate", "ProfitLock"]

@@ -93,10 +93,10 @@ export default function TokenIntelligencePage() {
         body={`${shortenAddress(mint, 8, 8)} has not been discovered by MEMESCOPE. If it launched moments ago, discovery may still be resolving it.`}
         action={
           <Link
-            href="/command"
+            href="/karthik-lab"
             className="rounded-md border border-line-control px-3 py-1.5 text-xs text-ink-2 transition-colors hover:border-line-strong hover:text-ink"
           >
-            Back to the scanner
+            Back to Karthik&apos;s Lab
           </Link>
         }
       />

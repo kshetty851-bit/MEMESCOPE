@@ -44,8 +44,8 @@ describe("the dance floor", () => {
   });
 
   it("fills the floor exactly, symmetric about the CEO", () => {
-    // Fifteen dancers on a five-by-three floor since Rex retired (2026-09-24):
-    // no gaps, and Nova on the middle column, which is the mirror line.
+    // Ten dancers on a five-by-two floor since the Rafiq analysts left
+    // (2026-09-25): no gaps, and Nova on the middle column, which is the mirror line.
     const taken = new Set([...SPOTS.values()].map(key));
     expect(taken.size).toBe(FLOOR.cols * FLOOR.rows);
     expect(SPOTS.get("nova")!.col).toBe(FLOOR.col + (FLOOR.cols - 1) / 2);
@@ -73,19 +73,6 @@ describe("the dance floor", () => {
   it("puts the CEO in the front row", () => {
     const front = FLOOR.row + FLOOR.rows - 1;
     expect(SPOTS.get("nova")!.row).toBe(front);
-  });
-
-  it("sends the analysts, who come up from the south, to the front", () => {
-    // Five wide since 2026-09-24: the front row is Nova and four analysts, and
-    // the fifth dances directly behind them rather than walking past anyone.
-    const front = FLOOR.row + FLOOR.rows - 1;
-    const analysts = ["anchor", "tempo", "sigma", "halt", "chorus"] as const;
-    const frontRow = [...SPOTS].filter(([, spot]) => spot.row === front).map(([id]) => id);
-    expect(frontRow.sort()).toEqual(
-      ["nova", ...analysts.filter((id) => SPOTS.get(id)!.row === front)].sort(),
-    );
-    expect(frontRow).toHaveLength(FLOOR.cols);
-    for (const id of analysts) expect(SPOTS.get(id)!.row, id).toBeGreaterThanOrEqual(front - 1);
   });
 });
 

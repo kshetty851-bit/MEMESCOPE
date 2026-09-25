@@ -263,7 +263,6 @@ x-backend-env: &backend-env
   # container may name a key path.
   MAINNET_SIGNER_SOCKET: ${MAINNET_SIGNER_SOCKET:-}
   FEATURE_LAB_ENABLED: ${FEATURE_LAB_ENABLED:-false}
-  FOREX_LAB_ENABLED: ${FOREX_LAB_ENABLED:-false}
   # In the anchor, not only in .env.production. This list is EXPLICIT, so a new
   # variable set in the env file and absent here never reaches the container —
   # the deploy appears to succeed and the flag does nothing. That has happened
@@ -293,22 +292,10 @@ x-backend-env: &backend-env
   DB_POOL_SIZE: ${DB_POOL_SIZE:-5}
   DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-5}
   LAB_VALID_FROM: ${LAB_VALID_FROM:-}
-  # Rafiq Lab. In the anchor rather than on `worker`, for the reason this
-  # anchor's comments give five times over: the beat runs it in `scheduler`,
-  # the worker executes it, and the API reads it, so all three have to agree
-  # about the flag or the lab ticks somewhere nobody can see it. Setting it in
-  # .env alone does nothing — this file enumerates every variable that reaches
-  # a container, and a value not named here never arrives.
-  RAFIQ_LAB_ENABLED: ${RAFIQ_LAB_ENABLED:-false}
-  # Momentum Lab. In the anchor for the same reason: beat schedules it, the
-  # worker runs it and the API reads it, and a value this file does not name
-  # never reaches a container.
-  LAB_MOMENTUM_ENABLED: ${LAB_MOMENTUM_ENABLED:-false}
-  # The Robinhood Chain recorder (2026-09-23). Records only — it has no
-  # book and nothing reads its tables. Default false so the beat entry
-  # that ships with it does nothing until this is set on the host.
-  LAB_RHOOD_ENABLED: ${LAB_RHOOD_ENABLED:-false}
-  # Rafiqv2, the same way and for the same reason.
+  # Rafiqv2. In the anchor rather than on `worker`: the beat runs it in
+  # `scheduler`, the worker executes it, and the API reads it, so all three
+  # have to agree about the flag. A value this file does not name never
+  # reaches a container.
   RAFIQV2_LAB_ENABLED: ${RAFIQV2_LAB_ENABLED:-false}
   NSE_BREAKOUT_ENABLED: ${NSE_BREAKOUT_ENABLED:-false}
   KARTHIK_CANDIDATE_LIMIT: ${KARTHIK_CANDIDATE_LIMIT:-250}

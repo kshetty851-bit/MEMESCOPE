@@ -52,15 +52,12 @@ celery_app = Celery(
         "app.security.lab_scheduler",
         "app.social.scheduler",
         "app.copycontrol.scheduler",
-        "app.labs.rafiq.scheduler",
         "app.labs.rafiqv2.scheduler",
         "app.labs.nse_breakout.scheduler",
         # Graduation Lab. Gated by LAB_GRADUATION_ENABLED (default off):
         # with the flag down its beat tasks return before opening a session.
         "app.labs.graduation.scheduler",
         # Momentum Lab. Gated by LAB_MOMENTUM_ENABLED (default off).
-        "app.labs.momentum.scheduler",
-        "app.labs.rhood.scheduler",
         "app.hq_ops.tasks",
     ],
 )
@@ -168,29 +165,14 @@ celery_app.conf.beat_schedule = {
         "task": "app.radar.scheduler.pumpfun_radar_scan",
         "schedule": crontab(minute="*/15"),
     },
-    # The paper wallet advances on its own beat because nothing else can move
-    # it: a position whose token stopped being enriched is exactly the one most
-    # likely to be sitting through its stop. Exits are resolved from the stored
-    # observation series, so a missed pass changes when a close is *recorded*,
-    # never which close it was or at what price.
-    #
-    # Every minute, not every five. The cadence used to match the opportunity
-    # review, which was defensible while an open position's quote was itself
-    # minutes old — the pass had nothing new to read. Open positions now sit in
-    # the priority lane at fifteen seconds, so this beat became the slowest link
-    # in the chain, and `last_evaluated_at` is a timestamp the wallet *shows*:
-    # a five-minute-old evaluation reads as a stalled wallet whatever the price
-    # behind it says. Measured at 2.5s per pass against 13 open positions on
-    # 2026-08-19, and a shorter window means each pass replays less, not more.
-    "paper-review": {
-        "task": "app.paper.scheduler.paper_review",
-        "schedule": crontab(minute="*"),
-    },
     # Membership of the priority enrichment lane is derived from what the
     # product currently displays, so it has to be recomputed rather than
     # accumulated. Every minute: the lane refreshes its members every fifteen
     # seconds, so a minute of membership lag costs at most four refreshes on a
     # token that just entered the visible ranks.
+    # The paper wallet's own beats (paper-review, daily-paper-report) went with
+    # its page on 2026-09-25; both were already idle (wallet disabled). The
+    # paper ENGINE stays: the real wallet runs on its code.
     "priority-lane": {
         "task": "app.workers.priority_tasks.refresh_priority_lane",
         "schedule": crontab(minute="*"),
@@ -220,7 +202,7 @@ celery_app.conf.beat_schedule = {
     # universe, regime and executable-outcome collectors. On a two-core box
     # each still cost CPU for data nothing running reads. The collectors share
     # FEATURE_RESEARCH_COLLECTORS_ENABLED with the holder snapshots below,
-    # which Rafiq Lab records, so their entries go rather than the flag. The
+    # which Rafiqv2's feed reads, so their entries go rather than the flag. The
     # tasks stay registered and can still be run by hand.
     "holder-snapshots-collect": {
         "task": "app.workers.research_tasks.holder_snapshots_collect",
@@ -266,13 +248,6 @@ celery_app.conf.beat_schedule = {
         "schedule": crontab(minute="*"),
     },
 
-    # Robinhood Chain recorder (2026-09-23). Records only; it has no book
-    # and nothing reads its tables. Gated by LAB_RHOOD_ENABLED, off by
-    # default, so scheduling it changes nothing until that is set.
-    "rhood-record": {
-        "task": "app.labs.rhood.scheduler.rhood_record",
-        "schedule": timedelta(minutes=1),
-    },
     # The Depth Lab: twenty wallets differing only in their liquidity floor.
     "depth-tick": {
         "task": "app.depth.scheduler.depth_tick",
@@ -315,16 +290,6 @@ celery_app.conf.beat_schedule = {
     "lab-sellability-refresh": {
         "task": "app.lab.scheduler.lab_sellability_refresh",
         "schedule": crontab(minute="*/3"),
-    },
-    # Rafiq Lab: five collaborator strategies on five $1,000 paper books. Every
-    # minute, like the Lab and the Arena, because Strategy B's exits are
-    # measured in a two-hour box and a five-minute beat would blur it. Gated by
-    # RAFIQ_LAB_ENABLED, which ships off: with the flag down the task returns
-    # `{"skipped": "rafiq_lab_disabled"}` before opening a session, so
-    # registering it here does not start anything.
-    "rafiq-lab-tick": {
-        "task": "app.labs.rafiq.scheduler.rafiq_lab_tick",
-        "schedule": crontab(minute="*"),
     },
     # Rafiqv2: six books on one engine. Every 30s, not the crontab minute: its
     # rug ladder has rungs at 30s and 60s. Expires after one interval so a tick
@@ -374,26 +339,6 @@ celery_app.conf.beat_schedule = {
                     # Its own worker (compose `worker-paper`): on the shared
                     # one it waited behind the :00 minute tasks.
                     "queue": "graduation_paper"},
-    },
-    # Momentum Lab: fifty paper strategies buying the momentum candle on tokens
-    # older than seven days. All three return before opening a session while
-    # LAB_MOMENTUM_ENABLED is off, so registering them starts nothing.
-    #
-    # The tick is SECONDS, not a crontab: a crontab cannot run more than once a
-    # minute, and a buy decided on one tick fills on the next tick's price. A
-    # tick left waiting a whole interval is dropped, not run late.
-    "momentum-lab-tick": {
-        "task": "app.labs.momentum.scheduler.momentum_tick",
-        "schedule": _seconds("LAB_MOMENTUM_TICK_S", 30.0),
-        "options": {"expires": _seconds("LAB_MOMENTUM_TICK_S", 30.0)},
-    },
-    "momentum-lab-universe": {
-        "task": "app.labs.momentum.scheduler.momentum_universe",
-        "schedule": crontab(minute="7,37"),
-    },
-    "momentum-lab-prune": {
-        "task": "app.labs.momentum.scheduler.momentum_prune",
-        "schedule": crontab(minute=17),
     },
     # NSE Breakout Tracker. The exchange publishes the day's bhavcopy after
     # the close, so ingest runs at 13:00 UTC (18:30 IST) and retries hourly to
@@ -492,20 +437,6 @@ celery_app.conf.beat_schedule = {
     # window between "fine" and "Redis cannot persist" was under two days.
     "check-disk-space": {
         "task": "app.workers.retention_tasks.check_disk_space",
-        "schedule": crontab(minute="*/15"),
-    },
-    # The daily paper-wallet email. Every fifteen minutes rather than once at
-    # 09:00, and the beat here is UTC while the report time is local — the task
-    # itself decides whether the wall clock in `DAILY_REPORT_TIMEZONE` has
-    # reached the configured hour.
-    #
-    # That indirection buys three things a `crontab(hour=...)` cannot: it
-    # survives a worker being down at the exact minute, it retries a failed
-    # send without waiting a day, and it does not silently shift when the
-    # report timezone observes DST while Celery does not. Sending twice is
-    # prevented by a partial unique index, not by the schedule.
-    "daily-paper-report": {
-        "task": "app.reports.scheduler.daily_paper_report",
         "schedule": crontab(minute="*/15"),
     },
 }

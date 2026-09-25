@@ -126,11 +126,10 @@ class Dossier:
     sources: list[str] = field(default_factory=list)
     counts: list[Count] = field(default_factory=list)
     timeline: list[Event] = field(default_factory=list)
-    #: Non-integer figures. Only the Rafiq analysts have these so far.
+    #: Non-integer figures.
     readings: list[Reading] = field(default_factory=list)
     #: What this desk has to say about its own record. Every entry names a
-    #: measurable quantity rather than an outcome — see `labs.rafiq.analyst`,
-    #: which is the only thing that produces them.
+    #: measurable quantity rather than an outcome.
     findings: list[Finding] = field(default_factory=list)
     #: The suggestion box. Rendered below the findings and deliberately
     #: separate from them: a finding is what the record says, a suggestion is
@@ -184,30 +183,6 @@ NO_LOG: dict[str, str] = {
 }
 
 
-#: The analysts' seating order, west to east. NOT a map to strategy codes.
-#:
-#: It used to be `{"anchor": "A", ...}`, hardcoded here AND in the frontend.
-#: On 2026-09-11 the lab shipped v2 with codes A2-E2 and retired A-E, and all
-#: five desks went dark reporting "No strategy 'A' is registered" — correct
-#: behaviour from a wrong premise, and invisible until somebody looked.
-#:
-#: So the codes are resolved from the registry at read time and paired by
-#: position. A future v3 renames nothing here. Where the lab has fewer
-#: strategies than analysts, the spare desks say so rather than guessing.
-ANALYST_ORDER: tuple[str, ...] = ("anchor", "tempo", "sigma", "halt", "chorus")
-
-
-def strategy_for(employee: str) -> str | None:
-    """The strategy code this analyst answers for, as the lab is registered now."""
-    from app.labs.rafiq import registry
-
-    if employee not in ANALYST_ORDER:
-        return None
-    seat = ANALYST_ORDER.index(employee)
-    codes = [s.code for s in registry.STRATEGIES]
-    return codes[seat] if seat < len(codes) else None
-
-
 async def build(
     session: AsyncSession, employee: str, *, now: datetime | None = None
 ) -> Dossier:
@@ -234,8 +209,6 @@ async def build(
         return await _from_incidents(session, employee, since, until)
     if employee == "radar":
         return await _from_admissions(session, employee, since, until)
-    if employee in ANALYST_ORDER:
-        return await _from_rafiq(session, employee, since, until)
 
     return _unlogged(
         employee,
@@ -462,126 +435,6 @@ async def _from_admissions(
                 kind="admission",
             )
             for row in rows
-        ],
-    )
-
-
-async def _from_rafiq(
-    session: AsyncSession, employee: str, since: datetime, until: datetime
-) -> Dossier:
-    """One analyst's day: their strategy's own trades, and their reading of it.
-
-    The timeline is what the brief asked for in plain words — the trades this
-    strategy opened and closed — and it is the one desk kind where a timeline
-    is unambiguously the right shape, because a position genuinely is an event
-    with a time on it.
-
-    The findings come from `labs.rafiq.analyst` unchanged. This function does
-    not compute a single one of them: two places deciding what a strategy's
-    record means is two places that can disagree, and the analyst module is
-    the one with the tests that police what it may say.
-    """
-    from app.labs.rafiq import analyst as rafiq_analyst
-    from app.labs.rafiq.models import RafiqLabPosition, RafiqLabStrategy
-
-    code = strategy_for(employee)
-    if code is None:
-        return _unlogged(
-            employee,
-            "This lab has fewer strategies registered than it has analysts, so "
-            "this desk has nothing assigned to it.",
-            since,
-            until,
-        )
-    analysis = await rafiq_analyst.analyse(session, code, now=until)
-
-    if not analysis.measured:
-        # The strategy has no trades, or is not registered. The analyst
-        # module's own sentence, not a second wording of it.
-        return _unlogged(employee, analysis.detail, since, until)
-
-    strategy = (
-        await session.execute(
-            select(RafiqLabStrategy).where(RafiqLabStrategy.code == code)
-        )
-    ).scalar_one()
-
-    # Opened OR closed in the window. A position that opened yesterday and
-    # closed this morning belongs in today's day, and one still open that was
-    # entered an hour ago belongs in it too.
-    rows = (
-        (
-            await session.execute(
-                select(RafiqLabPosition)
-                .where(
-                    RafiqLabPosition.strategy_id == strategy.id,
-                    (RafiqLabPosition.opened_at >= since)
-                    | (RafiqLabPosition.closed_at >= since),
-                )
-                .order_by(RafiqLabPosition.opened_at.desc())
-                .limit(TIMELINE_LIMIT)
-            )
-        )
-        .scalars()
-        .all()
-    )
-
-    timeline: list[Event] = []
-    opened = closed = 0
-    for row in rows:
-        name = row.symbol or row.mint_address[:8]
-        if row.closed_at is not None and row.closed_at >= since:
-            closed += 1
-            pnl = (
-                row.exit_proceeds_usd - row.cost_basis
-                if row.exit_proceeds_usd is not None
-                else None
-            )
-            timeline.append(
-                Event(
-                    at=row.closed_at,
-                    label=f"closed {name}",
-                    detail=(
-                        f"{row.exit_reason or 'unrecorded'}"
-                        + (f", {pnl:+,.2f} USD" if pnl is not None else "")
-                    ),
-                    kind="trade",
-                )
-            )
-        if row.opened_at >= since:
-            opened += 1
-            timeline.append(
-                Event(
-                    at=row.opened_at,
-                    label=f"opened {name}",
-                    detail=f"${row.cost_basis:,.2f} at {row.entry_price:.10f}",
-                    kind="trade",
-                )
-            )
-    timeline.sort(key=lambda e: e.at, reverse=True)
-
-    return Dossier(
-        employee=employee,
-        since=since,
-        until=until,
-        measured=True,
-        headline=analysis.verdict,
-        detail=(
-            f"Strategy {code} ({analysis.lane}). Figures are over the whole book; "
-            "the timeline is the last 24 hours."
-        ),
-        sources=["rafiq_lab_positions", "rafiq_lab_strategies"],
-        counts=[
-            Count("Opened in window", opened, "rafiq_lab_positions.opened_at"),
-            Count("Closed in window", closed, "rafiq_lab_positions.closed_at"),
-            Count("Open now", analysis.open_positions, "rafiq_lab_positions.status"),
-        ],
-        timeline=timeline[:TIMELINE_LIMIT],
-        readings=[
-            Reading(f.label, f.value, f.source) for f in analysis.figures
-        ],
-        findings=[
-            Finding(f.headline, f.evidence, f.lever, f.source) for f in analysis.findings
         ],
     )
 
