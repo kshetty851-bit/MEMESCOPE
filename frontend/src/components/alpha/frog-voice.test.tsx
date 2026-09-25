@@ -33,16 +33,16 @@ describe("the frog calls the launch", () => {
     window.localStorage.clear();
   });
 
-  it("says access approved to Karthik, counts down, and cheers", () => {
+  it("says access approved, counts down, and cheers", () => {
     const said = stubSpeech();
     const { rerender, container } = render(<FrogVoice phase="approved" count={null} />);
-    expect(container.querySelector(".frog-bubble")).toHaveTextContent("Access approved, Captain Karthik!");
+    expect(container.querySelector(".frog-bubble")).toHaveTextContent("Access approved, Captain!");
     for (const n of [5, 4, 3, 2, 1]) rerender(<FrogVoice phase="countdown" count={n} />);
     expect(container.querySelector(".frog-bubble")).toHaveTextContent("1!");
     rerender(<FrogVoice phase="ignition" count={null} />);
     expect(container.querySelector(".frog-bubble")).toHaveTextContent("WOO-HOO-HOO!");
     expect(said).toEqual([
-      "Access approved, Captain Karthik! Launching in…",
+      "Access approved, Captain! Launching in…",
       "five!", "four!", "three!", "two!", "one!",
       "Woo-hoo-hoo!",
     ]);

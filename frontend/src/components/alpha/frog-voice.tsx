@@ -11,8 +11,9 @@ import type { ScenePhase } from "@/lib/launch";
  *
  * The voice is the browser's own speech synthesiser — a male voice, pitched
  * up and a little fast, which is the cartoon — so there is no audio file.
- * Every line is tied to a step of the launch timeline, so the frog cannot say "three" while the screen shows four. A beep marks each
- * digit and lift-off gets a roar, a party horn and a cheer.
+ * Every line is tied to a step of the launch timeline, so the frog cannot
+ * say "three" while the screen shows four. A beep marks each digit and
+ * lift-off gets a roar, a party horn and a cheer.
  *
  * Silent when the crew is muted (the same remembered switch), and quiet by
  * construction otherwise: nothing here plays until a code has been accepted,
@@ -24,20 +25,20 @@ import type { ScenePhase } from "@/lib/launch";
  * sequence to screen readers.
  */
 
-// Karthik, 2026-09-25: "funnier, a male voice, and put my name in".
+// Karthik, 2026-09-25: "funnier, a male voice" — and, after trying it, no name.
 const SAY: Partial<Record<ScenePhase, string>> = {
-  approved: "Access approved, Captain Karthik! Launching in…",
+  approved: "Access approved, Captain! Launching in…",
   ignition: "Woo-hoo-hoo!",
-  launching: "Ribbit! Hold on to your helmet, Karthik!",
-  flight: "Are we there yet? Are we there yet, Karthik?",
+  launching: "Ribbit! Hold on to your helmet!",
+  flight: "Are we there yet? Are we there yet?",
   approach: "Ooh, shiny!",
-  unlock: "Welcome home, Boss Karthik! Ribbit!",
+  unlock: "Welcome home, Boss! Ribbit!",
 };
 
 const DIGITS = ["", "one!", "two!", "three!", "four!", "five!"];
 
 const BUBBLE: Partial<Record<ScenePhase, string>> = {
-  approved: "Access approved, Captain Karthik! 🫡 Launching in…",
+  approved: "Access approved, Captain! 🫡 Launching in…",
   ignition: "WOO-HOO-HOO! 🚀 Ribbit!",
 };
 
