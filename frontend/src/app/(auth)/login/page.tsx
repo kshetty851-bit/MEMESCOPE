@@ -12,7 +12,7 @@ import { useAuth } from "@/hooks/use-auth";
 /**
  * Where to go after signing in: `?next=` when it is a plain path on this site
  * (so the real wallet's "Sign in to start" comes back to the wallet), else the
- * Command Center. Anything else — another host, `//`, a backslash — is ignored.
+ * Karthik's Lab. Anything else — another host, `//`, a backslash — is ignored.
  */
 function afterSignIn(): string {
   const next = new URLSearchParams(window.location.search).get("next");
@@ -50,9 +50,9 @@ export default function LoginPage() {
   return (
     <div>
       <Label>Secure access</Label>
-      <h1 className="mt-2 text-title font-semibold text-ink">Enter the Command Center</h1>
+      <h1 className="mt-2 text-title font-semibold text-ink">Welcome back</h1>
       <p className="mt-2 text-sm text-ink-faint">
-        Authenticate to reach live intelligence.
+        Sign in and Karthik&apos;s Lab opens.
       </p>
 
       <form onSubmit={handleSubmit} className="mt-8 flex flex-col gap-5" noValidate>

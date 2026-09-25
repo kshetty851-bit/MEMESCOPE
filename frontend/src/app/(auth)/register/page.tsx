@@ -54,7 +54,7 @@ export default function RegisterPage() {
       <Label>Request access</Label>
       <h1 className="mt-2 text-title font-semibold text-ink">Deploy your division</h1>
       <p className="mt-2 text-sm text-ink-faint">
-        Seven AI specialists start working the moment you sign in.
+        Once you are in, Karthik&apos;s Lab opens.
       </p>
 
       <form onSubmit={handleSubmit} className="mt-8 flex flex-col gap-5" noValidate>
