@@ -341,11 +341,13 @@ function OwnWalletPanel({ member, wallet, book, isOwner, headers, onDone }: {
               </button>
             ) : null}
           </div>
-          {!isOwner ? (
-            <p className="mt-1 text-xs text-ink-3">
-              Only Karthik, signed in, can start this wallet or change its size. Anyone can stop it.
-            </p>
-          ) : null}
+          <p className="mt-1 text-xs text-ink-3">
+            Buys only while Karthik&apos;s main wallet is also on — when he stops his, this
+            one stops buying too.
+            {!isOwner
+              ? " Only Karthik, signed in, can start this wallet or change its size. Anyone can stop it."
+              : ""}
+          </p>
           {own.isError ? (
             <p className="mt-1 text-xs text-down">
               Not changed: {own.error instanceof ApiError ? own.error.message : "try again"}

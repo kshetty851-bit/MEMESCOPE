@@ -131,14 +131,22 @@ async def test_a_wallet_that_is_on_buys_the_same_coin_on_its_own_money(
     assert again.family == {"JAYA": "no_fresh_candidate"}
 
 
-async def test_the_member_wallet_trades_while_the_owner_is_stopped(db_session, monkeypatch):
+async def test_stopping_the_owner_stops_the_member_wallet_too(db_session, monkeypatch):
+    """Karthik, 2026-09-25: "stop family wallets when I stop mine"."""
     _funded(monkeypatch)
     await _jaya(db_session, own=True)
     now = datetime.now(UTC)
     await _signal(db_session, now, owner_on=False)
     out = await RealWalletDriver(db_session).tick(now=now)
     assert out.skipped == "autotrade_switch_off"
-    assert out.family == {"JAYA": f"created:{MINT}"}
+    assert out.family == {"JAYA": "owner_wallet_stopped"}
+    assert set(await _intents(db_session)) == set()
+
+    # Started again: Jaya's own switch was never touched, so she resumes.
+    await AutotradeSwitchService(db_session).start(
+        actor="op@x.com", reason="back on", strategy_id="G-QUIET", at=now)
+    again = await RealWalletDriver(db_session).tick(now=now)
+    assert again.family == {"JAYA": f"created:{MINT}"}
 
 
 async def test_an_empty_member_wallet_sits_out(db_session, monkeypatch):
@@ -258,14 +266,21 @@ def _executor(session) -> RealWalletExecutor:
                               signer=_Signer(), transport=object())  # type: ignore[arg-type]
 
 
-async def test_a_family_buy_runs_on_the_family_switch_not_the_owners(db_session, chain):
+async def test_a_family_buy_needs_both_switches_on(db_session, chain):
     now = datetime.now(UTC)
     await _jaya(db_session, own=True)
-    await _signal(db_session, now, owner_on=False)
+    await _signal(db_session, now)                      # owner on, Jaya on
     facts = await _executor(db_session)._facts(await _buy(db_session, JAYA), now)
     assert facts.autotrade_switch_on
     assert facts.signer_ready and facts.signer_matches_pinned_key
 
+    await AutotradeSwitchService(db_session).stop(     # owner off, Jaya on
+        actor="op@x.com", reason="stop all", at=now)
+    facts = await _executor(db_session)._facts(await _buy(db_session, JAYA), now)
+    assert not facts.autotrade_switch_on
+
+    await AutotradeSwitchService(db_session).start(    # owner on, Jaya off
+        actor="op@x.com", reason="on", strategy_id="G-QUIET", at=now)
     row = await db_session.get(RealWalletFamilyMember, "JAYA")
     row.own_enabled = False
     await db_session.flush()
