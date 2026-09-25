@@ -144,9 +144,6 @@ export function LandingPage() {
               </span>
             </h1>
             <WordmarkSubtitle className="mt-4" />
-            <p className="mt-2 text-sm text-ink-2">
-              Built by <span className="font-medium text-ink">Karthik Shetty</span>
-            </p>
             <p className="mt-6 text-[clamp(1.125rem,2vw,1.5rem)] font-medium leading-snug tracking-tight text-ink">
               Every pump.fun graduation, tested before it&apos;s traded.
             </p>

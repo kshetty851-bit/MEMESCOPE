@@ -81,7 +81,9 @@ describe("meet the MEMESCOPE team", () => {
       "Seventeen", "Eighteen", "Nineteen", "Twenty"];
     const lede = screen.getByText(/specialists, one per subsystem/);
     expect(lede.textContent).toContain(`${words[EMPLOYEES.length - 1]} specialists`);
-    expect(lede.textContent).toContain("Karthik Shetty, who built MEMESCOPE");
+    expect(lede.textContent).toContain("the founder at the graduation desk");
+    // The name appears once on the page, in the footer (2026-09-25).
+    expect(lede.textContent).not.toContain("Shetty");
     expect(EMPLOYEE_BY_ID.get("karthik")!.role).toBe("Founder");
   });
 
