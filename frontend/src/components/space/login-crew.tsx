@@ -14,8 +14,8 @@ import { cn } from "@/lib/utils";
  * HQ's chatter, the lines claim NOTHING about the platform: a timer that said
  * "the wallet is up" would be making it up.
  *
- * Sound is synthesised here (Web Audio), so there is no file to ship: soft
- * twinkles in the background, a pop for each bubble, a whoosh for the
+ * Sound is synthesised here (Web Audio), so there is no file to ship, and
+ * there is no background sound — only a pop for each bubble, a whoosh for the
  * fly-by and an arpeggio for the cheer. Browsers refuse sound before the
  * first click or key press, so the first bubble asks for one. The speaker
  * button mutes it all, and the choice is remembered in this browser.
@@ -38,7 +38,7 @@ const SHOW_MS = 3400;
 /* ── sound ─────────────────────────────────────────────────────────────── */
 
 type Sfx = {
-  start(ambient?: boolean): void;
+  start(): void;
   blip(pitch: number): void;
   whoosh(): void;
   cheer(): void;
@@ -58,7 +58,6 @@ function createSfx(): Sfx | null {
   const master = ctx.createGain();
   master.gain.value = 0.9;
   master.connect(ctx.destination);
-  let twinkle: ReturnType<typeof setInterval> | undefined;
   let started = false;
 
   function tone(freq: number, at: number, dur: number, vol: number, type: OscillatorType = "sine", glide?: number) {
@@ -76,20 +75,13 @@ function createSfx(): Sfx | null {
   }
 
   return {
-    start(ambient = true) {
+    start() {
+      // No background sound at all: Karthik found the low hum felt like a
+      // vibration and then asked for the twinkles to go too (2026-09-25).
+      // What is left plays only when something happens on screen.
       if (started) return;
       started = true;
       void ctx.resume();
-      if (!ambient) return;
-      // No hum under it: Karthik found the low drone felt like a vibration
-      // (2026-09-25), so the background is the twinkles alone.
-      // Twinkles: a high, soft note now and then, like distant stars.
-      const stars = [1568, 1760, 2093, 2349, 2637];
-      twinkle = setInterval(() => {
-        if (Math.random() < 0.55) {
-          tone(stars[Math.floor(Math.random() * stars.length)]!, ctx.currentTime, 1.4, 0.018);
-        }
-      }, 1700);
     },
     blip(pitch) {
       const t = ctx.currentTime;
@@ -130,7 +122,6 @@ function createSfx(): Sfx | null {
       master.gain.setTargetAtTime(muted ? 0 : 0.9, ctx.currentTime, 0.05);
     },
     close() {
-      if (twinkle) clearInterval(twinkle);
       void ctx.close();
     },
   };
@@ -148,7 +139,7 @@ function readSound(): boolean {
 
 type Bubble = { mate: string; text: string; key: number };
 
-function useCrewVoice(mates: readonly Mate[], { ambient }: { ambient: boolean }) {
+function useCrewVoice(mates: readonly Mate[]) {
   const [bubble, setBubble] = useState<Bubble | null>(null);
   const [soundOn, setSoundOn] = useState(true);
   const sfx = useRef<Sfx | null>(null);
@@ -174,7 +165,7 @@ function useCrewVoice(mates: readonly Mate[], { ambient }: { ambient: boolean })
   useEffect(() => {
     const wake = () => {
       if (!sfx.current) sfx.current = createSfx();
-      sfx.current?.start(ambient);
+      sfx.current?.start();
       sfx.current?.setMuted(!soundRef.current);
     };
     window.addEventListener("pointerdown", wake);
@@ -189,21 +180,21 @@ function useCrewVoice(mates: readonly Mate[], { ambient }: { ambient: boolean })
       sfx.current?.close();
       sfx.current = null;
     };
-  }, [ambient]);
+  }, []);
 
   const toggleSound = useCallback(() => {
     const next = !soundRef.current;
     setSoundOn(next);
     soundRef.current = next;
     if (!sfx.current) sfx.current = createSfx();
-    sfx.current?.start(ambient);
+    sfx.current?.start();
     sfx.current?.setMuted(!next);
     try {
       window.localStorage.setItem(SOUND_KEY, next ? "on" : "off");
     } catch {
       // A private window keeps the choice for this visit only.
     }
-  }, [ambient]);
+  }, []);
 
   return { bubble, say, soundOn, toggleSound, sfx, soundRef };
 }
@@ -263,7 +254,7 @@ function SoundButton({ on, onToggle, className }: { on: boolean; onToggle: () =>
 /* ── the airlock crew: the sign-in pages ───────────────────────────────── */
 
 export function LoginCrew() {
-  const { bubble, say, soundOn, toggleSound, sfx, soundRef } = useCrewVoice(MATES, { ambient: true });
+  const { bubble, say, soundOn, toggleSound, sfx, soundRef } = useCrewVoice(MATES);
   const [mood, setMood] = useState<"shy" | "cheer" | "sad" | null>(null);
   const lastTyping = useRef(0);
   const turn = useRef(0);
@@ -385,7 +376,7 @@ export function LoginCrew() {
  * follow the page but, like everything the crew says, claim nothing about
  * it — no balances, no results, nothing a timer could get wrong. Tap one and
  * it hops and says something. They can be tucked away (a paw brings them
- * back) and share the sign-in crew's mute. No twinkles here: pops only, because
+ * back) and share the sign-in crew's mute. Pops only, because
  * these pages are for reading numbers.
  */
 const DOCK: readonly Mate[] = [
@@ -413,7 +404,7 @@ function pageLines(pathname: string): readonly string[] {
 }
 
 export function DockCrew({ pathname }: { pathname: string }) {
-  const { bubble, say, soundOn, toggleSound } = useCrewVoice(DOCK, { ambient: false });
+  const { bubble, say, soundOn, toggleSound } = useCrewVoice(DOCK);
   const [hidden, setHidden] = useState(false);
   const [hop, setHop] = useState<string | null>(null);
   const turn = useRef(0);
