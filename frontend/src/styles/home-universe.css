@@ -117,14 +117,8 @@
   will-change: transform;
 }
 
-/* --- Planetary system ----------------------------------------------------- */
+/* --- Scene objects -------------------------------------------------------- */
 
-.home-universe__body {
-  position: absolute;
-  will-change: transform;
-}
-
-.home-universe__body svg,
 .home-universe__satellite svg,
 .home-universe__meteor svg,
 .home-universe__comet svg,
@@ -137,31 +131,6 @@
   display: block;
   width: 100%;
   height: auto;
-}
-
-/* Big, top-right, partly out of frame — the reference's red world. */
-.home-universe__body--red {
-  right: -6%;
-  top: -4%;
-  width: clamp(240px, 27vw, 520px);
-  opacity: 0.72;
-  animation: uv-body-drift-a 420s ease-in-out infinite;
-}
-
-.home-universe__body--ringed {
-  left: 6%;
-  top: 26%;
-  width: clamp(180px, 20vw, 380px);
-  opacity: 0.6;
-  animation: uv-body-drift-b 510s ease-in-out infinite;
-}
-
-.home-universe__body--blue {
-  right: 26%;
-  top: 46%;
-  width: clamp(70px, 8vw, 150px);
-  opacity: 0.55;
-  animation: uv-body-drift-a 300s ease-in-out infinite reverse;
 }
 
 /* Real orbital traffic: 96 seconds to cross, visible for most of it. */
@@ -1064,19 +1033,6 @@
   }
 }
 
-@media (min-width: 1024px) and (max-width: 1279px) {
-  .home-universe__body--ringed {
-    display: none;
-  }
-}
-
-@media (min-width: 1280px) {
-  .home-universe__body--ringed {
-    left: calc(50% - 10px);
-    top: 14%;
-    width: 200px;
-  }
-}
 
 /*
    Below `lg` the page is a single column, so the access form occupies the
@@ -1096,7 +1052,6 @@
   .home-universe__astronaut--two,
   .home-universe__rover,
   .home-universe__module,
-  .home-universe__body--blue,
   .home-universe__galaxy {
     display: none;
   }
@@ -1139,13 +1094,8 @@
   .home-universe__surface,
   .home-universe__meteor--b,
   .home-universe__nebula--cyan,
-  .home-universe__body--ringed,
   .home-universe__satellite {
     display: none;
-  }
-
-  .home-universe__body--red {
-    opacity: 0.4;
   }
 
   .home-universe__scrim {
@@ -1170,8 +1120,7 @@
 }
 
 [data-space="minimal"] .home-universe__nebula,
-[data-space="minimal"] .home-universe__galaxy,
-[data-space="minimal"] .home-universe__body {
+[data-space="minimal"] .home-universe__galaxy {
   animation: none;
 }
 
@@ -1195,7 +1144,6 @@
 @media (prefers-reduced-motion: reduce) {
   .home-universe__nebula,
   .home-universe__galaxy,
-  .home-universe__body,
   .home-universe__astronaut,
   .home-universe__rover,
   .home-universe__rocket,

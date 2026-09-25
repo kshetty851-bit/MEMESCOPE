@@ -5,14 +5,11 @@ import type { CSSProperties } from "react";
 import { PointerParallax } from "@/components/space/parallax";
 import { Planets } from "@/components/space/planets";
 import {
-  BluePlanetArt,
   CometArt,
   LaunchPadArt,
   LunarModuleArt,
   MeteorArt,
   MoonArt,
-  RedPlanetArt,
-  RingedPlanetArt,
   RocketArt,
   RocketFlame,
   RoverArt,
@@ -84,17 +81,11 @@ export function HomeUniverse({ phase = "idle" }: { phase?: ScenePhase }) {
             rocket, the frog and everything else in the scene. */}
         <Planets />
 
-        {/* --- MID: the planetary system -------------------------------- */}
+        {/* --- MID: orbital traffic --------------------------------------
+            The drawn red, ringed and blue planets that stood here were removed
+            (Karthik, 2026-09-25): beside the cartoon planets above they read
+            as clutter. */}
         <div className="universe__depth universe__depth--mid">
-          <div className="home-universe__body home-universe__body--red">
-            <RedPlanetArt />
-          </div>
-          <div className="home-universe__body home-universe__body--ringed">
-            <RingedPlanetArt />
-          </div>
-          <div className="home-universe__body home-universe__body--blue">
-            <BluePlanetArt />
-          </div>
           <div className="home-universe__satellite">
             <SatelliteArt />
           </div>
