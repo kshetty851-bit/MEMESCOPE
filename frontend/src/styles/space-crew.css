@@ -805,3 +805,122 @@
   position: static;
   margin: 8px auto 12px;
 }
+
+/* --- 10. THE PANDA'S NEWS DESK AND THE TOP PAIR (2026-09-25) --------------
+   The rail now holds the panda alone between HQ and Settings, with the Solana
+   news strip under it; the tiger and the penguin moved beside MEMESCOPE at
+   the top (`RailHeaderCrew`). */
+
+.dock-rail {
+  display: flex;
+  flex-direction: column;
+  padding: 0 10px 10px;
+}
+
+/* One panda, so its bubble centres on it and stays inside the rail. */
+.dock-crew--rail .dock-crew__mate--panda .login-crew__bubble {
+  left: 50%;
+  right: auto;
+  translate: -50% 0;
+  transform-origin: 50% 100%;
+  max-width: 180px;
+}
+.dock-crew--rail .dock-crew__mate--panda .login-crew__bubble::before {
+  left: 50%;
+  right: auto;
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.dock-news {
+  border: 1px solid var(--color-line, rgb(255 255 255 / 0.12));
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: rgb(255 255 255 / 0.03);
+}
+.dock-news__label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-ink-3, #8b93a7);
+}
+.dock-news__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: #ef4444;
+  animation: dock-news-live 1.6s ease-in-out infinite;
+}
+.dock-news__title {
+  display: -webkit-box;
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--color-ink, #e7eaf2);
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.dock-news__title:hover { text-decoration: underline; }
+.dock-news__meta {
+  margin-top: 3px;
+  font-size: 10px;
+  color: var(--color-ink-3, #8b93a7);
+}
+
+@keyframes dock-news-live {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+
+/* The tiger and the penguin, beside MEMESCOPE in the rail's header. Small,
+   bobbing, tappable; their bubbles drop below the header, over the nav, and
+   stay inside the rail's width. */
+.rail-top-crew {
+  position: relative;
+  z-index: 40;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  margin-left: auto;
+}
+.rail-top-crew__mate {
+  position: relative;
+  width: 28px;
+  animation: crew-bob 4.6s ease-in-out infinite;
+}
+.rail-top-crew__mate--tiger { width: 30px; animation-duration: 5.4s; animation-delay: -1.8s; }
+.rail-top-crew__mate .login-crew__img {
+  pointer-events: auto;
+  cursor: pointer;
+  animation: none;
+  filter: drop-shadow(0 3px 5px rgb(0 0 0 / 0.45));
+}
+.rail-top-crew[data-hop="penguin"] .rail-top-crew__mate--penguin .login-crew__img,
+.rail-top-crew[data-hop="tiger"] .rail-top-crew__mate--tiger .login-crew__img {
+  animation: crew-hop-flip 0.7s cubic-bezier(0.3, 0.9, 0.4, 1) 1;
+}
+.rail-top-crew .login-crew__bubble {
+  top: calc(100% + 10px);
+  left: auto;
+  right: -8px;
+  translate: 0 0;
+  transform-origin: 90% 0;
+  max-width: 170px;
+  font-size: 12px;
+}
+.rail-top-crew .login-crew__bubble::before {
+  left: auto;
+  right: 14px;
+  top: -6px;
+  transform: rotate(45deg);
+}
+.rail-top-crew__mate--penguin .login-crew__bubble { right: -38px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .rail-top-crew__mate,
+  .dock-news__dot { animation: none !important; }
+}

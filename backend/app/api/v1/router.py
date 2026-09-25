@@ -34,6 +34,7 @@ from app.labs.graduation import api as graduation_lab
 from app.labs.nse_breakout import api as nse_tracker
 from app.labs.rafiqv2 import api as rafiqv2_lab
 from app.momentum import api as momentum
+from app.news import api as news
 from app.paper import api as paper
 from app.pumpfun import api as pumpfun
 from app.radar import api as radar
@@ -131,3 +132,5 @@ api_router.include_router(nse_tracker.router)
 # Graduation Lab. Read-only status board; every route answers
 # `running: false` without a query when LAB_GRADUATION_ENABLED is off.
 api_router.include_router(graduation_lab.router)
+# Solana news headlines for the sidebar broadcast. Third-party RSS, read-only.
+api_router.include_router(news.router)

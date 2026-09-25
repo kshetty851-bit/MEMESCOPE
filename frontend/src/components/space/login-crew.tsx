@@ -1,7 +1,9 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { api } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 
 /**
@@ -14,10 +16,10 @@ import { cn } from "@/lib/utils";
  * HQ's chatter, the lines claim NOTHING about the platform: a timer that said
  * "the wallet is up" would be making it up.
  *
- * Sound is synthesised here (Web Audio), so there is no file to ship, and
- * nothing plays on its own — a pop when the visitor makes an animal talk
- * (typing, a tap, the password field), a whoosh and a cheer on submit, and a
- * low note on an error. Browsers refuse sound before the first click or key
+ * Sound is synthesised here (Web Audio), so there is no file to ship: a pop
+ * whenever an animal talks, a whoosh as the hamster flies past, a whoosh and a
+ * cheer on submit, and a low note on an error. No background hum or twinkles
+ * (removed at Karthik's request). Browsers refuse sound before the first click or key
  * press anyway. The speaker button mutes it all, and the choice is
  * remembered in this browser.
  */
@@ -148,9 +150,10 @@ function useCrewVoice(mates: readonly Mate[]) {
   const soundRef = useRef(true);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
-  // `pop` is false for everything a timer says: sound only answers something
-  // the visitor did. Karthik heard the timed pops and the fly-by's whoosh as
-  // background noise (2026-09-25), so the timers are silent.
+  // Every line pops, timed ones included — Karthik asked for the characters'
+  // sounds back (2026-09-25) after muting them earlier the same day. The
+  // background hum and twinkles stay gone. `pop = false` is still available
+  // for a line that should be silent.
   const say = useCallback((mateId: string, text: string, holdMs = SHOW_MS, pop = true) => {
     const mate = mates.find((m) => m.id === mateId) ?? mates[0]!;
     setBubble({ mate: mate.id, text, key: Date.now() });
@@ -274,13 +277,13 @@ export function LoginCrew() {
   // Idle chatter: a first line that asks for a tap, then someone every few
   // seconds, never the same animal twice running.
   useEffect(() => {
-    const first = setTimeout(() => say(onScreen()[0]!.id, "Hi! Welcome back.", SHOW_MS, false), 900);
+    const first = setTimeout(() => say(onScreen()[0]!.id, "Hi! Welcome back."), 900);
     const every = setInterval(() => {
       if (document.hidden) return;
       const shown = onScreen();
       turn.current = (turn.current + 1 + Math.floor(Math.random() * Math.max(1, shown.length - 1))) % shown.length;
       const mate = shown[turn.current]!;
-      say(mate.id, mate.lines[Math.floor(Math.random() * mate.lines.length)]!, SHOW_MS, false);
+      say(mate.id, mate.lines[Math.floor(Math.random() * mate.lines.length)]!);
     }, EVERY_MS);
     return () => {
       clearTimeout(first);
@@ -344,6 +347,14 @@ export function LoginCrew() {
     };
   }, [pick, say, sfx, soundRef]);
 
+  // The fly-by's whoosh, in time with its pass across the top (see CSS).
+  useEffect(() => {
+    const pass = setInterval(() => {
+      if (soundRef.current && !document.hidden) sfx.current?.whoosh();
+    }, 19_000);
+    return () => clearInterval(pass);
+  }, [sfx, soundRef]);
+
   return (
     <>
       <div className="login-crew" aria-hidden data-mood={mood ?? undefined}>
@@ -368,19 +379,21 @@ export function LoginCrew() {
 /* ── the dock crew: every page after sign-in ───────────────────────────── */
 
 /**
- * Three animals in the bottom-right corner, above the feedback button, who
- * keep talking while the site is used (asked for 2026-09-25). Their lines
- * follow the page but, like everything the crew says, claim nothing about
- * it — no balances, no results, nothing a timer could get wrong. Tap one and
- * it hops and says something. They can be tucked away (a paw brings them
- * back) and share the sign-in crew's mute. Pops only, because
- * these pages are for reading numbers.
+ * The animals on every page after sign-in (2026-09-25). On a phone: three in
+ * the bottom-right corner. On a wide screen they live in the sidebar: the
+ * tiger and penguin beside MEMESCOPE at the top (`RailHeaderCrew`), and the
+ * panda in the gap between HQ and Settings, reading the Solana news strip
+ * under it (`DockCrew placement="rail"`). Their own lines follow the page and
+ * claim nothing about it; the panda's news lines are other people's
+ * headlines, labelled as such under it. One hide button tucks them all away.
  */
 const DOCK: readonly Mate[] = [
   { id: "panda", src: "/crew/panda.webp", pitch: 523, lines: ["No rugs today, please.", "Snack break?", "I'm rooting for you!"] },
   { id: "penguin", src: "/crew/penguin.webp", pitch: 659, lines: ["Waddle, waddle… watching.", "Nice to see you!", "Stay cool out there."] },
   { id: "tiger", src: "/crew/tiger.webp", pitch: 294, lines: ["Grr… good to see you.", "Five minutes, then we sell!", "Tap me, I'm bored."] },
 ];
+const PANDA = DOCK.filter((m) => m.id === "panda");
+const TOP_PAIR = DOCK.filter((m) => m.id !== "panda");
 
 /** Page-aware lines, by longest matching path. Nothing here states a figure. */
 const PAGE_LINES: ReadonlyArray<readonly [string, readonly string[]]> = [
@@ -392,7 +405,9 @@ const PAGE_LINES: ReadonlyArray<readonly [string, readonly string[]]> = [
   ["/breakouts", ["Namaste, NSE!", "Charts, charts, charts."]],
 ];
 const DOCK_EVERY_MS = 9000;
+const NEWS_EVERY_MS = 12_000;
 const DOCK_KEY = "memescope.crewDock";
+const DOCK_EVENT = "memescope-crew-dock";
 
 function pageLines(pathname: string): readonly string[] {
   const hit = PAGE_LINES.filter(([p]) => pathname === p || pathname.startsWith(`${p}/`))
@@ -400,62 +415,154 @@ function pageLines(pathname: string): readonly string[] {
   return hit?.[1] ?? [];
 }
 
-export function DockCrew({
-  pathname,
-  placement = "floating",
-}: {
-  pathname: string;
-  /** "rail": inside the desktop sidebar. "floating": the phone corner. */
-  placement?: "floating" | "rail";
-}) {
-  const { bubble, say, soundOn, toggleSound } = useCrewVoice(DOCK);
+/** One hide switch for every dock animal, remembered, and shared between the
+ *  rail's two groups so hiding one hides both. */
+function useDockHidden(): [boolean, (next: boolean) => void] {
   const [hidden, setHidden] = useState(false);
-  const [hop, setHop] = useState<string | null>(null);
-  const turn = useRef(0);
-  const path = useRef(pathname);
-  path.current = pathname;
-
   useEffect(() => {
-    try {
-      setHidden(window.localStorage.getItem(DOCK_KEY) === "hidden");
-    } catch {
-      // Shown by default.
-    }
+    const read = () => {
+      try {
+        setHidden(window.localStorage.getItem(DOCK_KEY) === "hidden");
+      } catch {
+        // Shown by default.
+      }
+    };
+    read();
+    window.addEventListener(DOCK_EVENT, read);
+    return () => window.removeEventListener(DOCK_EVENT, read);
   }, []);
-
-  const line = useCallback((mate: Mate) => {
-    const pool = [...pageLines(path.current), ...mate.lines];
-    return pool[Math.floor(Math.random() * pool.length)]!;
-  }, []);
-
-  // A page-aware hello on every page change, then chatter.
-  useEffect(() => {
-    if (hidden) return;
-    const lines = pageLines(pathname);
-    const hello = setTimeout(() => say("penguin", lines[0] ?? "Hi again!", SHOW_MS, false), 1200);
-    return () => clearTimeout(hello);
-  }, [hidden, pathname, say]);
-
-  useEffect(() => {
-    if (hidden) return;
-    const every = setInterval(() => {
-      if (document.hidden) return;
-      const shown = visibleMates(DOCK, "dock-crew");
-      turn.current = (turn.current + 1 + Math.floor(Math.random() * Math.max(1, shown.length - 1))) % shown.length;
-      const mate = shown[turn.current]!;
-      say(mate.id, line(mate), SHOW_MS, false);
-    }, DOCK_EVERY_MS);
-    return () => clearInterval(every);
-  }, [hidden, line, say]);
-
-  function setDock(next: boolean) {
+  const set = useCallback((next: boolean) => {
     setHidden(next);
     try {
       window.localStorage.setItem(DOCK_KEY, next ? "hidden" : "shown");
     } catch {
       // Kept for this visit only.
     }
-  }
+    window.dispatchEvent(new Event(DOCK_EVENT));
+  }, []);
+  return [hidden, set];
+}
+
+export interface Headline {
+  title: string;
+  source: string;
+  url: string;
+  published_at: string | null;
+}
+
+/** Solana headlines from the API's news broadcast; refreshed every 3 minutes. */
+function useSolanaNews(enabled: boolean): Headline[] {
+  const news = useQuery({
+    queryKey: ["news", "solana"],
+    queryFn: () => api.get<{ items: Headline[] }>("/news/solana", { skipAuthRetry: true }),
+    enabled,
+    refetchInterval: 180_000,
+    staleTime: 120_000,
+    retry: false,
+  });
+  return news.data?.items ?? [];
+}
+
+function ago(iso: string | null, now: number): string {
+  if (!iso) return "";
+  const minutes = Math.max(0, Math.round((now - new Date(iso).getTime()) / 60_000));
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  return hours < 24 ? `${hours}h ago` : `${Math.round(hours / 24)}d ago`;
+}
+
+function shortTitle(title: string, max = 64): string {
+  return title.length <= max ? title : `${title.slice(0, max - 1).trimEnd()}…`;
+}
+
+/** The live strip under the panda: one headline at a time, rotating, linked. */
+function NewsStrip({ items, index }: { items: Headline[]; index: number }) {
+  const item = items.length ? items[index % items.length]! : null;
+  return (
+    <div className="dock-news" aria-live="off">
+      <p className="dock-news__label">
+        <span className="dock-news__dot" aria-hidden /> Solana news · live
+      </p>
+      {item ? (
+        <>
+          <a href={item.url} target="_blank" rel="noreferrer" className="dock-news__title">
+            {item.title}
+          </a>
+          <p className="dock-news__meta">
+            {item.source}
+            {item.published_at ? ` · ${ago(item.published_at, Date.now())}` : ""}
+          </p>
+        </>
+      ) : (
+        <p className="dock-news__meta">Tuning in…</p>
+      )}
+    </div>
+  );
+}
+
+export function DockCrew({
+  pathname,
+  placement = "floating",
+}: {
+  pathname: string;
+  /** "rail": the panda and the news in the desktop sidebar. "floating": the
+   *  phone corner, all three animals. */
+  placement?: "floating" | "rail";
+}) {
+  const rail = placement === "rail";
+  const mates = rail ? PANDA : DOCK;
+  const { bubble, say, soundOn, toggleSound } = useCrewVoice(mates);
+  const [hidden, setDock] = useDockHidden();
+  const [hop, setHop] = useState<string | null>(null);
+  const [newsIndex, setNewsIndex] = useState(0);
+  const newsRef = useRef(0);
+  const news = useSolanaNews(rail && !hidden);
+  const turn = useRef(0);
+  const path = useRef(pathname);
+  path.current = pathname;
+
+  const line = useCallback((mate: Mate) => {
+    const pool = [...pageLines(path.current), ...mate.lines];
+    return pool[Math.floor(Math.random() * pool.length)]!;
+  }, []);
+
+  // On a phone, a page-aware hello on every page change, then chatter. In the
+  // rail the top pair says hello (`RailHeaderCrew`) and the panda reads news.
+  useEffect(() => {
+    if (hidden || rail) return;
+    const lines = pageLines(pathname);
+    const hello = setTimeout(() => say("penguin", lines[0] ?? "Hi again!"), 1200);
+    return () => clearTimeout(hello);
+  }, [hidden, rail, pathname, say]);
+
+  useEffect(() => {
+    if (hidden || rail) return;
+    const every = setInterval(() => {
+      if (document.hidden) return;
+      const shown = visibleMates(DOCK, "dock-crew");
+      turn.current = (turn.current + 1 + Math.floor(Math.random() * Math.max(1, shown.length - 1))) % shown.length;
+      const mate = shown[turn.current]!;
+      say(mate.id, line(mate));
+    }, DOCK_EVERY_MS);
+    return () => clearInterval(every);
+  }, [hidden, rail, line, say]);
+
+  // The panda reads the news: the next headline every few seconds, short.
+  useEffect(() => {
+    if (hidden || !rail || news.length === 0) return;
+    const read = (i: number) => say("panda", `📰 ${shortTitle(news[i % news.length]!.title)}`, 6000);
+    const first = setTimeout(() => read(newsRef.current), 1500);
+    const every = setInterval(() => {
+      if (document.hidden) return;
+      newsRef.current += 1;
+      setNewsIndex(newsRef.current);
+      read(newsRef.current);
+    }, NEWS_EVERY_MS);
+    return () => {
+      clearTimeout(first);
+      clearInterval(every);
+    };
+  }, [hidden, rail, news, say]);
 
   if (hidden) {
     return (
@@ -466,25 +573,82 @@ export function DockCrew({
   }
 
   return (
-    <div className={cn("dock-crew", `dock-crew--${placement}`)} data-hop={hop ?? undefined}>
-      <div className="dock-crew__row" aria-hidden>
-        <Mates
-          mates={DOCK}
-          bubble={bubble}
-          prefix="dock-crew"
-          onTap={(mate) => {
-            setHop(mate.id);
-            setTimeout(() => setHop(null), 700);
-            say(mate.id, line(mate));
-          }}
-        />
+    <div className={cn(rail && "dock-rail")}>
+      <div className={cn("dock-crew", `dock-crew--${placement}`)} data-hop={hop ?? undefined}>
+        <div className="dock-crew__row" aria-hidden>
+          <Mates
+            mates={mates}
+            bubble={bubble}
+            prefix="dock-crew"
+            onTap={(mate) => {
+              setHop(mate.id);
+              setTimeout(() => setHop(null), 700);
+              const headline = rail && news.length ? news[newsIndex % news.length] : null;
+              say(mate.id, headline ? `📰 ${shortTitle(headline.title)}` : line(mate), headline ? 6000 : SHOW_MS);
+            }}
+          />
+        </div>
+        <div className="dock-crew__controls">
+          <SoundButton on={soundOn} onToggle={toggleSound} className="dock-crew__button" />
+          <button type="button" className="dock-crew__button" aria-label="Hide the crew" onClick={() => setDock(true)}>
+            ×
+          </button>
+        </div>
       </div>
-      <div className="dock-crew__controls">
-        <SoundButton on={soundOn} onToggle={toggleSound} className="dock-crew__button" />
-        <button type="button" className="dock-crew__button" aria-label="Hide the crew" onClick={() => setDock(true)}>
-          ×
-        </button>
-      </div>
+      {rail ? <NewsStrip items={news} index={newsIndex} /> : null}
+    </div>
+  );
+}
+
+/**
+ * The tiger and the penguin at the top of the sidebar, beside MEMESCOPE. They
+ * say hello on each page and chat now and then; tap one and it talks. Hidden
+ * with the rest of the crew.
+ */
+export function RailHeaderCrew({ pathname }: { pathname: string }) {
+  const { bubble, say } = useCrewVoice(TOP_PAIR);
+  const [hidden] = useDockHidden();
+  const [hop, setHop] = useState<string | null>(null);
+  const turn = useRef(0);
+  const path = useRef(pathname);
+  path.current = pathname;
+
+  const line = useCallback((mate: Mate) => {
+    const pool = [...pageLines(path.current), ...mate.lines];
+    return pool[Math.floor(Math.random() * pool.length)]!;
+  }, []);
+
+  useEffect(() => {
+    if (hidden) return;
+    const lines = pageLines(pathname);
+    const hello = setTimeout(() => say("penguin", lines[0] ?? "Hi again!"), 1200);
+    return () => clearTimeout(hello);
+  }, [hidden, pathname, say]);
+
+  useEffect(() => {
+    if (hidden) return;
+    const every = setInterval(() => {
+      if (document.hidden) return;
+      turn.current = (turn.current + 1) % TOP_PAIR.length;
+      const mate = TOP_PAIR[turn.current]!;
+      say(mate.id, line(mate));
+    }, DOCK_EVERY_MS + 2000);
+    return () => clearInterval(every);
+  }, [hidden, line, say]);
+
+  if (hidden) return null;
+  return (
+    <div className="rail-top-crew" data-hop={hop ?? undefined} aria-hidden>
+      <Mates
+        mates={TOP_PAIR}
+        bubble={bubble}
+        prefix="rail-top-crew"
+        onTap={(mate) => {
+          setHop(mate.id);
+          setTimeout(() => setHop(null), 700);
+          say(mate.id, line(mate));
+        }}
+      />
     </div>
   );
 }

@@ -8,7 +8,7 @@ import type { ReactNode } from "react";
 import { LogoMark, Wordmark } from "@/components/brand/logo";
 import { IconCollapse, IconExpand } from "@/components/layout/nav-icons";
 import { SolTicker } from "@/components/layout/sol-ticker";
-import { DockCrew } from "@/components/space/login-crew";
+import { DockCrew, RailHeaderCrew } from "@/components/space/login-crew";
 import { Tooltip } from "@/components/ui/tooltip";
 import { useNavRail } from "@/hooks/use-nav-rail";
 import { NAV_FOOTER, NAV_GROUPS, activeItem, type NavItem } from "@/lib/design/nav";
@@ -221,10 +221,13 @@ export function AppSidebar() {
           <LogoMark size={18} className="text-accent" />
           {collapsed ? null : <Wordmark className="text-xs tracking-[0.14em]" />}
         </Link>
+        {/* The tiger and the penguin, beside MEMESCOPE (2026-09-25). */}
+        {collapsed ? null : <RailHeaderCrew pathname={pathname} />}
       </div>
 
-      {/* The animal crew sits in the rail's empty space between HQ and
-          Settings (Karthik, 2026-09-25). A collapsed rail is too narrow. */}
+      {/* The panda sits in the rail's empty space between HQ and Settings and
+          reads the Solana news under it (Karthik, 2026-09-25). A collapsed
+          rail is too narrow. */}
       <SidebarContent
         collapsed={collapsed}
         between={collapsed ? null : <DockCrew pathname={pathname} placement="rail" />}
