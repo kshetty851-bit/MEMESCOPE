@@ -383,6 +383,7 @@ ENTRY_RULES: dict[str, str] = {
                    "'pump'",
     "floor75": "every graduation with a pool at or above $75,000, no selection — "
                "the baseline's own rule",
+    "floor150": "every graduation with a pool at or above $150,000, no selection",
     "sym_night": "symbol used before AND the pool opened 18:00-06:00 UTC",
     "band": "the pool held between $95,000 and $222,000 at the open — a band, "
             "not a floor, because tail risk rises again above it",
@@ -481,6 +482,12 @@ def accepts(arm: Arm, *, mint: str, open_at: datetime, liquidity: Decimal | None
         # `is_control` names "floor": a second control would move the board's
         # control band, which is not what a twin is for.
         return liquidity is not None and liquidity >= LIQ_BANDS[0][1]
+    if e == "floor150":
+        # Karthik, 2026-09-25, after EVO died in a $146k pool. On the quiet
+        # rule's record the $75k-$150k pools died 3 times in 41 trades and
+        # those above 2 in 223. POST-HOC: the line was drawn after seeing EVO,
+        # so this arm's own forward trades are the only test of it.
+        return liquidity is not None and liquidity >= 150_000
     if e == "floor10k":
         # Karthik's $10k book (2026-09-19): the baseline's rule on a lower
         # floor, so its fresh $500 wallet (`config.FRESH_BOOKS`) trades what
@@ -757,6 +764,12 @@ ARMS: tuple[Arm, ...] = (
     Arm("BASE_75k_quiet_4m", "floor75", 4, quiet=True,
         note="every graduation over $75k whose pool is still quiet (under "
              "100 trades) when it is bought, out at 4m"),
+    # Karthik, 2026-09-25: the quiet rule on $150k+ pools only, for the real
+    # wallet to follow (G-Q150). BASE_75k_quiet_5m is its matched control: the
+    # same coins, minus the $75k-$150k slice. See `floor150` for why post-hoc.
+    Arm("BASE_150k_quiet_5m", "floor150", 5, quiet=True,
+        note="every graduation over $150k whose pool is still quiet (under "
+             "100 trades) when it is bought, out at 5m"),
     # NOT part of the tournament, and kept when everything else went. These
     # two are a PRE-REGISTERED A/B on the rug signals — a never-seen symbol
     # rugs 18% against 3%, a daytime-UTC open 15% against 5% — opened
@@ -784,13 +797,14 @@ CONTROLS: tuple[Arm, ...] = tuple(a for a in ARMS if a.is_control)
 #: returned no edge. The count is pinned rather than free because an arm that
 #: appears mid-tournament changes what every other number means — so changing
 #: it must be a deliberate edit with a date, not a side effect.
-assert len(ARMS) == 16, (
+assert len(ARMS) == 17, (
     "three B3 arms (3m FROM ENTRY retired 2026-09-16 at -$58.90), B3 bought "
     "early (added 2026-09-16), the two rug arms (added 2026-09-16), the two "
     "shorter graduation clocks g2 and g3 (added 2026-09-17), the fast pair "
     "E75/E75T (added 2026-09-19), the quiet-pool arm BASE_75k_quiet_5m and the "
     "four $25k clocks (all added 2026-09-20), its four-minute twin "
-    "BASE_75k_quiet_4m (added 2026-09-21), the band's pump-only twin "
+    "BASE_75k_quiet_4m (added 2026-09-21), its $150k twin BASE_150k_quiet_5m "
+    "(added 2026-09-25), the band's pump-only twin "
     "BAND_55k_pump_5m (added 2026-09-22), the band's rug-money-blocked "
     "twin BAND_55k_blk_5m (added 2026-09-23), the BASELINE, the $500k+flow "
     "candidate, and the two "
@@ -822,10 +836,10 @@ assert all(a.tp is None and a.trail is None for a in ARMS), (
 assert all(a.stop is None or a.stop == Decimal("0.10") for a in ARMS), (
     "one stop level, so the twins differ in ONE thing. Sweeping levels here "
     "would be fitting a parameter on the same data that suggested it")
-assert len([a for a in ARMS if not a.is_control]) == 15, (
+assert len([a for a in ARMS if not a.is_control]) == 16, (
     "`config.required_pf` is calibrated on the maximum of FORTY-TWO noise "
-    "draws. Fifteen arms are now judged against it, so the bar is if anything "
-    "CONSERVATIVE — the luckiest of fifteen reaches less than the luckiest "
+    "draws. Sixteen arms are now judged against it, so the bar is if anything "
+    "CONSERVATIVE — the luckiest of sixteen reaches less than the luckiest "
     "of forty-two. Left as it is deliberately: a bar that is too hard costs a "
     "real finding some time, where one that is too easy costs a false one nothing")
 assert all(a.clock in {"entry", "graduation"} for a in ARMS), "a clock is one of two"
