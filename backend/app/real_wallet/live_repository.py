@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, cast
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, true, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -48,6 +48,29 @@ class OpenPositionExistsError(RuntimeError):
 
 
 class LiveIntentRepository:
+    @staticmethod
+    def _mine(wallet: str | None) -> Any:
+        """Positions of ONE wallet: `wallet`, or the owner's when None.
+
+        Every total below is per wallet (2026-09-25): a family member's own
+        wallet trades beside the owner's, and neither may count, cap or lose
+        against the other's book. With no owner configured and no wallet given
+        there is nothing to scope by, and the clause is always true.
+
+        A position with NO wallet recorded counts as the owner's. Every real
+        trade records its wallet, but the loss limit is the one figure that
+        must never undercount, so an unattributed loss lands on the book whose
+        limits have always counted it.
+        """
+        owner = settings.REAL_WALLET_PUBLIC_KEY.strip()
+        key = (wallet or owner).strip()
+        if not key:
+            return true()
+        if key == owner:
+            return or_(RealWalletPosition.wallet_public_key == key,
+                       RealWalletPosition.wallet_public_key.is_(None))
+        return RealWalletPosition.wallet_public_key == key
+
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
@@ -286,7 +309,7 @@ class LiveIntentRepository:
             )
         )
 
-    async def realised_pnl_today(self, now: datetime) -> Decimal:
+    async def realised_pnl_today(self, now: datetime, wallet: str | None = None) -> Decimal:
         """What the positions closed since UTC midnight made, net.
 
         Net where it was measured and gross where a fee could not be priced: a
@@ -299,11 +322,11 @@ class LiveIntentRepository:
         rows = (await self._session.execute(
             select(RealWalletPosition.realised_net_pnl_usd,
                    RealWalletPosition.realised_gross_pnl_usd)
-            .where(RealWalletPosition.closed_at >= start))).all()
+            .where(RealWalletPosition.closed_at >= start, self._mine(wallet)))).all()
         return sum(((net if net is not None else gross) or Decimal(0)
                     for net, gross in rows), Decimal(0))
 
-    async def since_first_trade(self) -> dict[str, Any] | None:
+    async def since_first_trade(self, wallet: str | None = None) -> dict[str, Any] | None:
         """Every real trade since the first, and the wallet's worth when it began.
 
         The starting worth is the last balance the watch recorded before the
@@ -314,7 +337,8 @@ class LiveIntentRepository:
         """
         await self._session.flush()
         first = (await self._session.execute(
-            select(RealWalletPosition).order_by(RealWalletPosition.opened_at).limit(1)
+            select(RealWalletPosition).where(self._mine(wallet))
+            .order_by(RealWalletPosition.opened_at).limit(1)
         )).scalars().first()
         if first is None:
             return None
@@ -329,7 +353,7 @@ class LiveIntentRepository:
             func.coalesce(func.sum(pnl).filter(closed), 0),
             func.coalesce(func.sum(RealWalletPosition.entry_price_usd
                                    * RealWalletPosition.quantity).filter(closed), 0),
-        ))).one()
+        ).where(self._mine(wallet)))).one()
         began = first.opened_at
         if first.opened_live_intent_id is not None:
             began = await self._session.scalar(
@@ -360,9 +384,9 @@ class LiveIntentRepository:
             "return_pct": net / start_usd * 100 if start_usd else None,
         }
 
-    async def realised_loss_today(self, now: datetime) -> Decimal:
+    async def realised_loss_today(self, now: datetime, wallet: str | None = None) -> Decimal:
         """Today's net realised loss; zero on an up day."""
-        return max(Decimal(0), -await self.realised_pnl_today(now))
+        return max(Decimal(0), -await self.realised_pnl_today(now, wallet))
 
     async def sell_attempts(self, position_id: uuid.UUID) -> int:
         """How many exits have been asked for this position, whatever became of them."""
@@ -371,13 +395,14 @@ class LiveIntentRepository:
             .where(RealWalletLiveIntent.position_id == position_id,
                    RealWalletLiveIntent.side == "SELL")) or 0)
 
-    async def open_positions_count(self) -> int:
+    async def open_positions_count(self, wallet: str | None = None) -> int:
         rows = await self._session.scalars(
-            select(RealWalletPosition.id).where(RealWalletPosition.status == "OPEN")
+            select(RealWalletPosition.id).where(RealWalletPosition.status == "OPEN",
+                                                self._mine(wallet))
         )
         return len(rows.all())
 
-    async def open_exposure_usd(self) -> Decimal:
+    async def open_exposure_usd(self, wallet: str | None = None) -> Decimal:
         """What the open book cost, at entry, in dollars.
 
         Cost rather than current value: this wallet stores no running mark, and
@@ -394,7 +419,7 @@ class LiveIntentRepository:
                     ),
                     0,
                 )
-            ).where(RealWalletPosition.status == "OPEN")
+            ).where(RealWalletPosition.status == "OPEN", self._mine(wallet))
         )
         return Decimal(total or 0)
 
@@ -409,11 +434,13 @@ class LiveIntentRepository:
             ),
         )
 
-    async def positions(self, *, limit: int = 30) -> list[RealWalletPosition]:
+    async def positions(self, *, limit: int = 30,
+                        wallet: str | None = None) -> list[RealWalletPosition]:
         return list(
             (
                 await self._session.scalars(
                     select(RealWalletPosition)
+                    .where(self._mine(wallet))
                     .order_by(RealWalletPosition.opened_at.desc())
                     .limit(limit)
                 )

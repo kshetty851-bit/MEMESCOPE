@@ -239,10 +239,23 @@ def _late(event_at: datetime, now: datetime) -> str:
     return f"\n({_duration(now - event_at)} ago)" if now - event_at > LATE_AFTER else ""
 
 
+def _whose(position: RealWalletPosition) -> str:
+    """"REAL WALLET" for the owner's, "JAYA'S WALLET" for a family member's own
+    (2026-09-25). A family map that cannot be read falls back to the plain
+    label rather than dropping the alert."""
+    from app.real_wallet import family_wallets
+
+    try:
+        member = family_wallets.member_for(position.wallet_public_key or "")
+    except family_wallets.FamilyWalletConfigError:
+        member = None
+    return f"{member}'S WALLET" if member else "REAL WALLET"
+
+
 def opened_message(position: RealWalletPosition, symbol: str | None, now: datetime) -> str:
     cost = position.quantity * position.entry_price_usd
     lines = [
-        f"🟢 REAL WALLET BOUGHT {_name(position, symbol)}",
+        f"🟢 {_whose(position)} BOUGHT {_name(position, symbol)}",
         f"{_usd(cost)} at {_price(position.entry_price_usd)}",
     ]
     if position.strategy_id:
@@ -273,7 +286,7 @@ def closed_message(position: RealWalletPosition, symbol: str | None, now: dateti
         mark = "✅" if pnl > 0 else "🔻" if pnl < 0 else "⚪"
 
     lines = [
-        f"{mark} REAL WALLET SOLD {_name(position, symbol)}",
+        f"{mark} {_whose(position)} SOLD {_name(position, symbol)}",
         headline,
         describe_exit(position.exit_reason)
         + (f" · held {_duration(position.closed_at - position.opened_at)}" if position.closed_at else ""),

@@ -15,13 +15,15 @@ from typing import Literal
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from app.api.deps import AdminUser, DbSession
+from app.api.deps import AdminUser, DbSession, OptionalUser
 from app.core.config import settings
 from app.core.exceptions import ConflictError, ServiceUnavailableError
 from app.core.logging import get_logger
 from app.models.real_wallet_family import RealWalletFamilyLedger, RealWalletFamilyMember
+from app.models.user import UserRole
 from app.real_wallet import family, family_wallets, withdraw_service
 from app.real_wallet.balance import ExecutionWalletBalanceService
+from app.real_wallet.live_repository import LiveIntentRepository
 from app.real_wallet.mainnet_signer_client import (
     MainnetSignerRejectedError,
     MainnetSignerUnavailableError,
@@ -66,6 +68,11 @@ class SettingsIn(BaseModel):
     ticket_usd: Decimal
 
 
+class OwnSettingsIn(BaseModel):
+    enabled: bool
+    ticket_usd: Decimal
+
+
 class WithdrawIn(BaseModel):
     """Amount only. The destination is Karthik's nominated address, always."""
 
@@ -73,21 +80,59 @@ class WithdrawIn(BaseModel):
     confirmation_phrase: Literal["WITHDRAW_TO_KARTHIK"]
 
 
+def _money(value: Decimal | None) -> str | None:
+    return None if value is None else str(Decimal(value).quantize(Decimal("0.01")))
+
+
+async def _own_book(session: DbSession, member: str, wallet: str) -> dict[str, object]:
+    """What the member's OWN wallet has traded: switch, size, record, trades.
+
+    Every figure is scoped to this wallet alone (`LiveIntentRepository`'s
+    `wallet=`), so the owner's trades never appear here and this wallet's
+    never appear on the owner's page.
+    """
+    row = await session.get(RealWalletFamilyMember, member)
+    repo = LiveIntentRepository(session)
+    now = datetime.now(UTC)
+    since = await repo.since_first_trade(wallet)
+    positions = await repo.positions(limit=100, wallet=wallet)
+    return {
+        "enabled": bool(row and row.own_enabled),
+        "ticket_usd": str(row.own_ticket_usd if row else Decimal(20)),
+        "ticket_choices": [str(t) for t in family.TICKETS_USD],
+        "today_pnl_usd": _money(await repo.realised_pnl_today(now, wallet)),
+        "open_positions": await repo.open_positions_count(wallet),
+        "since_first_trade": None if since is None else {
+            "trades": since["trades"], "won": since["won"], "lost": since["lost"],
+            "net_pnl_usd": _money(since["net_pnl_usd"]),
+        },
+        "trades_list": [{
+            "mint": pos.mint_address,
+            "status": pos.status,
+            "opened_at": pos.opened_at.isoformat(),
+            "closed_at": pos.closed_at.isoformat() if pos.closed_at else None,
+            "cost_usd": _money(pos.entry_price_usd * pos.quantity),
+            "pnl_usd": _money(pos.realised_net_pnl_usd if pos.realised_net_pnl_usd is not None
+                              else pos.realised_gross_pnl_usd),
+            "exit_reason": pos.exit_reason,
+        } for pos in positions],
+    }
+
+
 async def _own_wallet(member: str) -> dict[str, object]:
     """A member's OWN wallet: its address, and its balance read from chain.
 
-    Stage 1 of 2 (2026-09-25): the wallet can receive, and can send to
-    Karthik's address; it does not trade yet. A balance that cannot be read
-    is reported as unread — never as zero, which would be a claim.
+    It receives deposits, sends only to Karthik's address, and trades when its
+    own switch is on (`own_book`). A balance that cannot be read is reported
+    as unread — never as zero, which would be a claim.
     """
     address = family_wallets.address(member)
     if address is None:
-        return {"address": None, "trading": False}
+        return {"address": None}
     out: dict[str, object] = {
         "address": address,
         "explorer": f"https://solscan.io/account/{address}",
         "withdraws_to": settings.REAL_WALLET_WITHDRAWAL_ADDRESS.strip() or None,
-        "trading": False,
         "balance_sol": None,
         "balance_usd": None,
         "balance_error": None,
@@ -154,6 +199,8 @@ async def member_view(name: str, session: DbSession,
     return {
         "member": member,
         "own_wallet": await _own_wallet(member),
+        "own_book": (await _own_book(session, member, own)
+                     if (own := family_wallets.address(member)) else None),
         "enabled": row.enabled,
         "ticket_usd": str(row.ticket_usd),
         "ticket_choices": [str(t) for t in family.TICKETS_USD],
@@ -274,3 +321,45 @@ async def member_withdraw(name: str, payload: WithdrawIn,
         "note": ("Submitted once and never retried. If this response was lost, "
                  "check the signature on chain rather than sending again."),
     }
+
+
+@router.post("/{name}/own-settings",
+             summary="Switch a member's OWN wallet on or off, and size it")
+async def member_own_settings(name: str, payload: OwnSettingsIn, session: DbSession,
+                              viewer: OptionalUser,
+                              x_family_token: str | None = Header(default=None)
+                              ) -> dict[str, object]:
+    """STOP is anyone's with the family password; START and SIZE are Karthik's.
+
+    Stopping only ends buying, so the member (or whoever holds the family
+    password) may always switch their own wallet off. Switching it ON, or
+    changing how much each trade spends, also needs Karthik signed in as the
+    admin — starting a real wallet is his decision, as it is for his own.
+    """
+    member = _member(name)
+    _authorised(member, x_family_token)
+    if family_wallets.address(member) is None:
+        raise HTTPException(status_code=404,
+                            detail=f"{member} has no wallet of their own yet")
+    if payload.ticket_usd not in family.TICKETS_USD:
+        raise HTTPException(status_code=422, detail="trade size must be one of "
+                            + ", ".join(str(t) for t in family.TICKETS_USD))
+    row = await session.get(RealWalletFamilyMember, member)
+    if row is None:
+        raise HTTPException(status_code=404, detail="no such family member")
+    starting = payload.enabled and not row.own_enabled
+    resizing = payload.ticket_usd != row.own_ticket_usd
+    admin = viewer is not None and viewer.role == UserRole.ADMIN
+    if (starting or resizing) and not admin:
+        raise HTTPException(
+            status_code=403,
+            detail="only Karthik, signed in, can start this wallet or change its size")
+    row.own_enabled, row.own_ticket_usd = payload.enabled, payload.ticket_usd
+    row.own_updated_at = datetime.now(UTC)
+    row.own_updated_by = viewer.email if admin and viewer else f"family:{member}"
+    await session.commit()
+    logger.warning("real_wallet_family_own_settings", member=member,
+                   enabled=payload.enabled, ticket=str(payload.ticket_usd),
+                   by=row.own_updated_by)
+    return {"member": member, "enabled": row.own_enabled,
+            "ticket_usd": str(row.own_ticket_usd)}

@@ -216,8 +216,7 @@ async def sign_intent(intent_id: uuid.UUID) -> dict[str, Any]:
     intent even if two signers ran at once.
     """
     genesis = await _verified_chain()
-    expected = settings.REAL_WALLET_PUBLIC_KEY.strip()
-    if not expected:
+    if not settings.REAL_WALLET_PUBLIC_KEY.strip():
         raise MainnetSignerError("mainnet_signer_pinned_key_not_configured")
 
     async with SessionFactory() as session:
@@ -229,8 +228,14 @@ async def sign_intent(intent_id: uuid.UUID) -> dict[str, Any]:
         # a caller that skipped a barrier.
         if intent.state != ExecutionState.ORDER_CREATED:
             raise MainnetSignerError(f"intent_not_signable:{intent.state}")
-        if intent.wallet_public_key != expected:
-            raise MainnetSignerError("intent_wallet_is_not_this_signer")
+        # The wallet the intent names must be one this signer holds a pinned
+        # key for: the owner's, or (since 2026-09-25) a family member's own.
+        # Anything else is refused before a single byte is inspected.
+        expected = intent.wallet_public_key
+        try:
+            signer = _signer_for(expected)
+        except MainnetSignerError as exc:
+            raise MainnetSignerError(f"intent_wallet_is_not_this_signer:{exc}") from exc
 
         evidence = intent.order_evidence or {}
         encoded = evidence.get("unsigned_transaction")
@@ -254,9 +259,6 @@ async def sign_intent(intent_id: uuid.UUID) -> dict[str, Any]:
             input_amount_raw=int(raw_amount),
             request_id=intent.jupiter_request_id,
             max_slippage_bps=int(settings.REAL_WALLET_EXIT_MAX_SLIPPAGE_BPS),
-        )
-        signer = FileExecutionSigner.load(
-            secret_file=_secret_file(), expected_public_key=expected
         )
         try:
             signed = signer.sign_jupiter_transaction(
@@ -345,7 +347,9 @@ async def sign_withdrawal(
     }
 
 
-async def sign_close_accounts(encoded_transaction: str) -> dict[str, Any]:
+async def sign_close_accounts(
+    encoded_transaction: str, wallet: str | None = None
+) -> dict[str, Any]:
     """Sign a transaction that only closes this wallet's token accounts into itself.
 
     Bytes, like `sign_withdrawal`, and safe for the same kind of reason: the
@@ -354,20 +358,22 @@ async def sign_close_accounts(encoded_transaction: str) -> dict[str, Any]:
     whose only signer is that wallet. The token program refuses to close an
     account that still holds tokens, so the worst such a transaction can do is
     return rent to its owner.
+
+    ``wallet`` names whose accounts: the owner's by default, or a family
+    member's own wallet. The rent goes to that same wallet and no other.
     """
     genesis = await _verified_chain()
-    expected = settings.REAL_WALLET_PUBLIC_KEY.strip()
-    if not expected:
+    owner = settings.REAL_WALLET_PUBLIC_KEY.strip()
+    if not owner:
         raise MainnetSignerError("mainnet_signer_pinned_key_not_configured")
+    expected = (wallet or owner).strip()
+    signer = _signer_for(expected)
     try:
         inspected = account_close.inspect(encoded_transaction, wallet=expected)
     except account_close.AccountCloseRejectedError as exc:
         logger.warning("mainnet_signer_refused_close", reason=str(exc))
         raise MainnetSignerError(f"close_rejected:{exc}") from exc
 
-    signer = FileExecutionSigner.load(
-        secret_file=_secret_file(), expected_public_key=expected
-    )
     signed, signature = signer.sign_native_transaction(encoded_transaction)
     logger.info("mainnet_signer_signed_close", genesis=genesis[:12],
                 accounts=list(inspected.accounts))
@@ -399,10 +405,12 @@ async def _handle_connection(
                 raise MainnetSignerError("invalid_signer_request")
             response = {"ok": True, **(await sign_withdrawal(encoded, wallet))}
         elif op == "sign_close_accounts":
-            encoded = body.get("transaction")
+            encoded, wallet = body.get("transaction"), body.get("wallet")
             if not isinstance(encoded, str) or not encoded:
                 raise MainnetSignerError("invalid_signer_request")
-            response = {"ok": True, **(await sign_close_accounts(encoded))}
+            if wallet is not None and (not isinstance(wallet, str) or not wallet):
+                raise MainnetSignerError("invalid_signer_request")
+            response = {"ok": True, **(await sign_close_accounts(encoded, wallet))}
         elif op == "sign":
             raw_id = body.get("intent_id")
             if not isinstance(raw_id, str):

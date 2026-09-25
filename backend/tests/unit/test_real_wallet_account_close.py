@@ -223,7 +223,10 @@ def test_the_signer_inspects_with_its_own_wallet_setting():
     fn = next(n for n in ast.walk(tree)
               if isinstance(n, ast.AsyncFunctionDef) and n.name == "sign_close_accounts")
     src = ast.unparse(fn)
-    assert [a.arg for a in fn.args.args] == ["encoded_transaction"]
+    # `wallet` (2026-09-25) names whose accounts — the owner's by default, or a
+    # family member's own; the signer still inspects against that wallet, and
+    # `_signer_for` proves it is pinned before any byte is read.
+    assert [a.arg for a in fn.args.args] == ["encoded_transaction", "wallet"]
     assert "account_close.inspect(encoded_transaction, wallet=expected)" in src
     assert "settings.REAL_WALLET_PUBLIC_KEY" in src
 

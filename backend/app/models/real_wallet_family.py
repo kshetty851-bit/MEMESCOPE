@@ -47,6 +47,17 @@ class RealWalletFamilyMember(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_by: Mapped[str | None] = mapped_column(String(120))
+    # --- the member's OWN wallet (stage 2, 2026-09-25) -------------------
+    # Separate from `enabled`/`ticket_usd`, which size the member's SHARE of
+    # the owner's orders: turning a share on must never start a real wallet
+    # of theirs trading, and the other way round. Off until Karthik, signed
+    # in, switches it on (`family_api.member_own_settings`).
+    own_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false")
+    own_ticket_usd: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2), nullable=False, default=Decimal("20"), server_default="20")
+    own_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    own_updated_by: Mapped[str | None] = mapped_column(String(120))
 
 
 class RealWalletFamilyLedger(Base):

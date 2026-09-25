@@ -69,16 +69,20 @@ class UnixMainnetSignerClient:
             **({} if wallet is None else {"wallet": wallet}),
         })
 
-    async def sign_close_accounts(self, encoded_transaction: str) -> dict[str, Any]:
+    async def sign_close_accounts(
+        self, encoded_transaction: str, wallet: str | None = None
+    ) -> dict[str, Any]:
         """Ask for a signature over a transaction that closes empty token accounts.
 
         Bytes again, and safe for the same reason: the signer accepts only
         `CloseAccount`s that pay the wallet in its own environment and are
         signed by that wallet alone.
         """
-        return await self._ask(
-            {"op": "sign_close_accounts", "transaction": encoded_transaction}
-        )
+        return await self._ask({
+            "op": "sign_close_accounts",
+            "transaction": encoded_transaction,
+            **({} if wallet is None else {"wallet": wallet}),
+        })
 
     async def _ask(self, request: dict[str, Any]) -> dict[str, Any]:
         socket_path = settings.MAINNET_SIGNER_SOCKET.strip()
