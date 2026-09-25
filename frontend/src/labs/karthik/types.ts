@@ -30,7 +30,6 @@ export interface KarthikBook {
   wins: number;
   rugs: number;
   days: KarthikDay[];
-  holds: KarthikHold[];
   whatif: KarthikWhatIf;
   trades_list: KarthikTrade[];
 }
@@ -48,18 +47,6 @@ export interface KarthikDay {
    *  of the starting $500 like the figures above it. */
   pct: string;
   balance_usd: string;
-}
-
-/** The same coins, sold on a later clock. */
-export interface KarthikHold {
-  minutes: number;
-  coins: number;
-  pnl_usd: string;
-  per_trade_pct: string;
-  /** Coins worth under a tenth of the entry by then. */
-  wiped: number;
-  /** True for the row the book actually trades, which is net of its costs. */
-  book: boolean;
 }
 
 /** One way of trading the same book: its balance and record on those terms. */
