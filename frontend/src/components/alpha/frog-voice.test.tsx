@@ -40,11 +40,10 @@ describe("the frog calls the launch", () => {
     for (const n of [5, 4, 3, 2, 1]) rerender(<FrogVoice phase="countdown" count={n} />);
     expect(container.querySelector(".frog-bubble")).toHaveTextContent("1!");
     rerender(<FrogVoice phase="ignition" count={null} />);
-    expect(container.querySelector(".frog-bubble")).toHaveTextContent("WOO-HOO-HOO!");
+    expect(container.querySelector(".frog-bubble")).toHaveTextContent("WOO-HOO!");
     expect(said).toEqual([
       "Access approved, Captain! Launching in…",
-      "five!", "four!", "three!", "two!", "one!",
-      "Woo-hoo-hoo!",
+      "Five!", "Four!", "Three!", "Two!", "One!",
     ]);
   });
 
@@ -66,7 +65,7 @@ describe("the frog calls the launch", () => {
 describe("the frog's voice", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it("is a male voice when the browser has one", () => {
+  it("is a male voice, the most natural one the browser has", () => {
     const lines: { voice: { name: string } | null; pitch: number }[] = [];
     vi.stubGlobal("SpeechSynthesisUtterance", class { voice = null; pitch = 1; rate = 1; volume = 1; constructor(public text: string) {} });
     vi.stubGlobal("speechSynthesis", {
@@ -75,10 +74,12 @@ describe("the frog's voice", () => {
       getVoices: () => [
         { name: "Samantha", lang: "en-US" },
         { name: "Daniel", lang: "en-GB" },
+        { name: "Microsoft Guy Online (Natural) - English (United States)", lang: "en-US" },
       ],
       speak: (u: { voice: { name: string } | null; pitch: number }) => lines.push(u),
     });
     render(<FrogVoice phase="approved" count={null} />);
-    expect(lines[0]?.voice?.name).toBe("Daniel");
+    // A natural (neural) male voice beats an ordinary one.
+    expect(lines[0]?.voice?.name).toMatch(/Guy Online \(Natural\)/);
   });
 });
