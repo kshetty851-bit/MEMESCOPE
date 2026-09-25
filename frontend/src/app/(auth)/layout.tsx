@@ -3,6 +3,7 @@ import Link from "next/link";
 import { AiCore } from "@/components/brand/ai-core";
 import { Universe } from "@/components/brand/universe/universe";
 import { Logo } from "@/components/brand/logo";
+import { LoginCrew } from "@/components/space/login-crew";
 import { Label } from "@/components/ui/panel";
 
 /**
@@ -14,6 +15,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
   return (
     <div className="relative grid min-h-screen lg:grid-cols-2">
       <Universe minimal />
+      <LoginCrew />
 
       {/* Left: the instrument */}
       <aside className="relative hidden flex-col justify-between border-r border-line/60 bg-abyss/40 p-10 backdrop-blur-xl lg:flex">
@@ -26,7 +28,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
           <div className="max-w-sm text-center">
             <Label>AI Opportunity Intelligence</Label>
             <p className="mt-3 text-balance text-heading text-ink">
-              Seven AI specialists scanning Solana, continuously.
+              Karthik&apos;s Lab, the graduation lab and the real wallet, in one place.
             </p>
           </div>
         </div>
