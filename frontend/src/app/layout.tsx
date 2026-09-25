@@ -40,7 +40,7 @@ export const metadata: Metadata = {
     template: "%s · MEMESCOPE",
   },
   description:
-    "MEMESCOPE tests pump.fun graduation strategies on paper against a fair comparison before any real money follows them. Built by Karthik Shetty.",
+    "MEMESCOPE tests pump.fun graduation strategies on paper against a fair comparison before any real money follows them.",
   authors: [{ name: "Karthik Shetty" }],
   creator: "Karthik Shetty",
   robots:

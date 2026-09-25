@@ -69,8 +69,8 @@ export function Crew() {
           Meet the MEMESCOPE team
         </h2>
         <p className="crew-lede">
-          {inWords(EMPLOYEES.length - 1)} specialists, one per subsystem, and Karthik
-          Shetty, who built MEMESCOPE, at the graduation desk. Each is a desk you
+          {inWords(EMPLOYEES.length - 1)} specialists, one per subsystem, and the
+          founder at the graduation desk. Each is a desk you
           can open in HQ and watch working — the same characters, the same names,
           reading the same live evidence.
         </p>
