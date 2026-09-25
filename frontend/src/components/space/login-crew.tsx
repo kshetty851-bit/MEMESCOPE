@@ -38,9 +38,13 @@ const SHOW_MS = 3400;
 
 /* ── sound ─────────────────────────────────────────────────────────────── */
 
-type Sfx = {
+export type Sfx = {
   start(): void;
   blip(pitch: number): void;
+  /** One countdown beep. */
+  beep(freq: number): void;
+  /** Lift-off: a rocket roar, a party horn and the cheer, all at once. */
+  blastoff(): void;
   whoosh(): void;
   cheer(): void;
   oops(): void;
@@ -48,7 +52,7 @@ type Sfx = {
   close(): void;
 };
 
-function createSfx(): Sfx | null {
+export function createSfx(): Sfx | null {
   const Ctx =
     typeof window === "undefined"
       ? undefined
@@ -114,6 +118,33 @@ function createSfx(): Sfx | null {
       const t = ctx.currentTime;
       [523, 659, 784, 1047].forEach((f, i) => tone(f, t + i * 0.09, 0.3, 0.08, "triangle"));
     },
+    beep(freq) {
+      tone(freq, ctx.currentTime, 0.14, 0.08, "square");
+    },
+    blastoff() {
+      const t = ctx.currentTime;
+      // The roar: noise swept DOWN, so it sounds like it is leaving.
+      const buffer = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < data.length; i += 1) data[i] = Math.random() * 2 - 1;
+      const noise = ctx.createBufferSource();
+      noise.buffer = buffer;
+      const band = ctx.createBiquadFilter();
+      band.type = "lowpass";
+      band.frequency.setValueAtTime(1800, t);
+      band.frequency.exponentialRampToValueAtTime(160, t + 1.8);
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(0.16, t + 0.08);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 1.9);
+      noise.connect(band).connect(gain).connect(master);
+      noise.start(t);
+      noise.stop(t + 2);
+      // The party horn: a buzzy slide up, twice.
+      tone(310, t + 0.15, 0.45, 0.05, "sawtooth", 620);
+      tone(415, t + 0.55, 0.6, 0.05, "sawtooth", 830);
+      [523, 659, 784, 1047, 1319].forEach((f, i) => tone(f, t + 0.3 + i * 0.08, 0.35, 0.07, "triangle"));
+    },
     oops() {
       const t = ctx.currentTime;
       tone(392, t, 0.22, 0.07, "triangle", 262);
@@ -128,7 +159,8 @@ function createSfx(): Sfx | null {
   };
 }
 
-function readSound(): boolean {
+/** The crew's shared mute, remembered in this browser. On unless muted. */
+export function readSound(): boolean {
   try {
     return window.localStorage.getItem(SOUND_KEY) !== "off";
   } catch {

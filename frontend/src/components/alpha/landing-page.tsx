@@ -7,6 +7,7 @@ import { LogoMark } from "@/components/brand/logo";
 import { Wordmark, WordmarkSubtitle } from "@/components/brand/wordmark";
 import { Crew, EnterHq } from "@/components/alpha/crew";
 import { AlphaAccess } from "@/components/alpha/alpha-access";
+import { FrogVoice } from "@/components/alpha/frog-voice";
 import { HeroMascot, type MascotState } from "@/components/alpha/hero-mascot";
 import { LaunchOverlay, useLaunchSequence } from "@/components/alpha/launch-sequence";
 import { SiteFooter, WhatRunsHere } from "@/components/alpha/what-runs-here";
@@ -120,6 +121,7 @@ export function LandingPage() {
             to. */}
         <div className="alpha-mascot-mount pointer-events-none absolute" aria-hidden>
           <HeroMascot state={mascot} />
+          <FrogVoice phase={phase} count={count} />
         </div>
 
         <div
