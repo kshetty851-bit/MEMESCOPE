@@ -41,12 +41,6 @@ const SHOW_MS = 3400;
 export type Sfx = {
   start(): void;
   blip(pitch: number): void;
-  /** One countdown beep. */
-  beep(freq: number): void;
-  /** Lift-off: a rocket roar, a party horn and the cheer, all at once. */
-  blastoff(): void;
-  /** A cartoon "woo-hoo": two slide-whistle whoops, the second higher. */
-  woohoo(): void;
   whoosh(): void;
   cheer(): void;
   oops(): void;
@@ -119,59 +113,6 @@ export function createSfx(): Sfx | null {
     cheer() {
       const t = ctx.currentTime;
       [523, 659, 784, 1047].forEach((f, i) => tone(f, t + i * 0.09, 0.3, 0.08, "triangle"));
-    },
-    woohoo() {
-      const t = ctx.currentTime;
-      // A slide whistle with a wobble: an oscillator swept up, with a fast
-      // vibrato on its pitch. Two of them — "woo" then a higher "HOO".
-      for (const [at, from, to, dur] of [[0, 420, 900, 0.32], [0.36, 520, 1350, 0.5]] as const) {
-        const osc = ctx.createOscillator();
-        const wobble = ctx.createOscillator();
-        const depth = ctx.createGain();
-        const gain = ctx.createGain();
-        osc.type = "sine";
-        osc.frequency.setValueAtTime(from, t + at);
-        osc.frequency.exponentialRampToValueAtTime(to, t + at + dur * 0.7);
-        osc.frequency.exponentialRampToValueAtTime(to * 0.92, t + at + dur);
-        wobble.frequency.value = 11;
-        depth.gain.value = 22;
-        wobble.connect(depth).connect(osc.frequency);
-        gain.gain.setValueAtTime(0.0001, t + at);
-        gain.gain.exponentialRampToValueAtTime(0.12, t + at + 0.04);
-        gain.gain.exponentialRampToValueAtTime(0.0001, t + at + dur);
-        osc.connect(gain).connect(master);
-        osc.start(t + at);
-        wobble.start(t + at);
-        osc.stop(t + at + dur + 0.05);
-        wobble.stop(t + at + dur + 0.05);
-      }
-    },
-    beep(freq) {
-      tone(freq, ctx.currentTime, 0.14, 0.08, "square");
-    },
-    blastoff() {
-      const t = ctx.currentTime;
-      // The roar: noise swept DOWN, so it sounds like it is leaving.
-      const buffer = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
-      const data = buffer.getChannelData(0);
-      for (let i = 0; i < data.length; i += 1) data[i] = Math.random() * 2 - 1;
-      const noise = ctx.createBufferSource();
-      noise.buffer = buffer;
-      const band = ctx.createBiquadFilter();
-      band.type = "lowpass";
-      band.frequency.setValueAtTime(1800, t);
-      band.frequency.exponentialRampToValueAtTime(160, t + 1.8);
-      const gain = ctx.createGain();
-      gain.gain.setValueAtTime(0.0001, t);
-      gain.gain.exponentialRampToValueAtTime(0.16, t + 0.08);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t + 1.9);
-      noise.connect(band).connect(gain).connect(master);
-      noise.start(t);
-      noise.stop(t + 2);
-      // The party horn: a buzzy slide up, twice.
-      tone(310, t + 0.15, 0.45, 0.05, "sawtooth", 620);
-      tone(415, t + 0.55, 0.6, 0.05, "sawtooth", 830);
-      [523, 659, 784, 1047, 1319].forEach((f, i) => tone(f, t + 0.3 + i * 0.08, 0.35, 0.07, "triangle"));
     },
     oops() {
       const t = ctx.currentTime;

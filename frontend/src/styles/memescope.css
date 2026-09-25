@@ -718,7 +718,7 @@
   }
 }
 
-/* The frog's speech bubble (components/alpha/frog-voice.tsx): above its head,
+/* The frog's speech bubble (components/alpha/frog-bubble.tsx): above its head,
    shown while it is on screen for the launch. The countdown digits are set
    big, like the frog is shouting them. */
 .frog-bubble {
