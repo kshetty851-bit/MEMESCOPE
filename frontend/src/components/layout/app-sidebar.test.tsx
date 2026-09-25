@@ -18,7 +18,7 @@ import {
  * unavailable.
  */
 
-const pathname = vi.hoisted(() => ({ current: "/command" }));
+const pathname = vi.hoisted(() => ({ current: "/karthik-lab" }));
 
 vi.mock("next/navigation", () => ({
   usePathname: () => pathname.current,
@@ -26,17 +26,17 @@ vi.mock("next/navigation", () => ({
 
 afterEach(() => {
   cleanup();
-  pathname.current = "/command";
+  pathname.current = "/karthik-lab";
 });
 
 describe("navigation map", () => {
   it("marks the item that owns the current route", () => {
-    expect(activeItem("/command")?.label).toBe("Scanner");
-    expect(activeItem("/record")?.label).toBe("Track record");
+    expect(activeItem("/karthik-lab")?.label).toBe("Karthik's Lab");
+    expect(activeItem("/real-wallet")?.label).toBe("Real wallet");
   });
 
   it("resolves nested routes to their owning item", () => {
-    expect(activeItem("/record/archive")?.label).toBe("Track record");
+    expect(activeItem("/real-wallet/family/jaya")?.label).toBe("Real wallet");
   });
 
   it("does not light up an item for a route it does not own", () => {
@@ -48,7 +48,7 @@ describe("navigation map", () => {
     expect(sectionLabel("/tokens/So11111111111111111111111111111111111111112")).toBe(
       "Token intelligence",
     );
-    expect(sectionLabel("/command")).toBe("Scanner");
+    expect(sectionLabel("/karthik-lab")).toBe("Karthik's Lab");
   });
 
   it("routes every destination, now that Phase 8 shipped the last three", () => {
@@ -81,11 +81,7 @@ describe("SidebarContent", () => {
     render(<SidebarContent collapsed={false} />);
     const nav = screen.getByRole("navigation", { name: "Main" });
 
-    for (const label of [
-      "Scanner",
-      "Track record",
-      "Paper wallet",
-    ]) {
+    for (const label of ["Karthik's Lab", "Graduation Lab", "Real wallet", "HQ"]) {
       expect(within(nav).getByRole("link", { name: label })).toBeInTheDocument();
     }
     expect(screen.getByRole("link", { name: "Settings" })).toBeInTheDocument();
@@ -94,12 +90,12 @@ describe("SidebarContent", () => {
   it("renders the surviving destinations as real links", () => {
     render(<SidebarContent collapsed={false} />);
 
-    // Trending, New launches and Watchlist were removed on 2026-09-08 along
-    // with every lab page; what is left is what this must keep rendering.
+    // Scanner, Track record and the paper wallet went on 2026-09-25; what is
+    // left is what this must keep rendering.
     for (const [label, href] of [
-      ["Scanner", "/command"],
-      ["Track record", "/record"],
-      ["Paper wallet", "/wallet"],
+      ["Karthik's Lab", "/karthik-lab"],
+      ["Real wallet", "/real-wallet"],
+      ["HQ", "/hq"],
     ] as const) {
       expect(screen.getByRole("link", { name: label })).toHaveAttribute("href", href);
     }
@@ -112,14 +108,14 @@ describe("SidebarContent", () => {
   });
 
   it("marks the current route with aria-current", () => {
-    pathname.current = "/record";
+    pathname.current = "/real-wallet";
     render(<SidebarContent collapsed={false} />);
 
-    expect(screen.getByRole("link", { name: "Track record" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Real wallet" })).toHaveAttribute(
       "aria-current",
       "page",
     );
-    expect(screen.getByRole("link", { name: "Scanner" })).not.toHaveAttribute(
+    expect(screen.getByRole("link", { name: "HQ" })).not.toHaveAttribute(
       "aria-current",
     );
   });
@@ -128,7 +124,7 @@ describe("SidebarContent", () => {
     render(<SidebarContent collapsed />);
 
     // Labels are visually hidden in the narrow rail; they must not be dropped.
-    for (const label of ["Scanner", "Track record", "Paper wallet"]) {
+    for (const label of ["Karthik's Lab", "Real wallet", "HQ"]) {
       expect(screen.getByRole("link", { name: label })).toBeInTheDocument();
     }
   });

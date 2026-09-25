@@ -8,16 +8,9 @@ from app.db.base import Base
 from app.models.early_buyer import TokenEarlyBuyer
 from app.models.kol import KolWalletRank
 
-# Rafiq Lab's three `rafiq_lab_*` tables. Imported here for one reason: without
+# Rafiqv2's three `rafiqv2_*` tables. Imported here for one reason: without
 # it they exist in the database and not in this metadata, and autogenerate
-# emits `drop_table` for each of them. Additive — it declares tables, it does
-# not change any.
-from app.labs.rafiq.models import (  # noqa: F401
-    RafiqLabDailyState,
-    RafiqLabPosition,
-    RafiqLabStrategy,
-)
-# Rafiqv2's three `rafiqv2_*` tables, for the same reason.
+# emits `drop_table` for each of them.
 from app.labs.rafiqv2.models import (  # noqa: F401
     Rafiqv2Adjustment,
     Rafiqv2Book,
@@ -33,24 +26,6 @@ from app.labs.nse_breakout.models import (  # noqa: F401
     BtRun,
     BtState,
     BtUniverseMember,
-)
-# The Robinhood Chain recorder's two `rhood_*` tables. Imported here or
-# alembic autogenerate does not see them and writes a migration that drops
-# them — the same trap a second Base once set for the Rafiq Lab.
-from app.labs.rhood.models import RhoodLock, RhoodSample  # noqa: F401
-# Momentum Lab's five `mom_*` tables, for the same reason.
-from app.labs.momentum.models import (  # noqa: F401
-    MomCandle,
-    MomClose,
-    MomPair,
-    MomPosition,
-    MomSignal,
-)
-# Forex Lab's three `fx_*` tables, for the same reason.
-from app.labs.forex_lab.models import (  # noqa: F401
-    FxCandle,
-    FxIngestHour,
-    FxSweepRun,
 )
 from app.models.alpha_session import AlphaSession
 from app.models.curve import TokenCurveSnapshot  # noqa: F401

@@ -63,7 +63,9 @@ describe("navigation", () => {
     // intended set, so the test still catches an accidental deletion of what
     // remains rather than pinning a nav that no longer exists.
     const hrefs = NAV_GROUPS.flatMap((group) => group.items).map((item) => item.href);
-    for (const existing of ["/command", "/record", "/wallet", "/real-wallet", "/hq"]) {
+    // Scanner, Track record and the paper wallet went on 2026-09-25 with
+    // the Rafiq, Forex and Momentum Labs and the Robinhood Chain recorder.
+    for (const existing of ["/karthik-lab", "/real-wallet", "/hq"]) {
       expect(hrefs).toContain(existing);
     }
   });

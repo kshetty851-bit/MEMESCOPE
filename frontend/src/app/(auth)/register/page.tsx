@@ -41,7 +41,7 @@ export default function RegisterPage() {
         password: form.password,
         display_name: form.displayName || undefined,
       });
-      router.replace("/command");
+      router.replace("/karthik-lab");
     } catch {
       // Rendered from the store below.
     } finally {

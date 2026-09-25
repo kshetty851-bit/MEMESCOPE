@@ -48,6 +48,6 @@ describe("LoginPage return path", () => {
     "/login",
   ])("never leaves the site: %s", async (url) => {
     signedInAt(url);
-    await waitFor(() => expect(replace).toHaveBeenCalledWith("/command"));
+    await waitFor(() => expect(replace).toHaveBeenCalledWith("/karthik-lab"));
   });
 });

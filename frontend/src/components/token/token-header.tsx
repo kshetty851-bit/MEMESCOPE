@@ -54,14 +54,14 @@ export function TokenHeader({
     <header className="sticky top-0 z-20 -mx-4 border-b border-line bg-canvas px-4 py-3">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <Link
-          href="/command"
+          href="/karthik-lab"
           className={cn(
             "flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs text-ink-2",
             "transition-colors duration-[var(--duration-instant)]",
             "hover:bg-surface hover:text-ink",
           )}
         >
-          <span aria-hidden>←</span> Scanner
+          <span aria-hidden>←</span> Karthik&apos;s Lab
         </Link>
 
         <span aria-hidden className="h-5 w-px shrink-0 bg-line" />

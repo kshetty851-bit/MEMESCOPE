@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
-from app.labs.rafiq.config import FILL_DRIFT_CAP
+from app.labs.rafiqv2.base.config import FILL_DRIFT_CAP
 from app.labs.rafiqv2.config import Book
 from app.labs.rafiqv2.strategy_common import FastRugGate, ProfitLock
 

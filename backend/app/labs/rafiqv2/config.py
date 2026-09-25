@@ -17,8 +17,8 @@ from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
 
-from app.labs.rafiq.entry_gate import GateThresholds
-from app.labs.rafiq.strategies.strategy_d_daily_breaker import DailyBreakerPolicy
+from app.labs.rafiqv2.base.daily_breaker import DailyBreakerPolicy
+from app.labs.rafiqv2.base.entry_gate import GateThresholds
 
 
 def enabled() -> bool:

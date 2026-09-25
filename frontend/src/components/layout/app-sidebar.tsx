@@ -205,8 +205,8 @@ export function AppSidebar() {
         )}
       >
         <Link
-          href="/command"
-          aria-label="MEMESCOPE — Scanner"
+          href="/karthik-lab"
+          aria-label="MEMESCOPE — Karthik's Lab"
           className="flex min-w-0 items-center gap-2.5 rounded-sm"
         >
           <LogoMark size={18} className="text-accent" />

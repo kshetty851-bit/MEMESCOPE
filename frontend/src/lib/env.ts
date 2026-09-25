@@ -110,7 +110,8 @@ export const BUILD = {
  */
 export const ALPHA_ACCESS = {
   transitionKey: "memescope.alpha.justUnlocked",
-  dashboardPath: "/command",
+  // Karthik's Lab since 2026-09-25, when the Scanner and Track record went.
+  dashboardPath: "/karthik-lab",
 } as const;
 
 /**
