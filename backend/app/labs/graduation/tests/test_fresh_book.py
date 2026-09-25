@@ -191,12 +191,6 @@ class _StubDb:
     async def scalar(self, _statement: object) -> None:
         return None
 
-    async def execute(self, _statement: object, _params: object = None) -> _Rows:
-        # The later-exit comparison reads the price samples, which these
-        # synthetic positions have none of: an empty result is the honest
-        # answer and leaves the figures under test alone.
-        return _Rows([])
-
 
 class _Pos:
     """A closed paper position, with only the columns the endpoint reads."""
@@ -211,13 +205,6 @@ class _Pos:
         self.liq_open_usd = Decimal(100_000)
 
 
-def _no_hold_cache() -> None:
-    """The hold comparison caches at module level; a test must not inherit one
-    run's answer or leave its own behind for the next."""
-    from app.labs.graduation import api as _api
-    _api._HOLDS = None
-
-
 async def test_karthik_book_counts_only_the_trades_it_could_fund() -> None:
     """Every figure describes the SAME trades: the ones the book bought.
 
@@ -229,7 +216,6 @@ async def test_karthik_book_counts_only_the_trades_it_could_fund() -> None:
     """
     from app.labs.graduation.api import karthik_book
 
-    _no_hold_cache()
     start = next(s for s in config.FRESH_BOOKS
                  if s.book == "KARTHIK_QUIET_5M").start
     # Eight signals inside one five-minute hold: the book can fund three.
@@ -263,7 +249,6 @@ async def test_karthik_days_are_24h_from_the_open_not_calendar_days() -> None:
     """
     from app.labs.graduation.api import karthik_book
 
-    _no_hold_cache()
     start = next(s for s in config.FRESH_BOOKS
                  if s.book == "KARTHIK_QUIET_5M").start
     rows = [
@@ -296,7 +281,6 @@ async def test_the_public_summary_gives_headline_figures_and_nothing_else() -> N
     from app.labs.graduation import api as _api
     from app.middleware.alpha_access import AlphaAccessMiddleware
 
-    _no_hold_cache()
     _api._KARTHIK_PUBLIC = None
     start = next(s for s in config.FRESH_BOOKS if s.book == "KARTHIK_QUIET_5M").start
     rows = [_Pos("C0", start + timedelta(hours=1), 0.10)]
@@ -320,7 +304,6 @@ async def test_the_page_compares_sizes_and_a_150k_floor_without_changing_the_boo
     figures are untouched, and the $150k check leaves out shallower pools."""
     from app.labs.graduation.api import karthik_book
 
-    _no_hold_cache()
     start = next(s for s in config.FRESH_BOOKS if s.book == "KARTHIK_QUIET_5M").start
     deep = _Pos("DEEP", start + timedelta(hours=1), 0.10)
     deep.liq_open_usd = Decimal(300_000)
