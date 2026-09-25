@@ -9,7 +9,8 @@ import { useAuth } from "@/hooks/use-auth";
 import { ApiError, api } from "@/lib/api-client";
 
 /**
- * FAMILY SHARES OF THE ONE REAL WALLET.
+ * FAMILY SHARES OF THE ONE REAL WALLET — and, from 2026-09-25, each member's
+ * OWN wallet (address, balance, withdraw-to-Karthik; trading comes later).
  *
  * Jaya, Asha and Apoorva each own a slice of the real wallet's orders: their
  * own trade size, their own on/off, their own money. There is still one wallet
@@ -172,8 +173,19 @@ interface FamilyTrade {
   pct: string | null;
 }
 
+interface OwnWallet {
+  address: string | null;
+  explorer?: string;
+  withdraws_to?: string | null;
+  trading: boolean;
+  balance_sol?: string | null;
+  balance_usd?: string | null;
+  balance_error?: string | null;
+}
+
 interface FamilyView {
   member: string;
+  own_wallet?: OwnWallet;
   enabled: boolean;
   ticket_usd: string;
   ticket_choices: string[];
@@ -199,6 +211,152 @@ function Figure({ label, value, hint, cls }: {
       <p className={`mt-1 text-xl font-medium tabular-nums ${cls ?? "text-ink"}`}>{value}</p>
       {hint ? <p className="mt-1 text-xs text-ink-3">{hint}</p> : null}
     </div>
+  );
+}
+
+function short(address: string): string {
+  return `${address.slice(0, 4)}…${address.slice(-4)}`;
+}
+
+/**
+ * The member's OWN Solana wallet (stage 1, 2026-09-25): an address to deposit
+ * to, its balance read from chain, and a way out that can only reach Karthik's
+ * address. It does not trade yet; Karthik switches that on later.
+ */
+function OwnWalletPanel({ member, wallet, headers, onDone }: {
+  member: string;
+  wallet: OwnWallet;
+  headers: Record<string, string> | undefined;
+  onDone: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const [amount, setAmount] = useState("");
+  const [armed, setArmed] = useState(false);
+  const withdraw = useMutation({
+    mutationFn: () =>
+      api.post<{ signature: string; explorer: string; sol: string }>(
+        `/real-wallet/family/${member.toLowerCase()}/withdraw`,
+        { sol_amount: amount, confirmation_phrase: "WITHDRAW_TO_KARTHIK" },
+        { headers, skipAuthRetry: true },
+      ),
+    onSuccess: () => {
+      setAmount("");
+      setArmed(false);
+      onDone();
+    },
+  });
+
+  if (!wallet.address) {
+    return (
+      <section className="mt-5 rounded-lg border border-line p-4">
+        <p className="text-label text-ink-3">Own wallet</p>
+        <p className="mt-1 text-sm text-ink-2">{title(member)}&apos;s own wallet isn&apos;t set up yet.</p>
+      </section>
+    );
+  }
+
+  const address = wallet.address;
+  return (
+    <section className="mt-5 rounded-lg border border-accent/40 p-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p className="text-label text-accent">{title(member)}&apos;s own wallet</p>
+        <span className="rounded-full border border-line px-2 py-0.5 text-xs text-ink-3">
+          Trading: {wallet.trading ? "on" : "off — Karthik switches it on"}
+        </span>
+      </div>
+
+      <p className="mt-3 text-xs text-ink-3">Deposit SOL to this address</p>
+      <div className="mt-1 flex flex-wrap items-center gap-2">
+        <code className="break-all rounded-md bg-surface px-2 py-1 font-mono text-sm text-ink">
+          {address}
+        </code>
+        <button
+          type="button"
+          onClick={() => {
+            void navigator.clipboard?.writeText(address).then(() => {
+              setCopied(true);
+              window.setTimeout(() => setCopied(false), 1500);
+            });
+          }}
+          className="rounded-md border border-line px-2.5 py-1 text-xs text-ink-2 hover:border-line-strong hover:text-ink"
+        >
+          {copied ? "Copied ✓" : "Copy"}
+        </button>
+        {wallet.explorer ? (
+          <a href={wallet.explorer} target="_blank" rel="noreferrer" className="text-xs text-accent">
+            View on Solscan
+          </a>
+        ) : null}
+      </div>
+
+      <p className="mt-4 text-xs text-ink-3">Balance</p>
+      <p className="mt-1 text-xl font-medium tabular-nums text-ink">
+        {wallet.balance_sol != null
+          ? `${Number(wallet.balance_sol).toFixed(4)} SOL`
+          : "Couldn’t read it just now"}
+        {wallet.balance_usd != null ? (
+          <span className="ml-2 text-sm text-ink-3">≈ {usd(wallet.balance_usd)}</span>
+        ) : null}
+      </p>
+
+      <div className="mt-4 border-t border-line pt-3">
+        <p className="text-xs text-ink-3">
+          Withdraw — it can only go to Karthik&apos;s address
+          {wallet.withdraws_to ? ` (${short(wallet.withdraws_to)})` : ""}.
+        </p>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <input
+            inputMode="decimal"
+            placeholder="SOL"
+            value={amount}
+            onChange={(e) => {
+              setAmount(e.target.value);
+              setArmed(false);
+            }}
+            className="w-28 rounded-md border border-line bg-canvas px-2 py-1 text-sm text-ink"
+            aria-label="Amount of SOL to send to Karthik"
+          />
+          {armed ? (
+            <>
+              <button
+                type="button"
+                disabled={withdraw.isPending}
+                onClick={() => withdraw.mutate()}
+                className="rounded-md bg-accent px-3 py-1 text-sm font-medium text-canvas disabled:opacity-60"
+              >
+                {withdraw.isPending ? "Sending…" : `Yes, send ${amount} SOL to Karthik`}
+              </button>
+              <button type="button" onClick={() => setArmed(false)} className="text-sm text-ink-3">
+                Cancel
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              disabled={!(Number(amount) > 0)}
+              onClick={() => setArmed(true)}
+              className="rounded-md border border-line px-3 py-1 text-sm text-ink-2 hover:text-ink disabled:opacity-50"
+            >
+              Send to Karthik
+            </button>
+          )}
+        </div>
+        {withdraw.isSuccess ? (
+          <p className="mt-2 text-xs text-up">
+            Sent {withdraw.data.sol} SOL.{" "}
+            <a href={withdraw.data.explorer} target="_blank" rel="noreferrer" className="underline">
+              See it on Solscan
+            </a>
+            . It is sent once and never retried.
+          </p>
+        ) : null}
+        {withdraw.isError ? (
+          <p className="mt-2 text-xs text-down">
+            Not sent: {withdraw.error instanceof ApiError ? withdraw.error.message : "try again"}
+          </p>
+        ) : null}
+      </div>
+    </section>
   );
 }
 
@@ -321,6 +479,14 @@ export function FamilyMemberPage({ member }: { member: string }) {
 
       {d ? (
         <>
+          {d.own_wallet ? (
+            <OwnWalletPanel
+              member={key}
+              wallet={d.own_wallet}
+              headers={headers}
+              onDone={() => void queryClient.invalidateQueries({ queryKey: ["real-wallet", "family", key] })}
+            />
+          ) : null}
           <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-4">
             <Figure label="Balance" value={usd(d.balance_usd)} cls={tone(d.pnl_usd)}
               hint={`${usd(d.deposited_usd)} in · ${usd(d.withdrawn_usd)} out`} />

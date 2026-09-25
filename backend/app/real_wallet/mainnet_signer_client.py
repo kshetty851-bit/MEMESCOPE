@@ -37,6 +37,10 @@ class UnixMainnetSignerClient:
         """The public key it holds, and whether it matches the pinned one."""
         return await self._ask({"op": "identity"})
 
+    async def identity_family(self) -> dict[str, Any]:
+        """Per family member: the public key mounted and whether it matches."""
+        return await self._ask({"op": "identity_family"})
+
     async def sign(self, intent_id: uuid.UUID) -> dict[str, Any]:
         """Ask for one signature over one intent, named only by its id.
 
@@ -46,17 +50,24 @@ class UnixMainnetSignerClient:
         """
         return await self._ask({"op": "sign", "intent_id": str(intent_id)})
 
-    async def sign_withdrawal(self, encoded_transaction: str) -> dict[str, Any]:
+    async def sign_withdrawal(
+        self, encoded_transaction: str, wallet: str | None = None
+    ) -> dict[str, Any]:
         """Ask for a signature over a native SOL transfer.
 
         Unlike `sign`, this sends BYTES — and that is safe for one reason: the
         signer re-derives the destination from those bytes and compares it
         against the withdrawal address in its own environment. Handing it a
         transaction that pays anyone else gets a refusal, not a signature.
+
+        ``wallet`` names the PAYING wallet — omitted for the owner's, or a
+        family member's own. It picks the key; it cannot pick the destination.
         """
-        return await self._ask(
-            {"op": "sign_withdrawal", "transaction": encoded_transaction}
-        )
+        return await self._ask({
+            "op": "sign_withdrawal",
+            "transaction": encoded_transaction,
+            **({} if wallet is None else {"wallet": wallet}),
+        })
 
     async def sign_close_accounts(self, encoded_transaction: str) -> dict[str, Any]:
         """Ask for a signature over a transaction that closes empty token accounts.

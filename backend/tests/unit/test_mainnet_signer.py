@@ -141,7 +141,10 @@ def test_the_client_can_ask_for_a_signature_but_never_holds_a_key():
     # DESTINATION, and for a close that the rent goes to the wallet and the
     # wallet alone signs — see the withdrawal and account-close tests. What must
     # stay true is that this list is short and every entry is deliberate.
-    assert ops == {"identity", "sign", "sign_withdrawal", "sign_close_accounts"}
+    # `identity_family` (2026-09-25) is read-only like `identity`: the family
+    # wallets' public keys and whether each mounted key matches.
+    assert ops == {"identity", "identity_family", "sign", "sign_withdrawal",
+                   "sign_close_accounts"}
 
     # It imports nothing that could produce or handle key material.
     imported: set[str] = set()

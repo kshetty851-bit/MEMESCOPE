@@ -77,10 +77,15 @@ class PreparedWithdrawal:
 
 
 async def prepare(
-    rpc: SolanaRPC, *, sol_amount: Decimal, balance_lamports: int
+    rpc: SolanaRPC, *, sol_amount: Decimal, balance_lamports: int,
+    wallet: str | None = None,
 ) -> PreparedWithdrawal:
-    """Assemble and inspect a transfer. Signs nothing and submits nothing."""
-    wallet = settings.REAL_WALLET_PUBLIC_KEY.strip()
+    """Assemble and inspect a transfer. Signs nothing and submits nothing.
+
+    ``wallet`` is the PAYING wallet: the owner's by default, or a family
+    member's own (`family_wallets`). The destination is not affected by it.
+    """
+    wallet = (wallet or settings.REAL_WALLET_PUBLIC_KEY).strip()
     if not wallet:
         raise WithdrawError("wallet_not_configured")
 
@@ -89,6 +94,8 @@ async def prepare(
     destination = withdrawal.assert_permitted(
         settings.REAL_WALLET_WITHDRAWAL_ADDRESS.strip()
     )
+    if destination == wallet:
+        raise WithdrawError("withdrawal_destination_is_the_wallet_itself")
 
     if sol_amount <= 0:
         raise WithdrawError("amount_must_be_positive")
