@@ -355,6 +355,86 @@ function WhatIf({ data }: { data: KarthikBook }) {
   );
 }
 
+const TRADES_OPEN_KEY = "memescope.karthikTradesOpen";
+
+/**
+ * Every trade the book took, folded away by default (Karthik, 2026-09-25):
+ * the list is long and grows all day, and the figures above answer most
+ * visits. The header keeps the count, and the choice to keep it open is
+ * remembered in this browser.
+ */
+export function TradeList({ data }: { data: KarthikBook }) {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    try {
+      setOpen(window.localStorage.getItem(TRADES_OPEN_KEY) === "open");
+    } catch {
+      // Folded by default.
+    }
+  }, []);
+  function toggle() {
+    const next = !open;
+    setOpen(next);
+    try {
+      window.localStorage.setItem(TRADES_OPEN_KEY, next ? "open" : "closed");
+    } catch {
+      // Kept for this visit only.
+    }
+  }
+
+  return (
+    <Panel>
+      <PanelHeader>
+        <PanelTitle>
+          Every trade{" "}
+          <span className="font-normal text-ink-dim">
+            &middot; {data.trades_list.length} closed &middot; sells at {data.hold_minutes} minutes
+            {data.skipped ? ` · ${data.skipped} skipped for want of cash` : ""}
+          </span>
+        </PanelTitle>
+        <button
+          type="button"
+          onClick={toggle}
+          aria-expanded={open}
+          aria-controls="karthik-trade-list"
+          className="ml-auto rounded-md border border-line px-2.5 py-1 text-xs text-ink-2 transition-colors hover:border-line-strong hover:text-ink"
+        >
+          {open ? "Hide ▴" : "Show ▾"}
+        </button>
+      </PanelHeader>
+      {open ? (
+        <div id="karthik-trade-list">
+          {data.trades_list.length === 0 ? (
+            <EmptyState
+              title="No trades yet"
+              body="The rule buys a graduation over $75k whose pool is still quiet. On the arm it copies that is about sixty a day, so the first one usually arrives within the hour."
+            />
+          ) : (
+            <div className="overflow-x-auto p-3">
+              <table className="w-full text-[13px]">
+                <thead className="text-[11px] uppercase tracking-wider text-ink-dim">
+                  <tr>
+                    <th className="py-1 pr-3 text-left font-normal">bought</th>
+                    <th className="py-1 pr-3 text-left font-normal">coin</th>
+                    <th className="py-1 pr-3 text-right font-normal">pool</th>
+                    <th className="py-1 pr-3 text-right font-normal">result</th>
+                    <th className="py-1 text-right font-normal">money</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.trades_list.map((trade) => (
+                    <Row key={`${trade.symbol}-${trade.opened_at}`} trade={trade} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      ) : null}
+    </Panel>
+  );
+}
+
 export function KarthikLabPage() {
   const { data, isLoading, isError, refetch } = useKarthikBook();
   // Before the early returns: a hook may not sit behind a condition, and the
@@ -439,42 +519,7 @@ export function KarthikLabPage() {
       </div>
 
 
-      <Panel>
-        <PanelHeader>
-          <PanelTitle>
-            Every trade{" "}
-            <span className="font-normal text-ink-dim">
-              &middot; sells at {data.hold_minutes} minutes
-              {data.skipped ? ` · ${data.skipped} skipped for want of cash` : ""}
-            </span>
-          </PanelTitle>
-        </PanelHeader>
-        {data.trades_list.length === 0 ? (
-          <EmptyState
-            title="No trades yet"
-            body="The rule buys a graduation over $75k whose pool is still quiet. On the arm it copies that is about sixty a day, so the first one usually arrives within the hour."
-          />
-        ) : (
-          <div className="overflow-x-auto p-3">
-            <table className="w-full text-[13px]">
-              <thead className="text-[11px] uppercase tracking-wider text-ink-dim">
-                <tr>
-                  <th className="py-1 pr-3 text-left font-normal">bought</th>
-                  <th className="py-1 pr-3 text-left font-normal">coin</th>
-                  <th className="py-1 pr-3 text-right font-normal">pool</th>
-                  <th className="py-1 pr-3 text-right font-normal">result</th>
-                  <th className="py-1 text-right font-normal">money</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.trades_list.map((trade) => (
-                  <Row key={`${trade.symbol}-${trade.opened_at}`} trade={trade} />
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Panel>
+      <TradeList data={data} />
 
     </div>
     <WhatIf data={data} />

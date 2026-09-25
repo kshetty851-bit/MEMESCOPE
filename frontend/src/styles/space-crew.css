@@ -751,3 +751,57 @@
   .dock-crew__mate,
   .dock-crew__mate .login-crew__img { animation: none !important; }
 }
+
+/* --- 9. THE CREW IN THE RAIL (2026-09-25) --------------------------------
+   On a wide screen the crew moves out of the page corner into the sidebar's
+   empty space between the last nav group and Settings (app-sidebar.tsx), so
+   it covers nothing. The floating copy is then hidden; phones, which have no
+   rail, keep it. Bubbles open ABOVE the row and stay inside the rail's width,
+   because a bubble reaching right would pass under the page. */
+
+@media (min-width: 1024px) {
+  .dock-crew--floating,
+  .dock-crew__paw--floating { display: none; }
+}
+
+.dock-crew--rail {
+  position: relative;
+  right: auto;
+  bottom: auto;
+  z-index: auto;
+  justify-content: center;
+  padding: 10px 8px 12px;
+}
+.dock-crew--rail .dock-crew__mate { width: 50px; }
+.dock-crew--rail .dock-crew__mate--penguin { width: 46px; }
+.dock-crew--rail .dock-crew__mate--tiger { width: 54px; }
+.dock-crew--rail .dock-crew__mate--panda { display: block; }
+
+.dock-crew--rail .login-crew__bubble,
+.dock-crew--rail .dock-crew__mate--penguin .login-crew__bubble,
+.dock-crew--rail .dock-crew__mate--tiger .login-crew__bubble {
+  top: auto;
+  bottom: calc(100% + 10px);
+  /* 150, not 180: the row is centred with the buttons beside it, so the
+     tiger is not at the rail's edge and a wider bubble ran off its left. */
+  max-width: 150px;
+  font-size: 12px;
+  translate: 0 0;
+}
+.dock-crew--rail .dock-crew__mate--panda .login-crew__bubble { left: 0; right: auto; transform-origin: 15% 100%; }
+.dock-crew--rail .dock-crew__mate--penguin .login-crew__bubble { left: 50%; right: auto; translate: -50% 0; transform-origin: 50% 100%; }
+.dock-crew--rail .dock-crew__mate--tiger .login-crew__bubble { right: 0; left: auto; transform-origin: 85% 100%; }
+.dock-crew--rail .login-crew__bubble::before {
+  top: auto;
+  bottom: -6px;
+  right: auto;
+  left: 22px;
+  transform: rotate(45deg);
+}
+.dock-crew--rail .dock-crew__mate--penguin .login-crew__bubble::before { left: 50%; transform: translateX(-50%) rotate(45deg); }
+.dock-crew--rail .dock-crew__mate--tiger .login-crew__bubble::before { left: auto; right: 22px; }
+
+.dock-crew__paw--rail {
+  position: static;
+  margin: 8px auto 12px;
+}

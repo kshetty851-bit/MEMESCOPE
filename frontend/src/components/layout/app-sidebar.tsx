@@ -3,9 +3,12 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+import type { ReactNode } from "react";
+
 import { LogoMark, Wordmark } from "@/components/brand/logo";
 import { IconCollapse, IconExpand } from "@/components/layout/nav-icons";
 import { SolTicker } from "@/components/layout/sol-ticker";
+import { DockCrew } from "@/components/space/login-crew";
 import { Tooltip } from "@/components/ui/tooltip";
 import { useNavRail } from "@/hooks/use-nav-rail";
 import { NAV_FOOTER, NAV_GROUPS, activeItem, type NavItem } from "@/lib/design/nav";
@@ -128,9 +131,12 @@ function RailLink({
 export function SidebarContent({
   collapsed,
   onNavigate,
+  between,
 }: {
   collapsed: boolean;
   onNavigate?: () => void;
+  /** Rendered in the gap between the last nav group and Settings. */
+  between?: ReactNode;
 }) {
   const pathname = usePathname();
   const active = activeItem(pathname);
@@ -165,6 +171,8 @@ export function SidebarContent({
         ))}
       </nav>
 
+      {between}
+
       <div className="border-t border-line-subtle px-3 py-3">
         <ul className="flex flex-col gap-0.5">
           {NAV_FOOTER.map((item) => (
@@ -189,6 +197,7 @@ export function SidebarContent({
  */
 export function AppSidebar() {
   const { collapsed, toggle } = useNavRail();
+  const pathname = usePathname();
 
   return (
     <aside
@@ -214,7 +223,12 @@ export function AppSidebar() {
         </Link>
       </div>
 
-      <SidebarContent collapsed={collapsed} />
+      {/* The animal crew sits in the rail's empty space between HQ and
+          Settings (Karthik, 2026-09-25). A collapsed rail is too narrow. */}
+      <SidebarContent
+        collapsed={collapsed}
+        between={collapsed ? null : <DockCrew pathname={pathname} placement="rail" />}
+      />
 
       <SolTicker collapsed={collapsed} />
 
