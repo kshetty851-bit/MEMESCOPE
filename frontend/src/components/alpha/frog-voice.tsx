@@ -9,10 +9,9 @@ import type { ScenePhase } from "@/lib/launch";
  * THE FROG CALLS THE LAUNCH (2026-09-25, Karthik: "access approved, launching
  * in 5 4 3 2 1 in a cute cartoon voice, and a woohoo cheer — make it funny").
  *
- * The voice is the browser's own speech synthesiser at its highest pitch and a
- * little fast — chipmunk territory, which is the cartoon — so there is no
- * audio file. Every line is tied to a step of the launch timeline, so the
- * frog cannot say "three" while the screen shows four. A beep marks each
+ * The voice is the browser's own speech synthesiser — a male voice, pitched
+ * up and a little fast, which is the cartoon — so there is no audio file.
+ * Every line is tied to a step of the launch timeline, so the frog cannot say "three" while the screen shows four. A beep marks each
  * digit and lift-off gets a roar, a party horn and a cheer.
  *
  * Silent when the crew is muted (the same remembered switch), and quiet by
@@ -25,20 +24,31 @@ import type { ScenePhase } from "@/lib/launch";
  * sequence to screen readers.
  */
 
+// Karthik, 2026-09-25: "funnier, a male voice, and put my name in".
 const SAY: Partial<Record<ScenePhase, string>> = {
-  approved: "Access approved! Launching in…",
-  ignition: "Woo-hoo!",
-  launching: "Wheeeee! Hold on to your helmets!",
-  flight: "Are we there yet?",
-  unlock: "Welcome home, Karthik!",
+  approved: "Access approved, Captain Karthik! Launching in…",
+  ignition: "Woo-hoo-hoo!",
+  launching: "Ribbit! Hold on to your helmet, Karthik!",
+  flight: "Are we there yet? Are we there yet, Karthik?",
+  approach: "Ooh, shiny!",
+  unlock: "Welcome home, Boss Karthik! Ribbit!",
 };
 
-const DIGITS = ["", "one", "two", "three", "four", "five"];
+const DIGITS = ["", "one!", "two!", "three!", "four!", "five!"];
 
 const BUBBLE: Partial<Record<ScenePhase, string>> = {
-  approved: "Access approved! Launching in…",
-  ignition: "WOO-HOO! 🚀",
+  approved: "Access approved, Captain Karthik! 🫡 Launching in…",
+  ignition: "WOO-HOO-HOO! 🚀 Ribbit!",
 };
+
+/**
+ * A male voice, picked by name because the API has no gender field. Fred and
+ * Ralph are macOS's old novelty voices — the funniest if present — then the
+ * ordinary male voices on Mac, Chrome, Windows and Android. Pitched up and
+ * sped up a touch, a man's voice becomes a cartoon frog; a woman's at the same
+ * settings reads as a chipmunk, which is what it was before.
+ */
+const MALE = /\b(fred|ralph|daniel|alex|aaron|arthur|oliver|rishi|google uk english male|guy|david|mark|ryan|george|james|thomas)\b/i;
 
 function speak(text: string) {
   const synth = typeof window !== "undefined" ? window.speechSynthesis : undefined;
@@ -48,12 +58,10 @@ function speak(text: string) {
   synth.cancel();
   const line = new SpeechSynthesisUtterance(text);
   const voices = synth.getVoices();
-  line.voice =
-    voices.find((v) => /samantha|google us english|aria|jenny|karen|zira/i.test(v.name)) ??
-    voices.find((v) => v.lang.startsWith("en")) ??
-    null;
-  line.pitch = 2;
-  line.rate = 1.25;
+  const english = voices.filter((v) => v.lang.startsWith("en"));
+  line.voice = english.find((v) => MALE.test(v.name)) ?? english[0] ?? null;
+  line.pitch = 1.5;
+  line.rate = 1.2;
   line.volume = 1;
   synth.speak(line);
 }
