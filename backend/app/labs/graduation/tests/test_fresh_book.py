@@ -205,38 +205,55 @@ class _Pos:
         self.liq_open_usd = Decimal(100_000)
 
 
-async def test_karthik_book_counts_only_the_trades_it_could_fund() -> None:
+async def test_karthik_book_takes_one_trade_at_a_time() -> None:
     """Every figure describes the SAME trades: the ones the book bought.
 
-    A $400 book at $200 a ticket funds two positions at once, so when three
-    signals overlap the third is skipped. Counting wins and rugs over all the
-    arm's trades while the balance counted only the funded ones is what made
-    the page read "0 rugs of 11 trades, 12 wins" on its first afternoon: it
-    would credit the book with dodging a rug it merely had no money for.
+    Since 25 Sep (replayed from day 1) the book buys only when nothing is
+    held, so of eight signals inside one five-minute hold it takes the first
+    and lets the other seven go -- the rug among them included, which it did
+    not dodge on merit: it was busy. The old rule, every signal the cash
+    allowed, is kept beside it as `every_trade`.
     """
     from app.labs.graduation.api import karthik_book
 
     start = next(s for s in config.FRESH_BOOKS
                  if s.book == "KARTHIK_QUIET_5M").start
-    # Eight signals inside one five-minute hold: the book can fund two.
     rows = [_Pos(f"C{i}", start + timedelta(seconds=30 * i), 0.02)
             for i in range(8)]
-    # The last one is a rug, and it is one the book cannot afford.
     rows[-1].net_return = -0.99
     rows[-1].pnl_usd = Decimal("-99")
+    # One more after the first has closed: free again, so it is bought.
+    rows.append(_Pos("LATER", rows[0].closed_at, 0.02))
 
     book = await karthik_book(db=_StubDb(rows))  # type: ignore[arg-type]
 
-    assert book["trades"] + book["skipped"] == len(rows)
-    assert book["trades"] == 2 and book["skipped"] == 6
-    # The six it could not buy are absent from every count, including the
-    # rug -- which it did not dodge, it just had no money left.
-    assert book["wins"] == 2
-    assert book["rugs"] == 0
-    assert len(book["trades_list"]) == 2
-    assert {t["symbol"] for t in book["trades_list"]} == {f"C{i}" for i in range(2)}
-    # The invariant the defect broke: no figure may exceed the trade count.
+    assert (book["trades"], book["skipped"], book["busy_skipped"]) == (2, 0, 7)
+    assert [t["symbol"] for t in book["trades_list"]] == ["LATER", "C0"]
+    assert (book["wins"], book["rugs"]) == (2, 0)
     assert book["wins"] <= book["trades"] and book["rugs"] <= book["trades"]
+    # The old rule: a $400 book at $200 funds two at once, so C0 and C1, then
+    # LATER once C0 has sold; the rest were skipped for cash.
+    old = book["every_trade"]
+    assert (old["trades"], old["skipped"], old["rugs"]) == (3, 6, 0)
+
+
+async def test_each_check_takes_one_at_a_time_on_its_own_pools() -> None:
+    """A floor line is not the book's trades filtered afterwards: a line that
+    never bought the shallow coin is free for the deep one behind it."""
+    from app.labs.graduation.api import karthik_book
+
+    start = next(s for s in config.FRESH_BOOKS if s.book == "KARTHIK_QUIET_5M").start
+    shallow = _Pos("SHALLOW", start + timedelta(hours=1), 0.01)          # $100k pool
+    deep = _Pos("DEEP", start + timedelta(hours=1, minutes=2), -0.99)  # SHALLOW still held
+    deep.liq_open_usd = Decimal(600_000)
+
+    book = await karthik_book(db=_StubDb([shallow, deep]))  # type: ignore[arg-type]
+
+    assert (book["trades"], book["rugs"], book["busy_skipped"]) == (1, 0, 1)
+    w = book["whatif"]
+    assert (w["deep"]["trades"], w["deep"]["rugs"]) == (1, 1)
+    assert [(f["floor_usd"], f["trades"], f["rugs"]) for f in w["floors"]] == [
+        (150_000, 1, 1), (200_000, 1, 1), (300_000, 1, 1), (500_000, 1, 1)]
 
 
 async def test_karthik_days_are_24h_from_the_open_not_calendar_days() -> None:

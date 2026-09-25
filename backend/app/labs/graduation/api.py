@@ -1437,6 +1437,41 @@ KARTHIK_WHATIF_FLOOR_USD = 150_000
 KARTHIK_WHATIF_FLOORS = (150_000, 200_000, 300_000, 500_000)
 
 
+def _one_at_a_time(rows: Sequence[Any]) -> list[Any]:
+    """Karthik's rule since 25 Sep, applied from the book's first day: buy only
+    when nothing is held. A signal that arrives while a trade is open is let
+    go, whatever the cash. `rows` must be in the order they opened."""
+    out: list[Any] = []
+    busy_until = None
+    for row in rows:
+        if busy_until is None or row.opened_at >= busy_until:
+            out.append(row)
+            busy_until = row.closed_at
+    return out
+
+
+def _karthik_line(rows: Sequence[Any], sol: Decimal | None, *, size: float,
+                  capital: float, cents: Decimal) -> dict[str, Any]:
+    """One way of trading the book: the book's own walk (`_funded_walk`) over
+    these rows, so skips, pool impact at that size and the cash limit are all
+    the real book's."""
+    w = _funded_walk([(r.opened_at, r.closed_at, float(r.net_return),
+                       float(r.impact_open or 0), float(r.impact_close or 0))
+                      for r in rows], sol, ticket=size, start=capital)
+    took = [(r, m) for r, m in zip(rows, w.pnl, strict=True) if m is not None]
+    return {
+        "balance_usd": Decimal(str(w.cash)).quantize(cents),
+        "pnl_usd": Decimal(str(w.cash - capital)).quantize(cents),
+        "pnl_pct": (Decimal(str(100 * (w.cash - capital) / capital)).quantize(cents)
+                    if capital else Decimal(0)),
+        "trades": w.funded,
+        "skipped": w.skipped,
+        "rugs": sum(1 for r, _ in took
+                    if float(r.net_return) <= float(config.OPERATOR_RUG_MOVE)),
+        "lowest_usd": Decimal(str(w.low)).quantize(cents),
+    }
+
+
 def _karthik_whatif(rows: Sequence[Any], sol: Decimal | None, *, capital: float,
                     ticket: float, cents: Decimal) -> dict[str, Any]:
     """The same book on other terms, for comparison only: its trades at other
@@ -1444,29 +1479,18 @@ def _karthik_whatif(rows: Sequence[Any], sol: Decimal | None, *, capital: float,
     after EVO; see the quiet rule's record: 3 deaths in 41 trades under $150k,
     2 in 223 above).
 
-    Each line is the book's OWN walk (`_funded_walk`) from the same start, on
-    the balance that size is paired with, so skips, pool impact at that size
-    and the cash limit are all the real book's. Nothing here changes what the
-    book trades.
+    Each line is the book's OWN walk from the same start, on the balance that
+    size is paired with, and ONE TRADE AT A TIME on its own pools: `rows` is
+    every signal, and each line picks its trades from those it would see. A
+    floor line is not the book's trades filtered afterwards, because a line
+    that never bought the shallow coin was free for the next deep one.
+    Nothing here changes what the book trades.
     """
     deep = [r for r in rows if float(r.liq_open_usd or 0) >= KARTHIK_WHATIF_FLOOR_USD]
 
     def run(sub: Sequence[Any], size: float, capital: float) -> dict[str, Any]:
-        w = _funded_walk([(r.opened_at, r.closed_at, float(r.net_return),
-                           float(r.impact_open or 0), float(r.impact_close or 0))
-                          for r in sub], sol, ticket=size, start=capital)
-        took = [(r, m) for r, m in zip(sub, w.pnl, strict=True) if m is not None]
-        return {
-            "balance_usd": Decimal(str(w.cash)).quantize(cents),
-            "pnl_usd": Decimal(str(w.cash - capital)).quantize(cents),
-            "pnl_pct": (Decimal(str(100 * (w.cash - capital) / capital)).quantize(cents)
-                        if capital else Decimal(0)),
-            "trades": w.funded,
-            "skipped": w.skipped,
-            "rugs": sum(1 for r, _ in took
-                        if float(r.net_return) <= float(config.OPERATOR_RUG_MOVE)),
-            "lowest_usd": Decimal(str(w.low)).quantize(cents),
-        }
+        return _karthik_line(_one_at_a_time(sub), sol, size=size, capital=capital,
+                             cents=cents)
 
     return {
         "floor_usd": KARTHIK_WHATIF_FLOOR_USD,
@@ -1575,6 +1599,12 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
         select(GradPostgradSample.price_usd / GradPostgradSample.price_native)
         .where(GradPostgradSample.price_usd > 0, GradPostgradSample.price_native > 0)
         .order_by(GradPostgradSample.ts.desc()).limit(1))
+    # One trade at a time, from the first day (Karthik, 2026-09-25): chosen
+    # after WOTF, which the rule would have let go because LESGO was still
+    # held. Replayed from the start, so the days before it are a look back;
+    # `every_trade` keeps the old rule beside it so the change stays visible.
+    every = rows
+    rows = _one_at_a_time(every)
     walk = _funded_walk(
         [(p.opened_at, p.closed_at, float(p.net_return),
           float(p.impact_open or 0), float(p.impact_close or 0)) for p in rows],
@@ -1606,6 +1636,12 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
         "lowest_usd": Decimal(str(walk.low)).quantize(cents),
         "trades": walk.funded,
         "skipped": walk.skipped,
+        # Signals let go because a trade was already open -- the rule, not cash.
+        "busy_skipped": len(every) - len(rows),
+        "one_at_a_time_since": config.KARTHIK_ONE_AT_A_TIME_AT,
+        # The old rule, every signal the cash allowed, on the same start.
+        "every_trade": _karthik_line(every, sol, size=float(spec.ticket_usd),
+                                     capital=float(spec.capital_usd), cents=cents),
         "wins": sum(1 for money in pnl if money > 0),
         "rugs": sum(1 for row, _ in took
                     if float(row.net_return) <= float(config.OPERATOR_RUG_MOVE)),
@@ -1625,7 +1661,7 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
         "days": _karthik_days(took, spec.start, float(spec.capital_usd), cents),
         # The same trades at other sizes, and on $150k+ pools only. A check,
         # shown beside the book; the book itself stays on its own rule.
-        "whatif": _karthik_whatif(rows, sol, capital=float(spec.capital_usd),
+        "whatif": _karthik_whatif(every, sol, capital=float(spec.capital_usd),
                                   ticket=float(spec.ticket_usd), cents=cents),
         # The rows the BOOK bought, with the money the book made on them --
         # not the arm's $100-notional figure, which is the same only while the

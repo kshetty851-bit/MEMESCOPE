@@ -27,6 +27,14 @@ export interface KarthikBook {
   lowest_usd: string;
   trades: number;
   skipped: number;
+  /** Signals let go because a trade was already open: the one-at-a-time
+   *  rule, not a lack of cash. */
+  busy_skipped: number;
+  /** When the book became one trade at a time. Replayed from day 1, so what
+   *  came before is a look back chosen after seeing it. */
+  one_at_a_time_since: string;
+  /** The old rule on the same start: every signal the cash allowed. */
+  every_trade: KarthikWhatIfLine;
   wins: number;
   rugs: number;
   days: KarthikDay[];

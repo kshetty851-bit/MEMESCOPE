@@ -1067,6 +1067,11 @@ FRESH_BOOKS: tuple[FreshBookSpec, ...] = (
 KARTHIK_RESIZED_AT = datetime(2026, 9, 25, 4, 50, tzinfo=UTC)
 KARTHIK_PREVIOUS_SIZE = (Decimal(600), Decimal(200))
 
+#: When Karthik's book became ONE TRADE AT A TIME (his request, after WOTF).
+#: Replayed from the book's first day, so everything before this is a look
+#: back chosen after seeing it; only what follows tests the rule.
+KARTHIK_ONE_AT_A_TIME_AT = datetime(2026, 9, 25, 15, 20, tzinfo=UTC)
+
 #: When Karthik's book is judged. Thirty days from its start, written down
 #: before it had a single trade: a date chosen afterwards is chosen by the
 #: result.
