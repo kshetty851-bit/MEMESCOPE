@@ -65,5 +65,6 @@ export interface KarthikWhatIfLine {
 export interface KarthikWhatIf {
   floor_usd: number;
   deep: KarthikWhatIfLine;
+  floors: (KarthikWhatIfLine & { floor_usd: number })[];
   sizes: { ticket_usd: number; capital_usd: number; current: boolean; all: KarthikWhatIfLine; deep: KarthikWhatIfLine }[];
 }

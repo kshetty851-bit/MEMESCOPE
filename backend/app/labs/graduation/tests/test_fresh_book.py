@@ -312,6 +312,9 @@ async def test_the_page_compares_sizes_and_a_150k_floor_without_changing_the_boo
 
     w = book["whatif"]
     assert w["floor_usd"] == 150_000
+    # Deeper floors beside it: the $300k pool clears every line but $500k.
+    assert [(f["floor_usd"], f["trades"]) for f in w["floors"]] == [
+        (150_000, 1), (200_000, 1), (300_000, 1), (500_000, 0)]
     assert [s["ticket_usd"] for s in w["sizes"]] == [10, 20, 25, 50, 100, 200]
     # Each size on its own balance: $100 up to $50, $200 for $100, $400 for $200.
     assert [s["capital_usd"] for s in w["sizes"]] == [100, 100, 100, 100, 200, 400]
