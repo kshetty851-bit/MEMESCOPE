@@ -9,14 +9,13 @@ import { useAuth } from "@/hooks/use-auth";
 import { ApiError, api } from "@/lib/api-client";
 
 /**
- * FAMILY SHARES OF THE ONE REAL WALLET — and, from 2026-09-25, each member's
- * OWN wallet: an address, a balance, withdraw-to-Karthik, and its own trading
- * (off until Karthik, signed in, starts it; anyone with the password can stop).
+ * THE FAMILY'S OWN WALLETS.
  *
- * Jaya, Asha and Apoorva each own a slice of the real wallet's orders: their
- * own trade size, their own on/off, their own money. There is still one wallet
- * and one address; the backend adds each switched-on member's ticket to the
- * owner's order and splits the result.
+ * Jaya, Asha and Apoorva each have a Solana wallet of their own: an address
+ * to deposit to, a balance, a withdrawal that can only reach Karthik, and
+ * trading on its own switch (off until Karthik, signed in, starts it; anyone
+ * with the password can stop it). The shares of the main wallet these pages
+ * used to show were removed on 2026-09-25.
  *
  * The password is checked on the server, which keeps only a hash of it. What
  * comes back is a token for ONE member, kept in this tab's sessionStorage, so
@@ -131,8 +130,8 @@ export function FamilySection() {
     <section className="mt-6 rounded-lg border border-line p-5">
       <p className="text-label text-ink-3">Family</p>
       <p className="mt-1 max-w-2xl text-sm text-ink-3">
-        Each person has their own share of this wallet: their own trade size, their own
-        on/off and their own money. There is still one wallet and one address.
+        Each person has a Solana wallet of their own: its own address, balance, trade
+        size and on/off. Withdrawals from it can only go to Karthik&apos;s address.
       </p>
       <div className="mt-4 flex flex-wrap gap-2">
         {FAMILY.map((m) => (
@@ -161,17 +160,6 @@ export function FamilySection() {
       ) : null}
     </section>
   );
-}
-
-interface FamilyTrade {
-  mint: string;
-  bought_at: string;
-  sold_at: string | null;
-  amount_usd: string;
-  order_usd: string;
-  state: "open" | "closed" | "void";
-  pnl_usd: string | null;
-  pct: string | null;
 }
 
 interface OwnWallet {
@@ -207,32 +195,6 @@ interface FamilyView {
   member: string;
   own_wallet?: OwnWallet;
   own_book?: OwnBook | null;
-  enabled: boolean;
-  ticket_usd: string;
-  ticket_choices: string[];
-  combined_cap_usd: string;
-  deposited_usd: string;
-  withdrawn_usd: string;
-  pnl_usd: string;
-  balance_usd: string;
-  in_trades_usd: string;
-  available_usd: string;
-  trades: number;
-  wins: number;
-  trades_list: FamilyTrade[];
-  ledger: { kind: "deposit" | "withdrawal"; amount_usd: string; note: string | null; at: string }[];
-}
-
-function Figure({ label, value, hint, cls }: {
-  label: string; value: string; hint?: string; cls?: string;
-}) {
-  return (
-    <div className="rounded-lg border border-line p-3">
-      <p className="text-label text-ink-3">{label}</p>
-      <p className={`mt-1 text-xl font-medium tabular-nums ${cls ?? "text-ink"}`}>{value}</p>
-      {hint ? <p className="mt-1 text-xs text-ink-3">{hint}</p> : null}
-    </div>
-  );
 }
 
 function short(address: string): string {
@@ -523,30 +485,6 @@ export function FamilyMemberPage({ member }: { member: string }) {
     retry: false,
   });
 
-  const [draft, setDraft] = useState<{ enabled: boolean; ticket: string } | null>(null);
-  const settings = useMutation({
-    mutationFn: (next: { enabled: boolean; ticket: string }) =>
-      api.post(`/real-wallet/family/${key.toLowerCase()}/settings`,
-        { enabled: next.enabled, ticket_usd: next.ticket },
-        { headers, skipAuthRetry: true }),
-    onSuccess: () => {
-      setDraft(null);
-      void queryClient.invalidateQueries({ queryKey: ["real-wallet", "family", key] });
-    },
-  });
-
-  const [money, setMoney] = useState({ kind: "deposit", amount: "", note: "" });
-  const ledger = useMutation({
-    mutationFn: () =>
-      api.post(`/real-wallet/family/${key.toLowerCase()}/ledger`,
-        { kind: money.kind, amount_usd: money.amount, note: money.note || null },
-        { headers }),
-    onSuccess: () => {
-      setMoney({ kind: "deposit", amount: "", note: "" });
-      void queryClient.invalidateQueries({ queryKey: ["real-wallet", "family", key] });
-    },
-  });
-
   const lock = () => {
     writeToken(key, null);
     setToken(null);
@@ -589,7 +527,6 @@ export function FamilyMemberPage({ member }: { member: string }) {
   }
 
   const d = view.data;
-  const current = draft ?? (d ? { enabled: d.enabled, ticket: d.ticket_usd } : null);
   const isOwner = user?.role === "admin";
 
   return (
@@ -609,7 +546,7 @@ export function FamilyMemberPage({ member }: { member: string }) {
 
       {view.isPending ? <p className="mt-4 text-sm text-ink-3">Reading…</p> : null}
       {view.isError && !expired ? (
-        <p className="mt-4 text-sm text-down">Could not read this share. Try again.</p>
+        <p className="mt-4 text-sm text-down">Could not read this wallet. Try again.</p>
       ) : null}
 
       {d ? (
@@ -624,168 +561,6 @@ export function FamilyMemberPage({ member }: { member: string }) {
               onDone={() => void queryClient.invalidateQueries({ queryKey: ["real-wallet", "family", key] })}
             />
           ) : null}
-          <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-4">
-            <Figure label="Balance" value={usd(d.balance_usd)} cls={tone(d.pnl_usd)}
-              hint={`${usd(d.deposited_usd)} in · ${usd(d.withdrawn_usd)} out`} />
-            <Figure label="Profit" value={usd(d.pnl_usd)} cls={tone(d.pnl_usd)}
-              hint={`${d.trades} trades · ${d.wins} wins`} />
-            <Figure label="Free to trade" value={usd(d.available_usd)} />
-            <Figure label="In trades now" value={usd(d.in_trades_usd)} />
-          </div>
-
-          <section className="mt-6 rounded-lg border border-line p-5">
-            <p className="text-label text-ink-3">Trading</p>
-            {current ? (
-              <div className="mt-3 flex flex-wrap items-center gap-3">
-                <label className="flex items-center gap-2 text-sm text-ink">
-                  <input
-                    type="checkbox"
-                    checked={current.enabled}
-                    onChange={(e) => setDraft({ ...current, enabled: e.target.checked })}
-                  />
-                  {current.enabled ? "On" : "Off"}
-                </label>
-                <label className="flex items-center gap-2 text-sm text-ink">
-                  Trade size
-                  <select
-                    value={current.ticket}
-                    onChange={(e) => setDraft({ ...current, ticket: e.target.value })}
-                    className="h-9 rounded-md border border-line bg-transparent px-2 text-sm"
-                  >
-                    {d.ticket_choices.map((t) => (
-                      <option key={t} value={t}>{usd(t)}</option>
-                    ))}
-                  </select>
-                </label>
-                <button
-                  type="button"
-                  disabled={!draft || settings.isPending}
-                  onClick={() => draft && settings.mutate(draft)}
-                  className="h-9 rounded-md border border-line px-4 text-sm text-ink disabled:opacity-50"
-                >
-                  {settings.isPending ? "Saving…" : "Save"}
-                </button>
-              </div>
-            ) : null}
-            <p className="mt-3 max-w-2xl text-xs text-ink-3">
-              Trades the same coins as the main wallet, at the same moment, only while it
-              is on. A trade is only taken when there is a whole trade size free. Everyone&apos;s
-              orders on one coin add up, and the total is held to {usd(d.combined_cap_usd)}{" "}
-              a coin, because above that this strategy loses money.
-            </p>
-            {settings.isError ? (
-              <p className="mt-2 text-sm text-down" role="alert">Could not save. Try again.</p>
-            ) : null}
-          </section>
-
-          <section className="mt-6 rounded-lg border border-line p-5">
-            <p className="text-label text-ink-3">Money in and out</p>
-            <p className="mt-1 max-w-2xl text-xs text-ink-3">
-              This only records whose money it is. Send the SOL from your own address first;
-              withdrawals still go only to your address, from the main wallet.
-            </p>
-            {isOwner ? (
-              <form
-                className="mt-3 flex flex-wrap items-center gap-2"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  if (Number(money.amount) > 0) ledger.mutate();
-                }}
-              >
-                <select
-                  value={money.kind}
-                  onChange={(e) => setMoney({ ...money, kind: e.target.value })}
-                  className="h-9 rounded-md border border-line bg-transparent px-2 text-sm"
-                >
-                  <option value="deposit">Deposit</option>
-                  <option value="withdrawal">Withdrawal</option>
-                </select>
-                <input
-                  type="number" min="0.01" step="0.01" inputMode="decimal"
-                  value={money.amount}
-                  onChange={(e) => setMoney({ ...money, amount: e.target.value })}
-                  placeholder="Amount in $"
-                  className="h-9 w-32 rounded-md border border-line bg-transparent px-3 text-sm"
-                />
-                <input
-                  value={money.note}
-                  maxLength={200}
-                  onChange={(e) => setMoney({ ...money, note: e.target.value })}
-                  placeholder="Note (optional)"
-                  className="h-9 w-48 rounded-md border border-line bg-transparent px-3 text-sm"
-                />
-                <button
-                  type="submit"
-                  disabled={!(Number(money.amount) > 0) || ledger.isPending}
-                  className="h-9 rounded-md border border-line px-4 text-sm text-ink disabled:opacity-50"
-                >
-                  Record
-                </button>
-                {ledger.error ? (
-                  <p className="w-full text-sm text-down" role="alert">
-                    {ledger.error instanceof ApiError ? ledger.error.message : "Could not record it."}
-                  </p>
-                ) : null}
-              </form>
-            ) : (
-              <p className="mt-3 text-sm text-ink-3">
-                Only the wallet&apos;s owner, signed in, can record money in or out.
-              </p>
-            )}
-            {d.ledger.length ? (
-              <ul className="mt-4 space-y-1 text-sm">
-                {d.ledger.map((e) => (
-                  <li key={`${e.at}-${e.kind}`} className="flex gap-3 tabular-nums">
-                    <span className="w-40 text-ink-3">{new Date(e.at).toLocaleString()}</span>
-                    <span className={e.kind === "deposit" ? "text-up" : "text-down"}>
-                      {e.kind === "deposit" ? "+" : "-"}{usd(e.amount_usd)}
-                    </span>
-                    <span className="text-ink-3">{e.note ?? ""}</span>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-          </section>
-
-          <section className="mt-6 rounded-lg border border-line p-5">
-            <p className="text-label text-ink-3">Trades</p>
-            {d.trades_list.length === 0 ? (
-              <p className="mt-2 text-sm text-ink-3">No trades yet.</p>
-            ) : (
-              <div className="mt-3 overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="text-label text-ink-3">
-                    <tr>
-                      <th className="py-1 pr-3 text-left font-normal">bought</th>
-                      <th className="py-1 pr-3 text-left font-normal">coin</th>
-                      <th className="py-1 pr-3 text-right font-normal">{title(key)}&apos;s $</th>
-                      <th className="py-1 pr-3 text-right font-normal">whole order</th>
-                      <th className="py-1 text-right font-normal">result</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {d.trades_list.map((t) => (
-                      <tr key={`${t.mint}-${t.bought_at}`} className="border-t border-line/60">
-                        <td className="py-1.5 pr-3 tabular-nums text-ink-3">
-                          {new Date(t.bought_at).toLocaleString()}
-                        </td>
-                        <td className="py-1.5 pr-3 font-mono text-xs">{t.mint.slice(0, 8)}…</td>
-                        <td className="py-1.5 pr-3 text-right tabular-nums">{usd(t.amount_usd)}</td>
-                        <td className="py-1.5 pr-3 text-right tabular-nums text-ink-3">
-                          {usd(t.order_usd)}
-                        </td>
-                        <td className={`py-1.5 text-right tabular-nums ${tone(t.pnl_usd)}`}>
-                          {t.state === "closed"
-                            ? `${usd(t.pnl_usd)} (${Number(t.pct) >= 0 ? "+" : ""}${t.pct}%)`
-                            : t.state === "open" ? "open" : "not filled"}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
         </>
       ) : null}
     </main>

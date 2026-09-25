@@ -18,12 +18,7 @@ import { FamilyMemberPage } from "./family";
 const ADDRESS = "7WctMGpqz1tGkYStBBjJRMnmuh9uwJubYV2tL4pLwRr9";
 
 function view(own: object, book: object | null = null) {
-  return {
-    member: "JAYA", own_wallet: own, own_book: book, enabled: false, ticket_usd: "25", ticket_choices: ["25"],
-    combined_cap_usd: "400", deposited_usd: "0", withdrawn_usd: "0", pnl_usd: "0",
-    balance_usd: "0", in_trades_usd: "0", available_usd: "0", trades: 0, wins: 0,
-    trades_list: [], ledger: [],
-  };
+  return { member: "JAYA", own_wallet: own, own_book: book };
 }
 
 function page() {

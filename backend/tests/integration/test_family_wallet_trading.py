@@ -70,12 +70,11 @@ def _funded(monkeypatch, **sol: str) -> None:
     monkeypatch.setattr(RealWalletDriver, "_wallet_lamports", _lamports)
 
 
-async def _jaya(session, *, own: bool, ticket: str = "20", share: bool = False) -> None:
+async def _jaya(session, *, own: bool, ticket: str = "20") -> None:
     for name in ("JAYA", "ASHA", "APOORVA"):
-        session.add(RealWalletFamilyMember(name=name, enabled=False, ticket_usd=Decimal("25")))
+        session.add(RealWalletFamilyMember(name=name))
     await session.flush()
     row = await session.get(RealWalletFamilyMember, "JAYA")
-    row.enabled = share
     row.own_enabled, row.own_ticket_usd = own, Decimal(ticket)
     await session.flush()
 
@@ -124,7 +123,7 @@ async def test_a_wallet_that_is_on_buys_the_same_coin_on_its_own_money(
     assert (jaya.requested_usd, jaya.mint_address) == (Decimal("20"), MINT)
     assert jaya.idempotency_key == f"v6:G-QUIET:{MINT}:JAYA"
     assert jaya.actual_input_amount_raw == Decimal("200000000")   # $20 at $100/SOL
-    # The owner's order is his own ticket; Jaya's own wallet is not a share.
+    # The owner's order is his own ticket, untouched by Jaya's wallet.
     assert intents[OWNER].requested_usd == Decimal("100")
 
     # A second tick buys nothing more: each wallet trades a coin once.
