@@ -582,28 +582,6 @@
 }
 .login-crew__flyby .login-crew__img { animation: crew-spin 1.6s linear infinite; }
 
-.login-crew__sound {
-  position: fixed;
-  left: 16px;
-  bottom: 16px;
-  z-index: 31;
-  display: grid;
-  place-items: center;
-  width: 40px;
-  height: 40px;
-  border-radius: 999px;
-  border: 1px solid rgb(255 255 255 / 0.18);
-  background: rgb(10 14 30 / 0.7);
-  backdrop-filter: blur(8px);
-  font-size: 18px;
-  cursor: pointer;
-}
-/* On a wide screen the left column's footer sits bottom-left, so the button
-   moves to the foot of the divider, which is empty. */
-@media (min-width: 1024px) {
-  .login-crew__sound { left: calc(50% + 16px); }
-}
-.login-crew__sound:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 
 @keyframes login-crew-pop {
   0% { opacity: 0; transform: scale(0.5); }

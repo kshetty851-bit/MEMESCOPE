@@ -34,7 +34,6 @@ const MATES: readonly Mate[] = [
   { id: "tiger", src: "/crew/tiger.webp", pitch: 294, lines: ["Karthik's Lab is this way!", "Quiet pools only, remember.", "Grr… good to see you."] },
 ];
 
-const SOUND_KEY = "memescope.loginCrewSound";
 const EVERY_MS = 4800;
 const SHOW_MS = 3400;
 
@@ -88,8 +87,8 @@ export function createSfx(): Sfx | null {
     },
     blip(pitch) {
       const t = ctx.currentTime;
-      tone(pitch, t, 0.16, 0.09, "triangle", pitch * 1.5);
-      tone(pitch * 2, t + 0.07, 0.12, 0.04, "sine");
+      tone(pitch, t, 0.16, 0.18, "triangle", pitch * 1.5);
+      tone(pitch * 2, t + 0.07, 0.12, 0.08, "sine");
     },
     whoosh() {
       const t = ctx.currentTime;
@@ -106,7 +105,7 @@ export function createSfx(): Sfx | null {
       band.frequency.exponentialRampToValueAtTime(500, t + 0.95);
       const gain = ctx.createGain();
       gain.gain.setValueAtTime(0.0001, t);
-      gain.gain.exponentialRampToValueAtTime(0.07, t + 0.35);
+      gain.gain.exponentialRampToValueAtTime(0.14, t + 0.35);
       gain.gain.exponentialRampToValueAtTime(0.0001, t + 1);
       noise.connect(band).connect(gain).connect(master);
       noise.start(t);
@@ -130,55 +129,37 @@ export function createSfx(): Sfx | null {
   };
 }
 
-/** The crew's shared mute, remembered in this browser. On unless muted. */
-export function readSound(): boolean {
-  try {
-    return window.localStorage.getItem(SOUND_KEY) !== "off";
-  } catch {
-    return true;
-  }
-}
-
 /* ── the voice: bubbles and sound, shared by both crews ─────────────────── */
 
 type Bubble = { mate: string; text: string; key: number };
 
 function useCrewVoice(mates: readonly Mate[]) {
   const [bubble, setBubble] = useState<Bubble | null>(null);
-  const [soundOn, setSoundOn] = useState(true);
   const sfx = useRef<Sfx | null>(null);
-  const soundRef = useRef(true);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   // Every line pops, timed ones included — Karthik asked for the characters'
-  // sounds back (2026-09-25) after muting them earlier the same day. The
-  // background hum and twinkles stay gone. `pop = false` is still available
-  // for a line that should be silent.
+  // sounds back (2026-09-25). The background hum and twinkles stay gone. There
+  // is no mute button: a mute remembered from earlier kept him from hearing
+  // them, so he asked for the button to go.
   const say = useCallback((mateId: string, text: string, holdMs = SHOW_MS, pop = true) => {
     const mate = mates.find((m) => m.id === mateId) ?? mates[0]!;
     setBubble({ mate: mate.id, text, key: Date.now() });
-    if (pop && soundRef.current) sfx.current?.blip(mate.pitch);
+    if (pop) sfx.current?.blip(mate.pitch);
     clearTimeout(hideTimer.current);
     hideTimer.current = setTimeout(() => setBubble(null), holdMs);
   }, [mates]);
-
-  // Remembered sound choice, read after mount so the server render matches.
-  useEffect(() => {
-    const on = readSound();
-    setSoundOn(on);
-    soundRef.current = on;
-  }, []);
 
   // Sound can only start from a click or a key press.
   useEffect(() => {
     const wake = () => {
       if (!sfx.current) sfx.current = createSfx();
       sfx.current?.start();
-      sfx.current?.setMuted(!soundRef.current);
+      sfx.current?.setMuted(false);
     };
     window.addEventListener("pointerdown", wake);
     window.addEventListener("keydown", wake);
-    const hidden = () => sfx.current?.setMuted(document.hidden || !soundRef.current);
+    const hidden = () => sfx.current?.setMuted(document.hidden);
     document.addEventListener("visibilitychange", hidden);
     return () => {
       window.removeEventListener("pointerdown", wake);
@@ -190,21 +171,7 @@ function useCrewVoice(mates: readonly Mate[]) {
     };
   }, []);
 
-  const toggleSound = useCallback(() => {
-    const next = !soundRef.current;
-    setSoundOn(next);
-    soundRef.current = next;
-    if (!sfx.current) sfx.current = createSfx();
-    sfx.current?.start();
-    sfx.current?.setMuted(!next);
-    try {
-      window.localStorage.setItem(SOUND_KEY, next ? "on" : "off");
-    } catch {
-      // A private window keeps the choice for this visit only.
-    }
-  }, []);
-
-  return { bubble, say, soundOn, toggleSound, sfx, soundRef };
+  return { bubble, say, sfx };
 }
 
 /** The animals a screen actually shows: phones hide some of each crew. */
@@ -245,24 +212,10 @@ function Mates({ mates, bubble, prefix, onTap }: {
   );
 }
 
-function SoundButton({ on, onToggle, className }: { on: boolean; onToggle: () => void; className: string }) {
-  return (
-    <button
-      type="button"
-      onClick={onToggle}
-      aria-pressed={on}
-      aria-label={on ? "Mute the crew" : "Turn the crew's sound on"}
-      className={className}
-    >
-      {on ? "🔊" : "🔈"}
-    </button>
-  );
-}
-
 /* ── the airlock crew: the sign-in pages ───────────────────────────────── */
 
 export function LoginCrew() {
-  const { bubble, say, soundOn, toggleSound, sfx, soundRef } = useCrewVoice(MATES);
+  const { bubble, say, sfx } = useCrewVoice(MATES);
   const [mood, setMood] = useState<"shy" | "cheer" | "sad" | null>(null);
   const lastTyping = useRef(0);
   const turn = useRef(0);
@@ -315,10 +268,8 @@ export function LoginCrew() {
     const onSubmit = () => {
       setMood("cheer");
       say("penguin", "Launching! 🚀", 2600);
-      if (soundRef.current) {
-        sfx.current?.whoosh();
-        sfx.current?.cheer();
-      }
+      sfx.current?.whoosh();
+      sfx.current?.cheer();
       setTimeout(() => setMood(null), 1800);
     };
     // An error banner (`role="alert"`) appearing is the one signal every
@@ -330,7 +281,7 @@ export function LoginCrew() {
       if (!added) return;
       setMood("sad");
       say("koala", "Hmm… try that again?");
-      if (soundRef.current) sfx.current?.oops();
+      sfx.current?.oops();
       setTimeout(() => setMood(null), 2200);
     });
     document.addEventListener("focusin", onFocus);
@@ -345,15 +296,15 @@ export function LoginCrew() {
       document.removeEventListener("submit", onSubmit);
       alerts.disconnect();
     };
-  }, [pick, say, sfx, soundRef]);
+  }, [pick, say, sfx]);
 
   // The fly-by's whoosh, in time with its pass across the top (see CSS).
   useEffect(() => {
     const pass = setInterval(() => {
-      if (soundRef.current && !document.hidden) sfx.current?.whoosh();
+      if (!document.hidden) sfx.current?.whoosh();
     }, 19_000);
     return () => clearInterval(pass);
-  }, [sfx, soundRef]);
+  }, [sfx]);
 
   return (
     <>
@@ -364,14 +315,6 @@ export function LoginCrew() {
           <img src="/crew/hamster.webp" alt="" draggable={false} className="login-crew__img" />
         </div>
       </div>
-      <SoundButton
-        on={soundOn}
-        onToggle={() => {
-          toggleSound();
-          if (!soundOn) say("penguin", "Sound on!", 1800);
-        }}
-        className="login-crew__sound"
-      />
     </>
   );
 }
@@ -443,6 +386,13 @@ function useDockHidden(): [boolean, (next: boolean) => void] {
   return [hidden, set];
 }
 
+/** The phone-corner crew is hidden on a wide screen (the rail has its own), so
+ *  it must stay quiet there too, or an invisible crew pops over the rail's. */
+function floatingShown(): boolean {
+  const el = document.querySelector<HTMLElement>(".dock-crew--floating");
+  return !!el && getComputedStyle(el).display !== "none";
+}
+
 export interface Headline {
   title: string;
   source: string;
@@ -511,7 +461,7 @@ export function DockCrew({
 }) {
   const rail = placement === "rail";
   const mates = rail ? PANDA : DOCK;
-  const { bubble, say, soundOn, toggleSound } = useCrewVoice(mates);
+  const { bubble, say, sfx } = useCrewVoice(mates);
   const [hidden, setDock] = useDockHidden();
   const [hop, setHop] = useState<string | null>(null);
   const [newsIndex, setNewsIndex] = useState(0);
@@ -531,14 +481,16 @@ export function DockCrew({
   useEffect(() => {
     if (hidden || rail) return;
     const lines = pageLines(pathname);
-    const hello = setTimeout(() => say("penguin", lines[0] ?? "Hi again!"), 1200);
+    const hello = setTimeout(() => {
+      if (floatingShown()) say("penguin", lines[0] ?? "Hi again!");
+    }, 1200);
     return () => clearTimeout(hello);
   }, [hidden, rail, pathname, say]);
 
   useEffect(() => {
     if (hidden || rail) return;
     const every = setInterval(() => {
-      if (document.hidden) return;
+      if (document.hidden || !floatingShown()) return;
       const shown = visibleMates(DOCK, "dock-crew");
       turn.current = (turn.current + 1 + Math.floor(Math.random() * Math.max(1, shown.length - 1))) % shown.length;
       const mate = shown[turn.current]!;
@@ -583,13 +535,13 @@ export function DockCrew({
             onTap={(mate) => {
               setHop(mate.id);
               setTimeout(() => setHop(null), 700);
+              sfx.current?.whoosh();
               const headline = rail && news.length ? news[newsIndex % news.length] : null;
               say(mate.id, headline ? `📰 ${shortTitle(headline.title)}` : line(mate), headline ? 6000 : SHOW_MS);
             }}
           />
         </div>
         <div className="dock-crew__controls">
-          <SoundButton on={soundOn} onToggle={toggleSound} className="dock-crew__button" />
           <button type="button" className="dock-crew__button" aria-label="Hide the crew" onClick={() => setDock(true)}>
             ×
           </button>
@@ -606,7 +558,7 @@ export function DockCrew({
  * with the rest of the crew.
  */
 export function RailHeaderCrew({ pathname }: { pathname: string }) {
-  const { bubble, say } = useCrewVoice(TOP_PAIR);
+  const { bubble, say, sfx } = useCrewVoice(TOP_PAIR);
   const [hidden] = useDockHidden();
   const [hop, setHop] = useState<string | null>(null);
   const turn = useRef(0);
@@ -646,6 +598,7 @@ export function RailHeaderCrew({ pathname }: { pathname: string }) {
         onTap={(mate) => {
           setHop(mate.id);
           setTimeout(() => setHop(null), 700);
+          sfx.current?.whoosh();
           say(mate.id, line(mate));
         }}
       />
