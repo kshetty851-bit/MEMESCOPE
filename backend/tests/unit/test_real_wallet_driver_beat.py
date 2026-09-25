@@ -98,12 +98,14 @@ def test_the_driver_spends_the_asset_the_wallet_actually_holds():
     from app.real_wallet import driver as drv
 
     tree = ast.parse(Path(drv.__file__).read_text())
-    fn = next(n for n in ast.walk(tree)
-              if isinstance(n, ast.AsyncFunctionDef) and n.name == "tick")
-    src = ast.unparse(fn)
-    assert "settings.EXECUTION_SOL_MINT" in src
-    assert "JUPITER_USDC_MINT" not in src
-    assert "actual_input_amount_raw=lamports" in src
+    # The owner's pass and each family wallet's pass (2026-09-25) both buy.
+    for name in ("_owner_tick", "_family_tick"):
+        fn = next(n for n in ast.walk(tree)
+                  if isinstance(n, ast.AsyncFunctionDef) and n.name == name)
+        src = ast.unparse(fn)
+        assert "settings.EXECUTION_SOL_MINT" in src, name
+        assert "JUPITER_USDC_MINT" not in src, name
+        assert "actual_input_amount_raw=lamports" in src, name
 
 
 def test_an_unpriced_entry_refuses_rather_than_guessing():
@@ -112,10 +114,11 @@ def test_an_unpriced_entry_refuses_rather_than_guessing():
     from app.real_wallet import driver as drv
 
     tree = ast.parse(Path(drv.__file__).read_text())
-    tick = ast.unparse(next(n for n in ast.walk(tree)
-                            if isinstance(n, ast.AsyncFunctionDef) and n.name == "tick"))
-    assert "sol_price_unavailable" in tick
-    assert "entry_size_rounds_to_zero_lamports" in tick
+    for name in ("_owner_tick", "_family_tick"):
+        tick = ast.unparse(next(n for n in ast.walk(tree)
+                                if isinstance(n, ast.AsyncFunctionDef) and n.name == name))
+        assert "sol_price_unavailable" in tick, name
+        assert "entry_size_rounds_to_zero_lamports" in tick, name
 
 
 @pytest.mark.parametrize(

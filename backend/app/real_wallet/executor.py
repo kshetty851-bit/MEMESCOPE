@@ -73,7 +73,7 @@ from app.real_wallet.live_readiness import (
     LiveSubmissionGuard,
     SubmissionFacts,
 )
-from app.real_wallet import sol_price
+from app.real_wallet import family_wallets, sol_price
 from app.real_wallet.live_repository import (
     LiveIntentRepository,
     SettlementEvidenceError,
@@ -466,10 +466,26 @@ class RealWalletExecutor:
     async def _facts(
         self, intent: RealWalletLiveIntent, now: datetime
     ) -> SubmissionFacts:
-        """Measure every condition for THIS attempt. Unmeasurable stays refusing."""
+        """Measure every condition for THIS attempt. Unmeasurable stays refusing.
+
+        Per wallet since 2026-09-25: an intent for a family member's own wallet
+        is judged on THAT wallet's key, switch and limits, never the owner's.
+        """
+        owner = settings.REAL_WALLET_PUBLIC_KEY.strip()
+        account = (None if intent.wallet_public_key == owner else
+                   await family_wallets.account_for(self._session, intent.wallet_public_key))
         identity: dict = {}
         try:
-            identity = await self._signer.identity()
+            if account is None:
+                # The owner's wallet — or one nobody pinned, which the signer
+                # itself refuses to sign for — exactly as before.
+                identity = await self._signer.identity()
+            else:
+                # The signer's own answer for this member's mounted key.
+                entry = (await self._signer.identity_family()).get(
+                    "family", {}).get(account.member, {})
+                identity = {"can_sign": entry.get("error") is None,
+                            "matches_pinned_key": bool(entry.get("matches_pinned_key"))}
         except (MainnetSignerUnavailableError, MainnetSignerRejectedError):
             identity = {}
 
@@ -497,6 +513,9 @@ class RealWalletExecutor:
         # judge and only ever shrinks the book, so it is not asked.
         limits_ok = sell or await self._entry_limits_ok(intent, now, balance_lamports)
         switch = await AutotradeSwitchService(self._session).state()
+        # A family wallet's buys run on its OWN switch; the owner's switch is
+        # the owner's. A sell always runs, as before.
+        switch_on = switch.enabled if account is None else account.enabled
         safety_at = await self._safety_at(intent)
         evidence = intent.order_evidence or {}
         return SubmissionFacts(
@@ -523,15 +542,17 @@ class RealWalletExecutor:
             not_previously_signed=intent.transaction_signature is None,
             canary_limits_satisfied=limits_ok,
             transport_release_approved=LIVE_TRANSPORT_RELEASE_APPROVED,
-            autotrade_switch_on=switch.enabled or sell,
+            autotrade_switch_on=switch_on or sell,
         )
 
     async def _entry_limits_ok(
         self, intent: RealWalletLiveIntent, now: datetime,
         balance_lamports: int | None,
     ) -> bool:
-        """Every bound a BUY must satisfy at the moment it is sent."""
-        open_positions = await self._repository.open_positions_count()
+        """Every bound a BUY must satisfy at the moment it is sent, counted on
+        the wallet that pays for it."""
+        wallet = intent.wallet_public_key
+        open_positions = await self._repository.open_positions_count(wallet)
         entry_usd = Decimal(str(intent.requested_usd))
         # Equity, recomputed here rather than trusted from the row, because the
         # ladder scales the caps this re-check enforces. Without it the
@@ -543,7 +564,7 @@ class RealWalletExecutor:
         price = await sol_price.current_usd(now)
         equity_usd = (
             (Decimal(balance_lamports) / Decimal(1_000_000_000) * price
-             + await self._repository.open_exposure_usd())
+             + await self._repository.open_exposure_usd(wallet))
             if price is not None and balance_lamports is not None else None
         )
         # The spend as the ROW records it, not as anything recomputed here: the
@@ -559,7 +580,8 @@ class RealWalletExecutor:
                 daily_notional_usd=Decimal(0),
                 # Measured again here, not trusted from the driver: a sell can
                 # settle in the seconds between the two.
-                daily_realised_loss_usd=await self._repository.realised_loss_today(now),
+                daily_realised_loss_usd=await self._repository.realised_loss_today(
+                    now, wallet),
                 daily_trades=0,
                 wallet_balance_lamports=balance_lamports,
                 equity_usd=equity_usd,

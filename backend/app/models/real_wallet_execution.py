@@ -160,8 +160,12 @@ class RealWalletPosition(Base, UUIDPrimaryKeyMixin):
             "entry_transaction_signature", name="uq_real_position_entry_signature"
         ),
         UniqueConstraint("exit_transaction_signature", name="uq_real_position_exit_signature"),
+        # One open position per coin PER WALLET (was per coin, 2026-09-25):
+        # the owner's wallet and a family member's own wallet buy the same
+        # graduation in the same second, and each must be able to hold it.
         Index(
-            "uq_real_wallet_open_position_mint",
+            "uq_real_wallet_open_position_wallet_mint",
+            "wallet_public_key",
             "mint_address",
             unique=True,
             postgresql_where=text("status = 'OPEN'"),

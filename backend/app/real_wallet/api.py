@@ -608,7 +608,8 @@ async def status(viewer: OptionalUser, session: DbSession) -> dict[str, object]:
             "realised_pnl_usd": _decimal(pnl_today),
             "loss_limit_usd": _decimal(settings.REAL_WALLET_MAX_DAILY_LOSS_USD),
             "loss_limit_hit": -pnl_today >= settings.REAL_WALLET_MAX_DAILY_LOSS_USD,
-            "buys": await RealWalletDriver(session)._trades_today(now),
+            "buys": await RealWalletDriver(session)._trades_today(
+                now, settings.REAL_WALLET_PUBLIC_KEY.strip()),
             "buys_limit": settings.REAL_WALLET_MAX_DAILY_TRADES,
             "resets_at": tomorrow.isoformat(),
         },

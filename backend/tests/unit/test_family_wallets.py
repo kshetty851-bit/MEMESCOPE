@@ -159,14 +159,7 @@ async def test_the_owners_withdrawal_is_unchanged(keys):
     assert out["destination"] == str(keys.karthik.pubkey())
 
 
-async def test_a_family_wallet_cannot_sign_a_trade_yet(keys, monkeypatch):
-    """Stage 1: the family keys sign withdrawals and nothing else. A trade
-    intent naming Jaya's wallet is refused before any key is loaded."""
-    from app.real_wallet.live_readiness import ExecutionState
-
-    intent = SimpleNamespace(id=uuid.uuid4(), state=ExecutionState.ORDER_CREATED,
-                             wallet_public_key=str(keys.jaya.pubkey()))
-
+def _fake_intent_store(monkeypatch, intent):
     class Repo:
         def __init__(self, _session):
             pass
@@ -183,8 +176,45 @@ async def test_a_family_wallet_cannot_sign_a_trade_yet(keys, monkeypatch):
 
     monkeypatch.setattr(ms, "LiveIntentRepository", Repo)
     monkeypatch.setattr(ms, "SessionFactory", Session)
+
+
+async def test_a_family_wallet_may_sign_its_own_trade(keys, monkeypatch):
+    """Stage 2: a trade intent naming Jaya's wallet passes the wallet check and
+    goes on to the checks every trade faces (here: no order was built yet)."""
+    from app.real_wallet.live_readiness import ExecutionState
+
+    intent = SimpleNamespace(id=uuid.uuid4(), state=ExecutionState.ORDER_CREATED,
+                             wallet_public_key=str(keys.jaya.pubkey()), order_evidence={})
+    _fake_intent_store(monkeypatch, intent)
+    with pytest.raises(ms.MainnetSignerError, match="intent_has_no_unsigned_transaction"):
+        await ms.sign_intent(intent.id)
+
+
+async def test_a_trade_for_a_wallet_nobody_pinned_is_refused(keys, monkeypatch):
+    from app.real_wallet.live_readiness import ExecutionState
+
+    intent = SimpleNamespace(id=uuid.uuid4(), state=ExecutionState.ORDER_CREATED,
+                             wallet_public_key=str(Keypair().pubkey()), order_evidence={})
+    _fake_intent_store(monkeypatch, intent)
     with pytest.raises(ms.MainnetSignerError, match="intent_wallet_is_not_this_signer"):
         await ms.sign_intent(intent.id)
+
+
+def _close(wallet: Keypair) -> str:
+    from app.real_wallet import account_close
+
+    token_account = str(Keypair().pubkey())
+    return account_close.build(
+        wallet=str(wallet.pubkey()), blockhash=BLOCKHASH,
+        accounts=[(token_account, "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA")])
+
+
+async def test_a_family_wallet_closes_only_its_own_accounts(keys):
+    out = await ms.sign_close_accounts(_close(keys.jaya), wallet=str(keys.jaya.pubkey()))
+    assert out["signature"]
+    # Jaya's close presented as Asha's: the rent would not go to Asha.
+    with pytest.raises(ms.MainnetSignerError, match="close_rejected"):
+        await ms.sign_close_accounts(_close(keys.jaya), wallet=str(keys.asha.pubkey()))
 
 
 async def test_identity_family_reports_each_member(keys):
@@ -255,4 +285,4 @@ def test_the_withdrawal_names_no_destination():
 async def test_a_member_without_a_wallet_shows_none(keys):
     from app.real_wallet import family_api
 
-    assert await family_api._own_wallet("APOORVA") == {"address": None, "trading": False}
+    assert await family_api._own_wallet("APOORVA") == {"address": None}

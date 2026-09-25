@@ -42,7 +42,7 @@ from solders.instruction import AccountMeta, Instruction
 from solders.message import Message
 from solders.pubkey import Pubkey
 from solders.transaction import Transaction
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -213,9 +213,17 @@ async def sweep(
     rpc: SolanaRPC | None = None,
     signer: UnixMainnetSignerClient | None = None,
     limit: int = MAX_CLOSES_PER_SWEEP,
+    wallet: str | None = None,
 ) -> SweepOutcome:
-    """Close what is safe to close, one account per transaction."""
-    wallet = settings.REAL_WALLET_PUBLIC_KEY.strip()
+    """Close what is safe to close, one account per transaction.
+
+    ``wallet``: whose accounts — the owner's by default, or a family member's
+    own wallet (2026-09-25). Only that wallet's open positions are kept, and
+    the signer re-proves the rent goes back to that same wallet.
+    """
+    owner = settings.REAL_WALLET_PUBLIC_KEY.strip()
+    family = wallet is not None and wallet != owner
+    wallet = (wallet or owner).strip()
     if not wallet:
         return SweepOutcome(skipped="wallet_not_configured")
     # Automatic transactions follow the same two flags as trading. The autotrade
@@ -228,10 +236,17 @@ async def sweep(
     if await session.scalar(select(RealWalletLiveIntent.id).where(
             RealWalletLiveIntent.state.in_(IN_FLIGHT)).limit(1)):
         return SweepOutcome(skipped="trade_in_flight")
+    # This wallet's open coins — and any open position with no wallet
+    # recorded, which every sweep keeps: an account left open costs rent,
+    # one closed under a position cannot be undone.
     keep = frozenset((await session.scalars(
-        select(RealWalletPosition.mint_address).where(RealWalletPosition.status == "OPEN")
+        select(RealWalletPosition.mint_address).where(
+            RealWalletPosition.status == "OPEN",
+            or_(RealWalletPosition.wallet_public_key == wallet,
+                RealWalletPosition.wallet_public_key.is_(None)))
         .union(select(RealWalletLiveIntent.mint_address).where(
-            RealWalletLiveIntent.state == ExecutionState.RECONCILIATION_REQUIRED))
+            RealWalletLiveIntent.state == ExecutionState.RECONCILIATION_REQUIRED,
+            RealWalletLiveIntent.wallet_public_key == wallet))
     )).all())
 
     rpc = rpc or StandardSolanaRPC(rpc_url=settings.REAL_WALLET_RPC_URL)
@@ -255,7 +270,10 @@ async def sweep(
             try:
                 encoded = build(wallet=wallet, blockhash=blockhash,
                                 accounts=[(target.token_account, target.program_id)])
-                signed = await signer.sign_close_accounts(encoded)
+                # The owner's call is exactly what it always was; only a
+                # family wallet names itself.
+                signed = await (signer.sign_close_accounts(encoded, wallet=wallet)
+                                if family else signer.sign_close_accounts(encoded))
                 signatures.append(await _send(rpc, signed["signed_transaction"]))
             except (AccountCloseRejectedError, MainnetSignerRejectedError,
                     MainnetSignerUnavailableError, RpcError) as exc:

@@ -21,7 +21,7 @@ lifecycle's, and each has its own barrier.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from decimal import ROUND_DOWN, Decimal
 
@@ -32,7 +32,7 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.lab import LabDecision
 from app.models.real_wallet_execution import RealWalletLiveIntent
-from app.real_wallet import family, sol_price
+from app.real_wallet import family, family_wallets, sol_price
 from app.real_wallet.autotrade import AutotradeSwitchService, ticket_for
 from app.real_wallet.live_repository import LiveIntentRepository
 from app.real_wallet.policy import (
@@ -59,9 +59,15 @@ class DriverOutcome:
     created: int
     skipped: str | None = None
     mint: str | None = None
+    #: Per family member's own wallet: "created:<mint>" or why it skipped.
+    #: Empty when no member has a wallet. `created` counts the owner's only.
+    family: dict[str, str] = field(default_factory=dict)
 
     def as_dict(self) -> dict:
-        return {"created": self.created, "skipped": self.skipped, "mint": self.mint}
+        out = {"created": self.created, "skipped": self.skipped, "mint": self.mint}
+        if self.family:
+            out["family"] = self.family
+        return out
 
 
 class RealWalletDriver:
@@ -69,8 +75,107 @@ class RealWalletDriver:
         self._session = session
 
     async def tick(self, *, now: datetime | None = None) -> DriverOutcome:
+        """The owner's wallet first, exactly as before; then each family
+        member's own wallet, each on its own balance, switch and limits."""
         now = now or datetime.now(UTC)
+        owner = await self._owner_tick(now)
+        family_outcomes = await self._family_ticks(now)
+        return replace(owner, family=family_outcomes) if family_outcomes else owner
 
+    async def _family_ticks(self, now: datetime) -> dict[str, str]:
+        """One pass per family member's OWN wallet (stage 2, 2026-09-25).
+
+        Independent of the owner's on/off: each wallet has its own switch,
+        which only Karthik can turn on. It trades the strategy he nominated at
+        Start — there is one strategy on this platform worth real money at a
+        time — and every bound is that wallet's own: its balance, its open
+        positions, today's trades and losses. The kill switches still stop
+        everything.
+        """
+        accounts = await family_wallets.accounts(self._session)
+        if not accounts:
+            return {}
+        out: dict[str, str] = {}
+        switch = await AutotradeSwitchService(self._session).state()
+        repo = LiveIntentRepository(self._session)
+        halted = bool(await repo.active_kill_switches())
+        for account in accounts:
+            if not account.enabled:
+                out[account.member] = "own_wallet_off"
+            elif not switch.nominated_strategy:
+                out[account.member] = "no_strategy_nominated"
+            elif halted:
+                out[account.member] = "kill_switch_active"
+            else:
+                out[account.member] = await self._family_tick(
+                    account, strategy_id=switch.nominated_strategy, now=now)
+        return out
+
+    async def _family_tick(self, account: family_wallets.Account, *,
+                           strategy_id: str, now: datetime) -> str:
+        """At most one BUY for one family wallet. Every refusal is a string."""
+        wallet = account.wallet
+        repo = LiveIntentRepository(self._session)
+        candidate = await self._next_candidate(strategy_id=strategy_id, now=now, wallet=wallet)
+        if candidate is None:
+            return "no_fresh_candidate"
+        balance_lamports = await self._wallet_lamports(wallet)
+        if balance_lamports is None:
+            return "wallet_balance_unreadable"
+        price = await self._sol_usd(now)
+        if price is None:
+            return "sol_price_unavailable"
+        open_positions = await repo.open_positions_count(wallet)
+        # Their own ticket, never above the platform's per-trade ceiling. No
+        # growth ladder: the member chose a size, and it is the size.
+        ticket = min(account.ticket_usd, settings.REAL_WALLET_MAX_TRADE_USD)
+        entry_usd = self._fundable(strategy_id, ticket, balance_lamports=balance_lamports,
+                                   sol_price=price, open_positions=open_positions)
+        if entry_usd is None or entry_usd <= 0:
+            return "entry_not_fundable"
+        lamports = lamports_from_sol(
+            (entry_usd / price).quantize(Decimal("1e-9"), rounding=ROUND_DOWN))
+        if lamports <= 0:
+            return "entry_size_rounds_to_zero_lamports"
+        equity_usd = (Decimal(balance_lamports) / _LAMPORTS_PER_SOL * price
+                      + await repo.open_exposure_usd(wallet))
+        decision = AutonomousExecutionPolicy().evaluate_canary_entry(
+            requested_usd=entry_usd,
+            state=PolicyState(
+                open_positions=open_positions,
+                exposure_usd=Decimal(open_positions) * entry_usd,
+                daily_notional_usd=await self._notional_today(now, wallet),
+                daily_realised_loss_usd=await repo.realised_loss_today(now, wallet),
+                daily_trades=await self._trades_today(now, wallet),
+                wallet_balance_lamports=balance_lamports,
+                equity_usd=equity_usd,
+                side="BUY",
+                spend_lamports=lamports,
+            ),
+        )
+        if not decision.allowed:
+            return "policy:" + ",".join(decision.reason_codes)
+        intent = await repo.create_intent(
+            # The member in the key: the owner's key for the same coin is
+            # `v6:<strategy>:<mint>`, and the two must not collide.
+            idempotency_key=f"v6:{strategy_id}:{candidate}:{account.member}",
+            mint_address=candidate,
+            side="BUY",
+            strategy_id=strategy_id,
+            strategy_version=settings.REAL_WALLET_SAFETY_POLICY_VERSION,
+            wallet_public_key=wallet,
+            requested_usd=entry_usd,
+            input_mint=settings.EXECUTION_SOL_MINT,
+            output_mint=candidate,
+            actual_input_amount_raw=lamports,
+        )
+        if intent is None:
+            return "already_traded"
+        logger.warning("real_wallet_family_intent_created", member=account.member,
+                       mint=candidate, strategy=strategy_id, usd=str(entry_usd))
+        return f"created:{candidate}"
+
+    async def _owner_tick(self, now: datetime) -> DriverOutcome:
         switch = await AutotradeSwitchService(self._session).state()
         if not switch.enabled:
             return DriverOutcome(0, "autotrade_switch_off")
@@ -95,7 +200,7 @@ class RealWalletDriver:
         # decision there is nothing to size: the balance read below is an RPC
         # call and the SOL price an HTTP one, neither of which a no-op needs.
         candidate = await self._next_candidate(
-            strategy_id=switch.nominated_strategy, now=now
+            strategy_id=switch.nominated_strategy, now=now, wallet=wallet
         )
         if candidate is None:
             return DriverOutcome(0, "no_fresh_candidate")
@@ -118,7 +223,7 @@ class RealWalletDriver:
             # guess: every limit this wallet has is written in dollars.
             return DriverOutcome(0, "sol_price_unavailable")
 
-        open_positions = await repo.open_positions_count()
+        open_positions = await repo.open_positions_count(wallet)
 
         # --- GROWTH LADDER -------------------------------------------------
         # What the account is worth right now: the SOL it holds, plus what is
@@ -131,7 +236,7 @@ class RealWalletDriver:
         # is not the place to assume one.
         equity_usd = (
             Decimal(balance_lamports) / _LAMPORTS_PER_SOL * sol_price
-            + await repo.open_exposure_usd()
+            + await repo.open_exposure_usd(wallet)
         )
         entry_usd = configured_entry_size_usd(equity_usd)
         if entry_usd is None or entry_usd <= 0:
@@ -193,9 +298,9 @@ class RealWalletDriver:
             state=PolicyState(
                 open_positions=open_positions,
                 exposure_usd=Decimal(open_positions) * entry_usd,
-                daily_notional_usd=await self._notional_today(now),
-                daily_realised_loss_usd=await repo.realised_loss_today(now),
-                daily_trades=await self._trades_today(now),
+                daily_notional_usd=await self._notional_today(now, wallet),
+                daily_realised_loss_usd=await repo.realised_loss_today(now, wallet),
+                daily_trades=await self._trades_today(now, wallet),
                 wallet_balance_lamports=balance_lamports,
                 equity_usd=equity_usd,
                 side="BUY",
@@ -313,10 +418,16 @@ class RealWalletDriver:
                                   ticket=configured,
                                   floor=grad.wallet_floor(configured))
 
-    async def _next_candidate(self, *, strategy_id: str, now: datetime) -> str | None:
-        """The most recent mint this strategy chose and this wallet has not traded."""
+    async def _next_candidate(self, *, strategy_id: str, now: datetime,
+                              wallet: str) -> str | None:
+        """The most recent mint this strategy chose and THIS wallet has not traded.
+
+        Per wallet since 2026-09-25: a coin the owner bought is still a coin a
+        family wallet may buy, and the other way round.
+        """
         cutoff = now - self._decision_age(strategy_id)
-        traded = select(RealWalletLiveIntent.mint_address)
+        traded = select(RealWalletLiveIntent.mint_address).where(
+            RealWalletLiveIntent.wallet_public_key == wallet)
         rows = await self._session.execute(
             select(LabDecision.mint_address)
             .where(
@@ -330,23 +441,25 @@ class RealWalletDriver:
         )
         return rows.scalars().first()
 
-    async def _trades_today(self, now: datetime) -> int:
-        """Entries today. Sells are not counted: each would take a buy's place,
-        and an exit asked for again would take several."""
+    async def _trades_today(self, now: datetime, wallet: str) -> int:
+        """This wallet's entries today. Sells are not counted: each would take a
+        buy's place, and an exit asked for again would take several."""
         start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         rows = await self._session.execute(
             select(RealWalletLiveIntent.id).where(
                 RealWalletLiveIntent.created_at >= start,
                 RealWalletLiveIntent.side == "BUY",
+                RealWalletLiveIntent.wallet_public_key == wallet,
             )
         )
         return len(rows.scalars().all())
 
-    async def _notional_today(self, now: datetime) -> Decimal:
+    async def _notional_today(self, now: datetime, wallet: str) -> Decimal:
         start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         rows = await self._session.execute(
             select(RealWalletLiveIntent.requested_usd).where(
-                RealWalletLiveIntent.created_at >= start
+                RealWalletLiveIntent.created_at >= start,
+                RealWalletLiveIntent.wallet_public_key == wallet,
             )
         )
         return sum((v for v in rows.scalars() if v), Decimal(0))

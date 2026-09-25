@@ -10,7 +10,8 @@ import { ApiError, api } from "@/lib/api-client";
 
 /**
  * FAMILY SHARES OF THE ONE REAL WALLET — and, from 2026-09-25, each member's
- * OWN wallet (address, balance, withdraw-to-Karthik; trading comes later).
+ * OWN wallet: an address, a balance, withdraw-to-Karthik, and its own trading
+ * (off until Karthik, signed in, starts it; anyone with the password can stop).
  *
  * Jaya, Asha and Apoorva each own a slice of the real wallet's orders: their
  * own trade size, their own on/off, their own money. There is still one wallet
@@ -177,15 +178,35 @@ interface OwnWallet {
   address: string | null;
   explorer?: string;
   withdraws_to?: string | null;
-  trading: boolean;
   balance_sol?: string | null;
   balance_usd?: string | null;
   balance_error?: string | null;
 }
 
+interface OwnTrade {
+  mint: string;
+  status: "OPEN" | "CLOSED";
+  opened_at: string;
+  closed_at: string | null;
+  cost_usd: string | null;
+  pnl_usd: string | null;
+  exit_reason: string | null;
+}
+
+interface OwnBook {
+  enabled: boolean;
+  ticket_usd: string;
+  ticket_choices: string[];
+  today_pnl_usd: string | null;
+  open_positions: number;
+  since_first_trade: { trades: number; won: number; lost: number; net_pnl_usd: string | null } | null;
+  trades_list: OwnTrade[];
+}
+
 interface FamilyView {
   member: string;
   own_wallet?: OwnWallet;
+  own_book?: OwnBook | null;
   enabled: boolean;
   ticket_usd: string;
   ticket_choices: string[];
@@ -223,13 +244,25 @@ function short(address: string): string {
  * to, its balance read from chain, and a way out that can only reach Karthik's
  * address. It does not trade yet; Karthik switches that on later.
  */
-function OwnWalletPanel({ member, wallet, headers, onDone }: {
+function OwnWalletPanel({ member, wallet, book, isOwner, headers, onDone }: {
   member: string;
   wallet: OwnWallet;
+  book: OwnBook | null | undefined;
+  isOwner: boolean;
   headers: Record<string, string> | undefined;
   onDone: () => void;
 }) {
   const [copied, setCopied] = useState(false);
+  const [ticket, setTicket] = useState<string | null>(null);
+  const own = useMutation({
+    mutationFn: (next: { enabled: boolean; ticket: string }) =>
+      api.post(`/real-wallet/family/${member.toLowerCase()}/own-settings`,
+        { enabled: next.enabled, ticket_usd: next.ticket }, { headers }),
+    onSuccess: () => {
+      setTicket(null);
+      onDone();
+    },
+  });
   const [amount, setAmount] = useState("");
   const [armed, setArmed] = useState(false);
   const withdraw = useMutation({
@@ -260,8 +293,9 @@ function OwnWalletPanel({ member, wallet, headers, onDone }: {
     <section className="mt-5 rounded-lg border border-accent/40 p-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <p className="text-label text-accent">{title(member)}&apos;s own wallet</p>
-        <span className="rounded-full border border-line px-2 py-0.5 text-xs text-ink-3">
-          Trading: {wallet.trading ? "on" : "off — Karthik switches it on"}
+        <span className={`rounded-full border px-2 py-0.5 text-xs ${
+          book?.enabled ? "border-up/50 text-up" : "border-line text-ink-3"}`}>
+          Trading: {book?.enabled ? "on" : "off"}
         </span>
       </div>
 
@@ -298,6 +332,107 @@ function OwnWalletPanel({ member, wallet, headers, onDone }: {
           <span className="ml-2 text-sm text-ink-3">≈ {usd(wallet.balance_usd)}</span>
         ) : null}
       </p>
+
+      {book ? (
+        <div className="mt-4 border-t border-line pt-3">
+          <p className="text-xs text-ink-3">Trading from this wallet</p>
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+            <label className="text-ink-3" htmlFor={`own-ticket-${member}`}>Each trade</label>
+            <select
+              id={`own-ticket-${member}`}
+              value={ticket ?? book.ticket_usd}
+              disabled={!isOwner}
+              onChange={(e) => setTicket(e.target.value)}
+              className="rounded-md border border-line bg-canvas px-2 py-1 text-sm text-ink disabled:opacity-60"
+            >
+              {book.ticket_choices.map((t) => (
+                <option key={t} value={t}>{usd(t)}</option>
+              ))}
+            </select>
+            {book.enabled ? (
+              <button
+                type="button"
+                disabled={own.isPending}
+                onClick={() => own.mutate({ enabled: false, ticket: book.ticket_usd })}
+                className="rounded-md border border-down/50 px-3 py-1 text-sm text-down"
+              >
+                Stop trading
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled={own.isPending || !isOwner}
+                onClick={() => own.mutate({ enabled: true, ticket: ticket ?? book.ticket_usd })}
+                className="rounded-md bg-accent px-3 py-1 text-sm font-medium text-canvas disabled:opacity-50"
+              >
+                Start trading
+              </button>
+            )}
+            {isOwner && ticket && ticket !== book.ticket_usd && book.enabled ? (
+              <button
+                type="button"
+                disabled={own.isPending}
+                onClick={() => own.mutate({ enabled: true, ticket })}
+                className="rounded-md border border-line px-3 py-1 text-sm text-ink-2"
+              >
+                Save size
+              </button>
+            ) : null}
+          </div>
+          {!isOwner ? (
+            <p className="mt-1 text-xs text-ink-3">
+              Only Karthik, signed in, can start this wallet or change its size. Anyone can stop it.
+            </p>
+          ) : null}
+          {own.isError ? (
+            <p className="mt-1 text-xs text-down">
+              Not changed: {own.error instanceof ApiError ? own.error.message : "try again"}
+            </p>
+          ) : null}
+
+          <div className="mt-3 grid grid-cols-3 gap-2 text-sm">
+            <div>
+              <p className="text-xs text-ink-3">Profit so far</p>
+              <p className={`tabular-nums ${tone(book.since_first_trade?.net_pnl_usd)}`}>
+                {book.since_first_trade ? usd(book.since_first_trade.net_pnl_usd) : "—"}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-ink-3">Today</p>
+              <p className={`tabular-nums ${tone(book.today_pnl_usd)}`}>{usd(book.today_pnl_usd)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-ink-3">Trades</p>
+              <p className="tabular-nums text-ink">
+                {book.since_first_trade
+                  ? `${book.since_first_trade.trades} · ${book.since_first_trade.won} won`
+                  : "0"}
+                {book.open_positions ? ` · ${book.open_positions} open` : ""}
+              </p>
+            </div>
+          </div>
+
+          {book.trades_list.length ? (
+            <ul className="mt-3 divide-y divide-line text-xs">
+              {book.trades_list.slice(0, 20).map((t) => (
+                <li key={`${t.mint}-${t.opened_at}`} className="flex justify-between gap-2 py-1.5">
+                  <span className="font-mono text-ink-2">{short(t.mint)}</span>
+                  <span className="text-ink-3">
+                    {new Date(t.opened_at).toLocaleString(undefined, { timeZone: "Asia/Dubai",
+                      day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                  <span className="text-ink-3">{usd(t.cost_usd)}</span>
+                  <span className={`tabular-nums ${tone(t.pnl_usd)}`}>
+                    {t.status === "OPEN" ? "open" : usd(t.pnl_usd)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-3 text-xs text-ink-3">No trades from this wallet yet.</p>
+          )}
+        </div>
+      ) : null}
 
       <div className="mt-4 border-t border-line pt-3">
         <p className="text-xs text-ink-3">
@@ -483,6 +618,8 @@ export function FamilyMemberPage({ member }: { member: string }) {
             <OwnWalletPanel
               member={key}
               wallet={d.own_wallet}
+              book={d.own_book}
+              isOwner={isOwner}
               headers={headers}
               onDone={() => void queryClient.invalidateQueries({ queryKey: ["real-wallet", "family", key] })}
             />

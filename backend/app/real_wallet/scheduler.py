@@ -453,6 +453,15 @@ async def _real_wallet_balance_watch() -> dict[str, Any]:
         async with rpc:
             async with SessionFactory() as session:
                 reading = await balance_watch.observe(session, rpc, now=utcnow())
+                # Each family member's own wallet, on its own series.
+                from app.real_wallet import family_wallets
+
+                family = {}
+                for account in await family_wallets.accounts(session):
+                    seen = await balance_watch.observe(session, rpc, now=utcnow(),
+                                                       wallet=account.wallet)
+                    family[account.member] = {"lamports": seen.lamports,
+                                              "unexplained": seen.unexplained}
                 await session.commit()
     except Exception:
         logger.exception("real_wallet_balance_watch_failed")
@@ -462,6 +471,7 @@ async def _real_wallet_balance_watch() -> dict[str, Any]:
         "lamports": reading.lamports,
         "delta_lamports": reading.delta_lamports,
         "unexplained": reading.unexplained,
+        **({"family": family} if family else {}),
     }
 
 
@@ -492,14 +502,24 @@ async def _real_wallet_close_empty_accounts() -> dict[str, Any]:
                 await session.rollback()
                 return {"skipped": "close_sweep_already_running"}
             outcome = await account_close.sweep(session)
+            # Then each family member's own wallet, one at a time, under the
+            # same lock. A member with no wallet has nothing to sweep.
+            from app.real_wallet import family_wallets
+
+            family: dict[str, object] = {}
+            for account in await family_wallets.accounts(session):
+                done = await account_close.sweep(session, wallet=account.wallet)
+                if done.closed or done.refused:
+                    family[account.member] = done.as_dict()
             await session.rollback()
     except Exception:
         # Contained like its neighbours: parked rent can wait for the next sweep.
         logger.exception("real_wallet_close_empty_accounts_failed")
         return {"failed": True}
-    if outcome.closed or outcome.refused:
-        logger.warning("real_wallet_close_empty_accounts", **outcome.as_dict())
-    return outcome.as_dict()
+    if outcome.closed or outcome.refused or family:
+        logger.warning("real_wallet_close_empty_accounts", **outcome.as_dict(),
+                       family=family or None)
+    return {**outcome.as_dict(), **({"family": family} if family else {})}
 
 
 @celery_app.task(name="app.real_wallet.scheduler.real_wallet_trade_alerts")

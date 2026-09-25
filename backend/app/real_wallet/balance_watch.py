@@ -81,11 +81,16 @@ class BalanceReading:
 
 
 async def observe(
-    session: AsyncSession, rpc: SolanaRPC, *, now: datetime | None = None
+    session: AsyncSession, rpc: SolanaRPC, *, now: datetime | None = None,
+    wallet: str | None = None,
 ) -> BalanceReading:
-    """Read the chain, compare it to the last observation, record the verdict."""
+    """Read the chain, compare it to the last observation, record the verdict.
+
+    ``wallet``: the owner's by default, or a family member's own (2026-09-25)
+    — each is compared only with its own previous reading and its own trades.
+    """
     now = now or datetime.now(UTC)
-    wallet = settings.REAL_WALLET_PUBLIC_KEY.strip()
+    wallet = (wallet or settings.REAL_WALLET_PUBLIC_KEY).strip()
     if not wallet:
         return BalanceReading(measured=False, detail="No execution wallet configured.")
 

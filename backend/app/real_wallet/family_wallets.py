@@ -14,15 +14,24 @@ to the owner's wallet or to the withdrawal address is a configuration error,
 and every caller treats a configuration error as "no family wallets at all".
 A half-understood key map is the one thing a signer must never act on.
 
-Stage 1 of 2. With this in place a member has an address, a balance and a way
-out — a withdrawal that can only go to Karthik's nominated address, exactly
-like his own wallet's. Trading from these wallets is stage 2; until then the
-signer signs nothing but those withdrawals for them.
+Stage 1 gave each member an address, a balance and a way out — a withdrawal
+that can only go to Karthik's nominated address, like his own wallet's.
+Stage 2 (the same day) lets each wallet trade on its own: its own switch
+(`RealWalletFamilyMember.own_enabled`, off until Karthik turns it on), its own
+ticket, balance and limits, the strategy he nominated at Start. The signer
+signs trades, account closes and withdrawals for a member's wallet only with
+that member's key, proved against the address pinned here.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from decimal import Decimal
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.config import settings
+from app.models.real_wallet_family import RealWalletFamilyMember
 from app.real_wallet.family import MEMBERS
 from app.real_wallet.network import is_valid_wallet_address
 
@@ -80,4 +89,39 @@ def member_for(public_key: str) -> str | None:
     return None
 
 
-__all__ = ["FamilyWalletConfigError", "address", "member_for", "parse", "pinned"]
+@dataclass(frozen=True, slots=True)
+class Account:
+    """One family member's own wallet, as the driver and executor see it."""
+
+    member: str
+    wallet: str
+    enabled: bool
+    ticket_usd: Decimal
+
+
+async def accounts(session: AsyncSession) -> list[Account]:
+    """Every member with a pinned wallet, and whether it trades.
+
+    A bad map yields no accounts (fail closed). A member with a wallet but no
+    settings row is OFF: a switch nobody set is not on.
+    """
+    try:
+        wallets = pinned()
+    except FamilyWalletConfigError:
+        return []
+    out: list[Account] = []
+    for member, wallet in wallets.items():
+        row = await session.get(RealWalletFamilyMember, member)
+        out.append(Account(member=member, wallet=wallet,
+                           enabled=bool(row and row.own_enabled),
+                           ticket_usd=Decimal(row.own_ticket_usd) if row else Decimal(20)))
+    return out
+
+
+async def account_for(session: AsyncSession, wallet: str) -> Account | None:
+    """The family account that owns this wallet, or None (the owner's, or nobody's)."""
+    return next((a for a in await accounts(session) if a.wallet == wallet), None)
+
+
+__all__ = ["Account", "FamilyWalletConfigError", "account_for", "accounts", "address",
+           "member_for", "parse", "pinned"]
