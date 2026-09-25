@@ -59,10 +59,7 @@ const countdown: LaunchStep[] = Array.from({ length: COUNTDOWN_FROM }, (_, index
  * today is not held hostage by it.
  */
 export const LAUNCH_TIMELINE: readonly LaunchStep[] = [
-  // 1300 -> 2600 (2026-09-25): long enough for the frog to say "Access
-  // approved, Captain! Launching in…" at an unhurried pace before the first
-  // digit (frog-voice.tsx).
-  { phase: "approved", ms: 2600 },
+  { phase: "approved", ms: 1300 },
   ...countdown,
   { phase: "ignition", ms: 700 },
   { phase: "launching", ms: 1500 },
