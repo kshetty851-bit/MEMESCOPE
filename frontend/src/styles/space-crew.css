@@ -631,3 +631,123 @@
   .login-crew__bubble { animation: none !important; transition: none !important; }
   .login-crew__flyby { display: none; }
 }
+
+/* --- 8. THE DOCK CREW (every page after sign-in, 2026-09-25) --------------
+   Three animals in the bottom-right corner, sitting above the feedback button
+   (bottom-6 right-6 on wide screens, bottom-20 right-4 on phones). Only the
+   animals and the two small buttons take clicks; the row around them does
+   not, so nothing on the page beside them is blocked. Bubbles open to the
+   LEFT, into the page, and are short enough to cover a line, not a panel. */
+
+.dock-crew {
+  position: fixed;
+  right: 18px;
+  bottom: 84px;
+  z-index: 45;
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  pointer-events: none;
+}
+@media (max-width: 1023px) {
+  .dock-crew { right: 10px; bottom: 132px; }
+}
+
+.dock-crew__row {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.dock-crew__mate {
+  position: relative;
+  width: 58px;
+  animation: crew-bob 5s ease-in-out infinite;
+}
+.dock-crew__mate--penguin { width: 52px; animation-duration: 4.2s; animation-delay: -1.4s; }
+.dock-crew__mate--tiger { width: 64px; animation-duration: 5.6s; animation-delay: -2.8s; }
+
+.dock-crew__mate .login-crew__img {
+  pointer-events: auto;
+  cursor: pointer;
+  animation: none;
+}
+.dock-crew[data-hop="panda"] .dock-crew__mate--panda .login-crew__img,
+.dock-crew[data-hop="penguin"] .dock-crew__mate--penguin .login-crew__img,
+.dock-crew[data-hop="tiger"] .dock-crew__mate--tiger .login-crew__img {
+  animation: crew-hop-flip 0.7s cubic-bezier(0.3, 0.9, 0.4, 1) 1;
+}
+
+/* All three bubbles open leftwards from the animal, at mid-height. */
+.dock-crew .login-crew__bubble {
+  top: 20%;
+  left: auto;
+  right: calc(100% + 8px);
+  translate: 0 0;
+  transform-origin: 100% 50%;
+  max-width: 200px;
+}
+.dock-crew .login-crew__bubble::before {
+  left: auto;
+  right: -6px;
+  top: 50%;
+  transform: translateY(-50%) rotate(45deg);
+}
+/* The panda is leftmost; the tiger's and penguin's bubbles would otherwise
+   sit on the panda, so they rise above the row instead. */
+.dock-crew__mate--penguin .login-crew__bubble,
+.dock-crew__mate--tiger .login-crew__bubble {
+  top: auto;
+  bottom: calc(100% + 10px);
+  right: 0;
+  transform-origin: 100% 100%;
+}
+.dock-crew__mate--penguin .login-crew__bubble::before,
+.dock-crew__mate--tiger .login-crew__bubble::before {
+  top: auto;
+  bottom: -6px;
+  right: 20px;
+  transform: rotate(45deg);
+}
+
+.dock-crew__controls {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  pointer-events: auto;
+}
+.dock-crew__button,
+.dock-crew__paw {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: 1px solid rgb(255 255 255 / 0.16);
+  background: rgb(10 14 30 / 0.75);
+  color: var(--color-ink-2);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+}
+.dock-crew__paw {
+  position: fixed;
+  right: 18px;
+  bottom: 84px;
+  z-index: 45;
+  width: 36px;
+  height: 36px;
+  font-size: 16px;
+}
+@media (max-width: 1023px) {
+  .dock-crew__paw { right: 10px; bottom: 132px; }
+  .dock-crew__mate--panda { display: none; }
+}
+.dock-crew__button:focus-visible,
+.dock-crew__paw:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .dock-crew__mate,
+  .dock-crew__mate .login-crew__img { animation: none !important; }
+}

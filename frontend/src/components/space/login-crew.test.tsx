@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { LoginCrew } from "./login-crew";
+import { DockCrew, LoginCrew } from "./login-crew";
 
 describe("the crew at the airlock", () => {
   afterEach(() => {
@@ -43,5 +43,30 @@ describe("the crew at the airlock", () => {
     fireEvent.click(button);
     expect(screen.getByRole("button", { name: /sound on/i })).toHaveAttribute("aria-pressed", "false");
     expect(window.localStorage.getItem("memescope.loginCrewSound")).toBe("off");
+  });
+});
+
+describe("the crew after sign-in", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    window.localStorage.clear();
+  });
+
+  it("says hello for the page, talks when tapped, and can be tucked away", () => {
+    vi.useFakeTimers();
+    const { container } = render(<DockCrew pathname="/karthik-lab" />);
+    act(() => {
+      vi.advanceTimersByTime(1300);
+    });
+    expect(container.querySelector(".login-crew__bubble")).toHaveTextContent("Welcome to your lab, captain!");
+
+    fireEvent.click(container.querySelector(".dock-crew__mate--tiger img")!);
+    expect(container.querySelector(".dock-crew__mate--tiger .login-crew__bubble")).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Hide the crew" }));
+    expect(container.querySelector(".dock-crew")).toBeNull();
+    expect(window.localStorage.getItem("memescope.crewDock")).toBe("hidden");
+    fireEvent.click(screen.getByRole("button", { name: "Bring the crew back" }));
+    expect(container.querySelector(".dock-crew")).not.toBeNull();
   });
 });
