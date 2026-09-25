@@ -67,12 +67,12 @@ def test_the_page_shows_the_quiet_book_and_the_band_books() -> None:
         (Decimal(500), Decimal(100), SWEEP[0].start)}
     assert all(s.capital_usd == Decimal(500) and s.ticket_usd == Decimal(100)
                for s in SWEEP if s.book != "KARTHIK_QUIET_5M")
-    # Karthik's own book was resized at his request on 2026-09-24, after its
-    # first day, and says so: the size and the moment it changed are both
+    # Karthik's own book was resized at his request on 2026-09-24 and again on
+    # 2026-09-25, and says so: the size and the moment it changed are both
     # recorded, so the page can mark what came before as in sample.
     assert (by_book["KARTHIK_QUIET_5M"].capital_usd,
-            by_book["KARTHIK_QUIET_5M"].ticket_usd) == (Decimal(600), Decimal(200))
-    assert (Decimal(500), Decimal(100)) == config.KARTHIK_PREVIOUS_SIZE
+            by_book["KARTHIK_QUIET_5M"].ticket_usd) == (Decimal(400), Decimal(200))
+    assert (Decimal(600), Decimal(200)) == config.KARTHIK_PREVIOUS_SIZE
     assert (by_book["KARTHIK_QUIET_5M"].start < config.KARTHIK_RESIZED_AT
             < config.KARTHIK_JUDGE_AT)
     arms = [next(a for a in ARMS if a.name == s.book) for s in SWEEP]
@@ -208,8 +208,8 @@ class _Pos:
 async def test_karthik_book_counts_only_the_trades_it_could_fund() -> None:
     """Every figure describes the SAME trades: the ones the book bought.
 
-    A $600 book at $200 a ticket funds three positions at once, so when four
-    signals overlap the fourth is skipped. Counting wins and rugs over all the
+    A $400 book at $200 a ticket funds two positions at once, so when three
+    signals overlap the third is skipped. Counting wins and rugs over all the
     arm's trades while the balance counted only the funded ones is what made
     the page read "0 rugs of 11 trades, 12 wins" on its first afternoon: it
     would credit the book with dodging a rug it merely had no money for.
@@ -218,7 +218,7 @@ async def test_karthik_book_counts_only_the_trades_it_could_fund() -> None:
 
     start = next(s for s in config.FRESH_BOOKS
                  if s.book == "KARTHIK_QUIET_5M").start
-    # Eight signals inside one five-minute hold: the book can fund three.
+    # Eight signals inside one five-minute hold: the book can fund two.
     rows = [_Pos(f"C{i}", start + timedelta(seconds=30 * i), 0.02)
             for i in range(8)]
     # The last one is a rug, and it is one the book cannot afford.
@@ -228,13 +228,13 @@ async def test_karthik_book_counts_only_the_trades_it_could_fund() -> None:
     book = await karthik_book(db=_StubDb(rows))  # type: ignore[arg-type]
 
     assert book["trades"] + book["skipped"] == len(rows)
-    assert book["trades"] == 3 and book["skipped"] == 5
-    # The three it could not buy are absent from every count, including the
+    assert book["trades"] == 2 and book["skipped"] == 6
+    # The six it could not buy are absent from every count, including the
     # rug -- which it did not dodge, it just had no money left.
-    assert book["wins"] == 3
+    assert book["wins"] == 2
     assert book["rugs"] == 0
-    assert len(book["trades_list"]) == 3
-    assert {t["symbol"] for t in book["trades_list"]} == {f"C{i}" for i in range(3)}
+    assert len(book["trades_list"]) == 2
+    assert {t["symbol"] for t in book["trades_list"]} == {f"C{i}" for i in range(2)}
     # The invariant the defect broke: no figure may exceed the trade count.
     assert book["wins"] <= book["trades"] and book["rugs"] <= book["trades"]
 
@@ -264,13 +264,13 @@ async def test_karthik_days_are_24h_from_the_open_not_calendar_days() -> None:
     assert [d["n"] for d in book["days"]] == sorted(days, reverse=True)
     assert days[1]["trades"] == 2                      # not 3: C closed on day 2
     assert days[2]["trades"] == 2
-    # Day 1: two $200 tickets at +10% on a $600 book.
+    # Day 1: two $200 tickets at +10% on a $400 book.
     assert days[1]["pnl_usd"] == Decimal("40.00")
-    assert days[1]["pct"] == Decimal("6.67")           # 40 of the 600 it opened with
-    assert days[1]["balance_usd"] == Decimal("640.00")
-    # Day 2 is measured off 640, the balance it inherited -- not off 600.
+    assert days[1]["pct"] == Decimal("10.00")          # 40 of the 400 it opened with
+    assert days[1]["balance_usd"] == Decimal("440.00")
+    # Day 2 is measured off 440, the balance it inherited -- not off 400.
     assert days[2]["pnl_usd"] == Decimal("-80.00")     # +20 then -100
-    assert days[2]["pct"] == Decimal("-12.50")
+    assert days[2]["pct"] == Decimal("-18.18")
     # The days reconcile to the book: last day's balance is the book's balance.
     assert days[max(days)]["balance_usd"] == book["balance_usd"]
 
@@ -288,7 +288,7 @@ async def test_the_public_summary_gives_headline_figures_and_nothing_else() -> N
     assert set(out) == {"started_at", "judge_at", "capital_usd", "ticket_usd", "balance_usd",
                         "pnl_usd", "pnl_pct", "trades", "wins", "rugs"}
     assert out["pnl_usd"] == Decimal("20.00")          # one $200 ticket at +10%
-    assert out["pnl_pct"] == Decimal("3.33")           # of the $600 it started with
+    assert out["pnl_pct"] == Decimal("5.00")           # of the $400 it started with
     # Only that one path opens; the full book and anything beside it stay shut.
     exempt = AlphaAccessMiddleware._is_exempt
     assert exempt("/api/v1/labs/graduation/karthik/summary")
@@ -313,6 +313,8 @@ async def test_the_page_compares_sizes_and_a_150k_floor_without_changing_the_boo
     w = book["whatif"]
     assert w["floor_usd"] == 150_000
     assert [s["ticket_usd"] for s in w["sizes"]] == [10, 20, 25, 50, 100, 200]
+    # Each size on its own balance: $100 up to $50, $200 for $100, $400 for $200.
+    assert [s["capital_usd"] for s in w["sizes"]] == [100, 100, 100, 100, 200, 400]
     assert [s["current"] for s in w["sizes"]] == [False] * 5 + [True]
     # The $150k check never bought the shallow rug.
     assert (w["deep"]["trades"], w["deep"]["rugs"]) == (1, 0)
@@ -321,5 +323,6 @@ async def test_the_page_compares_sizes_and_a_150k_floor_without_changing_the_boo
     ten = w["sizes"][0]
     assert (ten["all"]["trades"], ten["all"]["rugs"]) == (2, 1)
     assert ten["all"]["pnl_usd"] == Decimal("1.00") + Decimal("-9.90")
+    assert ten["all"]["pnl_pct"] == Decimal("-8.90")          # of its $100
     # The book itself is still both trades at $200.
     assert (book["trades"], book["rugs"]) == (2, 1)
