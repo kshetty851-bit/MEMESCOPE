@@ -1,7 +1,21 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, fireEvent, render as rtlRender, screen } from "@testing-library/react";
+import type { ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+const get = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/api-client", async (orig) => ({
+  ...(await orig<Record<string, unknown>>()),
+  api: { get: (...a: unknown[]) => get(...a) },
+}));
+
 import { DockCrew, LoginCrew } from "./login-crew";
+
+/** The crew's news strip reads through react-query, so every render gets a client. */
+function render(ui: ReactElement) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return rtlRender(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+}
 
 describe("the crew at the airlock", () => {
   afterEach(() => {
@@ -78,8 +92,7 @@ describe("sound", () => {
     window.localStorage.clear();
   });
 
-  it("never plays on a timer, only when the visitor does something", () => {
-    // A fake Web Audio that counts every tone started.
+  function fakeAudio() {
     const tones = vi.fn();
     const node = () => ({
       connect: () => node(),
@@ -101,16 +114,56 @@ describe("sound", () => {
       resume = vi.fn();
       close = vi.fn();
     });
+    return tones;
+  }
+
+  it("pops when the crew talks, on a timer too (asked for back, 2026-09-25)", () => {
+    const tones = fakeAudio();
     vi.useFakeTimers();
-    const { container } = render(<DockCrew pathname="/karthik-lab" />);
+    render(<DockCrew pathname="/karthik-lab" />);
     fireEvent.pointerDown(window);                 // sound unlocked, as in a browser
     act(() => {
-      vi.advanceTimersByTime(55_000);              // ~a minute of chatter, mid-bubble
+      vi.advanceTimersByTime(20_000);
     });
-    expect(container.querySelector(".login-crew__bubble")).not.toBeNull();
-    expect(tones).not.toHaveBeenCalled();
-
-    fireEvent.click(container.querySelector(".dock-crew__mate--tiger img")!);
     expect(tones).toHaveBeenCalled();
+  });
+
+  it("stays silent when muted", () => {
+    window.localStorage.setItem("memescope.loginCrewSound", "off");
+    const tones = fakeAudio();
+    vi.useFakeTimers();
+    const { container } = render(<DockCrew pathname="/karthik-lab" />);
+    fireEvent.pointerDown(window);
+    act(() => {
+      vi.advanceTimersByTime(20_000);
+    });
+    fireEvent.click(container.querySelector(".dock-crew__mate--tiger img")!);
+    // Muted means the master gain is zero; nothing is scheduled at all when
+    // the say() path sees the switch off.
+    expect(tones).not.toHaveBeenCalled();
+  });
+});
+
+describe("the panda's news desk in the sidebar", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    window.localStorage.clear();
+    get.mockReset();
+  });
+
+  it("shows the latest Solana headline and reads it out short", async () => {
+    get.mockResolvedValue({ items: [
+      { title: "Solana Foundation hires two executives to drive global payments adoption",
+        source: "FF News", url: "https://example.com/a", published_at: new Date().toISOString() },
+    ] });
+    const { container } = render(<DockCrew pathname="/karthik-lab" placement="rail" />);
+    expect(await screen.findByRole("link", { name: /Solana Foundation hires/ })).toHaveAttribute(
+      "href", "https://example.com/a");
+    expect(screen.getByText(/FF News/)).toBeInTheDocument();
+    expect(get).toHaveBeenCalledWith("/news/solana", expect.anything());
+    // Only the panda lives in the rail's gap now.
+    expect(container.querySelectorAll(".dock-crew__mate")).toHaveLength(1);
+    fireEvent.click(container.querySelector(".dock-crew__mate--panda img")!);
+    expect(container.querySelector(".login-crew__bubble")?.textContent).toMatch(/^📰 Solana Foundation hires/);
   });
 });
