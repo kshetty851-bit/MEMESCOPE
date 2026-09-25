@@ -15,10 +15,11 @@ import { cn } from "@/lib/utils";
  * "the wallet is up" would be making it up.
  *
  * Sound is synthesised here (Web Audio), so there is no file to ship, and
- * there is no background sound — only a pop for each bubble, a whoosh for the
- * fly-by and an arpeggio for the cheer. Browsers refuse sound before the
- * first click or key press, so the first bubble asks for one. The speaker
- * button mutes it all, and the choice is remembered in this browser.
+ * nothing plays on its own — a pop when the visitor makes an animal talk
+ * (typing, a tap, the password field), a whoosh and a cheer on submit, and a
+ * low note on an error. Browsers refuse sound before the first click or key
+ * press anyway. The speaker button mutes it all, and the choice is
+ * remembered in this browser.
  */
 
 type Mate = { id: string; src: string; lines: readonly string[]; pitch: number };
@@ -146,10 +147,13 @@ function useCrewVoice(mates: readonly Mate[]) {
   const soundRef = useRef(true);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
-  const say = useCallback((mateId: string, text: string, holdMs = SHOW_MS) => {
+  // `pop` is false for everything a timer says: sound only answers something
+  // the visitor did. Karthik heard the timed pops and the fly-by's whoosh as
+  // background noise (2026-09-25), so the timers are silent.
+  const say = useCallback((mateId: string, text: string, holdMs = SHOW_MS, pop = true) => {
     const mate = mates.find((m) => m.id === mateId) ?? mates[0]!;
     setBubble({ mate: mate.id, text, key: Date.now() });
-    if (soundRef.current) sfx.current?.blip(mate.pitch);
+    if (pop && soundRef.current) sfx.current?.blip(mate.pitch);
     clearTimeout(hideTimer.current);
     hideTimer.current = setTimeout(() => setBubble(null), holdMs);
   }, [mates]);
@@ -269,13 +273,13 @@ export function LoginCrew() {
   // Idle chatter: a first line that asks for a tap, then someone every few
   // seconds, never the same animal twice running.
   useEffect(() => {
-    const first = setTimeout(() => say(onScreen()[0]!.id, "Hi! Tap anywhere to hear us."), 900);
+    const first = setTimeout(() => say(onScreen()[0]!.id, "Hi! Welcome back.", SHOW_MS, false), 900);
     const every = setInterval(() => {
       if (document.hidden) return;
       const shown = onScreen();
       turn.current = (turn.current + 1 + Math.floor(Math.random() * Math.max(1, shown.length - 1))) % shown.length;
       const mate = shown[turn.current]!;
-      say(mate.id, mate.lines[Math.floor(Math.random() * mate.lines.length)]!);
+      say(mate.id, mate.lines[Math.floor(Math.random() * mate.lines.length)]!, SHOW_MS, false);
     }, EVERY_MS);
     return () => {
       clearTimeout(first);
@@ -338,14 +342,6 @@ export function LoginCrew() {
       alerts.disconnect();
     };
   }, [pick, say, sfx, soundRef]);
-
-  // The fly-by's whoosh, in time with its pass across the top (see CSS).
-  useEffect(() => {
-    const pass = setInterval(() => {
-      if (soundRef.current && !document.hidden) sfx.current?.whoosh();
-    }, 19_000);
-    return () => clearInterval(pass);
-  }, [sfx, soundRef]);
 
   return (
     <>
@@ -428,7 +424,7 @@ export function DockCrew({ pathname }: { pathname: string }) {
   useEffect(() => {
     if (hidden) return;
     const lines = pageLines(pathname);
-    const hello = setTimeout(() => say("penguin", lines[0] ?? "Hi again!"), 1200);
+    const hello = setTimeout(() => say("penguin", lines[0] ?? "Hi again!", SHOW_MS, false), 1200);
     return () => clearTimeout(hello);
   }, [hidden, pathname, say]);
 
@@ -439,7 +435,7 @@ export function DockCrew({ pathname }: { pathname: string }) {
       const shown = visibleMates(DOCK, "dock-crew");
       turn.current = (turn.current + 1 + Math.floor(Math.random() * Math.max(1, shown.length - 1))) % shown.length;
       const mate = shown[turn.current]!;
-      say(mate.id, line(mate));
+      say(mate.id, line(mate), SHOW_MS, false);
     }, DOCK_EVERY_MS);
     return () => clearInterval(every);
   }, [hidden, line, say]);
