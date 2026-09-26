@@ -89,7 +89,7 @@ describe("update", () => {
   const phases: IntroPhase[] = ["seatbelt", "cockpit", "ignition", "warp", "approach", "landing", "reveal", "done"];
 
   it("renders every phase in every mode without throwing, incl. big t jumps", () => {
-    for (const mode of ["full", "short", "reduced"] as const) {
+    for (const mode of ["full", "reduced"] as const) {
       const s = scene();
       let t = 0;
       for (const ph of phases) for (let p = 0; p <= 1; p += 0.05) s.update(frame(ph, p, (t += 1 / 60), mode));

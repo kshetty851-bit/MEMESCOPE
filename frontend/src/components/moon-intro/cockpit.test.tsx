@@ -35,11 +35,11 @@ describe("Cockpit", () => {
   });
 
   it("raises HULL BREACH at the near miss and clears it once repaired", () => {
-    setup({ phase: "approach", mode: "short", keys: ["approach.nearMiss"] });
+    setup({ phase: "approach", mode: "full", keys: ["approach.nearMiss"] });
     expect(screen.getByText("HULL BREACH")).toBeInTheDocument();
     cleanup();
 
-    setup({ phase: "approach", mode: "short", keys: ["approach.nearMiss", "approach.repaired"] });
+    setup({ phase: "approach", mode: "full", keys: ["approach.nearMiss", "approach.repaired"] });
     expect(screen.queryByText("HULL BREACH")).toBeNull();
     expect(screen.getByText("AUTO-REPAIR ✓")).toBeInTheDocument();
   });

@@ -5,8 +5,8 @@
  * hands the same frame to the cockpit (React/SVG), the space canvas and the
  * soundboard. Nothing else keeps time. Tune the ride here and only here.
  *
- * Moments inside a phase are written as FRACTIONS of that phase (0..1), so the
- * short same-session cut, which squeezes the phases, keeps them in order.
+ * Moments inside a phase are written as FRACTIONS of that phase (0..1), so
+ * stretching a phase moves its beats with it.
  */
 
 export type IntroPhase =
@@ -22,22 +22,19 @@ export type IntroPhase =
 /** Seconds each phase lasts, in order. */
 export type Timeline = ReadonlyArray<readonly [IntroPhase, number]>;
 
-/** The full ride, ~10.8s. */
+/**
+ * The ride, 15s, played in full on every sign-in: Karthik asked for it slower
+ * so every animation can be seen (2026-09-26; it was 10.8s, with a 2.5s cut
+ * for a second visit in the same session). SKIP is there for when it isn't.
+ */
 export const TIMELINE: Timeline = [
-  ["seatbelt", 1.2],
-  ["cockpit", 1.4],
-  ["ignition", 1.0],
-  ["warp", 2.0],
-  ["approach", 2.8],
-  ["landing", 1.6],
-  ["reveal", 0.8],
-];
-
-/** Same session, seen it already: click, moon, door. 2.5s. */
-export const SHORT_TIMELINE: Timeline = [
-  ["seatbelt", 0.6],
-  ["approach", 1.3],
-  ["reveal", 0.6],
+  ["seatbelt", 1.8],
+  ["cockpit", 2.2],
+  ["ignition", 1.5],
+  ["warp", 2.8],
+  ["approach", 3.6],
+  ["landing", 2.1],
+  ["reveal", 1.0],
 ];
 
 /** Reduced motion: a still cockpit fades in, then the door. 1.5s, no travel. */
@@ -102,7 +99,7 @@ export type Frame = {
   /** Progress through the current phase, 0..1. */
   p: number;
   /** Which cut is playing: shapes what a layer may skip. */
-  mode: "full" | "short" | "reduced";
+  mode: "full" | "reduced";
 };
 
 export function totalSeconds(timeline: Timeline): number {

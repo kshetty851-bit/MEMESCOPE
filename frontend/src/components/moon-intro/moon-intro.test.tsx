@@ -1,8 +1,8 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import MoonIntro, { SEEN_KEY, SOUND_KEY } from "./moon-intro";
-import { MOMENTS, REDUCED_TIMELINE, SHORT_TIMELINE, TIMELINE, phaseStart, totalSeconds, type Frame } from "./timeline";
+import MoonIntro, { SOUND_KEY } from "./moon-intro";
+import { MOMENTS, REDUCED_TIMELINE, TIMELINE, phaseStart, totalSeconds, type Frame } from "./timeline";
 
 const scene = vi.hoisted(() => ({ frames: [] as Frame[], destroyed: 0 }));
 const board = vi.hoisted(() => ({ played: [] as string[], muted: [] as boolean[], unlocks: 0, throttle: [] as number[] }));
@@ -69,38 +69,16 @@ const mount = (onComplete = vi.fn()) => {
 };
 
 describe("MoonIntro", () => {
-  it("plays the full cut on a first visit and marks the session", () => {
+  it("plays the full 15s ride, every visit", () => {
+    expect(totalSeconds(TIMELINE)).toBeCloseTo(15);
     const { root, onComplete } = mount();
     expect(root).toHaveAttribute("data-mode", "full");
     expect(root).toHaveAttribute("aria-label", "Landing sequence");
-    expect(sessionStorage.getItem(SEEN_KEY)).toBe("1");
     step(totalSeconds(TIMELINE) + 0.2);
     expect(onComplete).toHaveBeenCalledTimes(1);
     expect(new Set(scene.frames.map((f) => f.phase))).toEqual(
       new Set(["seatbelt", "cockpit", "ignition", "warp", "approach", "landing", "reveal", "done"]),
     );
-  });
-
-  it("plays the short cut once the session has seen it", () => {
-    sessionStorage.setItem(SEEN_KEY, "1");
-    const { root, onComplete } = mount();
-    expect(root).toHaveAttribute("data-mode", "short");
-    step(totalSeconds(SHORT_TIMELINE) + 0.1);
-    expect(onComplete).toHaveBeenCalledTimes(1);
-    expect(scene.frames.some((f) => f.phase === "warp")).toBe(false);
-  });
-
-  it("has no near miss in the short cut: no crack, no alarm, no kick, but still the lock", () => {
-    sessionStorage.setItem(SEEN_KEY, "1");
-    const { container } = mount();
-    step(totalSeconds(SHORT_TIMELINE) - 0.7); // late in approach, past every near-miss moment
-    expect(container.querySelector(".mi-crack")).toBeNull();
-    expect(screen.queryByText("HULL BREACH")).toBeNull();
-    expect(board.played).not.toContain("alarm");
-    expect(screen.getByText("TARGET ACQUIRED: THE MOON")).toBeInTheDocument();
-    const shake = container.querySelector<HTMLElement>(".mi-shake")!.style.transform;
-    const px = Math.max(0, ...[...shake.matchAll(/-?[\d.]+(?=px)/g)].map((m) => Math.abs(Number(m[0]))));
-    expect(px).toBeLessThanOrEqual(1); // approach's base hum only, no 14px kick
   });
 
   it("plays the reduced cut, still and silent, under reduced motion", () => {
@@ -116,17 +94,22 @@ describe("MoonIntro", () => {
   });
 
   it("advances phases and passes moments in order", () => {
+    // Times come from the timeline, so retuning it doesn't break this test.
+    const len = (phase: string) => TIMELINE.find(([p]) => p === phase)![1];
+    const at = (phase: Parameters<typeof phaseStart>[1], frac: number) => phaseStart(TIMELINE, phase)! + frac * len(phase);
     const { root, container } = mount();
-    step(0.5);
+    let now = 0;
+    const to = (t: number) => { step(t - now); now = t; };
+    to(at("seatbelt", MOMENTS.seatbelt.secured) - 0.1);
     expect(root.dataset.phase).toBe("seatbelt");
     expect(screen.queryByText("SECURED ✓")).toBeNull();
-    step(0.6); // past seatbelt.secured at 0.96s
+    to(at("seatbelt", MOMENTS.seatbelt.secured) + 0.1);
     expect(screen.getByText("SECURED ✓")).toBeInTheDocument();
-    step(1.5); // into cockpit's switches
+    to(at("cockpit", MOMENTS.cockpit.switches[3]) + 0.05);
     expect(root.dataset.phase).toBe("cockpit");
     expect(container.querySelectorAll(".mi-switch[data-on]").length).toBeGreaterThan(0);
     expect(board.played.slice(0, 2)).toEqual(["click", "switch"]);
-    step(4); // through ignition + warp
+    to(at("warp", 0.95)); // through ignition + warp
     expect(board.played).toEqual(expect.arrayContaining(["beep", "whoosh", "static"]));
     expect(board.played.indexOf("beep")).toBeLessThan(board.played.indexOf("whoosh"));
     expect(Math.max(...board.throttle)).toBeGreaterThan(0.9);
