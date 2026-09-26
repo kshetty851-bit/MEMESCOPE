@@ -1,0 +1,22 @@
+/* Moon intro — the controller's shell. Above everything on the homepage
+   (its highest layer is z-45; the skip link is z-60). */
+.mi-root {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  overflow: hidden;
+  background: #000;
+  cursor: pointer;
+}
+.mi-shake {
+  position: absolute;
+  inset: 0;
+  will-change: transform;
+}
+.mi-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
