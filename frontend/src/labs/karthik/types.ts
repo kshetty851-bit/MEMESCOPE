@@ -33,6 +33,10 @@ export interface KarthikBook {
   /** When the book became one trade at a time. Replayed from day 1, so what
    *  came before is a look back chosen after seeing it. */
   one_at_a_time_since: string;
+  /** The pools the book counts, [low, high) USD, and when that was chosen.
+   *  Replayed from day 1, so what came before is a look back. */
+  pools_usd?: [number, number];
+  pools_since?: string;
   /** The old rule on the same start: every signal the cash allowed. */
   every_trade: KarthikWhatIfLine;
   wins: number;
@@ -59,6 +63,8 @@ export interface KarthikDay {
 
 /** One way of trading the same book: its balance and record on those terms. */
 export interface KarthikWhatIfLine {
+  /** Trades taken that were rebuilt from price snapshots, not taken live. */
+  replayed?: number;
   balance_usd: string;
   pnl_usd: string;
   pnl_pct: string;
@@ -78,6 +84,6 @@ export interface KarthikWhatIf {
    *  `book`: cut from this book's trades ($75k+). Otherwise from the arms that
    *  run the same rule on the pools the book skips; `replayed` of those trades
    *  were rebuilt from price snapshots rather than taken live. */
-  bands?: (KarthikWhatIfLine & { lo_usd: number; hi_usd: number | null; book: boolean; replayed: number })[];
+  bands?: (KarthikWhatIfLine & { lo_usd: number; hi_usd: number | null; book: boolean })[];
   sizes: { ticket_usd: number; capital_usd: number; current: boolean; all: KarthikWhatIfLine; deep: KarthikWhatIfLine }[];
 }

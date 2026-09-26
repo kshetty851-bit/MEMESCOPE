@@ -222,8 +222,8 @@ function bandLabel(lo: number, hi: number | null): string {
   return hi == null ? `${k(lo)}+` : `${k(lo)}–${k(hi)}`;
 }
 
-function replayedCount(bands: { book: boolean; replayed: number }[]): number {
-  return bands.filter((b) => !b.book).reduce((sum, b) => sum + b.replayed, 0);
+function replayedCount(bands: { book: boolean; replayed?: number }[]): number {
+  return bands.filter((b) => !b.book).reduce((sum, b) => sum + (b.replayed ?? 0), 0);
 }
 
 function Signed({ line }: { line: KarthikWhatIfLine }) {
@@ -566,6 +566,16 @@ export function KarthikLabPage() {
           first day a look back rather than a test: only what happens from{" "}
           {day(data.resized_at)} on is a fair measure of this size.
         </p>
+        {data.pools_usd && data.pools_since ? (
+          <p className="mt-1 max-w-[78ch] text-[12px] leading-relaxed text-ink-dim">
+            <b className="text-ink-2">
+              Pools {bandLabel(data.pools_usd[0], data.pools_usd[1])} only:
+            </b>{" "}
+            chosen on {day(data.pools_since)} from the pool-size splits (the middle sizes
+            made money, the deeper ones did not) and replayed from day 1, so every figure
+            here is a look back until then. The checks beside it still show every size.
+          </p>
+        ) : null}
         {data.one_at_a_time_since ? (
           <p className="mt-1 max-w-[78ch] text-[12px] leading-relaxed text-ink-dim">
             <b className="text-ink-2">One trade at a time:</b> it buys only when nothing is

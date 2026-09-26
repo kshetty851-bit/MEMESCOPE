@@ -386,6 +386,7 @@ ENTRY_RULES: dict[str, str] = {
     "floor150": "every graduation with a pool at or above $150,000, no selection",
     "band25_50": "every graduation whose pool is between $25,000 and $50,000, no selection",
     "band50_75": "every graduation whose pool is between $50,000 and $75,000, no selection",
+    "band75_300": "every graduation whose pool is between $75,000 and $300,000, no selection",
     "sym_night": "symbol used before AND the pool opened 18:00-06:00 UTC",
     "band": "the pool held between $95,000 and $222,000 at the open — a band, "
             "not a floor, because tail risk rises again above it",
@@ -416,6 +417,12 @@ ENTRY_RULES: dict[str, str] = {
 
 #: Candidate features, measured at the pool open. Every one was chosen before
 #: the tournament opened a position; none is tuned to a result.
+#: Half-open pool-size bands for Karthik's rule: (low, high) in USD.
+_BANDS: dict[str, tuple[int, int]] = {"band25_50": (25_000, 50_000),
+                                      "band50_75": (50_000, 75_000),
+                                      "band75_300": (75_000, 300_000)}
+
+
 def accepts(arm: Arm, *, mint: str, open_at: datetime, liquidity: Decimal | None,
             fdv: Decimal | None, sells: int | None, reuse: int | None,
             buys: int | None = None) -> bool:
@@ -490,11 +497,12 @@ def accepts(arm: Arm, *, mint: str, open_at: datetime, liquidity: Decimal | None
         # those above 2 in 223. POST-HOC: the line was drawn after seeing EVO,
         # so this arm's own forward trades are the only test of it.
         return liquidity is not None and liquidity >= 150_000
-    if e in ("band25_50", "band50_75"):
-        # Karthik, 2026-09-26: his quiet rule on the two pool sizes his book
-        # leaves out, as checks beside it. No lock requirement, like his own
-        # floor75 book, so the only difference from it is the pool size.
-        lo, hi = (25_000, 50_000) if e == "band25_50" else (50_000, 75_000)
+    if e in _BANDS:
+        # Karthik, 2026-09-26: his quiet rule by pool size. band25_50 and
+        # band50_75 are the checks beside his book; band75_300 is where every
+        # split made money over his book's first three days, and what the real
+        # wallet's G-QMID follows. No lock requirement, like his floor75 book.
+        lo, hi = _BANDS[e]
         return liquidity is not None and lo <= liquidity < hi
     if e == "floor10k":
         # Karthik's $10k book (2026-09-19): the baseline's rule on a lower
@@ -787,6 +795,14 @@ ARMS: tuple[Arm, ...] = (
     Arm("KARTHIK_Q50_5M", "band50_75", 5, quiet=True,
         note="Karthik's rule on $50-75k pools — every graduation with a $50-75k "
              "pool that is still quiet (under 100 trades) when bought, out at 5m"),
+    # Karthik, 2026-09-26: the quiet rule on $75k-$300k pools, for his book and
+    # for the real wallet to follow (G-QMID). POST-HOC: the band is where
+    # the pool-size splits of his book's first three days made money ($75-150k
+    # +$426, $150-300k +$344; $300-500k -$291, $500k+ -$110). Starts empty;
+    # only its forward trades are evidence.
+    Arm("BASE_75_300k_quiet_5m", "band75_300", 5, quiet=True,
+        note="every graduation with a $75k-$300k pool that is still quiet "
+             "(under 100 trades) when it is bought, out at 5m"),
     Arm("BASE_150k_quiet_5m", "floor150", 5, quiet=True,
         note="every graduation over $150k whose pool is still quiet (under "
              "100 trades) when it is bought, out at 5m"),
@@ -817,7 +833,7 @@ CONTROLS: tuple[Arm, ...] = tuple(a for a in ARMS if a.is_control)
 #: returned no edge. The count is pinned rather than free because an arm that
 #: appears mid-tournament changes what every other number means — so changing
 #: it must be a deliberate edit with a date, not a side effect.
-assert len(ARMS) == 19, (
+assert len(ARMS) == 20, (
     "three B3 arms (3m FROM ENTRY retired 2026-09-16 at -$58.90), B3 bought "
     "early (added 2026-09-16), the two rug arms (added 2026-09-16), the two "
     "shorter graduation clocks g2 and g3 (added 2026-09-17), the fast pair "
@@ -825,7 +841,8 @@ assert len(ARMS) == 19, (
     "four $25k clocks (all added 2026-09-20), its four-minute twin "
     "BASE_75k_quiet_4m (added 2026-09-21), its $150k twin BASE_150k_quiet_5m "
     "(added 2026-09-25), Karthik's two small-pool checks KARTHIK_Q25_5M and "
-    "KARTHIK_Q50_5M (added 2026-09-26), the band's pump-only twin "
+    "KARTHIK_Q50_5M and the $75-300k arm BASE_75_300k_quiet_5m (all added "
+    "2026-09-26), the band's pump-only twin "
     "BAND_55k_pump_5m (added 2026-09-22), the band's rug-money-blocked "
     "twin BAND_55k_blk_5m (added 2026-09-23), the BASELINE, the $500k+flow "
     "candidate, and the two "
@@ -857,10 +874,10 @@ assert all(a.tp is None and a.trail is None for a in ARMS), (
 assert all(a.stop is None or a.stop == Decimal("0.10") for a in ARMS), (
     "one stop level, so the twins differ in ONE thing. Sweeping levels here "
     "would be fitting a parameter on the same data that suggested it")
-assert len([a for a in ARMS if not a.is_control]) == 18, (
+assert len([a for a in ARMS if not a.is_control]) == 19, (
     "`config.required_pf` is calibrated on the maximum of FORTY-TWO noise "
-    "draws. Eighteen arms are now judged against it, so the bar is if anything "
-    "CONSERVATIVE — the luckiest of eighteen reaches less than the luckiest "
+    "draws. Nineteen arms are now judged against it, so the bar is if anything "
+    "CONSERVATIVE — the luckiest of nineteen reaches less than the luckiest "
     "of forty-two. Left as it is deliberately: a bar that is too hard costs a "
     "real finding some time, where one that is too easy costs a false one nothing")
 assert all(a.clock in {"entry", "graduation"} for a in ARMS), "a clock is one of two"

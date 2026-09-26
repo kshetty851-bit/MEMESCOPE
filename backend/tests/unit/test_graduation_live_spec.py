@@ -82,7 +82,12 @@ def test_each_live_arm_copies_its_own_paper_book() -> None:
     arms = {a.name: a for a in ARMS}
     assert set(live_spec.PAPER_BOOKS) == {"G-B3-5M", "G-B3-4M", "G-BAS-5M",
                                           "G-QUIET", "G-QUIET4", "G-BAND5",
-                                          "G-BANDP", "G-B5-5M", "G-Q150"}
+                                          "G-BANDP", "G-B5-5M", "G-Q150", "G-QMID"}
+    # The $75k-$300k band (2026-09-26): reported by its lower edge, the arm's
+    # own rule refuses $300k and up; same five-minute clock as G-QUIET.
+    assert live_spec.pool_floor("G-QMID") == 75_000
+    assert live_spec.hold_minutes(live_spec.BY_ID["G-QMID"]) == 5
+    assert live_spec.PAPER_BOOKS["G-QMID"] == "BASE_75_300k_quiet_5m"
     # The deep arm: its floor is the one number that separates it from the
     # baseline's population, and a reader taking it for B3's $198k would have
     # the wrong strategy.
