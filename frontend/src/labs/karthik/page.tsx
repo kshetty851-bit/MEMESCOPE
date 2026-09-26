@@ -403,7 +403,7 @@ function WhatIf({ data }: { data: KarthikBook }) {
                 <th className="py-1 pr-2 text-left font-normal">size</th>
                 <th className="py-1 pr-2 text-right font-normal">this book</th>
                 <th className="py-1 text-right font-normal">
-                  {usd(w.floor_usd).replace(".00", "")}+ only
+                  $75k+ pools
                 </th>
               </tr>
             </thead>
@@ -418,7 +418,7 @@ function WhatIf({ data }: { data: KarthikBook }) {
                     {s.current ? <span className="ml-1 text-[10px] font-normal text-ink-dim">now</span> : null}
                   </td>
                   <td className="py-1.5 pr-2 text-right"><Signed line={s.all} /></td>
-                  <td className="py-1.5 text-right"><Signed line={s.deep} /></td>
+                  <td className="py-1.5 text-right"><Signed line={s.wide} /></td>
                 </tr>
               ))}
             </tbody>
