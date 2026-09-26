@@ -35,7 +35,7 @@ export interface KarthikBook {
   one_at_a_time_since: string;
   /** The pools the book counts, [low, high) USD, and when that was chosen.
    *  Replayed from day 1, so what came before is a look back. */
-  pools_usd?: [number, number];
+  pools_usd?: [number, number | null];
   pools_since?: string;
   /** The old rule on the same start: every signal the cash allowed. */
   every_trade: KarthikWhatIfLine;

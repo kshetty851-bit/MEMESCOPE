@@ -1482,6 +1482,12 @@ def _karthik_line(rows: Sequence[Any], sol: Decimal | None, *, size: float,
     }
 
 
+def _pools_words() -> str:
+    """The book's pool range in words: "$150k and up" or "$75k-$300k"."""
+    lo, hi = config.KARTHIK_BOOK_POOLS
+    return f"${lo // 1000}k and up" if hi is None else f"${lo // 1000}k-${hi // 1000}k"
+
+
 def _karthik_whatif(rows: Sequence[Any], sol: Decimal | None, *, capital: float,
                     ticket: float, cents: Decimal, small: Sequence[Any] = (),
                     book: Sequence[Any] | None = None) -> dict[str, Any]:
@@ -1640,7 +1646,8 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     signals = rows
     # The book counts only its pool range (KARTHIK_BOOK_POOLS, 2026-09-26).
     lo, hi = config.KARTHIK_BOOK_POOLS
-    every = [r for r in signals if lo <= float(r.liq_open_usd or 0) < hi]
+    every = [r for r in signals if lo <= float(r.liq_open_usd or 0)
+             and (hi is None or float(r.liq_open_usd or 0) < hi)]
     rows = _one_at_a_time(every)
     walk = _funded_walk(
         [(p.opened_at, p.closed_at, float(p.net_return),
@@ -1659,9 +1666,9 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     pnl = [money for _, money in took]
     return {
         "book": spec.book,
-        "rule": (f"Karthik's book — every graduation with a ${config.KARTHIK_BOOK_POOLS[0] // 1000}k"
-                 f"-${config.KARTHIK_BOOK_POOLS[1] // 1000}k pool that is still quiet (under "
-                 f"{config.QUIET_MAX_POOL_TXS} trades) when it is bought, out at {arm.hold}m"),
+        "rule": (f"Karthik's book — every graduation with a {_pools_words()} pool that is "
+                 f"still quiet (under {config.QUIET_MAX_POOL_TXS} trades) when it is bought, "
+                 f"out at {arm.hold}m"),
         "pools_usd": list(config.KARTHIK_BOOK_POOLS),
         "pools_since": config.KARTHIK_BOOK_POOLS_AT,
         "hold_minutes": arm.hold,

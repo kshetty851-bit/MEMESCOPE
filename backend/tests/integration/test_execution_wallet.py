@@ -147,7 +147,7 @@ async def test_start_records_the_arm_and_the_trade_size(
 
     body = (await client.get(f"{API}/real-wallet/autotrade")).json()
     # Karthik, 2026-09-24: the wallet offers the two quiet arms and nothing else.
-    assert [s["id"] for s in body["strategies"]] == ["G-QUIET", "G-QUIET4", "G-Q150", "G-QMID"]
+    assert [s["id"] for s in body["strategies"]] == ["G-QUIET", "G-QUIET4", "G-Q150"]
     quiet4 = next(s for s in body["strategies"] if s["id"] == "G-QUIET4")
     assert quiet4["max_ticket_usd"] is None
     assert [c["ticket_usd"] for c in quiet4["ticket_choices"]] == [
