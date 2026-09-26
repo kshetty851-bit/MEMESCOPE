@@ -1476,12 +1476,15 @@ def _karthik_line(rows: Sequence[Any], sol: Decimal | None, *, size: float,
         "rugs": sum(1 for r, _ in took
                     if float(r.net_return) <= float(config.OPERATOR_RUG_MOVE)),
         "lowest_usd": Decimal(str(w.low)).quantize(cents),
+        # How many of the trades taken were rebuilt by replay, not taken live.
+        "replayed": sum(1 for r, _ in took
+                        if getattr(r, "close_reason", None) == "replayed"),
     }
 
 
 def _karthik_whatif(rows: Sequence[Any], sol: Decimal | None, *, capital: float,
-                    ticket: float, cents: Decimal,
-                    small: Sequence[Any] = ()) -> dict[str, Any]:
+                    ticket: float, cents: Decimal, small: Sequence[Any] = (),
+                    book: Sequence[Any] | None = None) -> dict[str, Any]:
     """The same book on other terms, for comparison only: its trades at other
     ticket sizes, and restricted to pools of $150k and up (asked for 24 Sep,
     after EVO; see the quiet rule's record: 3 deaths in 41 trades under $150k,
@@ -1508,10 +1511,8 @@ def _karthik_whatif(rows: Sequence[Any], sol: Decimal | None, *, capital: float,
             usd = float(r.liq_open_usd or 0)
             return lo <= usd and (hi is None or usd < hi)
         sub = [r for r in source if inside(r)]
-        replayed = sum(1 for r in _one_at_a_time(sub)
-                       if getattr(r, "close_reason", None) == "replayed")
         return {"lo_usd": lo, "hi_usd": hi, "book": lo >= 75_000,
-                "replayed": replayed, **run(sub, ticket, capital)}
+                **run(sub, ticket, capital)}
 
     return {
         "floor_usd": KARTHIK_WHATIF_FLOOR_USD,
@@ -1523,7 +1524,8 @@ def _karthik_whatif(rows: Sequence[Any], sol: Decimal | None, *, capital: float,
                    for f in KARTHIK_WHATIF_FLOORS],
         "sizes": [{"ticket_usd": t, "capital_usd": c,
                    "current": (t, c) == (ticket, capital),
-                   "all": run(rows, float(t), float(c)),
+                   # The book as it now trades (its pool range), at this size.
+                   "all": run(rows if book is None else book, float(t), float(c)),
                    "deep": run(deep, float(t), float(c))}
                   for t, c in KARTHIK_WHATIF_SIZES],
     }
@@ -1634,7 +1636,11 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     # after WOTF, which the rule would have let go because LESGO was still
     # held. Replayed from the start, so the days before it are a look back;
     # `every_trade` keeps the old rule beside it so the change stays visible.
-    every = rows
+    # Every $75k+ signal his arm took: what the checks beside the book read.
+    signals = rows
+    # The book counts only its pool range (KARTHIK_BOOK_POOLS, 2026-09-26).
+    lo, hi = config.KARTHIK_BOOK_POOLS
+    every = [r for r in signals if lo <= float(r.liq_open_usd or 0) < hi]
     rows = _one_at_a_time(every)
     walk = _funded_walk(
         [(p.opened_at, p.closed_at, float(p.net_return),
@@ -1653,7 +1659,11 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     pnl = [money for _, money in took]
     return {
         "book": spec.book,
-        "rule": arm.note,
+        "rule": (f"Karthik's book — every graduation with a ${config.KARTHIK_BOOK_POOLS[0] // 1000}k"
+                 f"-${config.KARTHIK_BOOK_POOLS[1] // 1000}k pool that is still quiet (under "
+                 f"{config.QUIET_MAX_POOL_TXS} trades) when it is bought, out at {arm.hold}m"),
+        "pools_usd": list(config.KARTHIK_BOOK_POOLS),
+        "pools_since": config.KARTHIK_BOOK_POOLS_AT,
         "hold_minutes": arm.hold,
         "started_at": spec.start,
         "judge_at": config.KARTHIK_JUDGE_AT,
@@ -1671,7 +1681,7 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
         "busy_skipped": len(every) - len(rows),
         "one_at_a_time_since": config.KARTHIK_ONE_AT_A_TIME_AT,
         # The old rule, every signal the cash allowed, on the same start.
-        "every_trade": _karthik_line(every, sol, size=float(spec.ticket_usd),
+        "every_trade": _karthik_line(signals, sol, size=float(spec.ticket_usd),
                                      capital=float(spec.capital_usd), cents=cents),
         "wins": sum(1 for money in pnl if money > 0),
         "rugs": sum(1 for row, _ in took
@@ -1692,7 +1702,8 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
         "days": _karthik_days(took, spec.start, float(spec.capital_usd), cents),
         # The same trades at other sizes, and on $150k+ pools only. A check,
         # shown beside the book; the book itself stays on its own rule.
-        "whatif": _karthik_whatif(every, sol, small=small, capital=float(spec.capital_usd),
+        "whatif": _karthik_whatif(signals, sol, small=small, book=every,
+                                  capital=float(spec.capital_usd),
                                   ticket=float(spec.ticket_usd), cents=cents),
         # The rows the BOOK bought, with the money the book made on them --
         # not the arm's $100-notional figure, which is the same only while the

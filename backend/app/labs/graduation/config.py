@@ -1072,6 +1072,14 @@ KARTHIK_PREVIOUS_SIZE = (Decimal(600), Decimal(200))
 #: back chosen after seeing it; only what follows tests the rule.
 KARTHIK_ONE_AT_A_TIME_AT = datetime(2026, 9, 25, 15, 20, tzinfo=UTC)
 
+#: The pools Karthik's book counts, [low, high) in USD, and when that was chosen
+#: (his request, 2026-09-26, after the pool-size splits: $75-300k made money,
+#: $300k+ did not). Replayed from the first day, so it is a look back until
+#: then. His arm still buys every $75k+ quiet pool, so the checks beside the
+#: book can keep showing the sizes it now leaves out.
+KARTHIK_BOOK_POOLS = (75_000, 300_000)
+KARTHIK_BOOK_POOLS_AT = datetime(2026, 9, 26, 17, 30, tzinfo=UTC)
+
 #: When Karthik's book is judged. Thirty days from its start, written down
 #: before it had a single trade: a date chosen afterwards is chosen by the
 #: result.
