@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { ExecutionVault, MissionBoard, PerformanceLab } from "./hq-boards";
 import { deriveHqState, type Source } from "@/lib/hq/adapter";
 import type { ExecutionPosture, TokenSecuritySummary } from "@/lib/hq/pipeline";
-import type { PaperWallet } from "@/types/paper";
+import type { KarthikLabSummary } from "@/lib/hq/karthik-lab";
 
 /**
  * The boards are where a summary could most easily lie: four true rows and a
@@ -32,23 +32,6 @@ function posture(overrides: Partial<ExecutionPosture> = {}): ExecutionPosture {
     sourced: true,
     ...overrides,
   };
-}
-
-function wallet(overrides: Record<string, unknown> = {}): PaperWallet {
-  return {
-    enabled: true,
-    strategy: { id: "trailing_stop_25_secured_v2", name: "Trailing Stop 25% (security-gated)" },
-    generation: 7,
-    metrics: {
-      starting_balance: "1000", cash: "13.76", equity: null, roi_pct: "1.38",
-      return_usd: null, open_value: null, known_partial_equity: "13.76",
-      invested_usd: "1400", unpriced_positions: 2, priced_positions: 12,
-      open_positions: 14, closed_positions: 168, realised_pnl: "413.76",
-      win_rate_pct: "31.40", average_win: null, average_loss: null,
-      profit_factor: "1.15",
-    },
-    ...overrides,
-  } as unknown as PaperWallet;
 }
 
 function security(overrides: Partial<TokenSecuritySummary> = {}): TokenSecuritySummary {
@@ -124,7 +107,7 @@ describe("Mission Board", () => {
     // them. "Paper execution" went with Rex on 2026-09-24 — it is the Paper
     // Wallet row's. What each remaining row reports is a distinct measurement.
     for (const label of [
-      "Scanner / discovery", "Enrichment queue", "Paper Wallet", "Security gate",
+      "Scanner / discovery", "Enrichment queue", "Karthik's Lab", "Security gate",
     ]) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
@@ -137,49 +120,50 @@ describe("Mission Board", () => {
 });
 
 describe("Performance Lab", () => {
-  it("shows the active generation and that the gate is strict", () => {
-    render(
-      <PerformanceLab wallet={source(wallet())} security={source(security())} now={NOW} />,
-    );
-    expect(screen.getByText("Gen 7")).toBeInTheDocument();
-    expect(screen.getByText("STRICT")).toBeInTheDocument();
+  // Karthik's Lab since 2026-09-26; it was the retired Paper Wallet before.
+  const lab = (over: Partial<KarthikLabSummary> = {}): KarthikLabSummary => ({
+    started_at: "2026-09-23T12:00:00Z",
+    judge_at: "2026-10-23T12:00:00Z",
+    capital_usd: "400",
+    ticket_usd: "200",
+    balance_usd: "777.80",
+    pnl_usd: "377.80",
+    pnl_pct: "94.45",
+    trades: 125,
+    wins: 118,
+    rugs: 0,
+    ...over,
   });
 
-  it("says NOT ENFORCED for an ungated generation rather than staying silent", () => {
+  it("shows Karthik's Lab as the lab publishes it", () => {
+    render(<PerformanceLab lab={source(lab())} security={source(security())} now={NOW} />);
+    expect(within(row("Balance")).getByText("$777.80")).toBeInTheDocument();
+    expect(within(row("Profit")).getByText("$377.80")).toBeInTheDocument();
+    expect(within(row("Return")).getByText("+94.45%")).toBeInTheDocument();
+    expect(within(row("Win rate")).getByText("94.4%")).toBeInTheDocument();
+    expect(within(row("Judged on")).getByText("23 Oct")).toBeInTheDocument();
+  });
+
+  it("counts rugs, and says what one is", () => {
+    render(<PerformanceLab lab={source(lab({ rugs: 2 }))} security={source(security())} now={NOW} />);
+    expect(within(row("Rugs")).getByText("2")).toBeInTheDocument();
+  });
+
+  it("reads No data throughout when the book could not be fetched", () => {
     render(
       <PerformanceLab
-        wallet={source(wallet({ generation: 2, strategy: { id: "trailing_stop_25_v1", name: "Trailing Stop 25%" } }))}
-        security={source(security())}
-        now={NOW}
-      />,
-    );
-    expect(screen.getByText("NOT ENFORCED")).toBeInTheDocument();
-  });
-
-  it("withholds equity rather than substituting cost when a holding is unpriced", () => {
-    render(
-      <PerformanceLab wallet={source(wallet())} security={source(security())} now={NOW} />,
-    );
-    expect(within(row("Equity")).getByText("No data")).toBeInTheDocument();
-    // ...while cost, which is genuinely known, is shown.
-    expect(screen.getByText("$1,400.00")).toBeInTheDocument();
-  });
-
-  it("reads No data throughout when the wallet could not be fetched", () => {
-    render(
-      <PerformanceLab
-        wallet={source<PaperWallet>(null, null, true)}
+        lab={source<KarthikLabSummary>(null, null, true)}
         security={source<TokenSecuritySummary>(null, null, true)}
         now={NOW}
       />,
     );
-    expect(screen.getAllByText("No data").length).toBeGreaterThanOrEqual(10);
+    expect(screen.getAllByText("No data").length).toBeGreaterThanOrEqual(7);
   });
 
   it("counts security-blocked candidates from failed plus unverified", () => {
     render(
       <PerformanceLab
-        wallet={source(wallet())}
+        lab={source(lab())}
         security={source(security({ failed_count: 2, unknown_count: 5 }))}
         now={NOW}
       />,

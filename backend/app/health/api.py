@@ -9,6 +9,9 @@ someone to point a 1-second kubelet check at it.
 
 from __future__ import annotations
 
+import asyncio
+import time
+
 from fastapi import APIRouter, Response, status
 
 from app.api.deps import DbSession
@@ -41,6 +44,17 @@ async def research_data_health(session: DbSession) -> ResearchDataHealth:
     )
 
 
+#: One snapshot per minute, shared. It costs ~20s of queries on prod's tables,
+#: and every open HQ tab polls it: without this, two viewers ran it twice at
+#: once, and a slow run piled up behind itself (2026-09-26: six workers busy
+#: on one abandoned count). The lock makes concurrent callers wait for the one
+#: run in flight rather than start their own.
+# ponytail: per-process cache; a Redis copy if more backend replicas are added.
+_PIPELINE_TTL_S = 60.0
+_pipeline_cache: tuple[float, PipelineHealth] | None = None
+_pipeline_lock = asyncio.Lock()
+
+
 @router.get(
     "/pipeline",
     response_model=PipelineHealth,
@@ -54,7 +68,11 @@ async def pipeline_health(session: DbSession, response: Response) -> PipelineHea
     `degraded` roll-up still returns 200: it is a warning, and paging on it
     would train the reader to ignore the page.
     """
-    health = await PipelineHealthService(session).snapshot()
+    global _pipeline_cache
+    async with _pipeline_lock:
+        if _pipeline_cache is None or time.monotonic() - _pipeline_cache[0] > _PIPELINE_TTL_S:
+            _pipeline_cache = (time.monotonic(), await PipelineHealthService(session).snapshot())
+        health = _pipeline_cache[1]
     if health.overall == "down":
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     return health

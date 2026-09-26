@@ -1161,12 +1161,10 @@ const RELIABILITY_ROUTINES: AmbientRoutine[] = [
  * check on all of them. Nine routines against Nova's five.
  *
  * **None of these means anything.** Every frame below is presentation — a
- * `looking_at_screen` on Karthik says "this bench is staffed", never "a target
- * is about to fill". The routines that *do* correspond to real events are
- * `KARTHIK_EVENT_ROUTINES`, kept in a separate array precisely so the
- * scheduler cannot pick one at random: §6's closing rule is that no fake
- * business event may be generated to drive an animation, and the way to
- * guarantee that is to make the celebration unreachable from the dice.
+ * `looking_at_screen` on Karthik says "this bench is staffed", never "a trade
+ * is about to close". A real close or rug reaches him only as a reaction
+ * (`react()` in the adapter), never from the dice: §6's closing rule is that
+ * no fake business event may be generated to drive an animation.
  */
 
 /** Desk (18,9) → the wall display's viewing tile. One step, inside the room. */
@@ -1182,36 +1180,6 @@ const KARTHIK_TO_COUNTER: Tile[] = [
 const KARTHIK_TO_CAT: Tile[] = [
   { col: 17, row: 10 },
   { col: 16, row: 10 },
-];
-
-/**
- * Desk → Nova, the long way, because it is the only way.
- *
- * North out of the lab onto the deck, west along the row-6 walkway, up the
- * column-9 spine and across to the tile Nova's visitors already use. Seventeen
- * waypoints is a genuinely long walk, and that is correct: Karthik Lab is at
- * the far south-east corner and an escalation to the CEO should read as
- * somebody crossing the whole building. It is also why this is an *event*
- * routine and not an ambient one — nobody makes that trip for no reason.
- */
-const KARTHIK_TO_NOVA: Tile[] = [
-  { col: 18, row: 8 },
-  { col: 18, row: 7 },
-  { col: 18, row: 6 },
-  { col: 17, row: 6 },
-  { col: 16, row: 6 },
-  { col: 15, row: 6 },
-  { col: 14, row: 6 },
-  { col: 13, row: 6 },
-  { col: 12, row: 6 },
-  { col: 11, row: 6 },
-  { col: 10, row: 6 },
-  { col: 9, row: 6 },
-  { col: 9, row: 5 },
-  { col: 9, row: 4 },
-  { col: 9, row: 3 },
-  { col: 9, row: 2 },
-  { col: 8, row: 2 },
 ];
 
 const VAULT_ROUTINES: AmbientRoutine[] = [
@@ -1260,9 +1228,9 @@ const KARTHIK_ROUTINES: AmbientRoutine[] = [
     employee: "karthik",
     weight: 5,
     frames: [
-      { pose: "looking_at_screen", hold: 3_800, detail: "Reading the wallet screen." },
+      { pose: "looking_at_screen", hold: 3_800, detail: "Reading the book's closed trades." },
       { pose: "seated_working", hold: 3_200, detail: "At the bench, working." },
-      { pose: "looking_at_screen", hold: 3_600, detail: "Reading the positions screen." },
+      { pose: "looking_at_screen", hold: 3_600, detail: "Checking the open trade." },
     ],
   },
   {
@@ -1276,7 +1244,7 @@ const KARTHIK_ROUTINES: AmbientRoutine[] = [
     employee: "karthik",
     weight: 4,
     frames: [
-      { pose: "looking_at_screen", hold: 6_800, detail: "Watching the Track Record feed." },
+      { pose: "looking_at_screen", hold: 6_800, detail: "Watching new graduations come in." },
     ],
   },
   {
@@ -1345,113 +1313,6 @@ const KARTHIK_ROUTINES: AmbientRoutine[] = [
     ],
   },
 ];
-
-/**
- * THE ROUTINES A REAL EVENT DRIVES, AND NOTHING ELSE MAY.
- *
- * Deliberately **not** in `AMBIENT_ROUTINES`. The scheduler picks from that
- * array, so anything in it can fire on a timer — and a celebration that could
- * fire on a timer is a claim that a target hit, made by a dice roll. These are
- * reachable only through an explicit override driven by a reading the backend
- * published, which is the same mechanism `useReportMeeting` already uses to
- * stage the report meeting.
- *
- * Every one of them therefore stays unused until a Karthik wallet exists and
- * publishes an event. That is the intended state, not an unfinished one.
- */
-export const KARTHIK_EVENT_ROUTINES: Record<string, AmbientRoutine> = {
-  /** A real 1.25x fill. The only celebration in the office. */
-  target_hit: {
-    id: "karthik-target-hit",
-    employee: "karthik",
-    weight: 0,
-    frames: [
-      { pose: "standing", hold: 1_400, detail: "A target filled at 1.25x." },
-      { pose: "stretching", hold: 1_200, detail: "Celebrating a target hit." },
-      { pose: "standing", hold: 1_200, detail: "Celebrating a target hit." },
-      { pose: "stretching", hold: 1_200, detail: "Celebrating a target hit." },
-      { pose: "returning_to_desk", hold: STEP },
-    ],
-  },
-  /** A new entry. He turns to the positions screen; that is all. */
-  new_entry: {
-    id: "karthik-new-entry",
-    employee: "karthik",
-    weight: 0,
-    frames: [
-      { pose: "looking_at_screen", hold: 5_200, detail: "A new Karthik position opened." },
-    ],
-  },
-  /** A dead position. Concerned, not theatrical. */
-  dead_zero: {
-    id: "karthik-dead-zero",
-    employee: "karthik",
-    weight: 0,
-    frames: [
-      { pose: "seated_reviewing", hold: 7_000, detail: "Reviewing a position that went to zero." },
-    ],
-  },
-  /** An open incident. Fast, head-down work at the health screen. */
-  incident: {
-    id: "karthik-incident",
-    employee: "karthik",
-    weight: 0,
-    frames: [
-      { pose: "looking_at_screen", hold: 3_000, detail: "Inspecting the system-health screen." },
-      { pose: "seated_working", hold: 3_000, detail: "Working an open incident." },
-      { pose: "looking_at_screen", hold: 3_000, detail: "Inspecting the system-health screen." },
-      { pose: "seated_working", hold: 3_000, detail: "Working an open incident." },
-    ],
-  },
-  /** A repair that succeeded. Back to work, and that is the whole reaction. */
-  repaired: {
-    id: "karthik-repaired",
-    employee: "karthik",
-    weight: 0,
-    frames: [{ pose: "seated_working", hold: 5_000, detail: "Repair verified; back at the bench." }],
-  },
-  /** Something only the owner may decide. The long walk to Nova. */
-  owner_required: {
-    id: "karthik-escalate",
-    employee: "karthik",
-    weight: 0,
-    frames: [
-      ...walk(KARTHIK_TO_NOVA),
-      {
-        pose: "talking_briefly",
-        tile: { col: 8, row: 2 },
-        hold: 6_200,
-        detail: "Escalating an owner-attention item to Nova.",
-      },
-      ...walkHome(KARTHIK_TO_NOVA),
-    ],
-    cast: [
-      {
-        employee: "nova",
-        frames: [
-          { pose: "standing", hold: STEP * KARTHIK_TO_NOVA.length },
-          { pose: "talking_briefly", hold: 6_200 },
-        ],
-      },
-    ],
-  },
-  /** A daily report is ready. He reads it at the wall display. */
-  report_ready: {
-    id: "karthik-report-ready",
-    employee: "karthik",
-    weight: 0,
-    frames: [
-      ...walk(KARTHIK_TO_DISPLAY),
-      {
-        pose: "standing",
-        tile: { col: 19, row: 9 },
-        hold: 8_000,
-        detail: "Reading the day's report on the wall display.",
-      },
-      ...walkHome(KARTHIK_TO_DISPLAY),
-    ],
-  },
-};
 
 /* ---- the games corner ---------------------------------------------------
  *

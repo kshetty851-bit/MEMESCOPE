@@ -234,63 +234,20 @@ function operations(overrides: Record<string, unknown> = {}) {
  * completely alone: the endpoint answered, so this is not a department with no
  * reading, it is a wallet that does not exist yet.
  */
+/** Karthik's Lab summary. Idle by default (no trade closed), so the office
+ *  fixture stays QUIET; tests that want a working book pass trades. */
 function karthik(overrides: Record<string, unknown> = {}) {
-  const unavailable = { measured: false, detail: "No wallet is designated.", values: {}, rows: [] };
   return {
-    binding: {
-      state: "unbound",
-      designated_strategy_id: "",
-      detail: "No wallet is designated.",
-      readable: false,
-      needs_owner: false,
-      wallet_id: null,
-      strategy_version: null,
-      generation: null,
-      starting_balance: null,
-      started_at: null,
-      archived_at: null,
-    },
-    autonomy: "OBSERVE_ONLY",
-    screens: {
-      wallet: unavailable,
-      feed: unavailable,
-      positions: unavailable,
-      targets: unavailable,
-      health: unavailable,
-      reports: unavailable,
-    },
-    accounting: unavailable,
-    integrity: {
-      score: null,
-      band: "NOT MEASURED",
-      headline: "No wallet is designated.",
-      deductions: [],
-      unmeasured: 7,
-    },
-    incidents: [],
-    recent: [],
-    actions: [],
-    allowlist: [],
-    checks: [],
-    reports: {},
-    while_away: {
-      since: null,
-      until: new Date(NOW).toISOString(),
-      measured: false,
-      detail: "No wallet is designated.",
-      opportunities: null,
-      new_trades: null,
-      targets_hit: null,
-      dead_positions: null,
-      pnl_usd: null,
-      biggest_winner: null,
-      biggest_loss: null,
-      bugs_found: null,
-      bugs_fixed: null,
-      owner_attention: null,
-      integrity_score: null,
-    },
-    observed_at: new Date(NOW).toISOString(),
+    started_at: "2026-09-23T12:00:00Z",
+    judge_at: "2026-10-23T12:00:00Z",
+    capital_usd: "400",
+    ticket_usd: "200",
+    balance_usd: "400",
+    pnl_usd: "0",
+    pnl_pct: "0",
+    trades: 0,
+    wins: 0,
+    rugs: 0,
     ...overrides,
   };
 }
@@ -1020,75 +977,27 @@ describe("Vault — the execution wallet custodian", () => {
   });
 });
 
-describe("Karthik's Strategy Lab watch", () => {
-  // Repointed 2026-09-08. These lines read `health.labs` — every lab whose
-  // feature flag is ON — rather than `health.lab`, which is pinned to V7.
-  // V7 was switched off that day, so the old lines reported on a stopped
-  // tournament while PumpFun and its control ran unwatched.
-  const labLines = (labs: unknown[] | undefined) => {
+describe("Karthik — Karthik's Lab", () => {
+  it("says where the book stands, from the lab's own figures", () => {
     const state = build({
-      operations: at(
-        operations({
-          health: { ...(operations() as never as { health: object }).health, labs },
-        }) as never,
-      ),
+      karthik: at(karthik({ balance_usd: "777.80", pnl_usd: "377.80", pnl_pct: "94.45",
+                            trades: 125, wins: 118, rugs: 0 }) as never),
     });
-    return Object.fromEntries(
-      state.employees.karthik!.metrics.map((m) => [m.label, m.value]),
+    expect(state.employees.karthik.state).toBe("working");
+    expect(state.employees.karthik.detail).toBe(
+      "Karthik's Lab: $777.80 from $400.00 (+94.45%), 125 trades, 118 won, 0 rugs. Judged 23 Oct.",
     );
-  };
-
-  it("names every lab that is actually running", () => {
-    const lines = labLines([
-      { measured: true, detail: "ok", label: "PumpFun", open_positions: 3,
-        quote_backed_pct: 96.4, minutes_since_decision: 7.2 },
-      { measured: true, detail: "ok", label: "Control CPY-02", open_positions: 2,
-        quote_backed_pct: 88.0, minutes_since_decision: 30.4 },
-    ]);
-    expect(lines["Labs running"]).toBe("PumpFun, Control CPY-02");
-    expect(lines["Lab positions"]).toBe("5 across 2 labs");
+    const labels = state.employees.karthik.metrics.map((m) => m.label);
+    expect(labels).toEqual(["Balance", "Profit", "Closed trades", "Won", "Rugs", "Judged on"]);
   });
 
-  it("reports the WORST book and the LONGEST silence, not an average", () => {
-    // One lab unable to price its positions is the thing worth knowing, and an
-    // average hides it behind the healthy ones.
-    const lines = labLines([
-      { measured: true, detail: "ok", label: "A", quote_backed_pct: 99,
-        minutes_since_decision: 2 },
-      { measured: true, detail: "ok", label: "B", quote_backed_pct: 40,
-        minutes_since_decision: 180 },
-    ]);
-    expect(lines["Worst book priced"]).toBe("40% quote-backed");
-    expect(lines["Longest silence"]).toBe("180 min ago");
+  it("is idle before the book has closed a trade", () => {
+    expect(build().employees.karthik.state).toBe("idle");
   });
 
-  it("says NONE rather than zero when no lab is running", () => {
-    // "0 positions" would read as a frozen book. An empty floor is different.
-    const lines = labLines([]);
-    expect(lines["Labs running"]).toBe("none");
-    // And no lab lines beyond that one — "0 positions" would read as a frozen
-    // book rather than an empty floor. Note Karthik's wallet screens have their
-    // OWN "Open positions" row, which is why the lab one is named differently.
-    expect(lines["Lab positions"]).toBeUndefined();
-  });
-
-  it("excludes a lab whose probe could not read it", () => {
-    // The distinction the whole Lab health module exists for: "nothing is
-    // stalled" and "the probe could not read" must never render alike.
-    const lines = labLines([
-      { measured: false, detail: "probe failed", label: "PumpFun" },
-    ]);
-    expect(lines["Labs running"]).toBe("none");
-  });
-
-  it("survives a payload from before the multi-lab probe existed", () => {
-    expect(labLines(undefined)["Labs running"]).toBe("none");
-  });
-
-  it("still leads with the wallet this desk is for", () => {
-    const metrics = build().employees.karthik!.metrics;
-    expect(metrics[0]!.label).toBe("Wallet");
-    expect(metrics.some((m) => m.label === "Labs running")).toBe(true);
+  it("is UNKNOWN, not idle, when the book could not be read", () => {
+    const state = build({ karthik: { data: null, observedAt: null, failed: true } });
+    expect(state.employees.karthik.state).toBe("unknown");
   });
 });
 

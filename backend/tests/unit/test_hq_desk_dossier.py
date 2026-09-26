@@ -171,3 +171,31 @@ class TestEveryFigureNamesItsSource:
         ).read_text()
         for writer in ("session.add", "session.commit", "session.flush", "update(", "delete("):
             assert writer not in source, f"desk.py contains {writer}"
+
+
+class TestKarthiksDesk:
+    """His own book only, since 2026-09-26: it used to read every Graduation Lab
+    book mixed together, so his findings described trades he never made."""
+
+    async def test_reads_karthiks_lab_and_no_other_book(self, db_session) -> None:
+        import uuid
+        from decimal import Decimal as D
+
+        from app.labs.graduation.models import GradPaperPosition
+
+        now = datetime.now(UTC)
+        for book, symbol, mint in (("KARTHIK_QUIET_5M", "MINE", "Mine1111"),
+                                   ("BASE_75k_5m", "THEIRS", "Theirs11")):
+            db_session.add(GradPaperPosition(
+                id=uuid.uuid4(), book=book, mint=mint, symbol=symbol,
+                opened_at=now - timedelta(minutes=10), closed_at=now - timedelta(minutes=5),
+                open_quote=D("0.001"), open_fill=D("0.001"), notional_usd=D(100),
+                sol_usd_at_open=D(100), notional_quote=D(1), tokens=D(1000),
+                peak_quote=D("0.0011"), last_quote=D("0.0011"), close_quote=D("0.0011"),
+                pnl_usd=D("9"), net_return=D("0.09"), liq_open_usd=D("200000")))
+        await db_session.flush()
+
+        dossier = desk.as_dict(await desk.build(db_session, "karthik", now=now))
+        blob = repr(dossier)
+        assert "MINE" in blob
+        assert "THEIRS" not in blob

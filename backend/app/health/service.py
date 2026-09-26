@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -280,17 +280,22 @@ class PipelineHealthService:
 
         # Observed freshness of the tracked set — what the lane actually
         # delivers, as opposed to the interval it was configured to promise.
+        # One index lookup per tracked mint (ix_snapshots_mint_captured_desc),
+        # not max() grouped over the whole snapshot table: 11s instead of 49s
+        # on prod's 15M rows, 2026-09-26, same answer.
+        latest = (
+            select(TokenMarketSnapshot.captured_at)
+            .where(TokenMarketSnapshot.mint_address == RadarToken.mint_address)
+            .order_by(TokenMarketSnapshot.captured_at.desc())
+            .limit(1)
+            .correlate(RadarToken)
+            .lateral()
+        )
         newest = (
-            select(
-                TokenMarketSnapshot.mint_address.label("mint"),
-                func.max(TokenMarketSnapshot.captured_at).label("newest"),
-            )
-            .where(
-                TokenMarketSnapshot.mint_address.in_(
-                    select(RadarToken.mint_address).where(RadarToken.is_active.is_(True))
-                )
-            )
-            .group_by(TokenMarketSnapshot.mint_address)
+            select(latest.c.captured_at.label("newest"))
+            .select_from(RadarToken)
+            .join(latest, true())
+            .where(RadarToken.is_active.is_(True))
             .subquery()
         )
         age = func.extract("epoch", now - newest.c.newest)
@@ -351,12 +356,16 @@ class PipelineHealthService:
             .where(TokenMarketSnapshot.token_id == DiscoveredToken.id)
             .exists()
         )
-        pending = await self._session.scalar(
+        # Only while scoring is on. Off, nothing scores, so the backlog only
+        # grows — and counting it scanned every discovered token against the
+        # snapshot table: on 2026-09-26 it ran 7+ minutes, so /health/pipeline
+        # never answered and four HQ desks read UNKNOWN.
+        pending = (await self._session.scalar(
             select(func.count())
             .select_from(DiscoveredToken)
             .outerjoin(TokenScore, TokenScore.token_id == DiscoveredToken.id)
             .where(TokenScore.id.is_(None), has_snapshot)
-        )
+        ) if settings.FEATURE_AI_SCORING_ENABLED else None)
         minutes = _minutes_since(last, now=now)
 
         return ScoringHealth(
@@ -367,7 +376,7 @@ class PipelineHealthService:
             ),
             last_score=last,
             minutes_since_last_score=None if minutes is None else round(minutes, 1),
-            pending=int(pending or 0),
+            pending=None if pending is None else int(pending),
         )
 
     async def _radar(self, now: datetime) -> RadarHealth:

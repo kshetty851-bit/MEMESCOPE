@@ -29,7 +29,6 @@ import {
   IncidentBoard,
   OwnerInbox,
 } from "@/components/hq/operations-panel";
-import { KarthikPanel } from "@/components/hq/karthik-panel";
 import { CAT_BY_ID, type CatId } from "@/lib/hq/cats";
 import { SUPPORT_BY_ID, type SupportId } from "@/lib/hq/support";
 import { VISITOR_BY_ID, type VisitorId } from "@/lib/hq/visitors";
@@ -368,19 +367,6 @@ export default function HqPage() {
         <DeskPanel employee={employee.id} onClose={() => { setSelected(null); camera.select(null); }} />
       ) : null}
 
-      {/* §14. Karthik's own surface, below the standard employee panel rather
-          than instead of it: the panel above is the room's convention — a
-          portrait, a status sentence and a sourced metrics table — and this is
-          the deep read that convention has no room for. It reads only the
-          isolated `/karthik` source; no figure on it comes from the Original
-          Paper Wallet, V2, the Strategy Lab or the Real Wallet. */}
-      {selected === "karthik" ? (
-        <KarthikPanel
-          source={state.sources.karthik}
-          now={state.now}
-          onClose={() => setSelected(null)}
-        />
-      ) : null}
 
       {supportNpc || cat || visitor ? (
         <Panel>
@@ -554,7 +540,7 @@ function Boards({ state }: { state: HqState }) {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <MissionBoard state={state} />
         <PerformanceLab
-          wallet={state.sources.paperWallet}
+          lab={state.sources.karthik}
           security={state.sources.tokenSecurity}
           now={state.now}
         />

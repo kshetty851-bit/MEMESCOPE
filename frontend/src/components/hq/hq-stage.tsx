@@ -1777,9 +1777,9 @@ function roomDescription(state: HqState): string {
  * ── IT READS THE SAME READING THE PANEL DOES ────────────────────────────
  *
  * The word under the lamp is a pure function of `state.employees.karthik`,
- * which is derived in `adapter.ts` from `GET /karthik` and from nothing else.
- * The lamp cannot be green while the panel says NEEDS OWNER, because there is
- * one derivation and this is a rendering of it.
+ * which is derived in `adapter.ts` from Karthik's Lab's summary and nothing
+ * else. The lamp cannot disagree with the desk panel, because there is one
+ * derivation and this is a rendering of it.
  *
  * ── THE UNMEASURED READING IS THE DEFAULT, AND THAT IS DELIBERATE ───────
  *
@@ -1835,7 +1835,7 @@ function KarthikSignage({ state }: { state: HqState }) {
         rx={8.5}
       />
       <text className="hq-zone-label" x={corner.x - 8} y={corner.y + 13}>
-        Track Record Wallet Operations
+        Paper book · judged on its own record
       </text>
       <circle cx={corner.x + width / 2 - 13} cy={corner.y + 9.5} r={3.4} fill={status.tone} />
       <text

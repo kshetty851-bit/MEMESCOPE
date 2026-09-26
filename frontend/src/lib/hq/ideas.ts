@@ -66,7 +66,6 @@ function pct(value: number): string {
 export function ideasFrom(state: HqState): Idea[] {
   const out: Idea[] = [];
   const ops = fresh(state.sources.operations, STALE_AFTER_MS.operations, state.now);
-  const karthik = fresh(state.sources.karthik, STALE_AFTER_MS.karthik, state.now);
 
   /* ---- Byte: the disk, which has taken this platform down twice --------- */
   if (ops?.health.disk.measured && ops.health.disk.percent_used !== null) {
@@ -154,34 +153,6 @@ export function ideasFrom(state: HqState): Idea[] {
         because: `Its last entry decision was ${Math.round(lab.minutes_since_decision)} minutes ago.`,
         source: "GET /hq · health.labs[].minutes_since_decision",
         urgency: lab.minutes_since_decision >= 180 ? "now" : "soon",
-      });
-    }
-  }
-
-  /* ---- Karthik: his own experiment's integrity -------------------------- */
-  if (karthik?.binding.readable) {
-    const worst = [...karthik.integrity.deductions]
-      .filter((d) => d.measured && d.penalty > 0)
-      .sort((a, b) => b.penalty - a.penalty)[0];
-    if (worst) {
-      out.push({
-        id: `karthik-${worst.factor}`,
-        from: "karthik",
-        headline: `Close the biggest hole in the wallet's evidence: ${worst.label.toLowerCase()}`,
-        because: `${worst.detail} That is ${worst.penalty} of the ${100 - (karthik.integrity.score ?? 0)} points off this experiment's integrity score.`,
-        source: "GET /karthik-ops · integrity.deductions",
-        urgency: worst.penalty >= 15 ? "soon" : "worth doing",
-      });
-    }
-    const unmeasured = karthik.integrity.deductions.filter((d) => !d.measured);
-    if (unmeasured.length > 0) {
-      out.push({
-        id: "karthik-unmeasured",
-        from: "karthik",
-        headline: "Make the unmeasurable parts of the wallet measurable",
-        because: `${unmeasured.length} of ${karthik.integrity.deductions.length} integrity factors cannot be read at all, starting with ${unmeasured[0]!.label.toLowerCase()}.`,
-        source: "GET /karthik-ops · integrity.deductions[measured=false]",
-        urgency: "worth doing",
       });
     }
   }

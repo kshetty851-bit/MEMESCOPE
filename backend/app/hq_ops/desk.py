@@ -148,6 +148,9 @@ def _unlogged(employee: str, why: str, since: datetime, until: datetime) -> Doss
     )
 
 
+#: Karthik's Lab: the book `labs.graduation` keys by this arm name.
+KARTHIK_BOOK = "KARTHIK_QUIET_5M"
+
 #: Why each logless desk has no log. Written per desk rather than as one
 #: generic sentence, because "there is no event stream for this" and "this desk
 #: reads a gauge" are different facts and a reader can act on the second.
@@ -193,10 +196,8 @@ async def build(
     if employee in NO_LOG:
         return _unlogged(employee, NO_LOG[employee], since, until)
 
-    # Karthik was re-tasked to the Graduation Lab on 2026-09-12. His ops watch
-    # still runs — that is `hq_ops`, a different system — but the question this
-    # desk answers is now "what did the graduation book do, and what would
-    # change it", which is the most active book on the platform.
+    # Karthik was re-tasked to the Graduation Lab on 2026-09-12 and narrowed to
+    # his own book, Karthik's Lab, on 2026-09-26; his old ops watch is retired.
     if employee == "karthik":
         return await _from_graduation(session, employee, since, until)
     if employee == "patch":
@@ -442,7 +443,10 @@ async def _from_admissions(
 async def _from_graduation(
     session: AsyncSession, employee: str, since: datetime, until: datetime
 ) -> Dossier:
-    """Karthik's day: the graduation book's closed trades, and what moves them.
+    """Karthik's day: Karthik's Lab's closed trades, and what moves them.
+
+    His own book only, since 2026-09-26 — it read every Graduation Lab book
+    mixed together, so his findings described trades he never made.
 
     The timeline is literally what was asked for — the trades this book opened
     and closed — and the findings and suggestions come from
@@ -453,7 +457,7 @@ async def _from_graduation(
     from app.labs.graduation import analyst as grad
     from app.labs.graduation.models import GradPaperPosition
 
-    analysis = await grad.analyse(session, now=until)
+    analysis = await grad.analyse(session, now=until, book=KARTHIK_BOOK)
     if not analysis.measured:
         return _unlogged(employee, analysis.detail, since, until)
 
@@ -462,8 +466,9 @@ async def _from_graduation(
             await session.execute(
                 select(GradPaperPosition)
                 .where(
+                    GradPaperPosition.book == KARTHIK_BOOK,
                     (GradPaperPosition.opened_at >= since)
-                    | (GradPaperPosition.closed_at >= since)
+                    | (GradPaperPosition.closed_at >= since),
                 )
                 .order_by(GradPaperPosition.opened_at.desc())
                 .limit(TIMELINE_LIMIT)

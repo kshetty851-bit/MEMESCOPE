@@ -6,7 +6,6 @@ import { describe, expect, it } from "vitest";
 import { deriveHqState, react, type HqWitness } from "./adapter";
 import {
   AMBIENT_ROUTINES,
-  KARTHIK_EVENT_ROUTINES,
   isWalkable,
   ROUTINES_BY_EMPLOYEE,
 } from "./ambient";
@@ -169,7 +168,7 @@ describe("Karthik's routines, and the ones he is not allowed to pick", () => {
   });
 
   it("keeps every one of his frames on walkable floor", () => {
-    for (const routine of [...routines, ...Object.values(KARTHIK_EVENT_ROUTINES)]) {
+    for (const routine of routines) {
       for (const frame of [
         ...routine.frames,
         ...(routine.cast ?? []).flatMap((member) => member.frames),
@@ -180,44 +179,6 @@ describe("Karthik's routines, and the ones he is not allowed to pick", () => {
           `${routine.id} stands on blocked ${frame.tile.col},${frame.tile.row}`,
         ).toBe(true);
       }
-    }
-  });
-
-  it("routes the escalation to Nova across real floor, and back", () => {
-    const escalate = KARTHIK_EVENT_ROUTINES.owner_required;
-    expect(escalate, "no owner_required routine").toBeDefined();
-    expect(escalate!.frames.at(-1)!.tile).toBeUndefined(); // ends at his own desk
-    const talking = escalate!.frames.find((frame) => frame.pose === "talking_briefly");
-    expect(talking).toBeDefined();
-    // Beside Nova, not on her desk.
-    const nova = EMPLOYEE_BY_ID.get("nova")!.desk;
-    const distance = Math.max(
-      Math.abs(talking!.tile!.col - nova.col),
-      Math.abs(talking!.tile!.row - nova.row),
-    );
-    expect(distance).toBeGreaterThan(0);
-    expect(distance).toBeLessThanOrEqual(2);
-  });
-
-  /**
-   * THE RULE THAT MATTERS MOST IN THIS FILE.
-   *
-   * §6: no fake business event may be generated to drive an animation. The
-   * scheduler picks from `AMBIENT_ROUTINES`; if a celebration were in there it
-   * could fire on a timer, and a dance on a timer is a claim that a target
-   * hit. So the check is structural — the event routines must not be reachable
-   * from the array the dice read.
-   */
-  it("keeps every event reaction out of the scheduler's reach", () => {
-    const schedulable = new Set(AMBIENT_ROUTINES.map((routine) => routine.id));
-    for (const routine of Object.values(KARTHIK_EVENT_ROUTINES)) {
-      expect(
-        schedulable.has(routine.id),
-        `${routine.id} can be picked at random`,
-      ).toBe(false);
-      // Weight zero as well, so even an accidental push into the array cannot
-      // make one selectable.
-      expect(routine.weight).toBe(0);
     }
   });
 
@@ -292,59 +253,36 @@ describe("real events, and only real events", () => {
       securityEvaluations: 5,
       queueDepth: 20,
       pipelineOverall: "healthy",
-      karthikTargetHits: 2,
-      karthikOpenPositions: 4,
-      karthikDeadPositions: 1,
-      karthikOpenIncidents: 0,
-      karthikOwnerItems: 0,
+      karthikTrades: 125,
+      karthikRugs: 0,
+      karthikBalance: 777.8,
       ...over,
     };
   }
 
-  it("celebrates only when the published target count actually rose", () => {
-    const quiet = react(base(), base(), NOW);
-    expect(quiet.karthik).toBeUndefined();
-
-    const hit = react(base(), base({ karthikTargetHits: 3 }), NOW);
-    expect(hit.karthik?.state).toBe("success");
-    expect(hit.karthik?.detail).toContain("1.25x");
+  it("reacts only when Karthik's Lab closed a trade", () => {
+    expect(react(base(), base(), NOW).karthik).toBeUndefined();
+    const green = react(base(), base({ karthikTrades: 126, karthikBalance: 779.1 }), NOW);
+    expect(green.karthik?.state).toBe("success");
+    const red = react(base(), base({ karthikTrades: 126, karthikBalance: 760 }), NOW);
+    expect(red.karthik?.state).toBe("reviewing");
   });
 
-  it("cannot celebrate while the wallet is unbound", () => {
-    // Unbound reports null for every counter, and a null on either side of the
-    // comparison means no reaction can fire. This is the check that makes
-    // "the room shows nothing because there is nothing" true rather than
-    // hoped for.
-    const unbound = base({
-      karthikTargetHits: null,
-      karthikOpenPositions: null,
-      karthikDeadPositions: null,
-      karthikOpenIncidents: null,
-      karthikOwnerItems: null,
-    });
-    expect(react(unbound, unbound, NOW).karthik).toBeUndefined();
+  it("puts a rug above an ordinary close", () => {
+    const rug = react(base(), base({ karthikTrades: 126, karthikRugs: 1, karthikBalance: 670 }), NOW);
+    expect(rug.karthik?.state).toBe("reviewing");
+    expect(rug.karthik?.detail).toContain("rug");
   });
 
-  it("puts an owner-attention item above everything else he could be doing", () => {
-    const both = react(
-      base(),
-      base({ karthikOwnerItems: 1, karthikTargetHits: 3 }),
-      NOW,
-    );
-    expect(both.karthik?.state).toBe("incident");
-  });
-
-  it("reads the lifetime counters, not the daily ones", () => {
-    // A daily counter resets at midnight, and a counter that resets looks like
-    // it went down — which would swallow the next real hit.
-    const source = read("lib/hq/adapter.ts");
-    expect(source).toContain("reports?.lifetime");
+  it("reacts to nothing on a first reading", () => {
+    const unread = base({ karthikTrades: null, karthikRugs: null, karthikBalance: null });
+    expect(react(unread, base(), NOW).karthik).toBeUndefined();
   });
 });
 
 /* ── isolation ───────────────────────────────────────────────────────── */
 
-describe("Karthik touches one wallet and no other", () => {
+describe("Karthik reads his book and nothing else", () => {
   it("reads its own source and never the Original Paper Wallet's", () => {
     const adapter = read("lib/hq/adapter.ts");
     const derive = adapter.slice(
@@ -360,22 +298,5 @@ describe("Karthik touches one wallet and no other", () => {
     ]) {
       expect(derive, `deriveKarthik reads ${foreign}`).not.toContain(foreign);
     }
-  });
-
-  it("renders its panel from the karthik source alone", () => {
-    const panel = read("components/hq/karthik-panel.tsx");
-    expect(panel).toContain('from "@/lib/hq/karthik"');
-    for (const foreign of ["paper-wallet", "paperWallet", "strategy-lab", "real-wallet"]) {
-      expect(panel, `the panel reads ${foreign}`).not.toContain(foreign);
-    }
-  });
-
-  it("offers no control that could change anything", () => {
-    // §14 and §23: no approve button, no repair button, no autonomy toggle.
-    // Arming autonomy is an environment variable and a separate decision; a
-    // switch here would make it a click.
-    const panel = read("components/hq/karthik-panel.tsx");
-    expect(panel).not.toMatch(/api\.(post|put|patch|delete)/);
-    expect(panel).not.toMatch(/useMutation/);
   });
 });

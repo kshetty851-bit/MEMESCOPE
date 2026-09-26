@@ -64,7 +64,8 @@ export interface ScoringHealth {
   status: StageStatus;
   last_score: string | null;
   minutes_since_last_score: number | null;
-  pending: number;
+  /** Null while scoring is switched off: the backend does not count it then. */
+  pending: number | null;
 }
 
 export interface RadarStageHealth {

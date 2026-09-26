@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.redis import get_redis
+from app.health import api as health_api
 from app.models.market import EnrichmentStatus
 from app.models.radar import RadarToken
 from app.repositories.market import EnrichmentStateRepository, MarketSnapshotRepository
@@ -85,6 +86,10 @@ async def _isolated_pipeline(client: AsyncClient, monkeypatch: pytest.MonkeyPatc
         "FEATURE_RADAR_ENABLED",
     ):
         monkeypatch.setattr(settings, flag, False)
+    # The route shares one snapshot a minute between callers; every test here
+    # writes rows and expects a fresh reading of them.
+    monkeypatch.setattr(health_api, "_pipeline_cache", None)
+    monkeypatch.setattr(health_api, "_PIPELINE_TTL_S", 0.0)
     yield
 
 
@@ -164,13 +169,14 @@ class TestStageVerdicts:
         assert token is not None
 
     async def test_scoring_pending_counts_only_scorable_tokens(
-        self, client: AsyncClient, db_session: AsyncSession
+        self, client: AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A token with no snapshot is not a scoring backlog.
 
         Counting it would report a permanent queue that no amount of working
         scoring could ever clear.
         """
+        monkeypatch.setattr(settings, "FEATURE_AI_SCORING_ENABLED", True)
         now = datetime.now(UTC)
         await _seed(db_session, discovered_at=now, captured_at=now)
         await TokenRepository(db_session).insert_if_absent(
@@ -186,6 +192,36 @@ class TestStageVerdicts:
         body = (await client.get(PIPELINE)).json()
         # The seeded token has a snapshot and no score; the other has neither.
         assert body["scoring"]["pending"] == 1
+
+    async def test_scoring_backlog_is_not_counted_while_scoring_is_off(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """Off, nothing scores, so the count only grows — and on prod it ran for
+        minutes and kept the whole endpoint from answering (2026-09-26)."""
+        now = datetime.now(UTC)
+        await _seed(db_session, discovered_at=now, captured_at=now)
+        body = (await client.get(PIPELINE)).json()
+        assert body["scoring"]["pending"] is None
+
+    async def test_one_snapshot_is_shared_within_the_minute(
+        self, client: AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Every open HQ tab polls this. Within the minute they share a reading
+        instead of each running the queries again."""
+        monkeypatch.setattr(health_api, "_PIPELINE_TTL_S", 60.0)
+        runs = 0
+        real = health_api.PipelineHealthService.snapshot
+
+        async def counted(self, **kwargs):
+            nonlocal runs
+            runs += 1
+            return await real(self, **kwargs)
+
+        monkeypatch.setattr(health_api.PipelineHealthService, "snapshot", counted)
+        first = (await client.get(PIPELINE)).json()
+        second = (await client.get(PIPELINE)).json()
+        assert runs == 1
+        assert first["observed_at"] == second["observed_at"]
 
     async def test_radar_cycle_comes_from_last_evaluated_not_snapshots(
         self, client: AsyncClient, db_session: AsyncSession
@@ -216,6 +252,40 @@ class TestStageVerdicts:
         body = (await client.get(PIPELINE)).json()
         assert body["radar"]["status"] == "healthy"
         assert body["radar"]["tracked_tokens"] == 1
+
+    async def test_tracked_freshness_reads_each_tokens_newest_snapshot(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """Freshness is per tracked token: its NEWEST snapshot, older ones
+        ignored, and untracked tokens not counted at all. Rewritten from a
+        grouped max() to one index lookup per token on 2026-09-26 (49s -> 11s)."""
+        now = datetime.now(UTC)
+
+        async def tracked(mint: str, sig: str, ages_s: list[int], active: bool = True) -> None:
+            token = await TokenRepository(db_session).insert_if_absent(
+                {"mint_address": mint, "signature": sig, "slot": 3, "discovered_at": now})
+            assert token is not None
+            await MarketSnapshotRepository(db_session).add_many([
+                {"token_id": token.id, "mint_address": mint,
+                 "captured_at": now - timedelta(seconds=age), "price_usd": Decimal("0.0001"),
+                 "liquidity_usd": Decimal("1000"), "provider": "test"} for age in ages_s])
+            db_session.add(RadarToken(
+                token_id=token.id, mint_address=mint, first_detected_at=now,
+                last_evaluated_at=now, first_opportunity_score=Decimal("50"),
+                first_confidence=Decimal("80"), category="breakout",
+                current_opportunity_score=Decimal("50"), current_confidence=Decimal("80"),
+                current_category="breakout", model_version="v1", is_active=active))
+
+        # Newest 60s old (older ones must not count), newest 7,200s old, and an
+        # inactive token whose ancient snapshot must not count either.
+        await tracked("FRESHaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "s-a", [60, 5_000, 9_000])
+        await tracked("STALEbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "s-b", [7_200])
+        await tracked("GONEcccccccccccccccccccccccccccccccccccccccc", "s-c", [900_000], active=False)
+        await db_session.flush()
+
+        enrichment = (await client.get(PIPELINE)).json()["market_enrichment"]
+        assert enrichment["tracked_freshness_worst_seconds"] == pytest.approx(7_200, abs=30)
+        assert enrichment["tracked_freshness_p50_seconds"] == pytest.approx(3_630, abs=30)
 
 
 class TestScannerState:

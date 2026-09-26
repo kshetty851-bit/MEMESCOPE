@@ -85,11 +85,9 @@ function base(over: Partial<HqWitness> = {}): HqWitness {
     // either side means none of them can fire — which is the property worth
     // having as the default in a fixture about reactions never firing on a
     // timer.
-    karthikTargetHits: null,
-    karthikOpenPositions: null,
-    karthikDeadPositions: null,
-    karthikOpenIncidents: null,
-    karthikOwnerItems: null,
+    karthikTrades: null,
+    karthikRugs: null,
+    karthikBalance: null,
     ...over,
   };
 }

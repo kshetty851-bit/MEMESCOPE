@@ -131,13 +131,18 @@ def _median(values: list[Decimal]) -> Decimal:
     return sorted(values)[len(values) // 2]
 
 
-async def analyse(session: AsyncSession, *, now: datetime | None = None) -> Analysis:
-    """The graduation paper book, read as an analyst would read it."""
+async def analyse(session: AsyncSession, *, now: datetime | None = None,
+                  book: str | None = None) -> Analysis:
+    """The graduation paper book, read as an analyst would read it.
+
+    `book` narrows it to one book (HQ's Karthik desk reads only his own);
+    without it, every book the lab runs."""
     observed_at = now or datetime.now(UTC)
 
-    rows = (await session.execute(
-        select(GradPaperPosition)
-        .where(GradPaperPosition.excluded.is_(None)))).scalars().all()
+    query = select(GradPaperPosition).where(GradPaperPosition.excluded.is_(None))
+    if book is not None:
+        query = query.where(GradPaperPosition.book == book)
+    rows = (await session.execute(query)).scalars().all()
     closed = [r for r in rows if r.closed_at is not None and r.pnl_usd is not None]
     live = [r for r in rows if r.closed_at is None]
 

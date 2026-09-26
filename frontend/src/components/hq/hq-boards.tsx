@@ -1,10 +1,10 @@
 "use client";
 
 import type { HqState, Source } from "@/lib/hq/adapter";
-import { STALE_AFTER_MS, fresh, isSecurityGated } from "@/lib/hq/adapter";
+import { STALE_AFTER_MS, fresh } from "@/lib/hq/adapter";
+import { judgeDay, type KarthikLabSummary } from "@/lib/hq/karthik-lab";
 import type { ComponentStatus, HqOperations } from "@/lib/hq/operations";
 import type { ExecutionPosture, TokenSecuritySummary, VaultState } from "@/lib/hq/pipeline";
-import type { PaperWallet } from "@/types/paper";
 import { Panel } from "@/components/ui/panel";
 
 /**
@@ -202,7 +202,9 @@ const MISSION_ROWS: Array<{ id: keyof HqState["employees"]; label: string }> = [
   // are one row now; splitting a single reading three ways was not depth.
   { id: "radar", label: "Scanner / discovery" },
   { id: "echo", label: "Enrichment queue" },
-  { id: "milo", label: "Paper Wallet" },
+  // "Paper Wallet" until 2026-09-26: that wallet was switched off in August and
+  // deleted from the site, so the row could only ever read "switched off".
+  { id: "karthik", label: "Karthik's Lab" },
   { id: "atlas", label: "Security gate" },
   { id: "byte", label: "Platform / stream" },
   { id: "sentinel", label: "Production watch" },
@@ -398,67 +400,44 @@ export function InfrastructureBoard({
 /* ── 3. PERFORMANCE LAB ──────────────────────────────────────────────── */
 
 /**
- * The Paper Wallet's own figures, and the generation they belong to.
+ * Karthik's Lab, the book the site opens on (since 2026-09-26).
  *
- * Every field here is served by `GET /paper`; nothing is computed in the
- * browser. `equity` is null whenever any holding is unpriced, and this panel
- * propagates that null rather than substituting cost — an equity figure that
- * silently fell back to entry price would understate a loss.
+ * It showed the Original Paper Wallet until then — switched off on 2026-08-25
+ * and deleted from the site on 2026-09-25, so for a month every figure here
+ * was frozen. Every value is served by `/labs/graduation/karthik/summary`,
+ * the Karthik's Lab page's own figures; nothing is computed in the browser.
  */
 export function PerformanceLab({
-  wallet,
+  lab,
   security,
   now,
 }: {
-  wallet: Source<PaperWallet>;
+  lab: Source<KarthikLabSummary>;
   security: Source<TokenSecuritySummary>;
   now: number;
 }) {
-  const paper = fresh(wallet, STALE_AFTER_MS.paper, now);
-  const metrics = paper?.metrics ?? null;
+  const book = fresh(lab, STALE_AFTER_MS.karthik, now);
   const summary = fresh(security, STALE_AFTER_MS.tokenSecurity, now);
+  const winRate = book && book.trades > 0 ? ((book.wins / book.trades) * 100).toFixed(1) : null;
 
   return (
     <Board
       title="Performance Lab"
-      subtitle="Paper Wallet figures as the backend publishes them. Simulated trades only — no real capital."
+      subtitle="Karthik's Lab, as the lab publishes it. Paper trades only — no real capital."
     >
-      <Row
-        label="Generation"
-        value={paper ? `Gen ${paper.generation}` : null}
-        tone="info"
-        note={paper?.strategy?.name ?? undefined}
-      />
-      <Row
-        label="Security gate"
-        value={
-          paper ? (isSecurityGated(paper.strategy?.id) ? "STRICT" : "NOT ENFORCED") : null
-        }
-        tone={isSecurityGated(paper?.strategy?.id) ? "good" : "warn"}
-        note={
-          isSecurityGated(paper?.strategy?.id)
-            ? "Every new entry requires mint authority, freeze authority, token program, venue and liquidity security to pass."
-            : "This generation takes entries without a security precondition."
-        }
-      />
-      <Row label="Wallet enabled" value={paper ? (paper.enabled ? "Yes" : "No") : null}
-           tone={paper?.enabled ? "good" : "warn"} />
-      <Row label="Equity" value={money(metrics?.equity)} tone="info"
-           note={metrics && metrics.unpriced_positions > 0
-             ? `${metrics.unpriced_positions} holding(s) unpriced — equity is withheld rather than estimated`
-             : undefined} />
-      <Row label="Cash" value={money(metrics?.cash)} tone="info" />
-      <Row label="Open value" value={money(metrics?.open_value)} tone="info" />
-      <Row label="Invested (at cost)" value={money(metrics?.invested_usd)} tone="muted" />
-      <Row label="Realised P/L" value={money(metrics?.realised_pnl)}
-           tone={Number(metrics?.realised_pnl ?? 0) >= 0 ? "good" : "bad"} />
-      <Row label="Return" value={pct(metrics?.roi_pct)}
-           tone={Number(metrics?.roi_pct ?? 0) >= 0 ? "good" : "bad"} />
-      <Row label="Win rate" value={pct(metrics?.win_rate_pct)} tone="info" />
-      <Row label="Profit factor" value={metrics?.profit_factor ?? null} tone="info"
-           note={metrics && metrics.profit_factor === null ? "Undefined while nothing has lost" : undefined} />
-      <Row label="Open positions" value={num(metrics?.open_positions)} tone="info" />
-      <Row label="Closed trades" value={num(metrics?.closed_positions)} tone="info" />
+      <Row label="Balance" value={money(book?.balance_usd)} tone="info"
+           note={book ? `Started with ${money(book.capital_usd)}, ${money(book.ticket_usd)} a trade` : undefined} />
+      <Row label="Profit" value={money(book?.pnl_usd)}
+           tone={Number(book?.pnl_usd ?? 0) >= 0 ? "good" : "bad"} />
+      <Row label="Return" value={pct(book?.pnl_pct)}
+           tone={Number(book?.pnl_pct ?? 0) >= 0 ? "good" : "bad"} />
+      <Row label="Closed trades" value={num(book?.trades)} tone="info" />
+      <Row label="Win rate" value={winRate === null ? null : `${winRate}%`} tone="info"
+           note={book ? `${book.wins} of ${book.trades}` : undefined} />
+      <Row label="Rugs" value={num(book?.rugs)} tone={book && book.rugs > 0 ? "bad" : "muted"}
+           note="Trades that closed 50% or more down" />
+      <Row label="Judged on" value={book ? judgeDay(book.judge_at) : null} tone="muted"
+           note={book ? `Fixed before its first trade on ${judgeDay(book.started_at)}` : undefined} />
       <Row
         label="Security-blocked candidates"
         value={summary ? String(summary.failed_count + summary.unknown_count) : null}

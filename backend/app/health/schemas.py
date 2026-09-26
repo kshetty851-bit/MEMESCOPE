@@ -66,7 +66,9 @@ class ScoringHealth(BaseSchema):
     last_score: datetime | None
     minutes_since_last_score: float | None
     #: Tokens that have market observations but no score row yet.
-    pending: int
+    #: None while scoring is switched off: the count is not taken then (it
+    #: scanned every discovered token and ran for minutes, 2026-09-26).
+    pending: int | None
 
 
 class RadarHealth(BaseSchema):
