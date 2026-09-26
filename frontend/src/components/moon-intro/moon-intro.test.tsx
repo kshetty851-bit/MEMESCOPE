@@ -90,6 +90,19 @@ describe("MoonIntro", () => {
     expect(scene.frames.some((f) => f.phase === "warp")).toBe(false);
   });
 
+  it("has no near miss in the short cut: no crack, no alarm, no kick, but still the lock", () => {
+    sessionStorage.setItem(SEEN_KEY, "1");
+    const { container } = mount();
+    step(totalSeconds(SHORT_TIMELINE) - 0.7); // late in approach, past every near-miss moment
+    expect(container.querySelector(".mi-crack")).toBeNull();
+    expect(screen.queryByText("HULL BREACH")).toBeNull();
+    expect(board.played).not.toContain("alarm");
+    expect(screen.getByText("TARGET ACQUIRED: THE MOON")).toBeInTheDocument();
+    const shake = container.querySelector<HTMLElement>(".mi-shake")!.style.transform;
+    const px = Math.max(0, ...[...shake.matchAll(/-?[\d.]+(?=px)/g)].map((m) => Math.abs(Number(m[0]))));
+    expect(px).toBeLessThanOrEqual(1); // approach's base hum only, no 14px kick
+  });
+
   it("plays the reduced cut, still and silent, under reduced motion", () => {
     reduced = true;
     const { root, onComplete, container } = mount();

@@ -63,8 +63,11 @@ const KICKS: Record<string, number> = {
 
 type Moment = { key: string; time: number };
 
-/** Every moment on this timeline, as an absolute time, in firing order. */
-function momentsOf(timeline: Timeline): Moment[] {
+/** The short cut flies no rocks (the space scene skips them), so it has no near miss either. */
+const NOT_IN_SHORT = new Set(["approach.asteroids", "approach.nearMiss", "approach.repaired"]);
+
+/** Every moment on this cut, as an absolute time, in firing order. */
+function momentsOf(timeline: Timeline, mode: Mode): Moment[] {
   const out: Moment[] = [];
   let start = 0;
   for (const [phase, seconds] of timeline) {
@@ -75,7 +78,9 @@ function momentsOf(timeline: Timeline): Moment[] {
     }
     start += seconds;
   }
-  return out.sort((a, b) => a.time - b.time);
+  return out
+    .filter((m) => mode !== "short" || !NOT_IN_SHORT.has(m.key))
+    .sort((a, b) => a.time - b.time);
 }
 
 /** Engine level: up from the throttle through ignition, full in warp, fading across approach. */
@@ -106,7 +111,7 @@ function storedSound(): boolean {
 export default function MoonIntro({ onComplete }: { onComplete: () => void }) {
   const [mode] = useState(pickMode);
   const timeline = TIMELINES[mode];
-  const [moments] = useState(() => momentsOf(timeline));
+  const [moments] = useState(() => momentsOf(timeline, mode));
   const [phase, setPhase] = useState<IntroPhase>(() => phaseAt(timeline, 0).phase);
   const [passed, setPassed] = useState<ReadonlySet<string>>(() => new Set());
   const [soundOn, setSoundOn] = useState(storedSound);
