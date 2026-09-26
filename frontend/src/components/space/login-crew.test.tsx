@@ -137,19 +137,24 @@ describe("the panda's news desk in the sidebar", () => {
     get.mockReset();
   });
 
-  it("shows the latest Solana headline and reads it out short", async () => {
+  it("broadcasts the latest Solana headline on the panda's TV", async () => {
     get.mockResolvedValue({ items: [
       { title: "Solana Foundation hires two executives to drive global payments adoption",
         source: "FF News", url: "https://example.com/a", published_at: new Date().toISOString() },
+      { title: "Second story", source: "Decrypt", url: "https://example.com/b", published_at: null },
     ] });
     const { container } = render(<DockCrew pathname="/karthik-lab" placement="rail" />);
     expect(await screen.findByRole("link", { name: /Solana Foundation hires/ })).toHaveAttribute(
       "href", "https://example.com/a");
-    expect(screen.getByText(/FF News/)).toBeInTheDocument();
     expect(get).toHaveBeenCalledWith("/news/solana", expect.anything());
-    // Only the panda lives in the rail's gap now.
-    expect(container.querySelectorAll(".dock-crew__mate")).toHaveLength(1);
-    fireEvent.click(container.querySelector(".dock-crew__mate--panda img")!);
-    expect(container.querySelector(".login-crew__bubble")?.textContent).toMatch(/^📰 Solana Foundation hires/);
+    // One set: the panda at the desk, the LIVE badge, and a ticker of the headlines.
+    expect(container.querySelectorAll(".panda-tv__panda")).toHaveLength(1);
+    expect(container.querySelector(".panda-tv__live")).toHaveTextContent("LIVE");
+    expect(container.querySelector(".panda-tv__ticker")).toHaveTextContent("Second story");
+    expect(screen.getByText(/FF News/)).toBeInTheDocument();
+    // Tapping the panda is a real button, and the hide control still tucks it away.
+    fireEvent.click(screen.getByRole("button", { name: "Ask the panda to read the headline" }));
+    fireEvent.click(screen.getByRole("button", { name: "Hide the crew" }));
+    expect(container.querySelector(".panda-tv")).toBeNull();
   });
 });
