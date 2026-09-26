@@ -143,13 +143,57 @@ export function WhatRunsHere() {
   );
 }
 
+/** The people Karthik credits beside himself (2026-09-26, his words). */
+const MISSION_SUPPORT = [
+  { name: "Rafiq", role: "The spark",
+    line: "Came up with the original idea and pushed me to turn it into something real." },
+  { name: "Ashwin", role: "The deployment",
+    line: "Helped take MEMESCOPE from local development to the cloud." },
+] as const;
+
 export function SiteFooter() {
   return (
     <footer className="relative z-10 mx-auto w-full max-w-[80rem] border-t border-line-subtle px-6 py-8 lg:px-10">
-      <p className="text-sm text-ink-2">
-        Designed and built by <span className="font-medium text-ink">Karthik Shetty</span>
-      </p>
-      <p className="mt-1 text-xs text-ink-3">Dubai · 2026</p>
+      {/* Frosted like the cards below: the planets wander behind the footer. */}
+      <div className="inline-block rounded-lg border border-line-subtle bg-abyss/85 px-5 py-4 backdrop-blur-md">
+        <p className="text-label font-medium uppercase tracking-[0.14em] text-ink-3">
+          Designed &amp; built by
+        </p>
+        <p className="mt-2 text-lg font-medium text-ink">Karthik Shetty</p>
+        <p className="mt-0.5 font-mono text-xs text-ink-2">Product · Engineering · Vision</p>
+        <p className="mt-1 text-xs text-ink-3">Dubai · 2026</p>
+      </div>
+
+      <div className="mt-7">
+        <p className="inline-block rounded bg-abyss/85 px-1.5 py-0.5 text-label font-medium uppercase tracking-[0.14em] text-ink-3 backdrop-blur-md">
+          Mission support
+        </p>
+        <ul className="mt-3 grid gap-3 sm:grid-cols-2 lg:max-w-2xl">
+          {MISSION_SUPPORT.map((p) => (
+            <li
+              key={p.name}
+              className="flex items-start gap-3 rounded-lg border border-line-subtle bg-abyss/85 px-4 py-3 backdrop-blur-md"
+            >
+              <span
+                aria-hidden
+                className="grid size-9 shrink-0 place-items-center rounded-full border border-accent/40 bg-accent/10 font-mono text-sm font-semibold text-accent"
+              >
+                {p.name[0]}
+              </span>
+              <div className="min-w-0">
+                <p className="text-sm text-ink">
+                  <span className="font-medium">{p.name}</span>
+                  <span className="text-ink-3"> — </span>
+                  <span className="font-mono text-[11px] uppercase tracking-wider text-accent">
+                    {p.role}
+                  </span>
+                </p>
+                <p className="mt-0.5 text-xs leading-relaxed text-ink-2">{p.line}</p>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </div>
     </footer>
   );
 }
