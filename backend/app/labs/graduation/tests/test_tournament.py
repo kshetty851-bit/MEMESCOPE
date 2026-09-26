@@ -59,7 +59,7 @@ def test_the_tournament_is_a_hold_sweep_with_a_baseline_on_every_hold() -> None:
     One baseline per hold, so no hold is judged without an unselected twin on
     its own clock. Nothing on this board decides by hashing a mint.
     """
-    assert len(ARMS) == 17
+    assert len(ARMS) == 19
     # Karthik's quiet-pool arm (2026-09-20): the baseline's rule, refusing a
     # pool already past `QUIET_MAX_POOL_TXS` transactions. Not a control, so
     # the baseline below is unchanged and it has something to be judged against.
@@ -1260,3 +1260,23 @@ async def test_the_scheduler_prices_pool_opens_off_the_pool(monkeypatch) -> None
     monkeypatch.setattr(scheduler, "Tournament", Recorded)
     assert await scheduler.paper_tick() == {"ticked": True}
     assert built["pool_reader"] is sources.pool_now
+
+
+def test_karthiks_small_pool_checks_buy_only_their_band():
+    """KARTHIK_Q25_5M and KARTHIK_Q50_5M: his rule on the pools his book skips.
+    Half-open bands, so a pool sits in exactly one of them."""
+    from datetime import UTC, datetime
+    from decimal import Decimal
+
+    from app.labs.graduation.tournament import BY_NAME, accepts
+
+    at = datetime(2026, 9, 26, tzinfo=UTC)
+    def takes(name, usd):
+        return accepts(BY_NAME[name], mint="xpump", open_at=at, liquidity=Decimal(usd),
+                       fdv=None, sells=None, reuse=None)
+    assert [takes("KARTHIK_Q25_5M", v) for v in (24_999, 25_000, 49_999, 50_000)] == [
+        False, True, True, False]
+    assert [takes("KARTHIK_Q50_5M", v) for v in (49_999, 50_000, 74_999, 75_000)] == [
+        False, True, True, False]
+    assert BY_NAME["KARTHIK_Q25_5M"].quiet and BY_NAME["KARTHIK_Q50_5M"].quiet
+    assert BY_NAME["KARTHIK_Q25_5M"].hold == BY_NAME["KARTHIK_Q50_5M"].hold == 5

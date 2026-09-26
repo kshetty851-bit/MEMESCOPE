@@ -346,3 +346,29 @@ async def test_the_page_compares_sizes_and_a_150k_floor_without_changing_the_boo
     assert ten["all"]["pnl_pct"] == Decimal("-8.90")          # of its $100
     # The book itself is still both trades at $200.
     assert (book["trades"], book["rugs"]) == (2, 1)
+
+
+async def test_pool_size_splits_take_the_small_pools_from_their_own_arms() -> None:
+    """Six splits, each its own one-at-a-time walk on the book's money. Below
+    $75k the book never buys, so those come from the small-pool arms; replayed
+    rows are counted so the page can say how much of a split is a look back."""
+    from app.labs.graduation.api import karthik_book
+
+    start = next(s for s in config.FRESH_BOOKS if s.book == "KARTHIK_QUIET_5M").start
+    small = _Pos("SMALL", start + timedelta(hours=1), -0.99)      # a $30k rug
+    small.liq_open_usd = Decimal(30_000)
+    small.close_reason = "replayed"
+    mid = _Pos("MID", start + timedelta(hours=2), 0.05)
+    mid.liq_open_usd = Decimal(60_000)
+    deep = _Pos("DEEP", start + timedelta(hours=3), 0.10)          # $100k: the book's own
+    book = await karthik_book(db=_StubDb([small, mid, deep]))  # type: ignore[arg-type]
+
+    bands = {(b["lo_usd"], b["hi_usd"]): b for b in book["whatif"]["bands"]}
+    assert list(bands) == [(25_000, 50_000), (50_000, 75_000), (75_000, 150_000),
+                           (150_000, 300_000), (300_000, 500_000), (500_000, None)]
+    assert (bands[(25_000, 50_000)]["trades"], bands[(25_000, 50_000)]["rugs"]) == (1, 1)
+    assert bands[(25_000, 50_000)]["replayed"] == 1
+    assert bands[(25_000, 50_000)]["book"] is False
+    assert bands[(50_000, 75_000)]["pnl_usd"] == Decimal("10.00")   # $200 at +5%
+    assert (bands[(75_000, 150_000)]["trades"], bands[(75_000, 150_000)]["book"]) == (1, True)
+    assert bands[(500_000, None)]["trades"] == 0

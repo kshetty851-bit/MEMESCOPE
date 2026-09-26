@@ -217,6 +217,15 @@ function Row({ trade }: { trade: KarthikTrade }) {
   );
 }
 
+function bandLabel(lo: number, hi: number | null): string {
+  const k = (n: number) => `$${Math.round(n / 1000)}k`;
+  return hi == null ? `${k(lo)}+` : `${k(lo)}–${k(hi)}`;
+}
+
+function replayedCount(bands: { book: boolean; replayed: number }[]): number {
+  return bands.filter((b) => !b.book).reduce((sum, b) => sum + b.replayed, 0);
+}
+
 function Signed({ line }: { line: KarthikWhatIfLine }) {
   const n = Number(line.pnl_usd);
   return (
@@ -301,6 +310,47 @@ function WhatIf({ data }: { data: KarthikBook }) {
           </p>
         </div>
       </Panel>
+
+      {w.bands?.length ? (
+        <Panel>
+          <PanelHeader>
+            <PanelTitle>Check: every pool size</PanelTitle>
+          </PanelHeader>
+          <div className="overflow-x-auto p-3">
+            <table className="w-full text-[12px] tabular-nums">
+              <thead className="text-[11px] uppercase tracking-wider text-ink-dim">
+                <tr>
+                  <th className="py-1 pr-2 text-left font-normal">pools</th>
+                  <th className="py-1 pr-2 text-right font-normal">profit / loss</th>
+                  <th className="py-1 pr-2 text-right font-normal">trades</th>
+                  <th className="py-1 text-right font-normal">rugs</th>
+                </tr>
+              </thead>
+              <tbody>
+                {w.bands.map((b) => (
+                  <tr key={b.lo_usd} className="border-t border-line/60">
+                    <td className="py-1.5 pr-2">
+                      {bandLabel(b.lo_usd, b.hi_usd)}
+                      {b.book ? null : <span className="ml-1 text-[10px] text-ink-dim">*</span>}
+                    </td>
+                    <td className="py-1.5 pr-2 text-right"><Signed line={b} /></td>
+                    <td className="py-1.5 pr-2 text-right">{b.trades}</td>
+                    <td className="py-1.5 text-right">{b.rugs}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="mt-2 text-[11px] leading-relaxed text-ink-dim">
+              Each size is its own {usd(data.capital_usd)} book at {usd(data.ticket_usd)} a
+              trade, one trade at a time, from the same start. $75k and up are this
+              book&apos;s own trades cut by pool size. * The same rule on the pools this
+              book skips: {replayedCount(w.bands)} of those trades were rebuilt from price
+              snapshots (they read about a point a trade too kind), the rest were taken
+              live. A look back, not a test.
+            </p>
+          </div>
+        </Panel>
+      ) : null}
 
       {w.floors ? (
         <Panel>
