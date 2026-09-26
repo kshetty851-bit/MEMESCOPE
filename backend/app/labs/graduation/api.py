@@ -1532,7 +1532,10 @@ def _karthik_whatif(rows: Sequence[Any], sol: Decimal | None, *, capital: float,
                    "current": (t, c) == (ticket, capital),
                    # The book as it now trades (its pool range), at this size.
                    "all": run(rows if book is None else book, float(t), float(c)),
-                   "deep": run(deep, float(t), float(c))}
+                   # Every $75k+ pool his rule buys, at this size (Karthik,
+                   # 2026-09-26: the book is $150k+ itself now, so "$150k+
+                   # only" beside it said nothing).
+                   "wide": run(rows, float(t), float(c))}
                   for t, c in KARTHIK_WHATIF_SIZES],
     }
 

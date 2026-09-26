@@ -85,5 +85,5 @@ export interface KarthikWhatIf {
    *  run the same rule on the pools the book skips; `replayed` of those trades
    *  were rebuilt from price snapshots rather than taken live. */
   bands?: (KarthikWhatIfLine & { lo_usd: number; hi_usd: number | null; book: boolean })[];
-  sizes: { ticket_usd: number; capital_usd: number; current: boolean; all: KarthikWhatIfLine; deep: KarthikWhatIfLine }[];
+  sizes: { ticket_usd: number; capital_usd: number; current: boolean; all: KarthikWhatIfLine; wide: KarthikWhatIfLine }[];
 }

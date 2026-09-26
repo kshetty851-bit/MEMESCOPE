@@ -386,7 +386,7 @@ async def test_the_book_counts_only_its_pool_range_but_the_checks_see_every_size
     from app.labs.graduation.api import karthik_book
 
     start = next(s for s in config.FRESH_BOOKS if s.book == "KARTHIK_QUIET_5M").start
-    shallow = _Pos("SHALLOW", start + timedelta(hours=1), -0.99)     # $100k rug: not the book's
+    shallow = _Pos("SHALLOW", start + timedelta(hours=1), -0.99)  # $100k rug, not the book's
     shallow.liq_open_usd = Decimal(100_000)
     deep = _Pos("DEEP", start + timedelta(hours=2), 0.10)            # $400k: the book's
     deep.liq_open_usd = Decimal(400_000)
@@ -399,3 +399,18 @@ async def test_the_book_counts_only_its_pool_range_but_the_checks_see_every_size
     assert book["every_trade"]["trades"] == 2                        # the old rule saw both
     bands = {b["lo_usd"]: b for b in book["whatif"]["bands"]}
     assert (bands[75_000]["trades"], bands[75_000]["rugs"]) == (1, 1)
+
+
+async def test_the_size_table_sets_the_book_beside_every_75k_pool() -> None:
+    """Each size shows the book ($150k+) and every $75k+ pool the rule buys."""
+    from app.labs.graduation.api import karthik_book
+
+    start = next(s for s in config.FRESH_BOOKS if s.book == "KARTHIK_QUIET_5M").start
+    mid = _Pos("MID", start + timedelta(hours=1), -0.99)            # $100k rug: not the book's
+    mid.liq_open_usd = Decimal(100_000)
+    deep = _Pos("DEEP", start + timedelta(hours=2), 0.10)           # $200k: the book's
+    book = await karthik_book(db=_StubDb([mid, deep]))  # type: ignore[arg-type]
+
+    now = next(s for s in book["whatif"]["sizes"] if s["current"])
+    assert (now["all"]["trades"], now["all"]["rugs"]) == (1, 0)
+    assert (now["wide"]["trades"], now["wide"]["rugs"]) == (2, 1)
