@@ -74,5 +74,10 @@ export interface KarthikWhatIf {
   floor_usd: number;
   deep: KarthikWhatIfLine;
   floors: (KarthikWhatIfLine & { floor_usd: number })[];
+  /** Pool-size splits, each its own one-at-a-time walk on the book's money.
+   *  `book`: cut from this book's trades ($75k+). Otherwise from the arms that
+   *  run the same rule on the pools the book skips; `replayed` of those trades
+   *  were rebuilt from price snapshots rather than taken live. */
+  bands?: (KarthikWhatIfLine & { lo_usd: number; hi_usd: number | null; book: boolean; replayed: number })[];
   sizes: { ticket_usd: number; capital_usd: number; current: boolean; all: KarthikWhatIfLine; deep: KarthikWhatIfLine }[];
 }

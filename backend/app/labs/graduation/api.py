@@ -1435,6 +1435,13 @@ KARTHIK_WHATIF_SIZES = ((10, 100), (20, 100), (25, 100), (50, 100), (100, 200), 
 KARTHIK_WHATIF_FLOOR_USD = 150_000
 #: Deeper floors shown beside it, to check (Karthik, 25 Sep).
 KARTHIK_WHATIF_FLOORS = (150_000, 200_000, 300_000, 500_000)
+#: Pool-size splits on the page (Karthik, 2026-09-26). The two below $75k come
+#: from the arms that run his rule on the pools his book skips; the rest are
+#: his own book's trades cut by pool size. `None` = no upper edge.
+KARTHIK_BANDS: tuple[tuple[int, int | None], ...] = (
+    (25_000, 50_000), (50_000, 75_000), (75_000, 150_000),
+    (150_000, 300_000), (300_000, 500_000), (500_000, None))
+KARTHIK_BAND_BOOKS = ("KARTHIK_Q25_5M", "KARTHIK_Q50_5M")
 
 
 def _one_at_a_time(rows: Sequence[Any]) -> list[Any]:
@@ -1473,7 +1480,8 @@ def _karthik_line(rows: Sequence[Any], sol: Decimal | None, *, size: float,
 
 
 def _karthik_whatif(rows: Sequence[Any], sol: Decimal | None, *, capital: float,
-                    ticket: float, cents: Decimal) -> dict[str, Any]:
+                    ticket: float, cents: Decimal,
+                    small: Sequence[Any] = ()) -> dict[str, Any]:
     """The same book on other terms, for comparison only: its trades at other
     ticket sizes, and restricted to pools of $150k and up (asked for 24 Sep,
     after EVO; see the quiet rule's record: 3 deaths in 41 trades under $150k,
@@ -1492,9 +1500,23 @@ def _karthik_whatif(rows: Sequence[Any], sol: Decimal | None, *, capital: float,
         return _karthik_line(_one_at_a_time(sub), sol, size=size, capital=capital,
                              cents=cents)
 
+    def band(lo: int, hi: int | None) -> dict[str, Any]:
+        # Below $75k the book never buys, so those splits come from `small`,
+        # the arms running the same rule on those pools (seeded by replay).
+        source = small if lo < 75_000 else rows
+        def inside(r: Any) -> bool:
+            usd = float(r.liq_open_usd or 0)
+            return lo <= usd and (hi is None or usd < hi)
+        sub = [r for r in source if inside(r)]
+        replayed = sum(1 for r in _one_at_a_time(sub)
+                       if getattr(r, "close_reason", None) == "replayed")
+        return {"lo_usd": lo, "hi_usd": hi, "book": lo >= 75_000,
+                "replayed": replayed, **run(sub, ticket, capital)}
+
     return {
         "floor_usd": KARTHIK_WHATIF_FLOOR_USD,
         "deep": run(deep, ticket, capital),
+        "bands": [band(lo, hi) for lo, hi in KARTHIK_BANDS],
         "floors": [{"floor_usd": f, **run([r for r in rows
                                            if float(r.liq_open_usd or 0) >= f],
                                           ticket, capital)}
@@ -1599,6 +1621,15 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
         select(GradPostgradSample.price_usd / GradPostgradSample.price_native)
         .where(GradPostgradSample.price_usd > 0, GradPostgradSample.price_native > 0)
         .order_by(GradPostgradSample.ts.desc()).limit(1))
+    # His rule on the pools his book skips ($25-75k), for the pool-size splits.
+    small = (await db.scalars(
+        select(GradPaperPosition)
+        .where(GradPaperPosition.book.in_(KARTHIK_BAND_BOOKS),
+               GradPaperPosition.closed_at.is_not(None),
+               GradPaperPosition.excluded.is_(None),
+               GradPaperPosition.net_return.is_not(None),
+               GradPaperPosition.opened_at >= spec.start)
+        .order_by(GradPaperPosition.opened_at))).all()
     # One trade at a time, from the first day (Karthik, 2026-09-25): chosen
     # after WOTF, which the rule would have let go because LESGO was still
     # held. Replayed from the start, so the days before it are a look back;
@@ -1661,7 +1692,7 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
         "days": _karthik_days(took, spec.start, float(spec.capital_usd), cents),
         # The same trades at other sizes, and on $150k+ pools only. A check,
         # shown beside the book; the book itself stays on its own rule.
-        "whatif": _karthik_whatif(every, sol, capital=float(spec.capital_usd),
+        "whatif": _karthik_whatif(every, sol, small=small, capital=float(spec.capital_usd),
                                   ticket=float(spec.ticket_usd), cents=cents),
         # The rows the BOOK bought, with the money the book made on them --
         # not the arm's $100-notional figure, which is the same only while the
