@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 
-import { atOrAfter, type ScenePhase } from "@/lib/launch";
 import { cn } from "@/lib/utils";
 
 /**
@@ -28,8 +27,7 @@ import { cn } from "@/lib/utils";
  *  - CardPeeker is an animal behind a card, showing over its top edge.
  *
  * Everything moves in CSS on transform and opacity only. The crew leaves when
- * the hero scrolls away and comes back with it, cheers when the access code is
- * accepted, and scatters when the rocket flies. With reduced motion the
+ * the hero scrolls away and comes back with it. With reduced motion the
  * parked figures stand still and the fly-bys and peekaboos do not happen.
  */
 
@@ -82,13 +80,9 @@ function useHeroAway(): boolean {
   return away;
 }
 
-export function FloatingCrew({ phase = "idle" }: { phase?: ScenePhase }) {
+export function FloatingCrew() {
   const away = useHeroAway();
-  const state = {
-    "data-away": away ? "" : undefined,
-    "data-sequence": atOrAfter(phase, "approved") ? "" : undefined,
-    "data-flying": atOrAfter(phase, "launching") ? "" : undefined,
-  };
+  const state = { "data-away": away ? "" : undefined };
   return (
     <>
       <div className="crew-sky crew-sky--back" aria-hidden {...state}>

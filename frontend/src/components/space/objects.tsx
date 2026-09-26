@@ -110,16 +110,6 @@ export function LaunchPadArt(props: Art) {
   );
 }
 
-/** Engine flame. Separate so it can be shown, hidden and pulsed on its own. */
-export function RocketFlame(props: Art) {
-  return (
-    <svg viewBox="0 32 40 58" {...base} {...props}>
-      <path d="M20 90C8 66 4 50 8 34c4 10 8 14 12 16 4-2 8-6 12-16 4 16 0 32-12 56z" fill="#f7a23b" />
-      <path d="M20 78C13 62 11 51 13 40c3 7 5 10 7 11 2-1 4-4 7-11 2 11 0 22-7 38z" fill="#ffd76e" />
-    </svg>
-  );
-}
-
 /* ==========================================================================
    SATELLITES
    ========================================================================== */
