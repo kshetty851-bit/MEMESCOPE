@@ -764,8 +764,8 @@
     one paints.
 
     Every other content child of `main` already carries a positive z-index:
-    the hero is `relative`, HomepageIntelligence is `relative z-10`,
-    `.alpha-transition` is z-30. `.crew` and `.crew-cta` were the only
+    the hero is `relative`, HomepageIntelligence is `relative z-10`.
+    `.crew` and `.crew-cta` were the only
     unpositioned ones, which is exactly the set that was invisible.
   */
   position: relative;

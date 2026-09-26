@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
@@ -8,35 +9,35 @@ import { Wordmark, WordmarkSubtitle } from "@/components/brand/wordmark";
 import { Crew, EnterHq } from "@/components/alpha/crew";
 import { AlphaAccess } from "@/components/alpha/alpha-access";
 import { HeroMascot, type MascotState } from "@/components/alpha/hero-mascot";
-import { LaunchOverlay, useLaunchSequence } from "@/components/alpha/launch-sequence";
 import { SiteFooter, WhatRunsHere } from "@/components/alpha/what-runs-here";
 import { HomeUniverse } from "@/components/space/home-universe";
 import { FloatingCrew, PerchedCrew } from "@/components/space/space-crew";
 import { SpaceAudioToggle } from "@/components/space/space-audio-toggle";
-import { useReducedMotion } from "@/hooks/use-reduced-motion";
 import { ALPHA_ACCESS } from "@/lib/env";
-import { atOrAfter, type GatePhase, type ScenePhase } from "@/lib/launch";
+import type { GatePhase } from "@/lib/launch";
 import { cn } from "@/lib/utils";
 
+/** The moon landing, as a lazy chunk: not in the page's first load. */
+const loadMoonIntro = () => import("@/components/moon-intro/moon-intro");
+const MoonIntro = dynamic(loadMoonIntro, { ssr: false });
+
 /**
- * THE ALPHA GATE — now a launch.
+ * THE ALPHA GATE — now a landing.
  *
  * The layout is unchanged and stays unchanged: a two-column grid whose copy
  * and access panel are siblings that cannot collide at any width, with the
  * scene behind both rather than beside them. That was the fix for a set of
  * real contrast failures and none of this touches it.
  *
- * What is new is that the page owns a sequence. An accepted code no longer
- * means "wait 1.7 seconds, then navigate" — it starts a timeline that the
- * mascot, the universe and the overlay all read from, and navigation happens
- * when that timeline reaches its last step.
+ * An accepted code mounts `MoonIntro` (components/moon-intro), a full-screen
+ * cockpit ride to the moon that owns its own clock and calls `enter` when it
+ * lands. The page behind it stays in its idle state.
  *
- * Three pieces of state, and no more:
+ * Two pieces of state, and no more:
  *
  *   gate      what the form last reported: idle, validating, or denied
  *   approved  a latch. Once set it never clears, so nothing can re-enter the
- *             sequence or resubmit a code while the rocket is in the air.
- *   phase     where the timeline is, once approved
+ *             intro or resubmit a code while it plays.
  *
  * A returning visitor never sees any of it: `AlphaAccess` asks the server
  * whether the session is already live and redirects before the form paints.
@@ -46,7 +47,6 @@ import { cn } from "@/lib/utils";
  */
 export function LandingPage() {
   const router = useRouter();
-  const reduced = useReducedMotion();
 
   const [gate, setGate] = useState<GatePhase>("idle");
   const [approved, setApproved] = useState(false);
@@ -56,7 +56,23 @@ export function LandingPage() {
     router.push(ALPHA_ACCESS.dashboardPath);
   }, [router]);
 
-  const { phase: launch, count } = useLaunchSequence(approved, reduced, enter);
+  // The server already said yes; warm the dashboard while the intro plays.
+  useEffect(() => {
+    if (approved) router.prefetch(ALPHA_ACCESS.dashboardPath);
+  }, [approved, router]);
+
+  // Fetch the intro's chunk once the page is idle, so an accepted code cuts
+  // straight to black instead of waiting on the download (~10 KB gzipped).
+  useEffect(() => {
+    const warm = () => void loadMoonIntro();
+    // Safari has no requestIdleCallback; a plain delay does the same job.
+    if (typeof window.requestIdleCallback !== "function") {
+      const timer = window.setTimeout(warm, 2000);
+      return () => window.clearTimeout(timer);
+    }
+    const id = window.requestIdleCallback(warm, { timeout: 4000 });
+    return () => window.cancelIdleCallback(id);
+  }, []);
 
   useEffect(() => {
     setSceneOnly(new URLSearchParams(window.location.search).get("scene") === "1");
@@ -71,36 +87,22 @@ export function LandingPage() {
     return () => window.clearTimeout(timer);
   }, [gate]);
 
-  const phase: ScenePhase = approved ? launch : gate;
-
-  const mascot: MascotState = atOrAfter(phase, "ignition")
-    ? "watching"
-    : atOrAfter(phase, "approved")
-      ? "approved"
-      : phase === "denied"
-        ? "denied"
-        : "idle";
+  const mascot: MascotState = gate === "denied" ? "denied" : "idle";
 
   return (
     <main
-      data-phase={phase}
-      // Latched, like the scene's own flags: once the code is accepted the
-      // interface stands down and cannot come back mid-flight.
-      data-sequence={atOrAfter(phase, "approved") ? "" : undefined}
+      data-phase={gate}
       className={cn(
         "alpha-landing relative isolate min-h-dvh overflow-x-hidden text-ink",
-        (phase === "unlock" || phase === "enter" || (reduced && approved)) &&
-          "alpha-landing--unlock",
         sceneOnly && "alpha-landing--scene-only",
       )}
     >
-      <HomeUniverse phase={phase} />
-      <FloatingCrew phase={phase} />
+      <HomeUniverse />
+      <FloatingCrew />
 
       <section className="relative mx-auto flex min-h-dvh w-full max-w-[80rem] flex-col px-6 py-8 lg:px-10">
         {/* `data-alpha-content` marks what `?scene=1` hides — a capture mode for
-            brand shots that shows the scene without the interface. It is also
-            what fades out under the countdown, so the mission has the frame. */}
+            brand shots that shows the scene without the interface. */}
         <header data-alpha-content className="relative z-10 flex items-center gap-3">
           <LogoMark size={22} className="text-accent" />
           <Wordmark className="text-xs tracking-[0.18em]" />
@@ -158,9 +160,7 @@ export function LandingPage() {
         </div>
       </section>
 
-      <LaunchOverlay phase={phase} count={count} />
-
-      <div className="alpha-transition" aria-hidden />
+      {approved && <MoonIntro onComplete={enter} />}
 
       {/*
         THE CREW COMES FIRST, AND THAT ORDERING IS THE FIX.

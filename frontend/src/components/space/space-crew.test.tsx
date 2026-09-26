@@ -37,17 +37,6 @@ describe("the space crew", () => {
     expect(front).not.toHaveAttribute("data-away");
   });
 
-  it("cheers when the code is accepted and scatters when the rocket flies", () => {
-    const { container, rerender } = render(<FloatingCrew phase="idle" />);
-    const front = () => container.querySelector(".crew-sky--front")!;
-    expect(front()).not.toHaveAttribute("data-sequence");
-    rerender(<FloatingCrew phase="approved" />);
-    expect(front()).toHaveAttribute("data-sequence");
-    expect(front()).not.toHaveAttribute("data-flying");
-    rerender(<FloatingCrew phase="launching" />);
-    expect(front()).toHaveAttribute("data-flying");
-  });
-
   it("puts a peeker on the side it is asked for", () => {
     const { container } = render(<CardPeeker src="/crew/lion.webp" side="left" />);
     expect(container.querySelector(".crew-peek--left img")).toHaveAttribute("src", "/crew/lion.webp");
