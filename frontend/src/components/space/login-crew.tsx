@@ -425,27 +425,71 @@ function shortTitle(title: string, max = 64): string {
   return title.length <= max ? title : `${title.slice(0, max - 1).trimEnd()}…`;
 }
 
-/** The live strip under the panda: one headline at a time, rotating, linked. */
-function NewsStrip({ items, index }: { items: Headline[]; index: number }) {
+
+/**
+ * The panda's retro TV (Karthik, 2026-09-26, from his own sketch): a wooden
+ * set with knobs, a glowing curved screen, the panda at the APN desk with a
+ * mic, a LIVE badge, the headline as a lower third and a ticker of the other
+ * headlines. Real headlines only; no prices, since none are measured here.
+ */
+function PandaTV({ items, index, hop, onTapPanda, onHide }: {
+  items: Headline[];
+  index: number;
+  hop: boolean;
+  onTapPanda: () => void;
+  onHide: () => void;
+}) {
   const item = items.length ? items[index % items.length]! : null;
+  const ticker = items.length ? items.map((h) => h.title).join("  ·  ") : "Tuning in to Solana…";
   return (
-    <div className="dock-news" aria-live="off">
-      <p className="dock-news__label">
-        <span className="dock-news__dot" aria-hidden /> Solana news · live
-      </p>
-      {item ? (
-        <>
-          <a href={item.url} target="_blank" rel="noreferrer" className="dock-news__title">
-            {item.title}
-          </a>
-          <p className="dock-news__meta">
-            {item.source}
-            {item.published_at ? ` · ${ago(item.published_at, Date.now())}` : ""}
-          </p>
-        </>
-      ) : (
-        <p className="dock-news__meta">Tuning in…</p>
-      )}
+    <div className="panda-tv">
+      <div className="panda-tv__cabinet">
+        <div className="panda-tv__screen">
+          <span className="panda-tv__grid" aria-hidden />
+          <span className="panda-tv__live" aria-hidden><i /> LIVE</span>
+          <span className="panda-tv__channel" aria-hidden>APN 24/7</span>
+          <button type="button" className="panda-tv__anchor" data-hop={hop ? "" : undefined}
+            aria-label="Ask the panda to read the headline" onClick={onTapPanda}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/crew/panda.webp" alt="" draggable={false} className="panda-tv__panda"
+              key={index} />
+            <span className="panda-tv__desk" aria-hidden />
+            <svg className="panda-tv__mic" viewBox="0 0 24 40" aria-hidden>
+              <rect x="10" y="18" width="4" height="20" rx="2" fill="#2b3342" />
+              <rect x="3" y="15" width="18" height="9" rx="2" fill="#2563eb" />
+              <text x="12" y="22" textAnchor="middle" fontSize="6" fontWeight="800" fill="#fff">APN</text>
+              <circle cx="12" cy="9" r="8" fill="#39424f" />
+              <circle cx="12" cy="9" r="6" fill="none" stroke="#5b6574" strokeWidth="1.2" strokeDasharray="1.5 1.5" />
+            </svg>
+          </button>
+          <div className="panda-tv__lower">
+            <span className="panda-tv__brand">Astro Panda News</span>
+            {item ? (
+              <a href={item.url} target="_blank" rel="noreferrer" className="panda-tv__headline">
+                {item.title}
+              </a>
+            ) : (
+              <span className="panda-tv__headline">Tuning in…</span>
+            )}
+          </div>
+          <div className="panda-tv__ticker" aria-hidden>
+            <span className="panda-tv__breaking">Breaking</span>
+            <div className="panda-tv__track"><span>{ticker}</span><span>{ticker}</span></div>
+          </div>
+          <span className="panda-tv__glass" aria-hidden />
+        </div>
+        <div className="panda-tv__panel" aria-hidden>
+          <span className="panda-tv__knob" />
+          <span className="panda-tv__knob panda-tv__knob--tune" />
+          <span className="panda-tv__grille" />
+        </div>
+      </div>
+      <div className="panda-tv__foot">
+        {item ? (
+          <span>{item.source}{item.published_at ? ` · ${ago(item.published_at, Date.now())}` : ""}</span>
+        ) : <span>Solana news</span>}
+        <button type="button" className="panda-tv__hide" aria-label="Hide the crew" onClick={onHide}>×</button>
+      </div>
     </div>
   );
 }
@@ -524,8 +568,28 @@ export function DockCrew({
     );
   }
 
+  if (rail) {
+    return (
+      <div className="dock-rail">
+        <PandaTV
+          items={news}
+          index={newsIndex}
+          hop={hop === "panda"}
+          onHide={() => setDock(true)}
+          onTapPanda={() => {
+            setHop("panda");
+            setTimeout(() => setHop(null), 700);
+            sfx.current?.whoosh();
+            const headline = news.length ? news[newsIndex % news.length] : null;
+            say("panda", headline ? `📰 ${shortTitle(headline.title)}` : line(mates[0]!), 6000);
+          }}
+        />
+      </div>
+    );
+  }
+
   return (
-    <div className={cn(rail && "dock-rail")}>
+    <div>
       <div className={cn("dock-crew", `dock-crew--${placement}`)} data-hop={hop ?? undefined}>
         <div className="dock-crew__row" aria-hidden>
           <Mates
@@ -547,7 +611,6 @@ export function DockCrew({
           </button>
         </div>
       </div>
-      {rail ? <NewsStrip items={news} index={newsIndex} /> : null}
     </div>
   );
 }
