@@ -571,9 +571,10 @@ export function KarthikLabPage() {
             <b className="text-ink-2">
               Pools {bandLabel(data.pools_usd[0], data.pools_usd[1])} only:
             </b>{" "}
-            chosen on {day(data.pools_since)} from the pool-size splits (the middle sizes
-            made money, the deeper ones did not) and replayed from day 1, so every figure
-            here is a look back until then. The checks beside it still show every size.
+            chosen on {day(data.pools_since)} from the pool-size splits of this
+            book&apos;s own trades (no rugs, and never below its start) and replayed from
+            day 1, so every figure here is a look back until then. The checks beside it
+            still show every size.
           </p>
         ) : null}
         {data.one_at_a_time_since ? (

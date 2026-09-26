@@ -517,8 +517,9 @@ BY_ID = {s.id: s for s in STRATEGIES}
 #: already opened - removing an arm would strand anything it still held, and
 #: its history would lose its rules.
 #: G-Q150 added 2026-09-25 at his request ("integrate 150K pool to real wallet"),
-#: G-QMID on 2026-09-26 ("integrate real wallet to $75k-300k pools").
-OFFERED: tuple[str, ...] = ("G-QUIET", "G-QUIET4", "G-Q150", "G-QMID")
+#: G-QMID was offered on 2026-09-26 and withdrawn the same day, when Karthik
+#: chose $150k and up (which is G-Q150) instead; it stays in STRATEGIES.
+OFFERED: tuple[str, ...] = ("G-QUIET", "G-QUIET4", "G-Q150")
 
 
 def fundable(cash: _Money, *, holding: bool, ticket: _Money,
