@@ -65,3 +65,11 @@ then `node intro-qa.js`.
 - At the very end the last frame holds until the dashboard paints.
 - Sound is off by default (speaker toggle, remembered per browser) — Karthik earlier asked for a silent
   launch, so it stays opt-in.
+
+## Update 2026-09-26 — 15 seconds, every time
+At Karthik's request the ride is now **15.0 s** (seatbelt 1.8 · cockpit 2.2 · ignition 1.5 · warp 2.8 ·
+approach 3.6 · landing 2.1 · reveal 1.0) and plays in full on EVERY sign-in: the 2.5 s same-session
+short cut and its `memescope.moonIntro.seen` flag are removed. Measured in Chrome on the production
+build: phases land on time, intro closes at 15.4 s after Enter. Skip now jumps to at most 0.35 s before
+the end (`SKIP_LEFT_S`), so a longer reveal can't slow it; the intro closes ~0.8 s after Esc locally,
+most of which is the page switch.

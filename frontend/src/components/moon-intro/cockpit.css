@@ -41,9 +41,6 @@
     transform calc(var(--mi-d) * 0.55) cubic-bezier(0.5, 0, 0.85, 0.3),
     opacity calc(var(--mi-d) * 0.55) ease-in;
 }
-.mi-cockpit[data-mode="short"] .mi-frame {
-  animation: mi-fade 0.25s ease-out both;
-}
 
 /* struts */
 .mi-strut {

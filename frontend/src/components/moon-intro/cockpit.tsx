@@ -7,7 +7,6 @@ import type { CSSProperties } from "react";
 import {
   RADIO,
   REDUCED_TIMELINE,
-  SHORT_TIMELINE,
   SWITCHES,
   TIMELINE,
   WARP_READOUTS,
@@ -22,7 +21,7 @@ import {
  */
 export type CockpitProps = {
   phase: IntroPhase;
-  mode: "full" | "short" | "reduced";
+  mode: "full" | "reduced";
   /** Moment keys already passed: `${phase}.${name}` or `${phase}.${name}.${i}`. */
   passed: ReadonlySet<string>;
   soundOn: boolean;
@@ -42,7 +41,6 @@ const ORDER: IntroPhase[] = [
 ];
 const TIMELINES = {
   full: TIMELINE,
-  short: SHORT_TIMELINE,
   reduced: REDUCED_TIMELINE,
 } as const;
 const idx = (p: IntroPhase) => ORDER.indexOf(p);

@@ -13,7 +13,6 @@ import {
   MOMENTS,
   REDUCED_TIMELINE,
   SHAKE,
-  SHORT_TIMELINE,
   TIMELINE,
   phaseAt,
   phaseStart,
@@ -30,14 +29,14 @@ import {
  * and shake kick once, as the clock crosses it; a skip marks the moments it
  * jumps over as passed without firing them.
  */
-type Mode = "full" | "short" | "reduced";
+type Mode = "full" | "reduced";
 
 export const SOUND_KEY = "memescope.moonIntro.sound";
-export const SEEN_KEY = "memescope.moonIntro.seen";
+/** A skip plays at most this much of the reveal before the next screen. */
+const SKIP_LEFT_S = 0.35;
 
 const TIMELINES: Record<Mode, Timeline> = {
   full: TIMELINE,
-  short: SHORT_TIMELINE,
   reduced: REDUCED_TIMELINE,
 };
 
@@ -63,11 +62,8 @@ const KICKS: Record<string, number> = {
 
 type Moment = { key: string; time: number };
 
-/** The short cut flies no rocks (the space scene skips them), so it has no near miss either. */
-const NOT_IN_SHORT = new Set(["approach.asteroids", "approach.nearMiss", "approach.repaired"]);
-
 /** Every moment on this cut, as an absolute time, in firing order. */
-function momentsOf(timeline: Timeline, mode: Mode): Moment[] {
+function momentsOf(timeline: Timeline): Moment[] {
   const out: Moment[] = [];
   let start = 0;
   for (const [phase, seconds] of timeline) {
@@ -78,9 +74,7 @@ function momentsOf(timeline: Timeline, mode: Mode): Moment[] {
     }
     start += seconds;
   }
-  return out
-    .filter((m) => mode !== "short" || !NOT_IN_SHORT.has(m.key))
-    .sort((a, b) => a.time - b.time);
+  return out.sort((a, b) => a.time - b.time);
 }
 
 /** Engine level: up from the throttle through ignition, full in warp, fading across approach. */
@@ -93,11 +87,7 @@ function throttleAt(phase: IntroPhase, p: number): number {
 }
 
 function pickMode(): Mode {
-  if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return "reduced";
-  try {
-    if (window.sessionStorage.getItem(SEEN_KEY) === "1") return "short";
-  } catch {}
-  return "full";
+  return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? "reduced" : "full";
 }
 
 function storedSound(): boolean {
@@ -111,7 +101,7 @@ function storedSound(): boolean {
 export default function MoonIntro({ onComplete }: { onComplete: () => void }) {
   const [mode] = useState(pickMode);
   const timeline = TIMELINES[mode];
-  const [moments] = useState(() => momentsOf(timeline, mode));
+  const [moments] = useState(() => momentsOf(timeline));
   const [phase, setPhase] = useState<IntroPhase>(() => phaseAt(timeline, 0).phase);
   const [passed, setPassed] = useState<ReadonlySet<string>>(() => new Set());
   const [soundOn, setSoundOn] = useState(storedSound);
@@ -163,7 +153,9 @@ export default function MoonIntro({ onComplete }: { onComplete: () => void }) {
     if (now === "reveal" || now === "done") return;
     const reveal = phaseStart(timeline, "reveal") ?? 0;
     const length = timeline.find(([name]) => name === "reveal")?.[1] ?? 0;
-    c.t = reveal + MOMENTS.reveal.dolly * length;
+    // The dolly-through, but never more than SKIP_LEFT_S from the end, so a
+    // skip reaches the next screen in time however long the reveal is tuned.
+    c.t = Math.max(reveal + MOMENTS.reveal.dolly * length, reveal + length - SKIP_LEFT_S);
     c.kick = 0;
     advance(c.t, true);
   }, [timeline, advance]);
@@ -174,10 +166,6 @@ export default function MoonIntro({ onComplete }: { onComplete: () => void }) {
     const wrap = shakeRef.current!;
     const c = clock.current;
     c.last = null;
-
-    try {
-      window.sessionStorage.setItem(SEEN_KEY, "1");
-    } catch {}
 
     const mobile = window.matchMedia?.("(max-width: 767px)").matches ?? false;
     const scene = createSpaceScene(canvasRef.current!, { mobile });
