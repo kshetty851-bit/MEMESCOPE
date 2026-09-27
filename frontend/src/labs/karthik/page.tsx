@@ -264,7 +264,8 @@ function Signed({ line }: { line: KarthikWhatIfLine }) {
  */
 function SizeGrid({ data }: { data: KarthikBook }) {
   const w = data.whatif;
-  if (!w?.floors?.length) return null;
+  // Hidden, not broken, while an older API (no `cells`) is still serving.
+  if (!w?.floors?.length || !w.sizes?.every((row) => Array.isArray(row.cells))) return null;
   const k = (n: number) => `$${Math.round(n / 1000)}k+`;
   return (
     <Panel>
