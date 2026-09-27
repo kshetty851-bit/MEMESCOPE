@@ -14,6 +14,7 @@ import { SiteFooter, WhatRunsHere } from "@/components/alpha/what-runs-here";
 import { HomeUniverse } from "@/components/space/home-universe";
 import { FloatingCrew, PerchedCrew } from "@/components/space/space-crew";
 import { SpaceAudioToggle } from "@/components/space/space-audio-toggle";
+import { SpaceFacts } from "@/components/space/space-facts";
 import { ALPHA_ACCESS } from "@/lib/env";
 import type { GatePhase } from "@/lib/launch";
 import { cn } from "@/lib/utils";
@@ -113,8 +114,12 @@ export function LandingPage() {
           {/* Off until asked for, every visit — see the component. It sits in
               the header rather than over the scene so it cannot be mistaken
               for part of the launch sequence. */}
+          {/* Space knowledge, top left (Karthik, 2026-09-27): in the header
+              line from md up, clear of the wordmark and the crew perched on it. */}
+          <SpaceFacts className="ml-4 hidden md:block" />
           <SpaceAudioToggle className="ml-auto" />
         </header>
+        <SpaceFacts className="relative z-10 mt-3 md:hidden" />
 
         {/* The mascot lives behind the grid, not beside it. Below `lg` it is out
             of the idle composition — a figure behind a login form on a 375px

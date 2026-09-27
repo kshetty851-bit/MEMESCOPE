@@ -1,7 +1,10 @@
 "use client";
 
+import { HumanAstronautArt } from "@/components/space/astronaut";
+import { MeteorStrikes } from "@/components/space/meteor-strikes";
 import { PointerParallax } from "@/components/space/parallax";
 import { Planets } from "@/components/space/planets";
+import { SpaceTravel } from "@/components/space/travel";
 import {
   CometArt,
   LaunchPadArt,
@@ -42,9 +45,14 @@ export function HomeUniverse() {
 
         {/* --- FAR ------------------------------------------------------ */}
         <div className="universe__depth universe__depth--far">
+          {/* The Milky Way and a rose nebula (Karthik, 2026-09-27). */}
+          <div className="home-universe__milkyway" />
           <div className="home-universe__nebula home-universe__nebula--violet" />
           <div className="home-universe__nebula home-universe__nebula--cyan" />
+          <div className="home-universe__nebula home-universe__nebula--rose" />
           <div className="home-universe__galaxy" />
+          {/* Stars streaming past: the feeling of travelling. */}
+          <SpaceTravel />
           <div className="universe__stars universe__stars--far" />
           <div className="universe__stars universe__stars--mid" />
           <div className="universe__stars universe__stars--near" />
@@ -54,6 +62,8 @@ export function HomeUniverse() {
         {/* Karthik's wandering planets: in front of the stars, behind the
             rocket, the frog and everything else in the scene. */}
         <Planets />
+        {/* Now and then a meteor strikes one of them. */}
+        <MeteorStrikes />
 
         {/* --- MID: orbital traffic --------------------------------------
             The drawn red, ringed and blue planets that stood here were removed
@@ -82,6 +92,11 @@ export function HomeUniverse() {
               screen; a second full-size figure beside it read as clutter and
               overlapped both the mascot and the access panel. This one is a
               distant companion, not a second lead. */}
+          {/* A human astronaut, tumbling slowly across the sky. */}
+          <div className="home-universe__spacewalker">
+            <HumanAstronautArt />
+          </div>
+
           <div className="home-universe__astronaut home-universe__astronaut--one">
             {/* The zebra from the space crew (2026-09-24), in the slot and
                 on the float the plain astronaut had. */}
