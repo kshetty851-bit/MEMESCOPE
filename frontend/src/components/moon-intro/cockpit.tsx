@@ -193,7 +193,7 @@ export function Cockpit({
               </div>
             )}
             {phase === "landing" && has("landing.eagle") && (
-              <p className="mi-eagle">THE EAGLE HAS LANDED 🌕</p>
+              <p className="mi-eagle">THE FALCON HAS LANDED 🌕</p>
             )}
             {at >= idx("reveal") && (
               <div className="mi-console">
