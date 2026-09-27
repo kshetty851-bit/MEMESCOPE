@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 
-import { inr } from "@/labs/nse-tracker/format";
 import { Panel, PanelHeader, PanelTitle } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/states";
@@ -31,28 +30,9 @@ import type { KarthikBook, KarthikDay, KarthikTrade, KarthikWhatIfLine } from ".
  * The JUDGE DATE is fixed in the backend and printed here rather than computed
  * from today, so it cannot quietly move to whenever the number looks best.
  *
- * RUPEES sit beside every dollar, because that is the currency Karthik reads
- * money in. The rate is a fixed constant rather than a live feed: it is there
- * to give the numbers a familiar size, and a book judged on whether it beat
- * its own starting balance cannot be changed by the rate used to print it.
+ * DOLLARS ONLY (Karthik, 2026-09-27): the rupee line under every figure was
+ * removed at his request.
  */
-
-/**
- * Dollars to rupees. Checked against three sources on 23 Sep 2026, which
- * agreed within 0.1% (95.65 / 95.74 / 95.76).
- *
- * ponytail: a constant, not a live feed. A drifting rate would move every
- * number on the page for reasons that have nothing to do with the strategy;
- * swap in a fetched rate only if rupees ever become the currency a decision
- * is made in.
- */
-const RUPEES_PER_DOLLAR = 95.7;
-
-function rupees(value: string | number | null | undefined): string {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return "—";
-  return inr(n * RUPEES_PER_DOLLAR, 0);
-}
 
 /**
  * How long the book has been running, ticking every second.
@@ -118,7 +98,7 @@ function Figure({
 }: {
   label: string;
   value: string;
-  /** The same money in rupees, under the dollars rather than instead of them. */
+  /** A second line under the value, when a figure has one. */
   sub?: string;
   hint?: string;
   tone?: "up" | "down";
@@ -230,7 +210,6 @@ function Row({ trade }: { trade: KarthikTrade }) {
         }`}
       >
         {usd(trade.pnl_usd)}
-        <div className="text-[11px] text-ink-dim">{rupees(trade.pnl_usd)}</div>
       </td>
     </tr>
   );
@@ -441,8 +420,7 @@ export function KarthikLabPage() {
           </div>
         </div>
         <p className="mt-1 max-w-[78ch] text-[13px] leading-relaxed text-ink-dim">
-          {usd(data.capital_usd)} ({rupees(data.capital_usd)}) at{" "}
-          {usd(data.ticket_usd)} ({rupees(data.ticket_usd)}) a trade on one
+          {usd(data.capital_usd)} at {usd(data.ticket_usd)} a trade on one
           rule: <b>{data.rule}</b>. Started {day(data.started_at)},{" "}
           <b>judged {day(data.judge_at)}</b>. Paper only: this book holds no
           wallet and has never placed an order.
@@ -486,14 +464,12 @@ export function KarthikLabPage() {
           label="Balance"
           value={`${usd(data.balance_usd)}  ${pctOfCapital(data.pnl_usd, data.capital_usd)}`}
           tone={up ? "up" : "down"}
-          sub={rupees(data.balance_usd)}
           hint={`${up ? "+" : ""}${usd(data.pnl_usd)} on ${usd(data.capital_usd)}`}
         />
         <Figure
           label="Lowest it has been"
           value={`${usd(data.lowest_usd)}  ${pctOfCapital(
             Number(data.lowest_usd) - Number(data.capital_usd), data.capital_usd)}`}
-          sub={rupees(data.lowest_usd)}
           hint="what holding it actually felt like"
         />
         <Figure
