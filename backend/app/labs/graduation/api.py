@@ -1718,14 +1718,17 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
         # The rows the BOOK bought, with the money the book made on them --
         # not the arm's $100-notional figure, which is the same only while the
         # ticket is $100 and silently diverges the moment it is not.
+        # EVERY trade the book took (Karthik, 2026-09-27: "not only 60"),
+        # newest first, with the mint so the page can link each to the exchange.
         "trades_list": [{
             "symbol": row.symbol,
+            "mint": row.mint,
             "opened_at": row.opened_at,
             "closed_at": row.closed_at,
             "pct": (Decimal(str(100 * float(row.net_return))).quantize(cents)),
             "pnl_usd": Decimal(str(money)).quantize(cents),
             "pool_usd": row.liq_open_usd,
-        } for row, money in reversed(took[-60:])],
+        } for row, money in reversed(took)],
     }
 
 
