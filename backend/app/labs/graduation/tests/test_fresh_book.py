@@ -200,6 +200,7 @@ class _Pos:
         self.symbol = symbol
         self.mint = f"{symbol}pump"
         self.opened_at = opened
+        self.graduated_at = opened - timedelta(seconds=30)   # a normal entry
         self.closed_at = opened + timedelta(minutes=5)
         self.net_return = ret
         self.pnl_usd = Decimal(str(100 * ret))
@@ -402,3 +403,24 @@ async def test_the_low_floors_include_the_small_pool_arms() -> None:
     assert now[50_000]["pnl_usd"] == Decimal("7.50")                   # $2.50 + $5.00
     assert now[75_000]["trades"] == 1
     assert [f["replayed_below"] for f in book["whatif"]["floors"]][:3] == [True, True, False]
+
+
+async def test_a_coin_bought_more_than_two_minutes_after_graduating_never_happened() -> None:
+    """The entry guard (2026-09-27), replayed from day 1: EVO was bought 186s
+    after graduating and its creator dumped inside the late hold."""
+    from app.labs.graduation.api import karthik_book
+
+    start = next(s for s in config.FRESH_BOOKS if s.book == "KARTHIK_QUIET_5M").start
+    evo = _Pos("EVO", start + timedelta(hours=1), -1.0)
+    evo.graduated_at = evo.opened_at - timedelta(seconds=186)
+    edge = _Pos("EDGE", start + timedelta(hours=2), 0.02)          # exactly 120s: kept
+    edge.graduated_at = edge.opened_at - timedelta(seconds=120)
+    unknown = _Pos("UNKNOWN", start + timedelta(hours=3), 0.02)    # no graduation time
+    unknown.graduated_at = None
+    book = await karthik_book(db=_StubDb([evo, edge, unknown]))  # type: ignore[arg-type]
+
+    assert [t["symbol"] for t in book["trades_list"]] == ["EDGE"]
+    assert (book["trades"], book["rugs"]) == (1, 0)
+    assert book["max_entry_age_s"] == 120 and book["quiet_max_txs"] == 100
+    _, now = _grid(book)
+    assert now[75_000]["trades"] == 1

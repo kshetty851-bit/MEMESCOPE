@@ -1086,6 +1086,18 @@ KARTHIK_ONE_AT_A_TIME_AT = datetime(2026, 9, 25, 15, 20, tzinfo=UTC)
 KARTHIK_BOOK_POOLS: tuple[int, int | None] = (75_000, None)
 KARTHIK_BOOK_POOLS_AT = datetime(2026, 9, 27, 5, 9, tzinfo=UTC)
 
+#: Never buy a coin more than this long after it graduated (Karthik,
+#: 2026-09-27, after EVO). EVO was bought 186s after graduating, the slowest
+#: of 258 trades, and its creator dumped at 6.6 minutes, inside the late hold;
+#: a normal ~35s entry would have sold a minute before. Over the quiet $75k
+#: rule's 450 trades the median gain falls with every step of delay (+1.99%
+#: within 30s, +1.07% past 2 minutes). Two minutes, not one: a one-minute
+#: guard also dropped 20-50 healthy trades and made less on both histories,
+#: and the real wallet fills later than the paper book. Replayed from the
+#: book's first day; the real wallet enforces it at the moment it buys.
+MAX_ENTRY_AGE_S = 120
+MAX_ENTRY_AGE_AT = datetime(2026, 9, 27, 6, 2, tzinfo=UTC)
+
 #: When Karthik's book is judged. Thirty days from its start, written down
 #: before it had a single trade: a date chosen afterwards is chosen by the
 #: result.

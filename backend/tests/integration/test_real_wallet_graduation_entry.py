@@ -54,6 +54,7 @@ async def _signal(session, now: datetime) -> None:
     await live_decisions.record(session, [live_decisions.Mirrored(
         strategy_id="G-QUIET",
         mint=MINT, opened_at=now - timedelta(seconds=5),
+        graduated_at=now - timedelta(seconds=35),
         liquidity_usd=Decimal("250000"), impact=None,
         price_native=Decimal("0.000001"))])
     await AutotradeSwitchService(session).start(
@@ -95,3 +96,19 @@ async def test_with_no_fresh_decision_the_chain_is_never_asked(db_session, monke
     outcome = await RealWalletDriver(db_session).tick(now=now)
     assert outcome.as_dict() == {"created": 0, "skipped": "no_fresh_candidate",
                                  "mint": None}
+
+
+async def test_a_coin_past_two_minutes_since_graduating_is_not_bought(db_session, monkeypatch):
+    """Karthik, 2026-09-27, after EVO (bought 186s after graduating; its creator
+    dumped at 6.6 minutes). A fresh decision on an old coin is still refused."""
+    _funded(monkeypatch, "1")
+    now = datetime.now(UTC)
+    await live_decisions.record(db_session, [live_decisions.Mirrored(
+        strategy_id="G-QUIET", mint=MINT, opened_at=now - timedelta(seconds=5),
+        graduated_at=now - timedelta(seconds=186),
+        liquidity_usd=Decimal("250000"), impact=None, price_native=Decimal("0.000001"))])
+    await AutotradeSwitchService(db_session).start(
+        actor="op@x.com", reason="late coin", strategy_id="G-QUIET", at=now)
+    out = await RealWalletDriver(db_session).tick(now=now)
+    assert (out.created, out.skipped) == (0, "no_fresh_candidate")
+    assert (await db_session.execute(select(RealWalletLiveIntent))).first() is None

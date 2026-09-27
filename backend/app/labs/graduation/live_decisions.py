@@ -55,6 +55,9 @@ class Mirrored:
     liquidity_usd: Decimal | None
     impact: Decimal | None
     price_native: Decimal | None
+    #: When the coin graduated: the wallet refuses a coin older than
+    #: `config.MAX_ENTRY_AGE_S` at the moment it would buy. None = unknown.
+    graduated_at: datetime | None = None
 
 
 async def strategy_row_id(session: AsyncSession,
@@ -169,6 +172,8 @@ async def _record(session: AsyncSession, s: spec.Strategy,
                 "price_native": (None if e.price_native is None
                                  else str(e.price_native)),
                 "hold_minutes": spec.hold_minutes(s),
+                "graduated_at": (None if e.graduated_at is None
+                                 else e.graduated_at.isoformat()),
             },
             requested_size_usd=s.size_usd,
         ))
