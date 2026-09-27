@@ -444,28 +444,19 @@ export function GraduationsSeen({ count }: { count: number | undefined }) {
   );
 }
 
-/** The book's pool bands, smallest first; the last has no ceiling. */
-const POOL_BANDS: [number, number | null][] = [
-  [75_000, 100_000], [100_000, 150_000], [150_000, 200_000],
-  [200_000, 300_000], [300_000, 500_000], [500_000, null],
-];
+/** Pool floors, as the grid below uses them: each counts every trade at or above it. */
+const POOL_FLOORS = [75_000, 100_000, 150_000, 200_000, 300_000, 500_000];
 
-function k(n: number): string {
-  return `$${n / 1000}k`;
-}
-
-/** Under the count: how many of the book's trades each pool size took
-    (Karthik, 2026-09-27). From the trade list, so it moves with it. */
+/** Under the count: how many of the book's trades each pool floor took, and
+    what they made (Karthik, 2026-09-27: "75k+, 100k+ like this", not bands).
+    From the trade list, so it moves with it. */
 export function PoolTrades({ trades }: { trades: KarthikTrade[] }) {
-  const rows = POOL_BANDS.map(([lo, hi]) => {
-    const inBand = trades.filter((t) => {
-      const pool = Number(t.pool_usd);
-      return t.pool_usd !== null && pool >= lo && (hi === null || pool < hi);
-    });
+  const rows = POOL_FLOORS.map((floor) => {
+    const above = trades.filter((t) => t.pool_usd !== null && Number(t.pool_usd) >= floor);
     return {
-      label: hi === null ? `${k(lo)}+` : `${k(lo)}–${k(hi)}`,
-      trades: inBand.length,
-      pnl: inBand.reduce((sum, t) => sum + Number(t.pnl_usd), 0),
+      label: `$${floor / 1000}k+`,
+      trades: above.length,
+      pnl: above.reduce((sum, t) => sum + Number(t.pnl_usd), 0),
     };
   }).filter((r) => r.trades > 0);
   if (!rows.length) return null;

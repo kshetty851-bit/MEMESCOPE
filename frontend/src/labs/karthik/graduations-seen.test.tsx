@@ -20,13 +20,13 @@ const trade = (pool: string | null, pnl: string) => ({
   symbol: "X", opened_at: "2026-09-27T10:00:00Z", closed_at: null, pct: "1", pnl_usd: pnl, pool_usd: pool,
 });
 
-describe("trades by pool size", () => {
-  it("counts the book's trades in each pool band, with what they made", () => {
+describe("trades by pool floor", () => {
+  it("counts every trade at or above each pool floor, with what they made", () => {
     render(<PoolTrades trades={[trade("80000", "1.50"), trade("99999", "-0.50"), trade("620000", "2")]} />);
     const box = screen.getByTestId("pool-trades");
-    expect(box).toHaveTextContent("$75k–$100k2+$1.00");
+    expect(box).toHaveTextContent("$75k+3+$3.00");           // all three
+    expect(box).toHaveTextContent("$100k+1+$2.00");          // only the $620k pool
     expect(box).toHaveTextContent("$500k+1+$2.00");
-    expect(box).not.toHaveTextContent("$100k–$150k");        // empty bands stay out
   });
 
   it("shows nothing before the first trade", () => {
