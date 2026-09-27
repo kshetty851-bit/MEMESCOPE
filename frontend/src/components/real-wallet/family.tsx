@@ -2,50 +2,25 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { useAuth } from "@/hooks/use-auth";
 import { ApiError, api } from "@/lib/api-client";
 
 /**
- * THE FAMILY'S OWN WALLETS.
+ * THE USER WALLETS: USER 1 … USER 10 (the family wallets until 2026-09-27).
  *
- * Jaya, Asha and Apoorva each have a Solana wallet of their own: an address
- * to deposit to, a balance, a withdrawal that can only reach Karthik, and
- * trading on its own switch (off until Karthik, signed in, starts it; anyone
- * with the password can stop it). The shares of the main wallet these pages
- * used to show were removed on 2026-09-25.
- *
- * The password is checked on the server, which keeps only a hash of it. What
- * comes back is a token for ONE member, kept in this tab's sessionStorage, so
- * closing the tab locks the page again.
+ * Each has a Solana wallet of its own: an address to deposit to, a balance,
+ * a withdrawal that can only reach Karthik, and trading that copies his
+ * nominated strategy on its own switch and size. Only Karthik, signed in as
+ * the admin, can open these pages; the server refuses anyone else.
  */
 
-export const FAMILY = ["JAYA", "ASHA", "APOORVA"] as const;
-export type Member = (typeof FAMILY)[number];
+export const FAMILY = Array.from({ length: 10 }, (_, i) => `USER${i + 1}`);
 
-const TOKEN_KEY = (m: string) => `family-token:${m.toUpperCase()}`;
-
-function readToken(member: string): string | null {
-  try {
-    return window.sessionStorage.getItem(TOKEN_KEY(member));
-  } catch {
-    return null;
-  }
-}
-
-function writeToken(member: string, token: string | null): void {
-  try {
-    if (token) window.sessionStorage.setItem(TOKEN_KEY(member), token);
-    else window.sessionStorage.removeItem(TOKEN_KEY(member));
-  } catch {
-    // A private window without storage still works for this page view.
-  }
-}
-
+/** "USER7" -> "USER 7". */
 function title(member: string): string {
-  return member.charAt(0) + member.slice(1).toLowerCase();
+  return member.replace("USER", "USER ");
 }
 
 function usd(value: string | number | null | undefined): string {
@@ -63,101 +38,28 @@ function tone(value: string | number | null | undefined): string {
   return n > 0 ? "text-up" : "text-down";
 }
 
-/** The password box. On success the token is stored and `onOpen` runs. */
-export function Unlock({ member, onOpen }: { member: string; onOpen: () => void }) {
-  const [password, setPassword] = useState("");
-  const unlock = useMutation({
-    mutationFn: () =>
-      api.post<{ token: string }>(
-        "/real-wallet/family/unlock",
-        { member, password },
-        // A 401 here is a wrong password, not an expired sign-in.
-        { skipAuthRetry: true },
-      ),
-    onSuccess: (out) => {
-      writeToken(member, out.token);
-      setPassword("");
-      onOpen();
-    },
-  });
-  const error = unlock.error;
-  return (
-    <form
-      className="mt-3 flex flex-wrap items-center gap-2"
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (password) unlock.mutate();
-      }}
-    >
-      <label className="sr-only" htmlFor={`family-password-${member}`}>
-        Password for {title(member)}
-      </label>
-      <input
-        id={`family-password-${member}`}
-        type="password"
-        autoComplete="current-password"
-        autoFocus
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-        placeholder="Password"
-        className="h-9 w-48 rounded-md border border-line bg-transparent px-3 text-sm text-ink"
-      />
-      <button
-        type="submit"
-        disabled={!password || unlock.isPending}
-        className="h-9 rounded-md border border-line px-4 text-sm text-ink disabled:opacity-50"
-      >
-        {unlock.isPending ? "Checking…" : "Log in"}
-      </button>
-      {error ? (
-        <p className="w-full text-sm text-down" role="alert">
-          {error instanceof ApiError && error.status === 429
-            ? "Too many wrong passwords. Wait ten minutes."
-            : error instanceof ApiError && error.status === 401
-              ? "Wrong password."
-              : "Could not check the password. Try again."}
-        </p>
-      ) : null}
-    </form>
-  );
-}
-
-/** The three family members on the real wallet page. */
+/** The ten user wallets on the real wallet page, for Karthik only. */
 export function FamilySection() {
-  const router = useRouter();
-  const [asking, setAsking] = useState<Member | null>(null);
+  const { user } = useAuth();
+  if (user?.role !== "admin") return null;
   return (
     <section className="mt-6 rounded-lg border border-line p-5">
-      <p className="text-label text-ink-3">Family</p>
+      <p className="text-label text-ink-3">User wallets</p>
       <p className="mt-1 max-w-2xl text-sm text-ink-3">
-        Each person has a Solana wallet of their own: its own address, balance, trade
-        size and on/off. Withdrawals from it can only go to Karthik&apos;s address.
+        Each user has a Solana wallet of their own that copies your strategy: its own address,
+        balance, trade size and on/off. Withdrawals from it can only go to your address.
       </p>
       <div className="mt-4 flex flex-wrap gap-2">
         {FAMILY.map((m) => (
-          <button
+          <Link
             key={m}
-            type="button"
-            onClick={() => {
-              if (readToken(m)) router.push(`/real-wallet/family/${m.toLowerCase()}`);
-              else setAsking(asking === m ? null : m);
-            }}
-            aria-expanded={asking === m}
-            className={`h-10 rounded-md border px-5 text-sm font-medium ${
-              asking === m ? "border-accent text-accent" : "border-line text-ink"
-            }`}
+            href={`/real-wallet/family/${m.toLowerCase()}`}
+            className="inline-flex h-10 items-center rounded-md border border-line px-5 text-sm font-medium text-ink hover:border-accent hover:text-accent"
           >
             {title(m)}
-          </button>
+          </Link>
         ))}
       </div>
-      {asking ? (
-        <Unlock
-          key={asking}
-          member={asking}
-          onOpen={() => router.push(`/real-wallet/family/${asking.toLowerCase()}`)}
-        />
-      ) : null}
     </section>
   );
 }
@@ -206,12 +108,11 @@ function short(address: string): string {
  * to, its balance read from chain, and a way out that can only reach Karthik's
  * address. It does not trade yet; Karthik switches that on later.
  */
-function OwnWalletPanel({ member, wallet, book, isOwner, headers, onDone }: {
+function OwnWalletPanel({ member, wallet, book, isOwner, onDone }: {
   member: string;
   wallet: OwnWallet;
   book: OwnBook | null | undefined;
   isOwner: boolean;
-  headers: Record<string, string> | undefined;
   onDone: () => void;
 }) {
   const [copied, setCopied] = useState(false);
@@ -219,7 +120,7 @@ function OwnWalletPanel({ member, wallet, book, isOwner, headers, onDone }: {
   const own = useMutation({
     mutationFn: (next: { enabled: boolean; ticket: string }) =>
       api.post(`/real-wallet/family/${member.toLowerCase()}/own-settings`,
-        { enabled: next.enabled, ticket_usd: next.ticket }, { headers }),
+        { enabled: next.enabled, ticket_usd: next.ticket }),
     onSuccess: () => {
       setTicket(null);
       onDone();
@@ -232,7 +133,7 @@ function OwnWalletPanel({ member, wallet, book, isOwner, headers, onDone }: {
       api.post<{ signature: string; explorer: string; sol: string }>(
         `/real-wallet/family/${member.toLowerCase()}/withdraw`,
         { sol_amount: amount, confirmation_phrase: "WITHDRAW_TO_KARTHIK" },
-        { headers, skipAuthRetry: true },
+        { skipAuthRetry: true },
       ),
     onSuccess: () => {
       setAmount("");
@@ -344,9 +245,6 @@ function OwnWalletPanel({ member, wallet, book, isOwner, headers, onDone }: {
           <p className="mt-1 text-xs text-ink-3">
             Buys only while Karthik&apos;s main wallet is also on — when he stops his, this
             one stops buying too.
-            {!isOwner
-              ? " Only Karthik, signed in, can start this wallet or change its size. Anyone can stop it."
-              : ""}
           </p>
           {own.isError ? (
             <p className="mt-1 text-xs text-down">
@@ -459,44 +357,26 @@ function OwnWalletPanel({ member, wallet, book, isOwner, headers, onDone }: {
   );
 }
 
-/** One member's page. Asks for the password when this tab has no token. */
+/** One user's page. The server answers only Karthik, signed in. */
 export function FamilyMemberPage({ member }: { member: string }) {
   const key = member.toUpperCase();
-  const known = (FAMILY as readonly string[]).includes(key);
-  // Read after mount, not during render: the server has no sessionStorage,
-  // and reading it while rendering would make the two disagree.
-  const [token, setToken] = useState<string | null>(null);
-  const [ready, setReady] = useState(false);
-  useEffect(() => {
-    setToken(readToken(key));
-    setReady(true);
-  }, [key]);
+  const known = FAMILY.includes(key);
   const { user } = useAuth();
   const queryClient = useQueryClient();
-  const headers = token ? { "X-Family-Token": token } : undefined;
 
   const view = useQuery({
-    queryKey: ["real-wallet", "family", key, token],
-    queryFn: () =>
-      api.get<FamilyView>(`/real-wallet/family/${key.toLowerCase()}`, {
-        headers,
-        skipAuthRetry: true,
-      }),
-    enabled: known && Boolean(token),
+    queryKey: ["real-wallet", "family", key],
+    queryFn: () => api.get<FamilyView>(`/real-wallet/family/${key.toLowerCase()}`),
+    enabled: known,
     refetchInterval: 30_000,
     retry: false,
   });
 
-  const lock = () => {
-    writeToken(key, null);
-    setToken(null);
-  };
-
   if (!known) {
     return (
       <main>
-        <p className="text-label text-accent">Family</p>
-        <h1 className="mt-2 text-2xl font-medium text-ink">No such family member.</h1>
+        <p className="text-label text-accent">User wallets</p>
+        <h1 className="mt-2 text-2xl font-medium text-ink">No such user wallet.</h1>
         <Link href="/real-wallet" className="mt-3 inline-block text-sm text-accent">
           Back to the real wallet
         </Link>
@@ -504,30 +384,7 @@ export function FamilyMemberPage({ member }: { member: string }) {
     );
   }
 
-  if (!ready) {
-    return (
-      <main>
-        <p className="text-label text-accent">Family · Real wallet</p>
-        <p className="mt-2 text-sm text-ink-3">Reading…</p>
-      </main>
-    );
-  }
-
-  const expired = view.error instanceof ApiError && view.error.status === 401;
-  if (!token || expired) {
-    return (
-      <main>
-        <p className="text-label text-accent">Family · Real wallet</p>
-        <h1 className="mt-2 text-3xl font-medium text-ink">{title(key)}</h1>
-        <p className="mt-2 text-sm text-ink-3">
-          {expired ? "This login has ended. " : ""}Enter the family password to open{" "}
-          {title(key)}&apos;s share.
-        </p>
-        <Unlock member={key} onOpen={() => setToken(readToken(key))} />
-      </main>
-    );
-  }
-
+  const refused = view.error instanceof ApiError && view.error.status === 403;
   const d = view.data;
   const isOwner = user?.role === "admin";
 
@@ -535,35 +392,27 @@ export function FamilyMemberPage({ member }: { member: string }) {
     <main>
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div>
-          <p className="text-label text-accent">Family · Real wallet</p>
+          <p className="text-label text-accent">User wallets · Real wallet</p>
           <h1 className="mt-2 text-3xl font-medium text-ink">{title(key)}</h1>
         </div>
-        <div className="flex gap-3 text-sm">
-          <Link href="/real-wallet" className="text-ink-3 hover:text-ink">Real wallet</Link>
-          <button type="button" onClick={lock} className="text-ink-3 hover:text-ink">
-            Lock
-          </button>
-        </div>
+        <Link href="/real-wallet" className="text-sm text-ink-3 hover:text-ink">Real wallet</Link>
       </div>
 
       {view.isPending ? <p className="mt-4 text-sm text-ink-3">Reading…</p> : null}
-      {view.isError && !expired ? (
+      {refused ? (
+        <p className="mt-4 text-sm text-ink-3">Only Karthik, signed in, can open this page.</p>
+      ) : view.isError ? (
         <p className="mt-4 text-sm text-down">Could not read this wallet. Try again.</p>
       ) : null}
 
-      {d ? (
-        <>
-          {d.own_wallet ? (
-            <OwnWalletPanel
-              member={key}
-              wallet={d.own_wallet}
-              book={d.own_book}
-              isOwner={isOwner}
-              headers={headers}
-              onDone={() => void queryClient.invalidateQueries({ queryKey: ["real-wallet", "family", key] })}
-            />
-          ) : null}
-        </>
+      {d?.own_wallet ? (
+        <OwnWalletPanel
+          member={key}
+          wallet={d.own_wallet}
+          book={d.own_book}
+          isOwner={isOwner}
+          onDone={() => void queryClient.invalidateQueries({ queryKey: ["real-wallet", "family", key] })}
+        />
       ) : null}
     </main>
   );

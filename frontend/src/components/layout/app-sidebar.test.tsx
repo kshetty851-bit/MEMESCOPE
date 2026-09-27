@@ -36,7 +36,7 @@ describe("navigation map", () => {
   });
 
   it("resolves nested routes to their owning item", () => {
-    expect(activeItem("/real-wallet/family/jaya")?.label).toBe("Real wallet");
+    expect(activeItem("/real-wallet/family/user1")?.label).toBe("Real wallet");
   });
 
   it("does not light up an item for a route it does not own", () => {

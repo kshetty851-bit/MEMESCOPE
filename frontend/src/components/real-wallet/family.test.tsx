@@ -13,27 +13,30 @@ const auth = vi.hoisted(() => ({ user: null as null | { role: string } }));
 vi.mock("@/hooks/use-auth", () => ({ useAuth: () => auth }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }));
 
+import { ApiError } from "@/lib/api-client";
+
 import { FamilyMemberPage } from "./family";
 
 const ADDRESS = "7WctMGpqz1tGkYStBBjJRMnmuh9uwJubYV2tL4pLwRr9";
 
 function view(own: object, book: object | null = null) {
-  return { member: "JAYA", own_wallet: own, own_book: book };
+  return { member: "USER1", own_wallet: own, own_book: book };
 }
 
 function page() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
-      <FamilyMemberPage member="jaya" />
+      <FamilyMemberPage member="user1" />
     </QueryClientProvider>,
   );
 }
 
-describe("a family member's own wallet", () => {
-  beforeEach(() => window.sessionStorage.setItem("family-token:JAYA", "t"));
+describe("a user's own wallet", () => {
+  beforeEach(() => {
+    auth.user = { role: "admin" };
+  });
   afterEach(() => {
-    window.sessionStorage.clear();
     get.mockReset();
     post.mockReset();
     auth.user = null;
@@ -63,7 +66,7 @@ describe("a family member's own wallet", () => {
     fireEvent.click(screen.getByRole("button", { name: "Yes, send 0.1 SOL to Karthik" }));
     await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
     const [url, body] = post.mock.calls[0]!;
-    expect(url).toBe("/real-wallet/family/jaya/withdraw");
+    expect(url).toBe("/real-wallet/family/user1/withdraw");
     expect(body).toEqual({ sol_amount: "0.1", confirmation_phrase: "WITHDRAW_TO_KARTHIK" });
   });
 
@@ -82,21 +85,21 @@ function book(enabled: boolean) {
 }
 
 describe("trading from a member's own wallet", () => {
-  beforeEach(() => window.sessionStorage.setItem("family-token:JAYA", "t"));
+  beforeEach(() => {
+    auth.user = { role: "admin" };
+  });
   afterEach(() => {
-    window.sessionStorage.clear();
     get.mockReset();
     post.mockReset();
     auth.user = null;
   });
 
-  it("cannot be started from the family password alone", async () => {
-    get.mockResolvedValue(view({ address: ADDRESS, balance_sol: "1" }, book(false)));
+  it("says only Karthik can open it when the server refuses", async () => {
+    auth.user = null;
+    get.mockRejectedValue(new ApiError(403, "permission_denied", "admin only"));
     page();
-    const start = await screen.findByRole("button", { name: "Start trading" });
-    expect(start).toBeDisabled();
-    expect(screen.getByText(/Only Karthik, signed in, can start this wallet/)).toBeInTheDocument();
-    expect(screen.getByText(/when he stops his, this\s+one stops buying too/)).toBeInTheDocument();
+    expect(await screen.findByText(/Only Karthik, signed in, can open this page/)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "USER 1" })).toBeInTheDocument();
   });
 
   it("starts when Karthik is signed in, at the size he picked", async () => {
@@ -107,7 +110,7 @@ describe("trading from a member's own wallet", () => {
     fireEvent.change(await screen.findByLabelText("Each trade"), { target: { value: "50" } });
     fireEvent.click(screen.getByRole("button", { name: "Start trading" }));
     await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
-    expect(post.mock.calls[0]![0]).toBe("/real-wallet/family/jaya/own-settings");
+    expect(post.mock.calls[0]![0]).toBe("/real-wallet/family/user1/own-settings");
     expect(post.mock.calls[0]![1]).toEqual({ enabled: true, ticket_usd: "50" });
   });
 

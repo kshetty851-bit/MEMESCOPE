@@ -1015,17 +1015,18 @@ class Settings(BaseSettings):
     #: nominated destination refuses rather than accepting any address, which is
     #: the same fail-closed direction as the RPC host list.
     REAL_WALLET_WITHDRAWAL_ADDRESS: str = ""
-    #: The family pages' password, as `salt_hex:hash_hex` (PBKDF2-SHA256; see
-    #: `real_wallet.family.hash_password`). Never the password itself: the
-    #: repository is public. Empty lets nobody in.
-    REAL_WALLET_FAMILY_PASSWORD_HASH: str = ""
-    #: Each family member's OWN wallet, public keys only:
-    #: `jaya=<pubkey>,asha=<pubkey>,apoorva=<pubkey>`. The secrets are 0600 files
+    #: Each user wallet (USER 1 … USER 10), public keys only:
+    #: `user1=<pubkey>,user2=<pubkey>,...`. The secrets are 0600 files
     #: only the isolated signer mounts (`FAMILY_SIGNER_DIR`); it checks each one
     #: against this map before signing. Set in the host's env file, never here:
     #: the repository is public. Empty means no family wallets. See
     #: `real_wallet.family_wallets`.
     REAL_WALLET_FAMILY_WALLETS: str = ""
+    #: The most every wallet together (Karthik's and the users') may put into
+    #: ONE coin within an hour. Eleven wallets copying one strategy buy the
+    #: same coins at the same moment; past this, a user wallet skips the coin
+    #: rather than move a thin pool against all of them.
+    REAL_WALLET_MAX_COIN_USD: Decimal = Field(default=Decimal("400"), gt=0)
     # Phase 2 is a separate, deliberately tiny manual-devnet workflow. These
     # values are used by the API and signer to enforce the same small envelope;
     # the signer-file *path* is intentionally not a Settings field because the

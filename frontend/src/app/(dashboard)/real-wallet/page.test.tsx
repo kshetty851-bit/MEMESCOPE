@@ -278,31 +278,22 @@ describe("RealWalletPage without signing in", () => {
   });
 });
 
-describe("RealWalletPage family shares", () => {
-  it("lists the three family members and asks for the password before anything opens", async () => {
+describe("RealWalletPage user wallets", () => {
+  it("lists USER 1 to USER 10 for Karthik, each a link to its page", async () => {
+    signInAsAdmin();
     serve();
     await renderLoaded();
-    const family = screen.getByText("Family").closest("section") as HTMLElement;
-    for (const name of ["Jaya", "Asha", "Apoorva"]) {
-      expect(within(family).getByRole("button", { name })).toBeInTheDocument();
-    }
-    expect(within(family).queryByLabelText(/password for/i)).not.toBeInTheDocument();
-    fireEvent.click(within(family).getByRole("button", { name: "Asha" }));
-    expect(within(family).getByLabelText("Password for Asha")).toHaveAttribute("type", "password");
+    const users = screen.getByText("User wallets").closest("section") as HTMLElement;
+    const links = within(users).getAllByRole("link");
+    expect(links.map((l) => l.textContent)).toEqual(
+      Array.from({ length: 10 }, (_, i) => `USER ${i + 1}`));
+    expect(links[6]).toHaveAttribute("href", "/real-wallet/family/user7");
   });
 
-  it("says so plainly when the password is wrong", async () => {
+  it("shows nothing about them to anyone else", async () => {
     serve();
-    vi.mocked(api.post).mockRejectedValueOnce(
-      new ApiError(401, "http_error", "wrong password"),
-    );
     await renderLoaded();
-    const family = screen.getByText("Family").closest("section") as HTMLElement;
-    fireEvent.click(within(family).getByRole("button", { name: "Jaya" }));
-    fireEvent.change(within(family).getByLabelText("Password for Jaya"),
-      { target: { value: "nope" } });
-    fireEvent.click(within(family).getByRole("button", { name: "Log in" }));
-    expect(await within(family).findByRole("alert")).toHaveTextContent("Wrong password.");
+    expect(screen.queryByText("User wallets")).not.toBeInTheDocument();
   });
 });
 

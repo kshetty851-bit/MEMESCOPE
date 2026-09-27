@@ -1,6 +1,7 @@
 """Family members and their own-wallet settings.
 
-Jaya, Asha and Apoorva each have a Solana wallet of their own
+USER 1 … USER 10 (the family wallets until 2026-09-27) each have a Solana
+wallet of their own
 (`app.real_wallet.family_wallets` pins whose key is whose). This table holds
 whether each one trades and how much each trade spends.
 

@@ -1,4 +1,4 @@
-"""The family pages' password and token, and what the real wallet offers.
+"""The user wallets' names, and what the real wallet offers.
 
 (The share sizing and balance tests went with the share system, 2026-09-25.)
 """
@@ -7,46 +7,18 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-import pytest
-
 from app.labs.graduation import live_spec
 from app.real_wallet import family
 
 D = Decimal
 
 
-# --- the password -----------------------------------------------------------
+# --- the users ---------------------------------------------------------------
 
-def test_the_password_checks_against_a_hash_and_nothing_else():
-    stored = family.hash_password("a family secret", salt=b"0123456789abcdef")
-    assert "$" not in stored            # docker compose would mangle a `$`
-    assert "a family secret" not in stored
-    assert family.password_ok("a family secret", stored)
-    assert not family.password_ok("a family secreT", stored)
-    assert not family.password_ok("", stored)
-
-
-@pytest.mark.parametrize("stored", ["", "   ", "nocolon", "zz:zz"])
-def test_no_or_broken_password_setting_lets_nobody_in(stored):
-    assert not family.password_ok("anything", stored)
-
-
-def test_a_token_opens_one_member_and_only_that_one():
-    token, _ = family.issue_token("JAYA")
-    assert family.token_member(token) == "JAYA"
-    assert family.token_member(token + "x") is None
-    assert family.token_member(None) is None
-    assert family.token_member("not-a-token") is None
-
-
-def test_wrong_passwords_are_throttled_per_caller():
-    t = family.Throttle(limit=3, window=600)
-    for i in range(3):
-        assert not t.blocked("a", now=i)
-        t.failed("a", now=i)
-    assert t.blocked("a", now=10)
-    assert not t.blocked("b", now=10)          # someone else is unaffected
-    assert not t.blocked("a", now=10 + 601)    # and it forgets after the window
+def test_ten_users_in_order_with_readable_names():
+    assert tuple(f"USER{i}" for i in range(1, 11)) == family.MEMBERS
+    assert family.label("USER1") == "USER 1"
+    assert family.label("USER10") == "USER 10"
 
 
 # --- what the wallet offers -------------------------------------------------
