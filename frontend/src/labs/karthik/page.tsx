@@ -444,6 +444,54 @@ export function GraduationsSeen({ count }: { count: number | undefined }) {
   );
 }
 
+/** The book's pool bands, smallest first; the last has no ceiling. */
+const POOL_BANDS: [number, number | null][] = [
+  [75_000, 100_000], [100_000, 150_000], [150_000, 200_000],
+  [200_000, 300_000], [300_000, 500_000], [500_000, null],
+];
+
+function k(n: number): string {
+  return `$${n / 1000}k`;
+}
+
+/** Under the count: how many of the book's trades each pool size took
+    (Karthik, 2026-09-27). From the trade list, so it moves with it. */
+export function PoolTrades({ trades }: { trades: KarthikTrade[] }) {
+  const rows = POOL_BANDS.map(([lo, hi]) => {
+    const inBand = trades.filter((t) => {
+      const pool = Number(t.pool_usd);
+      return t.pool_usd !== null && pool >= lo && (hi === null || pool < hi);
+    });
+    return {
+      label: hi === null ? `${k(lo)}+` : `${k(lo)}–${k(hi)}`,
+      trades: inBand.length,
+      pnl: inBand.reduce((sum, t) => sum + Number(t.pnl_usd), 0),
+    };
+  }).filter((r) => r.trades > 0);
+  if (!rows.length) return null;
+  return (
+    <div
+      className="ml-auto mt-2 w-fit rounded-md border border-line bg-canvas/85 px-3 py-2 text-[11px] backdrop-blur-sm min-[1150px]:absolute min-[1150px]:right-0 min-[1150px]:top-full min-[1150px]:z-10"
+      data-testid="pool-trades"
+    >
+      <div className="uppercase tracking-wider text-ink-dim">Trades by pool size</div>
+      <table className="mt-1 tabular-nums">
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.label}>
+              <td className="pr-4 text-ink-2">{r.label}</td>
+              <td className="pr-3 text-right font-medium text-ink">{r.trades}</td>
+              <td className={`text-right ${r.pnl < 0 ? "text-down" : "text-up"}`}>
+                {r.pnl < 0 ? "-" : "+"}${Math.abs(r.pnl).toFixed(2)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export function KarthikLabPage() {
   const { data, isLoading, isError, refetch } = useKarthikBook();
   // Before the early returns: a hook may not sit behind a condition, and the
@@ -474,14 +522,17 @@ export function KarthikLabPage() {
       <div>
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h1 className="text-xl font-semibold">Karthik&apos;s Lab</h1>
-          <div className="flex items-baseline gap-6">
-            <GraduationsSeen count={data.graduations_seen} />
-            <div className="text-right">
-              <div className="text-lg font-semibold tabular-nums">{elapsed}</div>
-              <div className="text-[11px] uppercase tracking-wider text-ink-dim">
-                running &middot; {days} days to judgement
+          <div className="relative">
+            <div className="flex items-baseline gap-6">
+              <GraduationsSeen count={data.graduations_seen} />
+              <div className="text-right">
+                <div className="text-lg font-semibold tabular-nums">{elapsed}</div>
+                <div className="text-[11px] uppercase tracking-wider text-ink-dim">
+                  running &middot; {days} days to judgement
+                </div>
               </div>
             </div>
+            <PoolTrades trades={data.trades_list} />
           </div>
         </div>
         <p className="mt-1 max-w-[78ch] text-[13px] leading-relaxed text-ink-dim">
