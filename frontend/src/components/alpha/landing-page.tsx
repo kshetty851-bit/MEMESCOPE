@@ -148,14 +148,23 @@ export function LandingPage() {
                 <PerchedCrew />
               </span>
             </h1>
-            <WordmarkSubtitle className="mt-4" />
-            <p className="mt-6 text-[clamp(1.125rem,2vw,1.5rem)] font-medium leading-snug tracking-tight text-ink">
-              Every pump.fun graduation, tested before it&apos;s traded.
+            {/* Restyled 2026-09-27 (Karthik: "more stylish and neat"). Same words. */}
+            <div className="hero-kicker">
+              <span className="hero-kicker__rule" aria-hidden />
+              <WordmarkSubtitle className="hero-kicker__text" />
+              <span className="hero-kicker__live">
+                <span aria-hidden />
+                Live
+              </span>
+            </div>
+            <p className="hero-tagline">
+              Every pump.fun graduation,{" "}
+              <span className="hero-tagline__em">tested before it&apos;s traded.</span>
             </p>
-            <p className="mt-3 max-w-md text-sm leading-relaxed text-ink-2">
-              MEMESCOPE watches around 1,500 graduations a day, runs each strategy
-              on paper against a fair comparison, and lets real money follow only
-              what earns it.
+            <p className="hero-lede">
+              MEMESCOPE watches around <b>1,500 graduations a day</b>, runs each strategy{" "}
+              <b>on paper</b> against a fair comparison, and lets <b>real money</b> follow
+              only what earns it.
             </p>
           </div>
 
