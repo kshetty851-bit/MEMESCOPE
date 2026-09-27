@@ -558,3 +558,173 @@
     display: none !important;
   }
 }
+
+/* --- 2026-09-27: travelling, the Milky Way, a rose nebula, a spacewalker,
+       meteor strikes, and space facts (Karthik). Transform/opacity motion
+       only; the starfield canvas is the one per-frame loop. ---------------- */
+
+.home-universe__travel {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0.85;
+}
+
+/* A soft diagonal band with a dark dust lane down its middle and a haze of
+   faint stars, the way the Milky Way looks from a dark site. */
+.home-universe__milkyway {
+  position: absolute;
+  left: -25%;
+  top: 18%;
+  width: 150%;
+  height: 34%;
+  transform: rotate(-24deg);
+  background:
+    linear-gradient(180deg, transparent 0%, rgb(8 10 22 / 0.55) 46%, rgb(8 10 22 / 0.7) 50%,
+      rgb(8 10 22 / 0.55) 54%, transparent 100%),
+    radial-gradient(ellipse 60% 50% at 55% 50%, rgb(255 236 214 / 0.30), transparent 70%),
+    radial-gradient(ellipse 30% 45% at 25% 45%, rgb(200 214 255 / 0.20), transparent 70%),
+    radial-gradient(ellipse 25% 40% at 80% 55%, rgb(255 222 240 / 0.18), transparent 70%),
+    linear-gradient(180deg, transparent, rgb(190 205 255 / 0.20) 30%, rgb(236 222 255 / 0.28) 50%,
+      rgb(190 205 255 / 0.20) 70%, transparent);
+  filter: blur(6px);
+  mix-blend-mode: screen;
+  opacity: 0.9;
+  animation: uv-milkyway 240s ease-in-out infinite alternate;
+}
+@keyframes uv-milkyway {
+  to { transform: rotate(-21deg) translate3d(-2%, 1%, 0); }
+}
+
+.home-universe__nebula--rose {
+  right: -8%;
+  bottom: 8%;
+  width: 55vw;
+  height: 45vh;
+  background:
+    radial-gradient(ellipse 45% 55% at 40% 50%, rgb(255 94 150 / 0.22), transparent 70%),
+    radial-gradient(ellipse 35% 40% at 65% 40%, rgb(255 170 90 / 0.16), transparent 70%),
+    radial-gradient(ellipse 50% 45% at 55% 65%, rgb(140 90 255 / 0.18), transparent 72%);
+  filter: blur(18px);
+  animation: uv-nebula-b 197s ease-in-out infinite reverse;
+}
+
+.home-universe__spacewalker {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 96px;
+  height: 117px;
+  opacity: 0.95;
+  filter: drop-shadow(0 6px 18px rgb(0 0 0 / 0.45));
+  /* Already partway across when the page opens. */
+  animation: uv-spacewalk 95s linear -38s infinite;
+  will-change: transform;
+}
+@keyframes uv-spacewalk {
+  0% { transform: translate(-12vw, 62vh) rotate(-20deg); }
+  25% { transform: translate(24vw, 40vh) rotate(60deg); }
+  50% { transform: translate(55vw, 58vh) rotate(150deg); }
+  75% { transform: translate(82vw, 30vh) rotate(250deg); }
+  100% { transform: translate(112vw, 48vh) rotate(340deg); }
+}
+
+.meteor-strikes {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.meteor-strike__rock {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 110px;
+  height: 8px;
+  margin: -4px 0 0 -100px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, rgb(255 170 90 / 0.5) 45%, #ffe7b3 88%, #fff);
+  box-shadow: 0 0 12px 3px rgb(255 190 110 / 0.55);
+  transform-origin: 100px 4px;
+}
+.meteor-strike__flash {
+  position: absolute;
+  width: 90px;
+  height: 90px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #fff 0%, #fff1c4 24%, #ffb45a 44%, rgb(255 80 40 / 0.7) 60%, transparent 74%);
+  box-shadow: 0 0 40px 12px rgb(255 170 80 / 0.55);
+}
+.meteor-strike__fire {
+  position: absolute;
+  width: 70px;
+  height: 70px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgb(255 140 60 / 0.8), rgb(160 50 30 / 0.35) 55%, transparent 72%);
+  filter: blur(4px);
+}
+.meteor-strike__ring {
+  position: absolute;
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  border: 3px solid rgb(255 214 150 / 0.9);
+  box-shadow: 0 0 14px rgb(255 190 110 / 0.6);
+}
+.meteor-strike__debris {
+  position: absolute;
+  width: 8px;
+  height: 7px;
+  border-radius: 40% 60% 50% 45%;
+  background: #8a5a3c;
+  box-shadow: 0 0 8px 2px rgb(255 140 60 / 0.9);
+}
+.meteor-strike__spark {
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #fff4c9;
+  box-shadow: 0 0 8px 2px rgb(255 214 120 / 0.95);
+}
+
+.space-facts {
+  max-width: 22rem;
+  border: 1px solid var(--color-line-subtle);
+  border-radius: 0.5rem;
+  background: color-mix(in oklch, var(--color-abyss) 80%, transparent);
+  backdrop-filter: blur(10px);
+  padding: 0.5rem 0.75rem;
+}
+.space-facts__label {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 0.65rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-accent);
+}
+.space-facts__text {
+  margin-top: 0.15rem;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: var(--color-ink-2);
+  animation: space-fact-in 600ms ease-out;
+}
+@keyframes space-fact-in {
+  from { opacity: 0; transform: translateY(4px); }
+}
+
+@media (max-width: 767px) {
+  .home-universe__milkyway { opacity: 0.6; }
+  .home-universe__nebula--rose { display: none; }
+  .home-universe__spacewalker { width: 64px; height: 78px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home-universe__milkyway,
+  .home-universe__spacewalker,
+  .space-facts__text { animation: none; }
+  .home-universe__spacewalker { transform: translate(70vw, 55vh) rotate(-15deg); }
+}
