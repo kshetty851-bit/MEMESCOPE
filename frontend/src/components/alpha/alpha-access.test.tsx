@@ -39,13 +39,13 @@ describe("AlphaAccess", () => {
     const onPhase = vi.fn();
     render(<AlphaAccess onPhase={onPhase} />);
 
-    fireEvent.change(screen.getByLabelText("Enter access code"), {
+    fireEvent.change(screen.getByLabelText("Access code"), {
       target: { value: "000000" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Unlock" }));
+    fireEvent.click(screen.getByRole("button", { name: "[ UNLOCK ]" }));
 
     await waitFor(() => {
-      expect(screen.getByText("Access code not recognised.")).toBeInTheDocument();
+      expect(screen.getByText("💀 NICE TRY. Unfortunately, the terminal has trust issues.")).toBeInTheDocument();
     });
     expect(window.sessionStorage.getItem(ALPHA_ACCESS.transitionKey)).toBeNull();
     // A refused code must never start the launch.
@@ -58,10 +58,10 @@ describe("AlphaAccess", () => {
     vi.mocked(api.post).mockRejectedValue(new ApiError(503, "upstream", "Unavailable"));
 
     render(<AlphaAccess onPhase={vi.fn()} />);
-    fireEvent.change(screen.getByLabelText("Enter access code"), {
+    fireEvent.change(screen.getByLabelText("Access code"), {
       target: { value: "000000" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Unlock" }));
+    fireEvent.click(screen.getByRole("button", { name: "[ UNLOCK ]" }));
 
     await waitFor(() => {
       expect(
@@ -79,10 +79,10 @@ describe("AlphaAccess", () => {
     const onPhase = vi.fn();
     render(<AlphaAccess onPhase={onPhase} />);
 
-    fireEvent.change(screen.getByLabelText("Enter access code"), {
+    fireEvent.change(screen.getByLabelText("Access code"), {
       target: { value: "619554" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Unlock" }));
+    fireEvent.click(screen.getByRole("button", { name: "[ UNLOCK ]" }));
 
     await waitFor(() => {
       expect(window.sessionStorage.getItem(ALPHA_ACCESS.transitionKey)).toBe("true");
@@ -104,17 +104,17 @@ describe("AlphaAccess", () => {
     });
 
     render(<AlphaAccess onPhase={vi.fn()} />);
-    fireEvent.change(screen.getByLabelText("Enter access code"), {
+    fireEvent.change(screen.getByLabelText("Access code"), {
       target: { value: "619554" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Unlock" }));
+    fireEvent.click(screen.getByRole("button", { name: "[ UNLOCK ]" }));
 
     // No path back to an editable field: the launch plays over a locked form,
     // so a second code cannot be submitted while the first one is in the air.
     await waitFor(() => {
-      expect(screen.getByLabelText("Enter access code")).toBeDisabled();
+      expect(screen.getByLabelText("Access code")).toBeDisabled();
     });
-    fireEvent.click(screen.getByRole("button", { name: "Unlocking…" }));
+    fireEvent.click(screen.getByRole("button", { name: "[ UNLOCKING… ]" }));
     expect(api.post).toHaveBeenCalledTimes(2); // the unlock and its activity ping, nothing more
   });
 
@@ -137,7 +137,7 @@ describe("AlphaAccess", () => {
     render(<AlphaAccess onPhase={vi.fn()} />);
 
     await waitFor(() =>
-      expect(screen.queryByPlaceholderText("Access code")).not.toBeInTheDocument(),
+      expect(screen.queryByPlaceholderText("Paste your alpha. Keep it secret.")).not.toBeInTheDocument(),
     );
     expect(replace).not.toHaveBeenCalled();
   });
@@ -171,7 +171,7 @@ describe("a visitor who is already in", () => {
     render(<AlphaAccess onPhase={() => {}} />);
 
     // The gate is untouched: no session means the code form, every time.
-    expect(await screen.findByPlaceholderText("Access code")).toBeInTheDocument();
+    expect(await screen.findByPlaceholderText("Paste your alpha. Keep it secret.")).toBeInTheDocument();
     expect(screen.queryByTestId("alpha-enter-terminal")).not.toBeInTheDocument();
   });
 
@@ -182,7 +182,7 @@ describe("a visitor who is already in", () => {
 
     // Fail closed. An unreachable session endpoint must never be read as
     // "already in" — that would hand the terminal link to a stranger.
-    expect(await screen.findByPlaceholderText("Access code")).toBeInTheDocument();
+    expect(await screen.findByPlaceholderText("Paste your alpha. Keep it secret.")).toBeInTheDocument();
     expect(screen.queryByTestId("alpha-enter-terminal")).not.toBeInTheDocument();
   });
 });

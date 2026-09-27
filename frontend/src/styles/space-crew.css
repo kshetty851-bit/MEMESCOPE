@@ -129,7 +129,8 @@
    and the fox drifts and parallaxes up to ~34px above its box). */
 .crew-float--fox {
   right: 5%;
-  top: max(50%, 420px);
+  /* Below the access box, which grew to ~530px with its new copy (2026-09-27). */
+  top: max(62%, 560px);
   width: clamp(96px, 8.5vw, 150px);
   --away: translateX(170%) rotate(20deg);
 }
