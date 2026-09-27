@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
@@ -39,6 +39,24 @@ from app.services.rpc.standard import StandardSolanaRPC
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/real-wallet/family", tags=["real-wallet"])
+
+
+def _caller(request: Request) -> str:
+    """Who is guessing, for the throttle: the LAST forwarded hop is the one the
+    site's own proxy added; earlier ones are whatever the client sent."""
+    forwarded = request.headers.get("x-forwarded-for", "")
+    hops = [h.strip() for h in forwarded.split(",") if h.strip()]
+    return hops[-1] if hops else (request.client.host if request.client else "unknown")
+
+
+def _unlocked(member: str, token: str | None) -> None:
+    """USER 2-10 need the users' password as well as the admin sign-in."""
+    if family.locked(member) and not family.token_ok(token):
+        raise HTTPException(status_code=401, detail="enter the users password first")
+
+
+class UnlockIn(BaseModel):
+    password: str = Field(min_length=1, max_length=200)
 
 
 def _member(name: str) -> str:
@@ -149,20 +167,45 @@ async def _charged(session: DbSession) -> None:
     await session.commit()
 
 
+@router.post("/unlock", summary="Trade the users password for a 12-hour token")
+async def unlock(payload: UnlockIn, request: Request, _: AdminUser) -> dict[str, object]:
+    who = _caller(request)
+    if family.THROTTLE.blocked(who):
+        raise HTTPException(status_code=429,
+                            detail="too many wrong passwords; wait ten minutes")
+    if not family.password_ok(payload.password):
+        family.THROTTLE.failed(who)
+        logger.warning("real_wallet_users_unlock_refused")
+        raise HTTPException(status_code=401, detail="wrong password")
+    token, expires = family.issue_token()
+    return {"token": token, "expires_at": expires.isoformat()}
+
+
 @router.get("", summary="The user wallets, their fee rates, and the fees")
-async def members(session: DbSession, _: AdminUser) -> dict[str, object]:
-    await _charged(session)
+async def members(session: DbSession, _: AdminUser,
+                  x_users_token: str | None = Header(default=None)) -> dict[str, object]:
+    """USER 1 always; USER 2-10 and the fees only with the users password."""
+    unlocked = family.token_ok(x_users_token)
     rates = {r.name: str(r.fee_rate) for r in
              (await session.execute(select(RealWalletFamilyMember))).scalars()}
-    return {"members": [{"member": m, "label": family.label(m), "fee_rate": rates.get(m)}
-                        for m in family.MEMBERS],
-            "fees": await user_fees.summary(session),
-            "ticket_choices": [str(t) for t in family.TICKETS_USD]}
+    shown = [m for m in family.MEMBERS if unlocked or not family.locked(m)]
+    out: dict[str, object] = {
+        "members": [{"member": m, "label": family.label(m), "fee_rate": rates.get(m)}
+                    for m in shown],
+        "unlocked": unlocked,
+        "locked_count": len(family.MEMBERS) - len(shown),
+        "ticket_choices": [str(t) for t in family.TICKETS_USD]}
+    if unlocked:
+        await _charged(session)
+        out["fees"] = await user_fees.summary(session)
+    return out
 
 
 @router.get("/{name}", summary="One member's own wallet")
-async def member_view(name: str, session: DbSession, _: AdminUser) -> dict[str, object]:
+async def member_view(name: str, session: DbSession, _: AdminUser,
+                      x_users_token: str | None = Header(default=None)) -> dict[str, object]:
     member = _member(name)
+    _unlocked(member, x_users_token)
     row = await session.get(RealWalletFamilyMember, member)
     if row is None:
         raise HTTPException(status_code=404, detail="no such user wallet")
@@ -178,7 +221,8 @@ async def member_view(name: str, session: DbSession, _: AdminUser) -> dict[str, 
 
 
 @router.post("/{name}/withdraw", summary="Send SOL from a member's own wallet to Karthik")
-async def member_withdraw(name: str, payload: WithdrawIn, _: AdminUser
+async def member_withdraw(name: str, payload: WithdrawIn, _: AdminUser,
+                          x_users_token: str | None = Header(default=None)
                           ) -> dict[str, object]:
     """The member's own wallet pays; Karthik's nominated address receives.
 
@@ -192,6 +236,7 @@ async def member_withdraw(name: str, payload: WithdrawIn, _: AdminUser
     Never retried: a lost response is an UNCERTAIN transfer.
     """
     member = _member(name)
+    _unlocked(member, x_users_token)
     wallet = family_wallets.address(member)
     if wallet is None:
         raise HTTPException(status_code=404, detail=f"{member} has no wallet of their own yet")
@@ -230,9 +275,12 @@ async def member_withdraw(name: str, payload: WithdrawIn, _: AdminUser
 @router.post("/{name}/own-settings",
              summary="Switch a member's OWN wallet on or off, and size it")
 async def member_own_settings(name: str, payload: OwnSettingsIn, session: DbSession,
-                              viewer: AdminUser) -> dict[str, object]:
+                              viewer: AdminUser,
+                              x_users_token: str | None = Header(default=None)
+                              ) -> dict[str, object]:
     """Start, stop and size are Karthik's, signed in as the admin."""
     member = _member(name)
+    _unlocked(member, x_users_token)
     if family_wallets.address(member) is None:
         raise HTTPException(status_code=404,
                             detail=f"{member} has no wallet of their own yet")
@@ -255,11 +303,14 @@ async def member_own_settings(name: str, payload: OwnSettingsIn, session: DbSess
 
 @router.post("/{name}/collect-fee", summary="Send a user's due profit fee to the fee address")
 async def member_collect_fee(name: str, payload: CollectFeeIn, session: DbSession,
-                             _: AdminUser) -> dict[str, object]:
+                             _: AdminUser,
+                             x_users_token: str | None = Header(default=None)
+                             ) -> dict[str, object]:
     """Karthik's button. Sends every month's due fee for this user as one SOL
     transfer to the pinned fee address; the signer re-checks the address.
     Never retried: a lost response is an UNCERTAIN transfer to look up."""
     member = _member(name)
+    _unlocked(member, x_users_token)
     await _charged(session)
     price = await sol_usd_now(datetime.now(UTC))
     if price is None:

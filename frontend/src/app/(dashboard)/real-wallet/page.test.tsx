@@ -170,13 +170,18 @@ function serve(
     if (path === "/real-wallet/status") return data.status ?? status();
     if (path === "/real-wallet/autotrade") return data.autotrade ?? autotrade();
     if (path === "/real-wallet/funding-readiness") return data.readiness ?? readiness();
-    if (path === "/real-wallet/family")
+    if (path === "/real-wallet/family") {
+      const unlocked = Boolean(window.sessionStorage.getItem("users-token"));
       return {
-        members: Array.from({ length: 10 }, (_, i) => ({
+        members: Array.from({ length: unlocked ? 10 : 1 }, (_, i) => ({
           member: `USER${i + 1}`, label: `USER ${i + 1}`, fee_rate: i === 0 ? "0" : "0.20",
         })),
-        fees: { collected_usd: "12.50", waiting_usd: "3.00", to_check: 0, fee_address: "x" },
+        unlocked,
+        ...(unlocked
+          ? { fees: { collected_usd: "12.50", waiting_usd: "3.00", to_check: 0, fee_address: "x" } }
+          : {}),
       };
+    }
     throw new Error(`unexpected GET ${path}`);
   });
 }
@@ -286,20 +291,35 @@ describe("RealWalletPage without signing in", () => {
 });
 
 describe("RealWalletPage user wallets", () => {
-  it("lists USER 1 to USER 10 for Karthik, each a link to its page", async () => {
+  afterEach(() => window.sessionStorage.clear());
+
+  it("shows USER 1, and keeps USER 2-10 and the fees behind the users password", async () => {
     signInAsAdmin();
     serve();
     await renderLoaded();
     const users = screen.getByText("User wallets").closest("section") as HTMLElement;
-    const links = within(users).getAllByRole("link");
-    expect(links.map((l) => l.textContent?.split(/\d+%|no fee/)[0])).toEqual(
-      Array.from({ length: 10 }, (_, i) => `USER ${i + 1}`));
-    expect(links[6]).toHaveAttribute("href", "/real-wallet/family/user7");
-    expect(await within(users).findByText("$12.50")).toBeInTheDocument();
-    expect(within(users).getByText("Profit fees collected")).toBeInTheDocument();
-    expect(within(users).getByText("$3.00")).toBeInTheDocument();
-    expect(links[0]).toHaveTextContent("no fee");
-    expect(links[1]).toHaveTextContent("20% fee");
+    expect(await within(users).findByRole("link", { name: /USER 1/ })).toHaveAttribute(
+      "href", "/real-wallet/family/user1");
+    const locked = within(users).getByTestId("users-locked-area");
+    expect(within(locked).getByLabelText("Users password")).toHaveAttribute("type", "password");
+    expect(within(users).queryByText("Profit fees collected")).not.toBeInTheDocument();
+    expect(within(users).queryByRole("link", { name: /USER 7/ })).not.toBeInTheDocument();
+  });
+
+  it("opens USER 2-10 and the fees once the password is accepted", async () => {
+    signInAsAdmin();
+    serve();
+    vi.mocked(api.post).mockResolvedValueOnce({ token: "t" });
+    await renderLoaded();
+    const users = screen.getByText("User wallets").closest("section") as HTMLElement;
+    fireEvent.change(await within(users).findByLabelText("Users password"), { target: { value: "pw" } });
+    fireEvent.click(within(users).getByRole("button", { name: "Open" }));
+    expect(await within(users).findByText("Profit fees collected")).toBeInTheDocument();
+    expect(within(users).getByText("$12.50")).toBeInTheDocument();
+    expect(within(users).getByRole("link", { name: /USER 7/ })).toHaveAttribute(
+      "href", "/real-wallet/family/user7");
+    expect(vi.mocked(api.post)).toHaveBeenCalledWith(
+      "/real-wallet/family/unlock", { password: "pw" }, { skipAuthRetry: true });
   });
 
   it("shows nothing about them to anyone else", async () => {

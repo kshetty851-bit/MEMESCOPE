@@ -338,14 +338,14 @@ async def test_a_member_without_a_wallet_has_no_switch(db_session):
     from fastapi import HTTPException
 
     from app.models.user import UserRole
-    from app.real_wallet import family_api
+    from app.real_wallet import family, family_api
 
     await _user1(db_session, own=False)
     karthik = SimpleNamespace(role=UserRole.ADMIN, email="karthik@example.com")
     with pytest.raises(HTTPException) as missing:
         await family_api.member_own_settings(
             "user2", family_api.OwnSettingsIn(enabled=False, ticket_usd=Decimal("20")),
-            db_session, viewer=karthik)
+            db_session, viewer=karthik, x_users_token=family.issue_token()[0])
     assert missing.value.status_code == 404
 
 

@@ -381,6 +381,9 @@ x-backend-env: &backend-env
   # separated). In the anchor so the API, the worker and the signer all read
   # the same map; the matching secrets reach the signer alone, below.
   REAL_WALLET_FAMILY_WALLETS: ${REAL_WALLET_FAMILY_WALLETS:-}
+  # The second lock on USER 2-10 and the fees: a PBKDF2 HASH only
+  # (salt_hex:hash_hex, no `$` on purpose). Empty keeps them locked.
+  REAL_WALLET_USERS_PASSWORD_HASH: ${REAL_WALLET_USERS_PASSWORD_HASH:-}
   # Every wallet together, in one coin within an hour (see config.py).
   REAL_WALLET_MAX_COIN_USD: ${REAL_WALLET_MAX_COIN_USD:-250}
   # Where the user wallets' monthly profit fee goes; the signer reads it too.
