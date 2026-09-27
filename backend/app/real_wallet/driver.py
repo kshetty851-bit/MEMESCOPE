@@ -403,8 +403,8 @@ class RealWalletDriver:
         cutoff = now - self._decision_age(strategy_id)
         traded = select(RealWalletLiveIntent.mint_address).where(
             RealWalletLiveIntent.wallet_public_key == wallet)
-        rows = await self._session.execute(
-            select(LabDecision.mint_address)
+        rows = (await self._session.execute(
+            select(LabDecision.mint_address, LabDecision.features)
             .where(
                 LabDecision.strategy_id == strategy_id.upper(),
                 LabDecision.eligible.is_(True),
@@ -412,9 +412,33 @@ class RealWalletDriver:
                 LabDecision.mint_address.not_in(traded),
             )
             .order_by(LabDecision.checkpoint_at.desc())
-            .limit(1)
-        )
-        return rows.scalars().first()
+            .limit(10)
+        )).all()
+        for mint, features in rows:
+            if self._too_old(strategy_id, features, now):
+                continue
+            return mint
+        return None
+
+    @staticmethod
+    def _too_old(strategy_id: str, features: dict | None, now: datetime) -> bool:
+        """A graduation coin past `MAX_ENTRY_AGE_S` since it graduated, or of
+        unknown age, is not bought (Karthik, 2026-09-27, after EVO: bought
+        186s after graduating, its creator dumped at 6.6 minutes, inside the
+        late hold). Other strategies have no graduation to count from."""
+        from app.labs.graduation import config as grad_config
+        from app.labs.graduation.live_spec import BY_ID as GRAD_BY_ID
+
+        if strategy_id.upper() not in GRAD_BY_ID:
+            return False
+        raw = (features or {}).get("graduated_at")
+        if not raw:
+            return True
+        try:
+            graduated = datetime.fromisoformat(raw)
+        except ValueError:
+            return True
+        return (now - graduated).total_seconds() > grad_config.MAX_ENTRY_AGE_S
 
     async def _trades_today(self, now: datetime, wallet: str) -> int:
         """This wallet's entries today. Sells are not counted: each would take a

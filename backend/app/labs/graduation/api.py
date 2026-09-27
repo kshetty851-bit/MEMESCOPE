@@ -1476,6 +1476,14 @@ def _karthik_line(rows: Sequence[Any], sol: Decimal | None, *, size: float,
     }
 
 
+def _fresh_entry(row: Any) -> bool:
+    """Bought within `config.MAX_ENTRY_AGE_S` of the coin graduating."""
+    graduated = getattr(row, "graduated_at", None)
+    if graduated is None:
+        return False
+    return (row.opened_at - graduated).total_seconds() <= config.MAX_ENTRY_AGE_S
+
+
 def _pools_words() -> str:
     """The book's pool range in words: "$150k and up" or "$75k-$300k"."""
     lo, hi = config.KARTHIK_BOOK_POOLS
@@ -1619,6 +1627,11 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     # One trade at a time, from the first day (Karthik, 2026-09-25): chosen
     # after WOTF, which the rule would have let go because LESGO was still
     # held. Replayed from the start, so the days before it are a look back.
+    # The two-minute entry guard (config.MAX_ENTRY_AGE_S, 2026-09-27), replayed
+    # from day 1 on the book AND the grid: a coin bought more than two minutes
+    # after it graduated, or of unknown age, never happened. EVO was 186s.
+    rows = [r for r in rows if _fresh_entry(r)]
+    small = [r for r in small if _fresh_entry(r)]
     # Every $75k+ signal his arm took: what the grid beside the book reads.
     signals = rows
     # The book counts only its pool range (KARTHIK_BOOK_POOLS, 2026-09-26).
@@ -1647,6 +1660,10 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
                  f"still quiet (under {config.QUIET_MAX_POOL_TXS} trades) when it is bought, "
                  f"out at {arm.hold}m"),
         "pools_usd": list(config.KARTHIK_BOOK_POOLS),
+        # What the page's rule book reads, so its words cannot drift from the rule.
+        "max_entry_age_s": config.MAX_ENTRY_AGE_S,
+        "max_entry_age_since": config.MAX_ENTRY_AGE_AT,
+        "quiet_max_txs": config.QUIET_MAX_POOL_TXS,
         "pools_since": config.KARTHIK_BOOK_POOLS_AT,
         "hold_minutes": arm.hold,
         "started_at": spec.start,

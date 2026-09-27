@@ -53,13 +53,14 @@ _Money = TypeVar("_Money", float, Decimal)
 #: 1.4.0 adds G-QUIET (2026-09-21); 1.5.0 adds its four-minute twin
 #: G-QUIET4 (2026-09-22); 1.6.0 adds G-BAND5 and 1.7.0 its pump-only twin
 #: G-BANDP, the same day; 1.8.0 adds G-B5-5M; 1.9.0 adds G-Q150 (2026-09-25);
-#: 1.10.0 adds G-QMID (2026-09-26).
+#: 1.10.0 adds G-QMID (2026-09-26); 1.11.0 adds the two-minute entry-age
+#: guard, `max_entry_age_s` (2026-09-27).
 #: The version MUST be bumped with
 #: a new strategy: `strategy_row_id` finds the tournament row by version, so adding
 #: one under the old version leaves that row holding the old `SPEC_HASH`, and
 #: `app.lab.health` then reads the difference as drift and halts every arm on
 #: it. A new version means a new tournament row, which is what 1.1.0 did.
-SPEC_VERSION = "gradlive-1.10.0"
+SPEC_VERSION = "gradlive-1.11.0"
 
 #: Each live arm and the paper arm it mirrors. Recorded so a reader can put the
 #: real book beside the arm it is supposed to be copying, and so nothing has to
@@ -522,6 +523,14 @@ BY_ID = {s.id: s for s in STRATEGIES}
 OFFERED: tuple[str, ...] = ("G-QUIET", "G-QUIET4", "G-Q150")
 
 
+def _entry_age_s() -> int:
+    """The entry-age guard the driver enforces (`config.MAX_ENTRY_AGE_S`),
+    in the hashed spec so a change to it is a new version."""
+    from app.labs.graduation import config
+
+    return config.MAX_ENTRY_AGE_S
+
+
 def fundable(cash: _Money, *, holding: bool, ticket: _Money,
              floor: _Money) -> _Money | None:
     """What the $100 account spends on its next entry, or None to skip it.
@@ -563,6 +572,7 @@ def _canonical() -> str:
          "paper_books": PAPER_BOOKS,
          "pool_floor_usd": POOL_FLOOR_USD,
          "max_decision_age_s": MAX_DECISION_AGE_SECONDS,
+         "max_entry_age_s": _entry_age_s(),
          "strategies": [clean(s) for s in STRATEGIES]},
         sort_keys=True, separators=(",", ":"), default=str,
     )

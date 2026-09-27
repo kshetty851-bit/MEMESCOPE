@@ -301,6 +301,52 @@ function SizeGrid({ data }: { data: KarthikBook }) {
   );
 }
 
+/**
+ * THE RULE BOOK (Karthik, 2026-09-27): the book's rules in plain words, for
+ * anyone reading the page. Every number comes from the API, so the words
+ * cannot drift from what the book actually does.
+ */
+export function RuleBook({ data }: { data: KarthikBook }) {
+  const pool = data.pools_usd?.[0];
+  const top = data.pools_usd?.[1];
+  const ageMin = data.max_entry_age_s ? data.max_entry_age_s / 60 : null;
+  const rugEvery = data.rugs > 0 ? Math.round(data.trades / data.rugs) : null;
+  const rules: [string, string][] = [
+    ["What it buys", "New pump.fun coins right after they “graduate” — finish their launch and open a real trading pool. About 1,000 do that every day."],
+    ...(pool ? [["Only big pools", top ? `The pool must hold between ${usd(pool).replace(".00", "")} and ${usd(top).replace(".00", "")}.` : `The pool must hold ${usd(pool).replace(".00", "")} or more.`] as [string, string]] : []),
+    ...(data.quiet_max_txs ? [["Only quiet pools", `Fewer than ${data.quiet_max_txs} trades in the pool so far when it buys. A busy start is skipped.`] as [string, string]] : []),
+    ...(ageMin ? [["Only fresh coins", `It buys within ${ageMin} minutes of the coin graduating, or not at all. A late buy sits in the danger zone when creators sell.`] as [string, string]] : []),
+    ["One at a time", "While it holds a coin, the next one is skipped. It can never be caught in two bad coins at once."],
+    ["Trade size", `${usd(data.ticket_usd)} per trade, from a ${usd(data.capital_usd)} balance.`],
+    ["Always sells", `Exactly ${data.hold_minutes} minutes after buying. No price targets, no stop-loss — the clock decides.`],
+    ["The risk", `If a coin's creator drains the pool (a “rug”), that trade loses almost all of it.${rugEvery ? ` So far about 1 in ${rugEvery} trades.` : ""}`],
+    ["Paper money", "A simulation on real market prices. The real wallet follows the same rules on its own."],
+  ];
+  return (
+    <Panel>
+      <PanelHeader>
+        <PanelTitle>Rule book</PanelTitle>
+      </PanelHeader>
+      <ul className="space-y-1.5 p-3 text-[13px] leading-relaxed">
+        {rules.map(([title, body]) => (
+          <li key={title} className="flex gap-2">
+            <span aria-hidden className="mt-[7px] size-1.5 shrink-0 rounded-full bg-accent" />
+            <span>
+              <b className="text-ink">{title}:</b> <span className="text-ink-dim">{body}</span>
+            </span>
+          </li>
+        ))}
+      </ul>
+      {data.max_entry_age_since ? (
+        <p className="px-3 pb-3 text-[11px] text-ink-dim">
+          The fresh-coin rule was added on {day(data.max_entry_age_since)} and replayed from the
+          first day, like every other rule here.
+        </p>
+      ) : null}
+    </Panel>
+  );
+}
+
 const TRADES_OPEN_KEY = "memescope.karthikTradesOpen";
 
 /**
@@ -451,6 +497,8 @@ export function KarthikLabPage() {
           </p>
         ) : null}
       </div>
+
+      <RuleBook data={data} />
 
       <div>
         <div className="mb-1 text-[11px] uppercase tracking-wider text-ink-dim">

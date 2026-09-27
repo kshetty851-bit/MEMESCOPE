@@ -1405,7 +1405,9 @@ class Tournament:
                         strategy_id=live_spec.MIRRORS[arm.name],
                         mint=row.mint, opened_at=row.open_at,
                         liquidity_usd=depth, impact=impact,
-                        price_native=price))
+                        # A curve entry has not graduated: no age to check,
+                        # and the wallet buys nothing it cannot age.
+                        price_native=price, graduated_at=None))
         await live_decisions.record(self._session, mirror)
         return opened
 
@@ -1838,7 +1840,7 @@ class Tournament:
                         strategy_id=live_spec.MIRRORS[arm.name],
                         mint=row.mint, opened_at=entry_at,
                         liquidity_usd=row.liquidity_usd, impact=impact,
-                        price_native=price))
+                        price_native=price, graduated_at=row.graduated_at))
         await live_decisions.record(self._session, mirror)
         opened += opened_curve
         if opened or refused or foreign or unpriced or money_blocked or unlocked or too_busy:

@@ -179,6 +179,7 @@ async def test_a_graduation_sale_follows_the_paper_clock_not_the_fill(db_session
     await live_decisions.record(db_session, [live_decisions.Mirrored(
         strategy_id="G-B3-5M",
         mint=MINT, opened_at=decided, liquidity_usd=Decimal("250000"),
+        graduated_at=decided - timedelta(seconds=30),
         impact=None, price_native=Decimal("0.000001"))])
     position = await _bought(db_session, at=filled, price=_usd(now))
     driver = RealWalletExitDriver(db_session)
@@ -195,6 +196,7 @@ async def test_only_the_graduation_arm_counts_from_the_decision(db_session):
     await live_decisions.record(db_session, [live_decisions.Mirrored(
         strategy_id="G-B3-5M",
         mint=MINT, opened_at=filled - timedelta(seconds=40),
+        graduated_at=filled - timedelta(seconds=70),
         liquidity_usd=Decimal("250000"), impact=None,
         price_native=Decimal("0.000001"))])
     position = await _bought(db_session, at=filled, price=_usd(now), strategy="V7-06")
@@ -443,6 +445,7 @@ def grad_signal(monkeypatch, live):
             strategy_id="G-QUIET",
             mint="DriverLossTestMint111111111111111111111pump",
             opened_at=now - timedelta(seconds=5), liquidity_usd=Decimal("250000"),
+            graduated_at=now - timedelta(seconds=35),
             impact=None, price_native=Decimal("0.000001"))])
         await AutotradeSwitchService(session).start(
             actor="op@x.com", reason="loss limit test", strategy_id="G-QUIET", at=now)

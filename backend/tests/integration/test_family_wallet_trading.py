@@ -82,6 +82,7 @@ async def _jaya(session, *, own: bool, ticket: str = "20") -> None:
 async def _signal(session, now: datetime, *, owner_on: bool = True) -> None:
     await live_decisions.record(session, [live_decisions.Mirrored(
         strategy_id="G-QUIET", mint=MINT, opened_at=now - timedelta(seconds=5),
+        graduated_at=now - timedelta(seconds=35),
         liquidity_usd=Decimal("250000"), impact=None, price_native=Decimal("0.000001"))])
     switch = AutotradeSwitchService(session)
     await switch.start(actor="op@x.com", reason="family wallet test",
