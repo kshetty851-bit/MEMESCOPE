@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
+import { DayLog, type LogDay } from "@/components/alpha/journey-log";
 import { api } from "@/lib/api-client";
 
 /**
@@ -31,6 +32,7 @@ interface Journey {
   graduations_watched: number;
   commits: number | null;
   merged_prs: number | null;
+  days?: LogDay[];
 }
 
 /** The first commit: "Day 1 Foundation Complete". */
@@ -366,6 +368,11 @@ export function Journey() {
           </Reveal>
         </li>
       </ol>
+
+      {/* THE DAY-BY-DAY LOG — grows by itself from each day's commits */}
+      <Reveal className="mt-10">
+        <DayLog days={data?.days} />
+      </Reveal>
 
       {/* WHAT WE STILL DON'T KNOW */}
       <Reveal>

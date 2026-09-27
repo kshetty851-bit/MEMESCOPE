@@ -26,6 +26,11 @@ async def test_today_counts_only_the_owners_trades_since_dubai_midnight(
         return {"commits": 760, "merged_prs": 154}
 
     monkeypatch.setattr(api, "github_counts", github)
+
+    async def days(now):
+        return [{"date": "2026-09-27", "commits": 11, "titles": ["Homepage (#155)"]}]
+
+    monkeypatch.setattr(api, "github_days", days)
     now = datetime.now(UTC)
 
     def closed(pnl: str, at: datetime, wallet: str = OWNER,
@@ -46,6 +51,7 @@ async def test_today_counts_only_the_owners_trades_since_dubai_midnight(
     assert out["real_today"]["trades"] == 2 and out["real_today"]["wins"] == 1
     assert out["trades_tested"] == 4                             # every real trade counts here
     assert (out["commits"], out["merged_prs"]) == (760, 154)
+    assert out["days"][0]["commits"] == 11
     # Counts and the lab's headline only: no amounts, coins or address.
     assert set(out["real_today"]) == {"trades", "wins", "since"}
     assert OWNER not in str(out)

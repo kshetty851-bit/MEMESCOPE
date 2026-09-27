@@ -20,7 +20,7 @@ from sqlalchemy import text
 from app.api.deps import DbSession
 from app.core.config import settings
 from app.labs.graduation.api import karthik_book
-from app.services.github_counts import github_counts
+from app.services.github_counts import github_counts, github_days
 
 router = APIRouter(tags=["homepage"])
 
@@ -64,6 +64,8 @@ async def journey(db: DbSession) -> dict[str, Any]:
         "trades_tested": counts.paper_trades + counts.real_trades,
         "graduations_watched": counts.graduations,
         **await github_counts(now),
+        # The day-by-day log: every day with a commit, and what it built.
+        "days": await github_days(now),
     }
     _CACHE = (now, out)
     return out

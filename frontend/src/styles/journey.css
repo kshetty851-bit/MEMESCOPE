@@ -213,6 +213,27 @@
   grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
 }
 
+.journey-log-row {
+  display: grid;
+  grid-template-columns: 4rem minmax(0, 1fr);
+  grid-template-areas: "date words" "count words";
+  column-gap: 1rem;
+  padding: 0.7rem 0;
+  border-top: 1px solid var(--color-line-subtle);
+}
+
+.journey-log-row > :nth-child(1) { grid-area: date; padding-top: 0.15rem; }
+.journey-log-row > :nth-child(2) { grid-area: words; }
+.journey-log-row > :nth-child(3) { grid-area: count; text-align: left; font-size: 0.65rem; }
+
+@media (min-width: 768px) {
+  .journey-log-row {
+    grid-template-columns: 4.5rem minmax(0, 1fr) 6.5rem;
+    grid-template-areas: "date words count";
+  }
+  .journey-log-row > :nth-child(3) { text-align: right; font-size: 0.75rem; padding-top: 0.15rem; }
+}
+
 .journey-unknowns {
   margin-top: 3.5rem;
   border-color: color-mix(in oklch, var(--color-warn) 35%, transparent);
