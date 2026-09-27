@@ -10,6 +10,8 @@ export interface KarthikTrade {
 }
 
 export interface KarthikBook {
+  /** Every pump.fun graduation seen since the book opened, bought or not. */
+  graduations_seen?: number;
   book: string;
   rule: string;
   hold_minutes: number;

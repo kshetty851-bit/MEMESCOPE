@@ -1654,8 +1654,13 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     took = [(row, money) for row, money in zip(rows, walk.pnl, strict=True)
             if money is not None]
     pnl = [money for _, money in took]
+    # Every pump.fun graduation seen since the book opened, bought or not, at
+    # any pool size (Karthik, 2026-09-27: "doesnt matter we took trade or not").
+    seen = await db.scalar(select(func.count()).select_from(GradMigration)
+                           .where(GradMigration.ts >= spec.start))
     return {
         "book": spec.book,
+        "graduations_seen": int(seen or 0),
         "rule": (f"Karthik's book — every graduation with a {_pools_words()} pool that is "
                  f"still quiet (under {config.QUIET_MAX_POOL_TXS} trades) when it is bought, "
                  f"out at {arm.hold}m"),
