@@ -39,8 +39,6 @@ export interface KarthikBook {
    *  Replayed from day 1, so what came before is a look back. */
   pools_usd?: [number, number | null];
   pools_since?: string;
-  /** The old rule on the same start: every signal the cash allowed. */
-  every_trade: KarthikWhatIfLine;
   wins: number;
   rugs: number;
   days: KarthikDay[];
@@ -79,13 +77,11 @@ export interface KarthikWhatIfLine {
 /** The same trades at other sizes, and on $150k+ pools only. A check shown
  *  beside the book; the book itself stays on its own rule. */
 export interface KarthikWhatIf {
-  floor_usd: number;
-  deep: KarthikWhatIfLine;
-  floors: (KarthikWhatIfLine & { floor_usd: number })[];
-  /** Pool-size splits, each its own one-at-a-time walk on the book's money.
-   *  `book`: cut from this book's trades ($75k+). Otherwise from the arms that
-   *  run the same rule on the pools the book skips; `replayed` of those trades
-   *  were rebuilt from price snapshots rather than taken live. */
-  bands?: (KarthikWhatIfLine & { lo_usd: number; hi_usd: number | null; book: boolean })[];
-  sizes: { ticket_usd: number; capital_usd: number; current: boolean; all: KarthikWhatIfLine; wide: KarthikWhatIfLine }[];
+  /** The grid's pool floors, left to right. `book` marks this book's own
+   *  floor; `replayed_below` marks floors that include the $25-75k pools the
+   *  book skips (rebuilt from price snapshots before those arms went live). */
+  floors: { floor_usd: number; book: boolean; replayed_below: boolean }[];
+  /** One row per trade size, on the balance it is paired with; one cell per
+   *  floor, each its own one-at-a-time walk from the book's start. */
+  sizes: { ticket_usd: number; capital_usd: number; current: boolean; cells: KarthikWhatIfLine[] }[];
 }
