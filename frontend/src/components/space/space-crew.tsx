@@ -80,32 +80,17 @@ function useHeroAway(): boolean {
   return away;
 }
 
+/** The fox, floating by the access panel. The hamster, toucans, monkey and
+ *  giraffe that shared the sky went on 2026-09-27 (Karthik: "it should not
+ *  look congested"). */
 export function FloatingCrew() {
   const away = useHeroAway();
   const state = { "data-away": away ? "" : undefined };
   return (
     <>
-      <div className="crew-sky crew-sky--back" aria-hidden {...state}>
-        <div className="crew-flyby crew-flyby--hamster">
-          <Img src="/crew/hamster.webp" className="crew-flyby__img" />
-        </div>
-        <div className="crew-flyby crew-flyby--toucan">
-          <Img src="/crew/toucan.webp" className="crew-flyby__img" />
-        </div>
-      </div>
-
       <div className="crew-sky crew-sky--front" aria-hidden {...state}>
         <div className="crew-float crew-float--fox">
           <Img src="/crew/fox.webp" className="crew-float__img" />
-        </div>
-        <div className="crew-float crew-float--toucan-bubble">
-          <Img src="/crew/toucan-bubble.webp" className="crew-float__img" />
-        </div>
-        <div className="crew-float crew-float--monkey">
-          <Img src="/crew/monkey.webp" className="crew-float__img" />
-        </div>
-        <div className="crew-float crew-float--giraffe">
-          <Img src="/crew/giraffe.webp" className="crew-float__img" />
         </div>
       </div>
     </>

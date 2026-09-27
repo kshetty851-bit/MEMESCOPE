@@ -728,3 +728,46 @@
   .space-facts__text { animation: none; }
   .home-universe__spacewalker { transform: translate(70vw, 55vh) rotate(-15deg); }
 }
+
+/* --- Sky traffic (components/space/sky-traffic.tsx, 2026-09-27) ---------- */
+.sky-traffic {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.sky-craft {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: var(--size);
+  height: var(--size);
+  animation: sky-fly var(--dur) linear forwards;
+  will-change: transform;
+  /* A touch brighter: the page's scrim sits over the whole sky. */
+  filter: brightness(1.25) drop-shadow(0 4px 10px rgb(0 0 0 / 0.5));
+}
+@keyframes sky-fly {
+  from { transform: translate(var(--fx), var(--fy)); }
+  to { transform: translate(var(--tx), var(--ty)); }
+}
+.sky-craft__art { width: 100%; height: 100%; }
+.sky-craft--rocket .sky-craft__art { transform: rotate(var(--turn)); }
+.sky-craft--satellite .sky-craft__art { animation: sky-tumble 16s linear infinite; }
+.sky-craft--ufo .sky-craft__art { animation: sky-hover 2.4s ease-in-out infinite alternate; }
+@keyframes sky-tumble { to { transform: rotate(360deg); } }
+@keyframes sky-hover {
+  from { transform: translateY(-4px) rotate(-4deg); }
+  to { transform: translateY(4px) rotate(4deg); }
+}
+.sky-craft__flame { transform-origin: 20px 54px; animation: sky-flame 0.18s ease-in-out infinite alternate; }
+@keyframes sky-flame { to { transform: scaleY(0.75); } }
+.sky-craft__blink { animation: sky-blink 1.1s steps(1) infinite; }
+@keyframes sky-blink { 50% { opacity: 0.2; } }
+.sky-craft__beam { animation: sky-beam 1.8s ease-in-out infinite alternate; }
+@keyframes sky-beam { from { opacity: 0.3; } to { opacity: 1; } }
+
+@media (max-width: 767px) {
+  .sky-craft { width: calc(var(--size) * 0.75); height: calc(var(--size) * 0.75); }
+}

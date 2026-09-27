@@ -54,7 +54,9 @@ const PHONE = 640;
  */
 export function plan(width: number, height: number): Orbit[] {
   const phone = width <= PHONE;
-  const shown = phone ? PLANETS.slice(0, 7) : PLANETS;
+  // Twelve on a big screen, seven on a phone: the rest stay in the list for
+  // the sign-in pages' variety but out of the sky (2026-09-27, decluttered).
+  const shown = PLANETS.slice(0, phone ? 7 : 12);
   const scale = phone ? 0.6 : 1;
   const cols = Math.max(1, Math.round(Math.sqrt((shown.length * width) / height)));
   const rows = Math.ceil(shown.length / cols);
