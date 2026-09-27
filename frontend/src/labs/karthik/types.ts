@@ -105,5 +105,7 @@ export interface KarthikFlows {
   other_buy_usd: string;
   other_sell_usd: string;
   insider_sold_trades: number;
+  /** Absent from an older API. */
+  insider_bought_trades?: number;
   other_buyers: number;
 }

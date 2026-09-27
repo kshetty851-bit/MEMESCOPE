@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import { GraduationsSeen, MoneyIn, PoolTrades } from "./page";
+import { day30, GraduationsSeen, MoneyIn, PoolTrades } from "./page";
 
 describe("graduations seen", () => {
   it("shows every graduation since the start, bought or not", () => {
@@ -54,8 +54,37 @@ describe("rugs and money in", () => {
     expect(box).toHaveTextContent("120 of 226 trades read so far");
   });
 
+  it("says in how many trades the owners bought, when the API sends it", () => {
+    render(<MoneyIn flows={{
+      trades: 230, measured: 230, insider_buy_usd: "1", insider_sell_usd: "0", other_buy_usd: "1",
+      other_sell_usd: "0", insider_sold_trades: 4, insider_bought_trades: 76, other_buyers: 1,
+    }} />);
+    expect(screen.getByTestId("money-in")).toHaveTextContent("Owners bought in 76 and sold in 4 of 230 trades");
+  });
+
   it("stays hidden until a trade has been read", () => {
     const { container } = render(<MoneyIn flows={undefined} />);
     expect(container).toBeEmptyDOMElement();
+  });
+});
+
+describe("day 30", () => {
+  const day = (n: number, pnl: string, balance: string, running = false) => ({
+    n, from: "", to: "", running, trades: 50, pnl_usd: pnl, pct: "1", balance_usd: balance,
+  });
+
+  it("adds the average finished day for every day left, and shows the worst pace", () => {
+    const now = Date.parse("2026-09-28T12:00:00Z");
+    const judge = "2026-10-23T12:00:00Z";                      // 25 days left
+    const guess = day30([day(6, "5", "400", true), day(5, "60", "395"), day(4, "40", "335"),
+                         day(3, "20", "295")], judge, now)!;
+    expect(guess.avg).toBe(40);
+    expect(guess.expected).toBe(400 + 40 * 25);
+    expect(guess.worstPace).toBe(400 + 20 * 25);
+    expect(guess.basedOn).toBe(3);
+  });
+
+  it("guesses nothing before the first full day", () => {
+    expect(day30([day(1, "5", "105", true)], "2026-10-23T12:00:00Z")).toBeNull();
   });
 });
