@@ -428,6 +428,22 @@ export function TradeList({ data }: { data: KarthikBook }) {
   );
 }
 
+/** Top right: every graduation seen since the book opened, bought or not
+    (Karthik, 2026-09-27). Refreshes with the book, once a minute. */
+export function GraduationsSeen({ count }: { count: number | undefined }) {
+  if (count === undefined) return null;
+  return (
+    <div className="text-right" data-testid="graduations-seen">
+      <div className="text-lg font-semibold tabular-nums text-accent">
+        {count.toLocaleString("en-US")}
+      </div>
+      <div className="text-[11px] uppercase tracking-wider text-ink-dim">
+        graduations seen &middot; taken or not
+      </div>
+    </div>
+  );
+}
+
 export function KarthikLabPage() {
   const { data, isLoading, isError, refetch } = useKarthikBook();
   // Before the early returns: a hook may not sit behind a condition, and the
@@ -458,10 +474,13 @@ export function KarthikLabPage() {
       <div>
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h1 className="text-xl font-semibold">Karthik&apos;s Lab</h1>
-          <div className="text-right">
-            <div className="text-lg font-semibold tabular-nums">{elapsed}</div>
-            <div className="text-[11px] uppercase tracking-wider text-ink-dim">
-              running &middot; {days} days to judgement
+          <div className="flex items-baseline gap-6">
+            <GraduationsSeen count={data.graduations_seen} />
+            <div className="text-right">
+              <div className="text-lg font-semibold tabular-nums">{elapsed}</div>
+              <div className="text-[11px] uppercase tracking-wider text-ink-dim">
+                running &middot; {days} days to judgement
+              </div>
             </div>
           </div>
         </div>
