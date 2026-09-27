@@ -31,6 +31,7 @@ import asyncio
 import base64
 import binascii
 import json
+import struct
 from dataclasses import dataclass, replace
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Sequence
 from datetime import UTC, datetime
@@ -574,6 +575,85 @@ async def pool_txs_now(pool: str, at: datetime) -> int | None:
     except Exception as exc:   # a stranger, not a crash: the tick goes on
         logger.info("graduation_pool_txs_unread", pool=pool, error=type(exc).__name__)
         return None
+
+
+@dataclass(frozen=True, slots=True)
+class Flows:
+    """SOL bought and sold in one pool over a window, split by who."""
+
+    insider_buy: float
+    insider_sell: float
+    other_buy: float
+    other_sell: float
+    other_buyers: int
+    swaps: int
+
+
+def pool_swaps(tx: dict[str, Any], pool: str) -> list[tuple[str, str, float]]:
+    """(side, wallet, SOL) for every PumpSwap Buy/Sell in `tx` on `pool`.
+
+    Offsets from `app.services.scanner.trade_events` (pool at 120, user at
+    152, verified against mainnet); the quote amount is the u64 at 64, the
+    SOL side of the swap (read against real wallets' own fills, 2026-09-27).
+    """
+    from app.services.curve.pda import b58encode
+    from app.services.scanner.trade_events import (
+        BUY_EVENT_DISCRIMINATOR,
+        SELL_EVENT_DISCRIMINATOR,
+    )
+
+    out: list[tuple[str, str, float]] = []
+    for line in ((tx.get("meta") or {}).get("logMessages") or []):
+        if not line.startswith("Program data: "):
+            continue
+        try:
+            data = base64.b64decode(line[14:], validate=True)
+        except (binascii.Error, ValueError):
+            continue
+        head = data[:8]
+        if (head in (BUY_EVENT_DISCRIMINATOR, SELL_EVENT_DISCRIMINATOR) and len(data) >= 184
+                and b58encode(data[120:152]) == pool):
+            out.append(("buy" if head == BUY_EVENT_DISCRIMINATOR else "sell",
+                        b58encode(data[152:184]),
+                        struct.unpack_from("<Q", data, 64)[0] / 1e9))
+    return out
+
+
+async def pool_flows(rpc: Any, pool: str, start: datetime, end: datetime, *,
+                     insiders: frozenset[str], exclude: frozenset[str]) -> Flows:
+    """Every swap in `pool` between `start` and `end`, insiders against others.
+
+    Full transaction bodies, 100 a page (~10 Helius credits a page); a coin
+    held five minutes is typically one or two pages. Raises on a node error:
+    the caller retries the coin next pass rather than store a partial count.
+    """
+    agg = {"insider_buy": 0.0, "insider_sell": 0.0, "other_buy": 0.0, "other_sell": 0.0}
+    buyers: set[str] = set()
+    swaps, token = 0, None
+    while True:
+        opts: dict[str, Any] = {
+            "transactionDetails": "full", "encoding": "json",
+            "maxSupportedTransactionVersion": 1, "sortOrder": "asc", "limit": 100,
+            "filters": {"status": "succeeded", "blockTime": {
+                "gte": int(start.timestamp()), "lte": int(end.timestamp())}}}
+        if token:
+            opts["paginationToken"] = token
+        page = await rpc.call("getTransactionsForAddress", [pool, opts]) or {}
+        for tx in page.get("data") or []:
+            for side, who, sol in pool_swaps(tx, pool):
+                if who in exclude:
+                    continue
+                swaps += 1
+                who_kind = "insider" if who in insiders else "other"
+                agg[f"{who_kind}_{side}"] += sol
+                if who_kind == "other" and side == "buy":
+                    buyers.add(who)
+        token = page.get("paginationToken")
+        if not token or not page.get("data"):
+            break
+    return Flows(insider_buy=agg["insider_buy"], insider_sell=agg["insider_sell"],
+                 other_buy=agg["other_buy"], other_sell=agg["other_sell"],
+                 other_buyers=len(buyers), swaps=swaps)
 
 
 def swap_reserves(tx: dict[str, Any], *, mint: str, pool: str) -> tuple[int, int] | None:

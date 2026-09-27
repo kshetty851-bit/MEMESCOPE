@@ -36,6 +36,8 @@ from app.labs.graduation.models import (
     GradPaperRestatement,
     GradPostgradSample,
     GradToken,
+    GradRugVerdict,
+    GradTradeFlow,
 )
 from app.labs.graduation.paper import PaperBook, costs, net_return, positions
 from app.labs.graduation.tournament import ARMS
@@ -1590,6 +1592,31 @@ async def karthik_summary(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     return out
 
 
+async def _graduation_rugs(db: AsyncSession, since: datetime) -> dict[str, Any]:
+    """Of every graduation since `since` whose first hour is over and has been
+    judged (`scheduler.rugs_pass`): how many rugged, and how many were measured."""
+    measured, rugged = (await db.execute(
+        select(func.count().filter(GradRugVerdict.measured),
+               func.count().filter(GradRugVerdict.rugged))
+        .where(GradRugVerdict.graduated_at >= since))).one()
+    return {"rugged": int(rugged or 0), "measured": int(measured or 0),
+            "window_minutes": 60}
+
+
+def _flows(took: list, rows: dict[str, GradTradeFlow]) -> dict[str, Any]:
+    """The book's own trades: insiders' money against other traders', summed.
+    Only coins already read on-chain count; `measured` says how many."""
+    got = [rows[r.mint] for r, _ in took if r.mint in rows]
+    total = lambda attr: str(sum((getattr(f, attr) for f in got), Decimal(0)))  # noqa: E731
+    return {"trades": len(took), "measured": len(got),
+            "insider_buy_usd": total("insider_buy_usd"),
+            "insider_sell_usd": total("insider_sell_usd"),
+            "other_buy_usd": total("other_buy_usd"),
+            "other_sell_usd": total("other_sell_usd"),
+            "insider_sold_trades": sum(1 for f in got if f.insider_sell_usd > 0),
+            "other_buyers": sum(f.other_buyers for f in got)}
+
+
 @router.get("/karthik", summary="Karthik's own $500 book, and its judge date")
 async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     """His book alone, with the two things a balance cannot say.
@@ -1658,9 +1685,16 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     # any pool size (Karthik, 2026-09-27: "doesnt matter we took trade or not").
     seen = await db.scalar(select(func.count()).select_from(GradMigration)
                            .where(GradMigration.ts >= spec.start))
+    flow_rows = {f.mint: f for f in (await db.execute(
+        select(GradTradeFlow).where(GradTradeFlow.mint.in_([r.mint for r, _ in took]))
+    )).scalars().all()}
     return {
         "book": spec.book,
         "graduations_seen": int(seen or 0),
+        # Of those, how many rugged in their first hour (Karthik, 2026-09-27).
+        "graduations_rugged": await _graduation_rugs(db, spec.start),
+        # Who put money into the coins the book bought, graduation to its sell.
+        "flows": _flows(took, flow_rows),
         "rule": (f"Karthik's book — every graduation with a {_pools_words()} pool that is "
                  f"still quiet (under {config.QUIET_MAX_POOL_TXS} trades) when it is bought, "
                  f"out at {arm.hold}m"),

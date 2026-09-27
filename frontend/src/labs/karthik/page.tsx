@@ -7,7 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/states";
 
 import { useKarthikBook } from "./hooks";
-import type { KarthikBook, KarthikDay, KarthikTrade, KarthikWhatIfLine } from "./types";
+import type { KarthikBook, KarthikDay, KarthikFlows, KarthikTrade, KarthikWhatIfLine } from "./types";
 
 /**
  * KARTHIK'S LAB — ONE BOOK, PAPER ONLY.
@@ -430,7 +430,10 @@ export function TradeList({ data }: { data: KarthikBook }) {
 
 /** Top right: every graduation seen since the book opened, bought or not
     (Karthik, 2026-09-27). Refreshes with the book, once a minute. */
-export function GraduationsSeen({ count }: { count: number | undefined }) {
+export function GraduationsSeen({ count, rugs }: {
+  count: number | undefined;
+  rugs?: KarthikBook["graduations_rugged"];
+}) {
   if (count === undefined) return null;
   return (
     <div className="text-right" data-testid="graduations-seen">
@@ -439,6 +442,60 @@ export function GraduationsSeen({ count }: { count: number | undefined }) {
       </div>
       <div className="text-[11px] uppercase tracking-wider text-ink-dim">
         graduations seen &middot; taken or not
+      </div>
+      {rugs && rugs.measured > 0 ? (
+        <div className="mt-0.5 text-[11px] text-ink-dim" data-testid="graduations-rugged">
+          <span className="font-semibold tabular-nums text-down">
+            {rugs.rugged.toLocaleString("en-US")}
+          </span>{" "}
+          rugged ({Math.round((100 * rugs.rugged) / rugs.measured)}%) &middot; fell 80%+ in
+          their first hour, of {rugs.measured.toLocaleString("en-US")} checked
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function money(value: string): string {
+  return `$${Math.round(Number(value)).toLocaleString("en-US")}`;
+}
+
+/** Under the pool box: who put money into the coins the book bought, from
+    graduation to the book's sell, read on-chain (Karthik, 2026-09-27). */
+export function MoneyIn({ flows }: { flows: KarthikFlows | undefined }) {
+  if (!flows || flows.measured === 0) return null;
+  const rows: [string, string, string, string][] = [
+    ["Owners & related wallets", flows.insider_buy_usd, flows.insider_sell_usd, "text-warn"],
+    ["Other traders", flows.other_buy_usd, flows.other_sell_usd, "text-ink"],
+  ];
+  return (
+    <div
+      className="ml-auto mt-2 w-fit max-w-[19rem] rounded-md border border-line bg-canvas/85 px-3 py-2 text-[11px] backdrop-blur-sm"
+      data-testid="money-in"
+    >
+      <div className="uppercase tracking-wider text-ink-dim">Money in our coins</div>
+      <table className="mt-1 tabular-nums">
+        <thead>
+          <tr className="text-ink-dim">
+            <th />
+            <th className="px-2 text-right font-normal">bought</th>
+            <th className="text-right font-normal">sold</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(([who, bought, sold, tone]) => (
+            <tr key={who}>
+              <td className={`pr-2 ${tone}`}>{who}</td>
+              <td className="px-2 text-right font-medium text-ink">{money(bought)}</td>
+              <td className="text-right text-ink-2">{money(sold)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="mt-1 leading-snug text-ink-dim">
+        {flows.other_buyers.toLocaleString("en-US")} other buyers. Owners sold in{" "}
+        {flows.insider_sold_trades} of {flows.measured} trades. Graduation to our sell,
+        on-chain{flows.measured < flows.trades ? ` · ${flows.measured} of ${flows.trades} trades read so far` : ""}.
       </div>
     </div>
   );
@@ -462,7 +519,7 @@ export function PoolTrades({ trades }: { trades: KarthikTrade[] }) {
   if (!rows.length) return null;
   return (
     <div
-      className="ml-auto mt-2 w-fit rounded-md border border-line bg-canvas/85 px-3 py-2 text-[11px] backdrop-blur-sm min-[1150px]:absolute min-[1150px]:right-0 min-[1150px]:top-full min-[1150px]:z-10"
+      className="ml-auto mt-2 w-fit rounded-md border border-line bg-canvas/85 px-3 py-2 text-[11px] backdrop-blur-sm"
       data-testid="pool-trades"
     >
       <div className="uppercase tracking-wider text-ink-dim">Trades by pool size</div>
@@ -510,22 +567,26 @@ export function KarthikLabPage() {
 
   return (
     <div className="min-w-0 space-y-4">
-      <div>
-        <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h1 className="text-xl font-semibold">Karthik&apos;s Lab</h1>
-          <div className="relative">
-            <div className="flex items-baseline gap-6">
-              <GraduationsSeen count={data.graduations_seen} />
-              <div className="text-right">
-                <div className="text-lg font-semibold tabular-nums">{elapsed}</div>
-                <div className="text-[11px] uppercase tracking-wider text-ink-dim">
-                  running &middot; {days} days to judgement
-                </div>
+      {/* Two columns from 1150px: the counts and their boxes on the right, and
+          the header grows to fit them rather than lying over the rule book. */}
+      <div className="grid gap-x-8 gap-y-2 min-[1150px]:grid-cols-[minmax(0,1fr)_auto]">
+        <h1 className="text-xl font-semibold min-[1150px]:col-start-1 min-[1150px]:row-start-1">
+          Karthik&apos;s Lab
+        </h1>
+        <div className="min-[1150px]:col-start-2 min-[1150px]:row-span-2 min-[1150px]:row-start-1">
+          <div className="flex items-baseline justify-end gap-6">
+            <GraduationsSeen count={data.graduations_seen} rugs={data.graduations_rugged} />
+            <div className="text-right">
+              <div className="text-lg font-semibold tabular-nums">{elapsed}</div>
+              <div className="text-[11px] uppercase tracking-wider text-ink-dim">
+                running &middot; {days} days to judgement
               </div>
             </div>
-            <PoolTrades trades={data.trades_list} />
           </div>
+          <PoolTrades trades={data.trades_list} />
+          <MoneyIn flows={data.flows} />
         </div>
+        <div className="min-[1150px]:col-start-1 min-[1150px]:row-start-2">
         <p className="mt-1 max-w-[78ch] text-[13px] leading-relaxed text-ink-dim">
           {usd(data.capital_usd)} at {usd(data.ticket_usd)} a trade on one
           rule: <b>{data.rule}</b>. Started {day(data.started_at)},{" "}
@@ -557,6 +618,7 @@ export function KarthikLabPage() {
             {day(data.one_at_a_time_since)} on test it.
           </p>
         ) : null}
+        </div>
       </div>
 
       <RuleBook data={data} />

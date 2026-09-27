@@ -813,3 +813,54 @@ class GradPaperRestatement(Base):
     #: The market moment the new exit price describes, and where it came from.
     exit_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     exit_source: Mapped[str | None] = mapped_column(String(16))
+
+
+class GradTradeFlow(Base):
+    """Who put money into a coin Karthik's arm bought, read on-chain once it closed.
+
+    Every PumpSwap buy and sell in the coin's own pool from the moment it
+    graduated to the moment the arm sold (Karthik, 2026-09-27: "how much $
+    were put by owners and their related wallets ... how much $ were invested
+    by other traders"). INSIDERS are the creator plus `grad_operators.ids` (every
+    wallet holding >=1% at entry, and whoever funded each); OTHERS are everyone
+    else, less our own real wallet. Dollars at the SOL price the arm bought at.
+
+    "Other" means not in the known-insider list: an operator's fresh, unlinked
+    wallet reads as an outsider, so the insiders' figure is a floor.
+    """
+
+    __tablename__ = "grad_trade_flows"
+
+    mint: Mapped[str] = mapped_column(_ADDRESS, primary_key=True)
+    window_from: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    window_to: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    insiders_known: Mapped[int] = mapped_column(Integer, nullable=False)
+    insider_buy_usd: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    insider_sell_usd: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    other_buy_usd: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    other_sell_usd: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    other_buyers: Mapped[int] = mapped_column(Integer, nullable=False)
+    swaps: Mapped[int] = mapped_column(Integer, nullable=False)
+    measured_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class GradRugVerdict(Base):
+    """Did a graduation rug in its first hour? Written once, when the hour is over.
+
+    Rugged = the hour's LAST price on the coin's own pool is under a fifth of
+    its first (a fall of more than 80%, the line the rug-rate study used). The
+    last price, not the lowest, so one bad print cannot make a rug. Under five
+    samples on its own pool = not measured, never "clean". Every graduation is
+    judged, bought or not (Karthik, 2026-09-27).
+    """
+
+    __tablename__ = "grad_rug_verdicts"
+
+    mint: Mapped[str] = mapped_column(_ADDRESS, primary_key=True)
+    graduated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False,
+                                                   index=True)
+    measured: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    rugged: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    decided_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now())

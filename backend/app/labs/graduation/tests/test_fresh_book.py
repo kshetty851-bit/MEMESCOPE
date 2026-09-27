@@ -192,6 +192,25 @@ class _StubDb:
     async def scalar(self, _statement: object) -> None:
         return None
 
+    async def execute(self, _statement: object, _params: object = None) -> _Empty:
+        return _Empty()
+
+
+class _Empty:
+    """What the book's other reads get from the stub: nothing."""
+
+    def all(self) -> list[object]:
+        return []
+
+    def one(self) -> tuple[int, int]:
+        return (0, 0)
+
+    def scalars(self) -> _Empty:
+        return self
+
+    def __iter__(self):
+        return iter(())
+
 
 class _Pos:
     """A closed paper position, with only the columns the endpoint reads."""
