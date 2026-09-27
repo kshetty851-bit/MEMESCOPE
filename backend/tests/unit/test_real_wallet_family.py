@@ -21,6 +21,25 @@ def test_ten_users_in_order_with_readable_names():
     assert family.label("USER10") == "USER 10"
 
 
+def test_the_users_password_checks_against_a_hash_and_nothing_else():
+    stored = family.hash_password("a users secret", salt=b"0123456789abcdef")
+    assert "$" not in stored            # docker compose would mangle a `$`
+    assert "a users secret" not in stored
+    assert family.password_ok("a users secret", stored)
+    assert not family.password_ok("a users secreT", stored)
+    assert not family.password_ok("anything", "")      # none set: nobody gets in
+    assert not family.password_ok("anything", "zz:zz")
+
+
+def test_only_user1_is_open_and_a_token_opens_the_rest():
+    assert not family.locked("USER1")
+    assert all(family.locked(f"USER{i}") for i in range(2, 11))
+    token, _ = family.issue_token()
+    assert family.token_ok(token)
+    assert not family.token_ok(token + "x")
+    assert not family.token_ok(None)
+
+
 # --- what the wallet offers -------------------------------------------------
 
 def test_only_the_two_quiet_arms_are_offered_and_both_still_exist():

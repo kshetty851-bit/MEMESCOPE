@@ -165,3 +165,28 @@ describe("the profit fee", () => {
     expect(screen.queryByRole("button", { name: /Collect fee/ })).not.toBeInTheDocument();
   });
 });
+
+describe("a locked user's page", () => {
+  afterEach(() => {
+    get.mockReset();
+    post.mockReset();
+    window.sessionStorage.clear();
+  });
+
+  it("asks for the users password, then opens", async () => {
+    auth.user = { role: "admin" };
+    get.mockRejectedValueOnce(new ApiError(401, "http_error", "enter the users password first"));
+    get.mockResolvedValue({ member: "USER7", own_wallet: { address: ADDRESS, balance_sol: "1" } });
+    post.mockResolvedValue({ token: "t" });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <FamilyMemberPage member="user7" />
+      </QueryClientProvider>,
+    );
+    fireEvent.change(await screen.findByLabelText("Users password"), { target: { value: "pw" } });
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    expect(await screen.findByText(ADDRESS)).toBeInTheDocument();
+    expect(window.sessionStorage.getItem("users-token")).toBe("t");
+  });
+});

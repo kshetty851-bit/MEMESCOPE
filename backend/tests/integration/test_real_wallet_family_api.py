@@ -19,6 +19,14 @@ from app.real_wallet import family
 pytestmark = pytest.mark.integration
 
 URL = f"{settings.API_V1_PREFIX}/real-wallet/family"
+COLLECT = {"confirmation_phrase": "COLLECT_FEE"}
+
+
+@pytest.fixture(autouse=True)
+def _password(monkeypatch):
+    monkeypatch.setattr(settings, "REAL_WALLET_USERS_PASSWORD_HASH",
+                        family.hash_password("right horse", salt=b"s" * 16))
+    monkeypatch.setattr(family, "THROTTLE", family.Throttle(limit=3, window=600))
 
 
 async def test_nobody_but_the_admin_opens_a_user_wallet(app, db_session):
@@ -34,18 +42,38 @@ async def test_nobody_but_the_admin_opens_a_user_wallet(app, db_session):
                                   json=settings_body)).status_code == 403
         assert (await client.post(f"{URL}/user1/withdraw", json=withdraw)).status_code == 403
         assert (await client.post(f"{URL}/user2/collect-fee",
-                                  json={"confirmation_phrase": "COLLECT_FEE"})).status_code == 403
+                                  json=COLLECT)).status_code == 403
 
         # (A refused request rolls the test's transaction back, so the rows
         # go in after the refusals.)
         db_session.add_all(RealWalletFamilyMember(name=n) for n in family.MEMBERS)
         await db_session.flush()
         viewer.role = UserRole.ADMIN
+        # Signed in as the admin, but without the users password: USER 1 only.
         listed = await client.get(URL)
         assert listed.status_code == 200, listed.text
+        assert [m["member"] for m in listed.json()["members"]] == ["USER1"]
+        assert "fees" not in listed.json() and listed.json()["locked_count"] == 9
+        assert (await client.get(f"{URL}/user1")).status_code == 200
+        assert (await client.get(f"{URL}/user7")).status_code == 401
+        assert (await client.post(f"{URL}/user7/collect-fee",
+                                  json=COLLECT)).status_code == 401
+
+        # Wrong passwords are refused, then throttled.
+        for _ in range(3):
+            wrong = await client.post(f"{URL}/unlock", json={"password": "nope"})
+            assert wrong.status_code == 401
+        assert (await client.post(f"{URL}/unlock",
+                                  json={"password": "right horse"})).status_code == 429
+        family.THROTTLE = family.Throttle(limit=3, window=600)
+
+        opened = await client.post(f"{URL}/unlock", json={"password": "right horse"})
+        token = opened.json()["token"]
+        headers = {"X-Users-Token": token}
+        listed = await client.get(URL, headers=headers)
         assert listed.json()["members"][9]["label"] == "USER 10"
         assert "collected_usd" in listed.json()["fees"]
-        view = await client.get(f"{URL}/user7")
+        view = await client.get(f"{URL}/user7", headers=headers)
         assert view.status_code == 200, view.text
         assert (view.json()["member"], view.json()["label"]) == ("USER7", "USER 7")
-        assert (await client.get(f"{URL}/user11")).status_code == 404
+        assert (await client.get(f"{URL}/user11", headers=headers)).status_code == 404

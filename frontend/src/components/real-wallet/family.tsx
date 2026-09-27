@@ -38,19 +38,121 @@ function tone(value: string | number | null | undefined): string {
   return n > 0 ? "text-up" : "text-down";
 }
 
+/*
+ * THE SECOND LOCK (Karthik, 2026-09-27): USER 2-10 and the fees also need the
+ * users password. The server keeps only its hash and answers the right one
+ * with a 12-hour token, kept in this tab's sessionStorage, so closing the tab
+ * locks them again. USER 1 stays open to the admin sign-in.
+ */
+const TOKEN_KEY = "users-token";
+
+export function readUsersToken(): string | null {
+  try {
+    return window.sessionStorage.getItem(TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeUsersToken(token: string | null): void {
+  try {
+    if (token) window.sessionStorage.setItem(TOKEN_KEY, token);
+    else window.sessionStorage.removeItem(TOKEN_KEY);
+  } catch {
+    // A private window without storage still works for this page view.
+  }
+}
+
+/** Headers for a user-wallet call: the token when this tab has one. */
+function usersHeaders(): Record<string, string> | undefined {
+  const token = typeof window === "undefined" ? null : readUsersToken();
+  return token ? { "X-Users-Token": token } : undefined;
+}
+
+const isLocked = (member: string) => member !== "USER1";
+
+export function UsersUnlock({ onOpen }: { onOpen: () => void }) {
+  const [password, setPassword] = useState("");
+  const unlock = useMutation({
+    mutationFn: () =>
+      api.post<{ token: string }>("/real-wallet/family/unlock", { password }, { skipAuthRetry: true }),
+    onSuccess: (out) => {
+      writeUsersToken(out.token);
+      setPassword("");
+      onOpen();
+    },
+  });
+  const error = unlock.error;
+  return (
+    <form
+      className="mt-3 flex flex-wrap items-center gap-2"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (password) unlock.mutate();
+      }}
+    >
+      <label className="sr-only" htmlFor="users-password">
+        Users password
+      </label>
+      <input
+        id="users-password"
+        type="password"
+        autoComplete="current-password"
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+        placeholder="Password"
+        className="h-9 w-48 rounded-md border border-line bg-transparent px-3 text-sm text-ink"
+      />
+      <button
+        type="submit"
+        disabled={!password || unlock.isPending}
+        className="h-9 rounded-md border border-line px-4 text-sm text-ink disabled:opacity-50"
+      >
+        {unlock.isPending ? "Checking…" : "Open"}
+      </button>
+      {error ? (
+        <p className="w-full text-sm text-down" role="alert">
+          {error instanceof ApiError && error.status === 429
+            ? "Too many wrong passwords. Wait ten minutes."
+            : error instanceof ApiError && error.status === 401
+              ? "Wrong password."
+              : "Could not check the password. Try again."}
+        </p>
+      ) : null}
+    </form>
+  );
+}
+
 /** The ten user wallets on the real wallet page, for Karthik only. */
 export function FamilySection() {
   const { user } = useAuth();
   const admin = user?.role === "admin";
+  const queryClient = useQueryClient();
   const list = useQuery({
     queryKey: ["real-wallet", "family"],
-    queryFn: () => api.get<MembersView>("/real-wallet/family"),
+    queryFn: () => api.get<MembersView>("/real-wallet/family", { headers: usersHeaders() }),
     enabled: admin,
     refetchInterval: 60_000,
   });
   if (!admin) return null;
+  const refresh = () => void queryClient.invalidateQueries({ queryKey: ["real-wallet", "family"] });
   const rates = new Map(list.data?.members.map((m) => [m.member, m.fee_rate]) ?? []);
   const fees = list.data?.fees;
+  const unlocked = Boolean(list.data?.unlocked);
+  const link = (m: string) => (
+    <Link
+      key={m}
+      href={`/real-wallet/family/${m.toLowerCase()}`}
+      className="inline-flex h-10 items-center gap-2 rounded-md border border-line px-4 text-sm font-medium text-ink hover:border-accent hover:text-accent"
+    >
+      {title(m)}
+      {rates.has(m) ? (
+        <span className="text-xs font-normal text-ink-3">
+          {Number(rates.get(m)) > 0 ? `${pct(rates.get(m))} fee` : "no fee"}
+        </span>
+      ) : null}
+    </Link>
+  );
   return (
     <section className="mt-6 rounded-lg border border-line p-5">
       <p className="text-label text-ink-3">User wallets</p>
@@ -58,38 +160,51 @@ export function FamilySection() {
         Each user has a Solana wallet of their own that copies your strategy: its own address,
         balance, trade size and on/off. Withdrawals from it can only go to your address.
       </p>
-      {fees ? (
-        <div className="mt-4 flex flex-wrap gap-x-8 gap-y-2 text-sm">
-          <div>
-            <p className="text-xs text-ink-3">Profit fees collected</p>
-            <p className="text-lg font-medium tabular-nums text-up">{usd(fees.collected_usd)}</p>
-          </div>
-          <div>
-            <p className="text-xs text-ink-3">Waiting to collect</p>
-            <p className="text-lg font-medium tabular-nums text-ink">{usd(fees.waiting_usd)}</p>
-          </div>
-          {fees.to_check > 0 ? (
-            <p className="self-end text-xs text-down">
-              {fees.to_check} fee send{fees.to_check === 1 ? "" : "s"} to check on Solscan
-            </p>
+      <div className="mt-4 flex flex-wrap gap-2">{link("USER1")}</div>
+
+      <div className="mt-5 rounded-md border border-line p-4" data-testid="users-locked-area">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <p className="text-sm font-medium text-ink">USER 2 – USER 10 and fees</p>
+          {unlocked ? (
+            <button
+              type="button"
+              onClick={() => {
+                writeUsersToken(null);
+                refresh();
+              }}
+              className="text-xs text-ink-3 hover:text-ink"
+            >
+              Lock
+            </button>
           ) : null}
         </div>
-      ) : null}
-      <div className="mt-4 flex flex-wrap gap-2">
-        {FAMILY.map((m) => (
-          <Link
-            key={m}
-            href={`/real-wallet/family/${m.toLowerCase()}`}
-            className="inline-flex h-10 items-center gap-2 rounded-md border border-line px-4 text-sm font-medium text-ink hover:border-accent hover:text-accent"
-          >
-            {title(m)}
-            {rates.has(m) ? (
-              <span className="text-xs font-normal text-ink-3">
-                {Number(rates.get(m)) > 0 ? `${pct(rates.get(m))} fee` : "no fee"}
-              </span>
+        {!unlocked ? (
+          <>
+            <p className="mt-1 text-xs text-ink-3">Locked. Enter the users password to open.</p>
+            <UsersUnlock onOpen={refresh} />
+          </>
+        ) : (
+          <>
+            {fees ? (
+              <div className="mt-3 flex flex-wrap gap-x-8 gap-y-2 text-sm">
+                <div>
+                  <p className="text-xs text-ink-3">Profit fees collected</p>
+                  <p className="text-lg font-medium tabular-nums text-up">{usd(fees.collected_usd)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-ink-3">Waiting to collect</p>
+                  <p className="text-lg font-medium tabular-nums text-ink">{usd(fees.waiting_usd)}</p>
+                </div>
+                {fees.to_check > 0 ? (
+                  <p className="self-end text-xs text-down">
+                    {fees.to_check} fee send{fees.to_check === 1 ? "" : "s"} to check on Solscan
+                  </p>
+                ) : null}
+              </div>
             ) : null}
-          </Link>
-        ))}
+            <div className="mt-4 flex flex-wrap gap-2">{FAMILY.filter(isLocked).map(link)}</div>
+          </>
+        )}
       </div>
     </section>
   );
@@ -150,7 +265,8 @@ interface FeeTotals {
 
 interface MembersView {
   members: { member: string; label: string; fee_rate: string | null }[];
-  fees: FeeTotals;
+  unlocked?: boolean;
+  fees?: FeeTotals;
 }
 
 function pct(rate: string | null | undefined): string {
@@ -178,7 +294,7 @@ function OwnWalletPanel({ member, wallet, book, isOwner, onDone }: {
   const own = useMutation({
     mutationFn: (next: { enabled: boolean; ticket: string }) =>
       api.post(`/real-wallet/family/${member.toLowerCase()}/own-settings`,
-        { enabled: next.enabled, ticket_usd: next.ticket }),
+        { enabled: next.enabled, ticket_usd: next.ticket }, { headers: usersHeaders() }),
     onSuccess: () => {
       setTicket(null);
       onDone();
@@ -191,7 +307,7 @@ function OwnWalletPanel({ member, wallet, book, isOwner, onDone }: {
       api.post<{ signature: string; explorer: string; sol: string }>(
         `/real-wallet/family/${member.toLowerCase()}/withdraw`,
         { sol_amount: amount, confirmation_phrase: "WITHDRAW_TO_KARTHIK" },
-        { skipAuthRetry: true },
+        { skipAuthRetry: true, headers: usersHeaders() },
       ),
     onSuccess: () => {
       setAmount("");
@@ -438,7 +554,7 @@ function FeePanel({ member, fee, onDone }: {
       api.post<{ status: string; usd: string; sol: string; explorer: string }>(
         `/real-wallet/family/${member.toLowerCase()}/collect-fee`,
         { confirmation_phrase: "COLLECT_FEE" },
-        { skipAuthRetry: true },
+        { skipAuthRetry: true, headers: usersHeaders() },
       ),
     onSuccess: () => {
       setArmed(false);
@@ -531,7 +647,11 @@ export function FamilyMemberPage({ member }: { member: string }) {
 
   const view = useQuery({
     queryKey: ["real-wallet", "family", key],
-    queryFn: () => api.get<FamilyView>(`/real-wallet/family/${key.toLowerCase()}`),
+    queryFn: () =>
+      api.get<FamilyView>(`/real-wallet/family/${key.toLowerCase()}`, {
+        headers: usersHeaders(),
+        skipAuthRetry: isLocked(key),
+      }),
     enabled: known,
     refetchInterval: 30_000,
     retry: false,
@@ -550,6 +670,8 @@ export function FamilyMemberPage({ member }: { member: string }) {
   }
 
   const refused = view.error instanceof ApiError && view.error.status === 403;
+  const needsPassword =
+    isLocked(key) && view.error instanceof ApiError && view.error.status === 401;
   const d = view.data;
   const isOwner = user?.role === "admin";
 
@@ -564,7 +686,12 @@ export function FamilyMemberPage({ member }: { member: string }) {
       </div>
 
       {view.isPending ? <p className="mt-4 text-sm text-ink-3">Reading…</p> : null}
-      {refused ? (
+      {needsPassword ? (
+        <div className="mt-4">
+          <p className="text-sm text-ink-3">Enter the users password to open {title(key)}.</p>
+          <UsersUnlock onOpen={() => void view.refetch()} />
+        </div>
+      ) : refused ? (
         <p className="mt-4 text-sm text-ink-3">Only Karthik, signed in, can open this page.</p>
       ) : view.isError ? (
         <p className="mt-4 text-sm text-down">Could not read this wallet. Try again.</p>

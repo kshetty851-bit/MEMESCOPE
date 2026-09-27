@@ -257,11 +257,12 @@ def test_every_service_reads_the_same_public_map():
 async def test_a_member_without_a_wallet_cannot_withdraw(keys):
     from fastapi import HTTPException
 
-    from app.real_wallet import family_api
+    from app.real_wallet import family, family_api
 
     body = family_api.WithdrawIn(sol_amount="0.1", confirmation_phrase="WITHDRAW_TO_KARTHIK")
     with pytest.raises(HTTPException) as refused:
-        await family_api.member_withdraw("user3", body, None)
+        await family_api.member_withdraw("user3", body, None,
+                                         x_users_token=family.issue_token()[0])
     assert refused.value.status_code == 404
 
 
