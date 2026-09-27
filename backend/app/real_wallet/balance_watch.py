@@ -171,6 +171,13 @@ async def _rail_activity(
     )).first()
     if row is not None:
         return f"intent {str(row.id)[:8]} {row.state}"
+    # A user wallet's profit fee, collected by Karthik (2026-09-27).
+    from app.models.real_wallet_family import RealWalletUserFee
+
+    fee = await session.scalar(select(RealWalletUserFee.period).where(
+        RealWalletUserFee.wallet == wallet, RealWalletUserFee.sent_at >= since).limit(1))
+    if fee is not None:
+        return f"profit fee {fee.isoformat()[:7]} sent"
     return None
 
 

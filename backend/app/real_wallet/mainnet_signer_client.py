@@ -51,7 +51,7 @@ class UnixMainnetSignerClient:
         return await self._ask({"op": "sign", "intent_id": str(intent_id)})
 
     async def sign_withdrawal(
-        self, encoded_transaction: str, wallet: str | None = None
+        self, encoded_transaction: str, wallet: str | None = None, to_fee: bool = False
     ) -> dict[str, Any]:
         """Ask for a signature over a native SOL transfer.
 
@@ -62,11 +62,14 @@ class UnixMainnetSignerClient:
 
         ``wallet`` names the PAYING wallet — omitted for the owner's, or a
         family member's own. It picks the key; it cannot pick the destination.
+        ``to_fee`` picks the signer's pinned FEE address instead of the
+        withdrawal one; the signer refuses it for the owner's wallet.
         """
         return await self._ask({
             "op": "sign_withdrawal",
             "transaction": encoded_transaction,
             **({} if wallet is None else {"wallet": wallet}),
+            **({"to": "fee"} if to_fee else {}),
         })
 
     async def sign_close_accounts(

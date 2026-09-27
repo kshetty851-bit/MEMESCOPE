@@ -41,7 +41,16 @@ function tone(value: string | number | null | undefined): string {
 /** The ten user wallets on the real wallet page, for Karthik only. */
 export function FamilySection() {
   const { user } = useAuth();
-  if (user?.role !== "admin") return null;
+  const admin = user?.role === "admin";
+  const list = useQuery({
+    queryKey: ["real-wallet", "family"],
+    queryFn: () => api.get<MembersView>("/real-wallet/family"),
+    enabled: admin,
+    refetchInterval: 60_000,
+  });
+  if (!admin) return null;
+  const rates = new Map(list.data?.members.map((m) => [m.member, m.fee_rate]) ?? []);
+  const fees = list.data?.fees;
   return (
     <section className="mt-6 rounded-lg border border-line p-5">
       <p className="text-label text-ink-3">User wallets</p>
@@ -49,14 +58,36 @@ export function FamilySection() {
         Each user has a Solana wallet of their own that copies your strategy: its own address,
         balance, trade size and on/off. Withdrawals from it can only go to your address.
       </p>
+      {fees ? (
+        <div className="mt-4 flex flex-wrap gap-x-8 gap-y-2 text-sm">
+          <div>
+            <p className="text-xs text-ink-3">Profit fees collected</p>
+            <p className="text-lg font-medium tabular-nums text-up">{usd(fees.collected_usd)}</p>
+          </div>
+          <div>
+            <p className="text-xs text-ink-3">Waiting to collect</p>
+            <p className="text-lg font-medium tabular-nums text-ink">{usd(fees.waiting_usd)}</p>
+          </div>
+          {fees.to_check > 0 ? (
+            <p className="self-end text-xs text-down">
+              {fees.to_check} fee send{fees.to_check === 1 ? "" : "s"} to check on Solscan
+            </p>
+          ) : null}
+        </div>
+      ) : null}
       <div className="mt-4 flex flex-wrap gap-2">
         {FAMILY.map((m) => (
           <Link
             key={m}
             href={`/real-wallet/family/${m.toLowerCase()}`}
-            className="inline-flex h-10 items-center rounded-md border border-line px-5 text-sm font-medium text-ink hover:border-accent hover:text-accent"
+            className="inline-flex h-10 items-center gap-2 rounded-md border border-line px-4 text-sm font-medium text-ink hover:border-accent hover:text-accent"
           >
             {title(m)}
+            {rates.has(m) ? (
+              <span className="text-xs font-normal text-ink-3">
+                {Number(rates.get(m)) > 0 ? `${pct(rates.get(m))} fee` : "no fee"}
+              </span>
+            ) : null}
           </Link>
         ))}
       </div>
@@ -93,10 +124,37 @@ interface OwnBook {
   trades_list: OwnTrade[];
 }
 
+interface FeeMonth {
+  month: string;
+  profit_usd: string;
+  high_water_usd: string;
+  rate: string;
+  fee_usd: string;
+  status: "none" | "due" | "sending" | "paid" | "uncertain";
+  explorer: string | null;
+}
+
 interface FamilyView {
   member: string;
   own_wallet?: OwnWallet;
   own_book?: OwnBook | null;
+  fee?: { rate: string; months: FeeMonth[] };
+}
+
+interface FeeTotals {
+  collected_usd: string;
+  waiting_usd: string;
+  to_check: number;
+  fee_address: string | null;
+}
+
+interface MembersView {
+  members: { member: string; label: string; fee_rate: string | null }[];
+  fees: FeeTotals;
+}
+
+function pct(rate: string | null | undefined): string {
+  return `${Math.round(Number(rate ?? 0) * 100)}%`;
 }
 
 function short(address: string): string {
@@ -357,6 +415,113 @@ function OwnWalletPanel({ member, wallet, book, isOwner, onDone }: {
   );
 }
 
+const FEE_STATUS: Record<FeeMonth["status"], string> = {
+  none: "No new profit",
+  due: "Due",
+  sending: "Sending — check Solscan",
+  paid: "Paid",
+  uncertain: "Sent? Check Solscan",
+};
+
+/** The user's profit fee: the rate, every month, and your Collect button. */
+function FeePanel({ member, fee, onDone }: {
+  member: string;
+  fee: { rate: string; months: FeeMonth[] };
+  onDone: () => void;
+}) {
+  const [armed, setArmed] = useState(false);
+  const due = fee.months
+    .filter((m) => m.status === "due")
+    .reduce((sum, m) => sum + Number(m.fee_usd), 0);
+  const collect = useMutation({
+    mutationFn: () =>
+      api.post<{ status: string; usd: string; sol: string; explorer: string }>(
+        `/real-wallet/family/${member.toLowerCase()}/collect-fee`,
+        { confirmation_phrase: "COLLECT_FEE" },
+        { skipAuthRetry: true },
+      ),
+    onSuccess: () => {
+      setArmed(false);
+      onDone();
+    },
+  });
+  const charged = Number(fee.rate) > 0;
+  return (
+    <section className="mt-5 rounded-lg border border-line p-4">
+      <p className="text-label text-ink-3">Profit fee</p>
+      <p className="mt-1 text-sm text-ink-2">
+        {charged
+          ? `${pct(fee.rate)} of the new trading profit each month (UTC), above this wallet’s best total so far. A month that loses, or only wins a loss back, pays nothing. Deposits and withdrawals never count as profit.`
+          : "No profit fee on this wallet."}
+      </p>
+      {fee.months.length ? (
+        <table className="mt-3 w-full text-left text-sm tabular-nums">
+          <thead className="text-xs text-ink-3">
+            <tr>
+              <th className="py-1 font-normal">Month</th>
+              <th className="py-1 font-normal">Profit to date</th>
+              <th className="py-1 font-normal">Fee</th>
+              <th className="py-1 font-normal">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {fee.months.map((m) => (
+              <tr key={m.month} className="border-t border-line">
+                <td className="py-1">{m.month}</td>
+                <td className={`py-1 ${tone(m.profit_usd)}`}>{usd(m.profit_usd)}</td>
+                <td className="py-1">{usd(m.fee_usd)}</td>
+                <td className="py-1 text-ink-3">
+                  {m.explorer ? (
+                    <a href={m.explorer} target="_blank" rel="noreferrer" className="text-accent">
+                      {FEE_STATUS[m.status]}
+                    </a>
+                  ) : (
+                    FEE_STATUS[m.status]
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        <p className="mt-2 text-xs text-ink-3">The first month is worked out on the 1st.</p>
+      )}
+      {due > 0 ? (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          {armed ? (
+            <>
+              <button
+                type="button"
+                onClick={() => collect.mutate()}
+                disabled={collect.isPending}
+                className="h-9 rounded-md border border-accent px-4 text-sm text-accent disabled:opacity-50"
+              >
+                {collect.isPending ? "Sending…" : `Yes, collect ${usd(due)}`}
+              </button>
+              <button type="button" onClick={() => setArmed(false)} className="text-sm text-ink-3">
+                Cancel
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setArmed(true)}
+              className="h-9 rounded-md border border-line px-4 text-sm text-ink"
+            >
+              Collect fee ({usd(due)})
+            </button>
+          )}
+        </div>
+      ) : null}
+      {collect.isError ? (
+        <p className="mt-2 text-xs text-down">
+          Not sent: {collect.error instanceof ApiError ? collect.error.message : "try again"}
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
 /** One user's page. The server answers only Karthik, signed in. */
 export function FamilyMemberPage({ member }: { member: string }) {
   const key = member.toUpperCase();
@@ -412,6 +577,13 @@ export function FamilyMemberPage({ member }: { member: string }) {
           book={d.own_book}
           isOwner={isOwner}
           onDone={() => void queryClient.invalidateQueries({ queryKey: ["real-wallet", "family", key] })}
+        />
+      ) : null}
+      {d?.fee ? (
+        <FeePanel
+          member={key}
+          fee={d.fee}
+          onDone={() => void queryClient.invalidateQueries({ queryKey: ["real-wallet", "family"] })}
         />
       ) : null}
     </main>

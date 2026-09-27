@@ -282,7 +282,7 @@ async def sign_intent(intent_id: uuid.UUID) -> dict[str, Any]:
 
 
 async def sign_withdrawal(
-    encoded_transaction: str, wallet: str | None = None
+    encoded_transaction: str, wallet: str | None = None, to_fee: bool = False
 ) -> dict[str, Any]:
     """Sign a native SOL transfer, after proving for itself where it goes.
 
@@ -311,7 +311,16 @@ async def sign_withdrawal(
     # Proves the wallet is pinned (owner or family) before anything is parsed.
     signer = _signer_for(expected)
 
-    destination = settings.REAL_WALLET_WITHDRAWAL_ADDRESS.strip()
+    if to_fee:
+        # The user wallets' monthly fee (2026-09-27): the OTHER pinned address,
+        # from this process's own environment, and never from the owner's.
+        if expected == owner:
+            raise MainnetSignerError("owner_wallet_pays_no_fee")
+        destination = settings.REAL_WALLET_FEE_ADDRESS.strip()
+        if not destination:
+            raise MainnetSignerError("fee_destination_not_configured")
+    else:
+        destination = settings.REAL_WALLET_WITHDRAWAL_ADDRESS.strip()
     if not destination:
         raise MainnetSignerError("withdrawal_destination_not_configured")
     if destination == expected:
@@ -403,7 +412,8 @@ async def _handle_connection(
                 raise MainnetSignerError("invalid_signer_request")
             if wallet is not None and (not isinstance(wallet, str) or not wallet):
                 raise MainnetSignerError("invalid_signer_request")
-            response = {"ok": True, **(await sign_withdrawal(encoded, wallet))}
+            to_fee = body.get("to") == "fee"
+            response = {"ok": True, **(await sign_withdrawal(encoded, wallet, to_fee))}
         elif op == "sign_close_accounts":
             encoded, wallet = body.get("transaction"), body.get("wallet")
             if not isinstance(encoded, str) or not encoded:

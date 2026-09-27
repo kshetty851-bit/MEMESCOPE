@@ -170,6 +170,13 @@ function serve(
     if (path === "/real-wallet/status") return data.status ?? status();
     if (path === "/real-wallet/autotrade") return data.autotrade ?? autotrade();
     if (path === "/real-wallet/funding-readiness") return data.readiness ?? readiness();
+    if (path === "/real-wallet/family")
+      return {
+        members: Array.from({ length: 10 }, (_, i) => ({
+          member: `USER${i + 1}`, label: `USER ${i + 1}`, fee_rate: i === 0 ? "0" : "0.20",
+        })),
+        fees: { collected_usd: "12.50", waiting_usd: "3.00", to_check: 0, fee_address: "x" },
+      };
     throw new Error(`unexpected GET ${path}`);
   });
 }
@@ -285,9 +292,14 @@ describe("RealWalletPage user wallets", () => {
     await renderLoaded();
     const users = screen.getByText("User wallets").closest("section") as HTMLElement;
     const links = within(users).getAllByRole("link");
-    expect(links.map((l) => l.textContent)).toEqual(
+    expect(links.map((l) => l.textContent?.split(/\d+%|no fee/)[0])).toEqual(
       Array.from({ length: 10 }, (_, i) => `USER ${i + 1}`));
     expect(links[6]).toHaveAttribute("href", "/real-wallet/family/user7");
+    expect(await within(users).findByText("$12.50")).toBeInTheDocument();
+    expect(within(users).getByText("Profit fees collected")).toBeInTheDocument();
+    expect(within(users).getByText("$3.00")).toBeInTheDocument();
+    expect(links[0]).toHaveTextContent("no fee");
+    expect(links[1]).toHaveTextContent("20% fee");
   });
 
   it("shows nothing about them to anyone else", async () => {

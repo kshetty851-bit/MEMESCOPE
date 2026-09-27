@@ -78,12 +78,15 @@ class PreparedWithdrawal:
 
 async def prepare(
     rpc: SolanaRPC, *, sol_amount: Decimal, balance_lamports: int,
-    wallet: str | None = None,
+    wallet: str | None = None, to_fee: bool = False,
 ) -> PreparedWithdrawal:
     """Assemble and inspect a transfer. Signs nothing and submits nothing.
 
     ``wallet`` is the PAYING wallet: the owner's by default, or a family
     member's own (`family_wallets`). The destination is not affected by it.
+    ``to_fee`` sends to the pinned FEE address instead of the withdrawal one —
+    a choice between two settings, never an address — and only a user wallet
+    may pay it.
     """
     wallet = (wallet or settings.REAL_WALLET_PUBLIC_KEY).strip()
     if not wallet:
@@ -91,9 +94,12 @@ async def prepare(
 
     # The destination is never a parameter. It cannot be passed in, so it cannot
     # be passed in wrongly.
-    destination = withdrawal.assert_permitted(
-        settings.REAL_WALLET_WITHDRAWAL_ADDRESS.strip()
-    )
+    if to_fee:
+        destination = fee_destination(wallet)
+    else:
+        destination = withdrawal.assert_permitted(
+            settings.REAL_WALLET_WITHDRAWAL_ADDRESS.strip()
+        )
     if destination == wallet:
         raise WithdrawError("withdrawal_destination_is_the_wallet_itself")
 
@@ -149,6 +155,27 @@ async def prepare(
     )
 
 
+def fee_destination(wallet: str) -> str:
+    """The pinned fee address, if ``wallet`` may pay it. Else a refusal."""
+    from app.real_wallet import family_wallets
+    from app.real_wallet.network import is_valid_wallet_address
+
+    fee = settings.REAL_WALLET_FEE_ADDRESS.strip()
+    if not fee:
+        raise WithdrawError("fee_address_not_configured")
+    if not is_valid_wallet_address(fee):
+        raise WithdrawError("fee_address_invalid")
+    try:
+        payer = family_wallets.member_for(wallet)
+    except family_wallets.FamilyWalletConfigError as exc:
+        raise WithdrawError(f"family_wallets_misconfigured:{exc}") from exc
+    if payer is None:
+        raise WithdrawError("only_a_user_wallet_pays_the_fee")
+    if fee == wallet:
+        raise WithdrawError("fee_destination_is_the_wallet_itself")
+    return fee
+
+
 async def _latest_blockhash(rpc: SolanaRPC) -> str:
     response = await rpc.call("getLatestBlockhash", [{"commitment": "finalized"}])
     value = (response or {}).get("value") if isinstance(response, dict) else None
@@ -177,4 +204,4 @@ async def submit(rpc: SolanaRPC, *, signed_transaction: str) -> str:
     return response
 
 
-__all__ = ["PreparedWithdrawal", "WithdrawError", "prepare", "submit"]
+__all__ = ["PreparedWithdrawal", "WithdrawError", "fee_destination", "prepare", "submit"]
