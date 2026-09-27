@@ -347,3 +347,40 @@ async def test_a_member_without_a_wallet_has_no_switch(db_session):
             "user2", family_api.OwnSettingsIn(enabled=False, ticket_usd=Decimal("20")),
             db_session, viewer=karthik)
     assert missing.value.status_code == 404
+
+
+# --- ten users take turns --------------------------------------------------------
+
+async def test_users_take_turns_longest_waiting_first(db_session, monkeypatch):
+    """Five users at $50, Karthik at $100, a $300 coin cap: the coin fills
+    with the four users who have waited longest, never "USER1 first"."""
+    users = {f"USER{i}": str(Keypair().pubkey()) for i in range(1, 6)}
+    monkeypatch.setattr(settings, "REAL_WALLET_FAMILY_WALLETS",
+                        ",".join(f"{m.lower()}={k}" for m, k in users.items()))
+    monkeypatch.setattr(settings, "REAL_WALLET_MAX_COIN_USD", Decimal("300"))
+
+    async def _lamports(self, wallet):
+        return 3_000_000_000
+
+    monkeypatch.setattr(RealWalletDriver, "_wallet_lamports", _lamports)
+    for member in users:
+        db_session.add(RealWalletFamilyMember(name=member, own_enabled=True,
+                                              own_ticket_usd=Decimal("50")))
+    now = datetime.now(UTC)
+    # USER1 and USER2 bought most recently; USER5 never has.
+    for member, ago in (("USER1", 10), ("USER2", 20), ("USER3", 60), ("USER4", 90)):
+        db_session.add(RealWalletLiveIntent(
+            idempotency_key=f"earlier:{member}", mint_address=f"Earlier{member}pump",
+            side="BUY", strategy_id="G-QUIET", strategy_version="v",
+            wallet_public_key=users[member], requested_usd=Decimal("50"),
+            input_mint=SOL, output_mint=f"Earlier{member}pump", actual_input_amount_raw=1,
+            state="closed", created_at=now - timedelta(minutes=ago)))
+    await db_session.flush()
+    await _signal(db_session, now)
+
+    out = await RealWalletDriver(db_session).tick(now=now)
+    # $100 owner + four users at $50 = $300: USER5 (never), then 4, 3, 2 — and
+    # USER1, who bought last, is the one left out of this coin.
+    assert out.family["USER1"] == "coin_cap_reached"
+    for member in ("USER2", "USER3", "USER4", "USER5"):
+        assert out.family[member] == f"created:{MINT}"

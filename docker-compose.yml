@@ -382,7 +382,7 @@ x-backend-env: &backend-env
   # the same map; the matching secrets reach the signer alone, below.
   REAL_WALLET_FAMILY_WALLETS: ${REAL_WALLET_FAMILY_WALLETS:-}
   # Every wallet together, in one coin within an hour (see config.py).
-  REAL_WALLET_MAX_COIN_USD: ${REAL_WALLET_MAX_COIN_USD:-400}
+  REAL_WALLET_MAX_COIN_USD: ${REAL_WALLET_MAX_COIN_USD:-250}
   # Where the user wallets' monthly profit fee goes; the signer reads it too.
   REAL_WALLET_FEE_ADDRESS: ${REAL_WALLET_FEE_ADDRESS:-}
   # Whether that ceiling applies at all. Defaults TRUE so a compose file that
