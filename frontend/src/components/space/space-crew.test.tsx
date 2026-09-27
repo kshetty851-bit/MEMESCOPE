@@ -17,6 +17,13 @@ describe("the space crew", () => {
     }
   });
 
+  it("keeps only the fox in the sky (decluttered 2026-09-27)", () => {
+    const { container } = render(<FloatingCrew />);
+    expect([...container.querySelectorAll("img")].map((i) => i.getAttribute("src"))).toEqual([
+      "/crew/fox.webp",
+    ]);
+  });
+
   it("leaves when the hero scrolls away and comes back with it", async () => {
     const { container } = render(<FloatingCrew />);
     const front = container.querySelector(".crew-sky--front")!;
