@@ -100,6 +100,18 @@ class RealWalletDriver:
         switch = await AutotradeSwitchService(self._session).state()
         repo = LiveIntentRepository(self._session)
         halted = bool(await repo.active_kill_switches())
+        # Longest-waiting wallet first (Karthik, 2026-09-27: all ten users
+        # trade). With one coin at a time per wallet and the per-coin cap,
+        # each coin fills from whoever has waited longest, so the ten take
+        # turns instead of USER 1 always going first and USER 10 never.
+        last = dict((await self._session.execute(
+            select(RealWalletLiveIntent.wallet_public_key,
+                   func.max(RealWalletLiveIntent.created_at))
+            .where(RealWalletLiveIntent.side == "BUY",
+                   RealWalletLiveIntent.wallet_public_key.in_([a.wallet for a in accounts]))
+            .group_by(RealWalletLiveIntent.wallet_public_key))).all())
+        never = datetime.min.replace(tzinfo=UTC)
+        accounts = sorted(accounts, key=lambda a: (last.get(a.wallet) or never, a.member))
         for account in accounts:
             if not account.enabled:
                 out[account.member] = "own_wallet_off"

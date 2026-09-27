@@ -1030,8 +1030,11 @@ class Settings(BaseSettings):
     #: The most every wallet together (Karthik's and the users') may put into
     #: ONE coin within an hour. Eleven wallets copying one strategy buy the
     #: same coins at the same moment; past this, a user wallet skips the coin
-    #: rather than move a thin pool against all of them.
-    REAL_WALLET_MAX_COIN_USD: Decimal = Field(default=Decimal("400"), gt=0)
+    #: rather than move a thin pool against all of them. $250 = Karthik's $50
+    #: plus four users at $50: about 0.4-0.8% of price moved round trip in
+    #: the book's pools, against ~1-1.7% for all eleven (2026-09-27). The
+    #: users then take turns (`driver._family_ticks`, longest-waiting first).
+    REAL_WALLET_MAX_COIN_USD: Decimal = Field(default=Decimal("250"), gt=0)
     # Phase 2 is a separate, deliberately tiny manual-devnet workflow. These
     # values are used by the API and signer to enforce the same small envelope;
     # the signer-file *path* is intentionally not a Settings field because the
