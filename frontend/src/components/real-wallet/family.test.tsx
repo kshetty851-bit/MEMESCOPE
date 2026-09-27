@@ -124,3 +124,44 @@ describe("trading from a member's own wallet", () => {
     expect(post.mock.calls[0]![1]).toEqual({ enabled: false, ticket_usd: "20" });
   });
 });
+
+describe("the profit fee", () => {
+  beforeEach(() => {
+    auth.user = { role: "admin" };
+  });
+  afterEach(() => {
+    get.mockReset();
+    post.mockReset();
+  });
+
+  const month = (status: string, fee: string) => ({
+    month: "2026-10", profit_usd: "60.00", high_water_usd: "30.00", rate: "0.2000",
+    fee_usd: fee, status, explorer: null,
+  });
+
+  it("shows the rate and every month, and collects only after a second click", async () => {
+    get.mockResolvedValue({
+      ...view({ address: ADDRESS, balance_sol: "1" }),
+      fee: { rate: "0.2000", months: [month("due", "6.00")] },
+    });
+    post.mockResolvedValue({ status: "paid", usd: "6.00", sol: "0.03", explorer: "x" });
+    page();
+    expect(await screen.findByText(/20% of the new trading profit each month/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Collect fee ($6.00)" }));
+    expect(post).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Yes, collect $6.00" }));
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+    expect(post.mock.calls[0]![0]).toBe("/real-wallet/family/user1/collect-fee");
+    expect(post.mock.calls[0]![1]).toEqual({ confirmation_phrase: "COLLECT_FEE" });
+  });
+
+  it("offers nothing to collect on a no-fee wallet", async () => {
+    get.mockResolvedValue({
+      ...view({ address: ADDRESS, balance_sol: "1" }),
+      fee: { rate: "0.0000", months: [month("none", "0.00")] },
+    });
+    page();
+    expect(await screen.findByText("No profit fee on this wallet.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Collect fee/ })).not.toBeInTheDocument();
+  });
+});

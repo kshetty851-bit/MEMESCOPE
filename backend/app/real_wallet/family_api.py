@@ -17,13 +17,14 @@ from typing import Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 
 from app.api.deps import AdminUser, DbSession
 from app.core.config import settings
 from app.core.exceptions import ConflictError, ServiceUnavailableError
 from app.core.logging import get_logger
 from app.models.real_wallet_family import RealWalletFamilyMember
-from app.real_wallet import family, family_wallets, withdraw_service
+from app.real_wallet import family, family_wallets, user_fees, withdraw_service
 from app.real_wallet.balance import ExecutionWalletBalanceService
 from app.real_wallet.live_repository import LiveIntentRepository
 from app.real_wallet.mainnet_signer_client import (
@@ -46,6 +47,12 @@ def _member(name: str) -> str:
         raise HTTPException(status_code=404, detail="no such user wallet")
     return key
 
+
+
+class CollectFeeIn(BaseModel):
+    """No amount and no address: it sends exactly what is due, to the fee address."""
+
+    confirmation_phrase: Literal["COLLECT_FEE"]
 
 
 class OwnSettingsIn(BaseModel):
@@ -136,23 +143,37 @@ async def _own_wallet(member: str) -> dict[str, object]:
     return out
 
 
-@router.get("", summary="The user wallets, names only")
-async def members(_: AdminUser) -> dict[str, object]:
-    return {"members": [{"member": m, "label": family.label(m)} for m in family.MEMBERS],
+async def _charged(session: DbSession) -> None:
+    """Write any finished month's fee rows (no money moves). Idempotent."""
+    await user_fees.charge(session, datetime.now(UTC))
+    await session.commit()
+
+
+@router.get("", summary="The user wallets, their fee rates, and the fees")
+async def members(session: DbSession, _: AdminUser) -> dict[str, object]:
+    await _charged(session)
+    rates = {r.name: str(r.fee_rate) for r in
+             (await session.execute(select(RealWalletFamilyMember))).scalars()}
+    return {"members": [{"member": m, "label": family.label(m), "fee_rate": rates.get(m)}
+                        for m in family.MEMBERS],
+            "fees": await user_fees.summary(session),
             "ticket_choices": [str(t) for t in family.TICKETS_USD]}
 
 
 @router.get("/{name}", summary="One member's own wallet")
 async def member_view(name: str, session: DbSession, _: AdminUser) -> dict[str, object]:
     member = _member(name)
-    if await session.get(RealWalletFamilyMember, member) is None:
+    row = await session.get(RealWalletFamilyMember, member)
+    if row is None:
         raise HTTPException(status_code=404, detail="no such user wallet")
+    await _charged(session)
     own = family_wallets.address(member)
     return {
         "member": member,
         "label": family.label(member),
         "own_wallet": await _own_wallet(member),
         "own_book": await _own_book(session, member, own) if own else None,
+        "fee": {"rate": str(row.fee_rate), "months": await user_fees.history(session, member)},
     }
 
 
@@ -230,3 +251,25 @@ async def member_own_settings(name: str, payload: OwnSettingsIn, session: DbSess
                    by=row.own_updated_by)
     return {"member": member, "enabled": row.own_enabled,
             "ticket_usd": str(row.own_ticket_usd)}
+
+
+@router.post("/{name}/collect-fee", summary="Send a user's due profit fee to the fee address")
+async def member_collect_fee(name: str, payload: CollectFeeIn, session: DbSession,
+                             _: AdminUser) -> dict[str, object]:
+    """Karthik's button. Sends every month's due fee for this user as one SOL
+    transfer to the pinned fee address; the signer re-checks the address.
+    Never retried: a lost response is an UNCERTAIN transfer to look up."""
+    member = _member(name)
+    await _charged(session)
+    price = await sol_usd_now(datetime.now(UTC))
+    if price is None:
+        raise ServiceUnavailableError("SOL price unavailable; try again shortly")
+    rpc = StandardSolanaRPC(rpc_url=settings.REAL_WALLET_RPC_URL)
+    try:
+        async with rpc:
+            return await user_fees.collect(session, member, sol_usd=price, rpc=rpc,
+                                           signer=UnixMainnetSignerClient())
+    except withdraw_service.WithdrawError as exc:
+        raise ConflictError(str(exc)) from exc
+    except (MainnetSignerUnavailableError, MainnetSignerRejectedError) as exc:
+        raise ServiceUnavailableError(f"signer: {exc}") from exc

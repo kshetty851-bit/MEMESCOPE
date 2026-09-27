@@ -77,7 +77,10 @@ from app.models.real_wallet_execution import (
     RealWalletAutotradeSwitch,
     RealWalletTradeAlert,
 )
-from app.models.real_wallet_family import RealWalletFamilyMember  # noqa: F401
+from app.models.real_wallet_family import (  # noqa: F401
+    RealWalletFamilyMember,
+    RealWalletUserFee,
+)
 from app.models.real_wallet_safety import RealWalletSafetyEvaluation
 from app.models.token_security import TokenSecurityEvaluationRow
 from app.models.refresh_token import RefreshToken

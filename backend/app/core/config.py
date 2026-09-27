@@ -1015,6 +1015,11 @@ class Settings(BaseSettings):
     #: nominated destination refuses rather than accepting any address, which is
     #: the same fail-closed direction as the RPC host list.
     REAL_WALLET_WITHDRAWAL_ADDRESS: str = ""
+    #: Where the user wallets' monthly profit fee goes (Karthik, 2026-09-27),
+    #: pinned like the withdrawal address and read again by the signer from its
+    #: own environment. Only a USER wallet may pay it — never the owner's. Empty
+    #: means no fee is ever sent.
+    REAL_WALLET_FEE_ADDRESS: str = ""
     #: Each user wallet (USER 1 … USER 10), public keys only:
     #: `user1=<pubkey>,user2=<pubkey>,...`. The secrets are 0600 files
     #: only the isolated signer mounts (`FAMILY_SIGNER_DIR`); it checks each one

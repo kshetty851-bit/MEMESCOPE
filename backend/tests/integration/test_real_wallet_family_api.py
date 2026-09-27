@@ -33,6 +33,8 @@ async def test_nobody_but_the_admin_opens_a_user_wallet(app, db_session):
         assert (await client.post(f"{URL}/user1/own-settings",
                                   json=settings_body)).status_code == 403
         assert (await client.post(f"{URL}/user1/withdraw", json=withdraw)).status_code == 403
+        assert (await client.post(f"{URL}/user2/collect-fee",
+                                  json={"confirmation_phrase": "COLLECT_FEE"})).status_code == 403
 
         # (A refused request rolls the test's transaction back, so the rows
         # go in after the refusals.)
@@ -41,7 +43,8 @@ async def test_nobody_but_the_admin_opens_a_user_wallet(app, db_session):
         viewer.role = UserRole.ADMIN
         listed = await client.get(URL)
         assert listed.status_code == 200, listed.text
-        assert listed.json()["members"][9] == {"member": "USER10", "label": "USER 10"}
+        assert listed.json()["members"][9]["label"] == "USER 10"
+        assert "collected_usd" in listed.json()["fees"]
         view = await client.get(f"{URL}/user7")
         assert view.status_code == 200, view.text
         assert (view.json()["member"], view.json()["label"]) == ("USER7", "USER 7")
