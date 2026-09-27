@@ -377,13 +377,12 @@ x-backend-env: &backend-env
   # The ceiling that makes the blast radius a number rather than a promise.
   # Compared in integer lamports; over-funding is refused, not traded.
   REAL_WALLET_MAX_BALANCE_SOL: ${REAL_WALLET_MAX_BALANCE_SOL:-0.25}
-  # The family pages' password HASH (salt_hex:hash_hex, no `$` in it on
-  # purpose). Empty keeps the family pages locked.
-  REAL_WALLET_FAMILY_PASSWORD_HASH: ${REAL_WALLET_FAMILY_PASSWORD_HASH:-}
-  # The family members' own wallets, PUBLIC keys only (name=pubkey, comma
+  # The user wallets (USER 1 … USER 10), PUBLIC keys only (name=pubkey, comma
   # separated). In the anchor so the API, the worker and the signer all read
   # the same map; the matching secrets reach the signer alone, below.
   REAL_WALLET_FAMILY_WALLETS: ${REAL_WALLET_FAMILY_WALLETS:-}
+  # Every wallet together, in one coin within an hour (see config.py).
+  REAL_WALLET_MAX_COIN_USD: ${REAL_WALLET_MAX_COIN_USD:-400}
   # Whether that ceiling applies at all. Defaults TRUE so a compose file that
   # has not heard of it keeps the bound — the safe direction, and the reason
   # this is a named flag rather than a sentinel value on the number above.
@@ -608,7 +607,7 @@ services:
       RUN_MIGRATIONS: "false"
       MAINNET_SIGNER_SOCKET: /run/memescope-mainnet-signer/signer.sock
       MAINNET_SIGNER_FILE: /run/secrets/mainnet-signer.json
-      # The family wallets' keys, one 0600 file per member (jaya.json, ...).
+      # The family wallets' keys, one 0600 file per member (user1.json, ...).
       # Signer only, like the owner's key; a directory nobody else mounts.
       FAMILY_SIGNER_DIR: /run/secrets/family
     volumes:

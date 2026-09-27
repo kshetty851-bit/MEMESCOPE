@@ -25,7 +25,7 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from decimal import ROUND_DOWN, Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -136,6 +136,9 @@ class RealWalletDriver:
                                    sol_price=price, open_positions=open_positions)
         if entry_usd is None or entry_usd <= 0:
             return "entry_not_fundable"
+        coin_usd = await self._coin_usd(candidate, now)
+        if coin_usd + entry_usd > settings.REAL_WALLET_MAX_COIN_USD:
+            return "coin_cap_reached"
         lamports = lamports_from_sol(
             (entry_usd / price).quantize(Decimal("1e-9"), rounding=ROUND_DOWN))
         if lamports <= 0:
@@ -452,6 +455,18 @@ class RealWalletDriver:
             )
         )
         return len(rows.scalars().all())
+
+    async def _coin_usd(self, mint: str, now: datetime) -> Decimal:
+        """What every wallet together has asked to buy of this coin in the
+        last hour: the owner's and each user wallet's, which all copy one
+        strategy and so all want the same coins at the same moment."""
+        total = await self._session.scalar(
+            select(func.coalesce(func.sum(RealWalletLiveIntent.requested_usd), 0)).where(
+                RealWalletLiveIntent.mint_address == mint,
+                RealWalletLiveIntent.side == "BUY",
+                RealWalletLiveIntent.created_at >= now - timedelta(hours=1),
+            ))
+        return Decimal(total or 0)
 
     async def _notional_today(self, now: datetime, wallet: str) -> Decimal:
         start = now.replace(hour=0, minute=0, second=0, microsecond=0)

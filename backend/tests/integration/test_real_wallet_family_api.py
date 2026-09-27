@@ -1,73 +1,48 @@
-"""The family endpoints, called directly on a real database: the password gate
-and one member per token. (The share settings and money-recording tests went
-with the share system, 2026-09-25; the own-wallet switch is tested in
-`test_family_wallet_trading.py`.)"""
+"""The user wallets' endpoints through the real routes: Karthik's alone.
+
+(The family password and its tokens went on 2026-09-27; the own-wallet switch
+is tested in `test_family_wallet_trading.py`.)"""
 
 from __future__ import annotations
 
 from types import SimpleNamespace
 
 import pytest
-from fastapi import HTTPException
-from starlette.requests import Request
+from httpx import ASGITransport, AsyncClient
 
+from app.api.deps import get_current_user
 from app.core.config import settings
 from app.models.real_wallet_family import RealWalletFamilyMember
-from app.real_wallet import family, family_api
-from app.real_wallet.family_api import UnlockIn
+from app.models.user import UserRole
+from app.real_wallet import family
 
 pytestmark = pytest.mark.integration
 
-OWNER = SimpleNamespace(email="owner@example.com")
+URL = f"{settings.API_V1_PREFIX}/real-wallet/family"
 
 
-def _request(ip: str = "203.0.113.9") -> Request:
-    return Request({"type": "http", "headers": [(b"x-forwarded-for", ip.encode())],
-                    "client": ("127.0.0.1", 1)})
+async def test_nobody_but_the_admin_opens_a_user_wallet(app, db_session):
+    viewer = SimpleNamespace(role=UserRole.USER, email="friend@example.com", is_active=True)
+    app.dependency_overrides[get_current_user] = lambda: viewer
+    withdraw = {"sol_amount": "0.1", "confirmation_phrase": "WITHDRAW_TO_KARTHIK"}
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as client:
+        # Signed in, but not the admin: every route refuses.
+        assert (await client.get(URL)).status_code == 403
+        assert (await client.get(f"{URL}/user1")).status_code == 403
+        settings_body = {"enabled": True, "ticket_usd": "20"}
+        assert (await client.post(f"{URL}/user1/own-settings",
+                                  json=settings_body)).status_code == 403
+        assert (await client.post(f"{URL}/user1/withdraw", json=withdraw)).status_code == 403
 
-
-@pytest.fixture(autouse=True)
-def _password(monkeypatch):
-    monkeypatch.setattr(settings, "REAL_WALLET_FAMILY_PASSWORD_HASH",
-                        family.hash_password("right horse", salt=b"s" * 16))
-    monkeypatch.setattr(family, "THROTTLE", family.Throttle(limit=3, window=600))
-    monkeypatch.setattr(family_api.family, "THROTTLE", family.THROTTLE)
-
-
-@pytest.fixture
-async def members(db_session):
-    for name in family.MEMBERS:
-        db_session.add(RealWalletFamilyMember(name=name))
-    await db_session.flush()
-
-
-async def _token(member: str = "JAYA") -> str:
-    out = await family_api.unlock(UnlockIn(member=member, password="right horse"), _request())
-    return out["token"]
-
-
-async def test_the_right_password_opens_one_member(members, db_session):
-    token = await _token("JAYA")
-    view = await family_api.member_view("jaya", db_session, x_family_token=token)
-    assert view["member"] == "JAYA"
-    with pytest.raises(HTTPException) as other:
-        await family_api.member_view("ASHA", db_session, x_family_token=token)
-    assert other.value.status_code == 401
-
-
-async def test_no_token_and_wrong_passwords_are_refused_then_throttled(members, db_session):
-    with pytest.raises(HTTPException) as none:
-        await family_api.member_view("JAYA", db_session, x_family_token=None)
-    assert none.value.status_code == 401
-    for _ in range(3):
-        with pytest.raises(HTTPException) as wrong:
-            await family_api.unlock(UnlockIn(member="JAYA", password="wrong"), _request())
-        assert wrong.value.status_code == 401
-    # Now even the right password waits.
-    with pytest.raises(HTTPException) as slow:
-        await family_api.unlock(UnlockIn(member="JAYA", password="right horse"), _request())
-    assert slow.value.status_code == 429
-    # A different caller is unaffected.
-    ok = await family_api.unlock(UnlockIn(member="JAYA", password="right horse"),
-                                 _request("198.51.100.4"))
-    assert ok["member"] == "JAYA"
+        # (A refused request rolls the test's transaction back, so the rows
+        # go in after the refusals.)
+        db_session.add_all(RealWalletFamilyMember(name=n) for n in family.MEMBERS)
+        await db_session.flush()
+        viewer.role = UserRole.ADMIN
+        listed = await client.get(URL)
+        assert listed.status_code == 200, listed.text
+        assert listed.json()["members"][9] == {"member": "USER10", "label": "USER 10"}
+        view = await client.get(f"{URL}/user7")
+        assert view.status_code == 200, view.text
+        assert (view.json()["member"], view.json()["label"]) == ("USER7", "USER 7")
+        assert (await client.get(f"{URL}/user11")).status_code == 404

@@ -1,8 +1,9 @@
-"""The family pages: unlock with the password, then one member's own wallet.
+"""The user wallets' pages (USER 1 … USER 10): Karthik's alone.
 
-A member's token lets them see their own wallet (address, balance, trades),
-send its SOL to Karthik's address, and switch its trading OFF. Switching it
-ON, or changing its trade size, also needs Karthik signed in as the admin.
+Every endpoint needs Karthik signed in as the admin (2026-09-27; the family
+password that used to open a member's page is gone). He sees each wallet's
+address, balance and trades, switches it on or off, sizes it, and withdraws
+its SOL — which can only ever reach his own nominated address.
 
 The SHARES of the owner's wallet these pages used to manage were removed on
 2026-09-25 at Karthik's request (migration 0105).
@@ -14,15 +15,14 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Literal
 
-from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from app.api.deps import DbSession, OptionalUser
+from app.api.deps import AdminUser, DbSession
 from app.core.config import settings
 from app.core.exceptions import ConflictError, ServiceUnavailableError
 from app.core.logging import get_logger
 from app.models.real_wallet_family import RealWalletFamilyMember
-from app.models.user import UserRole
 from app.real_wallet import family, family_wallets, withdraw_service
 from app.real_wallet.balance import ExecutionWalletBalanceService
 from app.real_wallet.live_repository import LiveIntentRepository
@@ -43,26 +43,9 @@ router = APIRouter(prefix="/real-wallet/family", tags=["real-wallet"])
 def _member(name: str) -> str:
     key = name.strip().upper()
     if key not in family.MEMBERS:
-        raise HTTPException(status_code=404, detail="no such family member")
+        raise HTTPException(status_code=404, detail="no such user wallet")
     return key
 
-
-def _caller(request: Request) -> str:
-    """Who is guessing, for the throttle. The LAST forwarded hop is the one
-    the site's own proxy added; earlier ones are whatever the client sent."""
-    forwarded = request.headers.get("x-forwarded-for", "")
-    hops = [h.strip() for h in forwarded.split(",") if h.strip()]
-    return hops[-1] if hops else (request.client.host if request.client else "unknown")
-
-
-def _authorised(member: str, token: str | None) -> None:
-    if family.token_member(token) != member:
-        raise HTTPException(status_code=401, detail="enter the family password first")
-
-
-class UnlockIn(BaseModel):
-    member: str
-    password: str = Field(min_length=1, max_length=200)
 
 
 class OwnSettingsIn(BaseModel):
@@ -153,46 +136,28 @@ async def _own_wallet(member: str) -> dict[str, object]:
     return out
 
 
-@router.get("", summary="The family members, names only")
-async def members() -> dict[str, object]:
-    return {"members": list(family.MEMBERS),
+@router.get("", summary="The user wallets, names only")
+async def members(_: AdminUser) -> dict[str, object]:
+    return {"members": [{"member": m, "label": family.label(m)} for m in family.MEMBERS],
             "ticket_choices": [str(t) for t in family.TICKETS_USD]}
 
 
-@router.post("/unlock", summary="Trade the family password for a member's token")
-async def unlock(payload: UnlockIn, request: Request) -> dict[str, object]:
-    member = _member(payload.member)
-    who = _caller(request)
-    if family.THROTTLE.blocked(who):
-        raise HTTPException(status_code=429,
-                            detail="too many wrong passwords; wait ten minutes")
-    if not family.password_ok(payload.password):
-        family.THROTTLE.failed(who)
-        logger.warning("real_wallet_family_unlock_refused", member=member)
-        raise HTTPException(status_code=401, detail="wrong password")
-    token, expires = family.issue_token(member)
-    logger.info("real_wallet_family_unlocked", member=member)
-    return {"member": member, "token": token, "expires_at": expires.isoformat()}
-
-
 @router.get("/{name}", summary="One member's own wallet")
-async def member_view(name: str, session: DbSession,
-                      x_family_token: str | None = Header(default=None)) -> dict[str, object]:
+async def member_view(name: str, session: DbSession, _: AdminUser) -> dict[str, object]:
     member = _member(name)
-    _authorised(member, x_family_token)
     if await session.get(RealWalletFamilyMember, member) is None:
-        raise HTTPException(status_code=404, detail="no such family member")
+        raise HTTPException(status_code=404, detail="no such user wallet")
     own = family_wallets.address(member)
     return {
         "member": member,
+        "label": family.label(member),
         "own_wallet": await _own_wallet(member),
         "own_book": await _own_book(session, member, own) if own else None,
     }
 
 
 @router.post("/{name}/withdraw", summary="Send SOL from a member's own wallet to Karthik")
-async def member_withdraw(name: str, payload: WithdrawIn,
-                          x_family_token: str | None = Header(default=None)
+async def member_withdraw(name: str, payload: WithdrawIn, _: AdminUser
                           ) -> dict[str, object]:
     """The member's own wallet pays; Karthik's nominated address receives.
 
@@ -206,7 +171,6 @@ async def member_withdraw(name: str, payload: WithdrawIn,
     Never retried: a lost response is an UNCERTAIN transfer.
     """
     member = _member(name)
-    _authorised(member, x_family_token)
     wallet = family_wallets.address(member)
     if wallet is None:
         raise HTTPException(status_code=404, detail=f"{member} has no wallet of their own yet")
@@ -245,18 +209,9 @@ async def member_withdraw(name: str, payload: WithdrawIn,
 @router.post("/{name}/own-settings",
              summary="Switch a member's OWN wallet on or off, and size it")
 async def member_own_settings(name: str, payload: OwnSettingsIn, session: DbSession,
-                              viewer: OptionalUser,
-                              x_family_token: str | None = Header(default=None)
-                              ) -> dict[str, object]:
-    """STOP is anyone's with the family password; START and SIZE are Karthik's.
-
-    Stopping only ends buying, so the member (or whoever holds the family
-    password) may always switch their own wallet off. Switching it ON, or
-    changing how much each trade spends, also needs Karthik signed in as the
-    admin — starting a real wallet is his decision, as it is for his own.
-    """
+                              viewer: AdminUser) -> dict[str, object]:
+    """Start, stop and size are Karthik's, signed in as the admin."""
     member = _member(name)
-    _authorised(member, x_family_token)
     if family_wallets.address(member) is None:
         raise HTTPException(status_code=404,
                             detail=f"{member} has no wallet of their own yet")
@@ -265,17 +220,10 @@ async def member_own_settings(name: str, payload: OwnSettingsIn, session: DbSess
                             + ", ".join(str(t) for t in family.TICKETS_USD))
     row = await session.get(RealWalletFamilyMember, member)
     if row is None:
-        raise HTTPException(status_code=404, detail="no such family member")
-    starting = payload.enabled and not row.own_enabled
-    resizing = payload.ticket_usd != row.own_ticket_usd
-    admin = viewer is not None and viewer.role == UserRole.ADMIN
-    if (starting or resizing) and not admin:
-        raise HTTPException(
-            status_code=403,
-            detail="only Karthik, signed in, can start this wallet or change its size")
+        raise HTTPException(status_code=404, detail="no such user wallet")
     row.own_enabled, row.own_ticket_usd = payload.enabled, payload.ticket_usd
     row.own_updated_at = datetime.now(UTC)
-    row.own_updated_by = viewer.email if admin and viewer else f"family:{member}"
+    row.own_updated_by = viewer.email
     await session.commit()
     logger.warning("real_wallet_family_own_settings", member=member,
                    enabled=payload.enabled, ticket=str(payload.ticket_usd),

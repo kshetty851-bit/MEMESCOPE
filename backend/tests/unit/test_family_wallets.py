@@ -37,45 +37,46 @@ def _key(path: Path, keypair: Keypair) -> None:
 @pytest.fixture
 def keys(tmp_path, monkeypatch):
     """Owner, Karthik's withdrawal address, and two family wallets on disk."""
-    owner, karthik, jaya, asha = Keypair(), Keypair(), Keypair(), Keypair()
+    owner, karthik, user1, user2 = Keypair(), Keypair(), Keypair(), Keypair()
     _key(tmp_path / "owner.json", owner)
     family = tmp_path / "family"
     family.mkdir()
-    _key(family / "jaya.json", jaya)
-    _key(family / "asha.json", asha)
+    _key(family / "user1.json", user1)
+    _key(family / "user2.json", user2)
     monkeypatch.setenv("MAINNET_SIGNER_FILE", str(tmp_path / "owner.json"))
     monkeypatch.setenv("FAMILY_SIGNER_DIR", str(family))
     monkeypatch.setattr(settings, "REAL_WALLET_PUBLIC_KEY", str(owner.pubkey()))
     monkeypatch.setattr(settings, "REAL_WALLET_WITHDRAWAL_ADDRESS", str(karthik.pubkey()))
     monkeypatch.setattr(settings, "REAL_WALLET_FAMILY_WALLETS",
-                        f"jaya={jaya.pubkey()},Asha={asha.pubkey()}")
+                        f"user1={user1.pubkey()},User2={user2.pubkey()}")
 
     async def chain() -> str:
         return "genesis"
 
     monkeypatch.setattr(ms, "_verified_chain", chain)
-    return SimpleNamespace(owner=owner, karthik=karthik, jaya=jaya, asha=asha, family=family)
+    return SimpleNamespace(owner=owner, karthik=karthik, user1=user1, user2=user2,
+                           family=family)
 
 
 # --- the map --------------------------------------------------------------------
 
 def test_the_map_names_members_by_their_own_keys(keys):
-    assert family_wallets.pinned() == {"JAYA": str(keys.jaya.pubkey()),
-                                       "ASHA": str(keys.asha.pubkey())}
-    assert family_wallets.address("jaya") == str(keys.jaya.pubkey())
-    assert family_wallets.address("APOORVA") is None
-    assert family_wallets.member_for(str(keys.asha.pubkey())) == "ASHA"
+    assert family_wallets.pinned() == {"USER1": str(keys.user1.pubkey()),
+                                       "USER2": str(keys.user2.pubkey())}
+    assert family_wallets.address("user1") == str(keys.user1.pubkey())
+    assert family_wallets.address("USER3") is None
+    assert family_wallets.member_for(str(keys.user2.pubkey())) == "USER2"
     assert family_wallets.member_for(str(keys.owner.pubkey())) is None
 
 
 @pytest.mark.parametrize("raw, why", [
     ("bob={a}", "unknown_family_member"),
-    ("jaya={a},jaya={b}", "family_member_listed_twice"),
-    ("jaya=not-a-key", "invalid_family_wallet"),
-    ("jaya={owner}", "family_wallet_collides"),
-    ("jaya={karthik}", "family_wallet_collides"),
-    ("jaya={a},asha={a}", "family_wallet_shared"),
-    ("jaya", "unknown_family_member"),
+    ("user1={a},user1={b}", "family_member_listed_twice"),
+    ("user1=not-a-key", "invalid_family_wallet"),
+    ("user1={owner}", "family_wallet_collides"),
+    ("user1={karthik}", "family_wallet_collides"),
+    ("user1={a},user2={a}", "family_wallet_shared"),
+    ("user1", "unknown_family_member"),
 ])
 def test_a_map_a_signer_could_misread_is_refused_whole(raw, why):
     a, b, owner, karthik = (str(Keypair().pubkey()) for _ in range(4))
@@ -89,14 +90,14 @@ def test_an_empty_map_means_no_family_wallets():
 
 
 def test_a_bad_map_gives_nobody_an_address(monkeypatch):
-    monkeypatch.setattr(settings, "REAL_WALLET_FAMILY_WALLETS", "jaya=nonsense")
-    assert family_wallets.address("JAYA") is None
+    monkeypatch.setattr(settings, "REAL_WALLET_FAMILY_WALLETS", "user1=nonsense")
+    assert family_wallets.address("USER1") is None
 
 
 # --- the signer -----------------------------------------------------------------
 
 def test_each_wallet_loads_its_own_key(keys):
-    for kp in (keys.owner, keys.jaya, keys.asha):
+    for kp in (keys.owner, keys.user1, keys.user2):
         assert ms._signer_for(str(kp.pubkey())).public_key == str(kp.pubkey())
 
 
@@ -106,23 +107,23 @@ def test_a_wallet_nobody_pinned_is_refused_before_any_file_is_read(keys):
 
 
 def test_key_files_swapped_between_members_sign_nothing(keys):
-    _key(keys.family / "jaya.json", keys.asha)  # Asha's key in Jaya's file
+    _key(keys.family / "user1.json", keys.user2)  # User2's key in User1's file
     from app.real_wallet.signer import ExecutionWalletPublicKeyMismatchError
 
     with pytest.raises(ExecutionWalletPublicKeyMismatchError):
-        ms._signer_for(str(keys.jaya.pubkey()))
+        ms._signer_for(str(keys.user1.pubkey()))
 
 
 def test_a_readable_family_key_is_refused(keys):
-    os.chmod(keys.family / "jaya.json", 0o644)
+    os.chmod(keys.family / "user1.json", 0o644)
     with pytest.raises(ms.MainnetSignerError, match="permissions"):
-        ms._signer_for(str(keys.jaya.pubkey()))
+        ms._signer_for(str(keys.user1.pubkey()))
 
 
 def test_a_misconfigured_map_stops_the_family_path(keys, monkeypatch):
-    monkeypatch.setattr(settings, "REAL_WALLET_FAMILY_WALLETS", "jaya=nonsense")
+    monkeypatch.setattr(settings, "REAL_WALLET_FAMILY_WALLETS", "user1=nonsense")
     with pytest.raises(ms.MainnetSignerError, match="family_wallets_misconfigured"):
-        ms._signer_for(str(keys.jaya.pubkey()))
+        ms._signer_for(str(keys.user1.pubkey()))
     # ...and the owner's own wallet is untouched by it.
     assert ms._signer_for(str(keys.owner.pubkey())).public_key == str(keys.owner.pubkey())
 
@@ -136,7 +137,7 @@ def _transfer(payer: Keypair, to: str, lamports: int = 1_000_000) -> str:
 
 async def test_a_family_wallet_can_withdraw_to_karthik(keys):
     out = await ms.sign_withdrawal(
-        _transfer(keys.jaya, str(keys.karthik.pubkey())), wallet=str(keys.jaya.pubkey()))
+        _transfer(keys.user1, str(keys.karthik.pubkey())), wallet=str(keys.user1.pubkey()))
     assert out["destination"] == str(keys.karthik.pubkey())
     assert out["lamports"] == 1_000_000
 
@@ -144,14 +145,14 @@ async def test_a_family_wallet_can_withdraw_to_karthik(keys):
 async def test_a_family_wallet_cannot_withdraw_anywhere_else(keys):
     thief = str(Keypair().pubkey())
     with pytest.raises(ms.MainnetSignerError, match="withdrawal_rejected"):
-        await ms.sign_withdrawal(_transfer(keys.jaya, thief), wallet=str(keys.jaya.pubkey()))
+        await ms.sign_withdrawal(_transfer(keys.user1, thief), wallet=str(keys.user1.pubkey()))
 
 
 async def test_one_members_key_cannot_pay_from_another_members_wallet(keys):
-    # Bytes paid by Asha, presented as Jaya's withdrawal.
+    # Bytes paid by User2, presented as User1's withdrawal.
     with pytest.raises(ms.MainnetSignerError, match="withdrawal_rejected"):
-        await ms.sign_withdrawal(_transfer(keys.asha, str(keys.karthik.pubkey())),
-                                 wallet=str(keys.jaya.pubkey()))
+        await ms.sign_withdrawal(_transfer(keys.user2, str(keys.karthik.pubkey())),
+                                 wallet=str(keys.user1.pubkey()))
 
 
 async def test_the_owners_withdrawal_is_unchanged(keys):
@@ -179,12 +180,12 @@ def _fake_intent_store(monkeypatch, intent):
 
 
 async def test_a_family_wallet_may_sign_its_own_trade(keys, monkeypatch):
-    """Stage 2: a trade intent naming Jaya's wallet passes the wallet check and
+    """Stage 2: a trade intent naming User1's wallet passes the wallet check and
     goes on to the checks every trade faces (here: no order was built yet)."""
     from app.real_wallet.live_readiness import ExecutionState
 
     intent = SimpleNamespace(id=uuid.uuid4(), state=ExecutionState.ORDER_CREATED,
-                             wallet_public_key=str(keys.jaya.pubkey()), order_evidence={})
+                             wallet_public_key=str(keys.user1.pubkey()), order_evidence={})
     _fake_intent_store(monkeypatch, intent)
     with pytest.raises(ms.MainnetSignerError, match="intent_has_no_unsigned_transaction"):
         await ms.sign_intent(intent.id)
@@ -210,19 +211,19 @@ def _close(wallet: Keypair) -> str:
 
 
 async def test_a_family_wallet_closes_only_its_own_accounts(keys):
-    out = await ms.sign_close_accounts(_close(keys.jaya), wallet=str(keys.jaya.pubkey()))
+    out = await ms.sign_close_accounts(_close(keys.user1), wallet=str(keys.user1.pubkey()))
     assert out["signature"]
-    # Jaya's close presented as Asha's: the rent would not go to Asha.
+    # User1's close presented as User2's: the rent would not go to User2.
     with pytest.raises(ms.MainnetSignerError, match="close_rejected"):
-        await ms.sign_close_accounts(_close(keys.jaya), wallet=str(keys.asha.pubkey()))
+        await ms.sign_close_accounts(_close(keys.user1), wallet=str(keys.user2.pubkey()))
 
 
 async def test_identity_family_reports_each_member(keys):
-    os.remove(keys.family / "asha.json")
+    os.remove(keys.family / "user2.json")
     out = (await ms.identity_family())["family"]
-    assert out["JAYA"] == {"public_key": str(keys.jaya.pubkey()), "matches_pinned_key": True}
-    assert out["ASHA"]["matches_pinned_key"] is False
-    assert "unavailable" in out["ASHA"]["error"]
+    assert out["USER1"] == {"public_key": str(keys.user1.pubkey()), "matches_pinned_key": True}
+    assert out["USER2"]["matches_pinned_key"] is False
+    assert "unavailable" in out["USER2"]["error"]
 
 
 # --- where the keys may live ----------------------------------------------------
@@ -253,26 +254,14 @@ def test_every_service_reads_the_same_public_map():
 
 # --- the family page's endpoints ------------------------------------------------
 
-async def test_a_withdrawal_needs_the_members_own_password(keys):
+async def test_a_member_without_a_wallet_cannot_withdraw(keys):
     from fastapi import HTTPException
 
     from app.real_wallet import family_api
 
     body = family_api.WithdrawIn(sol_amount="0.1", confirmation_phrase="WITHDRAW_TO_KARTHIK")
     with pytest.raises(HTTPException) as refused:
-        await family_api.member_withdraw("jaya", body, x_family_token=None)
-    assert refused.value.status_code == 401
-
-
-async def test_a_member_without_a_wallet_cannot_withdraw(keys, monkeypatch):
-    from fastapi import HTTPException
-
-    from app.real_wallet import family, family_api
-
-    token, _ = family.issue_token("APOORVA")
-    body = family_api.WithdrawIn(sol_amount="0.1", confirmation_phrase="WITHDRAW_TO_KARTHIK")
-    with pytest.raises(HTTPException) as refused:
-        await family_api.member_withdraw("apoorva", body, x_family_token=token)
+        await family_api.member_withdraw("user3", body, None)
     assert refused.value.status_code == 404
 
 
@@ -285,4 +274,4 @@ def test_the_withdrawal_names_no_destination():
 async def test_a_member_without_a_wallet_shows_none(keys):
     from app.real_wallet import family_api
 
-    assert await family_api._own_wallet("APOORVA") == {"address": None}
+    assert await family_api._own_wallet("USER3") == {"address": None}

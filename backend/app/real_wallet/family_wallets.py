@@ -1,12 +1,13 @@
 """The family members' OWN Solana wallets (2026-09-25).
 
-Karthik asked for each of Jaya, Asha and Apoorva to have an address of their
-own to deposit to, and to trade individually. This module is the one place
-that says which public key belongs to whom. It holds no secret: the keys live
-as 0600 files that only the isolated signer mounts, and the signer checks each
-one against the public key pinned here before it will sign anything with it.
+Karthik asked for each family member to have an address of their own to
+deposit to, and to trade individually; since 2026-09-27 they are USER 1 …
+USER 10. This module is the one place that says which public key belongs
+to whom. It holds no secret: the keys live as 0600 files that only the
+isolated signer mounts, and the signer checks each one against the public key
+pinned here before it will sign anything with it.
 
-Configured as ``REAL_WALLET_FAMILY_WALLETS="jaya=<pubkey>,asha=<pubkey>,..."``
+Configured as ``REAL_WALLET_FAMILY_WALLETS="user1=<pubkey>,user2=<pubkey>,..."``
 in the host's env file — not in this repository, which is public.
 
 Fail-closed: a malformed entry, an unknown member, a repeated key, a key equal
@@ -41,7 +42,7 @@ class FamilyWalletConfigError(ValueError):
 
 
 def parse(raw: str, *, owner: str, withdrawal: str) -> dict[str, str]:
-    """``"jaya=<pk>,asha=<pk>"`` -> ``{"JAYA": "<pk>", ...}``, or raise."""
+    """``"user1=<pk>,user2=<pk>"`` -> ``{"USER1": "<pk>", ...}``, or raise."""
     out: dict[str, str] = {}
     for entry in (e.strip() for e in raw.split(",")):
         if not entry:

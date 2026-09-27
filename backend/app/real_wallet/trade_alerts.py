@@ -240,16 +240,16 @@ def _late(event_at: datetime, now: datetime) -> str:
 
 
 def _whose(position: RealWalletPosition) -> str:
-    """"REAL WALLET" for the owner's, "JAYA'S WALLET" for a family member's own
+    """"REAL WALLET" for the owner's, "USER 3'S WALLET" for a user wallet
     (2026-09-25). A family map that cannot be read falls back to the plain
     label rather than dropping the alert."""
-    from app.real_wallet import family_wallets
+    from app.real_wallet import family, family_wallets
 
     try:
         member = family_wallets.member_for(position.wallet_public_key or "")
     except family_wallets.FamilyWalletConfigError:
         member = None
-    return f"{member}'S WALLET" if member else "REAL WALLET"
+    return f"{family.label(member)}'S WALLET" if member else "REAL WALLET"
 
 
 def opened_message(position: RealWalletPosition, symbol: str | None, now: datetime) -> str:
