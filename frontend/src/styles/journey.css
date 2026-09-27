@@ -1,0 +1,304 @@
+/*
+ * THE MEMESCOPE JOURNEY (components/alpha/journey.tsx), an ADDED homepage
+ * section. It borrows the page's own language — the brand face for headings,
+ * the frosted abyss cards the footer uses, the accent rail — and adds no new
+ * colours: every tone is an existing token.
+ */
+
+.journey {
+  position: relative;
+  z-index: 10;               /* above the fixed scene, like every section here */
+  max-width: 80rem;
+  margin: 0 auto;
+  padding: clamp(3.5rem, 8vw, 6rem) 1.5rem clamp(3rem, 6vw, 5rem);
+}
+
+@media (min-width: 1024px) {
+  .journey {
+    padding-left: 2.5rem;
+    padding-right: 2.5rem;
+  }
+}
+
+.journey-title {
+  font-family: var(--font-brand);
+  font-weight: 700;
+  font-size: clamp(2.2rem, 5.4vw, 3.8rem);
+  letter-spacing: -0.02em;
+  line-height: 1;
+  color: var(--color-ink);
+  margin-top: 0.85rem;
+  text-transform: uppercase;
+}
+
+.journey-span {
+  display: inline-block;
+  margin-top: 1.75rem;
+  padding: 0.9rem 1.2rem;
+  border: 1px solid color-mix(in oklch, var(--color-accent) 35%, transparent);
+  border-radius: 0.5rem;
+  background: color-mix(in oklch, var(--color-abyss) 85%, transparent);
+  backdrop-filter: blur(12px);
+}
+
+.journey-card {
+  position: relative;
+  border: 1px solid var(--color-line-subtle);
+  border-radius: 0.5rem;
+  background: color-mix(in oklch, var(--color-abyss) 85%, transparent);
+  backdrop-filter: blur(12px);
+  padding: 1.25rem;
+}
+
+.journey-stats {
+  margin-top: 2.5rem;
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (min-width: 1024px) {
+  .journey-stats {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.journey-stat {
+  margin-top: 0.35rem;
+  font-family: var(--font-brand);
+  font-weight: 700;
+  font-size: clamp(1.8rem, 4vw, 2.6rem);
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+  color: var(--color-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.journey-h3 {
+  font-family: var(--font-brand);
+  font-weight: 700;
+  font-size: 1.2rem;
+  letter-spacing: -0.01em;
+  text-transform: uppercase;
+  color: var(--color-ink);
+}
+
+.journey-chip {
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  padding: 0.2rem 0.7rem;
+  font-size: 0.75rem;
+  color: var(--color-ink-2);
+}
+
+/* --- the timeline: a rail with a node per step. Vertical at every width;
+       on desktop the tag moves into its own column beside the card. --- */
+
+.journey-timeline {
+  position: relative;
+  margin-top: 3.5rem;
+  display: grid;
+  gap: 1.5rem;
+  padding-left: 1.75rem;
+}
+
+.journey-timeline::before {
+  content: "";
+  position: absolute;
+  left: 0.4rem;
+  top: 0.4rem;
+  bottom: 0.4rem;
+  width: 1px;
+  background: linear-gradient(to bottom,
+    color-mix(in oklch, var(--color-accent) 60%, transparent),
+    color-mix(in oklch, var(--color-accent) 12%, transparent));
+}
+
+.journey-step {
+  position: relative;
+}
+
+.journey-step::before {
+  content: "";
+  position: absolute;
+  left: calc(-1.75rem + 0.4rem - 4px);
+  top: 0.35rem;
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--color-canvas);
+  border: 2px solid var(--color-accent);
+}
+
+.journey-step--lesson::before { border-color: var(--color-down); }
+.journey-step--now::before {
+  border-color: var(--color-up);
+  box-shadow: 0 0 0 4px color-mix(in oklch, var(--color-up) 20%, transparent);
+}
+
+.journey-tag {
+  margin-bottom: 0.6rem;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 0.75rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-accent);
+}
+
+@media (min-width: 1024px) {
+  .journey-timeline { padding-left: 0; }
+  .journey-timeline::before { left: 11.4rem; }
+  .journey-step > .journey-reveal {
+    display: grid;
+    grid-template-columns: 10rem minmax(0, 1fr);
+    column-gap: 3rem;
+    align-items: start;
+  }
+  .journey-step::before { left: calc(11.4rem - 4px); }
+  .journey-tag { margin: 0.2rem 0 0; text-align: right; }
+}
+
+.journey-card--lesson {
+  border-color: color-mix(in oklch, var(--color-down) 55%, transparent);
+  background:
+    linear-gradient(135deg, color-mix(in oklch, var(--color-down) 12%, transparent), transparent 60%),
+    color-mix(in oklch, var(--color-abyss) 88%, transparent);
+}
+
+.journey-lesson {
+  font-family: var(--font-brand);
+  font-weight: 700;
+  font-size: clamp(1.5rem, 3.4vw, 2.3rem);
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
+  color: var(--color-ink);
+}
+
+.journey-card--now {
+  border-color: color-mix(in oklch, var(--color-up) 50%, transparent);
+  background:
+    radial-gradient(120% 90% at 0% 0%, color-mix(in oklch, var(--color-up) 14%, transparent), transparent 60%),
+    color-mix(in oklch, var(--color-abyss) 88%, transparent);
+}
+
+.journey-now-title {
+  font-family: var(--font-brand);
+  font-weight: 700;
+  font-size: clamp(1.35rem, 3vw, 2rem);
+  line-height: 1.08;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
+  color: var(--color-ink);
+  max-width: 34rem;
+}
+
+.journey-badge {
+  flex-shrink: 0;
+  border: 1px solid color-mix(in oklch, var(--color-warn) 60%, transparent);
+  border-radius: 999px;
+  padding: 0.25rem 0.75rem;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 0.7rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-warn);
+  background: color-mix(in oklch, var(--color-warn) 10%, transparent);
+}
+
+.journey-now-stats {
+  margin-top: 1.5rem;
+  display: grid;
+  gap: 1.25rem;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+}
+
+.journey-unknowns {
+  margin-top: 3.5rem;
+  border-color: color-mix(in oklch, var(--color-warn) 35%, transparent);
+}
+
+.journey-pair {
+  margin-top: 1.5rem;
+  display: grid;
+  gap: 1.5rem;
+}
+
+@media (min-width: 1024px) {
+  .journey-pair { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); }
+}
+
+.journey-status {
+  margin-top: 1rem;
+  display: grid;
+}
+
+.journey-status > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.7rem 0;
+  border-top: 1px solid var(--color-line-subtle);
+}
+
+.journey-terminal {
+  margin-top: 1.25rem;
+  border: 1px solid var(--color-line-subtle);
+  border-radius: 0.4rem;
+  background: var(--color-sunken);
+  padding: 0.9rem 1rem;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 0.8rem;
+  line-height: 1.8;
+  color: var(--color-ink-2);
+}
+
+.journey-cursor {
+  display: inline-block;
+  width: 0.55em;
+  height: 1em;
+  vertical-align: text-bottom;
+  background: var(--color-accent);
+}
+
+.journey-final {
+  /* Frosted like every card here: the launch pad stands behind this spot. */
+  margin: 4rem auto 0;
+  max-width: 44rem;
+  padding: 2rem 1.5rem;
+  border: 1px solid var(--color-line-subtle);
+  border-radius: 0.5rem;
+  background: color-mix(in oklch, var(--color-abyss) 85%, transparent);
+  backdrop-filter: blur(12px);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* --- motion: one fade-up per block, the log typed line by line, a cursor
+       blink. Nothing moves for a reader who has asked for stillness. --- */
+
+@media (prefers-reduced-motion: no-preference) {
+  .journey-reveal {
+    opacity: 0;
+    transform: translateY(14px);
+    transition: opacity 600ms ease, transform 600ms cubic-bezier(0.2, 0.7, 0.2, 1);
+  }
+  .journey-reveal.is-seen {
+    opacity: 1;
+    transform: none;
+  }
+  .journey-terminal p { opacity: 0; }
+  .journey-terminal.is-seen p { animation: journey-type 380ms steps(12, end) forwards; }
+  .journey-cursor { animation: journey-blink 1s steps(1) infinite; }
+}
+
+@keyframes journey-type {
+  from { opacity: 0; clip-path: inset(0 100% 0 0); }
+  to { opacity: 1; clip-path: inset(0 0 0 0); }
+}
+
+@keyframes journey-blink {
+  50% { opacity: 0; }
+}

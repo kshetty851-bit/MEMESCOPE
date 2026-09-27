@@ -11,6 +11,7 @@ import "@/styles/memescope.css";
 import "@/styles/universe.css";
 import "@/styles/home-universe.css";
 import "@/styles/space-crew.css";
+import "@/styles/journey.css";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });

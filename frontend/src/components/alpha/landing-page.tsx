@@ -9,6 +9,7 @@ import { Wordmark, WordmarkSubtitle } from "@/components/brand/wordmark";
 import { Crew, EnterHq } from "@/components/alpha/crew";
 import { AlphaAccess } from "@/components/alpha/alpha-access";
 import { HeroMascot, type MascotState } from "@/components/alpha/hero-mascot";
+import { Journey } from "@/components/alpha/journey";
 import { SiteFooter, WhatRunsHere } from "@/components/alpha/what-runs-here";
 import { HomeUniverse } from "@/components/space/home-universe";
 import { FloatingCrew, PerchedCrew } from "@/components/space/space-crew";
@@ -178,6 +179,7 @@ export function LandingPage() {
       <Crew />
       <EnterHq />
       <WhatRunsHere />
+      <Journey />
       <SiteFooter />
     </main>
   );

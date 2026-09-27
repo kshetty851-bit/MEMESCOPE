@@ -14,6 +14,7 @@ from app.api.v1.endpoints import (
     events,
     health,
     identity,
+    journey,
     market,
     reports,
     scores,
@@ -132,5 +133,7 @@ api_router.include_router(nse_tracker.router)
 # Graduation Lab. Read-only status board; every route answers
 # `running: false` without a query when LAB_GRADUATION_ENABLED is off.
 api_router.include_router(graduation_lab.router)
+# The homepage journey section (public, counts only; see the module).
+api_router.include_router(journey.router)
 # Solana news headlines for the sidebar broadcast. Third-party RSS, read-only.
 api_router.include_router(news.router)
