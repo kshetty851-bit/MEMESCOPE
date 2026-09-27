@@ -690,30 +690,144 @@
   box-shadow: 0 0 8px 2px rgb(255 214 120 / 0.95);
 }
 
+/* The space fact: a holographic transmission. A glass panel with a glowing
+   cyan-to-violet edge, a little orbit, a counter, the fact in the brand face,
+   and a bar that fills until the next one. */
 .space-facts {
+  position: relative;
   max-width: 22rem;
-  border: 1px solid var(--color-line-subtle);
-  border-radius: 0.5rem;
-  background: color-mix(in oklch, var(--color-abyss) 80%, transparent);
-  backdrop-filter: blur(10px);
-  padding: 0.5rem 0.75rem;
+  padding: 0.85rem 1rem 1.2rem;
+  border-radius: 1rem;
+  border: 1px solid transparent;
+  background:
+    linear-gradient(145deg, rgb(16 24 48 / 0.82), rgb(34 18 58 / 0.78)) padding-box,
+    linear-gradient(135deg, rgb(94 234 255 / 0.9), rgb(167 139 250 / 0.55) 55%, rgb(255 94 170 / 0.7)) border-box;
+  backdrop-filter: blur(14px);
+  box-shadow:
+    0 0 0 1px rgb(94 234 255 / 0.08),
+    0 12px 40px rgb(0 0 0 / 0.45),
+    0 0 36px rgb(94 234 255 / 0.18);
+  isolation: isolate;
 }
+/* A slow sheen across the glass, moved by background position so it never
+   leaves the card (the pointer below needs the card unclipped). */
+.space-facts::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: linear-gradient(115deg, transparent 42%, rgb(255 255 255 / 0.08) 50%, transparent 58%);
+  background-size: 260% 100%;
+  animation: space-facts-sheen 7s ease-in-out infinite alternate;
+}
+@keyframes space-facts-sheen {
+  from { background-position: 100% 0; }
+  to { background-position: 0% 0; }
+}
+.space-facts__head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.space-facts__orbit {
+  position: relative;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #9ff3ff, #2aa9d6 60%, #155f86);
+  box-shadow: 0 0 10px rgb(94 234 255 / 0.7);
+}
+.space-facts__orbit > span {
+  position: absolute;
+  inset: -5px;
+  border-radius: 50%;
+  border: 1px solid rgb(94 234 255 / 0.35);
+  animation: space-facts-orbit 3s linear infinite;
+}
+.space-facts__orbit > span::after {
+  content: "";
+  position: absolute;
+  top: -2px;
+  left: 50%;
+  width: 4px;
+  height: 4px;
+  margin-left: -2px;
+  border-radius: 50%;
+  background: #ff8ed1;
+  box-shadow: 0 0 6px #ff8ed1;
+}
+@keyframes space-facts-orbit { to { transform: rotate(360deg); } }
 .space-facts__label {
   font-family: var(--font-geist-mono), ui-monospace, monospace;
-  font-size: 0.65rem;
-  letter-spacing: 0.14em;
+  font-size: 0.68rem;
+  letter-spacing: 0.2em;
   text-transform: uppercase;
-  color: var(--color-accent);
+  background: linear-gradient(90deg, #5eeaff, #c4a8ff);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.space-facts__count {
+  margin-left: auto;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 0.65rem;
+  color: var(--color-ink-3);
+  font-variant-numeric: tabular-nums;
 }
 .space-facts__text {
-  margin-top: 0.15rem;
-  font-size: 0.8rem;
+  margin-top: 0.55rem;
+  font-family: var(--font-brand);
+  font-size: 1rem;
+  font-weight: 600;
   line-height: 1.4;
-  color: var(--color-ink-2);
-  animation: space-fact-in 600ms ease-out;
+  letter-spacing: -0.005em;
+  color: var(--color-ink);
+  text-shadow: 0 0 18px rgb(94 234 255 / 0.18);
+  animation: space-fact-in 700ms cubic-bezier(.2,.8,.2,1);
 }
 @keyframes space-fact-in {
-  from { opacity: 0; transform: translateY(4px); }
+  from { opacity: 0; transform: translateY(8px); filter: blur(4px); }
+}
+.space-facts__bar {
+  position: absolute;
+  left: 1rem;
+  right: 1rem;
+  bottom: 0.45rem;
+  height: 2px;
+  border-radius: 2px;
+  transform-origin: left;
+  background: linear-gradient(90deg, #5eeaff, #c4a8ff, #ff8ed1);
+  box-shadow: 0 0 8px rgb(94 234 255 / 0.6);
+  animation: space-facts-bar 8s linear forwards;
+}
+@keyframes space-facts-bar {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+
+/* Desktop: bottom left of the first screen, beside the frog, with a pointer
+   towards it — as if the frog is telling you. */
+.space-facts--by-frog {
+  position: absolute;
+  z-index: 10;
+  /* Right up to the frog (its mount starts at 46%), 2.5rem short of it. */
+  left: max(2.5rem, calc(46% - min(23rem, 36%) - 2.5rem));
+  bottom: 11vh;
+  width: min(23rem, 36%);
+  max-width: none;
+}
+.space-facts--to-frog::after {
+  content: "";
+  position: absolute;
+  right: -9px;
+  top: 58%;
+  width: 16px;
+  height: 16px;
+  transform: rotate(45deg);
+  background: linear-gradient(145deg, rgb(30 20 55), rgb(34 18 58));
+  border-top: 1px solid rgb(196 168 255 / 0.55);
+  border-right: 1px solid rgb(196 168 255 / 0.55);
 }
 
 @media (max-width: 767px) {
@@ -725,7 +839,10 @@
 @media (prefers-reduced-motion: reduce) {
   .home-universe__milkyway,
   .home-universe__spacewalker,
+  .space-facts::before,
+  .space-facts__orbit > span,
   .space-facts__text { animation: none; }
+  .space-facts__bar { display: none; }
   .home-universe__spacewalker { transform: translate(70vw, 55vh) rotate(-15deg); }
 }
 

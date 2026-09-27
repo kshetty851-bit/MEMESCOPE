@@ -37,25 +37,45 @@ export const FACTS: readonly string[] = [
   "Footprints on the Moon can last for millions of years — there is no wind to erase them.",
 ];
 
-export function SpaceFacts({ className = "" }: { className?: string }) {
+const EVERY_MS = 8000;
+
+/**
+ * A holographic transmission card. `toFrog` adds the pointer on its right,
+ * for the desktop spot beside the frog (Karthik, 2026-09-27: "near frog,
+ * very stylish and attractive").
+ */
+export function SpaceFacts({ className = "", toFrog = false }: { className?: string; toFrog?: boolean }) {
   const [order, setOrder] = useState<number[] | null>(null);
   const [at, setAt] = useState(0);
 
   // Shuffled on the client only, so the server and first client render agree.
   useEffect(() => {
     setOrder(FACTS.map((_, i) => i).sort(() => Math.random() - 0.5));
-    const timer = window.setInterval(() => setAt((n) => n + 1), 8000);
+    const timer = window.setInterval(() => setAt((n) => n + 1), EVERY_MS);
     return () => window.clearInterval(timer);
   }, []);
 
   if (!order) return null;
-  const fact = FACTS[order[at % order.length]!];
+  const index = order[at % order.length]!;
   return (
-    <div className={`space-facts ${className}`} role="status" aria-live="polite">
-      <span className="space-facts__label">Space fact</span>
+    <div
+      className={`space-facts ${toFrog ? "space-facts--to-frog" : ""} ${className}`}
+      role="status"
+      aria-live="polite"
+    >
+      <div className="space-facts__head">
+        <span className="space-facts__orbit" aria-hidden>
+          <span />
+        </span>
+        <span className="space-facts__label">Space fact</span>
+        <span className="space-facts__count">
+          {String((at % order.length) + 1).padStart(2, "0")} / {FACTS.length}
+        </span>
+      </div>
       <p key={at} className="space-facts__text">
-        {fact}
+        {FACTS[index]}
       </p>
+      <span key={`bar-${at}`} className="space-facts__bar" aria-hidden />
     </div>
   );
 }

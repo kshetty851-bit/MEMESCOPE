@@ -114,12 +114,11 @@ export function LandingPage() {
           {/* Off until asked for, every visit — see the component. It sits in
               the header rather than over the scene so it cannot be mistaken
               for part of the launch sequence. */}
-          {/* Space knowledge, top left (Karthik, 2026-09-27): in the header
-              line from md up, clear of the wordmark and the crew perched on it. */}
-          <SpaceFacts className="ml-4 hidden md:block" />
           <SpaceAudioToggle className="ml-auto" />
         </header>
-        <SpaceFacts className="relative z-10 mt-3 md:hidden" />
+        {/* Space knowledge (Karthik, 2026-09-27). Under the header below lg,
+            where the frog is not shown; bottom left, beside the frog, above. */}
+        <SpaceFacts className="relative z-10 mt-3 lg:hidden" />
 
         {/* The mascot lives behind the grid, not beside it. Below `lg` it is out
             of the idle composition — a figure behind a login form on a 375px
@@ -164,6 +163,8 @@ export function LandingPage() {
             onPhase={(next) => (next === "approved" ? setApproved(true) : setGate(next))}
           />
         </div>
+
+        <SpaceFacts toFrog className="space-facts--by-frog hidden lg:block" />
       </section>
 
       {approved && <MoonIntro onComplete={enter} />}
