@@ -241,10 +241,6 @@ function bandLabel(lo: number, hi: number | null): string {
   return hi == null ? `${k(lo)}+` : `${k(lo)}–${k(hi)}`;
 }
 
-function replayedCount(bands: { book: boolean; replayed?: number }[]): number {
-  return bands.filter((b) => !b.book).reduce((sum, b) => sum + (b.replayed ?? 0), 0);
-}
-
 function Signed({ line }: { line: KarthikWhatIfLine }) {
   const n = Number(line.pnl_usd);
   return (
@@ -260,195 +256,68 @@ function Signed({ line }: { line: KarthikWhatIfLine }) {
 }
 
 /**
- * THE SIDE PANEL: the same book on other terms, to check, never to trade.
- *
- * "Pools $150k+ only" was asked for after EVO (24 Sep): on the quiet rule's
- * record the $75k-$150k pools died 3 times in 41 trades, those above 2 in 223.
- * The trade-size table answers "what if I had used $10, $20...". Every line is
- * the book's own walk on the same capital and start, so skips, pool impact at
- * that size and the cash limit are the real book's.
+ * IF EACH TRADE HAD BEEN (Karthik, 2026-09-27): every trade size down, every
+ * pool floor across, one table in place of the side checks. Each cell is its
+ * own book from the same start at that size, one trade at a time, on the
+ * pools at or above that floor — the book's own walk, so skips, pool impact
+ * at that size and the cash limit are the real book's.
  */
-function WhatIf({ data }: { data: KarthikBook }) {
+function SizeGrid({ data }: { data: KarthikBook }) {
   const w = data.whatif;
-  if (!w) return null;
-  const deepUp = Number(w.deep.pnl_usd) >= 0;
-  const old = data.every_trade;
+  if (!w?.floors?.length) return null;
+  const k = (n: number) => `$${Math.round(n / 1000)}k+`;
   return (
-    <aside className="space-y-4 lg:sticky lg:top-4">
-      {old ? (
-        <Panel>
-          <PanelHeader>
-            <PanelTitle>Check: every trade (the old rule)</PanelTitle>
-          </PanelHeader>
-          <div className="space-y-3 p-3">
-            <div>
-              <div className="text-[11px] uppercase tracking-wider text-ink-dim">Balance</div>
-              <div className={`text-xl font-semibold tabular-nums ${Number(old.pnl_usd) >= 0 ? "text-up" : "text-down"}`}>
-                {usd(old.balance_usd)} {pctOfCapital(old.pnl_usd, data.capital_usd)}
-              </div>
-              <div className="text-[12px] tabular-nums text-ink-dim">{rupees(old.balance_usd)}</div>
-            </div>
-            <div className="grid grid-cols-3 gap-2 text-[12px] tabular-nums">
-              <div><div className="text-ink-dim">trades</div>{old.trades}</div>
-              <div><div className="text-ink-dim">rugs</div>{old.rugs}</div>
-              <div><div className="text-ink-dim">lowest</div>{usd(old.lowest_usd)}</div>
-            </div>
-            <p className="text-[12px] leading-relaxed text-ink-dim">
-              The same start, buying every signal the cash allowed, as the book did
-              before {day(data.one_at_a_time_since)}. Kept here so the change of rule
-              stays visible.
-            </p>
-          </div>
-        </Panel>
-      ) : null}
-
-      <Panel>
-        <PanelHeader>
-          <PanelTitle>
-            Check: pools {usd(w.floor_usd).replace(".00", "")}+ only
-          </PanelTitle>
-        </PanelHeader>
-        <div className="space-y-3 p-3">
-          <div>
-            <div className="text-[11px] uppercase tracking-wider text-ink-dim">Balance</div>
-            <div className={`text-xl font-semibold tabular-nums ${deepUp ? "text-up" : "text-down"}`}>
-              {usd(w.deep.balance_usd)} {pctOfCapital(w.deep.pnl_usd, data.capital_usd)}
-            </div>
-            <div className="text-[12px] tabular-nums text-ink-dim">{rupees(w.deep.balance_usd)}</div>
-          </div>
-          <div className="grid grid-cols-3 gap-2 text-[12px] tabular-nums">
-            <div><div className="text-ink-dim">trades</div>{w.deep.trades}</div>
-            <div><div className="text-ink-dim">rugs</div>{w.deep.rugs}</div>
-            <div><div className="text-ink-dim">lowest</div>{usd(w.deep.lowest_usd)}</div>
-          </div>
-          <p className="text-[12px] leading-relaxed text-ink-dim">
-            The same {usd(data.capital_usd)}, {usd(data.ticket_usd)} a trade and start
-            date, buying only pools of {usd(w.floor_usd).replace(".00", "")} and up. A
-            what-if to watch: the book on the left stays on its own rule. The floor was
-            chosen after seeing EVO die at $146k, so only the days from now on test it.
-          </p>
-        </div>
-      </Panel>
-
-      {w.bands?.length ? (
-        <Panel>
-          <PanelHeader>
-            <PanelTitle>Check: every pool size</PanelTitle>
-          </PanelHeader>
-          <div className="overflow-x-auto p-3">
-            <table className="w-full text-[12px] tabular-nums">
-              <thead className="text-[11px] uppercase tracking-wider text-ink-dim">
-                <tr>
-                  <th className="py-1 pr-2 text-left font-normal">pools</th>
-                  <th className="py-1 pr-2 text-right font-normal">profit / loss</th>
-                  <th className="py-1 pr-2 text-right font-normal">trades</th>
-                  <th className="py-1 text-right font-normal">rugs</th>
-                </tr>
-              </thead>
-              <tbody>
-                {w.bands.map((b) => (
-                  <tr key={b.lo_usd} className="border-t border-line/60">
-                    <td className="py-1.5 pr-2">
-                      {bandLabel(b.lo_usd, b.hi_usd)}
-                      {b.book ? null : <span className="ml-1 text-[10px] text-ink-dim">*</span>}
-                    </td>
-                    <td className="py-1.5 pr-2 text-right"><Signed line={b} /></td>
-                    <td className="py-1.5 pr-2 text-right">{b.trades}</td>
-                    <td className="py-1.5 text-right">{b.rugs}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <p className="mt-2 text-[11px] leading-relaxed text-ink-dim">
-              Each size is its own {usd(data.capital_usd)} book at {usd(data.ticket_usd)} a
-              trade, one trade at a time, from the same start. $75k and up are this
-              book&apos;s own trades cut by pool size. * The same rule on the pools this
-              book skips: {replayedCount(w.bands)} of those trades were rebuilt from price
-              snapshots (they read about a point a trade too kind), the rest were taken
-              live. A look back, not a test.
-            </p>
-          </div>
-        </Panel>
-      ) : null}
-
-      {w.floors ? (
-        <Panel>
-          <PanelHeader>
-            <PanelTitle>Check: deeper pools</PanelTitle>
-          </PanelHeader>
-          <div className="overflow-x-auto p-3">
-            <table className="w-full text-[12px] tabular-nums">
-              <thead className="text-[11px] uppercase tracking-wider text-ink-dim">
-                <tr>
-                  <th className="py-1 pr-2 text-left font-normal">pools</th>
-                  <th className="py-1 pr-2 text-right font-normal">balance</th>
-                  <th className="py-1 pr-2 text-right font-normal">trades</th>
-                  <th className="py-1 text-right font-normal">rugs</th>
-                </tr>
-              </thead>
-              <tbody>
-                {w.floors.map((f) => (
-                  <tr key={f.floor_usd} className="border-t border-line/60">
-                    <td className="py-1.5 pr-2">{usd(f.floor_usd).replace(".00", "")}+</td>
-                    <td className="py-1.5 pr-2 text-right">
-                      {usd(f.balance_usd)}{" "}
-                      <span className={Number(f.pnl_usd) >= 0 ? "text-up" : "text-down"}>
-                        {pctOfCapital(f.pnl_usd, data.capital_usd)}
-                      </span>
-                    </td>
-                    <td className="py-1.5 pr-2 text-right">{f.trades}</td>
-                    <td className="py-1.5 text-right">{f.rugs}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <p className="mt-2 text-[11px] leading-relaxed text-ink-dim">
-              The same {usd(data.capital_usd)} at {usd(data.ticket_usd)} a trade, buying
-              only pools at or above each line. Deeper pools rug less but move less, so
-              wins shrink as the line rises. A look back, not a test.
-            </p>
-          </div>
-        </Panel>
-      ) : null}
-
-      <Panel>
-        <PanelHeader>
-          <PanelTitle>If each trade had been</PanelTitle>
-        </PanelHeader>
-        <div className="overflow-x-auto p-3">
-          <table className="w-full text-[12px] tabular-nums">
-            <thead className="text-[11px] uppercase tracking-wider text-ink-dim">
-              <tr>
-                <th className="py-1 pr-2 text-left font-normal">size</th>
-                <th className="py-1 pr-2 text-right font-normal">this book</th>
-                <th className="py-1 text-right font-normal">
-                  $75k+ pools
+    <Panel>
+      <PanelHeader>
+        <PanelTitle>If each trade had been</PanelTitle>
+      </PanelHeader>
+      <div className="overflow-x-auto p-3">
+        <table className="w-full min-w-[56rem] text-[12px] tabular-nums">
+          <thead className="text-[11px] uppercase tracking-wider text-ink-dim">
+            <tr>
+              <th className="py-1 pr-3 text-left font-normal">size</th>
+              {w.floors.map((f) => (
+                <th
+                  key={f.floor_usd}
+                  className={`py-1 px-2 text-right font-normal ${f.book ? "rounded-t-md bg-accent/10 text-accent" : ""}`}
+                >
+                  {k(f.floor_usd)}
+                  {f.replayed_below ? "*" : ""}
+                  {f.book ? <div className="text-[10px] normal-case tracking-normal">this book</div> : null}
                 </th>
-              </tr>
-            </thead>
-            <tbody>
-              {w.sizes.map((s) => (
-                <tr key={s.ticket_usd} className={`border-t border-line/60 ${s.current ? "font-semibold" : ""}`}>
-                  <td className="py-1.5 pr-2">
-                    {usd(s.ticket_usd).replace(".00", "")}
-                    <span className="font-normal text-ink-dim">
-                      {" "}on {usd(s.capital_usd).replace(".00", "")}
-                    </span>
-                    {s.current ? <span className="ml-1 text-[10px] font-normal text-ink-dim">now</span> : null}
-                  </td>
-                  <td className="py-1.5 pr-2 text-right"><Signed line={s.all} /></td>
-                  <td className="py-1.5 text-right"><Signed line={s.wide} /></td>
-                </tr>
               ))}
-            </tbody>
-          </table>
-          <p className="mt-2 text-[11px] leading-relaxed text-ink-dim">
-            Each size runs on its own balance from the same start, and its % is of
-            that balance. A rug costs the whole trade at any size.
-          </p>
-        </div>
-      </Panel>
-    </aside>
+            </tr>
+          </thead>
+          <tbody>
+            {w.sizes.map((s) => (
+              <tr key={s.ticket_usd} className={`border-t border-line/60 ${s.current ? "font-semibold" : ""}`}>
+                <td className="whitespace-nowrap py-1.5 pr-3">
+                  {usd(s.ticket_usd).replace(".00", "")}
+                  <span className="font-normal text-ink-dim"> on {usd(s.capital_usd).replace(".00", "")}</span>
+                  {s.current ? <span className="ml-1 text-[10px] font-normal text-accent">now</span> : null}
+                </td>
+                {s.cells.map((c, i) => (
+                  <td
+                    key={w.floors[i]!.floor_usd}
+                    className={`whitespace-nowrap py-1.5 px-2 text-right ${w.floors[i]!.book ? "bg-accent/10" : ""}`}
+                    title={`${c.trades} trades · ${c.rugs} rugs · lowest ${usd(c.lowest_usd)}`}
+                  >
+                    <Signed line={c} />
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p className="mt-2 text-[11px] leading-relaxed text-ink-dim">
+          Each cell is its own book from {day(data.started_at)} at that size, one trade at a
+          time, buying only pools at or above that floor. Hover a cell for its trades, rugs
+          and lowest balance. * These floors include the $25k–$75k pools this book skips;
+          those trades were rebuilt from price snapshots until 26 Sep (they read about a
+          point a trade too kind) and taken live since. A look back, not a test.
+        </p>
+      </div>
+    </Panel>
   );
 }
 
@@ -559,7 +428,6 @@ export function KarthikLabPage() {
   );
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_21rem] lg:items-start">
     <div className="min-w-0 space-y-4">
       <div>
         <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -591,7 +459,7 @@ export function KarthikLabPage() {
               Pools {bandLabel(data.pools_usd[0], data.pools_usd[1])} only:
             </b>{" "}
             chosen on {day(data.pools_since)} and replayed from day 1, so every figure
-            here is a look back until then. The checks beside it still show every size.
+            here is a look back until then. The table below shows every other floor.
           </p>
         ) : null}
         {data.one_at_a_time_since ? (
@@ -599,7 +467,7 @@ export function KarthikLabPage() {
             <b className="text-ink-2">One trade at a time:</b> it buys only when nothing is
             held, and lets a signal go while a trade is open. Chosen on{" "}
             {day(data.one_at_a_time_since)} and replayed from day 1, so every figure here
-            and in the checks beside it follows this rule; only trades from{" "}
+            and in the table below follows this rule; only trades from{" "}
             {day(data.one_at_a_time_since)} on test it.
           </p>
         ) : null}
@@ -635,10 +503,9 @@ export function KarthikLabPage() {
       </div>
 
 
-      <TradeList data={data} />
+      <SizeGrid data={data} />
 
-    </div>
-    <WhatIf data={data} />
+      <TradeList data={data} />
     </div>
   );
 }
