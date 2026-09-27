@@ -82,7 +82,7 @@ export function AlphaAccess({ onPhase }: { onPhase: (phase: GatePhase | "approve
       setError(
         error instanceof ApiError && error.status !== 401
           ? "Access service is temporarily unavailable. Please retry."
-          : "Access code not recognised.",
+          : "💀 NICE TRY. Unfortunately, the terminal has trust issues.",
       );
       setUnlocking(false);
       onPhase("denied");
@@ -149,18 +149,26 @@ export function AlphaAccess({ onPhase }: { onPhase: (phase: GatePhase | "approve
       aria-labelledby="alpha-access-heading"
       className="w-full rounded-lg border border-line bg-surface p-5 shadow-e3"
     >
+      {/* Karthik's words, 2026-09-27. */}
       <h2
         id="alpha-access-heading"
         className="text-label font-medium uppercase tracking-[0.16em] text-accent"
       >
-        Alpha access
+        <span aria-hidden>🩸 </span>Alpha access
       </h2>
-      <p className="mt-1.5 text-sm text-ink-2">
-        Enter the code you were issued to open the terminal.
+      <p className="mt-2 font-brand text-xl font-bold uppercase tracking-tight text-ink">
+        Welcome, astronaut.
+      </p>
+      <p className="mt-1.5 text-sm leading-relaxed text-ink-2">
+        The terminal is not publicly accessible. Enter the code you were issued before
+        the system decides you&apos;re a liability.
       </p>
 
-      <label htmlFor="alpha-code" className="sr-only">
-        Enter access code
+      <label
+        htmlFor="alpha-code"
+        className="mt-4 block text-label font-medium uppercase tracking-[0.16em] text-ink-3"
+      >
+        Access code
       </label>
       <input
         id="alpha-code"
@@ -171,15 +179,15 @@ export function AlphaAccess({ onPhase }: { onPhase: (phase: GatePhase | "approve
         }}
         inputMode="numeric"
         autoComplete="one-time-code"
-        placeholder="Access code"
+        placeholder="Paste your alpha. Keep it secret."
         disabled={unlocking}
         aria-invalid={error ? true : undefined}
         aria-describedby={error ? "alpha-code-error" : undefined}
         className={cn(
-          "mt-4 h-11 w-full rounded-md border bg-sunken px-4 text-center",
+          "mt-1.5 h-11 w-full rounded-md border bg-sunken px-4 text-center",
           "font-mono text-md tracking-[0.24em] text-ink",
           "transition-colors duration-[var(--duration-instant)]",
-          "placeholder:tracking-normal placeholder:text-ink-4",
+          "placeholder:font-sans placeholder:text-sm placeholder:tracking-normal placeholder:text-ink-4 placeholder:opacity-70",
           "disabled:opacity-70",
           error ? "border-down" : "border-line-control hover:border-line-strong",
         )}
@@ -202,13 +210,17 @@ export function AlphaAccess({ onPhase }: { onPhase: (phase: GatePhase | "approve
           "disabled:cursor-wait disabled:opacity-70",
         )}
       >
-        {unlocking ? "Unlocking…" : "Unlock"}
+        {unlocking ? "[ UNLOCKING… ]" : "[ UNLOCK ]"}
       </button>
 
       <div className="mt-4 border-t border-line-subtle pt-3">
         <p className="text-xs leading-relaxed text-ink-3">
-          During alpha testing, MEMESCOPE records basic session activity and page
-          usage to improve the product.
+          <span className="font-semibold text-warn">ALPHA WARNING:</span> MEMESCOPE records
+          basic session activity and page usage while we&apos;re breaking things.
+        </p>
+        <p className="mt-1.5 text-xs leading-relaxed text-ink-3">
+          We don&apos;t need your wallet. We&apos;ve already got enough trauma from watching
+          these tokens.
         </p>
       </div>
     </form>
