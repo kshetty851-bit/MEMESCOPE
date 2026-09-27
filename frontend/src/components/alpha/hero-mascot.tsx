@@ -1,8 +1,7 @@
 "use client";
 
-import Image from "next/image";
 import type { CSSProperties } from "react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -40,6 +39,7 @@ export function HeroMascot({
   compact?: boolean;
 }) {
   const mascotRef = useRef<HTMLDivElement>(null);
+  const act = useFrogActs(state === "idle" && !compact);
 
   useEffect(() => {
     if (compact || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
@@ -85,15 +85,7 @@ export function HeroMascot({
           <div className="alpha-mascot__frame">
             <span className="alpha-mascot__shadow" />
             <span className="alpha-mascot__backlight" />
-            <Image
-              src="/mascot/frog-astronaut-2d.png"
-              alt=""
-              width={1122}
-              height={1402}
-              priority={!compact}
-              sizes={compact ? "120px" : "(max-width: 1023px) 46vw, 34vw"}
-              className="alpha-mascot__image"
-            />
+            <FrogRig act={act} />
             {/* Placed on the drawn hands, so the reaction reads as the mascot
                 doing something rather than as a badge floating beside it. */}
             <ThumbsUp className="alpha-mascot__thumb alpha-mascot__thumb--raised" />
@@ -163,5 +155,110 @@ function ThumbsUp({ className }: { className?: string }) {
         opacity="0.42"
       />
     </svg>
+  );
+}
+
+/*
+ * THE FROG, ALIVE (Karthik, 2026-09-27: "animate the frog, move hands, legs,
+ * expressions, make him do some stuff").
+ *
+ * The drawing is cut into puppet layers, each the full canvas size so they
+ * stack exactly (`public/mascot/rig/`, cut by `frontend/scripts/cut-frog-rig.py`):
+ * the body with the moving parts removed, the waving hand, the lower hand,
+ * the tongue, and the motion marks. Drawn eyelids blink and wink over the
+ * eyes. While the frog is idle it runs through a loose routine of acts — wave,
+ * tongue out, a dance, a wink, a jump, a spin — each a CSS animation keyed on
+ * `data-act`, with a pause between. The legs move with the body (a jump, a
+ * bounce, a spin): the drawn feet are blended into the suit, and cutting them
+ * would show. Nothing moves for a reader who asked for less motion.
+ */
+
+export type FrogAct = "rest" | "wave" | "tongue" | "dance" | "wink" | "jump" | "spin";
+
+/** How long each act plays, in ms (its CSS animation runs this long). */
+export const ACT_MS: Record<Exclude<FrogAct, "rest">, number> = {
+  wave: 2400,
+  tongue: 2200,
+  dance: 2700,
+  wink: 1000,
+  jump: 1400,
+  spin: 1600,
+};
+
+const ROUTINE: Exclude<FrogAct, "rest">[] = ["wave", "tongue", "dance", "wink", "jump", "wave", "spin", "tongue", "dance"];
+
+function useFrogActs(active: boolean): FrogAct {
+  const [act, setAct] = useState<FrogAct>("rest");
+  useEffect(() => {
+    if (!active || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+      setAct("rest");
+      return;
+    }
+    let timer = 0;
+    let step = Math.floor(Math.random() * ROUTINE.length);
+    const rest = () => {
+      setAct("rest");
+      timer = window.setTimeout(perform, 2200 + Math.random() * 2600);
+    };
+    const perform = () => {
+      const next = ROUTINE[step++ % ROUTINE.length]!;
+      setAct(next);
+      timer = window.setTimeout(rest, ACT_MS[next]);
+    };
+    timer = window.setTimeout(perform, 1800);
+    return () => window.clearTimeout(timer);
+  }, [active]);
+  return act;
+}
+
+const RIG = "/mascot/rig";
+/** The eyes, in the drawing's own 1122 x 1402 pixel space. */
+const EYES = [
+  { id: "l", cx: 368, cy: 348, rx: 101, ry: 92 },
+  { id: "r", cx: 660, cy: 272, rx: 79, ry: 86 },
+] as const;
+
+function FrogRig({ act }: { act: FrogAct }) {
+  return (
+    <div className="alpha-mascot__image frog-rig" data-act={act}>
+      <div className="frog-rig__pose">
+        {/* eslint-disable @next/next/no-img-element */}
+        <img src={`${RIG}/body.webp`} alt="" width={1122} height={1402} fetchPriority="high"
+             draggable={false} className="frog-rig__body" />
+        <img src={`${RIG}/tongue.webp`} alt="" draggable={false} className="frog-rig__part frog-rig__tongue" />
+        <img src={`${RIG}/hand-l.webp`} alt="" draggable={false} className="frog-rig__part frog-rig__hand-l" />
+        <img src={`${RIG}/hand-r.webp`} alt="" draggable={false} className="frog-rig__part frog-rig__hand-r" />
+        <img src={`${RIG}/marks-head.webp`} alt="" draggable={false} className="frog-rig__part frog-rig__marks" />
+        <img src={`${RIG}/marks-hand.webp`} alt="" draggable={false} className="frog-rig__part frog-rig__marks" />
+        <img src={`${RIG}/marks-feet.webp`} alt="" draggable={false} className="frog-rig__part frog-rig__marks" />
+        {/* eslint-enable @next/next/no-img-element */}
+        <svg className="frog-rig__part frog-rig__lids" viewBox="0 0 1122 1402" aria-hidden focusable="false">
+          <defs>
+            {EYES.map((e) => (
+              <clipPath key={e.id} id={`frog-eye-${e.id}`}>
+                <ellipse cx={e.cx} cy={e.cy} rx={e.rx} ry={e.ry} />
+              </clipPath>
+            ))}
+          </defs>
+          {EYES.map((e) => {
+            const top = e.cy - e.ry - 10;
+            const bottom = e.cy + e.ry + 12;
+            const left = e.cx - e.rx - 10;
+            const right = e.cx + e.rx + 10;
+            return (
+              <g key={e.id} clipPath={`url(#frog-eye-${e.id})`}>
+                <g className={`frog-rig__lid frog-rig__lid--${e.id}`} style={{ "--lid": `${bottom - top}px` } as CSSProperties}>
+                  <path d={`M${left} ${top} H${right} V${bottom - 18} Q${e.cx} ${bottom + 14} ${left} ${bottom - 18} Z`}
+                        fill="#9dbb2b" />
+                  <path d={`M${left} ${top} H${right} V${top + 30} H${left} Z`} fill="#aac932" />
+                  <path d={`M${right} ${bottom - 18} Q${e.cx} ${bottom + 14} ${left} ${bottom - 18}`}
+                        fill="none" stroke="#23211b" strokeWidth="9" strokeLinecap="round" />
+                </g>
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+    </div>
   );
 }
