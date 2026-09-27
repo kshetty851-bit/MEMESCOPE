@@ -1,5 +1,7 @@
 export interface KarthikTrade {
   symbol: string | null;
+  /** The token's address: the page links it to DexScreener to verify. */
+  mint?: string;
   opened_at: string;
   closed_at: string | null;
   pct: string;

@@ -187,13 +187,32 @@ function Row({ trade }: { trade: KarthikTrade }) {
   const pct = Number(trade.pct);
   return (
     <tr className="border-t border-line/60">
-      <td className="py-1.5 pr-3 tabular-nums">
-        {new Date(trade.opened_at).toLocaleTimeString("en-GB", {
+      <td className="whitespace-nowrap py-1.5 pr-3 tabular-nums">
+        {new Date(trade.opened_at).toLocaleString("en-GB", {
+          timeZone: "Asia/Dubai",
+          day: "numeric",
+          month: "short",
           hour: "2-digit",
           minute: "2-digit",
         })}
       </td>
-      <td className="py-1.5 pr-3 font-medium">{trade.symbol || "—"}</td>
+      <td className="py-1.5 pr-3 font-medium">
+        {trade.mint ? (
+          // DexScreener's page for the token: its chart shows the price at the
+          // minute the book bought and sold, so every row can be checked.
+          <a
+            href={`https://dexscreener.com/solana/${trade.mint}`}
+            target="_blank"
+            rel="noreferrer"
+            className="text-accent underline-offset-2 hover:underline"
+            title={`Verify ${trade.symbol || trade.mint} on DexScreener`}
+          >
+            {trade.symbol || `${trade.mint.slice(0, 6)}…`} <span aria-hidden>↗</span>
+          </a>
+        ) : (
+          trade.symbol || "—"
+        )}
+      </td>
       <td className="py-1.5 pr-3 text-right tabular-nums text-ink-dim">
         {trade.pool_usd ? usd(trade.pool_usd) : "—"}
       </td>
@@ -571,10 +590,8 @@ export function KarthikLabPage() {
             <b className="text-ink-2">
               Pools {bandLabel(data.pools_usd[0], data.pools_usd[1])} only:
             </b>{" "}
-            chosen on {day(data.pools_since)} from the pool-size splits of this
-            book&apos;s own trades (no rugs, and never below its start) and replayed from
-            day 1, so every figure here is a look back until then. The checks beside it
-            still show every size.
+            chosen on {day(data.pools_since)} and replayed from day 1, so every figure
+            here is a look back until then. The checks beside it still show every size.
           </p>
         ) : null}
         {data.one_at_a_time_since ? (
