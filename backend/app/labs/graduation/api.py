@@ -1613,6 +1613,10 @@ def _flows(took: list, rows: dict[str, GradTradeFlow]) -> dict[str, Any]:
             "insider_sell_usd": total("insider_sell_usd"),
             "other_buy_usd": total("other_buy_usd"),
             "other_sell_usd": total("other_sell_usd"),
+            # Owners usually buy in one go at graduation — often most of the
+            # pool's tokens (10,867 SOL on one coin) — which is what makes
+            # many of these pools deep in the first place.
+            "insider_bought_trades": sum(1 for f in got if f.insider_buy_usd > 0),
             "insider_sold_trades": sum(1 for f in got if f.insider_sell_usd > 0),
             "other_buyers": sum(f.other_buyers for f in got)}
 

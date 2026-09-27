@@ -129,10 +129,44 @@ function Figure({
  * percentage sitting unlabelled beside whole ones invites reading a quiet
  * morning as a bad day.
  */
-function Days({ days }: { days: KarthikDay[] }) {
+/**
+ * Day 30, roughly (Karthik, 2026-09-27). The book trades a fixed $50 ticket,
+ * so it grows by dollars a day rather than compounding: today's balance plus
+ * the average finished day's profit for every day left to the judge date,
+ * and the same at the worst finished day's pace. A guide, not a promise — it
+ * rests on the few days there have been.
+ */
+export function day30(days: KarthikDay[], judgeAt: string, now = Date.now()) {
+  const done = days.filter((d) => !d.running);
+  if (done.length === 0 || days.length === 0) return null;
+  const pnl = done.map((d) => Number(d.pnl_usd));
+  const avg = pnl.reduce((a, b) => a + b, 0) / pnl.length;
+  const worst = Math.min(...pnl);
+  const balance = Number(days[0]!.balance_usd); // newest first, running day included
+  const left = Math.max(0, (Date.parse(judgeAt) - now) / 86_400_000);
+  return { expected: balance + avg * left, worstPace: balance + worst * left, avg, basedOn: done.length };
+}
+
+function Days({ days, judgeAt }: { days: KarthikDay[]; judgeAt: string }) {
   if (days.length === 0) return null;
+  const guess = day30(days, judgeAt);
   return (
     <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
+      {guess ? (
+        <div
+          className="min-w-[132px] shrink-0 rounded-lg border border-dashed border-accent/60 bg-accent/[0.06] p-2"
+          data-testid="day-30"
+          title={`If every day left is like the average finished day so far (${usd(String(guess.avg))} a day, from ${guess.basedOn} days). At the worst finished day's pace it would be ${usd(String(guess.worstPace))}.`}
+        >
+          <div className="text-[10px] uppercase tracking-wider text-accent">Day 30 · expected</div>
+          <div className="mt-0.5 text-base font-semibold tabular-nums text-ink">
+            ≈ {usd(String(Math.round(guess.expected)))}
+          </div>
+          <div className="text-[11px] tabular-nums text-ink-dim">
+            worst-day pace {usd(String(Math.round(guess.worstPace)))}
+          </div>
+        </div>
+      ) : null}
       {days.map((d) => {
         const pct = Number(d.pct);
         return (
@@ -493,9 +527,11 @@ export function MoneyIn({ flows }: { flows: KarthikFlows | undefined }) {
         </tbody>
       </table>
       <div className="mt-1 leading-snug text-ink-dim">
-        {flows.other_buyers.toLocaleString("en-US")} other buyers. Owners sold in{" "}
-        {flows.insider_sold_trades} of {flows.measured} trades. Graduation to our sell,
-        on-chain{flows.measured < flows.trades ? ` · ${flows.measured} of ${flows.trades} trades read so far` : ""}.
+        {flows.other_buyers.toLocaleString("en-US")} other buyers.
+        {flows.insider_bought_trades !== undefined
+          ? ` Owners bought in ${flows.insider_bought_trades} and sold in ${flows.insider_sold_trades} of ${flows.measured} trades — mostly one big buy at graduation that makes the pool deep.`
+          : ` Owners sold in ${flows.insider_sold_trades} of ${flows.measured} trades.`}{" "}
+        Graduation to our sell, on-chain{flows.measured < flows.trades ? ` · ${flows.measured} of ${flows.trades} trades read so far` : ""}.
       </div>
     </div>
   );
@@ -627,7 +663,7 @@ export function KarthikLabPage() {
         <div className="mb-1 text-[11px] uppercase tracking-wider text-ink-dim">
           Every 24 hours · percent of the balance that day started with
         </div>
-        <Days days={data.days} />
+        <Days days={data.days} judgeAt={data.judge_at} />
       </div>
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
