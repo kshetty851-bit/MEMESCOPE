@@ -31,11 +31,13 @@ MIGRATIONS = (
     BACKEND / "alembic" / "versions" / "20260911_0071_graduation_features.py",
     BACKEND / "alembic" / "versions" / "20260911_0073_graduation_paper_book.py",
     BACKEND / "alembic" / "versions" / "20260916_0088_grad_early_opens.py",
+    BACKEND / "alembic" / "versions" / "20260927_0108_grad_trade_flows.py",
 )
 TABLES = ["grad_checkpoints", "grad_curve_samples", "grad_early_opens",
           "grad_features", "grad_migrations", "grad_operators", "grad_paper_positions",
           "grad_paper_restatements",
-          "grad_postgrad_samples", "grad_tokens", "grad_trades"]
+          "grad_postgrad_samples", "grad_rug_verdicts", "grad_tokens", "grad_trade_flows",
+          "grad_trades"]
 
 FORBIDDEN_MODULES = (
     "app.paper", "app.paper_v2", "app.karthik", "app.karthik_ops",
@@ -63,6 +65,11 @@ ALLOWED_PLATFORM = (
     # purpose, so the books refuse exactly the coins the wallet refuses and
     # the two can never drift apart (2026-09-19).
     "app.core.rug_money",
+    # The platform's mainnet-verified PumpSwap event layout (pure: constants
+    # and a decoder, no I/O), for who bought and sold in a pool the arm held
+    # (`sources.pool_swaps`, 2026-09-27). A second copy of those offsets
+    # would be a second thing to get wrong.
+    "app.services.scanner.trade_events",
     # THE BRIDGE, and the only two modules allowed across it.
     #
     # `live_spec.py` and `live_decisions.py` exist to make one graduation arm
@@ -232,6 +239,7 @@ def test_each_migration_creates_the_tables_it_claims() -> None:
         "0071": ["grad_features"],
         "0073": ["grad_paper_positions"],
         "0088": ["grad_early_opens"],
+        "0108": ["grad_rug_verdicts", "grad_trade_flows"],
     }
     for path, expected in zip(MIGRATIONS, by_migration.values(), strict=True):
         created = re.findall(r'op\.create_table\(\s*"([^"]+)"', path.read_text())

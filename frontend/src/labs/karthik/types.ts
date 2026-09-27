@@ -12,6 +12,10 @@ export interface KarthikTrade {
 export interface KarthikBook {
   /** Every pump.fun graduation seen since the book opened, bought or not. */
   graduations_seen?: number;
+  /** Of those whose first hour is over: how many fell 80%+ within it. */
+  graduations_rugged?: { rugged: number; measured: number; window_minutes: number };
+  /** Who traded the coins the book bought, graduation to its sell (on-chain). */
+  flows?: KarthikFlows;
   book: string;
   rule: string;
   hold_minutes: number;
@@ -91,4 +95,15 @@ export interface KarthikWhatIf {
   /** One row per trade size, on the balance it is paired with; one cell per
    *  floor, each its own one-at-a-time walk from the book's start. */
   sizes: { ticket_usd: number; capital_usd: number; current: boolean; cells: KarthikWhatIfLine[] }[];
+}
+
+export interface KarthikFlows {
+  trades: number;
+  measured: number;
+  insider_buy_usd: string;
+  insider_sell_usd: string;
+  other_buy_usd: string;
+  other_sell_usd: string;
+  insider_sold_trades: number;
+  other_buyers: number;
 }
