@@ -32,14 +32,20 @@ echo "[backup] dumping ${PGDATABASE} -> ${name}"
 # Written to a temporary name and moved into place only on success, so a dump
 # interrupted halfway can never be mistaken for a restorable backup. This is the
 # difference between "we have backups" and "we have backups that restore".
-pg_dump --format=custom --compress=6 --file="$tmp" "$PGDATABASE"
+# The price snapshots' ROWS are left out (the table itself is kept): a
+# one-day rolling window the enrichment workers refill within minutes, and
+# half the dump (2026-09-28, Karthik: keep the disk under 80%).
+pg_dump --format=custom --compress=6 \
+	--exclude-table-data=token_market_snapshots \
+	--file="$tmp" "$PGDATABASE"
 mv "$tmp" "$DAILY/$name"
 
 # Sunday is the weekly anchor; the first of the month the monthly one. Hard
 # links rather than copies: same inode, so the extra tiers cost no disk until
 # the daily copy is pruned.
-[ "$(date -u +%u)" = "7" ] && ln -f "$DAILY/$name" "$WEEKLY/$name"
-[ "$(date -u +%d)" = "01" ] && ln -f "$DAILY/$name" "$MONTHLY/$name"
+# No weekly or monthly tiers since 2026-09-28 (Karthik): one daily backup is
+# the policy, because copies on the same disk die with it and only cost the
+# space a deploy needs. A weekly copy belongs OFF this host.
 
 prune() {
 	dir="$1"
@@ -87,8 +93,11 @@ prune() {
 # across five days, because the weekly and monthly are HARDLINKS to dailies
 # that would otherwise be pruned: the recovery window is wider than the daily
 # count suggests, which is why cutting to two costs less than it reads.
-prune "$DAILY" 2
-prune "$WEEKLY" 1
-prune "$MONTHLY" 1
+# ONE DAILY since 2026-09-28 (Karthik: keep the disk under 80%). The new dump
+# is written and moved into place before this prune, so there is never a
+# moment with no finished backup; the weekly/monthly tiers are emptied.
+prune "$DAILY" 1
+prune "$WEEKLY" 0
+prune "$MONTHLY" 0
 
 echo "[backup] complete: $(ls -1 "$DAILY" | wc -l) daily, $(ls -1 "$WEEKLY" | wc -l) weekly, $(ls -1 "$MONTHLY" | wc -l) monthly"

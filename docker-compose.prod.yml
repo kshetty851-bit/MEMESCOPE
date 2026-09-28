@@ -308,7 +308,14 @@ services:
       # Deliberately two and not more: provider load is 44 req/min against a
       # 300/min allowance, and open-position p95 refresh stayed at 71s. There
       # is headroom, and no reason to spend it.
-      replicas: 2
+      #
+      # BACK TO ONE on 2026-09-28 (Karthik: keep the disk under 80%). The second
+      # replica existed for the Radar's 12-observation floor, and every lab
+      # that traded Radar admissions was deleted on 2026-09-25. The three
+      # writers ran saturated at ~185k snapshot rows an hour (86% for coins
+      # with no pool at all), 8 GB of a one-day table. Held and displayed coins
+      # keep the 15s priority lane on `enrichment-fast`, which is untouched.
+      replicas: 1
 
   frontend:
     build:
