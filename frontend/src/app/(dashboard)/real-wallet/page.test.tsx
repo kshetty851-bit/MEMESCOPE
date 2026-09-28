@@ -175,7 +175,10 @@ function serve(
       return {
         members: Array.from({ length: unlocked ? 10 : 1 }, (_, i) => ({
           member: `USER${i + 1}`, label: `USER ${i + 1}`, fee_rate: i === 0 ? "0" : "0.20",
+          enabled: false, ticket_usd: i < 4 ? "50.00" : "100.00", band: i < 4 ? "1m-20m" : "5m-100m",
         })),
+        band_choices: [{ key: "any", label: "Any size" }, { key: "1m-20m", label: "$1M – $20M" },
+          { key: "5m-100m", label: "$5M – $100M" }],
         unlocked,
         ...(unlocked
           ? { fees: { collected_usd: "12.50", waiting_usd: "3.00", to_check: 0, fee_address: "x" } }
@@ -297,7 +300,7 @@ describe("RealWalletPage user wallets", () => {
     signInAsAdmin();
     serve();
     await renderLoaded();
-    const users = screen.getByText("User wallets").closest("section") as HTMLElement;
+    const users = screen.getByText("Family investment").closest("section") as HTMLElement;
     expect(await within(users).findByRole("link", { name: /USER 1/ })).toHaveAttribute(
       "href", "/real-wallet/family/user1");
     const locked = within(users).getByTestId("users-locked-area");
@@ -311,7 +314,7 @@ describe("RealWalletPage user wallets", () => {
     serve();
     vi.mocked(api.post).mockResolvedValueOnce({ token: "t" });
     await renderLoaded();
-    const users = screen.getByText("User wallets").closest("section") as HTMLElement;
+    const users = screen.getByText("Family investment").closest("section") as HTMLElement;
     fireEvent.change(await within(users).findByLabelText("Users password"), { target: { value: "pw" } });
     fireEvent.click(within(users).getByRole("button", { name: "Open" }));
     expect(await within(users).findByText("Profit fees collected")).toBeInTheDocument();
@@ -322,10 +325,21 @@ describe("RealWalletPage user wallets", () => {
       "/real-wallet/family/unlock", { password: "pw" }, { skipAuthRetry: true });
   });
 
+  it("shows the $500 plan and each wallet's size, coins and switch", async () => {
+    signInAsAdmin();
+    serve();
+    await renderLoaded();
+    const users = screen.getByText("Family investment").closest("section") as HTMLElement;
+    expect(within(users).getByTestId("family-plan")).toHaveTextContent("USER 5 – USER 7: $100 trades");
+    const one = await within(users).findByTestId("wallet-USER1");
+    expect(one).toHaveTextContent("$50 trades · $1M – $20M coins");
+    expect(one).toHaveTextContent("off");
+  });
+
   it("shows nothing about them to anyone else", async () => {
     serve();
     await renderLoaded();
-    expect(screen.queryByText("User wallets")).not.toBeInTheDocument();
+    expect(screen.queryByText("Family investment")).not.toBeInTheDocument();
   });
 });
 

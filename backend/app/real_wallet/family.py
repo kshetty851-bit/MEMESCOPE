@@ -33,6 +33,35 @@ MEMBERS: tuple[str, ...] = tuple(f"USER{i}" for i in range(1, 11))
 TICKETS_USD: tuple[Decimal, ...] = tuple(
     Decimal(t) for t in ("10", "20", "25", "50", "100", "200"))
 
+#: Coin-size bands a user wallet may be set to, by market cap (FDV) at the
+#: moment it would buy: key -> (at least, under), None = no bound. From the
+#: Karthik's Lab trades by size (2026-09-28): $1-5M coins returned most and
+#: $100M+ were the only ones that lost, and a $100 buy moves a small coin's
+#: price twice as far as a $50 one — so the $100 wallets start at $5M.
+BANDS: dict[str, tuple[Decimal | None, Decimal | None]] = {
+    "any": (None, None),
+    "1m-20m": (Decimal(1_000_000), Decimal(20_000_000)),
+    "5m-100m": (Decimal(5_000_000), Decimal(100_000_000)),
+}
+BAND_LABELS: dict[str, str] = {"any": "Any size", "1m-20m": "$1M – $20M",
+                               "5m-100m": "$5M – $100M"}
+#: At most this many wallets on the same band may buy one coin (in an hour),
+#: so one bad coin cannot catch a whole group.
+MAX_SAME_BAND_PER_COIN = 2
+
+
+def in_band(band: str, fdv: Decimal | None) -> bool:
+    """Whether a coin of market cap `fdv` may be bought on `band`. An unknown
+    band, or an unknown market cap on a bounded band, is a no."""
+    if band not in BANDS:
+        return False
+    lo, hi = BANDS[band]
+    if lo is None and hi is None:
+        return True
+    if fdv is None:
+        return False
+    return (lo is None or fdv >= lo) and (hi is None or fdv < hi)
+
 
 #: The one user wallet the second lock leaves open.
 OPEN_MEMBERS: frozenset[str] = frozenset({"USER1"})

@@ -32,7 +32,7 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.lab import LabDecision
 from app.models.real_wallet_execution import RealWalletLiveIntent
-from app.real_wallet import family_wallets, sol_price
+from app.real_wallet import family, family_wallets, sol_price
 from app.real_wallet.autotrade import AutotradeSwitchService, ticket_for
 from app.real_wallet.live_repository import LiveIntentRepository
 from app.real_wallet.policy import (
@@ -123,17 +123,27 @@ class RealWalletDriver:
                 out[account.member] = "kill_switch_active"
             else:
                 out[account.member] = await self._family_tick(
-                    account, strategy_id=switch.nominated_strategy, now=now)
+                    account, strategy_id=switch.nominated_strategy, now=now,
+                    peers=[a.wallet for a in accounts if a.band == account.band])
         return out
 
     async def _family_tick(self, account: family_wallets.Account, *,
-                           strategy_id: str, now: datetime) -> str:
+                           strategy_id: str, now: datetime,
+                           peers: list[str] | None = None) -> str:
         """At most one BUY for one family wallet. Every refusal is a string."""
         wallet = account.wallet
         repo = LiveIntentRepository(self._session)
         candidate = await self._next_candidate(strategy_id=strategy_id, now=now, wallet=wallet)
         if candidate is None:
             return "no_fresh_candidate"
+        # Family investment (Karthik, 2026-09-28): a wallet with a coin-size
+        # band buys only coins whose market cap is inside it, and at most
+        # `MAX_SAME_BAND_PER_COIN` wallets of one band share a coin.
+        if account.band != "any":
+            if not family.in_band(account.band, await self._fdv(candidate, now)):
+                return "market_cap_outside_band"
+            if await self._buys_by(candidate, peers or [wallet], now) >= family.MAX_SAME_BAND_PER_COIN:
+                return "band_coin_limit"
         balance_lamports = await self._wallet_lamports(wallet)
         if balance_lamports is None:
             return "wallet_balance_unreadable"
@@ -479,6 +489,31 @@ class RealWalletDriver:
                 RealWalletLiveIntent.created_at >= now - timedelta(hours=1),
             ))
         return Decimal(total or 0)
+
+    async def _fdv(self, mint: str, now: datetime) -> Decimal | None:
+        """The coin's market cap (FDV) as last read in the three minutes before
+        `now`, or None. Graduation coins are polled every few seconds after
+        they graduate; every Karthik's Lab entry in the last three days had a
+        reading before its buy."""
+        from app.labs.graduation.models import GradPostgradSample
+
+        return await self._session.scalar(
+            select(GradPostgradSample.fdv).where(
+                GradPostgradSample.mint == mint,
+                GradPostgradSample.fdv.is_not(None),
+                GradPostgradSample.ts <= now,
+                GradPostgradSample.ts >= now - timedelta(minutes=3),
+            ).order_by(GradPostgradSample.ts.desc()).limit(1))
+
+    async def _buys_by(self, mint: str, wallets: list[str], now: datetime) -> int:
+        """How many of `wallets` asked to buy this coin in the last hour."""
+        return int(await self._session.scalar(
+            select(func.count(func.distinct(RealWalletLiveIntent.wallet_public_key))).where(
+                RealWalletLiveIntent.mint_address == mint,
+                RealWalletLiveIntent.side == "BUY",
+                RealWalletLiveIntent.wallet_public_key.in_(wallets),
+                RealWalletLiveIntent.created_at >= now - timedelta(hours=1),
+            )) or 0)
 
     async def _notional_today(self, now: datetime, wallet: str) -> Decimal:
         start = now.replace(hour=0, minute=0, second=0, microsecond=0)
