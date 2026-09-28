@@ -28,13 +28,26 @@
 #     so and leaves it to a human.
 set -euo pipefail
 
-THRESHOLD="${DISK_GUARD_THRESHOLD:-85}"
+# 85 -> 78 on 2026-09-28 (Karthik: never above 80%).
+THRESHOLD="${DISK_GUARD_THRESHOLD:-78}"
 LOG="${DISK_GUARD_LOG:-/var/log/memescope-disk-guard.log}"
 
 used() { df --output=pcent / | tail -1 | tr -dc '0-9'; }
 say() { echo "[disk-guard] $(date -u +%Y-%m-%dT%H:%M:%SZ) $*" >>"$LOG"; }
 
 before="$(used)"
+
+# WEEKLY, whatever the disk says: Sunday's first run after 04:00 UTC drops
+# build cache and images older than a week. Recent cache stays, so the next
+# deploy is still quick; a week-old layer is one no deploy will reuse.
+if [ "$(date -u +%u)" = "7" ] && [ "$(date -u +%H)" = "04" ] && [ "$(date -u +%M)" -lt 15 ]; then
+	say "weekly clean at ${before}%"
+	docker builder prune -f --filter until=168h >>"$LOG" 2>&1 || say "weekly builder prune failed"
+	docker image prune -af --filter until=168h >>"$LOG" 2>&1 || say "weekly image prune failed"
+	before="$(used)"
+	say "weekly clean done: ${before}%"
+fi
+
 if [ "$before" -lt "$THRESHOLD" ]; then
 	exit 0
 fi
