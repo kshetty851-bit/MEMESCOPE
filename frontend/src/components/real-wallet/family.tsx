@@ -39,10 +39,11 @@ function tone(value: string | number | null | undefined): string {
 }
 
 /*
- * THE SECOND LOCK (Karthik, 2026-09-27): USER 2-10 and the fees also need the
- * users password. The server keeps only its hash and answers the right one
- * with a 12-hour token, kept in this tab's sessionStorage, so closing the tab
- * locks them again. USER 1 stays open to the admin sign-in.
+ * THE LOCKS: USER 1-7 (the family investment, 2026-09-28) need the family
+ * investment password; USER 8-10 and the fees need the users password. The
+ * server keeps only the hashes and answers a right one with a 12-hour token
+ * covering every lock this tab has opened, kept in sessionStorage, so closing
+ * the tab locks them again.
  */
 const TOKEN_KEY = "users-token";
 
@@ -69,13 +70,24 @@ function usersHeaders(): Record<string, string> | undefined {
   return token ? { "X-Users-Token": token } : undefined;
 }
 
-const isLocked = (member: string) => member !== "USER1";
+/** USER 1-7: the family investment, behind its own password (2026-09-28). */
+const INVESTMENT = FAMILY.slice(0, 7);
+const OTHERS = FAMILY.slice(7);
 
-export function UsersUnlock({ onOpen }: { onOpen: () => void }) {
+/**
+ * Either password. The tab's token goes along, so the answer keeps every lock
+ * this tab has already opened.
+ */
+export function UsersUnlock({ onOpen, label = "Users password", id = "users-password" }: {
+  onOpen: () => void;
+  label?: string;
+  id?: string;
+}) {
   const [password, setPassword] = useState("");
   const unlock = useMutation({
     mutationFn: () =>
-      api.post<{ token: string }>("/real-wallet/family/unlock", { password }, { skipAuthRetry: true }),
+      api.post<{ token: string }>("/real-wallet/family/unlock", { password },
+        { skipAuthRetry: true, headers: usersHeaders() }),
     onSuccess: (out) => {
       writeUsersToken(out.token);
       setPassword("");
@@ -91,11 +103,11 @@ export function UsersUnlock({ onOpen }: { onOpen: () => void }) {
         if (password) unlock.mutate();
       }}
     >
-      <label className="sr-only" htmlFor="users-password">
-        Users password
+      <label className="sr-only" htmlFor={id}>
+        {label}
       </label>
       <input
-        id="users-password"
+        id={id}
         type="password"
         autoComplete="current-password"
         value={password}
@@ -140,6 +152,19 @@ export function FamilySection() {
   const bands = new Map((list.data?.band_choices ?? []).map((b) => [b.key, b.label]));
   const fees = list.data?.fees;
   const unlocked = Boolean(list.data?.unlocked);
+  const investmentOpen = Boolean(list.data?.investment_unlocked);
+  const lock = (
+    <button
+      type="button"
+      onClick={() => {
+        writeUsersToken(null);
+        refresh();
+      }}
+      className="text-xs text-ink-3 hover:text-ink"
+    >
+      Lock
+    </button>
+  );
   const link = (m: string) => {
     const row = rows.get(m);
     return (
@@ -191,23 +216,25 @@ export function FamilySection() {
           trade size. Every wallet stays off until you press Start on its page.
         </p>
       </div>
-      <div className="mt-4 flex flex-wrap gap-2">{link("USER1")}</div>
+      <div className="mt-4 rounded-md border border-accent/40 p-4" data-testid="investment-area">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <p className="text-sm font-medium text-ink">USER 1 – USER 7</p>
+          {investmentOpen ? lock : null}
+        </div>
+        {investmentOpen ? (
+          <div className="mt-3 flex flex-wrap gap-2">{INVESTMENT.map(link)}</div>
+        ) : (
+          <>
+            <p className="mt-1 text-xs text-ink-3">Locked. Enter the family investment password to open.</p>
+            <UsersUnlock onOpen={refresh} label="Family investment password" id="investment-password" />
+          </>
+        )}
+      </div>
 
       <div className="mt-5 rounded-md border border-line p-4" data-testid="users-locked-area">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <p className="text-sm font-medium text-ink">USER 2 – USER 10 and fees</p>
-          {unlocked ? (
-            <button
-              type="button"
-              onClick={() => {
-                writeUsersToken(null);
-                refresh();
-              }}
-              className="text-xs text-ink-3 hover:text-ink"
-            >
-              Lock
-            </button>
-          ) : null}
+          <p className="text-sm font-medium text-ink">USER 8 – USER 10 and fees</p>
+          {unlocked ? lock : null}
         </div>
         {!unlocked ? (
           <>
@@ -233,7 +260,7 @@ export function FamilySection() {
                 ) : null}
               </div>
             ) : null}
-            <div className="mt-4 flex flex-wrap gap-2">{FAMILY.filter(isLocked).map(link)}</div>
+            <div className="mt-4 flex flex-wrap gap-2">{OTHERS.map(link)}</div>
           </>
         )}
       </div>
@@ -315,6 +342,7 @@ interface MembersView {
   members: MemberRow[];
   band_choices?: BandChoice[];
   unlocked?: boolean;
+  investment_unlocked?: boolean;
   fees?: FeeTotals;
 }
 
@@ -719,7 +747,7 @@ export function FamilyMemberPage({ member }: { member: string }) {
     queryFn: () =>
       api.get<FamilyView>(`/real-wallet/family/${key.toLowerCase()}`, {
         headers: usersHeaders(),
-        skipAuthRetry: isLocked(key),
+        skipAuthRetry: true,
       }),
     enabled: known,
     refetchInterval: 30_000,
@@ -740,7 +768,7 @@ export function FamilyMemberPage({ member }: { member: string }) {
 
   const refused = view.error instanceof ApiError && view.error.status === 403;
   const needsPassword =
-    isLocked(key) && view.error instanceof ApiError && view.error.status === 401;
+    view.error instanceof ApiError && view.error.status === 401;
   const d = view.data;
   const isOwner = user?.role === "admin";
 
@@ -757,8 +785,13 @@ export function FamilyMemberPage({ member }: { member: string }) {
       {view.isPending ? <p className="mt-4 text-sm text-ink-3">Reading…</p> : null}
       {needsPassword ? (
         <div className="mt-4">
-          <p className="text-sm text-ink-3">Enter the users password to open {title(key)}.</p>
-          <UsersUnlock onOpen={() => void view.refetch()} />
+          <p className="text-sm text-ink-3">
+            Enter the {INVESTMENT.includes(key) ? "family investment" : "users"} password to open {title(key)}.
+          </p>
+          <UsersUnlock
+            onOpen={() => void view.refetch()}
+            label={INVESTMENT.includes(key) ? "Family investment password" : "Users password"}
+          />
         </div>
       ) : refused ? (
         <p className="mt-4 text-sm text-ink-3">Only Karthik, signed in, can open this page.</p>

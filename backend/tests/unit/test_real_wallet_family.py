@@ -31,16 +31,34 @@ def test_the_users_password_checks_against_a_hash_and_nothing_else():
     assert not family.password_ok("anything", "zz:zz")
 
 
-def test_only_user1_is_open_and_a_token_opens_the_rest():
-    assert not family.locked("USER1")
-    assert all(family.locked(f"USER{i}") for i in range(2, 11))
-    token, _ = family.issue_token()
-    assert family.token_ok(token)
-    assert not family.token_ok(token + "x")
-    assert not family.token_ok(None)
+def test_user1_to_7_need_the_investment_password_and_8_to_10_the_users(monkeypatch):
+    from app.core.config import settings
+
+    assert [family.scope(f"USER{i}") for i in range(1, 11)] == \
+        ["investment"] * 7 + ["users"] * 3
+    monkeypatch.setattr(settings, "REAL_WALLET_INVESTMENT_PASSWORD_HASH",
+                        family.hash_password("seven", salt=b"a" * 16))
+    monkeypatch.setattr(settings, "REAL_WALLET_USERS_PASSWORD_HASH",
+                        family.hash_password("ten", salt=b"b" * 16))
+    assert family.password_scope("seven") == "investment"
+    assert family.password_scope("ten") == "users"
+    assert family.password_scope("other") is None
+    investment, _ = family.issue_token({"investment"})
+    assert family.opens("USER1", investment) and family.opens("USER7", investment)
+    assert not family.opens("USER8", investment)
+    both, _ = family.issue_token({"investment", "users"})
+    assert all(family.opens(f"USER{i}", both) for i in range(1, 11))
+    assert family.token_scopes(both + "x") == frozenset()
+    assert family.token_scopes(None) == frozenset()
 
 
-# --- what the wallet offers -------------------------------------------------
+def test_an_unset_investment_password_opens_nothing(monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "REAL_WALLET_INVESTMENT_PASSWORD_HASH", "")
+    monkeypatch.setattr(settings, "REAL_WALLET_USERS_PASSWORD_HASH", "")
+    assert family.password_scope("") is None and family.password_scope("x") is None
+
 
 def test_only_the_two_quiet_arms_are_offered_and_both_still_exist():
     assert live_spec.OFFERED == ("G-QUIET", "G-QUIET4", "G-Q150")

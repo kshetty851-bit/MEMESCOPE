@@ -171,12 +171,16 @@ function serve(
     if (path === "/real-wallet/autotrade") return data.autotrade ?? autotrade();
     if (path === "/real-wallet/funding-readiness") return data.readiness ?? readiness();
     if (path === "/real-wallet/family") {
-      const unlocked = Boolean(window.sessionStorage.getItem("users-token"));
+      // The fake token names the locks it opens: "users", "investment" or both.
+      const token = window.sessionStorage.getItem("users-token") ?? "";
+      const unlocked = token.includes("users");
+      const investment = token.includes("investment");
       return {
-        members: Array.from({ length: unlocked ? 10 : 1 }, (_, i) => ({
-          member: `USER${i + 1}`, label: `USER ${i + 1}`, fee_rate: i === 0 ? "0" : "0.20",
+        members: Array.from({ length: 10 }, (_, i) => ({
+          member: `USER${i + 1}`, label: `USER ${i + 1}`, fee_rate: i < 7 ? "0" : "0.20",
           enabled: false, ticket_usd: i < 4 ? "50.00" : "100.00", band: i < 4 ? "1m-20m" : "5m-100m",
-        })),
+        })).filter((_, i) => (i < 7 ? investment : unlocked)),
+        investment_unlocked: investment,
         band_choices: [{ key: "any", label: "Any size" }, { key: "1m-20m", label: "$1M – $20M" },
           { key: "5m-100m", label: "$5M – $100M" }],
         unlocked,
@@ -293,47 +297,76 @@ describe("RealWalletPage without signing in", () => {
   });
 });
 
-describe("RealWalletPage user wallets", () => {
+describe("RealWalletPage family investment", () => {
   afterEach(() => window.sessionStorage.clear());
 
-  it("shows USER 1, and keeps USER 2-10 and the fees behind the users password", async () => {
+  it("keeps every user wallet and the fees behind a password", async () => {
     signInAsAdmin();
     serve();
     await renderLoaded();
     const users = screen.getByText("Family investment").closest("section") as HTMLElement;
-    expect(await within(users).findByRole("link", { name: /USER 1/ })).toHaveAttribute(
-      "href", "/real-wallet/family/user1");
+    const investment = within(users).getByTestId("investment-area");
+    expect(within(investment).getByLabelText("Family investment password")).toHaveAttribute(
+      "type", "password");
     const locked = within(users).getByTestId("users-locked-area");
     expect(within(locked).getByLabelText("Users password")).toHaveAttribute("type", "password");
+    expect(within(users).queryByRole("link", { name: /USER 1/ })).not.toBeInTheDocument();
     expect(within(users).queryByText("Profit fees collected")).not.toBeInTheDocument();
-    expect(within(users).queryByRole("link", { name: /USER 7/ })).not.toBeInTheDocument();
   });
 
-  it("opens USER 2-10 and the fees once the password is accepted", async () => {
+  it("opens USER 1-7 with the family investment password", async () => {
     signInAsAdmin();
     serve();
-    vi.mocked(api.post).mockResolvedValueOnce({ token: "t" });
+    vi.mocked(api.post).mockResolvedValueOnce({ token: "investment" });
     await renderLoaded();
     const users = screen.getByText("Family investment").closest("section") as HTMLElement;
-    fireEvent.change(await within(users).findByLabelText("Users password"), { target: { value: "pw" } });
-    fireEvent.click(within(users).getByRole("button", { name: "Open" }));
+    const investment = within(users).getByTestId("investment-area");
+    fireEvent.change(within(investment).getByLabelText("Family investment password"),
+      { target: { value: "pw" } });
+    fireEvent.click(within(investment).getByRole("button", { name: "Open" }));
+    const one = await within(users).findByTestId("wallet-USER1");
+    expect(one).toHaveAttribute("href", "/real-wallet/family/user1");
+    expect(one).toHaveTextContent("$50 trades · $1M – $20M coins");
+    expect(one).toHaveTextContent("no fee");
+    expect(within(users).getByTestId("wallet-USER7")).toBeInTheDocument();
+    expect(within(users).queryByTestId("wallet-USER8")).not.toBeInTheDocument();
+    expect(within(users).queryByText("Profit fees collected")).not.toBeInTheDocument();
+    expect(within(users).getByTestId("family-plan")).toHaveTextContent("USER 5 – USER 7: $100 trades");
+  });
+
+  it("opens USER 8-10 and the fees with the users password", async () => {
+    signInAsAdmin();
+    serve();
+    vi.mocked(api.post).mockResolvedValueOnce({ token: "users" });
+    await renderLoaded();
+    const users = screen.getByText("Family investment").closest("section") as HTMLElement;
+    const locked = within(users).getByTestId("users-locked-area");
+    fireEvent.change(within(locked).getByLabelText("Users password"), { target: { value: "pw" } });
+    fireEvent.click(within(locked).getByRole("button", { name: "Open" }));
     expect(await within(users).findByText("Profit fees collected")).toBeInTheDocument();
     expect(within(users).getByText("$12.50")).toBeInTheDocument();
-    expect(within(users).getByRole("link", { name: /USER 7/ })).toHaveAttribute(
-      "href", "/real-wallet/family/user7");
+    expect(within(users).getByRole("link", { name: /USER 8/ })).toHaveAttribute(
+      "href", "/real-wallet/family/user8");
+    expect(within(users).queryByTestId("wallet-USER1")).not.toBeInTheDocument();
     expect(vi.mocked(api.post)).toHaveBeenCalledWith(
-      "/real-wallet/family/unlock", { password: "pw" }, { skipAuthRetry: true });
+      "/real-wallet/family/unlock", { password: "pw" }, { skipAuthRetry: true, headers: undefined });
   });
 
-  it("shows the $500 plan and each wallet's size, coins and switch", async () => {
+  it("sends the tab's token along, so a second password keeps the first lock open", async () => {
     signInAsAdmin();
+    window.sessionStorage.setItem("users-token", "users");
     serve();
+    vi.mocked(api.post).mockResolvedValueOnce({ token: "investment+users" });
     await renderLoaded();
     const users = screen.getByText("Family investment").closest("section") as HTMLElement;
-    expect(within(users).getByTestId("family-plan")).toHaveTextContent("USER 5 – USER 7: $100 trades");
-    const one = await within(users).findByTestId("wallet-USER1");
-    expect(one).toHaveTextContent("$50 trades · $1M – $20M coins");
-    expect(one).toHaveTextContent("off");
+    const investment = within(users).getByTestId("investment-area");
+    fireEvent.change(within(investment).getByLabelText("Family investment password"),
+      { target: { value: "pw" } });
+    fireEvent.click(within(investment).getByRole("button", { name: "Open" }));
+    expect(await within(users).findByTestId("wallet-USER1")).toBeInTheDocument();
+    expect(within(users).getByText("Profit fees collected")).toBeInTheDocument();
+    expect(vi.mocked(api.post)).toHaveBeenCalledWith("/real-wallet/family/unlock",
+      { password: "pw" }, { skipAuthRetry: true, headers: { "X-Users-Token": "users" } });
   });
 
   it("shows nothing about them to anyone else", async () => {

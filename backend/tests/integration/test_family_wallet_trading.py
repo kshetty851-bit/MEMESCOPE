@@ -39,6 +39,12 @@ MINT = "FamilyWalletTestMint111111111111111111pump"
 SOL = "So11111111111111111111111111111111111111112"
 
 
+def _open_token() -> str:
+    from app.real_wallet import family
+
+    return family.issue_token({"investment"})[0]
+
+
 @pytest.fixture(autouse=True)
 def _configured(monkeypatch):
     async def _price(self, now):
@@ -326,11 +332,11 @@ async def test_karthik_starts_stops_and_sizes_a_user_wallet(db_session):
     karthik = SimpleNamespace(role=UserRole.ADMIN, email="karthik@example.com")
     on = await family_api.member_own_settings(
         "user1", family_api.OwnSettingsIn(enabled=True, ticket_usd=Decimal("50")),
-        db_session, viewer=karthik)
+        db_session, viewer=karthik, x_users_token=_open_token())
     assert (on["enabled"], on["ticket_usd"]) == (True, "50")
     off = await family_api.member_own_settings(
         "user1", family_api.OwnSettingsIn(enabled=False, ticket_usd=Decimal("50")),
-        db_session, viewer=karthik)
+        db_session, viewer=karthik, x_users_token=_open_token())
     assert off["enabled"] is False
 
 
@@ -345,7 +351,7 @@ async def test_a_member_without_a_wallet_has_no_switch(db_session):
     with pytest.raises(HTTPException) as missing:
         await family_api.member_own_settings(
             "user2", family_api.OwnSettingsIn(enabled=False, ticket_usd=Decimal("20")),
-            db_session, viewer=karthik, x_users_token=family.issue_token()[0])
+            db_session, viewer=karthik, x_users_token=family.issue_token({"investment"})[0])
     assert missing.value.status_code == 404
 
 
@@ -444,15 +450,17 @@ async def test_karthik_sets_a_wallets_band_and_a_bad_band_is_refused(db_session)
     karthik = SimpleNamespace(role=UserRole.ADMIN, email="karthik@example.com")
     out = await family_api.member_own_settings(
         "user1", family_api.OwnSettingsIn(enabled=False, ticket_usd=Decimal("50"),
-                                          band="1m-20m"), db_session, viewer=karthik)
+                                          band="1m-20m"), db_session, viewer=karthik,
+        x_users_token=_open_token())
     assert out["band"] == "1m-20m"
     # Leaving the band out keeps it.
     out = await family_api.member_own_settings(
         "user1", family_api.OwnSettingsIn(enabled=True, ticket_usd=Decimal("50")),
-        db_session, viewer=karthik)
+        db_session, viewer=karthik, x_users_token=_open_token())
     assert (out["enabled"], out["band"]) == (True, "1m-20m")
     with pytest.raises(HTTPException) as bad:
         await family_api.member_own_settings(
             "user1", family_api.OwnSettingsIn(enabled=True, ticket_usd=Decimal("50"),
-                                              band="0-1b"), db_session, viewer=karthik)
+                                              band="0-1b"), db_session, viewer=karthik,
+            x_users_token=_open_token())
     assert bad.value.status_code == 422

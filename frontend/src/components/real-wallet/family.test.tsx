@@ -184,7 +184,7 @@ describe("a locked user's page", () => {
     window.sessionStorage.clear();
   });
 
-  it("asks for the users password, then opens", async () => {
+  it("asks USER 7 for the family investment password, then opens", async () => {
     auth.user = { role: "admin" };
     get.mockRejectedValueOnce(new ApiError(401, "http_error", "enter the users password first"));
     get.mockResolvedValue({ member: "USER7", own_wallet: { address: ADDRESS, balance_sol: "1" } });
@@ -195,7 +195,7 @@ describe("a locked user's page", () => {
         <FamilyMemberPage member="user7" />
       </QueryClientProvider>,
     );
-    fireEvent.change(await screen.findByLabelText("Users password"), { target: { value: "pw" } });
+    fireEvent.change(await screen.findByLabelText("Family investment password"), { target: { value: "pw" } });
     fireEvent.click(screen.getByRole("button", { name: "Open" }));
     expect(await screen.findByText(ADDRESS)).toBeInTheDocument();
     expect(window.sessionStorage.getItem("users-token")).toBe("t");

@@ -50,9 +50,11 @@ def _caller(request: Request) -> str:
 
 
 def _unlocked(member: str, token: str | None) -> None:
-    """USER 2-10 need the users' password as well as the admin sign-in."""
-    if family.locked(member) and not family.token_ok(token):
-        raise HTTPException(status_code=401, detail="enter the users password first")
+    """Every user wallet needs its password as well as the admin sign-in."""
+    if not family.opens(member, token):
+        which = ("family investment" if family.scope(member) == "investment"
+                 else "users")
+        raise HTTPException(status_code=401, detail=f"enter the {which} password first")
 
 
 class UnlockIn(BaseModel):
@@ -175,27 +177,33 @@ async def _charged(session: DbSession) -> None:
 
 
 @router.post("/unlock", summary="Trade the users password for a 12-hour token")
-async def unlock(payload: UnlockIn, request: Request, _: AdminUser) -> dict[str, object]:
+async def unlock(payload: UnlockIn, request: Request, _: AdminUser,
+                 x_users_token: str | None = Header(default=None)) -> dict[str, object]:
+    """Either password. The new token keeps every lock the tab already opened."""
     who = _caller(request)
     if family.THROTTLE.blocked(who):
         raise HTTPException(status_code=429,
                             detail="too many wrong passwords; wait ten minutes")
-    if not family.password_ok(payload.password):
+    scope = family.password_scope(payload.password)
+    if scope is None:
         family.THROTTLE.failed(who)
         logger.warning("real_wallet_users_unlock_refused")
         raise HTTPException(status_code=401, detail="wrong password")
-    token, expires = family.issue_token()
-    return {"token": token, "expires_at": expires.isoformat()}
+    scopes = family.token_scopes(x_users_token) | {scope}
+    token, expires = family.issue_token(scopes)
+    return {"token": token, "expires_at": expires.isoformat(), "scopes": sorted(scopes)}
 
 
 @router.get("", summary="The user wallets, their fee rates, and the fees")
 async def members(session: DbSession, _: AdminUser,
                   x_users_token: str | None = Header(default=None)) -> dict[str, object]:
-    """USER 1 always; USER 2-10 and the fees only with the users password."""
-    unlocked = family.token_ok(x_users_token)
+    """USER 1-7 with the family investment password; USER 8-10 and the fees
+    with the users password."""
+    scopes = family.token_scopes(x_users_token)
+    unlocked = "users" in scopes
     rows = {r.name: r for r in
             (await session.execute(select(RealWalletFamilyMember))).scalars()}
-    shown = [m for m in family.MEMBERS if unlocked or not family.locked(m)]
+    shown = [m for m in family.MEMBERS if family.scope(m) in scopes]
     out: dict[str, object] = {
         "members": [{"member": m, "label": family.label(m),
                      "fee_rate": str(rows[m].fee_rate) if m in rows else None,
@@ -206,6 +214,7 @@ async def members(session: DbSession, _: AdminUser,
                     for m in shown],
         "band_choices": _BAND_CHOICES,
         "unlocked": unlocked,
+        "investment_unlocked": "investment" in scopes,
         "locked_count": len(family.MEMBERS) - len(shown),
         "ticket_choices": [str(t) for t in family.TICKETS_USD]}
     if unlocked:
