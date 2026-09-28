@@ -479,14 +479,17 @@ class RealWalletDriver:
         return len(rows.scalars().all())
 
     async def _coin_usd(self, mint: str, now: datetime) -> Decimal:
-        """What every wallet together has asked to buy of this coin in the
-        last hour: the owner's and each user wallet's, which all copy one
-        strategy and so all want the same coins at the same moment."""
+        """What the USER wallets together have asked to buy of this coin in
+        the last hour. Karthik's own wallet is not counted (Karthik,
+        2026-09-28: "dont include my main wallet here, thats different"):
+        the cap is the family investment's, and his wallet never checks it.
+        A NULL wallet is the owner's, and `!=` leaves it out too."""
         total = await self._session.scalar(
             select(func.coalesce(func.sum(RealWalletLiveIntent.requested_usd), 0)).where(
                 RealWalletLiveIntent.mint_address == mint,
                 RealWalletLiveIntent.side == "BUY",
                 RealWalletLiveIntent.created_at >= now - timedelta(hours=1),
+                RealWalletLiveIntent.wallet_public_key != settings.REAL_WALLET_PUBLIC_KEY.strip(),
             ))
         return Decimal(total or 0)
 

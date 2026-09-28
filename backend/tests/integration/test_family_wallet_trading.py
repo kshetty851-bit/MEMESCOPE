@@ -138,16 +138,34 @@ async def test_a_wallet_that_is_on_buys_the_same_coin_on_its_own_money(
     assert again.family == {"USER1": "no_fresh_candidate"}
 
 
-async def test_every_wallet_together_stops_at_the_coin_cap(db_session, monkeypatch):
+async def test_the_coin_cap_counts_the_user_wallets_not_the_owners(db_session, monkeypatch):
+    """Karthik, 2026-09-28: "dont include my main wallet here"."""
     _funded(monkeypatch)
-    monkeypatch.setattr(settings, "REAL_WALLET_MAX_COIN_USD", Decimal("110"))
+    monkeypatch.setattr(settings, "REAL_WALLET_MAX_COIN_USD", Decimal("20"))
     await _user1(db_session, own=True, ticket="20")
     now = datetime.now(UTC)
     await _signal(db_session, now)
     out = await RealWalletDriver(db_session).tick(now=now)
-    # The owner's $100 is in; USER 1's $20 would take the coin to $120.
-    assert out.created == 1 and out.family == {"USER1": "coin_cap_reached"}
-    assert set(await _intents(db_session)) == {OWNER}
+    # The owner's $100 is in and does not count: USER 1's $20 fits the $20 cap.
+    assert out.created == 1 and out.family == {"USER1": f"created:{MINT}"}
+    assert set(await _intents(db_session)) == {OWNER, USER1}
+
+
+async def test_the_user_wallets_together_stop_at_the_coin_cap(db_session, monkeypatch):
+    _funded(monkeypatch)
+    monkeypatch.setattr(settings, "REAL_WALLET_MAX_COIN_USD", Decimal("30"))
+    await _user1(db_session, own=True, ticket="20")
+    now = datetime.now(UTC)
+    # Another user wallet already put $20 into this coin.
+    db_session.add(RealWalletLiveIntent(
+        idempotency_key="other-user", mint_address=MINT, side="BUY",
+        strategy_id="G-QUIET", strategy_version="v", wallet_public_key=str(Keypair().pubkey()),
+        requested_usd=Decimal("20"), input_mint=SOL, output_mint=MINT,
+        actual_input_amount_raw=1, state="closed", created_at=now - timedelta(minutes=1)))
+    await db_session.flush()
+    await _signal(db_session, now)
+    out = await RealWalletDriver(db_session).tick(now=now)
+    assert out.family == {"USER1": "coin_cap_reached"}
 
 
 async def test_stopping_the_owner_stops_the_member_wallet_too(db_session, monkeypatch):
@@ -358,12 +376,12 @@ async def test_a_member_without_a_wallet_has_no_switch(db_session):
 # --- ten users take turns --------------------------------------------------------
 
 async def test_users_take_turns_longest_waiting_first(db_session, monkeypatch):
-    """Five users at $50, Karthik at $100, a $300 coin cap: the coin fills
-    with the four users who have waited longest, never "USER1 first"."""
+    """Five users at $50 and a $200 coin cap: the coin fills with the four
+    users who have waited longest, never "USER1 first"."""
     users = {f"USER{i}": str(Keypair().pubkey()) for i in range(1, 6)}
     monkeypatch.setattr(settings, "REAL_WALLET_FAMILY_WALLETS",
                         ",".join(f"{m.lower()}={k}" for m, k in users.items()))
-    monkeypatch.setattr(settings, "REAL_WALLET_MAX_COIN_USD", Decimal("300"))
+    monkeypatch.setattr(settings, "REAL_WALLET_MAX_COIN_USD", Decimal("200"))
 
     async def _lamports(self, wallet):
         return 3_000_000_000
@@ -385,8 +403,8 @@ async def test_users_take_turns_longest_waiting_first(db_session, monkeypatch):
     await _signal(db_session, now)
 
     out = await RealWalletDriver(db_session).tick(now=now)
-    # $100 owner + four users at $50 = $300: USER5 (never), then 4, 3, 2 — and
-    # USER1, who bought last, is the one left out of this coin.
+    # Four users at $50 = $200 (the owner's $100 is not counted): USER5
+    # (never), then 4, 3, 2 — and USER1, who bought last, is left out.
     assert out.family["USER1"] == "coin_cap_reached"
     for member in ("USER2", "USER3", "USER4", "USER5"):
         assert out.family[member] == f"created:{MINT}"
