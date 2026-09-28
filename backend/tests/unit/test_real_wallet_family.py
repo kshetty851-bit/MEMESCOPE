@@ -61,3 +61,15 @@ def test_two_hundred_is_offered_once_the_ceiling_allows_it(monkeypatch):
     assert choices[0] == D("200")
     assert choices == sorted(choices, reverse=True)
     assert D("25") in choices and D("100") in choices
+
+
+def test_bands_include_the_lower_bound_and_exclude_the_upper():
+    from decimal import Decimal as D
+
+    from app.real_wallet.family import in_band
+
+    assert in_band("any", None) and in_band("any", D("5e9"))
+    assert in_band("1m-20m", D("1000000")) and not in_band("1m-20m", D("20000000"))
+    assert not in_band("1m-20m", D("999999")) and not in_band("1m-20m", None)
+    assert in_band("5m-100m", D("99999999")) and not in_band("5m-100m", D("100000000"))
+    assert not in_band("nonsense", D("5000000"))

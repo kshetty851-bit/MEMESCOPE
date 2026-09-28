@@ -38,6 +38,10 @@ class RealWalletFamilyMember(Base):
         Boolean, nullable=False, default=False, server_default="false")
     own_ticket_usd: Mapped[Decimal] = mapped_column(
         Numeric(12, 2), nullable=False, default=Decimal("20"), server_default="20")
+    #: Which coins this wallet buys, by market cap: a key of
+    #: `app.real_wallet.family.BANDS` ("any" buys every coin the strategy picks).
+    own_band: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="any", server_default="any")
     own_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     own_updated_by: Mapped[str | None] = mapped_column(String(120))
     #: The share of each month's NEW profit (above the high-water mark) this

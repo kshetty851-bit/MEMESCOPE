@@ -98,6 +98,7 @@ class Account:
     wallet: str
     enabled: bool
     ticket_usd: Decimal
+    band: str = "any"
 
 
 async def accounts(session: AsyncSession) -> list[Account]:
@@ -115,7 +116,8 @@ async def accounts(session: AsyncSession) -> list[Account]:
         row = await session.get(RealWalletFamilyMember, member)
         out.append(Account(member=member, wallet=wallet,
                            enabled=bool(row and row.own_enabled),
-                           ticket_usd=Decimal(row.own_ticket_usd) if row else Decimal(20)))
+                           ticket_usd=Decimal(row.own_ticket_usd) if row else Decimal(20),
+                           band=row.own_band if row else "any"))
     return out
 
 

@@ -80,6 +80,7 @@ describe("a user's own wallet", () => {
 function book(enabled: boolean) {
   return {
     enabled, ticket_usd: "20", ticket_choices: ["10", "20", "50"], today_pnl_usd: "0.00",
+    band: "any", band_choices: [{ key: "any", label: "Any size" }, { key: "1m-20m", label: "$1M – $20M" }],
     open_positions: 0, since_first_trade: null, trades_list: [],
   };
 }
@@ -111,7 +112,7 @@ describe("trading from a member's own wallet", () => {
     fireEvent.click(screen.getByRole("button", { name: "Start trading" }));
     await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
     expect(post.mock.calls[0]![0]).toBe("/real-wallet/family/user1/own-settings");
-    expect(post.mock.calls[0]![1]).toEqual({ enabled: true, ticket_usd: "50" });
+    expect(post.mock.calls[0]![1]).toEqual({ enabled: true, ticket_usd: "50", band: "any" });
   });
 
   it("can always be stopped", async () => {
@@ -121,7 +122,17 @@ describe("trading from a member's own wallet", () => {
     expect(await screen.findByText("Trading: on")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Stop trading" }));
     await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
-    expect(post.mock.calls[0]![1]).toEqual({ enabled: false, ticket_usd: "20" });
+    expect(post.mock.calls[0]![1]).toEqual({ enabled: false, ticket_usd: "20", band: "any" });
+  });
+
+  it("starts on the coin size Karthik picked", async () => {
+    get.mockResolvedValue(view({ address: ADDRESS, balance_sol: "1" }, book(false)));
+    post.mockResolvedValue({});
+    page();
+    fireEvent.change(await screen.findByLabelText("Coins worth"), { target: { value: "1m-20m" } });
+    fireEvent.click(screen.getByRole("button", { name: "Start trading" }));
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+    expect(post.mock.calls[0]![1]).toEqual({ enabled: true, ticket_usd: "20", band: "1m-20m" });
   });
 });
 

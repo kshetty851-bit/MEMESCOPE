@@ -136,30 +136,61 @@ export function FamilySection() {
   });
   if (!admin) return null;
   const refresh = () => void queryClient.invalidateQueries({ queryKey: ["real-wallet", "family"] });
-  const rates = new Map(list.data?.members.map((m) => [m.member, m.fee_rate]) ?? []);
+  const rows = new Map(list.data?.members.map((m) => [m.member, m]) ?? []);
+  const bands = new Map((list.data?.band_choices ?? []).map((b) => [b.key, b.label]));
   const fees = list.data?.fees;
   const unlocked = Boolean(list.data?.unlocked);
-  const link = (m: string) => (
-    <Link
-      key={m}
-      href={`/real-wallet/family/${m.toLowerCase()}`}
-      className="inline-flex h-10 items-center gap-2 rounded-md border border-line px-4 text-sm font-medium text-ink hover:border-accent hover:text-accent"
-    >
-      {title(m)}
-      {rates.has(m) ? (
-        <span className="text-xs font-normal text-ink-3">
-          {Number(rates.get(m)) > 0 ? `${pct(rates.get(m))} fee` : "no fee"}
+  const link = (m: string) => {
+    const row = rows.get(m);
+    return (
+      <Link
+        key={m}
+        href={`/real-wallet/family/${m.toLowerCase()}`}
+        data-testid={`wallet-${m}`}
+        className="flex min-w-[11rem] flex-col gap-0.5 rounded-md border border-line px-3 py-2 text-sm hover:border-accent"
+      >
+        <span className="flex items-center justify-between gap-3 font-medium text-ink">
+          {title(m)}
+          {row ? (
+            <span className={`text-xs font-normal ${row.enabled ? "text-up" : "text-ink-3"}`}>
+              {row.enabled ? "● on" : "off"}
+            </span>
+          ) : null}
         </span>
-      ) : null}
-    </Link>
-  );
+        {row?.ticket_usd ? (
+          <span className="text-xs text-ink-2">
+            {usd(row.ticket_usd).replace(".00", "")} trades ·{" "}
+            {row.band && row.band !== "any" ? `${bands.get(row.band) ?? row.band} coins` : "any coin"}
+          </span>
+        ) : null}
+        {row ? (
+          <span className="text-xs text-ink-3">
+            {Number(row.fee_rate) > 0 ? `${pct(row.fee_rate)} fee` : "no fee"}
+          </span>
+        ) : null}
+      </Link>
+    );
+  };
   return (
     <section className="mt-6 rounded-lg border border-line p-5">
-      <p className="text-label text-ink-3">User wallets</p>
+      <p className="text-label text-accent">Family investment</p>
       <p className="mt-1 max-w-2xl text-sm text-ink-3">
-        Each user has a Solana wallet of their own that copies your strategy: its own address,
-        balance, trade size and on/off. Withdrawals from it can only go to your address.
+        Each wallet has its own address, balance, trade size, coin size and on/off, and copies your
+        strategy. Withdrawals can only go to your address.
       </p>
+      <div className="mt-3 max-w-2xl rounded-md bg-surface p-3 text-sm text-ink-2" data-testid="family-plan">
+        <p className="font-medium text-ink">The $500 plan</p>
+        <ul className="mt-1 list-disc space-y-0.5 pl-5">
+          <li>USER 1 – USER 4: $50 trades, only coins worth $1M – $20M.</li>
+          <li>USER 5 – USER 7: $100 trades, only coins worth $5M – $100M.</li>
+          <li>Never a coin worth $100M or more, at most $250 in one coin across every wallet, and at
+            most two wallets of one group in the same coin.</li>
+        </ul>
+        <p className="mt-1 text-xs text-ink-3">
+          Each wallet keeps a little SOL for network fees, so deposit a couple of dollars over its
+          trade size. Every wallet stays off until you press Start on its page.
+        </p>
+      </div>
       <div className="mt-4 flex flex-wrap gap-2">{link("USER1")}</div>
 
       <div className="mt-5 rounded-md border border-line p-4" data-testid="users-locked-area">
@@ -233,6 +264,8 @@ interface OwnBook {
   enabled: boolean;
   ticket_usd: string;
   ticket_choices: string[];
+  band?: string;
+  band_choices?: BandChoice[];
   today_pnl_usd: string | null;
   open_positions: number;
   since_first_trade: { trades: number; won: number; lost: number; net_pnl_usd: string | null } | null;
@@ -263,8 +296,24 @@ interface FeeTotals {
   fee_address: string | null;
 }
 
+interface BandChoice {
+  key: string;
+  label: string;
+}
+
+interface MemberRow {
+  member: string;
+  label: string;
+  fee_rate: string | null;
+  enabled?: boolean;
+  ticket_usd?: string | null;
+  band?: string;
+  address?: string | null;
+}
+
 interface MembersView {
-  members: { member: string; label: string; fee_rate: string | null }[];
+  members: MemberRow[];
+  band_choices?: BandChoice[];
   unlocked?: boolean;
   fees?: FeeTotals;
 }
@@ -291,12 +340,15 @@ function OwnWalletPanel({ member, wallet, book, isOwner, onDone }: {
 }) {
   const [copied, setCopied] = useState(false);
   const [ticket, setTicket] = useState<string | null>(null);
+  const [band, setBand] = useState<string | null>(null);
   const own = useMutation({
     mutationFn: (next: { enabled: boolean; ticket: string }) =>
       api.post(`/real-wallet/family/${member.toLowerCase()}/own-settings`,
-        { enabled: next.enabled, ticket_usd: next.ticket }, { headers: usersHeaders() }),
+        { enabled: next.enabled, ticket_usd: next.ticket, band: band ?? book?.band },
+        { headers: usersHeaders() }),
     onSuccess: () => {
       setTicket(null);
+      setBand(null);
       onDone();
     },
   });
@@ -386,6 +438,22 @@ function OwnWalletPanel({ member, wallet, book, isOwner, onDone }: {
                 <option key={t} value={t}>{usd(t)}</option>
               ))}
             </select>
+            {book.band_choices?.length ? (
+              <>
+                <label className="text-ink-3" htmlFor={`own-band-${member}`}>Coins worth</label>
+                <select
+                  id={`own-band-${member}`}
+                  value={band ?? book.band ?? "any"}
+                  disabled={!isOwner}
+                  onChange={(e) => setBand(e.target.value)}
+                  className="rounded-md border border-line bg-canvas px-2 py-1 text-sm text-ink disabled:opacity-60"
+                >
+                  {book.band_choices.map((b) => (
+                    <option key={b.key} value={b.key}>{b.label}</option>
+                  ))}
+                </select>
+              </>
+            ) : null}
             {book.enabled ? (
               <button
                 type="button"
@@ -405,20 +473,21 @@ function OwnWalletPanel({ member, wallet, book, isOwner, onDone }: {
                 Start trading
               </button>
             )}
-            {isOwner && ticket && ticket !== book.ticket_usd && book.enabled ? (
+            {isOwner && book.enabled && ((ticket && ticket !== book.ticket_usd)
+              || (band && band !== book.band)) ? (
               <button
                 type="button"
                 disabled={own.isPending}
-                onClick={() => own.mutate({ enabled: true, ticket })}
+                onClick={() => own.mutate({ enabled: true, ticket: ticket ?? book.ticket_usd })}
                 className="rounded-md border border-line px-3 py-1 text-sm text-ink-2"
               >
-                Save size
+                Save
               </button>
             ) : null}
           </div>
           <p className="mt-1 text-xs text-ink-3">
             Buys only while Karthik&apos;s main wallet is also on — when he stops his, this
-            one stops buying too.
+            one stops buying too. A coin outside its market-cap range is skipped.
           </p>
           {own.isError ? (
             <p className="mt-1 text-xs text-down">

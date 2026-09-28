@@ -384,3 +384,75 @@ async def test_users_take_turns_longest_waiting_first(db_session, monkeypatch):
     assert out.family["USER1"] == "coin_cap_reached"
     for member in ("USER2", "USER3", "USER4", "USER5"):
         assert out.family[member] == f"created:{MINT}"
+
+
+# --- family investment: coin-size bands (2026-09-28) ----------------------------
+
+async def _five_on_band(session, monkeypatch, *, band: str, fdv: str | None,
+                        now: datetime) -> None:
+    from app.labs.graduation.models import GradPostgradSample
+
+    users = {f"USER{i}": str(Keypair().pubkey()) for i in range(1, 6)}
+    monkeypatch.setattr(settings, "REAL_WALLET_FAMILY_WALLETS",
+                        ",".join(f"{m.lower()}={k}" for m, k in users.items()))
+
+    async def _lamports(self, wallet):
+        return 3_000_000_000
+
+    monkeypatch.setattr(RealWalletDriver, "_wallet_lamports", _lamports)
+    for member in users:
+        session.add(RealWalletFamilyMember(name=member, own_enabled=True,
+                                           own_ticket_usd=Decimal("50"), own_band=band))
+    if fdv is not None:
+        # An old reading far outside the band, then the one that counts.
+        session.add(GradPostgradSample(ts=now - timedelta(minutes=10), mint=MINT,
+                                       source="dexscreener", fdv=Decimal("900000000")))
+        session.add(GradPostgradSample(ts=now - timedelta(seconds=4), mint=MINT,
+                                       source="dexscreener", fdv=Decimal(fdv)))
+    await session.flush()
+    await _signal(session, now)
+
+
+async def test_a_band_lets_only_two_wallets_into_one_coin(db_session, monkeypatch):
+    now = datetime.now(UTC)
+    await _five_on_band(db_session, monkeypatch, band="1m-20m", fdv="8000000", now=now)
+    out = await RealWalletDriver(db_session).tick(now=now)
+    created = [m for m, r in out.family.items() if r.startswith("created:")]
+    assert len(created) == 2
+    assert sorted(r for r in out.family.values() if not r.startswith("created:")) == \
+        ["band_coin_limit"] * 3
+
+
+@pytest.mark.parametrize("band, fdv", [("1m-20m", "25000000"), ("5m-100m", "150000000"),
+                                       ("5m-100m", "2000000"), ("1m-20m", None)])
+async def test_a_coin_outside_the_band_or_unmeasured_is_not_bought(
+        db_session, monkeypatch, band, fdv):
+    now = datetime.now(UTC)
+    await _five_on_band(db_session, monkeypatch, band=band, fdv=fdv, now=now)
+    out = await RealWalletDriver(db_session).tick(now=now)
+    assert set(out.family.values()) == {"market_cap_outside_band"}
+    assert set(await _intents(db_session)) == {OWNER}
+
+
+async def test_karthik_sets_a_wallets_band_and_a_bad_band_is_refused(db_session):
+    from fastapi import HTTPException
+
+    from app.models.user import UserRole
+    from app.real_wallet import family_api
+
+    await _user1(db_session, own=False)
+    karthik = SimpleNamespace(role=UserRole.ADMIN, email="karthik@example.com")
+    out = await family_api.member_own_settings(
+        "user1", family_api.OwnSettingsIn(enabled=False, ticket_usd=Decimal("50"),
+                                          band="1m-20m"), db_session, viewer=karthik)
+    assert out["band"] == "1m-20m"
+    # Leaving the band out keeps it.
+    out = await family_api.member_own_settings(
+        "user1", family_api.OwnSettingsIn(enabled=True, ticket_usd=Decimal("50")),
+        db_session, viewer=karthik)
+    assert (out["enabled"], out["band"]) == (True, "1m-20m")
+    with pytest.raises(HTTPException) as bad:
+        await family_api.member_own_settings(
+            "user1", family_api.OwnSettingsIn(enabled=True, ticket_usd=Decimal("50"),
+                                              band="0-1b"), db_session, viewer=karthik)
+    assert bad.value.status_code == 422

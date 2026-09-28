@@ -76,6 +76,8 @@ class CollectFeeIn(BaseModel):
 class OwnSettingsIn(BaseModel):
     enabled: bool
     ticket_usd: Decimal
+    #: A key of `family.BANDS`; left out keeps the wallet's band.
+    band: str | None = None
 
 
 class WithdrawIn(BaseModel):
@@ -83,6 +85,9 @@ class WithdrawIn(BaseModel):
 
     sol_amount: Decimal = Field(gt=0)
     confirmation_phrase: Literal["WITHDRAW_TO_KARTHIK"]
+
+
+_BAND_CHOICES = [{"key": k, "label": v} for k, v in family.BAND_LABELS.items()]
 
 
 def _money(value: Decimal | None) -> str | None:
@@ -105,6 +110,8 @@ async def _own_book(session: DbSession, member: str, wallet: str) -> dict[str, o
         "enabled": bool(row and row.own_enabled),
         "ticket_usd": str(row.own_ticket_usd if row else Decimal(20)),
         "ticket_choices": [str(t) for t in family.TICKETS_USD],
+        "band": row.own_band if row else "any",
+        "band_choices": _BAND_CHOICES,
         "today_pnl_usd": _money(await repo.realised_pnl_today(now, wallet)),
         "open_positions": await repo.open_positions_count(wallet),
         "since_first_trade": None if since is None else {
@@ -186,12 +193,18 @@ async def members(session: DbSession, _: AdminUser,
                   x_users_token: str | None = Header(default=None)) -> dict[str, object]:
     """USER 1 always; USER 2-10 and the fees only with the users password."""
     unlocked = family.token_ok(x_users_token)
-    rates = {r.name: str(r.fee_rate) for r in
-             (await session.execute(select(RealWalletFamilyMember))).scalars()}
+    rows = {r.name: r for r in
+            (await session.execute(select(RealWalletFamilyMember))).scalars()}
     shown = [m for m in family.MEMBERS if unlocked or not family.locked(m)]
     out: dict[str, object] = {
-        "members": [{"member": m, "label": family.label(m), "fee_rate": rates.get(m)}
+        "members": [{"member": m, "label": family.label(m),
+                     "fee_rate": str(rows[m].fee_rate) if m in rows else None,
+                     "enabled": bool(m in rows and rows[m].own_enabled),
+                     "ticket_usd": str(rows[m].own_ticket_usd) if m in rows else None,
+                     "band": rows[m].own_band if m in rows else "any",
+                     "address": family_wallets.address(m)}
                     for m in shown],
+        "band_choices": _BAND_CHOICES,
         "unlocked": unlocked,
         "locked_count": len(family.MEMBERS) - len(shown),
         "ticket_choices": [str(t) for t in family.TICKETS_USD]}
@@ -287,18 +300,23 @@ async def member_own_settings(name: str, payload: OwnSettingsIn, session: DbSess
     if payload.ticket_usd not in family.TICKETS_USD:
         raise HTTPException(status_code=422, detail="trade size must be one of "
                             + ", ".join(str(t) for t in family.TICKETS_USD))
+    if payload.band is not None and payload.band not in family.BANDS:
+        raise HTTPException(status_code=422, detail="coin size must be one of "
+                            + ", ".join(family.BANDS))
     row = await session.get(RealWalletFamilyMember, member)
     if row is None:
         raise HTTPException(status_code=404, detail="no such user wallet")
     row.own_enabled, row.own_ticket_usd = payload.enabled, payload.ticket_usd
+    if payload.band is not None:
+        row.own_band = payload.band
     row.own_updated_at = datetime.now(UTC)
     row.own_updated_by = viewer.email
     await session.commit()
     logger.warning("real_wallet_family_own_settings", member=member,
                    enabled=payload.enabled, ticket=str(payload.ticket_usd),
-                   by=row.own_updated_by)
+                   band=row.own_band, by=row.own_updated_by)
     return {"member": member, "enabled": row.own_enabled,
-            "ticket_usd": str(row.own_ticket_usd)}
+            "ticket_usd": str(row.own_ticket_usd), "band": row.own_band}
 
 
 @router.post("/{name}/collect-fee", summary="Send a user's due profit fee to the fee address")
