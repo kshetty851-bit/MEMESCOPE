@@ -11,7 +11,8 @@ to USER 10, and the fees, sit behind a second lock as well (Karthik,
 2026-09-27): a password of his own, kept on the server only as a PBKDF2 hash
 (`REAL_WALLET_USERS_PASSWORD_HASH`, `salt_hex:hash_hex`, no `$` because
 compose would mangle it; the repository is public). The right password buys a
-12-hour token, sent as `X-Users-Token`. USER 1 stays open to his sign-in.
+12-hour token, sent as `X-Users-Token`. Since 2026-09-28 USER 1-7 (the family
+investment) have a password of their own; see `INVESTMENT_MEMBERS`.
 """
 
 from __future__ import annotations
@@ -63,14 +64,18 @@ def in_band(band: str, fdv: Decimal | None) -> bool:
     return (lo is None or fdv >= lo) and (hi is None or fdv < hi)
 
 
-#: The one user wallet the second lock leaves open.
-OPEN_MEMBERS: frozenset[str] = frozenset({"USER1"})
+#: Family investment (Karthik, 2026-09-28): USER 1-7 sit behind a password
+#: of their own (`REAL_WALLET_INVESTMENT_PASSWORD_HASH`); USER 8-10 and the
+#: fees stay behind the users password. No user wallet is open to the admin
+#: sign-in alone any more.
+INVESTMENT_MEMBERS: frozenset[str] = frozenset(f"USER{i}" for i in range(1, 8))
 TOKEN_HOURS = 12
 _PBKDF2_ROUNDS = 600_000
 
 
-def locked(member: str) -> bool:
-    return member not in OPEN_MEMBERS
+def scope(member: str) -> str:
+    """Which password opens this wallet: "investment" or "users"."""
+    return "investment" if member in INVESTMENT_MEMBERS else "users"
 
 
 def hash_password(password: str, *, salt: bytes | None = None) -> str:
@@ -93,25 +98,48 @@ def password_ok(password: str, stored: str | None = None) -> bool:
     return hmac.compare_digest(got, want)
 
 
-def issue_token(*, now: datetime | None = None) -> tuple[str, datetime]:
+def password_scope(password: str) -> str | None:
+    """The lock this password opens, or None. Each hash unset = that lock shut."""
+    if password_ok(password, settings.REAL_WALLET_INVESTMENT_PASSWORD_HASH):
+        return "investment"
+    if password_ok(password, settings.REAL_WALLET_USERS_PASSWORD_HASH):
+        return "users"
+    return None
+
+
+def issue_token(scopes: frozenset[str] | set[str] = frozenset({"users"}), *,
+                now: datetime | None = None) -> tuple[str, datetime]:
+    """One token for every lock this tab has opened (`scopes`)."""
     now = now or datetime.now(UTC)
     expires = now + timedelta(hours=TOKEN_HOURS)
-    token = jwt.encode({"type": "users", "sub": "users", "iat": int(now.timestamp()),
+    token = jwt.encode({"type": "users", "sub": "users", "scopes": sorted(scopes),
+                        "iat": int(now.timestamp()),
                         "exp": int(expires.timestamp()), "iss": settings.PROJECT_NAME},
                        settings.SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
     return token, expires
 
 
-def token_ok(token: str | None) -> bool:
+def token_scopes(token: str | None) -> frozenset[str]:
+    """The locks a token opens; none for a bad, expired or missing one. A token
+    from before the family-investment lock carries no scopes and was issued
+    for the users password."""
     if not isinstance(token, str) or not token:
-        return False
+        return frozenset()
     try:
         claims = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.JWT_ALGORITHM],
                             issuer=settings.PROJECT_NAME,
                             options={"require": ["exp", "iat", "sub"]})
     except jwt.InvalidTokenError:
-        return False
-    return claims.get("type") == "users"
+        return frozenset()
+    if claims.get("type") != "users":
+        return frozenset()
+    scopes = claims.get("scopes", ["users"])
+    return frozenset(s for s in scopes if s in ("investment", "users")) \
+        if isinstance(scopes, list) else frozenset()
+
+
+def opens(member: str, token: str | None) -> bool:
+    return scope(member) in token_scopes(token)
 
 
 class Throttle:
