@@ -49,7 +49,7 @@ from app.real_wallet.devnet_workflow import (
 )
 from app.real_wallet.driver import RealWalletDriver
 from app.real_wallet.live_repository import LiveIntentRepository
-from app.real_wallet import withdraw_service, withdrawal
+from app.real_wallet import partners, withdraw_service, withdrawal
 from app.real_wallet.mainnet_signer_client import (
     MainnetSignerRejectedError,
     MainnetSignerUnavailableError,
@@ -640,6 +640,8 @@ async def status(viewer: OptionalUser, session: DbSession) -> dict[str, object]:
         "last_failure_reason": None if health is None else health.last_failure_reason,
         # Every real trade, not the latest 50 below, and the wallet's worth
         # when the first began; None until there is a first trade.
+        # Karthik and Rafiq's 50-50 from 28 Sep 15:00 Dubai (`partners`).
+        "partners": await partners.summary(session),
         "since_first_trade": None if since is None else {
             "first_trade_at": since["first_trade_at"],
             "trades": since["trades"], "won": since["won"], "lost": since["lost"],

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { FamilySection } from "@/components/real-wallet/family";
+import { PartnersCard, type Partners } from "@/components/real-wallet/partners";
 import { useAuth } from "@/hooks/use-auth";
 import { ApiError, api } from "@/lib/api-client";
 
@@ -104,6 +105,7 @@ type WalletStatus = {
   last_failure_reason: string | null;
   positions: Position[];
   since_first_trade?: SinceFirstTrade | null;
+  partners?: Partners;
 };
 
 type Strategy = {
@@ -1468,6 +1470,7 @@ export default function RealWalletPage() {
       </p>
       <ReadinessPanel data={readiness.data} />
       <BalanceCard data={data} readiness={readiness.data} />
+      <PartnersCard data={data?.partners} />
       <StrategyCard
         autotrade={autotrade.data}
         strategy={chosen}
