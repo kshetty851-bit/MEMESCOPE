@@ -25,7 +25,22 @@ export interface Partners {
   trades: number;
   wins: number;
   open: number;
-  partners: { name: string; share: string; put_in_usd: string; profit_usd: string; now_usd: string }[];
+  sol_usd?: string | null;
+  total_put_in_sol?: string;
+  total_profit_sol?: string | null;
+  total_now_sol?: string | null;
+  total_now_value_usd?: string | null;
+  partners: {
+    name: string;
+    share: string;
+    put_in_usd: string;
+    profit_usd: string;
+    now_usd: string;
+    put_in_sol?: string;
+    profit_sol?: string | null;
+    now_sol?: string | null;
+    now_value_usd?: string | null;
+  }[];
   days: PartnersDay[];
 }
 
@@ -34,6 +49,8 @@ const money = (value: string | number) => {
   return `${n < 0 ? "−" : ""}$${Math.abs(n).toFixed(2)}`;
 };
 const signed = (value: string | number) => `${Number(value) >= 0 ? "+" : ""}${money(value)}`;
+const sol = (value: string | null | undefined, sign = false) =>
+  value == null ? null : `${sign && Number(value) >= 0 ? "+" : ""}${Number(value).toFixed(4)} SOL`;
 const tone = (value: string | number) =>
   Number(value) > 0 ? "text-up" : Number(value) < 0 ? "text-down" : "text-ink";
 
@@ -63,9 +80,18 @@ export function PartnersCard({ data }: { data: Partners | undefined }) {
             <p className={`mt-1 text-2xl font-semibold tabular-nums ${tone(p.profit_usd)}`}>
               {signed(p.profit_usd)}
             </p>
+            {p.profit_sol != null ? (
+              <p className={`text-sm tabular-nums ${tone(p.profit_sol)}`}>{sol(p.profit_sol, true)}</p>
+            ) : null}
             <p className="text-xs text-ink-3">
-              put in {money(p.put_in_usd)} · now {money(p.now_usd)}
+              put in {money(p.put_in_usd)}
+              {p.put_in_sol ? ` (${sol(p.put_in_sol)})` : ""} · now {money(p.now_usd)}
             </p>
+            {p.now_sol != null ? (
+              <p className="text-xs text-ink-3">
+                holds {sol(p.now_sol)} ≈ {money(p.now_value_usd ?? 0)} at today&apos;s SOL price
+              </p>
+            ) : null}
           </div>
         ))}
         <div className="rounded-md border border-line bg-canvas/40 p-3">
@@ -73,6 +99,11 @@ export function PartnersCard({ data }: { data: Partners | undefined }) {
           <p className={`mt-1 text-2xl font-semibold tabular-nums ${tone(data.profit_usd)}`}>
             {signed(data.profit_usd)}
           </p>
+          {data.total_profit_sol != null ? (
+            <p className={`text-sm tabular-nums ${tone(data.total_profit_sol)}`}>
+              {sol(data.total_profit_sol, true)}
+            </p>
+          ) : null}
           <p className="text-xs text-ink-3">
             {money(data.capital_usd)} → {money(data.balance_usd)} ·{" "}
             <span className={tone(data.pct)}>
@@ -107,8 +138,11 @@ export function PartnersCard({ data }: { data: Partners | undefined }) {
         </div>
       ) : null}
       <p className="mt-2 text-[11px] text-ink-3">
-        Trading profit on closed trades, split half and half. SOL&apos;s own price moving is not
-        counted. Each day runs 3 PM to 3 PM Dubai; its % is of the balance it opened with.
+        Trading profit on closed trades, split half and half. The dollar figures leave SOL&apos;s
+        own price out; the SOL figures use today&apos;s price
+        {data.sol_usd ? ` (${money(data.sol_usd)} per SOL)` : ""}, and what each of you holds in SOL
+        is worth more or less as SOL moves. Each day runs 3 PM to 3 PM Dubai; its % is of the
+        balance it opened with.
       </p>
     </section>
   );

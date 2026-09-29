@@ -60,3 +60,21 @@ def test_before_the_start_there_is_nothing():
 def test_the_start_is_three_pm_dubai_on_the_28th():
     assert START.isoformat() == "2026-09-28T11:00:00+00:00"
     assert str(partners.CAPITAL) == "100"
+
+
+def test_each_partner_is_shown_in_sol_at_todays_price():
+    rows = [(START + H, START + 1.1 * H, D("20.00"), "CLOSED")]
+    out = book(rows, now=START + 2 * H, sol_usd=D("200"))
+    karthik = out["partners"][0]
+    # Half of 0.8457 SOL in; half of $20 = $10 = 0.05 SOL made at $200.
+    assert (karthik["put_in_sol"], karthik["profit_sol"], karthik["now_sol"]) == \
+        ("0.4229", "0.0500", "0.4729")
+    assert karthik["now_value_usd"] == "94.57"      # 0.47285 SOL x $200
+    assert (out["total_put_in_sol"], out["total_now_sol"], out["sol_usd"]) == \
+        ("0.8457", "0.9457", "200.00")
+
+
+def test_no_sol_price_means_no_sol_figures_rather_than_a_guess():
+    out = book([(START + H, START + 1.1 * H, D("20.00"), "CLOSED")], now=START + 2 * H)
+    assert out["partners"][0]["profit_sol"] is None and out["sol_usd"] is None
+    assert out["partners"][0]["put_in_sol"] == "0.4229"
