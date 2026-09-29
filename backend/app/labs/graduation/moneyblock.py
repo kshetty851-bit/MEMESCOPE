@@ -20,6 +20,14 @@ BEFORE this buy refuses the coin. Three of the four rugs that cost the fresh
 $75k book came from wallets nobody had seen, so blocking addresses by hand is
 always one rug late; this refuses the next repeat operator on its own record.
 Only labels already written count, so nothing here is decided with hindsight.
+
+SAME NAME (Karthik, 2026-09-29, after NTDA): a coin whose symbol belongs to a
+coin that closed at a rug's loss on any book in the last
+`SAME_NAME_BLOCK_HOURS` is refused. Two NTDAs rugged 17 minutes apart from
+wallets that shared no address, so the address checks passed the second.
+Replayed on the real wallet since 21 Sep: 13 of 289 trades skipped, 1 of 6
+rugs prevented, +$23 -> +$63; 1-3h helped in every $75k book, 6h+ hurt.
+Chosen after seeing the rug it prevents.
 """
 
 from __future__ import annotations
@@ -35,13 +43,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.rug_money import BLOCKED_SINCE
 from app.labs.graduation import config
-from app.labs.graduation.models import GradOperator, GradPaperPosition
+from app.labs.graduation.models import GradOperator, GradPaperPosition, GradToken
 
 #: What `excluded` says on a trade the wallet's checks would have refused.
 EXCLUDED = "wallet_blocked"
 KNOWN = "known_rug_money"
 LINKED = "linked_to_recent_rug"
 REPEAT = "repeat_rug_operator"
+SAME_NAME = "same_name_as_recent_rug"
+SAME_NAME_BLOCK_HOURS = 3
 
 
 def _window() -> timedelta:
@@ -138,6 +148,20 @@ async def recent_rug_ids(session: AsyncSession, at: datetime) -> set[str]:
     return {a for ids in rows for a in ids}
 
 
+def _name(symbol: str | None) -> str | None:
+    return (symbol or "").strip().lower() or None
+
+
+async def recent_rug_names(session: AsyncSession, at: datetime) -> set[str]:
+    """Symbols of coins that closed at a rug's loss on any book in the last
+    `SAME_NAME_BLOCK_HOURS` before `at`."""
+    rows = await session.scalars(select(GradPaperPosition.symbol).where(
+        GradPaperPosition.closed_at > at - timedelta(hours=SAME_NAME_BLOCK_HOURS),
+        GradPaperPosition.closed_at <= at,
+        GradPaperPosition.net_return <= settings.REAL_WALLET_RUG_RETURN))
+    return {n for s in rows if (n := _name(s))}
+
+
 async def refusals(session: AsyncSession, mints: Iterable[str],
                    at: datetime) -> dict[str, str]:
     """Mint -> reason, for the coins among `mints` the wallet would refuse now."""
@@ -148,12 +172,21 @@ async def refusals(session: AsyncSession, mints: Iterable[str],
     ids = dict((await session.execute(
         select(GradOperator.mint, GradOperator.ids)
         .where(GradOperator.mint.in_(mints), GradOperator.ids.is_not(None)))).all())
-    if not ids:
-        return {}
-    recent = await recent_rug_ids(session, at)
-    repeat = await repeat_rug_ids(session, at)
-    return {m: why for m, found in ids.items()
-            if (why := refused(found, at, recent, repeat))}
+    out: dict[str, str] = {}
+    if ids:
+        recent = await recent_rug_ids(session, at)
+        repeat = await repeat_rug_ids(session, at)
+        out = {m: why for m, found in ids.items()
+               if (why := refused(found, at, recent, repeat))}
+    # The name check needs no addresses: a coin nobody traced is still named.
+    names = await recent_rug_names(session, at)
+    if names:
+        symbols = (await session.execute(
+            select(GradToken.mint, GradToken.symbol).where(GradToken.mint.in_(mints)))).all()
+        for mint, symbol in symbols:
+            if mint not in out and _name(symbol) in names:
+                out[mint] = SAME_NAME
+    return out
 
 
 async def restate(session: AsyncSession, *, since: datetime, apply: bool) -> dict[str, Any]:
