@@ -13,7 +13,7 @@ from sqlalchemy import select
 
 from app.core import rug_money
 from app.labs.graduation import config, moneyblock
-from app.labs.graduation.models import GradOperator, GradPaperPosition
+from app.labs.graduation.models import GradOperator, GradPaperPosition, GradToken
 from app.labs.graduation.tournament import Tournament
 from tests.integration.test_graduation_fast_arms import (
     MINT,
@@ -170,3 +170,25 @@ async def test_a_deep_coin_the_fast_path_missed_is_read_at_the_buy(db_session) -
     moneyblock._REPEAT = None
     # Read once: a second tick finds it recorded and reads nothing.
     assert await t._record_late([deep]) == 0
+
+
+async def test_a_coin_named_like_a_rug_from_the_last_three_hours_is_refused(db_session) -> None:
+    """Karthik, 2026-09-29: two NTDAs from unrelated wallets rugged 17 minutes apart."""
+    def named(mint: str, symbol: str) -> GradToken:
+        return GradToken(mint=mint, symbol=symbol, first_seen_at=NOW - timedelta(hours=5))
+
+    rug = trade("NTDA1", book="KARTHIK_QUIET_5M", opened=NOW - timedelta(minutes=21), net="-0.99")
+    rug.symbol = "NTDA"
+    old = trade("OLDX1", book="KARTHIK_QUIET_5M", opened=NOW - timedelta(hours=3, minutes=10),
+                net="-0.99")
+    old.symbol = "OLDX"
+    win = trade("GOOD1", book="KARTHIK_QUIET_5M", opened=NOW - timedelta(minutes=30), net="0.02")
+    win.symbol = "GOOD"
+    db_session.add_all([rug, old, win,
+                        named("NTDA2", " ntda "),   # same name, fresh wallets, no operator row
+                        named("OLDX2", "OLDX"),     # its rug closed over three hours ago
+                        named("GOOD2", "GOOD"),     # its namesake won
+                        named("OTHER", "OTHER")])
+    await db_session.flush()
+    got = await moneyblock.refusals(db_session, ["NTDA2", "OLDX2", "GOOD2", "OTHER"], NOW)
+    assert got == {"NTDA2": moneyblock.SAME_NAME}
