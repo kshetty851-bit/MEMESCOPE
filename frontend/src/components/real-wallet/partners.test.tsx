@@ -23,8 +23,9 @@ describe("Karthik & Rafiq's box", () => {
     expect(box).toHaveTextContent("Karthik+$5.75put in $50.00 · now $55.75");
     expect(box).toHaveTextContent("Rafiq+$5.75put in $50.00 · now $55.75");
     expect(box).toHaveTextContent("$100.00 → $111.50");
-    expect(box).toHaveTextContent("Day 2 · so far+9.85%+$10.00 · 1 trades");
-    expect(box).toHaveTextContent("Day 1+1.50%+$1.50 · 2 trades");
+    expect(box).toHaveTextContent("Day 2 · so far+$10.00" + "1 trades");
+    expect(box).toHaveTextContent("Day 1+$1.502 trades");
+    expect(box).not.toHaveTextContent("+9.85%");        // dollars only on the days
     expect(box).toHaveTextContent("since 28 Sep, 3:00 PM (Dubai)");
   });
 

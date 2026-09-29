@@ -153,13 +153,11 @@ export function PartnersCard({ data }: { data: Partners | undefined }) {
               <div className="text-[10px] uppercase tracking-wider text-ink-3">
                 {d.running ? `Day ${d.n} · so far` : `Day ${d.n}`}
               </div>
-              <div className={`mt-0.5 text-base font-semibold tabular-nums ${tone(d.pct)}`}>
-                {Number(d.pct) >= 0 ? "+" : ""}
-                {Number(d.pct).toFixed(2)}%
+              {/* Dollars only (Karthik, 2026-09-30), as in Karthik's Lab. */}
+              <div className={`mt-0.5 text-base font-semibold tabular-nums ${tone(d.pnl_usd)}`}>
+                {signed(d.pnl_usd)}
               </div>
-              <div className="text-[11px] tabular-nums text-ink-3">
-                {signed(d.pnl_usd)} · {d.trades} trades
-              </div>
+              <div className="text-[11px] tabular-nums text-ink-3">{d.trades} trades</div>
             </div>
           ))}
         </div>
@@ -167,9 +165,9 @@ export function PartnersCard({ data }: { data: Partners | undefined }) {
       <p className="mt-2 text-[11px] text-ink-3">
         Profit is what the wallet is worth now at today&apos;s SOL price
         {data.sol_usd ? ` (${money(data.sol_usd)} per SOL)` : ""} minus the $100, split half and
-        half, so it moves with SOL. A trade that is open counts at what it cost. &quot;From trades&quot;
-        is the trading profit alone, and the days below are trading profit. Each day runs 3 PM to
-        3 PM Dubai; its % is of the balance it opened with.
+        half, so it moves with SOL. A trade that is open counts at what it would sell for now.
+        &quot;From trades&quot; is the trading profit alone, and the days below are trading profit.
+        Each day runs 3 PM to 3 PM Dubai.
       </p>
     </section>
   );
