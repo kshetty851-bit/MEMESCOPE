@@ -333,11 +333,9 @@ async def test_the_book_counts_only_its_pool_range_but_the_checks_see_every_size
     assert "$75k and up" in book["rule"]
     assert (book["trades"], book["rugs"]) == (1, 0)
     assert [(t["symbol"], t["mint"]) for t in book["trades_list"]] == [("DEEP", "DEEPpump")]
-    # The grid's $50k+ column still sees the $60k pool (from the small-pool arms).
-    now = next(r for r in book["whatif"]["sizes"] if r["current"])
-    floors = [f["floor_usd"] for f in book["whatif"]["floors"]]
-    fifty = now["cells"][floors.index(50_000)]
-    assert (fifty["trades"], fifty["rugs"]) == (2, 1)
+    # The grid starts at $75k (2026-09-30): the $60k pool is in no column.
+    _, now = _grid(book)
+    assert all((c["trades"], c["rugs"]) == (1, 0) for c in now.values())
 
 
 async def test_every_closed_trade_is_listed_not_just_the_latest_sixty() -> None:
@@ -368,18 +366,17 @@ async def test_the_grid_is_every_size_by_every_pool_floor() -> None:
     start = next(s for s in config.FRESH_BOOKS if s.book == "KARTHIK_QUIET_5M").start
     book = await karthik_book(db=_StubDb([_Pos("A", start + timedelta(hours=1), 0.10)]))  # type: ignore[arg-type]
     w = book["whatif"]
-    assert [f["floor_usd"] for f in w["floors"]] == [
-        25_000, 50_000, 75_000, 100_000, 150_000, 200_000, 300_000, 500_000]
+    assert [f["floor_usd"] for f in w["floors"]] == [75_000, 100_000, 150_000, 200_000]
     assert [f["floor_usd"] for f in w["floors"] if f["book"]] == [75_000]
     assert [(r["ticket_usd"], r["capital_usd"]) for r in w["sizes"]] == [
         (10, 100), (20, 100), (25, 100), (50, 100), (100, 200), (200, 400)]
     assert [r["current"] for r in w["sizes"]] == [False, False, False, True, False, False]
-    assert all(len(r["cells"]) == 8 for r in w["sizes"])
-    # A $200k pool at +10%: every floor up to $200k took it, $300k+ did not.
+    assert all(len(r["cells"]) == 4 for r in w["sizes"])
+    # A $200k pool at +10%: every floor up to $200k took it.
     floors, now = _grid(book)
-    assert [now[f]["trades"] for f in floors] == [1, 1, 1, 1, 1, 1, 0, 0]
+    assert [now[f]["trades"] for f in floors] == [1, 1, 1, 1]
     assert now[75_000]["pnl_usd"] == Decimal("5.00")                 # $50 at +10%
-    assert w["sizes"][-1]["cells"][2]["pnl_usd"] == Decimal("20.00")  # $200 at +10%
+    assert w["sizes"][-1]["cells"][0]["pnl_usd"] == Decimal("20.00")  # $200 at +10%
 
 
 async def test_each_floor_takes_one_trade_at_a_time_on_its_own_pools() -> None:
@@ -398,30 +395,7 @@ async def test_each_floor_takes_one_trade_at_a_time_on_its_own_pools() -> None:
     _, now = _grid(book)
     assert (now[75_000]["trades"], now[75_000]["rugs"]) == (1, 0)   # the book's column
     assert (now[150_000]["trades"], now[150_000]["rugs"]) == (1, 1)
-    assert (now[500_000]["trades"], now[500_000]["rugs"]) == (1, 1)
-
-
-async def test_the_low_floors_include_the_small_pool_arms() -> None:
-    """$25k+ and $50k+ need the pools the book skips: those come from the
-    small-pool arms, and replayed trades are counted as such."""
-    from app.labs.graduation.api import karthik_book
-
-    start = next(s for s in config.FRESH_BOOKS if s.book == "KARTHIK_QUIET_5M").start
-    small = _Pos("SMALL", start + timedelta(hours=1), -0.99)          # a $30k rug, replayed
-    small.liq_open_usd = Decimal(30_000)
-    small.close_reason = "replayed"
-    mid = _Pos("MID", start + timedelta(hours=2), 0.05)               # $60k
-    mid.liq_open_usd = Decimal(60_000)
-    deep = _Pos("DEEP", start + timedelta(hours=3), 0.10)             # $100k
-    deep.liq_open_usd = Decimal(100_000)
-    book = await karthik_book(db=_StubDb([small, mid, deep]))  # type: ignore[arg-type]
-
-    _, now = _grid(book)
-    assert (now[25_000]["trades"], now[25_000]["rugs"], now[25_000]["replayed"]) == (3, 1, 1)
-    assert (now[50_000]["trades"], now[50_000]["rugs"]) == (2, 0)
-    assert now[50_000]["pnl_usd"] == Decimal("7.50")                   # $2.50 + $5.00
-    assert now[75_000]["trades"] == 1
-    assert [f["replayed_below"] for f in book["whatif"]["floors"]][:3] == [True, True, False]
+    assert (now[200_000]["trades"], now[200_000]["rugs"]) == (1, 1)
 
 
 async def test_a_coin_bought_more_than_two_minutes_after_graduating_never_happened() -> None:

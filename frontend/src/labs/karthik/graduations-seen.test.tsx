@@ -26,7 +26,9 @@ describe("trades by pool floor", () => {
     const box = screen.getByTestId("pool-trades");
     expect(box).toHaveTextContent("$75k+3+$3.00");           // all three
     expect(box).toHaveTextContent("$100k+1+$2.00");          // only the $620k pool
-    expect(box).toHaveTextContent("$500k+1+$2.00");
+    expect(box).toHaveTextContent("$200k+1+$2.00");
+    expect(box).not.toHaveTextContent("$300k+");        // floors stop at $200k (2026-09-30)
+    expect(box).not.toHaveTextContent("$500k+");
   });
 
   it("shows nothing before the first trade", () => {
