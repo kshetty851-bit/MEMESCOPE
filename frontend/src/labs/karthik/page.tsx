@@ -168,10 +168,13 @@ function Days({ days, judgeAt }: { days: KarthikDay[]; judgeAt: string }) {
         </div>
       ) : null}
       {days.map((d) => {
-        const pct = Number(d.pct);
+        // Dollars only (Karthik, 2026-09-30): a % of the day's opening balance
+        // shrinks as the balance grows while every trade stays $50.
+        const pnl = Number(d.pnl_usd);
         return (
           <div
             key={d.n}
+            data-testid={`day-${d.n}`}
             className={`min-w-[104px] shrink-0 rounded-lg border p-2 ${
               d.running ? "border-dashed border-line" : "border-line"
             } bg-ink/[0.02]`}
@@ -181,15 +184,13 @@ function Days({ days, judgeAt }: { days: KarthikDay[]; judgeAt: string }) {
             </div>
             <div
               className={`mt-0.5 text-base font-semibold tabular-nums ${
-                pct >= 0 ? "text-up" : "text-down"
+                pnl >= 0 ? "text-up" : "text-down"
               }`}
             >
-              {pct >= 0 ? "+" : ""}
-              {pct.toFixed(2)}%
+              {pnl >= 0 ? "+" : ""}
+              {usd(d.pnl_usd)}
             </div>
-            <div className="text-[11px] tabular-nums text-ink-dim">
-              {usd(d.pnl_usd)} · {d.trades} trades
-            </div>
+            <div className="text-[11px] tabular-nums text-ink-dim">{d.trades} trades</div>
           </div>
         );
       })}
