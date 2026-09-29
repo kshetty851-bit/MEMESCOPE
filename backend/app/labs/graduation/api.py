@@ -1430,10 +1430,10 @@ async def fresh_held(book: str = "", db: AsyncSession = Depends(get_db)) -> Fres
     return out
 
 
-#: The trade sizes Karthik's page compares, each on the balance he chose for
-#: it (25 Sep): $100 behind the small sizes, $200 behind $100, $400 behind
-#: $200.
-KARTHIK_WHATIF_SIZES = ((10, 100), (20, 100), (25, 100), (50, 100), (100, 200), (200, 400))
+#: The trade sizes Karthik's page compares, each on twice its size, as the
+#: book itself runs $50 on $100 (Karthik, 2026-09-30: "$10 on $20, $20 on
+#: $40, $25 on $50"; the small sizes sat on $100 before).
+KARTHIK_WHATIF_SIZES = ((10, 20), (20, 40), (25, 50), (50, 100), (100, 200), (200, 400))
 #: The pool floors across the page's grid (Karthik, 2026-09-27).
 #: Karthik, 2026-09-30: "remove 25k 50k ... 300k 500k", keep 200k.
 KARTHIK_GRID_FLOORS = (75_000, 100_000, 150_000, 200_000)
