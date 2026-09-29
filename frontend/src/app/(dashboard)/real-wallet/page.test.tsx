@@ -232,6 +232,24 @@ describe("RealWalletPage without signing in", () => {
     expect(screen.getByText("0.049800")).toBeInTheDocument();
   });
 
+  it("shows the balance with an open trade included, and splits it underneath", async () => {
+    // 0.8 SOL free at $97 = $77.60, plus a trade worth $51.20 now.
+    serve({ status: status({ sol_balance: 0.8, balance_usd: 77.6, open_trade_usd: 51.2,
+      total_usd: 128.8, total_sol: 1.327835 }) });
+    await renderLoaded();
+    expect(screen.getByText("1.327835")).toBeInTheDocument();
+    expect(screen.getByText("$128.80", { exact: false })).toBeInTheDocument();
+    expect(screen.getByTestId("balance-split")).toHaveTextContent(
+      "incl. $51.20 in an open trade (at what it would sell for now) · $77.60 free (0.8000 SOL)");
+  });
+
+  it("shows the plain balance when no trade is open", async () => {
+    serve({ status: status({ open_trade_usd: 0, total_usd: 4.83, total_sol: 0.0498 }) });
+    await renderLoaded();
+    expect(screen.getByText("0.049800")).toBeInTheDocument();
+    expect(screen.queryByTestId("balance-split")).not.toBeInTheDocument();
+  });
+
   it("claims nothing about the wallet before it has been read", () => {
     vi.mocked(api.get).mockReturnValue(new Promise(() => {}));
     render(<RealWalletPage />, { wrapper });
