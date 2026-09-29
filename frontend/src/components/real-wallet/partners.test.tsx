@@ -28,23 +28,21 @@ describe("Karthik & Rafiq's box", () => {
     expect(box).toHaveTextContent("since 28 Sep, 3:00 PM (Dubai)");
   });
 
-  it("shows each partner in SOL at today's price, and nothing in SOL without a price", () => {
-    const withSol: Partners = {
-      ...data, sol_usd: "200.00", total_put_in_sol: "0.8457", total_profit_sol: "0.0575",
-      total_now_sol: "0.9032", total_now_value_usd: "180.64",
+  it("leads with what the wallet is worth now, in dollars and SOL", () => {
+    const worth: Partners = {
+      ...data, sol_usd: "116.61", value_pct: "37.63", open_cost_usd: "0.00",
+      total_put_in_sol: "0.8457", total_value_usd: "137.63", total_value_profit_usd: "37.63",
+      total_value_sol: "1.1803", total_value_profit_sol: "0.3227",
       partners: data.partners.map((p) => ({
-        ...p, put_in_sol: "0.4229", profit_sol: "0.0288", now_sol: "0.4516", now_value_usd: "90.32",
+        ...p, put_in_sol: "0.4229", value_usd: "68.82", value_profit_usd: "18.82",
+        value_sol: "0.5901", value_profit_sol: "0.1614",
       })),
     };
-    const { unmount } = render(<PartnersCard data={withSol} />);
+    render(<PartnersCard data={worth} />);
     const box = screen.getByTestId("partners");
-    expect(box).toHaveTextContent("Karthik+$5.75+0.0288 SOLput in $50.00 (0.4229 SOL) · now $55.75");
-    expect(box).toHaveTextContent("holds 0.4516 SOL ≈ $90.32 at today's SOL price");
-    expect(box).toHaveTextContent("+0.0575 SOL");
-    expect(box).toHaveTextContent("($200.00 per SOL)");
-    unmount();
-    render(<PartnersCard data={data} />);
-    expect(screen.getByTestId("partners")).not.toHaveTextContent("SOL price (");
-    expect(screen.getByTestId("partners")).not.toHaveTextContent("at today's SOL price");
+    expect(box).toHaveTextContent(
+      "Karthik+$18.82+0.1614 SOLput in $50.00 (0.4229 SOL) · now $68.82 (0.5901 SOL)from trades +$5.75");
+    expect(box).toHaveTextContent("Together+$37.63+0.3227 SOL$100.00 → $137.63 (1.1803 SOL) · +37.63%");
+    expect(box).toHaveTextContent("($116.61 per SOL)");
   });
 });
