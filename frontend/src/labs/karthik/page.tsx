@@ -326,9 +326,7 @@ function SizeGrid({ data }: { data: KarthikBook }) {
         <p className="mt-2 text-[11px] leading-relaxed text-ink-dim">
           Each cell is its own book from {day(data.started_at)} at that size, one trade at a
           time, buying only pools at or above that floor. Hover a cell for its trades, rugs
-          and lowest balance. * These floors include the $25k–$75k pools this book skips;
-          those trades were rebuilt from price snapshots until 26 Sep (they read about a
-          point a trade too kind) and taken live since. A look back, not a test.
+          and lowest balance. A look back, not a test.
         </p>
       </div>
     </Panel>
@@ -538,7 +536,7 @@ export function MoneyIn({ flows }: { flows: KarthikFlows | undefined }) {
 }
 
 /** Pool floors, as the grid below uses them: each counts every trade at or above it. */
-const POOL_FLOORS = [75_000, 100_000, 150_000, 200_000, 300_000, 500_000];
+const POOL_FLOORS = [75_000, 100_000, 150_000, 200_000];
 
 /** Under the count: how many of the book's trades each pool floor took, and
     what they made (Karthik, 2026-09-27: "75k+, 100k+ like this", not bands).

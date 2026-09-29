@@ -1435,9 +1435,9 @@ async def fresh_held(book: str = "", db: AsyncSession = Depends(get_db)) -> Fres
 #: $200.
 KARTHIK_WHATIF_SIZES = ((10, 100), (20, 100), (25, 100), (50, 100), (100, 200), (200, 400))
 #: The pool floors across the page's grid (Karthik, 2026-09-27).
-KARTHIK_GRID_FLOORS = (25_000, 50_000, 75_000, 100_000, 150_000, 200_000, 300_000, 500_000)
+#: Karthik, 2026-09-30: "remove 25k 50k ... 300k 500k", keep 200k.
+KARTHIK_GRID_FLOORS = (75_000, 100_000, 150_000, 200_000)
 #: The arms running his rule on the $25-75k pools his book skips.
-KARTHIK_BAND_BOOKS = ("KARTHIK_Q25_5M", "KARTHIK_Q50_5M")
 
 
 def _one_at_a_time(rows: Sequence[Any]) -> list[Any]:
@@ -1493,21 +1493,17 @@ def _pools_words() -> str:
 
 
 def _karthik_whatif(rows: Sequence[Any], sol: Decimal | None, *, capital: float,
-                    ticket: float, cents: Decimal,
-                    small: Sequence[Any] = ()) -> dict[str, Any]:
+                    ticket: float, cents: Decimal) -> dict[str, Any]:
     """The book's rule at every trade size and every pool floor, one grid
-    (Karthik, 2026-09-27: "remove the side checks ... 25k+, 50k+, 75k+ (this
-    book), 100k+, 150k+, 200k+, 300k+, 500k+").
+    (Karthik, 2026-09-27; floors cut to $75k-$200k on 2026-09-30).
 
     Every cell is its own walk from the book's start, on the balance its size
     is paired with, ONE TRADE AT A TIME on the pools at or above its floor: a
     floor that never bought a shallow coin was free for the next deep one, so
     a cell is never the book's trades filtered afterwards. `rows` are the
-    $75k+ signals his arm took; `small` are the arms running the same rule on
-    $25-75k pools (seeded from day 1 by replay). Nothing here changes what the
-    book trades.
+    $75k+ signals his arm took. Nothing here changes what the book trades.
     """
-    signals = sorted([*small, *rows], key=lambda r: r.opened_at)
+    signals = sorted(rows, key=lambda r: r.opened_at)
 
     def cell(floor: int, size: float, capital: float) -> dict[str, Any]:
         sub = [r for r in signals if float(r.liq_open_usd or 0) >= floor]
@@ -1646,15 +1642,6 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
         select(GradPostgradSample.price_usd / GradPostgradSample.price_native)
         .where(GradPostgradSample.price_usd > 0, GradPostgradSample.price_native > 0)
         .order_by(GradPostgradSample.ts.desc()).limit(1))
-    # His rule on the pools his book skips ($25-75k), for the pool-size splits.
-    small = (await db.scalars(
-        select(GradPaperPosition)
-        .where(GradPaperPosition.book.in_(KARTHIK_BAND_BOOKS),
-               GradPaperPosition.closed_at.is_not(None),
-               GradPaperPosition.excluded.is_(None),
-               GradPaperPosition.net_return.is_not(None),
-               GradPaperPosition.opened_at >= spec.start)
-        .order_by(GradPaperPosition.opened_at))).all()
     # One trade at a time, from the first day (Karthik, 2026-09-25): chosen
     # after WOTF, which the rule would have let go because LESGO was still
     # held. Replayed from the start, so the days before it are a look back.
@@ -1662,7 +1649,6 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     # from day 1 on the book AND the grid: a coin bought more than two minutes
     # after it graduated, or of unknown age, never happened. EVO was 186s.
     rows = [r for r in rows if _fresh_entry(r)]
-    small = [r for r in small if _fresh_entry(r)]
     # Every $75k+ signal his arm took: what the grid beside the book reads.
     signals = rows
     # The book counts only its pool range (KARTHIK_BOOK_POOLS, 2026-09-26).
@@ -1743,7 +1729,7 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
         "days": _karthik_days(took, spec.start, float(spec.capital_usd), cents),
         # The same trades at other sizes, and on $150k+ pools only. A check,
         # shown beside the book; the book itself stays on its own rule.
-        "whatif": _karthik_whatif(signals, sol, small=small,
+        "whatif": _karthik_whatif(signals, sol,
                                   capital=float(spec.capital_usd),
                                   ticket=float(spec.ticket_usd), cents=cents),
         # The rows the BOOK bought, with the money the book made on them --
