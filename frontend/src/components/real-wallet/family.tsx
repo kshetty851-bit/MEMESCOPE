@@ -196,45 +196,39 @@ export function FamilySection() {
       </Link>
     );
   };
+  // JUPITER (Karthik, 2026-09-29: "put all this inside JUPITER folder with
+  // password, i dont want to display all this"): closed, the section is one
+  // box and a password field — no plan, no wallets, not even their count. The
+  // password is the family investment one.
+  if (!investmentOpen) {
+    return (
+      <section className="mt-6 rounded-lg border border-line p-5" data-testid="jupiter">
+        <p className="text-label text-accent">JUPITER</p>
+        <p className="mt-1 text-xs text-ink-3">Locked. Enter the password to open.</p>
+        <UsersUnlock onOpen={refresh} label="JUPITER password" id="jupiter-password" />
+      </section>
+    );
+  }
   return (
-    <section className="mt-6 rounded-lg border border-line p-5">
-      <p className="text-label text-accent">Family investment</p>
-      <p className="mt-1 max-w-2xl text-sm text-ink-3">
-        Each wallet has its own address, balance, trade size, coin size and on/off, and copies your
-        strategy. Withdrawals can only go to your address.
-      </p>
-      <div className="mt-3 max-w-2xl rounded-md bg-surface p-3 text-sm text-ink-2" data-testid="family-plan">
-        <p className="font-medium text-ink">The $500 plan</p>
-        <ul className="mt-1 list-disc space-y-0.5 pl-5">
-          <li>USER 1 – USER 4: $50 trades, only coins worth $1M – $20M.</li>
-          <li>USER 5 – USER 7: $100 trades, only coins worth $5M – $100M.</li>
-          <li>Never a coin worth $100M or more, at most $250 in one coin across every wallet, and at
-            most two wallets of one group in the same coin.</li>
-        </ul>
-        <p className="mt-1 text-xs text-ink-3">
-          Each wallet keeps a little SOL for network fees, so deposit a couple of dollars over its
-          trade size. Every wallet stays off until you press Start on its page.
-        </p>
+    <section className="mt-6 rounded-lg border border-line p-5" data-testid="jupiter">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p className="text-label text-accent">JUPITER</p>
+        {lock}
       </div>
+      <p className="mt-1 max-w-2xl text-sm text-ink-3">
+        Family investment. Each wallet has its own address, balance, trade size, coin size and
+        on/off, and copies your strategy. Withdrawals can only go to your address. Deposit a couple
+        of dollars over a wallet&apos;s trade size for network fees; a wallet trades only after you
+        press Start on its page.
+      </p>
       <div className="mt-4 rounded-md border border-accent/40 p-4" data-testid="investment-area">
-        <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <p className="text-sm font-medium text-ink">USER 1 – USER 7</p>
-          {investmentOpen ? lock : null}
-        </div>
-        {investmentOpen ? (
-          <div className="mt-3 flex flex-wrap gap-2">{INVESTMENT.map(link)}</div>
-        ) : (
-          <>
-            <p className="mt-1 text-xs text-ink-3">Locked. Enter the family investment password to open.</p>
-            <UsersUnlock onOpen={refresh} label="Family investment password" id="investment-password" />
-          </>
-        )}
+        <p className="text-sm font-medium text-ink">USER 1 – USER 7</p>
+        <div className="mt-3 flex flex-wrap gap-2">{INVESTMENT.map(link)}</div>
       </div>
 
       <div className="mt-5 rounded-md border border-line p-4" data-testid="users-locked-area">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <p className="text-sm font-medium text-ink">USER 8 – USER 10 and fees</p>
-          {unlocked ? lock : null}
         </div>
         {!unlocked ? (
           <>
@@ -786,11 +780,11 @@ export function FamilyMemberPage({ member }: { member: string }) {
       {needsPassword ? (
         <div className="mt-4">
           <p className="text-sm text-ink-3">
-            Enter the {INVESTMENT.includes(key) ? "family investment" : "users"} password to open {title(key)}.
+            Enter the {INVESTMENT.includes(key) ? "JUPITER" : "users"} password to open {title(key)}.
           </p>
           <UsersUnlock
             onOpen={() => void view.refetch()}
-            label={INVESTMENT.includes(key) ? "Family investment password" : "Users password"}
+            label={INVESTMENT.includes(key) ? "JUPITER password" : "Users password"}
           />
         </div>
       ) : refused ? (
