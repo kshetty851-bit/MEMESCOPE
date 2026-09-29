@@ -61,6 +61,10 @@ type WalletStatus = {
   sol_price_usd: number | null;
   sol_price_fresh: boolean;
   balance_usd: number | null;
+  /** The owner's open trades at what they would sell for now; 0 when none. */
+  open_trade_usd?: number;
+  total_usd?: number | null;
+  total_sol?: number | null;
   token_balances: Array<{
     token_account: string;
     mint_address: string;
@@ -479,6 +483,9 @@ function BalanceCard({
   const [copied, setCopied] = useState(false);
   const address = data?.public_key ?? null;
   const balance = data?.sol_balance;
+  // With a trade open, the headline is the balance PLUS the trade (Karthik,
+  // 2026-09-29), so it does not drop by a trade's size for five minutes.
+  const inTrade = (data?.open_trade_usd ?? 0) > 0 && data?.total_usd != null;
   const reserve = Number(data?.limits?.min_sol_fee_reserve ?? 0);
   const ceiling = Number(data?.limits?.max_balance_sol ?? 0);
   const overCeiling =
@@ -503,13 +510,15 @@ function BalanceCard({
             {data?.rpc?.verified ? "" : " · CHAIN NOT VERIFIED"}
           </p>
           <p className="mt-2 text-4xl font-medium tabular-nums text-ink">
-            {balance != null ? balance.toFixed(6) : "—"}
+            {inTrade && data?.total_sol != null
+              ? data.total_sol.toFixed(6)
+              : balance != null ? balance.toFixed(6) : "—"}
             <span className="ml-2 text-lg text-ink-3">SOL</span>
           </p>
           <p className="mt-1 text-lg tabular-nums text-ink-2">
             {data?.balance_usd != null ? (
               <>
-                ${data.balance_usd.toFixed(2)}
+                ${(inTrade ? data.total_usd! : data.balance_usd).toFixed(2)}
                 <span className="ml-2 text-xs text-ink-3">
                   at ${data.sol_price_usd?.toFixed(2)}/SOL
                   {data.sol_price_fresh ? "" : " · PRICE STALE"}
@@ -520,6 +529,12 @@ function BalanceCard({
               <span className="text-sm text-ink-3">USD unavailable — no fresh SOL price</span>
             )}
           </p>
+          {inTrade ? (
+            <p className="mt-1 text-xs tabular-nums text-ink-3" data-testid="balance-split">
+              incl. ${data!.open_trade_usd!.toFixed(2)} in an open trade (at what it would sell for
+              now) · ${data!.balance_usd!.toFixed(2)} free ({balance?.toFixed(4)} SOL)
+            </p>
+          ) : null}
           {address ? (
             <button
               type="button"

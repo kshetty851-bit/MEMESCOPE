@@ -13,8 +13,9 @@ opened with — the same rule as Karthik's Lab.
 WHAT IT IS WORTH NOW (Karthik, 2026-09-29: "show current profit calculating
 SOL current value ... divide as per the 37.63 bcuz its fluctuate as per SOL
 value"): the headline profit is the wallet's value now — its SOL at today's
-price, plus what an open trade cost, since that money is in a coin for five
-minutes and not in SOL — minus the $100, split half and half. It moves with
+price, plus an open trade at what it would sell for now, since that money is
+in a coin for five minutes and not in SOL — minus the $100, split half and
+half. It moves with
 SOL's price. The trading profit above stays beside it, and the days are still
 trading profit. A deposit or withdrawal after the start would show here as
 profit or loss; there has been none.
@@ -150,7 +151,8 @@ async def summary(session: AsyncSession, now: datetime | None = None, *,
                 RealWalletPosition.closed_at,
                 pnl,
                 RealWalletPosition.status,
-                RealWalletPosition.entry_price_usd * RealWalletPosition.quantity,
+                RealWalletPosition.entry_price_usd * RealWalletPosition.quantity
+                * func.coalesce(RealWalletPosition.last_exec_multiple, 1),
             ).where(
                 RealWalletPosition.opened_at >= START,
                 or_(
@@ -165,6 +167,7 @@ async def summary(session: AsyncSession, now: datetime | None = None, *,
         from app.real_wallet import sol_price
 
         sol_usd = await sol_price.current_usd(now)
+    # An open trade at what it would sell for now, the same as the balance card.
     open_cost = sum((Decimal(r[4] or 0) for r in rows if r[3] == "OPEN"), Decimal(0))
     return book([tuple(r[:4]) for r in rows], now, sol_usd,
                 wallet_sol=wallet_sol, open_cost_usd=open_cost)

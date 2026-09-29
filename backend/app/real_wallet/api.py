@@ -552,6 +552,10 @@ async def status(viewer: OptionalUser, session: DbSession) -> dict[str, object]:
     def amount(value: Decimal | None) -> str | None:
         return None if value is None else _decimal(value)
 
+    open_trade_usd = open_trade_value(positions, public_key)
+    balance_usd = (Decimal(str(balance_sol)) * Decimal(str(sol_price.usd))
+                   if balance_sol is not None and sol_price is not None else None)
+
     return {
         "public_key": public_key or None,
         "address_valid": address_valid,
@@ -571,6 +575,14 @@ async def status(viewer: OptionalUser, session: DbSession) -> dict[str, object]:
             float(Decimal(str(balance_sol)) * sol_price.usd)
             if balance_sol is not None and sol_price is not None else None
         ),
+        # The balance plus the open trade, so the headline does not drop by a
+        # trade's size for the five minutes it is in a coin.
+        "open_trade_usd": float(open_trade_usd.quantize(Decimal("0.01"))),
+        "total_usd": (None if balance_usd is None
+                      else float((balance_usd + open_trade_usd).quantize(Decimal("0.01")))),
+        "total_sol": (None if balance_usd is None or not sol_price
+                      else float(Decimal(str(balance_sol))
+                                 + open_trade_usd / Decimal(str(sol_price.usd)))),
         "token_balances": token_balances,
         "balance_error": balance_error,
         "mode": settings.REAL_WALLET_EXECUTION_MODE,
@@ -684,6 +696,22 @@ async def status(viewer: OptionalUser, session: DbSession) -> dict[str, object]:
             for position in positions
         ],
     }
+
+
+def open_trade_value(positions, owner: str) -> Decimal:
+    """The owner's open trades at what they would sell for now.
+
+    Karthik, 2026-09-29: "if there is open trade, make sure the main balance
+    shows including the value of open trade". The exit driver's executable
+    multiple, or cost until the first mark; a NULL wallet is the owner's.
+    ponytail: ignores a partial sell's banked proceeds; this strategy never
+    sells in parts.
+    """
+    return sum(
+        (p.entry_price_usd * p.quantity * (p.last_exec_multiple or Decimal(1))
+         for p in positions
+         if p.status == "OPEN" and p.wallet_public_key in (None, owner)),
+        Decimal(0))
 
 
 @router.post(
