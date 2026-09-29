@@ -27,4 +27,24 @@ describe("Karthik & Rafiq's box", () => {
     expect(box).toHaveTextContent("Day 1+1.50%+$1.50 · 2 trades");
     expect(box).toHaveTextContent("since 28 Sep, 3:00 PM (Dubai)");
   });
+
+  it("shows each partner in SOL at today's price, and nothing in SOL without a price", () => {
+    const withSol: Partners = {
+      ...data, sol_usd: "200.00", total_put_in_sol: "0.8457", total_profit_sol: "0.0575",
+      total_now_sol: "0.9032", total_now_value_usd: "180.64",
+      partners: data.partners.map((p) => ({
+        ...p, put_in_sol: "0.4229", profit_sol: "0.0288", now_sol: "0.4516", now_value_usd: "90.32",
+      })),
+    };
+    const { unmount } = render(<PartnersCard data={withSol} />);
+    const box = screen.getByTestId("partners");
+    expect(box).toHaveTextContent("Karthik+$5.75+0.0288 SOLput in $50.00 (0.4229 SOL) · now $55.75");
+    expect(box).toHaveTextContent("holds 0.4516 SOL ≈ $90.32 at today's SOL price");
+    expect(box).toHaveTextContent("+0.0575 SOL");
+    expect(box).toHaveTextContent("($200.00 per SOL)");
+    unmount();
+    render(<PartnersCard data={data} />);
+    expect(screen.getByTestId("partners")).not.toHaveTextContent("SOL price (");
+    expect(screen.getByTestId("partners")).not.toHaveTextContent("at today's SOL price");
+  });
 });
