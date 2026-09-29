@@ -10,9 +10,14 @@ price moving is not counted, and a later deposit or withdrawal is not profit.
 The days are 24-hour windows from 15:00 Dubai, each day's % of the balance it
 opened with — the same rule as Karthik's Lab.
 
-In SOL too (Karthik, 2026-09-28): each partner put in half of 0.8457 SOL; the
-profit is turned into SOL at today's price, and the SOL they now hold is also
-shown at today's price — which, unlike the dollar figures, does move with SOL.
+WHAT IT IS WORTH NOW (Karthik, 2026-09-29: "show current profit calculating
+SOL current value ... divide as per the 37.63 bcuz its fluctuate as per SOL
+value"): the headline profit is the wallet's value now — its SOL at today's
+price, plus what an open trade cost, since that money is in a coin for five
+minutes and not in SOL — minus the $100, split half and half. It moves with
+SOL's price. The trading profit above stays beside it, and the days are still
+trading profit. A deposit or withdrawal after the start would show here as
+profit or loss; there has been none.
 """
 
 from __future__ import annotations
@@ -51,6 +56,8 @@ def book(
     rows: list[tuple[datetime, datetime | None, Decimal | None, str]],
     now: datetime,
     sol_usd: Decimal | None = None,
+    wallet_sol: Decimal | None = None,
+    open_cost_usd: Decimal = Decimal(0),
 ) -> dict[str, object]:
     """The partnership from (opened_at, closed_at, pnl, status) rows opened
     since START. Pure, so the arithmetic is tested without a database."""
@@ -83,20 +90,27 @@ def book(
             }
         )
         n += 1
+    # The wallet now, at today's price: None without a price or a balance.
+    worth = (None if not sol_usd or wallet_sol is None
+             else Decimal(wallet_sol) * sol_usd + open_cost_usd)
+
     def in_sol(share: Decimal) -> dict[str, str | None]:
-        """A partner's (or, share 1, the whole) SOL: None without a price."""
-        put_in = CAPITAL_SOL * share
-        if not sol_usd:
-            return {"put_in_sol": _sol(put_in), "profit_sol": None, "now_sol": None,
-                    "now_value_usd": None}
-        made = profit * share / sol_usd
-        return {"put_in_sol": _sol(put_in), "profit_sol": _sol(made),
-                "now_sol": _sol(put_in + made),
-                "now_value_usd": _money((put_in + made) * sol_usd)}
+        """A partner's (or, share 1, the whole) value now, in dollars and SOL."""
+        out: dict[str, str | None] = {"put_in_sol": _sol(CAPITAL_SOL * share),
+                                      "value_usd": None, "value_profit_usd": None,
+                                      "value_sol": None, "value_profit_sol": None}
+        if worth is None:
+            return out
+        mine, made = worth * share, (worth - CAPITAL) * share
+        return {**out, "value_usd": _money(mine), "value_profit_usd": _money(made),
+                "value_sol": _sol(mine / sol_usd), "value_profit_sol": _sol(made / sol_usd)}
 
     return {
         "started_at": START.isoformat(),
         "sol_usd": None if not sol_usd else _money(Decimal(sol_usd)),
+        "value_pct": (None if worth is None
+                      else str(((worth - CAPITAL) / CAPITAL * 100).quantize(CENT))),
+        "open_cost_usd": _money(open_cost_usd),
         **{f"total_{k}": v for k, v in in_sol(Decimal(1)).items()},
         "capital_usd": _money(CAPITAL),
         "profit_usd": _money(profit),
@@ -120,7 +134,11 @@ def book(
     }
 
 
-async def summary(session: AsyncSession, now: datetime | None = None) -> dict[str, object]:
+async def summary(session: AsyncSession, now: datetime | None = None, *,
+                  wallet_sol: Decimal | None = None,
+                  sol_usd: Decimal | None = None) -> dict[str, object]:
+    """`wallet_sol` and `sol_usd` are the ones the page's balance was read
+    with, so the box and the balance agree to the cent."""
     owner = settings.REAL_WALLET_PUBLIC_KEY.strip()
     pnl = func.coalesce(
         RealWalletPosition.realised_net_pnl_usd, RealWalletPosition.realised_gross_pnl_usd
@@ -132,6 +150,7 @@ async def summary(session: AsyncSession, now: datetime | None = None) -> dict[st
                 RealWalletPosition.closed_at,
                 pnl,
                 RealWalletPosition.status,
+                RealWalletPosition.entry_price_usd * RealWalletPosition.quantity,
             ).where(
                 RealWalletPosition.opened_at >= START,
                 or_(
@@ -142,9 +161,13 @@ async def summary(session: AsyncSession, now: datetime | None = None) -> dict[st
         )
     ).all()
     now = now or datetime.now(UTC)
-    from app.real_wallet import sol_price
+    if sol_usd is None:
+        from app.real_wallet import sol_price
 
-    return book([tuple(r) for r in rows], now, await sol_price.current_usd(now))
+        sol_usd = await sol_price.current_usd(now)
+    open_cost = sum((Decimal(r[4] or 0) for r in rows if r[3] == "OPEN"), Decimal(0))
+    return book([tuple(r[:4]) for r in rows], now, sol_usd,
+                wallet_sol=wallet_sol, open_cost_usd=open_cost)
 
 
 __all__ = ["CAPITAL", "CAPITAL_SOL", "SHARES", "START", "book", "summary"]

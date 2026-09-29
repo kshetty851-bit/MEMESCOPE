@@ -641,7 +641,10 @@ async def status(viewer: OptionalUser, session: DbSession) -> dict[str, object]:
         # Every real trade, not the latest 50 below, and the wallet's worth
         # when the first began; None until there is a first trade.
         # Karthik and Rafiq's 50-50 from 28 Sep 15:00 Dubai (`partners`).
-        "partners": await partners.summary(session),
+        "partners": await partners.summary(
+            session, now,
+            wallet_sol=None if balance_sol is None else Decimal(str(balance_sol)),
+            sol_usd=None if sol_price is None else Decimal(str(sol_price.usd))),
         "since_first_trade": None if since is None else {
             "first_trade_at": since["first_trade_at"],
             "trades": since["trades"], "won": since["won"], "lost": since["lost"],

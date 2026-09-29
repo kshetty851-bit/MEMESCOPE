@@ -62,19 +62,30 @@ def test_the_start_is_three_pm_dubai_on_the_28th():
     assert str(partners.CAPITAL) == "100"
 
 
-def test_each_partner_is_shown_in_sol_at_todays_price():
-    rows = [(START + H, START + 1.1 * H, D("20.00"), "CLOSED")]
-    out = book(rows, now=START + 2 * H, sol_usd=D("200"))
+def test_profit_now_is_the_wallets_value_at_todays_sol_price_split_in_half():
+    """Karthik, 2026-09-29: the balance is $137.63, so each has made $18.815."""
+    rows = [(START + H, START + 1.1 * H, D("38.64"), "CLOSED")]
+    # 1.1803 SOL at $116.61 = $137.63.
+    out = book(rows, now=START + 2 * H, sol_usd=D("116.61"), wallet_sol=D("1.180259"))
+    assert out["total_value_usd"] == "137.63" and out["value_pct"] == "37.63"
     karthik = out["partners"][0]
-    # Half of 0.8457 SOL in; half of $20 = $10 = 0.05 SOL made at $200.
-    assert (karthik["put_in_sol"], karthik["profit_sol"], karthik["now_sol"]) == \
-        ("0.4229", "0.0500", "0.4729")
-    assert karthik["now_value_usd"] == "94.57"      # 0.47285 SOL x $200
-    assert (out["total_put_in_sol"], out["total_now_sol"], out["sol_usd"]) == \
-        ("0.8457", "0.9457", "200.00")
+    assert (karthik["value_usd"], karthik["value_profit_usd"]) == ("68.82", "18.82")
+    assert karthik["value_sol"] == "0.5901" and karthik["put_in_sol"] == "0.4229"
+    assert karthik["profit_usd"] == "19.32"          # the trading profit, beside it
 
 
-def test_no_sol_price_means_no_sol_figures_rather_than_a_guess():
-    out = book([(START + H, START + 1.1 * H, D("20.00"), "CLOSED")], now=START + 2 * H)
-    assert out["partners"][0]["profit_sol"] is None and out["sol_usd"] is None
-    assert out["partners"][0]["put_in_sol"] == "0.4229"
+def test_an_open_trade_counts_at_what_it_cost():
+    """$50 is in a coin for five minutes, not in SOL: the value must not dip."""
+    out = book([], now=START + H, sol_usd=D("100"), wallet_sol=D("0.60"),
+               open_cost_usd=D("50"))
+    assert out["total_value_usd"] == "110.00" and out["open_cost_usd"] == "50.00"
+
+
+def test_no_price_or_no_balance_means_no_value_rather_than_a_guess():
+    rows = [(START + H, START + 1.1 * H, D("20.00"), "CLOSED")]
+    for out in (book(rows, now=START + 2 * H),
+                book(rows, now=START + 2 * H, sol_usd=D("200")),
+                book(rows, now=START + 2 * H, wallet_sol=D("1"))):
+        assert out["partners"][0]["value_profit_usd"] is None
+        assert out["value_pct"] is None
+        assert out["partners"][0]["put_in_sol"] == "0.4229"
