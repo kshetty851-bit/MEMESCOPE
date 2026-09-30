@@ -64,6 +64,18 @@ def _int(name: str, default: int) -> int:
 #: needs a key. `subscribeTokenTrade` is metered and is deliberately not used:
 #: progress comes from the chain instead, which costs nothing.
 PUMPPORTAL_WS_URL = "wss://pumpportal.fun/api/data"
+
+#: The on-chain BACKUP for graduations (Karthik, 2026-09-30): a free Solana
+#: websocket watching pump.fun's migration account, which every graduation's
+#: transaction carries. Not Helius — its credits are being cut to the free
+#: plan. Off with LAB_GRADUATION_CHAIN_MIGRATIONS=0.
+CHAIN_MIGRATIONS_WS_URL = (os.getenv("LAB_GRADUATION_CHAIN_WS_URL", "").strip()
+                           or "wss://api.mainnet-beta.solana.com")
+PUMP_MIGRATION_ACCOUNT = "39azUYFWPz3VHgKCf3VChUwbpURdCHRxjWVowf5jUJjg"
+
+
+def chain_migrations_enabled() -> bool:
+    return os.getenv("LAB_GRADUATION_CHAIN_MIGRATIONS", "1").strip() not in ("0", "false", "")
 #: Where the held-position watcher subscribes. The PUBLIC Solana node, on
 #: purpose and not as a fallback.
 #:
