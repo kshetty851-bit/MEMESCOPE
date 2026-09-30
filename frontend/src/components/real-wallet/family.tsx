@@ -7,6 +7,13 @@ import { useState } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { ApiError, api } from "@/lib/api-client";
 
+import {
+  SinceFirstTradeCard,
+  TradesTable,
+  type Position,
+  type SinceFirstTrade,
+} from "./trades";
+
 /**
  * THE USER WALLETS: USER 1 … USER 10 (the family wallets until 2026-09-27).
  *
@@ -270,14 +277,12 @@ interface OwnWallet {
   balance_error?: string | null;
 }
 
-interface OwnTrade {
-  mint: string;
-  status: "OPEN" | "CLOSED";
-  opened_at: string;
-  closed_at: string | null;
-  cost_usd: string | null;
-  pnl_usd: string | null;
-  exit_reason: string | null;
+interface WalletDay {
+  day: string;
+  running: boolean;
+  pnl_usd: string;
+  trades: number;
+  won: number;
 }
 
 interface OwnBook {
@@ -288,8 +293,10 @@ interface OwnBook {
   band_choices?: BandChoice[];
   today_pnl_usd: string | null;
   open_positions: number;
-  since_first_trade: { trades: number; won: number; lost: number; net_pnl_usd: string | null } | null;
-  trades_list: OwnTrade[];
+  open_trade_usd?: string | null;
+  since_first_trade: SinceFirstTrade | null;
+  days?: WalletDay[];
+  positions?: Position[];
 }
 
 interface FeeMonth {
@@ -516,47 +523,6 @@ function OwnWalletPanel({ member, wallet, book, isOwner, onDone }: {
             </p>
           ) : null}
 
-          <div className="mt-3 grid grid-cols-3 gap-2 text-sm">
-            <div>
-              <p className="text-xs text-ink-3">Profit so far</p>
-              <p className={`tabular-nums ${tone(book.since_first_trade?.net_pnl_usd)}`}>
-                {book.since_first_trade ? usd(book.since_first_trade.net_pnl_usd) : "—"}
-              </p>
-            </div>
-            <div>
-              <p className="text-xs text-ink-3">Today</p>
-              <p className={`tabular-nums ${tone(book.today_pnl_usd)}`}>{usd(book.today_pnl_usd)}</p>
-            </div>
-            <div>
-              <p className="text-xs text-ink-3">Trades</p>
-              <p className="tabular-nums text-ink">
-                {book.since_first_trade
-                  ? `${book.since_first_trade.trades} · ${book.since_first_trade.won} won`
-                  : "0"}
-                {book.open_positions ? ` · ${book.open_positions} open` : ""}
-              </p>
-            </div>
-          </div>
-
-          {book.trades_list.length ? (
-            <ul className="mt-3 divide-y divide-line text-xs">
-              {book.trades_list.slice(0, 20).map((t) => (
-                <li key={`${t.mint}-${t.opened_at}`} className="flex justify-between gap-2 py-1.5">
-                  <span className="font-mono text-ink-2">{short(t.mint)}</span>
-                  <span className="text-ink-3">
-                    {new Date(t.opened_at).toLocaleString(undefined, { timeZone: "Asia/Dubai",
-                      day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
-                  </span>
-                  <span className="text-ink-3">{usd(t.cost_usd)}</span>
-                  <span className={`tabular-nums ${tone(t.pnl_usd)}`}>
-                    {t.status === "OPEN" ? "open" : usd(t.pnl_usd)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="mt-3 text-xs text-ink-3">No trades from this wallet yet.</p>
-          )}
         </div>
       ) : null}
 
@@ -736,6 +702,76 @@ function FeePanel({ member, fee, onDone, canCollect = true }: {
 }
 
 /** One user's page. The server answers only Karthik, signed in. */
+/** "30 Sep" in Dubai. */
+function dayLabel(day: string): string {
+  return new Date(`${day}T12:00:00Z`)
+    .toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "Asia/Dubai" })
+    .replace("Sept", "Sep");
+}
+
+/**
+ * The same page as the main real wallet (Karthik, 2026-09-30): what the
+ * wallet is worth with its open trade, today, profit per day in dollars,
+ * since the first trade, and every trade open and closed.
+ */
+export function WalletDashboard({ book, wallet }: { book: OwnBook; wallet?: OwnWallet }) {
+  const open = Number(book.open_trade_usd ?? 0);
+  const free = wallet?.balance_usd != null ? Number(wallet.balance_usd) : null;
+  return (
+    <div data-testid="wallet-dashboard">
+      <section className="mt-6 grid gap-3 sm:grid-cols-3">
+        <div className="rounded-lg border border-line p-4">
+          <p className="text-label text-ink-3">Worth now</p>
+          <p className="mt-1 text-2xl tabular-nums text-ink">
+            {free != null ? usd(free + open) : "—"}
+          </p>
+          <p className="mt-1 text-xs text-ink-3">
+            {open > 0 ? `incl. ${usd(open)} in an open trade` : "nothing held right now"}
+          </p>
+        </div>
+        <div className="rounded-lg border border-line p-4">
+          <p className="text-label text-ink-3">Today (Dubai)</p>
+          <p className={`mt-1 text-2xl tabular-nums ${tone(book.today_pnl_usd)}`}>
+            {usd(book.today_pnl_usd)}
+          </p>
+        </div>
+        <div className="rounded-lg border border-line p-4">
+          <p className="text-label text-ink-3">Open now</p>
+          <p className="mt-1 text-2xl tabular-nums text-ink">{book.open_positions}</p>
+        </div>
+      </section>
+
+      {book.days?.length ? (
+        <div className="-mx-1 mt-4 flex gap-2 overflow-x-auto px-1 pb-1" data-testid="wallet-days">
+          {book.days.map((d) => (
+            <div
+              key={d.day}
+              className={`min-w-[104px] shrink-0 rounded-lg border p-2 ${
+                d.running ? "border-dashed border-line" : "border-line"
+              }`}
+            >
+              <div className="text-[10px] uppercase tracking-wider text-ink-3">
+                {dayLabel(d.day)}
+                {d.running ? " · so far" : ""}
+              </div>
+              <div className={`mt-0.5 text-base font-semibold tabular-nums ${tone(d.pnl_usd)}`}>
+                {Number(d.pnl_usd) >= 0 ? "+" : ""}
+                {usd(d.pnl_usd)}
+              </div>
+              <div className="text-[11px] tabular-nums text-ink-3">
+                {d.trades} trades{d.trades ? ` · ${d.won} won` : ""}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      <SinceFirstTradeCard since={book.since_first_trade} />
+      <TradesTable positions={book.positions ?? []} />
+    </div>
+  );
+}
+
 export function FamilyMemberPage({ member }: { member: string }) {
   const key = member.toUpperCase();
   const known = FAMILY.includes(key);
@@ -808,6 +844,7 @@ export function FamilyMemberPage({ member }: { member: string }) {
           onDone={() => void queryClient.invalidateQueries({ queryKey: ["real-wallet", "family", key] })}
         />
       ) : null}
+      {d?.own_book ? <WalletDashboard book={d.own_book} wallet={d.own_wallet} /> : null}
       {d?.fee ? (
         <FeePanel
           member={key}

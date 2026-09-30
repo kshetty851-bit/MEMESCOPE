@@ -24,7 +24,7 @@ from app.core.config import settings
 from app.core.exceptions import ConflictError, ServiceUnavailableError
 from app.core.logging import get_logger
 from app.models.real_wallet_family import RealWalletFamilyMember
-from app.real_wallet import family, family_wallets, user_fees, withdraw_service
+from app.real_wallet import family, family_wallets, user_fees, views, withdraw_service
 from app.real_wallet.balance import ExecutionWalletBalanceService
 from app.real_wallet.live_repository import LiveIntentRepository
 from app.real_wallet.mainnet_signer_client import (
@@ -102,7 +102,10 @@ def _money(value: Decimal | None) -> str | None:
 
 
 async def _own_book(session: DbSession, member: str, wallet: str) -> dict[str, object]:
-    """What the member's OWN wallet has traded: switch, size, record, trades.
+    """What the member's OWN wallet has traded, in the main wallet's own shape
+    (Karthik, 2026-09-30: "user 1 dashboard should be same as real wallet"):
+    switch and size, today, since the first trade, profit per day, and every
+    trade open and closed.
 
     Every figure is scoped to this wallet alone (`LiveIntentRepository`'s
     `wallet=`), so the owner's trades never appear here and this wallet's
@@ -111,7 +114,6 @@ async def _own_book(session: DbSession, member: str, wallet: str) -> dict[str, o
     row = await session.get(RealWalletFamilyMember, member)
     repo = LiveIntentRepository(session)
     now = datetime.now(UTC)
-    since = await repo.since_first_trade(wallet)
     positions = await repo.positions(limit=100, wallet=wallet)
     return {
         "enabled": bool(row and row.own_enabled),
@@ -121,20 +123,10 @@ async def _own_book(session: DbSession, member: str, wallet: str) -> dict[str, o
         "band_choices": _BAND_CHOICES,
         "today_pnl_usd": _money(await repo.realised_pnl_today(now, wallet)),
         "open_positions": await repo.open_positions_count(wallet),
-        "since_first_trade": None if since is None else {
-            "trades": since["trades"], "won": since["won"], "lost": since["lost"],
-            "net_pnl_usd": _money(since["net_pnl_usd"]),
-        },
-        "trades_list": [{
-            "mint": pos.mint_address,
-            "status": pos.status,
-            "opened_at": pos.opened_at.isoformat(),
-            "closed_at": pos.closed_at.isoformat() if pos.closed_at else None,
-            "cost_usd": _money(pos.entry_price_usd * pos.quantity),
-            "pnl_usd": _money(pos.realised_net_pnl_usd if pos.realised_net_pnl_usd is not None
-                              else pos.realised_gross_pnl_usd),
-            "exit_reason": pos.exit_reason,
-        } for pos in positions],
+        "open_trade_usd": _money(views.open_trade_value(positions, wallet)),
+        "since_first_trade": views.since_payload(await repo.since_first_trade(wallet)),
+        "days": views.days_payload(positions, now),
+        "positions": await views.positions_payload(session, positions),
     }
 
 
