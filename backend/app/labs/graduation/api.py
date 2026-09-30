@@ -1617,6 +1617,81 @@ def _flows(took: list, rows: dict[str, GradTradeFlow]) -> dict[str, Any]:
             "other_buyers": sum(f.other_buyers for f in got)}
 
 
+#: SOL a pump.fun curve holds when it graduates: 30 virtual SOL in, 115 at
+#: the 279.9M-virtual-token floor (`config` curve constants), so 85 real.
+GRADUATION_SOL = 85
+DUBAI = timedelta(hours=4)
+#: Finished days never change, so each is worked out once per process.
+_PUMPFUN_DAYS: dict[date, dict[str, Any]] = {}
+_PUMPFUN_TODAY: tuple[datetime, dict[str, Any]] | None = None
+_PUMPFUN_TODAY_TTL_S = 600
+
+_PUMPFUN_DAY_SQL = text("""
+    select
+      (select count(*) from grad_tokens
+        where first_seen_at >= :a and first_seen_at < :b) as launches,
+      count(m.mint) as graduations,
+      coalesce(sum(p.liq), 0) as pools_usd,
+      count(*) filter (where p.liq >= 75000) as pools_75k,
+      (select avg(sol_usd_at_open) from grad_paper_positions
+        where book = 'KARTHIK_QUIET_5M' and opened_at >= :a and opened_at < :b) as sol_usd
+    from grad_migrations m
+    left join lateral (
+      select s.liquidity_usd as liq from grad_postgrad_samples s
+      where s.mint = m.mint and s.source = 'dexscreener' and s.ts <= m.ts + interval '2 minutes'
+      order by s.ts desc limit 1) p on true
+    where m.ts >= :a and m.ts < :b
+""")
+
+
+async def _pumpfun_day(db: AsyncSession, day: date, sol_now: Decimal | None) -> dict[str, Any]:
+    a = datetime(day.year, day.month, day.day, tzinfo=UTC) - DUBAI
+    row = (await db.execute(_PUMPFUN_DAY_SQL, {"a": a, "b": a + timedelta(days=1)})).one()
+    sol = row.sol_usd or sol_now
+    return {
+        "day": day.isoformat(),
+        "launches": int(row.launches),
+        "graduations": int(row.graduations),
+        "into_curves_usd": (None if sol is None else
+                            str((Decimal(row.graduations * GRADUATION_SOL) * Decimal(sol))
+                                .quantize(Decimal(1)))),
+        "pools_usd": str(Decimal(row.pools_usd).quantize(Decimal(1))),
+        "pools_75k": int(row.pools_75k),
+    }
+
+
+@router.get("/karthik/pumpfun-days", summary="Money flowing into pump.fun, day by day")
+async def pumpfun_days(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+    """Every Dubai calendar day since Karthik's book opened (Karthik,
+    2026-09-30): coins launched, coins that graduated, the SOL paid into the
+    curves that graduated (85 each, at that day's SOL price), and the money in
+    the new pools two minutes after graduating. Newest first. Launches and
+    graduations are what this lab saw: an hour the server was down is missing.
+    """
+    global _PUMPFUN_TODAY
+    now = datetime.now(UTC)
+    spec = next(s for s in config.FRESH_BOOKS if s.book == "KARTHIK_QUIET_5M")
+    first, today = (spec.start + DUBAI).date(), (now + DUBAI).date()
+    sol_now = await db.scalar(
+        select(GradPostgradSample.price_usd / GradPostgradSample.price_native)
+        .where(GradPostgradSample.price_usd > 0, GradPostgradSample.price_native > 0)
+        .order_by(GradPostgradSample.ts.desc()).limit(1))
+    days: list[dict[str, Any]] = []
+    day = first
+    while day <= today:
+        if day == today:
+            if _PUMPFUN_TODAY is None or _PUMPFUN_TODAY[1]["day"] != day.isoformat() or (
+                    now - _PUMPFUN_TODAY[0]).total_seconds() >= _PUMPFUN_TODAY_TTL_S:
+                _PUMPFUN_TODAY = (now, await _pumpfun_day(db, day, sol_now))
+            days.append({**_PUMPFUN_TODAY[1], "running": True})
+        else:
+            if day not in _PUMPFUN_DAYS:
+                _PUMPFUN_DAYS[day] = await _pumpfun_day(db, day, sol_now)
+            days.append({**_PUMPFUN_DAYS[day], "running": False})
+        day += timedelta(days=1)
+    return {"graduation_sol": GRADUATION_SOL, "days": list(reversed(days))}
+
+
 @router.get("/karthik", summary="Karthik's own $500 book, and its judge date")
 async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     """His book alone, with the two things a balance cannot say.
