@@ -11,7 +11,7 @@ from types import SimpleNamespace
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, get_optional_user
 from app.core.config import settings
 from app.models.real_wallet_family import RealWalletFamilyMember
 from app.models.user import UserRole
@@ -32,14 +32,19 @@ def _password(monkeypatch):
     monkeypatch.setattr(family, "THROTTLE", family.Throttle(limit=3, window=600))
 
 
-async def test_nobody_but_the_admin_opens_a_user_wallet(app, db_session):
+async def test_the_password_opens_the_view_but_only_the_admin_moves_money(app, db_session):
+    """Karthik, 2026-09-30: JUPITER from any browser, signed in or not. The
+    password opens the view; every money action still needs the admin."""
     viewer = SimpleNamespace(role=UserRole.USER, email="friend@example.com", is_active=True)
     app.dependency_overrides[get_current_user] = lambda: viewer
+    app.dependency_overrides[get_optional_user] = lambda: None     # not signed in at all
     withdraw = {"sol_amount": "0.1", "confirmation_phrase": "WITHDRAW_TO_KARTHIK"}
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as client:
-        # Signed in, but not the admin: every route refuses.
-        assert (await client.get(URL)).status_code == 403
-        assert (await client.get(f"{URL}/user1")).status_code == 403
+        # The closed box is there for anyone; nothing in it without the password.
+        listed = await client.get(URL)
+        assert listed.status_code == 200 and listed.json()["members"] == []
+        assert (await client.get(f"{URL}/user1")).status_code == 401
+        # Money: the admin only, password or not.
         settings_body = {"enabled": True, "ticket_usd": "20"}
         assert (await client.post(f"{URL}/user1/own-settings",
                                   json=settings_body)).status_code == 403
@@ -51,6 +56,16 @@ async def test_nobody_but_the_admin_opens_a_user_wallet(app, db_session):
         # go in after the refusals.)
         db_session.add_all(RealWalletFamilyMember(name=n) for n in family.MEMBERS)
         await db_session.flush()
+        # Not signed in, with the JUPITER password: USER 1-7 open to look at.
+        opened = await client.post(f"{URL}/unlock", json={"password": "family seven"})
+        assert opened.status_code == 200, opened.text
+        seen = {"X-Users-Token": opened.json()["token"]}
+        assert [m["member"] for m in (await client.get(URL, headers=seen)).json()["members"]] \
+            == [f"USER{i}" for i in range(1, 8)]
+        assert (await client.get(f"{URL}/user1", headers=seen)).status_code == 200
+        assert (await client.post(f"{URL}/user1/own-settings", json=settings_body,
+                                  headers=seen)).status_code == 403
+        family.THROTTLE = family.Throttle(limit=3, window=600)
         viewer.role = UserRole.ADMIN
         # Signed in as the admin, but without either password: nothing.
         listed = await client.get(URL)

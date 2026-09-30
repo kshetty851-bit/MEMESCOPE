@@ -19,7 +19,7 @@ from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from app.api.deps import AdminUser, DbSession
+from app.api.deps import AdminUser, DbSession, OptionalUser
 from app.core.config import settings
 from app.core.exceptions import ConflictError, ServiceUnavailableError
 from app.core.logging import get_logger
@@ -39,6 +39,11 @@ from app.services.rpc.standard import StandardSolanaRPC
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/real-wallet/family", tags=["real-wallet"])
+# Seeing is the password's; acting is the admin's (Karthik, 2026-09-30: "doesnt
+# matter where i open i want to see that"). Unlocking, the list and a wallet's
+# page need only the JUPITER / users password, from any browser, signed in or
+# not. Starting, stopping, sizing, withdrawing and collecting fees still need
+# the admin sign-in as well — a guessed password can look, never move money.
 
 
 def _caller(request: Request) -> str:
@@ -52,7 +57,7 @@ def _caller(request: Request) -> str:
 def _unlocked(member: str, token: str | None) -> None:
     """Every user wallet needs its password as well as the admin sign-in."""
     if not family.opens(member, token):
-        which = ("family investment" if family.scope(member) == "investment"
+        which = ("JUPITER" if family.scope(member) == "investment"
                  else "users")
         raise HTTPException(status_code=401, detail=f"enter the {which} password first")
 
@@ -177,7 +182,7 @@ async def _charged(session: DbSession) -> None:
 
 
 @router.post("/unlock", summary="Trade the users password for a 12-hour token")
-async def unlock(payload: UnlockIn, request: Request, _: AdminUser,
+async def unlock(payload: UnlockIn, request: Request, _: OptionalUser,
                  x_users_token: str | None = Header(default=None)) -> dict[str, object]:
     """Either password. The new token keeps every lock the tab already opened."""
     who = _caller(request)
@@ -195,7 +200,7 @@ async def unlock(payload: UnlockIn, request: Request, _: AdminUser,
 
 
 @router.get("", summary="The user wallets, their fee rates, and the fees")
-async def members(session: DbSession, _: AdminUser,
+async def members(session: DbSession, _: OptionalUser,
                   x_users_token: str | None = Header(default=None)) -> dict[str, object]:
     """USER 1-7 with the family investment password; USER 8-10 and the fees
     with the users password."""
@@ -224,7 +229,7 @@ async def members(session: DbSession, _: AdminUser,
 
 
 @router.get("/{name}", summary="One member's own wallet")
-async def member_view(name: str, session: DbSession, _: AdminUser,
+async def member_view(name: str, session: DbSession, _: OptionalUser,
                       x_users_token: str | None = Header(default=None)) -> dict[str, object]:
     member = _member(name)
     _unlocked(member, x_users_token)
