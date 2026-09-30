@@ -30,7 +30,6 @@ from app.models.lab import LabDecision
 from app.models.real_wallet_execution import (
     RealWalletDevnetIntent,
     RealWalletDevnetQuote,
-    RealWalletLiveIntent,
     RealWalletPosition,
 )
 from app.models.user import User, UserRole
@@ -49,7 +48,7 @@ from app.real_wallet.devnet_workflow import (
 )
 from app.real_wallet.driver import RealWalletDriver
 from app.real_wallet.live_repository import LiveIntentRepository
-from app.real_wallet import partners, withdraw_service, withdrawal
+from app.real_wallet import partners, views, withdraw_service, withdrawal
 from app.real_wallet.mainnet_signer_client import (
     MainnetSignerRejectedError,
     MainnetSignerUnavailableError,
@@ -537,14 +536,6 @@ async def status(viewer: OptionalUser, session: DbSession) -> dict[str, object]:
     open_positions = await live.open_positions_count()
     health = await live.health()
     positions = await live.positions(limit=50)
-    exit_states: dict[uuid.UUID, str] = {
-        row.id: row.state for row in (await session.execute(
-            select(RealWalletLiveIntent.id, RealWalletLiveIntent.state).where(
-                RealWalletLiveIntent.id.in_(
-                    [p.exit_intent_id for p in positions if p.exit_intent_id])))).all()
-    }
-    symbols = await TokenRepository(session).get_many_by_mints(
-        list({p.mint_address for p in positions}))
     pnl_today = await live.realised_pnl_today(now)
     since = await live.since_first_trade()
     tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -657,61 +648,12 @@ async def status(viewer: OptionalUser, session: DbSession) -> dict[str, object]:
             session, now,
             wallet_sol=None if balance_sol is None else Decimal(str(balance_sol)),
             sol_usd=None if sol_price is None else Decimal(str(sol_price.usd))),
-        "since_first_trade": None if since is None else {
-            "first_trade_at": since["first_trade_at"],
-            "trades": since["trades"], "won": since["won"], "lost": since["lost"],
-            "open": since["open"],
-            **{key: None if since[key] is None
-               else _decimal(since[key].quantize(Decimal(places)))
-               for key, places in (("net_pnl_usd", "0.0001"),
-                                   ("traded_usd", "0.01"),
-                                   ("average_return_pct", "0.01"),
-                                   ("start_balance_sol", "0.000000001"),
-                                   ("start_value_usd", "0.01"),
-                                   ("return_pct", "0.01"))},
-        },
-        "positions": [
-            {
-                "id": str(position.id),
-                "mint_address": position.mint_address,
-                "symbol": (symbols[position.mint_address].symbol
-                           if position.mint_address in symbols else None),
-                "status": position.status,
-                "strategy_id": position.strategy_id,
-                "quantity": _decimal(position.quantity),
-                "cost_usd": _decimal(position.entry_price_usd * position.quantity),
-                "spent": amount(position.entry_actual_input_amount),
-                "received": amount(position.exit_actual_output_amount),
-                "realised_gross_pnl_usd": amount(position.realised_gross_pnl_usd),
-                "realised_net_pnl_usd": amount(position.realised_net_pnl_usd),
-                "exit_reason": position.exit_reason,
-                # What the sell is doing right now, for an open position.
-                "exit_state": (exit_states.get(position.exit_intent_id)
-                               if position.exit_intent_id else None),
-                "opened_at": position.opened_at,
-                "closed_at": position.closed_at,
-                "entry_signature": position.entry_transaction_signature,
-                "exit_signature": position.exit_transaction_signature,
-            }
-            for position in positions
-        ],
+        "since_first_trade": views.since_payload(since),
+        "positions": await views.positions_payload(session, positions),
     }
 
 
-def open_trade_value(positions, owner: str) -> Decimal:
-    """The owner's open trades at what they would sell for now.
-
-    Karthik, 2026-09-29: "if there is open trade, make sure the main balance
-    shows including the value of open trade". The exit driver's executable
-    multiple, or cost until the first mark; a NULL wallet is the owner's.
-    ponytail: ignores a partial sell's banked proceeds; this strategy never
-    sells in parts.
-    """
-    return sum(
-        (p.entry_price_usd * p.quantity * (p.last_exec_multiple or Decimal(1))
-         for p in positions
-         if p.status == "OPEN" and p.wallet_public_key in (None, owner)),
-        Decimal(0))
+open_trade_value = views.open_trade_value
 
 
 @router.post(

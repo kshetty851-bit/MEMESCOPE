@@ -15,7 +15,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), replace: 
 
 import { ApiError } from "@/lib/api-client";
 
-import { FamilyMemberPage } from "./family";
+import { FamilyMemberPage, WalletDashboard } from "./family";
 
 const ADDRESS = "7WctMGpqz1tGkYStBBjJRMnmuh9uwJubYV2tL4pLwRr9";
 
@@ -81,7 +81,7 @@ function book(enabled: boolean) {
   return {
     enabled, ticket_usd: "20", ticket_choices: ["10", "20", "50"], today_pnl_usd: "0.00",
     band: "any", band_choices: [{ key: "any", label: "Any size" }, { key: "1m-20m", label: "$1M – $20M" }],
-    open_positions: 0, since_first_trade: null, trades_list: [],
+    open_positions: 0, since_first_trade: null, positions: [], days: [],
   };
 }
 
@@ -217,5 +217,45 @@ describe("a locked user's page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open" }));
     expect(await screen.findByText(ADDRESS)).toBeInTheDocument();
     expect(window.sessionStorage.getItem("users-token")).toBe("t");
+  });
+});
+
+
+describe("a user wallet's dashboard, as the main wallet's", () => {
+  it("shows worth with the open trade, profit per day, and open and closed trades", () => {
+    render(
+      <WalletDashboard
+        wallet={{ address: ADDRESS, balance_usd: "150.00" }}
+        book={{
+          enabled: true, ticket_usd: "50", ticket_choices: ["50"], today_pnl_usd: "1.20",
+          open_positions: 1, open_trade_usd: "50.40", since_first_trade: null,
+          days: [
+            { day: "2026-09-30", running: true, pnl_usd: "1.20", trades: 1, won: 1 },
+            { day: "2026-09-29", running: false, pnl_usd: "-0.50", trades: 2, won: 1 },
+          ],
+          positions: [
+            { id: "o", mint_address: "OpenMint1111", symbol: "OPEN", status: "OPEN",
+              strategy_id: "G-QUIET", quantity: "1", cost_usd: "50", spent: "0.42",
+              received: null, realised_gross_pnl_usd: null, realised_net_pnl_usd: null,
+              exit_reason: null, exit_state: null, opened_at: "2026-09-30T19:00:00Z",
+              closed_at: null, entry_signature: "sigBuy", exit_signature: null },
+            { id: "c", mint_address: "DoneMint1111", symbol: "DONE", status: "CLOSED",
+              strategy_id: "G-QUIET", quantity: "1", cost_usd: "50", spent: "0.42",
+              received: "0.43", realised_gross_pnl_usd: "1.30", realised_net_pnl_usd: "1.20",
+              exit_reason: "time_0.0833h", exit_state: null, opened_at: "2026-09-30T18:00:00Z",
+              closed_at: "2026-09-30T18:05:00Z", entry_signature: "b", exit_signature: "s" },
+          ],
+        }}
+      />,
+    );
+    const dash = screen.getByTestId("wallet-dashboard");
+    expect(dash).toHaveTextContent("Worth now$200.40incl. $50.40 in an open trade");
+    const days = screen.getByTestId("wallet-days");
+    expect(days).toHaveTextContent("30 Sep · so far+$1.201 trades · 1 won");
+    expect(days).toHaveTextContent("29 Sep-$0.502 trades · 1 won");
+    expect(dash).toHaveTextContent("Open — 1");
+    expect(dash).toHaveTextContent("Closed — 1");
+    expect(screen.getByRole("link", { name: "DONE" })).toHaveAttribute(
+      "href", "https://dexscreener.com/solana/DoneMint1111");
   });
 });
