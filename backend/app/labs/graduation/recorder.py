@@ -65,6 +65,7 @@ from app.labs.graduation.postgrad import (
     _decimal,
 )
 from app.labs.graduation.sources import (
+    ChainMigrationStream,
     CurveRPC,
     HeldVaultStream,
     MarketSource,
@@ -88,6 +89,7 @@ class GraduationRecorder:
         self,
         *,
         stream: PumpPortalStream | None = None,
+        chain: ChainMigrationStream | None = None,
         rpc: CurveRPC | None = None,
         market: MarketSource | None = None,
         watch: WatchSet | None = None,
@@ -95,6 +97,14 @@ class GraduationRecorder:
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self._stream = stream or PumpPortalStream()
+        #: The on-chain backup for graduations (2026-09-30). Whichever of the
+        #: two reports a mint first wins; `_migrated` remembers which.
+        # Only beside the real feed: a recorder handed a stream (a test's)
+        # gets no backup unless it hands one in too.
+        self._chain = chain if chain is not None else (
+            ChainMigrationStream()
+            if stream is None and config.chain_migrations_enabled() else None)
+        self._migrated: dict[str, str] = {}
         self._rpc = rpc or CurveRPC()
         #: Mints that graduated this pass and have not had their holders read.
         #: A set, so a mint the chain and the websocket both report is asked
@@ -153,6 +163,8 @@ class GraduationRecorder:
                 asyncio.create_task(self._held_loop(), name="graduation-held"),
                 asyncio.create_task(self._holders_loop(), name="graduation-holders"),
             ]
+            if self._chain is not None:
+                tasks.append(asyncio.create_task(self._chain_loop(), name="graduation-chain"))
             try:
                 await self._discovery()
             finally:
@@ -226,6 +238,15 @@ class GraduationRecorder:
                 self.handle(message, self._now())
             except Exception:  # one bad message must not end the run
                 logger.exception("graduation_handle_failed")
+
+    async def _chain_loop(self) -> None:
+        """Graduations off the chain, into the same handler as the feed's."""
+        assert self._chain is not None
+        async for row in self._chain.migrations():
+            try:
+                self._on_migration(row)
+            except Exception:  # one bad row must not end the backup
+                logger.exception("graduation_chain_handle_failed")
 
     async def _poll_loop(self) -> None:
         while True:
@@ -543,7 +564,23 @@ class GraduationRecorder:
     def _on_migration(self, row: parse.MigrationRow) -> None:
         """The graduation. The feed is GLOBAL: it reports migrations of tokens
         this lab never watched, and those are recorded too — a graduation
-        nobody watched is still a graduation that happened."""
+        nobody watched is still a graduation that happened.
+
+        Two sources report graduations (PumpPortal and the chain); the first
+        report of a mint is the one kept, and the log says which source it was
+        and whether the other ever agreed.
+        """
+        source = row.raw.get("source", "pumpportal") if isinstance(row.raw, dict) else "pumpportal"
+        first = self._migrated.get(row.mint)
+        if first is not None:
+            if first != source:
+                logger.info("graduation_migration_confirmed", mint=row.mint,
+                            first=first, then=source)
+            return
+        if len(self._migrated) >= 10_000:  # ponytail: ~10 days of mints, oldest dropped
+            self._migrated.pop(next(iter(self._migrated)))
+        self._migrated[row.mint] = source
+        logger.info("graduation_migration_first", mint=row.mint, source=source)
         state = self.watch.get(row.mint)
         self._buffer(self._migrations, {
             "mint": row.mint,

@@ -36,10 +36,15 @@ once and the health route counts it.
 
 from __future__ import annotations
 
+import base64
+import binascii
+import hashlib
+import struct
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 
 from app.labs.graduation import config
+from app.services.curve.pda import b58encode
 
 _CREATE = "create"
 #: PumpPortal publishes no example migration payload. These are the plausible
@@ -95,6 +100,35 @@ class MigrationRow:
     pool: str | None
     signature: str | None
     raw: dict
+
+
+#: pump.fun's `CompletePumpAmmMigrationEvent`, logged by every graduation:
+#: user, mint, mint_amount, sol_amount, pool_migration_fee, bonding_curve,
+#: timestamp, pool — checked against mainnet on 2026-09-30 (84.99 SOL, the
+#: coin's own mint and PumpSwap pool, timestamp == block time).
+_MIGRATION_EVENT = hashlib.sha256(b"event:CompletePumpAmmMigrationEvent").digest()[:8]
+
+
+def chain_migration(signature: str, logs: list[str] | None) -> MigrationRow | None:
+    """The graduation in one transaction's logs, or None. A `MigrateV2` that
+    did nothing (about one in six on the migration account) logs no event."""
+    for line in logs or ():
+        if not line.startswith("Program data: "):
+            continue
+        try:
+            data = base64.b64decode(line[14:], validate=True)
+        except (binascii.Error, ValueError):
+            continue
+        if data[:8] != _MIGRATION_EVENT or len(data) < 168:
+            continue
+        (sol,) = struct.unpack_from("<Q", data, 80)
+        (ts,) = struct.unpack_from("<q", data, 128)
+        return MigrationRow(
+            mint=b58encode(data[40:72]), ts=datetime.fromtimestamp(ts, UTC),
+            pool=config.PUMPSWAP_VENUE, signature=signature,
+            raw={"source": "chain", "pool_address": b58encode(data[136:168]),
+                 "sol": sol / 1e9, "signature": signature})
+    return None
 
 
 def _text(value: object, limit: int) -> str | None:

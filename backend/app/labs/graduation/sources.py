@@ -45,7 +45,7 @@ import websockets
 from app.core.backoff import BackoffPolicy
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.labs.graduation import config, held_watch, curve
+from app.labs.graduation import config, held_watch, curve, parse
 from app.security.liquidity import parse_pool
 from app.services.curve.pda import InvalidAddressError, bonding_curve_address
 from app.services.curve.state import CurveState
@@ -153,6 +153,77 @@ class PumpPortalStream:
                 continue
             if isinstance(message, dict):
                 yield message
+
+
+class ChainMigrationStream:
+    """pump.fun graduations straight off the chain: `logsSubscribe` on the
+    migration account over a free websocket, reconnecting for ever. The backup
+    for PumpPortal's `subscribeMigration` (Karthik, 2026-09-30): when the feed
+    is down or drops one, the chain still says the coin graduated."""
+
+    #: Graduations arrive about once a minute; ten silent minutes is a fault.
+    IDLE_TIMEOUT_S = 600.0
+
+    def __init__(
+        self,
+        *,
+        url: str | None = None,
+        connect: Callable[..., Any] = websockets.connect,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        backoff: BackoffPolicy | None = None,
+    ) -> None:
+        self._url = url or config.CHAIN_MIGRATIONS_WS_URL
+        self._connect = connect
+        self._sleep = sleep
+        self._backoff = backoff or BackoffPolicy(
+            initial_seconds=config.RECONNECT_INITIAL_SECONDS,
+            max_seconds=config.RECONNECT_MAX_SECONDS,
+        )
+        self._stop = asyncio.Event()
+        self.reconnects = 0
+
+    def stop(self) -> None:
+        self._stop.set()
+
+    async def migrations(self) -> AsyncIterator[parse.MigrationRow]:
+        attempt = 0
+        while not self._stop.is_set():
+            try:
+                async with self._connect(
+                    self._url,
+                    ping_interval=config.WS_PING_INTERVAL_SECONDS,
+                    ping_timeout=config.WS_PING_INTERVAL_SECONDS,
+                    close_timeout=5,
+                ) as ws:
+                    await ws.send(json.dumps({
+                        "jsonrpc": "2.0", "id": 1, "method": "logsSubscribe",
+                        "params": [{"mentions": [config.PUMP_MIGRATION_ACCOUNT]},
+                                   {"commitment": "confirmed"}]}))
+                    attempt = 0
+                    while not self._stop.is_set():
+                        raw = await asyncio.wait_for(ws.recv(), timeout=self.IDLE_TIMEOUT_S)
+                        try:
+                            message = json.loads(raw)
+                        except (ValueError, TypeError):
+                            continue
+                        value = (((message.get("params") or {}).get("result") or {})
+                                 .get("value") or {}) if isinstance(message, dict) else {}
+                        if value.get("err") is not None or not value.get("signature"):
+                            continue
+                        row = parse.chain_migration(value["signature"], value.get("logs"))
+                        if row is not None:
+                            yield row
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                if self._stop.is_set():
+                    break
+                attempt += 1
+                self.reconnects += 1
+                delay = self._backoff.delay_for(attempt)
+                logger.warning("graduation_chain_reconnect", attempt=attempt,
+                               delay_seconds=round(delay, 2), error=type(exc).__name__)
+                await self._sleep(delay)
 
 
 class CurveRPC:
