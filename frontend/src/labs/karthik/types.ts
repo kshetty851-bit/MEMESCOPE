@@ -109,3 +109,22 @@ export interface KarthikFlows {
   insider_bought_trades?: number;
   other_buyers: number;
 }
+
+
+/** One Dubai calendar day of pump.fun, from `/labs/graduation/karthik/pumpfun-days`. */
+export interface PumpfunDay {
+  day: string;
+  running: boolean;
+  launches: number;
+  graduations: number;
+  /** SOL paid into the curves that graduated (85 each), in dollars. */
+  into_curves_usd: string | null;
+  /** Money in the new pools two minutes after graduating. */
+  pools_usd: string;
+  pools_75k: number;
+}
+
+export interface PumpfunDays {
+  graduation_sol: number;
+  days: PumpfunDay[];
+}

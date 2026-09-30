@@ -6,8 +6,10 @@ import { Panel, PanelHeader, PanelTitle } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/states";
 
-import { useKarthikBook } from "./hooks";
-import type { KarthikBook, KarthikDay, KarthikFlows, KarthikTrade, KarthikWhatIfLine } from "./types";
+import { useKarthikBook, usePumpfunDays } from "./hooks";
+import type {
+  KarthikBook, KarthikDay, KarthikFlows, KarthikTrade, KarthikWhatIfLine, PumpfunDay,
+} from "./types";
 
 /**
  * KARTHIK'S LAB — ONE BOOK, PAPER ONLY.
@@ -575,6 +577,74 @@ export function PoolTrades({ trades }: { trades: KarthikTrade[] }) {
   );
 }
 
+/** "$10.2M", "$850k". */
+function short(value: string | number): string {
+  const n = Number(value);
+  if (n >= 1e6) return `$${(n / 1e6).toFixed(1)}M`;
+  if (n >= 1e3) return `$${Math.round(n / 1e3)}k`;
+  return `$${Math.round(n)}`;
+}
+
+/** Money flowing into pump.fun, day by day since the book opened (Karthik,
+    2026-09-30). Its own call, so a slow count never holds up the book. */
+export function PumpfunMoneyTable({ days, graduationSol }: {
+  days: PumpfunDay[];
+  graduationSol: number;
+}) {
+  if (!days.length) return null;
+  return (
+    <Panel>
+      <PanelHeader>
+        <PanelTitle>Money into pump.fun, day by day</PanelTitle>
+      </PanelHeader>
+      <div className="overflow-x-auto p-3">
+        <table className="w-full min-w-[36rem] text-[12px] tabular-nums" data-testid="pumpfun-days">
+          <thead className="text-[11px] uppercase tracking-wider text-ink-dim">
+            <tr>
+              <th className="py-1.5 pr-2 text-left font-normal">Day (Dubai)</th>
+              <th className="px-2 text-right font-normal">Coins launched</th>
+              <th className="px-2 text-right font-normal">Graduated</th>
+              <th className="px-2 text-right font-normal">Paid into graduated coins</th>
+              <th className="px-2 text-right font-normal">In new pools at 2 min</th>
+              <th className="pl-2 text-right font-normal">$75k+ pools</th>
+            </tr>
+          </thead>
+          <tbody>
+            {days.map((d) => (
+              <tr key={d.day} className="border-t border-line">
+                <td className="whitespace-nowrap py-1.5 pr-2 text-ink">
+                  {new Date(`${d.day}T00:00:00`)
+                    .toLocaleDateString("en-GB", { day: "numeric", month: "short" })
+                    .replace("Sept", "Sep")}
+                  {d.running ? <span className="ml-1 text-ink-dim">· so far</span> : null}
+                </td>
+                <td className="px-2 text-right text-ink-2">{d.launches.toLocaleString()}</td>
+                <td className="px-2 text-right text-ink-2">{d.graduations.toLocaleString()}</td>
+                <td className="px-2 text-right text-ink">{d.into_curves_usd ? short(d.into_curves_usd) : "—"}</td>
+                <td className="px-2 text-right text-ink">{short(d.pools_usd)}</td>
+                <td className="pl-2 text-right text-accent">{d.pools_75k}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p className="mt-2 text-[11px] leading-relaxed text-ink-dim">
+          What this lab saw each calendar day. A coin graduates when {graduationSol} SOL has been
+          paid into it, so &ldquo;paid into graduated coins&rdquo; is {graduationSol} SOL a graduation at
+          that day&apos;s SOL price. &ldquo;In new pools&rdquo; is every graduated pool&apos;s depth two
+          minutes in, owners&apos; bait money included. Hours the server was off are missing (30
+          Sep, 2:09–6:27 AM).
+        </p>
+      </div>
+    </Panel>
+  );
+}
+
+function PumpfunMoney() {
+  const q = usePumpfunDays();
+  if (!q.data) return null;
+  return <PumpfunMoneyTable days={q.data.days} graduationSol={q.data.graduation_sol} />;
+}
+
 export function KarthikLabPage() {
   const { data, isLoading, isError, refetch } = useKarthikBook();
   // Before the early returns: a hook may not sit behind a condition, and the
@@ -660,7 +730,7 @@ export function KarthikLabPage() {
 
       <div>
         <div className="mb-1 text-[11px] uppercase tracking-wider text-ink-dim">
-          Every 24 hours · percent of the balance that day started with
+          Every 24 hours · profit that day
         </div>
         <Days days={data.days} judgeAt={data.judge_at} />
       </div>
@@ -685,6 +755,8 @@ export function KarthikLabPage() {
         />
       </div>
 
+
+      <PumpfunMoney />
 
       <SizeGrid data={data} />
 
