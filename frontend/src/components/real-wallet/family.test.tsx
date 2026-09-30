@@ -136,6 +136,24 @@ describe("trading from a member's own wallet", () => {
   });
 });
 
+describe("a wallet opened with the password but not signed in", () => {
+  afterEach(() => {
+    get.mockReset();
+    post.mockReset();
+    auth.user = null;
+  });
+
+  it("is view only: no start, stop, resize or withdraw", async () => {
+    auth.user = null;
+    get.mockResolvedValue(view({ address: ADDRESS, balance_sol: "1" }, book(true)));
+    page();
+    expect(await screen.findByTestId("view-only")).toHaveTextContent("Sign in as Karthik");
+    expect(screen.getByRole("button", { name: "Stop trading" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Send to Karthik" })).not.toBeInTheDocument();
+    expect(screen.getByText(ADDRESS)).toBeInTheDocument();          // the deposit address still shows
+  });
+});
+
 describe("the profit fee", () => {
   beforeEach(() => {
     auth.user = { role: "admin" };

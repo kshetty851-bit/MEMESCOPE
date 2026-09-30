@@ -378,10 +378,12 @@ describe("RealWalletPage JUPITER", () => {
       { password: "pw" }, { skipAuthRetry: true, headers: { "X-Users-Token": "investment" } });
   });
 
-  it("shows nothing about it to anyone else", async () => {
+  it("shows the closed box to anyone, signed in or not, and nothing inside it", async () => {
     serve();
     await renderLoaded();
-    expect(screen.queryByTestId("jupiter")).not.toBeInTheDocument();
+    const box = screen.getByTestId("jupiter");
+    expect(within(box).getByLabelText("JUPITER password")).toBeInTheDocument();
+    expect(screen.queryByTestId("wallet-USER1")).not.toBeInTheDocument();
   });
 });
 

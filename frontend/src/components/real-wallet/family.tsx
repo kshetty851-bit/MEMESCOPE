@@ -137,16 +137,15 @@ export function UsersUnlock({ onOpen, label = "Users password", id = "users-pass
 
 /** The ten user wallets on the real wallet page, for Karthik only. */
 export function FamilySection() {
-  const { user } = useAuth();
-  const admin = user?.role === "admin";
+  // Shown to everyone, signed in or not (Karthik, 2026-09-30: "doesnt matter
+  // where i open i want to see that"). The JUPITER password opens the view;
+  // money actions still need his admin sign-in, on the server.
   const queryClient = useQueryClient();
   const list = useQuery({
     queryKey: ["real-wallet", "family"],
     queryFn: () => api.get<MembersView>("/real-wallet/family", { headers: usersHeaders() }),
-    enabled: admin,
     refetchInterval: 60_000,
   });
-  if (!admin) return null;
   const refresh = () => void queryClient.invalidateQueries({ queryKey: ["real-wallet", "family"] });
   const rows = new Map(list.data?.members.map((m) => [m.member, m]) ?? []);
   const bands = new Map((list.data?.band_choices ?? []).map((b) => [b.key, b.label]));
@@ -479,7 +478,7 @@ function OwnWalletPanel({ member, wallet, book, isOwner, onDone }: {
             {book.enabled ? (
               <button
                 type="button"
-                disabled={own.isPending}
+                disabled={own.isPending || !isOwner}
                 onClick={() => own.mutate({ enabled: false, ticket: book.ticket_usd })}
                 className="rounded-md border border-down/50 px-3 py-1 text-sm text-down"
               >
@@ -561,6 +560,11 @@ function OwnWalletPanel({ member, wallet, book, isOwner, onDone }: {
         </div>
       ) : null}
 
+      {!isOwner ? (
+        <p className="mt-4 border-t border-line pt-3 text-xs text-ink-3" data-testid="view-only">
+          View only. Sign in as Karthik to start, stop, resize or withdraw.
+        </p>
+      ) : (
       <div className="mt-4 border-t border-line pt-3">
         <p className="text-xs text-ink-3">
           Withdraw — it can only go to Karthik&apos;s address
@@ -618,6 +622,7 @@ function OwnWalletPanel({ member, wallet, book, isOwner, onDone }: {
           </p>
         ) : null}
       </div>
+      )}
     </section>
   );
 }
@@ -631,10 +636,11 @@ const FEE_STATUS: Record<FeeMonth["status"], string> = {
 };
 
 /** The user's profit fee: the rate, every month, and your Collect button. */
-function FeePanel({ member, fee, onDone }: {
+function FeePanel({ member, fee, onDone, canCollect = true }: {
   member: string;
   fee: { rate: string; months: FeeMonth[] };
   onDone: () => void;
+  canCollect?: boolean;
 }) {
   const [armed, setArmed] = useState(false);
   const due = fee.months
@@ -693,7 +699,7 @@ function FeePanel({ member, fee, onDone }: {
       ) : (
         <p className="mt-2 text-xs text-ink-3">The first month is worked out on the 1st.</p>
       )}
-      {due > 0 ? (
+      {due > 0 && canCollect ? (
         <div className="mt-3 flex flex-wrap items-center gap-2">
           {armed ? (
             <>
@@ -806,6 +812,7 @@ export function FamilyMemberPage({ member }: { member: string }) {
         <FeePanel
           member={key}
           fee={d.fee}
+          canCollect={isOwner}
           onDone={() => void queryClient.invalidateQueries({ queryKey: ["real-wallet", "family"] })}
         />
       ) : null}
