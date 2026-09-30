@@ -725,6 +725,15 @@ class LiveIntentRepository:
         cost_usd = (input_amount * _entry_sol_usd(intent, sol_price)
                     if intent.input_mint == settings.EXECUTION_SOL_MINT
                     else input_amount)
+        # Idempotent (2026-10-01): a position already recorded for THIS buy is
+        # the answer, not a second row. USER 1's buy was saved, then refused;
+        # every retry inserted it again, broke `uq_real_position_opened_live_
+        # intent`, and rolled back the whole fast-exit pass — owner's sell too.
+        already = await self._session.scalar(
+            select(RealWalletPosition).where(
+                RealWalletPosition.opened_live_intent_id == intent.id))
+        if already is not None:
+            return already
         position = RealWalletPosition(
             mint_address=intent.mint_address,
             status="OPEN",
@@ -750,9 +759,13 @@ class LiveIntentRepository:
         )
         self._session.add(position)
         await self._session.flush()
+        # One open position per coin PER WALLET: the owner's wallet and the
+        # user wallets buy the same coins at the same moment by design.
         existing = await self._session.scalar(
             select(RealWalletPosition).where(
                 RealWalletPosition.mint_address == intent.mint_address,
+                RealWalletPosition.wallet_public_key.is_not_distinct_from(
+                    intent.wallet_public_key),
                 RealWalletPosition.status == "OPEN",
                 RealWalletPosition.id != position.id,
             )
