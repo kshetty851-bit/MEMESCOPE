@@ -592,9 +592,11 @@ function OwnWalletPanel({ member, wallet, book, isOwner, onDone }: {
 
       {!isOwner ? (
         <p className="mt-4 border-t border-line pt-3 text-xs text-ink-3" data-testid="view-only">
-          View only. Sign in as Karthik to start, stop, resize or withdraw.
+          Sign in as Karthik to start, stop or resize.
         </p>
-      ) : (
+      ) : null}
+      {/* Karthik, 2026-10-01: withdraw like the main wallet. JUPITER is on his
+          paired devices only, and the money can only reach his address. */}
       <div className="mt-4 border-t border-line pt-3">
         <p className="text-xs text-ink-3">
           Withdraw — it can only go to Karthik&apos;s address
@@ -652,7 +654,6 @@ function OwnWalletPanel({ member, wallet, book, isOwner, onDone }: {
           </p>
         ) : null}
       </div>
-      )}
     </section>
   );
 }
