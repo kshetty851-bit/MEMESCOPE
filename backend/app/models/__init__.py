@@ -7,26 +7,6 @@ model that is never imported is invisible to it.
 from app.db.base import Base
 from app.models.early_buyer import TokenEarlyBuyer
 from app.models.kol import KolWalletRank
-
-# Rafiqv2's three `rafiqv2_*` tables. Imported here for one reason: without
-# it they exist in the database and not in this metadata, and autogenerate
-# emits `drop_table` for each of them.
-from app.labs.rafiqv2.models import (  # noqa: F401
-    Rafiqv2Adjustment,
-    Rafiqv2Book,
-    Rafiqv2Position,
-)
-# NSE Breakout Tracker's five `bt_*` tables, for the same reason.
-from app.labs.nse_breakout.models import (  # noqa: F401
-    BtCandle,
-    BtEpisode,
-    BtEpisodeEvent,
-    BtIndexClose,
-    BtIngestDay,
-    BtRun,
-    BtState,
-    BtUniverseMember,
-)
 from app.models.alpha_session import AlphaSession
 from app.models.curve import TokenCurveSnapshot  # noqa: F401
 from app.models.basechain import EvmLaunch  # noqa: F401

@@ -32,8 +32,6 @@ from app.karthik import api as karthik
 from app.karthik_ops import api as karthik_ops
 from app.lab import api as lab
 from app.labs.graduation import api as graduation_lab
-from app.labs.nse_breakout import api as nse_tracker
-from app.labs.rafiqv2 import api as rafiqv2_lab
 from app.momentum import api as momentum
 from app.news import api as news
 from app.paper import api as paper
@@ -124,12 +122,6 @@ api_router.include_router(hq_ops.router)
 # able to shadow the other on a route table. Read-only — there is no POST, PUT,
 # PATCH or DELETE on this router — and additive: no existing route changes.
 api_router.include_router(karthik_ops.router)
-# Rafiqv2. Six books on one engine, over their own `rafiqv2_*` tables and
-# `RAFIQV2_LAB_ENABLED` flag. Read-only and additive.
-api_router.include_router(rafiqv2_lab.router)
-# NSE Breakout Tracker. Indian equities, not Solana: its own `bt_*` tables and
-# its own flag. Read-only and additive.
-api_router.include_router(nse_tracker.router)
 # Graduation Lab. Read-only status board; every route answers
 # `running: false` without a query when LAB_GRADUATION_ENABLED is off.
 api_router.include_router(graduation_lab.router)

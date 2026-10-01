@@ -399,13 +399,6 @@ async def _status_now(db: AsyncSession) -> GraduationStatus:
     return base
 
 
-def _filter_description() -> str:
-    return (f"pool opened {config.PAPER_FILTER_HOUR_START:02d}:00-"
-            f"{config.PAPER_FILTER_HOUR_END:02d}:00 UTC, and the symbol had "
-            f"been used by at least {config.PAPER_FILTER_MIN_SYMBOL_REUSE} "
-            f"earlier token{'s' if config.PAPER_FILTER_MIN_SYMBOL_REUSE != 1 else ''}")
-
-
 async def _paper(db: AsyncSession, *, book: str = "E05_hold_5m",
                  limit: int | None = 10, ticket: float | None = None,
                  split: int = 1, since: datetime | None = None) -> PaperBookOut:
@@ -460,8 +453,6 @@ async def _paper(db: AsyncSession, *, book: str = "E05_hold_5m",
     return PaperBookOut(
         running=config.paper_enabled(),
         book=book,
-        filter_description=(_filter_description()
-                            if book == config.PAPER_BOOKS[1] else ""),
         # Quantised HERE, not left to the renderer: an unrounded Decimal
         # serialises as 1023.223558651711844672524598 and reads as false
         # precision on a figure that is only ever dollars and cents.

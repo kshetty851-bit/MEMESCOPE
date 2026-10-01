@@ -52,8 +52,6 @@ celery_app = Celery(
         "app.security.lab_scheduler",
         "app.social.scheduler",
         "app.copycontrol.scheduler",
-        "app.labs.rafiqv2.scheduler",
-        "app.labs.nse_breakout.scheduler",
         # Graduation Lab. Gated by LAB_GRADUATION_ENABLED (default off):
         # with the flag down its beat tasks return before opening a session.
         "app.labs.graduation.scheduler",
@@ -291,16 +289,6 @@ celery_app.conf.beat_schedule = {
         "task": "app.lab.scheduler.lab_sellability_refresh",
         "schedule": crontab(minute="*/3"),
     },
-    # Rafiqv2: six books on one engine. Every 30s, not the crontab minute: its
-    # rug ladder has rungs at 30s and 60s. Expires after one interval so a tick
-    # stuck behind the minute burst is dropped, not run late. Gated by
-    # RAFIQV2_LAB_ENABLED (default off): the task returns before opening a
-    # session, so registering it starts nothing.
-    "rafiqv2-lab-tick": {
-        "task": "app.labs.rafiqv2.scheduler.rafiqv2_lab_tick",
-        "schedule": timedelta(seconds=30),
-        "options": {"expires": 30},
-    },
     # Graduation Lab. Both gated by LAB_GRADUATION_ENABLED, which ships off:
     # each task returns before it opens a session, so registering them here
     # starts nothing.
@@ -339,34 +327,6 @@ celery_app.conf.beat_schedule = {
                     # Its own worker (compose `worker-paper`): on the shared
                     # one it waited behind the :00 minute tasks.
                     "queue": "graduation_paper"},
-    },
-    # NSE Breakout Tracker. The exchange publishes the day's bhavcopy after
-    # the close, so ingest runs at 13:00 UTC (18:30 IST) and retries hourly to
-    # 14:00 UTC, then again at 02:00 UTC (07:30 IST) if the file was late.
-    # Celery here runs on UTC; writing IST times as UTC is cheaper than moving
-    # the app timezone, which would shift every other lab's schedule.
-    "nse-tracker-ingest": {
-        "task": "app.labs.nse_breakout.scheduler.nse_tracker_ingest",
-        "schedule": crontab(minute=0, hour="13,14,2"),
-    },
-    # The archive walk. Bounded per run and resumable, so it simply does
-    # nothing once the history is complete.
-    "nse-tracker-backfill": {
-        "task": "app.labs.nse_breakout.scheduler.nse_tracker_backfill",
-        "schedule": crontab(minute=20),
-    },
-    # Outcomes: what the episodes whose window has closed actually did. A
-    # separate task from detection on purpose — the pass that records the
-    # return must not be the pass that decides the state.
-    "nse-tracker-outcomes": {
-        "task": "app.labs.nse_breakout.scheduler.nse_tracker_outcomes",
-        "schedule": crontab(minute=40, hour="15"),
-    },
-    # The historical replay. Bounded and resumable; does nothing once every
-    # symbol has been walked.
-    "nse-tracker-replay": {
-        "task": "app.labs.nse_breakout.scheduler.nse_tracker_replay",
-        "schedule": crontab(minute=50),
     },
     # The real wallet's heartbeat. Beside the Lab's and at the same cadence,
     # because it acts on Lab decisions and those are actionable for ten minutes.
