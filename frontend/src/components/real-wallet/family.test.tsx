@@ -17,6 +17,10 @@ import { ApiError } from "@/lib/api-client";
 
 import { FamilyMemberPage, SideBySide, WalletDashboard } from "./family";
 
+// JUPITER only opens on a paired browser (2026-10-01); these run as one.
+const DEVICE = "test-macbook-device-key-0123456789abcdef";
+beforeEach(() => window.localStorage.setItem("jupiter-device", DEVICE));
+
 const ADDRESS = "7WctMGpqz1tGkYStBBjJRMnmuh9uwJubYV2tL4pLwRr9";
 
 function view(own: object, book: object | null = null) {

@@ -384,6 +384,7 @@ x-backend-env: &backend-env
   # The second lock on USER 2-10 and the fees: a PBKDF2 HASH only
   # (salt_hex:hash_hex, no `$` on purpose). Empty keeps them locked.
   REAL_WALLET_USERS_PASSWORD_HASH: ${REAL_WALLET_USERS_PASSWORD_HASH:-}
+  REAL_WALLET_JUPITER_DEVICES: ${REAL_WALLET_JUPITER_DEVICES:-}
   REAL_WALLET_INVESTMENT_PASSWORD_HASH: ${REAL_WALLET_INVESTMENT_PASSWORD_HASH:-}
   # Every wallet together, in one coin within an hour (see config.py).
   REAL_WALLET_MAX_COIN_USD: ${REAL_WALLET_MAX_COIN_USD:-250}

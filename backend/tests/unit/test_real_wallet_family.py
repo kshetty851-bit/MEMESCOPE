@@ -91,3 +91,15 @@ def test_bands_include_the_lower_bound_and_exclude_the_upper():
     assert not in_band("1m-20m", D("999999")) and not in_band("1m-20m", None)
     assert in_band("5m-100m", D("99999999")) and not in_band("5m-100m", D("100000000"))
     assert not in_band("nonsense", D("5000000"))
+
+
+def test_only_a_known_device_key_opens_jupiter():
+    import hashlib
+
+    key = "k" * 40
+    allowed = f" {hashlib.sha256(key.encode()).hexdigest().upper()} , abc"
+    assert family.device_ok(key, allowed)                 # case and spaces ignored
+    assert not family.device_ok("x" * 40, allowed)
+    assert not family.device_ok(key, "")                  # nothing configured: nobody
+    assert not family.device_ok("short", allowed)
+    assert not family.device_ok(None, allowed)

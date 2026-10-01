@@ -167,6 +167,18 @@ class Throttle:
 THROTTLE = Throttle()
 
 
+def device_ok(key: str | None, allowed: str | None = None) -> bool:
+    """Whether a browser's device key is one of Karthik's (Karthik, 2026-10-01:
+    "this jupiter box should only visible to my macbook"). The server keeps
+    only sha256 digests; the key itself lives in his browsers."""
+    if not isinstance(key, str) or len(key) < 32:
+        return False
+    digest = hashlib.sha256(key.encode()).hexdigest()
+    known = (settings.REAL_WALLET_JUPITER_DEVICES if allowed is None else allowed)
+    return any(hmac.compare_digest(digest, d.strip().lower())
+               for d in known.split(",") if d.strip())
+
+
 def label(member: str) -> str:
     """"USER7" -> "USER 7", for people to read."""
     return member.replace("USER", "USER ", 1)
