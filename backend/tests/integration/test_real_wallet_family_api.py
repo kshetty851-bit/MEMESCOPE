@@ -23,8 +23,15 @@ URL = f"{settings.API_V1_PREFIX}/real-wallet/family"
 COLLECT = {"confirmation_phrase": "COLLECT_FEE"}
 
 
+DEVICE_KEY = "macbook-device-key-0123456789abcdef0123456789"
+DEVICE = {"X-Jupiter-Device": DEVICE_KEY}
+
+
 @pytest.fixture(autouse=True)
 def _password(monkeypatch):
+    import hashlib
+    monkeypatch.setattr(settings, "REAL_WALLET_JUPITER_DEVICES",
+                        hashlib.sha256(DEVICE_KEY.encode()).hexdigest())
     monkeypatch.setattr(settings, "REAL_WALLET_USERS_PASSWORD_HASH",
                         family.hash_password("right horse", salt=b"s" * 16))
     monkeypatch.setattr(settings, "REAL_WALLET_INVESTMENT_PASSWORD_HASH",
@@ -39,7 +46,8 @@ async def test_the_password_opens_the_view_but_only_the_admin_moves_money(app, d
     app.dependency_overrides[get_current_user] = lambda: viewer
     app.dependency_overrides[get_optional_user] = lambda: None     # not signed in at all
     withdraw = {"sol_amount": "0.1", "confirmation_phrase": "WITHDRAW_TO_KARTHIK"}
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t",
+                           headers=DEVICE) as client:
         # The closed box is there for anyone; nothing in it without the password.
         listed = await client.get(URL)
         assert listed.status_code == 200 and listed.json()["members"] == []
@@ -60,11 +68,11 @@ async def test_the_password_opens_the_view_but_only_the_admin_moves_money(app, d
         opened = await client.post(f"{URL}/unlock", json={"password": "family seven"})
         assert opened.status_code == 200, opened.text
         seen = {"X-Users-Token": opened.json()["token"]}
-        assert [m["member"] for m in (await client.get(URL, headers=seen)).json()["members"]] \
+        assert [m["member"] for m in (await client.get(URL, headers={**DEVICE, **seen})).json()["members"]] \
             == [f"USER{i}" for i in range(1, 8)]
-        assert (await client.get(f"{URL}/user1", headers=seen)).status_code == 200
+        assert (await client.get(f"{URL}/user1", headers={**DEVICE, **seen})).status_code == 200
         assert (await client.post(f"{URL}/user1/own-settings", json=settings_body,
-                                  headers=seen)).status_code == 403
+                                  headers={**DEVICE, **seen})).status_code == 403
         family.THROTTLE = family.Throttle(limit=3, window=600)
         viewer.role = UserRole.ADMIN
         # Signed in as the admin, but without either password: nothing.
@@ -88,24 +96,24 @@ async def test_the_password_opens_the_view_but_only_the_admin_moves_money(app, d
         # The users password: USER 8-10 and the fees, still not USER 1-7.
         opened = await client.post(f"{URL}/unlock", json={"password": "right horse"})
         headers = {"X-Users-Token": opened.json()["token"]}
-        listed = await client.get(URL, headers=headers)
+        listed = await client.get(URL, headers={**DEVICE, **headers})
         assert [m["member"] for m in listed.json()["members"]] == ["USER8", "USER9", "USER10"]
         assert "collected_usd" in listed.json()["fees"]
-        assert (await client.get(f"{URL}/user9", headers=headers)).status_code == 200
-        assert (await client.get(f"{URL}/user1", headers=headers)).status_code == 401
+        assert (await client.get(f"{URL}/user9", headers={**DEVICE, **headers})).status_code == 200
+        assert (await client.get(f"{URL}/user1", headers={**DEVICE, **headers})).status_code == 401
 
         # Then the family investment password, on the same tab: both open.
         opened = await client.post(f"{URL}/unlock", json={"password": "family seven"},
-                                   headers=headers)
+                                   headers={**DEVICE, **headers})
         assert opened.json()["scopes"] == ["investment", "users"]
         headers = {"X-Users-Token": opened.json()["token"]}
-        listed = await client.get(URL, headers=headers)
+        listed = await client.get(URL, headers={**DEVICE, **headers})
         assert listed.json()["members"][9]["label"] == "USER 10"
         assert listed.json()["investment_unlocked"] is True
-        view = await client.get(f"{URL}/user7", headers=headers)
+        view = await client.get(f"{URL}/user7", headers={**DEVICE, **headers})
         assert view.status_code == 200, view.text
         assert (view.json()["member"], view.json()["label"]) == ("USER7", "USER 7")
-        assert (await client.get(f"{URL}/user11", headers=headers)).status_code == 404
+        assert (await client.get(f"{URL}/user11", headers={**DEVICE, **headers})).status_code == 404
 
 
 async def test_wallets_are_compared_side_by_side_today_and_since_start(db_session):
@@ -139,3 +147,24 @@ async def test_wallets_are_compared_side_by_side_today_and_since_start(db_sessio
     assert (main["all_trades"], main["all_pnl_usd"]) == (2, "3.50")
     assert (one["today_trades"], one["today_won"], one["today_pnl_usd"]) == (2, 1, "0.60")
     assert (two["today_trades"], two["all_pnl_usd"], two["today_avg_pct"]) == (0, "0.00", None)
+
+
+
+async def test_jupiter_does_not_exist_off_karthiks_devices(app, db_session):
+    """Karthik, 2026-10-01: "this jupiter box should only visible to my
+    macbook". Without his device key every route is a 404 — admin, password
+    and all."""
+    from app.api.deps import get_optional_user
+
+    admin = SimpleNamespace(role=UserRole.ADMIN, email="karthik@example.com", is_active=True)
+    app.dependency_overrides[get_current_user] = lambda: admin
+    app.dependency_overrides[get_optional_user] = lambda: admin
+    db_session.add_all(RealWalletFamilyMember(name=n) for n in family.MEMBERS)
+    await db_session.flush()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as client:
+        assert (await client.post(f"{URL}/unlock", json={"password": "family seven"})).status_code == 404
+        assert (await client.get(URL)).status_code == 404
+        assert (await client.get(f"{URL}/user1",
+                                 headers={"X-Jupiter-Device": "someone-elses-key-0123456789abcdef"})
+                ).status_code == 404
+        assert (await client.get(URL, headers=DEVICE)).status_code == 200

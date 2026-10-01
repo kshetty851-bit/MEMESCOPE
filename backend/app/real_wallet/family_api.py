@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Literal
 
-from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
@@ -38,7 +38,16 @@ from app.real_wallet.tx_inspect import lamports_from_sol
 from app.services.rpc.standard import StandardSolanaRPC
 
 logger = get_logger(__name__)
-router = APIRouter(prefix="/real-wallet/family", tags=["real-wallet"])
+async def _on_karthiks_device(
+        x_jupiter_device: str | None = Header(default=None)) -> None:
+    """Every JUPITER route answers only a browser holding one of Karthik's
+    device keys (2026-10-01). Elsewhere it does not exist: 404, not 401."""
+    if not family.device_ok(x_jupiter_device):
+        raise HTTPException(status_code=404, detail="Not Found")
+
+
+router = APIRouter(prefix="/real-wallet/family", tags=["real-wallet"],
+                   dependencies=[Depends(_on_karthiks_device)])
 # Seeing is the password's; acting is the admin's (Karthik, 2026-09-30: "doesnt
 # matter where i open i want to see that"). Unlocking, the list and a wallet's
 # page need only the JUPITER / users password, from any browser, signed in or

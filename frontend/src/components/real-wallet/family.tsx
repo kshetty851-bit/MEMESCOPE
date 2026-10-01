@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { useAuth } from "@/hooks/use-auth";
 import { ApiError, api } from "@/lib/api-client";
@@ -72,9 +72,56 @@ function writeUsersToken(token: string | null): void {
 }
 
 /** Headers for a user-wallet call: the token when this tab has one. */
+/*
+ * KARTHIK'S DEVICES ONLY (2026-10-01: "this jupiter box should only visible to
+ * my macbook"). A browser opens JUPITER only while it holds a device key the
+ * server knows; the key arrives once, through a pairing link
+ * (`/real-wallet?jupiter-pair=<key>`), and is kept in localStorage. Without it
+ * the box is not drawn and the server answers every JUPITER route with 404.
+ */
+const DEVICE_KEY = "jupiter-device";
+const PAIR_PARAM = "jupiter-pair";
+
+export function readDeviceKey(): string | null {
+  try {
+    return window.localStorage.getItem(DEVICE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/** Keep a key handed over by the pairing link, and take it out of the URL. */
+function pairFromUrl(): void {
+  try {
+    const url = new URL(window.location.href);
+    const key = url.searchParams.get(PAIR_PARAM);
+    if (!key) return;
+    window.localStorage.setItem(DEVICE_KEY, key);
+    url.searchParams.delete(PAIR_PARAM);
+    window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+  } catch {
+    // No storage: this browser cannot be paired.
+  }
+}
+
+/** This browser's device key, once mounted (never during the server render). */
+function useDeviceKey(): string | null | undefined {
+  const [key, setKey] = useState<string | null | undefined>(undefined);
+  useEffect(() => {
+    pairFromUrl();
+    setKey(readDeviceKey());
+  }, []);
+  return key;
+}
+
 function usersHeaders(): Record<string, string> | undefined {
-  const token = typeof window === "undefined" ? null : readUsersToken();
-  return token ? { "X-Users-Token": token } : undefined;
+  if (typeof window === "undefined") return undefined;
+  const token = readUsersToken();
+  const device = readDeviceKey();
+  const headers: Record<string, string> = {};
+  if (token) headers["X-Users-Token"] = token;
+  if (device) headers["X-Jupiter-Device"] = device;
+  return Object.keys(headers).length ? headers : undefined;
 }
 
 /** USER 1-7: the family investment, behind its own password (2026-09-28). */
@@ -144,15 +191,17 @@ export function UsersUnlock({ onOpen, label = "Users password", id = "users-pass
 
 /** The ten user wallets on the real wallet page, for Karthik only. */
 export function FamilySection() {
-  // Shown to everyone, signed in or not (Karthik, 2026-09-30: "doesnt matter
-  // where i open i want to see that"). The JUPITER password opens the view;
-  // money actions still need his admin sign-in, on the server.
+  // Only on Karthik's paired browsers (2026-10-01), signed in or not; the
+  // JUPITER password opens the view and money actions still need his sign-in.
+  const device = useDeviceKey();
   const queryClient = useQueryClient();
   const list = useQuery({
     queryKey: ["real-wallet", "family"],
     queryFn: () => api.get<MembersView>("/real-wallet/family", { headers: usersHeaders() }),
+    enabled: Boolean(device),
     refetchInterval: 60_000,
   });
+  if (!device) return null;
   const refresh = () => void queryClient.invalidateQueries({ queryKey: ["real-wallet", "family"] });
   const rows = new Map(list.data?.members.map((m) => [m.member, m]) ?? []);
   const bands = new Map((list.data?.band_choices ?? []).map((b) => [b.key, b.label]));
@@ -841,7 +890,8 @@ export function WalletDashboard({ book, wallet }: { book: OwnBook; wallet?: OwnW
 
 export function FamilyMemberPage({ member }: { member: string }) {
   const key = member.toUpperCase();
-  const known = FAMILY.includes(key);
+  const device = useDeviceKey();
+  const known = FAMILY.includes(key) && Boolean(device);
   const { user } = useAuth();
   const queryClient = useQueryClient();
 
@@ -857,6 +907,7 @@ export function FamilyMemberPage({ member }: { member: string }) {
     retry: false,
   });
 
+  if (device === undefined) return null;  // still reading this browser's key
   if (!known) {
     return (
       <main>

@@ -8,6 +8,10 @@ import type * as ApiClientModule from "@/lib/api-client";
 import { ApiError, api } from "@/lib/api-client";
 import { useAuthStore } from "@/stores/auth-store";
 
+// JUPITER only opens on a paired browser (2026-10-01); these run as one.
+const DEVICE = "test-macbook-device-key-0123456789abcdef";
+beforeEach(() => window.localStorage.setItem("jupiter-device", DEVICE));
+
 // `api` is mocked; `ApiError` is not. The page branches on the real error type.
 // The Family section navigates to a member's page after the password.
 vi.mock("next/navigation", () => ({
@@ -318,6 +322,27 @@ describe("RealWalletPage without signing in", () => {
 describe("RealWalletPage JUPITER", () => {
   afterEach(() => window.sessionStorage.clear());
 
+  it("is not there at all on a browser that was never paired", async () => {
+    window.localStorage.removeItem("jupiter-device");
+    signInAsAdmin();
+    serve();
+    await renderLoaded();
+    expect(screen.queryByTestId("jupiter")).not.toBeInTheDocument();
+    expect(vi.mocked(api.get).mock.calls.some(([path]) => path === "/real-wallet/family")).toBe(false);
+  });
+
+  it("pairs from the one-time link, then sends the key with every JUPITER call", async () => {
+    window.localStorage.removeItem("jupiter-device");
+    window.history.replaceState(null, "", "/real-wallet?jupiter-pair=paired-key-0123456789abcdef0123");
+    serve();
+    await renderLoaded();
+    expect(await screen.findByTestId("jupiter")).toBeInTheDocument();
+    expect(window.localStorage.getItem("jupiter-device")).toBe("paired-key-0123456789abcdef0123");
+    expect(window.location.search).toBe("");                    // the key leaves the address bar
+    const call = vi.mocked(api.get).mock.calls.find(([path]) => path === "/real-wallet/family");
+    expect(call?.[1]).toMatchObject({ headers: { "X-Jupiter-Device": "paired-key-0123456789abcdef0123" } });
+  });
+
   it("shows only a closed JUPITER box and a password until it is opened", async () => {
     signInAsAdmin();
     serve();
@@ -350,7 +375,8 @@ describe("RealWalletPage JUPITER", () => {
     expect(within(users).getByLabelText("Users password")).toBeInTheDocument();
     expect(screen.queryByText("Profit fees collected")).not.toBeInTheDocument();
     expect(vi.mocked(api.post)).toHaveBeenCalledWith(
-      "/real-wallet/family/unlock", { password: "pw" }, { skipAuthRetry: true, headers: undefined });
+      "/real-wallet/family/unlock", { password: "pw" },
+      { skipAuthRetry: true, headers: { "X-Jupiter-Device": DEVICE } });
   });
 
   it("the users password alone does not open JUPITER", async () => {
@@ -375,7 +401,8 @@ describe("RealWalletPage JUPITER", () => {
     expect(screen.getByText("$12.50")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /USER 8/ })).toHaveAttribute("href", "/real-wallet/family/user8");
     expect(vi.mocked(api.post)).toHaveBeenCalledWith("/real-wallet/family/unlock",
-      { password: "pw" }, { skipAuthRetry: true, headers: { "X-Users-Token": "investment" } });
+      { password: "pw" },
+      { skipAuthRetry: true, headers: { "X-Users-Token": "investment", "X-Jupiter-Device": DEVICE } });
   });
 
   it("shows the closed box to anyone, signed in or not, and nothing inside it", async () => {

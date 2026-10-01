@@ -1031,6 +1031,10 @@ class Settings(BaseSettings):
     #: (PBKDF2-SHA256; `real_wallet.family.hash_password`). Never the password
     #: itself: the repository is public. Empty opens nothing behind it.
     REAL_WALLET_USERS_PASSWORD_HASH: str = ""
+    #: JUPITER on Karthik's own devices only (2026-10-01): comma-separated
+    #: sha256 hex digests of the device keys his browsers hold. Empty = no
+    #: device may open JUPITER at all.
+    REAL_WALLET_JUPITER_DEVICES: str = ""
     #: USER 1-7 (family investment), same `salt_hex:hash_hex` form. Empty = shut.
     REAL_WALLET_INVESTMENT_PASSWORD_HASH: str = ""
     #: The most every wallet together (Karthik's and the users') may put into
