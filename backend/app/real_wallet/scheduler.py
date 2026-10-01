@@ -7,6 +7,7 @@ from datetime import timedelta
 from typing import Any
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.config import settings
 from app.core.events import publish_live_update
@@ -303,9 +304,18 @@ async def _drain(session: Any, *, now_fn: Any) -> list[dict[str, object]]:
             # particular must not stop a SUBMITTED intent being reconciled.
             try:
                 outcome = await executor.advance(intent_id, now=now_fn())
-            except Exception:
+            except Exception as exc:
                 logger.exception("real_wallet_fast_advance_failed",
                                  intent_id=str(intent_id))
+                if isinstance(exc, SQLAlchemyError):
+                    # A database error aborts the whole transaction, so every
+                    # later intent's step fails with it. On 2026-10-01 one
+                    # wallet's failed step froze every wallet's SELL for ~14
+                    # minutes. Nothing of the failed step can commit anyway;
+                    # rolling it back lets the next intent run.
+                    await session.rollback()
+                    if not await _locked(session):
+                        return moved
                 break
             if not outcome.changed:
                 break
@@ -314,6 +324,30 @@ async def _drain(session: Any, *, now_fn: Any) -> list[dict[str, object]]:
             if not await _locked(session):
                 return moved
     return moved
+
+
+async def _fast_lock(session: Any) -> bool:
+    return bool(await session.scalar(select(func.pg_try_advisory_xact_lock(
+        DRY_RUN_LOCK_NAMESPACE, FAST_EXIT_LOCK_KEY))))
+
+
+async def _stage(session: Any, name: str, run: Any) -> Any:
+    """One stage of a fast pass, committed on its own; None when it failed.
+
+    Entries and exits share the pass's session, so a stage that raised used to
+    take the whole pass down with it, every three seconds: one wallet's bad
+    buy could hold every wallet's SELL (2026-10-01). Both stages only create
+    intents and sign nothing, so rolling a failed one back loses nothing that
+    left this database, and the stages after it still run.
+    """
+    try:
+        result = await run()
+        await session.commit()
+        return result
+    except Exception:
+        logger.exception("real_wallet_fast_stage_failed", stage=name)
+        await session.rollback()
+        return None
 
 
 async def _has_work() -> bool:
@@ -375,12 +409,7 @@ async def _real_wallet_fast_exit_tick() -> dict[str, Any]:
     while True:
         try:
             async with SessionFactory() as session:
-                acquired = await session.scalar(
-                    select(func.pg_try_advisory_xact_lock(
-                        DRY_RUN_LOCK_NAMESPACE, FAST_EXIT_LOCK_KEY
-                    ))
-                )
-                if not acquired:
+                if not await _fast_lock(session):
                     await session.rollback()
                     return {"skipped": "fast_exit_already_running",
                             "passes": passes}
@@ -401,19 +430,28 @@ async def _real_wallet_fast_exit_tick() -> dict[str, Any]:
                 # refuse, never whether — and REAL_WALLET_MAX_OPEN_POSITIONS
                 # and MAX_TOTAL_EXPOSURE_USD bound the book however fast this
                 # runs.
-                bought = await RealWalletDriver(session).tick(now=utcnow())
-                outcome = await RealWalletExitDriver(session).tick(now=utcnow())
+                #
+                # Each stage commits on its own (`_stage`), and a commit drops
+                # the pass's lock, so it is taken again before the next one.
+                bought = await _stage(session, "entries",
+                                      lambda: RealWalletDriver(session).tick(now=utcnow()))
+                if not await _fast_lock(session):
+                    await session.rollback()
+                    return {"skipped": "fast_exit_already_running", "passes": passes}
+                outcome = await _stage(
+                    session, "exits",
+                    lambda: RealWalletExitDriver(session).tick(now=utcnow()))
                 moved = await _drain(session, now_fn=utcnow)
                 await session.commit()
             passes += 1
-            entries += bought.created
-            exits += outcome.exits_requested
+            created = bought.created if bought else 0
+            requested = outcome.exits_requested if outcome else 0
+            entries += created
+            exits += requested
             advanced += len(moved)
-            if bought.created or outcome.exits_requested or moved:
+            if created or requested or moved:
                 logger.warning("real_wallet_fast_exit_pass",
-                               entries=bought.created,
-                               exits=outcome.exits_requested,
-                               advanced=len(moved))
+                               entries=created, exits=requested, advanced=len(moved))
         except Exception:
             # Contained like its neighbours: this task shares a beat with the
             # kill switch's, and must not take them down with it.

@@ -41,7 +41,8 @@ def _password(monkeypatch):
 
 async def test_the_password_opens_the_view_but_only_the_admin_moves_money(app, db_session):
     """Karthik, 2026-09-30: JUPITER from any browser, signed in or not. The
-    password opens the view; every money action still needs the admin."""
+    password opens the view; every money action still needs the admin, except
+    a withdrawal (2026-10-01), which can only reach Karthik's own address."""
     viewer = SimpleNamespace(role=UserRole.USER, email="friend@example.com", is_active=True)
     app.dependency_overrides[get_current_user] = lambda: viewer
     app.dependency_overrides[get_optional_user] = lambda: None     # not signed in at all
@@ -56,7 +57,8 @@ async def test_the_password_opens_the_view_but_only_the_admin_moves_money(app, d
         settings_body = {"enabled": True, "ticket_usd": "20"}
         assert (await client.post(f"{URL}/user1/own-settings",
                                   json=settings_body)).status_code == 403
-        assert (await client.post(f"{URL}/user1/withdraw", json=withdraw)).status_code == 403
+        # A withdrawal needs no admin, but still the password.
+        assert (await client.post(f"{URL}/user1/withdraw", json=withdraw)).status_code == 401
         assert (await client.post(f"{URL}/user2/collect-fee",
                                   json=COLLECT)).status_code == 403
 
