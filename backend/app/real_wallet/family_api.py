@@ -51,8 +51,10 @@ router = APIRouter(prefix="/real-wallet/family", tags=["real-wallet"],
 # Seeing is the password's; acting is the admin's (Karthik, 2026-09-30: "doesnt
 # matter where i open i want to see that"). Unlocking, the list and a wallet's
 # page need only the JUPITER / users password, from any browser, signed in or
-# not. Starting, stopping, sizing, withdrawing and collecting fees still need
-# the admin sign-in as well — a guessed password can look, never move money.
+# not. Starting, stopping, sizing and collecting fees still need the admin
+# sign-in as well. Withdrawing does not (Karthik, 2026-10-01, "like the main
+# wallet"): JUPITER answers only his paired devices, and a withdrawal can only
+# reach his own nominated address, checked again inside the signer.
 
 
 def _caller(request: Request) -> str:
@@ -256,7 +258,7 @@ async def member_view(name: str, session: DbSession, _: OptionalUser,
 
 
 @router.post("/{name}/withdraw", summary="Send SOL from a member's own wallet to Karthik")
-async def member_withdraw(name: str, payload: WithdrawIn, _: AdminUser,
+async def member_withdraw(name: str, payload: WithdrawIn, _: OptionalUser,
                           x_users_token: str | None = Header(default=None)
                           ) -> dict[str, object]:
     """The member's own wallet pays; Karthik's nominated address receives.
