@@ -121,7 +121,12 @@ def test_each_live_arm_copies_its_own_paper_book() -> None:
         return accepts(q150, mint="x", open_at=datetime.now(UTC), liquidity=Decimal(liq),
                        fdv=None, sells=None, reuse=None)
     assert (buys(149_999), buys(150_000)) == (False, True)
+    # G-BAND5's paper arm (BAND_55k_5m) lost and went on 2026-10-01. Its live
+    # entry stays: editing the spec moves SPEC_HASH, which halts the live side.
+    assert live_spec.PAPER_BOOKS["G-BAND5"] not in arms
     for sid, book in live_spec.PAPER_BOOKS.items():
+        if sid == "G-BAND5":
+            continue
         assert live_spec.hold_minutes(live_spec.BY_ID[sid]) == arms[book].hold
         assert arms[book].clock == "entry", "the live clock starts at the entry"
         assert live_spec.MIRRORS[book] == sid

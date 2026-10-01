@@ -670,10 +670,6 @@ PAPER_INTERVAL_SECONDS = _int("LAB_GRADUATION_PAPER_TICK_S", 3)
 # keep 47% of graduations. Two days is not enough to trust the P&L, so the
 # filter runs as a SECOND book beside the control, on the same graduations,
 # and the two are compared after four weeks. The control is not touched.
-#: The two arms the dedicated Paper panels render. Both are ordinary members
-#: of `tournament.ARMS` — the panels are a close-up of two rows of the
-#: leaderboard, not a separate experiment.
-PAPER_BOOKS = ("F01_all_2m", "F14_symnight_2m")
 #: The filtered book enters only when the pool opened inside this UTC window
 #: (start inclusive, end exclusive, wrapping midnight).
 PAPER_FILTER_HOUR_START = _int("LAB_GRADUATION_PAPER_FILTER_HOUR_START", 18)
@@ -1022,13 +1018,10 @@ FRESH_BOOKS: tuple[FreshBookSpec, ...] = (
     # they are funded from the same start with the same money.
     FreshBookSpec("BASE_75k_quiet_4m", datetime(2026, 9, 20, 15, 0, tzinfo=UTC),
                   Decimal(500), Decimal(100)),
-    *(FreshBookSpec(book, datetime(2026, 9, 21, 14, 15, tzinfo=UTC),
-                    Decimal(500), Decimal(100))
-      for book in ("BAND_55k_2m", "BAND_55k_5m", "BAND_55k_quiet_5m",
-                   # Same start as its control on purpose: its first 24 trades
-                   # ARE that control's, copied, so two walks from different
-                   # minutes would not be comparable.
-                   "BAND_55k_pump_5m")),
+    # Same start as its control had (BAND_55k_5m, deleted 2026-10-01 with
+    # every losing arm): its first 24 trades were that control's, copied.
+    FreshBookSpec("BAND_55k_pump_5m", datetime(2026, 9, 21, 14, 15, tzinfo=UTC),
+                  Decimal(500), Decimal(100)),
     # Karthik's decision book, 2026-09-22: "let it continue and also start a
     # fresh one with $500 ... let this run until end of month then I will put
     # real $500". B3 is the deepest arm on the board and the only one that
@@ -1053,10 +1046,6 @@ FRESH_BOOKS: tuple[FreshBookSpec, ...] = (
     #
     # Starts FORWARD at 05:00 UTC, the first round hour after this was written.
     FreshBookSpec("B5_500k_flow_5m", datetime(2026, 9, 23, 5, 0, tzinfo=UTC),
-                  Decimal(500), Decimal(100)),
-    # Karthik's rug-money block (2026-09-23), beside the band it copies so the
-    # two can be read together. Starts FORWARD at 10:00 UTC.
-    FreshBookSpec("BAND_55k_blk_5m", datetime(2026, 9, 23, 10, 0, tzinfo=UTC),
                   Decimal(500), Decimal(100)),
     # KARTHIK'S BOOK. His own money on the quiet rule, opened when he asked
     # for it and JUDGED 2026-10-23 — thirty days, fixed before its first trade

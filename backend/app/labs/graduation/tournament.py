@@ -706,10 +706,6 @@ ARMS: tuple[Arm, ...] = (
     # 5-minute at $84, and the $25-40k slice alone cost $1,136 and $1,174 of
     # that — more than the four books lost in total. The quiet twins went with
     # them: at this floor the filter did not reduce rugs (20% against 13%).
-    Arm("BAND_55k_2m", "band55", 2, locked=True,
-        note="every graduation with a $55-75k pool and locked liquidity, out at 2m"),
-    Arm("BAND_55k_5m", "band55", 5, locked=True,
-        note="every graduation with a $55-75k pool and locked liquidity, out at 5m"),
     # The quiet filter, tested where the rugs actually are. At $75k it looks
     # good and has met no rug; at $25k it made things worse. The band is where
     # that question has an answer worth having.
@@ -722,19 +718,6 @@ ARMS: tuple[Arm, ...] = (
     Arm("BAND_55k_pump_5m", "band55_pump", 5, locked=True,
         note="every graduation with a $55-75k pool, locked liquidity and a "
              "pump.fun mint, out at 5m"),
-    # Karthik, 2026-09-23: "only block books with high rug rate". A NEW arm
-    # rather than a change to BAND_55k_5m, which keeps running untouched as its
-    # matched control — the band is the highest-rug arm on the board (7 rugs in
-    # 70 trades, 10%) and the one where blocking should pay. Measured on that
-    # book the wide list refuses 36 of 70 and takes it from +$342 to +$219, so
-    # this is not expected to win; it is expected to ANSWER, which the numbers
-    # so far cannot (65th percentile against a random refusal of the same size).
-    Arm("BAND_55k_blk_5m", "band55", 5, locked=True, rug_blocked=True,
-        note="every graduation with a $55-75k pool and locked liquidity, "
-             "refusing any coin whose money has been behind a rug, out at 5m"),
-    Arm("BAND_55k_quiet_5m", "band55", 5, locked=True, quiet=True,
-        note="every graduation with a $55-75k pool and locked liquidity whose "
-             "pool is still quiet (under 100 trades) when it is bought, out at 5m"),
     # Karthik, 2026-09-20. PRE-REGISTERED: the baseline's rule, refusing any
     # coin whose pool has already had `QUIET_MAX_POOL_TXS` transactions when
     # the book buys (see that constant for the measurement it was frozen on).
@@ -789,9 +772,6 @@ ARMS: tuple[Arm, ...] = (
     # post-graduation samples (close_reason "replayed"), which ran about a
     # point a trade optimistic against the trades the lab really took. Only
     # rows opened after the deploy are forward evidence.
-    Arm("KARTHIK_Q25_5M", "band25_50", 5, quiet=True,
-        note="Karthik's rule on $25-50k pools — every graduation with a $25-50k "
-             "pool that is still quiet (under 100 trades) when bought, out at 5m"),
     Arm("KARTHIK_Q50_5M", "band50_75", 5, quiet=True,
         note="Karthik's rule on $50-75k pools — every graduation with a $50-75k "
              "pool that is still quiet (under 100 trades) when bought, out at 5m"),
@@ -806,19 +786,6 @@ ARMS: tuple[Arm, ...] = (
     Arm("BASE_150k_quiet_5m", "floor150", 5, quiet=True,
         note="every graduation over $150k whose pool is still quiet (under "
              "100 trades) when it is bought, out at 5m"),
-    # NOT part of the tournament, and kept when everything else went. These
-    # two are a PRE-REGISTERED A/B on the rug signals — a never-seen symbol
-    # rugs 18% against 3%, a daytime-UTC open 15% against 5% — opened
-    # 2026-09-13 with a judge date of 10 October, and `test_ab.py` exists
-    # specifically to stop them being ended quietly.
-    #
-    # They compete with nothing here: B3 asks which pool depth to buy, this
-    # asks whether a symbol predicts a rug. Retiring them three weeks short
-    # would throw away two days of accumulated evidence and answer nothing.
-    Arm("F01_all_2m", "all", 2, ab_experiment=True,
-        note="A/B control — every graduation, out at 2m"),
-    Arm("F14_symnight_2m", "sym_night", 2, ab_experiment=True,
-        note="A/B arm — reused symbol AND a night-UTC open, out at 2m"),
 )
 
 BY_NAME: dict[str, Arm] = {a.name: a for a in ARMS}
@@ -833,30 +800,19 @@ CONTROLS: tuple[Arm, ...] = tuple(a for a in ARMS if a.is_control)
 #: returned no edge. The count is pinned rather than free because an arm that
 #: appears mid-tournament changes what every other number means — so changing
 #: it must be a deliberate edit with a date, not a side effect.
-assert len(ARMS) == 20, (
-    "three B3 arms (3m FROM ENTRY retired 2026-09-16 at -$58.90), B3 bought "
-    "early (added 2026-09-16), the two rug arms (added 2026-09-16), the two "
-    "shorter graduation clocks g2 and g3 (added 2026-09-17), the fast pair "
-    "E75/E75T (added 2026-09-19), the quiet-pool arm BASE_75k_quiet_5m and the "
-    "four $25k clocks (all added 2026-09-20), its four-minute twin "
-    "BASE_75k_quiet_4m (added 2026-09-21), its $150k twin BASE_150k_quiet_5m "
-    "(added 2026-09-25), Karthik's two small-pool checks KARTHIK_Q25_5M and "
-    "KARTHIK_Q50_5M and the $75-300k arm BASE_75_300k_quiet_5m (all added "
-    "2026-09-26), the band's pump-only twin "
-    "BAND_55k_pump_5m (added 2026-09-22), the band's rug-money-blocked "
-    "twin BAND_55k_blk_5m (added 2026-09-23), the BASELINE, the $500k+flow "
-    "candidate, and the two "
-    "pre-registered A/B arms — which run but are flagged off the tournament "
-    f"board — not {len(ARMS)}. Karthik retired BASE_10k_2m (out of money after "
-    "277 trades) and BASE_75k_4m (five trades, four hours old) on 2026-09-20: "
-    "their rules stay in ENTRY_RULES as every retired arm's does, their trades "
-    "stay in the table, and `_manage` settles what they still held as "
-    "`arm_retired`")
-assert len([a for a in ARMS if a.ab_experiment]) == 2, (
-    "the rug-signal A/B is exactly F01_all_2m and F14_symnight_2m; flagging a "
-    "tournament arm as an experiment would hide it from its own comparison")
-assert {a.hold for a in ARMS} == {2, 4, 5}, (
-    "Four and five minutes, the A/B pair's two, and — from 2026-09-17 — two "
+#: 2026-10-01, Karthik: "delete ... the loss arm" — every arm still losing
+#: went: F01_all_2m, F14_symnight_2m (the rug-signal A/B), KARTHIK_Q25_5M and
+#: BAND_55k_2m/_5m/_blk_5m/_quiet_5m. The history below is why there were 20.
+assert len(ARMS) == 13, (
+    "the BASELINE, B3 at four and five minutes, the $500k+flow candidate, the "
+    "fast pair E75/E75T, the quiet arms (75k at four and five, 150k, 75-300k), "
+    "the band's pump-only arm and Karthik's two (KARTHIK_QUIET_5M, "
+    f"KARTHIK_Q50_5M) — not {len(ARMS)}. Retired and deleted arms' rules stay in "
+    "ENTRY_RULES, and `_manage` settles what they still held as `arm_retired`")
+assert {a.hold for a in ARMS} == {4, 5}, (
+    "Four and five minutes. The two-minute arms (the A/B pair and BAND_55k_2m) "
+    "went with every losing arm on 2026-10-01. Before that — from 2026-09-17 — "
+    "two "
     "and three counted from GRADUATION rather than from entry, which is a "
     "different rule on a different clock: B3_198k_3m measured three minutes "
     "from the fill and was retired at -$58.90; the last two three-minute arms "
@@ -874,10 +830,10 @@ assert all(a.tp is None and a.trail is None for a in ARMS), (
 assert all(a.stop is None or a.stop == Decimal("0.10") for a in ARMS), (
     "one stop level, so the twins differ in ONE thing. Sweeping levels here "
     "would be fitting a parameter on the same data that suggested it")
-assert len([a for a in ARMS if not a.is_control]) == 19, (
+assert len([a for a in ARMS if not a.is_control]) == 12, (
     "`config.required_pf` is calibrated on the maximum of FORTY-TWO noise "
-    "draws. Nineteen arms are now judged against it, so the bar is if anything "
-    "CONSERVATIVE — the luckiest of nineteen reaches less than the luckiest "
+    "draws. Twelve arms are now judged against it, so the bar is if anything "
+    "CONSERVATIVE — the luckiest of twelve reaches less than the luckiest "
     "of forty-two. Left as it is deliberately: a bar that is too hard costs a "
     "real finding some time, where one that is too easy costs a false one nothing")
 assert all(a.clock in {"entry", "graduation"} for a in ARMS), "a clock is one of two"

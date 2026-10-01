@@ -94,7 +94,7 @@ MODULES = ("config.py", "curve.py", "parse.py", "watchset.py", "sources.py",
            "held_watch.py",
            "postgrad.py", "recorder.py", "features.py", "backtest.py",
            "scheduler.py", "models.py", "api.py", "paper.py", "analyst.py",
-           "tournament.py", "ab.py", "restate.py", "moneyblock.py", "__main__.py",
+           "tournament.py", "restate.py", "moneyblock.py", "__main__.py",
            *BRIDGE_MODULES)
 
 

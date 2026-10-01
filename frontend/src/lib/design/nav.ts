@@ -54,16 +54,8 @@ export const NAV_GROUPS: NavGroup[] = [
       // the Breakout Lab until 2026-09-12 and the Dex Lab until 2026-09-13 —
       // each deleted on the operator's instruction, code and records together.
       // The Rafiq, Forex and Momentum Labs, the Robinhood Chain recorder and
-      // the paper wallet went the same way on 2026-09-25.
-      // Rafiqv2: a collaborator's six books on one engine, with their own
-      // tables and flag. Paper only.
-      {
-        href: "/rafiqv2-lab",
-        label: "Rafiqv2 Lab",
-        icon: IconSpark,
-        status: "ready",
-        note: "Research simulation. Six books on one engine, $1,000 each.",
-      },
+      // the paper wallet went the same way on 2026-09-25; Rafiqv2 and NSE
+      // Breakouts on 2026-10-01.
       // pump.fun launches climbing the bonding curve. Watch only, like the
       // NSE tracker below — no book, nothing ranked — so it is named for what
       // it records rather than for a strategy it does not have.
@@ -84,17 +76,6 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: IconSpark,
         status: "ready",
         note: "Paper only. $400 at $200 a trade on the quiet rule, judged 23 Oct.",
-      },
-      // Indian equities, not Solana, and the only destination here with no
-      // book at all — it watches and records. Listed beside the labs because
-      // that is where a reader looks for one, and named for the market so it
-      // cannot be confused with the Solana Breakout Lab above it.
-      {
-        href: "/breakouts",
-        label: "NSE Breakouts",
-        icon: IconSpark,
-        status: "ready",
-        note: "Watch only. NSE equities into daily resistance; no book.",
       },
     ],
   },

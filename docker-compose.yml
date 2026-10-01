@@ -296,8 +296,6 @@ x-backend-env: &backend-env
   # `scheduler`, the worker executes it, and the API reads it, so all three
   # have to agree about the flag. A value this file does not name never
   # reaches a container.
-  RAFIQV2_LAB_ENABLED: ${RAFIQV2_LAB_ENABLED:-false}
-  NSE_BREAKOUT_ENABLED: ${NSE_BREAKOUT_ENABLED:-false}
   KARTHIK_CANDIDATE_LIMIT: ${KARTHIK_CANDIDATE_LIMIT:-250}
   KARTHIK_REVIEW_BATCH_LIMIT: ${KARTHIK_REVIEW_BATCH_LIMIT:-2000}
   KARTHIK_MAX_MARKET_AGE_SECONDS: ${KARTHIK_MAX_MARKET_AGE_SECONDS:-900}

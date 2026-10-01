@@ -321,25 +321,6 @@ def test_the_book_ticks_often_enough_to_honour_its_own_exit() -> None:
 
 # --- the A/B entry filter -----------------------------------------------------
 
-def test_the_paper_panels_render_two_tournament_arms() -> None:
-    """They are a close-up of two rows of the leaderboard, not a separate
-    experiment: the control arm the live book has always run, and the filtered
-    arm the rug research proposed. Both are ordinary members of `ARMS`, so
-    neither can drift from the tournament it is being compared inside."""
-    from app.labs.graduation.paper import PaperBook
-    from app.labs.graduation.tournament import BY_NAME
-
-    assert config.PAPER_BOOKS == ("F01_all_2m", "F14_symnight_2m")
-    control, filtered = (BY_NAME[n] for n in config.PAPER_BOOKS)
-    assert control.entry == "all" and filtered.entry == "sym_night"
-    assert control.hold == filtered.hold == config.PAPER_MAX_HOLD_MINUTES
-    assert (control.tp, control.trail) == (filtered.tp, filtered.trail) == (None, None)
-
-    import pytest
-    with pytest.raises(ValueError):
-        PaperBook(None, book="tuned")  # type: ignore[arg-type]
-
-
 def test_the_filter_is_pinned_to_what_the_replay_found() -> None:
     """18:00-05:59 UTC, symbol used at least once before. Pinned so a later
     edit is a visible change to a stated rule; the values came from a replay

@@ -344,8 +344,6 @@ const PAGE_LINES: ReadonlyArray<readonly [string, readonly string[]]> = [
   ["/real-wallet", ["Real money here — careful!", "Only you can press Start.", "I'm watching the wallet with you."]],
   ["/graduation-lab", ["Every arm vs its control!", "So many graduations…", "Deep pools, short holds."]],
   ["/hq", ["Say hi to the office!", "Everyone's at their desk.", "Want to see them dance? 🎵"]],
-  ["/rafiqv2-lab", ["Six books, one engine.", "Rafiqv2 reporting in!"]],
-  ["/breakouts", ["Namaste, NSE!", "Charts, charts, charts."]],
 ];
 const DOCK_EVERY_MS = 9000;
 const NEWS_EVERY_MS = 12_000;

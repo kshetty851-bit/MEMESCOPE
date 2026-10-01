@@ -59,7 +59,7 @@ def test_the_tournament_is_a_hold_sweep_with_a_baseline_on_every_hold() -> None:
     One baseline per hold, so no hold is judged without an unselected twin on
     its own clock. Nothing on this board decides by hashing a mint.
     """
-    assert len(ARMS) == 20
+    assert len(ARMS) == 13
     # Karthik's quiet-pool arm (2026-09-20): the baseline's rule, refusing a
     # pool already past `QUIET_MAX_POOL_TXS` transactions. Not a control, so
     # the baseline below is unchanged and it has something to be judged against.
@@ -68,13 +68,8 @@ def test_the_tournament_is_a_hold_sweep_with_a_baseline_on_every_hold() -> None:
     # Karthik's rug-money block (2026-09-23) is a NEW arm beside the band, not
     # a change to it: BAND_55k_5m keeps running untouched as its control, so
     # the pair differs in that one filter and nothing else.
-    blk, ctl = BY_NAME["BAND_55k_blk_5m"], BY_NAME["BAND_55k_5m"]
-    assert blk.rug_blocked and not ctl.rug_blocked
-    assert ((blk.entry, blk.hold, blk.locked, blk.quiet)
-            == (ctl.entry, ctl.hold, ctl.locked, ctl.quiet))
-    assert sum(a.rug_blocked for a in ARMS) == 1, (
-        "one arm asks for the wide list; it is a tax on any arm whose rugs are "
-        "rare (B5: +$256 -> +$229 while preventing none)")
+    # It and its control went with every losing arm on 2026-10-01.
+    assert sum(a.rug_blocked for a in ARMS) == 0
     quiet75 = sorted((a for a in ARMS if a.entry == "floor75"),
                      key=lambda a: (a.hold, a.name))
     assert [a.name for a in quiet75] == [
@@ -155,8 +150,16 @@ def test_every_entry_filter_is_implemented() -> None:
 
 
 def test_the_filters_split_the_population_the_way_they_claim() -> None:
+    from app.labs.graduation.tournament import Arm
+
+    # The A/B arms went on 2026-10-01; their RULES stay in ENTRY_RULES, so
+    # they are checked on stand-in arms.
+    stand_in = {"F01_all_2m": Arm("F01_all_2m", "all", 2),
+                "F14_symnight_2m": Arm("F14_symnight_2m", "sym_night", 2)}
+
     def took(name: str, when: datetime, **over: object) -> bool:
-        return accepts(BY_NAME[name], open_at=when, **{**TOKEN, **over})
+        arm = stand_in.get(name) or BY_NAME[name]
+        return accepts(arm, open_at=when, **{**TOKEN, **over})
 
     assert took("F01_all_2m", DAY) and took("F01_all_2m", NIGHT)
     assert took("F14_symnight_2m", NIGHT)
@@ -215,15 +218,6 @@ def test_a_missing_feature_is_a_refusal_not_a_pass() -> None:
                            **{**TOKEN, "liquidity": None, "fdv": None})
     # Every surviving arm is a liquidity band, and a missing reading must
     # refuse rather than pass — that is the whole of this test now.
-
-
-def test_the_live_book_and_the_ab_arm_are_both_in_the_tournament() -> None:
-    """The Paper panels render two arms of the leaderboard rather than a
-    separate experiment, so those names must exist."""
-    assert config.PAPER_BOOKS == ("F01_all_2m", "F14_symnight_2m")
-    for name in config.PAPER_BOOKS:
-        assert name in BY_NAME
-    assert BY_NAME["F01_all_2m"].hold == 2
 
 
 def test_the_calling_gate_is_stated_before_the_tournament_runs() -> None:
@@ -924,12 +918,9 @@ async def test_a_token_that_never_graduated_is_not_bought(monkeypatch) -> None:
         return 0
 
     monkeypatch.setattr(tournament.live_decisions, "record", no_mirror)
-    # Nine arms take a $250k pool: the baseline, the seven B3 arms — five on
-    # the entry clock plus g2/g3/g4 on the graduation clock, which this
-    # candidate graduated 40s ago so all three still have time — and the
-    # all-graduations A/B control. B5 needs $500k; B3E and the night A/B do not
-    # buy from this query.
-    for pair, bought in ((OTHER_POOL, 0), (REAL_POOL, 4)):
+    # Three arms take this $250k pool once every losing arm went (2026-10-01):
+    # the baseline and the B3 arms that still run. B5 needs $500k.
+    for pair, bought in ((OTHER_POOL, 0), (REAL_POOL, 3)):
         session = _Answers([], [], [])
         session.statements = []
         t = Tournament(session, now=NIGHT)
@@ -1173,7 +1164,7 @@ async def test_an_arm_that_asks_for_locked_liquidity_gets_it(monkeypatch) -> Non
         _, added, _, _ = await _buy(monkeypatch, feed_price="0.00050", pool=pool)
         books = {p.book for p in added}
         assert ("TEST_locked_2m" in books) is locked, lp_supply
-        assert "F01_all_2m" in books
+        assert "BASE_75k_5m" in books
 
 
 async def test_a_buy_fills_at_the_pools_own_price_not_the_feeds_first_report(
@@ -1184,7 +1175,7 @@ async def test_a_buy_fills_at_the_pools_own_price_not_the_feeds_first_report(
     the report, the book booked +1,044%; on-chain the trade made +4%."""
     bought, added, mirrored, reads = await _buy(
         monkeypatch, feed_price="0.000004773", pool=_pool("0.0000541", "980"))
-    assert bought == 4   # every arm this coin qualifies for; a $250k pool is
+    assert bought == 3   # every arm this coin qualifies for; a $250k pool is
     # above the band arms' ceiling, so only the deep books take it
     assert reads == [(REAL_MINT, REAL_POOL)], "one read prices every arm"
     for p in added:
@@ -1212,7 +1203,7 @@ async def test_a_pool_price_a_scale_error_away_is_not_bought(monkeypatch) -> Non
     assert (await _buy(monkeypatch, feed_price="0.00008",
                        pool=_pool("0.00000008", "980")))[0] == 0
     assert (await _buy(monkeypatch, feed_price="0.00008",
-                       pool=_pool("0.00088", "980")))[0] == 4
+                       pool=_pool("0.00088", "980")))[0] == 3
 
 
 async def test_a_pool_not_quoted_in_sol_is_not_bought(monkeypatch) -> None:
@@ -1268,15 +1259,18 @@ def test_karthiks_small_pool_checks_buy_only_their_band():
     from datetime import UTC, datetime
     from decimal import Decimal
 
-    from app.labs.graduation.tournament import BY_NAME, accepts
+    from app.labs.graduation.tournament import BY_NAME, Arm, accepts
 
     at = datetime(2026, 9, 26, tzinfo=UTC)
+    # KARTHIK_Q25_5M went with every losing arm on 2026-10-01; its rule stays.
+    arms = {**BY_NAME, "KARTHIK_Q25_5M": Arm("KARTHIK_Q25_5M", "band25_50", 5, quiet=True)}
+
     def takes(name, usd):
-        return accepts(BY_NAME[name], mint="xpump", open_at=at, liquidity=Decimal(usd),
+        return accepts(arms[name], mint="xpump", open_at=at, liquidity=Decimal(usd),
                        fdv=None, sells=None, reuse=None)
     assert [takes("KARTHIK_Q25_5M", v) for v in (24_999, 25_000, 49_999, 50_000)] == [
         False, True, True, False]
     assert [takes("KARTHIK_Q50_5M", v) for v in (49_999, 50_000, 74_999, 75_000)] == [
         False, True, True, False]
-    assert BY_NAME["KARTHIK_Q25_5M"].quiet and BY_NAME["KARTHIK_Q50_5M"].quiet
-    assert BY_NAME["KARTHIK_Q25_5M"].hold == BY_NAME["KARTHIK_Q50_5M"].hold == 5
+    assert arms["KARTHIK_Q25_5M"].quiet and arms["KARTHIK_Q50_5M"].quiet
+    assert arms["KARTHIK_Q25_5M"].hold == arms["KARTHIK_Q50_5M"].hold == 5
