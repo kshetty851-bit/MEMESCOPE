@@ -53,25 +53,38 @@ describe("a user's own wallet", () => {
     }));
     page();
     expect(await screen.findByText(ADDRESS)).toBeInTheDocument();
+    expect(screen.getByText("$90.00")).toBeInTheDocument();       // dollars first
     expect(screen.getByText("0.5000 SOL")).toBeInTheDocument();
     expect(screen.getByText(/Trading: off/)).toBeInTheDocument();
     expect(screen.getByText(/can only go to Karthik/)).toBeInTheDocument();
   });
 
-  it("asks twice before sending, and names only Karthik as the destination", async () => {
-    get.mockResolvedValue(view({ address: ADDRESS, trading: false, balance_sol: "0.5" }));
+  it("takes dollars, asks twice, and sends the SOL they buy only to Karthik", async () => {
+    // 0.5 SOL worth $90: $180 a SOL, so $18 is 0.1 SOL.
+    get.mockResolvedValue(view({
+      address: ADDRESS, trading: false, balance_sol: "0.5", balance_usd: "90.00" }));
     post.mockResolvedValue({ signature: "sig", explorer: "https://solscan.io/tx/sig", sol: "0.1" });
     page();
-    fireEvent.change(await screen.findByLabelText("Amount of SOL to send to Karthik"), {
-      target: { value: "0.1" },
+    fireEvent.change(await screen.findByLabelText("Dollars to send to Karthik"), {
+      target: { value: "18" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Send to Karthik" }));
     expect(post).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Yes, send 0.1 SOL to Karthik" }));
+    fireEvent.click(screen.getByRole("button", { name: "Yes, send $18.00 (0.1 SOL) to Karthik" }));
     await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
     const [url, body] = post.mock.calls[0]!;
     expect(url).toBe("/real-wallet/family/user1/withdraw");
     expect(body).toEqual({ sol_amount: "0.1", confirmation_phrase: "WITHDRAW_TO_KARTHIK" });
+  });
+
+  it("will not convert dollars without a price", async () => {
+    get.mockResolvedValue(view({ address: ADDRESS, trading: false, balance_sol: "0.5" }));
+    page();
+    fireEvent.change(await screen.findByLabelText("Dollars to send to Karthik"), {
+      target: { value: "18" },
+    });
+    expect(screen.getByRole("button", { name: "Send to Karthik" })).toBeDisabled();
+    expect(screen.getByText(/Can.t read the SOL price/)).toBeInTheDocument();
   });
 
   it("says so when the member has no wallet yet", async () => {
@@ -259,6 +272,9 @@ describe("a user wallet's dashboard, as the main wallet's", () => {
     expect(days).toHaveTextContent("29 Sep-$0.502 trades · 1 won");
     expect(dash).toHaveTextContent("Open — 1");
     expect(dash).toHaveTextContent("Closed — 1");
+    // Spent and got back in dollars, not SOL: $50 in, $51.20 back after fees.
+    expect(dash).toHaveTextContent("$50.00$51.20");
+    expect(dash).not.toHaveTextContent("SOL");
     expect(screen.getByRole("link", { name: "DONE" })).toHaveAttribute(
       "href", "https://dexscreener.com/solana/DoneMint1111");
   });

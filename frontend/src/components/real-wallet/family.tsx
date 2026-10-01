@@ -444,13 +444,19 @@ function OwnWalletPanel({ member, wallet, book, isOwner, onDone }: {
       onDone();
     },
   });
+  // Typed in dollars (Karthik, 2026-10-01), sent as SOL at the price the
+  // balance was just read at; the confirm button names both.
   const [amount, setAmount] = useState("");
   const [armed, setArmed] = useState(false);
+  const solPrice = Number(wallet.balance_usd) / Number(wallet.balance_sol);
+  const solAmount = Number(amount) > 0 && solPrice > 0
+    ? (Math.floor((Number(amount) / solPrice) * 1e6) / 1e6).toString()
+    : null;
   const withdraw = useMutation({
     mutationFn: () =>
       api.post<{ signature: string; explorer: string; sol: string }>(
         `/real-wallet/family/${member.toLowerCase()}/withdraw`,
-        { sol_amount: amount, confirmation_phrase: "WITHDRAW_TO_KARTHIK" },
+        { sol_amount: solAmount, confirmation_phrase: "WITHDRAW_TO_KARTHIK" },
         { skipAuthRetry: true, headers: usersHeaders() },
       ),
     onSuccess: () => {
@@ -506,11 +512,13 @@ function OwnWalletPanel({ member, wallet, book, isOwner, onDone }: {
 
       <p className="mt-4 text-xs text-ink-3">Balance</p>
       <p className="mt-1 text-xl font-medium tabular-nums text-ink">
-        {wallet.balance_sol != null
-          ? `${Number(wallet.balance_sol).toFixed(4)} SOL`
-          : "Couldn’t read it just now"}
-        {wallet.balance_usd != null ? (
-          <span className="ml-2 text-sm text-ink-3">≈ {usd(wallet.balance_usd)}</span>
+        {wallet.balance_usd != null
+          ? usd(wallet.balance_usd)
+          : wallet.balance_sol != null
+            ? `${Number(wallet.balance_sol).toFixed(4)} SOL`
+            : "Couldn’t read it just now"}
+        {wallet.balance_usd != null && wallet.balance_sol != null ? (
+          <span className="ml-2 text-sm text-ink-3">{Number(wallet.balance_sol).toFixed(4)} SOL</span>
         ) : null}
       </p>
 
@@ -605,16 +613,16 @@ function OwnWalletPanel({ member, wallet, book, isOwner, onDone }: {
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <input
             inputMode="decimal"
-            placeholder="SOL"
+            placeholder="$"
             value={amount}
             onChange={(e) => {
               setAmount(e.target.value);
               setArmed(false);
             }}
             className="w-28 rounded-md border border-line bg-canvas px-2 py-1 text-sm text-ink"
-            aria-label="Amount of SOL to send to Karthik"
+            aria-label="Dollars to send to Karthik"
           />
-          {armed ? (
+          {armed && solAmount ? (
             <>
               <button
                 type="button"
@@ -622,7 +630,9 @@ function OwnWalletPanel({ member, wallet, book, isOwner, onDone }: {
                 onClick={() => withdraw.mutate()}
                 className="rounded-md bg-accent px-3 py-1 text-sm font-medium text-canvas disabled:opacity-60"
               >
-                {withdraw.isPending ? "Sending…" : `Yes, send ${amount} SOL to Karthik`}
+                {withdraw.isPending
+                  ? "Sending…"
+                  : `Yes, send ${usd(amount)} (${solAmount} SOL) to Karthik`}
               </button>
               <button type="button" onClick={() => setArmed(false)} className="text-sm text-ink-3">
                 Cancel
@@ -631,7 +641,7 @@ function OwnWalletPanel({ member, wallet, book, isOwner, onDone }: {
           ) : (
             <button
               type="button"
-              disabled={!(Number(amount) > 0)}
+              disabled={!solAmount}
               onClick={() => setArmed(true)}
               className="rounded-md border border-line px-3 py-1 text-sm text-ink-2 hover:text-ink disabled:opacity-50"
             >
@@ -639,9 +649,15 @@ function OwnWalletPanel({ member, wallet, book, isOwner, onDone }: {
             </button>
           )}
         </div>
+        {Number(amount) > 0 && !solAmount ? (
+          <p className="mt-2 text-xs text-ink-3">
+            Can&apos;t read the SOL price just now, so the dollars can&apos;t be converted. Try again shortly.
+          </p>
+        ) : null}
         {withdraw.isSuccess ? (
           <p className="mt-2 text-xs text-up">
-            Sent {withdraw.data.sol} SOL.{" "}
+            Sent {withdraw.data.sol} SOL
+            {solPrice > 0 ? ` (≈ ${usd(Number(withdraw.data.sol) * solPrice)})` : ""}.{" "}
             <a href={withdraw.data.explorer} target="_blank" rel="noreferrer" className="underline">
               See it on Solscan
             </a>
@@ -884,7 +900,7 @@ export function WalletDashboard({ book, wallet }: { book: OwnBook; wallet?: OwnW
       ) : null}
 
       <SinceFirstTradeCard since={book.since_first_trade} />
-      <TradesTable positions={book.positions ?? []} />
+      <TradesTable positions={book.positions ?? []} inDollars />
     </div>
   );
 }

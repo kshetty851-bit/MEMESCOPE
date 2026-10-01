@@ -225,7 +225,11 @@ const sol = (value: string | null) => (value ? `${Number(value).toFixed(4)} SOL`
  * now, what closed and how, and the totals. Figures are the wallet's settled
  * amounts; the server sends its latest 50.
  */
-export function TradesTable({ positions }: { positions: Position[] }) {
+export function TradesTable({ positions, inDollars = false }: {
+  positions: Position[];
+  /** Spent and got back in dollars: the user wallets (Karthik, 2026-10-01). */
+  inDollars?: boolean;
+}) {
   const open = positions.filter((p) => p.status === "OPEN");
   const closed = positions.filter((p) => p.status !== "OPEN");
   const results = closed.map(resultOf).filter((r): r is number => r !== null);
@@ -285,7 +289,9 @@ export function TradesTable({ positions }: { positions: Position[] }) {
                   <td className="text-ink-3">
                     {(p.exit_state && EXIT_STATE[p.exit_state]) || "holding"}
                   </td>
-                  <td className="tabular-nums">{sol(p.spent)}</td>
+                  <td className="tabular-nums">
+                    {inDollars ? usd(Number(p.cost_usd)) : sol(p.spent)}
+                  </td>
                   <td className="tabular-nums text-ink-3">{when(p.opened_at)}</td>
                   <td className="text-ink-3">{p.strategy_id ?? "—"}</td>
                   <td className="p-3">
@@ -349,8 +355,10 @@ export function TradesTable({ positions }: { positions: Position[] }) {
                         ? "sold on time"
                         : `sold · ${p.exit_reason ?? "closed"}`}
                     </td>
-                    <td className="tabular-nums">{sol(p.spent)}</td>
-                    <td className="tabular-nums">{sol(p.received)}</td>
+                    <td className="tabular-nums">{inDollars ? usd(cost) : sol(p.spent)}</td>
+                    <td className="tabular-nums">
+                      {!inDollars ? sol(p.received) : result == null ? "—" : usd(cost + result)}
+                    </td>
                     <td className="tabular-nums text-ink-3">{when(p.opened_at)}</td>
                     <td className="tabular-nums text-ink-3">
                       {p.closed_at ? when(p.closed_at) : "—"}
