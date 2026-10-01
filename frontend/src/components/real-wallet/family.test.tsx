@@ -15,7 +15,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), replace: 
 
 import { ApiError } from "@/lib/api-client";
 
-import { FamilyMemberPage, WalletDashboard } from "./family";
+import { FamilyMemberPage, SideBySide, WalletDashboard } from "./family";
 
 const ADDRESS = "7WctMGpqz1tGkYStBBjJRMnmuh9uwJubYV2tL4pLwRr9";
 
@@ -257,5 +257,27 @@ describe("a user wallet's dashboard, as the main wallet's", () => {
     expect(dash).toHaveTextContent("Closed — 1");
     expect(screen.getByRole("link", { name: "DONE" })).toHaveAttribute(
       "href", "https://dexscreener.com/solana/DoneMint1111");
+  });
+});
+
+
+describe("JUPITER side by side", () => {
+  it("lists each wallet's day and all-time results in one table", () => {
+    render(
+      <SideBySide
+        rows={[
+          { label: "Main wallet", today_trades: 51, today_won: 47, today_pnl_usd: "45.41",
+            today_avg_pct: "1.78", all_trades: 300, all_pnl_usd: "120.00", all_avg_pct: "0.80" },
+          { label: "USER 1", today_trades: 51, today_won: 46, today_pnl_usd: "41.26",
+            today_avg_pct: "1.62", all_trades: 52, all_pnl_usd: "41.59", all_avg_pct: "1.60" },
+          { label: "USER 2", today_trades: 0, today_won: 0, today_pnl_usd: "0.00",
+            today_avg_pct: null, all_trades: 0, all_pnl_usd: "0.00", all_avg_pct: null },
+        ]}
+      />,
+    );
+    const rows = screen.getByTestId("side-by-side").querySelectorAll("tbody tr");
+    expect(rows[0]).toHaveTextContent("Main wallet+$45.4151 · 47+1.78%+$120.00300+0.80%");
+    expect(rows[1]).toHaveTextContent("USER 1+$41.2651 · 46+1.62%+$41.5952+1.60%");
+    expect(rows[2]).toHaveTextContent("USER 2—0——0—");
   });
 });

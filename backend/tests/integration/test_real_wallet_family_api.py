@@ -106,3 +106,36 @@ async def test_the_password_opens_the_view_but_only_the_admin_moves_money(app, d
         assert view.status_code == 200, view.text
         assert (view.json()["member"], view.json()["label"]) == ("USER7", "USER 7")
         assert (await client.get(f"{URL}/user11", headers=headers)).status_code == 404
+
+
+async def test_wallets_are_compared_side_by_side_today_and_since_start(db_session):
+    """Karthik, 2026-10-01: each wallet's results next to the others."""
+    from datetime import UTC, datetime, timedelta
+    from decimal import Decimal as D
+
+    from app.models.real_wallet_execution import RealWalletPosition
+    from app.real_wallet import views
+
+    now = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)                 # 16:00 Dubai
+
+    def closed(wallet, opened, pnl):
+        return RealWalletPosition(
+            mint_address=f"M{opened.timestamp()}{wallet[:4]}", status="CLOSED",
+            quantity=D(100), entry_price_usd=D("0.5"), opened_at=opened,
+            closed_at=opened + timedelta(minutes=5), wallet_public_key=wallet,
+            realised_gross_pnl_usd=D(pnl), realised_net_pnl_usd=D(pnl))
+    db_session.add_all([
+        closed("MainWallet", now - timedelta(hours=1), "1.50"),
+        closed("MainWallet", now - timedelta(days=2), "2.00"),       # before today
+        closed("UserOne", now - timedelta(hours=1), "1.00"),
+        closed("UserOne", now - timedelta(minutes=30), "-0.40"),
+    ])
+    await db_session.flush()
+    rows = await views.wallet_results(
+        db_session, [("Main wallet", "MainWallet"), ("USER 1", "UserOne"),
+                     ("USER 2", "NeverTraded")], now)
+    main, one, two = rows
+    assert (main["today_trades"], main["today_pnl_usd"], main["today_avg_pct"]) == (1, "1.50", "3.00")
+    assert (main["all_trades"], main["all_pnl_usd"]) == (2, "3.50")
+    assert (one["today_trades"], one["today_won"], one["today_pnl_usd"]) == (2, 1, "0.60")
+    assert (two["today_trades"], two["all_pnl_usd"], two["today_avg_pct"]) == (0, "0.00", None)

@@ -10,10 +10,10 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.real_wallet_execution import RealWalletLiveIntent
+from app.models.real_wallet_execution import RealWalletLiveIntent, RealWalletPosition
 from app.repositories.token import TokenRepository
 
 DUBAI = timedelta(hours=4)
@@ -113,3 +113,49 @@ def days_payload(positions, now: datetime) -> list[dict[str, Any]]:
              "pnl_usd": decimal_str(sum(v, Decimal(0)).quantize(Decimal("0.01"))),
              "trades": len(v), "won": sum(1 for x in v if x > 0)}
             for day, v in sorted(by_day.items(), reverse=True)]
+
+
+async def wallet_results(session: AsyncSession, wallets: list[tuple[str, str]],
+                         now: datetime) -> list[dict[str, Any]]:
+    """Each wallet's closed trades side by side (Karthik, 2026-10-01: "show
+    each wallet side by side in jupiter"): today (Dubai) and since it began.
+    `wallets` is [(label, address)], in the order to show them. Net where
+    measured, gross else."""
+    if not wallets:
+        return []
+    pnl = func.coalesce(RealWalletPosition.realised_net_pnl_usd,
+                        RealWalletPosition.realised_gross_pnl_usd)
+    cost = RealWalletPosition.entry_price_usd * RealWalletPosition.quantity
+    start = datetime.combine((now + DUBAI).date(), datetime.min.time(), now.tzinfo) - DUBAI
+    today = RealWalletPosition.opened_at >= start
+    rows = {r.w: r for r in (await session.execute(
+        select(RealWalletPosition.wallet_public_key.label("w"),
+               func.count().filter(today).label("t_trades"),
+               func.count().filter(today, pnl > 0).label("t_won"),
+               func.coalesce(func.sum(pnl).filter(today), 0).label("t_pnl"),
+               func.coalesce(func.sum(cost).filter(today), 0).label("t_cost"),
+               func.count().label("a_trades"),
+               func.coalesce(func.sum(pnl), 0).label("a_pnl"),
+               func.coalesce(func.sum(cost), 0).label("a_cost"))
+        .where(RealWalletPosition.status == "CLOSED", pnl.is_not(None),
+               RealWalletPosition.wallet_public_key.in_([a for _, a in wallets]))
+        .group_by(RealWalletPosition.wallet_public_key))).all()}
+
+    def pct(made: Decimal, spent: Decimal) -> str | None:
+        return None if not spent else decimal_str((Decimal(made) / Decimal(spent) * 100)
+                                                  .quantize(Decimal("0.01")))
+    out = []
+    for label, address in wallets:
+        r = rows.get(address)
+        out.append({
+            "label": label,
+            "today_trades": int(r.t_trades) if r else 0,
+            "today_won": int(r.t_won) if r else 0,
+            "today_pnl_usd": decimal_str(
+                Decimal(r.t_pnl if r else 0).quantize(Decimal("0.01"))),
+            "today_avg_pct": pct(r.t_pnl, r.t_cost) if r else None,
+            "all_trades": int(r.a_trades) if r else 0,
+            "all_pnl_usd": decimal_str(Decimal(r.a_pnl if r else 0).quantize(Decimal("0.01"))),
+            "all_avg_pct": pct(r.a_pnl, r.a_cost) if r else None,
+        })
+    return out
