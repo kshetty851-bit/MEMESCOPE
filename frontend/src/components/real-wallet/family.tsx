@@ -232,6 +232,8 @@ export function FamilySection() {
         <div className="mt-3 flex flex-wrap gap-2">{INVESTMENT.map(link)}</div>
       </div>
 
+      <SideBySide rows={list.data?.compare ?? []} />
+
       <div className="mt-5 rounded-md border border-line p-4" data-testid="users-locked-area">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <p className="text-sm font-medium text-ink">USER 8 – USER 10 and fees</p>
@@ -338,7 +340,20 @@ interface MemberRow {
   address?: string | null;
 }
 
+/** One wallet's closed trades, today (Dubai) and since it began. */
+interface CompareRow {
+  label: string;
+  today_trades: number;
+  today_won: number;
+  today_pnl_usd: string;
+  today_avg_pct: string | null;
+  all_trades: number;
+  all_pnl_usd: string;
+  all_avg_pct: string | null;
+}
+
 interface MembersView {
+  compare?: CompareRow[];
   members: MemberRow[];
   band_choices?: BandChoice[];
   unlocked?: boolean;
@@ -702,6 +717,58 @@ function FeePanel({ member, fee, onDone, canCollect = true }: {
 }
 
 /** One user's page. The server answers only Karthik, signed in. */
+const signedPct = (v: string | null) =>
+  v == null ? "—" : `${Number(v) >= 0 ? "+" : ""}${Number(v).toFixed(2)}%`;
+
+/** Every wallet's results next to the others (Karthik, 2026-10-01). */
+export function SideBySide({ rows }: { rows: CompareRow[] }) {
+  if (!rows.length) return null;
+  const head = "py-1.5 px-2 text-right font-normal";
+  return (
+    <div className="mt-4 rounded-md border border-line p-4" data-testid="side-by-side">
+      <p className="text-sm font-medium text-ink">Side by side</p>
+      <div className="mt-2 overflow-x-auto">
+        <table className="w-full min-w-[34rem] text-[12px] tabular-nums">
+          <thead className="text-[11px] uppercase tracking-wider text-ink-3">
+            <tr>
+              <th className="py-1.5 pr-2 text-left font-normal">Wallet</th>
+              <th className={head}>Today</th>
+              <th className={head}>Trades · won</th>
+              <th className={head}>Avg / trade</th>
+              <th className={head}>All time</th>
+              <th className={head}>Trades</th>
+              <th className="py-1.5 pl-2 text-right font-normal">Avg / trade</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.label} className="border-t border-line">
+                <td className="py-1.5 pr-2 text-ink">{r.label}</td>
+                <td className={`px-2 text-right ${tone(r.today_pnl_usd)}`}>
+                  {r.today_trades ? `${Number(r.today_pnl_usd) >= 0 ? "+" : ""}${usd(r.today_pnl_usd)}` : "—"}
+                </td>
+                <td className="px-2 text-right text-ink-2">
+                  {r.today_trades ? `${r.today_trades} · ${r.today_won}` : "0"}
+                </td>
+                <td className={`px-2 text-right ${tone(r.today_avg_pct)}`}>{signedPct(r.today_avg_pct)}</td>
+                <td className={`px-2 text-right ${tone(r.all_pnl_usd)}`}>
+                  {r.all_trades ? `${Number(r.all_pnl_usd) >= 0 ? "+" : ""}${usd(r.all_pnl_usd)}` : "—"}
+                </td>
+                <td className="px-2 text-right text-ink-2">{r.all_trades}</td>
+                <td className={`pl-2 text-right ${tone(r.all_avg_pct)}`}>{signedPct(r.all_avg_pct)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-2 text-[11px] text-ink-3">
+        Closed trades only, after fees. &ldquo;Today&rdquo; runs from midnight Dubai. Wallets buy the
+        same coins a few seconds apart, so each later one usually makes a little less.
+      </p>
+    </div>
+  );
+}
+
 /** "30 Sep" in Dubai. */
 function dayLabel(day: string): string {
   return new Date(`${day}T12:00:00Z`)

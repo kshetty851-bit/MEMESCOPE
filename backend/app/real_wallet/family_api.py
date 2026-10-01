@@ -214,6 +214,13 @@ async def members(session: DbSession, _: OptionalUser,
         "investment_unlocked": "investment" in scopes,
         "locked_count": len(family.MEMBERS) - len(shown),
         "ticket_choices": [str(t) for t in family.TICKETS_USD]}
+    if shown:
+        owner = settings.REAL_WALLET_PUBLIC_KEY.strip()
+        out["compare"] = await views.wallet_results(
+            session,
+            [("Main wallet", owner)] * bool(owner)
+            + [(family.label(m), a) for m in shown if (a := family_wallets.address(m))],
+            datetime.now(UTC))
     if unlocked:
         await _charged(session)
         out["fees"] = await user_fees.summary(session)
