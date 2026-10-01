@@ -214,3 +214,96 @@ async def test_the_graduation_arm_keeps_the_loop_awake(monkeypatch) -> None:
     # A strategy that decides on a ten-minute horizon still waits for a decision.
     monkeypatch.setattr(scheduler, "AutotradeSwitchService", _switch("V7-06"))
     assert await scheduler._has_work() is False
+
+
+class _Tx(_FakeSession):
+    """A session that rolls back, and is dead after a database error until it does."""
+
+    def __init__(self, ids: list[str]) -> None:
+        super().__init__(ids)
+        self.rollbacks = 0
+        self.aborted = False
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return None
+
+    async def scalar(self, _stmt: object) -> bool:
+        if self.aborted:
+            raise RuntimeError("current transaction is aborted")
+        return True
+
+    async def commit(self) -> None:
+        if self.aborted:
+            raise RuntimeError("current transaction is aborted")
+        await super().commit()
+
+    async def rollback(self) -> None:
+        self.rollbacks += 1
+        self.aborted = False
+
+
+@pytest.mark.asyncio
+async def test_one_wallets_database_error_does_not_freeze_others(monkeypatch) -> None:
+    """2026-10-01: USER1's confirmed BUY hit a unique index; the error aborted
+    the transaction, so main's SELL in the same pass failed with it, and the
+    pass was thrown away every three seconds for ~14 minutes."""
+    from sqlalchemy.exc import IntegrityError
+
+    session = _Tx(["user1_buy", "main_sell"])
+
+    class _OneBadWallet(_FakeExecutor):
+        async def advance(self, intent_id: object, *, now: object) -> _FakeOutcome:
+            if intent_id == "user1_buy":
+                session.aborted = True
+                raise IntegrityError("insert", {}, Exception("duplicate key"))
+            return await super().advance(intent_id, now=now)
+
+    monkeypatch.setattr(scheduler, "RealWalletExecutor", _OneBadWallet)
+    moved = await scheduler._drain(session, now_fn=lambda: None)
+    assert session.rollbacks == 1
+    assert [m["state"] for m in moved] == [
+        "safety_approved", "order_created", "submitted", "reconciled"], (
+        "main's SELL must still reach the chain in the same pass")
+
+
+@pytest.mark.asyncio
+async def test_a_buy_that_fails_does_not_stop_the_sells(monkeypatch) -> None:
+    """Entries run first in each pass. A wallet whose buy raises every pass
+    must not keep every wallet's exits from ever running."""
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(settings, "REAL_WALLET_EXECUTION_MODE", "live")
+    monkeypatch.setattr(settings, "REAL_WALLET_FAST_EXIT_WINDOW_S", 0)
+    session = _Tx([])
+
+    async def _work() -> bool:
+        return True
+
+    class _BrokenBuyer:
+        def __init__(self, s):
+            pass
+
+        async def tick(self, *, now):
+            session.aborted = True
+            raise RuntimeError("USER2's buy failed")
+
+    exits_ran: list[bool] = []
+
+    class _Exits:
+        def __init__(self, s):
+            pass
+
+        async def tick(self, *, now):
+            exits_ran.append(True)
+            return SimpleNamespace(exits_requested=2)
+
+    monkeypatch.setattr(scheduler, "_has_work", _work)
+    monkeypatch.setattr(scheduler, "SessionFactory", lambda: session)
+    monkeypatch.setattr(scheduler, "RealWalletDriver", _BrokenBuyer)
+    monkeypatch.setattr(scheduler, "RealWalletExitDriver", _Exits)
+    out = await scheduler._real_wallet_fast_exit_tick()
+    assert exits_ran == [True]
+    assert out == {"passes": 1, "entries": 0, "exits_requested": 2, "advanced": 0}
