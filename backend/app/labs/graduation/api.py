@@ -32,6 +32,7 @@ from app.labs.graduation.models import (
     GradCheckpoint,
     GradCurveSample,
     GradMigration,
+    GradOperator,
     GradPaperPosition,
     GradPaperRestatement,
     GradPostgradSample,
@@ -1648,6 +1649,59 @@ async def _pumpfun_day(db: AsyncSession, day: date, sol_now: Decimal | None) -> 
                                 .quantize(Decimal(1)))),
         "pools_usd": str(Decimal(row.pools_usd).quantize(Decimal(1))),
         "pools_75k": int(row.pools_75k),
+    }
+
+
+#: The real wallet's rule buys pools from $75k, so a refused coin counts only
+#: from there: a shallower one it would never have bought anyway.
+PREVENTED_FLOOR_USD = 75_000
+#: What one wallet stakes a trade, for the "saved" figure.
+PREVENTED_TICKET_USD = Decimal(50)
+
+
+@router.get("/rugs-prevented", summary="Rugs the real wallet's checks refused")
+async def rugs_prevented(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+    """Karthik, 2026-10-02: "show this prevented rugs count". Every $75k+
+    graduation the money checks refused (`GradOperator.blocked_reason`), the
+    ones that rugged within five minutes (`rugged`), and what all of them
+    together would have done to a $50-a-trade wallet — the winners it turned
+    away included. Plus the rugs the quiet rule avoided: the baseline book
+    against the quiet book, same coins, same days."""
+    blocked = GradOperator.blocked_reason.is_not(None)
+    deep = GradOperator.depth_usd >= PREVENTED_FLOOR_USD
+    move = GradOperator.exit_price_native / GradOperator.price_native - 1
+    refused, rugs, moved, since = (await db.execute(
+        select(func.count().filter(blocked),
+               func.count().filter(blocked, GradOperator.rugged.is_(True)),
+               func.sum(move).filter(blocked, GradOperator.exit_price_native.is_not(None)),
+               func.min(GradOperator.entry_at).filter(blocked))
+        .where(deep))).one()
+    last = (await db.execute(
+        select(GradOperator.entry_at, GradToken.symbol)
+        .outerjoin(GradToken, GradToken.mint == GradOperator.mint)
+        .where(deep, blocked, GradOperator.rugged.is_(True))
+        .order_by(GradOperator.entry_at.desc()).limit(1))).first()
+    quiet_start = await db.scalar(select(func.min(GradPaperPosition.opened_at))
+                                  .where(GradPaperPosition.book == "BASE_75k_quiet_5m"))
+    by_book = dict((await db.execute(
+        select(GradPaperPosition.book, func.count())
+        .where(GradPaperPosition.book.in_(("BASE_75k_5m", "BASE_75k_quiet_5m")),
+               GradPaperPosition.opened_at >= quiet_start,
+               GradPaperPosition.closed_at.is_not(None),
+               GradPaperPosition.excluded.is_(None),
+               GradPaperPosition.net_return <= config.OPERATOR_RUG_MOVE)
+        .group_by(GradPaperPosition.book))).all()) if quiet_start else {}
+    return {
+        "since": since.isoformat() if since else None,
+        "refused": int(refused),
+        "rugs_blocked": int(rugs),
+        "saved_per_wallet_usd": str((-(Decimal(moved or 0)) * PREVENTED_TICKET_USD)
+                                    .quantize(Decimal("0.01"))),
+        "ticket_usd": str(PREVENTED_TICKET_USD),
+        "last_rug": None if last is None else {"symbol": last.symbol,
+                                               "at": last.entry_at.isoformat()},
+        "quiet_rugs_avoided": max(0, by_book.get("BASE_75k_5m", 0)
+                                  - by_book.get("BASE_75k_quiet_5m", 0)),
     }
 
 

@@ -6,6 +6,7 @@ import { useState } from "react";
 
 import { FamilySection } from "@/components/real-wallet/family";
 import { PartnersCard, type Partners } from "@/components/real-wallet/partners";
+import { RugsPreventedLive } from "@/components/rugs-prevented";
 import {
   SinceFirstTradeCard,
   TradesTable,
@@ -1139,6 +1140,7 @@ export default function RealWalletPage() {
       <ReadinessPanel data={readiness.data} />
       <BalanceCard data={data} readiness={readiness.data} />
       <PartnersCard data={data?.partners} />
+      <RugsPreventedLive compact />
       <StrategyCard
         autotrade={autotrade.data}
         strategy={chosen}

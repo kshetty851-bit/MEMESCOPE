@@ -40,7 +40,7 @@ from decimal import Decimal
 from functools import lru_cache
 from typing import Any, NamedTuple
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -1477,17 +1477,21 @@ class Tournament:
         opened = blocked = 0
         for (row, price, depth), ids in zip(deep, found, strict=True):
             ids = ids if isinstance(ids, frozenset) else None
+            # Only a coin deep enough to buy can be refused; the rest are
+            # recorded for the operator's record alone.
+            why = (moneyblock.refused(ids, self._now, recent, repeat)
+                   if ids and depth >= LIQ_BANDS[0][1] else None)
             self._session.add(GradOperator(
                 mint=row.mint, pool=pools[row.mint], migrated_at=row.ts,
                 entry_at=self._now, price_native=price.quantize(_P),
                 depth_usd=depth.quantize(Decimal("0.01")),
                 ids=sorted(ids) if ids else None,
                 label_due_at=self._now + timedelta(seconds=config.OPERATOR_LABEL_AFTER_S),
-                source="live"))
+                source="live", blocked_reason=why))
             if depth < LIQ_BANDS[0][1]:
                 continue  # recorded for the operator's record, too shallow to buy
             # The real wallet would refuse it, so no book here buys it either.
-            if ids and (why := moneyblock.refused(ids, self._now, recent, repeat)):
+            if why:
                 blocked += 1
                 logger.info("graduation_tournament_money_blocked", mint=row.mint, reason=why)
                 continue
@@ -1713,6 +1717,12 @@ class Tournament:
                 money_blocked += 1
                 logger.info("graduation_tournament_money_blocked", mint=row.mint,
                             reason=blocked[row.mint])
+                # Kept on the coin's record for the "rugs prevented" count.
+                await self._session.execute(
+                    update(GradOperator)
+                    .where(GradOperator.mint == row.mint,
+                           GradOperator.blocked_reason.is_(None))
+                    .values(blocked_reason=blocked[row.mint]))
                 continue
             price, depth = row.price_native, row.liquidity_usd
             pool = None
