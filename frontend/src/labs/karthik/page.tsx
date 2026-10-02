@@ -646,44 +646,56 @@ function PumpfunMoney() {
   return <PumpfunMoneyTable days={q.data.days} graduationSol={q.data.graduation_sol} />;
 }
 
-/** What Karthik has put into the trading wallets together (2026-10-02: "my
- * invested amount is 250$ among 3"). Change it here when he adds money. */
-const INVESTED_USD = 250;
+/** Each trading wallet started with $100 (Karthik, 2026-10-02: "main 50
+ * from my side, other 50 belongs to rafiq ... paper 1 and 2 100 each"). */
+const PUT_IN_PER_WALLET_USD = 100;
+/** Karthik's half of the main wallet; Rafiq owns the other. */
+const KARTHIK_SHARE_OF_MAIN = 0.5;
+const MAIN_LABEL = "Karthik";
 
 /**
  * REAL MONEY, at a glance (Karthik, 2026-10-02: "just to check from mobile or
  * other laptop"): the main wallet and each user wallet that is trading, down
- * the page, each one's profit since it began (closed trades), and a total
- * with its % of what he put in across them.
+ * the page, each one's profit from closed trades since its money went in (the
+ * main wallet from the partnership's start, 28 Sep), then the total on what
+ * the wallets were given and Karthik's own share on what he put in.
  */
-export function RealWallets({ wallets, totalValue, invested = INVESTED_USD }: {
+export function RealWallets({ wallets, totalValue }: {
   wallets: WalletProfit[] | undefined;
   totalValue?: string | null;
-  invested?: number;
 }) {
   if (!wallets?.length) return null;
-  const total = wallets.reduce((acc, w) => acc + Number(w.all_pnl_usd), 0);
+  const profit = (w: WalletProfit) => Number(w.all_pnl_usd);
+  const total = wallets.reduce((acc, w) => acc + profit(w), 0);
+  const putIn = wallets.length * PUT_IN_PER_WALLET_USD;
+  const isMain = (w: WalletProfit) => w.label === MAIN_LABEL;
+  const share = wallets.reduce(
+    (acc, w) => acc + profit(w) * (isMain(w) ? KARTHIK_SHARE_OF_MAIN : 1), 0);
+  const mine = putIn - (wallets.some(isMain)
+    ? PUT_IN_PER_WALLET_USD * (1 - KARTHIK_SHARE_OF_MAIN) : 0);
   const tone = (n: number) => (n > 0 ? "text-up" : n < 0 ? "text-down" : "text-ink");
   const signed = (n: number) => `${n > 0 ? "+" : ""}${usd(n)}`;
-  const pct = (total / invested) * 100;
+  const onWhat = (n: number, base: number) =>
+    `(${n > 0 ? "+" : ""}${((n / base) * 100).toFixed(2)}% on ${usd(base)})`;
   return (
     <div className="max-w-sm rounded-lg border border-line p-3" data-testid="real-wallets">
       {wallets.map((w) => (
         <div key={w.label} className="flex items-baseline justify-between py-0.5 text-sm">
           {/* "Paper 1", not "USER 1", on this page (Karthik, 2026-10-02). */}
           <span className="text-ink-2">{w.label.replace(/^USER /, "Paper ")}</span>
-          <span className={`tabular-nums ${tone(Number(w.all_pnl_usd))}`}>
-            {signed(Number(w.all_pnl_usd))}
-          </span>
+          <span className={`tabular-nums ${tone(profit(w))}`}>{signed(profit(w))}</span>
         </div>
       ))}
       <div className="mt-1 flex items-baseline justify-between border-t border-line pt-1.5">
         <span className="text-sm font-medium text-ink">Total</span>
         <span className={`font-semibold tabular-nums ${tone(total)}`}>
-          {signed(total)}{" "}
-          <span className="text-xs">
-            ({pct > 0 ? "+" : ""}{pct.toFixed(2)}% on {usd(invested)})
-          </span>
+          {signed(total)} <span className="text-xs">{onWhat(total, putIn)}</span>
+        </span>
+      </div>
+      <div className="flex items-baseline justify-between pt-0.5">
+        <span className="text-sm font-medium text-ink">Your share</span>
+        <span className={`font-semibold tabular-nums ${tone(share)}`}>
+          {signed(share)} <span className="text-xs">{onWhat(share, mine)}</span>
         </span>
       </div>
       {totalValue != null ? (

@@ -8,14 +8,16 @@ const wallet = (label: string, all: string) => ({
 });
 
 describe("the real wallets box", () => {
-  it("lists each wallet's profit since it began, then a total with its % of the $250 put in", () => {
-    render(<RealWallets totalValue="331.87" wallets={[
-      wallet("Karthik", "40.32"), wallet("USER 1", "43.78"), wallet("USER 2", "-4.56"),
+  it("lists each wallet, the total on $300, Karthik's share on his $250, and the value", () => {
+    render(<RealWallets totalValue="459.77" wallets={[
+      wallet("Karthik", "103.94"), wallet("USER 1", "45.00"), wallet("USER 2", "-3.37"),
     ]} />);
     const box = screen.getByTestId("real-wallets");
-    expect(box).toHaveTextContent(
-      "Karthik+$40.32Paper 1+$43.78Paper 2-$4.56Total+$79.54 (+31.82% on $250.00)Total value$331.87");
-    expect(box).not.toHaveTextContent("today");
+    expect(box).toHaveTextContent("Karthik+$103.94Paper 1+$45.00Paper 2-$3.37");
+    expect(box).toHaveTextContent("Total+$145.57 (+48.52% on $300.00)");
+    // Half of main's profit (Rafiq owns the other half) plus both paper wallets.
+    expect(box).toHaveTextContent("Your share+$93.60 (+37.44% on $250.00)");
+    expect(box).toHaveTextContent("Total value$459.77");
     expect(box).not.toHaveTextContent("USER");
   });
 
