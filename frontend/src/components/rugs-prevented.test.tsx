@@ -24,9 +24,9 @@ describe("rugs prevented", () => {
   });
 
   it("fits on one line on the real wallet page", () => {
-    render(<RugsPreventedLine data={data} />);
+    render(<RugsPreventedLine data={{ ...data, since_label: "the timer started" }} />);
     expect(screen.getByTestId("rugs-prevented-line")).toHaveTextContent(
-      "32 rugs prevented by the rug checks · $655 kept per $50-a-trade wallet");
+      "32 rugs prevented since the timer started · $655 kept per $50-a-trade wallet");
   });
 
   it("shows nothing before the count arrives", () => {

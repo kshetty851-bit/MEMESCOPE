@@ -1140,7 +1140,10 @@ export default function RealWalletPage() {
       <ReadinessPanel data={readiness.data} />
       <BalanceCard data={data} readiness={readiness.data} />
       <PartnersCard data={data?.partners} />
-      <RugsPreventedLive compact />
+      {/* From the partnership timer's start (Karthik, 2026-10-02). */}
+      {data?.partners?.started_at ? (
+        <RugsPreventedLive compact start={data.partners.started_at} />
+      ) : null}
       <StrategyCard
         autotrade={autotrade.data}
         strategy={chosen}

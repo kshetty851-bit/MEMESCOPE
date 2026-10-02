@@ -56,3 +56,17 @@ async def test_counts_the_rugs_it_refused_and_what_refusing_saved(db_session):
     assert out["last_rug"]["symbol"] == "LATE"
     assert out["since"] == (T0 + timedelta(minutes=1)).isoformat()
     assert out["quiet_rugs_avoided"] == 2
+
+
+async def test_counts_only_from_a_start_when_asked(db_session):
+    """The real wallet page counts from the partnership's start."""
+    db_session.add_all([
+        coin("Old", depth=90_000, why="repeat_rug_operator", end="0.05", minutes=1),
+        coin("New", depth=90_000, why="linked_to_recent_rug", end="0.10", minutes=30),
+        paper("BASE_75k_5m", "B1", "-0.95", 2), paper("BASE_75k_5m", "B2", "-0.95", 31),
+        paper("BASE_75k_quiet_5m", "Q1", "0.01", 0),
+    ])
+    await db_session.flush()
+    out = await api.rugs_prevented(db_session, start=T0 + timedelta(minutes=10))
+    assert (out["refused"], out["rugs_blocked"], out["quiet_rugs_avoided"]) == (1, 1, 1)
+    assert out["saved_per_wallet_usd"] == "45.00"

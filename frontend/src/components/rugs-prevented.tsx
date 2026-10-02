@@ -21,12 +21,16 @@ export interface RugsPreventedData {
   ticket_usd: string;
   last_rug: { symbol: string | null; at: string } | null;
   quiet_rugs_avoided: number;
+  /** Set by the page, not the server: what "since" to print on the line. */
+  since_label?: string;
 }
 
-export function useRugsPrevented() {
+/** `start`: count only from then (the real wallet page's partnership timer). */
+export function useRugsPrevented(start?: string) {
   return useQuery({
-    queryKey: ["graduation", "rugs-prevented"],
-    queryFn: () => api.get<RugsPreventedData>("/labs/graduation/rugs-prevented"),
+    queryKey: ["graduation", "rugs-prevented", start ?? "all"],
+    queryFn: () => api.get<RugsPreventedData>(
+      `/labs/graduation/rugs-prevented${start ? `?start=${encodeURIComponent(start)}` : ""}`),
     refetchInterval: 60_000,
     staleTime: 30_000,
   });
@@ -165,7 +169,7 @@ export function RugsPreventedLine({ data }: { data: RugsPreventedData | undefine
       <Shield live={bumped} size={26} />
       <p className="text-sm text-ink-2">
         <span className="text-lg font-semibold tabular-nums text-up">{shown}</span>{" "}
-        rugs prevented by the rug checks
+        rugs prevented{data.since_label ? ` since ${data.since_label}` : ""}
         <span className="text-ink-3">
           {" "}· {money(data.saved_per_wallet_usd)} kept per {money(data.ticket_usd)}-a-trade wallet
         </span>
@@ -174,7 +178,15 @@ export function RugsPreventedLine({ data }: { data: RugsPreventedData | undefine
   );
 }
 
-export function RugsPreventedLive({ compact = false }: { compact?: boolean }) {
-  const q = useRugsPrevented();
-  return compact ? <RugsPreventedLine data={q.data} /> : <RugsPreventedCard data={q.data} />;
+export function RugsPreventedLive({ compact = false, start }: {
+  compact?: boolean;
+  /** Count from here; the line also says so ("since the timer started"). */
+  start?: string;
+}) {
+  const q = useRugsPrevented(start);
+  if (!compact) return <RugsPreventedCard data={q.data} />;
+  return (
+    <RugsPreventedLine
+      data={q.data && { ...q.data, since_label: start ? "the timer started" : undefined }} />
+  );
 }
