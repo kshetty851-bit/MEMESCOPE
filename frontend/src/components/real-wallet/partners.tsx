@@ -5,6 +5,8 @@
  * Trading profit only; the server's `partners` block (`real_wallet/partners.py`).
  */
 
+import { useEffect, useState } from "react";
+
 export interface PartnersDay {
   n: number;
   from: string;
@@ -58,8 +60,44 @@ const sol = (value: string | null | undefined, sign = false) =>
 const tone = (value: string | number) =>
   Number(value) > 0 ? "text-up" : Number(value) < 0 ? "text-down" : "text-ink";
 
+const DAY_MS = 86_400_000;
+const HORIZON_DAYS = 30;
+
+/** "4d 07h 12m 08s" since `from`. */
+export function elapsed(from: number, now: number): string {
+  const s = Math.max(0, Math.floor((now - from) / 1000));
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${Math.floor(s / 86400)}d ${pad(Math.floor(s / 3600) % 24)}h ${pad(
+    Math.floor(s / 60) % 60)}m ${pad(s % 60)}s`;
+}
+
+/**
+ * Day 30's value if the gain so far keeps its average daily pace (Karthik,
+ * 2026-10-02). Straight-line, not compounded; null before a full day, when a
+ * few hours would be stretched thirty-fold.
+ */
+export function dayThirty(capital: number, value: number, days: number): number | null {
+  if (!(days >= 1)) return null;
+  // A wallet cannot be worth less than nothing.
+  return Math.max(0, capital + ((value - capital) / days) * HORIZON_DAYS);
+}
+
+function useNow(): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+  return now;
+}
+
 export function PartnersCard({ data }: { data: Partners | undefined }) {
+  const now = useNow();
   if (!data) return null;
+  const started = new Date(data.started_at).getTime();
+  const capital = Number(data.capital_usd);
+  const worth = Number(data.total_value_usd ?? data.balance_usd);
+  const expected = dayThirty(capital, worth, (now - started) / DAY_MS);
   const since = new Date(data.started_at)
     .toLocaleString("en-GB", {
       timeZone: "Asia/Dubai", day: "numeric", month: "short", hour: "numeric", minute: "2-digit",
@@ -75,6 +113,25 @@ export function PartnersCard({ data }: { data: Partners | undefined }) {
           {money(data.capital_usd)} in since {since} (Dubai) · {data.trades} trades · {data.wins} won
           {data.open ? ` · ${data.open} open` : ""}
         </p>
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <p className="text-xs text-ink-3">Running for</p>
+          <p className="text-xl font-semibold tabular-nums text-ink" data-testid="partners-timer">
+            {elapsed(started, now)}
+          </p>
+        </div>
+        {expected != null ? (
+          <div className="text-right">
+            <p className="text-xs text-ink-3">Day {HORIZON_DAYS} expected total</p>
+            <p className={`text-xl font-semibold tabular-nums ${tone(expected - capital)}`}
+               data-testid="partners-day30">
+              {money(expected)}
+            </p>
+            <p className="text-[11px] text-ink-3">if the pace so far holds · not a promise</p>
+          </div>
+        ) : null}
       </div>
 
       <div className="mt-3 grid gap-3 sm:grid-cols-3">
@@ -167,7 +224,8 @@ export function PartnersCard({ data }: { data: Partners | undefined }) {
         {data.sol_usd ? ` (${money(data.sol_usd)} per SOL)` : ""} minus the $100, split half and
         half, so it moves with SOL. A trade that is open counts at what it would sell for now.
         &quot;From trades&quot; is the trading profit alone, and the days below are trading profit.
-        Each day runs 3 PM to 3 PM Dubai.
+        Each day runs 3 PM to 3 PM Dubai. Day {HORIZON_DAYS} expected: the gain so far at its
+        average daily pace, carried to day {HORIZON_DAYS} — one bad rug or SOL&apos;s price moves it.
       </p>
     </section>
   );

@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import { PartnersCard, type Partners } from "./partners";
+import { PartnersCard, dayThirty, elapsed, type Partners } from "./partners";
 
 const data: Partners = {
   started_at: "2026-09-28T11:00:00+00:00", capital_usd: "100.00", profit_usd: "11.50",
@@ -45,5 +45,27 @@ describe("Karthik & Rafiq's box", () => {
       "Karthik+$18.82+0.1614 SOLput in $50.00 (0.4229 SOL) · now $68.82 (0.5901 SOL)from trades +$5.75");
     expect(box).toHaveTextContent("Together+$37.63+0.3227 SOL$100.00 → $137.63 (1.1803 SOL) · +37.63%");
     expect(box).toHaveTextContent("($116.61 per SOL)");
+  });
+});
+
+describe("the timer and day 30", () => {
+  it("counts days, hours, minutes and seconds since the start", () => {
+    const from = Date.parse("2026-09-28T11:00:00Z");
+    expect(elapsed(from, from + ((4 * 24 + 7) * 3600 + 12 * 60 + 8) * 1000)).toBe("4d 07h 12m 08s");
+    expect(elapsed(from, from - 5000)).toBe("0d 00h 00m 00s");
+  });
+
+  it("carries the gain's daily pace, straight-line, to day 30", () => {
+    // $100 -> $120 in 4 days: $5 a day, so $250 at day 30.
+    expect(dayThirty(100, 120, 4)).toBe(250);
+    expect(dayThirty(100, 95, 2)).toBe(25);    // a loss carried the same way
+    expect(dayThirty(100, 90, 2)).toBe(0);     // and never below nothing
+    expect(dayThirty(100, 120, 0.5)).toBeNull();  // not before a full day
+  });
+
+  it("shows both on the box", () => {
+    render(<PartnersCard data={data} />);
+    expect(screen.getByTestId("partners-timer")).toHaveTextContent(/^\d+d \d\dh \d\dm \d\ds$/);
+    expect(screen.getByTestId("partners-day30")).toHaveTextContent("$");
   });
 });
