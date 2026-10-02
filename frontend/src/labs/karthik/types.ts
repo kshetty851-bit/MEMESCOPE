@@ -128,3 +128,17 @@ export interface PumpfunDays {
   graduation_sol: number;
   days: PumpfunDay[];
 }
+
+/** One real wallet's closed trades: today (Dubai) and since it began. */
+export interface WalletProfit {
+  label: string;
+  today_trades: number;
+  today_won: number;
+  today_pnl_usd: string;
+  all_trades: number;
+  all_pnl_usd: string;
+}
+
+export interface WalletsProfit {
+  wallets: WalletProfit[];
+}
