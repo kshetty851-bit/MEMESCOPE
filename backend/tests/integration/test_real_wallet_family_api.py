@@ -170,3 +170,26 @@ async def test_jupiter_does_not_exist_off_karthiks_devices(app, db_session):
                                  headers={"X-Jupiter-Device": "someone-elses-key-0123456789abcdef"})
                 ).status_code == 404
         assert (await client.get(URL, headers=DEVICE)).status_code == 200
+
+
+async def test_the_lab_box_shows_karthik_and_the_trading_wallets_only(app, monkeypatch):
+    """Karthik's Lab's box (2026-10-02): readable from any device, so names and
+    figures only, never an address; a switched-off user wallet is left out."""
+    from app.real_wallet import family_wallets
+
+    monkeypatch.setattr(settings, "REAL_WALLET_PUBLIC_KEY", "OwnerWallet1111")
+
+    async def accounts(_session):
+        return [family_wallets.Account("USER2", "UserTwoWallet", True, 50),
+                family_wallets.Account("USER3", "UserThreeWallet", False, 50),
+                family_wallets.Account("USER1", "UserOneWallet", True, 50)]
+
+    monkeypatch.setattr(family_wallets, "accounts", accounts)
+    app.dependency_overrides[get_optional_user] = lambda: None
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as client:
+        r = await client.get(f"{settings.API_V1_PREFIX}/real-wallet/wallets-profit")
+    assert r.status_code == 200, r.text
+    rows = r.json()["wallets"]
+    assert [w["label"] for w in rows] == ["Karthik", "USER 1", "USER 2"]
+    assert rows[0]["today_pnl_usd"] == "0.00" and rows[0]["all_trades"] == 0
+    assert "Wallet" not in r.text, "no address may reach a page anyone can open"

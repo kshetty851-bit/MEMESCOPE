@@ -48,7 +48,9 @@ from app.real_wallet.devnet_workflow import (
 )
 from app.real_wallet.driver import RealWalletDriver
 from app.real_wallet.live_repository import LiveIntentRepository
-from app.real_wallet import partners, views, withdraw_service, withdrawal
+from app.real_wallet import (
+    family, family_wallets, partners, views, withdraw_service, withdrawal,
+)
 from app.real_wallet.mainnet_signer_client import (
     MainnetSignerRejectedError,
     MainnetSignerUnavailableError,
@@ -462,6 +464,20 @@ async def withdraw(
         "note": ("Submitted once and never retried. If this response was lost, "
                  "check the signature on chain rather than sending again."),
     }
+
+
+@router.get("/wallets-profit", summary="Each trading wallet's profit")
+async def wallets_profit(session: DbSession) -> dict[str, object]:
+    """Karthik's Lab's small box (Karthik, 2026-10-02: "just to check from
+    mobile or other laptop"): today (Dubai) and since each began, closed
+    trades only. Names and figures only — no address, nothing that moves
+    money — so it needs no device key or password, like `/status`."""
+    owner = settings.REAL_WALLET_PUBLIC_KEY.strip()
+    trading = sorted((a for a in await family_wallets.accounts(session) if a.enabled),
+                     key=lambda a: int(a.member.removeprefix("USER")))
+    wallets = ([("Karthik", owner)] if owner else []) + [
+        (family.label(a.member), a.wallet) for a in trading]
+    return {"wallets": await views.wallet_results(session, wallets, datetime.now(UTC))}
 
 
 @router.get("/status", summary="Read dedicated execution-wallet status")
