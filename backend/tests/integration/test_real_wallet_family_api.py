@@ -193,3 +193,51 @@ async def test_the_lab_box_shows_karthik_and_the_trading_wallets_only(app, monke
     assert [w["label"] for w in rows] == ["Karthik", "USER 1", "USER 2"]
     assert rows[0]["today_pnl_usd"] == "0.00" and rows[0]["all_trades"] == 0
     assert "Wallet" not in r.text, "no address may reach a page anyone can open"
+
+
+async def test_the_lab_box_totals_what_the_wallets_are_worth(app, monkeypatch):
+    """Each wallet's SOL at today's price, added up; a wallet that cannot be
+    read hides the total rather than leaving it out."""
+    from decimal import Decimal
+
+    from app.real_wallet import api as real_api
+    from app.real_wallet import family_wallets
+
+    monkeypatch.setattr(settings, "REAL_WALLET_PUBLIC_KEY", "OwnerWallet1111")
+
+    async def accounts(_session):
+        return [family_wallets.Account("USER1", "UserOneWallet", True, 50),
+                family_wallets.Account("USER2", "UserTwoWallet", True, 50)]
+
+    async def price(_now):
+        return Decimal("100")
+
+    held = {"OwnerWallet1111": "1.2", "UserOneWallet": "0.5", "UserTwoWallet": "0.25"}
+
+    class _Rpc:
+        def __init__(self, **_):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return None
+
+    class _Balances:
+        def __init__(self, _rpc):
+            pass
+
+        async def get_sol_balance(self, address):
+            return SimpleNamespace(sol=held[address])
+
+    monkeypatch.setattr(family_wallets, "accounts", accounts)
+    monkeypatch.setattr(real_api, "sol_usd_now", price)
+    monkeypatch.setattr(real_api, "StandardSolanaRPC", _Rpc)
+    monkeypatch.setattr(real_api, "ExecutionWalletBalanceService", _Balances)
+    app.dependency_overrides[get_optional_user] = lambda: None
+    url = f"{settings.API_V1_PREFIX}/real-wallet/wallets-profit"
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as client:
+        assert (await client.get(url)).json()["total_value_usd"] == "195.00"
+        del held["UserTwoWallet"]          # one balance unread
+        assert (await client.get(url)).json()["total_value_usd"] is None

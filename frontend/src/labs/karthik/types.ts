@@ -141,4 +141,6 @@ export interface WalletProfit {
 
 export interface WalletsProfit {
   wallets: WalletProfit[];
+  /** All of them together now: SOL at today's price plus open trades. */
+  total_value_usd?: string | null;
 }

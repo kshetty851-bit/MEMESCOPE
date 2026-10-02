@@ -656,8 +656,9 @@ const INVESTED_USD = 250;
  * the page, each one's profit since it began (closed trades), and a total
  * with its % of what he put in across them.
  */
-export function RealWallets({ wallets, invested = INVESTED_USD }: {
+export function RealWallets({ wallets, totalValue, invested = INVESTED_USD }: {
   wallets: WalletProfit[] | undefined;
+  totalValue?: string | null;
   invested?: number;
 }) {
   if (!wallets?.length) return null;
@@ -685,13 +686,19 @@ export function RealWallets({ wallets, invested = INVESTED_USD }: {
           </span>
         </span>
       </div>
+      {totalValue != null ? (
+        <div className="flex items-baseline justify-between pt-0.5 text-sm">
+          <span className="text-ink-2">Total value</span>
+          <span className="font-semibold tabular-nums text-ink">{usd(totalValue)}</span>
+        </div>
+      ) : null}
     </div>
   );
 }
 
 function RealWalletsLive() {
   const q = useWalletsProfit();
-  return <RealWallets wallets={q.data?.wallets} />;
+  return <RealWallets wallets={q.data?.wallets} totalValue={q.data?.total_value_usd} />;
 }
 
 export function KarthikLabPage() {
