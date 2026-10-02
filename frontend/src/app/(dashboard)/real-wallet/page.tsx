@@ -471,26 +471,33 @@ function BalanceCard({
             Balance · {(data?.network ?? "—").toUpperCase()}
             {data?.rpc?.verified ? "" : " · CHAIN NOT VERIFIED"}
           </p>
-          <p className="mt-2 text-4xl font-medium tabular-nums text-ink">
-            {inTrade && data?.total_sol != null
-              ? data.total_sol.toFixed(6)
-              : balance != null ? balance.toFixed(6) : "—"}
-            <span className="ml-2 text-lg text-ink-3">SOL</span>
-          </p>
-          <p className="mt-1 text-lg tabular-nums text-ink-2">
+          {/* Dollars first, SOL small (Karthik, 2026-10-02); SOL leads only
+              when there is no price to turn it into dollars. */}
+          {data?.balance_usd != null ? (
+            <p className="mt-2 text-4xl font-medium tabular-nums text-ink">
+              ${(inTrade ? data.total_usd! : data.balance_usd).toFixed(2)}
+            </p>
+          ) : null}
+          <p className={data?.balance_usd != null
+            ? "mt-1 text-sm tabular-nums text-ink-3"
+            : "mt-2 text-4xl font-medium tabular-nums text-ink"}>
+            <span>
+              {inTrade && data?.total_sol != null
+                ? data.total_sol.toFixed(6)
+                : balance != null ? balance.toFixed(6) : "—"}
+            </span>{" "}
+            SOL
             {data?.balance_usd != null ? (
-              <>
-                ${(inTrade ? data.total_usd! : data.balance_usd).toFixed(2)}
-                <span className="ml-2 text-xs text-ink-3">
-                  at ${data.sol_price_usd?.toFixed(2)}/SOL
-                  {data.sol_price_fresh ? "" : " · PRICE STALE"}
-                </span>
-              </>
-            ) : (
-              // Never a guessed rate: every limit here is in dollars.
-              <span className="text-sm text-ink-3">USD unavailable — no fresh SOL price</span>
-            )}
+              <span className="ml-2 text-xs">
+                at ${data.sol_price_usd?.toFixed(2)}/SOL
+                {data.sol_price_fresh ? "" : " · PRICE STALE"}
+              </span>
+            ) : null}
           </p>
+          {data?.balance_usd == null ? (
+            // Never a guessed rate: every limit here is in dollars.
+            <p className="mt-1 text-sm text-ink-3">USD unavailable — no fresh SOL price</p>
+          ) : null}
           {inTrade ? (
             <p className="mt-1 text-xs tabular-nums text-ink-3" data-testid="balance-split">
               incl. ${data!.open_trade_usd!.toFixed(2)} in an open trade (at what it would sell for

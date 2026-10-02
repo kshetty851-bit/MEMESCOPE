@@ -60,6 +60,21 @@ const sol = (value: string | null | undefined, sign = false) =>
 const tone = (value: string | number) =>
   Number(value) > 0 ? "text-up" : Number(value) < 0 ? "text-down" : "text-ink";
 
+/**
+ * The profit above, in its two parts (Karthik, 2026-10-02): what the trades
+ * made, and what SOL's price did to the rest. They add up to the headline.
+ * An open trade's gain so far sits in the second part until it closes.
+ */
+function Split({ total, trading, open }: { total: string; trading: string; open: number }) {
+  const market = Number(total) - Number(trading);
+  return (
+    <p className="text-xs tabular-nums text-ink-3" data-testid="profit-split">
+      trading <span className={tone(trading)}>{signed(trading)}</span> · SOL price
+      {open ? " & open trade" : ""} <span className={tone(market)}>{signed(market)}</span>
+    </p>
+  );
+}
+
 const DAY_MS = 86_400_000;
 const HORIZON_DAYS = 30;
 
@@ -155,7 +170,7 @@ export function PartnersCard({ data }: { data: Partners | undefined }) {
                 {now ? `${money(p.value_usd!)} (${sol(p.value_sol)})` : money(p.now_usd)}
               </p>
               {now ? (
-                <p className="text-xs text-ink-3">from trades {signed(p.profit_usd)}</p>
+                <Split total={p.value_profit_usd!} trading={p.profit_usd} open={data.open} />
               ) : null}
             </div>
           );
@@ -179,7 +194,7 @@ export function PartnersCard({ data }: { data: Partners | undefined }) {
                   {Number(data.value_pct).toFixed(2)}%
                 </span>
               </p>
-              <p className="text-xs text-ink-3">from trades {signed(data.profit_usd)}</p>
+              <Split total={data.total_value_profit_usd} trading={data.profit_usd} open={data.open} />
             </>
           ) : (
             <>
@@ -223,7 +238,8 @@ export function PartnersCard({ data }: { data: Partners | undefined }) {
         Profit is what the wallet is worth now at today&apos;s SOL price
         {data.sol_usd ? ` (${money(data.sol_usd)} per SOL)` : ""} minus the $100, split half and
         half, so it moves with SOL. A trade that is open counts at what it would sell for now.
-        &quot;From trades&quot; is the trading profit alone, and the days below are trading profit.
+        Below it, &quot;trading&quot; is what the closed trades made and &quot;SOL price&quot; is what
+        SOL&apos;s price did to the rest; the days below are trading profit.
         Each day runs 3 PM to 3 PM Dubai. Day {HORIZON_DAYS} expected: the gain so far at its
         average daily pace, carried to day {HORIZON_DAYS} — one bad rug or SOL&apos;s price moves it.
       </p>
