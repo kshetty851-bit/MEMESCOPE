@@ -17,6 +17,7 @@ import { useHqState } from "@/components/hq/use-hq-state";
 import type { HqState } from "@/lib/hq/adapter";
 import { useTokenCaseFile, useVisiblePackets } from "@/components/hq/use-token-cases";
 import { CaseFilePanel } from "@/components/hq/case-file-panel";
+import { CheckpointLive } from "@/components/hq/checkpoint";
 import { RecentCases } from "@/components/hq/recent-cases";
 import {
   ExecutionVault,
@@ -228,6 +229,7 @@ export default function HqPage() {
       {viewport === "mobile" ? (
         <>
           <HqCards onSelectEmployee={openActor} state={state} showSummary={false} />
+          <CheckpointLive />
           <Boards state={state} />
           <RecentCases onSelectCase={openCase} />
         </>
@@ -254,6 +256,8 @@ export default function HqPage() {
               Back to overview
             </button>
           ) : null}
+          {/* The thirty pre-buy checks, in their own office (2026-10-02). */}
+          <CheckpointLive />
           <Boards state={state} />
           <RecentCases onSelectCase={openCase} />
         </>
