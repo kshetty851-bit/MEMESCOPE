@@ -524,7 +524,10 @@ async def _values(session: Any, addresses: list[str], now: datetime) -> list[Dec
 
 #: The rule's pool floor: a refused coin under it would never have been bought.
 CHECKPOINT_FLOOR_USD = 75_000
-CHECKPOINT_FEED = 14
+#: The belt's mix: the latest buys AND the latest stops, so a day of buying
+#: still shows the rug bin working (2026-10-02).
+CHECKPOINT_BOUGHT = 8
+CHECKPOINT_STOPPED = 6
 
 
 @router.get("/checkpoint", summary="What the pre-buy checks stopped, and the latest coins")
@@ -555,30 +558,36 @@ async def checkpoint(session: DbSession) -> dict[str, object]:
         select(RealWalletPosition.mint_address, RealWalletPosition.opened_at)
         .where(RealWalletPosition.wallet_public_key == owner,
                RealWalletPosition.opened_at >= since)
-        .order_by(RealWalletPosition.opened_at.desc()).limit(CHECKPOINT_FEED))).all()
+        .order_by(RealWalletPosition.opened_at.desc()).limit(CHECKPOINT_BOUGHT))).all()
     stopped = (await session.execute(
         select(GradOperator.mint, GradOperator.entry_at, GradOperator.blocked_reason,
                GradOperator.rugged)
         .where(deep, GradOperator.blocked_reason.is_not(None),
                GradOperator.entry_at >= since)
-        .order_by(GradOperator.entry_at.desc()).limit(CHECKPOINT_FEED))).all()
+        .order_by(GradOperator.entry_at.desc()).limit(CHECKPOINT_STOPPED))).all()
     refused = (await session.execute(
         select(RealWalletSafetyEvaluation.mint_address,
                RealWalletSafetyEvaluation.evaluated_at,
                RealWalletSafetyEvaluation.reason_codes)
         .where(RealWalletSafetyEvaluation.decision == "REJECT",
                RealWalletSafetyEvaluation.evaluated_at >= since)
-        .order_by(RealWalletSafetyEvaluation.evaluated_at.desc()).limit(CHECKPOINT_FEED))).all()
-    feed = (
-        [{"kind": "bought", "mint": m, "at": at} for m, at in bought]
-        + [{"kind": "stopped", "mint": m, "at": at, "code": why, "rugged": rugged}
-           for m, at, why, rugged in stopped]
+        .order_by(RealWalletSafetyEvaluation.evaluated_at.desc())
+        .limit(CHECKPOINT_STOPPED))).all()
+    stops = sorted(
+        [{"kind": "stopped", "mint": m, "at": at, "code": why, "rugged": rugged}
+         for m, at, why, rugged in stopped]
         + [{"kind": "stopped", "mint": m, "at": at, "code": (codes or [None])[0],
-            "rugged": None} for m, at, codes in refused])
-    feed = sorted(feed, key=lambda e: e["at"], reverse=True)[:CHECKPOINT_FEED]
-    symbols = dict((await session.execute(
-        select(GradToken.mint, GradToken.symbol)
-        .where(GradToken.mint.in_([e["mint"] for e in feed])))).all())
+            "rugged": None} for m, at, codes in refused],
+        key=lambda e: e["at"], reverse=True)[:CHECKPOINT_STOPPED]
+    feed = sorted([{"kind": "bought", "mint": m, "at": at} for m, at in bought] + stops,
+                  key=lambda e: e["at"], reverse=True)
+    mints = [e["mint"] for e in feed]
+    # The lab's record first; the wallet's own token list for what it missed.
+    symbols = {m: s for m, s in (await session.execute(
+        select(GradToken.mint, GradToken.symbol).where(GradToken.mint.in_(mints)))).all() if s}
+    known = await TokenRepository(session).get_many_by_mints(
+        [m for m in mints if m not in symbols])
+    symbols.update({m: t.symbol for m, t in known.items() if t.symbol})
     return {
         "stopped_by": {**{k: int(v) for k, v in rejects.items()},
                        **{k: int(v) for k, v in blocks.items()}},
