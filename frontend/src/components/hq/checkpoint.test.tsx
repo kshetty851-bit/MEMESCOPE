@@ -1,8 +1,10 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { act, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 
 import { EMPLOYEES } from "@/lib/hq/employees";
-import { ROBOTS, robotIndexFor, stoppedBy, type Checkpoint } from "@/lib/hq/checkpoint";
+import {
+  ROBOTS, robotIndexFor, stoppedBy, type Checkpoint, type LiveBelt,
+} from "@/lib/hq/checkpoint";
 
 import { CheckpointOffice } from "./checkpoint";
 
@@ -49,24 +51,70 @@ describe("the thirty robots", () => {
   });
 });
 
-describe("the Checkpoint office", () => {
-  it("shows every robot, its count, the sleeper, and where the newest coin stopped", () => {
-    render(<CheckpointOffice data={data} motionOverride={false}
-                             now={Date.parse("2026-10-02T14:26:51Z")} />);
+describe("the Checkpoint office, live", () => {
+  const live: LiveBelt = {
+    now: "2026-10-02T19:10:00Z",
+    coins: [
+      { symbol: "NEWC", graduated_at: "2026-10-02T19:09:40Z", status: "checking", robot: "depth",
+        code: null, note: "waiting for the pool to show" },
+      { symbol: "SMOL", graduated_at: "2026-10-02T19:08:00Z", status: "stopped", robot: "depth",
+        code: null, note: "pool $20,203, under $75,000" },
+      { symbol: "RUGGO", graduated_at: "2026-10-02T19:06:00Z", status: "stopped", robot: null,
+        code: "linked_to_recent_rug", note: "a rug block refused it" },
+      { symbol: "HELD", graduated_at: "2026-10-02T19:05:00Z", status: "stopped", robot: null,
+        code: null, note: "passed the rule; the wallet did not take it (reason not recorded)" },
+      { symbol: "WINNY", graduated_at: "2026-10-02T19:01:00Z", status: "bought", robot: "wallet",
+        code: null, note: "passed all 30 and was bought" },
+    ],
+  };
+  const now = Date.parse("2026-10-02T19:10:00Z");
+
+  it("puts each coin at the check its records reached", () => {
+    render(<CheckpointOffice data={data} live={live} motionOverride={false} now={now} />);
     for (const r of ROBOTS) expect(screen.getByTestId(`cp-bot-${r.id}`)).toBeInTheDocument();
-    expect(screen.getByTestId("cp-bot-scale")).toHaveTextContent("48 stopped");
-    expect(screen.getByTestId("cp-bot-purse")).toHaveTextContent("guard");
-    expect(screen.getByTestId("cp-asleep")).toBeInTheDocument();
-    // Without motion the newest coin sits where it ended: stopped by Tracer.
-    expect(screen.getByTestId("cp-bot-tracer")).toHaveAttribute("data-state", "stop");
-    expect(screen.getByTestId("cp-bot-tracer")).toHaveTextContent("STOP");
-    expect(screen.getByTestId("cp-caption")).toHaveTextContent("ARROW stopped by Tracer · 10 min ago");
-    expect(screen.getByTestId("checkpoint")).toHaveTextContent("1into the wallet");
-    expect(screen.getByTestId("checkpoint")).toHaveTextContent("1in the rug bin");
+    // Depth is still waiting on one pool, and has stopped another this window.
+    expect(screen.getByTestId("cp-bot-depth")).toHaveAttribute("data-state", "scan");
+    expect(screen.getByTestId("cp-bot-depth")).toHaveTextContent("NEWC");
+    expect(screen.getByTestId("cp-bot-depth")).toHaveTextContent("1");
+    expect(screen.getByTestId("cp-bot-tracer")).toHaveTextContent("1");
+    expect(screen.getByTestId("checkpoint")).toHaveTextContent("5 graduated in 10 min");
+    expect(screen.getByTestId("checkpoint")).toHaveTextContent("1 being checked now");
   });
 
-  it("says it is waiting before any coin has come through", () => {
-    render(<CheckpointOffice data={{ ...data, feed: [] }} motionOverride={false} />);
-    expect(screen.getByTestId("cp-caption")).toHaveTextContent("Waiting for the first coin");
+  it("lists the latest coins in plain words, naming no robot it cannot", () => {
+    render(<CheckpointOffice data={data} live={live} motionOverride={false} now={now} />);
+    const list = screen.getByTestId("cp-live-list");
+    expect(list).toHaveTextContent("NEWCDepthwaiting for the pool to show20s ago");
+    expect(list).toHaveTextContent("SMOLDepthpool $20,203, under $75,000");
+    expect(list).toHaveTextContent("RUGGOTracer");
+    expect(list).toHaveTextContent("HELDWallet gatepassed the rule; the wallet did not take it");
+    expect(list).toHaveTextContent("WINNYBoughtpassed all 30 and was bought");
+    expect(screen.getByTestId("cp-bot-scale")).toHaveTextContent("48 stopped");
+    expect(screen.getByTestId("cp-asleep")).toBeInTheDocument();
+  });
+
+  it("rolls a newly graduated coin in from Hatch to where its records put it", () => {
+    vi.useFakeTimers();
+    try {
+      const first: LiveBelt = { now: live.now, coins: [live.coins[4]!] };
+      const { rerender } = render(<CheckpointOffice data={data} live={first} motionOverride now={now} />);
+      const arrived: LiveBelt = { now: live.now, coins: [
+        { ...live.coins[2]!, graduated_at: "2026-10-02T19:09:59Z", symbol: "FRESH" }, live.coins[4]!] };
+      rerender(<CheckpointOffice data={data} live={arrived} motionOverride now={now} />);
+      expect(screen.getByTestId("cp-bot-hatch")).toHaveTextContent("FRESH");
+      act(() => { vi.advanceTimersByTime(140 * 4); });
+      // Tracer is the fifth robot: Hatch, Depth, Hush, Recall, Tracer.
+      expect(screen.getByTestId("cp-bot-tracer")).toHaveTextContent("FRESH");
+      expect(screen.getByTestId("cp-bot-tracer")).toHaveAttribute("data-state", "stop");
+      expect(screen.getByTestId("cp-bot-tracer")).toHaveTextContent("STOP");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("says it is waiting when nothing graduated lately", () => {
+    render(<CheckpointOffice data={data} live={{ now: live.now, coins: [] }}
+                             motionOverride={false} now={now} />);
+    expect(screen.getByTestId("cp-live-list")).toHaveTextContent("waiting for the next one");
   });
 });

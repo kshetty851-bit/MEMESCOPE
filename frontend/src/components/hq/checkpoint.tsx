@@ -1,35 +1,47 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { api } from "@/lib/api-client";
 import {
-  ROBOTS, STAGES, robotIndexFor, stoppedBy,
-  type Checkpoint, type CheckpointEvent, type Robot,
+  ROBOTS, STAGES, coinKey, liveIndex, stoppedBy,
+  type Checkpoint, type CheckpointEvent, type LiveBelt, type LiveCoin, type Robot,
 } from "@/lib/hq/checkpoint";
 
 /**
  * THE CHECKPOINT (Karthik, 2026-10-02: "show this 30 checks as 30 agents look
  * like robots and name them, give them their own big office with all
- * animations ... make it more attractive and live").
+ * animations"; then "i want real time token checks").
  *
  * Its own office beside HQ's, not more staff in it: the main floor's
  * invariants (four standing, unique accessories, routes on the grid) were
  * written for a dozen people, and thirty robots would break every one.
  *
- * LIVE means the records: each robot's counter is the refusals it owns
- * (`/real-wallet/checkpoint`), and the belt replays the latest real coins —
- * a bought one passes all thirty into the wallet; a stopped one halts at the
- * robot that refused it and drops into the rug bin.
+ * LIVE, from the records: every coin that graduated in the last ten minutes
+ * sits at the check it has reached (`/real-wallet/checkpoint/live`, polled
+ * every few seconds). A coin that appears rolls in from Hatch and steps along
+ * to where its records put it, each robot it passes flashing green; the robot
+ * that decides it scans while it waits, then stamps STOP or passes it on.
+ * Each robot's all-time count is the refusal codes it owns
+ * (`/real-wallet/checkpoint`).
  */
 
-const STEP_MS = 150;
-const HOLD_MS = 1700;
-const GAP_MS = 500;
+const STEP_MS = 140;
+/** How long a fresh stop or buy keeps its stamp and its coin on the belt. */
+const FRESH_MS = 6000;
+const POLL_MS = 4000;
 
-type Phase = "move" | "hold";
 type BotState = "idle" | "scan" | "pass" | "stop" | "asleep";
+
+interface Track {
+  coin: LiveCoin;
+  target: number;
+  shown: number;
+  /** When `shown` last moved, and when it reached `target` (or decided there). */
+  movedAt: number;
+  settledAt: number;
+}
 
 function useCheckpoint() {
   return useQuery({
@@ -37,6 +49,15 @@ function useCheckpoint() {
     queryFn: () => api.get<Checkpoint>("/real-wallet/checkpoint"),
     refetchInterval: 60_000,
     staleTime: 30_000,
+  });
+}
+
+function useLive() {
+  return useQuery({
+    queryKey: ["hq", "checkpoint", "live"],
+    queryFn: () => api.get<LiveBelt>("/real-wallet/checkpoint/live"),
+    refetchInterval: POLL_MS,
+    staleTime: POLL_MS / 2,
   });
 }
 
@@ -49,49 +70,78 @@ function useMotion(): boolean {
   return ok;
 }
 
-/** Walks each event along the robots, oldest first, round and round. */
-export function useConveyor(events: CheckpointEvent[], motion: boolean) {
-  const key = events.map((e) => e.at).join("|");
-  const [state, setState] = useState<{ e: number; step: number; phase: Phase }>(
-    { e: 0, step: 0, phase: "move" });
+function useClock(ms: number): number {
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    if (!events.length || !motion) return;
-    let e = 0;
-    let step = 0;
-    let hold = false;
-    let timer = 0;
-    const run = () => {
-      const target = robotIndexFor(events[e]!);
-      if (!hold && step < target) {
-        step += 1;
-        setState({ e, step, phase: "move" });
-        timer = window.setTimeout(run, STEP_MS);
-      } else if (!hold) {
-        hold = true;
-        setState({ e, step: target, phase: "hold" });
-        timer = window.setTimeout(run, HOLD_MS);
-      } else {
-        hold = false;
-        step = 0;
-        e = (e + 1) % events.length;
-        setState({ e, step: 0, phase: "move" });
-        timer = window.setTimeout(run, GAP_MS);
-      }
-    };
-    setState({ e: 0, step: 0, phase: "move" });
-    timer = window.setTimeout(run, STEP_MS);
-    return () => window.clearTimeout(timer);
-    // `key` stands for `events`: a refetch with the same coins keeps its place.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, motion]);
-  return state;
+    const id = window.setInterval(() => setNow(Date.now()), ms);
+    return () => window.clearInterval(id);
+  }, [ms]);
+  return now;
 }
 
-function ago(iso: string, now: number): string {
-  const min = Math.max(0, Math.round((now - new Date(iso).getTime()) / 60_000));
-  if (min < 60) return `${min} min ago`;
-  const h = Math.floor(min / 60);
-  return `${h}h ${min % 60}m ago`;
+/**
+ * Each coin's place on the belt. Coins already there on the first reading
+ * start where they are; a coin that appears later starts at Hatch and steps
+ * along. A change of status where the coin stands (checking → stopped)
+ * restamps it.
+ */
+export function useLiveBelt(coins: LiveCoin[] | undefined, motion: boolean) {
+  const [tracks, setTracks] = useState<Record<string, Track>>({});
+  const seen = useRef(false);
+  useEffect(() => {
+    if (!coins) return;
+    const first = !seen.current;
+    seen.current = true;
+    const t = Date.now();
+    setTracks((prev) => {
+      const next: Record<string, Track> = {};
+      for (const coin of coins) {
+        const key = coinKey(coin);
+        const target = liveIndex(coin);
+        const old = prev[key];
+        const start = old ? old.shown : first || !motion ? target : 0;
+        const restamp = old && old.coin.status !== coin.status && old.shown === target;
+        next[key] = {
+          coin, target, shown: Math.min(start, Math.max(target, 0)),
+          movedAt: old?.movedAt ?? t,
+          settledAt: restamp ? t : old?.settledAt ?? (start === target ? (first ? 0 : t) : 0),
+        };
+      }
+      return next;
+    });
+  }, [coins, motion]);
+  useEffect(() => {
+    if (!motion) return;
+    const id = window.setInterval(() => {
+      setTracks((prev) => {
+        let moved = false;
+        const t = Date.now();
+        const next = { ...prev };
+        for (const [key, tr] of Object.entries(prev)) {
+          if (tr.target >= 0 && tr.shown < tr.target) {
+            const shown = tr.shown + 1;
+            next[key] = { ...tr, shown, movedAt: t, settledAt: shown === tr.target ? t : 0 };
+            moved = true;
+          }
+        }
+        return moved ? next : prev;
+      });
+    }, STEP_MS);
+    return () => window.clearInterval(id);
+  }, [motion]);
+  return Object.values(tracks);
+}
+
+function since(iso: string, now: number): string {
+  const s = Math.max(0, Math.round((now - new Date(iso).getTime()) / 1000));
+  return s < 90 ? `${s}s ago` : `${Math.round(s / 60)} min ago`;
+}
+
+function who(coin: LiveCoin): string {
+  const i = liveIndex(coin);
+  if (coin.status === "bought") return "Bought";
+  if (i < 0) return coin.status === "stopped" ? "Wallet gate" : "Checking";
+  return ROBOTS[i]!.name;
 }
 
 /** One robot. `look` varies the antenna and head so no two neighbours match. */
@@ -164,53 +214,60 @@ function SleepingRobot() {
   );
 }
 
-function Coin({ event, state }: { event: CheckpointEvent; state: "move" | "stop" | "deliver" }) {
+function Coin({ label, extra, state }: { label: string | null; extra: number; state: "move" | "stop" | "deliver" }) {
   return (
     <span data-state={state}
-          className="cp-coin absolute -top-2 left-1/2 z-10 -ml-[22px] flex h-[22px] min-w-[44px] items-center justify-center rounded-full bg-[var(--color-score-elite)] px-1.5 text-[9px] font-bold text-[var(--color-canvas)]">
-      {(event.symbol ?? "?").slice(0, 7)}
+          className="cp-coin absolute -top-2 left-1/2 z-10 -ml-[24px] flex h-[22px] min-w-[48px] items-center justify-center rounded-full bg-[var(--color-score-elite)] px-1.5 font-bold text-[var(--color-canvas)]">
+      {(label ?? "?").slice(0, 7)}{extra > 0 ? ` +${extra}` : ""}
     </span>
   );
 }
 
-export function CheckpointOffice({ data, now = Date.now(), motionOverride }: {
+export function CheckpointOffice({ data, live, now: nowProp, motionOverride }: {
   data: Checkpoint | undefined;
+  live: LiveBelt | undefined;
   now?: number;
   /** Tests pass false; the page asks the browser. */
   motionOverride?: boolean;
 }) {
   const motionPref = useMotion();
   const motion = motionOverride ?? motionPref;
-  const events = useMemo(() => [...(data?.feed ?? [])].reverse(), [data]);
-  const belt = useConveyor(events, motion);
+  const clock = useClock(1000);
+  const now = nowProp ?? clock;
+  const tracks = useLiveBelt(live?.coins, motion);
   const [picked, setPicked] = useState<number | null>(null);
 
-  // Without motion, the newest coin sits where it ended.
-  const live = motion
-    ? belt
-    : events.length
-      ? { e: events.length - 1, step: robotIndexFor(events[events.length - 1]!), phase: "hold" as Phase }
-      : { e: 0, step: 0, phase: "move" as Phase };
-  const event = events[live.e];
-  const target = event ? robotIndexFor(event) : -1;
-
+  const fresh = (t: number) => t > 0 && now - t < FRESH_MS;
   const stateOf = (i: number): BotState => {
-    if (!event) return "idle";
-    if (live.phase === "hold" && i === target) return event.kind === "stopped" ? "stop" : "pass";
-    if (i < live.step) return "pass";
-    if (i === live.step && live.phase === "move") return "scan";
-    return "idle";
+    let state: BotState = "idle";
+    for (const tr of tracks) {
+      if (tr.shown === i && tr.shown < tr.target) return "scan";
+      if (tr.shown === i && tr.target === i) {
+        if (tr.coin.status === "checking") state = "scan";
+        else if (fresh(tr.settledAt)) return tr.coin.status === "stopped" ? "stop" : "pass";
+      }
+      if (tr.shown === i + 1 && tr.shown <= tr.target && now - tr.movedAt < 500 && state === "idle") {
+        state = "pass";
+      }
+    }
+    return state;
   };
+  const onBelt = (i: number) => tracks.filter((tr) => tr.shown === i && (
+    tr.shown < tr.target || tr.coin.status === "checking" || fresh(tr.settledAt)));
+  const stamp = (i: number) => {
+    const tr = tracks.find((t) => t.shown === i && t.target === i && t.coin.status !== "checking"
+      && fresh(t.settledAt));
+    return tr ? tr.coin.status : null;
+  };
+  const recentStops = (i: number) => tracks.filter(
+    (tr) => tr.target === i && tr.shown === i && tr.coin.status === "stopped").length;
 
+  const coins = live?.coins ?? [];
+  const checking = coins.filter((c) => c.status === "checking").length;
   const totalStopped = Object.values(data?.stopped_by ?? {}).reduce((a, b) => a + b, 0);
-  const bought = data?.feed.filter((e) => e.kind === "bought").length ?? 0;
-  const binned = data?.feed.filter((e) => e.kind === "stopped").length ?? 0;
+  const bought = data?.feed.filter((e: CheckpointEvent) => e.kind === "bought").length ?? 0;
+  const binned = data?.feed.filter((e: CheckpointEvent) => e.kind === "stopped").length ?? 0;
   const robot = picked !== null ? ROBOTS[picked] : null;
-  const caption = event
-    ? event.kind === "bought"
-      ? `${event.symbol ?? "A coin"} passed all 30 and was bought · ${ago(event.at, now)}`
-      : `${event.symbol ?? "A coin"} stopped by ${ROBOTS[target]!.name} · ${ago(event.at, now)}`
-    : "Waiting for the first coin";
 
   return (
     <section className="cp overflow-hidden rounded-xl border border-line" aria-label="The Checkpoint"
@@ -219,11 +276,10 @@ export function CheckpointOffice({ data, now = Date.now(), motionOverride }: {
         <div>
           <h2 className="text-base font-semibold text-ink">The Checkpoint</h2>
           <p className="text-xs text-ink-3">
-            30 robots check every coin before the real wallet buys it. The belt replays the latest
-            real coins.
+            30 robots check every coin before the real wallet buys it — live, as each coin graduates.
           </p>
         </div>
-        <div className="flex items-center gap-4 text-xs tabular-nums">
+        <div className="flex flex-wrap items-center gap-4 text-xs tabular-nums">
           <span className="flex items-center gap-1.5 text-up">
             <span className="relative inline-flex h-2 w-2">
               <span className="cp-live-dot absolute inset-0 rounded-full bg-up" />
@@ -231,30 +287,39 @@ export function CheckpointOffice({ data, now = Date.now(), motionOverride }: {
             </span>
             Live
           </span>
+          <span className="text-ink-2"><b className="text-ink">{coins.length}</b> graduated in 10 min</span>
+          <span className="text-ink-2"><b className="text-warn">{checking}</b> being checked now</span>
           {data ? (
-            <>
-              <span className="text-ink-2"><b className="text-ink">{data.safety_checked.toLocaleString("en-US")}</b> safety checks</span>
-              <span className="text-ink-2"><b className="text-up">{data.safety_allowed.toLocaleString("en-US")}</b> passed</span>
-              <span className="text-ink-2"><b className="text-down">{totalStopped.toLocaleString("en-US")}</b> stops on record</span>
-            </>
+            <span className="text-ink-2"><b className="text-down">{totalStopped.toLocaleString("en-US")}</b> stops on record</span>
           ) : null}
         </div>
       </header>
 
-      <div className="px-4 pt-3 text-sm text-ink-2" aria-live="polite" data-testid="cp-caption">
-        <span className="text-ink-3">Now on the belt: </span>{caption}
-      </div>
-
-      {/* Four a row in the first two halls, eight in the third. */}
       <div className="grid gap-3 p-4 xl:grid-cols-[minmax(0,4fr)_minmax(0,4fr)_minmax(0,8fr)]">
         {STAGES.map((stage) => (
-          <Hall key={stage.id} stage={stage} stateOf={stateOf} data={data}
-                coinAt={event ? live.step : -1}
-                coin={event ? { event, state: live.phase === "hold"
-                  ? (event.kind === "stopped" ? "stop" : "deliver") : "move" } : null}
-                stamp={live.phase === "hold" && event ? { at: target, kind: event.kind } : null}
-                onPick={setPicked} picked={picked} />
+          <Hall key={stage.id} stage={stage} stateOf={stateOf} data={data} onBelt={onBelt}
+                stamp={stamp} recentStops={recentStops} onPick={setPicked} picked={picked} />
         ))}
+      </div>
+
+      <div className="border-t border-line px-4 py-3" data-testid="cp-live-list">
+        <div className="mb-1.5 text-[11px] uppercase tracking-wider text-ink-3">Latest coins</div>
+        {coins.length ? (
+          <ul className="grid gap-1 text-xs sm:grid-cols-2">
+            {coins.slice(0, 8).map((c) => (
+              <li key={coinKey(c)} className="flex items-baseline gap-2">
+                <span className={`h-1.5 w-1.5 shrink-0 translate-y-[-1px] rounded-full ${
+                  c.status === "bought" ? "bg-up" : c.status === "stopped" ? "bg-down" : "bg-warn"}`} />
+                <b className="text-ink">{c.symbol ?? "?"}</b>
+                <span className="text-ink-2">{who(c)}</span>
+                <span className="min-w-0 truncate text-ink-3">{c.note}</span>
+                <span className="ml-auto shrink-0 tabular-nums text-ink-3">{since(c.graduated_at, now)}</span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-xs text-ink-3">No graduations in the last 10 minutes — waiting for the next one.</p>
+        )}
       </div>
 
       <footer className="grid gap-3 border-t border-line px-4 py-3 sm:grid-cols-[1fr_auto_auto]">
@@ -277,24 +342,24 @@ export function CheckpointOffice({ data, now = Date.now(), motionOverride }: {
         </div>
         <div className="flex items-center gap-2 rounded-lg border border-up/40 bg-up/[0.06] px-3 py-2 text-xs">
           <span className="text-lg font-semibold tabular-nums text-up">{bought}</span>
-          <span className="text-ink-2">into the wallet<br /><span className="text-ink-3">last 24h</span></span>
+          <span className="text-ink-2">into the wallet<br /><span className="text-ink-3">recently</span></span>
         </div>
         <div className="flex items-center gap-2 rounded-lg border border-down/40 bg-down/[0.06] px-3 py-2 text-xs">
           <span className="text-lg font-semibold tabular-nums text-down">{binned}</span>
-          <span className="text-ink-2">in the rug bin<br /><span className="text-ink-3">last 24h</span></span>
+          <span className="text-ink-2">rug blocks &amp; safety stops<br /><span className="text-ink-3">recently</span></span>
         </div>
       </footer>
     </section>
   );
 }
 
-function Hall({ stage, stateOf, data, coinAt, coin, stamp, onPick, picked }: {
+function Hall({ stage, stateOf, data, onBelt, stamp, recentStops, onPick, picked }: {
   stage: (typeof STAGES)[number];
   stateOf: (i: number) => BotState;
   data: Checkpoint | undefined;
-  coinAt: number;
-  coin: { event: CheckpointEvent; state: "move" | "stop" | "deliver" } | null;
-  stamp: { at: number; kind: CheckpointEvent["kind"] } | null;
+  onBelt: (i: number) => Track[];
+  stamp: (i: number) => LiveCoin["status"] | null;
+  recentStops: (i: number) => number;
   onPick: (i: number) => void;
   picked: number | null;
 }) {
@@ -310,21 +375,26 @@ function Hall({ stage, stateOf, data, coinAt, coin, stamp, onPick, picked }: {
       <div className="flex flex-1 flex-wrap content-start justify-center gap-x-1 gap-y-3 px-2 pb-2 pt-4">
         {members.map(({ r, i }) => {
           const count = stoppedBy(r, data);
+          const here = onBelt(i);
+          const stamped = stamp(i);
+          const recent = recentStops(i);
           return (
             <button key={r.id} type="button" onClick={() => onPick(i)}
                     className="cp-bot relative flex w-[76px] flex-col items-center rounded-lg pt-1"
                     data-state={stateOf(i)} data-testid={`cp-bot-${r.id}`}
                     aria-pressed={picked === i} aria-label={`${r.name}: ${r.job}`}
                     style={{ "--cp-delay": `${(i * 0.37) % 3}s` } as React.CSSProperties}>
-              {coin && coinAt === i ? <Coin event={coin.event} state={coin.state} /> : null}
-              {stamp && stamp.at === i ? (
+              {here.length ? (
+                <Coin label={here[0]!.coin.symbol} extra={here.length - 1}
+                      state={stamped === "stopped" ? "stop" : stamped === "bought" ? "deliver" : "move"} />
+              ) : null}
+              {stamped && stamped !== "checking" ? (
                 <span className={`cp-stamp absolute right-0 top-5 z-20 rounded border-2 px-1 text-[9px] font-black tracking-wider ${
-                  stamp.kind === "stopped" ? "border-down text-down" : "border-up text-up"}`}>
-                  {stamp.kind === "stopped" ? "STOP" : "BUY ✓"}
+                  stamped === "stopped" ? "border-down text-down" : "border-up text-up"}`}>
+                  {stamped === "stopped" ? "STOP" : "BUY ✓"}
                 </span>
               ) : null}
               <RobotFigure robot={r} index={i} />
-              {/* Its desk: three lights that blink at their own pace. */}
               <span className="cp-desk" aria-hidden="true">
                 <span className="cp-led" /><span className="cp-led" /><span className="cp-led" />
               </span>
@@ -332,6 +402,12 @@ function Hall({ stage, stateOf, data, coinAt, coin, stamp, onPick, picked }: {
               <span className="text-[10px] tabular-nums text-ink-3">
                 {count === null ? "guard" : `${count.toLocaleString("en-US")} stopped`}
               </span>
+              {recent ? (
+                <span className="absolute left-1 top-1 rounded-full bg-down/90 px-1 text-[9px] font-bold tabular-nums text-[var(--color-canvas)]"
+                      title={`${recent} stopped here in the last 10 minutes`}>
+                  {recent}
+                </span>
+              ) : null}
             </button>
           );
         })}
@@ -344,5 +420,6 @@ function Hall({ stage, stateOf, data, coinAt, coin, stamp, onPick, picked }: {
 
 export function CheckpointLive() {
   const q = useCheckpoint();
-  return <CheckpointOffice data={q.data} />;
+  const live = useLive();
+  return <CheckpointOffice data={q.data} live={live.data} />;
 }
