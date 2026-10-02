@@ -149,6 +149,13 @@ async def test_wallets_are_compared_side_by_side_today_and_since_start(db_sessio
     assert (main["all_trades"], main["all_pnl_usd"]) == (2, "3.50")
     assert (one["today_trades"], one["today_won"], one["today_pnl_usd"]) == (2, 1, "0.60")
     assert (two["today_trades"], two["all_pnl_usd"], two["today_avg_pct"]) == (0, "0.00", None)
+    # From a start (2026-10-02: JUPITER and Karthik's Lab count the main wallet
+    # from the partnership's start): a trade before it leaves "all".
+    main, one, _ = await views.wallet_results(
+        db_session, [("Main wallet", "MainWallet"), ("USER 1", "UserOne"),
+                     ("USER 2", "NeverTraded")], now, since=now - timedelta(days=1))
+    assert (main["all_trades"], main["all_pnl_usd"]) == (1, "1.50")
+    assert (one["all_trades"], one["all_pnl_usd"]) == (2, "0.60")
 
 
 

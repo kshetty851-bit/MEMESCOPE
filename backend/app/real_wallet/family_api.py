@@ -24,7 +24,14 @@ from app.core.config import settings
 from app.core.exceptions import ConflictError, ServiceUnavailableError
 from app.core.logging import get_logger
 from app.models.real_wallet_family import RealWalletFamilyMember
-from app.real_wallet import family, family_wallets, user_fees, views, withdraw_service
+from app.real_wallet import (
+    family,
+    family_wallets,
+    partners,
+    user_fees,
+    views,
+    withdraw_service,
+)
 from app.real_wallet.balance import ExecutionWalletBalanceService
 from app.real_wallet.live_repository import LiveIntentRepository
 from app.real_wallet.mainnet_signer_client import (
@@ -231,7 +238,10 @@ async def members(session: DbSession, _: OptionalUser,
             session,
             [("Main wallet", owner)] * bool(owner)
             + [(family.label(m), a) for m in shown if (a := family_wallets.address(m))],
-            datetime.now(UTC))
+            # From 28 Sep 15:00 Dubai, when the main wallet's $100 went in, so
+            # it reads as on the partners box and Karthik's Lab (Karthik,
+            # 2026-10-02). The user wallets all began after it.
+            datetime.now(UTC), since=partners.START)
     if unlocked:
         await _charged(session)
         out["fees"] = await user_fees.summary(session)
