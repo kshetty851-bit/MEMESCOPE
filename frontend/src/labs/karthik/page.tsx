@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 
 import { Panel, PanelHeader, PanelTitle } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -676,34 +676,42 @@ export function RealWallets({ wallets, totalValue }: {
   const tone = (n: number) => (n > 0 ? "text-up" : n < 0 ? "text-down" : "text-ink");
   const signed = (n: number) => `${n > 0 ? "+" : ""}${usd(n)}`;
   const onWhat = (n: number, base: number) =>
-    `(${n > 0 ? "+" : ""}${((n / base) * 100).toFixed(2)}% on ${usd(base)})`;
+    `${n > 0 ? "+" : ""}${((n / base) * 100).toFixed(2)}% on ${usd(base)}`;
   return (
     <div className="max-w-sm rounded-lg border border-line p-3" data-testid="real-wallets">
-      {wallets.map((w) => (
-        <div key={w.label} className="flex items-baseline justify-between py-0.5 text-sm">
-          {/* "Paper 1", not "USER 1", on this page (Karthik, 2026-10-02). */}
-          <span className="text-ink-2">{w.label.replace(/^USER /, "Paper ")}</span>
-          <span className={`tabular-nums ${tone(profit(w))}`}>{signed(profit(w))}</span>
-        </div>
-      ))}
-      <div className="mt-1 flex items-baseline justify-between border-t border-line pt-1.5">
-        <span className="text-sm font-medium text-ink">Total</span>
-        <span className={`font-semibold tabular-nums ${tone(total)}`}>
-          {signed(total)} <span className="text-xs">{onWhat(total, putIn)}</span>
+      {/* Each wallet: what it is worth now, then what its trades made. */}
+      <div className="grid grid-cols-[1fr_auto_auto] items-baseline gap-x-4 gap-y-0.5 text-sm">
+        {wallets.map((w) => (
+          <Fragment key={w.label}>
+            {/* "Paper 1", not "USER 1", on this page (Karthik, 2026-10-02). */}
+            <span className="text-ink-2">{w.label.replace(/^USER /, "Paper ")}</span>
+            <span className="text-right tabular-nums text-ink">
+              {w.value_usd != null ? usd(w.value_usd) : "—"}
+            </span>
+            <span className={`text-right tabular-nums ${tone(profit(w))}`}>
+              {signed(profit(w))}
+            </span>
+          </Fragment>
+        ))}
+        <span className="mt-1 border-t border-line pt-1.5 font-medium text-ink">Total</span>
+        <span className="mt-1 border-t border-line pt-1.5 text-right font-semibold tabular-nums text-ink">
+          {totalValue != null ? usd(totalValue) : "—"}
+        </span>
+        <span className={`mt-1 border-t border-line pt-1.5 text-right font-semibold tabular-nums ${tone(total)}`}>
+          {signed(total)}
+        </span>
+        <span className="col-span-3 text-right text-[11px] tabular-nums text-ink-dim">
+          {onWhat(total, putIn)}
+        </span>
+        <span className="font-medium text-ink">Your share</span>
+        <span />
+        <span className={`text-right font-semibold tabular-nums ${tone(share)}`}>
+          {signed(share)}
+        </span>
+        <span className="col-span-3 text-right text-[11px] tabular-nums text-ink-dim">
+          {onWhat(share, mine)}
         </span>
       </div>
-      <div className="flex items-baseline justify-between pt-0.5">
-        <span className="text-sm font-medium text-ink">Your share</span>
-        <span className={`font-semibold tabular-nums ${tone(share)}`}>
-          {signed(share)} <span className="text-xs">{onWhat(share, mine)}</span>
-        </span>
-      </div>
-      {totalValue != null ? (
-        <div className="flex items-baseline justify-between pt-0.5 text-sm">
-          <span className="text-ink-2">Total value</span>
-          <span className="font-semibold tabular-nums text-ink">{usd(totalValue)}</span>
-        </div>
-      ) : null}
     </div>
   );
 }

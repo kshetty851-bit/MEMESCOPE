@@ -137,6 +137,8 @@ export interface WalletProfit {
   today_pnl_usd: string;
   all_trades: number;
   all_pnl_usd: string;
+  /** What the wallet is worth now: SOL at today's price plus open trades. */
+  value_usd?: string | null;
 }
 
 export interface WalletsProfit {
