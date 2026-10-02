@@ -145,7 +145,7 @@
 .cp-coin[data-state="stop"] { animation: cp-coin-drop 1.4s ease-in both 0.3s; }
 .cp-coin[data-state="deliver"] { animation: cp-coin-deliver 1.2s ease-in both 0.2s; }
 
-.cp-stamp { animation: cp-stamp 0.4s cubic-bezier(0.3, 1.5, 0.5, 1) both; }
+.cp-stamp { animation: cp-stamp 0.4s cubic-bezier(0.16, 1, 0.3, 1) both; }
 
 .cp-live-dot { animation: pulse-ring 1.8s ease-out infinite; }
 
