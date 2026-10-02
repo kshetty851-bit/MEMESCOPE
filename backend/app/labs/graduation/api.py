@@ -1660,15 +1660,21 @@ PREVENTED_TICKET_USD = Decimal(50)
 
 
 @router.get("/rugs-prevented", summary="Rugs the real wallet's checks refused")
-async def rugs_prevented(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+async def rugs_prevented(db: AsyncSession = Depends(get_db),
+                         start: datetime | None = None) -> dict[str, Any]:
     """Karthik, 2026-10-02: "show this prevented rugs count". Every $75k+
     graduation the money checks refused (`GradOperator.blocked_reason`), the
     ones that rugged within five minutes (`rugged`), and what all of them
     together would have done to a $50-a-trade wallet — the winners it turned
     away included. Plus the rugs the quiet rule avoided: the baseline book
-    against the quiet book, same coins, same days."""
+    against the quiet book, same coins, same days.
+
+    With `start`, only from then (the real wallet page counts from the
+    partnership's start, 2026-10-02)."""
     blocked = GradOperator.blocked_reason.is_not(None)
     deep = GradOperator.depth_usd >= PREVENTED_FLOOR_USD
+    if start is not None:
+        deep = deep & (GradOperator.entry_at >= start)
     move = GradOperator.exit_price_native / GradOperator.price_native - 1
     refused, rugs, moved, since = (await db.execute(
         select(func.count().filter(blocked),
@@ -1683,6 +1689,8 @@ async def rugs_prevented(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
         .order_by(GradOperator.entry_at.desc()).limit(1))).first()
     quiet_start = await db.scalar(select(func.min(GradPaperPosition.opened_at))
                                   .where(GradPaperPosition.book == "BASE_75k_quiet_5m"))
+    if quiet_start is not None and start is not None:
+        quiet_start = max(quiet_start, start)
     by_book = dict((await db.execute(
         select(GradPaperPosition.book, func.count())
         .where(GradPaperPosition.book.in_(("BASE_75k_5m", "BASE_75k_quiet_5m")),
