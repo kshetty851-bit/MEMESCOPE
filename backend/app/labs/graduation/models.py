@@ -397,6 +397,9 @@ class GradOperator(Base):
     labelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     exit_price_native: Mapped[Decimal | None] = mapped_column(_PRICE)
     source: Mapped[str] = mapped_column(String(8), nullable=False, server_default="live")
+    #: Why the real wallet's money checks refused it (`moneyblock`), or NULL if
+    #: they did not (2026-10-02). With `rugged`, the "rugs prevented" count.
+    blocked_reason: Mapped[str | None] = mapped_column(String(32))
 
 
 class GradCheckpoint(Base):

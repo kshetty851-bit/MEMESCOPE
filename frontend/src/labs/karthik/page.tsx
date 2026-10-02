@@ -2,6 +2,7 @@
 
 import { Fragment, useEffect, useState } from "react";
 
+import { RugsPreventedLive } from "@/components/rugs-prevented";
 import { Panel, PanelHeader, PanelTitle } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/states";
@@ -836,7 +837,10 @@ export function KarthikLabPage() {
 
       <SizeGrid data={data} />
 
-      <RealWalletsLive />
+      <div className="grid items-start gap-3 md:grid-cols-2">
+        <RealWalletsLive />
+        <RugsPreventedLive />
+      </div>
 
       <TradeList data={data} />
     </div>
