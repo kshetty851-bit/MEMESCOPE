@@ -42,7 +42,7 @@ describe("Karthik & Rafiq's box", () => {
     render(<PartnersCard data={worth} />);
     const box = screen.getByTestId("partners");
     expect(box).toHaveTextContent(
-      "Karthik+$18.82+0.1614 SOLput in $50.00 (0.4229 SOL) · now $68.82 (0.5901 SOL)from trades +$5.75");
+      "Karthik+$18.82+0.1614 SOLput in $50.00 (0.4229 SOL) · now $68.82 (0.5901 SOL)trading +$5.75 · SOL price & open trade +$13.07");
     expect(box).toHaveTextContent("Together+$37.63+0.3227 SOL$100.00 → $137.63 (1.1803 SOL) · +37.63%");
     expect(box).toHaveTextContent("($116.61 per SOL)");
   });
