@@ -252,3 +252,55 @@ async def test_the_lab_box_totals_what_the_wallets_are_worth(app, monkeypatch):
         body = (await client.get(url)).json()
         assert body["total_value_usd"] is None
         assert [w["value_usd"] for w in body["wallets"]] == [None, None, None]
+
+
+async def test_the_checkpoint_counts_real_refusals_and_feeds_the_latest_coins(
+        app, db_session, monkeypatch):
+    """HQ's Checkpoint (2026-10-02): what each check stopped, from the records,
+    and the latest coins newest first, with names only, never an address."""
+    from datetime import UTC, datetime, timedelta
+    from decimal import Decimal
+
+    from app.labs.graduation.models import GradOperator, GradToken
+    from app.models.real_wallet_execution import RealWalletPosition
+    from app.models.real_wallet_safety import RealWalletSafetyEvaluation
+
+    monkeypatch.setattr(settings, "REAL_WALLET_PUBLIC_KEY", "OwnerWallet1111")
+    now = datetime.now(UTC)
+    one = Decimal(1)
+    db_session.add_all([
+        GradOperator(mint="MintRug", pool="P1", entry_at=now - timedelta(minutes=30),
+                     price_native=one, depth_usd=Decimal(90_000), rugged=True,
+                     label_due_at=now, blocked_reason="linked_to_recent_rug"),
+        GradOperator(mint="MintShallow", pool="P2", entry_at=now - timedelta(minutes=20),
+                     price_native=one, depth_usd=Decimal(40_000), label_due_at=now,
+                     blocked_reason="known_rug_money"),          # under the floor
+        RealWalletSafetyEvaluation(
+            mint_address="MintThin", decision="REJECT", trade_size_usd=Decimal(50),
+            policy_version="v", provenance={}, evaluated_at=now - timedelta(minutes=10),
+            reason_codes=["POSITION_TOO_LARGE_FOR_LIQUIDITY", "BUY_PRICE_IMPACT_TOO_HIGH"]),
+        RealWalletSafetyEvaluation(
+            mint_address="MintWin", decision="ALLOW", trade_size_usd=Decimal(50),
+            policy_version="v", provenance={}, reason_codes=[]),
+        RealWalletPosition(mint_address="MintWin", status="CLOSED", quantity=Decimal(100),
+                           entry_price_usd=Decimal("0.5"),
+                           opened_at=now - timedelta(minutes=5),
+                           wallet_public_key="OwnerWallet1111"),
+        GradToken(mint="MintRug", symbol="RUGGY", first_seen_at=now),
+        GradToken(mint="MintWin", symbol="WINNY", first_seen_at=now),
+    ])
+    await db_session.flush()
+    app.dependency_overrides[get_optional_user] = lambda: None
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as client:
+        r = await client.get(f"{settings.API_V1_PREFIX}/real-wallet/checkpoint")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["stopped_by"] == {"linked_to_recent_rug": 1,
+                                  "POSITION_TOO_LARGE_FOR_LIQUIDITY": 1,
+                                  "BUY_PRICE_IMPACT_TOO_HIGH": 1}
+    assert (body["safety_checked"], body["safety_allowed"]) == (2, 1)
+    assert [(e["kind"], e["symbol"], e["code"]) for e in body["feed"]] == [
+        ("bought", "WINNY", None),
+        ("stopped", None, "POSITION_TOO_LARGE_FOR_LIQUIDITY"),
+        ("stopped", "RUGGY", "linked_to_recent_rug")]
+    assert "Mint" not in r.text and "OwnerWallet" not in r.text

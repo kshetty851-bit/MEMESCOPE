@@ -1,0 +1,169 @@
+/* ============================================================================
+   THE CHECKPOINT — HQ's robot office (2026-10-02).
+   Thirty checks as thirty robots in three halls, a belt through all three,
+   and the latest real coins replayed along it. Chassis colour = hall;
+   green/red are reserved for pass/stop and never used as decoration.
+   Motion is transform/opacity only; the global reduced-motion rule
+   collapses all of it.
+   ========================================================================== */
+
+.cp {
+  --cp-rule: var(--color-accent);
+  --cp-gate: var(--color-score-elite);
+  --cp-safety: oklch(0.760 0.120 300);
+  --cp-pass: var(--color-up);
+  --cp-stop: var(--color-down);
+  --cp-metal: oklch(0.300 0.012 255);
+  --cp-metal-hi: oklch(0.420 0.014 255);
+  --cp-visor: oklch(0.120 0.010 255);
+  background:
+    radial-gradient(120% 80% at 50% 0%, oklch(0.200 0.020 255 / 0.9), transparent 70%),
+    repeating-linear-gradient(90deg, oklch(1 0 0 / 0.025) 0 1px, transparent 1px 48px),
+    repeating-linear-gradient(0deg, oklch(1 0 0 / 0.025) 0 1px, transparent 1px 48px),
+    var(--color-sunken);
+}
+
+.cp-hall[data-stage="rule"] { --cp-chassis: var(--cp-rule); }
+.cp-hall[data-stage="gate"] { --cp-chassis: var(--cp-gate); }
+.cp-hall[data-stage="safety"] { --cp-chassis: var(--cp-safety); }
+
+.cp-hall {
+  background: linear-gradient(180deg, color-mix(in oklch, var(--cp-chassis) 9%, transparent), transparent 60%);
+  border-color: color-mix(in oklch, var(--cp-chassis) 35%, var(--color-line));
+}
+
+.cp-hall-light {
+  background: linear-gradient(90deg, transparent, var(--cp-chassis), transparent);
+  animation: cp-hall-light 4.8s ease-in-out infinite;
+}
+
+/* --- the robot ------------------------------------------------------------ */
+
+.cp-bot { cursor: pointer; }
+.cp-bot:focus-visible { outline: 2px solid var(--cp-chassis); outline-offset: 3px; border-radius: 10px; }
+
+.cp-bot .cp-chassis { fill: var(--cp-chassis); }
+.cp-bot .cp-chassis-dark { fill: color-mix(in oklch, var(--cp-chassis) 55%, black); }
+.cp-bot .cp-metal { fill: var(--cp-metal); }
+.cp-bot .cp-visor { fill: var(--cp-visor); }
+.cp-bot .cp-eye { fill: var(--cp-chassis); }
+.cp-bot .cp-tip { fill: var(--cp-chassis); }
+.cp-bot .cp-screen { fill: var(--cp-visor); stroke: color-mix(in oklch, var(--cp-chassis) 60%, transparent); }
+
+.cp-body {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  animation: cp-bob 3.2s ease-in-out infinite;
+  animation-delay: var(--cp-delay, 0s);
+}
+.cp-tip { animation: cp-blink 2.6s steps(1) infinite; animation-delay: var(--cp-delay, 0s); }
+.cp-eyes { animation: cp-scan 5.5s ease-in-out infinite; animation-delay: var(--cp-delay, 0s); }
+
+/* Looking at the coin in front of it. */
+.cp-bot[data-state="scan"] .cp-eye,
+.cp-bot[data-state="scan"] .cp-tip { fill: var(--color-warn); }
+.cp-bot[data-state="scan"] .cp-beam { opacity: 1; }
+.cp-bot[data-state="scan"] .cp-eyes { animation: cp-scan-fast 0.5s ease-in-out infinite; }
+
+/* Passed it on. */
+.cp-bot[data-state="pass"] .cp-eye,
+.cp-bot[data-state="pass"] .cp-tip { fill: var(--cp-pass); }
+.cp-bot[data-state="pass"] .cp-halo { opacity: 0.55; fill: var(--cp-pass); animation: cp-pop 0.6s ease-out both; }
+
+/* Stopped it. */
+.cp-bot[data-state="stop"] .cp-eye,
+.cp-bot[data-state="stop"] .cp-tip { fill: var(--cp-stop); }
+.cp-bot[data-state="stop"] .cp-halo { opacity: 0.7; fill: var(--cp-stop); animation: cp-alarm 0.45s ease-in-out infinite alternate; }
+.cp-bot[data-state="stop"] .cp-body { animation: cp-shake 0.35s ease-in-out 3; }
+
+.cp-halo { opacity: 0; transform-box: fill-box; transform-origin: 50% 50%; }
+.cp-beam {
+  opacity: 0;
+  fill: color-mix(in oklch, var(--color-warn) 40%, transparent);
+  transition: opacity 120ms;
+}
+
+/* Asleep: the holder check is switched off. */
+.cp-bot[data-state="asleep"] .cp-eye { fill: var(--color-neutral); }
+.cp-bot[data-state="asleep"] .cp-tip { fill: var(--color-neutral); animation: none; }
+.cp-bot[data-state="asleep"] .cp-body { animation: cp-breathe 5s ease-in-out infinite; }
+.cp-zz { animation: cp-zz 3s ease-out infinite; }
+
+/* --- desks and halls ------------------------------------------------------ */
+
+.cp-desk {
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+  width: 58px;
+  margin-top: -2px;
+  padding: 2px 0;
+  border-radius: 4px;
+  background: linear-gradient(180deg, var(--cp-metal-hi), var(--cp-metal));
+  box-shadow: 0 3px 6px oklch(0 0 0 / 0.35);
+}
+.cp-led {
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--cp-chassis);
+  animation: cp-led 1.9s steps(1) infinite;
+  animation-delay: var(--cp-delay, 0s);
+}
+.cp-led:nth-child(2) { animation-duration: 2.7s; background: color-mix(in oklch, var(--cp-chassis) 60%, white); }
+.cp-led:nth-child(3) { animation-duration: 1.3s; }
+.cp-bot[data-state="pass"] .cp-led { background: var(--cp-pass); }
+.cp-bot[data-state="stop"] .cp-led { background: var(--cp-stop); animation-duration: 0.3s; }
+
+.cp-hall-number {
+  position: absolute;
+  right: 10px;
+  bottom: 6px;
+  font-size: 92px;
+  line-height: 1;
+  font-weight: 800;
+  color: var(--cp-chassis);
+  opacity: 0.06;
+  pointer-events: none;
+}
+
+/* --- the belt and the coin ----------------------------------------------- */
+
+.cp-belt {
+  background:
+    repeating-linear-gradient(-45deg, var(--cp-metal-hi) 0 6px, var(--cp-metal) 6px 14px);
+  background-size: 40px 100%;
+  animation: cp-belt 1.2s linear infinite;
+}
+
+.cp-coin {
+  font-size: 10px;
+  animation: cp-coin-in 0.25s ease-out both;
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--color-score-elite) 45%, transparent),
+              0 0 14px color-mix(in oklch, var(--color-score-elite) 55%, transparent);
+}
+.cp-coin[data-state="stop"] { animation: cp-coin-drop 1.4s ease-in both 0.3s; }
+.cp-coin[data-state="deliver"] { animation: cp-coin-deliver 1.2s ease-in both 0.2s; }
+
+.cp-stamp { animation: cp-stamp 0.4s cubic-bezier(0.3, 1.5, 0.5, 1) both; }
+
+.cp-live-dot { animation: pulse-ring 1.8s ease-out infinite; }
+
+/* --- keyframes ------------------------------------------------------------ */
+
+@keyframes cp-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-1.5px); } }
+@keyframes cp-breathe { 0%, 100% { transform: translateY(0) scaleY(1); } 50% { transform: translateY(0.5px) scaleY(0.985); } }
+@keyframes cp-blink { 0%, 86% { opacity: 1; } 87%, 92% { opacity: 0.15; } 93%, 100% { opacity: 1; } }
+@keyframes cp-scan { 0%, 20% { transform: translateX(0); } 35%, 55% { transform: translateX(-2.2px); } 70%, 100% { transform: translateX(2.2px); } }
+@keyframes cp-scan-fast { 0%, 100% { transform: translateX(-2.4px); } 50% { transform: translateX(2.4px); } }
+@keyframes cp-pop { from { transform: scale(0.6); opacity: 0.9; } to { transform: scale(1.25); opacity: 0; } }
+@keyframes cp-alarm { from { opacity: 0.25; } to { opacity: 0.8; } }
+@keyframes cp-shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-1.5px) rotate(-2deg); } 75% { transform: translateX(1.5px) rotate(2deg); } }
+@keyframes cp-zz { from { opacity: 0; transform: translate(0, 0) scale(0.7); } 30% { opacity: 1; } to { opacity: 0; transform: translate(6px, -12px) scale(1.1); } }
+@keyframes cp-belt { from { background-position-x: 0; } to { background-position-x: 40px; } }
+@keyframes cp-coin-in { from { opacity: 0; transform: translateX(-10px) scale(0.8); } to { opacity: 1; transform: none; } }
+@keyframes cp-coin-drop { 0% { transform: none; opacity: 1; } 30% { transform: translateY(-6px) rotate(-12deg); } 100% { transform: translateY(26px) rotate(140deg) scale(0.5); opacity: 0; } }
+@keyframes cp-coin-deliver { 0% { transform: none; opacity: 1; } 100% { transform: translateX(26px) translateY(-10px) scale(0.4); opacity: 0; } }
+@keyframes cp-stamp { from { opacity: 0; transform: scale(1.8) rotate(-14deg); } to { opacity: 1; transform: scale(1) rotate(-8deg); } }
+@keyframes cp-led { 0%, 60% { opacity: 1; } 61%, 100% { opacity: 0.25; } }
+@keyframes cp-hall-light { 0%, 100% { opacity: 0.25; } 50% { opacity: 0.85; } }

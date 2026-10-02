@@ -26,7 +26,9 @@ from sqlalchemy import func, or_, select
 from app.api.deps import AdminUser, DbSession, OptionalUser
 from app.core.config import settings
 from app.core.exceptions import ConflictError, NotFoundError, ServiceUnavailableError
+from app.labs.graduation.models import GradOperator, GradToken
 from app.models.lab import LabDecision
+from app.models.real_wallet_safety import RealWalletSafetyEvaluation
 from app.models.real_wallet_execution import (
     RealWalletDevnetIntent,
     RealWalletDevnetQuote,
@@ -518,6 +520,74 @@ async def _values(session: Any, addresses: list[str], now: datetime) -> list[Dec
         logger.warning("real_wallet_total_value_unread", exc_info=True)
         return None
     return out
+
+
+#: The rule's pool floor: a refused coin under it would never have been bought.
+CHECKPOINT_FLOOR_USD = 75_000
+CHECKPOINT_FEED = 14
+
+
+@router.get("/checkpoint", summary="What the pre-buy checks stopped, and the latest coins")
+async def checkpoint(session: DbSession) -> dict[str, object]:
+    """HQ's Checkpoint (Karthik, 2026-10-02: "show this 30 checks as 30
+    agents"). Real records only: the rug blocks' refusals
+    (`GradOperator.blocked_reason`, $75k+ pools), the safety check's REJECT
+    reasons, and the coins the main wallet bought. The wallet gate's own
+    refusals are not recorded anywhere, so they are not counted here.
+    Names and figures only, like `/status`."""
+    now = datetime.now(UTC)
+    deep = GradOperator.depth_usd >= CHECKPOINT_FLOOR_USD
+    blocks = dict((await session.execute(
+        select(GradOperator.blocked_reason, func.count())
+        .where(deep, GradOperator.blocked_reason.is_not(None))
+        .group_by(GradOperator.blocked_reason))).all())
+    reason = func.jsonb_array_elements_text(RealWalletSafetyEvaluation.reason_codes)
+    rejects = dict((await session.execute(
+        select(reason.label("code"), func.count())
+        .where(RealWalletSafetyEvaluation.decision == "REJECT")
+        .group_by("code"))).all())
+    checked, allowed = (await session.execute(select(
+        func.count(), func.count().filter(RealWalletSafetyEvaluation.decision == "ALLOW"))
+    )).one()
+    owner = settings.REAL_WALLET_PUBLIC_KEY.strip()
+    since = now - timedelta(days=1)
+    bought = (await session.execute(
+        select(RealWalletPosition.mint_address, RealWalletPosition.opened_at)
+        .where(RealWalletPosition.wallet_public_key == owner,
+               RealWalletPosition.opened_at >= since)
+        .order_by(RealWalletPosition.opened_at.desc()).limit(CHECKPOINT_FEED))).all()
+    stopped = (await session.execute(
+        select(GradOperator.mint, GradOperator.entry_at, GradOperator.blocked_reason,
+               GradOperator.rugged)
+        .where(deep, GradOperator.blocked_reason.is_not(None),
+               GradOperator.entry_at >= since)
+        .order_by(GradOperator.entry_at.desc()).limit(CHECKPOINT_FEED))).all()
+    refused = (await session.execute(
+        select(RealWalletSafetyEvaluation.mint_address,
+               RealWalletSafetyEvaluation.evaluated_at,
+               RealWalletSafetyEvaluation.reason_codes)
+        .where(RealWalletSafetyEvaluation.decision == "REJECT",
+               RealWalletSafetyEvaluation.evaluated_at >= since)
+        .order_by(RealWalletSafetyEvaluation.evaluated_at.desc()).limit(CHECKPOINT_FEED))).all()
+    feed = (
+        [{"kind": "bought", "mint": m, "at": at} for m, at in bought]
+        + [{"kind": "stopped", "mint": m, "at": at, "code": why, "rugged": rugged}
+           for m, at, why, rugged in stopped]
+        + [{"kind": "stopped", "mint": m, "at": at, "code": (codes or [None])[0],
+            "rugged": None} for m, at, codes in refused])
+    feed = sorted(feed, key=lambda e: e["at"], reverse=True)[:CHECKPOINT_FEED]
+    symbols = dict((await session.execute(
+        select(GradToken.mint, GradToken.symbol)
+        .where(GradToken.mint.in_([e["mint"] for e in feed])))).all())
+    return {
+        "stopped_by": {**{k: int(v) for k, v in rejects.items()},
+                       **{k: int(v) for k, v in blocks.items()}},
+        "safety_checked": int(checked),
+        "safety_allowed": int(allowed),
+        "feed": [{"kind": e["kind"], "symbol": symbols.get(e["mint"]),
+                  "at": e["at"].isoformat(), "code": e.get("code"),
+                  "rugged": e.get("rugged")} for e in feed],
+    }
 
 
 @router.get("/status", summary="Read dedicated execution-wallet status")
