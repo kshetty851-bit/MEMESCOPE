@@ -26,15 +26,37 @@ from sqlalchemy import func, or_, select
 from app.api.deps import AdminUser, DbSession, OptionalUser
 from app.core.config import settings
 from app.core.exceptions import ConflictError, NotFoundError, ServiceUnavailableError
-from app.labs.graduation.models import GradOperator, GradToken
+from app.core.logging import get_logger
+from app.labs.graduation.models import (
+    GradMigration,
+    GradOperator,
+    GradPaperPosition,
+    GradPostgradSample,
+    GradToken,
+)
 from app.models.lab import LabDecision
-from app.models.real_wallet_safety import RealWalletSafetyEvaluation
 from app.models.real_wallet_execution import (
     RealWalletDevnetIntent,
     RealWalletDevnetQuote,
     RealWalletPosition,
 )
+from app.models.real_wallet_safety import RealWalletSafetyEvaluation
 from app.models.user import User, UserRole
+from app.real_wallet import (
+    family,
+    family_wallets,
+    partners,
+    views,
+    withdraw_service,
+    withdrawal,
+)
+from app.real_wallet.autotrade import (
+    AutotradeSwitchService,
+    InvalidTicketError,
+    UnknownStrategyError,
+    ticket_choices,
+    ticket_for,
+)
 from app.real_wallet.balance import ExecutionWalletBalanceService
 from app.real_wallet.devnet_intent import DevnetIntentState, DevnetIntentTransitionError
 from app.real_wallet.devnet_repository import DevnetIntentExpiredError, DevnetIntentRepository
@@ -49,10 +71,9 @@ from app.real_wallet.devnet_workflow import (
     DevnetManualWorkflowError,
 )
 from app.real_wallet.driver import RealWalletDriver
+from app.real_wallet.funding_readiness import as_dict as readiness_as_dict
+from app.real_wallet.funding_readiness import evaluate as evaluate_funding_readiness
 from app.real_wallet.live_repository import LiveIntentRepository
-from app.real_wallet import (
-    family, family_wallets, partners, views, withdraw_service, withdrawal,
-)
 from app.real_wallet.mainnet_signer_client import (
     MainnetSignerRejectedError,
     MainnetSignerUnavailableError,
@@ -63,26 +84,15 @@ from app.real_wallet.network import (
     is_valid_wallet_address,
     verify_wallet_network,
 )
-from app.real_wallet.funding_readiness import as_dict as readiness_as_dict
-from app.real_wallet.funding_readiness import evaluate as evaluate_funding_readiness
-from app.real_wallet.autotrade import (
-    AutotradeSwitchService,
-    InvalidTicketError,
-    UnknownStrategyError,
-    ticket_choices,
-    ticket_for,
-)
+from app.real_wallet.policy import configured_entry_size_usd
 from app.real_wallet.rehearsal import as_dict as rehearsal_as_dict
 from app.real_wallet.rehearsal import rehearse
-from app.real_wallet.policy import configured_entry_size_usd
 from app.real_wallet.sol_price import JupiterSolUsdPriceSource
 from app.real_wallet.sol_price import current_usd as sol_usd_now
 from app.real_wallet.transport_policy import readiness as transport_readiness
 from app.real_wallet.tx_inspect import lamports_from_sol
 from app.repositories.token import TokenRepository
 from app.services.rpc.standard import StandardSolanaRPC
-
-from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/real-wallet", tags=["real-wallet"])
@@ -597,6 +607,85 @@ async def checkpoint(session: DbSession) -> dict[str, object]:
                   "at": e["at"].isoformat(), "code": e.get("code"),
                   "rugged": e.get("rugged")} for e in feed],
     }
+
+
+#: How far back the live belt looks: a few minutes of graduations.
+LIVE_WINDOW = timedelta(minutes=10)
+LIVE_MAX = 24
+
+
+@router.get("/checkpoint/live", summary="Where each new graduation is in the checks, now")
+async def checkpoint_live_view(session: DbSession) -> dict[str, object]:
+    """Karthik, 2026-10-02: "i want real time token checks". Every coin that
+    graduated in the last ten minutes and the check it has reached, from the
+    records each check leaves (`checkpoint_live.where`). Names only."""
+    from app.models.real_wallet_execution import RealWalletLiveIntent
+    from app.real_wallet import checkpoint_live as live
+
+    now = datetime.now(UTC)
+    grads = (await session.execute(
+        select(GradMigration.mint, GradMigration.ts)
+        .where(GradMigration.ts >= now - LIVE_WINDOW)
+        .order_by(GradMigration.ts.desc()).limit(LIVE_MAX))).all()
+    coins = {m: live.Coin(graduated=ts) for m, ts in grads}
+    symbols: dict[str, str] = {}
+    if coins:
+        mints = list(coins)
+        owner = settings.REAL_WALLET_PUBLIC_KEY.strip()
+        for m, liq in (await session.execute(
+                select(GradPostgradSample.mint, GradPostgradSample.liquidity_usd)
+                .where(GradPostgradSample.mint.in_(mints),
+                       GradPostgradSample.liquidity_usd.is_not(None))
+                .order_by(GradPostgradSample.mint, GradPostgradSample.ts)
+                .distinct(GradPostgradSample.mint))).all():
+            coins[m].liquidity = Decimal(liq)
+        for m, why in (await session.execute(
+                select(GradOperator.mint, GradOperator.blocked_reason)
+                .where(GradOperator.mint.in_(mints)))).all():
+            coins[m].blocked = why
+        for m, book, at in (await session.execute(
+                select(GradPaperPosition.mint, GradPaperPosition.book,
+                       GradPaperPosition.opened_at)
+                .where(GradPaperPosition.mint.in_(mints),
+                       GradPaperPosition.book.in_((live.BASELINE_BOOK, live.QUIET_BOOK)))
+                )).all():
+            coins[m].books.setdefault(book, at)
+        for m, at in (await session.execute(
+                select(RealWalletLiveIntent.mint_address, RealWalletLiveIntent.created_at)
+                .where(RealWalletLiveIntent.mint_address.in_(mints),
+                       RealWalletLiveIntent.side == "BUY",
+                       RealWalletLiveIntent.wallet_public_key == owner))).all():
+            coins[m].intent_at = at
+        for m, at, decision, codes in (await session.execute(
+                select(RealWalletSafetyEvaluation.mint_address,
+                       RealWalletSafetyEvaluation.evaluated_at,
+                       RealWalletSafetyEvaluation.decision,
+                       RealWalletSafetyEvaluation.reason_codes)
+                .where(RealWalletSafetyEvaluation.mint_address.in_(mints))
+                .order_by(RealWalletSafetyEvaluation.evaluated_at))).all():
+            coins[m].evaluations.append((at, decision, list(codes or [])))
+        held = (await session.execute(
+            select(RealWalletPosition.mint_address, RealWalletPosition.opened_at,
+                   RealWalletPosition.closed_at)
+            .where(RealWalletPosition.wallet_public_key == owner,
+                   RealWalletPosition.opened_at >= now - 2 * LIVE_WINDOW))).all()
+        for m, opened, _closed in held:
+            if m in coins:
+                coins[m].bought_at = opened
+        for coin in coins.values():
+            took = coin.books.get(live.QUIET_BOOK)
+            coin.wallet_busy = took is not None and any(
+                opened <= took and (closed is None or closed > took)
+                for _m, opened, closed in held)
+        symbols = {m: s for m, s in (await session.execute(
+            select(GradToken.mint, GradToken.symbol).where(GradToken.mint.in_(mints)))).all()
+            if s}
+        known = await TokenRepository(session).get_many_by_mints(
+            [m for m in mints if m not in symbols])
+        symbols.update({m: t.symbol for m, t in known.items() if t.symbol})
+    return {"now": now.isoformat(), "coins": [
+        {"symbol": symbols.get(m), "graduated_at": ts.isoformat(), **live.where(coins[m], now)}
+        for m, ts in grads]}
 
 
 @router.get("/status", summary="Read dedicated execution-wallet status")

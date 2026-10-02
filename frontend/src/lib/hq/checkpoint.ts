@@ -92,3 +92,34 @@ export function stoppedBy(robot: Robot, data: Checkpoint | undefined): number | 
   if (!robot.codes.length || !data) return null;
   return robot.codes.reduce((n, code) => n + (data.stopped_by[code] ?? 0), 0);
 }
+
+/** A coin on the live belt (`/real-wallet/checkpoint/live`), 2026-10-02. */
+export interface LiveCoin {
+  symbol: string | null;
+  graduated_at: string;
+  status: "checking" | "stopped" | "bought";
+  /** A robot's id, or "wallet" for a bought coin. */
+  robot: string | null;
+  /** A refusal code, mapped to its robot here. */
+  code: string | null;
+  note: string;
+}
+
+export interface LiveBelt {
+  now: string;
+  coins: LiveCoin[];
+}
+
+const BY_ID = new Map(ROBOTS.map((r, i) => [r.id, i] as const));
+
+/** Where a live coin sits on the belt; -1 when no robot can honestly be named. */
+export function liveIndex(coin: LiveCoin): number {
+  if (coin.robot === "wallet") return ROBOTS.length - 1;
+  if (coin.robot) return BY_ID.get(coin.robot) ?? -1;
+  if (coin.code) return BY_CODE.get(coin.code) ?? -1;
+  return -1;
+}
+
+export function coinKey(coin: LiveCoin): string {
+  return `${coin.graduated_at}|${coin.symbol ?? ""}`;
+}
