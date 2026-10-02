@@ -17,11 +17,11 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import ROUND_UP, Decimal
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 
 from app.api.deps import AdminUser, DbSession, OptionalUser
 from app.core.config import settings
@@ -477,7 +477,38 @@ async def wallets_profit(session: DbSession) -> dict[str, object]:
                      key=lambda a: int(a.member.removeprefix("USER")))
     wallets = ([("Karthik", owner)] if owner else []) + [
         (family.label(a.member), a.wallet) for a in trading]
-    return {"wallets": await views.wallet_results(session, wallets, datetime.now(UTC))}
+    now = datetime.now(UTC)
+    return {"wallets": await views.wallet_results(session, wallets, now),
+            "total_value_usd": await _total_value(session, [a for _, a in wallets], now)}
+
+
+async def _total_value(session: Any, addresses: list[str], now: datetime) -> str | None:
+    """What the wallets are worth together now (Karthik, 2026-10-02: "show
+    total value too"): each one's SOL at today's price plus its open trade at
+    what it would sell for, as the balance on this page counts it. None if
+    any balance or the price is unread — a total missing a wallet is wrong,
+    not approximate."""
+    price = await sol_usd_now(now)
+    if price is None or not addresses:
+        return None
+    owner = settings.REAL_WALLET_PUBLIC_KEY.strip()
+    open_ = (await session.scalars(select(RealWalletPosition).where(
+        RealWalletPosition.status == "OPEN",
+        or_(RealWalletPosition.wallet_public_key.in_(addresses),
+            RealWalletPosition.wallet_public_key.is_(None))))).all()
+    total = Decimal(0)
+    try:
+        rpc = StandardSolanaRPC(rpc_url=settings.REAL_WALLET_RPC_URL)
+        async with rpc:
+            reader = ExecutionWalletBalanceService(rpc)
+            for address in addresses:
+                sol = Decimal(str((await reader.get_sol_balance(address)).sol))
+                held = [p for p in open_ if (p.wallet_public_key or owner) == address]
+                total += sol * price + views.open_trade_value(held, address)
+    except Exception:  # a read, reported as unread
+        logger.warning("real_wallet_total_value_unread", exc_info=True)
+        return None
+    return views.decimal_str(total.quantize(Decimal("0.01")))
 
 
 @router.get("/status", summary="Read dedicated execution-wallet status")
