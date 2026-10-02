@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.real_wallet_execution import RealWalletLiveIntent, RealWalletPosition
@@ -116,11 +116,12 @@ def days_payload(positions, now: datetime) -> list[dict[str, Any]]:
 
 
 async def wallet_results(session: AsyncSession, wallets: list[tuple[str, str]],
-                         now: datetime) -> list[dict[str, Any]]:
+                         now: datetime, since: datetime | None = None) -> list[dict[str, Any]]:
     """Each wallet's closed trades side by side (Karthik, 2026-10-01: "show
     each wallet side by side in jupiter"): today (Dubai) and since it began.
     `wallets` is [(label, address)], in the order to show them. Net where
-    measured, gross else."""
+    measured, gross else. With `since`, "all" counts only trades opened from
+    then on."""
     if not wallets:
         return []
     pnl = func.coalesce(RealWalletPosition.realised_net_pnl_usd,
@@ -138,7 +139,8 @@ async def wallet_results(session: AsyncSession, wallets: list[tuple[str, str]],
                func.coalesce(func.sum(pnl), 0).label("a_pnl"),
                func.coalesce(func.sum(cost), 0).label("a_cost"))
         .where(RealWalletPosition.status == "CLOSED", pnl.is_not(None),
-               RealWalletPosition.wallet_public_key.in_([a for _, a in wallets]))
+               RealWalletPosition.wallet_public_key.in_([a for _, a in wallets]),
+               RealWalletPosition.opened_at >= since if since else true())
         .group_by(RealWalletPosition.wallet_public_key))).all()}
 
     def pct(made: Decimal, spent: Decimal) -> str | None:

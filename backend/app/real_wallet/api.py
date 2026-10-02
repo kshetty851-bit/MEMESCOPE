@@ -478,7 +478,11 @@ async def wallets_profit(session: DbSession) -> dict[str, object]:
     wallets = ([("Karthik", owner)] if owner else []) + [
         (family.label(a.member), a.wallet) for a in trading]
     now = datetime.now(UTC)
-    return {"wallets": await views.wallet_results(session, wallets, now),
+    # From the money each wallet holds now: the main wallet's $100 went in at
+    # the partnership's start (Karthik, 2026-10-02: "main 50 from my side,
+    # other 50 belongs to rafiq"); the user wallets began after it.
+    return {"wallets": await views.wallet_results(session, wallets, now,
+                                                  since=partners.START),
             "total_value_usd": await _total_value(session, [a for _, a in wallets], now)}
 
 
