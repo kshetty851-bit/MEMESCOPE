@@ -646,47 +646,43 @@ function PumpfunMoney() {
   return <PumpfunMoneyTable days={q.data.days} graduationSol={q.data.graduation_sol} />;
 }
 
+/** What Karthik has put into the trading wallets together (2026-10-02: "my
+ * invested amount is 250$ among 3"). Change it here when he adds money. */
+const INVESTED_USD = 250;
+
 /**
  * REAL MONEY, at a glance (Karthik, 2026-10-02: "just to check from mobile or
- * other laptop"): the main wallet and each user wallet that is trading, with a
- * total. Closed trades only, today (Dubai) and since each began.
+ * other laptop"): the main wallet and each user wallet that is trading, down
+ * the page, each one's profit since it began (closed trades), and a total
+ * with its % of what he put in across them.
  */
-export function RealWallets({ wallets }: { wallets: WalletProfit[] | undefined }) {
+export function RealWallets({ wallets, invested = INVESTED_USD }: {
+  wallets: WalletProfit[] | undefined;
+  invested?: number;
+}) {
   if (!wallets?.length) return null;
-  const sum = (key: "today_pnl_usd" | "all_pnl_usd") =>
-    wallets.reduce((acc, w) => acc + Number(w[key]), 0);
-  const rows = [
-    ...wallets.map((w) => ({ label: w.label, today: Number(w.today_pnl_usd),
-      trades: w.today_trades, all: Number(w.all_pnl_usd), total: false })),
-    ...(wallets.length > 1
-      ? [{ label: "Total", today: sum("today_pnl_usd"),
-          trades: wallets.reduce((acc, w) => acc + w.today_trades, 0),
-          all: sum("all_pnl_usd"), total: true }]
-      : []),
-  ];
+  const total = wallets.reduce((acc, w) => acc + Number(w.all_pnl_usd), 0);
   const tone = (n: number) => (n > 0 ? "text-up" : n < 0 ? "text-down" : "text-ink");
   const signed = (n: number) => `${n > 0 ? "+" : ""}${usd(n)}`;
+  const pct = (total / invested) * 100;
   return (
-    <div className="rounded-lg border border-line p-3" data-testid="real-wallets">
-      <div className="mb-2 text-[11px] uppercase tracking-wider text-ink-dim">
-        Real wallets · profit from closed trades
-      </div>
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        {rows.map((r) => (
-          <div key={r.label}
-               className={`rounded-md border p-2 ${r.total ? "border-accent/50" : "border-line"}`}>
-            <div className="text-xs font-medium text-ink-2">{r.label}</div>
-            <div className={`text-base font-semibold tabular-nums ${tone(r.today)}`}>
-              {signed(r.today)}
-            </div>
-            <div className="text-[11px] tabular-nums text-ink-dim">
-              today · {r.trades} trades
-            </div>
-            <div className={`text-[11px] tabular-nums ${tone(r.all)}`}>
-              {signed(r.all)} all time
-            </div>
-          </div>
-        ))}
+    <div className="max-w-sm rounded-lg border border-line p-3" data-testid="real-wallets">
+      {wallets.map((w) => (
+        <div key={w.label} className="flex items-baseline justify-between py-0.5 text-sm">
+          <span className="text-ink-2">{w.label}</span>
+          <span className={`tabular-nums ${tone(Number(w.all_pnl_usd))}`}>
+            {signed(Number(w.all_pnl_usd))}
+          </span>
+        </div>
+      ))}
+      <div className="mt-1 flex items-baseline justify-between border-t border-line pt-1.5">
+        <span className="text-sm font-medium text-ink">Total</span>
+        <span className={`font-semibold tabular-nums ${tone(total)}`}>
+          {signed(total)}{" "}
+          <span className="text-xs">
+            ({pct > 0 ? "+" : ""}{pct.toFixed(2)}% on {usd(invested)})
+          </span>
+        </span>
       </div>
     </div>
   );
