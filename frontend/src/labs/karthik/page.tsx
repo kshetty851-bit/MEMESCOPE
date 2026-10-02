@@ -669,7 +669,8 @@ export function RealWallets({ wallets, invested = INVESTED_USD }: {
     <div className="max-w-sm rounded-lg border border-line p-3" data-testid="real-wallets">
       {wallets.map((w) => (
         <div key={w.label} className="flex items-baseline justify-between py-0.5 text-sm">
-          <span className="text-ink-2">{w.label}</span>
+          {/* "Paper 1", not "USER 1", on this page (Karthik, 2026-10-02). */}
+          <span className="text-ink-2">{w.label.replace(/^USER /, "Paper ")}</span>
           <span className={`tabular-nums ${tone(Number(w.all_pnl_usd))}`}>
             {signed(Number(w.all_pnl_usd))}
           </span>
