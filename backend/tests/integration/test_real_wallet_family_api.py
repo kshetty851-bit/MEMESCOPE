@@ -238,6 +238,10 @@ async def test_the_lab_box_totals_what_the_wallets_are_worth(app, monkeypatch):
     app.dependency_overrides[get_optional_user] = lambda: None
     url = f"{settings.API_V1_PREFIX}/real-wallet/wallets-profit"
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as client:
-        assert (await client.get(url)).json()["total_value_usd"] == "195.00"
+        body = (await client.get(url)).json()
+        assert [w["value_usd"] for w in body["wallets"]] == ["120.00", "50.00", "25.00"]
+        assert body["total_value_usd"] == "195.00"
         del held["UserTwoWallet"]          # one balance unread
-        assert (await client.get(url)).json()["total_value_usd"] is None
+        body = (await client.get(url)).json()
+        assert body["total_value_usd"] is None
+        assert [w["value_usd"] for w in body["wallets"]] == [None, None, None]

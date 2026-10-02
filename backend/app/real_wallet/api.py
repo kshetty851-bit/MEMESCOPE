@@ -481,14 +481,18 @@ async def wallets_profit(session: DbSession) -> dict[str, object]:
     # From the money each wallet holds now: the main wallet's $100 went in at
     # the partnership's start (Karthik, 2026-10-02: "main 50 from my side,
     # other 50 belongs to rafiq"); the user wallets began after it.
-    return {"wallets": await views.wallet_results(session, wallets, now,
-                                                  since=partners.START),
-            "total_value_usd": await _total_value(session, [a for _, a in wallets], now)}
+    rows = await views.wallet_results(session, wallets, now, since=partners.START)
+    values = await _values(session, [a for _, a in wallets], now)
+    for row, value in zip(rows, values or [None] * len(rows), strict=True):
+        row["value_usd"] = None if value is None else views.decimal_str(value)
+    return {"wallets": rows,
+            "total_value_usd": None if values is None
+            else views.decimal_str(sum(values, Decimal(0)))}
 
 
-async def _total_value(session: Any, addresses: list[str], now: datetime) -> str | None:
-    """What the wallets are worth together now (Karthik, 2026-10-02: "show
-    total value too"): each one's SOL at today's price plus its open trade at
+async def _values(session: Any, addresses: list[str], now: datetime) -> list[Decimal] | None:
+    """What each wallet is worth now (Karthik, 2026-10-02: "value shud be
+    same as main wallet"): its SOL at today's price plus its open trade at
     what it would sell for, as the balance on this page counts it. None if
     any balance or the price is unread — a total missing a wallet is wrong,
     not approximate."""
@@ -500,7 +504,7 @@ async def _total_value(session: Any, addresses: list[str], now: datetime) -> str
         RealWalletPosition.status == "OPEN",
         or_(RealWalletPosition.wallet_public_key.in_(addresses),
             RealWalletPosition.wallet_public_key.is_(None))))).all()
-    total = Decimal(0)
+    out: list[Decimal] = []
     try:
         rpc = StandardSolanaRPC(rpc_url=settings.REAL_WALLET_RPC_URL)
         async with rpc:
@@ -508,11 +512,12 @@ async def _total_value(session: Any, addresses: list[str], now: datetime) -> str
             for address in addresses:
                 sol = Decimal(str((await reader.get_sol_balance(address)).sol))
                 held = [p for p in open_ if (p.wallet_public_key or owner) == address]
-                total += sol * price + views.open_trade_value(held, address)
+                out.append((sol * price + views.open_trade_value(held, address))
+                           .quantize(Decimal("0.01")))
     except Exception:  # a read, reported as unread
         logger.warning("real_wallet_total_value_unread", exc_info=True)
         return None
-    return views.decimal_str(total.quantize(Decimal("0.01")))
+    return out
 
 
 @router.get("/status", summary="Read dedicated execution-wallet status")
