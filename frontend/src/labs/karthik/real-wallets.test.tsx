@@ -14,8 +14,9 @@ describe("the real wallets box", () => {
     ]} />);
     const box = screen.getByTestId("real-wallets");
     expect(box).toHaveTextContent(
-      "Karthik+$40.32USER 1+$43.78USER 2-$4.56Total+$79.54 (+31.82% on $250.00)");
+      "Karthik+$40.32Paper 1+$43.78Paper 2-$4.56Total+$79.54 (+31.82% on $250.00)");
     expect(box).not.toHaveTextContent("today");
+    expect(box).not.toHaveTextContent("USER");
   });
 
   it("shows nothing until there is something to show", () => {
