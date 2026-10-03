@@ -1437,9 +1437,11 @@ KARTHIK_WHATIF_WIDE_FROM = datetime(2026, 9, 30, 20, 0, tzinfo=UTC)
 #: Each column is (at least, under); None = no upper bound. Karthik,
 #: 2026-10-03: the $100k-$150k band beside $75k, the best pool size since
 #: 18 Sep by every graduation's 5-minute return.
-KARTHIK_GRID_COLUMNS = ((75_000, None), (100_000, 150_000), (100_000, None),
+KARTHIK_GRID_COLUMNS = ((50_000, None), (75_000, None), (100_000, 150_000), (100_000, None),
                         (150_000, None), (200_000, None))
-#: The arms running his rule on the $25-75k pools his book skips.
+#: The $50k+ column (Karthik, 2026-10-03: "add 50k pool too") needs his rule on
+#: the $50-75k pools his book skips: this arm, seeded by replay before 26 Sep.
+KARTHIK_BAND_BOOK = "KARTHIK_Q50_5M"
 
 
 def _one_at_a_time(rows: Sequence[Any]) -> list[Any]:
@@ -1495,7 +1497,8 @@ def _pools_words() -> str:
 
 
 def _karthik_whatif(rows: Sequence[Any], sol: Decimal | None, *, capital: float,
-                    ticket: float, cents: Decimal) -> dict[str, Any]:
+                    ticket: float, cents: Decimal,
+                    small: Sequence[Any] = ()) -> dict[str, Any]:
     """The book's rule at every trade size and every pool floor, one grid
     (Karthik, 2026-09-27; floors cut to $75k-$200k on 2026-09-30).
 
@@ -1503,9 +1506,10 @@ def _karthik_whatif(rows: Sequence[Any], sol: Decimal | None, *, capital: float,
     is paired with, ONE TRADE AT A TIME on the pools at or above its floor: a
     floor that never bought a shallow coin was free for the next deep one, so
     a cell is never the book's trades filtered afterwards. `rows` are the
-    $75k+ signals his arm took. Nothing here changes what the book trades.
+    $75k+ signals his arm took; `small` is the same rule on $50-75k pools
+    (`KARTHIK_BAND_BOOK`). Nothing here changes what the book trades.
     """
-    signals = sorted(rows, key=lambda r: r.opened_at)
+    signals = sorted([*small, *rows], key=lambda r: r.opened_at)
 
     def cell(col: tuple[int, int | None], size: float, capital: float,
              since: datetime | None = None) -> dict[str, Any]:
@@ -1796,6 +1800,15 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     # from day 1 on the book AND the grid: a coin bought more than two minutes
     # after it graduated, or of unknown age, never happened. EVO was 186s.
     rows = [r for r in rows if _fresh_entry(r)]
+    # His rule on the $50-75k pools, for the grid's $50k+ column only.
+    small = [r for r in (await db.scalars(
+        select(GradPaperPosition)
+        .where(GradPaperPosition.book == KARTHIK_BAND_BOOK,
+               GradPaperPosition.closed_at.is_not(None),
+               GradPaperPosition.excluded.is_(None),
+               GradPaperPosition.net_return.is_not(None),
+               GradPaperPosition.opened_at >= spec.start)
+        .order_by(GradPaperPosition.opened_at))).all() if _fresh_entry(r)]
     # Every $75k+ signal his arm took: what the grid beside the book reads.
     signals = rows
     # The book counts only its pool range (KARTHIK_BOOK_POOLS, 2026-09-26).
@@ -1876,7 +1889,7 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
         "days": _karthik_days(took, spec.start, float(spec.capital_usd), cents),
         # The same trades at other sizes, and on $150k+ pools only. A check,
         # shown beside the book; the book itself stays on its own rule.
-        "whatif": _karthik_whatif(signals, sol,
+        "whatif": _karthik_whatif(signals, sol, small=small,
                                   capital=float(spec.capital_usd),
                                   ticket=float(spec.ticket_usd), cents=cents),
         # The rows the BOOK bought, with the money the book made on them --
