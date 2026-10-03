@@ -67,7 +67,7 @@ class EventConfig:
     detector_version: str = "mll-events-v1"
     increase_multiple: Decimal = Decimal("2")
     acceleration_threshold: Decimal = Decimal("1.5")
-    #: Revival: the meme was quiet (rate below ``dormant_multiple`` × its
+    #: Revival: the meme was quiet (rate below ``dormant_multiple`` x its
     #: longer-run baseline) for at least ``dormant_for`` and is now above
     #: ``revival_multiple``.
     dormant_multiple: Decimal = Decimal("0.5")

@@ -178,7 +178,7 @@ class DivergenceCase(StrEnum):
     C_ATTENTION_UP_PRICE_SURGE = "C"
     D_ATTENTION_DOWN_PRICE_SURGE = "D"
     E_ATTENTION_DOWN_PRICE_DOWN = "E"
-    #: Inputs unavailable, or the pair falls in none of A–E.
+    #: Inputs unavailable, or the pair falls in none of A-E.
     NONE = "none"
 
 
@@ -195,7 +195,7 @@ class AgeBucket(StrEnum):
 
 
 class Arm(StrEnum):
-    """Control architecture. Only BASELINE has a strategy in Phase 1–4."""
+    """Control architecture. Only BASELINE has a strategy in Phase 1-4."""
 
     CONTROL_A_EXISTING = "control_a_existing"
     CONTROL_B_MARKET_ONLY = "control_b_market_only"
