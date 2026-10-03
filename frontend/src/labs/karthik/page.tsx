@@ -280,17 +280,39 @@ function Signed({ line }: { line: KarthikWhatIfLine }) {
  * pools at or above that floor — the book's own walk, so skips, pool impact
  * at that size and the cash limit are the real book's.
  */
-function SizeGrid({ data }: { data: KarthikBook }) {
+export function SizeGrid({ data }: { data: KarthikBook }) {
   const w = data.whatif;
   // Hidden, not broken, while an older API (no `cells`) is still serving.
   if (!w?.floors?.length || !w.sizes?.every((row) => Array.isArray(row.cells))) return null;
+  return (
+    <>
+      <GridPanel data={data} title="If each trade had been" rows={w.sizes} />
+      {/* Karthik, 2026-10-03: the same sizes on ten times the money, shown
+          as the balance each would have now. */}
+      {w.sizes_wide?.length ? (
+        <GridPanel data={data} title="If each trade had been — on 10x the money"
+                   rows={w.sizes_wide} value testId="size-grid-wide" />
+      ) : null}
+    </>
+  );
+}
+
+function GridPanel({ data, title, rows, value = false, testId }: {
+  data: KarthikBook;
+  title: string;
+  rows: KarthikBook["whatif"]["sizes"];
+  /** Show each cell as the balance now, with the change under it. */
+  value?: boolean;
+  testId?: string;
+}) {
+  const w = data.whatif;
   const k = (n: number) => `$${Math.round(n / 1000)}k+`;
   return (
     <Panel>
       <PanelHeader>
-        <PanelTitle>If each trade had been</PanelTitle>
+        <PanelTitle>{title}</PanelTitle>
       </PanelHeader>
-      <div className="overflow-x-auto p-3">
+      <div className="overflow-x-auto p-3" data-testid={testId}>
         <table className="w-full min-w-[56rem] text-[12px] tabular-nums">
           <thead className="text-[11px] uppercase tracking-wider text-ink-dim">
             <tr>
@@ -308,7 +330,7 @@ function SizeGrid({ data }: { data: KarthikBook }) {
             </tr>
           </thead>
           <tbody>
-            {w.sizes.map((s) => (
+            {rows.map((s) => (
               <tr key={s.ticket_usd} className={`border-t border-line/60 ${s.current ? "font-semibold" : ""}`}>
                 <td className="whitespace-nowrap py-1.5 pr-3">
                   {usd(s.ticket_usd).replace(".00", "")}
@@ -321,7 +343,14 @@ function SizeGrid({ data }: { data: KarthikBook }) {
                     className={`whitespace-nowrap py-1.5 px-2 text-right ${w.floors[i]!.book ? "bg-accent/10" : ""}`}
                     title={`${c.trades} trades · ${c.rugs} rugs · lowest ${usd(c.lowest_usd)}`}
                   >
-                    <Signed line={c} />
+                    {value ? (
+                      <>
+                        <div className="font-semibold text-ink">{usd(c.balance_usd)}</div>
+                        <div className="text-[11px]"><Signed line={c} /></div>
+                      </>
+                    ) : (
+                      <Signed line={c} />
+                    )}
                   </td>
                 ))}
               </tr>
