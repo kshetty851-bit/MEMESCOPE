@@ -558,7 +558,10 @@ function OwnWalletPanel({ member, wallet, book, isOwner, onDone }: {
               <button
                 type="button"
                 disabled={own.isPending || !isOwner}
-                onClick={() => own.mutate({ enabled: false, ticket: book.ticket_usd })}
+                // The size on screen, not the saved one: Stop used to send the
+                // old size and then clear the choice, so a Start after it put
+                // the old size back (Karthik, 2026-10-03: $10 picked, $50 kept).
+                onClick={() => own.mutate({ enabled: false, ticket: ticket ?? book.ticket_usd })}
                 className="rounded-md border border-down/50 px-3 py-1 text-sm text-down"
               >
                 Stop trading

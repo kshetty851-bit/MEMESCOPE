@@ -142,6 +142,18 @@ describe("trading from a member's own wallet", () => {
     expect(post.mock.calls[0]![1]).toEqual({ enabled: false, ticket_usd: "20", band: "any" });
   });
 
+  it("stops at the size on screen, so a Start after it keeps the new size", async () => {
+    // 2026-10-03: $10 picked, Stop pressed, then Start: both sent the old $50.
+    auth.user = { role: "admin" };
+    get.mockResolvedValue(view({ address: ADDRESS, balance_sol: "1" }, book(true)));
+    post.mockResolvedValue({});
+    page();
+    fireEvent.change(await screen.findByLabelText("Each trade"), { target: { value: "10" } });
+    fireEvent.click(screen.getByRole("button", { name: "Stop trading" }));
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+    expect(post.mock.calls[0]![1]).toEqual({ enabled: false, ticket_usd: "10", band: "any" });
+  });
+
   it("starts on the coin size Karthik picked", async () => {
     get.mockResolvedValue(view({ address: ADDRESS, balance_sol: "1" }, book(false)));
     post.mockResolvedValue({});
