@@ -1350,6 +1350,40 @@ class Settings(BaseSettings):
     FEATURE_ENRICHMENT_ENABLED: bool = False
     FEATURE_AI_SCORING_ENABLED: bool = False
 
+    # --- Meme Lifecycle Lab (research measurement; never trades) -------------
+    # docs/MEME_LIFECYCLE_LAB.md. Every MLL_*_ENABLED source switch below acts
+    # only when FEATURE_LIFECYCLE_LAB_ENABLED is true; a switched-off source
+    # still yields a DISABLED collection run, never a zero-valued observation.
+    FEATURE_LIFECYCLE_LAB_ENABLED: bool = False
+    #: pump.fun replies are READ from pumpfun_social_snapshots; this only gates
+    #: the health probe, and also requires FEATURE_PUMPFUN_SOCIAL_ENABLED.
+    MLL_PUMPFUN_REPLIES_ENABLED: bool = True
+    MLL_WIKIPEDIA_ENABLED: bool = True
+    MLL_GDELT_ENABLED: bool = True
+    MLL_DEXSCREENER_ENABLED: bool = True
+    MLL_GECKOTERMINAL_BACKFILL_ENABLED: bool = True
+    #: Reddit and X are off until authorised access exists. We do not scrape.
+    MLL_REDDIT_ENABLED: bool = False
+    MLL_REDDIT_CLIENT_ID: SecretStr = SecretStr("")
+    MLL_REDDIT_CLIENT_SECRET: SecretStr = SecretStr("")
+    #: Reddit requires a unique descriptive User-Agent; empty keeps it disabled.
+    MLL_REDDIT_USER_AGENT: str = ""
+    MLL_X_ENABLED: bool = False
+    MLL_X_BEARER_TOKEN: SecretStr = SecretStr("")
+    #: Upper bound on linked mints refreshed on the fast market cadence.
+    MLL_MAX_TRACKED_TOKENS: int = 200
+    MLL_MARKET_INTERVAL_SECONDS: int = 300
+    #: ISO date of the authoritative forward epoch. Empty = not started, so no
+    #: FORWARD observation counts toward a verdict yet.
+    MLL_FORWARD_START: str = ""
+    #: Wikimedia's API etiquette requires a descriptive User-Agent with contact
+    #: details; generic client UAs are throttled or blocked.
+    MLL_WIKIPEDIA_USER_AGENT: str = (
+        "MEMESCOPE-LifecycleLab/0.1 (research; contact via repo owner)"
+    )
+    #: GDELT asks for at most one request per ~5s; 6s leaves headroom.
+    MLL_GDELT_MIN_INTERVAL_SECONDS: int = 6
+
     @computed_field  # type: ignore[prop-decorator]
     @property
     def HELIUS_RPC_URL(self) -> str:

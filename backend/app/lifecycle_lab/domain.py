@@ -109,9 +109,7 @@ class Metric(StrEnum):
 
 #: Metrics whose value keeps growing after the window closes. A backfilled
 #: reading of these describes the present, not the past.
-ACCUMULATING_METRICS: frozenset[Metric] = frozenset(
-    {Metric.ENGAGEMENT, Metric.REPLIES_TOTAL}
-)
+ACCUMULATING_METRICS: frozenset[Metric] = frozenset({Metric.ENGAGEMENT, Metric.REPLIES_TOTAL})
 
 
 class ValueKind(StrEnum):
@@ -526,7 +524,9 @@ def _canonical(value: Any) -> Any:
     if isinstance(value, StrEnum):
         return value.value
     if isinstance(value, dict):
-        return {str(k): _canonical(v) for k, v in sorted(value.items(), key=lambda kv: str(kv[0]))}
+        return {
+            str(k): _canonical(v) for k, v in sorted(value.items(), key=lambda kv: str(kv[0]))
+        }
     if isinstance(value, (list, tuple)):
         return [_canonical(v) for v in value]
     return value

@@ -184,6 +184,25 @@ REQUIRED_IN_ANCHOR = {
     "KARTHIK_MAX_MARKET_AGE_SECONDS": (
         "the freshness bound that decides an entry must not differ per service"
     ),
+    # Meme Lifecycle Lab: the scheduler collects, the worker executes, the API
+    # reports source health. Disagreement shows a lab as off while it collects.
+    "FEATURE_LIFECYCLE_LAB_ENABLED": "scheduler collects, worker runs it, API reports it",
+    "MLL_PUMPFUN_REPLIES_ENABLED": "collector probes it, API reports the source status",
+    "MLL_WIKIPEDIA_ENABLED": "collector runs it, API reports the source status",
+    "MLL_GDELT_ENABLED": "collector runs it, API reports the source status",
+    "MLL_DEXSCREENER_ENABLED": "collector runs it, API reports the source status",
+    "MLL_GECKOTERMINAL_BACKFILL_ENABLED": "backfill runs it, API reports the source status",
+    "MLL_REDDIT_ENABLED": "collector gates on it, API reports DISABLED vs UNAVAILABLE",
+    "MLL_REDDIT_CLIENT_ID": "empty keeps Reddit disabled; must reach the collector",
+    "MLL_REDDIT_CLIENT_SECRET": "empty keeps Reddit disabled; must reach the collector",
+    "MLL_REDDIT_USER_AGENT": "Reddit rejects requests without a descriptive agent",
+    "MLL_X_ENABLED": "collector gates on it, API reports DISABLED vs UNAVAILABLE",
+    "MLL_X_BEARER_TOKEN": "empty keeps X disabled; must reach the collector",
+    "MLL_MAX_TRACKED_TOKENS": "bounds enrichment and retention protection together",
+    "MLL_MARKET_INTERVAL_SECONDS": "enrichment cadence and the PIT freshness check agree",
+    "MLL_FORWARD_START": "the authoritative epoch must be one value fleet-wide",
+    "MLL_WIKIPEDIA_USER_AGENT": "Wikimedia throttles generic agents; one identity",
+    "MLL_GDELT_MIN_INTERVAL_SECONDS": "politeness bound must not differ per process",
 }
 
 #: Real-wallet execution settings, kept as their own set because the failure
@@ -354,6 +373,9 @@ def test_the_committed_defaults_are_the_disabled_ones() -> None:
         ("REAL_WALLET_EXECUTION_ENABLED", "false"),
         ("REAL_WALLET_AUTOTRADE_ENABLED", "false"),
         ("FEATURE_REAL_WALLET_DRY_RUN_ENABLED", "false"),
+        ("FEATURE_LIFECYCLE_LAB_ENABLED", "false"),
+        ("MLL_REDDIT_ENABLED", "false"),
+        ("MLL_X_ENABLED", "false"),
     ):
         match = re.search(rf"^  {key}: \$\{{{key}:-([^}}]*)\}}", text, re.M)
         assert match is not None, f"{key} is not declared with a default in the anchor"
