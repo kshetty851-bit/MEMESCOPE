@@ -32,7 +32,7 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.lab import LabDecision
 from app.models.real_wallet_execution import RealWalletLiveIntent
-from app.real_wallet import family, family_wallets, sol_price
+from app.real_wallet import family, family_wallets, rug_brake, sol_price
 from app.real_wallet.autotrade import AutotradeSwitchService, ticket_for
 from app.real_wallet.live_repository import LiveIntentRepository
 from app.real_wallet.policy import (
@@ -78,9 +78,23 @@ class RealWalletDriver:
         """The owner's wallet first, exactly as before; then each family
         member's own wallet, each on its own balance, switch and limits."""
         now = now or datetime.now(UTC)
+        # Before any wallet buys: one more rug under $150 stops them all.
+        if await rug_brake.pull_if_due(self._session, now, lambda: self._owner_worth(now)):
+            return DriverOutcome(0, "rug_brake")
         owner = await self._owner_tick(now)
         family_outcomes = await self._family_ticks(now)
         return replace(owner, family=family_outcomes) if family_outcomes else owner
+
+    async def _owner_worth(self, now: datetime) -> Decimal | None:
+        """The main wallet's SOL at today's price plus its open trades, as the
+        growth ladder counts it; None if the balance or the price is unread."""
+        wallet = settings.REAL_WALLET_PUBLIC_KEY.strip()
+        lamports = await self._wallet_lamports(wallet) if wallet else None
+        price = await self._sol_usd(now) if lamports is not None else None
+        if lamports is None or price is None:
+            return None
+        return (Decimal(lamports) / _LAMPORTS_PER_SOL * price
+                + await LiveIntentRepository(self._session).open_exposure_usd(wallet))
 
     async def _family_ticks(self, now: datetime) -> dict[str, str]:
         """One pass per family member's OWN wallet (stage 2, 2026-09-25).
