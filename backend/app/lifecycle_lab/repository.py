@@ -423,6 +423,11 @@ class LifecycleLabRepository:
         row = await self.session.scalar(select(MllMeme).where(MllMeme.slug == slug))
         return None if row is None else _meme(row)
 
+    async def meme_record(self, slug: str) -> dict[str, Any] | None:
+        """The whole row (description and status included), for display."""
+        row = await self.session.scalar(select(MllMeme).where(MllMeme.slug == slug))
+        return None if row is None else _row_dict(row)
+
     async def aliases_for(self, meme_ids: Sequence[str]) -> list[MemeAlias]:
         if not meme_ids:
             return []
@@ -692,6 +697,27 @@ class LifecycleLabRepository:
                 )
                 if row is not None:
                     out.append(_run(row))
+        return out
+
+    async def observation_counts(self, *, since: datetime) -> dict[str, int]:
+        """Raw readings per source observed since `since`.
+
+        One probe per source on ``(source, observed_at)`` rather than a
+        GROUP BY over the whole table. Sources that read in place (pump.fun
+        replies) or write candles (GeckoTerminal) have no rows here and
+        report 0 — the caller decides whether that 0 means anything.
+        """
+        out: dict[str, int] = {}
+        for source in sorted(Source, key=lambda s: s.value):
+            count = await self.session.scalar(
+                select(func.count())
+                .select_from(MllAttentionObservation)
+                .where(
+                    MllAttentionObservation.source == source.value,
+                    MllAttentionObservation.observed_at >= since,
+                )
+            )
+            out[source.value] = int(count or 0)
         return out
 
     async def market_points(
@@ -984,6 +1010,29 @@ class LifecycleLabRepository:
         )
         return [_row_dict(r) for r in rows.all()]
 
+    async def get_experiment_by_key(self, experiment_key: str) -> dict[str, Any] | None:
+        row = await self.session.scalar(
+            select(MllExperiment).where(MllExperiment.experiment_key == experiment_key)
+        )
+        return None if row is None else _row_dict(row)
+
+    async def find_run(
+        self, *, experiment_id: str, mode: str, segment: str
+    ) -> dict[str, Any] | None:
+        """The newest run of an experiment in one mode and segment — the
+        forward run that each forward replay re-saves into."""
+        row = await self.session.scalar(
+            select(MllBacktestRun)
+            .where(
+                MllBacktestRun.experiment_id == _uuid(experiment_id),
+                MllBacktestRun.mode == mode,
+                MllBacktestRun.segment == segment,
+            )
+            .order_by(MllBacktestRun.started_at.desc(), MllBacktestRun.id.desc())
+            .limit(1)
+        )
+        return None if row is None else _row_dict(row)
+
     async def save_run(self, values: Mapping[str, Any]) -> str:
         """Insert a backtest run; returns its id. Keys are `MllBacktestRun`
         columns; ``id`` is optional (generated when absent)."""
@@ -1013,13 +1062,17 @@ class LifecycleLabRepository:
         return None if row is None else _row_dict(row)
 
     async def latest_run(
-        self, *, mode: str, status: str = "completed"
+        self, *, mode: str, status: str = "completed", experiment_id: str | None = None
     ) -> dict[str, Any] | None:
+        stmt = select(MllBacktestRun).where(
+            MllBacktestRun.mode == mode, MllBacktestRun.status == status
+        )
+        if experiment_id is not None:
+            stmt = stmt.where(MllBacktestRun.experiment_id == _uuid(experiment_id))
         row = await self.session.scalar(
-            select(MllBacktestRun)
-            .where(MllBacktestRun.mode == mode, MllBacktestRun.status == status)
-            .order_by(MllBacktestRun.finished_at.desc().nulls_last(), MllBacktestRun.id.desc())
-            .limit(1)
+            stmt.order_by(
+                MllBacktestRun.finished_at.desc().nulls_last(), MllBacktestRun.id.desc()
+            ).limit(1)
         )
         return None if row is None else _row_dict(row)
 
@@ -1071,12 +1124,14 @@ class LifecycleLabRepository:
         )
         return [_row_dict(r) for r in rows.all()]
 
-    async def trades_for_meme(self, meme_id: str, *, limit: int = 200) -> list[dict[str, Any]]:
+    async def trades_for_meme(
+        self, meme_id: str, *, limit: int = 200, backtest_run_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        stmt = select(MllPaperTrade).where(MllPaperTrade.meme_id == _uuid(meme_id))
+        if backtest_run_id is not None:
+            stmt = stmt.where(MllPaperTrade.backtest_run_id == _uuid(backtest_run_id))
         rows = await self.session.scalars(
-            select(MllPaperTrade)
-            .where(MllPaperTrade.meme_id == _uuid(meme_id))
-            .order_by(MllPaperTrade.entry_at.desc(), MllPaperTrade.id.desc())
-            .limit(limit)
+            stmt.order_by(MllPaperTrade.entry_at.desc(), MllPaperTrade.id.desc()).limit(limit)
         )
         return [_row_dict(r) for r in rows.all()]
 
@@ -1160,6 +1215,24 @@ class LifecycleLabRepository:
             stmt = stmt.where(MllMemeEvent.mode == mode)
         rows = await self.session.scalars(
             stmt.order_by(MllMemeEvent.detected_at.desc(), MllMemeEvent.id.desc()).limit(limit)
+        )
+        return [_row_dict(r) for r in rows.all()]
+
+    async def recent_events(
+        self, meme_ids: Sequence[str], *, mode: str, since: datetime
+    ) -> list[dict[str, Any]]:
+        """Events of these memes detected since `since`, oldest first — the
+        prior events a forward detection or a state classification needs."""
+        if not meme_ids:
+            return []
+        rows = await self.session.scalars(
+            select(MllMemeEvent)
+            .where(
+                MllMemeEvent.meme_id.in_([_uuid(m) for m in meme_ids]),
+                MllMemeEvent.mode == mode,
+                MllMemeEvent.detected_at >= since,
+            )
+            .order_by(MllMemeEvent.meme_id, MllMemeEvent.detected_at, MllMemeEvent.id)
         )
         return [_row_dict(r) for r in rows.all()]
 

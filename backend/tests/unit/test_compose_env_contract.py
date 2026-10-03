@@ -201,6 +201,8 @@ REQUIRED_IN_ANCHOR = {
     "MLL_MAX_TRACKED_TOKENS": "bounds enrichment and retention protection together",
     "MLL_MARKET_INTERVAL_SECONDS": "enrichment cadence and the PIT freshness check agree",
     "MLL_FORWARD_START": "the authoritative epoch must be one value fleet-wide",
+    "MLL_EXPERIMENT_HORIZON_DAYS": "the pre-registered split must be one value fleet-wide",
+    "MLL_AUTOLINK_MIN_CONFIDENCE": "the autolinker and the API must agree on what links",
     "MLL_WIKIPEDIA_USER_AGENT": "Wikimedia throttles generic agents; one identity",
     "MLL_GDELT_MIN_INTERVAL_SECONDS": "politeness bound must not differ per process",
 }

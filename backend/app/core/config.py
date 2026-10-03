@@ -1376,6 +1376,14 @@ class Settings(BaseSettings):
     #: ISO date of the authoritative forward epoch. Empty = not started, so no
     #: FORWARD observation counts toward a verdict yet.
     MLL_FORWARD_START: str = ""
+    #: Span of the pre-registered baseline experiment, from MLL_FORWARD_START.
+    #: The 70/15/15 split boundaries are fixed over it when the experiment is
+    #: first registered and never recomputed.
+    MLL_EXPERIMENT_HORIZON_DAYS: int = 90
+    #: Autolinker floor. 0.8 admits website/social-handle matches only; name
+    #: and ticker collisions (0.6 / 0.5) need manual curation, because many
+    #: tokens share a ticker and a false link contaminates every feature.
+    MLL_AUTOLINK_MIN_CONFIDENCE: str = "0.8"
     #: Wikimedia's API etiquette requires a descriptive User-Agent with contact
     #: details; generic client UAs are throttled or blocked.
     MLL_WIKIPEDIA_USER_AGENT: str = (
