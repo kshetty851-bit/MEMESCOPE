@@ -101,6 +101,7 @@ class Reason:
     EXECUTION_PRICE_DEVIATION_TOO_HIGH = "EXECUTION_PRICE_DEVIATION_TOO_HIGH"
     ROUND_TRIP_LOSS_TOO_HIGH = "ROUND_TRIP_LOSS_TOO_HIGH"
     SYMBOL_RUGGED_BEFORE = "SYMBOL_RUGGED_BEFORE"
+    CREATOR_LAUNCHED_BEFORE = "CREATOR_LAUNCHED_BEFORE"
     HOLDER_TOO_LARGE = "HOLDER_TOO_LARGE"
     HOLDERS_UNREADABLE = "HOLDERS_UNREADABLE"
     LINKED_TO_RECENT_RUG = "LINKED_TO_RECENT_RUG"
@@ -200,6 +201,8 @@ class RealWalletSafetyGate:
 
         if await self._symbol_has_rugged(mint_address, token):
             reasons.append(Reason.SYMBOL_RUGGED_BEFORE)
+        if await self._creator_launched_before(token):
+            reasons.append(Reason.CREATOR_LAUNCHED_BEFORE)
 
         market_age, price, liquidity = self._market_reasons(snapshot, evaluated_at, reasons)
         pool_price = await self._pool_price(mint_address, snapshot, evaluated_at)
@@ -432,6 +435,29 @@ class RealWalletSafetyGate:
         if ids & sources.ALWAYS_BLOCKED:
             reasons.append(Reason.KNOWN_RUG_MONEY)
         return {"recent_rug_ids": len(recent), **mine.as_json(), "matched": matched}
+
+    async def _creator_launched_before(self, token: DiscoveredToken | None) -> bool:
+        """Has this coin's creator launched another coin before this one?
+
+        Karthik, 2026-10-03, "ok block them": since the partners timer, the 16
+        repeat-creator trades made -$50.19 (one rug, the other 15 -$0.25)
+        against +$91.54 from 247 first-time creators. Sixteen trades is thin;
+        it is a setting so it can be switched off without a deploy of code.
+
+        "Before" is any earlier launch in `discovered_tokens` (the scanner sees
+        almost every pump.fun launch since July). A coin with no launch record
+        or no creator is allowed through: refusing on missing data would be a
+        different rule.
+        """
+        if not settings.REAL_WALLET_BLOCK_REPEAT_CREATORS or token is None:
+            return False
+        if not token.creator_address or token.block_time is None:
+            return False
+        return bool(await self._session.scalar(
+            select(DiscoveredToken.id).where(
+                DiscoveredToken.creator_address == token.creator_address,
+                DiscoveredToken.block_time < token.block_time,
+                DiscoveredToken.mint_address != token.mint_address).limit(1)))
 
     async def _symbol_has_rugged(
         self, mint_address: str, token: DiscoveredToken | None

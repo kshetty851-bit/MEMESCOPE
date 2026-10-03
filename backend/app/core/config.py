@@ -855,6 +855,10 @@ class Settings(BaseSettings):
     #: on pump.fun and a reused name is a different token with different
     #: holders. Off by default in code; production sets it.
     REAL_WALLET_BLOCK_RUGGED_SYMBOLS: bool = False
+    #: Refuse a coin whose creator wallet launched another coin before it
+    #: (Karthik, 2026-10-03). Off in code like the name rule; production turns
+    #: it on in docker-compose.yml.
+    REAL_WALLET_BLOCK_REPEAT_CREATORS: bool = False
     #: What counts as a rug for that rule: a closed trade at or below this
     #: fraction of its stake. -50% is the line the lab's own rug counts use.
     REAL_WALLET_RUG_RETURN: Decimal = Field(
