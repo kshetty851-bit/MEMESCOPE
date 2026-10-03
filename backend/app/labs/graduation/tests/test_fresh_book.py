@@ -360,6 +360,11 @@ async def test_the_grid_is_every_size_by_every_pool_floor() -> None:
     assert [now[f]["trades"] for f in floors] == [1, 1, 1, 1]
     assert now[75_000]["pnl_usd"] == Decimal("5.00")                 # $50 at +10%
     assert w["sizes"][-1]["cells"][0]["pnl_usd"] == Decimal("20.00")  # $200 at +10%
+    # The second table (2026-10-03): the same sizes on ten times their size.
+    assert [(r["ticket_usd"], r["capital_usd"]) for r in w["sizes_wide"]] == [
+        (10, 100), (20, 200), (25, 250), (50, 500), (100, 1000), (200, 2000)]
+    wide = w["sizes_wide"][-1]["cells"][0]
+    assert (wide["pnl_usd"], wide["balance_usd"]) == (Decimal("20.00"), Decimal("2020.00"))
 
 
 async def test_each_floor_takes_one_trade_at_a_time_on_its_own_pools() -> None:

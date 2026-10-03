@@ -95,6 +95,8 @@ export interface KarthikWhatIf {
   /** One row per trade size, on the balance it is paired with; one cell per
    *  floor, each its own one-at-a-time walk from the book's start. */
   sizes: { ticket_usd: number; capital_usd: number; current: boolean; cells: KarthikWhatIfLine[] }[];
+  /** The same sizes on ten times their size (2026-10-03); absent from an older API. */
+  sizes_wide?: { ticket_usd: number; capital_usd: number; current: boolean; cells: KarthikWhatIfLine[] }[];
 }
 
 export interface KarthikFlows {

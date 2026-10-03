@@ -1426,6 +1426,9 @@ async def fresh_held(book: str = "", db: AsyncSession = Depends(get_db)) -> Fres
 #: book itself runs $50 on $100 (Karthik, 2026-09-30: "$10 on $20, $20 on
 #: $40, $25 on $50"; the small sizes sat on $100 before).
 KARTHIK_WHATIF_SIZES = ((10, 20), (20, 40), (25, 50), (50, 100), (100, 200), (200, 400))
+#: The same sizes on TEN times their size (Karthik, 2026-10-03: "$10 on 100,
+#: 20 on 200 ... 200 on 2000"), a second table under the first.
+KARTHIK_WHATIF_SIZES_WIDE = tuple((t, 10 * t) for t, _ in KARTHIK_WHATIF_SIZES)
 #: The pool floors across the page's grid (Karthik, 2026-09-27).
 #: Karthik, 2026-09-30: "remove 25k 50k ... 300k 500k", keep 200k.
 KARTHIK_GRID_FLOORS = (75_000, 100_000, 150_000, 200_000)
@@ -1510,6 +1513,9 @@ def _karthik_whatif(rows: Sequence[Any], sol: Decimal | None, *, capital: float,
                    "current": (t, c) == (ticket, capital),
                    "cells": [cell(f, float(t), float(c)) for f in KARTHIK_GRID_FLOORS]}
                   for t, c in KARTHIK_WHATIF_SIZES],
+        "sizes_wide": [{"ticket_usd": t, "capital_usd": c, "current": False,
+                        "cells": [cell(f, float(t), float(c)) for f in KARTHIK_GRID_FLOORS]}
+                       for t, c in KARTHIK_WHATIF_SIZES_WIDE],
     }
 
 
