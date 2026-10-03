@@ -260,3 +260,139 @@ value that could not be computed is a `Measured` object, never `0`:
 "split_meaningful", "split_note", "status" }] }`
 
 `GET /runs/{id}` → `{ "run": {...}, "metrics": {...}, "snapshots": [...], "trades": [...] }`
+
+---
+
+# Validation phase (2026-10-03)
+
+Goal: move from "the Lab passes tests" to "the Lab collects trustworthy forward
+data continuously and replays it incrementally". No new strategies, no tuning.
+
+## DEV STARTUP
+
+<!-- W-E: replace this placeholder -->
+
+## SEEDING THE FIRST MEMES
+
+<!-- W-E: replace this placeholder -->
+
+## LIVE SOURCE STATUS
+
+<!-- W-B / orchestrator: replace this placeholder -->
+
+## GDELT API BEHAVIOUR
+
+<!-- W-B: replace this placeholder -->
+
+## COLLECTION SCHEDULER AND PRIORITY
+
+<!-- W-B: replace this placeholder -->
+
+## INCREMENTAL REPLAY AND CHECKPOINTS
+
+<!-- W-A: replace this placeholder -->
+
+## DATA-QUALITY MODEL
+
+<!-- W-C: replace this placeholder -->
+
+## EXPLORATORY vs AUTHORITATIVE DATA
+
+The two classes are labelled identically everywhere (API `data_label`, UI banners):
+
+> **EXPLORATORY DATA** — Historical data may contain survivorship or look-ahead
+> limitations. Not used for the authoritative strategy verdict.
+
+> **FORWARD DATA** — Collected prospectively by MEMESCOPE. Eligible for the
+> authoritative research dataset.
+
+Authoritative replay admits FORWARD rows only (`pit.py`); backfilled engagement
+and cumulative metrics are invisible even in exploratory mode until retrieved.
+
+## RESEARCH VERDICT STATES
+
+```
+NOT_STARTED        MLL_FORWARD_START unset or in the future, or the Lab flag is off
+COLLECTING         forward collection running; gate not evaluated as near
+INSUFFICIENT_DATA  forward data exists but at least one minimum-evidence requirement is unmet
+READY_FOR_ANALYSIS every requirement met and the experiment's data_cutoff has passed
+ANALYZING          an authoritative analysis run is in progress
+AUTHORITATIVE_RESULT a completed analysis over the pre-registered splits
+```
+
+`verdict` is **UNCERTAIN** in every state except AUTHORITATIVE_RESULT. The
+verdict engine (EDGE EXISTS / NO EDGE / WEAK EDGE / OVERFIT) is **not built in
+this phase**, so the furthest reachable state is READY_FOR_ANALYSIS and the
+verdict is UNCERTAIN by construction. COLLECTING vs INSUFFICIENT_DATA:
+COLLECTING while the forward span is shorter than 7 days (too early to judge any
+requirement); INSUFFICIENT_DATA afterwards until every requirement is met.
+
+## MINIMUM EVIDENCE REQUIREMENTS
+
+Fixed before any result was seen. Chosen from research-quality conventions
+already used in this repo (the 25/50/100/200/500 sample ladder, the V6 protocol's
+≥100-trade promotion floor and top-trade concentration rule) — not from Lab
+results, of which there are none.
+
+| Requirement | Threshold | Why |
+|---|---|---|
+| Forward observation period | ≥ the experiment horizon (`MLL_EXPERIMENT_HORIZON_DAYS`, 90) and `data_cutoff` passed | The 70/15/15 split is defined over that horizon; an unfinished test segment is not out-of-sample |
+| Independent meme events | ≥ 100 forward events (one per episode, per `events.py` re-arm rules) | Below 100 the event-level return distribution is anecdotal |
+| Revival / later-wave events | ≥ 30 (MEME_REVIVAL + SECOND_WAVE + THIRD_WAVE) | The core hypothesis is about *re*-activation; first waves alone cannot test it |
+| Trades (baseline arm, all segments) | ≥ 100 closed | Repo-wide promotion floor (V6 protocol) |
+| Out-of-sample trades (test segment) | ≥ 30 closed | Smallest OOS sample where a profit factor is not dominated by one trade |
+| Distinct memes with trades | ≥ 10 | Guards against "it works because of one meme" |
+| Single-meme concentration | top meme ≤ 25% of trades | Same reason |
+| Control arms run | B, C, D completed over the same window | "Adds information" is only answerable against controls |
+
+Every requirement reports `{threshold, observed, met}`; a requirement that
+cannot be measured is `met=false` with a reason, never assumed.
+
+## NEW API CONTRACT (validation phase)
+
+`GET /quality` — forward data-quality report
+```jsonc
+{ "generated_at": iso,
+  "tracked_memes": 12, "tracked_tokens": 9,
+  "observations_today": { "forward": 340, "backfill": 0 },
+  "observations_week":  { "forward": 2100, "backfill": 5600 },
+  "collection": {
+    "runs_24h": 180, "failures_24h": 4, "success_rate_24h": "0.977" | null,
+    "by_source": [{ "source", "label", "runs_24h", "available", "unavailable", "disabled",
+                    "error", "stale", "partial", "success_rate_24h": str|null,
+                    "last_success_at": iso|null, "last_status": str|null, "last_reason": str|null }] },
+  "unavailable_sources": ["reddit"], "stale_sources": [],
+  "oldest_forward_observation_at": iso|null, "newest_forward_observation_at": iso|null,
+  "memes_without_observations": [{ "slug", "display_name" }],
+  "tokens_without_market_history": [{ "mint", "meme_slug" }],
+  "tokens_with_incomplete_market_data": [{ "mint", "meme_slug", "missing": ["liquidity_usd"] }] }
+```
+`success_rate` = AVAILABLE ÷ (runs − DISABLED); DISABLED is a configuration
+state, not a failure, and is excluded from both sides.
+
+`GET /memes/{slug}/quality` — per-meme audit trail
+```jsonc
+{ "meme": { "slug", "display_name", "description", "tracking_started_at", "wikipedia_title", "gdelt_query" },
+  "aliases": [{ "alias", "kind", "added_at" }],
+  "links": [{ "mint", "method", "confidence", "linked_at", "unlinked_at", "linked_by", "evidence" }],
+  "sources": [{ "source", "label", "status", "reason", "first_observation_at", "latest_observation_at",
+                "observation_count", "forward_count", "backfill_count" }],
+  "market": [{ "mint", "first_observation_at", "latest_observation_at", "observation_count",
+               "missing_fields": ["liquidity_usd"] }],
+  "lifecycle_state": "dormant",
+  "attention": { "mentions_1h": Measured, "velocity": Measured, "acceleration": Measured,
+                 "baseline_multiple": Measured },
+  "divergence_case": "none",
+  "collection_priority": { "level": "low|normal|high", "interval_seconds": 21600, "reason": str } }
+```
+
+`GET /research-status`
+```jsonc
+{ "state": "NOT_STARTED|COLLECTING|INSUFFICIENT_DATA|READY_FOR_ANALYSIS|ANALYZING|AUTHORITATIVE_RESULT",
+  "verdict": "UNCERTAIN", "verdict_engine_available": false,
+  "forward_start": iso|null, "forward_days": 0.0|null, "experiment_key": str|null,
+  "requirements": [{ "key", "label", "threshold": str, "observed": str|null, "met": false,
+                     "reason": str|null }],
+  "explanation": str }
+```
+`GET /overview` gains `"research_status": <same object>`.
