@@ -66,8 +66,9 @@ def test_the_page_shows_the_quiet_book_and_the_other_books() -> None:
     # and says so: the size and the moment it changed are both recorded, so
     # the page can mark what came before as in sample.
     assert (by_book["KARTHIK_QUIET_5M"].capital_usd,
-            by_book["KARTHIK_QUIET_5M"].ticket_usd) == (Decimal(100), Decimal(50))
-    assert (Decimal(400), Decimal(200)) == config.KARTHIK_PREVIOUS_SIZE
+            by_book["KARTHIK_QUIET_5M"].ticket_usd) == (Decimal(500), Decimal(50))
+    # ...and on 2026-10-03 to $500 at $50, when it moved to $50k+ pools.
+    assert (Decimal(100), Decimal(50)) == config.KARTHIK_PREVIOUS_SIZE
     assert (by_book["KARTHIK_QUIET_5M"].start < config.KARTHIK_RESIZED_AT
             < config.KARTHIK_JUDGE_AT)
     arms = [next(a for a in ARMS if a.name == s.book) for s in SWEEP]
@@ -163,14 +164,19 @@ class _Rows:
 
 
 class _StubDb:
-    """The two reads `karthik_book` makes: the book's closed positions, then
-    the SOL rate. No engine, because the thing under test is arithmetic."""
+    """The reads `karthik_book` makes: the book's closed positions, the SOL
+    rate, then his $50-75k arm's positions (none here). No engine, because the
+    thing under test is arithmetic."""
 
     def __init__(self, rows: list[object]) -> None:
         self._rows = rows
+        self._read = False
 
     async def scalars(self, _statement: object) -> _Rows:
-        return _Rows(self._rows)
+        # Only the first read is the book's: the rest (the $50-75k arm) get
+        # nothing, or every row would be counted twice.
+        first, self._read = not self._read, True
+        return _Rows(self._rows if first else [])
 
     async def scalar(self, _statement: object) -> None:
         return None
@@ -264,13 +270,13 @@ async def test_karthik_days_are_24h_from_the_open_not_calendar_days() -> None:
     assert [d["n"] for d in book["days"]] == sorted(days, reverse=True)
     assert days[1]["trades"] == 2                      # not 3: C closed on day 2
     assert days[2]["trades"] == 2
-    # Day 1: two $50 tickets at +10% on a $100 book.
+    # Day 1: two $50 tickets at +10% on a $500 book.
     assert days[1]["pnl_usd"] == Decimal("10.00")
-    assert days[1]["pct"] == Decimal("10.00")          # 10 of the 100 it opened with
-    assert days[1]["balance_usd"] == Decimal("110.00")
-    # Day 2 is measured off 110, the balance it inherited -- not off 100.
+    assert days[1]["pct"] == Decimal("2.00")           # 10 of the 500 it opened with
+    assert days[1]["balance_usd"] == Decimal("510.00")
+    # Day 2 is measured off 510, the balance it inherited -- not off 500.
     assert days[2]["pnl_usd"] == Decimal("-20.00")     # +5 then -25
-    assert days[2]["pct"] == Decimal("-18.18")
+    assert days[2]["pct"] == Decimal("-3.92")
     # The days reconcile to the book: last day's balance is the book's balance.
     assert days[max(days)]["balance_usd"] == book["balance_usd"]
 
@@ -288,7 +294,7 @@ async def test_the_public_summary_gives_headline_figures_and_nothing_else() -> N
     assert set(out) == {"started_at", "judge_at", "capital_usd", "ticket_usd", "balance_usd",
                         "pnl_usd", "pnl_pct", "trades", "wins", "rugs"}
     assert out["pnl_usd"] == Decimal("5.00")           # one $50 ticket at +10%
-    assert out["pnl_pct"] == Decimal("5.00")           # of the $100 it started with
+    assert out["pnl_pct"] == Decimal("1.00")           # of the $500 it started with
     # Only that one path opens; the full book and anything beside it stay shut.
     exempt = AlphaAccessMiddleware._is_exempt
     assert exempt("/api/v1/labs/graduation/karthik/summary")
@@ -300,23 +306,23 @@ async def test_the_public_summary_gives_headline_figures_and_nothing_else() -> N
 
 
 async def test_the_book_counts_only_its_pool_range_but_the_checks_see_every_size() -> None:
-    """The book counts $75k-and-up pools (2026-09-27). Anything under that is
+    """The book counts $50k-and-up pools (2026-10-03). Anything under that is
     never the book's, even if a row for it reaches this read; the checks
     beside the book still see every size."""
     from app.labs.graduation.api import karthik_book
 
     start = next(s for s in config.FRESH_BOOKS if s.book == "KARTHIK_QUIET_5M").start
-    shallow = _Pos("SHALLOW", start + timedelta(hours=1), -0.99)  # $60k rug, not the book's
-    shallow.liq_open_usd = Decimal(60_000)
+    shallow = _Pos("SHALLOW", start + timedelta(hours=1), -0.99)  # $40k rug, not the book's
+    shallow.liq_open_usd = Decimal(40_000)
     deep = _Pos("DEEP", start + timedelta(hours=2), 0.10)            # $400k: the book's
     deep.liq_open_usd = Decimal(400_000)
     book = await karthik_book(db=_StubDb([shallow, deep]))  # type: ignore[arg-type]
 
-    assert book["pools_usd"] == [75_000, None]
-    assert "$75k and up" in book["rule"]
+    assert book["pools_usd"] == [50_000, None]
+    assert "$50k and up" in book["rule"]
     assert (book["trades"], book["rugs"]) == (1, 0)
     assert [(t["symbol"], t["mint"]) for t in book["trades_list"]] == [("DEEP", "DEEPpump")]
-    # The grid starts at $75k (2026-09-30): the $60k pool is in no column.
+    # The grid starts at $50k (2026-10-03): the $40k pool is in no column.
     _, now = _grid(book)
     # The $400k pool is in every floor's column, not the $100k-$150k band's.
     assert all((c["trades"], c["rugs"]) == (1, 0) for k, c in now.items() if not isinstance(k, tuple))
@@ -347,24 +353,26 @@ def _grid(book: dict) -> tuple[list, dict]:
 
 async def test_the_grid_is_every_size_by_every_pool_floor() -> None:
     """Karthik, 2026-09-27: one table, sizes down, pool floors across, the
-    book's own $75k+ column marked. Each size on its own balance."""
+    book's own column marked ($50k+ since 2026-10-03). Each size on ten
+    times its size (2026-10-03)."""
     from app.labs.graduation.api import karthik_book
 
     start = next(s for s in config.FRESH_BOOKS if s.book == "KARTHIK_QUIET_5M").start
     book = await karthik_book(db=_StubDb([_Pos("A", start + timedelta(hours=1), 0.10)]))  # type: ignore[arg-type]
     w = book["whatif"]
     assert [(f["floor_usd"], f["cap_usd"]) for f in w["floors"]] == [
-        (75_000, None), (100_000, 150_000), (100_000, None), (150_000, None), (200_000, None)]
-    assert [f["floor_usd"] for f in w["floors"] if f["book"]] == [75_000]
+        (50_000, None), (75_000, None), (100_000, 150_000), (100_000, None),
+        (150_000, None), (200_000, None)]
+    assert [f["floor_usd"] for f in w["floors"] if f["book"]] == [50_000]
     assert [(r["ticket_usd"], r["capital_usd"]) for r in w["sizes"]] == [
-        (10, 20), (20, 40), (25, 50), (50, 100), (100, 200), (200, 400)]
+        (10, 100), (20, 200), (25, 250), (50, 500), (100, 1000), (200, 2000)]
     assert [r["current"] for r in w["sizes"]] == [False, False, False, True, False, False]
-    assert all(len(r["cells"]) == 5 for r in w["sizes"])
+    assert all(len(r["cells"]) == 6 for r in w["sizes"])
     # A $200k pool at +10%: every floor up to $200k took it.
     floors, now = _grid(book)
     # A $200k pool: every floor up to $200k took it; the $100k-$150k band did not.
-    assert [now[f]["trades"] for f in floors] == [1, 0, 1, 1, 1]
-    assert now[75_000]["pnl_usd"] == Decimal("5.00")                 # $50 at +10%
+    assert [now[f]["trades"] for f in floors] == [1, 1, 0, 1, 1, 1]
+    assert now[50_000]["pnl_usd"] == Decimal("5.00")                 # $50 at +10%
     assert w["sizes"][-1]["cells"][0]["pnl_usd"] == Decimal("20.00")  # $200 at +10%
     # The second table (2026-10-03): the same sizes on ten times their size.
     assert [(r["ticket_usd"], r["capital_usd"]) for r in w["sizes_wide"]] == [
@@ -389,7 +397,8 @@ async def test_each_floor_takes_one_trade_at_a_time_on_its_own_pools() -> None:
 
     assert (book["trades"], book["rugs"], book["busy_skipped"]) == (1, 0, 1)
     _, now = _grid(book)
-    assert (now[75_000]["trades"], now[75_000]["rugs"]) == (1, 0)   # the book's column
+    assert (now[50_000]["trades"], now[50_000]["rugs"]) == (1, 0)   # the book's column
+    assert (now[75_000]["trades"], now[75_000]["rugs"]) == (1, 0)
     assert (now[150_000]["trades"], now[150_000]["rugs"]) == (1, 1)
     assert (now[200_000]["trades"], now[200_000]["rugs"]) == (1, 1)
 

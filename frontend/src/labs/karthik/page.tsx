@@ -483,7 +483,7 @@ export function TradeList({ data }: { data: KarthikBook }) {
           {data.trades_list.length === 0 ? (
             <EmptyState
               title="No trades yet"
-              body="The rule buys a graduation over $75k whose pool is still quiet. On the arm it copies that is about sixty a day, so the first one usually arrives within the hour."
+              body="The rule buys a graduation over $50k whose pool is still quiet. On the arm it copies that is about sixty a day, so the first one usually arrives within the hour."
             />
           ) : (
             <div className="overflow-x-auto p-3">
@@ -587,7 +587,7 @@ export function MoneyIn({ flows }: { flows: KarthikFlows | undefined }) {
 }
 
 /** Pool floors, as the grid below uses them: each counts every trade at or above it. */
-const POOL_FLOORS = [75_000, 100_000, 150_000, 200_000];
+const POOL_FLOORS = [50_000, 75_000, 100_000, 150_000, 200_000];
 
 /** Under the count: how many of the book's trades each pool floor took, and
     what they made (Karthik, 2026-09-27: "75k+, 100k+ like this", not bands).
