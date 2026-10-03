@@ -216,33 +216,30 @@ class _Pos:
         self.liq_open_usd = Decimal(200_000)   # inside the book's $150k+ range
 
 
-async def test_karthik_book_takes_one_trade_at_a_time() -> None:
+async def test_karthik_book_buys_as_many_as_the_balance_allows() -> None:
     """Every figure describes the SAME trades: the ones the book bought.
 
-    Since 25 Sep (replayed from day 1) the book buys only when nothing is
-    held, so of eight signals inside one five-minute hold it takes the first
-    and lets the other seven go -- the rug among them included, which it did
-    not dodge on merit: it was busy. The old rule, every signal the cash
-    allowed, is kept beside it as `every_trade`.
+    Since 2026-10-03 (replayed from day 1) the book buys every signal while a
+    $50 ticket of its $500 is free: twelve signals inside one five-minute hold
+    fund ten, the rug among them included, and the last two find no money.
+    One more after the first ten have closed is free again, so it is bought.
     """
     from app.labs.graduation.api import karthik_book
 
     start = next(s for s in config.FRESH_BOOKS
                  if s.book == "KARTHIK_QUIET_5M").start
-    rows = [_Pos(f"C{i}", start + timedelta(seconds=30 * i), 0.02)
-            for i in range(8)]
-    rows[-1].net_return = -0.99
-    rows[-1].pnl_usd = Decimal("-99")
-    # One more after the first has closed: free again, so it is bought.
-    rows.append(_Pos("LATER", rows[0].closed_at, 0.02))
+    rows = [_Pos(f"C{i:02d}", start + timedelta(seconds=10 * i), 0.02)
+            for i in range(12)]
+    rows[3].net_return = -0.99
+    rows[3].pnl_usd = Decimal("-99")
+    rows.append(_Pos("LATER", rows[-1].closed_at, 0.02))
 
     book = await karthik_book(db=_StubDb(rows))  # type: ignore[arg-type]
 
-    assert (book["trades"], book["skipped"], book["busy_skipped"]) == (2, 0, 7)
-    assert [t["symbol"] for t in book["trades_list"]] == ["LATER", "C0"]
-    assert (book["wins"], book["rugs"]) == (2, 0)
-    assert book["wins"] <= book["trades"] and book["rugs"] <= book["trades"]
-
+    assert (book["trades"], book["skipped"], book["busy_skipped"]) == (11, 2, 0)
+    assert book["trades_list"][0]["symbol"] == "LATER"
+    assert (book["wins"], book["rugs"]) == (10, 1)
+    assert book["one_at_a_time_since"] is None and book["many_at_once_since"]
 
 
 async def test_karthik_days_are_24h_from_the_open_not_calendar_days() -> None:
@@ -388,9 +385,9 @@ async def test_the_grid_is_every_size_by_every_pool_floor() -> None:
     assert w["wide_from"] == "2026-09-30T20:00:00+00:00"
 
 
-async def test_each_floor_takes_one_trade_at_a_time_on_its_own_pools() -> None:
-    """A floor that never bought the shallow coin was free for the deep one
-    behind it, so a cell is never the book's trades filtered afterwards."""
+async def test_each_floor_buys_only_its_own_pools() -> None:
+    """Each cell is its own walk over the pools at or above its floor, so a
+    floor that never spent on the shallow coin still buys the deep one."""
     from app.labs.graduation.api import karthik_book
 
     start = next(s for s in config.FRESH_BOOKS if s.book == "KARTHIK_QUIET_5M").start
@@ -400,10 +397,10 @@ async def test_each_floor_takes_one_trade_at_a_time_on_its_own_pools() -> None:
     deep.liq_open_usd = Decimal(600_000)
     book = await karthik_book(db=_StubDb([shallow, deep]))  # type: ignore[arg-type]
 
-    assert (book["trades"], book["rugs"], book["busy_skipped"]) == (1, 0, 1)
+    assert (book["trades"], book["rugs"], book["busy_skipped"]) == (2, 1, 0)
     _, now = _grid(book)
-    assert (now[50_000]["trades"], now[50_000]["rugs"]) == (1, 0)   # the book's column
-    assert (now[75_000]["trades"], now[75_000]["rugs"]) == (1, 0)
+    assert (now[50_000]["trades"], now[50_000]["rugs"]) == (2, 1)   # the book's column
+    assert (now[75_000]["trades"], now[75_000]["rugs"]) == (2, 1)
     assert (now[150_000]["trades"], now[150_000]["rugs"]) == (1, 1)
     assert (now[200_000]["trades"], now[200_000]["rugs"]) == (1, 1)
 
@@ -430,14 +427,17 @@ async def test_a_coin_bought_more_than_two_minutes_after_graduating_never_happen
 
 
 async def test_coins_opened_in_the_same_instant_are_always_taken_in_one_order() -> None:
-    """Replayed rows share a timestamp; the book must not depend on the order
-    the database returns them in (2026-10-03: its figures moved between reads)."""
+    """Replayed rows share a timestamp; when the cash runs out among them, the
+    coin left over must not depend on the order the database returns them in
+    (2026-10-03: the book's figures moved between two reads of the same data)."""
     from app.labs.graduation.api import karthik_book
 
     start = next(s for s in config.FRESH_BOOKS if s.book == "KARTHIK_QUIET_5M").start
     at = start + timedelta(hours=1)
-    a, b = _Pos("AAA", at, 0.10), _Pos("BBB", at, -0.90)
-    one = await karthik_book(db=_StubDb([a, b]))  # type: ignore[arg-type]
-    two = await karthik_book(db=_StubDb([b, a]))  # type: ignore[arg-type]
-    assert [t["symbol"] for t in one["trades_list"]] == ["AAA"]
+    coins = [_Pos(f"C{i:02d}", at, 0.01 * i) for i in range(11)]   # 11 tickets, room for 10
+    one = await karthik_book(db=_StubDb(coins))  # type: ignore[arg-type]
+    two = await karthik_book(db=_StubDb(list(reversed(coins))))  # type: ignore[arg-type]
+    taken = sorted(t["symbol"] for t in one["trades_list"])
+    assert taken == [f"C{i:02d}" for i in range(10)]
+    assert taken == sorted(t["symbol"] for t in two["trades_list"])
     assert one["balance_usd"] == two["balance_usd"]

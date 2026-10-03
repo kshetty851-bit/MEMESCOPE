@@ -285,7 +285,8 @@ function Signed({ line }: { line: KarthikWhatIfLine }) {
 /**
  * IF EACH TRADE HAD BEEN (Karthik, 2026-09-27): every trade size down, every
  * pool floor across, one table in place of the side checks. Each cell is its
- * own book from the same start at that size, one trade at a time, on the
+ * own book from the same start at that size, as many at once as its balance
+ * allows (one at a time before 2026-10-03), on the
  * pools at or above that floor — the book's own walk, so skips, pool impact
  * at that size and the cash limit are the real book's.
  */
@@ -373,8 +374,8 @@ function GridPanel({ data, title, rows, value = false, from, testId }: {
           </tbody>
         </table>
         <p className="mt-2 text-[11px] leading-relaxed text-ink-dim">
-          Each cell is its own book from {day(from ?? data.started_at)} at that size, one trade at a
-          time, buying only pools at or above that floor. Hover a cell for its trades, rugs
+          Each cell is its own book from {day(from ?? data.started_at)} at that size, buying every
+          coin on pools at or above that floor while its balance has money free. Hover a cell for its trades, rugs
           and lowest balance. A look back, not a test.
           {w.floors.some((f) => f.replayed_below)
             ? " * includes the $25k–$75k pools, traded by paper arms on the same rule; their trades before they went live ($50k–$75k: 26 Sep, $25k–$50k: 3 Oct) were rebuilt from price history and ran about a point a trade too kind."
@@ -400,7 +401,9 @@ export function RuleBook({ data }: { data: KarthikBook }) {
     ...(pool ? [["Only big pools", top ? `The pool must hold between ${usd(pool).replace(".00", "")} and ${usd(top).replace(".00", "")}.` : `The pool must hold ${usd(pool).replace(".00", "")} or more.`] as [string, string]] : []),
     ...(data.quiet_max_txs ? [["Only quiet pools", `Fewer than ${data.quiet_max_txs} trades in the pool so far when it buys. A busy start is skipped.`] as [string, string]] : []),
     ...(ageMin ? [["Only fresh coins", `It buys within ${ageMin} minutes of the coin graduating, or not at all. A late buy sits in the danger zone when creators sell.`] as [string, string]] : []),
-    ["One at a time", "While it holds a coin, the next one is skipped. It can never be caught in two bad coins at once."],
+    data.many_at_once_since
+      ? ["Several at once", `It buys every coin that passes while at least ${usd(data.ticket_usd)} of the balance is free, so it can hold several at once.`]
+      : ["One at a time", "While it holds a coin, the next one is skipped. It can never be caught in two bad coins at once."],
     ["Trade size", `${usd(data.ticket_usd)} per trade, from a ${usd(data.capital_usd)} balance.`],
     ["Always sells", `Exactly ${data.hold_minutes} minutes after buying. No price targets, no stop-loss — the clock decides.`],
     ["The risk", `If a coin's creator drains the pool (a “rug”), that trade loses almost all of it.${rugEvery ? ` So far about 1 in ${rugEvery} trades.` : ""}`],
@@ -840,7 +843,15 @@ export function KarthikLabPage() {
             here is a look back until then. The table below shows every other floor.
           </p>
         ) : null}
-        {data.one_at_a_time_since ? (
+        {data.many_at_once_since ? (
+          <p className="mt-1 max-w-[78ch] text-[12px] leading-relaxed text-ink-dim">
+            <b className="text-ink-2">Several trades at once:</b> it buys every coin that passes
+            while the balance has a trade&apos;s worth free. Chosen on{" "}
+            {day(data.many_at_once_since)} and replayed from day 1, so every figure here and in
+            the tables below follows this rule; only trades from{" "}
+            {day(data.many_at_once_since)} on test it.
+          </p>
+        ) : data.one_at_a_time_since ? (
           <p className="mt-1 max-w-[78ch] text-[12px] leading-relaxed text-ink-dim">
             <b className="text-ink-2">One trade at a time:</b> it buys only when nothing is
             held, and lets a signal go while a trade is open. Chosen on{" "}
