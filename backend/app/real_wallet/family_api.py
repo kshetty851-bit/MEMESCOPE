@@ -139,6 +139,7 @@ async def _own_book(session: DbSession, member: str, wallet: str) -> dict[str, o
         "ticket_choices": [str(t) for t in family.TICKETS_USD],
         "band": row.own_band if row else "any",
         "band_choices": _BAND_CHOICES,
+        "strategy": _strategy(member),
         "today_pnl_usd": _money(await repo.realised_pnl_today(now, wallet)),
         "open_positions": await repo.open_positions_count(wallet),
         "open_trade_usd": _money(views.open_trade_value(positions, wallet)),
@@ -146,6 +147,26 @@ async def _own_book(session: DbSession, member: str, wallet: str) -> dict[str, o
         "days": views.days_payload(positions, now),
         "positions": await views.positions_payload(session, positions),
     }
+
+
+#: A user wallet's own strategy in plain words, for its page.
+_RULE_WORDS = {
+    "G-Q50": ("Buys new pump.fun coins right after they graduate, when the pool "
+              "holds $50,000 or more and has had fewer than 100 trades. Sells "
+              "every coin 5 minutes after buying. Coins linked to earlier rugs "
+              "are refused, as on the main wallet."),
+}
+
+
+def _strategy(member: str) -> dict[str, object]:
+    """Which strategy this wallet trades and how many coins it may hold."""
+    own = settings.REAL_WALLET_MEMBER_STRATEGY.get(member.upper())
+    if own not in _RULE_WORDS:
+        own = None
+    return {"id": own,
+            "rule": _RULE_WORDS.get(own or "", "The same coins as the main wallet."),
+            "max_open": settings.REAL_WALLET_MEMBER_MAX_OPEN.get(
+                member.upper(), settings.REAL_WALLET_MAX_OPEN_POSITIONS)}
 
 
 async def _own_wallet(member: str) -> dict[str, object]:

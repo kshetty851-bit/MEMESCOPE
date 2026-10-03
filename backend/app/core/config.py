@@ -1049,6 +1049,19 @@ class Settings(BaseSettings):
     #: The users take turns past it (`driver._family_ticks`, longest-waiting
     #: first).
     REAL_WALLET_MAX_COIN_USD: Decimal = Field(default=Decimal("250"), gt=0)
+    #: A user wallet's own strategy, in place of the one the owner nominated at
+    #: Start (Karthik, 2026-10-03: "integrate 50k pool stratergy to user 1
+    #: wallet"). Each must be a graduation live arm; a member not listed trades
+    #: the owner's. The owner's switch still gates every user wallet. Empty in
+    #: code; production sets USER1 -> G-Q50 in docker-compose.yml.
+    REAL_WALLET_MEMBER_STRATEGY: dict[str, str] = Field(default_factory=dict)
+    #: A user wallet's own open-position limit, in place of
+    #: `REAL_WALLET_MAX_OPEN_POSITIONS` (2026-10-03: "mutlipe trade rule"):
+    #: USER 1 buys every coin its strategy takes while a ticket's worth of its
+    #: balance is free. Cash, the exposure and daily-loss caps, the per-coin
+    #: cap and the rug brake still bound it. Empty in code; production sets
+    #: USER1 -> 25 in docker-compose.yml.
+    REAL_WALLET_MEMBER_MAX_OPEN: dict[str, int] = Field(default_factory=dict)
     # Phase 2 is a separate, deliberately tiny manual-devnet workflow. These
     # values are used by the API and signer to enforce the same small envelope;
     # the signer-file *path* is intentionally not a Settings field because the

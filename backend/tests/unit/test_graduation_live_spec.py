@@ -82,7 +82,12 @@ def test_each_live_arm_copies_its_own_paper_book() -> None:
     arms = {a.name: a for a in ARMS}
     assert set(live_spec.PAPER_BOOKS) == {"G-B3-5M", "G-B3-4M", "G-BAS-5M",
                                           "G-QUIET", "G-QUIET4", "G-BAND5",
-                                          "G-BANDP", "G-B5-5M", "G-Q150", "G-QMID"}
+                                          "G-BANDP", "G-B5-5M", "G-Q150", "G-QMID",
+                                          "G-Q50"}
+    assert live_spec.pool_floor("G-Q50") == 50_000
+    assert live_spec.PAPER_BOOKS["G-Q50"] == "BASE_50k_quiet_5m"
+    # USER 1's arm only: never offered at the owner's Start.
+    assert "G-Q50" not in live_spec.OFFERED
     # The $75k-$300k band (2026-09-26): reported by its lower edge, the arm's
     # own rule refuses $300k and up; same five-minute clock as G-QUIET.
     assert live_spec.pool_floor("G-QMID") == 75_000

@@ -384,6 +384,7 @@ ENTRY_RULES: dict[str, str] = {
     "floor75": "every graduation with a pool at or above $75,000, no selection — "
                "the baseline's own rule",
     "floor150": "every graduation with a pool at or above $150,000, no selection",
+    "floor50": "every graduation with a pool at or above $50,000, no selection",
     "band25_50": "every graduation whose pool is between $25,000 and $50,000, no selection",
     "band50_75": "every graduation whose pool is between $50,000 and $75,000, no selection",
     "band75_300": "every graduation whose pool is between $75,000 and $300,000, no selection",
@@ -491,6 +492,10 @@ def accepts(arm: Arm, *, mint: str, open_at: datetime, liquidity: Decimal | None
         # `is_control` names "floor": a second control would move the board's
         # control band, which is not what a twin is for.
         return liquidity is not None and liquidity >= LIQ_BANDS[0][1]
+    if e == "floor50":
+        # Karthik, 2026-10-03: "integrate 50k pool stratergy to user 1 wallet".
+        # His book's $50k+ rule as ONE arm, so one live strategy can mirror it.
+        return liquidity is not None and liquidity >= 50_000
     if e == "floor150":
         # Karthik, 2026-09-25, after EVO died in a $146k pool. On the quiet
         # rule's record the $75k-$150k pools died 3 times in 41 trades and
@@ -792,6 +797,11 @@ ARMS: tuple[Arm, ...] = (
     Arm("BASE_150k_quiet_5m", "floor150", 5, quiet=True,
         note="every graduation over $150k whose pool is still quiet (under "
              "100 trades) when it is bought, out at 5m"),
+    # Karthik, 2026-10-03: the $50k+ quiet rule for USER 1's real wallet
+    # (G-Q50). Starts empty; only its forward trades are evidence.
+    Arm("BASE_50k_quiet_5m", "floor50", 5, quiet=True,
+        note="every graduation over $50k whose pool is still quiet (under "
+             "100 trades) when it is bought, out at 5m"),
 )
 
 BY_NAME: dict[str, Arm] = {a.name: a for a in ARMS}
@@ -809,11 +819,12 @@ CONTROLS: tuple[Arm, ...] = tuple(a for a in ARMS if a.is_control)
 #: 2026-10-01, Karthik: "delete ... the loss arm" — every arm still losing
 #: went: F01_all_2m, F14_symnight_2m (the rug-signal A/B), KARTHIK_Q25_5M and
 #: BAND_55k_2m/_5m/_blk_5m/_quiet_5m. The history below is why there were 20.
-#: 2026-10-03: KARTHIK_Q25_5M back, for the $25k+ column on his page.
-assert len(ARMS) == 14, (
+#: 2026-10-03: KARTHIK_Q25_5M back, for the $25k+ column on his page, and
+#: BASE_50k_quiet_5m for USER 1's G-Q50.
+assert len(ARMS) == 15, (
     "the BASELINE, B3 at four and five minutes, the $500k+flow candidate, the "
     "fast pair E75/E75T, the quiet arms (75k at four and five, 150k, 75-300k), "
-    "the band's pump-only arm and Karthik's three (KARTHIK_QUIET_5M, "
+    "the $50k quiet arm, the band's pump-only arm and Karthik's three (KARTHIK_QUIET_5M, "
     f"KARTHIK_Q50_5M, KARTHIK_Q25_5M) — not {len(ARMS)}. Retired and deleted "
     "arms' rules stay in ENTRY_RULES, and `_manage` settles what they still "
     "held as `arm_retired`")
@@ -838,10 +849,10 @@ assert all(a.tp is None and a.trail is None for a in ARMS), (
 assert all(a.stop is None or a.stop == Decimal("0.10") for a in ARMS), (
     "one stop level, so the twins differ in ONE thing. Sweeping levels here "
     "would be fitting a parameter on the same data that suggested it")
-#: Thirteen since KARTHIK_Q25_5M came back (2026-10-03); still under 42.
-assert len([a for a in ARMS if not a.is_control]) == 13, (
+#: Fourteen since KARTHIK_Q25_5M and BASE_50k_quiet_5m (2026-10-03); under 42.
+assert len([a for a in ARMS if not a.is_control]) == 14, (
     "`config.required_pf` is calibrated on the maximum of FORTY-TWO noise "
-    "draws. Thirteen arms are now judged against it, so the bar is if anything "
+    "draws. Fourteen arms are now judged against it, so the bar is if anything "
     "CONSERVATIVE — the luckiest of twelve reaches less than the luckiest "
     "of forty-two. Left as it is deliberately: a bar that is too hard costs a "
     "real finding some time, where one that is too easy costs a false one nothing")

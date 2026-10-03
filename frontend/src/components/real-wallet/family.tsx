@@ -345,6 +345,8 @@ interface OwnBook {
   today_pnl_usd: string | null;
   open_positions: number;
   open_trade_usd?: string | null;
+  /** This wallet's own strategy (2026-10-03), or null id = the main wallet's. */
+  strategy?: { id: string | null; rule: string; max_open: number };
   since_first_trade: SinceFirstTrade | null;
   days?: WalletDay[];
   positions?: Position[];
@@ -855,6 +857,19 @@ export function WalletDashboard({ book, wallet }: { book: OwnBook; wallet?: OwnW
   const free = wallet?.balance_usd != null ? Number(wallet.balance_usd) : null;
   return (
     <div data-testid="wallet-dashboard">
+      {book.strategy ? (
+        <section className="mt-6 rounded-lg border border-line p-4" data-testid="wallet-strategy">
+          <p className="text-label text-ink-3">
+            Strategy{book.strategy.id ? ` · ${book.strategy.id}` : ""}
+          </p>
+          <p className="mt-1 text-sm text-ink-2">{book.strategy.rule}</p>
+          <p className="mt-1 text-sm text-ink-2">
+            {book.strategy.max_open > 1
+              ? `Several trades at once: it buys every coin that passes while ${usd(book.ticket_usd)} of the balance is free (up to ${book.strategy.max_open} at once).`
+              : "One trade at a time: while it holds a coin, the next one is skipped."}
+          </p>
+        </section>
+      ) : null}
       <section className="mt-6 grid gap-3 sm:grid-cols-3">
         <div className="rounded-lg border border-line p-4">
           <p className="text-label text-ink-3">Worth now</p>
@@ -862,7 +877,9 @@ export function WalletDashboard({ book, wallet }: { book: OwnBook; wallet?: OwnW
             {free != null ? usd(free + open) : "—"}
           </p>
           <p className="mt-1 text-xs text-ink-3">
-            {open > 0 ? `incl. ${usd(open)} in an open trade` : "nothing held right now"}
+            {open > 0
+              ? `${free != null ? `${usd(free)} cash + ` : ""}${usd(open)} in ${book.open_positions} open trade${book.open_positions === 1 ? "" : "s"}`
+              : "nothing held right now"}
           </p>
         </div>
         <div className="rounded-lg border border-line p-4">

@@ -278,7 +278,7 @@ describe("a user wallet's dashboard, as the main wallet's", () => {
       />,
     );
     const dash = screen.getByTestId("wallet-dashboard");
-    expect(dash).toHaveTextContent("Worth now$200.40incl. $50.40 in an open trade");
+    expect(dash).toHaveTextContent("Worth now$200.40$150.00 cash + $50.40 in 1 open trade");
     const days = screen.getByTestId("wallet-days");
     expect(days).toHaveTextContent("30 Sep · so far+$1.201 trades · 1 won");
     expect(days).toHaveTextContent("29 Sep-$0.502 trades · 1 won");

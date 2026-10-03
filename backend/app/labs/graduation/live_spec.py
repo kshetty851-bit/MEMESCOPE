@@ -54,13 +54,13 @@ _Money = TypeVar("_Money", float, Decimal)
 #: G-QUIET4 (2026-09-22); 1.6.0 adds G-BAND5 and 1.7.0 its pump-only twin
 #: G-BANDP, the same day; 1.8.0 adds G-B5-5M; 1.9.0 adds G-Q150 (2026-09-25);
 #: 1.10.0 adds G-QMID (2026-09-26); 1.11.0 adds the two-minute entry-age
-#: guard, `max_entry_age_s` (2026-09-27).
+#: guard, `max_entry_age_s` (2026-09-27); 1.12.0 adds G-Q50 (2026-10-03).
 #: The version MUST be bumped with
 #: a new strategy: `strategy_row_id` finds the tournament row by version, so adding
 #: one under the old version leaves that row holding the old `SPEC_HASH`, and
 #: `app.lab.health` then reads the difference as drift and halts every arm on
 #: it. A new version means a new tournament row, which is what 1.1.0 did.
-SPEC_VERSION = "gradlive-1.11.0"
+SPEC_VERSION = "gradlive-1.12.0"
 
 #: Each live arm and the paper arm it mirrors. Recorded so a reader can put the
 #: real book beside the arm it is supposed to be copying, and so nothing has to
@@ -75,7 +75,8 @@ PAPER_BOOKS = {"G-B3-5M": "B3_198k_5m", "G-B3-4M": "B3_198k_4m",
                "G-BAS-5M": "BASE_75k_5m", "G-QUIET": "BASE_75k_quiet_5m",
                "G-QUIET4": "BASE_75k_quiet_4m", "G-BAND5": "BAND_55k_5m",
                "G-BANDP": "BAND_55k_pump_5m", "G-B5-5M": "B5_500k_flow_5m",
-               "G-Q150": "BASE_150k_quiet_5m", "G-QMID": "BASE_75_300k_quiet_5m"}
+               "G-Q150": "BASE_150k_quiet_5m", "G-QMID": "BASE_75_300k_quiet_5m",
+               "G-Q50": "BASE_50k_quiet_5m"}
 #: The same mapping read the other way: the live arm a paper entry feeds.
 MIRRORS = {book: sid for sid, book in PAPER_BOOKS.items()}
 
@@ -96,7 +97,7 @@ POOL_FLOORS = {"G-B3-5M": POOL_FLOOR_USD, "G-B3-4M": POOL_FLOOR_USD,
                "G-BAND5": 55_000, "G-BANDP": 55_000, "G-B5-5M": 500_000,
                "G-Q150": 150_000,
                #: A band, $75k to $300k: the arm's own rule enforces the top.
-               "G-QMID": 75_000}
+               "G-QMID": 75_000, "G-Q50": 50_000}
 
 #: The largest trade size Start offers for an arm, where that is smaller than
 #: `REAL_WALLET_ENTRY_SIZE_USD`.
@@ -478,6 +479,32 @@ STRATEGIES: tuple[Strategy, ...] = (
             "its trades from then on are evidence. It also trades less — "
             "about four in five of G-QUIET's coins. Nominating it is a "
             "separate decision and starting it is the operator's alone."
+        ),
+    ),
+    Strategy(
+        id="G-Q50",
+        name="GRADUATION-QUIET-50K-5MIN",
+        hypothesis=(
+            "G-QUIET's rule reaching down to $50k pools: a graduation over "
+            "$50k whose pool has had fewer than 100 transactions when the "
+            "book buys, held five minutes."
+        ),
+        checkpoint_minutes=0,
+        entry=(),
+        size_usd=D("100"),
+        max_concurrent=10,
+        max_exposure_usd=D("1000"),
+        exits=Exits(take_profit=None, stop_loss=None, time_exit_hours=_hours(5)),
+        evidence="POST_HOC_SLICE_OF_THE_QUIET_RECORD",
+        overfit_risk="HIGH",
+        note=(
+            "REGISTERED AT KARTHIK'S REQUEST, 2026-10-03, for USER 1's wallet "
+            "only (`REAL_WALLET_MEMBER_STRATEGY`), after Karthik's Lab moved "
+            "to $50k+ pools. Real-time trades since 1 Oct: +$173 on $500 at "
+            "$50 a trade against +$44 for $75k+, with more rugs (8 against "
+            "3). The $50-75k pools rug far more often; the rug blocks refused "
+            "most of them from 2 Oct. Its paper arm BASE_50k_quiet_5m starts "
+            "empty today; only its trades from then on are evidence."
         ),
     ),
     Strategy(
