@@ -534,6 +534,20 @@ async def _values(session: Any, addresses: list[str], now: datetime) -> list[Dec
 
 #: The rule's pool floor: a refused coin under it would never have been bought.
 CHECKPOINT_FLOOR_USD = 75_000
+#: Karthik, 2026-10-03: "in karthik lab only show as 50k pool". The floors the
+#: Checkpoint can be drawn at: the main wallet's $75k (HQ, Real wallet) and his
+#: book's $50k (his Lab). Anything else is refused, not rounded to one. An
+#: int checked by hand: FastAPI will not read "50000" as `Literal[50000]`.
+CHECKPOINT_FLOORS = (50_000, 75_000)
+
+
+def _checkpoint_floor(floor: int) -> int:
+    if floor not in CHECKPOINT_FLOORS:
+        raise HTTPException(status_code=422,
+                            detail=f"floor must be one of {CHECKPOINT_FLOORS}")
+    return floor
+
+
 #: The belt's mix: the latest buys AND the latest stops, so a day of buying
 #: still shows the rug bin working (2026-10-02).
 CHECKPOINT_BOUGHT = 8
@@ -541,15 +555,18 @@ CHECKPOINT_STOPPED = 6
 
 
 @router.get("/checkpoint", summary="What the pre-buy checks stopped, and the latest coins")
-async def checkpoint(session: DbSession) -> dict[str, object]:
+async def checkpoint(session: DbSession,
+                     floor: int = CHECKPOINT_FLOOR_USD) -> dict[str, object]:
     """HQ's Checkpoint (Karthik, 2026-10-02: "show this 30 checks as 30
     agents"). Real records only: the rug blocks' refusals
-    (`GradOperator.blocked_reason`, $75k+ pools), the safety check's REJECT
-    reasons, and the coins the main wallet bought. The wallet gate's own
-    refusals are not recorded anywhere, so they are not counted here.
-    Names and figures only, like `/status`."""
+    (`GradOperator.blocked_reason`, pools over `floor`, $75k unless asked),
+    the safety check's REJECT reasons, and the coins the main wallet bought.
+    The wallet gate's own refusals are not recorded anywhere, so they are not
+    counted here. Names and figures only, like `/status`. `floor` moves only
+    the rug blocks' pool floor; the safety and wallet records are the
+    wallet's own."""
     now = datetime.now(UTC)
-    deep = GradOperator.depth_usd >= CHECKPOINT_FLOOR_USD
+    deep = GradOperator.depth_usd >= _checkpoint_floor(floor)
     blocks = dict((await session.execute(
         select(GradOperator.blocked_reason, func.count())
         .where(deep, GradOperator.blocked_reason.is_not(None))
@@ -615,14 +632,18 @@ LIVE_MAX = 24
 
 
 @router.get("/checkpoint/live", summary="Where each new graduation is in the checks, now")
-async def checkpoint_live_view(session: DbSession) -> dict[str, object]:
+async def checkpoint_live_view(
+        session: DbSession, floor: int = CHECKPOINT_FLOOR_USD,
+) -> dict[str, object]:
     """Karthik, 2026-10-02: "i want real time token checks". Every coin that
     graduated in the last ten minutes and the check it has reached, from the
-    records each check leaves (`checkpoint_live.where`). Names only."""
+    records each check leaves (`checkpoint_live.where`), against the pool rule
+    `floor` names (`checkpoint_live.QUIET_BOOKS`). Names only."""
     from app.models.real_wallet_execution import RealWalletLiveIntent
     from app.real_wallet import checkpoint_live as live
 
     now = datetime.now(UTC)
+    quiet_books = live.QUIET_BOOKS[_checkpoint_floor(floor)]
     grads = (await session.execute(
         select(GradMigration.mint, GradMigration.ts)
         .where(GradMigration.ts >= now - LIVE_WINDOW)
@@ -647,7 +668,7 @@ async def checkpoint_live_view(session: DbSession) -> dict[str, object]:
                 select(GradPaperPosition.mint, GradPaperPosition.book,
                        GradPaperPosition.opened_at)
                 .where(GradPaperPosition.mint.in_(mints),
-                       GradPaperPosition.book.in_((live.BASELINE_BOOK, live.QUIET_BOOK)))
+                       GradPaperPosition.book.in_((*live.BASELINE_BOOKS, *quiet_books)))
                 )).all():
             coins[m].books.setdefault(book, at)
         for m, at in (await session.execute(
@@ -684,7 +705,8 @@ async def checkpoint_live_view(session: DbSession) -> dict[str, object]:
             [m for m in mints if m not in symbols])
         symbols.update({m: t.symbol for m, t in known.items() if t.symbol})
     return {"now": now.isoformat(), "coins": [
-        {"symbol": symbols.get(m), "graduated_at": ts.isoformat(), **live.where(coins[m], now)}
+        {"symbol": symbols.get(m), "graduated_at": ts.isoformat(),
+         **live.where(coins[m], now, floor=Decimal(floor), quiet_books=quiet_books)}
         for m, ts in grads]}
 
 

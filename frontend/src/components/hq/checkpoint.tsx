@@ -7,8 +7,9 @@ import { api } from "@/lib/api-client";
 import { Character, RigDefs, portraitViewBox } from "@/components/hq/character-rig";
 import type { CharacterDefinition, Emotion, Pose } from "@/lib/hq/characters";
 import {
-  ROBOTS, STAGES, WHALE, coinKey, idleOf, liveIndex, lookOf, stoppedBy,
-  type Checkpoint, type CheckpointEvent, type LiveBelt, type LiveCoin,
+  DEFAULT_FLOOR, ROBOTS, STAGES, WHALE, atFloor, coinKey, idleOf, jobOf, liveIndex, lookOf,
+  stoppedBy,
+  type Checkpoint, type CheckpointEvent, type CheckpointFloor, type LiveBelt, type LiveCoin,
 } from "@/lib/hq/checkpoint";
 
 /**
@@ -45,19 +46,19 @@ interface Track {
   settledAt: number;
 }
 
-function useCheckpoint() {
+function useCheckpoint(floorUsd: CheckpointFloor) {
   return useQuery({
-    queryKey: ["hq", "checkpoint"],
-    queryFn: () => api.get<Checkpoint>("/real-wallet/checkpoint"),
+    queryKey: ["hq", "checkpoint", floorUsd],
+    queryFn: () => api.get<Checkpoint>(atFloor("/real-wallet/checkpoint", floorUsd)),
     refetchInterval: 60_000,
     staleTime: 30_000,
   });
 }
 
-function useLive() {
+function useLive(floorUsd: CheckpointFloor) {
   return useQuery({
-    queryKey: ["hq", "checkpoint", "live"],
-    queryFn: () => api.get<LiveBelt>("/real-wallet/checkpoint/live"),
+    queryKey: ["hq", "checkpoint", "live", floorUsd],
+    queryFn: () => api.get<LiveBelt>(atFloor("/real-wallet/checkpoint/live", floorUsd)),
     refetchInterval: POLL_MS,
     staleTime: POLL_MS / 2,
   });
@@ -198,12 +199,16 @@ function Coin({ label, extra, state }: { label: string | null; extra: number; st
   );
 }
 
-export function CheckpointOffice({ data, live, now: nowProp, motionOverride }: {
+export function CheckpointOffice({
+  data, live, now: nowProp, motionOverride, floorUsd = DEFAULT_FLOOR,
+}: {
   data: Checkpoint | undefined;
   live: LiveBelt | undefined;
   now?: number;
   /** Tests pass false; the page asks the browser. */
   motionOverride?: boolean;
+  /** The pool rule drawn: Karthik's Lab passes his book's $50k (2026-10-03). */
+  floorUsd?: CheckpointFloor;
 }) {
   const motionPref = useMotion();
   const motion = motionOverride ?? motionPref;
@@ -275,7 +280,8 @@ export function CheckpointOffice({ data, live, now: nowProp, motionOverride }: {
       <div className="grid gap-3 p-4 xl:grid-cols-[minmax(0,4fr)_minmax(0,4fr)_minmax(0,8fr)]">
         {STAGES.map((stage) => (
           <Hall key={stage.id} stage={stage} stateOf={stateOf} data={data} onBelt={onBelt}
-                stamp={stamp} recentStops={recentStops} onPick={setPicked} picked={picked} now={now} />
+                stamp={stamp} recentStops={recentStops} onPick={setPicked} picked={picked} now={now}
+                floorUsd={floorUsd} />
         ))}
       </div>
 
@@ -306,7 +312,7 @@ export function CheckpointOffice({ data, live, now: nowProp, motionOverride }: {
               <div className="text-sm font-semibold text-ink">
                 {robot.first} · {robot.name} <span className="font-normal text-ink-3">· {STAGES.find((s) => s.id === robot.stage)!.title}</span>
               </div>
-              <div className="text-ink-2">{robot.job}</div>
+              <div className="text-ink-2">{jobOf(robot, floorUsd)}</div>
               <div className="mt-0.5 text-ink-3">
                 {stoppedBy(robot, data) === null
                   ? "Guards every buy. Its refusals aren't recorded, so it shows no count."
@@ -330,8 +336,9 @@ export function CheckpointOffice({ data, live, now: nowProp, motionOverride }: {
   );
 }
 
-function Hall({ stage, stateOf, data, onBelt, stamp, recentStops, onPick, picked, now }: {
+function Hall({ stage, stateOf, data, onBelt, stamp, recentStops, onPick, picked, now, floorUsd }: {
   now: number;
+  floorUsd: CheckpointFloor;
   stage: (typeof STAGES)[number];
   stateOf: (i: number) => BotState;
   data: Checkpoint | undefined;
@@ -360,7 +367,7 @@ function Hall({ stage, stateOf, data, onBelt, stamp, recentStops, onPick, picked
             <button key={r.id} type="button" onClick={() => onPick(i)}
                     className="cp-bot relative flex w-[76px] flex-col items-center rounded-lg pt-1"
                     data-state={stateOf(i)} data-testid={`cp-bot-${r.id}`}
-                    aria-pressed={picked === i} aria-label={`${r.first} (${r.name}): ${r.job}`}
+                    aria-pressed={picked === i} aria-label={`${r.first} (${r.name}): ${jobOf(r, floorUsd)}`}
                     style={{ "--cp-delay": `${(i * 0.37) % 3}s` } as React.CSSProperties}>
               {here.length ? (
                 <Coin label={here[0]!.coin.symbol} extra={here.length - 1}
@@ -402,8 +409,10 @@ function Hall({ stage, stateOf, data, onBelt, stamp, recentStops, onPick, picked
   );
 }
 
-export function CheckpointLive() {
-  const q = useCheckpoint();
-  const live = useLive();
-  return <CheckpointOffice data={q.data} live={live.data} />;
+/** `floorUsd`: the pool rule to draw. HQ and the Real wallet pass nothing and
+ *  keep the main wallet's $75k; Karthik's Lab passes his book's $50k. */
+export function CheckpointLive({ floorUsd = DEFAULT_FLOOR }: { floorUsd?: CheckpointFloor } = {}) {
+  const q = useCheckpoint(floorUsd);
+  const live = useLive(floorUsd);
+  return <CheckpointOffice data={q.data} live={live.data} floorUsd={floorUsd} />;
 }

@@ -799,8 +799,9 @@ export function KarthikLabPage() {
 
   return (
     <div className="min-w-0 space-y-4">
-      {/* The thirty pre-buy checks, live, on top (Karthik, 2026-10-03). */}
-      <CheckpointLive />
+      {/* The thirty pre-buy checks, live, on top (Karthik, 2026-10-03), drawn
+          at his book's $50k rule: "in karthik lab only show as 50k pool". */}
+      <CheckpointLive floorUsd={50_000} />
       {/* Two columns from 1150px: the counts and their boxes on the right, and
           the header grows to fit them rather than lying over the rule book. */}
       <div className="grid gap-x-8 gap-y-2 min-[1150px]:grid-cols-[minmax(0,1fr)_auto]">
