@@ -318,7 +318,9 @@ async def test_the_book_counts_only_its_pool_range_but_the_checks_see_every_size
     assert [(t["symbol"], t["mint"]) for t in book["trades_list"]] == [("DEEP", "DEEPpump")]
     # The grid starts at $75k (2026-09-30): the $60k pool is in no column.
     _, now = _grid(book)
-    assert all((c["trades"], c["rugs"]) == (1, 0) for c in now.values())
+    # The $400k pool is in every floor's column, not the $100k-$150k band's.
+    assert all((c["trades"], c["rugs"]) == (1, 0) for k, c in now.items() if not isinstance(k, tuple))
+    assert (now[(100_000, 150_000)]["trades"], now[(100_000, 150_000)]["rugs"]) == (0, 0)
 
 
 async def test_every_closed_trade_is_listed_not_just_the_latest_sixty() -> None:
@@ -334,9 +336,11 @@ async def test_every_closed_trade_is_listed_not_just_the_latest_sixty() -> None:
     assert all(t["mint"].endswith("pump") for t in book["trades_list"])
 
 
-def _grid(book: dict) -> tuple[list[int], dict]:
-    """(floors, the current size's cells by floor)."""
-    floors = [f["floor_usd"] for f in book["whatif"]["floors"]]
+def _grid(book: dict) -> tuple[list, dict]:
+    """(columns, the current size's cells by column): a floor's key is its
+    floor, a band's is (floor, cap)."""
+    floors = [f["floor_usd"] if f.get("cap_usd") is None else (f["floor_usd"], f["cap_usd"])
+              for f in book["whatif"]["floors"]]
     now = next(r for r in book["whatif"]["sizes"] if r["current"])
     return floors, dict(zip(floors, now["cells"], strict=True))
 
@@ -349,15 +353,17 @@ async def test_the_grid_is_every_size_by_every_pool_floor() -> None:
     start = next(s for s in config.FRESH_BOOKS if s.book == "KARTHIK_QUIET_5M").start
     book = await karthik_book(db=_StubDb([_Pos("A", start + timedelta(hours=1), 0.10)]))  # type: ignore[arg-type]
     w = book["whatif"]
-    assert [f["floor_usd"] for f in w["floors"]] == [75_000, 100_000, 150_000, 200_000]
+    assert [(f["floor_usd"], f["cap_usd"]) for f in w["floors"]] == [
+        (75_000, None), (100_000, 150_000), (100_000, None), (150_000, None), (200_000, None)]
     assert [f["floor_usd"] for f in w["floors"] if f["book"]] == [75_000]
     assert [(r["ticket_usd"], r["capital_usd"]) for r in w["sizes"]] == [
         (10, 20), (20, 40), (25, 50), (50, 100), (100, 200), (200, 400)]
     assert [r["current"] for r in w["sizes"]] == [False, False, False, True, False, False]
-    assert all(len(r["cells"]) == 4 for r in w["sizes"])
+    assert all(len(r["cells"]) == 5 for r in w["sizes"])
     # A $200k pool at +10%: every floor up to $200k took it.
     floors, now = _grid(book)
-    assert [now[f]["trades"] for f in floors] == [1, 1, 1, 1]
+    # A $200k pool: every floor up to $200k took it; the $100k-$150k band did not.
+    assert [now[f]["trades"] for f in floors] == [1, 0, 1, 1, 1]
     assert now[75_000]["pnl_usd"] == Decimal("5.00")                 # $50 at +10%
     assert w["sizes"][-1]["cells"][0]["pnl_usd"] == Decimal("20.00")  # $200 at +10%
     # The second table (2026-10-03): the same sizes on ten times their size.

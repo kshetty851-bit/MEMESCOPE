@@ -1434,7 +1434,11 @@ KARTHIK_WHATIF_SIZES_WIDE = tuple((t, 10 * t) for t, _ in KARTHIK_WHATIF_SIZES)
 KARTHIK_WHATIF_WIDE_FROM = datetime(2026, 9, 30, 20, 0, tzinfo=UTC)
 #: The pool floors across the page's grid (Karthik, 2026-09-27).
 #: Karthik, 2026-09-30: "remove 25k 50k ... 300k 500k", keep 200k.
-KARTHIK_GRID_FLOORS = (75_000, 100_000, 150_000, 200_000)
+#: Each column is (at least, under); None = no upper bound. Karthik,
+#: 2026-10-03: the $100k-$150k band beside $75k, the best pool size since
+#: 18 Sep by every graduation's 5-minute return.
+KARTHIK_GRID_COLUMNS = ((75_000, None), (100_000, 150_000), (100_000, None),
+                        (150_000, None), (200_000, None))
 #: The arms running his rule on the $25-75k pools his book skips.
 
 
@@ -1503,25 +1507,27 @@ def _karthik_whatif(rows: Sequence[Any], sol: Decimal | None, *, capital: float,
     """
     signals = sorted(rows, key=lambda r: r.opened_at)
 
-    def cell(floor: int, size: float, capital: float,
+    def cell(col: tuple[int, int | None], size: float, capital: float,
              since: datetime | None = None) -> dict[str, Any]:
+        floor, cap = col
         sub = [r for r in signals if float(r.liq_open_usd or 0) >= floor
+               and (cap is None or float(r.liq_open_usd or 0) < cap)
                and (since is None or r.opened_at >= since)]
         return _karthik_line(_one_at_a_time(sub), sol, size=size, capital=capital,
                              cents=cents)
 
     lo, hi = config.KARTHIK_BOOK_POOLS
     return {
-        "floors": [{"floor_usd": f, "book": hi is None and f == lo,
-                    "replayed_below": f < 75_000} for f in KARTHIK_GRID_FLOORS],
+        "floors": [{"floor_usd": f, "cap_usd": c, "book": hi is None and f == lo and c is None,
+                    "replayed_below": f < 75_000} for f, c in KARTHIK_GRID_COLUMNS],
         "sizes": [{"ticket_usd": t, "capital_usd": c,
                    "current": (t, c) == (ticket, capital),
-                   "cells": [cell(f, float(t), float(c)) for f in KARTHIK_GRID_FLOORS]}
+                   "cells": [cell(col, float(t), float(c)) for col in KARTHIK_GRID_COLUMNS]}
                   for t, c in KARTHIK_WHATIF_SIZES],
         "wide_from": KARTHIK_WHATIF_WIDE_FROM.isoformat(),
         "sizes_wide": [{"ticket_usd": t, "capital_usd": c, "current": False,
-                        "cells": [cell(f, float(t), float(c), KARTHIK_WHATIF_WIDE_FROM)
-                                  for f in KARTHIK_GRID_FLOORS]}
+                        "cells": [cell(col, float(t), float(c), KARTHIK_WHATIF_WIDE_FROM)
+                                  for col in KARTHIK_GRID_COLUMNS]}
                        for t, c in KARTHIK_WHATIF_SIZES_WIDE],
     }
 
